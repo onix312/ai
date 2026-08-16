@@ -7,15 +7,7 @@
 <style>
   .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
   .cut { outline: 1px dashed #c3cbdd; outline-offset: 0; }
-
-  /* --- круглые наклейки --- */
-  .round {
-    width: 40mm; height: 40mm; border-radius: 50%;
-    background: linear-gradient(140deg, var(--brand), var(--brand-2));
-    color: #fff; padding: 4mm;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
-    page-break-inside: avoid; break-inside: avoid;
-  }
+  .round { width: 40mm; height: 40mm; border-radius: 50%; background: linear-gradient(140deg, var(--brand), var(--brand-2)); color: #fff; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
   .round img { width: 12mm; height: 12mm; filter: brightness(0) invert(1); opacity: .95; }
   .round .word { font-size: 13px; font-weight: 800; letter-spacing: .12em; margin-top: 1.5mm; }
   .round .sub { font-size: 6.5px; letter-spacing: .06em; opacity: .85; margin-top: .8mm; line-height: 1.3; }
@@ -27,195 +19,108 @@
   .round.small img { width: 9mm; height: 9mm; }
   .round.small .word { font-size: 10px; }
   .round.small .sub { font-size: 5.5px; }
-
-  /* --- прямоугольные наклейки 50×25 --- */
-  .rect {
-    width: 50mm; height: 25mm; border-radius: 2mm;
-    border: 1px solid var(--line); padding: 3mm 4mm;
-    display: flex; align-items: center; gap: 3mm; position: relative; overflow: hidden;
-    page-break-inside: avoid; break-inside: avoid;
-  }
-  .rect::before {
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.4mm;
-    background: linear-gradient(180deg, var(--brand), var(--brand-2));
-  }
+  .rect { width: 50mm; height: 25mm; border-radius: 2mm; border: 1px solid var(--line); padding: 3mm 4mm; display: flex; align-items: center; gap: 3mm; position: relative; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
+  .rect::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.4mm; background: linear-gradient(180deg, var(--brand), var(--brand-2)); }
   .rect img { width: 10mm; height: 10mm; flex: none; }
   .rect .word { font-size: 12px; font-weight: 800; letter-spacing: .1em; }
   .rect .sub { font-size: 7px; color: var(--ink-soft); line-height: 1.35; margin-top: .5mm; }
-
-  /* --- бирки с QR --- */
-  .hangtag {
-    width: 32mm; height: 55mm; border-radius: 2mm;
-    border: 1px solid var(--line); padding: 3mm 2.5mm 2.5mm;
-    display: flex; flex-direction: column; align-items: center; text-align: center;
-    position: relative; page-break-inside: avoid; break-inside: avoid;
-  }
-  .hangtag .hole {
-    width: 3.5mm; height: 3.5mm; border-radius: 50%;
-    border: 1px dashed #b6bfd4; margin-bottom: 1.5mm; flex: none;
-  }
+  .hangtag { width: 32mm; height: 55mm; border-radius: 2mm; border: 1px solid var(--line); padding: 3mm 2.5mm 2.5mm; display: flex; flex-direction: column; align-items: center; text-align: center; position: relative; page-break-inside: avoid; break-inside: avoid; }
+  .hangtag .hole { width: 3.5mm; height: 3.5mm; border-radius: 50%; border: 1px dashed #b6bfd4; margin-bottom: 1.5mm; flex: none; }
   .hangtag .htitle { font-size: 8.5px; font-weight: 800; line-height: 1.2; min-height: 6mm; }
   .hangtag svg { width: 20mm; height: 20mm; margin: 1.5mm 0; }
   .hangtag .hprice { font-size: 15px; font-weight: 900; line-height: 1; }
   .hangtag .hprice span { font-size: 9px; }
   .hangtag .hmeta { font-size: 6px; color: var(--ink-soft); margin-top: .8mm; }
-  .hangtag .hbrand {
-    margin-top: auto; font-size: 7px; font-weight: 800; letter-spacing: .12em; color: var(--brand);
-  }
+  .hangtag .hbrand { margin-top: auto; font-size: 7px; font-weight: 800; letter-spacing: .12em; color: var(--brand); }
   .hangtag .hcare { font-size: 5.5px; color: #98a2b8; line-height: 1.3; }
-
-  .sheet-title {
-    font-size: 11px; font-weight: 700; color: var(--ink-soft);
-    letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm;
-  }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
   .sheet-title + .sheet-title { margin-top: 8mm; }
   h3.block { font-size: 11px; color: var(--ink-soft); margin: 7mm 0 3mm; letter-spacing: .05em; text-transform: uppercase; }
 </style>
 </head><body>
-
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Наклейки и бирки</h1>
-    <label>Сайт / ссылка
-      <input type="text" id="site" value="nozza.ru">
-    </label>
-    <label>Ссылка в QR бирок
-      <input type="text" id="qrbase" value="https://nozza.ru/p/">
-    </label>
-    <label>Источник бирок
-      <select id="src">
-        <option value="api">Каталог PrintFlow</option>
-        <option value="demo">Демо-набор</option>
-      </select>
-    </label>
+    <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Наклейки и бирки</h1>
+    <label>Город <input type="text" id="city" value="Симферополь" style="min-width:120px"></label>
+    <label>Сайт / ссылка <input type="text" id="site" value="nozza.ru"></label>
+    <label>Ссылка в QR бирок <input type="text" id="qrbase" value="https://nozza.ru/p/"></label>
+    <label>Источник бирок <select id="src"><option value="api">Каталог PrintFlow</option><option value="demo">Демо-набор</option></select></label>
+    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn" id="reload">Обновить</button>
     <button class="btn primary" id="print">Печать</button>
+    <a class="btn" href="логотипы-на-выбор.html">Лого</a>
     <span class="status" id="status">загрузка…</span>
   </div>
 </div>
-
-<div class="note noprint">
-  <b>Материал:</b> круглые и прямоугольные наклейки — на самоклеящейся плёнке или матовой бумаге A4;
-  бирки — на плотном картоне 250–300 г/м², отверстие пробивается дыроколом по пунктиру, шнур продевается сверху.
-  Печать в масштабе 100 %, режущие линии показаны пунктиром.
-</div>
-
+<div class="note noprint"><b>Материал:</b> круглые и прямоугольные наклейки — на самоклеящейся плёнке или матовой бумаге A4; бирки — на плотном картоне 250–300 г/м². Город Симферополь по умолчанию, сохраняется.</div>
 <div id="sheets"></div>
-
 <script src="../assets/qr.js"></script>
 <script>
 'use strict';
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-const DEMO = [
-  { id: 'd1', name: 'Органайзер для стола', price: 890, material: 'PLA', grams: 120 },
-  { id: 'd2', name: 'Держатель наушников', price: 690, material: 'PETG', grams: 85 },
-  { id: 'd3', name: 'Адресник для питомца', price: 350, material: 'PETG', grams: 12 },
-  { id: 'd4', name: 'Подставка под телефон', price: 550, material: 'PLA', grams: 60 },
-  { id: 'd5', name: 'Крючок настенный', price: 320, material: 'PETG', grams: 30 },
-  { id: 'd6', name: 'Кабель-организатор', price: 420, material: 'PLA', grams: 40 },
+const $=id=>document.getElementById(id);
+const LS_CONTACT='nozza:contact'; const LS_LOGO='nozza:logo';
+function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
+function saveContact(p){ const c=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...c,...p})); }
+function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
+function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const DEMO=[
+  {id:'d1',name:'Органайзер для стола',price:890,material:'PLA',grams:120},
+  {id:'d2',name:'Держатель наушников',price:690,material:'PETG',grams:85},
+  {id:'d3',name:'Адресник для питомца',price:350,material:'PETG',grams:12},
+  {id:'d4',name:'Подставка под телефон',price:550,material:'PLA',grams:60},
+  {id:'d5',name:'Крючок настенный',price:320,material:'PETG',grams:30},
+  {id:'d6',name:'Кабель-организатор',price:420,material:'PLA',grams:40},
 ];
-
-function roundSticker(cls, sub) {
-  return `<div class="round ${cls} cut">
-    <img src="../assets/brand/nozza-mark.svg" alt="">
-    <div class="word">NOZZA</div>
-    <div class="sub">${esc(sub)}</div>
-  </div>`;
+function roundSticker(cls, sub, markSrc){
+  return `<div class="round ${cls} cut"><img src="${markSrc}" alt=""><div class="word">NOZZA</div><div class="sub">${esc(sub)}</div></div>`;
 }
-
-function rectSticker(sub) {
-  return `<div class="rect cut">
-    <img src="../assets/brand/nozza-mark.svg" alt="">
-    <div>
-      <div class="word">NOZZA</div>
-      <div class="sub">${esc(sub)}</div>
-    </div>
-  </div>`;
+function rectSticker(sub, markSrc){
+  return `<div class="rect cut"><img src="${markSrc}" alt=""><div><div class="word">NOZZA</div><div class="sub">${esc(sub)}</div></div></div>`;
 }
-
-function hangtag(item, qrbase) {
-  const link = qrbase + encodeURIComponent(item.id || '');
-  const qr = QR.svg(link, { ecl: 'M', margin: 1 });
-  const meta = [item.material, item.grams ? Math.round(item.grams) + ' г' : ''].filter(Boolean).join(' · ');
-  return `<div class="hangtag cut">
-    <div class="hole"></div>
-    <div class="htitle">${esc(item.name)}</div>
-    ${qr}
-    <div class="hprice">${item.price ? Math.round(item.price).toLocaleString('ru-RU') : '____'} <span>₽</span></div>
-    <div class="hmeta">${esc(meta)}</div>
-    <div class="hbrand">NOZZA</div>
-    <div class="hcare">Не мыть горячей водой<br>и не оставлять на солнце</div>
-  </div>`;
+function hangtag(item, qrbase){
+  const link=qrbase+encodeURIComponent(item.id||'');
+  const qr=QR.svg(link,{ecl:'M',margin:1});
+  const meta=[item.material,item.grams?Math.round(item.grams)+' г':''].filter(Boolean).join(' · ');
+  return `<div class="hangtag cut"><div class="hole"></div><div class="htitle">${esc(item.name)}</div>${qr}<div class="hprice">${item.price?Math.round(item.price).toLocaleString('ru-RU'):'____'} <span>₽</span></div><div class="hmeta">${esc(meta)}</div><div class="hbrand">NOZZA · ${esc(loadContact().city||'Симферополь')}</div><div class="hcare">Не мыть горячей водой<br>и не оставлять на солнце</div></div>`;
 }
-
-function render(items) {
-  const site = $('site').value.trim();
-  const qrbase = $('qrbase').value.trim();
-
-  const roundDark = Array.from({ length: 12 }, () => roundSticker('', site)).join('');
-  const roundLight = Array.from({ length: 8 }, () => roundSticker('light', site)).join('');
-  const roundSmall = Array.from({ length: 20 }, () => roundSticker('small', site)).join('');
-  const rects = Array.from({ length: 12 }, () => rectSticker('Напечатано для вас · ' + site)).join('');
-
-  // бирок — на весь лист, повторяем каталог до 18 штук
-  const tags = [];
-  for (let i = 0; i < 18; i++) tags.push(hangtag(items[i % items.length], qrbase));
-
-  $('sheets').innerHTML = `
-    <div class="sheet">
-      <div class="sheet-title">Круглые наклейки Ø40 мм — цветные</div>
-      <div class="grid">${roundDark}</div>
-      <h3 class="block">Круглые Ø40 мм — светлые (для тёмной упаковки)</h3>
-      <div class="grid">${roundLight}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title">Круглые наклейки Ø30 мм — пломба на пакет</div>
-      <div class="grid">${roundSmall}</div>
-      <h3 class="block">Прямоугольные 50 × 25 мм</h3>
-      <div class="grid">${rects}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title">Бирки 32 × 55 мм с QR — привязываются к изделию</div>
-      <div class="grid">${tags}</div>
-    </div>`;
+function render(items){
+  const site=$('site').value.trim();
+  const city=$('city').value.trim()||'Симферополь';
+  const qrbase=$('qrbase').value.trim();
+  const logoId=$('logoSel')?$('logoSel').value:loadLogo();
+  const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
+  if($('panelMark')) $('panelMark').src=markSrc;
+  saveContact({city, site, qrbase}); saveLogo(logoId);
+  const roundDark=Array.from({length:12},()=>roundSticker('', `${site} · ${city}`, markSrc)).join('');
+  const roundLight=Array.from({length:8},()=>roundSticker('light', `${site} · ${city}`, markSrc)).join('');
+  const roundSmall=Array.from({length:20},()=>roundSticker('small', city, markSrc)).join('');
+  const rects=Array.from({length:12},()=>rectSticker(`Напечатано для вас · ${site} · ${city}`, markSrc)).join('');
+  const tags=[]; for(let i=0;i<18;i++) tags.push(hangtag(items[i%items.length], qrbase));
+  $('sheets').innerHTML=`<div class="sheet"><div class="sheet-title">Круглые наклейки Ø40 мм — цветные (${esc(city)})</div><div class="grid">${roundDark}</div><h3 class="block">Круглые Ø40 мм — светлые (для тёмной упаковки)</h3><div class="grid">${roundLight}</div></div><div class="sheet"><div class="sheet-title">Круглые наклейки Ø30 мм — пломба на пакет</div><div class="grid">${roundSmall}</div><h3 class="block">Прямоугольные 50 × 25 мм</h3><div class="grid">${rects}</div></div><div class="sheet"><div class="sheet-title">Бирки 32 × 55 мм с QR — привязываются к изделию</div><div class="grid">${tags}</div></div>`;
 }
-
-async function load() {
-  const status = $('status');
-  if ($('src').value === 'demo') {
-    status.textContent = 'демо-набор';
-    status.className = 'status';
-    render(DEMO);
-    return;
-  }
-  try {
-    const res = await fetch('/api/catalog').then((r) => r.json());
-    const rows = (res.catalog || []).map((r) => ({
-      id: r.id, name: r.name || 'Без названия', price: r.price || 0,
-      material: r.material || '', grams: r.grams || 0,
-    }));
-    if (!rows.length) {
-      status.textContent = 'каталог PrintFlow пуст — показан демо-набор';
-      status.className = 'status err';
-      render(DEMO);
-      return;
-    }
-    status.textContent = 'каталог PrintFlow · ' + rows.length + ' позиций';
-    status.className = 'status ok';
-    render(rows);
-  } catch (e) {
-    status.textContent = 'PrintFlow не отвечает — показан демо-набор';
-    status.className = 'status err';
-    render(DEMO);
-  }
+async function load(){
+  const status=$('status');
+  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
+  if($('src').value==='demo'){ status.textContent='демо-набор'; status.className='status'; render(DEMO); return; }
+  try{
+    const res=await fetch('/api/catalog').then(r=>r.json());
+    const rows=(res.catalog||[]).map(r=>({id:r.id,name:r.name||'Без названия',price:r.price||0,material:r.material||'',grams:r.grams||0}));
+    if(!rows.length){ status.textContent='каталог PrintFlow пуст — показан демо-набор'; status.className='status err'; render(DEMO); return; }
+    status.textContent='каталог PrintFlow · '+rows.length+' позиций'; status.className='status ok'; render(rows);
+  }catch(e){ status.textContent='PrintFlow не отвечает — показан демо-набор'; status.className='status err'; render(DEMO); }
 }
-
-['site', 'qrbase', 'src'].forEach((id) => $(id).addEventListener('change', load));
+function init(){
+  const c=loadContact();
+  if(c.city) $('city').value=c.city; else { $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
+  if(c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
+  if(c.site) $('site').value=c.site;
+  if(c.qrbase) $('qrbase').value=c.qrbase;
+  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
+}
+['city','site','qrbase','src','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('change', load); });
 $('reload').addEventListener('click', load);
-$('print').addEventListener('click', () => window.print());
-load();
+$('print').addEventListener('click', ()=>window.print());
+init(); load();
 </script>
 </body></html>

@@ -13,8 +13,6 @@
   .canvas-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
   canvas { border: 1px solid var(--line); border-radius: 8px; max-width: 100%; height: auto; background: #fff; }
   .dl { margin-top: 8px; }
-
-  /* текстовые блоки для копирования */
   .copy {
     font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.6;
     background: #f5f7fc; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
@@ -24,11 +22,14 @@
 </head><body>
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Шапки Telegram и Авито</h1>
-    <label>Город <input type="text" id="city" value="Москва" style="min-width:120px"></label>
+    <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Шапки Telegram и Авито</h1>
+    <label>Город <input type="text" id="city" value="Симферополь" style="min-width:140px"></label>
     <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
     <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
+    <label>Сайт <input type="text" id="site" value="https://nozza.ru" style="min-width:160px"></label>
+    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn primary" id="redraw">Обновить</button>
+    <a class="btn" href="логотипы-на-выбор.html" style="text-decoration:none">4 логотипа</a>
   </div>
 </div>
 
@@ -36,7 +37,7 @@
 
   <div class="block">
     <h2>Аватар 512 × 512 — Telegram, Авито, WhatsApp</h2>
-    <p class="hint">Квадратный знак без надписи: в мелком размере читается лучше всего. Скачайте PNG и поставьте на профиль.</p>
+    <p class="hint">Квадратный знак без надписи: в мелком размере читается лучше всего. Скачайте PNG и поставьте на профиль. Город по умолчанию — Симферополь, данные сохраняются в браузере.</p>
     <div class="canvas-row">
       <div>
         <canvas id="av" width="512" height="512" style="width:200px"></canvas>
@@ -65,7 +66,7 @@
 
   <div class="block">
     <h2>Описание профиля — скопируйте текст</h2>
-    <p class="hint">Готовые тексты под каждую площадку. Подставьте свои контакты, если поменяли поля наверху.</p>
+    <p class="hint">Готовые тексты под каждую площадку. Город — Симферополь, подставьте свои контакты.</p>
     <h3 style="font-size:12px;margin:14px 0 6px;color:var(--ink-soft)">Telegram — описание канала (до 255 знаков)</h3>
     <div class="copy" id="txt_tg"></div>
     <h3 style="font-size:12px;margin:14px 0 6px;color:var(--ink-soft)">Авито — описание магазина</h3>
@@ -80,13 +81,24 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
 const BRAND = '#4f46e5', BRAND2 = '#7c3aed', INK = '#131a2b';
+const LS_CONTACT='nozza:contact';
+const LS_LOGO='nozza:logo';
+
+function loadContact(){
+  try{ const v=JSON.parse(localStorage.getItem(LS_CONTACT)||'{}'); return v&&typeof v==='object'?v:{} }catch(e){ return {}; }
+}
+function saveContact(patch){
+  const cur=loadContact(); const next={...cur, ...patch};
+  localStorage.setItem(LS_CONTACT, JSON.stringify(next));
+}
+function loadLogoId(){ return localStorage.getItem(LS_LOGO)||'1'; }
+function saveLogoId(id){ localStorage.setItem(LS_LOGO, id); }
 
 function grad(ctx, w, h) {
   const g = ctx.createLinearGradient(0, 0, w, h);
   g.addColorStop(0, BRAND); g.addColorStop(1, BRAND2);
   return g;
 }
-
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -96,144 +108,116 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
-
-/* знак: 4 сужающихся слоя + капля, рисуется в квадрате size×size от (x,y) */
-function drawMark(ctx, x, y, size, color) {
+function drawMarkV1(ctx, x, y, size, color) {
   const u = size / 72;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.fillStyle = color;
-  const bars = [
-    [16, 17, 40, 7, 0.95],
-    [19, 28, 34, 7, 0.85],
-    [23, 39, 26, 7, 0.72],
-  ];
-  for (const [bx, by, bw, bh, op] of bars) {
-    ctx.globalAlpha = op;
-    roundRect(ctx, bx * u, by * u, bw * u, bh * u, (bh / 2) * u);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 0.9;
-  ctx.beginPath();
-  ctx.arc(36 * u, 58 * u, 4.5 * u, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.save(); ctx.translate(x, y); ctx.fillStyle = color;
+  const bars = [[16,17,40,7,0.95],[19,28,34,7,0.85],[23,39,26,7,0.72]];
+  for(const [bx,by,bw,bh,op] of bars){ ctx.globalAlpha=op; roundRect(ctx,bx*u,by*u,bw*u,bh*u,(bh/2)*u); ctx.fill(); }
+  ctx.globalAlpha=0.9; ctx.beginPath(); ctx.arc(36*u,58*u,4.5*u,0,Math.PI*2); ctx.fill(); ctx.restore();
+}
+function drawMarkV2(ctx,x,y,size,color){
+  const u=size/72;
+  ctx.save(); ctx.translate(x,y);
+  ctx.strokeStyle=color; ctx.lineWidth=3.2*u; ctx.lineCap='round'; ctx.lineJoin='round';
+  function hex(cx,cy,r){ ctx.beginPath(); for(let i=0;i<6;i++){ const a=Math.PI/3*i - Math.PI/6; const px=cx+Math.cos(a)*r; const py=cy+Math.sin(a)*r; if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);} ctx.closePath(); ctx.stroke(); }
+  ctx.globalAlpha=0.95; hex(36*u,30*u,16*u);
+  ctx.globalAlpha=0.7; ctx.lineWidth=2.2*u; hex(36*u,30*u,9*u);
+  ctx.globalAlpha=1; ctx.fillStyle=color; ctx.beginPath(); ctx.arc(36*u,30*u,4.2*u,0,Math.PI*2); ctx.fill();
   ctx.restore();
 }
-
+function drawMarkV3(ctx,x,y,size,color){
+  const u=size/72;
+  ctx.save(); ctx.translate(x,y); ctx.fillStyle=color;
+  ctx.globalAlpha=0.98;
+  const p=new Path2D();
+  p.moveTo(16*u,54*u); p.lineTo(16*u,18*u); p.lineTo(20*u,16*u); p.lineTo(25*u,16*u); p.lineTo(27*u,18*u); p.lineTo(27*u,32*u); p.lineTo(39*u,16*u); p.lineTo(44*u,16*u); p.lineTo(46*u,18*u); p.lineTo(46*u,52*u); p.lineTo(42*u,54*u); p.lineTo(37*u,54*u); p.lineTo(35*u,52*u); p.lineTo(35*u,37*u); p.lineTo(23*u,54*u); p.closePath();
+  ctx.fill(p);
+  ctx.restore();
+}
+function drawMarkV4(ctx,x,y,size,color){
+  const u=size/72;
+  ctx.save(); ctx.translate(x,y);
+  ctx.strokeStyle=color; ctx.lineWidth=1.8*u; ctx.globalAlpha=0.92;
+  ctx.beginPath(); ctx.arc(36*u,36*u,20*u,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([2*u,2.5*u]); ctx.globalAlpha=0.6; ctx.lineWidth=1.2*u; ctx.beginPath(); ctx.arc(36*u,36*u,14.5*u,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle=color; ctx.globalAlpha=1; ctx.font=`900 ${11*u}px Inter, sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('NOZZA',36*u,38*u);
+  ctx.restore();
+}
+function drawMark(ctx,x,y,size,color){
+  const id=loadLogoId();
+  if(id==='2') return drawMarkV2(ctx,x,y,size,color);
+  if(id==='3') return drawMarkV3(ctx,x,y,size,color);
+  if(id==='4') return drawMarkV4(ctx,x,y,size,color);
+  return drawMarkV1(ctx,x,y,size,color);
+}
 function avatar(id, light) {
   const c = $(id), ctx = c.getContext('2d'), s = c.width;
   ctx.clearRect(0, 0, s, s);
   if (light) {
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, s, s);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, s, s);
     drawMark(ctx, s * 0.13, s * 0.13, s * 0.74, BRAND);
   } else {
-    ctx.fillStyle = grad(ctx, s, s);
-    ctx.fillRect(0, 0, s, s);
+    ctx.fillStyle = grad(ctx, s, s); ctx.fillRect(0, 0, s, s);
     drawMark(ctx, s * 0.13, s * 0.13, s * 0.74, '#fff');
   }
 }
-
 function tgCover() {
   const c = $('tgcover'), ctx = c.getContext('2d'), w = c.width, h = c.height;
-  ctx.fillStyle = grad(ctx, w, h);
-  ctx.fillRect(0, 0, w, h);
-
-  // мягкие «слои» на фоне
-  ctx.save();
-  ctx.globalAlpha = 0.08;
-  ctx.fillStyle = '#fff';
-  for (let i = 0; i < 5; i++) {
-    roundRect(ctx, w - 470 + i * 22, 90 + i * 78, 420 - i * 44, 44, 22);
-    ctx.fill();
-  }
+  ctx.fillStyle = grad(ctx, w, h); ctx.fillRect(0, 0, w, h);
+  ctx.save(); ctx.globalAlpha = 0.08; ctx.fillStyle = '#fff';
+  for (let i = 0; i < 5; i++) { roundRect(ctx, w - 470 + i * 22, 90 + i * 78, 420 - i * 44, 44, 22); ctx.fill(); }
   ctx.restore();
-
   drawMark(ctx, 96, h / 2 - 130, 190, '#fff');
-
-  ctx.fillStyle = '#fff';
-  ctx.textBaseline = 'alphabetic';
-  ctx.font = '800 92px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillText('NOZZA', 300, h / 2 - 22);
-  ctx.globalAlpha = 0.92;
-  ctx.font = '500 34px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillText('Там, где рождается форма', 304, h / 2 + 30);
-  ctx.globalAlpha = 0.85;
-  ctx.font = '600 27px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillText('3D-печать на заказ · ' + $('city').value.trim(), 304, h / 2 + 86);
+  ctx.fillStyle = '#fff'; ctx.textBaseline = 'alphabetic';
+  ctx.font = '800 92px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillText('NOZZA', 300, h / 2 - 22);
+  ctx.globalAlpha = 0.92; ctx.font = '500 34px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillText('Там, где рождается форма', 304, h / 2 + 30);
+  ctx.globalAlpha = 0.85; ctx.font = '600 27px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillText('3D-печать на заказ · ' + ($('city').value.trim()||'Симферополь'), 304, h / 2 + 86);
   ctx.globalAlpha = 1;
 }
-
 function avitoCover() {
   const c = $('avito'), ctx = c.getContext('2d'), w = c.width, h = c.height;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = grad(ctx, w, 0);
-  ctx.fillRect(0, 0, w, 10);
-
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = grad(ctx, w, 0); ctx.fillRect(0, 0, w, 10);
   drawMark(ctx, 60, h / 2 - 62, 124, BRAND);
-
-  ctx.fillStyle = INK;
-  ctx.font = '800 62px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillText('NOZZA', 210, h / 2 - 4);
-  ctx.fillStyle = '#5d6b85';
-  ctx.font = '500 26px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillText('3D-печать на заказ · изделия по вашим размерам', 214, h / 2 + 40);
-  ctx.font = '600 24px Inter, "Segoe UI", Arial, sans-serif';
-  ctx.fillStyle = BRAND;
-  ctx.fillText($('city').value.trim() + ' · ' + $('phone').value.trim() + ' · ' + $('tg').value.trim(), 214, h / 2 + 84);
-
-  ctx.save();
-  ctx.globalAlpha = 0.07;
-  ctx.fillStyle = BRAND;
-  for (let i = 0; i < 4; i++) {
-    roundRect(ctx, w - 330 + i * 20, 70 + i * 68, 280 - i * 40, 38, 19);
-    ctx.fill();
-  }
+  ctx.fillStyle = INK; ctx.font = '800 62px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillText('NOZZA', 210, h / 2 - 4);
+  ctx.fillStyle = '#5d6b85'; ctx.font = '500 26px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillText('3D-печать на заказ · изделия по вашим размерам', 214, h / 2 + 40);
+  ctx.font = '600 24px Inter, "Segoe UI", Arial, sans-serif'; ctx.fillStyle = BRAND;
+  ctx.fillText(($('city').value.trim()||'Симферополь') + ' · ' + ($('phone').value.trim()||'') + ' · ' + ($('tg').value.trim()||''), 214, h / 2 + 84);
+  ctx.save(); ctx.globalAlpha = 0.07; ctx.fillStyle = BRAND;
+  for (let i = 0; i < 4; i++) { roundRect(ctx, w - 330 + i * 20, 70 + i * 68, 280 - i * 40, 38, 19); ctx.fill(); }
   ctx.restore();
 }
-
 function texts() {
-  const city = $('city').value.trim();
+  const city = $('city').value.trim()||'Симферополь';
   const phone = $('phone').value.trim();
   const tg = $('tg').value.trim();
-
-  $('txt_tg').textContent =
-`NOZZA — 3D-печать на заказ, ${city}.
-Печатаем изделия по вашим размерам: органайзеры, крепления, таблички, адресники, запчасти взамен сломанных.
-Готовое — с полки, под заказ — за 1–3 дня.
-Считаем стоимость сразу: ${phone}`;
-
-  $('txt_avito').textContent =
-`NOZZA — мастерская 3D-печати в городе ${city}.
-
-Что делаем:
-• Изделия по вашим размерам — от держателя кабеля до корпуса прибора
-• Запчасти взамен сломанных: принесите деталь или фото с линейкой
-• Партии для бизнеса: таблички, ценникодержатели, оснастка (от 10 шт. дешевле)
-• Печать по вашей модели: STL, 3MF, STEP
-
-Материалы: PLA (дом, декор), PETG (прочность, тепло, улица). Цвет на выбор.
-Срок: обычно 1–3 дня, срочные заказы — в день обращения.
-Цену называем до начала печати и не меняем.
-
-Связь: ${phone}, Telegram ${tg}`;
-
-  $('txt_bio').textContent =
-`NOZZA · Там, где рождается форма
-3D-печать на заказ, ${city}
-Ваш размер, ваш цвет, 1–3 дня
-${tg}`;
+  $('txt_tg').textContent = `NOZZA — 3D-печать на заказ, ${city}.\nПечатаем изделия по вашим размерам: органайзеры, крепления, таблички, адресники, запчасти взамен сломанных.\nГотовое — с полки, под заказ — за 1–3 дня.\nСчитаем стоимость сразу: ${phone}`;
+  $('txt_avito').textContent = `NOZZA — мастерская 3D-печати в городе ${city}.\n\nЧто делаем:\n• Изделия по вашим размерам — от держателя кабеля до корпуса прибора\n• Запчасти взамен сломанных: принесите деталь или фото с линейкой\n• Партии для бизнеса: таблички, ценникодержатели, оснастка (от 10 шт. дешевле)\n• Печать по вашей модели: STL, 3MF, STEP\n\nМатериалы: PLA (дом, декор), PETG (прочность, тепло, улица). Цвет на выбор.\nСрок: обычно 1–3 дня, срочные заказы — в день обращения.\nЦену называем до начала печати и не меняем.\n\nСвязь: ${phone}, Telegram ${tg}`;
+  $('txt_bio').textContent = `NOZZA · Там, где рождается форма\n3D-печать на заказ, ${city}\nВаш размер, ваш цвет, 1–3 дня\n${tg}`;
 }
-
 function redraw() {
+  const contact={city:$('city').value.trim()||'Симферополь', phone:$('phone').value.trim(), tg:$('tg').value.trim(), site:$('site').value.trim()};
+  saveContact(contact);
+  if($('logoSel')) saveLogoId($('logoSel').value);
+  const logoId=loadLogoId();
+  const markPath=`../assets/brand/nozza-mark-${logoId}.svg`;
+  const panelMark=$('panelMark'); if(panelMark) panelMark.src=markPath;
   avatar('av', false);
   avatar('av2', true);
   tgCover();
   avitoCover();
   texts();
 }
-
+function init(){
+  const c=loadContact();
+  if(c.city) $('city').value=c.city;
+  if(!c.city || c.city==='Москва') {$('city').value='Симферополь'; saveContact({city:'Симферополь'});}
+  if(c.phone) $('phone').value=c.phone;
+  if(c.tg) $('tg').value=c.tg;
+  if(c.site && $('site')) $('site').value=c.site;
+  const logoId=loadLogoId(); if($('logoSel')) $('logoSel').value=logoId;
+  ['city','phone','tg','site','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', redraw); });
+}
 document.querySelectorAll('[data-dl]').forEach((b) => {
   b.addEventListener('click', () => {
     const c = $(b.dataset.dl);
@@ -243,9 +227,8 @@ document.querySelectorAll('[data-dl]').forEach((b) => {
     a.click();
   });
 });
-['city', 'phone', 'tg'].forEach((id) => $(id).addEventListener('input', redraw));
 $('redraw').addEventListener('click', redraw);
-
+init();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(redraw);
 redraw();
 </script>
