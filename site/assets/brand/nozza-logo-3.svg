@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 72" width="260" height="72" role="img" aria-label="NOZZA v3">
+ <title>NOZZA — Нить</title>
+ <defs><linearGradient id="l3" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f46e5"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+ <g>
+  <rect x="4" y="6" width="60" height="60" rx="16" fill="url(#l3)"/>
+  <path d="M18 52 V18.5 C18 18.5 18 16.5 20 16.5 H23.5 C25.5 16.5 26 18 26 19.5 V30.5 L36 16.5 C38 14.5 39.5 16 39.5 18 V50 C39.5 52 38 51.5 36 51.5 H32.5 C30.5 51.5 30 50 30 48.5 V37 L20 51 C18.5 53 18 52 18 52 Z" fill="#fff" opacity="0.98"/>
+ </g>
+ <text x="80" y="47" font-family="Inter,'Segoe UI',system-ui,Arial,sans-serif" font-size="34" font-weight="800" letter-spacing="1.5" fill="#131a2b">NOZZA</text>
+</svg>

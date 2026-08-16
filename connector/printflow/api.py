@@ -23,7 +23,15 @@ from .db import Database
 from .manager import PrinterManager
 from .repo import Repo
 
-ALLOWED_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+ALLOWED_ORIGIN = re.compile(
+    r"^https?://"
+    r"(localhost|127\.0\.0\.1|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|"
+    r"\[::1\]|::1"
+    r")(:\d+)?$"
+)
 MAX_UPLOAD = 400 * 1024 * 1024  # 400 МБ — с запасом на крупные 3MF
 
 

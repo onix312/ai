@@ -7,19 +7,9 @@
 <style>
   .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
   .cut { outline: 1px dashed #c3cbdd; }
-  .sheet-title {
-    font-size: 11px; font-weight: 700; color: var(--ink-soft);
-    letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm;
-  }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
   h3.block { font-size: 11px; color: var(--ink-soft); margin: 7mm 0 3mm; letter-spacing: .05em; text-transform: uppercase; }
-
-  /* ---------------- визитки 90×50 ---------------- */
-  .card {
-    width: 90mm; height: 50mm; border-radius: 2mm; padding: 6mm;
-    display: flex; flex-direction: column; justify-content: space-between;
-    position: relative; overflow: hidden;
-    page-break-inside: avoid; break-inside: avoid;
-  }
+  .card { width: 90mm; height: 50mm; border-radius: 2mm; padding: 6mm; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden; page-break-inside: avoid; break-inside: avoid; }
   .card.front { background: linear-gradient(140deg, var(--brand), var(--brand-2)); color: #fff; }
   .card.front .c-top { display: flex; align-items: center; gap: 3mm; }
   .card.front img { width: 13mm; height: 13mm; filter: brightness(0) invert(1); }
@@ -34,45 +24,22 @@
   .card.back .c-lines b { font-size: 11px; }
   .card.back svg { width: 26mm; height: 26mm; flex: none; }
   .card.back .c-qrcap { font-size: 6.5px; color: var(--ink-soft); text-align: center; margin-top: 1mm; }
-
-  /* ---------------- таблички на полку 90×55 ---------------- */
-  .sign {
-    width: 90mm; height: 55mm; border-radius: 2mm; border: 1px solid var(--line);
-    padding: 5mm 5mm 4mm 6.5mm; position: relative; overflow: hidden;
-    display: flex; flex-direction: column;
-    page-break-inside: avoid; break-inside: avoid;
-  }
-  .sign::before {
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.8mm;
-    background: linear-gradient(180deg, var(--brand), var(--brand-2));
-  }
-  .sign .s-kicker {
-    font-size: 7px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--brand);
-  }
+  .sign { width: 90mm; height: 55mm; border-radius: 2mm; border: 1px solid var(--line); padding: 5mm 5mm 4mm 6.5mm; position: relative; overflow: hidden; display: flex; flex-direction: column; page-break-inside: avoid; break-inside: avoid; }
+  .sign::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.8mm; background: linear-gradient(180deg, var(--brand), var(--brand-2)); }
+  .sign .s-kicker { font-size: 7px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--brand); }
   .sign .s-title { font-size: 17px; font-weight: 900; line-height: 1.12; margin-top: 1.5mm; letter-spacing: -.01em; }
   .sign .s-text { font-size: 9.5px; color: var(--ink-soft); line-height: 1.4; margin-top: 2mm; }
-  .sign .s-foot {
-    margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 3mm;
-  }
+  .sign .s-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 3mm; }
   .sign .s-brand { font-size: 7.5px; font-weight: 800; letter-spacing: .12em; color: var(--brand); }
   .sign svg { width: 16mm; height: 16mm; flex: none; }
-
-  /* ---------------- вкладыш «спасибо» A6 ---------------- */
-  .insert {
-    width: 95mm; height: 135mm; border: 1px dashed #c3cbdd; border-radius: 2mm;
-    padding: 8mm 8mm; display: flex; flex-direction: column; text-align: center;
-    page-break-inside: avoid; break-inside: avoid;
-  }
+  .insert { width: 95mm; height: 135mm; border: 1px dashed #c3cbdd; border-radius: 2mm; padding: 8mm 8mm; display: flex; flex-direction: column; text-align: center; page-break-inside: avoid; break-inside: avoid; }
   .insert img.mark { width: 16mm; height: 16mm; align-self: center; }
   .insert .i-word { font-size: 20px; font-weight: 900; letter-spacing: .12em; margin-top: 3mm; }
   .insert .i-slogan { font-size: 8px; color: var(--ink-soft); letter-spacing: .08em; margin-top: 1.2mm; }
   .insert .i-thanks { font-size: 22px; font-weight: 800; margin-top: 8mm; line-height: 1.2; letter-spacing: -.01em; }
   .insert .i-body { font-size: 10.5px; color: var(--ink-soft); line-height: 1.6; margin-top: 4mm; text-align: left; }
   .insert .i-body b { color: var(--ink); }
-  .insert .i-care {
-    margin-top: 5mm; text-align: left; font-size: 9px; line-height: 1.6;
-    background: #f4f6fc; border-radius: 2mm; padding: 4mm;
-  }
+  .insert .i-care { margin-top: 5mm; text-align: left; font-size: 9px; line-height: 1.6; background: #f4f6fc; border-radius: 2mm; padding: 4mm; }
   .insert .i-care b { display: block; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; color: var(--brand); margin-bottom: 1.5mm; }
   .insert .i-qr { margin-top: auto; display: flex; align-items: center; gap: 4mm; text-align: left; }
   .insert .i-qr svg { width: 24mm; height: 24mm; flex: none; }
@@ -80,139 +47,70 @@
   .insert .i-qr .t b { font-size: 10.5px; }
 </style>
 </head><body>
-
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Визитки, таблички, вкладыш</h1>
+    <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Визитки, таблички, вкладыш</h1>
     <label>Имя <input type="text" id="who" value="" placeholder="Ваше имя" style="min-width:140px"></label>
     <label>Роль <input type="text" id="role" value="3D-печать на заказ" style="min-width:150px"></label>
+    <label>Город <input type="text" id="city" value="Симферополь" style="min-width:120px"></label>
     <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
     <label>Ссылка <input type="text" id="site" value="https://nozza.ru"></label>
     <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
+    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn primary" id="print">Печать</button>
+    <a class="btn" href="логотипы-на-выбор.html">Лого</a>
   </div>
 </div>
-
-<div class="note noprint">
-  <b>Печать:</b> визитки 90 × 50 мм — картон 300 г/м², лицо и оборот на разных листах (при двусторонней печати
-  ставьте «переворот по длинной стороне»). Таблички на полку 90 × 55 мм — картон + прозрачный держатель или
-  напечатанная подставка. Вкладыш A6 кладётся в пакет к каждому заказу.
-</div>
-
+<div class="note noprint"><b>Печать:</b> визитки 90 × 50 мм — картон 300 г/м², лицо и оборот на разных листах (при двусторонней печати ставьте «переворот по длинной стороне»). Город Симферополь сохраняется автоматически.</div>
 <div id="sheets"></div>
-
 <script src="../assets/qr.js"></script>
 <script>
 'use strict';
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-const SIGNS = [
-  { k: 'Можно трогать', t: 'Берите в руки', d: 'Все образцы на полке можно потрогать, покрутить и примерить. Так понятнее, чем на фото.' },
-  { k: 'Под заказ', t: 'Сделаем ваш размер', d: 'Любое изделие с полки печатаем в другом цвете и под ваши габариты. Обычно 1–3 дня.' },
-  { k: 'Сломалось?', t: 'Напечатаем деталь', d: 'Принесите сломанную часть или её фото с линейкой — подберём замену.' },
-  { k: 'Свой макет', t: 'Печать по вашей модели', d: 'Присылайте STL, 3MF или STEP — проверим и посчитаем стоимость.' },
-  { k: 'Для бизнеса', t: 'Партии и оснастка', d: 'Таблички, держатели, ценникодержатели и запчасти — от 10 штук со скидкой.' },
-  { k: 'Материалы', t: 'PLA, PETG и другие', d: 'PLA — для дома и декора. PETG — прочнее, терпит тепло и улицу. Подскажем, что выбрать.' },
+const $=id=>document.getElementById(id);
+const LS_CONTACT='nozza:contact'; const LS_LOGO='nozza:logo';
+function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
+function saveContact(p){ const c=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...c,...p})); }
+function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
+function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const SIGNS=[
+  {k:'Можно трогать',t:'Берите в руки',d:'Все образцы на полке можно потрогать, покрутить и примерить. Так понятнее, чем на фото.'},
+  {k:'Под заказ',t:'Сделаем ваш размер',d:'Любое изделие с полки печатаем в другом цвете и под ваши габариты. Обычно 1–3 дня.'},
+  {k:'Сломалось?',t:'Напечатаем деталь',d:'Принесите сломанную часть или её фото с линейкой — подберём замену.'},
+  {k:'Свой макет',t:'Печать по вашей модели',d:'Присылайте STL, 3MF или STEP — проверим и посчитаем стоимость.'},
+  {k:'Для бизнеса',t:'Партии и оснастка',d:'Таблички, держатели, ценникодержатели и запчасти — от 10 штук со скидкой.'},
+  {k:'Материалы',t:'PLA, PETG и другие',d:'PLA — для дома и декора. PETG — прочнее, терпит тепло и улицу. Подскажем, что выбрать.'},
 ];
-
-function render() {
-  const who = $('who').value.trim();
-  const role = $('role').value.trim();
-  const phone = $('phone').value.trim();
-  const site = $('site').value.trim();
-  const tg = $('tg').value.trim();
-  const shortSite = site.replace(/^https?:\/\//, '');
-  const qrSite = QR.svg(site, { ecl: 'M', margin: 1 });
-  const qrTg = QR.svg('https://t.me/' + tg.replace(/^@/, ''), { ecl: 'M', margin: 1 });
-
-  const front = `<div class="card front cut">
-    <div class="c-top">
-      <img src="../assets/brand/nozza-mark.svg" alt="">
-      <div>
-        <div class="c-word">NOZZA</div>
-        <div class="c-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА</div>
-      </div>
-    </div>
-    <div class="c-what">3D-печать на заказ · изделия по вашим размерам<br>ремонт деталей · партии для бизнеса</div>
-  </div>`;
-
-  const back = `<div class="card back cut">
-    <div class="c-info">
-      ${who ? `<div class="c-name">${esc(who)}</div>` : '<div class="c-name">NOZZA</div>'}
-      <div class="c-role">${esc(role)}</div>
-      <div class="c-lines">
-        <b>${esc(phone)}</b><br>
-        ${esc(shortSite)}<br>
-        Telegram ${esc(tg)}
-      </div>
-    </div>
-    <div>${qrTg}<div class="c-qrcap">Написать в Telegram</div></div>
-  </div>`;
-
-  const signHtml = (s) => `<div class="sign cut">
-    <div class="s-kicker">${esc(s.k)}</div>
-    <div class="s-title">${esc(s.t)}</div>
-    <div class="s-text">${esc(s.d)}</div>
-    <div class="s-foot">
-      <div>
-        <div class="s-brand">NOZZA</div>
-        <div style="font-size:7.5px;color:var(--ink-soft);margin-top:.6mm">${esc(shortSite)} · ${esc(tg)}</div>
-      </div>
-      ${qrTg}
-    </div>
-  </div>`;
-
-  const insert = `<div class="insert">
-    <img class="mark" src="../assets/brand/nozza-mark.svg" alt="">
-    <div class="i-word">NOZZA</div>
-    <div class="i-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА</div>
-    <div class="i-thanks">Спасибо<br>за покупку!</div>
-    <div class="i-body">
-      Это изделие напечатано слой за слоем на нашем принтере — возможно, прямо в тот день,
-      когда вы зашли. Если что-то не подошло по размеру или цвету, <b>вернитесь к нам:
-      переделаем или подгоним</b>.
-    </div>
-    <div class="i-care">
-      <b>Как ухаживать</b>
-      • Мыть тёплой водой, без кипятка и посудомойки.<br>
-      • Не оставлять в машине на солнце: PLA размягчается.<br>
-      • Клеить — секундным клеем или эпоксидкой.<br>
-      • Царапину можно затереть мелкой наждачкой.
-    </div>
-    <div class="i-qr">
-      ${qrSite}
-      <div class="t">
-        <b>Нужно ещё что-то?</b><br>
-        ${esc(shortSite)}<br>
-        Telegram ${esc(tg)}<br>
-        ${esc(phone)}
-      </div>
-    </div>
-  </div>`;
-
-  $('sheets').innerHTML = `
-    <div class="sheet">
-      <div class="sheet-title">Визитки 90 × 50 мм — лицевая сторона</div>
-      <div class="grid">${Array.from({ length: 10 }, () => front).join('')}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title">Визитки 90 × 50 мм — оборот</div>
-      <div class="grid">${Array.from({ length: 10 }, () => back).join('')}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title">Таблички на полку 90 × 55 мм</div>
-      <div class="grid">${SIGNS.map(signHtml).join('')}</div>
-    </div>
-    <div class="sheet">
-      <div class="sheet-title">Вкладыш «спасибо за покупку» — 95 × 135 мм, кладётся в пакет</div>
-      <div class="grid">${insert}${insert}${insert}${insert}</div>
-    </div>`;
+function render(){
+  const who=$('who').value.trim(); const role=$('role').value.trim()||'3D-печать на заказ';
+  const city=$('city').value.trim()||'Симферополь';
+  const phone=$('phone').value.trim(); const site=$('site').value.trim(); const tg=$('tg').value.trim();
+  const logoId=$('logoSel')?$('logoSel').value:loadLogo();
+  const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
+  if($('panelMark')) $('panelMark').src=markSrc;
+  saveContact({who, role, city, phone, site, tg}); saveLogo(logoId);
+  const shortSite=site.replace(/^https?:\/\//,'');
+  const qrSite=QR.svg(site,{ecl:'M',margin:1});
+  const qrTg=QR.svg('https://t.me/'+tg.replace(/^@/,'',{ecl:'M',margin:1}));
+  const front=`<div class="card front cut"><div class="c-top"><img src="${markSrc}" alt=""><div><div class="c-word">NOZZA</div><div class="c-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · ${esc(city.toUpperCase())}</div></div></div><div class="c-what">3D-печать на заказ в ${esc(city)} · изделия по вашим размерам<br>ремонт деталей · партии для бизнеса</div></div>`;
+  const back=`<div class="card back cut"><div class="c-info">${who?`<div class="c-name">${esc(who)}</div>`:'<div class="c-name">NOZZA · '+esc(city)+'</div>'}<div class="c-role">${esc(role)}</div><div class="c-lines"><b>${esc(phone)}</b><br>${esc(shortSite)}<br>Telegram ${esc(tg)} · ${esc(city)}</div></div><div>${qrTg}<div class="c-qrcap">Написать в Telegram</div></div></div>`;
+  const signHtml=s=>`<div class="sign cut"><div class="s-kicker">${esc(s.k)}</div><div class="s-title">${esc(s.t)}</div><div class="s-text">${esc(s.d)}</div><div class="s-foot"><div><div class="s-brand">NOZZA · ${esc(city)}</div><div style="font-size:7.5px;color:var(--ink-soft);margin-top:.6mm">${esc(shortSite)} · ${esc(tg)}</div></div>${qrTg}</div></div>`;
+  const insert=`<div class="insert"><img class="mark" src="${markSrc}" alt=""><div class="i-word">NOZZA</div><div class="i-slogan">ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · ${esc(city)}</div><div class="i-thanks">Спасибо<br>за покупку!</div><div class="i-body">Это изделие напечатано слой за слоем в мастерской NOZZA, ${esc(city)} — возможно, прямо в тот день, когда вы зашли. Если что-то не подошло по размеру или цвету, <b>вернитесь к нам: переделаем или подгоним</b>.</div><div class="i-care"><b>Как ухаживать</b>• Мыть тёплой водой, без кипятка и посудомойки.<br>• Не оставлять в машине на солнце: PLA размягчается.<br>• Клеить — секундным клеем или эпоксидкой.<br>• Царапину можно затереть мелкой наждачкой.</div><div class="i-qr">${qrSite}<div class="t"><b>Нужно ещё что-то?</b><br>${esc(shortSite)}<br>Telegram ${esc(tg)}<br>${esc(phone)}<br>${esc(city)}</div></div></div>`;
+  $('sheets').innerHTML=`<div class="sheet"><div class="sheet-title">Визитки 90 × 50 мм — лицевая сторона (${esc(city)})</div><div class="grid">${Array.from({length:10},()=>front).join('')}</div></div><div class="sheet"><div class="sheet-title">Визитки 90 × 50 мм — оборот</div><div class="grid">${Array.from({length:10},()=>back).join('')}</div></div><div class="sheet"><div class="sheet-title">Таблички на полку 90 × 55 мм</div><div class="grid">${SIGNS.map(signHtml).join('')}</div></div><div class="sheet"><div class="sheet-title">Вкладыш «спасибо за покупку» — 95 × 135 мм</div><div class="grid">${insert}${insert}${insert}${insert}</div></div>`;
 }
-
-['who', 'role', 'phone', 'site', 'tg'].forEach((id) => $(id).addEventListener('input', render));
-$('print').addEventListener('click', () => window.print());
-render();
+function init(){
+  const c=loadContact();
+  if(c.who) $('who').value=c.who;
+  if(c.role) $('role').value=c.role;
+  if(c.city) $('city').value=c.city; else { $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
+  if(c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
+  if(c.phone) $('phone').value=c.phone;
+  if(c.site) $('site').value=c.site;
+  if(c.tg) $('tg').value=c.tg;
+  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
+}
+['who','role','city','phone','site','tg','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', render); });
+$('print').addEventListener('click', ()=>window.print());
+init(); render();
 </script>
 </body></html>

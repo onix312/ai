@@ -6,7 +6,6 @@
 <link rel="stylesheet" href="generator.css">
 <style>
   .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
-
   .tag {
     width: 62mm; height: 38mm;
     border: 1px solid var(--line); border-radius: 2mm;
@@ -14,7 +13,10 @@
     display: flex; gap: 3mm;
     position: relative; overflow: hidden;
     page-break-inside: avoid; break-inside: avoid;
+    cursor: pointer; transition: outline .12s ease, box-shadow .12s ease, transform .12s ease;
   }
+  .tag:hover { box-shadow: 0 6px 18px -12px rgba(19,26,43,.6); transform: translateY(-0.5mm); }
+  .tag.selected { outline: 2.5px solid var(--brand); outline-offset: 2px; box-shadow: 0 10px 24px -14px rgba(79,70,229,.7); }
   .tag::before {
     content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.6mm;
     background: linear-gradient(180deg, var(--brand), var(--brand-2));
@@ -40,12 +42,10 @@
   }
   .tag .brandline {
     font-size: 6.5px; font-weight: 800; letter-spacing: .1em; color: var(--brand);
-    text-align: center;
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
   }
   .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 4mm; }
   .tag.blank .price { color: #cbd2e0; }
-
-  /* мелкий формат 43×25 мм — для маленьких изделий */
   .grid.small .tag { width: 43mm; height: 25mm; padding: 3mm 3mm 2.5mm 4.5mm; gap: 2mm; }
   .grid.small .tag .name { font-size: 9.5px; -webkit-line-clamp: 2; }
   .grid.small .tag .desc { display: none; }
@@ -55,58 +55,81 @@
   .grid.small .tag-side svg { width: 11mm; height: 11mm; }
   .grid.small .tag .badge { font-size: 5.5px; max-width: 12mm; }
   .grid.small .tag .meta { font-size: 6px; }
-
-  .sheet-title {
-    font-size: 11px; font-weight: 700; color: var(--ink-soft);
-    letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm;
-  }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
   .empty { padding: 30mm 10mm; text-align: center; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+
+  /* Manual editor */
+  .editor {
+    background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px;
+    padding: 12px 14px; margin-top: 10px;
+  }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input[type="text"], .editor input[type="number"], .editor select {
+    font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); min-width: 110px;
+  }
+  .editor input.wide { min-width: 220px; }
+  .editor .hint { font-size: 11px; color: var(--ink-soft); line-height: 1.4; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
+  .chip b { font-weight: 800; color: var(--brand); }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+  .btn.danger:hover { border-color: #e38a8a; }
 </style>
 </head><body>
 
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Генератор ценников</h1>
-    <label>Источник
-      <select id="src">
-        <option value="api">Каталог PrintFlow</option>
-        <option value="demo">Демо-набор</option>
-      </select>
-    </label>
-    <label>Размер
-      <select id="size">
-        <option value="big">62 × 38 мм (12 на лист)</option>
-        <option value="small">43 × 25 мм (24 на лист)</option>
-      </select>
-    </label>
-    <label>Наценка, %
-      <input type="number" id="markup" value="0" step="5" style="width:70px">
-    </label>
-    <label>Округлять до
-      <select id="round">
-        <option value="0">не округлять</option>
-        <option value="10" selected>10 ₽</option>
-        <option value="50">50 ₽</option>
-        <option value="100">100 ₽</option>
-      </select>
-    </label>
+    <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Генератор ценников</h1>
+    <label>Источник <select id="src"><option value="api">Каталог PrintFlow</option><option value="custom">Только ручные</option><option value="demo">Демо-набор</option></select></label>
+    <label>Размер <select id="size"><option value="big">62 × 38 мм (12 на лист)</option><option value="small">43 × 25 мм (24 на лист)</option></select></label>
+    <label>Наценка, % <input type="number" id="markup" value="0" step="5" style="width:60px"></label>
+    <label>Округлять до <select id="round"><option value="0">не округлять</option><option value="10" selected>10 ₽</option><option value="50">50 ₽</option><option value="100">100 ₽</option></select></label>
+    <label>Город <input type="text" id="city" value="Симферополь" style="width:120px"></label>
+    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
   </div>
   <div class="panel-row" style="margin-top:9px">
-    <label>Ссылка в QR
-      <input type="text" id="qrbase" value="https://nozza.ru/p/" placeholder="https://nozza.ru/p/">
-    </label>
-    <label><input type="checkbox" id="qron" checked> QR на ценнике</label>
-    <label><input type="checkbox" id="blanks" checked> добавить пустые бланки</label>
+    <label>Ссылка в QR <input type="text" id="qrbase" value="https://nozza.ru/p/" placeholder="https://nozza.ru/p/"></label>
+    <label><input type="checkbox" id="qron" checked> QR</label>
+    <label><input type="checkbox" id="blanks" checked> пустые бланки</label>
+    <label><input type="checkbox" id="showCity" checked> город на ценнике</label>
     <button class="btn" id="reload">Обновить</button>
     <button class="btn primary" id="print">Печать</button>
+    <a class="btn" href="логотипы-на-выбор.html" style="text-decoration:none">Логотипы</a>
     <span class="status" id="status">загрузка…</span>
+  </div>
+
+  <div class="editor" id="editor">
+    <h3>✏️ Ручной ценник — клик по любому ценнику для редактирования</h3>
+    <div class="row">
+      <label>Название* <input type="text" id="m_name" class="wide" placeholder="Органайзер для стола" value=""></label>
+      <label>Описание <input type="text" id="m_notes" class="wide" placeholder="Три отсека, цвет на выбор"></label>
+    </div>
+    <div class="row">
+      <label>Цена ₽ <input type="number" id="m_price" placeholder="890" style="width:90px"></label>
+      <label>Материал <input type="text" id="m_material" placeholder="PLA" style="width:80px"></label>
+      <label>Граммы <input type="number" id="m_grams" placeholder="120" style="width:70px"></label>
+      <label>Бейдж <input type="text" id="m_niche" placeholder="Для дома / Новинка" style="width:130px"></label>
+      <label>QR id <input type="text" id="m_id" placeholder="org-001" style="width:110px"></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btnAdd">+ Добавить новый ценник</button>
+      <button class="btn" id="btnApply">Применить к выбранному</button>
+      <button class="btn" id="btnDuplicate">Дублировать</button>
+      <button class="btn danger" id="btnDelete">Удалить выбранный</button>
+      <button class="btn" id="btnClearSel">Снять выбор</button>
+      <span class="chip" id="selInfo"><b>Выбрано:</b> нет — клик по ценнику</span>
+      <span class="chip"><b>Ручных:</b> <span id="customCount">0</span></span>
+      <button class="btn" id="btnExport">Экспорт JSON</button>
+      <button class="btn" id="btnClearAll">Очистить ручные</button>
+    </div>
+    <div class="hint">Клик по ценнику → поля заполняются, можно править название, цену, описание, бейдж, QR. <b>Город Симферополь</b> по умолчанию сохраняется в браузере (nozza:contact). Ручные ценники хранятся локально (nozza:priceCustom) и попадают на печать первыми. Пустые бланки — для ручного вписывания.</div>
   </div>
 </div>
 
 <div class="note noprint">
-  <b>Как печатать:</b> масштаб 100 %, без «вписать в лист», бумага плотная (160–250 г/м²) или самоклейка.
-  QR ведёт на страницу товара — в поле «Ссылка в QR» подставьте свой адрес, к нему добавится артикул.
-  Если каталог PrintFlow не открыт, генератор покажет демо-набор: цены в нём условные, замените перед печатью.
+  <b>Как печатать:</b> масштаб 100 %, без «вписать в лист», бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указывать информацию самостоятельно в полях выше — цена, материал, бейдж, QR. Если каталог PrintFlow не открыт, покажется демо-набор. Город по умолчанию — Симферополь.
 </div>
 
 <div id="sheets"></div>
@@ -114,164 +137,313 @@
 <script src="../assets/qr.js"></script>
 <script>
 'use strict';
+const $=id=>document.getElementById(id);
+const LS_CONTACT='nozza:contact';
+const LS_LOGO='nozza:logo';
+const LS_CUSTOM='nozza:priceCustom';
+const PER_PAGE={big:12,small:24};
 
-const $ = (id) => document.getElementById(id);
-const PER_PAGE = { big: 12, small: 24 };
-
-const DEMO = [
-  { id: 'd1', name: 'Органайзер для стола', notes: 'Три отсека, цвет на выбор', price: 890, material: 'PLA', grams: 120, niche: 'Для дома' },
-  { id: 'd2', name: 'Держатель наушников', notes: 'Крепление на стол или полку', price: 690, material: 'PETG', grams: 85, niche: 'Рабочее место' },
-  { id: 'd3', name: 'Адресник для питомца', notes: 'Имя и телефон, гравировка слоем', price: 350, material: 'PETG', grams: 12, niche: 'Питомцы' },
-  { id: 'd4', name: 'Подставка под телефон', notes: 'Складная, угол 60°', price: 550, material: 'PLA', grams: 60, niche: 'Рабочее место' },
-  { id: 'd5', name: 'Крючок настенный', notes: 'Нагрузка до 3 кг, комплект 2 шт.', price: 320, material: 'PETG', grams: 30, niche: 'Для дома' },
-  { id: 'd6', name: 'Кабель-органайзер', notes: 'Комплект 5 шт., клейкая основа', price: 420, material: 'PLA', grams: 40, niche: 'Рабочее место' },
-  { id: 'd7', name: 'Настольная табличка', notes: 'Текст и два цвета AMS', price: 780, material: 'PLA', grams: 95, niche: 'Для бизнеса' },
-  { id: 'd8', name: 'Держатель ценника', notes: 'Под стандартную вставку', price: 260, material: 'PETG', grams: 25, niche: 'Для бизнеса' },
-  { id: 'd9', name: 'Подставка для растения', notes: 'Диаметр 12 см, дренаж', price: 940, material: 'PLA', grams: 150, niche: 'Для дома' },
-  { id: 'd10', name: 'Крепление роутера', notes: 'С учётом вентиляции', price: 720, material: 'PETG', grams: 110, niche: 'Для дома' },
-  { id: 'd11', name: 'Брелок с именем', notes: 'Любой текст до 12 знаков', price: 250, material: 'PLA', grams: 8, niche: 'Подарки' },
-  { id: 'd12', name: 'Коробка с крышкой', notes: '10 × 8 × 5 см, штабелируется', price: 610, material: 'PLA', grams: 90, niche: 'Для дома' },
+const DEMO=[
+  {id:'d1',name:'Органайзер для стола',notes:'Три отсека, цвет на выбор',price:890,material:'PLA',grams:120,niche:'Для дома'},
+  {id:'d2',name:'Держатель наушников',notes:'Крепление на стол или полку',price:690,material:'PETG',grams:85,niche:'Рабочее место'},
+  {id:'d3',name:'Адресник для питомца',notes:'Имя и телефон, гравировка слоем',price:350,material:'PETG',grams:12,niche:'Питомцы'},
+  {id:'d4',name:'Подставка под телефон',notes:'Складная, угол 60°',price:550,material:'PLA',grams:60,niche:'Рабочее место'},
+  {id:'d5',name:'Крючок настенный',notes:'Нагрузка до 3 кг, комплект 2 шт.',price:320,material:'PETG',grams:30,niche:'Для дома'},
+  {id:'d6',name:'Кабель-органайзер',notes:'Комплект 5 шт., клейкая основа',price:420,material:'PLA',grams:40,niche:'Рабочее место'},
+  {id:'d7',name:'Настольная табличка',notes:'Текст и два цвета AMS',price:780,material:'PLA',grams:95,niche:'Для бизнеса'},
+  {id:'d8',name:'Держатель ценника',notes:'Под стандартную вставку',price:260,material:'PETG',grams:25,niche:'Для бизнеса'},
 ];
 
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
+function saveContact(p){ const cur=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...cur,...p})); }
+function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
+function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+function loadCustom(){
+  try{ const arr=JSON.parse(localStorage.getItem(LS_CUSTOM)||'[]'); return Array.isArray(arr)?arr:[] }catch(e){ return []; }
+}
+function saveCustom(arr){ localStorage.setItem(LS_CUSTOM, JSON.stringify(arr)); }
 
-function roundPrice(value, step) {
-  if (!step) return Math.round(value);
-  return Math.round(value / step) * step;
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function roundPrice(value,step){ if(!step) return Math.round(value); return Math.round(value/step)*step; }
+function priceText(n){ return Math.round(n).toLocaleString('ru-RU'); }
+
+let catalogItems=[]; // from api
+let selectedIndex=-1; // index in displayItems
+
+function getOpts(){
+  return {
+    markup:Number($('markup').value)||0,
+    round:Number($('round').value)||0,
+    qr:$('qron').checked,
+    qrbase:$('qrbase').value.trim(),
+    city:($('city').value.trim()||'Симферополь'),
+    showCity:$('showCity').checked,
+    size:$('size').value,
+  };
 }
 
-function priceText(n) {
-  return Math.round(n).toLocaleString('ru-RU');
-}
-
-function tagHtml(item, opts) {
-  const markup = 1 + (opts.markup || 0) / 100;
-  const price = roundPrice((Number(item.price) || 0) * markup, opts.round);
-  const badge = item.niche ? `<div class="badge">${esc(item.niche)}</div>` : '<div class="badge">NOZZA</div>';
-  let qr = '';
-  if (opts.qr) {
-    const link = (opts.qrbase || '') + encodeURIComponent(item.id || '');
-    qr = QR.svg(link, { ecl: 'M', margin: 1 });
+function buildTagInner(item, opts, globalIdx){
+  const markup=1+(opts.markup||0)/100;
+  const rawPrice=Number(item.price)||0;
+  const price=rawPrice?roundPrice(rawPrice*markup, opts.round):0;
+  const isCustom = item._custom;
+  const badgeText = item.niche || (isCustom ? 'NOZZA — ручной' : 'NOZZA');
+  const badge=`<div class="badge">${esc(badgeText)}</div>`;
+  let qr='';
+  if(opts.qr){
+    const link=(opts.qrbase||'')+encodeURIComponent(item.id||'');
+    qr=QR.svg(link,{ecl:'M',margin:1});
   }
-  const meta = [item.material, item.grams ? Math.round(item.grams) + ' г' : ''].filter(Boolean).join(' · ');
-  return `<div class="tag">
+  const metaParts=[];
+  if(item.material) metaParts.push(item.material);
+  if(item.grams) metaParts.push(Math.round(item.grams)+' г');
+  if(opts.showCity) metaParts.push(opts.city);
+  const meta=metaParts.join(' · ');
+  const brandLine=opts.showCity?`NOZZA · ${esc(opts.city)}`:'NOZZA';
+  // selectable + selected classes handled via wrapper
+  return `<div class="tag${globalIdx===selectedIndex?' selected':''}" data-idx="${globalIdx}" title="${isCustom?'Ручной — клик для редактирования':'Клик — скопировать в ручной редактор'}">
     <div class="tag-main">
       <div>
-        <div class="name">${esc(item.name)}</div>
-        ${item.notes ? `<div class="desc">${esc(item.notes)}</div>` : ''}
+        <div class="name">${esc(item.name||'Без названия')}</div>
+        ${item.notes?`<div class="desc">${esc(item.notes)}</div>`:''}
       </div>
       <div>
-        <div class="price">${price ? priceText(price) : '____'} <span>₽</span></div>
-        ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+        <div class="price">${price?priceText(price):'____'} <span>₽</span></div>
+        ${meta?`<div class="meta">${esc(meta)}</div>`:''}
       </div>
     </div>
     <div class="tag-side">
       ${badge}
-      ${qr || '<div></div>'}
-      <div class="brandline">NOZZA</div>
+      ${qr||'<div></div>'}
+      <div class="brandline">${brandLine}</div>
     </div>
   </div>`;
 }
 
-function blankHtml() {
-  return `<div class="tag blank">
-    <div class="tag-main">
-      <div><div class="name"></div><div class="desc"></div></div>
-      <div><div class="price">____ <span>₽</span></div></div>
-    </div>
-    <div class="tag-side"><div class="badge">NOZZA</div><div></div><div class="brandline">nozza.ru</div></div>
-  </div>`;
+function blankHtml(){
+  const opts=getOpts();
+  const brandLine=opts.showCity?`NOZZA · ${esc(opts.city)}`:'nozza.ru';
+  return `<div class="tag blank"><div class="tag-main"><div><div class="name"></div><div class="desc"></div></div><div><div class="price">____ <span>₽</span></div></div></div><div class="tag-side"><div class="badge">NOZZA</div><div></div><div class="brandline">${brandLine}</div></div></div>`;
 }
 
-function render(items) {
-  const opts = {
-    markup: Number($('markup').value) || 0,
-    round: Number($('round').value) || 0,
-    qr: $('qron').checked,
-    qrbase: $('qrbase').value.trim(),
-  };
-  const size = $('size').value;
-  const per = PER_PAGE[size];
-  const host = $('sheets');
+function render(){
+  const opts=getOpts();
+  const city=opts.city;
+  saveContact({city, qrbase:opts.qrbase});
+  saveLogo($('logoSel').value);
+  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${$('logoSel').value||loadLogo()}.svg`;
+  const custom=loadCustom();
+  $('customCount').textContent=custom.length;
+  let base=[];
+  const src=$('src').value;
+  if(src==='custom'){
+    base=[]; // only custom
+  }else if(src==='demo'){
+    base=catalogItems.length?catalogItems:DEMO;
+  }else{ // api
+    base=catalogItems.length?catalogItems:DEMO;
+  }
+  const display = src==='custom' ? [...custom] : [...custom, ...base];
+  // mark custom
+  display.forEach((it,i)=>{ it._custom = i<custom.length; it._globalIdx=i; });
 
-  if (!items.length) {
-    host.innerHTML = `<div class="sheet"><div class="empty">
-      Каталог пуст.<br>Добавьте изделия в PrintFlow → «База изделий» или переключитесь на демо-набор.
-    </div></div>`;
+  const per=PER_PAGE[opts.size];
+  const host=$('sheets');
+  if(!display.length){
+    host.innerHTML=`<div class="sheet"><div class="empty">Каталог пуст и ручных нет.<br>Добавьте ручной ценник в редакторе выше или выберите другой источник.</div></div>`;
     return;
   }
+  const pages=[];
+  for(let i=0;i<display.length;i+=per) pages.push(display.slice(i,i+per));
 
-  const pages = [];
-  for (let i = 0; i < items.length; i += per) pages.push(items.slice(i, i + per));
-
-  let html = pages.map((page, idx) => `
+  let html=pages.map((page,idx)=>`
     <div class="sheet">
-      <div class="sheet-title noprint">Лист ${idx + 1} из ${pages.length} · ${page.length} ценников</div>
-      <div class="grid ${size === 'small' ? 'small' : ''}">${page.map((it) => tagHtml(it, opts)).join('')}</div>
+      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} ценников ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
+      <div class="grid ${opts.size==='small'?'small':''}">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
     </div>`).join('');
 
-  if ($('blanks').checked) {
-    const count = size === 'small' ? 24 : 12;
-    html += `<div class="sheet">
-      <div class="sheet-title">Пустые бланки — вписать от руки</div>
-      <div class="grid ${size === 'small' ? 'small' : ''}">${Array.from({ length: count }, blankHtml).join('')}</div>
-    </div>`;
+  if($('blanks').checked){
+    const count=opts.size==='small'?24:12;
+    html+=`<div class="sheet"><div class="sheet-title">Пустые бланки — вписать от руки · ${esc(city)}</div><div class="grid ${opts.size==='small'?'small':''}">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
   }
-  host.innerHTML = html;
+  host.innerHTML=html;
+
+  // bind click
+  host.querySelectorAll('.tag[data-idx]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const idx=Number(el.dataset.idx);
+      selectedIndex=idx;
+      const item=display[idx];
+      if(item){
+        $('m_name').value=item.name||'';
+        $('m_notes').value=item.notes||'';
+        $('m_price').value=item.price||'';
+        $('m_material').value=item.material||'';
+        $('m_grams').value=item.grams||'';
+        $('m_niche').value=item.niche||'';
+        $('m_id').value=item.id||'';
+        $('selInfo').innerHTML=`<b>Выбрано:</b> #${idx+1} ${esc(item.name||'')} ${item._custom?'(ручной)':'(каталог)'}`;
+      }
+      // re-render to show selected outline (avoid infinite loop by not re-calling render heavily, but we need to update class)
+      host.querySelectorAll('.tag').forEach(t=>t.classList.remove('selected'));
+      el.classList.add('selected');
+      el.scrollIntoView({behavior:'smooth', block:'center'});
+    });
+  });
 }
 
-function normalize(rows, niches) {
-  const nameById = {};
-  (niches || []).forEach((n) => { nameById[n.id] = n.name || n.title || ''; });
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name || 'Без названия',
-    notes: r.notes || '',
-    price: r.price || 0,
-    material: r.material || '',
-    grams: r.grams || 0,
-    niche: nameById[r.niche_id] || '',
-  }));
+function normalize(rows,niches){
+  const nameById={}; (niches||[]).forEach(n=>{ nameById[n.id]=n.name||n.title||''; });
+  return rows.map(r=>({id:r.id, name:r.name||'Без названия', notes:r.notes||'', price:r.price||0, material:r.material||'', grams:r.grams||0, niche:nameById[r.niche_id]||''}));
 }
 
-async function load() {
-  const status = $('status');
-  if ($('src').value === 'demo') {
-    status.textContent = 'демо-набор · ' + DEMO.length + ' позиций';
-    status.className = 'status';
-    render(DEMO);
+async function loadCatalog(){
+  const status=$('status');
+  const src=$('src').value;
+  if(src==='custom'){
+    status.textContent='только ручные · '+loadCustom().length+' шт';
+    status.className='status ok';
+    render();
     return;
   }
-  status.textContent = 'загрузка каталога…';
-  status.className = 'status';
-  try {
-    const [catRes, nicheRes] = await Promise.all([
-      fetch('/api/catalog').then((r) => r.json()),
-      fetch('/api/niches').then((r) => r.json()).catch(() => ({ niches: [] })),
+  if(src==='demo'){
+    catalogItems=DEMO;
+    status.textContent='демо-набор · '+DEMO.length+' позиций';
+    status.className='status';
+    render();
+    return;
+  }
+  status.textContent='загрузка каталога…'; status.className='status';
+  try{
+    const [catRes,nicheRes]=await Promise.all([
+      fetch('/api/catalog').then(r=>r.json()),
+      fetch('/api/niches').then(r=>r.json()).catch(()=>({niches:[]})),
     ]);
-    const rows = catRes.catalog || [];
-    if (!rows.length) {
-      status.textContent = 'каталог PrintFlow пуст — показан демо-набор';
-      status.className = 'status err';
-      render(DEMO);
-      return;
+    const rows=catRes.catalog||[];
+    if(!rows.length){
+      status.textContent='каталог PrintFlow пуст — показан демо-набор + ручные';
+      status.className='status err';
+      catalogItems=DEMO;
+      render(); return;
     }
-    status.textContent = 'каталог PrintFlow · ' + rows.length + ' позиций';
-    status.className = 'status ok';
-    render(normalize(rows, nicheRes.niches));
-  } catch (e) {
-    status.textContent = 'PrintFlow не отвечает — показан демо-набор';
-    status.className = 'status err';
-    render(DEMO);
+    status.textContent='каталог PrintFlow · '+rows.length+' позиций + '+loadCustom().length+' ручных';
+    status.className='status ok';
+    catalogItems=normalize(rows, nicheRes.niches);
+    render();
+  }catch(e){
+    status.textContent='PrintFlow не отвечает — показан демо-набор + ручные';
+    status.className='status err';
+    catalogItems=DEMO;
+    render();
   }
 }
 
-['src', 'size', 'markup', 'round', 'qron', 'blanks', 'qrbase'].forEach((id) => {
-  $(id).addEventListener('change', load);
+function readManualForm(){
+  return {
+    id:($('m_id').value.trim()||'custom-'+Date.now()),
+    name:($('m_name').value.trim()||'Без названия'),
+    notes:($('m_notes').value.trim()||''),
+    price:Number($('m_price').value)||0,
+    material:($('m_material').value.trim()||''),
+    grams:Number($('m_grams').value)||0,
+    niche:($('m_niche').value.trim()||''),
+  };
+}
+
+$('btnAdd').addEventListener('click', ()=>{
+  const item=readManualForm();
+  const custom=loadCustom();
+  custom.unshift(item);
+  saveCustom(custom);
+  selectedIndex=0;
+  $('selInfo').innerHTML=`<b>Выбрано:</b> новый #1 ${esc(item.name)} (ручной)`;
+  render();
 });
-$('reload').addEventListener('click', load);
-$('print').addEventListener('click', () => window.print());
-load();
+$('btnApply').addEventListener('click', ()=>{
+  if(selectedIndex<0){ alert('Сначала кликните по ценнику'); return; }
+  const custom=loadCustom();
+  const isCustomSelected=selectedIndex<custom.length;
+  const form=readManualForm();
+  if(isCustomSelected){
+    custom[selectedIndex]=form;
+    saveCustom(custom);
+  }else{
+    // editing catalog item -> create custom copy
+    custom.unshift(form);
+    saveCustom(custom);
+    selectedIndex=0;
+  }
+  render();
+});
+$('btnDuplicate').addEventListener('click', ()=>{
+  const form=readManualForm();
+  if(!form.name){ alert('Заполните название'); return; }
+  const dup={...form, id:form.id+'-copy-'+Math.floor(Math.random()*1000), name:form.name+' (копия)'};
+  const custom=loadCustom();
+  custom.unshift(dup);
+  saveCustom(custom);
+  selectedIndex=0;
+  render();
+});
+$('btnDelete').addEventListener('click', ()=>{
+  if(selectedIndex<0){ alert('Выберите ценник'); return; }
+  const custom=loadCustom();
+  if(selectedIndex>=custom.length){ alert('Можно удалить только ручные ценники (первые '+custom.length+'). Выберите ручной.'); return; }
+  if(!confirm('Удалить ручной ценник #'+(selectedIndex+1)+'?')) return;
+  custom.splice(selectedIndex,1);
+  saveCustom(custom);
+  selectedIndex=-1;
+  $('selInfo').innerHTML='<b>Выбрано:</b> нет';
+  render();
+});
+$('btnClearSel').addEventListener('click', ()=>{
+  selectedIndex=-1;
+  $('selInfo').innerHTML='<b>Выбрано:</b> нет — клик по ценнику';
+  document.querySelectorAll('.tag.selected').forEach(el=>el.classList.remove('selected'));
+});
+$('btnClearAll').addEventListener('click', ()=>{
+  if(!confirm('Очистить все ручные ценники?')) return;
+  saveCustom([]);
+  selectedIndex=-1;
+  render();
+});
+$('btnExport').addEventListener('click', ()=>{
+  const custom=loadCustom();
+  const data=JSON.stringify(custom,null,2);
+  const blob=new Blob([data],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='nozza-custom-price-tags.json'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+});
+
+['src','size','markup','round','qron','blanks','showCity','qrbase','city','logoSel'].forEach(id=>{
+  const el=$(id); if(el) el.addEventListener('change', render);
+});
+$('reload').addEventListener('click', loadCatalog);
+$('print').addEventListener('click', ()=>window.print());
+
+function init(){
+  const c=loadContact();
+  if(c.city) $('city').value=c.city;
+  if(!c.city || c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
+  if(c.qrbase) $('qrbase').value=c.qrbase;
+  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
+  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${logoId}.svg`;
+  // restore last manual form if any
+  try{
+    const last=JSON.parse(localStorage.getItem('nozza:priceManualForm')||'{}');
+    if(last.name) $('m_name').value=last.name;
+    if(last.notes) $('m_notes').value=last.notes;
+  }catch(e){}
+}
+function saveManualFormDraft(){
+  const draft={name:$('m_name').value, notes:$('m_notes').value};
+  localStorage.setItem('nozza:priceManualForm', JSON.stringify(draft));
+}
+['m_name','m_notes','m_price','m_material','m_grams','m_niche','m_id'].forEach(id=>{
+  const el=$(id); if(el) el.addEventListener('input', saveManualFormDraft);
+});
+
+init();
+loadCatalog();
 </script>
 </body></html>
