@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — постеры A4 и A3</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  .poster {
+    height: 281mm; display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+  }
+  .sheet.a3 .poster { height: 404mm; }
+
+  .p-top { display: flex; align-items: center; gap: 5mm; }
+  .p-top img { width: 22mm; height: 22mm; }
+  .p-word { font-size: 40px; font-weight: 900; letter-spacing: .06em; line-height: 1; }
+  .sheet.a3 .p-word { font-size: 58px; }
+  .p-tag { font-size: 12px; color: var(--ink-soft); letter-spacing: .1em; text-transform: uppercase; margin-top: 2mm; }
+  .sheet.a3 .p-tag { font-size: 16px; }
+
+  .p-hero {
+    margin-top: 14mm; font-size: 52px; font-weight: 900; line-height: 1.03; letter-spacing: -.02em;
+  }
+  .sheet.a3 .p-hero { font-size: 74px; margin-top: 20mm; }
+  .p-hero em {
+    font-style: normal;
+    background: linear-gradient(120deg, var(--brand), var(--brand-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .p-lead { margin-top: 8mm; font-size: 17px; line-height: 1.5; color: var(--ink-soft); max-width: 150mm; }
+  .sheet.a3 .p-lead { font-size: 23px; max-width: 215mm; }
+
+  .p-list { margin-top: 10mm; display: flex; flex-direction: column; gap: 4mm; }
+  .p-item { display: flex; align-items: baseline; gap: 4mm; font-size: 16px; }
+  .sheet.a3 .p-item { font-size: 22px; }
+  .p-num {
+    font-size: 13px; font-weight: 900; color: #fff; flex: none;
+    width: 8mm; height: 8mm; border-radius: 50%;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sheet.a3 .p-num { width: 11mm; height: 11mm; font-size: 17px; }
+  .p-item b { font-weight: 750; }
+  .p-item span { color: var(--ink-soft); }
+
+  .p-bottom {
+    margin-top: auto; padding-top: 8mm; border-top: 2px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 8mm;
+  }
+  .p-contact { font-size: 15px; line-height: 1.7; }
+  .sheet.a3 .p-contact { font-size: 20px; }
+  .p-contact b { font-size: 19px; }
+  .sheet.a3 .p-contact b { font-size: 26px; }
+  .p-contact .muted { color: var(--ink-soft); font-size: 13px; }
+  .sheet.a3 .p-contact .muted { font-size: 17px; }
+  .p-qr { text-align: center; flex: none; }
+  .p-qr svg { width: 38mm; height: 38mm; display: block; }
+  .sheet.a3 .p-qr svg { width: 52mm; height: 52mm; }
+  .p-qr div { font-size: 10px; color: var(--ink-soft); margin-top: 2mm; letter-spacing: .05em; }
+
+  .p-strip {
+    position: absolute; right: -30mm; top: 60mm; width: 90mm; height: 90mm;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    opacity: .07; border-radius: 22mm; transform: rotate(18deg);
+  }
+
+  /* вариант «под заказ» */
+  .poster.order .p-hero { font-size: 46px; }
+  .sheet.a3 .poster.order .p-hero { font-size: 66px; }
+  .steps { display: flex; flex-direction: column; gap: 5mm; margin-top: 10mm; }
+  .step { display: flex; gap: 5mm; align-items: flex-start; }
+  .step .sn {
+    font-size: 22px; font-weight: 900; color: var(--brand); line-height: 1; flex: none; width: 12mm;
+  }
+  .sheet.a3 .step .sn { font-size: 30px; width: 16mm; }
+  .step .st { font-size: 17px; font-weight: 750; }
+  .sheet.a3 .step .st { font-size: 23px; }
+  .step .sd { font-size: 13.5px; color: var(--ink-soft); margin-top: 1mm; line-height: 1.45; }
+  .sheet.a3 .step .sd { font-size: 18px; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Постеры</h1>
+    <label>Формат
+      <select id="fmt">
+        <option value="a4">A4</option>
+        <option value="a3">A3</option>
+      </select>
+    </label>
+    <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
+    <label>Ссылка <input type="text" id="site" value="https://nozza.ru"></label>
+    <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
+    <button class="btn primary" id="print">Печать</button>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Куда вешать:</b> постер «Печатаем на месте» — над полкой или на стену за прилавком;
+  постер «Как заказать своё» — рядом с образцами. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра.
+  Перед печатью подставьте телефон и ссылку: QR генерируется автоматически.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+let pageStyle = null;
+function setPageSize(a3) {
+  if (!pageStyle) {
+    pageStyle = document.createElement('style');
+    document.head.appendChild(pageStyle);
+  }
+  pageStyle.textContent = a3
+    ? '@page { size: A3; margin: 8mm; }'
+    : '@page { size: A4; margin: 8mm; }';
+}
+
+function render() {
+  const a3 = $('fmt').value === 'a3';
+  setPageSize(a3);
+  const cls = 'sheet' + (a3 ? ' a3' : '');
+  const phone = $('phone').value.trim();
+  const site = $('site').value.trim();
+  const tg = $('tg').value.trim();
+  const qr = QR.svg(site, { ecl: 'M', margin: 1 });
+  const shortSite = site.replace(/^https?:\/\//, '');
+
+  const head = `
+    <div class="p-top">
+      <img src="../assets/brand/nozza-mark.svg" alt="">
+      <div>
+        <div class="p-word">NOZZA</div>
+        <div class="p-tag">Там, где рождается форма</div>
+      </div>
+    </div>`;
+
+  const foot = `
+    <div class="p-bottom">
+      <div class="p-contact">
+        <b>${esc(phone)}</b><br>
+        ${esc(shortSite)}<br>
+        <span class="muted">Telegram ${esc(tg)}</span>
+      </div>
+      <div class="p-qr">${qr}<div>Наведите камеру</div></div>
+    </div>`;
+
+  $('sheets').innerHTML = `
+    <div class="${cls}">
+      <div class="poster">
+        <div class="p-strip"></div>
+        ${head}
+        <div class="p-hero">Печатаем<br><em>вещи под вас</em></div>
+        <div class="p-lead">
+          3D-печать по вашим размерам: от держателя для кабеля до партии
+          фирменных табличек. Приносите идею, фото или чертёж — посчитаем при вас.
+        </div>
+        <div class="p-list">
+          <div class="p-item"><span class="p-num">1</span><div><b>Готовые изделия на полке</b> <span>— забирайте сразу</span></div></div>
+          <div class="p-item"><span class="p-num">2</span><div><b>Под заказ за 1–3 дня</b> <span>— цвет и размер на выбор</span></div></div>
+          <div class="p-item"><span class="p-num">3</span><div><b>Ремонт и запчасти</b> <span>— восстановим сломанную деталь</span></div></div>
+          <div class="p-item"><span class="p-num">4</span><div><b>Партии для бизнеса</b> <span>— таблички, держатели, оснастка</span></div></div>
+        </div>
+        ${foot}
+      </div>
+    </div>
+
+    <div class="${cls}">
+      <div class="poster order">
+        <div class="p-strip"></div>
+        ${head}
+        <div class="p-hero">Как заказать<br><em>своё изделие</em></div>
+        <div class="steps">
+          <div class="step"><div class="sn">01</div><div>
+            <div class="st">Покажите, что нужно</div>
+            <div class="sd">Фото, эскиз на бумаге, размеры или ссылка на модель — подойдёт любой вариант.</div></div></div>
+          <div class="step"><div class="sn">02</div><div>
+            <div class="st">Получите цену и срок</div>
+            <div class="sd">Считаем сразу: материал, время печати и работа. Цена фиксируется до начала печати.</div></div></div>
+          <div class="step"><div class="sn">03</div><div>
+            <div class="st">Согласуйте образец</div>
+            <div class="sd">Для сложных заказов сначала печатаем пробную деталь и проверяем посадку.</div></div></div>
+          <div class="step"><div class="sn">04</div><div>
+            <div class="st">Забирайте готовое</div>
+            <div class="sd">Сообщим в Telegram, когда будет готово. Обычно 1–3 дня, срочно — в тот же день.</div></div></div>
+        </div>
+        <div class="p-lead" style="margin-top:10mm">
+          <b style="color:var(--ink)">Что мы печатаем чаще всего:</b> органайзеры и подставки,
+          крепления и кронштейны, адресники для питомцев, таблички и указатели,
+          корпуса и заглушки, сувениры с именем.
+        </div>
+        ${foot}
+      </div>
+    </div>`;
+}
+
+['fmt', 'phone', 'site', 'tg'].forEach((id) => $(id).addEventListener('input', render));
+$('print').addEventListener('click', () => window.print());
+render();
+</script>
+</body></html>

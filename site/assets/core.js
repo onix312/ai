@@ -269,7 +269,7 @@ function showView(name, sub) {
   $$('.nav-link').forEach((a) => a.classList.toggle('on', a.dataset.view === name));
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
-  document.title = `${VIEWS[name].title} · PrintFlow`;
+  document.title = `${VIEWS[name].title} · NOZZA`;
   window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
   $('side').classList.remove('show');
   const scrim = $('scrim'); if (scrim) scrim.remove();

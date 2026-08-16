@@ -3,7 +3,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>PrintFlow — управление 3D-производством</title>
+<title>NOZZA · PrintFlow — управление 3D-производством</title>
+<link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
 <link rel="stylesheet" href="assets/theme.css">
 <link rel="stylesheet" href="assets/app.css">
 </head><body>
@@ -11,7 +13,7 @@
 
 <div id="shell">
 <nav id="side">
- <div class="brand"><div class="brand-logo">PF</div><div><b>PrintFlow</b><small>3D-производство · Bambu Lab</small></div></div>
+ <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · Bambu Lab</small></div></div>
  <div class="side-scroll">
   <div class="nav-group-title">Работа</div>
   <a class="nav-link" href="#dashboard" data-view="dashboard"><span class="ic">◈</span>Обзор</a>
@@ -1628,7 +1630,7 @@
 <li>[ ] Заказ и оплата отражены в учёте.</li>
 <li>[ ] Проведён контроль качества.</li>
 <li>[ ] Сделана свежая резервная копия.</li>
-</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — материалы для магазина</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники</b><span>12 позиций трёх ниш + пустые бланки; цены вписываются из PrintFlow</span><a class="printbtn" href="materials/ценники.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Плакат над полкой</b><span>Три ниши и понятная инструкция заказа</span><a class="printbtn" href="materials/плакат-над-полкой.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Таблички и визитки</b><span>Образцы, свой размер, QR и обновлённые визитки</span><a class="printbtn" href="materials/таблички-и-визитки.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Три ниши, безопасные ответы и бланк заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Печатайте на обычном A4 в масштабе 100%. Ценники и визитки разрежьте по пунктиру.</p></article>
+</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий; два размера и пустые бланки</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Генераторы берут цены из «Базы изделий».</p></article>
  </div>
 </section>
 
@@ -1859,6 +1861,7 @@
 
 <div id="toasts"></div>
 
+<script src="assets/qr.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/printer.js"></script>
 <script src="assets/ops.js"></script>

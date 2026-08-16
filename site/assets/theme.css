@@ -133,8 +133,10 @@ html[data-theme="dark"] #side { background: rgba(18, 24, 40, .86); backdrop-filt
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff; font-weight: 800; font-size: 13px; letter-spacing: .04em;
   box-shadow: 0 8px 18px -8px var(--accent);
+  object-fit: contain;
 }
-.brand b { display: block; font-size: 15.5px; letter-spacing: -.015em; }
+img.brand-logo { background: none; box-shadow: 0 8px 18px -10px var(--accent); }
+.brand b { display: block; font-size: 15.5px; letter-spacing: .02em; }
 .brand small { display: block; font-size: 11.5px; color: var(--muted); }
 
 .side-scroll { flex: 1; overflow-y: auto; padding: 2px 2px 8px; margin-right: -4px; }

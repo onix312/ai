@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — шапки Telegram и Авито</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  body { background: #eef1f7; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px; }
+  .block { background: #fff; border-radius: 14px; padding: 18px; margin-bottom: 18px; box-shadow: 0 10px 30px -22px rgba(19,26,43,.6); }
+  .block h2 { font-size: 14px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .block p.hint { font-size: 12px; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.5; }
+  .canvas-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+  canvas { border: 1px solid var(--line); border-radius: 8px; max-width: 100%; height: auto; background: #fff; }
+  .dl { margin-top: 8px; }
+
+  /* текстовые блоки для копирования */
+  .copy {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.6;
+    background: #f5f7fc; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+    white-space: pre-wrap; color: var(--ink);
+  }
+</style>
+</head><body>
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Шапки Telegram и Авито</h1>
+    <label>Город <input type="text" id="city" value="Москва" style="min-width:120px"></label>
+    <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
+    <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
+    <button class="btn primary" id="redraw">Обновить</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="block">
+    <h2>Аватар 512 × 512 — Telegram, Авито, WhatsApp</h2>
+    <p class="hint">Квадратный знак без надписи: в мелком размере читается лучше всего. Скачайте PNG и поставьте на профиль.</p>
+    <div class="canvas-row">
+      <div>
+        <canvas id="av" width="512" height="512" style="width:200px"></canvas>
+        <div class="dl"><button class="btn" data-dl="av" data-name="nozza-avatar-512.png">Скачать PNG</button></div>
+      </div>
+      <div>
+        <canvas id="av2" width="512" height="512" style="width:200px"></canvas>
+        <div class="dl"><button class="btn" data-dl="av2" data-name="nozza-avatar-svetly-512.png">Скачать PNG</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2>Обложка канала Telegram — 1280 × 640</h2>
+    <p class="hint">Загружается в настройках канала. Важное держите в центре: на телефоне края обрезаются.</p>
+    <canvas id="tgcover" width="1280" height="640" style="width:100%;max-width:640px"></canvas>
+    <div class="dl"><button class="btn" data-dl="tgcover" data-name="nozza-telegram-1280x640.png">Скачать PNG</button></div>
+  </div>
+
+  <div class="block">
+    <h2>Обложка магазина Авито — 1200 × 400</h2>
+    <p class="hint">Ставится в профиль магазина. Ничего мелкого: на выдаче баннер показывается узкой полосой.</p>
+    <canvas id="avito" width="1200" height="400" style="width:100%;max-width:720px"></canvas>
+    <div class="dl"><button class="btn" data-dl="avito" data-name="nozza-avito-1200x400.png">Скачать PNG</button></div>
+  </div>
+
+  <div class="block">
+    <h2>Описание профиля — скопируйте текст</h2>
+    <p class="hint">Готовые тексты под каждую площадку. Подставьте свои контакты, если поменяли поля наверху.</p>
+    <h3 style="font-size:12px;margin:14px 0 6px;color:var(--ink-soft)">Telegram — описание канала (до 255 знаков)</h3>
+    <div class="copy" id="txt_tg"></div>
+    <h3 style="font-size:12px;margin:14px 0 6px;color:var(--ink-soft)">Авито — описание магазина</h3>
+    <div class="copy" id="txt_avito"></div>
+    <h3 style="font-size:12px;margin:14px 0 6px;color:var(--ink-soft)">Короткое био (Instagram, VK, визитка)</h3>
+    <div class="copy" id="txt_bio"></div>
+  </div>
+
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const BRAND = '#4f46e5', BRAND2 = '#7c3aed', INK = '#131a2b';
+
+function grad(ctx, w, h) {
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, BRAND); g.addColorStop(1, BRAND2);
+  return g;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* знак: 4 сужающихся слоя + капля, рисуется в квадрате size×size от (x,y) */
+function drawMark(ctx, x, y, size, color) {
+  const u = size / 72;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = color;
+  const bars = [
+    [16, 17, 40, 7, 0.95],
+    [19, 28, 34, 7, 0.85],
+    [23, 39, 26, 7, 0.72],
+  ];
+  for (const [bx, by, bw, bh, op] of bars) {
+    ctx.globalAlpha = op;
+    roundRect(ctx, bx * u, by * u, bw * u, bh * u, (bh / 2) * u);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 0.9;
+  ctx.beginPath();
+  ctx.arc(36 * u, 58 * u, 4.5 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function avatar(id, light) {
+  const c = $(id), ctx = c.getContext('2d'), s = c.width;
+  ctx.clearRect(0, 0, s, s);
+  if (light) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, s, s);
+    drawMark(ctx, s * 0.13, s * 0.13, s * 0.74, BRAND);
+  } else {
+    ctx.fillStyle = grad(ctx, s, s);
+    ctx.fillRect(0, 0, s, s);
+    drawMark(ctx, s * 0.13, s * 0.13, s * 0.74, '#fff');
+  }
+}
+
+function tgCover() {
+  const c = $('tgcover'), ctx = c.getContext('2d'), w = c.width, h = c.height;
+  ctx.fillStyle = grad(ctx, w, h);
+  ctx.fillRect(0, 0, w, h);
+
+  // мягкие «слои» на фоне
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 5; i++) {
+    roundRect(ctx, w - 470 + i * 22, 90 + i * 78, 420 - i * 44, 44, 22);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  drawMark(ctx, 96, h / 2 - 130, 190, '#fff');
+
+  ctx.fillStyle = '#fff';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = '800 92px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillText('NOZZA', 300, h / 2 - 22);
+  ctx.globalAlpha = 0.92;
+  ctx.font = '500 34px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillText('Там, где рождается форма', 304, h / 2 + 30);
+  ctx.globalAlpha = 0.85;
+  ctx.font = '600 27px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillText('3D-печать на заказ · ' + $('city').value.trim(), 304, h / 2 + 86);
+  ctx.globalAlpha = 1;
+}
+
+function avitoCover() {
+  const c = $('avito'), ctx = c.getContext('2d'), w = c.width, h = c.height;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = grad(ctx, w, 0);
+  ctx.fillRect(0, 0, w, 10);
+
+  drawMark(ctx, 60, h / 2 - 62, 124, BRAND);
+
+  ctx.fillStyle = INK;
+  ctx.font = '800 62px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillText('NOZZA', 210, h / 2 - 4);
+  ctx.fillStyle = '#5d6b85';
+  ctx.font = '500 26px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillText('3D-печать на заказ · изделия по вашим размерам', 214, h / 2 + 40);
+  ctx.font = '600 24px Inter, "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = BRAND;
+  ctx.fillText($('city').value.trim() + ' · ' + $('phone').value.trim() + ' · ' + $('tg').value.trim(), 214, h / 2 + 84);
+
+  ctx.save();
+  ctx.globalAlpha = 0.07;
+  ctx.fillStyle = BRAND;
+  for (let i = 0; i < 4; i++) {
+    roundRect(ctx, w - 330 + i * 20, 70 + i * 68, 280 - i * 40, 38, 19);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function texts() {
+  const city = $('city').value.trim();
+  const phone = $('phone').value.trim();
+  const tg = $('tg').value.trim();
+
+  $('txt_tg').textContent =
+`NOZZA — 3D-печать на заказ, ${city}.
+Печатаем изделия по вашим размерам: органайзеры, крепления, таблички, адресники, запчасти взамен сломанных.
+Готовое — с полки, под заказ — за 1–3 дня.
+Считаем стоимость сразу: ${phone}`;
+
+  $('txt_avito').textContent =
+`NOZZA — мастерская 3D-печати в городе ${city}.
+
+Что делаем:
+• Изделия по вашим размерам — от держателя кабеля до корпуса прибора
+• Запчасти взамен сломанных: принесите деталь или фото с линейкой
+• Партии для бизнеса: таблички, ценникодержатели, оснастка (от 10 шт. дешевле)
+• Печать по вашей модели: STL, 3MF, STEP
+
+Материалы: PLA (дом, декор), PETG (прочность, тепло, улица). Цвет на выбор.
+Срок: обычно 1–3 дня, срочные заказы — в день обращения.
+Цену называем до начала печати и не меняем.
+
+Связь: ${phone}, Telegram ${tg}`;
+
+  $('txt_bio').textContent =
+`NOZZA · Там, где рождается форма
+3D-печать на заказ, ${city}
+Ваш размер, ваш цвет, 1–3 дня
+${tg}`;
+}
+
+function redraw() {
+  avatar('av', false);
+  avatar('av2', true);
+  tgCover();
+  avitoCover();
+  texts();
+}
+
+document.querySelectorAll('[data-dl]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const c = $(b.dataset.dl);
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png');
+    a.download = b.dataset.name;
+    a.click();
+  });
+});
+['city', 'phone', 'tg'].forEach((id) => $(id).addEventListener('input', redraw));
+$('redraw').addEventListener('click', redraw);
+
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(redraw);
+redraw();
+</script>
+</body></html>

@@ -25,7 +25,7 @@ LOG_FILE = DATA_DIR / "connector.log"
 # Тарифы и производственные константы. Пользователь меняет их в интерфейсе,
 # значения ниже — только стартовые ориентиры, а не обещание рынка.
 DEFAULT_SETTINGS: dict[str, object] = {
-    "company_name": "PrintFlow",
+    "company_name": "NOZZA",
     "currency": "₽",
     # Энергия и амортизация
     "power_kw": 0.15,             # средняя потребляемая мощность P1S, кВт
