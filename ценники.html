@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Ценники для полки 3D-печати</title>
+<style>
+  @page { size: A4; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; margin:0; background:#fff; color:#12203c; }
+  .hint { background:#fff4d6; border:1px solid #e6c760; padding:10px 14px; border-radius:8px;
+          font-size:12px; margin-bottom:10px; }
+  .grid { display:flex; flex-wrap:wrap; gap:4mm; }
+  .tag { width:62mm; height:38mm; border:1.5px dashed #b9c4da; border-radius:6px;
+         padding:5mm 5mm 4mm; display:flex; flex-direction:column; justify-content:space-between;
+         position:relative; overflow:hidden; page-break-inside:avoid; }
+  .tag::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:#1f3864; }
+  .name { font-size:14px; font-weight:800; line-height:1.15; letter-spacing:-.2px; }
+  .desc { font-size:9.5px; color:#5d6b85; line-height:1.25; margin-top:2px; }
+  .bottom { display:flex; align-items:flex-end; justify-content:space-between; }
+  .price { font-size:27px; font-weight:900; color:#1f3864; line-height:1; }
+  .price span { font-size:14px; font-weight:700; }
+  .badge { font-size:7.5px; font-weight:800; text-transform:uppercase; letter-spacing:.5px;
+           background:#1f3864; color:#fff; padding:3px 6px; border-radius:20px; }
+  .badge.hit { background:#c0392b; }
+  .badge.new { background:#1e8449; }
+  .madehere { font-size:7.5px; color:#8892a6; letter-spacing:.3px; }
+  h2 { font-size:13px; margin:14px 0 6px; color:#1f3864; }
+  @media print { .hint { display:none } }
+</style></head>
+<body>
+<div class="hint"><b>Печать:</b> обычный A4, без масштабирования (100%). Разрежьте по пунктиру. Ламинировать не обязательно — достаточно заклеить скотчем. Пустые бланки в конце — впишите ручкой.</div>
+
+<div class="grid">
+
+  <div class="tag"><div><div class="name">Дракон подвижный</div><div class="desc">Шевелится по всей длине. Цельная печать, без сборки. 6+</div></div>
+  <div class="bottom"><div class="price">350 <span>₽</span></div><div class="badge hit">Хит</div></div></div>
+
+  <div class="tag"><div><div class="name">Змейка подвижная</div><div class="desc">Гнётся и извивается. Разные цвета. 6+</div></div>
+  <div class="bottom"><div class="price">250 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Дракон большой 28 см</div><div class="desc">Двухцветный, шевелится целиком. Эффектный подарок.</div></div>
+  <div class="bottom"><div class="price">890 <span>₽</span></div><div class="badge">Двухцветный</div></div></div>
+
+  <div class="tag"><div><div class="name">Фиджет-крутилка</div><div class="desc">Антистресс в карман. Крутится бесшумно.</div></div>
+  <div class="bottom"><div class="price">250 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Брелок с именем</div><div class="desc">Любое имя или слово. Готов за час — спросите на кассе.</div></div>
+  <div class="bottom"><div class="price">350 <span>₽</span></div><div class="badge new">На заказ</div></div></div>
+
+  <div class="tag"><div><div class="name">Подставка под телефон</div><div class="desc">Складная, помещается в карман. Держит крепко.</div></div>
+  <div class="bottom"><div class="price">350 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Крючок на дверь</div><div class="desc">Без сверления. Выдерживает до 3 кг.</div></div>
+  <div class="bottom"><div class="price">150 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Клипсы для пакетов</div><div class="desc">Набор 5 штук. Закрывают крупу, чипсы, заморозку.</div></div>
+  <div class="bottom"><div class="price">200 <span>₽</span></div><div class="badge new">Полезное</div></div></div>
+
+  <div class="tag"><div><div class="name">Органайзер для мелочи</div><div class="desc">Ключи, монеты, зарядки. На тумбу у входа.</div></div>
+  <div class="bottom"><div class="price">500 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Ваза декоративная</div><div class="desc">Спиральный узор. Для сухоцветов и как декор.</div></div>
+  <div class="bottom"><div class="price">600 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Ночник</div><div class="desc">Мягкий свет. Работает от LED-свечки.</div></div>
+  <div class="bottom"><div class="price">900 <span>₽</span></div><div class="badge">Подарок</div></div></div>
+
+  <div class="tag"><div><div class="name">Держатель щёток</div><div class="desc">На раковину. Моется, не ржавеет.</div></div>
+  <div class="bottom"><div class="price">300 <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name">Вырубка для печенья</div><div class="desc">Буквы, фигуры, цифры. Сделаем любую форму на заказ.</div></div>
+  <div class="bottom"><div class="price">250 <span>₽</span></div><div class="badge new">На заказ</div></div></div>
+
+  <div class="tag"><div><div class="name">Топпер на торт</div><div class="desc">С любым именем и датой. Готов за день.</div></div>
+  <div class="bottom"><div class="price">500 <span>₽</span></div><div class="badge new">На заказ</div></div></div>
+
+  <div class="tag"><div><div class="name">Мини-фигурки</div><div class="desc">Животные, машинки, монстрики. Выбирай в корзинке!</div></div>
+  <div class="bottom"><div class="price">150 <span>₽</span></div><div class="badge hit">Всё по 150</div></div></div>
+
+  <div class="tag"><div><div class="name">Подарочный набор</div><div class="desc">Коробка + 3 предмета на выбор + открытка.</div></div>
+  <div class="bottom"><div class="price">1200 <span>₽</span></div><div class="badge">Подарок</div></div></div>
+
+</div>
+
+<h2>Пустые бланки — впишите ручкой</h2>
+<div class="grid">
+  <div class="tag"><div><div class="name" style="border-bottom:1px solid #ccd; min-height:17px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:6px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:5px"></div></div>
+  <div class="bottom"><div class="price" style="color:#ccd3e0">____ <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name" style="border-bottom:1px solid #ccd; min-height:17px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:6px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:5px"></div></div>
+  <div class="bottom"><div class="price" style="color:#ccd3e0">____ <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name" style="border-bottom:1px solid #ccd; min-height:17px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:6px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:5px"></div></div>
+  <div class="bottom"><div class="price" style="color:#ccd3e0">____ <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+
+  <div class="tag"><div><div class="name" style="border-bottom:1px solid #ccd; min-height:17px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:6px"></div>
+  <div class="desc" style="border-bottom:1px solid #e2e6ef; min-height:13px; margin-top:5px"></div></div>
+  <div class="bottom"><div class="price" style="color:#ccd3e0">____ <span>₽</span></div><div class="madehere">Напечатано здесь</div></div></div>
+</div>
+
+</body></html>

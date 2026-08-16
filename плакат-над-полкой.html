@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Плакат над полкой A4</title>
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:"Segoe UI", Arial, sans-serif; }
+  .sheet { width:210mm; height:297mm; padding:14mm 13mm; display:flex; flex-direction:column;
+           color:#12203c; background:
+           radial-gradient(circle at 88% 6%, #e8eefc 0 42%, transparent 42%),
+           radial-gradient(circle at 6% 96%, #eaf6ee 0 30%, transparent 30%), #fff; }
+  .kicker { font-size:13pt; letter-spacing:5px; text-transform:uppercase; color:#5a6a8a; font-weight:700; }
+  h1 { font-size:47pt; line-height:.97; font-weight:900; letter-spacing:-2px; margin:5mm 0 3mm; }
+  h1 .accent { color:#1f3864; display:block; }
+  .lead { font-size:14.5pt; color:#42506e; line-height:1.4; max-width:150mm; }
+  .rule { height:5px; width:52mm; background:#1f3864; border-radius:3px; margin:6mm 0; }
+  .cards { display:flex; gap:4mm; margin-top:2mm; }
+  .card { flex:1; border:2px solid #dbe3f2; border-radius:11px; padding:5mm 4mm; text-align:center; }
+  .card .ico { font-size:26pt; line-height:1; }
+  .card .t { font-size:11.5pt; font-weight:800; margin-top:2.5mm; }
+  .card .d { font-size:9pt; color:#5d6b85; margin-top:1.5mm; line-height:1.3; }
+  .band { margin-top:7mm; background:#1f3864; color:#fff; border-radius:12px; padding:6mm 7mm; }
+  .band h2 { font-size:17pt; font-weight:800; margin-bottom:3mm; }
+  .band ul { list-style:none; font-size:12pt; line-height:1.75; }
+  .band li::before { content:"→ "; opacity:.65; }
+  .prices { margin-top:6mm; display:flex; gap:3mm; }
+  .p { flex:1; background:#f3f6fd; border-radius:10px; padding:4mm 3mm; text-align:center; }
+  .p .n { font-size:19pt; font-weight:900; color:#1f3864; }
+  .p .l { font-size:8.5pt; color:#5d6b85; margin-top:1mm; line-height:1.25; }
+  .foot { margin-top:auto; display:flex; align-items:center; gap:6mm;
+          border-top:2px dashed #c9d3e8; padding-top:5mm; }
+  .qr { width:33mm; height:33mm; border:2px solid #1f3864; border-radius:8px;
+        display:flex; align-items:center; justify-content:center; text-align:center;
+        font-size:7.5pt; color:#7d89a2; padding:3mm; line-height:1.3; }
+  .foot .txt { flex:1; }
+  .foot .big { font-size:15pt; font-weight:900; }
+  .foot .sm { font-size:10.5pt; color:#4a5876; margin-top:1.5mm; line-height:1.45; }
+</style></head>
+<body>
+<div class="sheet">
+  <div class="kicker">Прямо в этом магазине</div>
+  <h1>Печатаем<span class="accent">на 3D-принтере</span></h1>
+  <div class="lead">Игрушки, фигурки, полезные мелочи и детали, которых нет в продаже. Всё, что на полке — сделано здесь.</div>
+  <div class="rule"></div>
+
+  <div class="cards">
+    <div class="card"><div class="ico">🐉</div><div class="t">Игрушки</div><div class="d">Подвижные драконы, фиджеты, фигурки</div></div>
+    <div class="card"><div class="ico">🏠</div><div class="t">Для дома</div><div class="d">Крючки, органайзеры, держатели</div></div>
+    <div class="card"><div class="ico">🎁</div><div class="t">Подарки</div><div class="d">С именем, надписью, датой</div></div>
+    <div class="card"><div class="ico">🔧</div><div class="t">Детали</div><div class="d">Повторим сломанное</div></div>
+  </div>
+
+  <div class="band">
+    <h2>Что можно заказать</h2>
+    <ul>
+      <li>Брелок или бирку с именем — готово за час</li>
+      <li>Топпер на торт и вырубку для печенья</li>
+      <li>Деталь взамен сломанной — принесите образец</li>
+      <li>Печать по вашей модели, если файл уже есть</li>
+    </ul>
+  </div>
+
+  <div class="prices">
+    <div class="p"><div class="n">от 150 ₽</div><div class="l">мелочь<br>с полки</div></div>
+    <div class="p"><div class="n">350 ₽</div><div class="l">именной<br>брелок</div></div>
+    <div class="p"><div class="n">500 ₽</div><div class="l">топпер<br>на торт</div></div>
+    <div class="p"><div class="n">30 ₽/г</div><div class="l">печать по<br>вашей модели</div></div>
+  </div>
+
+  <div class="foot">
+    <div class="qr">ВСТАВЬТЕ<br>СЮДА<br>QR-КОД</div>
+    <div class="txt">
+      <div class="big">Спросите на кассе</div>
+      <div class="sm">Покажем каталог, посчитаем заказ и скажем срок.<br>
+      Наведите камеру на QR — новинки, цены и приём заказов в Telegram.</div>
+    </div>
+  </div>
+</div>
+</body></html>
