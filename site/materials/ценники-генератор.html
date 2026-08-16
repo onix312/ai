@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — генератор ценников</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
+
+  .tag {
+    width: 62mm; height: 38mm;
+    border: 1px solid var(--line); border-radius: 2mm;
+    padding: 4mm 4mm 3.5mm 5.5mm;
+    display: flex; gap: 3mm;
+    position: relative; overflow: hidden;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  .tag::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.6mm;
+    background: linear-gradient(180deg, var(--brand), var(--brand-2));
+  }
+  .tag-main { flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
+  .tag .name {
+    font-size: 12.5px; font-weight: 800; line-height: 1.15; letter-spacing: -.01em;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tag .desc {
+    font-size: 8.5px; color: var(--ink-soft); line-height: 1.3; margin-top: 1mm;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tag .price { font-size: 25px; font-weight: 900; line-height: 1; letter-spacing: -.02em; }
+  .tag .price span { font-size: 13px; font-weight: 700; }
+  .tag .meta { font-size: 7.5px; color: #98a2b8; letter-spacing: .02em; margin-top: .8mm; }
+  .tag-side { width: 17mm; display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+  .tag-side svg { width: 16mm; height: 16mm; display: block; }
+  .tag .badge {
+    font-size: 6.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+    background: var(--ink); color: #fff; padding: 1mm 2mm; border-radius: 10mm;
+    max-width: 17mm; text-align: center; line-height: 1.2;
+  }
+  .tag .brandline {
+    font-size: 6.5px; font-weight: 800; letter-spacing: .1em; color: var(--brand);
+    text-align: center;
+  }
+  .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 4mm; }
+  .tag.blank .price { color: #cbd2e0; }
+
+  /* мелкий формат 43×25 мм — для маленьких изделий */
+  .grid.small .tag { width: 43mm; height: 25mm; padding: 3mm 3mm 2.5mm 4.5mm; gap: 2mm; }
+  .grid.small .tag .name { font-size: 9.5px; -webkit-line-clamp: 2; }
+  .grid.small .tag .desc { display: none; }
+  .grid.small .tag .price { font-size: 17px; }
+  .grid.small .tag .price span { font-size: 9px; }
+  .grid.small .tag-side { width: 12mm; }
+  .grid.small .tag-side svg { width: 11mm; height: 11mm; }
+  .grid.small .tag .badge { font-size: 5.5px; max-width: 12mm; }
+  .grid.small .tag .meta { font-size: 6px; }
+
+  .sheet-title {
+    font-size: 11px; font-weight: 700; color: var(--ink-soft);
+    letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm;
+  }
+  .empty { padding: 30mm 10mm; text-align: center; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Генератор ценников</h1>
+    <label>Источник
+      <select id="src">
+        <option value="api">Каталог PrintFlow</option>
+        <option value="demo">Демо-набор</option>
+      </select>
+    </label>
+    <label>Размер
+      <select id="size">
+        <option value="big">62 × 38 мм (12 на лист)</option>
+        <option value="small">43 × 25 мм (24 на лист)</option>
+      </select>
+    </label>
+    <label>Наценка, %
+      <input type="number" id="markup" value="0" step="5" style="width:70px">
+    </label>
+    <label>Округлять до
+      <select id="round">
+        <option value="0">не округлять</option>
+        <option value="10" selected>10 ₽</option>
+        <option value="50">50 ₽</option>
+        <option value="100">100 ₽</option>
+      </select>
+    </label>
+  </div>
+  <div class="panel-row" style="margin-top:9px">
+    <label>Ссылка в QR
+      <input type="text" id="qrbase" value="https://nozza.ru/p/" placeholder="https://nozza.ru/p/">
+    </label>
+    <label><input type="checkbox" id="qron" checked> QR на ценнике</label>
+    <label><input type="checkbox" id="blanks" checked> добавить пустые бланки</label>
+    <button class="btn" id="reload">Обновить</button>
+    <button class="btn primary" id="print">Печать</button>
+    <span class="status" id="status">загрузка…</span>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Как печатать:</b> масштаб 100 %, без «вписать в лист», бумага плотная (160–250 г/м²) или самоклейка.
+  QR ведёт на страницу товара — в поле «Ссылка в QR» подставьте свой адрес, к нему добавится артикул.
+  Если каталог PrintFlow не открыт, генератор покажет демо-набор: цены в нём условные, замените перед печатью.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const PER_PAGE = { big: 12, small: 24 };
+
+const DEMO = [
+  { id: 'd1', name: 'Органайзер для стола', notes: 'Три отсека, цвет на выбор', price: 890, material: 'PLA', grams: 120, niche: 'Для дома' },
+  { id: 'd2', name: 'Держатель наушников', notes: 'Крепление на стол или полку', price: 690, material: 'PETG', grams: 85, niche: 'Рабочее место' },
+  { id: 'd3', name: 'Адресник для питомца', notes: 'Имя и телефон, гравировка слоем', price: 350, material: 'PETG', grams: 12, niche: 'Питомцы' },
+  { id: 'd4', name: 'Подставка под телефон', notes: 'Складная, угол 60°', price: 550, material: 'PLA', grams: 60, niche: 'Рабочее место' },
+  { id: 'd5', name: 'Крючок настенный', notes: 'Нагрузка до 3 кг, комплект 2 шт.', price: 320, material: 'PETG', grams: 30, niche: 'Для дома' },
+  { id: 'd6', name: 'Кабель-органайзер', notes: 'Комплект 5 шт., клейкая основа', price: 420, material: 'PLA', grams: 40, niche: 'Рабочее место' },
+  { id: 'd7', name: 'Настольная табличка', notes: 'Текст и два цвета AMS', price: 780, material: 'PLA', grams: 95, niche: 'Для бизнеса' },
+  { id: 'd8', name: 'Держатель ценника', notes: 'Под стандартную вставку', price: 260, material: 'PETG', grams: 25, niche: 'Для бизнеса' },
+  { id: 'd9', name: 'Подставка для растения', notes: 'Диаметр 12 см, дренаж', price: 940, material: 'PLA', grams: 150, niche: 'Для дома' },
+  { id: 'd10', name: 'Крепление роутера', notes: 'С учётом вентиляции', price: 720, material: 'PETG', grams: 110, niche: 'Для дома' },
+  { id: 'd11', name: 'Брелок с именем', notes: 'Любой текст до 12 знаков', price: 250, material: 'PLA', grams: 8, niche: 'Подарки' },
+  { id: 'd12', name: 'Коробка с крышкой', notes: '10 × 8 × 5 см, штабелируется', price: 610, material: 'PLA', grams: 90, niche: 'Для дома' },
+];
+
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function roundPrice(value, step) {
+  if (!step) return Math.round(value);
+  return Math.round(value / step) * step;
+}
+
+function priceText(n) {
+  return Math.round(n).toLocaleString('ru-RU');
+}
+
+function tagHtml(item, opts) {
+  const markup = 1 + (opts.markup || 0) / 100;
+  const price = roundPrice((Number(item.price) || 0) * markup, opts.round);
+  const badge = item.niche ? `<div class="badge">${esc(item.niche)}</div>` : '<div class="badge">NOZZA</div>';
+  let qr = '';
+  if (opts.qr) {
+    const link = (opts.qrbase || '') + encodeURIComponent(item.id || '');
+    qr = QR.svg(link, { ecl: 'M', margin: 1 });
+  }
+  const meta = [item.material, item.grams ? Math.round(item.grams) + ' г' : ''].filter(Boolean).join(' · ');
+  return `<div class="tag">
+    <div class="tag-main">
+      <div>
+        <div class="name">${esc(item.name)}</div>
+        ${item.notes ? `<div class="desc">${esc(item.notes)}</div>` : ''}
+      </div>
+      <div>
+        <div class="price">${price ? priceText(price) : '____'} <span>₽</span></div>
+        ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}
+      </div>
+    </div>
+    <div class="tag-side">
+      ${badge}
+      ${qr || '<div></div>'}
+      <div class="brandline">NOZZA</div>
+    </div>
+  </div>`;
+}
+
+function blankHtml() {
+  return `<div class="tag blank">
+    <div class="tag-main">
+      <div><div class="name"></div><div class="desc"></div></div>
+      <div><div class="price">____ <span>₽</span></div></div>
+    </div>
+    <div class="tag-side"><div class="badge">NOZZA</div><div></div><div class="brandline">nozza.ru</div></div>
+  </div>`;
+}
+
+function render(items) {
+  const opts = {
+    markup: Number($('markup').value) || 0,
+    round: Number($('round').value) || 0,
+    qr: $('qron').checked,
+    qrbase: $('qrbase').value.trim(),
+  };
+  const size = $('size').value;
+  const per = PER_PAGE[size];
+  const host = $('sheets');
+
+  if (!items.length) {
+    host.innerHTML = `<div class="sheet"><div class="empty">
+      Каталог пуст.<br>Добавьте изделия в PrintFlow → «База изделий» или переключитесь на демо-набор.
+    </div></div>`;
+    return;
+  }
+
+  const pages = [];
+  for (let i = 0; i < items.length; i += per) pages.push(items.slice(i, i + per));
+
+  let html = pages.map((page, idx) => `
+    <div class="sheet">
+      <div class="sheet-title noprint">Лист ${idx + 1} из ${pages.length} · ${page.length} ценников</div>
+      <div class="grid ${size === 'small' ? 'small' : ''}">${page.map((it) => tagHtml(it, opts)).join('')}</div>
+    </div>`).join('');
+
+  if ($('blanks').checked) {
+    const count = size === 'small' ? 24 : 12;
+    html += `<div class="sheet">
+      <div class="sheet-title">Пустые бланки — вписать от руки</div>
+      <div class="grid ${size === 'small' ? 'small' : ''}">${Array.from({ length: count }, blankHtml).join('')}</div>
+    </div>`;
+  }
+  host.innerHTML = html;
+}
+
+function normalize(rows, niches) {
+  const nameById = {};
+  (niches || []).forEach((n) => { nameById[n.id] = n.name || n.title || ''; });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name || 'Без названия',
+    notes: r.notes || '',
+    price: r.price || 0,
+    material: r.material || '',
+    grams: r.grams || 0,
+    niche: nameById[r.niche_id] || '',
+  }));
+}
+
+async function load() {
+  const status = $('status');
+  if ($('src').value === 'demo') {
+    status.textContent = 'демо-набор · ' + DEMO.length + ' позиций';
+    status.className = 'status';
+    render(DEMO);
+    return;
+  }
+  status.textContent = 'загрузка каталога…';
+  status.className = 'status';
+  try {
+    const [catRes, nicheRes] = await Promise.all([
+      fetch('/api/catalog').then((r) => r.json()),
+      fetch('/api/niches').then((r) => r.json()).catch(() => ({ niches: [] })),
+    ]);
+    const rows = catRes.catalog || [];
+    if (!rows.length) {
+      status.textContent = 'каталог PrintFlow пуст — показан демо-набор';
+      status.className = 'status err';
+      render(DEMO);
+      return;
+    }
+    status.textContent = 'каталог PrintFlow · ' + rows.length + ' позиций';
+    status.className = 'status ok';
+    render(normalize(rows, nicheRes.niches));
+  } catch (e) {
+    status.textContent = 'PrintFlow не отвечает — показан демо-набор';
+    status.className = 'status err';
+    render(DEMO);
+  }
+}
+
+['src', 'size', 'markup', 'round', 'qron', 'blanks', 'qrbase'].forEach((id) => {
+  $(id).addEventListener('change', load);
+});
+$('reload').addEventListener('click', load);
+$('print').addEventListener('click', () => window.print());
+load();
+</script>
+</body></html>

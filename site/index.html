@@ -1,312 +1,364 @@
 <!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
+<html lang="ru" data-theme="light" data-accent="indigo"><head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PrintFlow — управление 3D-производством</title>
-<link rel="stylesheet" href="assets/style.css">
-<link rel="stylesheet" href="assets/ops.css">
-<link rel="stylesheet" href="assets/printer.css">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA · PrintFlow — управление 3D-производством</title>
+<link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
+<link rel="stylesheet" href="assets/theme.css">
+<link rel="stylesheet" href="assets/app.css">
 </head><body>
-<button id="burger">☰</button>
-<nav id="nav">
- <div class="brand"><b><span class="brand-mark">P1</span> PrintFlow</b><span>Локальная система 3D-производства<br>Bambu Lab P1S + AMS</span></div>
- <div class="srch"><input id="navsearch" placeholder="Найти раздел…" autocomplete="off"></div>
- <div class="navsec">РАБОТА</div>
- <div class="navgroup"><a class="main" href="#dashboard"><span class="ic">⌂</span>Дашборд</a></div>
- <div class="navgroup"><a class="main" href="#printer"><span class="ic">◉</span>Принтер <span class="nav-live" id="nav_printer_dot"></span></a></div>
- <div class="navgroup"><a class="main" href="#orders"><span class="ic">▦</span>Заказы</a></div>
- <div class="navgroup"><a class="main" href="#customers"><span class="ic">◎</span>Клиенты</a></div>
- <div class="navgroup"><a class="main" href="#niches"><span class="ic">◫</span>Тест ниш</a></div>
- <div class="navsec">ПРОИЗВОДСТВО</div>
- <div class="navgroup"><a class="main" href="#calc"><span class="ic">⌁</span>Инструменты</a><div class="subs"><a class="sub" href="#calc-h0">Калькулятор заказа</a><a class="sub" href="#calc-h2">База изделий</a><a class="sub" href="#calc-h6">Планировщик печати</a><a class="sub" href="#calc-h7">Склад пластика</a><a class="sub" href="#calc-h8">Резервная копия</a></div></div>
- <div class="navsec">СПРАВОЧНИК</div>
- <div class="navgroup"><a class="main" href="#library"><span class="ic">▤</span>Библиотека</a><div class="subs"><a class="sub" href="#start">Запуск</a><a class="sub" href="#plan">Бизнес-план</a><a class="sub" href="#models">Что печатать</a><a class="sub" href="#tech">Техника печати</a><a class="sub" href="#b2b">B2B и продажи</a><a class="sub" href="#legal">Юридика</a></div></div>
- <div class="navgroup"><a class="main" href="#mats"><span class="ic">▧</span>Материалы A4</a></div>
- <div class="nav-bottom"><span class="storage-dot"></span><span>Данные хранятся локально</span><a href="#calc-h8">Копия</a></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
+
+<div id="shell">
+<nav id="side">
+ <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · Bambu Lab</small></div></div>
+ <div class="side-scroll">
+  <div class="nav-group-title">Работа</div>
+  <a class="nav-link" href="#dashboard" data-view="dashboard"><span class="ic">◈</span>Обзор</a>
+  <a class="nav-link" href="#printers" data-view="printers"><span class="ic">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
+  <a class="nav-link" href="#queue" data-view="queue"><span class="ic">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
+  <a class="nav-link" href="#orders" data-view="orders"><span class="ic">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
+  <a class="nav-link" href="#customers" data-view="customers"><span class="ic">◎</span>Клиенты</a>
+  <div class="nav-group-title">Экономика</div>
+  <a class="nav-link" href="#finance" data-view="finance"><span class="ic">₽</span>Финансы</a>
+  <a class="nav-link" href="#inventory" data-view="inventory"><span class="ic">◍</span>Склад пластика<span class="tag warn" id="nav_stock_tag" hidden></span></a>
+  <a class="nav-link" href="#niches" data-view="niches"><span class="ic">◫</span>Ниши</a>
+  <a class="nav-link" href="#calc" data-view="calc"><span class="ic">⌁</span>Калькулятор</a>
+  <div class="nav-group-title">Справочник</div>
+  <a class="nav-link" href="#library" data-view="library"><span class="ic">▤</span>Библиотека</a>
+  <a class="nav-link" href="#settings" data-view="settings"><span class="ic">⚙</span>Настройки</a>
+ </div>
+ <div class="side-foot">
+  <button class="conn-chip" id="conn_chip" type="button"><span class="dot" id="conn_dot"></span><span><b id="conn_title">Проверяем связь…</b><small id="conn_sub">Локальный коннектор</small></span></button>
+ </div>
 </nav>
+
 <div id="main">
- <header class="app-topbar"><div><b id="page_context">Рабочая панель</b><span>Все изменения сохраняются автоматически</span></div><div class="topbar-actions"><span class="online-pill"><i></i> Локально</span><a href="#calc-h8" class="backup-link">Резервная копия</a></div></header>
-<section id="printer" class="ops-section printer-section">
- <div class="ops-head"><div><span class="eyebrow">BAMBU LAB · LIVE</span><h1>Состояние принтера</h1><p><span id="pr_connection_dot" class="connection-dot offline"></span><span id="pr_connection">Коннектор не подключён</span> <span id="pr_last_seen"></span></p></div><div class="head-actions"><button class="secondary-btn" id="pr_refresh">Обновить</button><button class="primary-btn" id="pr_settings">Подключить P1S</button></div></div>
- <div id="pr_connector_notice" class="connector-notice"><b>Запустите PrintFlow через новый BAT-файл</b><span>Обычное открытие index.html показывает интерфейс, но не может связаться с MQTT и камерой принтера.</span></div>
- <div class="printer-layout">
-  <div class="printer-main">
-   <article class="live-job-card">
-    <div class="live-job-head"><div><span id="pr_state" class="printer-state">OFFLINE</span><h2 id="pr_task">Нет активной печати</h2><p id="pr_order_link">Не связано с заказом PrintFlow</p></div><div class="progress-orbit"><b id="pr_progress">0%</b><span>готово</span></div></div>
-    <div class="job-progress"><i id="pr_progress_bar"></i></div>
-    <div class="job-facts"><div><span>Слой</span><b id="pr_layers">0 / 0</b></div><div><span>Осталось</span><b id="pr_remaining">—</b></div><div><span>Скорость</span><b id="pr_speed">Обычная</b></div><div><span>Wi-Fi</span><b id="pr_wifi">—</b></div></div>
-   </article>
-   <div class="telemetry-grid">
-    <article class="telemetry-card"><header><span>Температуры</span><small>сейчас / цель</small></header><div class="temp-row"><div class="temp-icon hot">●</div><span>Сопло</span><b><em id="pr_nozzle">—</em> / <small id="pr_nozzle_target">—</small> °C</b></div><div class="temp-row"><div class="temp-icon bed">▰</div><span>Стол</span><b><em id="pr_bed">—</em> / <small id="pr_bed_target">—</small> °C</b></div><div class="temp-row"><div class="temp-icon chamber">□</div><span>Камера</span><b><em id="pr_chamber">—</em> °C</b></div></article>
-    <article class="telemetry-card"><header><span>Вентиляторы</span><small>мощность</small></header><div class="fan-row"><span>Обдув детали</span><b id="pr_fan_part">0%</b><i><u id="pr_fan_part_bar"></u></i></div><div class="fan-row"><span>Дополнительный</span><b id="pr_fan_aux">0%</b><i><u id="pr_fan_aux_bar"></u></i></div><div class="fan-row"><span>Камера</span><b id="pr_fan_chamber">0%</b><i><u id="pr_fan_chamber_bar"></u></i></div></article>
+ <header id="topbar">
+  <button id="burger" type="button" aria-label="Меню">☰</button>
+  <div class="top-title"><b id="top_title">Обзор</b><span id="top_sub">Производство, деньги и принтеры в одном месте</span></div>
+  <div class="top-spacer"></div>
+  <button class="cmd-trigger" id="cmd_open" type="button"><span>⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
+  <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
+  <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления">◐</button>
+  <button class="btn primary" id="quick_order" type="button"><span class="ic">＋</span>Заказ</button>
+ </header>
+
+ <main id="views">
+  <div id="offline-bar"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow через <code>ЗАПУСТИТЬ-Windows.bat</code> или <code>ЗАПУСТИТЬ-Mac-Linux.command</code>.</span></div>
+
+<!-- ================================================== ОБЗОР -->
+<section class="view" id="view-dashboard">
+ <div class="view-head">
+  <div><span class="eyebrow">Операционная панель</span><h1>Производство сегодня</h1><p>Загрузка парка, деньги и ближайшие сроки.</p></div>
+  <div class="head-actions">
+   <div class="seg" id="dash_period"><button data-days="7" class="on">7 дней</button><button data-days="30">30 дней</button><button data-days="90">90 дней</button></div>
+   <button class="btn" id="dash_refresh" type="button">↻ Обновить</button>
+  </div>
+ </div>
+ <div class="kpi-grid" id="dash_kpis"></div>
+ <div class="grid g-2-1">
+  <div class="card">
+   <div class="card-head"><div><h2>Деньги и печать по дням</h2><p id="dash_chart_sub">Доход, расход и часы печати</p></div>
+    <div class="seg" id="dash_chart_mode"><button data-mode="money" class="on">Деньги</button><button data-mode="hours">Часы</button><button data-mode="grams">Граммы</button></div></div>
+   <div class="chart-wrap"><div id="dash_chart"></div><div class="chart-tip" id="dash_tip"></div></div>
+   <div class="chart-legend" id="dash_legend"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Парк принтеров</h2><p>Живое состояние</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
+   <div id="dash_printers"></div>
+  </div>
+ </div>
+ <div class="grid g2" style="margin-top:16px">
+  <div class="card">
+   <div class="card-head"><div><h2>Ближайшие сроки</h2><p>Сначала просроченные и срочные</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
+   <div id="dash_due"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Лента событий</h2><p>Печать, ошибки, склад и заказы</p></div><button class="btn sm ghost" id="dash_events_refresh" type="button">↻</button></div>
+   <div class="event-list" id="dash_events"></div>
+  </div>
+ </div>
+</section>
+
+<!-- ================================================== ПРИНТЕРЫ -->
+<section class="view" id="view-printers">
+ <div class="view-head">
+  <div><span class="eyebrow">Bambu Lab · Live</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
+  <div class="head-actions">
+   <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
+   <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
+   <button class="btn primary" id="pr_add" type="button">＋ Принтер</button>
+  </div>
+ </div>
+ <div class="printer-tabs" id="pr_tabs"></div>
+ <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «＋ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
+ <div id="pr_workspace" hidden>
+  <div class="printer-grid">
+   <div class="grid" style="gap:16px">
+    <article class="job-card" id="pr_job">
+     <div class="job-top">
+      <div class="info">
+       <span class="state-badge" id="pr_state">Не в сети</span>
+       <h2 id="pr_task">Нет активной печати</h2>
+       <p class="sub" id="pr_order">Не связано с заказом</p>
+      </div>
+      <div class="orbit"><svg viewBox="0 0 104 104"><circle class="track" cx="52" cy="52" r="45"></circle><circle class="fill" id="pr_ring" cx="52" cy="52" r="45" stroke-dasharray="283" stroke-dashoffset="283"></circle></svg><div class="cap"><b id="pr_progress">0%</b><span>готово</span></div></div>
+     </div>
+     <div class="job-facts">
+      <div><span>Слой</span><b id="pr_layers">— / —</b></div>
+      <div><span>Осталось</span><b id="pr_remaining">—</b></div>
+      <div><span>Завершится</span><b id="pr_eta">—</b></div>
+      <div><span>Скорость</span><b id="pr_speed">—</b></div>
+      <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
+     </div>
+    </article>
+    <div class="telemetry">
+     <div class="card">
+      <div class="card-head"><h3>Температуры</h3><span class="muted" style="font-size:11.6px">сейчас / цель</span></div>
+      <div class="temp-row"><span class="tic hot" id="pr_nozzle_ic">▲</span><span class="name">Сопло</span><b><span id="pr_nozzle">—</span> / <span class="muted" id="pr_nozzle_t">—</span> °C</b></div>
+      <div class="temp-row"><span class="tic bed">▬</span><span class="name">Стол</span><b><span id="pr_bed">—</span> / <span class="muted" id="pr_bed_t">—</span> °C</b></div>
+      <div class="temp-row"><span class="tic cham">□</span><span class="name">Камера</span><b><span id="pr_chamber">—</span> °C</b></div>
+     </div>
+     <div class="card">
+      <div class="card-head"><h3>Вентиляторы</h3><span class="muted" style="font-size:11.6px">мощность</span></div>
+      <div class="fan-row"><span class="name">Обдув детали</span><b id="pr_fan_part">0%</b><div class="bar thin"><i id="pr_fan_part_bar"></i></div></div>
+      <div class="fan-row"><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div></div>
+      <div class="fan-row"><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div></div>
+     </div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><span class="chip outline">только LAN</span></div>
+     <div class="cmd-grid">
+      <button class="cmd-btn" data-cmd="pause" type="button"><span class="ic">❙❙</span>Пауза</button>
+      <button class="cmd-btn" data-cmd="resume" type="button"><span class="ic">▶</span>Продолжить</button>
+      <button class="cmd-btn" data-cmd="light" type="button"><span class="ic">☀</span>Свет</button>
+      <button class="cmd-btn" data-cmd="refresh" type="button"><span class="ic">⟳</span>Опросить</button>
+      <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic">■</span>Стоп</button>
+     </div>
+     <div class="cmd-row">
+      <label class="field"><span>Скорость печати</span><select id="pr_speed_sel"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Ludicrous</option></select></label>
+      <button class="btn" id="pr_speed_apply" type="button">Применить</button>
+     </div>
+     <details class="adv"><summary>Температуры и вентиляторы</summary><div class="adv-body">
+      <div class="cmd-row"><label class="field"><span>Сопло, °C</span><input type="number" id="pr_set_nozzle" min="0" max="300" value="0"></label><button class="btn" data-set="nozzle_temp" type="button">Задать</button></div>
+      <div class="cmd-row"><label class="field"><span>Стол, °C</span><input type="number" id="pr_set_bed" min="0" max="110" value="0"></label><button class="btn" data-set="bed_temp" type="button">Задать</button></div>
+      <div class="cmd-row"><label class="field"><span>Обдув детали, %</span><input type="number" id="pr_set_fan" min="0" max="100" value="0"></label><button class="btn" data-set="part_fan" type="button">Задать</button></div>
+     </div></details>
+     <details class="adv"><summary>Оси, экструдер и калибровка</summary><div class="adv-body">
+      <div class="jog">
+       <span class="spacer"></span><button data-jog="Y:10" type="button">Y+</button><span class="spacer"></span>
+       <button data-jog="X:-10" type="button">X−</button><button data-cmd="home" type="button" title="Парковка осей">⌂</button><button data-jog="X:10" type="button">X+</button>
+       <span class="spacer"></span><button data-jog="Y:-10" type="button">Y−</button><span class="spacer"></span>
+       <button data-jog="Z:-1" type="button">Z−</button><span class="spacer"></span><button data-jog="Z:1" type="button">Z+</button>
+      </div>
+      <div class="cmd-row">
+       <button class="btn sm" data-cmd="extrude" data-value="10" type="button">Подать 10 мм</button>
+       <button class="btn sm" data-cmd="extrude" data-value="-10" type="button">Ретракт 10 мм</button>
+       <button class="btn sm" data-cmd="unload_filament" type="button">Выгрузить филамент</button>
+      </div>
+      <div class="cmd-row">
+       <button class="btn sm" data-cmd="bed_level" type="button">Калибровка стола</button>
+       <button class="btn sm" data-cmd="calibration" data-value="4" type="button">Вибрации</button>
+       <button class="btn sm" data-cmd="calibration" data-value="7" type="button">Полная калибровка</button>
+      </div>
+      <p class="muted" style="font-size:12px">Калибровка занимает несколько минут и недоступна во время печати.</p>
+     </div></details>
+    </div>
+   </div>
+
+   <div class="grid" style="gap:16px">
+    <div class="card">
+     <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div>
+     <div class="cam-frame"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span></div>
+     <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span><button class="btn sm ghost" id="pr_cam_full" type="button">Развернуть</button></div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><span class="chip" id="pr_ams_count">0 слотов</span></div>
+     <div class="ams-grid" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health">Нет ошибок</span></div>
+     <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
+    </div>
    </div>
   </div>
-  <aside class="camera-card"><header><div><b>Камера P1S</b><small id="pr_camera_status">Нет сигнала</small></div><button class="icon-btn" id="pr_camera_reload">↻</button></header><div class="camera-frame"><img id="pr_camera" alt="Камера P1S"><div id="pr_camera_empty"><span>◉</span><b>Ожидаем видеопоток</b><small>Порт 6000 · только локальная сеть</small></div><span class="camera-live">LIVE</span></div><div class="camera-caption"><span id="pr_camera_age">—</span><button class="text-btn" id="pr_camera_full">Развернуть</button></div></aside>
- </div>
- <div class="printer-lower-grid">
-  <article class="panel ams-panel"><div class="panel-title"><div><h2>AMS</h2><p><span id="pr_ams_env">Температура и влажность —</span></p></div><span id="pr_ams_count" class="soft-badge">0 слотов</span></div><div id="pr_ams_trays" class="ams-trays"><div class="empty-state compact"><span>Данные AMS появятся после подключения.</span></div></div></article>
-  <article class="panel control-panel"><div class="panel-title"><div><h2>Управление</h2><p>Опасные действия требуют подтверждения</p></div><span class="soft-badge">LAN</span></div><div class="control-buttons"><button data-pr-command="pause"><span>Ⅱ</span>Пауза</button><button data-pr-command="resume"><span>▶</span>Продолжить</button><button data-pr-command="light"><span>☀</span>Свет</button><button data-pr-command="stop" class="control-danger"><span>■</span>Стоп</button></div><div class="control-row"><label>Скорость<select id="pr_speed_control"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Людическая</option></select></label><button class="secondary-btn" id="pr_speed_apply">Применить</button></div><details class="advanced-controls"><summary>Температуры и вентиляторы</summary><div><label>Сопло, °C<input id="pr_set_nozzle" type="number" min="0" max="300" value="0"></label><button data-pr-set="nozzle_temp">Задать</button><label>Стол, °C<input id="pr_set_bed" type="number" min="0" max="120" value="0"></label><button data-pr-set="bed_temp">Задать</button><label>Обдув, %<input id="pr_set_fan" type="number" min="0" max="100" value="0"></label><button data-pr-set="part_fan">Задать</button></div></details></article>
-  <article class="panel health-panel"><div class="panel-title"><div><h2>Состояние и HMS</h2><p id="pr_firmware">Прошивка —</p></div><span id="pr_health_badge" class="health-ok">Нет ошибок</span></div><div id="pr_errors" class="health-list"><div class="empty-state compact"><span>Активных ошибок нет.</span></div></div></article>
- </div>
- <div class="history-link-grid">
-  <article class="panel"><div class="panel-title"><div><h2>Связать с заказом</h2><p>По имени файла автоматически, вручную — если не найден</p></div></div><div class="link-job-form"><input id="pr_link_filename" placeholder="Имя текущего 3MF/G-code"><select id="pr_link_order"><option value="">Выберите заказ…</option></select><button class="primary-btn" id="pr_link_save">Связать</button></div></article>
-  <article class="panel"><div class="panel-title"><div><h2>История принтера</h2><p>Начало, пауза, завершение, ошибки и команды</p></div><button class="text-btn" id="pr_history_refresh">Обновить</button></div><div id="pr_history" class="printer-history"><div class="empty-state compact"><span>Событий пока нет.</span></div></div></article>
- </div>
-</section>
 
-<dialog id="printer_settings_modal" class="app-dialog"><form method="dialog"><div class="dialog-head"><div><span class="eyebrow">ЛОКАЛЬНОЕ ПОДКЛЮЧЕНИЕ</span><h2>Подключение Bambu Lab P1S</h2><p>Секреты сохраняются в %APPDATA%\PrintFlow и не попадают в браузер или Git.</p></div><button type="button" class="dialog-x" id="pr_settings_close">×</button></div><div class="dialog-body">
- <div class="setup-steps"><div><b>1</b><span><strong>Принтер</strong>Откройте Settings → WLAN. Для новой защищённой прошивки включите LAN Only и Developer Mode.</span></div><div><b>2</b><span><strong>Сеть</strong>Компьютер и P1S должны быть в одной локальной сети. Не открывайте порты на роутере.</span></div><div><b>3</b><span><strong>Реквизиты</strong>IP, Serial Number и Access Code вводятся только здесь, локально.</span></div></div>
- <div class="form-section"><div class="section-line"><h3>Принтер</h3><button type="button" class="text-btn" id="pr_discover">Найти в сети</button></div><div id="pr_discovery_results" class="discovery-results"></div><div class="form-grid"><label>Название<input id="pc_name" placeholder="Основной P1S"></label><label>IP-адрес<input id="pc_host" placeholder="192.168.1.100"></label><label>Серийный номер<input id="pc_serial" placeholder="01P…"></label><label>LAN Access Code<input id="pc_access_code" type="password" autocomplete="new-password" placeholder="Не отображается после сохранения"></label></div></div>
- <div class="form-section"><h3>Telegram-уведомления</h3><div class="form-grid"><label class="check-label span-2"><input id="pc_telegram_enabled" type="checkbox"> Включить Telegram</label><label>Bot Token<input id="pc_telegram_token" type="password" autocomplete="new-password" placeholder="Хранится только на этом компьютере"></label><label>Chat ID<input id="pc_telegram_chat_id" placeholder="Например: 123456789"></label><label class="check-label"><input id="pc_notify_complete" type="checkbox"> Завершение</label><label class="check-label"><input id="pc_notify_error" type="checkbox"> Ошибки</label><label class="check-label"><input id="pc_notify_pause" type="checkbox"> Пауза</label><button type="button" class="secondary-btn" id="pr_telegram_test">Тест Telegram</button></div></div>
- <div id="pr_settings_result" class="settings-result"></div>
- </div><div class="dialog-foot"><span></span><span></span><button type="button" class="secondary-btn" id="pr_settings_cancel">Отмена</button><button type="button" class="primary-btn" id="pr_settings_save">Сохранить и подключить</button></div></form></dialog>
-
-<dialog id="camera_modal" class="camera-dialog"><button id="camera_modal_close">×</button><img id="pr_camera_full_image" alt="Камера P1S"></dialog>
-
-<section id="dashboard" class="ops-section">
- <div class="ops-head"><div><span class="eyebrow">ОПЕРАЦИОННАЯ ПАНЕЛЬ</span><h1>Производство сегодня</h1><p>Заказы, загрузка принтера и ближайшие сроки в одном месте.</p></div><button class="primary-btn" id="dash_new_order">＋ Новый заказ</button></div>
- <div class="metric-grid">
-  <div class="metric-card"><span>Активные заказы</span><b id="op_active">0</b><small>не завершены</small></div>
-  <div class="metric-card accent"><span>Очередь печати</span><b id="op_hours">0 ч</b><small id="op_load_text">0% от 110 ч</small><div class="mini-progress"><i id="op_load_bar"></i></div></div>
-  <div class="metric-card danger"><span>Требуют внимания</span><b id="op_due">0</b><small>срок сегодня или прошёл</small></div>
-  <div class="metric-card"><span>Ожидаем оплату</span><b id="op_money">0 ₽</b><small>по активным заказам</small></div>
-  <div class="metric-card"><span>Нужно материала</span><b id="op_material">0 г</b><small>по активным заказам</small></div>
- </div>
- <div class="dashboard-grid">
-  <div class="panel"><div class="panel-title"><div><h2>Ближайшие сроки</h2><p>Сначала просроченные и срочные заказы</p></div><a href="#orders">Все заказы →</a></div><div id="op_today"></div></div>
-  <div class="panel"><div class="panel-title"><div><h2>В производстве</h2><p>Очередь, печать и постобработка</p></div><a href="#calc-h6">Планировщик →</a></div><div id="op_queue"></div><div class="stock-note"><span>Запас пластика</span><b id="op_stock_text">—</b></div></div>
- </div>
- <div class="quick-grid"><a href="#orders"><span>▦</span><b>Заказы</b><small>Канбан и журнал</small></a><a href="#niches"><span>◫</span><b>Тест ниш</b><small>Воронка и прибыль</small></a><a href="#calc-h6"><span>◉</span><b>План печати</b><small>Часы и материал</small></a><a href="#calc-h7"><span>◒</span><b>Склад</b><small>Остатки катушек</small></a></div>
-</section>
-
-<section id="orders" class="ops-section wide-section">
- <div class="ops-head"><div><span class="eyebrow">ПРОДАЖИ И ПРОИЗВОДСТВО</span><h1>Заказы</h1><p><span id="orders_count">0</span> · перетаскивайте карточки между статусами</p></div><div class="head-actions"><button class="secondary-btn" id="export_orders">Экспорт CSV</button><button class="secondary-btn" id="manage_statuses">Настроить статусы</button><button class="primary-btn" id="new_order">＋ Новый заказ</button></div></div>
- <div class="toolbar"><div class="search-box"><span>⌕</span><input id="order_search" placeholder="Изделие, клиент, файл…"></div><select id="order_status_filter"><option value="">Все статусы</option></select><select id="order_niche_filter"><option value="">Все ниши</option></select><div class="view-switch"><button data-order-view="kanban" class="active">Канбан</button><button data-order-view="table">Таблица</button></div></div>
- <div id="orders_kanban" class="kanban-board"></div>
- <div id="orders_table_wrap" class="data-table-wrap" hidden><table class="data-table"><thead><tr><th>Заказ</th><th>Изделие / файл</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th>Производство</th><th>Экономика</th><th>Срок</th></tr></thead><tbody id="orders_table_body"></tbody></table></div>
-</section>
-
-<section id="customers" class="ops-section">
- <div class="ops-head"><div><span class="eyebrow">CRM</span><h1>Клиенты</h1><p>История покупок собирается автоматически из заказов.</p></div><div class="customer-kpis"><span>Всего <b id="customer_total">0</b></span><span>Постоянных <b id="customer_repeat">0</b></span></div></div>
- <div class="toolbar"><div class="search-box"><span>⌕</span><input id="customer_search" placeholder="Имя, телефон, мессенджер…"></div></div>
- <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Клиент</th><th>Связь</th><th>Заказов</th><th>Выручка</th><th>Последний заказ</th><th>Сегмент</th></tr></thead><tbody id="customers_body"></tbody></table></div>
-</section>
-
-<section id="niches" class="ops-section">
- <div class="ops-head"><div><span class="eyebrow">ПРОВЕРКА ГИПОТЕЗ</span><h1>Ниши</h1><p>Сравнивайте путь от показа до повторной покупки, а не личные ощущения.</p></div><button class="primary-btn" id="new_niche">＋ Добавить нишу</button></div>
- <div class="niche-explainer"><b>Как заполнять</b><span>Показы — сколько людей увидели предложение. Обращения — сколько написали или спросили на кассе. Заказы, выручка и прибыль подтягиваются автоматически.</span></div>
- <div id="niche_grid" class="niche-grid"></div>
-</section>
-
-<section id="library" class="ops-section">
- <div class="ops-head"><div><span class="eyebrow">БАЗА ЗНАНИЙ</span><h1>Библиотека</h1><p>Подробные инструкции сохранены, но не мешают ежедневной работе.</p></div></div>
- <div class="library-grid">
-  <a href="#start"><span>🚀</span><b>Запуск</b><small>Первая неделя и чек-листы</small></a><a href="#plan"><span>📊</span><b>Бизнес-план</b><small>Экономика и план роста</small></a><a href="#models"><span>🧩</span><b>Модели</b><small>Лицензии и очередь печати</small></a><a href="#tech"><span>🛠</span><b>Техника</b><small>Настройки, брак, упаковка</small></a><a href="#b2b"><span>🤝</span><b>B2B</b><small>Кондитеры и скрипты</small></a><a href="#avito"><span>📱</span><b>Авито</b><small>Объявления и ответы</small></a><a href="#tg"><span>✈</span><b>Telegram</b><small>Канал и приём заказов</small></a><a href="#posts"><span>✍</span><b>Контент</b><small>Посты и календарь</small></a><a href="#ip"><span>🏛</span><b>ИП и налоги</b><small>Разделение схем</small></a><a href="#legal"><span>⚖</span><b>Юридика</b><small>Маркировка, права, учёт</small></a><a href="#mats"><span>🖨</span><b>Материалы A4</b><small>Ценники и памятки</small></a>
- </div>
-</section>
-
-<dialog id="order_modal" class="app-dialog"><form method="dialog" id="order_form"><div class="dialog-head"><div><span class="eyebrow">КАРТОЧКА ЗАКАЗА</span><h2 id="order_modal_title">Новый заказ</h2></div><button type="button" class="dialog-x" id="order_close">×</button></div><div class="dialog-body">
- <div class="form-section"><h3>Заказ</h3><div class="form-grid"><label class="span-2">Изделие / работа<input id="of_product" placeholder="Например: адресник с именем" required></label><label>Статус<select id="of_status"></select></label><label>Приоритет<select id="of_priority"><option value="low">Низкий</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label><label>Ниша<select id="of_niche"></select></label><label>Канал<select id="of_channel"><option>Полка магазина</option><option>Telegram</option><option>Авито</option><option>B2B</option><option>Рекомендация</option><option>Другое</option></select></label><label>Количество<input id="of_qty" type="number" min="1"></label><label>Срок<input id="of_due" type="date"></label></div></div>
- <div class="form-section"><h3>Клиент</h3><div class="form-grid"><label>Имя<input id="of_customerName" placeholder="Имя или компания"></label><label>Телефон<input id="of_phone" placeholder="+7…"></label><label class="span-2">Мессенджер / контакт<input id="of_messenger" placeholder="@telegram, WhatsApp или другой способ связи"></label></div></div>
- <div class="form-section"><h3>Производство</h3><div class="form-grid"><label>Материал<input id="of_material" placeholder="PLA, PETG, TPU…"></label><label>Цвет<input id="of_color" placeholder="Чёрный + золотой"></label><label>Пластик, г<input id="of_grams" type="number" min="0" step="any"></label><label>Печать, ч<input id="of_hours" type="number" min="0" step="any"></label><label class="span-2">Файл / папка модели<input id="of_file" placeholder="pets/adresnik-v2.3mf"></label></div></div>
- <div class="form-section"><h3>Экономика</h3><div class="form-grid"><label>Цена, ₽<input id="of_price" type="number" min="0" step="any"></label><label>Себестоимость, ₽<input id="of_cost" type="number" min="0" step="any"></label><label>Предоплата, ₽<input id="of_prepaid" type="number" min="0" step="any"></label><div class="calc-preview"><span>Прибыль <b id="of_profit">0 ₽</b></span><span>За час <b id="of_ph">—</b></span><span>Осталось <b id="of_left">0 ₽</b></span></div></div></div>
- <div class="form-section"><h3>Комментарий и контроль качества</h3><div class="form-grid"><label>Проверка качества<select id="of_quality"><option value="pending">Не проверено</option><option value="passed">Проверено — всё хорошо</option><option value="rework">Нужна переделка</option></select></label><label>Результат / упаковка<input id="of_qualityNote" placeholder="Осмотр, размеры, упаковка…"></label><label class="span-2">Заметки<textarea id="of_notes" rows="4" placeholder="Размеры, пожелания, что согласовано…"></textarea></label></div></div>
- </div><div class="dialog-foot"><button type="button" class="danger-btn" id="order_delete">Удалить</button><span></span><button type="button" class="secondary-btn" id="order_cancel">Отмена</button><button type="button" class="primary-btn" id="order_save">Сохранить заказ</button></div></form></dialog>
-
-<dialog id="niche_modal" class="app-dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><span class="eyebrow">ГИПОТЕЗА</span><h2 id="niche_modal_title">Ниша</h2></div></div><div class="dialog-body"><div class="form-grid"><label>Название<input id="nf_name"></label><label>Значок<input id="nf_icon" maxlength="4"></label><label>Цвет<input id="nf_color" type="color"></label><label>Показы<input id="nf_views" type="number" min="0"></label><label>Обращения<input id="nf_leads" type="number" min="0"></label><label class="span-2">Гипотеза<textarea id="nf_hypothesis" rows="3"></textarea></label><label class="span-2">Цель теста<textarea id="nf_target" rows="2"></textarea></label></div></div><div class="dialog-foot"><button type="button" class="danger-btn" id="niche_delete">Удалить</button><span></span><button type="button" class="secondary-btn" id="niche_cancel">Отмена</button><button type="button" class="primary-btn" id="niche_save">Сохранить</button></div></form></dialog>
-
-<dialog id="statuses_modal" class="app-dialog small-dialog"><form method="dialog"><div class="dialog-head"><div><span class="eyebrow">НАСТРОЙКА</span><h2>Статусы заказов</h2><p>Порядок строк станет порядком колонок канбана.</p></div></div><div class="dialog-body"><div id="status_editor"></div><button type="button" class="secondary-btn full-btn" id="status_add">＋ Добавить статус</button></div><div class="dialog-foot"><span></span><span></span><button type="button" class="secondary-btn" id="statuses_cancel">Отмена</button><button type="button" class="primary-btn" id="statuses_save">Сохранить</button></div></form></dialog>
-
- <section id="calc">
-<div class="sechead"><span class="secic">🧮</span><div><h1>Калькуляторы и учёт</h1><p>9 инструментов · стартовые значения заменяйте своими данными</p></div></div>
-
-<h2 id="calc-h0">Калькулятор заказа</h2>
-<p>Выберите готовое изделие из базы (вес и часы подставятся сами) или вбейте свои цифры из слайсера — увидите себестоимость, цену для выбранного канала продаж и <strong>главное: сколько зарабатывает принтер за час чистыми</strong>. Норма 250–500 ₽/ч.</p>
-<div class="calcwrap">
- <div class="cbox"><h3>Параметры заказа</h3>
-  <div class="fld"><label>Готовое изделие из базы</label><select id="c_preset" style="max-width:230px"></select></div>
-  <p class="hint" id="c_refprice" style="margin:2px 0 8px"></p>
-  <div class="fld"><label>Вес изделия, г</label><input type="number" step="any" id="c_w" data-k="cw" value="60"></div><div class="fld"><label>Время печати, часов</label><input type="number" step="any" id="c_h" data-k="ch" value="2.5"></div><div class="fld"><label>Отход AMS (смена цвета), г</label><input type="number" step="any" id="c_wa" data-k="cwa" value="0"></div><div class="fld"><label>Цена катушки, ₽</label><input type="number" step="any" id="c_sp" data-k="csp" value="1600"></div><div class="fld"><label>Вес катушки, г</label><input type="number" step="any" id="c_sw" data-k="csw" value="1000"></div><div class="fld"><label>Количество, шт</label><input type="number" step="any" id="c_q" data-k="cq" value="1"></div><div class="fld"><label><b>Влезает на стол за раз, шт</b></label><input type="number" step="1" min="1" id="c_fit" data-k="cfit" value="1"></div><p class="hint">Главное поле для партий: если на стол помещается 6 топперов, 40 штук — это 7 запусков, а не 40. Разогрев и отход AMS платятся за плиту, а не за штуку.</p>
-  <h3 style="margin-top:18px">Канал продажи</h3>
-  <div class="fld"><label>Где продаёте</label><select id="c_chan" style="max-width:230px"></select></div>
-  <div class="fld"><label>Комиссия канала, %</label><input type="number" step="any" id="c_fee" data-k="cfee" value="0"></div>
-  <div class="fld"><label>Фикс. издержки на заказ, ₽ (логистика/упаковка МП)</label><input type="number" step="any" id="c_fix" data-k="cfix" value="0"></div>
-  <p class="hint">Комиссии, логистика и эквайринг меняются. Откройте текущий тариф своего кабинета и внесите фактический процент и фиксированные расходы — пресеты каналов намеренно не подставляют устаревающие цифры.</p>
-  <h3 style="margin-top:18px">Ваши издержки — настройте один раз</h3>
-  <div class="fld"><label>Брак / перепечатка, %</label><input type="number" step="any" id="c_br" data-k="cbr" value="8"></div><div class="fld"><label>Амортизация, ₽/час</label><input type="number" step="any" id="c_am" data-k="cam" value="12"></div><div class="fld"><label>Электричество, ₽/час</label><input type="number" step="any" id="c_el" data-k="cel" value="3.5"></div><div class="fld"><label>Ваша работа, мин</label><input type="number" step="any" id="c_mn" data-k="cmn" value="20"></div><div class="fld"><label>Оценка своего часа, ₽</label><input type="number" step="any" id="c_hr" data-k="chr" value="500"></div><div class="fld"><label>Расходники, ₽</label><input type="number" step="any" id="c_ex" data-k="cex" value="15"></div><div class="fld"><label>Упаковка, ₽</label><input type="number" step="any" id="c_pk" data-k="cpk" value="40"></div><div class="fld"><label>Наценка, %</label><input type="number" step="any" id="c_mk" data-k="cmk" value="120"></div><div class="fld"><label>Разогрев и калибровка, мин на запуск</label><input type="number" step="any" id="c_oh" data-k="coh" value="8"></div><div class="fld"><label>Рост отхода AMS за каждую доп. модель на столе, %</label><input type="number" step="any" id="c_amsk" data-k="camsk" value="15"></div><div class="fld"><label><input type="checkbox" id="c_batch" checked> Считать партиями (печать пачкой)</label></div><p class="hint">Снимите галочку, чтобы увидеть, во что обходилась бы печать по одной штуке.</p>
- </div>
- <div>
-  <div class="cbox"><h3>Себестоимость</h3>
-   <div class="rrow"><span>Пластик с браком и отходом AMS</span><b id="r_mat">—</b></div>
-   <div class="rrow"><span>Амортизация принтера</span><b id="r_amo">—</b></div>
-   <div class="rrow"><span>Электричество</span><b id="r_ele">—</b></div>
-   <div class="rrow"><span>Ваш труд</span><b id="r_lab">—</b></div>
-   <div class="rrow"><span>Расходники и упаковка</span><b id="r_oth">—</b></div>
-   <div class="rrow" style="border-top:2px solid #0f1d38;margin-top:5px;padding-top:9px"><span><b>Себестоимость 1 шт</b></span><b id="r_cost">—</b></div>
-  </div>
-  <div class="res">
-   <div class="rrow"><span>Цена за 1 шт</span><span class="rbig" id="r_price">—</span></div>
-   <div class="rrow"><span>Комиссия и издержки канала</span><b id="r_fee">—</b></div>
-   <div class="rrow"><span>Вам на руки с 1 шт</span><b id="r_net">—</b></div>
-   <div class="rrow"><span>ИТОГО за заказ</span><b id="r_total" style="font-size:18px">—</b></div>
-   <div class="rrow"><span>Прибыль чистыми</span><b id="r_profit">—</b></div>
-   <div class="rrow"><span>Заработок за час печати</span><b id="r_ph">—</b></div>
-   <div class="rrow" style="border-top:2px solid #0f1d38;margin-top:5px;padding-top:9px"><span><b>Партия на столе</b></span><b id="r_plates">—</b></div><div class="rrow"><span>Часов на всю партию</span><b id="r_bhours">—</b></div><div class="rrow"><span>из них разогрев плит</span><b id="r_ohh">—</b></div><div class="rrow"><span>Отход AMS на партию</span><b id="r_bwaste">—</b></div><div class="rrow"><span>Выгода от партии</span><b id="r_save" style="font-size:12.5px">—</b></div><div class="rrow"><span>Эквивалент за грамм</span><b id="r_g">—</b></div>
-   <div class="rrow" style="color:#96261a"><span><b>Минимум, ниже нельзя</b></span><b id="r_min">—</b></div>
-   <div id="r_verdict" class="verdict">—</div>
-   <p class="hint">Торгуются — не роняйте цену, а меняйте условия: заливка 10%, слой 0,28 мм — и пересчитайте здесь. Двухцветное на AMS продаётся в 1,5 раза дороже при почти той же себестоимости — не забывайте про поле «Отход AMS».</p>
+  <div class="grid g2" style="margin-top:16px">
+   <div class="card">
+    <div class="card-head"><div><h2>Файлы на принтере</h2><p>FTPS 990 · 3MF и G-code с SD-карты</p></div><button class="btn sm" id="pr_files_refresh" type="button">↻ Обновить</button></div>
+    <div class="dropzone" id="pr_drop"><span class="big">⇪</span><b>Перетащите 3MF или G-code</b><span class="muted">или <button class="btn sm" id="pr_upload_btn" type="button">выберите файл</button></span></div>
+    <input type="file" id="pr_file_input" accept=".3mf,.gcode" hidden>
+    <div id="pr_files" style="margin-top:12px"><div class="empty compact"><span>Список появится после подключения по FTPS.</span></div></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Журнал принтера</h2><p>Старт, пауза, завершение, ошибки, команды</p></div><button class="btn sm ghost" id="pr_events_refresh" type="button">↻</button></div>
+    <div class="event-list" id="pr_events"></div>
+   </div>
   </div>
  </div>
-</div>
+</section>
 
-<h2 id="calc-h1">Окупаемость принтера</h2>
-<p>План по месяцам. Правьте выручку и расходы под реальность — таблица сама покажет, когда выходите в плюс.</p>
-<div class="calcwrap">
- <div class="cbox"><h3>Вводные</h3>
-  <div class="fld"><label>Вложения в принтер + старт, ₽</label><input type="number" step="any" id="p_inv" data-k="pinv" value="80000"></div><div class="fld"><label>Налог, %</label><input type="number" step="any" id="p_tax" data-k="ptax" value="5"></div><div class="fld"><label>Средний заработок принтера, ₽/час (из калькулятора заказа)</label><input type="number" step="any" id="p_ph" data-k="pph" value="300"></div>
-  <div class="rrow" style="margin-top:10px"><span>Нужно прибыли в месяц</span><b id="p_need">—</b></div>
-  <div class="rrow"><span>Нужно часов печати</span><b id="p_hours">—</b></div>
-  <h3 style="margin-top:16px">Выручка по месяцам, ₽</h3><div class="fld"><label>Месяц 1</label><input type="number" step="any" id="p_r1" data-k="pr1" value="15000"></div><div class="fld"><label>Месяц 2</label><input type="number" step="any" id="p_r2" data-k="pr2" value="35000"></div><div class="fld"><label>Месяц 3</label><input type="number" step="any" id="p_r3" data-k="pr3" value="55000"></div><div class="fld"><label>Месяц 4</label><input type="number" step="any" id="p_r4" data-k="pr4" value="70000"></div><div class="fld"><label>Месяц 5</label><input type="number" step="any" id="p_r5" data-k="pr5" value="80000"></div><div class="fld"><label>Месяц 6</label><input type="number" step="any" id="p_r6" data-k="pr6" value="90000"></div>
+<!-- ================================================== ОЧЕРЕДЬ -->
+<section class="view" id="view-queue">
+ <div class="view-head">
+  <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
+  <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn primary" id="queue_add" type="button">＋ Задание</button></div>
  </div>
- <div class="cbox"><h3>Расходы по месяцам, ₽</h3><div class="fld"><label>Месяц 1</label><input type="number" step="any" id="p_e1" data-k="pe1" value="10900"></div><div class="fld"><label>Месяц 2</label><input type="number" step="any" id="p_e2" data-k="pe2" value="17250"></div><div class="fld"><label>Месяц 3</label><input type="number" step="any" id="p_e3" data-k="pe3" value="24250"></div><div class="fld"><label>Месяц 4</label><input type="number" step="any" id="p_e4" data-k="pe4" value="28500"></div><div class="fld"><label>Месяц 5</label><input type="number" step="any" id="p_e5" data-k="pe5" value="31000"></div><div class="fld"><label>Месяц 6</label><input type="number" step="any" id="p_e6" data-k="pe6" value="33500"></div>
-  <p class="hint">Пластик, упаковка, продвижение, витрина, резерв на ремонт. Налог считается отдельно от выручки.</p>
+ <div class="grid g-2-1">
+  <div class="card">
+   <div class="card-head"><div><h2>В работе и в очереди</h2><p id="queue_sub">—</p></div></div>
+   <div id="queue_list"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Журнал печати</h2><p>Завершённые задания и брак</p></div></div>
+   <div id="queue_history"></div>
+  </div>
  </div>
-</div>
-<table class="tbl-in"><thead><tr><th>Период</th><th>Выручка</th><th>Расходы+налог</th><th>Прибыль</th><th>Накоплено</th><th>Осталось отбить</th></tr></thead><tbody id="p_rows"></tbody></table>
-<div id="p_verdict" class="verdict">—</div>
+</section>
 
-<h2 id="calc-h2">Редактор базы изделий</h2>
-<p>Это <strong>единый справочник</strong>: отсюда позиции попадают в калькулятор заказа, тест полки, опт B2B и планировщик печати. Добавляйте свои изделия — считать их будет везде. Себестоимость и ₽/час пересчитываются из ваших настроек выше.</p>
-<button class="printbtn g" id="cat_add">+ Добавить изделие</button><button class="printbtn" id="cat_sort">Сортировать по ₽/час</button><button class="printbtn" id="cat_group">Сгруппировать по категориям</button><button class="printbtn" id="cat_reset" style="background:#96261a">Сбросить базу</button>
-<span class="hint" id="cat_count" style="margin-left:8px"></span>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Категория</th><th>Название</th><th>Вес, г</th><th>Часы</th><th>Отход AMS, г</th><th>Шт на стол</th><th>Цена, ₽</th><th>Себест., ₽</th><th>₽/час</th><th></th></tr></thead><tbody id="cat_body"></tbody></table></div>
-<p class="hint">₽/час здесь — маржа без учёта вашего труда, то есть сколько зарабатывает сам принтер. Зелёный — от 250 ₽/ч, красный — меньше 100 ₽/ч, такое печатать невыгодно. <b>«Шт на стол»</b> — сколько помещается за один запуск: по этой цифре считается партионная себестоимость, мелким шрифтом показано, во что обошлась бы печать по одной.</p>
+<!-- ================================================== ЗАКАЗЫ -->
+<section class="view" id="view-orders">
+ <div class="view-head">
+  <div><span class="eyebrow">Продажи и производство</span><h1>Заказы</h1><p id="orders_sub">Перетаскивайте карточки между статусами.</p></div>
+  <div class="head-actions">
+   <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
+   <button class="btn" id="orders_statuses" type="button">Статусы</button>
+   <button class="btn primary" id="orders_new" type="button">＋ Новый заказ</button>
+  </div>
+ </div>
+ <div class="toolbar">
+  <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…"></div>
+  <select id="orders_filter_status"><option value="">Все статусы</option></select>
+  <select id="orders_filter_niche"><option value="">Все ниши</option></select>
+  <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
+ </div>
+ <div id="orders_kanban" class="kanban"></div>
+ <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th class="right">Часы</th><th class="right">Граммы</th><th class="right">Цена</th><th class="right">Прибыль</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
+</section>
 
-<h2 id="calc-h3">Тест полки: что продаётся</h2>
-<p>Вписывайте <strong>продажи за неделю</strong> — таблица скажет по каждой позиции, что делать. Вердикт учитывает сразу три вещи: <strong>сколько продалось</strong>, <strong>выгодно ли это по ₽/час</strong> и <strong>влезает ли всё в реальные ~110 часов печати в неделю</strong>. Список позиций берётся из базы выше. Себестоимость и часы считаются <strong>партионно</strong>: если продали 8 брелоков и они печатаются по 16 на столе — это один запуск, а не восемь.</p>
-<button class="printbtn" id="sh_clear">Очистить продажи недели</button>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Позиция</th><th>Вес, г</th><th>Часы</th><th>Себест., ₽</th><th>Цена, ₽</th><th>Маржа, ₽</th><th>₽/час</th><th>Продано за нед.</th><th>К прошлой</th><th>Вердикт</th></tr></thead><tbody id="sh_body"></tbody></table></div>
-<div class="calcwrap">
- <div class="res">
-  <div class="rrow"><span>Выручка за неделю</span><b id="sh_rev">—</b></div>
-  <div class="rrow"><span>Прибыль за неделю</span><b id="sh_prof">—</b></div>
-  <div class="rrow"><span>Часов печати на проданное</span><b id="sh_hrs">—</b></div>
-  <div class="rrow"><span>Средний заработок принтера</span><b id="sh_avg">—</b></div>
-  <div class="rrow"><span>Загрузка принтера</span><b id="sh_cap" style="font-size:12px">—</b></div>
-  <div class="progwrap"><div class="progbar" id="sh_bar" style="width:0"></div></div>
+<!-- ================================================== КЛИЕНТЫ -->
+<section class="view" id="view-customers">
+ <div class="view-head">
+  <div><span class="eyebrow">CRM</span><h1>Клиенты</h1><p>История покупок собирается автоматически из заказов.</p></div>
+  <div class="head-actions" id="customers_kpi"></div>
  </div>
- <div><div id="sh_verdict" class="verdict">—</div>
- <p class="hint">Наведите курсор на вердикт — покажет, почему именно так. «Резать первым» появляется, когда принтер перегружен: система сама выбирает позиции с наименьшим ₽/час.</p></div>
-</div>
+ <div class="toolbar"><div class="search-box"><input id="customers_search" type="search" placeholder="Имя, телефон, мессенджер…"></div></div>
+ <div class="table-wrap"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
+</section>
 
-<h2 id="calc-h4">История недель</h2>
-<p>Сохраняйте результат каждой недели — увидите динамику и поймёте, растёте вы или топчетесь. История нужна и для колонки «К прошлой» в тесте полки.</p>
-<div class="fld" style="max-width:420px"><label>Дата недели (конец недели)</label><input type="date" id="h_date" style="width:150px"></div>
-<button class="printbtn g" id="h_save">💾 Сохранить текущую неделю</button>
-<div class="sparkwrap" id="h_spark"></div>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Неделя</th><th>Выручка, ₽</th><th>Прибыль, ₽</th><th>Часы</th><th>₽/час</th><th>Динамика</th><th></th></tr></thead><tbody id="h_body"></tbody></table></div>
-<div class="calcwrap">
- <div class="res">
-  <div class="rrow"><span>Лучшая неделя</span><b id="h_best">—</b></div>
-  <div class="rrow"><span>Средняя выручка</span><b id="h_avg">—</b></div>
-  <div class="rrow"><span>Прибыль за всё время</span><b id="h_total">—</b></div>
+<!-- ================================================== ФИНАНСЫ -->
+<section class="view" id="view-finance">
+ <div class="view-head">
+  <div><span class="eyebrow">Автоматический учёт</span><h1>Финансы</h1><p>Доходы и расходы пишутся сами: по завершённым печатям и закрытым заказам.</p></div>
+  <div class="head-actions">
+   <div class="seg" id="fin_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
+   <button class="btn primary" id="fin_add" type="button">＋ Проводка</button>
+  </div>
  </div>
- <div id="h_verdict" class="verdict">—</div>
-</div>
+ <div class="kpi-grid" id="fin_kpis"></div>
+ <div class="grid g-2-1">
+  <div class="card">
+   <div class="card-head"><div><h2>Прибыль по дням</h2><p>Доход минус расход</p></div></div>
+   <div class="chart-wrap"><div id="fin_chart"></div><div class="chart-tip" id="fin_tip"></div></div>
+   <div class="chart-legend" id="fin_legend"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Прибыль по нишам</h2><p>Сравнение гипотез по факту</p></div></div>
+   <div id="fin_niches"></div>
+  </div>
+ </div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Последние проводки</h2><p>Автоматические помечены значком ⚙</p></div></div>
+  <div id="fin_tx"></div>
+ </div>
+</section>
 
-<h2 id="calc-h5">Опт B2B: сетка скидок</h2>
-<p>Кондитер или магазин просит «оптом дешевле». Здесь видно, <strong>до какой скидки можно опускаться</strong> и с какого тиража это перестаёт быть выгодным.</p>
-<div class="calcwrap">
- <div class="cbox"><h3>Что считаем</h3>
-  <div class="fld"><label>Изделие из базы</label><select id="b_item" style="max-width:230px"></select></div>
-  <div class="fld"><label>Розничная цена, ₽</label><input type="number" step="any" id="b_retail" data-k="bretail" value="500"></div>
-  <div class="fld"><label>Упаковка опта на 1 шт, ₽</label><input type="number" step="any" id="b_pack" data-k="bpack" value="5"></div>
-  <h3 style="margin-top:16px">Ваша сетка скидок</h3>
-  <div class="fld"><label>Тираж 1, шт / скидка %</label><span style="display:flex;gap:6px"><input type="number" step="1" id="b_q1" data-k="bq1" value="10" style="width:62px"><input type="number" step="any" id="b_d1" data-k="bd1" value="10" style="width:62px"></span></div>
-  <div class="fld"><label>Тираж 2, шт / скидка %</label><span style="display:flex;gap:6px"><input type="number" step="1" id="b_q2" data-k="bq2" value="25" style="width:62px"><input type="number" step="any" id="b_d2" data-k="bd2" value="20" style="width:62px"></span></div>
-  <div class="fld"><label>Тираж 3, шт / скидка %</label><span style="display:flex;gap:6px"><input type="number" step="1" id="b_q3" data-k="bq3" value="50" style="width:62px"><input type="number" step="any" id="b_d3" data-k="bd3" value="30" style="width:62px"></span></div>
-  <div class="fld"><label>Тираж 4, шт / скидка %</label><span style="display:flex;gap:6px"><input type="number" step="1" id="b_q4" data-k="bq4" value="100" style="width:62px"><input type="number" step="any" id="b_d4" data-k="bd4" value="40" style="width:62px"></span></div>
+<!-- ================================================== СКЛАД -->
+<section class="view" id="view-inventory">
+ <div class="view-head">
+  <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
+  <div class="head-actions"><button class="btn primary" id="spool_add" type="button">＋ Катушка</button></div>
  </div>
- <div class="res">
-  <div class="rrow"><span>Влезает на стол</span><b id="b_fit">—</b></div><div class="rrow"><span>Себестоимость 1 шт партией (с упаковкой)</span><b id="b_cost">—</b></div><div class="rrow"><span>Выгода партии</span><b id="b_solo" style="font-size:12px">—</b></div>
-  <div class="rrow" style="color:#96261a"><span><b>Пол по цене — ниже нельзя</b></span><b id="b_floor">—</b></div>
-  <div class="rrow"><span>Максимальная скидка</span><b id="b_maxd" style="font-size:20px">—</b></div>
-  <p class="hint">Пол = себестоимость × 1,4. Всё, что ниже, — работа принтера в ноль: износ и время есть, денег нет.</p>
+ <div class="kpi-grid" id="stock_kpis"></div>
+ <div class="spool-grid" id="spool_grid"></div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><button class="btn sm" id="cat_add" type="button">＋ Позиция</button></div>
+  <div class="table-wrap"><table class="data"><thead><tr><th>Название</th><th>Материал</th><th class="right">Граммы</th><th class="right">Часы</th><th class="right">На стол</th><th class="right">Цена</th><th class="right">₽/час</th><th></th></tr></thead><tbody id="cat_tbody"></tbody></table></div>
  </div>
-</div>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Тираж</th><th>Шт</th><th>Скидка</th><th>Цена за шт, ₽</th><th>Маржа за шт, ₽</th><th>₽/час</th><th>Сумма сделки, ₽</th><th>Вердикт</th></tr></thead><tbody id="b_rows"></tbody></table></div>
-<div id="b_verdict" class="verdict">—</div>
-<p class="hint">Скидку давайте только за предоплату и весь тираж сразу. «Дайте 5 штук по цене как за 50, а остальное потом» — самая частая уловка, соглашаться нельзя.</p>
+</section>
 
-<h2 id="calc-h6">Планировщик печати</h2>
-<p>Соберите очередь на неделю или под заказ — покажу, <strong>сколько часов это займёт, сколько уйдёт пластика и успеваете ли к сроку</strong>.</p>
-<div class="calcwrap">
- <div class="cbox"><h3>Добавить в очередь</h3>
-  <div class="fld"><label>Изделие</label><select id="pl_item" style="max-width:230px"></select></div>
-  <div class="fld"><label>Количество, шт</label><input type="number" step="1" min="1" id="pl_qty" data-k="plqty" value="5"></div>
-  <button class="printbtn g" id="pl_add">+ В очередь</button>
-  <button class="printbtn" id="pl_fromshelf">Заполнить по продажам</button>
-  <button class="printbtn" id="pl_clear" style="background:#96261a">Очистить</button>
-  <h3 style="margin-top:16px">Условия</h3>
-  <div class="fld"><label>Часов печати в день реально</label><input type="number" step="any" id="pl_hpd" data-k="plhpd" value="12"></div>
-  <div class="fld"><label>Дней до срока</label><input type="number" step="any" id="pl_days" data-k="pldays" value="7"></div>
-  <p class="hint">12 ч/день — честная цифра при режиме 8:00–21:00 с ночной печатью крупного. Круглосуточно принтер не работает: снятие, чистка, замена пластика.</p>
+<!-- ================================================== НИШИ -->
+<section class="view" id="view-niches">
+ <div class="view-head">
+  <div><span class="eyebrow">Проверка гипотез</span><h1>Ниши</h1><p>Показы и обращения вводите вручную, заказы и прибыль считаются сами.</p></div>
+  <div class="head-actions"><button class="btn primary" id="niche_add" type="button">＋ Ниша</button></div>
  </div>
- <div class="res">
-  <div class="rrow"><span>Всего часов печати</span><span class="rbig" id="pl_hrs">—</span></div>
-  <div class="rrow"><span>Запусков (плит)</span><b id="pl_plates">—</b></div><div class="rrow"><span>Экономия от партий</span><b id="pl_saveh" style="font-size:12.5px">—</b></div><div class="rrow"><span>Нужно пластика</span><b id="pl_g">—</b></div>
-  <div class="rrow"><span>Есть на складе</span><b id="pl_stock">—</b></div>
-  <div class="rrow"><span>Займёт дней</span><b id="pl_dur">—</b></div>
-  <div class="rrow"><span>Выручка с очереди</span><b id="pl_rev">—</b></div>
-  <div class="rrow"><span>Прибыль с очереди</span><b id="pl_prof">—</b></div>
-  <div class="rrow"><span>Средний заработок</span><b id="pl_ph">—</b></div>
-  <div class="rrow"><span>Загрузка срока</span><b id="pl_load">—</b></div>
-  <div class="progwrap"><div class="progbar" id="pl_bar" style="width:0"></div></div>
- </div>
-</div>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Позиция</th><th>Штук</th><th>Плит</th><th>Часы</th><th>Пластик, г</th><th>Выручка, ₽</th><th>Прибыль, ₽</th><th></th></tr></thead><tbody id="pl_body"></tbody></table></div>
-<div id="pl_verdict" class="verdict">—</div>
+ <div class="niche-grid" id="niche_grid"></div>
+</section>
 
-<h2 id="calc-h7">Учёт пластика</h2>
-<p>Склад катушек и главный вопрос: <strong>когда заказывать следующую</strong>. В Крыму доставка идёт долго — заказывать надо заранее, а не когда пластик кончился.</p>
-<button class="printbtn g" id="sp_add">+ Добавить катушку</button><button class="printbtn" id="sp_writeoff">Списать очередь печати</button>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Цвет</th><th>Тип</th><th>Остаток, г</th><th>Заполнение</th><th>Цена катушки, ₽</th><th>Стоимость остатка, ₽</th><th></th></tr></thead><tbody id="sp_body"></tbody></table></div>
-<div class="calcwrap">
- <div class="cbox"><h3>Расход и доставка</h3>
-  <div class="fld"><label>Расход пластика в неделю, г</label><input type="number" step="any" id="sp_week" data-k="spweek" value="700"></div>
-  <div class="fld"><label><input type="checkbox" id="sp_auto"> Брать расход из планировщика</label></div>
-  <div class="fld"><label>Срок доставки пластика, дней</label><input type="number" step="any" id="sp_lead" data-k="splead" value="14"></div>
-  <p class="hint">Правило из бизнес-плана: держите запас на 2 недели вперёд и заказывайте новую катушку, когда осталась одна полная.</p>
+<!-- ================================================== КАЛЬКУЛЯТОР -->
+<section class="view" id="view-calc">
+ <div class="view-head">
+  <div><span class="eyebrow">Экономика заказа</span><h1>Калькулятор</h1><p>Считает по вашим тарифам из настроек: пластик, энергия, износ, труд и брак.</p></div>
+  <div class="head-actions"><button class="btn" id="calc_from_cat" type="button">Взять из базы изделий</button><button class="btn primary" id="calc_to_order" type="button">Создать заказ</button></div>
  </div>
- <div class="res">
-  <div class="rrow"><span>Всего на складе</span><span class="rbig" id="sp_stock">—</span></div>
-  <div class="rrow"><span>Стоимость запаса</span><b id="sp_value">—</b></div>
-  <div class="rrow"><span>Расход</span><b id="sp_weekout">—</b></div>
-  <div class="rrow"><span>Хватит на</span><b id="sp_days">—</b></div>
-  <div class="rrow"><span>Уйдёт за срок доставки</span><b id="sp_need">—</b></div>
+ <div class="calc-grid">
+  <div class="card">
+   <div class="card-head"><div><h2>Параметры</h2><p>Данные из слайсера</p></div></div>
+   <div class="form-grid">
+    <label class="field span-2"><span>Изделие из базы</span><select id="calc_preset"><option value="">— свой расчёт —</option></select></label>
+    <label class="field"><span>Вес изделия, г</span><input type="number" id="calc_grams" step="any" min="0" value="60"></label>
+    <label class="field"><span>Время печати, ч</span><input type="number" id="calc_hours" step="any" min="0" value="2.5"></label>
+    <label class="field"><span>Количество, шт</span><input type="number" id="calc_qty" step="1" min="1" value="1"></label>
+    <label class="field"><span>Влезает на стол, шт</span><input type="number" id="calc_fit" step="1" min="1" value="1"></label>
+    <label class="field"><span>Ручная работа, мин</span><input type="number" id="calc_minutes" step="any" min="0" value="10"></label>
+    <label class="field"><span>Цена катушки, ₽</span><input type="number" id="calc_spool_price" step="any" min="0"></label>
+    <label class="field"><span>Вес катушки, г</span><input type="number" id="calc_spool_weight" step="any" min="1"></label>
+    <label class="field"><span>Наценка, %</span><input type="number" id="calc_markup" step="any" min="0" value="150"></label>
+    <label class="field"><span>Комиссия канала, %</span><input type="number" id="calc_fee" step="any" min="0" value="0"></label>
+    <label class="field"><span>Фикс. издержки, ₽</span><input type="number" id="calc_fix" step="any" min="0" value="0"></label>
+   </div>
+  </div>
+  <div class="grid" style="gap:16px">
+   <div class="card">
+    <div class="card-head"><div><h2>Себестоимость партии</h2><p id="calc_batch_sub">—</p></div></div>
+    <div id="calc_rows"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Цена и прибыль</h2><p>Норма — от 250 ₽ чистыми за час печати</p></div></div>
+    <div class="big-num"><b id="calc_price">0 ₽</b><span>рекомендованная цена за штуку</span></div>
+    <div id="calc_profit_rows"></div>
+    <div class="verdict" id="calc_verdict" style="margin-top:12px">Введите вес и время печати.</div>
+   </div>
+  </div>
  </div>
-</div>
-<div id="sp_verdict" class="verdict">—</div>
+</section>
 
-<h2 id="calc-h8">Резервная копия</h2>
-<p>Все ваши цифры хранятся <strong>только в этом браузере</strong>. Очистка кэша, переустановка системы или новый телефон — и данные исчезнут. Раз в неделю скачивайте файл копии.</p>
-<div id="bk_remind" class="verdict">—</div>
-<div class="calcwrap">
- <div class="cbox"><h3>Сохранить</h3>
-  <button class="printbtn g" id="b_save">💾 Скачать копию (.json)</button>
-  <button class="printbtn" id="b_csv">📊 Выгрузить таблицы (.csv для Excel)</button>
-  <div class="rrow" style="margin-top:12px"><span>Последняя копия</span><b id="b_last">—</b></div>
-  <p class="hint">JSON — полная копия: база изделий, продажи, история недель, очередь, склад пластика, все поля калькуляторов и галочки чек-листов. CSV открывается в Excel и ложится рядом с вашей финмоделью.</p>
+<!-- ================================================== БИБЛИОТЕКА -->
+<section class="view" id="view-library">
+ <div class="view-head">
+  <div><span class="eyebrow">База знаний</span><h1>Библиотека</h1><p>Инструкции, скрипты и материалы для печати на A4.</p></div>
+  <div class="head-actions"><div class="lib-progress"><span>Чек-листы</span><div class="bar" id="lib_bar_wrap"><i id="lib_bar"></i></div><b id="lib_progress">0 / 0</b></div><button class="btn ghost" id="lib_back" type="button" hidden>← К списку</button></div>
  </div>
- <div class="cbox"><h3>Восстановить</h3>
-  <button class="printbtn" id="b_load">📂 Загрузить копию из файла</button>
-  <input type="file" id="b_file" accept=".json,application/json" style="display:none">
-  <p class="hint">Так же переносятся данные между компьютером и телефоном: скачали файл на компьютере — загрузили в браузере телефона.</p>
-  <h3 style="margin-top:18px">Опасная зона</h3>
-  <button class="printbtn" id="b_wipe" style="background:#96261a">Стереть все данные</button>
-  <p class="hint">Сначала скачайте копию. После стирания восстановить можно будет только из файла.</p>
+ <div class="lib-grid" id="lib_grid">
+  <a class="lib-card" href="#library/start" data-article="start"><span class="ic">🚀</span><b>Запуск</b><small>Первая неделя и чек-листы</small></a>
+  <a class="lib-card" href="#library/plan" data-article="plan"><span class="ic">📊</span><b>Бизнес-план</b><small>Экономика и план роста</small></a>
+  <a class="lib-card" href="#library/models" data-article="models"><span class="ic">🧩</span><b>Модели</b><small>Лицензии и ассортимент</small></a>
+  <a class="lib-card" href="#library/tech" data-article="tech"><span class="ic">🛠</span><b>Техника</b><small>Настройки, брак, упаковка</small></a>
+  <a class="lib-card" href="#library/b2b" data-article="b2b"><span class="ic">🤝</span><b>B2B</b><small>Локальный бизнес и скрипты</small></a>
+  <a class="lib-card" href="#library/avito" data-article="avito"><span class="ic">📱</span><b>Авито</b><small>Объявления и ответы</small></a>
+  <a class="lib-card" href="#library/tg" data-article="tg"><span class="ic">✈</span><b>Telegram</b><small>Канал и приём заказов</small></a>
+  <a class="lib-card" href="#library/posts" data-article="posts"><span class="ic">✍</span><b>Посты</b><small>30 готовых шаблонов</small></a>
+  <a class="lib-card" href="#library/content" data-article="content"><span class="ic">🎬</span><b>Контент</b><small>Съёмка и календарь</small></a>
+  <a class="lib-card" href="#library/ip" data-article="ip"><span class="ic">🏛</span><b>ИП и налоги</b><small>Разделение схем</small></a>
+  <a class="lib-card" href="#library/legal" data-article="legal"><span class="ic">⚖</span><b>Юридика</b><small>Маркировка, права, учёт</small></a>
+  <a class="lib-card" href="#library/mats" data-article="mats"><span class="ic">🖨</span><b>Материалы A4</b><small>Ценники и памятки</small></a>
  </div>
-</div>
-</section><section id="start" class="library-article"><div class="sechead"><span class="secic">🚀</span><div><h1>Первая неделя</h1><p>Тест трёх ниш и запуск учёта</p></div></div><blockquote>
+ <div id="library-body">
+<article data-article="start" class="library-article"><div class="sechead"><span class="secic">🚀</span><div><h1>Первая неделя</h1><p>Тест трёх ниш и запуск учёта</p></div></div><blockquote>
 <p>Цель недели — не заполнить склад, а получить первые измеримые сигналы спроса.</p>
 </blockquote>
 <h2>День 1 — система и безопасность</h2>
@@ -373,7 +425,7 @@
 <li>брак.</li>
 </ul>
 <h2>Критерий успешной недели</h2>
-<p>Неделя успешна, если система учёта работает, напечатано не более 9–15 осмысленных образцов, получены реальные обращения и понятно, что тестировать дальше. Большой непроданный склад успехом не считается.</p></section><section id="plan" class="library-article"><div class="sechead"><span class="secic">📊</span><div><h1>Бизнес-план</h1><p>Стратегия трёх ниш на 2026 год</p></div></div><blockquote>
+<p>Неделя успешна, если система учёта работает, напечатано не более 9–15 осмысленных образцов, получены реальные обращения и понятно, что тестировать дальше. Большой непроданный склад успехом не считается.</p></article><article data-article="plan" class="library-article"><div class="sechead"><span class="secic">📊</span><div><h1>Бизнес-план</h1><p>Стратегия трёх ниш на 2026 год</p></div></div><blockquote>
 <p>Обновлено 16 августа 2026 года. Цены, комиссии и правовой статус товаров проверяйте перед запуском: они меняются быстрее технологии печати.</p>
 </blockquote>
 <h2>1. Стратегия</h2>
@@ -545,7 +597,7 @@
 <li>результаты трёх ниш;</li>
 <li>свежесть резервной копии.</li>
 </ul>
-<p>Главное правило: <strong>решения принимаются по заказам и фактической телеметрии принтера, а не по лайкам и ощущениям</strong>.</p></section><section id="models" class="library-article"><div class="sechead"><span class="secic">🧩</span><div><h1>Ассортимент и модели</h1><p>Лицензии, риски и стартовая матрица</p></div></div><h2>Проверка лицензии</h2>
+<p>Главное правило: <strong>решения принимаются по заказам и фактической телеметрии принтера, а не по лайкам и ощущениям</strong>.</p></article><article data-article="models" class="library-article"><div class="sechead"><span class="secic">🧩</span><div><h1>Ассортимент и модели</h1><p>Лицензии, риски и стартовая матрица</p></div></div><h2>Проверка лицензии</h2>
 <p>Перед коммерческой печатью откройте страницу исходной модели и сохраните ссылку и снимок условий лицензии.</p>
 <table>
 <thead>
@@ -750,7 +802,7 @@
 <li>лицензия допускает коммерческое использование;</li>
 <li>есть хотя бы один платный заказ или подтверждённый тест полки;</li>
 <li>прибыль на час соответствует текущей загрузке принтера.</li>
-</ul></section><section id="tech" class="library-article"><div class="sechead"><span class="secic">🛠</span><div><h1>Техника печати</h1><p>Коммерческая печать на P1S</p></div></div><blockquote>
+</ul></article><article data-article="tech" class="library-article"><div class="sechead"><span class="secic">🛠</span><div><h1>Техника печати</h1><p>Коммерческая печать на P1S</p></div></div><blockquote>
 <p>Параметры ниже — стартовые ориентиры. Профиль материала, геометрия и требования клиента важнее универсальной таблицы.</p>
 </blockquote>
 <h2>1. Возможности и ограничения P1S</h2>
@@ -940,7 +992,7 @@
 <li>удержанием человека или животного;</li>
 <li>сертифицированной детской продукцией;</li>
 <li>постоянным контактом с пищей.</li>
-</ul></section><section id="b2b" class="library-article"><div class="sechead"><span class="secic">🤝</span><div><h1>B2B</h1><p>Локальный бизнес и повторные заказы</p></div></div><h2>1. Что продавать</h2>
+</ul></article><article data-article="b2b" class="library-article"><div class="sechead"><span class="secic">🤝</span><div><h1>B2B</h1><p>Локальный бизнес и повторные заказы</p></div></div><h2>1. Что продавать</h2>
 <p>Не продавать «3D-печать вообще». Предлагать конкретное решение:</p>
 <table>
 <thead>
@@ -1057,7 +1109,7 @@
 <li>повторные клиенты;</li>
 <li>дебиторскую задолженность.</li>
 </ul>
-<p>Не использовать обещание «один клиент обязательно принесёт X рублей». Решение о нише принимается по собственной воронке.</p></section><section id="avito" class="library-article"><div class="sechead"><span class="secic">📱</span><div><h1>Авито</h1><p>Актуальная структура предложений</p></div></div><blockquote>
+<p>Не использовать обещание «один клиент обязательно принесёт X рублей». Решение о нише принимается по собственной воронке.</p></article><article data-article="avito" class="library-article"><div class="sechead"><span class="secic">📱</span><div><h1>Авито</h1><p>Актуальная структура предложений</p></div></div><blockquote>
 <p>Интерфейс, категории, комиссии, доставка и правила площадки меняются. Перед публикацией проверяйте актуальные условия в своём кабинете; не копируйте старые проценты и названия категорий.</p>
 </blockquote>
 <h2>1. Структура объявлений</h2>
@@ -1137,7 +1189,7 @@
 <li>[ ] доставка реально доступна из вашего адреса;</li>
 <li>[ ] заказ создаётся в PrintFlow;</li>
 <li>[ ] персональные данные клиента не попадают в портфолио.</li>
-</ul></section><section id="tg" class="library-article"><div class="sechead"><span class="secic">✈</span><div><h1>Telegram</h1><p>Каталог и приём заказов</p></div></div><h2>1. Роль канала</h2>
+</ul></article><article data-article="tg" class="library-article"><div class="sechead"><span class="secic">✈</span><div><h1>Telegram</h1><p>Каталог и приём заказов</p></div></div><h2>1. Роль канала</h2>
 <p>Telegram не заменяет учёт заказов. Канал показывает примеры и приводит обращения, а заказ, срок, предоплата и файл фиксируются в PrintFlow.</p>
 <h2>2. Структура</h2>
 <p>Закреплённое сообщение:</p>
@@ -1205,7 +1257,7 @@
 <li>получать согласие на фото логотипа/заказа;</li>
 <li>не обещать медицинские, пищевые или нагрузочные свойства без оснований;</li>
 <li>не принимать оплату за запрещённую модель или товар.</li>
-</ul></section><section id="posts" class="library-article"><div class="sechead"><span class="secic">✍</span><div><h1>Готовые посты</h1><p>30 шаблонов под три ниши</p></div></div><p>Замените квадратные скобки своими данными. Не публикуйте телефон клиента, адрес или логотип без разрешения.</p>
+</ul></article><article data-article="posts" class="library-article"><div class="sechead"><span class="secic">✍</span><div><h1>Готовые посты</h1><p>30 шаблонов под три ниши</p></div></div><p>Замените квадратные скобки своими данными. Не публикуйте телефон клиента, адрес или логотип без разрешения.</p>
 <h2>Знакомство</h2>
 <h3>1</h3>
 <blockquote>
@@ -1329,7 +1381,7 @@
 <h3>30</h3>
 <blockquote>
 <p>Что напечатать следующим образцом: [вариант 1], [вариант 2] или [вариант 3]? Победителя сначала проверим на полезность и безопасность.</p>
-</blockquote></section><section id="content" class="library-article"><div class="sechead"><span class="secic">🎬</span><div><h1>Контент-план</h1><p>30 дней измеримого контента</p></div></div><h2>Принципы</h2>
+</blockquote></article><article data-article="content" class="library-article"><div class="sechead"><span class="secic">🎬</span><div><h1>Контент-план</h1><p>30 дней измеримого контента</p></div></div><h2>Принципы</h2>
 <ol>
 <li>Показывать пользу и реальный контекст.</li>
 <li>Один пост — одна проблема и одно действие.</li>
@@ -1398,7 +1450,7 @@
 <li>сравнение версии 1 и версии 2.</li>
 </ul>
 <h2>Метрики</h2>
-<p>Для каждого поста записывать нишу, показы, обращения и заказы. Лайк без обращения не подтверждает спрос.</p></section><section id="ip" class="library-article"><div class="sechead"><span class="secic">🏛</span><div><h1>ИП и налоги</h1><p>Выбор продавца, режима и документов</p></div></div><blockquote>
+<p>Для каждого поста записывать нишу, показы, обращения и заказы. Лайк без обращения не подтверждает спрос.</p></article><article data-article="ip" class="library-article"><div class="sechead"><span class="secic">🏛</span><div><h1>ИП и налоги</h1><p>Выбор продавца, режима и документов</p></div></div><blockquote>
 <p>Обновлено в августе 2026 года. Финальную схему подтвердите у бухгалтера с учётом того, на кого оформлен магазин и кто владеет 3D-производством.</p>
 </blockquote>
 <h2>1. Сначала определить участников</h2>
@@ -1473,7 +1525,7 @@
 <li>Какие требования по персональным данным применимы к клиентской базе?</li>
 </ol>
 <h2>8. Практическое правило проекта</h2>
-<p>До письменного ответа бухгалтера основными товарами остаются немаркируемые функциональные изделия для взрослых, питомцев и бизнеса. Детские игрушки не включаются в базовую матрицу только потому, что принтер умеет их печатать.</p></section><section id="legal" class="library-article"><div class="sechead"><span class="secic">⚖</span><div><h1>Юридика и учёт</h1><p>Актуализация на август 2026</p></div></div><blockquote>
+<p>До письменного ответа бухгалтера основными товарами остаются немаркируемые функциональные изделия для взрослых, питомцев и бизнеса. Детские игрушки не включаются в базовую матрицу только потому, что принтер умеет их печатать.</p></article><article data-article="legal" class="library-article"><div class="sechead"><span class="secic">⚖</span><div><h1>Юридика и учёт</h1><p>Актуализация на август 2026</p></div></div><blockquote>
 <p>Это рабочий чек-лист, а не юридическая или налоговая консультация. Классификацию конкретного товара, режим продавца, документы соответствия и маркировку подтвердите у бухгалтера, сертификационного специалиста и оператора «Честного знака».</p>
 </blockquote>
 <h2>1. Детские игрушки: не маскировать названием</h2>
@@ -1578,10 +1630,241 @@
 <li>[ ] Заказ и оплата отражены в учёте.</li>
 <li>[ ] Проведён контроль качества.</li>
 <li>[ ] Сделана свежая резервная копия.</li>
-</ul></section><section id="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — материалы для магазина</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники</b><span>12 позиций трёх ниш + пустые бланки; цены вписываются из PrintFlow</span><a class="printbtn" href="materials/ценники.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Плакат над полкой</b><span>Три ниши и понятная инструкция заказа</span><a class="printbtn" href="materials/плакат-над-полкой.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Таблички и визитки</b><span>Образцы, свой размер, QR и обновлённые визитки</span><a class="printbtn" href="materials/таблички-и-визитки.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Три ниши, безопасные ответы и бланк заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Печатайте на обычном A4 в масштабе 100%. Ценники и визитки разрежьте по пунктиру.</p></section>
+</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий; два размера и пустые бланки</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Генераторы берут цены из «Базы изделий».</p></article>
+ </div>
+</section>
+
+<!-- ================================================== НАСТРОЙКИ -->
+<section class="view" id="view-settings">
+ <div class="view-head">
+  <div><span class="eyebrow">Система</span><h1>Настройки</h1><p>Тарифы, автоматизация, уведомления и резервная копия. Секреты хранятся только на этом компьютере.</p></div>
+  <div class="head-actions"><button class="btn primary" id="settings_save" type="button">Сохранить</button></div>
+ </div>
+ <div class="set-grid">
+  <div class="card">
+   <div class="card-head"><div><h2>Тарифы производства</h2><p>Основа автоматической себестоимости</p></div></div>
+   <div id="set_rates"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Автоматизация</h2><p>Что система делает сама</p></div></div>
+   <div id="set_auto"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Токен хранится локально и не попадает в бэкап</p></div></div>
+   <div id="set_tg"></div>
+   <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Оформление</h2><p>Тема и акцент интерфейса</p></div></div>
+   <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
+    <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
+   <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">＋</button></div>
+   <div id="set_printers"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Данные</h2><p>Резервная копия и перенос из старой версии</p></div></div>
+   <div class="notice"><span>ℹ</span><span>Копия содержит заказы, клиентов, склад, журнал печати и финансы. Секреты (Access Code, токен Telegram) в файл не попадают.</span></div>
+   <div class="grid g2" style="gap:9px">
+    <button class="btn" id="backup_download" type="button">↓ Скачать копию</button>
+    <button class="btn" id="backup_restore" type="button">↑ Восстановить</button>
+    <button class="btn" id="backup_import_ls" type="button">Перенести из браузера</button>
+    <button class="btn danger" id="backup_wipe" type="button">Стереть данные</button>
+   </div>
+   <input type="file" id="backup_file" accept="application/json,.json" hidden>
+   <p class="muted" style="font-size:12px;margin-top:10px">Каталог данных: <code id="set_data_dir">%APPDATA%\PrintFlow</code></p>
+  </div>
+ </div>
+</section>
+
+ </main>
 </div>
-<a id="top" href="#">↑</a>
-<script src="assets/app.js"></script>
-<script src="assets/ops.js"></script>
+</div>
+
+<!-- ================================================== ДИАЛОГИ -->
+<dialog class="modal" id="order_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Карточка заказа</span><h2 id="order_modal_title">Новый заказ</h2><p id="order_modal_sub">Клиент создаётся автоматически по имени и телефону.</p></div><button class="icon-btn" type="button" data-close="order_modal">×</button></div>
+ <div class="modal-body">
+  <div class="form-section"><h3>Заказ</h3><div class="form-grid">
+   <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" required></label>
+   <label class="field"><span>Статус</span><select id="of_status"></select></label>
+   <label class="field"><span>Приоритет</span><select id="of_priority"><option value="low">Низкий</option><option value="normal" selected>Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label>
+   <label class="field"><span>Ниша</span><select id="of_niche_id"></select></label>
+   <label class="field"><span>Канал</span><select id="of_channel"><option>Полка магазина</option><option>Telegram</option><option>Авито</option><option>B2B</option><option>Рекомендация</option><option>Другое</option></select></label>
+   <label class="field"><span>Количество</span><input id="of_qty" type="number" min="1" step="1" value="1"></label>
+   <label class="field"><span>Срок</span><input id="of_due" type="date"></label>
+  </div></div>
+  <div class="form-section"><h3>Клиент</h3><div class="form-grid">
+   <label class="field"><span>Имя или компания</span><input id="of_customer_name" list="customers_datalist"></label>
+   <label class="field"><span>Телефон</span><input id="of_phone" placeholder="+7…"></label>
+   <label class="field span-2"><span>Мессенджер / контакт</span><input id="of_messenger" placeholder="@telegram, WhatsApp"></label>
+  </div><datalist id="customers_datalist"></datalist></div>
+  <div class="form-section"><h3>Производство</h3><div class="form-grid">
+   <label class="field"><span>Материал</span><input id="of_material" placeholder="PLA, PETG, TPU"></label>
+   <label class="field"><span>Цвет</span><input id="of_color" placeholder="Чёрный + золотой"></label>
+   <label class="field"><span>Пластик, г</span><input id="of_grams" type="number" min="0" step="any"></label>
+   <label class="field"><span>Печать, ч</span><input id="of_hours" type="number" min="0" step="any"></label>
+   <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
+   <label class="field"><span>Файл на принтере</span><input id="of_file" placeholder="adresnik-v2.3mf"></label>
+  </div></div>
+  <div class="form-section"><h3>Экономика</h3><div class="form-grid">
+   <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
+   <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
+   <label class="field"><span>Предоплата, ₽</span><input id="of_prepaid" type="number" min="0" step="any"></label>
+   <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
+   <div class="span-2" id="of_econ"></div>
+  </div></div>
+  <div class="form-section"><h3>Качество и заметки</h3><div class="form-grid">
+   <label class="field"><span>Проверка качества</span><select id="of_quality"><option value="pending">Не проверено</option><option value="passed">Проверено — всё хорошо</option><option value="rework">Нужна переделка</option></select></label>
+   <label class="field"><span>Результат / упаковка</span><input id="of_quality_note"></label>
+   <label class="field span-2"><span>Заметки</span><textarea id="of_notes" rows="3"></textarea></label>
+  </div></div>
+  <div class="form-section" id="of_jobs_wrap" hidden><h3>Печати по заказу</h3><div id="of_jobs"></div></div>
+ </div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">В очередь печати</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="niche_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Гипотеза</span><h2 id="niche_modal_title">Ниша</h2></div><button class="icon-btn" type="button" data-close="niche_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field"><span>Название</span><input id="nf_name"></label>
+  <label class="field"><span>Значок</span><input id="nf_icon" maxlength="4"></label>
+  <label class="field"><span>Цвет</span><input id="nf_color" type="color" value="#4f46e5"></label>
+  <label class="field"><span>Активна</span><select id="nf_active"><option value="1">Да</option><option value="0">Нет</option></select></label>
+  <label class="field"><span>Показы</span><input id="nf_views" type="number" min="0"></label>
+  <label class="field"><span>Обращения</span><input id="nf_leads" type="number" min="0"></label>
+  <label class="field span-2"><span>Гипотеза</span><textarea id="nf_hypothesis" rows="2"></textarea></label>
+  <label class="field span-2"><span>Цель теста</span><textarea id="nf_target" rows="2"></textarea></label>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="niche_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="niche_modal">Отмена</button><button class="btn primary" type="button" id="niche_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="status_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Настройка</span><h2>Статусы заказов</h2><p>Порядок строк — порядок колонок канбана.</p></div><button class="icon-btn" type="button" data-close="status_modal">×</button></div>
+ <div class="modal-body"><div id="status_editor"></div><button class="btn wide" type="button" id="status_add" style="margin-top:10px">＋ Добавить статус</button></div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="status_modal">Отмена</button><button class="btn primary" type="button" id="status_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal" id="printer_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Локальное подключение</span><h2 id="printer_modal_title">Принтер Bambu Lab</h2><p>Access Code сохраняется в каталоге данных и не попадает в браузер, Git или резервную копию.</p></div><button class="icon-btn" type="button" data-close="printer_modal">×</button></div>
+ <div class="modal-body">
+  <div class="setup-steps">
+   <div><b>1</b><span><strong>Принтер</strong>Settings → WLAN. Для защищённой прошивки включите LAN Only и Developer Mode.</span></div>
+   <div><b>2</b><span><strong>Сеть</strong>Компьютер и принтер — в одной локальной сети. Порты на роутере не открывайте.</span></div>
+   <div><b>3</b><span><strong>Реквизиты</strong>IP, серийный номер и Access Code вводятся только здесь.</span></div>
+  </div>
+  <div class="card-head"><h3>Поиск в сети</h3><button class="btn sm" type="button" id="pf_discover">Найти принтеры</button></div>
+  <div class="discover-list" id="pf_discovered"></div>
+  <div class="form-grid">
+   <label class="field"><span>Название</span><input id="pf_name" placeholder="Основной P1S"></label>
+   <label class="field"><span>Модель</span><select id="pf_model"><option>P1S</option><option>P1P</option><option>X1C</option><option>X1E</option><option>A1</option><option>A1 mini</option></select></label>
+   <label class="field"><span>IP-адрес</span><input id="pf_host" placeholder="192.168.1.100"></label>
+   <label class="field"><span>Серийный номер</span><input id="pf_serial" placeholder="01P…"></label>
+   <label class="field"><span>LAN Access Code</span><input id="pf_access_code" type="password" autocomplete="new-password" placeholder="8 символов с экрана принтера"></label>
+   <label class="field"><span>AMS подключён</span><select id="pf_has_ams"><option value="1">Да</option><option value="0">Нет</option></select></label>
+   <label class="field"><span>Активен</span><select id="pf_enabled"><option value="1">Да</option><option value="0">Отключён</option></select></label>
+   <label class="field"><span>Заметка</span><input id="pf_notes" placeholder="Где стоит, чем занят"></label>
+  </div>
+  <div id="pf_result" style="margin-top:12px"></div>
+ </div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="printer_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" id="pf_ftps_test">Проверить FTPS</button><button class="btn" type="button" data-close="printer_modal">Отмена</button><button class="btn primary" type="button" id="printer_save">Сохранить и подключить</button></div>
+</form></dialog>
+
+<dialog class="modal" id="print_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Запуск печати</span><h2 id="print_modal_title">Печать файла</h2><p>Проверьте плиту, AMS и калибровку перед стартом.</p></div><button class="icon-btn" type="button" data-close="print_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice warn"><span>⚠</span><span>Принтер начнёт нагрев и движение немедленно. Убедитесь, что стол чист, а рядом никого нет.</span></div>
+  <div class="form-grid">
+   <label class="field span-2"><span>Файл на принтере</span><input id="pj_file" readonly></label>
+   <label class="field"><span>Принтер</span><select id="pj_printer"></select></label>
+   <label class="field"><span>Плита (plate)</span><input id="pj_plate" type="number" min="1" value="1"></label>
+   <label class="field"><span>Связать с заказом</span><select id="pj_order"><option value="">Без заказа</option></select></label>
+   <label class="field"><span>Катушка со склада</span><select id="pj_spool"><option value="">Определить автоматически</option></select></label>
+   <label class="field span-2"><span>Слоты AMS (через запятую, напр. 0,1)</span><input id="pj_ams_mapping" placeholder="0"></label>
+   <label class="check"><input type="checkbox" id="pj_use_ams" checked> Использовать AMS</label>
+   <label class="check"><input type="checkbox" id="pj_bed_level" checked> Калибровка стола</label>
+   <label class="check"><input type="checkbox" id="pj_flow_cali"> Калибровка потока</label>
+   <label class="check"><input type="checkbox" id="pj_timelapse"> Таймлапс</label>
+  </div>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" id="pj_queue">В очередь</button><button class="btn" type="button" data-close="print_modal">Отмена</button><button class="btn primary" type="button" id="pj_start">Печатать сейчас</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="spool_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Склад</span><h2 id="spool_modal_title">Катушка</h2></div><button class="icon-btn" type="button" data-close="spool_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field"><span>Материал</span><input id="sf_material" placeholder="PLA" list="materials_datalist"></label>
+  <label class="field"><span>Бренд</span><input id="sf_brand" placeholder="Bambu Lab"></label>
+  <label class="field"><span>Цвет</span><input id="sf_color_name" placeholder="Чёрный"></label>
+  <label class="field"><span>Оттенок</span><input id="sf_color_hex" type="color" value="#333333"></label>
+  <label class="field"><span>Вес катушки, г</span><input id="sf_total_grams" type="number" min="1" step="any" value="1000"></label>
+  <label class="field"><span>Осталось, г</span><input id="sf_remaining_grams" type="number" min="0" step="any" value="1000"></label>
+  <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>
+  <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
+  <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
+ </div><datalist id="materials_datalist"><option>PLA</option><option>PLA Silk</option><option>PETG</option><option>ABS</option><option>ASA</option><option>TPU</option><option>PA-CF</option></datalist></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="spool_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="spool_modal">Отмена</button><button class="btn primary" type="button" id="spool_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="catalog_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">База изделий</span><h2 id="catalog_modal_title">Позиция</h2></div><button class="icon-btn" type="button" data-close="catalog_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="cf_name"></label>
+  <label class="field"><span>Ниша</span><select id="cf_niche_id"></select></label>
+  <label class="field"><span>Материал</span><input id="cf_material" value="PLA"></label>
+  <label class="field"><span>Вес, г</span><input id="cf_grams" type="number" min="0" step="any"></label>
+  <label class="field"><span>Часы</span><input id="cf_hours" type="number" min="0" step="any"></label>
+  <label class="field"><span>Влезает на стол, шт</span><input id="cf_fit_per_plate" type="number" min="1" step="1" value="1"></label>
+  <label class="field"><span>Цена, ₽</span><input id="cf_price" type="number" min="0" step="any"></label>
+  <label class="field span-2"><span>Файл модели</span><input id="cf_file" placeholder="pets/adresnik-v2.3mf"></label>
+  <label class="field span-2"><span>Заметка</span><input id="cf_notes"></label>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="catalog_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="catalog_modal">Отмена</button><button class="btn primary" type="button" id="catalog_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="tx_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Касса</span><h2>Новая проводка</h2></div><button class="icon-btn" type="button" data-close="tx_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field"><span>Тип</span><select id="tf_kind"><option value="income">Доход</option><option value="expense">Расход</option></select></label>
+  <label class="field"><span>Категория</span><select id="tf_category"><option value="order">Заказ</option><option value="filament">Пластик</option><option value="energy">Электричество</option><option value="equipment">Оборудование</option><option value="marketing">Реклама</option><option value="other">Прочее</option></select></label>
+  <label class="field"><span>Сумма, ₽</span><input id="tf_amount" type="number" min="0" step="any"></label>
+  <label class="field"><span>Название</span><input id="tf_title"></label>
+  <label class="field span-2"><span>Комментарий</span><input id="tf_note"></label>
+ </div></div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="tx_modal">Отмена</button><button class="btn primary" type="button" id="tx_save">Добавить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="job_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Очередь</span><h2>Задание печати</h2></div><button class="icon-btn" type="button" data-close="job_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="jf_name"></label>
+  <label class="field span-2"><span>Файл на принтере</span><input id="jf_file" placeholder="model.3mf"></label>
+  <label class="field"><span>Принтер</span><select id="jf_printer_id"><option value="">Любой свободный</option></select></label>
+  <label class="field"><span>Заказ</span><select id="jf_order_id"><option value="">Без заказа</option></select></label>
+  <label class="field"><span>Плита</span><input id="jf_plate" type="number" min="1" value="1"></label>
+  <label class="field"><span>Приоритет</span><input id="jf_priority" type="number" value="0"></label>
+  <label class="check"><input type="checkbox" id="jf_use_ams" checked> AMS</label>
+  <label class="check"><input type="checkbox" id="jf_bed_level" checked> Калибровка стола</label>
+ </div></div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="job_modal">Отмена</button><button class="btn primary" type="button" id="job_save">Добавить в очередь</button></div>
+</form></dialog>
+
+<dialog id="cam_modal"><button class="icon-btn" type="button" data-close="cam_modal">×</button><img id="cam_full" alt="Камера принтера"></dialog>
+
+<dialog id="palette">
+ <div class="palette-input"><span>⌕</span><input id="palette_input" placeholder="Команда, раздел, заказ или клиент…" autocomplete="off"></div>
+ <div class="palette-list" id="palette_list"></div>
+ <div class="palette-foot"><span>↑↓ выбор</span><span>↵ открыть</span><span>Esc закрыть</span></div>
+</dialog>
+
+<div id="toasts"></div>
+
+<script src="assets/qr.js"></script>
+<script src="assets/core.js"></script>
 <script src="assets/printer.js"></script>
+<script src="assets/ops.js"></script>
+<script src="assets/money.js"></script>
+<script src="assets/app.js"></script>
 </body></html>

@@ -1,13 +1,13 @@
 @echo off
 chcp 65001 >nul
 setlocal
-title PrintFlow - Bambu Lab Connector
+title PrintFlow 2.0 - Bambu Lab Connector
 cd /d "%~dp0.."
 
 echo.
 echo  ==================================================
-echo   PrintFlow: управление 3D-производством
-echo   Bambu Lab P1S + AMS - локальное подключение
+echo   PrintFlow 2.0: управление 3D-производством
+echo   Bambu Lab + AMS - локальное подключение
 echo  ==================================================
 echo.
 
@@ -37,9 +37,11 @@ echo  Проверяем компонент связи с принтером...
 if errorlevel 1 goto :error
 
 echo.
-echo  Сайт: http://localhost:8080
-echo  Данные: %APPDATA%\PrintFlow
-echo  Не закрывайте это окно, пока используете интеграцию.
+echo  Сайт:   http://localhost:8080
+echo  Данные: %APPDATA%\PrintFlow  (база printflow.sqlite3)
+echo.
+echo  Не закрывайте это окно, пока работаете с PrintFlow:
+echo  без него интерфейс не сохраняет данные и не видит принтер.
 echo  Для остановки нажмите Ctrl+C.
 echo.
 "%PF_VENV%\Scripts\python.exe" "connector\printflow_connector.py"

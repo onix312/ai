@@ -1,0 +1,83 @@
+/* NOZZA — общие стили печатных материалов.
+   Все размеры в мм: макеты рассчитаны на печать 1:1 без масштабирования. */
+
+:root {
+  --ink: #131a2b;
+  --ink-soft: #5d6b85;
+  --line: #d6dcea;
+  --brand: #4f46e5;
+  --brand-2: #7c3aed;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: "Inter", "Segoe UI", Arial, sans-serif;
+  margin: 0;
+  background: #eef1f7;
+  color: var(--ink);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ------------------------------------------------------ панель (не печатается) */
+.panel {
+  position: sticky; top: 0; z-index: 20;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 18px;
+  box-shadow: 0 4px 18px -12px rgba(19, 26, 43, .5);
+}
+.panel-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.panel h1 {
+  font-size: 15px; margin: 0 14px 0 0; letter-spacing: -.01em;
+  display: flex; align-items: center; gap: 9px;
+}
+.panel h1 img { width: 26px; height: 26px; }
+.panel label { font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+.panel select, .panel input[type="text"], .panel input[type="number"] {
+  font: inherit; font-size: 12.5px; padding: 5px 8px;
+  border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink);
+}
+.panel input[type="text"] { min-width: 190px; }
+.btn {
+  font: inherit; font-size: 12.5px; font-weight: 650;
+  padding: 6px 13px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+}
+.btn:hover { border-color: #b9c2d8; }
+.btn.primary {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  border-color: transparent; color: #fff;
+}
+.note {
+  font-size: 12px; color: var(--ink-soft); line-height: 1.45;
+  background: #fff8e5; border: 1px solid #f0d99a; border-radius: 8px;
+  padding: 9px 12px; margin: 12px 18px 0;
+}
+.note b { color: #8a6516; }
+.status { font-size: 12px; color: var(--ink-soft); }
+.status.err { color: #c0392b; }
+.status.ok { color: #1e8449; }
+
+/* --------------------------------------------------------------- листы A4 */
+.sheet {
+  width: 210mm; min-height: 297mm;
+  margin: 16px auto; padding: 8mm;
+  background: #fff;
+  box-shadow: 0 10px 40px -20px rgba(19, 26, 43, .6);
+}
+.sheet.landscape { width: 297mm; min-height: 210mm; }
+.sheet.a3 { width: 297mm; min-height: 420mm; }
+
+@page { size: A4; margin: 8mm; }
+
+@media print {
+  body { background: #fff; }
+  .panel, .note, .noprint { display: none !important; }
+  .sheet {
+    width: auto; min-height: 0; margin: 0; padding: 0;
+    box-shadow: none; page-break-after: always;
+  }
+  .sheet:last-child { page-break-after: auto; }
+}

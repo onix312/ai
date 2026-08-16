@@ -1,0 +1,378 @@
+"""SQLite-хранилище PrintFlow — источник правды для всей системы.
+
+Все данные лежат в одном файле в каталоге пользователя. Схема версионируется
+через user_version, чтобы обновления не теряли данные.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from typing import Any, Iterable
+
+from .config import DB_FILE, DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso
+
+SCHEMA_VERSION = 1
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS printers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    model TEXT DEFAULT 'P1S',
+    host TEXT DEFAULT '',
+    serial TEXT DEFAULT '',
+    access_code TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    has_ams INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS statuses (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT DEFAULT '#64748b',
+    position INTEGER DEFAULT 0,
+    is_final INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS niches (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT DEFAULT '◆',
+    color TEXT DEFAULT '#2563eb',
+    hypothesis TEXT DEFAULT '',
+    target TEXT DEFAULT '',
+    views INTEGER DEFAULT 0,
+    leads INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    messenger TEXT DEFAULT '',
+    company TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    number TEXT DEFAULT '',
+    product TEXT DEFAULT '',
+    customer_id TEXT,
+    customer_name TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    messenger TEXT DEFAULT '',
+    channel TEXT DEFAULT '',
+    niche_id TEXT,
+    status TEXT DEFAULT 'new',
+    priority TEXT DEFAULT 'normal',
+    qty REAL DEFAULT 1,
+    material TEXT DEFAULT '',
+    color TEXT DEFAULT '',
+    grams REAL DEFAULT 0,
+    hours REAL DEFAULT 0,
+    price REAL DEFAULT 0,
+    cost REAL DEFAULT 0,
+    prepaid REAL DEFAULT 0,
+    manual_minutes REAL DEFAULT 0,
+    file TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    quality TEXT DEFAULT 'pending',
+    quality_note TEXT DEFAULT '',
+    due TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT,
+    closed_at TEXT,
+    actual_grams REAL DEFAULT 0,
+    actual_hours REAL DEFAULT 0,
+    actual_cost REAL DEFAULT 0,
+    auto_cost INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(number);
+
+CREATE TABLE IF NOT EXISTS spools (
+    id TEXT PRIMARY KEY,
+    material TEXT DEFAULT 'PLA',
+    brand TEXT DEFAULT '',
+    color_name TEXT DEFAULT '',
+    color_hex TEXT DEFAULT '#4b5563',
+    total_grams REAL DEFAULT 1000,
+    remaining_grams REAL DEFAULT 1000,
+    price REAL DEFAULT 1600,
+    printer_id TEXT,
+    ams_slot TEXT DEFAULT '',
+    tray_uuid TEXT DEFAULT '',
+    archived INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS print_jobs (
+    id TEXT PRIMARY KEY,
+    printer_id TEXT,
+    order_id TEXT,
+    name TEXT DEFAULT '',
+    file TEXT DEFAULT '',
+    state TEXT DEFAULT 'queued',
+    source TEXT DEFAULT 'printer',
+    ams_mapping TEXT DEFAULT '',
+    plate INTEGER DEFAULT 1,
+    use_ams INTEGER DEFAULT 1,
+    bed_level INTEGER DEFAULT 1,
+    flow_cali INTEGER DEFAULT 0,
+    timelapse INTEGER DEFAULT 0,
+    priority INTEGER DEFAULT 0,
+    queued_at TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    duration_min REAL DEFAULT 0,
+    grams REAL DEFAULT 0,
+    layers INTEGER DEFAULT 0,
+    progress REAL DEFAULT 0,
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    cost REAL DEFAULT 0,
+    energy_kwh REAL DEFAULT 0,
+    spool_id TEXT,
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_state ON print_jobs(state);
+CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    printer_id TEXT,
+    kind TEXT,
+    title TEXT,
+    detail TEXT,
+    data TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_at ON events(at DESC);
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    kind TEXT,              -- income | expense
+    category TEXT,          -- order | filament | energy | equipment | other
+    amount REAL DEFAULT 0,
+    title TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    order_id TEXT,
+    job_id TEXT,
+    auto INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tx_at ON transactions(at DESC);
+
+CREATE TABLE IF NOT EXISTS filament_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    spool_id TEXT,
+    job_id TEXT,
+    order_id TEXT,
+    grams REAL DEFAULT 0,
+    cost REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    auto INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS catalog (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    niche_id TEXT,
+    grams REAL DEFAULT 0,
+    hours REAL DEFAULT 0,
+    fit_per_plate INTEGER DEFAULT 1,
+    price REAL DEFAULT 0,
+    material TEXT DEFAULT 'PLA',
+    file TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    archived INTEGER DEFAULT 0,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS printer_stats (
+    day TEXT,
+    printer_id TEXT,
+    print_minutes REAL DEFAULT 0,
+    grams REAL DEFAULT 0,
+    jobs_done INTEGER DEFAULT 0,
+    jobs_failed INTEGER DEFAULT 0,
+    energy_kwh REAL DEFAULT 0,
+    PRIMARY KEY (day, printer_id)
+);
+"""
+
+
+class Database:
+    """Потокобезопасная обёртка над SQLite."""
+
+    def __init__(self, path=DB_FILE):
+        ensure_dirs()
+        self.path = path
+        self.lock = threading.RLock()
+        self.conn = sqlite3.connect(str(path), check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        # SQLite lower() умеет только ASCII — регистронезависимый поиск по
+        # кириллице делаем средствами Python.
+        self.conn.create_function("pylower", 1, lambda v: v.lower() if isinstance(v, str) else v)
+        self.conn.executescript(SCHEMA)
+        self._migrate()
+        self._seed()
+
+    # ------------------------------------------------------------------ ядро
+    def _migrate(self) -> None:
+        with self.lock:
+            version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                self.conn.commit()
+
+    def _seed(self) -> None:
+        with self.lock:
+            cur = self.conn
+            if not cur.execute("SELECT 1 FROM statuses LIMIT 1").fetchone():
+                cur.executemany(
+                    "INSERT INTO statuses(id,name,color,position,is_final) VALUES(?,?,?,?,?)",
+                    DEFAULT_STATUSES,
+                )
+            if not cur.execute("SELECT 1 FROM niches LIMIT 1").fetchone():
+                cur.executemany(
+                    "INSERT INTO niches(id,name,icon,color,hypothesis,target,views,leads,active,position)"
+                    " VALUES(?,?,?,?,?,?,0,0,1,0)",
+                    DEFAULT_NICHES,
+                )
+            for key, value in DEFAULT_SETTINGS.items():
+                cur.execute(
+                    "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",
+                    (key, json.dumps(value, ensure_ascii=False)),
+                )
+            cur.commit()
+
+    def query(self, sql: str, params: Iterable = ()) -> list[dict]:
+        with self.lock:
+            rows = self.conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    def one(self, sql: str, params: Iterable = ()) -> dict | None:
+        rows = self.query(sql, params)
+        return rows[0] if rows else None
+
+    def execute(self, sql: str, params: Iterable = ()) -> sqlite3.Cursor:
+        with self.lock:
+            cur = self.conn.execute(sql, tuple(params))
+            self.conn.commit()
+            return cur
+
+    def executemany(self, sql: str, seq: Iterable[Iterable]) -> None:
+        with self.lock:
+            self.conn.executemany(sql, [tuple(x) for x in seq])
+            self.conn.commit()
+
+    def upsert(self, table: str, data: dict[str, Any], key: str = "id") -> dict:
+        """Вставить или обновить запись по первичному ключу."""
+        columns = self.columns(table)
+        payload = {k: v for k, v in data.items() if k in columns}
+        if key not in payload or not payload[key]:
+            raise ValueError(f"{table}: не указан {key}")
+        placeholders = ",".join("?" for _ in payload)
+        names = ",".join(payload)
+        updates = ",".join(f"{k}=excluded.{k}" for k in payload if k != key)
+        sql = f"INSERT INTO {table}({names}) VALUES({placeholders})"
+        if updates:
+            sql += f" ON CONFLICT({key}) DO UPDATE SET {updates}"
+        self.execute(sql, list(payload.values()))
+        return self.one(f"SELECT * FROM {table} WHERE {key}=?", (payload[key],)) or {}
+
+    def columns(self, table: str) -> set[str]:
+        return {r["name"] for r in self.query(f"PRAGMA table_info({table})")}
+
+    def delete(self, table: str, ident: str, key: str = "id") -> None:
+        self.execute(f"DELETE FROM {table} WHERE {key}=?", (ident,))
+
+    # -------------------------------------------------------------- настройки
+    def settings(self, include_secrets: bool = False) -> dict[str, Any]:
+        data = dict(DEFAULT_SETTINGS)
+        for row in self.query("SELECT key,value FROM settings"):
+            try:
+                data[row["key"]] = json.loads(row["value"])
+            except json.JSONDecodeError:
+                data[row["key"]] = row["value"]
+        if not include_secrets:
+            from .config import SECRET_SETTINGS
+            for key in SECRET_SETTINGS:
+                data[f"has_{key}"] = bool(data.get(key))
+                data[key] = "••••••••" if data.get(key) else ""
+        return data
+
+    def setting(self, key: str, default: Any = None) -> Any:
+        row = self.one("SELECT value FROM settings WHERE key=?", (key,))
+        if not row:
+            return DEFAULT_SETTINGS.get(key, default)
+        try:
+            return json.loads(row["value"])
+        except json.JSONDecodeError:
+            return row["value"]
+
+    def set_settings(self, patch: dict[str, Any]) -> dict:
+        from .config import SECRET_SETTINGS
+        for key, value in patch.items():
+            if key not in DEFAULT_SETTINGS:
+                continue
+            if key in SECRET_SETTINGS and (value == "" or value == "••••••••"):
+                continue  # пустое поле означает «не менять сохранённый секрет»
+            self.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, json.dumps(value, ensure_ascii=False)),
+            )
+        return self.settings()
+
+    # ------------------------------------------------------------------ events
+    def add_event(self, kind: str, title: str, detail: str = "",
+                  printer_id: str = "", data: dict | None = None) -> dict:
+        cur = self.execute(
+            "INSERT INTO events(at,printer_id,kind,title,detail,data) VALUES(?,?,?,?,?,?)",
+            (now_iso(), printer_id, kind, title, detail,
+             json.dumps(data or {}, ensure_ascii=False)),
+        )
+        return {"id": cur.lastrowid, "at": now_iso(), "kind": kind, "title": title,
+                "detail": detail, "printer_id": printer_id, "data": data or {}}
+
+    def events(self, limit: int = 100, printer_id: str = "", kind: str = "") -> list[dict]:
+        sql = "SELECT * FROM events WHERE 1=1"
+        params: list[Any] = []
+        if printer_id:
+            sql += " AND printer_id=?"
+            params.append(printer_id)
+        if kind:
+            sql += " AND kind=?"
+            params.append(kind)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+        rows = self.query(sql, params)
+        for row in rows:
+            try:
+                row["data"] = json.loads(row.get("data") or "{}")
+            except json.JSONDecodeError:
+                row["data"] = {}
+        return rows
+
+    def close(self) -> None:
+        with self.lock:
+            self.conn.close()
