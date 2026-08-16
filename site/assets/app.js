@@ -81,34 +81,34 @@ const ruDate=s=>{const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString('ru-
 
 // ================================================================
 // БАЗА ИЗДЕЛИЙ — стартовый набор (рынок 2025)
-// [категория, название, вес г, часы, цена ₽, отход AMS г]
+// [категория, название, вес г, часы, цена ₽, отход AMS г, шт на стол]
 // ================================================================
 const PRESETS=[
- ['🐉 Игрушки и фиджеты','Дракон кристальный 18 см',45,3.0,550,15],
- ['🐉 Игрушки и фиджеты','Дракон кристальный 28 см',110,5.5,890,25],
- ['🐉 Игрушки и фиджеты','Дракон XL 40+ см (витринный)',250,11,1900,40],
- ['🐉 Игрушки и фиджеты','Дракон в яйце (сюрприз)',35,2.2,500,10],
- ['🐉 Игрушки и фиджеты','Змейка подвижная 45 см',40,2.2,350,0],
- ['🐉 Игрушки и фиджеты','Подвижный человечек (тип Dummy 13)',60,5.0,750,0],
- ['🐉 Игрушки и фиджеты','Аксолотль флекси',30,1.8,350,10],
- ['🐉 Игрушки и фиджеты','Осьминог-перевёртыш',22,1.3,300,8],
- ['🐉 Игрушки и фиджеты','Лягушка флекси',25,1.5,300,8],
- ['🐉 Игрушки и фиджеты','Динозавр-скелет флекси',45,2.5,500,0],
- ['🐉 Игрушки и фиджеты','Брелок-кликер антистресс',10,0.6,200,4],
- ['🐉 Игрушки и фиджеты','Мини-фигурка (корзинка «всё по 150»)',8,0.5,150,0],
- ['🐉 Игрушки и фиджеты','Брелок с именем (AMS 2 цвета)',8,0.5,350,4],
- ['🏠 Быт и декор','Подставка под телефон',25,1.3,350,0],
- ['🏠 Быт и декор','Крючок на дверь',12,0.7,150,0],
- ['🏠 Быт и декор','Клипсы для пакетов, 5 шт',15,0.8,200,0],
- ['🏠 Быт и декор','Органайзер для мелочи',70,3.5,500,0],
- ['🏠 Быт и декор','Ваза-спираль',55,2.0,600,0],
- ['🏠 Быт и декор','Ночник-литофан',90,4.5,900,0],
- ['🤝 B2B','Топпер на торт (AMS 2 цвета)',7,0.4,500,3],
- ['🤝 B2B','Вырубка для печенья',12,0.6,250,0],
- ['🤝 B2B','Держатель ценника',10,0.5,250,0],
- ['🤝 B2B','Именная табличка (AMS 2 цвета)',30,1.5,600,8],
- ['🎄 Сезон','Ёлочная игрушка с именем',15,0.8,300,5],
- ['🎁 Наборы','Подарочный набор (дракон + яйцо + коробка)',150,7.5,1400,30]
+ ['🐉 Игрушки и фиджеты','Дракон кристальный 18 см',45,3.0,550,15,2],
+ ['🐉 Игрушки и фиджеты','Дракон кристальный 28 см',110,5.5,890,25,1],
+ ['🐉 Игрушки и фиджеты','Дракон XL 40+ см (витринный)',250,11,1900,40,1],
+ ['🐉 Игрушки и фиджеты','Дракон в яйце (сюрприз)',35,2.2,500,10,4],
+ ['🐉 Игрушки и фиджеты','Змейка подвижная 45 см',40,2.2,350,0,2],
+ ['🐉 Игрушки и фиджеты','Подвижный человечек (тип Dummy 13)',60,5.0,750,0,2],
+ ['🐉 Игрушки и фиджеты','Аксолотль флекси',30,1.8,350,10,6],
+ ['🐉 Игрушки и фиджеты','Осьминог-перевёртыш',22,1.3,300,8,8],
+ ['🐉 Игрушки и фиджеты','Лягушка флекси',25,1.5,300,8,8],
+ ['🐉 Игрушки и фиджеты','Динозавр-скелет флекси',45,2.5,500,0,4],
+ ['🐉 Игрушки и фиджеты','Брелок-кликер антистресс',10,0.6,200,4,12],
+ ['🐉 Игрушки и фиджеты','Мини-фигурка (корзинка «всё по 150»)',8,0.5,150,0,20],
+ ['🐉 Игрушки и фиджеты','Брелок с именем (AMS 2 цвета)',8,0.5,350,4,16],
+ ['🏠 Быт и декор','Подставка под телефон',25,1.3,350,0,4],
+ ['🏠 Быт и декор','Крючок на дверь',12,0.7,150,0,12],
+ ['🏠 Быт и декор','Клипсы для пакетов, 5 шт',15,0.8,200,0,6],
+ ['🏠 Быт и декор','Органайзер для мелочи',70,3.5,500,0,2],
+ ['🏠 Быт и декор','Ваза-спираль',55,2.0,600,0,2],
+ ['🏠 Быт и декор','Ночник-литофан',90,4.5,900,0,2],
+ ['🤝 B2B','Топпер на торт (AMS 2 цвета)',7,0.4,500,3,6],
+ ['🤝 B2B','Вырубка для печенья',12,0.6,250,0,8],
+ ['🤝 B2B','Держатель ценника',10,0.5,250,0,12],
+ ['🤝 B2B','Именная табличка (AMS 2 цвета)',30,1.5,600,8,4],
+ ['🎄 Сезон','Ёлочная игрушка с именем',15,0.8,300,5,10],
+ ['🎁 Наборы','Подарочный набор (дракон + яйцо + коробка)',150,7.5,1400,30,1]
 ];
 
 // ================================================================
@@ -130,8 +130,14 @@ const CAT_KEY='catalog1', SHELF_KEY='shelf3', HIST_KEY='hist1', PLAN_KEY='plan1'
 const store=(k,def)=>{try{const d=JSON.parse(localStorage.getItem(k));return d==null?def:d;}catch(e){return def;}};
 const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){alert('Не удалось сохранить: память браузера переполнена. Сделайте резервную копию и удалите лишние фото/записи.');}};
 
-function catDefaults(){return PRESETS.map(p=>({c:p[0],n:p[1],w:p[2],h:p[3],p:p[4],a:p[5]}));}
-let CATALOG=(()=>{const d=store(CAT_KEY,null);return Array.isArray(d)&&d.length?d:catDefaults();})();
+function catDefaults(){return PRESETS.map(p=>({c:p[0],n:p[1],w:p[2],h:p[3],p:p[4],a:p[5],f:p[6]}));}
+// добросить «шт на стол» в базы, сохранённые до появления партий
+function catMigrate(list){
+ list.forEach(r=>{if(r.f===undefined||r.f===''||!(+r.f>0)){
+  const d=PRESETS.find(p=>p[1]===r.n); r.f=d?d[6]:1;}});
+ return list;
+}
+let CATALOG=(()=>{const d=store(CAT_KEY,null);return Array.isArray(d)&&d.length?catMigrate(d):catDefaults();})();
 function catSave(){save(CAT_KEY,CATALOG);}
 
 // продажи за текущую неделю: {название: количество}
@@ -159,14 +165,51 @@ function spoolSave(){save(SPOOL_KEY,SPOOLS);}
 // ---------- общие настройки себестоимости (из первого калькулятора) ----------
 function settings(){
  return {sp:num('c_sp')||1600, sw:num('c_sw')||1000, am:num('c_am')||12,
-         el:num('c_el')||3.5, br:num('c_br')||8};
+         el:num('c_el')||3.5, br:num('c_br')||8,
+         oh:num('c_oh'), ams:num('c_amsk')||15, batch:!document.getElementById('c_batch')||document.getElementById('c_batch').checked};
+}
+
+// ================================================================
+// ПАРТИОННЫЙ РАСЧЁТ — «куча игрушек на столе»
+// Печать пачкой меняет экономику: разогрев/калибровка платится один раз
+// за ПЛИТУ, а не за штуку; отход AMS на смену цвета тоже делится на всю
+// плиту (пруж/башня одна на слой, а не на каждую фигурку).
+// batchOf(изделие, кол-во) -> {plates, hours, grams, ...}
+// ================================================================
+function batchOf(r,qty,st){
+ st=st||settings();
+ const q=Math.max(0,+qty||0);
+ const w=+r.w||0, h=+r.h||0, a=+r.a||0;
+ const fit=st.batch?Math.max(1,Math.round(+r.f||1)):1;   // сколько влезает на стол
+ const plates=q>0?Math.ceil(q/fit):0;                    // сколько запусков
+ const perPlate=q>0?Math.min(fit,q):0;
+ const oh=st.oh;                                         // разогрев+калибровка, мин на плиту
+ const printH=h*q;                                       // чистая печать
+ const ohH=plates*oh/60;                                 // накладные часы
+ const hours=printH+ohH;
+ // отход AMS: на плите он общий, но чуть растёт с числом моделей на ней
+ const perPlateWaste=a>0?a*(1+Math.max(0,perPlate-1)*(st.ams/100)):0;
+ const wasteG=a>0?(plates>0?perPlateWaste*plates:0):0;
+ const soloWaste=a*q;                                    // если бы печатали по одной
+ const k=1+st.br/100;
+ const grams=(w*q+wasteG)*k;
+ const mat=st.sw>0?grams/st.sw*st.sp:0;
+ const machine=hours*(st.am+st.el)*k;
+ const cost=mat+machine;
+ return {q:q,fit:fit,plates:plates,perPlate:perPlate,hours:hours,printH:printH,ohH:ohH,
+         grams:grams,wasteG:wasteG*k,soloWaste:soloWaste*k,cost:cost,mat:mat,machine:machine,
+         unit:q>0?cost/q:0,unitH:q>0?hours/q:0};
 }
 // себестоимость печати без учёта вашего труда — то, что вычитается для «₽ за час принтера»
-function costOf(w,h,a,st){
+// qty>1 -> честная партионная себестоимость за штуку
+function costOf(w,h,a,st,f,qty){
  st=st||settings();
+ if(qty&&qty>1) return batchOf({w:w,h:h,a:a,f:f||1},qty,st).unit;
  const k=1+st.br/100;
- return ((+w||0)+(+a||0))/st.sw*st.sp*k + (+h||0)*(st.am+st.el)*k;
+ const oh=st.oh/60*(st.am+st.el)*k;
+ return ((+w||0)+(+a||0))/st.sw*st.sp*k + (+h||0)*(st.am+st.el)*k + oh;
 }
+const costOfItem=(r,st,qty)=>costOf(r.w,r.h,r.a,st,r.f,qty);
 const NORM=250; // норма ₽ чистыми за час печати
 const CAP=110;  // реальный потолок часов печати в неделю на один принтер
 
@@ -177,7 +220,7 @@ function buildPreset(){
  let html='<option value="">— свой заказ (вручную) —</option>',cat=null;
  CATALOG.forEach((p,i)=>{
   if(p.c!==cat){if(cat!==null)html+='</optgroup>';html+='<optgroup label="'+esc(p.c)+'">';cat=p.c;}
-  html+='<option value="'+i+'">'+esc(p.n)+' · '+p.w+' г · '+p.h+' ч</option>';
+  html+='<option value="'+i+'">'+esc(p.n)+' · '+p.w+' г · '+p.h+' ч · по '+(p.f||1)+' на стол</option>';
  });
  if(cat!==null)html+='</optgroup>';
  sel.innerHTML=html;
@@ -187,7 +230,7 @@ function buildPreset(){
    const i=sel.value; if(i==='')return;
    const p=CATALOG[+i]; if(!p) return;
    const set=(id,v)=>{const e=document.getElementById(id);if(!e)return;e.value=v;localStorage.setItem('f_'+e.dataset.k,v);};
-   set('c_w',p.w); set('c_h',p.h); set('c_wa',p.a); set('c_q',1);
+   set('c_w',p.w); set('c_h',p.h); set('c_wa',p.a); set('c_fit',p.f||1);
    const rp=document.getElementById('c_refprice');
    if(rp) rp.textContent='Рыночная розница на такое: ~'+fmt(p.p)+' ₽';
    calcAll();
@@ -212,15 +255,34 @@ function calcOrder(){
   br=num('c_br'),am=num('c_am'),el=num('c_el'),mn=num('c_mn'),hr=num('c_hr'),
   ex=num('c_ex'),pk=num('c_pk'),mk=num('c_mk'),fee=num('c_fee'),fix=num('c_fix');
  const k=1+br/100;
- const mat=sw>0?(w+wa)/sw*sp*k:0, amo=h*am*k, ele=h*el*k, lab=mn/60*hr, oth=ex+pk;
+ const st=settings();
+ const fit=Math.max(1,Math.round(num('c_fit')||1));
+ const B=batchOf({w:w,h:h,a:wa,f:fit},Math.max(1,q),st);
+ // на штуку — уже с учётом того, что плита греется один раз на всю партию
+ const mat=B.mat/B.q, amo=B.hours*am*k/B.q, ele=B.hours*el*k/B.q;
+ const lab=mn/60*hr, oth=ex+pk;
  const cost=mat+amo+ele+lab+oth;
+ // сравнение «по одной» против партии
+ const S=batchOf({w:w,h:h,a:wa,f:1},Math.max(1,q),st);
+ const soloCost=S.cost/S.q+lab+oth;
+ const saveTotal=(soloCost-cost)*B.q, saveH=S.hours-B.hours;
+ put('r_plates',B.plates+' шт ('+B.perPlate+' на столе)');
+ put('r_bhours',fmt2(B.hours)+' ч');
+ put('r_ohh',B.ohH>0?'+'+fmt2(B.ohH)+' ч':'0 ч');
+ put('r_bwaste',fmt(B.wasteG)+' г');
+ const sv=document.getElementById('r_save');
+ if(sv){
+  if(B.q>1&&B.fit>1&&saveTotal>1){sv.textContent='−'+fmt(saveTotal)+' ₽ и −'+fmt2(saveH)+' ч против печати по одной';sv.style.color='#14663a';}
+  else if(B.q>1&&B.fit<=1){sv.textContent='влезает по 1 шт — партия не помогает';sv.style.color='#6b7891';}
+  else{sv.textContent='—';sv.style.color='#6b7891';}
+ }
  const feeK=fee<100?1-fee/100:1;
  const price=Math.ceil((cost*(1+mk/100)+fix)/feeK/10)*10;
  const feeAmt=price*fee/100+fix;
  const net=price-feeAmt;
  const total=price*q;
  const profit=(net-cost)*q;
- const perHour=h>0?profit/(h*q):0;
+ const perHour=B.hours>0?profit/B.hours:0;
  const minp=Math.max(400,Math.ceil((cost*1.4+fix)/feeK/10)*10);
  const g=w>0?price/w:0;
  put('r_mat',fmt2(mat)+' ₽'); put('r_amo',fmt2(amo)+' ₽'); put('r_ele',fmt2(ele)+' ₽');
@@ -267,16 +329,22 @@ function buildCat(){
  const tb=document.getElementById('cat_body'); if(!tb) return;
  const st=settings();
  tb.innerHTML=CATALOG.map((r,i)=>{
-  const cost=costOf(r.w,r.h,r.a,st), ph=(+r.h>0)?((+r.p||0)-cost)/(+r.h):0;
+  const fit=Math.max(1,Math.round(+r.f||1));
+  const solo=costOf(r.w,r.h,r.a,st,1,1);
+  const B=batchOf(r,fit,st);                 // полная плита
+  const cost=B.unit;
+  const ph=B.hours>0?((+r.p||0)*B.q-B.cost)/B.hours:0;
+  const phSolo=(()=>{const S=batchOf(r,1,st);return S.hours>0?((+r.p||0)-S.cost)/S.hours:0;})();
   return `<tr>
  <td><input data-i="${i}" data-f="c" value="${esc(r.c)}" style="text-align:left;min-width:110px"></td>
  <td><input data-i="${i}" data-f="n" value="${esc(r.n)}" style="text-align:left;min-width:170px;font-weight:600"></td>
  <td><input type="number" step="any" data-i="${i}" data-f="w" value="${r.w}"></td>
  <td><input type="number" step="any" data-i="${i}" data-f="h" value="${r.h}"></td>
  <td><input type="number" step="any" data-i="${i}" data-f="a" value="${r.a}"></td>
+ <td><input type="number" step="1" min="1" data-i="${i}" data-f="f" value="${fit}"></td>
  <td><input type="number" step="any" data-i="${i}" data-f="p" value="${r.p}"></td>
- <td class="out">${fmt(cost)}</td>
- <td class="out" style="color:${ph>=NORM?'#14663a':ph>=100?'#8a5a06':'#96261a'}">${fmt(ph)}</td>
+ <td class="out">${fmt(cost)}<div class="mini">по 1 шт ${fmt(solo)}</div></td>
+ <td class="out" style="color:${ph>=NORM?'#14663a':ph>=100?'#8a5a06':'#96261a'}">${fmt(ph)}${fit>1?'<div class="mini">по 1 шт '+fmt(phSolo)+'</div>':''}</td>
  <td style="text-align:center"><button class="cat-del" data-i="${i}" title="Удалить позицию">✕</button></td></tr>`;
  }).join('');
  put('cat_count',CATALOG.length+' позиций');
@@ -302,7 +370,7 @@ function catEvents(){
  });
  const add=document.getElementById('cat_add');
  if(add) add.onclick=()=>{
-  CATALOG.push({c:'📦 Своё',n:'Новая позиция '+(CATALOG.length+1),w:30,h:1.5,p:400,a:0});
+  CATALOG.push({c:'📦 Своё',n:'Новая позиция '+(CATALOG.length+1),w:30,h:1.5,p:400,a:0,f:4});
   catSave(); refreshAll();
   const tbl=document.getElementById('cat_body');
   if(tbl&&tbl.lastElementChild) tbl.lastElementChild.querySelector('input[data-f="n"]').focus();
@@ -310,10 +378,9 @@ function catEvents(){
  const srt=document.getElementById('cat_sort');
  if(srt) srt.onclick=()=>{
   const st=settings();
-  CATALOG.sort((a,b)=>{
-   const pa=(+a.h>0)?((+a.p||0)-costOf(a.w,a.h,a.a,st))/(+a.h):-1e9;
-   const pb=(+b.h>0)?((+b.p||0)-costOf(b.w,b.h,b.a,st))/(+b.h):-1e9;
-   return pb-pa;});
+  const phOf=r=>{const B=batchOf(r,Math.max(1,Math.round(+r.f||1)),st);
+   return B.hours>0?((+r.p||0)*B.q-B.cost)/B.hours:-1e9;};
+  CATALOG.sort((a,b)=>phOf(b)-phOf(a));
   catSave(); refreshAll();
  };
  const grp=document.getElementById('cat_group');
@@ -353,11 +420,15 @@ function calcShelf(){
   const w=+r.w||0,h=+r.h||0,price=+r.p||0;
   const raw=SALES[r.n];
   const sold=(raw===undefined||raw==='')?null:(+raw||0);
-  const cost=costOf(w,h,r.a,st);
-  const marg=price-cost, ph=h>0?marg/h:0;
-  if(sold!==null){totRev+=price*sold; totProf+=marg*sold; totHrs+=h*sold;}
+  // считаем так, как реально печатали: партией на столько штук, сколько продали
+  const B=batchOf(r,Math.max(1,sold||1),st);
+  const cost=B.unit;
+  const marg=price-cost;
+  const hEff=B.unitH;                       // часы на штуку с учётом разогрева плиты
+  const ph=hEff>0?marg/hEff:0;
+  if(sold!==null){totRev+=price*sold; totProf+=marg*sold; totHrs+=(sold>0?B.hours:0);}
   put('sh_c'+i,fmt(cost)); put('sh_m'+i,fmt(marg)); put('sh_h'+i,fmt(ph));
-  rows.push({i:i,n:r.n,sold:sold,ph:ph,h:h,marg:marg});
+  rows.push({i:i,n:r.n,sold:sold,ph:ph,h:hEff,marg:marg,plates:B.plates});
   // тренд к прошлой неделе
   const tEl=document.getElementById('sh_t'+i);
   if(tEl){
@@ -526,9 +597,11 @@ function calcB2B(){
  const r=CATALOG[+sel.value]; if(!r) return;
  const st=settings();
  const retail=num('b_retail')||+r.p||0;
- const cost=costOf(r.w,r.h,r.a,st);
  const pack=num('b_pack');
- const unit=cost+pack;
+ const fit=Math.max(1,Math.round(+r.f||1));
+ // себестоимость опта считаем по полной плите — так тираж и печатается
+ const unit=batchOf(r,fit,st).unit+pack;
+ const unitSolo=costOf(r.w,r.h,r.a,st,1,1)+pack;
  const tiers=[
   {q:num('b_q1')||10,d:num('b_d1')},
   {q:num('b_q2')||25,d:num('b_d2')},
@@ -537,13 +610,15 @@ function calcB2B(){
  ];
  const floor=unit*1.4; // ниже этого опускаться нельзя
  let rows='',bestQ=0,warn=false;
- rows+=`<tr><td class="lbl">Розница, 1 шт</td><td class="out">1</td><td class="out">0%</td><td class="out">${fmt(retail)}</td><td class="out">${fmt(retail-unit)}</td><td class="out">${fmt(r.h>0?(retail-unit)/r.h:0)}</td><td class="out">${fmt(retail)}</td><td style="font-size:11.5px;font-weight:700;color:#14663a">базовая</td></tr>`;
+ const S1=batchOf(r,1,st);
+ rows+=`<tr><td class="lbl">Розница, 1 шт</td><td class="out">1</td><td class="out">0%</td><td class="out">${fmt(retail)}</td><td class="out">${fmt(retail-unitSolo)}</td><td class="out">${fmt(S1.hours>0?(retail-unitSolo)/S1.hours:0)}</td><td class="out">${fmt(retail)}</td><td style="font-size:11.5px;font-weight:700;color:#14663a">базовая</td></tr>`;
  tiers.forEach(t=>{
   const price=Math.round(retail*(1-t.d/100));
-  const marg=price-unit;
-  const ph=r.h>0?marg/r.h:0;
+  const B=batchOf(r,t.q,st);
+  const marg=price-(B.unit+pack);
+  const ph=B.hours>0?(price*t.q-(B.cost+pack*t.q))/B.hours:0;
   const total=price*t.q;
-  const hrs=r.h*t.q;
+  const hrs=B.hours;
   let txt,col;
   if(price<unit){txt='❌ В УБЫТОК';col='#96261a';warn=true;}
   else if(price<floor){txt='❌ ниже минимума';col='#96261a';warn=true;}
@@ -553,10 +628,14 @@ function calcB2B(){
   rows+=`<tr><td class="lbl">от ${t.q} шт</td><td class="out">${t.q}</td><td class="out">${t.d}%</td><td class="out">${fmt(price)}</td>
   <td class="out">${fmt(marg)}</td><td class="out" style="color:${ph>=NORM?'#14663a':ph>=100?'#8a5a06':'#96261a'}">${fmt(ph)}</td>
   <td class="out">${fmt(total)}</td><td style="font-size:11.5px;font-weight:700;color:${col}">${txt}</td></tr>`;
-  rows+=`<tr class="sub"><td colspan="8" class="mini" style="padding:3px 10px 7px">${t.q} шт = ${fmt2(hrs)} ч печати ≈ ${fmt2(hrs/12)} дн. по 12 ч · пластика ${fmt((+r.w+ +r.a)*t.q*(1+st.br/100))} г · ваша прибыль ${fmt(marg*t.q)} ₽</td></tr>`;
+  rows+=`<tr class="sub"><td colspan="8" class="mini" style="padding:3px 10px 7px">${t.q} шт = <b>${B.plates} плит${B.plates===1?'а':''}</b> по ${B.perPlate} шт · ${fmt2(hrs)} ч печати ≈ ${fmt2(hrs/12)} дн. по 12 ч · пластика ${fmt(B.grams)} г · ваша прибыль ${fmt(marg*t.q)} ₽</td></tr>`;
  });
  const tb=document.getElementById('b_rows'); if(tb) tb.innerHTML=rows;
  put('b_cost',fmt2(unit)+' ₽');
+ put('b_fit',fit+' шт на стол');
+ const bs=document.getElementById('b_solo');
+ if(bs){if(fit>1){bs.textContent='по 1 шт вышло бы '+fmt2(unitSolo)+' ₽ — партия дешевле на '+fmt(unitSolo-unit)+' ₽/шт';bs.style.color='#14663a';}
+  else{bs.textContent='влезает по 1 шт — экономии от партии нет';bs.style.color='#6b7891';}}
  put('b_floor',fmt(floor)+' ₽');
  const maxD=retail>0?Math.max(0,(1-floor/retail)*100):0;
  put('b_maxd',Math.floor(maxD)+'%');
@@ -583,11 +662,14 @@ function buildPlan(){
  tb.innerHTML=PLAN.map((p,i)=>{
   const r=CATALOG.find(c=>c.n===p.n);
   if(!r) return `<tr><td class="lbl">${esc(p.n)}</td><td colspan="5" class="mini">нет в базе — удалите строку</td><td style="text-align:center"><button class="cat-del" data-p="${i}">✕</button></td></tr>`;
-  const q=+p.q||0, hrs=r.h*q, g=(+r.w+ +r.a)*q*(1+st.br/100);
-  const marg=(+r.p-costOf(r.w,r.h,r.a,st))*q;
+  const q=+p.q||0;
+  const B=batchOf(r,q,st);
+  const marg=(+r.p||0)*q-B.cost;
   return `<tr><td class="lbl">${esc(r.n)}</td>
   <td><input type="number" step="1" min="0" data-pq="${i}" value="${q}"></td>
-  <td class="out">${fmt2(hrs)}</td><td class="out">${fmt(g)}</td>
+  <td class="out">${B.plates}<div class="mini">по ${B.perPlate} шт</div></td>
+  <td class="out">${fmt2(B.hours)}${B.ohH>0?'<div class="mini">+'+fmt2(B.ohH)+' ч разогрев</div>':''}</td>
+  <td class="out">${fmt(B.grams)}</td>
   <td class="out">${fmt(+r.p*q)}</td><td class="out">${fmt(marg)}</td>
   <td style="text-align:center"><button class="cat-del" data-p="${i}" title="Убрать">✕</button></td></tr>`;
  }).join('');
@@ -595,13 +677,17 @@ function buildPlan(){
 function calcPlan(){
  if(!document.getElementById('pl_body')) return;
  const st=settings();
- let hrs=0,g=0,rev=0,prof=0;
+ let hrs=0,g=0,rev=0,prof=0,plates=0,ohh=0,soloH=0;
  PLAN.forEach(p=>{
   const r=CATALOG.find(c=>c.n===p.n); if(!r) return;
-  const q=+p.q||0;
-  hrs+=r.h*q; g+=(+r.w+ +r.a)*q*(1+st.br/100);
-  rev+=+r.p*q; prof+=(+r.p-costOf(r.w,r.h,r.a,st))*q;
+  const q=+p.q||0; if(q<=0) return;
+  const B=batchOf(r,q,st);
+  hrs+=B.hours; g+=B.grams; plates+=B.plates; ohh+=B.ohH;
+  rev+=(+r.p||0)*q; prof+=(+r.p||0)*q-B.cost;
+  soloH+=batchOf({w:r.w,h:r.h,a:r.a,f:1},q,st).hours;
  });
+ put('pl_plates',plates+' шт');
+ put('pl_saveh',soloH>hrs?'−'+fmt2(soloH-hrs)+' ч против печати по одной':'—');
  PLAN_NEED={g:g,h:hrs};
  const hpd=num('pl_hpd')||12, days=num('pl_days')||7;
  const need=hpd>0?hrs/hpd:0;
@@ -697,7 +783,7 @@ function calcPlastic(){
    const src=HIST.length?HIST[HIST.length-1].s:SALES;
    Object.keys(src||{}).forEach(k=>{
     const r=CATALOG.find(c=>c.n===k); if(!r) return;
-    g+=(+r.w+ +r.a)*(+src[k]||0)*(1+st.br/100);
+    g+=batchOf(r,+src[k]||0,st).grams;
    });
   }
   week=g;
@@ -781,10 +867,13 @@ function csv(rows){
 }
 function exportCSV(){
  const st=settings();
- const rows=[['РАЗДЕЛ','Название','Категория','Вес г','Часы','Отход AMS г','Цена ₽','Себестоимость ₽','Маржа ₽','₽/час','Продано за неделю']];
+ const rows=[['РАЗДЕЛ','Название','Категория','Вес г','Часы','Отход AMS г','Шт на стол','Цена ₽','Себест. партией ₽','Себест. по 1 шт ₽','Маржа ₽','₽/час','Продано за неделю']];
  CATALOG.forEach(r=>{
-  const c=costOf(r.w,r.h,r.a,st), m=(+r.p||0)-c;
-  rows.push(['База изделий',r.n,r.c,r.w,r.h,r.a,r.p,Math.round(c),Math.round(m),Math.round(r.h>0?m/r.h:0),SALES[r.n]===undefined?'':SALES[r.n]]);
+  const fit=Math.max(1,Math.round(+r.f||1));
+  const B=batchOf(r,fit,st);
+  const c=B.unit, solo=costOf(r.w,r.h,r.a,st,1,1), m=(+r.p||0)-c;
+  rows.push(['База изделий',r.n,r.c,r.w,r.h,r.a,fit,r.p,Math.round(c),Math.round(solo),Math.round(m),
+   Math.round(B.hours>0?((+r.p||0)*B.q-B.cost)/B.hours:0),SALES[r.n]===undefined?'':SALES[r.n]]);
  });
  rows.push([]);
  rows.push(['РАЗДЕЛ','Неделя','Выручка ₽','Прибыль ₽','Часы','₽/час']);
@@ -793,9 +882,10 @@ function exportCSV(){
  rows.push(['РАЗДЕЛ','Цвет','Тип','Остаток г','Цена катушки ₽','Стоимость остатка ₽']);
  SPOOLS.forEach(s=>rows.push(['Склад пластика',s.c,s.t,s.g,s.pr,Math.round((+s.pr||0)/1000*(+s.g||0))]));
  rows.push([]);
- rows.push(['РАЗДЕЛ','Позиция','Штук','Часы','Пластик г']);
+ rows.push(['РАЗДЕЛ','Позиция','Штук','Плит','Часы','Пластик г']);
  PLAN.forEach(p=>{const r=CATALOG.find(c=>c.n===p.n);if(!r)return;
-  rows.push(['Очередь печати',p.n,p.q,+r.h*(+p.q||0),Math.round((+r.w+ +r.a)*(+p.q||0)*(1+st.br/100))]);});
+  const B=batchOf(r,+p.q||0,st);
+  rows.push(['Очередь печати',p.n,p.q,B.plates,Math.round(B.hours*100)/100,Math.round(B.grams)]);});
  dl('3d-печать-таблицы-'+today()+'.csv',csv(rows),'text/csv');
 }
 function doRestore(file){
@@ -864,8 +954,9 @@ function dash(){
  if(src){
   Object.keys(src).forEach(k=>{
    const r=CATALOG.find(c=>c.n===k); if(!r) return;
-   const q=+src[k]||0;
-   rev+=(+r.p||0)*q; hrs+=(+r.h||0)*q; prof+=((+r.p||0)-costOf(r.w,r.h,r.a,st))*q;
+   const q=+src[k]||0; if(q<=0) return;
+   const B=batchOf(r,q,st);
+   rev+=(+r.p||0)*q; hrs+=B.hours; prof+=(+r.p||0)*q-B.cost;
   });
  }
  const ph=hrs>0?prof/hrs:0;
@@ -927,6 +1018,13 @@ spoolEvents();
 backupEvents();
 bindSave();
 initChecks();
+// чекбокс «считать партиями» — сохраняем отдельно (bindSave работает по value)
+const cb=document.getElementById('c_batch');
+if(cb){
+ const v=localStorage.getItem('c_batchchk');
+ if(v!==null) cb.checked=v==='1';
+ cb.addEventListener('change',()=>{localStorage.setItem('c_batchchk',cb.checked?'1':'0');refreshAll();});
+}
 const bsel=document.getElementById('b_item');
 if(bsel) bsel.addEventListener('change',()=>{localStorage.setItem('f_bitem',bsel.value);
  const r=CATALOG[+bsel.value];const ri=document.getElementById('b_retail');

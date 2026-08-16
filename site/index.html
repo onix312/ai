@@ -35,14 +35,14 @@
  <div class="cbox"><h3>Параметры заказа</h3>
   <div class="fld"><label>Готовое изделие из базы</label><select id="c_preset" style="max-width:230px"></select></div>
   <p class="hint" id="c_refprice" style="margin:2px 0 8px"></p>
-  <div class="fld"><label>Вес изделия, г</label><input type="number" step="any" id="c_w" data-k="cw" value="60"></div><div class="fld"><label>Время печати, часов</label><input type="number" step="any" id="c_h" data-k="ch" value="2.5"></div><div class="fld"><label>Отход AMS (смена цвета), г</label><input type="number" step="any" id="c_wa" data-k="cwa" value="0"></div><div class="fld"><label>Цена катушки, ₽</label><input type="number" step="any" id="c_sp" data-k="csp" value="1600"></div><div class="fld"><label>Вес катушки, г</label><input type="number" step="any" id="c_sw" data-k="csw" value="1000"></div><div class="fld"><label>Количество, шт</label><input type="number" step="any" id="c_q" data-k="cq" value="1"></div>
+  <div class="fld"><label>Вес изделия, г</label><input type="number" step="any" id="c_w" data-k="cw" value="60"></div><div class="fld"><label>Время печати, часов</label><input type="number" step="any" id="c_h" data-k="ch" value="2.5"></div><div class="fld"><label>Отход AMS (смена цвета), г</label><input type="number" step="any" id="c_wa" data-k="cwa" value="0"></div><div class="fld"><label>Цена катушки, ₽</label><input type="number" step="any" id="c_sp" data-k="csp" value="1600"></div><div class="fld"><label>Вес катушки, г</label><input type="number" step="any" id="c_sw" data-k="csw" value="1000"></div><div class="fld"><label>Количество, шт</label><input type="number" step="any" id="c_q" data-k="cq" value="1"></div><div class="fld"><label><b>Влезает на стол за раз, шт</b></label><input type="number" step="1" min="1" id="c_fit" data-k="cfit" value="1"></div><p class="hint">Главное поле для партий: если на стол помещается 6 топперов, 40 штук — это 7 запусков, а не 40. Разогрев и отход AMS платятся за плиту, а не за штуку.</p>
   <h3 style="margin-top:18px">Канал продажи</h3>
   <div class="fld"><label>Где продаёте</label><select id="c_chan" style="max-width:230px"></select></div>
   <div class="fld"><label>Комиссия канала, %</label><input type="number" step="any" id="c_fee" data-k="cfee" value="0"></div>
   <div class="fld"><label>Фикс. издержки на заказ, ₽ (логистика/упаковка МП)</label><input type="number" step="any" id="c_fix" data-k="cfix" value="0"></div>
   <p class="hint">Магазин и Telegram — 0%. Авито Доставка ~7% (1–9% от категории). WB/Ozon по схеме FBS реально забирают 15–25% + логистика — поэтому туда только позиции дороже 500 ₽.</p>
   <h3 style="margin-top:18px">Ваши издержки — настройте один раз</h3>
-  <div class="fld"><label>Брак / перепечатка, %</label><input type="number" step="any" id="c_br" data-k="cbr" value="8"></div><div class="fld"><label>Амортизация, ₽/час</label><input type="number" step="any" id="c_am" data-k="cam" value="12"></div><div class="fld"><label>Электричество, ₽/час</label><input type="number" step="any" id="c_el" data-k="cel" value="3.5"></div><div class="fld"><label>Ваша работа, мин</label><input type="number" step="any" id="c_mn" data-k="cmn" value="20"></div><div class="fld"><label>Оценка своего часа, ₽</label><input type="number" step="any" id="c_hr" data-k="chr" value="500"></div><div class="fld"><label>Расходники, ₽</label><input type="number" step="any" id="c_ex" data-k="cex" value="15"></div><div class="fld"><label>Упаковка, ₽</label><input type="number" step="any" id="c_pk" data-k="cpk" value="40"></div><div class="fld"><label>Наценка, %</label><input type="number" step="any" id="c_mk" data-k="cmk" value="120"></div>
+  <div class="fld"><label>Брак / перепечатка, %</label><input type="number" step="any" id="c_br" data-k="cbr" value="8"></div><div class="fld"><label>Амортизация, ₽/час</label><input type="number" step="any" id="c_am" data-k="cam" value="12"></div><div class="fld"><label>Электричество, ₽/час</label><input type="number" step="any" id="c_el" data-k="cel" value="3.5"></div><div class="fld"><label>Ваша работа, мин</label><input type="number" step="any" id="c_mn" data-k="cmn" value="20"></div><div class="fld"><label>Оценка своего часа, ₽</label><input type="number" step="any" id="c_hr" data-k="chr" value="500"></div><div class="fld"><label>Расходники, ₽</label><input type="number" step="any" id="c_ex" data-k="cex" value="15"></div><div class="fld"><label>Упаковка, ₽</label><input type="number" step="any" id="c_pk" data-k="cpk" value="40"></div><div class="fld"><label>Наценка, %</label><input type="number" step="any" id="c_mk" data-k="cmk" value="120"></div><div class="fld"><label>Разогрев и калибровка, мин на запуск</label><input type="number" step="any" id="c_oh" data-k="coh" value="8"></div><div class="fld"><label>Рост отхода AMS за каждую доп. модель на столе, %</label><input type="number" step="any" id="c_amsk" data-k="camsk" value="15"></div><div class="fld"><label><input type="checkbox" id="c_batch" checked> Считать партиями (печать пачкой)</label></div><p class="hint">Снимите галочку, чтобы увидеть, во что обходилась бы печать по одной штуке.</p>
  </div>
  <div>
   <div class="cbox"><h3>Себестоимость</h3>
@@ -60,7 +60,7 @@
    <div class="rrow"><span>ИТОГО за заказ</span><b id="r_total" style="font-size:18px">—</b></div>
    <div class="rrow"><span>Прибыль чистыми</span><b id="r_profit">—</b></div>
    <div class="rrow"><span>Заработок за час печати</span><b id="r_ph">—</b></div>
-   <div class="rrow"><span>Эквивалент за грамм</span><b id="r_g">—</b></div>
+   <div class="rrow" style="border-top:2px solid #0f1d38;margin-top:5px;padding-top:9px"><span><b>Партия на столе</b></span><b id="r_plates">—</b></div><div class="rrow"><span>Часов на всю партию</span><b id="r_bhours">—</b></div><div class="rrow"><span>из них разогрев плит</span><b id="r_ohh">—</b></div><div class="rrow"><span>Отход AMS на партию</span><b id="r_bwaste">—</b></div><div class="rrow"><span>Выгода от партии</span><b id="r_save" style="font-size:12.5px">—</b></div><div class="rrow"><span>Эквивалент за грамм</span><b id="r_g">—</b></div>
    <div class="rrow" style="color:#96261a"><span><b>Минимум, ниже нельзя</b></span><b id="r_min">—</b></div>
    <div id="r_verdict" class="verdict">—</div>
    <p class="hint">Торгуются — не роняйте цену, а меняйте условия: заливка 10%, слой 0,28 мм — и пересчитайте здесь. Двухцветное на AMS продаётся в 1,5 раза дороже при почти той же себестоимости — не забывайте про поле «Отход AMS».</p>
@@ -88,11 +88,11 @@
 <p>Это <strong>единый справочник</strong>: отсюда позиции попадают в калькулятор заказа, тест полки, опт B2B и планировщик печати. Добавляйте свои изделия — считать их будет везде. Себестоимость и ₽/час пересчитываются из ваших настроек выше.</p>
 <button class="printbtn g" id="cat_add">+ Добавить изделие</button><button class="printbtn" id="cat_sort">Сортировать по ₽/час</button><button class="printbtn" id="cat_group">Сгруппировать по категориям</button><button class="printbtn" id="cat_reset" style="background:#96261a">Сбросить базу</button>
 <span class="hint" id="cat_count" style="margin-left:8px"></span>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Категория</th><th>Название</th><th>Вес, г</th><th>Часы</th><th>Отход AMS, г</th><th>Цена, ₽</th><th>Себест., ₽</th><th>₽/час</th><th></th></tr></thead><tbody id="cat_body"></tbody></table></div>
-<p class="hint">₽/час здесь — маржа без учёта вашего труда, то есть сколько зарабатывает сам принтер. Зелёный — от 250 ₽/ч, красный — меньше 100 ₽/ч, такое печатать невыгодно.</p>
+<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Категория</th><th>Название</th><th>Вес, г</th><th>Часы</th><th>Отход AMS, г</th><th>Шт на стол</th><th>Цена, ₽</th><th>Себест., ₽</th><th>₽/час</th><th></th></tr></thead><tbody id="cat_body"></tbody></table></div>
+<p class="hint">₽/час здесь — маржа без учёта вашего труда, то есть сколько зарабатывает сам принтер. Зелёный — от 250 ₽/ч, красный — меньше 100 ₽/ч, такое печатать невыгодно. <b>«Шт на стол»</b> — сколько помещается за один запуск: по этой цифре считается партионная себестоимость, мелким шрифтом показано, во что обошлась бы печать по одной.</p>
 
 <h2 id="calc-h3">Тест полки: что продаётся</h2>
-<p>Вписывайте <strong>продажи за неделю</strong> — таблица скажет по каждой позиции, что делать. Вердикт учитывает сразу три вещи: <strong>сколько продалось</strong>, <strong>выгодно ли это по ₽/час</strong> и <strong>влезает ли всё в реальные ~110 часов печати в неделю</strong>. Список позиций берётся из базы выше.</p>
+<p>Вписывайте <strong>продажи за неделю</strong> — таблица скажет по каждой позиции, что делать. Вердикт учитывает сразу три вещи: <strong>сколько продалось</strong>, <strong>выгодно ли это по ₽/час</strong> и <strong>влезает ли всё в реальные ~110 часов печати в неделю</strong>. Список позиций берётся из базы выше. Себестоимость и часы считаются <strong>партионно</strong>: если продали 8 брелоков и они печатаются по 16 на столе — это один запуск, а не восемь.</p>
 <button class="printbtn" id="sh_clear">Очистить продажи недели</button>
 <div class="tblwrap"><table class="tbl-in"><thead><tr><th>Позиция</th><th>Вес, г</th><th>Часы</th><th>Себест., ₽</th><th>Цена, ₽</th><th>Маржа, ₽</th><th>₽/час</th><th>Продано за нед.</th><th>К прошлой</th><th>Вердикт</th></tr></thead><tbody id="sh_body"></tbody></table></div>
 <div class="calcwrap">
@@ -137,7 +137,7 @@
   <div class="fld"><label>Тираж 4, шт / скидка %</label><span style="display:flex;gap:6px"><input type="number" step="1" id="b_q4" data-k="bq4" value="100" style="width:62px"><input type="number" step="any" id="b_d4" data-k="bd4" value="40" style="width:62px"></span></div>
  </div>
  <div class="res">
-  <div class="rrow"><span>Себестоимость 1 шт (с упаковкой)</span><b id="b_cost">—</b></div>
+  <div class="rrow"><span>Влезает на стол</span><b id="b_fit">—</b></div><div class="rrow"><span>Себестоимость 1 шт партией (с упаковкой)</span><b id="b_cost">—</b></div><div class="rrow"><span>Выгода партии</span><b id="b_solo" style="font-size:12px">—</b></div>
   <div class="rrow" style="color:#96261a"><span><b>Пол по цене — ниже нельзя</b></span><b id="b_floor">—</b></div>
   <div class="rrow"><span>Максимальная скидка</span><b id="b_maxd" style="font-size:20px">—</b></div>
   <p class="hint">Пол = себестоимость × 1,4. Всё, что ниже, — работа принтера в ноль: износ и время есть, денег нет.</p>
@@ -163,7 +163,7 @@
  </div>
  <div class="res">
   <div class="rrow"><span>Всего часов печати</span><span class="rbig" id="pl_hrs">—</span></div>
-  <div class="rrow"><span>Нужно пластика</span><b id="pl_g">—</b></div>
+  <div class="rrow"><span>Запусков (плит)</span><b id="pl_plates">—</b></div><div class="rrow"><span>Экономия от партий</span><b id="pl_saveh" style="font-size:12.5px">—</b></div><div class="rrow"><span>Нужно пластика</span><b id="pl_g">—</b></div>
   <div class="rrow"><span>Есть на складе</span><b id="pl_stock">—</b></div>
   <div class="rrow"><span>Займёт дней</span><b id="pl_dur">—</b></div>
   <div class="rrow"><span>Выручка с очереди</span><b id="pl_rev">—</b></div>
@@ -173,7 +173,7 @@
   <div class="progwrap"><div class="progbar" id="pl_bar" style="width:0"></div></div>
  </div>
 </div>
-<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Позиция</th><th>Штук</th><th>Часы</th><th>Пластик, г</th><th>Выручка, ₽</th><th>Прибыль, ₽</th><th></th></tr></thead><tbody id="pl_body"></tbody></table></div>
+<div class="tblwrap"><table class="tbl-in"><thead><tr><th>Позиция</th><th>Штук</th><th>Плит</th><th>Часы</th><th>Пластик, г</th><th>Выручка, ₽</th><th>Прибыль, ₽</th><th></th></tr></thead><tbody id="pl_body"></tbody></table></div>
 <div id="pl_verdict" class="verdict">—</div>
 
 <h2 id="calc-h7">Учёт пластика</h2>
