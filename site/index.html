@@ -28,16 +28,23 @@
 <div class="sechead"><span class="secic">🧮</span><div><h1>Калькуляторы</h1><p>Считают сразу, всё сохраняется в браузере</p></div></div>
 
 <h2 id="calc-h0">Калькулятор заказа</h2>
-<p>Вбейте вес и время из слайсера — увидите себестоимость, цену и <strong>главное: сколько зарабатывает принтер за час</strong>. Норма 250–500 ₽/ч.</p>
+<p>Выберите готовое изделие из базы (вес и часы подставятся сами) или вбейте свои цифры из слайсера — увидите себестоимость, цену для выбранного канала продаж и <strong>главное: сколько зарабатывает принтер за час чистыми</strong>. Норма 250–500 ₽/ч.</p>
 <div class="calcwrap">
  <div class="cbox"><h3>Параметры заказа</h3>
-  <div class="fld"><label>Вес изделия, г</label><input type="number" step="any" id="c_w" data-k="cw" value="60"></div><div class="fld"><label>Время печати, часов</label><input type="number" step="any" id="c_h" data-k="ch" value="2.5"></div><div class="fld"><label>Цена катушки, ₽</label><input type="number" step="any" id="c_sp" data-k="csp" value="1600"></div><div class="fld"><label>Вес катушки, г</label><input type="number" step="any" id="c_sw" data-k="csw" value="1000"></div><div class="fld"><label>Количество, шт</label><input type="number" step="any" id="c_q" data-k="cq" value="1"></div>
+  <div class="fld"><label>Готовое изделие из базы</label><select id="c_preset" style="max-width:230px"></select></div>
+  <p class="hint" id="c_refprice" style="margin:2px 0 8px"></p>
+  <div class="fld"><label>Вес изделия, г</label><input type="number" step="any" id="c_w" data-k="cw" value="60"></div><div class="fld"><label>Время печати, часов</label><input type="number" step="any" id="c_h" data-k="ch" value="2.5"></div><div class="fld"><label>Отход AMS (смена цвета), г</label><input type="number" step="any" id="c_wa" data-k="cwa" value="0"></div><div class="fld"><label>Цена катушки, ₽</label><input type="number" step="any" id="c_sp" data-k="csp" value="1600"></div><div class="fld"><label>Вес катушки, г</label><input type="number" step="any" id="c_sw" data-k="csw" value="1000"></div><div class="fld"><label>Количество, шт</label><input type="number" step="any" id="c_q" data-k="cq" value="1"></div>
+  <h3 style="margin-top:18px">Канал продажи</h3>
+  <div class="fld"><label>Где продаёте</label><select id="c_chan" style="max-width:230px"></select></div>
+  <div class="fld"><label>Комиссия канала, %</label><input type="number" step="any" id="c_fee" data-k="cfee" value="0"></div>
+  <div class="fld"><label>Фикс. издержки на заказ, ₽ (логистика/упаковка МП)</label><input type="number" step="any" id="c_fix" data-k="cfix" value="0"></div>
+  <p class="hint">Магазин и Telegram — 0%. Авито Доставка ~7% (1–9% от категории). WB/Ozon по схеме FBS реально забирают 15–25% + логистика — поэтому туда только позиции дороже 500 ₽.</p>
   <h3 style="margin-top:18px">Ваши издержки — настройте один раз</h3>
   <div class="fld"><label>Брак / перепечатка, %</label><input type="number" step="any" id="c_br" data-k="cbr" value="8"></div><div class="fld"><label>Амортизация, ₽/час</label><input type="number" step="any" id="c_am" data-k="cam" value="12"></div><div class="fld"><label>Электричество, ₽/час</label><input type="number" step="any" id="c_el" data-k="cel" value="3.5"></div><div class="fld"><label>Ваша работа, мин</label><input type="number" step="any" id="c_mn" data-k="cmn" value="20"></div><div class="fld"><label>Оценка своего часа, ₽</label><input type="number" step="any" id="c_hr" data-k="chr" value="500"></div><div class="fld"><label>Расходники, ₽</label><input type="number" step="any" id="c_ex" data-k="cex" value="15"></div><div class="fld"><label>Упаковка, ₽</label><input type="number" step="any" id="c_pk" data-k="cpk" value="40"></div><div class="fld"><label>Наценка, %</label><input type="number" step="any" id="c_mk" data-k="cmk" value="120"></div>
  </div>
  <div>
   <div class="cbox"><h3>Себестоимость</h3>
-   <div class="rrow"><span>Пластик с браком</span><b id="r_mat">—</b></div>
+   <div class="rrow"><span>Пластик с браком и отходом AMS</span><b id="r_mat">—</b></div>
    <div class="rrow"><span>Амортизация принтера</span><b id="r_amo">—</b></div>
    <div class="rrow"><span>Электричество</span><b id="r_ele">—</b></div>
    <div class="rrow"><span>Ваш труд</span><b id="r_lab">—</b></div>
@@ -46,13 +53,15 @@
   </div>
   <div class="res">
    <div class="rrow"><span>Цена за 1 шт</span><span class="rbig" id="r_price">—</span></div>
+   <div class="rrow"><span>Комиссия и издержки канала</span><b id="r_fee">—</b></div>
+   <div class="rrow"><span>Вам на руки с 1 шт</span><b id="r_net">—</b></div>
    <div class="rrow"><span>ИТОГО за заказ</span><b id="r_total" style="font-size:18px">—</b></div>
-   <div class="rrow"><span>Прибыль</span><b id="r_profit">—</b></div>
+   <div class="rrow"><span>Прибыль чистыми</span><b id="r_profit">—</b></div>
    <div class="rrow"><span>Заработок за час печати</span><b id="r_ph">—</b></div>
    <div class="rrow"><span>Эквивалент за грамм</span><b id="r_g">—</b></div>
    <div class="rrow" style="color:#96261a"><span><b>Минимум, ниже нельзя</b></span><b id="r_min">—</b></div>
    <div id="r_verdict" class="verdict">—</div>
-   <p class="hint">Торгуются — не роняйте цену, а меняйте условия: заливка 10%, слой 0,28 мм — и пересчитайте здесь.</p>
+   <p class="hint">Торгуются — не роняйте цену, а меняйте условия: заливка 10%, слой 0,28 мм — и пересчитайте здесь. Двухцветное на AMS продаётся в 1,5 раза дороже при почти той же себестоимости — не забывайте про поле «Отход AMS».</p>
   </div>
  </div>
 </div>
@@ -61,8 +70,9 @@
 <p>План по месяцам. Правьте выручку и расходы под реальность — таблица сама покажет, когда выходите в плюс.</p>
 <div class="calcwrap">
  <div class="cbox"><h3>Вводные</h3>
-  <div class="fld"><label>Вложения в принтер + старт, ₽</label><input type="number" step="any" id="p_inv" data-k="pinv" value="80000"></div><div class="fld"><label>Налог, %</label><input type="number" step="any" id="p_tax" data-k="ptax" value="5"></div>
+  <div class="fld"><label>Вложения в принтер + старт, ₽</label><input type="number" step="any" id="p_inv" data-k="pinv" value="80000"></div><div class="fld"><label>Налог, %</label><input type="number" step="any" id="p_tax" data-k="ptax" value="5"></div><div class="fld"><label>Средний заработок принтера, ₽/час (из калькулятора заказа)</label><input type="number" step="any" id="p_ph" data-k="pph" value="300"></div>
   <div class="rrow" style="margin-top:10px"><span>Нужно прибыли в месяц</span><b id="p_need">—</b></div>
+  <div class="rrow"><span>Нужно часов печати</span><b id="p_hours">—</b></div>
   <h3 style="margin-top:16px">Выручка по месяцам, ₽</h3><div class="fld"><label>Месяц 1</label><input type="number" step="any" id="p_r1" data-k="pr1" value="15000"></div><div class="fld"><label>Месяц 2</label><input type="number" step="any" id="p_r2" data-k="pr2" value="35000"></div><div class="fld"><label>Месяц 3</label><input type="number" step="any" id="p_r3" data-k="pr3" value="55000"></div><div class="fld"><label>Месяц 4</label><input type="number" step="any" id="p_r4" data-k="pr4" value="70000"></div><div class="fld"><label>Месяц 5</label><input type="number" step="any" id="p_r5" data-k="pr5" value="80000"></div><div class="fld"><label>Месяц 6</label><input type="number" step="any" id="p_r6" data-k="pr6" value="90000"></div>
  </div>
  <div class="cbox"><h3>Расходы по месяцам, ₽</h3><div class="fld"><label>Месяц 1</label><input type="number" step="any" id="p_e1" data-k="pe1" value="10900"></div><div class="fld"><label>Месяц 2</label><input type="number" step="any" id="p_e2" data-k="pe2" value="17250"></div><div class="fld"><label>Месяц 3</label><input type="number" step="any" id="p_e3" data-k="pe3" value="24250"></div><div class="fld"><label>Месяц 4</label><input type="number" step="any" id="p_e4" data-k="pe4" value="28500"></div><div class="fld"><label>Месяц 5</label><input type="number" step="any" id="p_e5" data-k="pe5" value="31000"></div><div class="fld"><label>Месяц 6</label><input type="number" step="any" id="p_e6" data-k="pe6" value="33500"></div>
@@ -73,13 +83,16 @@
 <div id="p_verdict" class="verdict">—</div>
 
 <h2 id="calc-h2">Тест полки: что продаётся</h2>
-<p>Себестоимость считается автоматически из настроек первого калькулятора. <strong>Вписывайте продажи за неделю</strong> — таблица скажет, что масштабировать, а что убрать.</p>
-<table class="tbl-in"><thead><tr><th>Позиция</th><th>Вес, г</th><th>Часы</th><th>Себест., ₽</th><th>Цена, ₽</th><th>Маржа, ₽</th><th>₽/час</th><th>Продано за нед.</th><th>Вердикт</th></tr></thead><tbody id="sh_body"></tbody></table>
-<div class="res" style="max-width:420px">
+<p>Себестоимость считается автоматически из настроек первого калькулятора. Список <strong>полностью редактируемый</strong>: меняйте названия, вес, часы и цены, добавляйте свои позиции, удаляйте лишние — всё сохраняется. <strong>Вписывайте продажи за неделю</strong> — таблица скажет, что масштабировать, а что убрать.</p>
+<button class="printbtn g" id="sh_add">+ Добавить позицию</button><button class="printbtn" id="sh_sort">Сортировать по ₽/час</button><button class="printbtn" id="sh_reset" style="background:#96261a">Сбросить к стандартному списку</button>
+<table class="tbl-in"><thead><tr><th>Позиция</th><th>Вес, г</th><th>Часы</th><th>Себест., ₽</th><th>Цена, ₽</th><th>Маржа, ₽</th><th>₽/час</th><th>Продано за нед.</th><th>Вердикт</th><th></th></tr></thead><tbody id="sh_body"></tbody></table>
+<div class="res" style="max-width:520px">
  <div class="rrow"><span>Выручка за неделю</span><b id="sh_rev">—</b></div>
  <div class="rrow"><span>Прибыль за неделю</span><b id="sh_prof">—</b></div>
+ <div class="rrow"><span>Часов печати на проданное</span><b id="sh_hrs">—</b></div>
+ <div class="rrow"><span>Загрузка принтера</span><b id="sh_cap" style="font-size:12px">—</b></div>
 </div>
-<p class="hint">Правило: 3+ продажи за неделю — печатайте больше и выкладывайте на Авито. 0 продаж — убирайте, освобождайте место.</p>
+<p class="hint">Правило: 3+ продажи за неделю — печатайте больше и выкладывайте на Авито. 0 продаж — убирайте, освобождайте место. Если часов на проданное больше ~110 в неделю — принтер физически не успеет, режьте ассортимент или думайте о втором принтере.</p>
 </section><section id="start"><div class="sechead"><span class="secic">🚀</span><div><h1>Первая неделя</h1><p>План по дням и часам</p></div></div><p><strong>Вводные:</strong> принтер дома, магазин в этом же доме, режим 8:00–21:00, помогает семья, бюджет 0 — растём из выручки, есть 1-3 катушки.</p>
 <p><strong>Логика недели:</strong> принтер работает круглосуточно и делает товар, пока ты занят другим. Твоя задача — не стоять над ним, а каждый вечер заряжать очередь на ночь. К воскресенью полка должна стоять и продавать.</p>
 <p><strong>Правило первой недели:</strong> ничего не покупаем, кроме LED-ленты. Всё остальное — из того, что есть.</p>
@@ -90,7 +103,7 @@
 - [ ] Поставить печататься <strong>первого дракона</strong> — пусть работает, пока занимаешься остальным</p>
 <p><strong>День (2 часа)</strong>
 - [ ] Зайти на <strong>MakerWorld</strong>, зарегистрироваться (там профили под P1S и AMS уже готовы)
-- [ ] Скачать 15-20 моделей по списку из <code>СПИСОК-МОДЕЛЕЙ.md</code>, проверяя лицензию (нет <code>NC</code> — годится)
+- [ ] Скачать 15-20 моделей по списку из <code>docs/СПИСОК-МОДЕЛЕЙ.md</code> (или раздел «Что печатать»), проверяя лицензию (нет <code>NC</code> — годится)
 - [ ] Разложить их по папкам: <code>Игрушки / Быт / Декор / B2B / Сезон</code>
 - [ ] Померить полку в магазине рулеткой, записать размеры</p>
 <p><strong>Вечер (30 мин)</strong>
@@ -122,7 +135,7 @@
 <p><strong>День (3-4 часа) — собираем полку</strong>
 - [ ] Протереть и освободить полку
 - [ ] <strong>Приклеить LED-ленту</strong> — сверху или по краю. Без света пластик выглядит серо и дёшево, со светом — как товар
-- [ ] Распечатать на A4 файлы из папки <code>материалы-магазина</code>:
+- [ ] Распечатать на A4 файлы из раздела «Печать на A4» (папка <code>materials</code>):
   - <code>ценники.html</code> → разрезать
   - <code>плакат-над-полкой.html</code> → повесить над полкой
   - <code>таблички-и-визитки.html</code> → таблички на полку, визитки разрезать
@@ -658,7 +671,7 @@
 - [ ] Скачать/подготовить 15 моделей с Printables, MakerWorld, Thingiverse — <strong>обязательно проверить лицензию: нужна разрешающая коммерческое использование</strong> (CC-BY, CC0). MakerWorld удобен тем, что там сразу профили под Bambu
 - [ ] Напечатать по 2-3 шт каждой позиции = стартовая партия ~40 предметов
 - [ ] Собрать полку: подсветка, ценники, таблички, корзинка «по 150»
-- [ ] Сделать QR на Telegram, распечатать (файлы в папке <code>материалы-магазина</code>)
+- [ ] Сделать QR на Telegram, распечатать (файлы в разделе «Печать на A4» (папка <code>materials</code>))
 - [ ] <strong>Запустить полку в магазине</strong> ← первые деньги приходят здесь</p>
 <p><strong>Неделя 2 — Авито и соцсети</strong>
 - [ ] Отснять фотофонд: все изделия при дневном свете на однотонном фоне + фото в руке
@@ -950,7 +963,7 @@
 </table>
 <p><strong>Постобработка — идеальная задача для делегирования.</strong> Она монотонная, не требует квалификации, но съедает у тебя 30-40% времени. Отдай её.</p>
 <h3>Памятка для того, кто стоит на кассе</h3>
-<p>Распечатай и положи под кассу — файл <code>материалы-магазина/памятка-продавцу.html</code>. Продавец должен уметь ответить на три вопроса и принять заказ, не зовя тебя.</p>
+<p>Распечатай и положи под кассу — файл <code>site/materials/памятка-продавцу.html</code>. Продавец должен уметь ответить на три вопроса и принять заказ, не зовя тебя.</p>
 <hr />
 <h2 id="plan-h11">11. Электричество — отдельная тема для Крыма</h2>
 <p>Свет иногда моргает — для FDM это брак на длинной печати.</p>
@@ -969,17 +982,17 @@
 <li>Поставить принтер печатать <strong>двухцветного дракона</strong> — пусть к вечеру будет первый образец</li>
 <li>Пока печатает — выбрать и скачать ещё 14 моделей с проверенной лицензией</li>
 <li>Померить полку в магазине, прикинуть выкладку, купить LED-ленту</li>
-<li>Распечатать материалы из папки <code>материалы-магазина</code> на обычном А4 (включая памятку продавцу)</li>
+<li>Распечатать материалы из раздела «Печать на A4» (папка <code>materials</code>) на обычном А4 (включая памятку продавцу)</li>
 <li>Создать Telegram-канал и выложить первый пост «мы запускаем 3D-печать»</li>
 </ol>
 <p><strong>Файлы в комплекте:</strong>
 - <code>ПЕРВАЯ-НЕДЕЛЯ.md</code> — план по дням и часам, начни отсюда
-- <code>СПИСОК-МОДЕЛЕЙ.md</code> — что печатать, где брать, как проверять лицензии
+- <code>docs/СПИСОК-МОДЕЛЕЙ.md</code> (или раздел «Что печатать») — что печатать, где брать, как проверять лицензии
 - <code>B2B-СКРИПТЫ.md</code> — обход соседей и работа с кондитерами
 - <code>ЗАПУСК-НА-АВИТО.md</code> — объявления, скрипты чата, чек-лист
 - <code>КОНТЕНТ-ПЛАН.md</code> — 30 дней постов и видео
 - <code>финмодель-окупаемости.xlsx</code> — 8 листов: окупаемость, калькулятор, прайс, журнал, тест полки, обход B2B, закупка пластика, постоянные клиенты
-- <code>материалы-магазина/</code> — ценники, плакат, таблички, визитки, памятка продавцу</p></section><section id="models"><div class="sechead"><span class="secic">🧩</span><div><h1>Что печатать</h1><p>Модели, лицензии, очередь, AMS</p></div></div><h2 id="models-h0">Как проверять лицензию (30 секунд, делай всегда)</h2>
+- <code>site/materials/</code> — ценники, плакат, таблички, визитки, памятка продавцу</p></section><section id="models"><div class="sechead"><span class="secic">🧩</span><div><h1>Что печатать</h1><p>Модели, лицензии, очередь, AMS</p></div></div><h2 id="models-h0">Как проверять лицензию (30 секунд, делай всегда)</h2>
 <p>На странице любой модели есть блок лицензии. Смотри на него <strong>до</strong> того, как поставил печать.</p>
 <table>
 <thead>
@@ -3283,7 +3296,7 @@ B2B С ДОКУМЕНТАМИ ──────────► ИП (расчё
 </tbody>
 </table>
 <p><strong>Что можно:</strong> делать «в стиле» — свой дракон вместо Беззубика, свой робот вместо Бамблби. Юридически чисто.</p>
-<p><strong>Как проверять лицензию:</strong> подробно в файле <code>СПИСОК-МОДЕЛЕЙ.md</code>. Короткое правило: видите <code>NC</code> — проходите мимо.</p>
+<p><strong>Как проверять лицензию:</strong> подробно в файле <code>docs/СПИСОК-МОДЕЛЕЙ.md</code> (или раздел «Что печатать»). Короткое правило: видите <code>NC</code> — проходите мимо.</p>
 <hr />
 <h2 id="legal-h5">Гарантия и возвраты</h2>
 <p>Возьмите за правило и пропишите в объявлениях:</p>
