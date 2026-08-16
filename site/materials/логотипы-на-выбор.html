@@ -8,7 +8,7 @@
   body{background:#eef1f7}
   .wrap{max-width:1120px;margin:0 auto;padding:22px 18px 80px}
   .hero{display:flex;align-items:center;gap:14px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-radius:18px;padding:22px 24px;margin-bottom:18px}
-  .hero img{width:52px;height:52px;filter:brightness(0) invert(1)}
+  .hero img{width:52px;height:52px;flex:none}
   .hero h1{margin:0;font-size:26px;font-weight:900;letter-spacing:.04em}
   .hero p{margin:4px 0 0;font-size:13px;opacity:.9}
   .note{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.6;color:var(--ink-soft);margin-bottom:18px}
@@ -39,7 +39,7 @@
 </head><body>
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img src="../assets/brand/nozza-mark.svg" alt="">Логотипы NOZZA — выбор</h1>
+    <h1><img src="../assets/brand/nozza-mark-1.svg" alt="">Логотипы NOZZA — выбор</h1>
     <span class="status">Симферополь · 4 варианта</span>
     <a class="btn" href="./index.html">← К материалам</a>
   </div>
@@ -47,7 +47,7 @@
 
 <div class="wrap">
   <div class="hero">
-    <img src="../assets/brand/nozza-mark.svg" alt="">
+    <img src="../assets/brand/nozza-mark-1-white.svg" alt="">
     <div><h1>NOZZA — 4 варианта логотипа</h1><p>ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · Выберите один для аватаров, вывески, ценников и упаковки. Город по умолчанию — Симферополь.</p></div>
   </div>
 
@@ -71,17 +71,17 @@
 
   <div class="note" style="margin-top:16px">
     <b>Внедрение:</b> после выбора замените файлы <code>site/assets/brand/nozza-logo.svg</code> и <code>nozza-mark.svg</code> на выбранный вариант (скачайте и переименуйте), либо оставьте как есть — генераторы уже умеют читать <code>nozza:logo</code> из localStorage и подставляют нужный mark автоматически.
-    <br>Цвета градиента: <code>#4f46e5 → #7c3aed</code>. Шрифт логотипа: <code>Inter 800</code>. Все SVG оптимизированы для 1-цветной печати (белый на цветном фоне).
+    <br>Цвета градиента: <code>#4f46e5 → #7c3aed</code>. Шрифт логотипа: <code>Inter 800</code>. Для тёмных фонов используйте файлы <code>*-white.svg</code> — это отдельная монохромная версия знака (не фильтр), поэтому знак остаётся читаемым, а не превращается в белый квадрат.
   </div>
 </div>
 
 <script>
 'use strict';
 const OPTIONS = [
-  {id:'1', name:'Вариант 1 — Слои', tag:'Дружелюбный · для полки', desc:'Фирменный знак из 4 слоёв печати + капля. Самый узнаваемый, отлично читается в мелком размере (аватар 32px). Был основным.', mark:'../assets/brand/nozza-mark-1.svg', logo:'../assets/brand/nozza-logo-1.svg', best:'Аватар, стикеры, ценники'},
-  {id:'2', name:'Вариант 2 — Сопло', tag:'Техничный · для B2B', desc:'Гексагональное сопло сверху — отсылка к Bambu Lab и инженерной точности. Строгий, для табличек и вывески.', mark:'../assets/brand/nozza-mark-2.svg', logo:'../assets/brand/nozza-logo-2.svg', best:'Вывеска, таблички, постеры'},
-  {id:'3', name:'Вариант 3 — Нить', tag:'Модный · для соцсетей', desc:'Монограмма N из непрерывной нити филамента. Динамичный, молодежный, хорошо смотрится на темном фоне Telegram.', mark:'../assets/brand/nozza-mark-3.svg', logo:'../assets/brand/nozza-logo-3.svg', best:'Telegram, Авито обложка, мерч'},
-  {id:'4', name:'Вариант 4 — Штамп', tag:'Крафтовый · для упаковки', desc:'Круглый штамп с пунктирной внутренней окружностью — ощущение "сделано вручную". Идеален для пломб Ø30 и пакетов.', mark:'../assets/brand/nozza-mark-4.svg', logo:'../assets/brand/nozza-logo-4.svg', best:'Пломбы, бирки, крафт-пакеты'},
+  {id:'1', name:'Вариант 1 — Слои', tag:'Дружелюбный · для полки', desc:'Фирменный знак из 4 слоёв печати + капля. Самый узнаваемый, отлично читается в мелком размере (аватар 32px). Был основным.', mark:'../assets/brand/nozza-mark-1.svg', markWhite:'../assets/brand/nozza-mark-1-white.svg', logo:'../assets/brand/nozza-logo-1.svg', logoWhite:'../assets/brand/nozza-logo-1-white.svg', best:'Аватар, стикеры, ценники'},
+  {id:'2', name:'Вариант 2 — Сопло', tag:'Техничный · для B2B', desc:'Гексагональное сопло сверху — отсылка к Bambu Lab и инженерной точности. Строгий, для табличек и вывески.', mark:'../assets/brand/nozza-mark-2.svg', markWhite:'../assets/brand/nozza-mark-2-white.svg', logo:'../assets/brand/nozza-logo-2.svg', logoWhite:'../assets/brand/nozza-logo-2-white.svg', best:'Вывеска, таблички, постеры'},
+  {id:'3', name:'Вариант 3 — Нить', tag:'Модный · для соцсетей', desc:'Монограмма N из непрерывной нити филамента. Динамичный, молодежный, хорошо смотрится на темном фоне Telegram.', mark:'../assets/brand/nozza-mark-3.svg', markWhite:'../assets/brand/nozza-mark-3-white.svg', logo:'../assets/brand/nozza-logo-3.svg', logoWhite:'../assets/brand/nozza-logo-3-white.svg', best:'Telegram, Авито обложка, мерч'},
+  {id:'4', name:'Вариант 4 — Штамп', tag:'Крафтовый · для упаковки', desc:'Круглый штамп с пунктирной внутренней окружностью — ощущение "сделано вручную". Идеален для пломб Ø30 и пакетов.', mark:'../assets/brand/nozza-mark-4.svg', markWhite:'../assets/brand/nozza-mark-4-white.svg', logo:'../assets/brand/nozza-logo-4.svg', logoWhite:'../assets/brand/nozza-logo-4-white.svg', best:'Пломбы, бирки, крафт-пакеты'},
 ];
 const LS_LOGO='nozza:logo';
 const LS_CONTACT='nozza:contact';
@@ -109,12 +109,13 @@ function cardHtml(opt, selected){
     <div class="desc">${opt.desc}<br><span style="color:#5d6b85">Лучше для: ${opt.best}</span></div>
     <div class="previews">
       <div class="pv"><img src="${opt.mark}" alt=""><div class="txt"><b>Знак 56×56</b>Аватар Telegram/Авито<br>Фон цветной</div><img src="${opt.logo}" alt="" style="width:110px;height:auto;background:transparent;border-radius:0;margin-left:auto"></div>
-      <div class="pv dark"><img src="${opt.mark}" alt="" style="background:transparent"><div class="txt"><b style="color:#fff">На темном</b>Обложка, вывеска<br>Читаемость</div><img src="${opt.logo}" alt="" style="width:110px;height:auto;background:transparent;filter:brightness(0) invert(1);margin-left:auto"></div>
+      <div class="pv dark"><img src="${opt.markWhite}" alt="" style="background:transparent"><div class="txt"><b style="color:#fff">На темном</b>Обложка, вывеска<br>Читаемость</div><img src="${opt.logoWhite}" alt="" style="width:110px;height:auto;background:transparent;margin-left:auto"></div>
       <div class="pv"><div style="width:36px;height:36px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid #e2e6f0;flex:none"><img src="${opt.mark}" style="width:24px;height:24px;border-radius:0;background:transparent"></div><div class="txt"><b>Пломба Ø30</b>Мелкий размер 24px<br>Узнаваемость</div><div style="margin-left:auto;font-size:10px;color:#98a2b8">NOZZA<br>Симферополь</div></div>
     </div>
     <div class="actions">
       <a class="btn" href="${opt.mark}" download>Знак SVG</a>
       <a class="btn" href="${opt.logo}" download>Лого SVG</a>
+      <a class="btn" href="${opt.logoWhite}" download>Лого белый SVG</a>
       <button class="btn" type="button" onclick="navigator.clipboard.writeText('${opt.mark}').then(()=>alert('Путь скопирован: ${opt.mark}'))">Копировать путь</button>
     </div>
   </label>`;
@@ -130,6 +131,8 @@ function render(){
     });
   });
   const cur=OPTIONS.find(o=>o.id===sel)||OPTIONS[0];
+  document.querySelectorAll('.hero img').forEach(img=>{ img.src=cur.markWhite; });
+  document.querySelectorAll('.panel h1 img').forEach(img=>{ img.src=cur.mark; });
   document.getElementById('selName').textContent=cur.name;
   document.getElementById('selDesc').textContent=cur.desc;
   // ensure city default

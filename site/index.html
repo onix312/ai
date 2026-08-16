@@ -859,42 +859,557 @@
 </table>
 <p>Прочность часто эффективнее повышать ориентацией и числом стенок, а не заполнением 100%.</p>
 <h2>3. Выбор материала</h2>
+<blockquote>
+<p>Значения температур, усадки и цен — стартовые ориентиры для P1S с соплом 0,4 мм. Профиль конкретной катушки от производителя всегда важнее общей таблицы: партии и бренды отличаются.</p>
+</blockquote>
+<h3>3.1. Быстрый выбор по задаче</h3>
+<table>
+<thead>
+<tr>
+<th>Задача клиента</th>
+<th>Материал первого выбора</th>
+<th>Запасной вариант</th>
+<th>Почему</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Декор, сувенир, подарок, образец на полку</td>
+<td>PLA / PLA Silk</td>
+<td>PLA Matte</td>
+<td>лучшая детализация и цвет, самая низкая цена</td>
+</tr>
+<tr>
+<td>Органайзер, держатель, крепление в доме</td>
+<td>PETG</td>
+<td>PLA+</td>
+<td>не боится влаги и тепла у окна, вязкий, не колется</td>
+</tr>
+<tr>
+<td>Адресник, брелок, бирка для питомца</td>
+<td>PETG</td>
+<td>PLA+</td>
+<td>контакт с водой, ударная нагрузка, шерсть и грязь</td>
+</tr>
+<tr>
+<td>Ножки, вставки, амортизаторы, чехлы</td>
+<td>TPU 95A</td>
+<td>TPU 85A (мягче)</td>
+<td>упругость и сцепление, не трескается</td>
+</tr>
+<tr>
+<td>Уличная табличка, номер дома, вывеска</td>
+<td>ASA</td>
+<td>ABS (в тени)</td>
+<td>стойкость к УФ и погоде</td>
+</tr>
+<tr>
+<td>Корпус, кронштейн, деталь у мотора</td>
+<td>ABS / ASA</td>
+<td>PETG (до 70 °C)</td>
+<td>теплостойкость 90–100 °C</td>
+</tr>
+<tr>
+<td>Втулка, шестерня, силовой кронштейн</td>
+<td>PAHT-CF (PA-CF)</td>
+<td>PET-CF</td>
+<td>жёсткость, износостойкость, теплостойкость</td>
+</tr>
+<tr>
+<td>Прозрачная деталь, окошко, световод</td>
+<td>PETG прозрачный</td>
+<td>PC прозрачный</td>
+<td>пропускает свет, лучше склеивается</td>
+</tr>
+<tr>
+<td>Растворимая поддержка под нависания</td>
+<td>PVA (в воде)</td>
+<td>HIPS (в лимонене, с ABS)</td>
+<td>чистая внутренняя геометрия</td>
+</tr>
+</tbody>
+</table>
+<h3>3.2. Основные материалы: режимы печати</h3>
 <table>
 <thead>
 <tr>
 <th>Материал</th>
-<th>Подходит</th>
-<th>Ограничения</th>
+<th style="text-align: right;">Сопло, °C</th>
+<th style="text-align: right;">Стол, °C</th>
+<th>Камера</th>
+<th>Обдув</th>
+<th>Скорость</th>
+<th style="text-align: right;">Усадка</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>PLA</td>
-<td>декор, сухой интерьер, образцы</td>
-<td>размягчается от нагрева, хрупкость</td>
+<td style="text-align: right;">200–230</td>
+<td style="text-align: right;">45–60</td>
+<td>открыто/дверь приоткрыта</td>
+<td>100%</td>
+<td>высокая</td>
+<td style="text-align: right;">0,2–0,3%</td>
+</tr>
+<tr>
+<td>PLA+ (Tough)</td>
+<td style="text-align: right;">210–235</td>
+<td style="text-align: right;">50–60</td>
+<td>открыто</td>
+<td>80–100%</td>
+<td>высокая</td>
+<td style="text-align: right;">0,2–0,3%</td>
+</tr>
+<tr>
+<td>PLA Silk</td>
+<td style="text-align: right;">215–240</td>
+<td style="text-align: right;">50–60</td>
+<td>открыто</td>
+<td>60–100%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,2–0,3%</td>
+</tr>
+<tr>
+<td>PLA Matte</td>
+<td style="text-align: right;">200–230</td>
+<td style="text-align: right;">45–60</td>
+<td>открыто</td>
+<td>100%</td>
+<td>высокая</td>
+<td style="text-align: right;">0,2–0,3%</td>
 </tr>
 <tr>
 <td>PETG</td>
-<td>влажность, функциональные держатели</td>
-<td>нити, сложнее мосты и мелкий текст</td>
+<td style="text-align: right;">230–260</td>
+<td style="text-align: right;">70–85</td>
+<td>закрыто</td>
+<td>30–60%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,4–0,6%</td>
 </tr>
 <tr>
-<td>TPU</td>
-<td>мягкие вставки, ножки, фиксаторы</td>
-<td>AMS обычно не используют; печатать медленнее</td>
-</tr>
-<tr>
-<td>ASA</td>
-<td>улица и солнце</td>
-<td>вентиляция, запах, усадка</td>
+<td>TPU 95A</td>
+<td style="text-align: right;">220–245</td>
+<td style="text-align: right;">35–50</td>
+<td>закрыто</td>
+<td>30–60%</td>
+<td>низкая (20–40 мм/с)</td>
+<td style="text-align: right;">0,5–1,0%</td>
 </tr>
 <tr>
 <td>ABS</td>
-<td>функциональные детали в корпусе</td>
-<td>вентиляция и контроль усадки</td>
+<td style="text-align: right;">250–270</td>
+<td style="text-align: right;">90–100</td>
+<td>закрыто, прогретая</td>
+<td>0–20%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,7–0,9%</td>
+</tr>
+<tr>
+<td>ASA</td>
+<td style="text-align: right;">250–280</td>
+<td style="text-align: right;">90–105</td>
+<td>закрыто, прогретая</td>
+<td>0–20%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,7–0,9%</td>
+</tr>
+<tr>
+<td>PC (поликарбонат)</td>
+<td style="text-align: right;">260–290</td>
+<td style="text-align: right;">90–110</td>
+<td>закрыто, прогретая</td>
+<td>0–10%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,6–0,8%</td>
+</tr>
+<tr>
+<td>PAHT-CF (нейлон + углеволокно)</td>
+<td style="text-align: right;">280–300</td>
+<td style="text-align: right;">90–100</td>
+<td>закрыто, прогретая</td>
+<td>0–20%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,3–0,6%</td>
+</tr>
+<tr>
+<td>PET-CF</td>
+<td style="text-align: right;">270–300</td>
+<td style="text-align: right;">80–100</td>
+<td>закрыто</td>
+<td>20–40%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,2–0,4%</td>
+</tr>
+<tr>
+<td>PLA-CF</td>
+<td style="text-align: right;">210–240</td>
+<td style="text-align: right;">45–60</td>
+<td>открыто</td>
+<td>80–100%</td>
+<td>высокая</td>
+<td style="text-align: right;">0,1–0,2%</td>
+</tr>
+<tr>
+<td>HIPS (поддержка)</td>
+<td style="text-align: right;">230–250</td>
+<td style="text-align: right;">90–100</td>
+<td>закрыто</td>
+<td>0–30%</td>
+<td>средняя</td>
+<td style="text-align: right;">0,6–0,8%</td>
+</tr>
+<tr>
+<td>PVA (поддержка)</td>
+<td style="text-align: right;">195–225</td>
+<td style="text-align: right;">45–60</td>
+<td>закрыто</td>
+<td>40–100%</td>
+<td>низкая</td>
+<td style="text-align: right;">—</td>
 </tr>
 </tbody>
 </table>
+<p>Обдув в таблице — для основного тела детали. Первый слой почти всегда печатается без обдува и медленнее.</p>
+<h3>3.3. Основные материалы: свойства и эксплуатация</h3>
+<table>
+<thead>
+<tr>
+<th>Материал</th>
+<th>Теплостойкость</th>
+<th>Прочность</th>
+<th>Гибкость / хрупкость</th>
+<th>Влага</th>
+<th>УФ и улица</th>
+<th>Запах и вентиляция</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PLA</td>
+<td>до 55–60 °C</td>
+<td>высокая на изгиб, но статичная</td>
+<td>хрупкий, колется</td>
+<td>впитывает медленно, разрушается в воде и на солнце</td>
+<td>нет, желтеет и трескается</td>
+<td>почти нет</td>
+</tr>
+<tr>
+<td>PLA+</td>
+<td>до 60 °C</td>
+<td>выше обычного PLA</td>
+<td>заметно вязче</td>
+<td>как PLA</td>
+<td>нет</td>
+<td>почти нет</td>
+</tr>
+<tr>
+<td>PLA Silk</td>
+<td>до 55 °C</td>
+<td>ниже обычного PLA</td>
+<td>хрупкий, слоится</td>
+<td>как PLA</td>
+<td>нет</td>
+<td>почти нет</td>
+</tr>
+<tr>
+<td>PLA Matte</td>
+<td>до 55–60 °C</td>
+<td>как PLA</td>
+<td>как PLA</td>
+<td>как PLA</td>
+<td>нет</td>
+<td>почти нет</td>
+</tr>
+<tr>
+<td>PETG</td>
+<td>до 70–75 °C</td>
+<td>высокая, ударопрочный</td>
+<td>вязкий, гнётся, не колется</td>
+<td>стоек, но сам гигроскопичен при хранении</td>
+<td>ограниченно, мутнеет за сезон</td>
+<td>слабый</td>
+</tr>
+<tr>
+<td>TPU 95A</td>
+<td>до 70–80 °C</td>
+<td>не ломается, тянется</td>
+<td>резиноподобный, до 400–500%</td>
+<td>стоек</td>
+<td>средне</td>
+<td>слабый</td>
+</tr>
+<tr>
+<td>ABS</td>
+<td>90–100 °C</td>
+<td>высокая</td>
+<td>вязкий</td>
+<td>стоек</td>
+<td>нет, желтеет и мелит</td>
+<td>сильный, нужна вытяжка</td>
+</tr>
+<tr>
+<td>ASA</td>
+<td>95–105 °C</td>
+<td>высокая</td>
+<td>вязкий</td>
+<td>стоек</td>
+<td>да, лучший бытовой выбор</td>
+<td>сильный, нужна вытяжка</td>
+</tr>
+<tr>
+<td>PC</td>
+<td>110–135 °C</td>
+<td>самая высокая ударная</td>
+<td>вязкий, но склонен к расслоению</td>
+<td>очень гигроскопичен</td>
+<td>средне (есть УФ-марки)</td>
+<td>заметный</td>
+</tr>
+<tr>
+<td>PAHT-CF</td>
+<td>120–150 °C</td>
+<td>очень высокая, износостойкий</td>
+<td>жёсткий</td>
+<td>крайне гигроскопичен, обязательна сушка</td>
+<td>средне</td>
+<td>заметный</td>
+</tr>
+<tr>
+<td>PET-CF</td>
+<td>90–110 °C</td>
+<td>очень высокая жёсткость</td>
+<td>жёсткий, хрупче PETG</td>
+<td>гигроскопичен</td>
+<td>средне</td>
+<td>слабый</td>
+</tr>
+<tr>
+<td>PLA-CF</td>
+<td>до 60 °C</td>
+<td>жёсткий, не гнётся</td>
+<td>хрупкий</td>
+<td>как PLA</td>
+<td>нет</td>
+<td>почти нет</td>
+</tr>
+<tr>
+<td>HIPS</td>
+<td>85–95 °C</td>
+<td>средняя</td>
+<td>вязкий</td>
+<td>стоек</td>
+<td>нет</td>
+<td>заметный</td>
+</tr>
+<tr>
+<td>PVA</td>
+<td>—</td>
+<td>низкая</td>
+<td>ломкий в сухом виде</td>
+<td>растворяется в воде</td>
+<td>нет</td>
+<td>слабый</td>
+</tr>
+</tbody>
+</table>
+<h3>3.4. Сушка, хранение и адгезия к столу</h3>
+<table>
+<thead>
+<tr>
+<th>Материал</th>
+<th>Сушка</th>
+<th>Хранение</th>
+<th>Стол и адгезия</th>
+<th>Абразивность</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PLA и его виды</td>
+<td>45–55 °C, 4–6 ч</td>
+<td>пакет с силикагелем</td>
+<td>текстурированный PEI, без клея</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>PLA-CF</td>
+<td>55 °C, 6 ч</td>
+<td>герметично</td>
+<td>текстурированный PEI</td>
+<td>да, закалённое сопло</td>
+</tr>
+<tr>
+<td>PETG</td>
+<td>60–65 °C, 6–8 ч</td>
+<td>пакет с силикагелем</td>
+<td>текстурированный PEI, тонкий слой клея-карандаша как разделитель</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>TPU</td>
+<td>60–70 °C, 8–12 ч</td>
+<td>герметично, обязательно</td>
+<td>текстурированный PEI, печать напрямую из сухой коробки</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>ABS / ASA</td>
+<td>70–80 °C, 4–6 ч</td>
+<td>пакет с силикагелем</td>
+<td>клей-карандаш, юбка/кайма, закрытая камера</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>PC</td>
+<td>80 °C, 8–12 ч</td>
+<td>герметично, обязательно</td>
+<td>клей, кайма, высокая температура стола</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>PAHT-CF / PA</td>
+<td>80–90 °C, 8–12 ч</td>
+<td>герметично, печать из сушилки</td>
+<td>клей, кайма</td>
+<td>да, закалённое сопло</td>
+</tr>
+<tr>
+<td>PET-CF</td>
+<td>70–80 °C, 8 ч</td>
+<td>герметично</td>
+<td>клей, кайма</td>
+<td>да, закалённое сопло</td>
+</tr>
+<tr>
+<td>HIPS</td>
+<td>60–65 °C, 4 ч</td>
+<td>пакет с силикагелем</td>
+<td>клей, закрытая камера</td>
+<td>нет</td>
+</tr>
+<tr>
+<td>PVA</td>
+<td>45 °C, 6–10 ч</td>
+<td>герметично, обязательно</td>
+<td>вместе с основным материалом</td>
+<td>нет</td>
+</tr>
+</tbody>
+</table>
+<p>Признаки сырого пластика: треск и пар при экструзии, пузыри и рябь на поверхности, ломкая нить, слабое сцепление слоёв. Одна сушка обычно возвращает материал в работу.</p>
+<h3>3.5. Цена, расход и применение в NOZZA</h3>
+<table>
+<thead>
+<tr>
+<th>Материал</th>
+<th style="text-align: right;">Ориентир цены, ₽/кг</th>
+<th style="text-align: right;">Плотность, г/см³</th>
+<th>Типовые изделия NOZZA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PLA</td>
+<td style="text-align: right;">1200–1900</td>
+<td style="text-align: right;">1,24</td>
+<td>образцы, декор, топперы, подставки, витринные таблички</td>
+</tr>
+<tr>
+<td>PLA+</td>
+<td style="text-align: right;">1500–2200</td>
+<td style="text-align: right;">1,24</td>
+<td>брелоки, органайзеры для сухих помещений</td>
+</tr>
+<tr>
+<td>PLA Silk</td>
+<td style="text-align: right;">1700–2500</td>
+<td style="text-align: right;">1,24</td>
+<td>подарочные изделия, витрина, фотосъёмка</td>
+</tr>
+<tr>
+<td>PLA Matte</td>
+<td style="text-align: right;">1600–2300</td>
+<td style="text-align: right;">1,24</td>
+<td>ценники, номерки, таблички без бликов</td>
+</tr>
+<tr>
+<td>PETG</td>
+<td style="text-align: right;">1500–2300</td>
+<td style="text-align: right;">1,27</td>
+<td>адресники, держатели, крепления, кухня, ванная</td>
+</tr>
+<tr>
+<td>TPU 95A</td>
+<td style="text-align: right;">2500–4000</td>
+<td style="text-align: right;">1,21</td>
+<td>ножки, прокладки, вставки, фиксаторы</td>
+</tr>
+<tr>
+<td>ABS</td>
+<td style="text-align: right;">1500–2200</td>
+<td style="text-align: right;">1,04</td>
+<td>корпуса, оснастка, детали в помещении</td>
+</tr>
+<tr>
+<td>ASA</td>
+<td style="text-align: right;">1800–2600</td>
+<td style="text-align: right;">1,07</td>
+<td>уличные таблички, номера домов, вывески</td>
+</tr>
+<tr>
+<td>PC</td>
+<td style="text-align: right;">3000–5000</td>
+<td style="text-align: right;">1,20</td>
+<td>прозрачные и теплонагруженные детали</td>
+</tr>
+<tr>
+<td>PAHT-CF</td>
+<td style="text-align: right;">6000–9000</td>
+<td style="text-align: right;">1,10</td>
+<td>втулки, шестерни, силовые кронштейны</td>
+</tr>
+<tr>
+<td>PET-CF</td>
+<td style="text-align: right;">4500–7000</td>
+<td style="text-align: right;">1,30</td>
+<td>жёсткие кронштейны, оснастка</td>
+</tr>
+<tr>
+<td>PLA-CF</td>
+<td style="text-align: right;">2500–4000</td>
+<td style="text-align: right;">1,22</td>
+<td>жёсткий декор и корпуса без нагрева</td>
+</tr>
+<tr>
+<td>HIPS</td>
+<td style="text-align: right;">1800–2600</td>
+<td style="text-align: right;">1,04</td>
+<td>растворимая поддержка для ABS</td>
+</tr>
+<tr>
+<td>PVA</td>
+<td style="text-align: right;">4000–7000</td>
+<td style="text-align: right;">1,23</td>
+<td>растворимая поддержка для PLA и PETG</td>
+</tr>
+</tbody>
+</table>
+<p>Цены — ориентир на 2026 год для розницы РФ; в калькуляторе используется фактическая закупочная стоимость катушки из раздела «Склад пластика».</p>
+<h3>3.6. Практические правила</h3>
+<ul>
+<li>Начинать с PLA и PETG: две катушки закрывают более 80% заказов витрины и локального B2B.</li>
+<li>Улица и солнце — только ASA. PLA на улице теряет вид за один сезон, PETG мутнеет и становится хрупким.</li>
+<li>Автомобиль летом — не PLA и не PETG: в салоне бывает выше 70 °C.</li>
+<li>TPU печатать напрямую, без AMS и без обратных подач: мягкая нить заминается в буфере и трубке.</li>
+<li>ABS, ASA и PC — только при закрытой двери и с проветриванием помещения после печати.</li>
+<li>Абразивные наполненные материалы (CF, GF, светящиеся и металлизированные) требуют закалённого сопла; обычная латунь стачивается за несколько катушек.</li>
+<li>Наполненные углеволокном материалы жёстче, но не «прочнее во всём»: ударная вязкость у них ниже, чем у PETG или PA без наполнителя.</li>
+<li>Смешивать материалы в одной печати через AMS можно только при близких температурах: PLA + PVA, ABS + HIPS, PETG + PETG.</li>
+<li>Заявлять пищевую, медицинскую или детскую безопасность нельзя ни для одного из этих материалов: FDM-деталь пористая, а краситель и сопло не сертифицированы.</li>
+<li>В карточке заказа фиксировать материал и цвет: повтор через полгода без этой записи почти невозможно.</li>
+</ul>
 <p>Абразивные наполненные материалы требуют совместимого закалённого тракта. Проверяйте актуальные рекомендации Bambu Lab для конкретного сопла и экструдера.</p>
 <h2>4. Ориентация и нагрузка</h2>
 <p>FDM-деталь слабее между слоями. Перед печатью определите направление усилия и поверните модель так, чтобы нагрузка шла вдоль слоёв. Для настенных изделий тестируйте:</p>
@@ -1702,7 +2217,7 @@
    <label class="field span-2"><span>Мессенджер / контакт</span><input id="of_messenger" placeholder="@telegram, WhatsApp"></label>
   </div><datalist id="customers_datalist"></datalist></div>
   <div class="form-section"><h3>Производство</h3><div class="form-grid">
-   <label class="field"><span>Материал</span><input id="of_material" placeholder="PLA, PETG, TPU"></label>
+   <label class="field"><span>Материал</span><input id="of_material" placeholder="PLA, PETG, TPU" list="materials_datalist"></label>
    <label class="field"><span>Цвет</span><input id="of_color" placeholder="Чёрный + золотой"></label>
    <label class="field"><span>Пластик, г</span><input id="of_grams" type="number" min="0" step="any"></label>
    <label class="field"><span>Печать, ч</span><input id="of_hours" type="number" min="0" step="any"></label>
@@ -1804,7 +2319,7 @@
   <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>
   <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
   <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
- </div><datalist id="materials_datalist"><option>PLA</option><option>PLA Silk</option><option>PETG</option><option>ABS</option><option>ASA</option><option>TPU</option><option>PA-CF</option></datalist></div>
+ </div><datalist id="materials_datalist"><option>PLA</option><option>PLA+</option><option>PLA Silk</option><option>PLA Matte</option><option>PLA-CF</option><option>PETG</option><option>PETG-CF</option><option>TPU 95A</option><option>TPU 85A</option><option>ABS</option><option>ASA</option><option>PC</option><option>PAHT-CF</option><option>PET-CF</option><option>HIPS</option><option>PVA</option></datalist></div>
  <div class="modal-foot"><button class="btn danger" type="button" id="spool_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="spool_modal">Отмена</button><button class="btn primary" type="button" id="spool_save">Сохранить</button></div>
 </form></dialog>
 
@@ -1813,7 +2328,7 @@
  <div class="modal-body"><div class="form-grid">
   <label class="field span-2"><span>Название</span><input id="cf_name"></label>
   <label class="field"><span>Ниша</span><select id="cf_niche_id"></select></label>
-  <label class="field"><span>Материал</span><input id="cf_material" value="PLA"></label>
+  <label class="field"><span>Материал</span><input id="cf_material" value="PLA" list="materials_datalist"></label>
   <label class="field"><span>Вес, г</span><input id="cf_grams" type="number" min="0" step="any"></label>
   <label class="field"><span>Часы</span><input id="cf_hours" type="number" min="0" step="any"></label>
   <label class="field"><span>Влезает на стол, шт</span><input id="cf_fit_per_plate" type="number" min="1" step="1" value="1"></label>

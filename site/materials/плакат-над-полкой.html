@@ -9,17 +9,21 @@
            color:#12203c; background:
            radial-gradient(circle at 88% 6%, #e8eefc 0 42%, transparent 42%),
            radial-gradient(circle at 6% 96%, #eaf6ee 0 30%, transparent 30%), #fff; }
+  .brandrow { display:flex; align-items:center; gap:4mm; margin-bottom:2mm; }
+  .brandrow img { width:15mm; height:15mm; flex:none; }
+  .brandrow .bname { font-size:20pt; font-weight:900; letter-spacing:3px; color:#1f3864; line-height:1; }
+  .brandrow .btag { font-size:8.5pt; letter-spacing:2px; text-transform:uppercase; color:#5a6a8a; margin-top:1.5mm; }
   .kicker { font-size:13pt; letter-spacing:5px; text-transform:uppercase; color:#5a6a8a; font-weight:700; }
-  h1 { font-size:47pt; line-height:.97; font-weight:900; letter-spacing:-2px; margin:5mm 0 3mm; }
+  h1 { font-size:45pt; line-height:.97; font-weight:900; letter-spacing:-2px; margin:4mm 0 3mm; }
   h1 .accent { color:#1f3864; display:block; }
   .lead { font-size:14.5pt; color:#42506e; line-height:1.4; max-width:150mm; }
-  .rule { height:5px; width:52mm; background:#1f3864; border-radius:3px; margin:6mm 0; }
+  .rule { height:5px; width:52mm; background:#1f3864; border-radius:3px; margin:5mm 0; }
   .cards { display:flex; gap:4mm; margin-top:2mm; }
   .card { flex:1; border:2px solid #dbe3f2; border-radius:11px; padding:5mm 4mm; text-align:center; }
   .card .ico { font-size:26pt; line-height:1; }
   .card .t { font-size:11.5pt; font-weight:800; margin-top:2.5mm; }
   .card .d { font-size:9pt; color:#5d6b85; margin-top:1.5mm; line-height:1.3; }
-  .band { margin-top:7mm; background:#1f3864; color:#fff; border-radius:12px; padding:6mm 7mm; }
+  .band { margin-top:6mm; background:#1f3864; color:#fff; border-radius:12px; padding:6mm 7mm; }
   .band h2 { font-size:17pt; font-weight:800; margin-bottom:3mm; }
   .band ul { list-style:none; font-size:12pt; line-height:1.75; }
   .band li::before { content:"→ "; opacity:.65; }
@@ -31,16 +35,38 @@
           border-top:2px dashed #c9d3e8; padding-top:5mm; }
   .qr { width:33mm; height:33mm; border:2px solid #1f3864; border-radius:8px;
         display:flex; align-items:center; justify-content:center; text-align:center;
-        font-size:7.5pt; color:#7d89a2; padding:3mm; line-height:1.3; }
+        font-size:7.5pt; color:#7d89a2; padding:3mm; line-height:1.3; overflow:hidden; }
+  .qr svg { width:100%; height:100%; display:block; }
   .foot .txt { flex:1; }
   .foot .big { font-size:15pt; font-weight:900; }
   .foot .sm { font-size:10.5pt; color:#4a5876; margin-top:1.5mm; line-height:1.45; }
 </style></head>
 <body><div class="sheet">
+<div class="brandrow"><img src="../assets/brand/nozza-mark-1.svg" alt="NOZZA"><div><div class="bname">NOZZA</div><div class="btag">Там, где рождается форма · Симферополь</div></div></div>
 <div class="kicker">Локальное производство</div><h1>Полезные вещи<span class="accent">точно под вашу задачу</span></h1><div class="lead">Покажите фото и размеры — подготовим расчёт, макет и срок.</div><div class="rule"></div>
 <div class="cards"><div class="card"><div class="ico">🐾</div><div class="t">Питомцы</div><div class="d">Адресники, именные таблички, организация зоны ухода</div></div><div class="card"><div class="ico">🏠</div><div class="t">Для дома</div><div class="d">Органайзеры, держатели и крепления по размерам</div></div><div class="card"><div class="ico">🏪</div><div class="t">Для бизнеса</div><div class="d">QR-стойки, ценники, номерки и оснастка</div></div></div>
 <div class="band"><h2>Как заказать</h2><ul><li>Сфотографируйте место или принесите образец</li><li>Укажите точные размеры и назначение</li><li>Выберите количество, цвет и нужную дату</li><li>Получите расчёт и согласуйте макет до печати</li></ul></div>
 <div class="prices"><div class="p"><div class="n">1 день</div><div class="l">ответ на<br>понятный бриф</div></div><div class="p"><div class="n">1 штука</div><div class="l">можно начать<br>с образца</div></div><div class="p"><div class="n">свой размер</div><div class="l">не только<br>типовой товар</div></div><div class="p"><div class="n">точная цена</div><div class="l">после фото<br>и размеров</div></div></div>
-<div class="foot"><div class="qr">ВСТАВЬТЕ<br>СЮДА<br>QR-КОД</div><div class="txt"><div class="big">Спросите на кассе</div><div class="sm">Покажем образцы и примем данные для расчёта.<br>Новинки и готовые заказы — в Telegram.</div></div></div>
-</div></body>
+<div class="foot"><div class="qr" id="qr">ВСТАВЬТЕ<br>СЮДА<br>QR-КОД</div><div class="txt"><div class="big">Спросите на кассе</div><div class="sm">Покажем образцы и примем данные для расчёта.<br>Новинки и готовые заказы — в Telegram.</div></div></div>
+</div>
+<script src="../assets/qr.js"></script>
+<script>
+// QR и знак берём из общих настроек генераторов (localStorage), плейсхолдер заменяем живым кодом.
+(function(){
+  var c={}; try{ c=JSON.parse(localStorage.getItem('nozza:contact')||'{}'); }catch(e){}
+  var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
+  var mark=document.querySelector('.brandrow img');
+  if(mark) mark.src='../assets/brand/nozza-mark-'+id+'.svg';
+  var city=c.city||'Симферополь';
+  var tagEl=document.querySelector('.brandrow .btag');
+  if(tagEl) tagEl.textContent='Там, где рождается форма · '+city;
+  var link=c.site||'https://nozza.ru';
+  var box=document.getElementById('qr');
+  if(box && window.QR){
+    var svg=QR.svg(link,{ecl:'M',margin:1});
+    if(svg){ box.innerHTML=svg; box.style.padding='2mm'; }
+  }
+})();
+</script>
+</body>
 </html>
