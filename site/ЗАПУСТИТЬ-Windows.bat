@@ -1,21 +1,54 @@
 @echo off
 chcp 65001 >nul
-title 3D-pechat - rukovodstvo
+setlocal
+title PrintFlow - Bambu Lab Connector
+cd /d "%~dp0.."
+
 echo.
-echo  ================================================
-echo   3D-PECHAT: RUKOVODSTVO I KALKULYATORY
-echo  ================================================
+echo  ==================================================
+echo   PrintFlow: управление 3D-производством
+echo   Bambu Lab P1S + AMS - локальное подключение
+echo  ==================================================
 echo.
-echo  Otkryvaem sayt v brauzere...
-echo.
-echo  NE ZAKRYVAYTE ETO OKNO poka polzuetes saytom.
-echo  Chtoby zakryt - nazhmite Ctrl+C ili prosto zakroyte okno.
-echo.
-start "" http://localhost:8080
-python -m http.server 8080 2>nul || py -m http.server 8080 2>nul || (
-  echo.
-  echo  ОШИБКА: ne nayden Python.
-  echo  Prosto otkroyte fayl index.html dvoynym klikom - sayt rabotaet i tak.
+
+set "PYTHON_CMD="
+where py >nul 2>nul && set "PYTHON_CMD=py -3"
+if not defined PYTHON_CMD (where python >nul 2>nul && set "PYTHON_CMD=python")
+if not defined PYTHON_CMD (
+  echo  ОШИБКА: Python 3 не найден.
+  echo  Установите Python с https://python.org/downloads/
+  echo  При установке включите галочку "Add Python to PATH".
   echo.
   pause
+  exit /b 1
 )
+
+set "PF_HOME=%LOCALAPPDATA%\PrintFlow"
+set "PF_VENV=%PF_HOME%\venv"
+if not exist "%PF_HOME%" mkdir "%PF_HOME%"
+if not exist "%PF_VENV%\Scripts\python.exe" (
+  echo  Первый запуск: создаём локальное окружение...
+  %PYTHON_CMD% -m venv "%PF_VENV%"
+  if errorlevel 1 goto :error
+)
+
+echo  Проверяем компонент связи с принтером...
+"%PF_VENV%\Scripts\python.exe" -m pip install --disable-pip-version-check -q -r "connector\requirements.txt"
+if errorlevel 1 goto :error
+
+echo.
+echo  Сайт: http://localhost:8080
+echo  Данные: %APPDATA%\PrintFlow
+echo  Не закрывайте это окно, пока используете интеграцию.
+echo  Для остановки нажмите Ctrl+C.
+echo.
+"%PF_VENV%\Scripts\python.exe" "connector\printflow_connector.py"
+exit /b 0
+
+:error
+echo.
+echo  Не удалось подготовить PrintFlow Connector.
+echo  Проверьте интернет для первого запуска и повторите попытку.
+echo.
+pause
+exit /b 1
