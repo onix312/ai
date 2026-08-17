@@ -409,6 +409,16 @@ class BambuPrinter:
             for tray in unit.get("tray", []) or []:
                 color = str(tray.get("tray_color") or "").strip()
                 global_id = f"{unit.get('id', 0)}{tray.get('id', 0)}"
+                # Остаток катушки: на большинстве прошивок 0–100, но на части
+                # приходит в десятых долях процента (0–1000). Нормализуем, иначе
+                # в интерфейсе «1000%», а предупреждение о низком остатке не сработает.
+                remain = None
+                if tray.get("remain") is not None:
+                    raw = as_num(tray.get("remain"), -1)
+                    if raw >= 0:
+                        if raw > 100:
+                            raw = raw / 10.0
+                        remain = round(max(0.0, min(100.0, raw)), 1)
                 trays.append({
                     "id": global_id,
                     "unit": int(as_num(unit.get("id"))),
@@ -416,7 +426,7 @@ class BambuPrinter:
                     "label": f"AMS {int(as_num(unit.get('id'))) + 1} · слот {int(as_num(tray.get('id'))) + 1}",
                     "type": tray.get("tray_type") or tray.get("tray_sub_brands") or "",
                     "color": "#" + color[:6] if len(color) >= 6 else "#cbd5e1",
-                    "remain": tray.get("remain"),
+                    "remain": remain,
                     "uuid": tray.get("tray_uuid", ""),
                     "nozzle_min": tray.get("nozzle_temp_min"),
                     "nozzle_max": tray.get("nozzle_temp_max"),

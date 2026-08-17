@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta
 
 from .accounting import num
 from .config import now_iso
@@ -56,6 +57,16 @@ def _hm(minutes: float) -> str:
 
 def _money(value: float) -> str:
     return f"{round(num(value)):,}".replace(",", " ") + " ₽"
+
+
+def _keyboard(*rows: list[tuple[str, str]]) -> dict:
+    """Inline-клавиатура: [[(текст, callback_data)], ...]."""
+    return {
+        "inline_keyboard": [
+            [{"text": text, "callback_data": data} for text, data in row]
+            for row in rows
+        ]
+    }
 
 
 class TelegramBot:
@@ -104,16 +115,53 @@ class TelegramBot:
             try:
                 result = self._call("getUpdates", {
                     "offset": self._offset, "timeout": 25,
-                    "allowed_updates": json.dumps(["message"]),
+                    "allowed_updates": json.dumps(["message", "callback_query"]),
                 })
                 for update in (result.get("result") or []):
                     self._offset = max(self._offset, num(update.get("update_id")) + 1)
                     self._handle(update, str(settings.get("telegram_chat_id")))
+                self._maybe_digest(settings)
+                self._maybe_weekly(settings)
             except Exception:
                 self._stop.wait(10)
 
+    # ------------------------------------------------- расписания рассылок
+    def _maybe_digest(self, settings: dict) -> None:
+        """Утренний дайджест в digest_time, раз в сутки."""
+        digest_time = str(settings.get("digest_time") or "09:00")
+        now = datetime.now()
+        if now.strftime("%H:%M") != digest_time:
+            return
+        last = str(settings.get("digest_last") or "")
+        today = now.strftime("%Y-%m-%d")
+        if last == today:
+            return
+        self.db.set_settings({"digest_last": today})
+        chat = str(settings.get("telegram_chat_id") or "")
+        if chat:
+            self.manager.notify_async(self.text_digest())
+
+    def _maybe_weekly(self, settings: dict) -> None:
+        """Еженедельный отчёт: день недели (1=пн) и время."""
+        day = int(num(settings.get("weekly_report_day", 1), 1))
+        at = str(settings.get("weekly_report_time") or "20:00")
+        now = datetime.now()
+        if now.isoweekday() != day or now.strftime("%H:%M") != at:
+            return
+        key = f"{now.isocalendar().year}-W{now.isocalendar().week}"
+        if str(settings.get("weekly_last") or "") == key:
+            return
+        self.db.set_settings({"weekly_last": key})
+        chat = str(settings.get("telegram_chat_id") or "")
+        if chat:
+            self.manager.notify_async(self.text_weekly())
+
     # -------------------------------------------------------------- разбор
     def _handle(self, update: dict, owner: str) -> None:
+        # Кнопки управления: «пауза», «продолжить», «свет», «стоп», «кадр»
+        callback = update.get("callback_query") or {}
+        if callback:
+            return self._handle_callback(callback, owner)
         message = update.get("message") or {}
         chat = str((message.get("chat") or {}).get("id", ""))
         text = (message.get("text") or "").strip()
@@ -129,6 +177,49 @@ class TelegramBot:
             self._dispatch(chat, text)
         except Exception as exc:
             self._reply(chat, f"Не получилось: {exc}")
+
+    def _handle_callback(self, callback: dict, owner: str) -> None:
+        """Нажатие inline-кнопки. Отвечаем владельцу, чужому — отказ."""
+        message = callback.get("message") or {}
+        chat = str((message.get("chat") or {}).get("id", ""))
+        data = str(callback.get("data") or "")
+        callback_id = str(callback.get("id") or "")
+        if not chat or not data:
+            return
+        if chat != owner:
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id,
+                                                "text": "Этот бот приватный."})
+            return
+        command = data.replace("cmd:", "", 1)
+        text = self._run_command(command, chat)
+        self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+        try:
+            self._call("editMessageText", {"chat_id": chat,
+                                            "message_id": str(message.get("message_id")),
+                                            "text": text[:3800],
+                                            "reply_markup": json.dumps(_keyboard(
+                                                [("❙❙ Пауза", "cmd:pause"), ("▶ Продолжить", "cmd:resume")],
+                                                [("☀ Свет", "cmd:light"), ("◉ Кадр", "cmd:frame")],
+                                                [("■ Стоп", "cmd:stop")]))})
+        except Exception:
+            self._reply(chat, text)
+
+    def _run_command(self, command: str, chat: str = "") -> str:
+        """Выполнить команду управления и вернуть текст ответа."""
+        if command == "pause":
+            return self.do_command("pause", "Печать поставлена на паузу")
+        if command == "resume":
+            return self.do_command("resume", "Печать продолжена")
+        if command == "light":
+            return self.do_command("light", "Подсветка переключена")
+        if command == "stop":
+            return self.do_stop(chat or "", "стоп" if chat else "стоп да")
+        if command == "frame" or command == "кадр":
+            if chat:
+                self.send_frame(chat)
+                return "Кадр отправлен."
+            return "Кадр недоступен"
+        return "Не понял команду."
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е").strip()
@@ -154,9 +245,35 @@ class TelegramBot:
             return self._reply(chat, self.do_command("light", "Подсветка переключена"))
         if word in ("стоп", "stop"):
             return self._reply(chat, self.do_stop(chat, text))
+        if word in ("готов", "ready", "выдан"):
+            return self._reply(chat, self.order_ready(text))
         self._reply(chat, "Не понял команду. Напишите «помощь» — покажу список.")
 
     # -------------------------------------------------------------- ответы
+    def order_ready(self, raw: str) -> str:
+        """«готов 1001» — перевести заказ в статус ready и дать шаблон клиенту."""
+        words = raw.lower().replace("ё", "е").split()
+        number = next((w for w in words[1:] if w.isdigit()), "")
+        if not number:
+            return ("Укажите номер заказа: «готов 1001».\n"
+                    "Заказ перейдёт в статус «Готов», я пришлю текст для клиента.")
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return f"Заказ №{number} не найден."
+        ready = self.db.one("SELECT id FROM statuses WHERE id='ready'")
+        if ready and order.get("status") != "ready":
+            self.db.execute("UPDATE orders SET status='ready', updated_at=? WHERE id=?",
+                            (now_iso(), order["id"]))
+            self.db.add_event("order", "Заказ готов (Telegram)",
+                              f"№{order.get('number')} · {order.get('product')}",
+                              data={"order_id": order["id"]})
+        name = (order.get("customer_name") or "").strip()
+        hello = f", {name}," if name else ","
+        return (f"Заказ №{order.get('number')} готов ✓\n\nШаблон для клиента:\n"
+                f"Здравствуйте{hello} ваш заказ «{order.get('product') or ''}» готов.\n"
+                f"Можно забрать {order.get('due') or 'в удобное время'}. Спасибо!")
+        """Отправить сообщение в канал клиента PrintFlow не может — это шаблон для копирования."""
+
     def text_status(self) -> str:
         state = self.manager.snapshot()
         printers = state.get("printers") or []
@@ -244,6 +361,73 @@ class TelegramBot:
             f"Напечатано заданий: {int(num(job.get('n')))}, пластика {round(num(job.get('g')))} г, "
             f"время печати {_hm(num(job.get('m')))}",
         ]
+        return "\n".join(lines)
+
+    def text_digest(self) -> str:
+        """Утренний дайджест: дедлайны, очередь, остатки, кому написать."""
+        today = now_iso()[:10]
+        finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        orders = self.db.query("SELECT * FROM orders")
+        active = [o for o in orders if o["status"] not in finals]
+        due_today = [o for o in active if o.get("due") == today]
+        late = [o for o in active if o.get("due") and o["due"] < today]
+        lines = ["☀ Доброе утро! Дайджест PrintFlow:"]
+        if late:
+            lines.append(f"⚠ Просрочено заказов: {len(late)}")
+            for o in late[:3]:
+                lines.append(f"  №{o.get('number')} {o.get('product') or ''} (срок {o.get('due')})")
+        if due_today:
+            lines.append(f"📌 Срок сегодня: {len(due_today)}")
+            for o in due_today[:3]:
+                lines.append(f"  №{o.get('number')} {o.get('product') or ''}")
+        else:
+            lines.append("📌 Заказов со сроком на сегодня нет.")
+        queue = [j for j in self.manager.queue() if j.get("state") == "queued"]
+        if queue:
+            lines.append(f"🖨 В очереди {len(queue)} заданий:")
+            for j in queue[:5]:
+                order = j.get("order") or {}
+                lines.append(f"  · {order.get('number') and ('№' + str(order['number']) + ' ') or ''}{j.get('name') or ''}")
+        else:
+            lines.append("🖨 Очередь печати пуста.")
+        low = self.db.query(
+            "SELECT material, color_name, remaining_grams FROM spools WHERE archived=0")
+        low = [s for s in low
+               if num(s["remaining_grams"]) / max(1.0, num(self.db.setting("default_spool_weight", 1000))) * 100
+               <= num(self.db.setting("filament_low_threshold", 15.0))]
+        if low:
+            lines.append("🧵 Мало пластика:")
+            for s in low[:5]:
+                lines.append(f"  · {s['material']} {s['color_name']} — {round(num(s['remaining_grams']))} г")
+        debts = self.manager.acc.debts()
+        if num(debts.get("total")) > 0:
+            lines.append(f"💰 Ждут оплаты {_money(debts['total'])} по {debts.get('count', 0)} заказам")
+        return "\n".join(lines)
+
+    def text_weekly(self) -> str:
+        """Еженедельный отчёт: деньги, печать, брак, пластик."""
+        summary = self.manager.acc.summary(7)
+        jobs = self.db.query(
+            "SELECT state, COUNT(*) n, COALESCE(SUM(grams),0) g, COALESCE(SUM(duration_min),0) m"
+            " FROM print_jobs WHERE finished_at>=? GROUP BY state",
+            ((datetime.now() - timedelta(days=7)).isoformat(),))
+        by_state = {r["state"]: r for r in jobs}
+        lines = [
+            "📊 Недельный отчёт PrintFlow:",
+            f"Выручка {_money(summary.get('income'))}, расход {_money(summary.get('expense'))}",
+            f"Прибыль {_money(summary.get('profit'))} (маржа {round(num(summary.get('margin')))}%)",
+            f"Печать: {int(num((by_state.get('done') or {}).get('n')))} заданий, "
+            f"{round(num((by_state.get('done') or {}).get('g')))} г, "
+            f"{_hm(num((by_state.get('done') or {}).get('m')))}",
+        ]
+        failed = int(num((by_state.get("failed") or {}).get("n")))
+        if failed:
+            lines.append(f"⚠ Брак: {failed} печатей")
+        stock = self.db.one("SELECT COALESCE(SUM(remaining_grams),0) v FROM spools WHERE archived=0") or {}
+        lines.append(f"🧵 Пластика на складе: {round(num(stock.get('v')))} г")
+        debts = self.manager.acc.debts()
+        if num(debts.get("total")) > 0:
+            lines.append(f"💰 Долги: {_money(debts['total'])}")
         return "\n".join(lines)
 
     def send_frame(self, chat: str) -> None:

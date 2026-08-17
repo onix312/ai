@@ -151,6 +151,23 @@ const OF = ['product', 'status', 'priority', 'niche_id', 'channel', 'qty', 'due'
   'manual_minutes', 'file', 'price', 'cost', 'prepaid', 'auto_cost', 'quality',
   'quality_note', 'notes'];
 
+/* Многоцветный расход: JSON в базе <-> строка «Белый:40, Чёрный:15» в форме */
+function colorsToStr(json) {
+  try {
+    const list = JSON.parse(json || '[]');
+    if (!Array.isArray(list)) return '';
+    return list.map((c) => `${c.color || c.material || ''}:${num(c.grams)}`).filter(Boolean).join(', ');
+  } catch (e) { return ''; }
+}
+function colorsToJson(str) {
+  const out = [];
+  String(str || '').split(',').forEach((part) => {
+    const [name, grams] = part.split(':').map((x) => (x || '').trim());
+    if (name && num(grams) > 0) out.push({ color: name, material: '', grams: num(grams) });
+  });
+  return JSON.stringify(out);
+}
+
 async function openOrder(id) {
   editingOrder = id || null;
   fillSelectors();
@@ -167,6 +184,7 @@ async function openOrder(id) {
   OF.forEach((k) => {
     const el = $('of_' + k);
     if (!el) return;
+    if (k === 'colors') { if (el) el.value = colorsToStr(data.colors); return; }
     el.value = data[k] == null ? '' : String(data[k]);
   });
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
@@ -190,6 +208,9 @@ async function openOrder(id) {
       + `<small>${esc(dateTimeText(j.finished_at || j.started_at))} · ${nfmt(j.grams)} г · ${U.minutesText(j.duration_min)}</small></div>`
       + `<span class="amt">${money(j.cost)}</span></div>`).join('');
   }
+  renderOrderPhotos((order && order.photos) || []);
+  renderOrderDefects((order && order.defects) || []);
+  renderQcChecklist((order && order.qc_done) || '');
   updateEcon();
   openModal('order_modal');
 }
@@ -226,6 +247,7 @@ const updateEconDebounced = debounce(updateEcon, 350);
 async function saveOrder() {
   const payload = { id: editingOrder || '' };
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
+  if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
   if (!payload.product.trim()) return fail(new Error('Укажите изделие или работу'));
   ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
   // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
@@ -238,6 +260,133 @@ async function saveOrder() {
     await PF.refreshCore();
     PF.refreshFinance();
   } catch (e) { fail(e); }
+}
+
+/* ====================================================== фото к заказу */
+function renderOrderPhotos(photos) {
+  const wrap = $('of_photos_wrap');
+  if (!wrap) return;
+  wrap.hidden = !photos.length;
+  if (photos.length) {
+    $('of_photos').innerHTML = photos.map((ph) =>
+      `<div class="ophoto"><img src="/api/order/photo.jpg?photo_id=${esc(ph.id)}" alt="">`
+      + `<small>${esc(ph.note || '')}</small>`
+      + `<button class="icon-btn sm" type="button" data-photo-del="${esc(ph.id)}">×</button></div>`).join('');
+  }
+}
+async function addOrderPhoto(orderId, dataUrl, kind, note) {
+  try {
+    await post('/api/order/photo', { order_id: orderId, data, kind, note });
+    toast('Фото добавлено');
+  } catch (e) { fail(e); }
+}
+function bindOrderPhotos() {
+  const wrap = $('of_photos_wrap');
+  if (!wrap) return;
+  const cam = $('of_photo_camera');
+  if (cam) cam.addEventListener('click', async () => {
+    if (!editingOrder) return;
+    const pr = PF.livePrinter();
+    if (!pr || !pr.camera || !pr.camera.available) return fail(new Error('Кадр камеры недоступен'));
+    try {
+      const res = await fetch('/api/printer/camera.jpg?printer_id=' + encodeURIComponent(pr.id));
+      const blob = await res.blob();
+      const reader = new FileReader();
+      reader.onload = async () => { await addOrderPhoto(editingOrder, reader.result, 'camera', 'кадр с камеры'); refreshOrderDetail(); };
+      reader.readAsDataURL(blob);
+    } catch (e) { fail(e); }
+  });
+  const upBtn = $('of_photo_upload_btn');
+  if (upBtn) upBtn.addEventListener('click', () => { const f = $('of_photo_file'); if (f) f.click(); });
+  const up = $('of_photo_file');
+  if (up) up.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file || !editingOrder) return;
+    const reader = new FileReader();
+    reader.onload = async () => { await addOrderPhoto(editingOrder, reader.result, 'upload', 'фото'); refreshOrderDetail(); };
+    reader.readAsDataURL(file);
+    up.value = '';
+  });
+  const list = $('of_photos');
+  if (list) list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-photo-del]');
+    if (!btn) return;
+    await post('/api/order/photo/delete', { id: btn.dataset.photoDel });
+    refreshOrderDetail();
+  });
+}
+async function refreshOrderDetail() {
+  if (!editingOrder) return;
+  try {
+    const order = await get('/api/order', { id: editingOrder });
+    renderOrderPhotos(order.photos || []);
+    renderOrderDefects(order.defects || []);
+  } catch (e) { /* не критично */ }
+}
+
+/* ====================================================== журнал брака */
+const DEFECT_REASONS = {
+  detached: 'Деталь отклеилась', clog: 'Засор сопла', shift: 'Смещение слоёв',
+  runout: 'Закончился пластик', warp: 'Деформация', other: 'Другое',
+};
+function renderOrderDefects(defects) {
+  const wrap = $('of_defects_wrap');
+  if (!wrap) return;
+  wrap.hidden = !defects.length;
+  if (defects.length) {
+    $('of_defects').innerHTML = defects.map((d) => `<div class="tx-row">`
+      + `<span class="tx-ic expense">✕</span>`
+      + `<div class="tx-body"><b>${esc(DEFECT_REASONS[d.reason] || d.reason || 'Брак')}</b>`
+      + `<small>${esc(dateTimeText(d.at))}${d.phase ? ' · ' + esc(d.phase) : ''}${d.code ? ' · ' + esc(d.code) : ''}${d.note ? ' · ' + esc(d.note) : ''}</small></div>`
+      + `<span class="amt neg">${d.loss ? money(d.loss) : (d.grams ? nfmt(d.grams) + ' г' : '')}</span></div>`).join('');
+  }
+}
+function openDefect(orderId) {
+  const jobs = PF.state.jobs.history || [];
+  $('df_job').innerHTML = '<option value="">Без задания</option>' + jobs.slice(0, 20).map((j) =>
+    `<option value="${esc(j.id)}">${esc(j.name || j.file || 'печать')} · ${esc(dateText(j.finished_at))}</option>`).join('');
+  $('df_reason').value = 'detached';
+  $('df_phase').value = 'middle';
+  $('df_code').value = '';
+  $('df_grams').value = '';
+  $('df_loss').value = '';
+  $('df_note').value = '';
+  $('df_job').dataset.orderId = orderId || '';
+  openModal('defect_modal');
+}
+async function saveDefect() {
+  const job_id = $('df_job').value;
+  try {
+    const res = await post('/api/defect/save', {
+      job_id, order_id: $('df_job').dataset.orderId || null,
+      reason: $('df_reason').value, phase: $('df_phase').value,
+      code: $('df_code').value.trim(), grams: num($('df_grams').value),
+      loss: num($('df_loss').value), note: $('df_note').value.trim(),
+    });
+    closeModal('defect_modal');
+    toast('Брак записан', DEFECT_REASONS[res.defect.reason] || '');
+    refreshOrderDetail();
+    PF.refreshCore();
+  } catch (e) { fail(e); }
+}
+
+/* ==================================================== чек-лист качества */
+function renderQcChecklist(saved) {
+  const host = $('of_qc');
+  if (!host) return;
+  const steps = (PF.state.settings.qc_checklist || []).map(String);
+  if (!steps.length) { host.innerHTML = ''; return; }
+  let done = {};
+  try { done = JSON.parse(saved || '{}'); } catch (e) { done = {}; }
+  host.innerHTML = steps.map((step, i) => `<label class="check qc-check">`
+    + `<input type="checkbox" data-qc="${i}"${done[i] ? ' checked' : ''}>${esc(step)}</label>`).join('');
+  host.querySelectorAll('[data-qc]').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const payload = { id: editingOrder, qc_done: JSON.stringify(
+        Object.fromEntries([...host.querySelectorAll('[data-qc]')].map((x) => [x.dataset.qc, x.checked]))) };
+      try { await post('/api/order/save', payload); toast('Чек-лист обновлён'); } catch (e) { fail(e); }
+    });
+  });
 }
 
 /* ============================================================= клиенты */
@@ -378,6 +527,10 @@ function bind() {
       PF.refreshFinance();
     } catch (e) { fail(e); }
   });
+  $('order_defect_btn').addEventListener('click', () => openDefect(editingOrder));
+  $('defect_save').addEventListener('click', saveDefect);
+  bindOrderPhotos();
+
   $('order_queue').addEventListener('click', () => {
     const file = $('of_file').value.trim();
     if (!file) return fail(new Error('Сначала укажите файл модели на принтере'));

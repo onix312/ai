@@ -17,7 +17,9 @@ ORDER_FIELDS = (
     "priority qty material color grams hours price cost prepaid manual_minutes file notes "
     "quality quality_note due auto_cost "
     # деньги и условия сделки
-    "paid discount delivery fee rush payer account_id design_minutes"
+    "paid discount delivery fee rush payer account_id design_minutes "
+    # многоцветная печать и чек-лист качества
+    "colors qc_done"
 ).split()
 
 
@@ -55,6 +57,10 @@ class Repo:
             "SELECT * FROM print_jobs WHERE order_id=? ORDER BY datetime(created_at) DESC", (order_id,))
         row["transactions"] = self.db.query(
             "SELECT * FROM transactions WHERE order_id=? ORDER BY datetime(at) DESC", (order_id,))
+        row["defects"] = self.db.query(
+            "SELECT * FROM defects WHERE order_id=? ORDER BY datetime(at) DESC", (order_id,))
+        row["photos"] = self.db.query(
+            "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC", (order_id,))
         return row
 
     def next_order_number(self) -> str:
@@ -570,8 +576,27 @@ class Repo:
                           json.dumps(stats, ensure_ascii=False))
         return stats
 
+    # -------------------------------------------------------------- таймлайн
+    def timeline(self, day: str = "") -> list[dict]:
+        """Задания печати за день (для таймлайна на панели)."""
+        day = day or now_iso()[:10]
+        rows = self.db.query(
+            "SELECT * FROM print_jobs WHERE"
+            " substr(COALESCE(started_at, queued_at, created_at),1,10)=?"
+            " OR substr(COALESCE(finished_at,''),1,10)=?"
+            " ORDER BY datetime(COALESCE(started_at, queued_at, created_at))",
+            (day, day))
+        for row in rows:
+            if row.get("order_id"):
+                order = self.db.one("SELECT number, product FROM orders WHERE id=?",
+                                    (row["order_id"],))
+                if order:
+                    row["order"] = order
+        return rows
+
     # ------------------------------------------------------------------ поиск
     def search(self, text: str, limit: int = 20) -> list[dict]:
+        """Глобальный поиск по заказам, клиентам, катушкам и принтерам."""
         text = (text or "").strip().lower()
         if not text:
             return []

@@ -70,6 +70,11 @@ class Api:
         self.repo = Repo(self.db)
         self.acc = Accounting(self.db)
         self.manager = PrinterManager(self.db, self.repo)
+        from .shelf import Shelf
+        self.shelf = Shelf(self.db)
+        from .updater import UpdateChecker
+        self.updater = UpdateChecker(APP_VERSION)
+        self.last_host = ""
         self.started_at = time.time()
 
     # --------------------------------------------------------------- хелперы
@@ -78,6 +83,79 @@ class Api:
         if not printer:
             raise ValueError("Принтер не настроен. Добавьте его в разделе «Принтеры».")
         return printer
+
+    def _templates(self) -> list[dict]:
+        """Шаблоны ответов клиентам: список {id, title, text} из настроек."""
+        try:
+            raw = self.db.setting("reply_templates", "[]")
+            if isinstance(raw, str):
+                raw = json.loads(raw) if raw else []
+            if isinstance(raw, list):
+                return [t for t in raw if isinstance(t, dict) and t.get("text")]
+        except Exception:
+            pass
+        return []
+
+    def order_save_photo(self, order_id: str, data_url: str, note: str = "", kind: str = "upload") -> dict:
+        """Сохранить фото заказа (загрузка или кадр камеры)."""
+        import base64
+        from .config import PHOTO_DIR
+        if "," not in data_url:
+            raise ValueError("Не похоже на data URL")
+        head, _, b64 = data_url.partition(",")
+        ext = "png" if "png" in head else "jpg"
+        try:
+            raw = base64.b64decode(b64)
+        except Exception as exc:
+            raise ValueError(f"Не удалось разобрать фото: {exc}")
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError("Фото больше 8 МБ")
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"order_{order_id}_{int(time.time())}.{ext}"
+        (PHOTO_DIR / name).write_bytes(raw)
+        row = self.db.upsert("order_photos", {
+            "id": uid("ph"), "order_id": order_id, "at": now_iso(),
+            "file": name, "note": note or ("кадр с камеры" if kind == "camera" else "фото"),
+            "kind": kind})
+        return {"ok": True, "photo": row}
+
+    def serve_order_photo(self, photo_id: str):
+        """Отдать фото заказа по id записи order_photos."""
+        from .config import PHOTO_DIR
+        row = self.db.one("SELECT * FROM order_photos WHERE id=?", (photo_id,))
+        name = (row or {}).get("file") or ""
+        if not name:
+            return self.send_json(404, {"error": "Фото не найдено"})
+        target = (PHOTO_DIR / name).resolve()
+        if not str(target).startswith(str(PHOTO_DIR.resolve())) or not target.exists():
+            return self.send_json(404, {"error": "Фото не найдено"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(target.stat().st_size))
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(target.read_bytes())
+
+    def shelf_save_photo(self, item_id: str, data_url: str) -> dict:
+        """Сохранить фото позиции стеллажа из data URL (jpeg/png)."""
+        from .config import PHOTO_DIR
+        import base64
+        if "," not in data_url:
+            raise ValueError("Не похоже на data URL")
+        head, _, b64 = data_url.partition(",")
+        ext = "png" if "png" in head else "jpg"
+        try:
+            raw = base64.b64decode(b64)
+        except Exception as exc:
+            raise ValueError(f"Не удалось разобрать фото: {exc}")
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError("Фото больше 8 МБ")
+        name = f"shelf_{item_id}.{ext}"
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        (PHOTO_DIR / name).write_bytes(raw)
+        self.db.execute("UPDATE shelf_items SET photo=?, updated_at=? WHERE id=?",
+                        (name, now_iso(), item_id))
+        return {"ok": True, "photo": name}
 
     # ------------------------------------------------------------------- GET
     def get(self, path: str, query: dict) -> tuple[int, object]:
@@ -181,11 +259,57 @@ class Api:
         if path == "/api/jobs":
             return 200, {"queue": self.manager.queue(),
                          "history": self.manager.history(int(num(one("limit", "100"), 100)))}
+        if path == "/api/timeline":
+            return 200, {"day": one("day", now_iso()[:10]),
+                         "jobs": self.repo.timeline(one("day", now_iso()[:10]))}
+        if path == "/api/shelf":
+            return 200, {"items": self.shelf.items(), "summary": self.shelf.summary()}
+        if path == "/api/shelf/item":
+            item = self.shelf.item(one("id"))
+            return (200, item) if item else (404, {"error": "Позиция не найдена"})
+        if path == "/api/shelf/moves":
+            return 200, {"moves": self.shelf.moves(one("item_id"),
+                                                   int(num(one("limit", "100"), 100)))}
+        if path == "/api/shelf/qr-link":
+            item = self.shelf.item(one("id"))
+            if not item:
+                return 404, {"error": "Позиция не найдена"}
+            return 200, {"url": self.shelf.qr_link(one("id"), getattr(self, "last_host", ""))}
         if path == "/api/events":
             return 200, {"events": self.db.events(int(num(one("limit", "80"), 80)),
                                                   one("printer_id"), one("kind"))}
         if path == "/api/settings":
             return 200, {"settings": self.db.settings()}
+        if path == "/api/update-check":
+            if not self.db.setting("update_check_enabled", True):
+                return 200, {"current": APP_VERSION, "latest": None, "update": False}
+            return 200, self.updater.report()
+        if path == "/api/abc":
+            return 200, self.acc.abc_report(int(num(one("days", "30"), 30)))
+        if path == "/api/filament-stats":
+            return 200, self.acc.filament_stats(int(num(one("days", "30"), 30)))
+        if path == "/api/price-history":
+            return 200, {"history": self.acc.price_history(one("product"),
+                                                           int(num(one("limit", "30"), 30)))}
+        if path == "/api/defects":
+            return 200, {"defects": self.db.query(
+                "SELECT d.*, j.name job_name FROM defects d"
+                " LEFT JOIN print_jobs j ON j.id=d.job_id"
+                " ORDER BY datetime(d.at) DESC LIMIT ?", (int(num(one("limit", "100"), 100)),))}
+        if path == "/api/schedule":
+            return 200, {"commands": self.db.query(
+                "SELECT * FROM scheduled_commands ORDER BY done, datetime(at) LIMIT ?",
+                (int(num(one("limit", "50"), 50)),))}
+        if path == "/api/ams-profiles":
+            return 200, {"profiles": self.db.query("SELECT * FROM ams_profiles ORDER BY name")}
+        if path == "/api/templates":
+            return 200, {"templates": self._templates()}
+        if path == "/api/order/photos":
+            return 200, {"photos": self.db.query(
+                "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC",
+                (one("order_id"),))}
+        if path == "/api/order/photo.jpg":
+            return self.serve_order_photo(one("photo_id"))
         if path == "/api/search":
             return 200, {"results": self.repo.search(one("q"))}
         if path == "/api/backup":
@@ -406,6 +530,143 @@ class Api:
             return 200, self.acc.order_economics(order)
 
         # --- настройки, бэкап, уведомления
+        # --- стеллаж магазина
+        if path == "/api/shelf/save":
+            return 200, {"ok": True, "item": self.shelf.save_item(body)}
+        if path == "/api/shelf/delete":
+            self.shelf.delete_item(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/shelf/produce":
+            return 200, self.shelf.produce(body.get("item_id", ""), num(body.get("qty")),
+                                           body.get("job_id", ""), body.get("note", ""),
+                                           num(body.get("cost_per_unit")))
+        if path == "/api/shelf/sale":
+            return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
+                                        num(body.get("price")), body.get("channel", "shelf"),
+                                        body.get("note", ""))
+        if path == "/api/shelf/sales":
+            return 200, {"ok": True, "results": self.shelf.sales_many(
+                body.get("rows") or [], body.get("channel", "shelf"))}
+        if path == "/api/shelf/writeoff":
+            return 200, self.shelf.writeoff(body.get("item_id", ""), num(body.get("qty")),
+                                            body.get("note", "Списание"))
+        if path == "/api/shelf/inventory":
+            return 200, self.shelf.inventory(body.get("item_id", ""), num(body.get("actual")),
+                                             body.get("note", ""))
+        if path == "/api/shelf/photo":
+            if not body.get("id") or not body.get("data"):
+                raise ValueError("Нужны id позиции и фото (data URL)")
+            return 200, self.shelf_save_photo(body["id"], str(body["data"]))
+
+        # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
+        if path == "/api/defect/save":
+            data = dict(body)
+            data.setdefault("id", uid("df"))
+            data.setdefault("at", now_iso())
+            if data.get("job_id"):
+                job = self.db.one("SELECT order_id FROM print_jobs WHERE id=?", (data["job_id"],))
+                if job and not data.get("order_id"):
+                    data["order_id"] = job["order_id"]
+            row = self.db.upsert("defects", data)
+            self.db.add_event("defect", "Записан брак", f"{row.get('reason') or ''} · {row.get('code') or ''}",
+                              row.get("printer_id") or "", {"defect_id": row["id"], "order_id": row.get("order_id")})
+            return 200, {"ok": True, "defect": row}
+        if path == "/api/defect/delete":
+            self.db.delete("defects", body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/order/photo":
+            if not body.get("order_id") or not body.get("data"):
+                raise ValueError("Нужны order_id и фото (data URL)")
+            return 200, self.order_save_photo(body["order_id"], str(body["data"]),
+                                              body.get("note", ""), body.get("kind", "upload"))
+        if path == "/api/order/photo/delete":
+            self.db.delete("order_photos", body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/templates/save":
+            templates = body.get("templates")
+            if not isinstance(templates, list):
+                raise ValueError("Ожидается список шаблонов")
+            self.db.set_settings({"reply_templates": json.dumps(
+                [{"id": t.get("id") or uid("tmpl"), "title": t.get("title", ""),
+                  "text": t.get("text", "")} for t in templates if t.get("text")],
+                ensure_ascii=False)})
+            return 200, {"ok": True, "templates": self._templates()}
+        if path == "/api/ams-profile/save":
+            data = dict(body)
+            if not data.get("name"):
+                raise ValueError("Укажите название профиля")
+            if not data.get("id"):
+                data["id"] = uid("ap")
+                data.setdefault("created_at", now_iso())
+            if isinstance(data.get("slots"), list):
+                data["slots"] = json.dumps(data["slots"], ensure_ascii=False)
+            row = self.db.upsert("ams_profiles", data)
+            return 200, {"ok": True, "profile": row}
+        if path == "/api/ams-profile/delete":
+            self.db.delete("ams_profiles", body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/ams-profile/apply":
+            profile = self.db.one("SELECT * FROM ams_profiles WHERE id=?", (body.get("id", ""),))
+            if not profile:
+                raise ValueError("Профиль не найден")
+            printer = self.printer_or_fail(body.get("printer_id") or "")
+            try:
+                slots = json.loads(profile.get("slots") or "[]")
+            except json.JSONDecodeError:
+                slots = []
+            sent = 0
+            for slot in slots:
+                if not isinstance(slot, dict) or slot.get("type") not in (None, ""):
+                    try:
+                        printer.command("ams_filament", {"ams_id": 0, "tray_id": int(num(slot.get("tray"))),
+                                                          "type": slot.get("type", "PLA"),
+                                                          "color": slot.get("color", "FFFFFFFF")})
+                        sent += 1
+                    except Exception:
+                        continue
+            self.db.add_event("ams", "Профиль AMS применён", f"{profile['name']} · слотов: {sent}",
+                              printer.id, {"profile_id": profile["id"], "sent": sent})
+            return 200, {"ok": True, "sent": sent}
+        if path == "/api/schedule/command":
+            if not body.get("command") or not body.get("at"):
+                raise ValueError("Нужны команда и время")
+            self.db.upsert("scheduled_commands", {
+                "id": uid("sch"), "at": body["at"], "printer_id": body.get("printer_id") or "",
+                "command": body["command"], "value": json.dumps(body.get("value"), ensure_ascii=False),
+                "note": body.get("note", ""), "done": 0, "created_at": now_iso()})
+            self.db.add_event("command", "Отложенная команда", f"{body['command']} · {body.get('note') or ''}",
+                              body.get("printer_id") or "", {})
+            return 200, {"ok": True}
+        if path == "/api/schedule/delete":
+            self.db.delete("scheduled_commands", body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/spool/dry":
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (body.get("id", ""),))
+            if not spool:
+                raise ValueError("Катушка не найдена")
+            self.db.upsert("drying_sessions", {
+                "id": uid("dry"), "at": now_iso(), "spool_id": spool["id"],
+                "material": spool.get("material", ""), "color_name": spool.get("color_name", ""),
+                "minutes": num(body.get("minutes")), "temp": num(body.get("temp")),
+                "note": body.get("note", "")})
+            self.db.add_event("dry", "Сушка пластика", f"{spool.get('material')} {spool.get('color_name')} · {round(num(body.get('minutes')))} мин",
+                              spool.get("printer_id") or "", {"spool_id": spool["id"]})
+            return 200, {"ok": True}
+        if path == "/api/spool/bind":
+            if not body.get("id") or body.get("ams_slot") is None:
+                raise ValueError("Нужны id катушки и слот AMS")
+            printer_id = body.get("printer_id") or ""
+            self.db.execute(
+                "UPDATE spools SET printer_id=?, ams_slot=?, updated_at=? WHERE id=?",
+                (printer_id or None, str(body["ams_slot"]), now_iso(), body["id"]))
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (body["id"],)) or {}
+            self.db.add_event("spool", "Катушка привязана к слоту AMS",
+                              f"{spool.get('material')} {spool.get('color_name')} → слот {body['ams_slot']}",
+                              printer_id, {"spool_id": body["id"]})
+            return 200, {"ok": True, "spool": spool}
+        if path == "/api/update-check":
+            return 200, self.updater.report(force=True)
+
         if path == "/api/settings":
             return 200, {"ok": True, "settings": self.db.set_settings(body)}
         if path == "/api/settings/reset":
@@ -456,6 +717,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+        self.api.last_host = self.headers.get("Host", "")
         try:
             if path == "/api/printer/camera.jpg":
                 return self.serve_camera_frame((query.get("printer_id") or [""])[0])
@@ -464,6 +726,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/printer/shot.jpg":
                 return self.serve_shot((query.get("printer_id") or [""])[0],
                                        (query.get("id") or [""])[0])
+            if path == "/api/shelf/photo.jpg":
+                return self.serve_shelf_photo((query.get("id") or [""])[0])
+            if path == "/api/stream":
+                return self.serve_sse()
             if path.startswith("/api/"):
                 code, payload = self.api.get(path, query)
                 return self.send_json(code, payload)
@@ -477,6 +743,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
         except Exception as exc:
+            try:
+                from .logging_setup import log
+                log().exception("Ошибка GET %s", path)
+            except Exception:
+                pass
             return self.send_json(500, {"error": str(exc)})
 
     def serve_camera_frame(self, printer_id: str):
@@ -491,6 +762,54 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(frame)
+
+    def serve_sse(self):
+        """Server-Sent Events: поток «refresh» при появлении новых событий.
+
+        Фронтенд слушает его и обновляет данные сразу, а не по таймеру.
+        Поллинг остаётся как запасной вариант (например, при проксировании).
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        last_id = 0
+        try:
+            row = self.api.db.one("SELECT MAX(id) m FROM events")
+            last_id = int(num((row or {}).get("m") or 0))
+            deadline = time.time() + 12 * 3600  # поток живёт не дольше 12 часов
+            while time.time() < deadline:
+                row = self.api.db.one("SELECT MAX(id) m FROM events")
+                cur = int(num((row or {}).get("m") or 0))
+                if cur > last_id:
+                    last_id = cur
+                    self.wfile.write(b"event: refresh\ndata: {}\n\n")
+                else:
+                    self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+                time.sleep(2.5)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            self.close_connection = True
+
+    def serve_shelf_photo(self, item_id: str):
+        """Фото позиции стеллажа из каталога данных."""
+        from .config import PHOTO_DIR
+        item = self.api.db.one("SELECT photo FROM shelf_items WHERE id=?", (item_id,))
+        name = (item or {}).get("photo") or ""
+        if not name:
+            return self.send_json(404, {"error": "Фото не найдено"})
+        target = (PHOTO_DIR / name).resolve()
+        if not str(target).startswith(str(PHOTO_DIR.resolve())) or not target.exists():
+            return self.send_json(404, {"error": "Фото не найдено"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(target.stat().st_size))
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(target.read_bytes())
 
     def serve_shot(self, printer_id: str, shot_id: str):
         """Отдать сохранённый кадр из архива камеры."""
@@ -580,6 +899,11 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ConnectionError) as exc:
             return self.send_json(503, {"error": str(exc)})
         except Exception as exc:
+            try:
+                from .logging_setup import log
+                log().exception("Ошибка POST %s", path)
+            except Exception:
+                pass
             return self.send_json(500, {"error": str(exc)})
 
     def handle_upload(self, query: dict):
@@ -610,11 +934,18 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(400, {"error": "Принтер не настроен"})
         result = printer.files.upload(local, name)
         self.api.db.add_event("upload", "Файл загружен на принтер", name, printer.id, result)
+        # оценка печати до запуска: время и граммы из 3MF/G-code
+        estimate = {}
+        try:
+            from .estimate import estimate_file
+            estimate = estimate_file(local)
+        except Exception:
+            estimate = {}
         order_id = fields.get("order_id", "")
         if order_id:
             self.api.db.execute("UPDATE orders SET file=?, updated_at=? WHERE id=?",
                                 (name, now_iso(), order_id))
-        return self.send_json(200, {"ok": True, **result})
+        return self.send_json(200, {"ok": True, "estimate": estimate, **result})
 
 
 class Server(ThreadingHTTPServer):

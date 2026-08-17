@@ -31,6 +31,13 @@ class PrinterManager:
         self.guard = Watchdog(self)
         self.lock = threading.RLock()
         self._stop = threading.Event()
+        # Память мониторинга: tray_uuid слотов, отчёты о расхождениях, напоминания
+        self._tray_uuids: dict[str, dict[str, str]] = {}
+        self._ams_reported: dict[str, set[str]] = {}
+        self._finish_reminded: set[str] = set()
+        self._restock_reported: set[str] = set()
+        self._dry_reported: float = 0.0
+        self._last_ams_sync = 0.0
         self.reload()
         self._poller = threading.Thread(target=self._loop, name="pf-manager", daemon=True)
         self._poller.start()
@@ -91,7 +98,32 @@ class PrinterManager:
             self._on_print_start(printer_id, detail, data)
         elif kind in ("complete", "error", "stop"):
             self._on_print_end(printer_id, kind, detail, data)
+        if kind in ("start", "complete", "error", "pause"):
+            self._auto_photo(printer_id, kind, detail)
         self._notify(kind, title, detail, printer_id)
+
+    def _auto_photo(self, printer_id: str, kind: str, note: str) -> None:
+        """Авто-снимок камеры при событиях печати: кадр прикрепляется к заданию."""
+        try:
+            printer = self.get(printer_id)
+            if not printer or not printer.camera.frame:
+                return
+            shot = printer.camera.snapshot(note=f"авто: {note}")
+            job = self.db.one(
+                "SELECT id, order_id FROM print_jobs WHERE printer_id=?"
+                " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
+            if not job:
+                return
+            from .config import PHOTO_DIR
+            PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+            name = f"job_{job['id']}_{kind}_{int(time.time())}.jpg"
+            (PHOTO_DIR / name).write_bytes(printer.camera.frame)
+            self.db.execute(
+                "INSERT INTO order_photos(id,order_id,at,file,note,kind) VALUES(?,?,?,?,?,?)",
+                (uid("ph"), job.get("order_id") or None, now_iso(), name,
+                 f"авто-снимок: {note}", "camera"))
+        except Exception:
+            pass
 
     def _on_print_start(self, printer_id: str, name: str, data: dict) -> None:
         job = self.db.one(
@@ -245,6 +277,17 @@ class PrinterManager:
             "spool_id": data.get("spool_id") or None,
             "queued_at": now_iso(), "created_at": now_iso(),
         }
+        # оценка печати до запуска: время и граммы из файла
+        try:
+            from .config import UPLOAD_DIR
+            from .estimate import estimate_file
+            local = UPLOAD_DIR / (job.get("file") or "").rsplit("/", 1)[-1]
+            if local.exists():
+                est = estimate_file(local)
+                job["est_minutes"] = est.get("minutes", 0)
+                job["est_grams"] = est.get("grams", 0)
+        except Exception:
+            pass
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
@@ -315,6 +358,26 @@ class PrinterManager:
                 return str(order["material"]).upper()
         return ""
 
+    def _material_matches(self, job: dict, snap: dict) -> tuple[bool, str]:
+        """Совпадает ли материал задания с материалом в активном слоте AMS.
+
+        Печать PETG, когда в слоте PLA, даст брак (температуры не подходят) —
+        лучше не начинать вовсе.
+        """
+        if not self.db.setting("queue_check_material", True):
+            return True, ""
+        need = self._job_material(job)
+        if not need:
+            return True, ""
+        active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
+        if not active:
+            return True, ""
+        loaded = str(active.get("type") or "").upper()
+        if loaded and loaded != need:
+            return False, (f"Задание требует {need}, а в активном слоте {loaded}. "
+                           f"Поставьте {need} в слот {active.get('label', '')}.")
+        return True, ""
+
     def _enough_filament(self, job: dict, snap: dict) -> tuple[bool, str]:
         """Хватит ли пластика в активном слоте на это задание."""
         if not self.db.setting("queue_check_filament", True):
@@ -342,8 +405,10 @@ class PrinterManager:
     def next_job(self, printer_id: str, snap: dict | None = None) -> dict | None:
         """Выбрать следующее задание с учётом материала в AMS."""
         jobs = self.db.query(
-            "SELECT * FROM print_jobs WHERE state='queued' AND (printer_id IS NULL OR printer_id=?)"
-            " AND file<>'' ORDER BY priority DESC, datetime(created_at)", (printer_id,))
+            "SELECT j.* FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
+            " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
+            " AND j.file<>'' ORDER BY COALESCE(o.due,'9999-12-31'),"
+            " j.priority DESC, datetime(j.created_at)", (printer_id,))
         if not jobs:
             return None
         if not self.db.setting("queue_group_material", True) or not snap:
@@ -376,6 +441,11 @@ class PrinterManager:
             return
         job = self.next_job(printer_id, snap)
         if not job:
+            return
+        ok, reason = self._material_matches(job, snap)
+        if not ok:
+            self.db.add_event("queue", "Автозапуск отложен: не тот материал",
+                              reason, printer_id, {"job_id": job["id"]})
             return
         ok, reason = self._enough_filament(job, snap)
         if not ok:
@@ -471,12 +541,18 @@ class PrinterManager:
     def wall(self) -> dict:
         """Компактная сводка для режима «Стена»: только то, что видно издалека."""
         state = self.snapshot()
+        low_threshold = num(self.db.setting("filament_low_threshold", 15.0), 15.0)
         tiles = []
         for snap in state["printers"]:
             info = snap["printer"]
             job = snap.get("job") or {}
             order = job.get("order") or {}
             alerts = (snap.get("guard") or {}).get("alerts") or []
+            ams_low = 0
+            for tray in snap["ams"].get("trays", []):
+                remain = tray.get("remain")
+                if remain is not None and remain >= 0 and remain < low_threshold:
+                    ams_low += 1
             tiles.append({
                 "id": snap["id"],
                 "name": snap["name"],
@@ -494,6 +570,7 @@ class PrinterManager:
                 "camera": snap["camera"],
                 "severity": info.get("severity", ""),
                 "alerts": alerts,
+                "ams_low": ams_low,
                 "order": {"number": order.get("number"), "product": order.get("product"),
                           "customer": order.get("customer_name")} if order else None,
                 "spent": job.get("spent"),
@@ -583,6 +660,170 @@ class PrinterManager:
             "utilization": round(len(printing) / len(printers) * 100) if printers else 0,
         }
 
+    # ------------------------------------------------------------ мониторинг AMS
+    def ams_monitor(self, printer: BambuPrinter, snap: dict) -> None:
+        """Сверка остатков AMS со складом и история смены катушек в слотах.
+
+        Запускается из фонового цикла не чаще раза в 5 минут:
+          1) сменился tray_uuid слота → событие «в слот поставили новую катушку»;
+          2) остаток слота (AMS) расходится с остатком катушки (склад) больше
+             чем на 20 п.п. → событие «проверьте катушку» — похоже, в AMS
+             поставили другую катушку, чем учтено на складе.
+        """
+        now = time.time()
+        if now - self._last_ams_sync < 300:
+            return
+        self._last_ams_sync = now
+        trays = snap["ams"].get("trays", []) or []
+        if not trays:
+            return
+        pid = printer.id
+        memory = self._tray_uuids.setdefault(pid, {})
+        reported = self._ams_reported.setdefault(pid, set())
+        for tray in trays:
+            slot = str(tray.get("slot"))
+            uuid = str(tray.get("uuid") or "")
+            previous = memory.get(slot)
+            if previous is not None and uuid and uuid != previous:
+                self.db.add_event(
+                    "ams", "В AMS заменили катушку",
+                    f"{tray.get('label', 'Слот ' + slot)}: поставлена новая катушка",
+                    pid, {"slot": slot, "tray_uuid": uuid})
+                reported.discard(f"diff:{slot}")
+            if uuid:
+                memory[slot] = uuid
+            # сверка остатков: AMS-процент против остатка катушки на складе
+            remain = tray.get("remain")
+            if remain is None or remain < 0:
+                continue
+            spool = self.acc.pick_spool(pid, slot, tray.get("type") or "", uuid)
+            if not spool:
+                continue
+            total = max(1.0, num(spool.get("total_grams"), 1000))
+            stock_pct = num(spool.get("remaining_grams")) / total * 100
+            diff = abs(remain - stock_pct)
+            key = f"diff:{slot}"
+            if diff > 20 and key not in reported:
+                reported.add(key)
+                self.db.add_event(
+                    "ams", "Остаток AMS не сходится со складом",
+                    f"{tray.get('label', 'Слот ' + slot)}: AMS говорит {round(remain)}%, "
+                    f"по складу {round(stock_pct)}%. Похоже, в слоте другая катушка — "
+                    f"проверьте и поправьте остаток.",
+                    pid, {"slot": slot, "ams_pct": remain, "stock_pct": round(stock_pct, 1)})
+                if self.db.setting("notify_guard", True):
+                    self.notify_async(
+                        f"PrintFlow · {printer.record.get('name', 'Принтер')}\n"
+                        f"Остаток AMS не сходится со складом\n"
+                        f"{tray.get('label', 'Слот ' + slot)}: AMS {round(remain)}% vs склад {round(stock_pct)}%",
+                        None)
+            elif diff <= 20:
+                reported.discard(key)
+
+    def check_filament_stock(self) -> None:
+        """Напоминания о закупке пластика: катушки ниже порога, раз в сутки."""
+        if not self.db.setting("restock_remind", True):
+            return
+        threshold = num(self.db.setting("filament_low_threshold", 15.0), 15.0)
+        today = now_iso()[:10]
+        for spool in self.db.query(
+                "SELECT * FROM spools WHERE archived=0 AND remaining_grams>0"):
+            total = max(1.0, num(spool.get("total_grams"), 1000))
+            pct = num(spool.get("remaining_grams")) / total * 100
+            if pct > threshold:
+                continue
+            key = f"{spool['id']}:{today}"
+            if key in self._restock_reported:
+                continue
+            self._restock_reported.add(key)
+            if len(self._restock_reported) > 500:
+                self._restock_reported.clear()
+            self.db.add_event(
+                "filament_low", "Пора закупить пластик",
+                f"{spool.get('material')} {spool.get('color_name')}: "
+                f"осталось {round(num(spool.get('remaining_grams')))} г ({round(pct)}%)",
+                spool.get("printer_id") or "", {"spool_id": spool["id"]})
+            if self.db.setting("notify_filament_low", True):
+                self.notify_async(
+                    f"PrintFlow · закупка пластика\n"
+                    f"{spool.get('material')} {spool.get('color_name')}: "
+                    f"осталось {round(num(spool.get('remaining_grams')))} г",
+                    None)
+
+    def check_dry_humidity(self, printer: BambuPrinter, snap: dict) -> None:
+        """Влажность AMS выше порога — пора сушить пластик (не чаще раза в 6 часов)."""
+        humidity = snap["ams"].get("humidity")
+        if humidity is None:
+            return
+        threshold = num(self.db.setting("dry_humidity_threshold", 55.0), 55.0)
+        now = time.time()
+        if num(humidity) <= threshold or now - self._dry_reported < 6 * 3600:
+            return
+        self._dry_reported = now
+        self.db.add_event(
+            "ams", "Влажность в AMS высокая",
+            f"{round(num(humidity))}% при пороге {round(threshold)}% — "
+            f"просушите пластик, иначе будут пузыри и хрупкие детали.",
+            printer.id, {"humidity": humidity})
+        if self.db.setting("notify_guard", True):
+            self.notify_async(
+                f"PrintFlow · {printer.record.get('name', 'Принтер')}\n"
+                f"Влажность в AMS {round(num(humidity))}% — пора сушить пластик", None)
+
+    def remind_finish(self, printer: BambuPrinter, snap: dict) -> None:
+        """«Готово через N минут»: напомнить подойти к принтеру до конца печати."""
+        remind_min = num(self.db.setting("notify_finish_remind_min", 10.0), 10.0)
+        if remind_min <= 0:
+            return
+        info = snap["printer"]
+        if info.get("state") != "RUNNING":
+            return
+        remaining = num(info.get("remaining_min"))
+        if remaining <= 0 or remaining > remind_min:
+            return
+        job = self.db.one(
+            "SELECT id FROM print_jobs WHERE printer_id=? AND state='running'",
+            (printer.id,))
+        if not job or job["id"] in self._finish_reminded:
+            return
+        self._finish_reminded.add(job["id"])
+        if len(self._finish_reminded) > 200:
+            self._finish_reminded.clear()
+        text = (f"PrintFlow · {printer.record.get('name', 'Принтер')}\n"
+                f"Печать закончится через ~{int(remaining)} мин — подойдите снять деталь.")
+        photo = printer.camera.frame if self.db.setting("notify_photo", True) else None
+        self.notify_async(text, photo)
+
+    def run_scheduled(self) -> None:
+        """Отложенные команды: выполнить те, чьё время наступило."""
+        due = self.db.query(
+            "SELECT * FROM scheduled_commands WHERE done=0 AND at<=? ORDER BY at",
+            (now_iso(),))
+        for cmd in due:
+            printer = self.get(cmd.get("printer_id") or "")
+            ok, err = False, "Принтер не найден"
+            if printer:
+                try:
+                    value = None
+                    try:
+                        value = json.loads(cmd.get("value") or "null")
+                    except json.JSONDecodeError:
+                        value = None
+                    printer.command(cmd.get("command", ""), value)
+                    ok, err = True, ""
+                except Exception as exc:
+                    err = str(exc)
+            self.db.execute(
+                "UPDATE scheduled_commands SET done=1, result=? WHERE id=?",
+                (err or "ok", cmd["id"]))
+            self.db.add_event(
+                "command", "Отложенная команда выполнена",
+                f"{cmd.get('command') or ''} · {cmd.get('note') or ''}"
+                + (f" — {err}" if err else ""),
+                cmd.get("printer_id") or "", {"ok": ok, "error": err})
+            if not ok and self.db.setting("notify_guard", True):
+                self.notify_async(f"PrintFlow: отложенная команда не выполнилась\n{err}", None)
+
     # ------------------------------------------------------------ фоновый цикл
     def _loop(self) -> None:
         """Раз в 30 секунд: прогресс, телеметрия, сторож и очередь."""
@@ -594,6 +835,12 @@ class PrinterManager:
                     if not printer.connected:
                         continue
                     snap = printer.snapshot()
+                    try:
+                        self.ams_monitor(printer, snap)
+                        self.check_dry_humidity(printer, snap)
+                        self.remind_finish(printer, snap)
+                    except Exception as exc:
+                        self.db.add_event("error", "Сбой мониторинга AMS", str(exc), printer.id)
                     job = self.db.one(
                         "SELECT id FROM print_jobs WHERE printer_id=? AND state='running'",
                         (printer.id,))
@@ -608,5 +855,10 @@ class PrinterManager:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
                     if snap["printer"]["state"] in ("IDLE", "FINISH"):
                         self._maybe_start_next(printer.id)
+                try:
+                    self.run_scheduled()
+                    self.check_filament_stock()
+                except Exception:
+                    continue
             except Exception:
                 continue

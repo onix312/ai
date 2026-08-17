@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -94,11 +95,13 @@ class Accounting:
     def cost_breakdown(self, grams: float, hours: float, spool_price: float | None = None,
                        spool_weight: float | None = None, manual_minutes: float = 0.0,
                        qty: float = 1.0, design_minutes: float = 0.0,
-                       delivery: float = 0.0) -> dict[str, float]:
+                       delivery: float = 0.0, color_swaps: float = 0.0) -> dict[str, float]:
         """Полная раскладка себестоимости партии.
 
         Своя работа по умолчанию расходом не считается (count_labor_in_cost),
         но всегда показывается отдельной строкой как ориентир по трудозатратам.
+        color_swaps — сколько раз принтер сменит цвет/материал: на каждую смену
+        Bambu тратит ~10–15 г на продувку сопла, это реальный расход пластика.
         """
         s = self.db.settings()
         grams = max(0.0, num(grams))
@@ -107,6 +110,10 @@ class Accounting:
         price = num(spool_price if spool_price is not None else s["default_spool_price"], 1600)
         weight = max(1.0, num(spool_weight if spool_weight is not None else s["default_spool_weight"], 1000))
 
+        swaps = max(0.0, num(color_swaps))
+        if swaps:
+            # продувка между цветами — это те же граммы пластика в отходы
+            grams += swaps * 12.0
         filament = grams * price / weight
         energy_kwh = hours * num(s["power_kw"], 0.15)
         energy = energy_kwh * num(s["energy_price"], 6)
@@ -328,6 +335,114 @@ class Accounting:
                                  f"Катушка {spool['material']} {spool['color_name']}", auto=False)
         return self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,)) or {}
 
+    # --------------------------------------------------- многоцветная печать
+    def consume_order_colors(self, job: dict) -> list[dict]:
+        """Списать расход по цветам заказа (поле orders.colors).
+
+        Формат: JSON-список [{"material":"PLA","color":"Белый","grams":40}].
+        Возвращает список результатов consume_filament.
+        """
+        order = self.db.one("SELECT colors FROM orders WHERE id=?",
+                            (job.get("order_id") or "",)) if job.get("order_id") else None
+        raw = (order or {}).get("colors") or ""
+        try:
+            colors = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            colors = []
+        if not isinstance(colors, list):
+            return []
+        out = []
+        for item in colors:
+            if not isinstance(item, dict):
+                continue
+            grams = num(item.get("grams"))
+            if grams <= 0:
+                continue
+            material = str(item.get("material") or "").upper()
+            color = str(item.get("color") or "")
+            spool = None
+            if material and color:
+                spool = self.db.one(
+                    "SELECT * FROM spools WHERE UPPER(material)=? AND pylower(color_name)=?"
+                    " AND archived=0 AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                    (material, color.lower()))
+            if not spool and material:
+                spool = self.db.one(
+                    "SELECT * FROM spools WHERE UPPER(material)=? AND archived=0"
+                    " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                    (material,))
+            if not spool:
+                continue
+            result = self.consume_filament(
+                grams, spool_id=spool["id"], job_id=job.get("id", ""),
+                order_id=job.get("order_id") or "", auto=True,
+                note=f"цвет: {color or '—'} ({material})")
+            out.append({**result, "material": material, "color": color})
+        return out
+
+    # ------------------------------------------- статистика расхода пластика
+    def filament_stats(self, days: int = 30) -> dict[str, Any]:
+        """Расход по материалам и цветам за период — для закупок и анализа."""
+        since = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat()
+        rows = self.db.query(
+            "SELECT f.*, s.material, s.color_name, s.brand FROM filament_usage f"
+            " LEFT JOIN spools s ON s.id=f.spool_id WHERE f.at>=? ORDER BY f.at", (since,))
+        by_mat: dict[str, dict[str, float]] = {}
+        by_color: dict[str, dict[str, float]] = {}
+        total_g = total_cost = 0.0
+        for r in rows:
+            material = str(r.get("material") or "—").upper()
+            color = str(r.get("color_name") or "—")
+            g, c = num(r.get("grams")), num(r.get("cost"))
+            total_g += g
+            total_cost += c
+            m = by_mat.setdefault(material, {"grams": 0.0, "cost": 0.0, "uses": 0})
+            m["grams"] += g
+            m["cost"] += c
+            m["uses"] += 1
+            key = f"{material} · {color}"
+            k = by_color.setdefault(key, {"material": material, "color": color,
+                                          "grams": 0.0, "cost": 0.0, "uses": 0})
+            k["grams"] += g
+            k["cost"] += c
+            k["uses"] += 1
+        for d in (by_mat, by_color):
+            for v in d.values():
+                v["grams"] = round(v["grams"], 1)
+                v["cost"] = round(v["cost"], 2)
+        return {
+            "days": int(days),
+            "total_grams": round(total_g, 1),
+            "total_cost": round(total_cost, 2),
+            "by_material": sorted(by_mat.values(), key=lambda x: -x["grams"]),
+            "by_color": sorted(by_color.values(), key=lambda x: -x["grams"]),
+        }
+
+    # ------------------------------------------------------------ история цен
+    def record_price_history(self, order: dict) -> None:
+        """Записать цену заказа в историю (для замера эластичности)."""
+        try:
+            price = round(num(order.get("price")), 2)
+            if price <= 0:
+                return
+            self.db.execute(
+                "INSERT INTO price_history(at,order_id,product,price,catalog_id)"
+                " VALUES(?,?,?,?,?)",
+                (now_iso(), order.get("id"), order.get("product") or "",
+                 price, order.get("catalog_id") or ""))
+        except Exception:
+            pass
+
+    def price_history(self, product: str = "", limit: int = 30) -> list[dict]:
+        sql = "SELECT * FROM price_history WHERE 1=1"
+        params: list[Any] = []
+        if product:
+            sql += " AND pylower(product)=?"
+            params.append(product.lower())
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(int(limit))
+        return self.db.query(sql, params)
+
     # ------------------------------------------------------------------ касса
     def add_transaction(self, kind: str, category: str, amount: float, title: str,
                         note: str = "", order_id: str = "", job_id: str = "",
@@ -409,6 +524,11 @@ class Accounting:
                 order_id=job.get("order_id") or "", note=job.get("name", ""),
                 printer_id=job.get("printer_id") or "",
                 ams_slot=str(job.get("ams_slot") or ""))
+            # многоцветная печать: дополнительный расход по цветам заказа
+            try:
+                result["colors"] = self.consume_order_colors(job)
+            except Exception:
+                result["colors"] = []
 
         self.db.execute(
             "UPDATE print_jobs SET cost=?, energy_kwh=? WHERE id=?",
@@ -895,6 +1015,49 @@ class Accounting:
             "hours_needed": round(revenue_needed / num(s.get("target_profit_per_hour"), 250), 1)
             if num(s.get("target_profit_per_hour")) else 0.0,
         }
+
+    # ------------------------------------------------------------- ABC-анализ
+    def abc_report(self, days: int = 30) -> dict[str, Any]:
+        """ABC-анализ изделий: топ по выручке и прибыли за период.
+
+        A — первые ~80% выручки (ядро), B — следующие ~15%, C — хвост ~5%.
+        По нему видно, что масштабировать, а что снять с полки.
+        """
+        since = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat()
+        rows: dict[str, dict[str, float]] = {}
+        for o in self.db.query(
+                "SELECT * FROM orders WHERE created_at>=? AND created_at<?",
+                (since, datetime.now().isoformat())):
+            eco = self.order_economics(o)
+            key = (o.get("product") or "Без названия").strip()
+            item = rows.setdefault(key, {"name": key, "qty": 0.0, "revenue": 0.0,
+                                         "profit": 0.0, "orders": 0})
+            item["qty"] += num(o.get("qty"), 1)
+            item["revenue"] += eco["price"]
+            item["profit"] += eco["profit"]
+            item["orders"] += 1
+        items = sorted(rows.values(), key=lambda x: -x["revenue"])
+        total = sum(i["revenue"] for i in items) or 1.0
+        acc = 0.0
+        for index, i in enumerate(items):
+            acc += i["revenue"]
+            share = acc / total
+            i["revenue"] = round(i["revenue"], 2)
+            i["profit"] = round(i["profit"], 2)
+            i["qty"] = int(i["qty"])
+            i["share"] = round(i["revenue"] / total * 100, 1)
+            # первый элемент — всегда ядро (A), даже если он один покрыл всё
+            if index == 0 or share <= 0.8:
+                i["cls"] = "A"
+            elif share <= 0.95:
+                i["cls"] = "B"
+            else:
+                i["cls"] = "C"
+        return {"days": int(days), "total_revenue": round(total, 2),
+                "items": items,
+                "a_share": round(sum(i["revenue"] for i in items if i["cls"] == "A") / total * 100, 1),
+                "b_share": round(sum(i["revenue"] for i in items if i["cls"] == "B") / total * 100, 1),
+                "c_share": round(sum(i["revenue"] for i in items if i["cls"] == "C") / total * 100, 1)}
 
     # -------------------------------------------------------------- отчёты
     def period_bounds(self, period: str = "month", offset: int = 0) -> tuple[str, str, str]:
