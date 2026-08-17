@@ -358,6 +358,9 @@ img.brand-logo { background: none; box-shadow: 0 8px 18px -10px var(--accent); }
 .pos { color: var(--ok); }
 .neg { color: var(--bad); }
 
+/* атрибут hidden сильнее любых display:flex/grid у компонентов */
+[hidden] { display: none !important; }
+
 .empty {
   display: grid; place-items: center; gap: 6px;
   padding: 30px 18px; text-align: center;
@@ -413,6 +416,10 @@ table.data th {
   padding: 11px 13px; background: var(--panel-2);
   border-bottom: 1px solid var(--line); white-space: nowrap;
 }
+/* .right проигрывал по специфичности правилу выше — заголовок числовой
+   колонки уезжал влево от своих значений */
+table.data th.right { text-align: right; }
+table.data th.center { text-align: center; }
 table.data td { padding: 11px 13px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 table.data tbody tr:last-child td { border-bottom: 0; }
 table.data tbody tr { transition: background .14s var(--ease); }

@@ -9,13 +9,15 @@ import json
 from typing import Any
 
 from .accounting import Accounting, num, uid
-from .config import now_iso
+from .config import DEFAULT_SETTINGS, now_iso
 from .db import Database
 
 ORDER_FIELDS = (
     "number product customer_id customer_name phone messenger channel niche_id status "
     "priority qty material color grams hours price cost prepaid manual_minutes file notes "
-    "quality quality_note due auto_cost"
+    "quality quality_note due auto_cost "
+    # деньги и условия сделки
+    "paid discount delivery fee rush payer account_id design_minutes"
 ).split()
 
 
@@ -62,6 +64,10 @@ class Repo:
     def save_order(self, data: dict) -> dict:
         order_id = data.get("id") or uid("ord")
         existing = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if data.get("id") and not existing:
+            # правка несуществующего заказа — это ошибка вызова, а не повод
+            # молча завести новый заказ с чужим идентификатором
+            raise ValueError("Заказ не найден")
         payload: dict[str, Any] = {"id": order_id}
         for field in ORDER_FIELDS:
             if field in data:
@@ -108,8 +114,14 @@ class Repo:
         return self.save_order({"id": order_id, "status": status})
 
     def delete_order(self, order_id: str) -> None:
+        if not order_id:
+            raise ValueError("Не указан заказ")
         self.db.delete("orders", order_id)
         self.db.execute("UPDATE print_jobs SET order_id=NULL WHERE order_id=?", (order_id,))
+        # платежи без заказа исказили бы сверку касс и долги — удаляем вместе с ним,
+        # проводки же остаются в кассе, но теряют ссылку на заказ
+        self.db.execute("DELETE FROM payments WHERE order_id=?", (order_id,))
+        self.db.execute("UPDATE transactions SET order_id=NULL WHERE order_id=?", (order_id,))
 
     # ---------------------------------------------------------------- клиенты
     def customers(self) -> list[dict]:
@@ -125,7 +137,8 @@ class Repo:
 
     def save_customer(self, data: dict) -> dict:
         data = dict(data)
-        data.setdefault("id", uid("cus"))
+        if not data.get("id"):
+            data["id"] = uid("cus")
         data.setdefault("created_at", now_iso())
         return self.db.upsert("customers", data)
 
@@ -139,7 +152,8 @@ class Repo:
 
     def save_status(self, data: dict) -> dict:
         data = dict(data)
-        data.setdefault("id", uid("st"))
+        if not data.get("id"):
+            data["id"] = uid("st")
         return self.db.upsert("statuses", data)
 
     def delete_status(self, status_id: str) -> None:
@@ -153,10 +167,13 @@ class Repo:
 
     def save_niche(self, data: dict) -> dict:
         data = dict(data)
-        data.setdefault("id", uid("nch"))
+        if not data.get("id"):
+            data["id"] = uid("nch")
         return self.db.upsert("niches", data)
 
     def delete_niche(self, niche_id: str) -> None:
+        if not niche_id:
+            raise ValueError("Не указана ниша")
         self.db.execute("UPDATE orders SET niche_id=NULL WHERE niche_id=?", (niche_id,))
         self.db.delete("niches", niche_id)
 
@@ -179,7 +196,8 @@ class Repo:
     def save_spool(self, data: dict) -> dict:
         data = dict(data)
         new = not data.get("id")
-        data.setdefault("id", uid("sp"))
+        if not data.get("id"):
+            data["id"] = uid("sp")
         if new:
             data.setdefault("created_at", now_iso())
             data.setdefault("remaining_grams", data.get("total_grams", 1000))
@@ -187,6 +205,8 @@ class Repo:
         return self.db.upsert("spools", data)
 
     def delete_spool(self, spool_id: str) -> None:
+        if not spool_id:
+            raise ValueError("Не указана катушка")
         self.db.delete("spools", spool_id)
 
     # ---------------------------------------------------------------- каталог
@@ -200,11 +220,14 @@ class Repo:
 
     def save_catalog_item(self, data: dict) -> dict:
         data = dict(data)
-        data.setdefault("id", uid("cat"))
+        if not data.get("id"):
+            data["id"] = uid("cat")
         data.setdefault("created_at", now_iso())
         return self.db.upsert("catalog", data)
 
     def delete_catalog_item(self, item_id: str) -> None:
+        if not item_id:
+            raise ValueError("Не указана позиция")
         self.db.delete("catalog", item_id)
 
     # ------------------------------------------------------------------ касса
@@ -213,7 +236,122 @@ class Repo:
             "SELECT * FROM transactions ORDER BY datetime(at) DESC LIMIT ?", (int(limit),))
 
     def delete_transaction(self, tx_id: str) -> None:
+        if not tx_id:
+            raise ValueError("Не указана проводка")
         self.db.delete("transactions", tx_id)
+
+    def save_transaction_fields(self, data: dict) -> dict:
+        """Правка проводки вручную (сумма, статья, касса, налоговые флаги)."""
+        data = dict(data)
+        if not data.get("id"):
+            raise ValueError("Не указана проводка")
+        data.pop("auto", None)
+        if "amount" in data:
+            amount = abs(float(data.get("amount") or 0))
+            if amount <= 0:
+                raise ValueError("Сумма проводки должна быть больше нуля")
+            data["amount"] = round(amount, 2)
+        if data.get("at"):
+            data["period"] = str(data["at"])[:7]
+        if "category" in data and not str(data.get("category") or "").strip():
+            cur = self.db.one("SELECT kind FROM transactions WHERE id=?", (data["id"],)) or {}
+            kind = str(data.get("kind") or cur.get("kind") or "expense")
+            data["category"] = "sale" if kind == "income" else "other"
+        return self.db.upsert("transactions", data)
+
+    # ------------------------------------------------------- кассы и счета
+    def accounts(self) -> list[dict]:
+        return self.db.query("SELECT * FROM accounts ORDER BY archived, position, name")
+
+    def save_account(self, data: dict) -> dict:
+        data = dict(data)
+        if not data.get("name"):
+            raise ValueError("Нужно название кассы")
+        if not data.get("id"):
+            data["id"] = uid("acc")
+        return self.db.upsert("accounts", data)
+
+    def delete_account(self, account_id: str) -> None:
+        if not account_id:
+            raise ValueError("Не указана касса")
+        used = self.db.one("SELECT COUNT(*) AS n FROM transactions WHERE account_id=?",
+                           (account_id,)) or {}
+        if int(used.get("n") or 0):
+            # касса с историей не удаляется, а уходит в архив
+            self.db.execute("UPDATE accounts SET archived=1 WHERE id=?", (account_id,))
+            return
+        self.db.delete("accounts", account_id)
+
+    # ------------------------------------------------------- каналы продаж
+    def channels(self) -> list[dict]:
+        return self.db.query("SELECT * FROM channels ORDER BY position, name")
+
+    def save_channel(self, data: dict) -> dict:
+        data = dict(data)
+        if not data.get("name"):
+            raise ValueError("Нужно название канала")
+        if not data.get("id"):
+            data["id"] = uid("ch")
+        return self.db.upsert("channels", data)
+
+    def delete_channel(self, channel_id: str) -> None:
+        if not channel_id:
+            raise ValueError("Не указан канал продаж")
+        self.db.delete("channels", channel_id)
+
+    # -------------------------------------------------- статьи и постоянные расходы
+    def expense_categories(self) -> list[dict]:
+        return self.db.query("SELECT * FROM expense_categories ORDER BY position, name")
+
+    def save_expense_category(self, data: dict) -> dict:
+        data = dict(data)
+        if not data.get("name"):
+            raise ValueError("Нужно название статьи")
+        if not data.get("id"):
+            data["id"] = uid("cat")
+        return self.db.upsert("expense_categories", data)
+
+    def delete_expense_category(self, cat_id: str) -> None:
+        if not cat_id:
+            raise ValueError("Не указана статья расходов")
+        self.db.delete("expense_categories", cat_id)
+
+    def fixed_costs(self) -> list[dict]:
+        return self.db.query("SELECT * FROM fixed_costs ORDER BY active DESC, name")
+
+    def save_fixed_cost(self, data: dict) -> dict:
+        data = dict(data)
+        if not data.get("name"):
+            raise ValueError("Нужно название расхода")
+        if not data.get("id"):
+            data["id"] = uid("fix")
+        if not data.get("started_at"):
+            data["started_at"] = now_iso()[:10]
+        return self.db.upsert("fixed_costs", data)
+
+    def delete_fixed_cost(self, cost_id: str) -> None:
+        if not cost_id:
+            raise ValueError("Не указан постоянный расход")
+        self.db.delete("fixed_costs", cost_id)
+
+    def payments(self, order_id: str = "", limit: int = 200) -> list[dict]:
+        if order_id:
+            return self.db.query(
+                "SELECT * FROM payments WHERE order_id=? ORDER BY datetime(at) DESC",
+                (order_id,))
+        return self.db.query(
+            "SELECT * FROM payments ORDER BY datetime(at) DESC LIMIT ?", (int(limit),))
+
+    def delete_payment(self, payment_id: str) -> None:
+        if not payment_id:
+            raise ValueError("Не указан платёж")
+        row = self.db.one("SELECT * FROM payments WHERE id=?", (payment_id,))
+        if not row:
+            raise ValueError("Платёж не найден")
+        sign = -1 if row["kind"] == "refund" else 1
+        self.db.execute("UPDATE orders SET paid=COALESCE(paid,0)-? WHERE id=?",
+                        (sign * float(row["amount"] or 0), row["order_id"]))
+        self.db.delete("payments", payment_id)
 
     # --------------------------------------------------------------- принтеры
     def printers(self, include_secrets: bool = False) -> list[dict]:
@@ -227,7 +365,8 @@ class Repo:
     def save_printer(self, data: dict) -> dict:
         data = dict(data)
         new = not data.get("id")
-        data.setdefault("id", uid("prn"))
+        if not data.get("id"):
+            data["id"] = uid("prn")
         if new:
             data.setdefault("created_at", now_iso())
             data.setdefault("name", "Принтер")
@@ -239,12 +378,28 @@ class Repo:
         return self.db.upsert("printers", data)
 
     def delete_printer(self, printer_id: str) -> None:
+        if not printer_id:
+            raise ValueError("Не указан принтер")
         self.db.delete("printers", printer_id)
+
+    def reset_settings(self, keys: list[str] | None = None) -> dict:
+        """Сброс настроек к заводским: всех или только указанной группы."""
+        if keys:
+            values = {k: DEFAULT_SETTINGS[k] for k in keys if k in DEFAULT_SETTINGS}
+        else:
+            values = {k: v for k, v in DEFAULT_SETTINGS.items()
+                      if k not in ("telegram_token", "telegram_chat")}
+        self.db.set_settings(values)
+        self.db.add_event("settings", "Настройки сброшены к заводским",
+                          ", ".join(sorted(values)[:12]))
+        return self.db.settings()
 
     # --------------------------------------------------------- бэкап и импорт
     def export_all(self) -> dict:
         tables = ["settings", "statuses", "niches", "customers", "orders", "spools",
-                  "print_jobs", "transactions", "filament_usage", "catalog", "printer_stats"]
+                  "print_jobs", "transactions", "filament_usage", "catalog", "printer_stats",
+                  "accounts", "channels", "expense_categories", "fixed_costs", "payments",
+                  "tax_periods"]
         data: dict[str, Any] = {"format": "printflow-backup", "version": 2, "exported_at": now_iso()}
         for table in tables:
             data[table] = self.db.query(f"SELECT * FROM {table}")
@@ -269,7 +424,9 @@ class Repo:
     def _import_native(self, payload: dict) -> dict:
         stats: dict[str, int] = {}
         for table in ("statuses", "niches", "customers", "orders", "spools",
-                      "catalog", "transactions", "print_jobs"):
+                      "catalog", "accounts", "channels", "expense_categories",
+                      "fixed_costs", "transactions", "payments", "print_jobs",
+                      "tax_periods"):
             rows = payload.get(table)
             if not isinstance(rows, list):
                 continue

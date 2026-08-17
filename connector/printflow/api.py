@@ -125,10 +125,46 @@ class Api:
             return 200, {"transactions": self.repo.transactions(int(num(one("limit", "200"), 200)))}
         if path == "/api/finance":
             days = int(num(one("days", "30"), 30))
+            self.acc.run_fixed_costs()
             return 200, {"summary": self.acc.summary(days),
                          "series": self.acc.daily_series(days),
                          "transactions": self.repo.transactions(50),
-                         "niches": self.acc.niche_report()}
+                         "niches": self.acc.niche_report(),
+                         "accounts": self.acc.accounts_state(),
+                         "debts": self.acc.debts(),
+                         "break_even": self.acc.break_even()}
+        if path == "/api/money":
+            return 200, self.acc.money_state(int(num(one("months", "6"), 6)))
+        if path == "/api/pnl":
+            return 200, self.acc.pnl(int(num(one("months", "6"), 6)))
+        if path == "/api/tax":
+            return 200, self.acc.tax_report(int(num(one("year", "0"), 0)))
+        if path == "/api/break-even":
+            return 200, self.acc.break_even()
+        if path == "/api/report":
+            return 200, self.acc.report(one("period", "month"),
+                                        int(num(one("offset", "0"), 0)))
+        if path == "/api/debts":
+            return 200, self.acc.debts()
+        if path == "/api/accounts":
+            return 200, {"accounts": self.repo.accounts(),
+                         "state": self.acc.accounts_state()}
+        if path == "/api/channels":
+            return 200, {"channels": self.repo.channels()}
+        if path == "/api/expense-categories":
+            return 200, {"categories": self.repo.expense_categories()}
+        if path == "/api/fixed-costs":
+            return 200, {"fixed_costs": self.repo.fixed_costs(),
+                         "monthly": self.acc.fixed_costs_monthly()}
+        if path == "/api/payments":
+            return 200, {"payments": self.repo.payments(one("order_id"))}
+        if path == "/api/export/report":
+            return 200, {"filename": f"printflow-{one('period', 'month')}.csv",
+                         "csv": self.acc.report_csv(one("period", "month"),
+                                                    int(num(one("offset", "0"), 0)))}
+        if path == "/api/export/transactions":
+            return 200, {"filename": "printflow-проводки.csv",
+                         "csv": self.acc.transactions_csv(int(num(one("days", "365"), 365)))}
         if path == "/api/jobs":
             return 200, {"queue": self.manager.queue(),
                          "history": self.manager.history(int(num(one("limit", "100"), 100)))}
@@ -211,7 +247,9 @@ class Api:
         if path == "/api/customer/save":
             return 200, {"ok": True, "customer": self.repo.save_customer(body)}
         if path == "/api/customer/delete":
-            self.db.delete("customers", body.get("id", ""))
+            if not body.get("id"):
+                raise ValueError("Не указан клиент")
+            self.db.delete("customers", body["id"])
             return 200, {"ok": True}
         if path == "/api/status/save":
             return 200, {"ok": True, "status": self.repo.save_status(body)}
@@ -245,22 +283,106 @@ class Api:
             self.repo.delete_catalog_item(body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/transaction/save":
+            if body.get("id"):
+                return 200, {"ok": True,
+                             "transaction": self.repo.save_transaction_fields(body)}
             return 200, {"ok": True, "transaction": self.acc.add_transaction(
                 body.get("kind", "income"), body.get("category", "other"),
                 num(body.get("amount")), body.get("title", ""), body.get("note", ""),
-                body.get("order_id", ""), body.get("job_id", ""), auto=False)}
+                body.get("order_id", ""), body.get("job_id", ""), auto=False,
+                account_id=body.get("account_id", ""), channel=body.get("channel", ""),
+                payer=body.get("payer", ""), fee=num(body.get("fee")),
+                taxable=body.get("taxable", True) not in (False, 0, "0"),
+                deductible=body.get("deductible", True) not in (False, 0, "0"),
+                customer_id=body.get("customer_id", ""), at=body.get("at", ""))}
         if path == "/api/transaction/delete":
             self.repo.delete_transaction(body.get("id", ""))
             return 200, {"ok": True}
+
+        # --- кассы, каналы, статьи, постоянные расходы, платежи
+        if path == "/api/account/save":
+            return 200, {"ok": True, "account": self.repo.save_account(body)}
+        if path == "/api/account/delete":
+            self.repo.delete_account(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/channel/save":
+            return 200, {"ok": True, "channel": self.repo.save_channel(body)}
+        if path == "/api/channel/delete":
+            self.repo.delete_channel(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/expense-category/save":
+            return 200, {"ok": True, "category": self.repo.save_expense_category(body)}
+        if path == "/api/expense-category/delete":
+            self.repo.delete_expense_category(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/fixed-cost/save":
+            return 200, {"ok": True, "fixed_cost": self.repo.save_fixed_cost(body)}
+        if path == "/api/fixed-cost/delete":
+            self.repo.delete_fixed_cost(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/fixed-costs/run":
+            created = self.acc.run_fixed_costs()
+            return 200, {"ok": True, "created": created, "count": len(created)}
+        if path == "/api/payment/save":
+            payment = self.acc.add_payment(
+                body.get("order_id", ""), num(body.get("amount")),
+                body.get("kind", "payment"), body.get("account_id", ""),
+                body.get("method", ""), body.get("note", ""))
+            return 200, {"ok": True, "payment": payment,
+                         "order": self.repo.order(body.get("order_id", ""))}
+        if path == "/api/payment/delete":
+            self.repo.delete_payment(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/tax/pay":
+            if num(body.get("amount")) <= 0:
+                raise ValueError("Сумма платежа должна быть больше нуля")
+            tx = self.acc.add_transaction(
+                "expense", body.get("category", "tax"), num(body.get("amount")),
+                body.get("title") or "Уплата налога", body.get("note", ""),
+                account_id=body.get("account_id", ""), deductible=False)
+            return 200, {"ok": True, "transaction": tx, "tax": self.acc.tax_report()}
+
         if path == "/api/calc/cost":
             return 200, self.acc.cost_breakdown(
                 num(body.get("grams")), num(body.get("hours")),
                 num(body.get("spool_price")) or None, num(body.get("spool_weight")) or None,
-                num(body.get("manual_minutes")))
+                num(body.get("manual_minutes")), num(body.get("qty"), 1),
+                num(body.get("design_minutes")), num(body.get("delivery")))
+        if path == "/api/calc/price":
+            cost = num(body.get("cost"))
+            breakdown = None
+            if cost <= 0 and (num(body.get("grams")) or num(body.get("hours"))):
+                # цену можно спросить сразу по граммам и часам, без ручного расчёта
+                breakdown = self.acc.cost_breakdown(
+                    num(body.get("grams")), num(body.get("hours")),
+                    num(body.get("spool_price")) or None, num(body.get("spool_weight")) or None,
+                    num(body.get("manual_minutes")), num(body.get("qty"), 1),
+                    num(body.get("design_minutes")), num(body.get("delivery")))
+                cost = num(breakdown.get("per_unit")) or num(breakdown.get("total"))
+            result = self.acc.suggest_price(
+                cost, num(body.get("qty"), 1),
+                body.get("channel", ""), bool(body.get("rush")))
+            result["cost_per_unit"] = round(cost, 2)
+            if breakdown is not None:
+                result["breakdown"] = breakdown
+            return 200, result
+        if path == "/api/calc/order":
+            # можно прислать либо весь заказ, либо только {"id": "..."} —
+            # во втором случае берём актуальные данные из базы
+            order = dict(body)
+            if body.get("id"):
+                saved = self.db.one("SELECT * FROM orders WHERE id=?", (body["id"],))
+                if not saved:
+                    raise ValueError("Заказ не найден")
+                saved.update({k: v for k, v in body.items() if k != "id" and v not in ("", None)})
+                order = saved
+            return 200, self.acc.order_economics(order)
 
         # --- настройки, бэкап, уведомления
         if path == "/api/settings":
             return 200, {"ok": True, "settings": self.db.set_settings(body)}
+        if path == "/api/settings/reset":
+            return 200, {"ok": True, "settings": self.repo.reset_settings(body.get("keys"))}
         if path == "/api/telegram/test":
             self.db.set_settings({k: v for k, v in body.items() if k.startswith("telegram")})
             return 200, self.manager.send_telegram("PrintFlow: проверка уведомлений прошла успешно.")

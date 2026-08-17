@@ -6,8 +6,8 @@
 <title>NOZZA · PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
-<link rel="stylesheet" href="assets/theme.css?v=2.0.1">
-<link rel="stylesheet" href="assets/app.css?v=2.0.1">
+<link rel="stylesheet" href="assets/theme.css?v=2.0.8">
+<link rel="stylesheet" href="assets/app.css?v=2.0.8">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -43,7 +43,7 @@
   <button class="cmd-trigger" id="cmd_open" type="button"><span>⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
   <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления">◐</button>
-  <button class="btn primary" id="quick_order" type="button"><span class="ic">＋</span>Заказ</button>
+  <button class="btn primary" id="quick_order" type="button"><span class="ic">+</span>Заказ</button>
  </header>
 
  <main id="views">
@@ -90,11 +90,11 @@
   <div class="head-actions">
    <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
    <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
-   <button class="btn primary" id="pr_add" type="button">＋ Принтер</button>
+   <button class="btn primary" id="pr_add" type="button">+ Принтер</button>
   </div>
  </div>
  <div class="printer-tabs" id="pr_tabs"></div>
- <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «＋ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
+ <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «+ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
  <div id="pr_workspace" hidden>
   <div class="printer-grid">
    <div class="grid" style="gap:16px">
@@ -205,7 +205,7 @@
 <section class="view" id="view-queue">
  <div class="view-head">
   <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
-  <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn primary" id="queue_add" type="button">＋ Задание</button></div>
+  <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
  </div>
  <div class="grid g-2-1">
   <div class="card">
@@ -226,7 +226,7 @@
   <div class="head-actions">
    <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
    <button class="btn" id="orders_statuses" type="button">Статусы</button>
-   <button class="btn primary" id="orders_new" type="button">＋ Новый заказ</button>
+   <button class="btn primary" id="orders_new" type="button">+ Новый заказ</button>
   </div>
  </div>
  <div class="toolbar">
@@ -255,24 +255,128 @@
   <div><span class="eyebrow">Автоматический учёт</span><h1>Финансы</h1><p>Доходы и расходы пишутся сами: по завершённым печатям и закрытым заказам.</p></div>
   <div class="head-actions">
    <div class="seg" id="fin_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
-   <button class="btn primary" id="fin_add" type="button">＋ Проводка</button>
+   <button class="btn" id="fin_export_tx" type="button">↓ CSV</button>
+   <button class="btn primary" id="fin_add" type="button">+ Проводка</button>
   </div>
  </div>
- <div class="kpi-grid" id="fin_kpis"></div>
- <div class="grid g-2-1">
-  <div class="card">
-   <div class="card-head"><div><h2>Прибыль по дням</h2><p>Доход минус расход</p></div></div>
-   <div class="chart-wrap"><div id="fin_chart"></div><div class="chart-tip" id="fin_tip"></div></div>
-   <div class="chart-legend" id="fin_legend"></div>
+ <div class="seg tabs" id="fin_tabs">
+  <button data-pane="overview" class="on">Обзор</button>
+  <button data-pane="pnl">Прибыль по месяцам</button>
+  <button data-pane="tax">Налоги</button>
+  <button data-pane="cash">Кассы и долги</button>
+  <button data-pane="reports">Отчёты</button>
+ </div>
+
+ <!-- ---------------------------------------------------------- обзор -->
+ <div class="pane on" id="finpane-overview">
+  <div class="kpi-grid" id="fin_kpis"></div>
+  <div class="grid g-2-1">
+   <div class="card">
+    <div class="card-head"><div><h2>Прибыль по дням</h2><p>Доход минус расход</p></div></div>
+    <div class="chart-wrap"><div id="fin_chart"></div><div class="chart-tip" id="fin_tip"></div></div>
+    <div class="chart-legend" id="fin_legend"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Прибыль по нишам</h2><p>Сравнение гипотез по факту</p></div></div>
+    <div id="fin_niches"></div>
+   </div>
   </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Прибыль по нишам</h2><p>Сравнение гипотез по факту</p></div></div>
-   <div id="fin_niches"></div>
+  <div class="card" style="margin-top:16px">
+   <div class="card-head"><div><h2>Последние проводки</h2><p>Автоматические помечены значком ⚙</p></div></div>
+   <div id="fin_tx"></div>
   </div>
  </div>
- <div class="card" style="margin-top:16px">
-  <div class="card-head"><div><h2>Последние проводки</h2><p>Автоматические помечены значком ⚙</p></div></div>
-  <div id="fin_tx"></div>
+
+ <!-- ------------------------------------------------------------ P&L -->
+ <div class="pane" id="finpane-pnl">
+  <div class="kpi-grid" id="pnl_kpis"></div>
+  <div class="grid g-2-1">
+   <div class="card">
+    <div class="card-head"><div><h2>Доход, расход и прибыль по месяцам</h2><p>Постоянные расходы начисляются автоматически</p></div></div>
+    <div class="chart-wrap"><div id="pnl_chart"></div><div class="chart-tip" id="pnl_tip"></div></div>
+    <div class="chart-legend" id="pnl_legend"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Точка безубыточности</h2><p>Сколько нужно заработать, чтобы выйти в ноль</p></div></div>
+    <div id="be_box"></div>
+   </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+   <div class="card-head"><div><h2>Отчёт о прибылях и убытках</h2><p>Свою работу в расходы не включаем — это ваша прибыль</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Месяц</th><th class="right">Доход</th><th class="right">Комиссии</th><th class="right">Переменные</th><th class="right">Постоянные</th><th class="right">Налоги</th><th class="right">Прибыль</th><th class="right">Маржа</th></tr></thead><tbody id="pnl_tbody"></tbody></table></div>
+  </div>
+ </div>
+
+ <!-- -------------------------------------------------------- налоги -->
+ <div class="pane" id="finpane-tax">
+  <div class="kpi-grid" id="tax_kpis"></div>
+  <div class="grid g-2-1">
+   <div class="card">
+    <div class="card-head"><div><h2 id="tax_mode_name">Налоговый режим</h2><p>Настраивается в разделе «Настройки → Налоги»</p></div><button class="btn sm" id="tax_go_settings" type="button">Настроить</button></div>
+    <div id="tax_box"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Резерв под налоги</h2><p>Откладывайте сразу — потом не придётся искать</p></div><button class="btn sm primary" id="tax_pay" type="button">Записать уплату</button></div>
+    <div id="tax_reserve"></div>
+   </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+   <div class="card-head"><div><h2>По кварталам</h2><p>База авансовых платежей — до уменьшения на страховые взносы</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Квартал</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">Налог с базы</th></tr></thead><tbody id="tax_tbody"></tbody></table></div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------- кассы и долги -->
+ <div class="pane" id="finpane-cash">
+  <div class="kpi-grid" id="cash_kpis"></div>
+  <div class="grid g-2-1">
+   <div class="card">
+    <div class="card-head"><div><h2>Кассы и счета</h2><p>Где физически лежат деньги</p></div><button class="btn sm" id="acc_add2" type="button">+ Касса</button></div>
+    <div id="cash_accounts"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Постоянные расходы</h2><p>Начисляются сами каждый месяц</p></div><button class="btn sm" id="fix_add2" type="button">+ Расход</button></div>
+    <div id="cash_fixed"></div>
+   </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+   <div class="card-head"><div><h2>Долги клиентов</h2><p>Заказы, по которым деньги получены не полностью</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Заказ</th><th>Клиент</th><th class="right">Цена</th><th class="right">Оплачено</th><th class="right">Долг</th><th class="right">Дней</th><th></th></tr></thead><tbody id="debt_tbody"></tbody></table></div>
+  </div>
+ </div>
+
+ <!-- -------------------------------------------------------- отчёты -->
+ <div class="pane" id="finpane-reports">
+  <div class="card">
+   <div class="card-head">
+    <div><h2>Отчёт за период</h2><p id="rep_label">—</p></div>
+    <div class="head-actions">
+     <div class="seg" id="rep_period"><button data-period="month" class="on">Месяц</button><button data-period="quarter">Квартал</button><button data-period="year">Год</button></div>
+     <button class="btn sm" id="rep_prev" type="button">←</button>
+     <button class="btn sm" id="rep_next" type="button">→</button>
+     <button class="btn sm" id="rep_export" type="button">↓ CSV</button>
+    </div>
+   </div>
+   <div class="kpi-grid" id="rep_kpis"></div>
+  </div>
+  <div class="grid g2" style="margin-top:16px">
+   <div class="card">
+    <div class="card-head"><div><h2>Топ клиентов</h2><p>По выручке за период</p></div></div>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Клиент</th><th class="right">Заказов</th><th class="right">Выручка</th><th class="right">Прибыль</th></tr></thead><tbody id="rep_customers"></tbody></table></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Топ товаров</h2><p>По прибыли за период</p></div></div>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Товар</th><th class="right">Штук</th><th class="right">Выручка</th><th class="right">Прибыль</th></tr></thead><tbody id="rep_products"></tbody></table></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Каналы продаж</h2><p>Сколько съедает комиссия</p></div></div>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Канал</th><th class="right">Заказов</th><th class="right">Выручка</th><th class="right">Комиссия</th><th class="right">Прибыль</th></tr></thead><tbody id="rep_channels"></tbody></table></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Структура расходов</h2><p>Куда уходят деньги</p></div></div>
+    <div id="rep_expenses"></div>
+   </div>
+  </div>
  </div>
 </section>
 
@@ -280,12 +384,12 @@
 <section class="view" id="view-inventory">
  <div class="view-head">
   <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
-  <div class="head-actions"><button class="btn primary" id="spool_add" type="button">＋ Катушка</button></div>
+  <div class="head-actions"><button class="btn primary" id="spool_add" type="button">+ Катушка</button></div>
  </div>
  <div class="kpi-grid" id="stock_kpis"></div>
  <div class="spool-grid" id="spool_grid"></div>
  <div class="card" style="margin-top:16px">
-  <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><button class="btn sm" id="cat_add" type="button">＋ Позиция</button></div>
+  <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><button class="btn sm" id="cat_add" type="button">+ Позиция</button></div>
   <div class="table-wrap"><table class="data"><thead><tr><th>Название</th><th>Материал</th><th class="right">Граммы</th><th class="right">Часы</th><th class="right">На стол</th><th class="right">Цена</th><th class="right">₽/час</th><th></th></tr></thead><tbody id="cat_tbody"></tbody></table></div>
  </div>
 </section>
@@ -294,7 +398,7 @@
 <section class="view" id="view-niches">
  <div class="view-head">
   <div><span class="eyebrow">Проверка гипотез</span><h1>Ниши</h1><p>Показы и обращения вводите вручную, заказы и прибыль считаются сами.</p></div>
-  <div class="head-actions"><button class="btn primary" id="niche_add" type="button">＋ Ниша</button></div>
+  <div class="head-actions"><button class="btn primary" id="niche_add" type="button">+ Ниша</button></div>
  </div>
  <div class="niche-grid" id="niche_grid"></div>
 </section>
@@ -2152,44 +2256,155 @@
 <!-- ================================================== НАСТРОЙКИ -->
 <section class="view" id="view-settings">
  <div class="view-head">
-  <div><span class="eyebrow">Система</span><h1>Настройки</h1><p>Тарифы, автоматизация, уведомления и резервная копия. Секреты хранятся только на этом компьютере.</p></div>
-  <div class="head-actions"><button class="btn primary" id="settings_save" type="button">Сохранить</button></div>
+  <div><span class="eyebrow">Система</span><h1>Настройки</h1><p>Тарифы, налоги, ценообразование и данные. Секреты хранятся только на этом компьютере.</p></div>
+  <div class="head-actions">
+   <input type="search" id="set_search" class="set-search" placeholder="Поиск по настройкам…" autocomplete="off">
+   <button class="btn" id="settings_reset" type="button">Сбросить</button>
+   <button class="btn primary" id="settings_save" type="button">Сохранить</button>
+  </div>
  </div>
- <div class="set-grid">
-  <div class="card">
-   <div class="card-head"><div><h2>Тарифы производства</h2><p>Основа автоматической себестоимости</p></div></div>
-   <div id="set_rates"></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Автоматизация</h2><p>Что система делает сама</p></div></div>
-   <div id="set_auto"></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Токен хранится локально и не попадает в бэкап</p></div></div>
-   <div id="set_tg"></div>
-   <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Оформление</h2><p>Тема и акцент интерфейса</p></div></div>
-   <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
-    <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
-   <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">＋</button></div>
-   <div id="set_printers"></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Данные</h2><p>Резервная копия и перенос из старой версии</p></div></div>
-   <div class="notice"><span>ℹ</span><span>Копия содержит заказы, клиентов, склад, журнал печати и финансы. Секреты (Access Code, токен Telegram) в файл не попадают.</span></div>
-   <div class="grid g2" style="gap:9px">
-    <button class="btn" id="backup_download" type="button">↓ Скачать копию</button>
-    <button class="btn" id="backup_restore" type="button">↑ Восстановить</button>
-    <button class="btn" id="backup_import_ls" type="button">Перенести из браузера</button>
-    <button class="btn danger" id="backup_wipe" type="button">Стереть данные</button>
+ <div class="seg tabs" id="set_tabs">
+  <button data-pane="business" class="on">Бизнес</button>
+  <button data-pane="tax">Налоги</button>
+  <button data-pane="pricing">Цены</button>
+  <button data-pane="money">Учёт денег</button>
+  <button data-pane="production">Производство</button>
+  <button data-pane="system">Система</button>
+ </div>
+ <div class="set-empty" id="set_no_results" hidden>По запросу ничего не нашлось. Очистите поиск, чтобы увидеть все настройки.</div>
+
+ <!-- ------------------------------------------------------- бизнес -->
+ <div class="pane on" id="setpane-business">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Реквизиты</h2><p>Подставляются в документы и печатные материалы</p></div></div>
+    <div id="set_company"></div>
    </div>
-   <input type="file" id="backup_file" accept="application/json,.json" hidden>
-   <p class="muted" style="font-size:12px;margin-top:10px">Каталог данных: <code id="set_data_dir">%APPDATA%\PrintFlow</code></p>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Каналы продаж</h2><p>Комиссия площадки вычитается из прибыли каждого заказа</p></div><button class="btn sm" id="ch_add" type="button">+</button></div>
+    <div id="set_channels"></div>
+    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Комиссия и реклама на заказ учитываются в расчёте цены и прибыли автоматически.</span></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Цели</h2><p>От них считается план и точка безубыточности</p></div></div>
+    <div id="set_goals"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- -------------------------------------------------------- налоги -->
+ <div class="pane" id="setpane-tax">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Налоговый режим</h2><p>Выберите свою схему — расчёты подстроятся</p></div></div>
+    <div class="set-row"><div class="sinfo"><b>Режим</b><small>От него зависят ставки, лимиты и взносы</small></div>
+     <select id="set_tax_mode" data-setting="tax_mode">
+      <option value="none">Без налога</option>
+      <option value="npd">Самозанятый (НПД)</option>
+      <option value="usn6">УСН «Доходы» 6%</option>
+      <option value="usn15">УСН «Доходы минус расходы»</option>
+      <option value="patent">Патент</option>
+      <option value="manual">Своя ставка</option>
+     </select></div>
+    <div id="set_tax_hint" class="notice"><span>ℹ</span><span></span></div>
+    <div id="set_tax"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Страховые взносы</h2><p>Для ИП: фиксированная часть и 1% с дохода свыше лимита</p></div></div>
+    <div id="set_insurance"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>НДС и резерв</h2><p>Пригодится при выходе за 20 млн ₽ в год</p></div></div>
+    <div id="set_vat"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- --------------------------------------------------------- цены -->
+ <div class="pane" id="setpane-pricing">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила ценообразования</h2><p>Используются калькулятором и подсказками цены</p></div></div>
+    <div id="set_pricing"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Скидки и надбавки</h2><p>За объём и за срочность</p></div></div>
+    <div id="set_discounts"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Приём оплаты и доставка</h2><p>Эти расходы вычитаются из прибыли заказа</p></div></div>
+    <div id="set_payments"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ---------------------------------------------------- учёт денег -->
+ <div class="pane" id="setpane-money">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Кассы и счета</h2><p>Наличные, карта, расчётный счёт</p></div><button class="btn sm" id="acc_add" type="button">+</button></div>
+    <div id="set_accounts"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Постоянные расходы</h2><p>Аренда, интернет, подписки — начисляются сами</p></div><button class="btn sm" id="fix_add" type="button">+</button></div>
+    <div id="set_fixed"></div>
+    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Печатаете дома и постоянных расходов нет — просто оставьте список пустым.</span></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила учёта</h2><p>Как считать себестоимость и когда предупреждать</p></div></div>
+    <div id="set_money_rules"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Статьи расходов</h2><p>Группировка в отчётах</p></div><button class="btn sm" id="cat_expense_add" type="button">+</button></div>
+    <div id="set_categories"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- --------------------------------------------------- производство -->
+ <div class="pane" id="setpane-production">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Тарифы производства</h2><p>Основа автоматической себестоимости</p></div></div>
+    <div id="set_rates"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Автоматизация</h2><p>Что система делает сама</p></div></div>
+    <div id="set_auto"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">+</button></div>
+    <div id="set_printers"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------------- система -->
+ <div class="pane" id="setpane-system">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Токен хранится локально и не попадает в бэкап</p></div></div>
+    <div id="set_tg"></div>
+    <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Оформление</h2><p>Тема и акцент интерфейса</p></div></div>
+    <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
+     <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
+    <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Данные</h2><p>Резервная копия и перенос из старой версии</p></div></div>
+    <div class="notice"><span>ℹ</span><span>Копия содержит заказы, клиентов, склад, журнал печати и финансы. Секреты (Access Code, токен Telegram) в файл не попадают.</span></div>
+    <div class="btn-grid">
+     <button class="btn" id="backup_download" type="button">↓ Скачать копию</button>
+     <button class="btn" id="backup_restore" type="button">↑ Восстановить</button>
+     <button class="btn" id="backup_import_ls" type="button">Перенести из браузера</button>
+     <button class="btn danger" id="backup_wipe" type="button">Стереть данные</button>
+    </div>
+    <input type="file" id="backup_file" accept="application/json,.json" hidden>
+    <p class="muted" style="font-size:12px;margin-top:10px">Каталог данных: <code id="set_data_dir">%APPDATA%\PrintFlow</code></p>
+   </div>
   </div>
  </div>
 </section>
@@ -2227,7 +2442,7 @@
   <div class="form-section"><h3>Экономика</h3><div class="form-grid">
    <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
    <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
-   <label class="field"><span>Предоплата, ₽</span><input id="of_prepaid" type="number" min="0" step="any"></label>
+   <label class="field"><span>Оплачено, ₽</span><input id="of_prepaid" type="number" min="0" step="any"><small class="hint">Предоплата или полная оплата. Остаток попадёт в «Долги клиентов».</small></label>
    <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
    <div class="span-2" id="of_econ"></div>
   </div></div>
@@ -2258,7 +2473,7 @@
 
 <dialog class="modal narrow" id="status_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Настройка</span><h2>Статусы заказов</h2><p>Порядок строк — порядок колонок канбана.</p></div><button class="icon-btn" type="button" data-close="status_modal">×</button></div>
- <div class="modal-body"><div id="status_editor"></div><button class="btn wide" type="button" id="status_add" style="margin-top:10px">＋ Добавить статус</button></div>
+ <div class="modal-body"><div id="status_editor"></div><button class="btn wide" type="button" id="status_add" style="margin-top:10px">+ Добавить статус</button></div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="status_modal">Отмена</button><button class="btn primary" type="button" id="status_save">Сохранить</button></div>
 </form></dialog>
 
@@ -2340,15 +2555,91 @@
 </form></dialog>
 
 <dialog class="modal narrow" id="tx_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">Касса</span><h2>Новая проводка</h2></div><button class="icon-btn" type="button" data-close="tx_modal">×</button></div>
+ <div class="modal-head"><div><span class="eyebrow">Касса</span><h2 id="tx_modal_title">Новая проводка</h2></div><button class="icon-btn" type="button" data-close="tx_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
   <label class="field"><span>Тип</span><select id="tf_kind"><option value="income">Доход</option><option value="expense">Расход</option></select></label>
-  <label class="field"><span>Категория</span><select id="tf_category"><option value="order">Заказ</option><option value="filament">Пластик</option><option value="energy">Электричество</option><option value="equipment">Оборудование</option><option value="marketing">Реклама</option><option value="other">Прочее</option></select></label>
+  <label class="field"><span>Статья</span><select id="tf_category"></select></label>
   <label class="field"><span>Сумма, ₽</span><input id="tf_amount" type="number" min="0" step="any"></label>
+  <label class="field"><span>Касса</span><select id="tf_account"></select></label>
   <label class="field"><span>Название</span><input id="tf_title"></label>
+  <label class="field"><span>Дата</span><input id="tf_at" type="date"></label>
+  <label class="field" id="tf_channel_wrap"><span>Канал продаж</span><select id="tf_channel"></select></label>
+  <label class="field" id="tf_payer_wrap"><span>Плательщик</span><select id="tf_payer"><option value="person">Физлицо</option><option value="company">Юрлицо или ИП</option></select></label>
   <label class="field span-2"><span>Комментарий</span><input id="tf_note"></label>
+  <div class="field span-2 inline-checks">
+   <label class="chk"><input type="checkbox" id="tf_taxable" checked><span>Учитывать в налоговой базе</span></label>
+   <label class="chk"><input type="checkbox" id="tf_deductible" checked><span>Принимать в расходы</span></label>
+  </div>
  </div></div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="tx_modal">Отмена</button><button class="btn primary" type="button" id="tx_save">Добавить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="account_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Деньги</span><h2>Касса или счёт</h2></div><button class="icon-btn" type="button" data-close="account_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="af_name" placeholder="Наличные, Тинькофф, Сбер"></label>
+  <label class="field"><span>Тип</span><select id="af_kind"><option value="cash">Наличные</option><option value="card">Карта</option><option value="bank">Расчётный счёт</option><option value="other">Другое</option></select></label>
+  <label class="field"><span>Комиссия при поступлении, %</span><input id="af_fee" type="number" min="0" step="any" value="0"></label>
+  <label class="field"><span>Начальный остаток, ₽</span><input id="af_opening" type="number" step="any" value="0"></label>
+  <label class="field"><span>Заметка</span><input id="af_note"></label>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="account_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="account_modal">Отмена</button><button class="btn primary" type="button" id="account_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="channel_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Продажи</span><h2>Канал продаж</h2></div><button class="icon-btn" type="button" data-close="channel_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="chf_name" placeholder="Авито, маркетплейс, B2B"></label>
+  <label class="field"><span>Комиссия, %</span><input id="chf_fee" type="number" min="0" step="any" value="0"></label>
+  <label class="field"><span>Фикс. сбор за заказ, ₽</span><input id="chf_fixed" type="number" min="0" step="any" value="0"></label>
+  <label class="field"><span>Реклама на заказ, ₽</span><input id="chf_ads" type="number" min="0" step="any" value="0"></label>
+  <label class="field"><span>Кто платит</span><select id="chf_payer"><option value="person">Физлица</option><option value="company">Юрлица и ИП</option></select></label>
+  <div class="field span-2 inline-checks"><label class="chk"><input type="checkbox" id="chf_active" checked><span>Канал активен</span></label></div>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="channel_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="channel_modal">Отмена</button><button class="btn primary" type="button" id="channel_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="fixed_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Учёт</span><h2>Постоянный расход</h2></div><button class="icon-btn" type="button" data-close="fixed_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="ff_name" placeholder="Аренда, интернет, подписка"></label>
+  <label class="field"><span>Сумма, ₽</span><input id="ff_amount" type="number" min="0" step="any"></label>
+  <label class="field"><span>Периодичность</span><select id="ff_period"><option value="month">Ежемесячно</option><option value="quarter">Раз в квартал</option><option value="year">Раз в год</option></select></label>
+  <label class="field"><span>День начисления</span><input id="ff_day" type="number" min="1" max="28" value="1"></label>
+  <label class="field"><span>Статья</span><select id="ff_category"></select></label>
+  <label class="field"><span>Касса</span><select id="ff_account"></select></label>
+  <label class="field"><span>Заметка</span><input id="ff_note"></label>
+  <div class="field span-2 inline-checks">
+   <label class="chk"><input type="checkbox" id="ff_active" checked><span>Начислять автоматически</span></label>
+   <label class="chk"><input type="checkbox" id="ff_deductible" checked><span>Принимать в расходы для налога</span></label>
+  </div>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="fixed_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="fixed_modal">Отмена</button><button class="btn primary" type="button" id="fixed_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="expcat_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Учёт</span><h2>Статья расходов</h2></div><button class="icon-btn" type="button" data-close="expcat_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="ecf_name"></label>
+  <label class="field"><span>Группа</span><select id="ecf_grp"><option value="variable">Переменные</option><option value="fixed">Постоянные</option><option value="invest">Вложения</option><option value="tax">Налоги</option><option value="owner">Вывод себе</option></select></label>
+  <div class="field inline-checks"><label class="chk"><input type="checkbox" id="ecf_is_fixed"><span>Считать постоянной</span></label></div>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="expcat_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="expcat_modal">Отмена</button><button class="btn primary" type="button" id="expcat_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="payment_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Оплата</span><h2 id="pay_title">Платёж по заказу</h2></div><button class="icon-btn" type="button" data-close="payment_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice" id="pay_info"><span>ℹ</span><span></span></div>
+  <div class="form-grid">
+   <label class="field"><span>Сумма, ₽</span><input id="pf_amount" type="number" min="0" step="any"></label>
+   <label class="field"><span>Тип</span><select id="pf_kind"><option value="payment">Оплата</option><option value="prepay">Предоплата</option><option value="refund">Возврат</option></select></label>
+   <label class="field"><span>Касса</span><select id="pf_account"></select></label>
+   <label class="field"><span>Способ</span><input id="pf_method" placeholder="наличные, перевод"></label>
+   <label class="field span-2"><span>Комментарий</span><input id="pf_note"></label>
+  </div>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="payment_modal">Отмена</button><button class="btn primary" type="button" id="payment_save">Записать</button></div>
 </form></dialog>
 
 <dialog class="modal narrow" id="job_modal"><form method="dialog">
@@ -2376,10 +2667,11 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=2.0.1"></script>
-<script src="assets/core.js?v=2.0.1"></script>
-<script src="assets/printer.js?v=2.0.1"></script>
-<script src="assets/ops.js?v=2.0.1"></script>
-<script src="assets/money.js?v=2.0.1"></script>
-<script src="assets/app.js?v=2.0.1"></script>
+<script src="assets/qr.js?v=2.0.8"></script>
+<script src="assets/core.js?v=2.0.8"></script>
+<script src="assets/printer.js?v=2.0.8"></script>
+<script src="assets/ops.js?v=2.0.8"></script>
+<script src="assets/money.js?v=2.0.8"></script>
+<script src="assets/finance.js?v=2.0.8"></script>
+<script src="assets/app.js?v=2.0.8"></script>
 </body></html>
