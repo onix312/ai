@@ -33,6 +33,16 @@ ALLOWED_ORIGIN = re.compile(
 )
 MAX_UPLOAD = 400 * 1024 * 1024  # 400 МБ — с запасом на крупные 3MF
 
+# Браузер штатно закрывает долгие SSE/MJPEG-соединения при обновлении страницы,
+# закрытии вкладки и переходе в сон. На разных ОС это проявляется разными
+# подклассами ConnectionError (на Windows в том числе ConnectionAbortedError,
+# WinError 10053), поэтому все эти варианты должны завершаться без traceback.
+CLIENT_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+)
+
 
 def safe_file(root: Path, name: str) -> Path | None:
     """Вернуть путь только если он действительно находится внутри root."""
@@ -683,7 +693,7 @@ class Handler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         try:
             super().handle_one_request()
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             self.close_connection = True
 
     # ---------------------------------------------------------------- ответы
@@ -696,7 +706,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             # Пользователь закрыл вкладку или перешёл в другой раздел — не ошибка.
             self.close_connection = True
 
@@ -732,7 +742,7 @@ class Handler(BaseHTTPRequestHandler):
                 code, payload = self.api.get(path, query)
                 return self.send_json(code, payload)
             return self.serve_static(path)
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             return
         except TimeoutError:
             return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
@@ -787,7 +797,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b": ping\n\n")
                 self.wfile.flush()
                 time.sleep(2.5)
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             pass
         finally:
             self.close_connection = True
@@ -850,7 +860,7 @@ class Handler(BaseHTTPRequestHandler):
                                  + f"Content-Length: {len(frame)}\r\n\r\n".encode())
                 self.wfile.write(frame)
                 self.wfile.write(b"\r\n")
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             pass
         finally:
             printer.camera.unsubscribe(event)
@@ -896,7 +906,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(code, payload)
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        except (BrokenPipeError, ConnectionResetError):
+        except CLIENT_DISCONNECT_ERRORS:
             return
         except TimeoutError:
             return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
