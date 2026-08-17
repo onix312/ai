@@ -41,9 +41,13 @@
     max-width: 17mm; text-align: center; line-height: 1.2;
   }
   .tag .brandline {
-    font-size: 6.5px; font-weight: 800; letter-spacing: .1em; color: var(--brand);
-    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+    font-size: 7px; font-weight: 800; letter-spacing: .08em; color: var(--brand);
+    text-align: center; line-height: 1.2; max-width: 100%; white-space: nowrap;
+    display: flex; align-items: center; justify-content: center; gap: 1mm;
   }
+  .tag .brandline img { width: 3.6mm; height: 3.6mm; flex: none; }
+  .grid.small .tag .brandline { font-size: 5.5px; letter-spacing: .04em; }
+  .grid.small .tag .brandline img { width: 3mm; height: 3mm; }
   .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 4mm; }
   .tag.blank .price { color: #cbd2e0; }
   .grid.small .tag { width: 43mm; height: 25mm; padding: 3mm 3mm 2.5mm 4.5mm; gap: 2mm; }
@@ -199,7 +203,8 @@ function buildTagInner(item, opts, globalIdx){
   if(item.grams) metaParts.push(Math.round(item.grams)+' г');
   if(opts.showCity) metaParts.push(opts.city);
   const meta=metaParts.join(' · ');
-  const brandLine=opts.showCity?`NOZZA · ${esc(opts.city)}`:'NOZZA';
+  const markSrc=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
+  const brandLine=`<img src="${markSrc}" alt=""><span>NOZZA</span>`;
   // selectable + selected classes handled via wrapper
   return `<div class="tag${globalIdx===selectedIndex?' selected':''}" data-idx="${globalIdx}" title="${isCustom?'Ручной — клик для редактирования':'Клик — скопировать в ручной редактор'}">
     <div class="tag-main">
@@ -222,7 +227,8 @@ function buildTagInner(item, opts, globalIdx){
 
 function blankHtml(){
   const opts=getOpts();
-  const brandLine=opts.showCity?`NOZZA · ${esc(opts.city)}`:'nozza.ru';
+  const markSrc=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
+  const brandLine=`<img src="${markSrc}" alt=""><span>NOZZA</span>`;
   return `<div class="tag blank"><div class="tag-main"><div><div class="name"></div><div class="desc"></div></div><div><div class="price">____ <span>₽</span></div></div></div><div class="tag-side"><div class="badge">NOZZA</div><div></div><div class="brandline">${brandLine}</div></div></div>`;
 }
 

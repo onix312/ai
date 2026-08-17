@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 72" width="260" height="72" role="img" aria-label="NOZZA v4 (белый)">
+ <title>NOZZA — Штамп</title>
+ <defs><linearGradient id="l4" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f46e5"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+ <g>
+  <rect x="4" y="6" width="60" height="60" rx="16" fill="#ffffff" fill-opacity=".16" stroke="#ffffff" stroke-width="1.6"/>
+  <g fill="none" stroke="#fff" stroke-width="1.6" opacity="0.92">
+   <circle cx="34" cy="36" r="18"/><circle cx="34" cy="36" r="13.8" stroke-dasharray="1.8 2.2" opacity="0.6" stroke-width="1"/>
+  </g>
+  <text x="34" y="40" text-anchor="middle" font-family="Inter,'Segoe UI',Arial,sans-serif" font-size="10.5" font-weight="900" letter-spacing="1" fill="#fff">NOZZA</text>
+ </g>
+ <text x="80" y="47" font-family="Inter,'Segoe UI',system-ui,Arial,sans-serif" font-size="34" font-weight="800" letter-spacing="1.5" fill="#ffffff">NOZZA</text>
+</svg>

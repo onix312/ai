@@ -131,6 +131,25 @@ document.addEventListener('click', (e) => {
 /** Подтверждение опасного действия. */
 function confirmDanger(text) { return window.confirm(text); }
 
+/* Запасные названия статей: показываем человеческий текст, даже пока
+   справочник расходов ещё не загрузился с коннектора. */
+const CAT_FALLBACK = {
+  order: 'Заказ', filament: 'Пластик', energy: 'Электричество',
+  packaging: 'Упаковка', delivery: 'Доставка', fee: 'Комиссии площадок',
+  equipment: 'Оборудование и запчасти', rent: 'Аренда',
+  subscription: 'Подписки и сервисы', ads: 'Реклама и продвижение',
+  tax: 'Налоги', insurance: 'Страховые взносы', withdrawal: 'Вывод себе',
+  other: 'Прочее', sale: 'Продажа', service: 'Услуга',
+};
+
+/** Человеческое имя статьи расходов или дохода по её коду. */
+function catName(id) {
+  const code = String(id || '').trim();
+  if (!code) return 'Без статьи';
+  const found = (PF.state.expenseCategories || []).find((c) => c.id === code);
+  return (found && found.name) || CAT_FALLBACK[code] || code;
+}
+
 /* ========================================================= состояние */
 const PF = {
   state: {
@@ -142,7 +161,7 @@ const PF = {
   ui: {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
     dateText, dateTimeText, agoText, todayISO, initials, debounce,
-    toast, fail, openModal, closeModal, confirmDanger, CUR, store,
+    toast, fail, openModal, closeModal, confirmDanger, CUR, store, catName,
   },
   modules: {},
   bus: new EventTarget(),
@@ -156,6 +175,36 @@ PF.niche = (id) => PF.state.niches.find((n) => n.id === id) || null;
 PF.printer = (id) => PF.state.printers.find((p) => p.id === id) || null;
 PF.finalStatusIds = () => PF.state.statuses.filter((s) => Number(s.is_final)).map((s) => s.id);
 PF.isFinal = (order) => PF.finalStatusIds().includes(order.status);
+
+/* Налог по выбранному режиму — те же правила, что в accounting.py.
+   payer: 'person' (физлицо) или 'company' (юрлицо/ИП). */
+PF.taxRate = (payer) => {
+  const s = PF.state.settings || {};
+  const n = (v, d) => { const x = Number(v); return Number.isFinite(x) ? x : (d || 0); };
+  switch (s.tax_mode) {
+    case 'npd': return payer === 'company' ? n(s.npd_rate_company, 6) : n(s.npd_rate_person, 4);
+    case 'usn6': return n(s.usn_income_rate, 6);
+    case 'usn15': return n(s.usn_profit_rate, 15);
+    case 'manual': return n(s.tax_rate, 0);
+    default: return 0; // «без налога» и патент с оборота не считаются
+  }
+};
+
+/** Налог с конкретной сделки: на УСН 15 — с прибыли, иначе с оборота. */
+PF.taxOf = (price, profitBase, payer) => {
+  const s = PF.state.settings || {};
+  const n = (v, d) => { const x = Number(v); return Number.isFinite(x) ? x : (d || 0); };
+  if (s.tax_mode === 'usn15') return Math.max(0, n(profitBase)) * n(s.usn_profit_rate, 15) / 100;
+  return n(price) * PF.taxRate(payer) / 100;
+};
+
+/** Подпись налоговой строки в расчётах: «после налога 6%» или «после налога». */
+PF.taxLabel = () => {
+  const s = PF.state.settings || {};
+  const modes = { npd: 'НПД', usn6: 'УСН 6%', usn15: 'УСН 15%', patent: 'патент', manual: 'налог' };
+  if (!s.tax_mode || s.tax_mode === 'none') return '';
+  return modes[s.tax_mode] || 'налог';
+};
 PF.livePrinter = (id) => {
   const live = PF.state.live;
   if (!live) return null;
@@ -260,9 +309,18 @@ const VIEWS = {
   library: { title: 'Библиотека', sub: 'Инструкции, скрипты и материалы' },
   settings: { title: 'Настройки', sub: 'Тарифы, автоматизация и данные' },
 };
+/* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
+const VIEW_ALIASES = {
+  spools: 'inventory', filament: 'inventory', stock: 'inventory', warehouse: 'inventory',
+  money: 'finance', finances: 'finance', accounting: 'finance',
+  home: 'dashboard', main: 'dashboard', overview: 'dashboard',
+  jobs: 'queue', print: 'queue', clients: 'customers',
+  calculator: 'calc', docs: 'library', settings2: 'settings',
+};
 let currentView = '';
 
 function showView(name, sub) {
+  if (!VIEWS[name] && VIEW_ALIASES[name]) name = VIEW_ALIASES[name];
   if (!VIEWS[name]) name = 'dashboard';
   currentView = name;
   $$('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));
@@ -315,10 +373,10 @@ function baseCommands() {
     group: 'Разделы', icon: '→', title: v.title, sub: v.sub, run: () => PF.go(id),
   }));
   return nav.concat([
-    { group: 'Действия', icon: '＋', title: 'Новый заказ', sub: 'Создать карточку заказа', run: () => PF.modules.ops && PF.modules.ops.openOrder() },
-    { group: 'Действия', icon: '＋', title: 'Новая катушка', sub: 'Добавить пластик на склад', run: () => PF.modules.money && PF.modules.money.openSpool() },
-    { group: 'Действия', icon: '＋', title: 'Новая проводка', sub: 'Доход или расход вручную', run: () => PF.modules.money && PF.modules.money.openTx() },
-    { group: 'Действия', icon: '＋', title: 'Задание в очередь', sub: 'Печать файла с принтера', run: () => PF.modules.printer && PF.modules.printer.openJob() },
+    { group: 'Действия', icon: '+', title: 'Новый заказ', sub: 'Создать карточку заказа', run: () => PF.modules.ops && PF.modules.ops.openOrder() },
+    { group: 'Действия', icon: '+', title: 'Новая катушка', sub: 'Добавить пластик на склад', run: () => PF.modules.money && PF.modules.money.openSpool() },
+    { group: 'Действия', icon: '+', title: 'Новая проводка', sub: 'Доход или расход вручную', run: () => PF.modules.money && PF.modules.money.openTx() },
+    { group: 'Действия', icon: '+', title: 'Задание в очередь', sub: 'Печать файла с принтера', run: () => PF.modules.printer && PF.modules.printer.openJob() },
     { group: 'Принтер', icon: '❙❙', title: 'Пауза печати', sub: 'Активный принтер', run: () => PF.modules.printer && PF.modules.printer.command('pause') },
     { group: 'Принтер', icon: '▶', title: 'Продолжить печать', sub: 'Активный принтер', run: () => PF.modules.printer && PF.modules.printer.command('resume') },
     { group: 'Принтер', icon: '☀', title: 'Свет камеры', sub: 'Включить или выключить', run: () => PF.modules.printer && PF.modules.printer.command('light') },

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA v2 (белый)">
+ <title>NOZZA — Вариант 2: Сопло (монохром для тёмного фона)</title>
+ <rect x="2.9" y="2.9" width="66.2" height="66.2" rx="17.4" fill="#ffffff" fill-opacity=".16" stroke="#ffffff" stroke-width="1.8"/>
+ <g stroke="#fff" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <polygon points="36,18 50,26 50,42 36,50 22,42 22,26" opacity="0.98" stroke-width="3.2"/>
+  <polygon points="36,24 44,28.5 44,37.5 36,42 28,37.5 28,28.5" opacity="0.75" stroke-width="2.6"/>
+  <circle cx="36" cy="33" r="4.2" fill="#fff" stroke="none"/>
+ </g>
+ <circle cx="36" cy="56" r="2.2" fill="#fff" opacity="0.6"/>
+</svg>

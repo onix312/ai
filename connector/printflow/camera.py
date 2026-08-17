@@ -2,6 +2,11 @@
 
 Работает только в локальной сети принтера. Кадры хранятся в памяти и
 раздаются интерфейсу как обычный JPEG или MJPEG-поток.
+
+Если принтер недоступен (например, интерфейс смотрят не из домашней сети),
+включается демонстрационный режим: вместо живого видео проигрываются
+заготовленные кадры из site/assets/demo. Это позволяет проверить интерфейс
+без принтера, но честно помечается флагом ``demo``.
 """
 from __future__ import annotations
 
@@ -10,6 +15,27 @@ import ssl
 import struct
 import threading
 import time
+
+from .config import SITE
+
+DEMO_DIR = SITE / "assets" / "demo"
+
+
+def demo_frames() -> list[bytes]:
+    """Кадры демонстрационного потока, загруженные один раз."""
+    global _DEMO_CACHE
+    if _DEMO_CACHE is None:
+        frames = []
+        for path in sorted(DEMO_DIR.glob("cam-*.jpg")):
+            try:
+                frames.append(path.read_bytes())
+            except OSError:
+                continue
+        _DEMO_CACHE = frames
+    return _DEMO_CACHE
+
+
+_DEMO_CACHE: list[bytes] | None = None
 
 
 class CameraWorker:
@@ -23,6 +49,9 @@ class CameraWorker:
         self.frame_at = 0.0
         self.error = ""
         self.fps = 0.0
+        self.demo = False          # показываем заготовленные кадры
+        self.snapshots: list[dict] = []  # архив кадров печати (таймлапс)
+        self._demo_index = 0
         self._frames_window: list[float] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -65,11 +94,29 @@ class CameraWorker:
                 + b"bblp".ljust(32, b"\0")
                 + code.encode("ascii", "ignore").ljust(32, b"\0"))
 
+    def _demo_tick(self) -> bool:
+        """Показать следующий демо-кадр. False, если демо выключено."""
+        cfg = self.get_config() or {}
+        if not cfg.get("demo"):
+            return False
+        frames = demo_frames()
+        if not frames:
+            return False
+        self.demo = True
+        self.error = ""
+        self._publish(frames[self._demo_index % len(frames)])
+        self._demo_index += 1
+        self._stop.wait(2.5)
+        return True
+
     def _run(self) -> None:
         while not self._stop.is_set():
             cfg = self.get_config() or {}
             host, code = cfg.get("host"), cfg.get("access_code")
             if not host or not code:
+                if self._demo_tick():
+                    continue
+                self.demo = False
                 self._stop.wait(3)
                 continue
             try:
@@ -81,6 +128,7 @@ class CameraWorker:
                         sock.settimeout(12)
                         sock.sendall(self._auth_packet(code))
                         self.error = ""
+                        self.demo = False
                         buf = bytearray()
                         while not self._stop.is_set():
                             chunk = sock.recv(65536)
@@ -102,14 +150,45 @@ class CameraWorker:
                                 del buf[:end + 2]
             except Exception as exc:  # соединение восстанавливается автоматически
                 self.error = str(exc)
-                self._stop.wait(4)
+                # Принтера нет в сети — не оставляем экран пустым, если
+                # пользователь включил демонстрационный режим.
+                if not self._demo_tick():
+                    self._stop.wait(4)
+
+    # ------------------------------------------------------------ снимки
+    def snapshot(self, note: str = "", job_id: str = "") -> dict:
+        """Сохранить текущий кадр в архив (память, максимум 60 штук)."""
+        if not self.frame:
+            raise ValueError("Кадр ещё не получен — камера не отвечает")
+        item = {
+            "id": f"shot{int(time.time() * 1000)}",
+            "at": time.time(),
+            "note": note,
+            "job_id": job_id,
+            "frame": self.frame,
+        }
+        with self._lock:
+            self.snapshots.append(item)
+            del self.snapshots[:-60]
+        return {k: v for k, v in item.items() if k != "frame"}
+
+    def snapshot_list(self) -> list[dict]:
+        with self._lock:
+            return [{k: v for k, v in s.items() if k != "frame"}
+                    for s in reversed(self.snapshots)]
+
+    def snapshot_frame(self, shot_id: str) -> bytes | None:
+        with self._lock:
+            return next((s["frame"] for s in self.snapshots if s["id"] == shot_id), None)
 
     def state(self) -> dict:
         return {
             "available": bool(self.frame),
             "age": round(time.time() - self.frame_at, 1) if self.frame_at else None,
             "fps": self.fps,
-            "error": self.friendly_error(),
+            "demo": self.demo,
+            "shots": len(self.snapshots),
+            "error": "" if self.demo else self.friendly_error(),
         }
 
     def friendly_error(self) -> str:

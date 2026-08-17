@@ -8,12 +8,11 @@
   .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
   .cut { outline: 1px dashed #c3cbdd; outline-offset: 0; }
   .round { width: 40mm; height: 40mm; border-radius: 50%; background: linear-gradient(140deg, var(--brand), var(--brand-2)); color: #fff; padding: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; page-break-inside: avoid; break-inside: avoid; }
-  .round img { width: 12mm; height: 12mm; filter: brightness(0) invert(1); opacity: .95; }
+  .round img { width: 12mm; height: 12mm; flex: none; }
   .round .word { font-size: 13px; font-weight: 800; letter-spacing: .12em; margin-top: 1.5mm; }
   .round .sub { font-size: 6.5px; letter-spacing: .06em; opacity: .85; margin-top: .8mm; line-height: 1.3; }
   .round.light { background: #fff; color: var(--ink); border: 1.2px solid var(--line); }
-  .round.light img { filter: none; }
-  .round.light .word { color: var(--brand); }
+    .round.light .word { color: var(--brand); }
   .round.light .sub { color: var(--ink-soft); opacity: 1; }
   .round.small { width: 30mm; height: 30mm; padding: 3mm; }
   .round.small img { width: 9mm; height: 9mm; }
@@ -90,11 +89,12 @@ function render(items){
   const qrbase=$('qrbase').value.trim();
   const logoId=$('logoSel')?$('logoSel').value:loadLogo();
   const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
+  const markWhite=`../assets/brand/nozza-mark-${logoId}-white.svg`;
   if($('panelMark')) $('panelMark').src=markSrc;
   saveContact({city, site, qrbase}); saveLogo(logoId);
-  const roundDark=Array.from({length:12},()=>roundSticker('', `${site} · ${city}`, markSrc)).join('');
+  const roundDark=Array.from({length:12},()=>roundSticker('', `${site} · ${city}`, markWhite)).join('');
   const roundLight=Array.from({length:8},()=>roundSticker('light', `${site} · ${city}`, markSrc)).join('');
-  const roundSmall=Array.from({length:20},()=>roundSticker('small', city, markSrc)).join('');
+  const roundSmall=Array.from({length:20},()=>roundSticker('small', city, markWhite)).join('');
   const rects=Array.from({length:12},()=>rectSticker(`Напечатано для вас · ${site} · ${city}`, markSrc)).join('');
   const tags=[]; for(let i=0;i<18;i++) tags.push(hangtag(items[i%items.length], qrbase));
   $('sheets').innerHTML=`<div class="sheet"><div class="sheet-title">Круглые наклейки Ø40 мм — цветные (${esc(city)})</div><div class="grid">${roundDark}</div><h3 class="block">Круглые Ø40 мм — светлые (для тёмной упаковки)</h3><div class="grid">${roundLight}</div></div><div class="sheet"><div class="sheet-title">Круглые наклейки Ø30 мм — пломба на пакет</div><div class="grid">${roundSmall}</div><h3 class="block">Прямоугольные 50 × 25 мм</h3><div class="grid">${rects}</div></div><div class="sheet"><div class="sheet-title">Бирки 32 × 55 мм с QR — привязываются к изделию</div><div class="grid">${tags}</div></div>`;

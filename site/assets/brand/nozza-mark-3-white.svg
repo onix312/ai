@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA v3 (белый)">
+ <title>NOZZA — Вариант 3: Нить (монохром для тёмного фона)</title>
+ <rect x="2.9" y="2.9" width="66.2" height="66.2" rx="17.4" fill="#ffffff" fill-opacity=".16" stroke="#ffffff" stroke-width="1.8"/>
+ <path d="M20 54 V20 C20 20 20 18 22.5 18 H27 C29.5 18 30 20 30 22 V36 L42 18 C44 15.5 46 18 46 20 V52 C46 55 44 54 42 54 H38 C35.5 54 35 52 35 50 V36 L23 54 C21 56.5 20 54 20 54 Z" fill="#fff"/>
+ <circle cx="52" cy="20" r="2" fill="#fff" opacity="0.65"/>
+</svg>

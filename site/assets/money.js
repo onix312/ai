@@ -4,7 +4,7 @@
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, dateText,
   dateTimeText, debounce, toast, fail, openModal, closeModal, confirmDanger,
-  drawChart, legend, store } = U;
+  drawChart, legend, store, catName } = U;
 const { get, post } = PF.api;
 
 let editingSpool = null, editingCatalog = null;
@@ -54,8 +54,8 @@ function renderFinance() {
   $('fin_tx').innerHTML = tx.length ? tx.slice(0, 30).map((t) => `<div class="tx-row">`
     + `<span class="tx-ic ${esc(t.kind)}">${t.kind === 'income' ? '↑' : '↓'}</span>`
     + `<div class="tx-body"><b>${esc(t.title || t.category)}</b>`
-    + `<small>${esc(dateTimeText(t.at))} · ${esc(t.category)}${num(t.auto) ? ' · ⚙ авто' : ''}</small></div>`
-    + `<span class="amt ${t.kind === 'income' ? 'pos' : 'neg'}">${t.kind === 'income' ? '+' : '−'}${money(t.amount)}</span>`
+    + `<small>${esc(dateTimeText(t.at))} · ${esc(catName(t.category))}${num(t.auto) ? ' · ⚙ авто' : ''}</small></div>`
+    + `<span class="amt ${t.kind === 'income' ? 'pos' : 'neg'}">${t.kind === 'income' ? '+' : '−'}${money(Math.abs(num(t.amount)))}</span>`
     + (num(t.auto) ? '' : `<button class="icon-btn sm danger" type="button" data-tx-del="${esc(t.id)}">×</button>`)
     + '</div>').join('')
     : '<div class="empty compact"><span>Проводок пока нет. Они появятся сами при закрытии заказов.</span></div>';
@@ -151,17 +151,31 @@ async function runCalc() {
     $('calc_rows').innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
     return;
   }
+  // Строки, которые реально входят в итог. Своя работа показывается отдельно
+  // и в сумму не попадает, пока в настройках не включено «считать её расходом».
   const rows = [
     ['Пластик', br.filament], ['Электричество', br.energy],
     ['Амортизация', br.amortization], ['Обслуживание', br.maintenance],
-    ['Ручная работа', br.labor], ['Упаковка', br.packaging],
-    ['Резерв на брак', br.failure_reserve],
+    ['Упаковка', br.packaging],
   ];
+  if (num(br.delivery)) rows.push(['Доставка', br.delivery]);
+  if (num(br.overhead)) rows.push(['Доля постоянных расходов', br.overhead]);
+  if (br.labor_counted) {
+    rows.push(['Ручная работа', br.labor]);
+    if (num(br.design)) rows.push(['Моделирование', br.design]);
+  }
+  rows.push(['Резерв на брак', br.failure_reserve]);
+  const extra = !br.labor_counted && num(br.labor)
+    ? `<div class="res-row muted-row"><span class="lbl">Ваша работа ${nfmt(v.minutes * v.qty, 0)} мин `
+      + '<i class="hint-i" title="В настройках выключено «Считать свою работу расходом» — эти деньги остаются вашей прибылью">?</i>'
+      + `</span><span class="val">${money(br.labor, 2)} · вне себестоимости</span></div>`
+    : '';
   $('calc_rows').innerHTML = rows.map(([l, val]) =>
     `<div class="res-row"><span class="lbl">${esc(l)}</span><span class="val">${money(val, 2)}</span></div>`).join('')
+    + extra
     + `<div class="res-row total"><span class="lbl">Себестоимость партии</span><span class="val">${money(br.total, 2)}</span></div>`
     + `<div class="res-row"><span class="lbl">За штуку</span><span class="val">${money(br.total / v.qty, 2)}</span></div>`
-    + `<div class="res-row"><span class="lbl">Энергия</span><span class="val">${nfmt(br.energy_kwh, 2)} кВт·ч</span></div>`;
+    + `<div class="res-row muted-row"><span class="lbl">Расход электричества</span><span class="val">${nfmt(br.energy_kwh, 2)} кВт·ч</span></div>`;
 
   const unitCost = num(br.total) / v.qty;
   const feeK = v.fee < 100 ? 1 - v.fee / 100 : 1;
@@ -171,15 +185,21 @@ async function runCalc() {
   const profit = (net - unitCost) * v.qty;
   const perHour = totalHours ? profit / totalHours : 0;
   const target = num(PF.state.settings.target_profit_per_hour, 250);
-  const tax = num(PF.state.settings.tax_rate, 0);
-  const afterTax = profit - price * v.qty * tax / 100;
+  // налог считаем по выбранному режиму, а не по «запасной» ставке из настроек
+  const taxAmt = PF.taxOf(price * v.qty, profit, 'person');
+  const afterTax = profit - taxAmt;
+  const taxMode = PF.taxLabel();
+  const taxRow = taxMode
+    ? `Прибыль после налога (${taxMode})`
+    : 'Прибыль после налога (режим не выбран)';
 
   $('calc_price').textContent = money(price);
   $('calc_profit_rows').innerHTML = [
     ['Выручка за партию', money(price * v.qty)],
     ['Комиссия и издержки', feeAmt ? '−' + money(feeAmt * v.qty) : money(0)],
     ['Прибыль до налога', money(profit)],
-    [`Прибыль после налога ${nfmt(tax, 0)}%`, money(afterTax)],
+    ['Налог с этой сделки', taxAmt ? '−' + money(taxAmt) : money(0)],
+    [taxRow, money(afterTax)],
     ['Прибыль за час печати', totalHours ? money(perHour) : '—'],
     ['Минимальная разумная цена', money(Math.ceil((unitCost * 1.4 + v.fix) / feeK / 10) * 10)],
   ].map(([l, val]) => `<div class="res-row"><span class="lbl">${esc(l)}</span><span class="val">${val}</span></div>`).join('');
@@ -244,12 +264,42 @@ function openCatalog(id) {
   $('catalog_delete').hidden = !id;
   openModal('catalog_modal');
 }
-function openTx() {
-  $('tf_kind').value = 'expense';
-  $('tf_category').value = 'filament';
+/** Показывает поля, относящиеся только к доходу (канал и плательщик). */
+function syncTxKind() {
+  const income = $('tf_kind').value === 'income';
+  const cat = $('tf_category');
+  if (cat && cat.dataset.kind !== (income ? 'income' : 'expense')) {
+    const html = income ? cat.dataset.income : cat.dataset.expense;
+    if (html) {
+      cat.dataset.kind = income ? 'income' : 'expense';
+      const keep = cat.value;
+      cat.innerHTML = html;
+      if (keep && [...cat.options].some((o) => o.value === keep)) cat.value = keep;
+    }
+  }
+  $('tf_channel_wrap').hidden = !income;
+  $('tf_payer_wrap').hidden = !income;
+  $('tf_taxable').closest('.chk').hidden = !income;
+  $('tf_deductible').closest('.chk').hidden = income;
+}
+
+function openTx(kind) {
+  PF.modules.finance && PF.modules.finance.fillSelects();
+  $('tx_modal_title').textContent = kind === 'income' ? 'Новый доход' : 'Новая проводка';
+  $('tf_kind').value = kind === 'income' ? 'income' : 'expense';
+  syncTxKind();
+  const defCat = kind === 'income' ? 'sale' : 'filament';
+  if ($('tf_category').querySelector(`[value="${defCat}"]`)) $('tf_category').value = defCat;
   $('tf_amount').value = '';
   $('tf_title').value = '';
   $('tf_note').value = '';
+  $('tf_at').value = U.todayISO();
+  $('tf_taxable').checked = true;
+  $('tf_deductible').checked = true;
+  $('tf_payer').value = 'person';
+  const def = PF.state.settings.default_account || 'cash';
+  if ($('tf_account').querySelector(`[value="${def}"]`)) $('tf_account').value = def;
+  syncTxKind();
   openModal('tx_modal');
 }
 
@@ -261,18 +311,29 @@ function bind() {
     $$('#fin_period button').forEach((b) => b.classList.toggle('on', b === btn));
     await PF.refreshFinance(+btn.dataset.days);
   });
-  $('fin_add').addEventListener('click', openTx);
+  $('fin_add').addEventListener('click', () => openTx());
+  $('tf_kind').addEventListener('change', syncTxKind);
   $('tx_save').addEventListener('click', async () => {
     const amount = num($('tf_amount').value);
     if (amount <= 0) return fail(new Error('Укажите сумму больше нуля'));
+    const income = $('tf_kind').value === 'income';
+    const at = $('tf_at').value;
     try {
       await post('/api/transaction/save', {
         kind: $('tf_kind').value, category: $('tf_category').value, amount,
-        title: $('tf_title').value.trim() || $('tf_category').value, note: $('tf_note').value.trim(),
+        title: $('tf_title').value.trim() || $('tf_category').value,
+        note: $('tf_note').value.trim(),
+        account_id: $('tf_account').value,
+        at: at ? at + 'T12:00:00' : '',
+        channel: income ? $('tf_channel').value : '',
+        payer: income ? $('tf_payer').value : '',
+        taxable: income ? ($('tf_taxable').checked ? 1 : 0) : 1,
+        deductible: income ? 1 : ($('tf_deductible').checked ? 1 : 0),
       });
       closeModal('tx_modal');
       toast('Проводка добавлена', money(amount));
       PF.refreshFinance();
+      PF.refreshMoney && PF.refreshMoney();
     } catch (e) { fail(e); }
   });
 

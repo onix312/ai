@@ -358,6 +358,9 @@ img.brand-logo { background: none; box-shadow: 0 8px 18px -10px var(--accent); }
 .pos { color: var(--ok); }
 .neg { color: var(--bad); }
 
+/* атрибут hidden сильнее любых display:flex/grid у компонентов */
+[hidden] { display: none !important; }
+
 .empty {
   display: grid; place-items: center; gap: 6px;
   padding: 30px 18px; text-align: center;
@@ -413,6 +416,10 @@ table.data th {
   padding: 11px 13px; background: var(--panel-2);
   border-bottom: 1px solid var(--line); white-space: nowrap;
 }
+/* .right проигрывал по специфичности правилу выше — заголовок числовой
+   колонки уезжал влево от своих значений */
+table.data th.right { text-align: right; }
+table.data th.center { text-align: center; }
 table.data td { padding: 11px 13px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 table.data tbody tr:last-child td { border-bottom: 0; }
 table.data tbody tr { transition: background .14s var(--ease); }
@@ -561,6 +568,24 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid .span-2 { grid-column: span 1; }
   .view-head h1 { font-size: 21px; }
+  /* Шапка на телефоне: заголовок не должен наезжать на плашку принтера. */
+  #topbar { gap: 8px; padding: 0 12px; }
+  .top-title b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live-pill {
+    max-width: 40vw; overflow: hidden; padding: 0 10px; gap: 6px;
+    white-space: nowrap; flex-wrap: nowrap;
+  }
+  .live-pill > span { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; }
+  .live-pill b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .live-pill small { white-space: nowrap; flex: none; }
+  #quick_order .ic { margin: 0; }
+}
+@media (max-width: 460px) {
+  /* Совсем узкий экран: оставляем меню, принтер и кнопку заказа. */
+  .top-title { display: none; }
+  #cmd_open { display: none; }
+  .live-pill { max-width: 52vw; }
+  .live-pill small { display: none; }        /* имя принтера важнее статуса словом */
 }
 
 @media print {

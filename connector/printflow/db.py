@@ -10,9 +10,54 @@ import sqlite3
 import threading
 from typing import Any, Iterable
 
-from .config import DB_FILE, DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso
+from .config import (DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS, DEFAULT_EXPENSE_CATEGORIES,
+                     DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
+
+# Колонки, добавленные после первой версии схемы. Ключ — таблица,
+# значение — список (колонка, SQL-тип со значением по умолчанию).
+ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "printers": [
+        ("camera_demo", "INTEGER DEFAULT 0"),      # показывать демо-поток без принтера
+        ("guard_enabled", "INTEGER DEFAULT 1"),    # сторож печати следит за ошибками
+        ("total_minutes", "REAL DEFAULT 0"),       # наработка, минуты
+        ("total_grams", "REAL DEFAULT 0"),         # израсходовано пластика, г
+        ("nozzle_size", "REAL DEFAULT 0.4"),
+        ("nozzle_type", "TEXT DEFAULT 'steel'"),
+    ],
+    "transactions": [
+        ("account_id", "TEXT"),
+        ("customer_id", "TEXT"),
+        ("channel", "TEXT DEFAULT ''"),
+        ("payer", "TEXT DEFAULT ''"),
+        ("fee", "REAL DEFAULT 0"),
+        ("taxable", "INTEGER DEFAULT 1"),
+        ("deductible", "INTEGER DEFAULT 1"),
+        ("fixed_cost_id", "TEXT"),
+        ("period", "TEXT DEFAULT ''"),
+    ],
+    "orders": [
+        ("paid", "REAL DEFAULT 0"),          # фактически полученные деньги
+        ("discount", "REAL DEFAULT 0"),      # скидка, ₽
+        ("delivery", "REAL DEFAULT 0"),      # доставка за счёт мастера, ₽
+        ("fee", "REAL DEFAULT 0"),           # комиссия площадки, ₽
+        ("rush", "INTEGER DEFAULT 0"),       # срочный заказ
+        ("payer", "TEXT DEFAULT 'person'"),  # физлицо или юрлицо
+        ("account_id", "TEXT"),
+        ("design_minutes", "REAL DEFAULT 0"),
+    ],
+    "customers": [
+        ("kind", "TEXT DEFAULT 'person'"),   # person | company
+        ("inn", "TEXT DEFAULT ''"),
+        ("discount", "REAL DEFAULT 0"),
+        ("channel", "TEXT DEFAULT ''"),
+    ],
+    "catalog": [
+        ("cost", "REAL DEFAULT 0"),
+        ("sold", "INTEGER DEFAULT 0"),
+    ],
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -173,9 +218,91 @@ CREATE TABLE IF NOT EXISTS transactions (
     note TEXT DEFAULT '',
     order_id TEXT,
     job_id TEXT,
-    auto INTEGER DEFAULT 0
+    auto INTEGER DEFAULT 0,
+    account_id TEXT,        -- касса или счёт
+    customer_id TEXT,
+    channel TEXT DEFAULT '',
+    payer TEXT DEFAULT '',  -- person | company (важно для ставки НПД)
+    fee REAL DEFAULT 0,     -- удержанная комиссия площадки или эквайринга
+    taxable INTEGER DEFAULT 1,   -- попадает ли в налоговую базу
+    deductible INTEGER DEFAULT 1,  -- принимается ли в расходы на УСН 15
+    fixed_cost_id TEXT,     -- если проводка создана постоянным расходом
+    period TEXT DEFAULT ''  -- YYYY-MM, к какому месяцу отнести
 );
 CREATE INDEX IF NOT EXISTS idx_tx_at ON transactions(at DESC);
+CREATE INDEX IF NOT EXISTS idx_tx_order ON transactions(order_id);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    kind TEXT DEFAULT 'cash',      -- cash | card | bank | other
+    fee_percent REAL DEFAULT 0,    -- комиссия при поступлении
+    opening_balance REAL DEFAULT 0,
+    archived INTEGER DEFAULT 0,
+    position INTEGER DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS channels (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    fee_percent REAL DEFAULT 0,    -- комиссия площадки
+    fee_fixed REAL DEFAULT 0,      -- фиксированный сбор за заказ
+    ads_per_order REAL DEFAULT 0,  -- средние затраты на привлечение
+    payer TEXT DEFAULT 'person',   -- person | company
+    active INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS expense_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    grp TEXT DEFAULT 'variable',   -- variable | fixed | invest | tax | owner
+    is_fixed INTEGER DEFAULT 0,
+    position INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS fixed_costs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    amount REAL DEFAULT 0,
+    category TEXT DEFAULT 'rent',
+    period TEXT DEFAULT 'month',   -- month | quarter | year
+    day INTEGER DEFAULT 1,         -- день начисления
+    account_id TEXT,
+    active INTEGER DEFAULT 1,
+    deductible INTEGER DEFAULT 1,
+    started_at TEXT DEFAULT '',
+    last_charged TEXT DEFAULT '',  -- YYYY-MM последнего начисления
+    note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    order_id TEXT,
+    customer_id TEXT,
+    amount REAL DEFAULT 0,
+    kind TEXT DEFAULT 'payment',   -- prepay | payment | refund
+    account_id TEXT,
+    method TEXT DEFAULT '',
+    fee REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    tx_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pay_order ON payments(order_id);
+
+CREATE TABLE IF NOT EXISTS tax_periods (
+    id TEXT PRIMARY KEY,           -- 2026-Q1 или 2026-05
+    kind TEXT DEFAULT 'quarter',   -- month | quarter | year
+    income REAL DEFAULT 0,
+    expense REAL DEFAULT 0,
+    tax_due REAL DEFAULT 0,
+    tax_paid REAL DEFAULT 0,
+    insurance_paid REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    closed INTEGER DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS filament_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,6 +329,39 @@ CREATE TABLE IF NOT EXISTS catalog (
     notes TEXT DEFAULT '',
     archived INTEGER DEFAULT 0,
     created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS telemetry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    printer_id TEXT,
+    job_id TEXT,
+    state TEXT DEFAULT '',
+    progress REAL DEFAULT 0,
+    layer INTEGER DEFAULT 0,
+    nozzle REAL DEFAULT 0,
+    nozzle_target REAL DEFAULT 0,
+    bed REAL DEFAULT 0,
+    bed_target REAL DEFAULT 0,
+    chamber REAL DEFAULT 0,
+    fan_part REAL DEFAULT 0,
+    fan_aux REAL DEFAULT 0,
+    speed REAL DEFAULT 0,
+    wifi TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_printer ON telemetry(printer_id, at);
+
+CREATE TABLE IF NOT EXISTS maintenance (
+    id TEXT PRIMARY KEY,
+    printer_id TEXT,
+    task TEXT DEFAULT '',
+    every_hours REAL DEFAULT 0,
+    last_at TEXT,
+    last_hours REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS printer_stats (
@@ -237,11 +397,20 @@ class Database:
 
     # ------------------------------------------------------------------ ядро
     def _migrate(self) -> None:
+        """Догоняющие миграции: новые колонки добавляются без потери данных."""
         with self.lock:
             version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            for table, columns in ADDED_COLUMNS.items():
+                existing = {r["name"] for r in
+                            self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
+                if not existing:
+                    continue  # таблицы ещё нет — её создаст SCHEMA
+                for name, decl in columns:
+                    if name not in existing:
+                        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
             if version < SCHEMA_VERSION:
                 self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-                self.conn.commit()
+            self.conn.commit()
 
     def _seed(self) -> None:
         with self.lock:
@@ -257,6 +426,18 @@ class Database:
                     " VALUES(?,?,?,?,?,?,0,0,1,0)",
                     DEFAULT_NICHES,
                 )
+            for i, row in enumerate(DEFAULT_ACCOUNTS):
+                cur.execute(
+                    "INSERT OR IGNORE INTO accounts(id,name,kind,fee_percent,opening_balance,position)"
+                    " VALUES(?,?,?,?,?,?)", (*row, i))
+            for i, row in enumerate(DEFAULT_CHANNELS):
+                cur.execute(
+                    "INSERT OR IGNORE INTO channels(id,name,fee_percent,fee_fixed,ads_per_order,payer,position)"
+                    " VALUES(?,?,?,?,?,?,?)", (*row, i))
+            for i, row in enumerate(DEFAULT_EXPENSE_CATEGORIES):
+                cur.execute(
+                    "INSERT OR IGNORE INTO expense_categories(id,name,grp,is_fixed,position)"
+                    " VALUES(?,?,?,?,?)", (*row, i))
             for key, value in DEFAULT_SETTINGS.items():
                 cur.execute(
                     "INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)",

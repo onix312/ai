@@ -12,7 +12,7 @@
     background: linear-gradient(135deg, var(--brand), var(--brand-2));
     color: #fff; border-radius: 18px; padding: 26px 28px; margin-bottom: 22px;
   }
-  .hero img { width: 62px; height: 62px; filter: brightness(0) invert(1); }
+  .hero img { width: 62px; height: 62px; flex: none; }
   .hero h1 { margin: 0; font-size: 30px; font-weight: 900; letter-spacing: .08em; }
   .hero p { margin: 5px 0 0; font-size: 13.5px; opacity: .92; letter-spacing: .04em; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
@@ -44,7 +44,7 @@
 <div class="wrap">
 
   <div class="hero">
-    <img src="../assets/brand/nozza-mark.svg" alt="">
+    <img id="heroMark" src="../assets/brand/nozza-mark-white.svg" alt="">
     <div>
       <h1>NOZZA</h1>
       <p>ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · материалы для полки и магазина</p>
@@ -127,4 +127,13 @@
   </div>
 
 </div>
+<script>
+// Подставляем выбранный на странице «Логотипы» вариант знака (белая версия для тёмной шапки).
+(function(){
+  var id='1';
+  try { id = localStorage.getItem('nozza:logo') || '1'; } catch(e) {}
+  var img=document.getElementById('heroMark');
+  if(img) img.src='../assets/brand/nozza-mark-'+id+'-white.svg';
+})();
+</script>
 </body></html>

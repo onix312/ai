@@ -31,7 +31,7 @@ function orderCard(o) {
   const n = PF.niche(o.niche_id);
   const st = PF.status(o.status);
   const econ = o.economics || {};
-  const left = Math.max(0, num(o.price) - num(o.prepaid));
+  const left = Math.max(0, num(o.price) - Math.max(num(o.paid), num(o.prepaid)));
   const cls = ['ocard'];
   if (o.priority === 'urgent') cls.push('urgent');
   if (overdue(o)) cls.push('late');
@@ -47,7 +47,7 @@ function orderCard(o) {
     + (o.due ? `<span class="due muted">${esc(dateText(o.due))}</span>` : '')
     + `<span class="price">${money(o.price)}</span>`
     + '</div>'
-    + (left > 0 && num(o.prepaid) > 0 ? `<div class="muted" style="font-size:11.4px;margin-top:5px">осталось получить ${money(left)}</div>` : '')
+    + (left > 0 && Math.max(num(o.paid), num(o.prepaid)) > 0 ? `<div class="muted" style="font-size:11.4px;margin-top:5px">осталось получить ${money(left)}</div>` : '')
     + (econ.profit != null && num(o.price) ? `<div class="muted" style="font-size:11.4px;margin-top:3px">прибыль ${money(econ.profit)}${econ.profit_per_hour ? ` · ${money(econ.profit_per_hour)}/ч` : ''}</div>` : '')
     + '</article>';
 }
@@ -57,11 +57,10 @@ function renderKanban(list) {
   host.innerHTML = PF.state.statuses.map((st) => {
     const items = list.filter((o) => o.status === st.id);
     const sum = items.reduce((a, o) => a + num(o.price), 0);
-    return `<div class="kan-col" data-status="${esc(st.id)}">`
+    return `<div class="kan-col${items.length ? '' : ' empty-col'}" data-status="${esc(st.id)}">`
       + `<div class="kan-head"><i style="background:${esc(st.color)}"></i><b>${esc(st.name)}</b><span class="n">${items.length}</span></div>`
       + (sum ? `<div class="kan-sum">${money(sum)}</div>` : '')
-      + (items.length ? items.map(orderCard).join('')
-        : '<div class="empty compact"><span>Пусто</span></div>')
+      + (items.length ? items.map(orderCard).join('') : '')
       + '</div>';
   }).join('');
   bindDrag();
@@ -171,6 +170,10 @@ async function openOrder(id) {
     el.value = data[k] == null ? '' : String(data[k]);
   });
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
+  // в поле показываем фактически полученные деньги: платежи пишутся в paid,
+  // prepaid остался от старых заказов
+  const paidNow = Math.max(num(data.paid), num(data.prepaid));
+  $('of_prepaid').value = paidNow ? String(paidNow) : '';
   $('order_modal_title').textContent = id ? `Заказ №${data.number}` : 'Новый заказ';
   $('order_modal_sub').textContent = id
     ? `Создан ${dateTimeText(data.created_at)}${data.closed_at ? ' · закрыт ' + dateTimeText(data.closed_at) : ''}`
@@ -225,6 +228,8 @@ async function saveOrder() {
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (!payload.product.trim()) return fail(new Error('Укажите изделие или работу'));
   ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
+  // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
+  payload.paid = payload.prepaid;
   payload.auto_cost = +$('of_auto_cost').value;
   try {
     const res = await post('/api/order/save', payload);
