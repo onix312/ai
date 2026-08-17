@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import argparse
-import socket
 import sys
 import time
 import webbrowser
@@ -26,59 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from printflow import APP_VERSION  # noqa: E402
 from printflow.api import serve  # noqa: E402
 from printflow.logging_setup import setup_logging  # noqa: E402
-from printflow.config import DATA_DIR  # noqa: E402
-
-
-def get_local_ips() -> list[str]:
-    """Вернуть список IPv4-адресов этого ПК в локальной сети.
-
-    Метод устойчив к отсутствию интернета: пробуем несколько способов.
-    """
-    ips: set[str] = set()
-
-    # 1) через hostname
-    try:
-        hostname = socket.gethostname()
-        for ip in socket.gethostbyname_ex(hostname)[2]:
-            if ip and not ip.startswith("127.") and "." in ip:
-                ips.add(ip)
-    except Exception:
-        pass
-
-    # 2) через исходящий маршрут (не отправляет данных)
-    for target in [("8.8.8.8", 80), ("1.1.1.1", 80), ("192.168.1.1", 80)]:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(0.8)
-            s.connect(target)
-            ip = s.getsockname()[0]
-            s.close()
-            if ip and not ip.startswith("127.") and "." in ip:
-                ips.add(ip)
-        except Exception:
-            pass
-
-    # Фильтруем link-local и оставляем приоритет: 192.168.* > 10.* > 172.16-31.* > прочее
-    def sort_key(ip: str):
-        if ip.startswith("192.168."):
-            return (0, ip)
-        if ip.startswith("10."):
-            return (1, ip)
-        if ip.startswith("172."):
-            try:
-                second = int(ip.split(".")[1])
-                if 16 <= second <= 31:
-                    return (2, ip)
-            except Exception:
-                pass
-        if ip.startswith("169.254."):
-            return (99, ip)
-        return (3, ip)
-
-    cleaned = [ip for ip in ips if not ip.startswith("169.254.")]
-    if not cleaned:
-        cleaned = list(ips)
-    return sorted(cleaned, key=sort_key)
+from printflow.config import DATA_DIR, get_local_ips  # noqa: E402
 
 
 def print_banner(host: str, port: int, data_dir: Path, lan_ips: list[str]) -> None:

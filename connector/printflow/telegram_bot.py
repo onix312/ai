@@ -23,17 +23,20 @@ from .config import now_iso
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = """PrintFlow — управление печатью с телефона.
+HELP = """PrintFlow 5.0 — панель в кармане.
 
-Что умею:
-• статус — что печатает каждый принтер
-• кадр — свежий снимок с камеры
-• очередь — что ждёт запуска
-• деньги — выручка, прибыль и долги за месяц
-• день — итоги сегодняшнего дня
-• пауза / продолжить — управление печатью
-• свет — включить или выключить подсветку
-• стоп — прервать печать (нужно подтверждение: стоп да)
+Кнопки внизу или команды (без слэша, в любом регистре):
+• панель — всё сразу: печать, деньги, план, долги
+• статус · кадр · очередь — что происходит сейчас
+• деньги · день — финансы
+• план — что печатать сегодня
+• продажа — продать со стеллажа (−1 шт)
+• выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
+• оплата 1500 по 1001 — принять оплату
+• статус 1001 печать — сменить статус заказа
+• новый адресник 2шт 900р Мария — заказ из текста
+• пауза / продолжить / свет — управление
+• стоп — прервать печать (подтверждение: стоп да)
 
 Можно писать без слэша и в любом регистре."""
 
@@ -104,6 +107,19 @@ class TelegramBot:
     def _reply(self, chat: str, text: str) -> None:
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "disable_web_page_preview": "true"}, timeout=15)
+
+    def _reply_keyboard(self, chat: str, text: str) -> None:
+        """Сообщение с постоянной клавиатурой-меню внизу."""
+        keyboard = [
+            [{"text": "🖨 Панель"}, {"text": "📷 Кадр"}],
+            [{"text": "≡ Очередь"}, {"text": "₽ Деньги"}],
+            [{"text": "⚑ План"}, {"text": "🛍 Продажа"}],
+            [{"text": "📊 Итоги"}],
+        ]
+        self._call("sendMessage", {
+            "chat_id": chat, "text": text[:3800], "disable_web_page_preview": "true",
+            "reply_markup": json.dumps({"keyboard": keyboard, "resize_keyboard": True}),
+        }, timeout=15)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -193,19 +209,24 @@ class TelegramBot:
         command = data.replace("cmd:", "", 1)
         text = self._run_command(command, chat)
         self._call("answerCallbackQuery", {"callback_query_id": callback_id})
-        try:
-            self._call("editMessageText", {"chat_id": chat,
-                                            "message_id": str(message.get("message_id")),
-                                            "text": text[:3800],
-                                            "reply_markup": json.dumps(_keyboard(
-                                                [("❙❙ Пауза", "cmd:pause"), ("▶ Продолжить", "cmd:resume")],
-                                                [("☀ Свет", "cmd:light"), ("◉ Кадр", "cmd:frame")],
-                                                [("■ Стоп", "cmd:stop")]))})
-        except Exception:
-            self._reply(chat, text)
+        # Управление печатью обновляем в том же сообщении; продажа и панель — новым.
+        control = command in ("pause", "resume", "light", "frame", "stop")
+        if control:
+            try:
+                self._call("editMessageText", {"chat_id": chat,
+                                                "message_id": str(message.get("message_id")),
+                                                "text": text[:3800],
+                                                "reply_markup": json.dumps(_keyboard(
+                                                    [("❙❙ Пауза", "cmd:pause"), ("▶ Продолжить", "cmd:resume")],
+                                                    [("☀ Свет", "cmd:light"), ("◉ Кадр", "cmd:frame")],
+                                                    [("■ Стоп", "cmd:stop")]))})
+                return
+            except Exception:
+                pass
+        self._reply(chat, text)
 
     def _run_command(self, command: str, chat: str = "") -> str:
-        """Выполнить команду управления и вернуть текст ответа."""
+        """Выполнить команду (текстовую или inline-кнопки) и вернуть ответ."""
         if command == "pause":
             return self.do_command("pause", "Печать поставлена на паузу")
         if command == "resume":
@@ -219,16 +240,41 @@ class TelegramBot:
                 self.send_frame(chat)
                 return "Кадр отправлен."
             return "Кадр недоступен"
+        if command == "panel":
+            return self.text_panel()
+        if command == "plan":
+            return self.text_plan()
+        if command.startswith("sell:"):
+            return self.do_sell(command.split(":", 1)[1])
         return "Не понял команду."
 
     def _dispatch(self, chat: str, raw: str) -> None:
-        text = raw.lower().lstrip("/").replace("ё", "е").strip()
+        text = raw.lower().lstrip("/").replace("ё", "е")
+        for emoji in "🖨📷≡₽⚑🛍📊▦▤·":
+            text = text.replace(emoji, " ")
+        text = text.strip()
         word = text.split()[0] if text else ""
 
         if word in ("start", "help", "старт", "помощь", "меню", "?"):
-            return self._reply(chat, HELP)
+            return self._reply_keyboard(chat, HELP)
+        if word in ("панель", "panel", "дашборд"):
+            return self._reply_keyboard(chat, self.text_panel())
+        if word in ("план", "plan", "печатать"):
+            return self._reply(chat, self.text_plan())
+        if word in ("продажа", "продать", "продажи", "sell"):
+            return self.sell_keyboard(chat)
+        if word in ("оплата", "оплатить", "payment"):
+            return self._reply(chat, self._pay(text))
         if word in ("статус", "status", "принтер", "принтеры"):
-            return self._reply(chat, self.text_status())
+            # «статус 1001 печать» — смена статуса; иначе состояние принтеров
+            digits = any(w.isdigit() for w in text.split()[1:])
+            return self._reply(chat, self._set_status(text) if digits else self.text_status())
+        if word in ("выдать", "выдал", "закрыть"):
+            number = next((w for w in text.split()[1:] if w.isdigit()), "")
+            return self._reply(chat, self._fulfill(number) if number
+                               else "Укажите номер: «выдать 1001».")
+        if word in ("новый", "заказ", "создать"):
+            return self._reply(chat, self._new_order(text))
         if word in ("кадр", "камера", "фото", "photo", "cam"):
             return self.send_frame(chat)
         if word in ("очередь", "queue"):
@@ -243,6 +289,9 @@ class TelegramBot:
             return self._reply(chat, self.do_command("resume", "Печать продолжена"))
         if word in ("свет", "light"):
             return self._reply(chat, self.do_command("light", "Подсветка переключена"))
+        if word in ("снял", "снято", "забрал"):
+            result = self.manager.part_removed()
+            return self._reply(chat, f"✅ Деталь снята. Простой после печати {result.get('idle_min', 0)} мин.")
         if word in ("стоп", "stop"):
             return self._reply(chat, self.do_stop(chat, text))
         if word in ("готов", "ready", "выдан"):
@@ -453,6 +502,220 @@ class TelegramBot:
             printer.camera.snapshot(note="Запрос из Telegram")
         except Exception as exc:
             self._reply(chat, f"Не удалось отправить кадр: {exc}")
+
+    # -------------------------------------------------- 5.0: панель и продажи
+    def text_panel(self) -> str:
+        """Главная панель: печать, деньги, план, долги — одним сообщением."""
+        blocks = []
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        farm = state.get("farm") or {}
+        if printers:
+            active = next((p for p in printers if p["printer"]["state"] in ("RUNNING", "PAUSE", "PREPARE")), None)
+            if active:
+                info = active["printer"]
+                blocks.append(f"🖨 {active['name']} — {STATE_RU.get(info['state'], info['state'])} "
+                              f"{round(num(info.get('progress')))}%"
+                              + (f", осталось {_hm(info['remaining_min'])}" if num(info.get("remaining_min")) else ""))
+            else:
+                blocks.append(f"🖨 Парк свободен ({len(printers)} принтер(ов), в очереди {farm.get('queued', 0)})")
+        summary = self.manager.acc.summary(30)
+        blocks.append(f"₽ За 30 дней: доход {_money(summary.get('income'))}, "
+                      f"прибыль {_money(summary.get('profit'))}")
+        debts = self.manager.acc.debts()
+        if num(debts.get("total")) > 0:
+            blocks.append(f"💰 Ждут оплаты {_money(debts['total'])} по {debts.get('count', 0)} заказам")
+        # что печатать следующим
+        try:
+            from .planner import Planner
+            from .batches import Batches
+            planner = Planner(self.db, Batches(self.db))
+            plan = planner.day_plan()
+            next_task = plan.get("suggested_next")
+            if next_task:
+                label = "заказ" if next_task.get("kind") == "order" else "полка"
+                blocks.append(f"⚑ Следующее ({label}): {next_task.get('title')} · {_hm(next_task.get('hours', 0) * 60)}")
+            elif plan.get("sequence"):
+                blocks.append("⚑ Очередь пуста, но есть план — откройте «план».")
+            else:
+                blocks.append("⚑ Печатать нечего: очередь и полка в порядке.")
+        except Exception:
+            pass
+        alerts = []
+        for p in printers:
+            for a in (p.get("guard") or {}).get("alerts", [])[:2]:
+                alerts.append(f"⚠ {a.get('title')}")
+        if alerts:
+            blocks.append("\n".join(alerts[:3]))
+        return "\n".join(blocks)
+
+    def text_plan(self) -> str:
+        """Что печатать сегодня — из мастер-плана производства."""
+        try:
+            from .planner import Planner
+            from .batches import Batches
+            planner = Planner(self.db, Batches(self.db))
+            plan = planner.day_plan()
+        except Exception:
+            return "План сейчас недоступен."
+        lines = [f"⚑ План на сегодня ({plan.get('verdict_text') or ''})",
+                 f"Занято {plan.get('in_progress_hours')} ч, план {plan.get('planned_hours')} ч, "
+                 f"загрузка {round(num(plan.get('load_pct')))}%"]
+        for i, t in enumerate(plan.get("sequence")[:8], 1):
+            kind = "▦" if t.get("kind") == "order" else "▤"
+            issues = " ✕" if not t.get("ready") else ""
+            lines.append(f"{kind} {t.get('title')} · {_hm(num(t.get('hours')) * 60)}{issues}")
+        if not plan.get("sequence"):
+            lines.append("Печатать нечего — полка и очередь в порядке.")
+        return "\n".join(lines)
+
+    def _sell_rows(self) -> list[dict]:
+        """Позиции номенклатуры с остатком для продажи со стеллажа."""
+        from .nomenclature import Nomenclature
+        items = Nomenclature(self.db).items()
+        rows = [i for i in items if num(i.get("qty")) > 0 and num(i.get("price")) > 0]
+        rows.sort(key=lambda i: -num(i["qty"]))
+        return rows[:8]
+
+    def sell_keyboard(self, chat: str) -> None:
+        rows = self._sell_rows()
+        if not rows:
+            self._reply(chat, "Нет позиций с остатком для продажи. Добавьте приход на склад.")
+            return
+        lines = ["🛍 Продажа со стеллажа — нажмите «−1»:"]
+        buttons = []
+        for i in rows:
+            lines.append(f"• {i['name']} — {int(num(i['qty']))} шт · {_money(i['price'])}")
+            buttons.append([{"text": f"−1 · {i['name'][:24]}", "callback_data": f"cmd:sell:{i['id']}"}])
+        self._call("sendMessage", {"chat_id": chat, "text": "\n".join(lines)[:3800],
+                                   "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
+
+    def do_sell(self, nom_id: str) -> str:
+        from .documents import Documents
+        from .nomenclature import Nomenclature
+        item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        if not item:
+            return "Позиция не найдена."
+        warehouse = self.db.one(
+            "SELECT id FROM warehouses WHERE archived=0 AND retail=1 ORDER BY position LIMIT 1") \
+            or self.db.one("SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+        if not warehouse:
+            return "Не настроен склад."
+        docs = Documents(self.db)
+        try:
+            docs.quick_sale([{"nom_id": nom_id, "qty": 1}], warehouse["id"],
+                            "shop", "", "продажа из Telegram")
+            name = item.get("name") or "позиция"
+            return f"Продано 1 шт «{name}» — проведено и учтено в кассе."
+        except Exception as exc:
+            return f"Не получилось продать: {exc}"
+
+    def _final_status_id(self) -> str | None:
+        row = self.db.one("SELECT id FROM statuses WHERE is_final=1 ORDER BY position LIMIT 1")
+        return (row or {}).get("id")
+
+    def _fulfill(self, number: str) -> str:
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return f"Заказ №{number} не найден."
+        final = self._final_status_id()
+        if not final:
+            return "Не настроен финальный статус."
+        if order.get("status") == final:
+            return f"Заказ №{number} уже выдан."
+        rest = round(max(0.0, num(order.get("price")) -
+                          max(num(order.get("paid")), num(order.get("prepaid")))), 2)
+        if rest > 0 and self.db.setting("auto_income_on_done", True):
+            self.manager.acc.add_payment(order["id"], rest, "payment",
+                                         order.get("account_id") or "", "выдача из Telegram")
+        self.db.execute("UPDATE orders SET status=?, closed_at=?, updated_at=? WHERE id=?",
+                        (final, now_iso(), now_iso(), order["id"]))
+        self.db.add_event("order", "Заказ выдан (Telegram)",
+                          f"№{order.get('number')} · {order.get('product')}",
+                          data={"order_id": order["id"]})
+        name = (order.get("customer_name") or "").strip()
+        return (f"✅ Заказ №{order.get('number')} выдан."
+                + (f" Зачислено {_money(rest)}." if rest > 0 else "")
+                + (f"\n\nТекст клиенту:\nЗдравствуйте{', ' + name if name else ''}! "
+                   f"Ваш заказ «{order.get('product') or ''}» готов, можно забирать. Спасибо!"))
+
+    def _pay(self, text: str) -> str:
+        import re as _re
+        amount_m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)?\s*по\s*(\d+)", text.lower())
+        if not amount_m:
+            amount_m = _re.search(r"по\s*(\d+).*?(\d[\d\s.,]*)\s*(?:р|руб|₽)?", text.lower())
+        if not amount_m:
+            return "Формат: «оплата 1500 по 1001»."
+        amount = num(amount_m.group(1).replace(" ", "").replace(",", "."))
+        number = amount_m.group(2)
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return f"Заказ №{number} не найден."
+        if amount <= 0:
+            return "Сумма должна быть больше нуля."
+        self.manager.acc.add_payment(order["id"], amount, "payment",
+                                     order.get("account_id") or "", "оплата из Telegram")
+        left = max(0.0, num(order.get("price")) -
+                   (max(num(order.get("paid")), num(order.get("prepaid"))) + amount))
+        return f"💰 Принято {_money(amount)} по заказу №{number}." + \
+            (f" Осталось {_money(left)}." if left > 0 else " Оплачен полностью.")
+
+    def _set_status(self, text: str) -> str:
+        parts = text.split()
+        number = next((w for w in parts[1:] if w.isdigit()), "")
+        if not number:
+            return "Формат: «статус 1001 печать»."
+        target = next((w for w in parts[1:] if w.isalpha() and not w.isdigit()), "")
+        if not target:
+            return "Укажите статус: «статус 1001 печать»."
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return f"Заказ №{number} не найден."
+        status = self.db.one(
+            "SELECT id FROM statuses WHERE pylower(name) LIKE ? LIMIT 1",
+            (f"%{target}%",))
+        if not status:
+            return f"Статус «{target}» не найден."
+        self.db.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
+                        (status["id"], now_iso(), order["id"]))
+        self.db.add_event("order", "Статус изменён (Telegram)",
+                          f"№{number} → {status['id']}", data={"order_id": order["id"]})
+        return f"✅ Заказ №{number} → «{status['id']}»."
+
+    def _parse_new_order(self, text: str) -> dict:
+        import re as _re
+        body = text.split(None, 1)[1] if " " in text else ""
+        price = 0.0
+        m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)", body)
+        if m:
+            price = num(m.group(1).replace(" ", "").replace(",", "."))
+            body = body.replace(m.group(0), " ")
+        qty = 1.0
+        m = _re.search(r"(\d+)\s*шт", body)
+        if m:
+            qty = float(m.group(1))
+            body = body.replace(m.group(0), " ")
+        tokens = [t for t in body.split() if t.strip()]
+        product, client = " ".join(tokens), ""
+        if len(tokens) >= 2 and tokens[-1].isalpha() and len(tokens[-1]) > 1:
+            client = tokens[-1]
+            product = " ".join(tokens[:-1])
+        return {"product": product.strip() or "Заказ", "client": client,
+                "price": price, "qty": qty}
+
+    def _new_order(self, text: str) -> str:
+        parsed = self._parse_new_order(text)
+        if not parsed["product"]:
+            return "Формат: «новый адресник 2шт 900р Мария»."
+        order = self.manager.repo.save_order({
+            "product": parsed["product"], "customer_name": parsed["client"],
+            "status": "new", "qty": parsed["qty"], "price": parsed["price"],
+            "channel": "telegram", "notes": "заказ из Telegram",
+        })
+        return (f"📝 Создан заказ №{order.get('number')} «{parsed['product']}»"
+                + (f" · {int(parsed['qty'])} шт" if parsed["qty"] > 1 else "")
+                + (f" · {_money(parsed['price'])}" if parsed["price"] else "")
+                + (f" · {parsed['client']}" if parsed["client"] else ""))
 
     # -------------------------------------------------------------- команды
     def do_command(self, command: str, ok_text: str) -> str:

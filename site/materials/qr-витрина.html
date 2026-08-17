@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — плакат «закажи по QR»</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Arial, sans-serif; }
+  .panel { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+    background: #fff; border-bottom: 1px solid #dbe3f2; padding: 10px 14px; }
+  .panel b { font-size: 13px; margin-right: 6px; }
+  .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
+  .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
+  .sheet { width: 210mm; height: 297mm; padding: 15mm 14mm; display: flex; flex-direction: column;
+    color: #fff; background: linear-gradient(150deg, #1f3864 0%, #4f46e5 55%, #7c3aed 100%); }
+  .top { display: flex; align-items: center; gap: 4mm; }
+  .top img { width: 18mm; height: 18mm; flex: none; }
+  .top .bname { font-size: 22pt; font-weight: 900; letter-spacing: 3px; }
+  .top .btag { font-size: 9pt; letter-spacing: 2px; text-transform: uppercase; opacity: .8; margin-top: 1.5mm; }
+  h1 { font-size: 47pt; font-weight: 900; letter-spacing: -2px; line-height: .98; margin: 9mm 0 4mm; }
+  .lead { font-size: 15pt; opacity: .92; line-height: 1.45; max-width: 150mm; }
+  .steps { margin-top: 7mm; display: flex; flex-direction: column; gap: 3.5mm; }
+  .step { display: flex; gap: 4mm; align-items: center; }
+  .step .n { width: 10mm; height: 10mm; flex: none; border-radius: 50%; background: rgba(255,255,255,.16);
+    display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 14pt; }
+  .step .t { font-size: 12.5pt; }
+  .qr-block { margin-top: auto; display: flex; align-items: center; gap: 9mm;
+    background: #fff; color: #12203c; border-radius: 18px; padding: 8mm 9mm; }
+  .qr { width: 46mm; height: 46mm; flex: none; }
+  .qr svg { width: 100%; height: 100%; display: block; }
+  .qr-block .txt .big { font-size: 19pt; font-weight: 900; }
+  .qr-block .txt .sm { font-size: 11pt; color: #42506e; margin-top: 2mm; line-height: 1.45; }
+  .foot { margin-top: 6mm; font-size: 9.5pt; opacity: .75; letter-spacing: .5px; }
+  @media print { .panel { display: none; } }
+</style></head>
+<body>
+<div class="panel">
+  <b>Плакат «закажи по QR»</b>
+  <label>Город <input id="city" value=""></label>
+  <label>Ссылка QR <input id="link" value=""></label>
+</div>
+<div class="sheet">
+  <div class="top"><img id="mark" src="../assets/brand/nozza-mark-1-white.svg" alt="NOZZA"><div><div class="bname">NOZZA</div><div class="btag" id="btag">Там, где рождается форма</div></div></div>
+  <h1>Понравилось?<br>Сделаем такое для вас.</h1>
+  <div class="lead">Покажите эту полку продавцу или отсканируйте QR — примем заявку и пришлём расчёт, даже когда нас нет на месте.</div>
+  <div class="steps">
+    <div class="step"><div class="n">1</div><div class="t">Сфотографируйте место или образец</div></div>
+    <div class="step"><div class="n">2</div><div class="t">Снимите размеры и выберите цвет</div></div>
+    <div class="step"><div class="n">3</div><div class="t">Получите расчёт до печати</div></div>
+    <div class="step"><div class="n">4</div><div class="t">Заберите готовое на этой точке</div></div>
+  </div>
+  <div class="qr-block"><div class="qr" id="qr"></div><div class="txt"><div class="big">Заказать или спросить</div><div class="sm">Сканируйте камерой телефона — откроется витрина с ценами и формой заявки.</div></div></div>
+  <div class="foot">NOZZA · локальное 3D-производство · питомцы / для дома / для бизнеса</div>
+</div>
+<script src="../assets/qr.js"></script>
+<script>
+(function(){
+  function el(id){ return document.getElementById(id); }
+  function c(){ var o={}; try{ o=JSON.parse(localStorage.getItem('nozza:contact')||'{}'); }catch(e){} return o; }
+  function draw(){
+    var cfg = c();
+    if(!el('city').value) el('city').value = cfg.city || 'Симферополь';
+    if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8080/order.html';
+    var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
+    el('mark').src = '../assets/brand/nozza-mark-'+id+'-white.svg';
+    el('btag').textContent = 'Там, где рождается форма · ' + el('city').value;
+    var box = el('qr');
+    if (window.QR) box.innerHTML = QR.svg(el('link').value, { ecl: 'M', margin: 1 });
+    else box.textContent = 'QR: ' + el('link').value;
+  }
+  ['city','link'].forEach(function(id){ el(id).addEventListener('input', function(){ var cfg=c(); cfg.city=el('city').value; cfg.site=el('link').value; try{ localStorage.setItem('nozza:contact', JSON.stringify(cfg)); }catch(e){} draw(); }); });
+  draw();
+})();
+</script>
+</body></html>

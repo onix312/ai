@@ -57,6 +57,17 @@
    <button class="btn ghost" id="backBtn" type="button">← Вернуться в PrintFlow</button>
   </form>
   <div class="msg" id="msg"></div>
+
+  <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+  <p class="name" style="font-size:14px">Заказать или спросить</p>
+  <form id="askForm" autocomplete="off">
+   <input id="a_name" placeholder="Ваше имя" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font-size:15px;margin-top:8px">
+   <input id="a_contact" placeholder="Телефон или Telegram" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font-size:15px;margin-top:8px">
+   <input id="a_color" placeholder="Цвет (если нужен)" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font-size:15px;margin-top:8px">
+   <button class="btn" id="askBtn" type="submit">Отправить заявку</button>
+   <a class="btn ghost" href="/order.html" style="text-align:center;text-decoration:none">Вся витрина NOZZA →</a>
+  </form>
+  <div class="msg" id="askMsg"></div>
  </div>
 </div>
 <script>
@@ -136,6 +147,41 @@
     var ref = document.referrer;
     if (ref && ref.indexOf(location.host) !== -1) { location.href = ref; return; }
     location.href = url;
+  });
+
+  function askMsg(text, ok) {
+    var m = $('#askMsg');
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+    clearTimeout(askMsg._t);
+    askMsg._t = setTimeout(function () { m.className = 'msg'; }, 4000);
+  }
+
+  $('#askForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!item) return;
+    var name = $('#a_name').value.trim();
+    var contact = $('#a_contact').value.trim();
+    if (!name) return askMsg('Укажите имя', false);
+    if (!contact) return askMsg('Оставьте телефон или Telegram', false);
+    fetch('/api/public/order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        phone: /^\+?\d[\d\s()-]{5,}$/.test(contact) ? contact : '',
+        messenger: /^\+?\d[\d\s()-]{5,}$/.test(contact) ? '' : contact,
+        product: item.name || 'Позиция стеллажа',
+        color: $('#a_color').value.trim(),
+        qty: 1,
+        channel: 'shop',
+        note: 'Заявка со страницы товара',
+      }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        askMsg('Заявка №' + d.order_number + ' принята! Мы свяжемся с вами.', true);
+        $('#a_name').value = ''; $('#a_contact').value = ''; $('#a_color').value = '';
+      } else askMsg(d.error || 'Не получилось', false);
+    }).catch(function () { askMsg('Нет связи с коннектором', false); });
   });
 
   load();

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA — витрина и заказ</title>
+<style>
+ :root { --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b;
+   --ok:#0f9d58; --warn:#c97a08; --bad:#d63a3a; --accent:#4f46e5; --accent-soft:rgba(79,70,229,.1); --r:12px; }
+ @media (prefers-color-scheme: dark) {
+  :root { --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8; --accent-soft:rgba(129,140,248,.14); }
+ }
+ * { box-sizing: border-box; }
+ body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:760px; margin:0 auto; padding:20px 16px 60px; }
+ .logo { text-align:center; margin-bottom:6px; font-weight:750; letter-spacing:.02em; font-size:20px; }
+ .logo small { display:block; color:var(--muted); font-weight:500; font-size:12px; margin-top:2px; }
+ .sub { text-align:center; color:var(--muted); font-size:13px; margin:0 0 18px; }
+ .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; overflow:hidden;
+   display:flex; flex-direction:column; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+ .card img { width:100%; height:150px; object-fit:cover; background:var(--bg); }
+ .card .body { padding:12px 14px 14px; display:flex; flex-direction:column; flex:1; }
+ .name { font-size:14.5px; font-weight:700; margin:0 0 2px; }
+ .grp { color:var(--muted); font-size:11.5px; margin:0 0 8px; }
+ .price { font-size:19px; font-weight:750; font-variant-numeric:tabular-nums; }
+ .stock { display:inline-block; align-self:flex-start; font-size:11.5px; font-weight:600;
+   padding:3px 9px; border-radius:999px; margin-top:6px; }
+ .stock.ok { background:rgba(15,157,88,.14); color:var(--ok); }
+ .stock.low { background:rgba(201,122,8,.14); color:var(--warn); }
+ .stock.empty { background:rgba(214,58,58,.12); color:var(--bad); }
+ .btn { display:block; width:100%; margin-top:12px; padding:11px; border:0; border-radius:10px;
+   background:var(--accent); color:#fff; font-size:14px; font-weight:650; cursor:pointer; }
+ .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--text); margin-top:8px; }
+ .btn:disabled { opacity:.5; cursor:default; }
+ .banner { margin:0 0 16px; padding:14px 16px; border:1px dashed var(--accent); border-radius:14px;
+   background:var(--accent-soft); font-size:13.5px; }
+ .banner b { display:block; margin-bottom:2px; }
+ .empty { text-align:center; color:var(--muted); padding:40px 10px; }
+ /* форма заказа */
+ .modal { position:fixed; inset:0; background:rgba(10,14,25,.5); display:none;
+   align-items:flex-end; justify-content:center; z-index:10; }
+ .modal.on { display:flex; }
+ .sheet { width:100%; max-width:440px; background:var(--panel); border-radius:18px 18px 0 0; padding:20px 18px 26px; }
+ .sheet h3 { margin:0 0 4px; font-size:17px; }
+ .sheet .sub { text-align:left; margin:0 0 14px; }
+ label { display:block; margin-top:11px; font-size:12.5px; color:var(--muted); }
+ input, select, textarea { width:100%; margin-top:6px; padding:12px; border:1px solid var(--line);
+   border-radius:11px; background:var(--bg); color:var(--text); font-size:15px; font-family:inherit; }
+ .row2 { display:flex; gap:10px; } .row2 > div { flex:1; }
+ .msg { display:none; margin-top:12px; padding:11px; border-radius:10px; font-size:13.5px; font-weight:600; }
+ .msg.ok { display:block; background:rgba(15,157,88,.14); color:var(--ok); }
+ .msg.err { display:block; background:rgba(214,58,58,.12); color:var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="logo" id="logo">NOZZA<small>Там, где рождается форма</small></div>
+ <p class="sub">Готовое в наличии и на заказ — имя, цвет и размер под вас. Срок и цену подтвердим после заявки.</p>
+
+ <div class="banner">🛠 <b>Нужно по вашим размерам?</b>
+  Пришлите фото и размеры — подготовим расчёт. Нажмите «Свой заказ» ниже.</div>
+
+ <div class="grid" id="grid"><div class="empty">Загружаем витрину…</div></div>
+
+ <button class="btn" id="customBtn" type="button">📐 Свой заказ — по размерам</button>
+</div>
+
+<div class="modal" id="modal">
+ <div class="sheet">
+  <h3 id="m_title">Заказать</h3>
+  <p class="sub" id="m_sub"></p>
+  <form id="orderForm" autocomplete="off">
+   <label>Ваше имя<input id="f_name" placeholder="Как к вам обращаться"></label>
+   <div class="row2">
+    <div><label>Телефон<input id="f_phone" placeholder="+7…"></label></div>
+    <div><label>Количество<input id="f_qty" type="number" min="1" step="1" value="1"></label></div>
+   </div>
+   <label>Цвет (если нужен)
+    <select id="f_color">
+     <option value="">Любой</option>
+     <option>Чёрный</option><option>Белый</option><option>Серый</option>
+     <option>Оранжевый</option><option>Красный</option><option>Синий</option>
+     <option>Зелёный</option><option>Жёлтый</option>
+    </select></label>
+   <label id="f_messenger_wrap">Telegram / WhatsApp<input id="f_messenger" placeholder="@username"></label>
+   <label id="f_note_wrap">Что нужно сделать<textarea id="f_note" rows="2" placeholder="Размеры, пожелания, для кого"></textarea></label>
+   <button class="btn" id="submitBtn" type="submit">Отправить заявку</button>
+   <button class="btn ghost" id="closeBtn" type="button">Отмена</button>
+   <div class="msg" id="msg"></div>
+  </form>
+ </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var currency = '₽';
+  var current = null; // выбранный товар или {custom:true}
+
+  function $(s) { return document.querySelector(s); }
+  function num(v, d) { var n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : (d || 0); }
+  function money(v) { return Math.round(num(v)).toLocaleString('ru-RU') + ' ' + currency; }
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, function (c) {
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]); }); }
+  function showMsg(text, ok) {
+    var m = $('#msg'); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = text;
+    clearTimeout(showMsg._t); showMsg._t = setTimeout(function () { m.className = 'msg'; }, 4000);
+  }
+  function openSheet(item) {
+    current = item;
+    $('#msg').className = 'msg';
+    $('#f_name').value = ''; $('#f_phone').value = ''; $('#f_messenger').value = '';
+    $('#f_note').value = ''; $('#f_qty').value = '1'; $('#f_color').value = '';
+    if (item && item.custom) {
+      $('#m_title').textContent = 'Свой заказ по размерам';
+      $('#m_sub').textContent = 'Опишите, что нужно, — пришлём расчёт и срок.';
+      $('#f_note_wrap').style.display = 'block';
+    } else {
+      $('#m_title').textContent = item ? item.name : 'Заказать';
+      $('#m_sub').textContent = item ? (money(item.price) + ' · в наличии ' + num(item.qty) + ' шт') : '';
+      $('#f_note_wrap').style.display = 'block';
+    }
+    $('#modal').classList.add('on');
+  }
+  function closeSheet() { $('#modal').classList.remove('on'); }
+
+  function load() {
+    fetch('/api/public/catalog').then(function (r) { return r.json(); }).then(function (d) {
+      currency = d.currency || '₽';
+      $('#logo').innerHTML = esc(d.company || 'NOZZA') + '<small>Там, где рождается форма</small>';
+      var items = d.items || [];
+      var grid = $('#grid');
+      if (!items.length) {
+        grid.innerHTML = '<div class="empty">Витрина пока пуста — загляните позже.</div>';
+        return;
+      }
+      grid.innerHTML = items.map(function (it) {
+        var st = it.status || 'ok';
+        var labels = { ok: 'В наличии: ' + num(it.qty) + ' шт', low: 'Осталось мало: ' + num(it.qty) + ' шт',
+          empty: 'Нет в наличии', dead: 'Под заказ' };
+        var stCls = (st === 'empty' || st === 'dead') ? 'empty' : st;
+        var photo = it.photo
+          ? '<img src="/api/nomenclature/photo.jpg?id=' + encodeURIComponent(it.id) + '" alt="" loading="lazy">'
+          : '<div style="height:150px;display:grid;place-items:center;color:var(--muted);font-size:30px">◫</div>';
+        return '<article class="card" data-item="' + esc(it.id) + '">' + photo
+          + '<div class="body"><p class="name">' + esc(it.name) + '</p>'
+          + '<p class="grp">' + esc(it.group || it.material || '') + '</p>'
+          + '<span class="price">' + money(it.price) + '</span>'
+          + '<span class="stock ' + stCls + '">' + esc(labels[st] || labels.ok) + '</span>'
+          + '<button class="btn" type="button" data-order="' + esc(it.id) + '">Заказать</button></div></article>';
+      }).join('');
+    }).catch(function () {
+      $('#grid').innerHTML = '<div class="empty">Нет связи с PrintFlow. Запустите коннектор.</div>';
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-order]');
+    if (btn) {
+      fetch('/api/public/catalog').then(function (r) { return r.json(); }).then(function (d) {
+        var it = (d.items || []).find(function (x) { return x.id === btn.dataset.order; });
+        if (it) openSheet(it);
+      });
+      return;
+    }
+    if (e.target.id === 'customBtn') openSheet({ custom: true });
+    if (e.target.id === 'closeBtn') closeSheet();
+    if (e.target.id === 'modal' && e.target === $('#modal')) closeSheet();
+  });
+
+  $('#orderForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var payload = {
+      name: $('#f_name').value.trim(),
+      phone: $('#f_phone').value.trim(),
+      messenger: $('#f_messenger').value.trim(),
+      qty: Math.max(1, parseInt($('#f_qty').value, 10) || 1),
+      color: $('#f_color').value,
+      note: $('#f_note').value.trim(),
+      channel: 'shop',
+    };
+    if (!current) return;
+    if (current.custom) {
+      payload.product = $('#f_note').value.trim() || 'Индивидуальный заказ';
+      if (!payload.note) payload.note = payload.product;
+    } else {
+      payload.product = current.name;
+      payload.nom_id = current.id;
+    }
+    if (!payload.name) return showMsg('Укажите имя', false);
+    if (!payload.phone && !payload.messenger) return showMsg('Оставьте телефон или Telegram', false);
+    if (payload.product === 'Индивидуальный заказ' && !payload.note) return showMsg('Опишите задачу', false);
+    $('#submitBtn').disabled = true;
+    fetch('/api/public/order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      $('#submitBtn').disabled = false;
+      if (d.ok) {
+        showMsg('Заявка №' + d.order_number + ' принята! Мы свяжемся с вами.', true);
+        setTimeout(closeSheet, 1600);
+      } else showMsg(d.error || 'Не получилось отправить', false);
+    }).catch(function () { $('#submitBtn').disabled = false; showMsg('Нет связи с коннектором', false); });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

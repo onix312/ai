@@ -681,8 +681,14 @@ async function uploadFile(file) {
   form.append('printer_id', p.id);
   toast('Загружаем на принтер', file.name, 'info');
   try {
-    await api('/api/printer/upload', { method: 'POST', body: form });
-    toast('Файл загружен', file.name);
+    const res = await api('/api/printer/upload', { method: 'POST', body: form });
+    const est = res && res.estimate ? res.estimate : {};
+    const bits = [];
+    if (num(est.minutes)) bits.push(minutesText(est.minutes));
+    if (num(est.grams)) bits.push('~' + nfmt(est.grams) + ' г');
+    if (est.material) bits.push(est.material);
+    if (est.color) bits.push(est.color);
+    toast('Файл загружен', bits.length ? 'Оценка из 3MF: ' + bits.join(' · ') : file.name);
     loadFiles();
   } catch (e) { fail(e); }
 }
@@ -1097,6 +1103,27 @@ function bind() {
   });
 
   $('pr_events_refresh').addEventListener('click', loadEvents);
+
+  // Диагностика связи (5.0): порты принтера и сравнение подсети.
+  $('pr_net_btn').addEventListener('click', async () => {
+    const p = PF.printer(PF.state.activePrinter);
+    const host = (p && p.host) || '';
+    const box = $('pr_net');
+    if (!host) { box.innerHTML = '<div class="empty compact"><span>У принтера не задан IP-адрес.</span></div>'; return; }
+    box.innerHTML = '<div class="skeleton" style="height:44px"></div>';
+    try {
+      const data = await get('/api/network/diagnose', { host });
+      const dot = { ok: 'ok', warn: 'warn', bad: 'bad' }[data.level] || '';
+      box.innerHTML = `<div class="notice ${dot}"><span>${dot === 'ok' ? '✓' : '⚠'}</span><span>${esc(data.text)}</span></div>`
+        + (data.ports || []).map((p2) => `<div class="tx-row">`
+          + `<span class="tx-ic ${p2.ok ? 'income' : 'expense'}">${p2.ok ? '✓' : '✕'}</span>`
+          + `<div class="tx-body"><b>${esc(p2.name)} · порт ${p2.port}</b><small>${esc(p2.label)}</small></div>`
+          + `<span class="amt">${p2.ok ? p2.ms + ' мс' : 'нет ответа'}</span></div>`).join('');
+      if (data.local_ips && data.local_ips.length) {
+        box.insertAdjacentHTML('beforeend', '<small class="muted">Этот компьютер: ' + data.local_ips.map(esc).join(', ') + '</small>');
+      }
+    } catch (e) { box.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`; }
+  });
 }
 
 async function loadEvents() {

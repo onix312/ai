@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA — конструктор изделий</title>
+<style>
+ :root { --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b; --accent:#4f46e5; }
+ @media (prefers-color-scheme: dark) {
+  :root { --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8; }
+ }
+ * { box-sizing:border-box; margin:0; padding:0; }
+ body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:760px; margin:0 auto; padding:26px 16px 60px; }
+ .logo { text-align:center; font-weight:750; letter-spacing:.02em; margin-bottom:4px; }
+ .logo small { display:block; color:var(--muted); font-weight:500; font-size:11.5px; margin-top:2px; }
+ .sub { text-align:center; color:var(--muted); font-size:13px; margin-bottom:18px; }
+ .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+ @media (max-width:640px){ .grid { grid-template-columns:1fr; } }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; }
+ h2 { font-size:14px; margin-bottom:12px; }
+ label { display:block; margin-top:10px; font-size:12.5px; color:var(--muted); }
+ input, select { width:100%; margin-top:6px; padding:11px; border:1px solid var(--line); border-radius:11px;
+   background:var(--bg); color:var(--text); font-size:15px; }
+ .preview { display:flex; align-items:center; justify-content:center; min-height:200px;
+   background:repeating-conic-gradient(#0000 0 25%,#f0f3fa 0 50%) 50%/28px 28px; border-radius:12px; }
+ .preview svg { max-width:240px; max-height:200px; }
+ .btn { display:block; width:100%; margin-top:16px; padding:13px; border:0; border-radius:12px;
+   background:var(--accent); color:#fff; font-size:15px; font-weight:650; cursor:pointer; }
+ .hint { margin-top:12px; font-size:12px; color:var(--muted); line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="logo">NOZZA<small>конструктор изделий · 5.0</small></div>
+ <p class="sub">Параметры → живой предпросмотр → STL для слайсера. Без внешних программ.</p>
+ <div class="grid">
+  <div class="card">
+   <h2>Параметры</h2>
+   <label>Форма
+    <select id="shape">
+     <option value="number_plate">Номерок / табличка с номером</option>
+     <option value="tag_disc">Диск-адресник (монетка)</option>
+     <option value="qr_stand_base">Основание QR-стойки</option>
+    </select></label>
+   <div id="plateParams">
+    <label>Номер / текст (только цифры)<input id="number" value="12"></label>
+    <label>Ширина, мм<input id="width" type="number" value="40"></label>
+    <label>Высота, мм<input id="height" type="number" value="24"></label>
+   </div>
+   <div id="discParams" style="display:none">
+    <label>Диаметр, мм<input id="diameter" type="number" value="30"></label>
+   </div>
+   <div id="standParams" style="display:none">
+    <label>Ширина, мм<input id="swidth" type="number" value="60"></label>
+    <label>Глубина, мм<input id="sdepth" type="number" value="40"></label>
+   </div>
+   <button class="btn" id="download" type="button">Скачать STL</button>
+   <p class="hint">Кириллический текст в этом срезе не поддерживается — только цифры, «-», «.», «/». Шрифты с кириллицей и больше форм — следующий шаг.</p>
+  </div>
+  <div class="card">
+   <h2>Предпросмотр</h2>
+   <div class="preview" id="preview"></div>
+  </div>
+ </div>
+</div>
+<script>
+(function(){
+  function $(s){ return document.querySelector(s); }
+  function params(){
+    var shape=$('#shape').value, p={shape:shape};
+    if(shape==='number_plate'){ p.number=$('#number').value||'1'; p.width=$('#width').value||40; p.height=$('#height').value||24; }
+    if(shape==='tag_disc'){ p.diameter=$('#diameter').value||30; }
+    if(shape==='qr_stand_base'){ p.width=$('#swidth').value||60; p.depth=$('#sdepth').value||40; }
+    return p;
+  }
+  function qs(p){ var s=new URLSearchParams(); Object.keys(p).forEach(function(k){s.set(k,p[k]);}); return s.toString(); }
+  function updatePreview(){
+    $('#preview').innerHTML='<img src="/api/design/preview?'+qs(params())+'&t='+Date.now()+'" alt="" style="max-width:240px">';
+  }
+  function syncParams(){
+    var s=$('#shape').value;
+    $('#plateParams').style.display = s==='number_plate'?'block':'none';
+    $('#discParams').style.display = s==='tag_disc'?'block':'none';
+    $('#standParams').style.display = s==='qr_stand_base'?'block':'none';
+    updatePreview();
+  }
+  ['shape','number','width','height','diameter','swidth','sdepth'].forEach(function(id){
+    $(id).addEventListener('input', function(){ clearTimeout(syncParams._t); syncParams._t=setTimeout(updatePreview,150); });
+  });
+  $('#shape').addEventListener('change', syncParams);
+  $('#download').addEventListener('click', function(){
+    var p=params(), shape=p.shape;
+    var name = shape==='number_plate' ? 'номерок-'+ (p.number||'1')
+      : shape==='tag_disc' ? 'диск-'+ (p.diameter||30) : 'qr-стойка';
+    location.href='/api/design/stl?'+qs(p);
+  });
+  syncParams();
+})();
+</script>
+</body>
+</html>

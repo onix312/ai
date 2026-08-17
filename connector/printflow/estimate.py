@@ -18,10 +18,35 @@ from pathlib import Path
 _TIME_RE = re.compile(r";\s*TIME\s*:\s*(\d+)")
 _GRAMS_RE = re.compile(r";\s*Filament used \[g\]\s*:\s*([\d.]+)")
 _METERS_RE = re.compile(r";\s*Filament used\s*:\s*([\d.]+)")
+# Материал и цвет из заголовка G-code: Bambu Studio пишет их в нескольких
+# вариантах — через '=' или ':', с пробелами или без, "colour" и "color".
+_TYPE_RE = re.compile(r";\s*filament[_ ]type\s*[:=]\s*([A-Za-z0-9+\-]+)")
+_COLOR_HEX_RE = re.compile(r";\s*filament[_ ](?:colour|color)\s*[:=]\s*#?([0-9A-Fa-f]{6,8})")
+
+
+def _hex_to_name(value: str) -> str:
+    """Шестнадцатеричный цвет → имя по простой палитре (для заказа)."""
+    value = value.lstrip("#")
+    if len(value) >= 6:
+        r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    else:
+        return ""
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx - mn < 30:
+        if mx < 60:
+            return "Чёрный"
+        if mx > 200:
+            return "Белый"
+        return "Серый"
+    if r >= g and r >= b:
+        return "Оранжевый" if g > 90 else "Красный"
+    if g >= r and g >= b:
+        return "Зелёный"
+    return "Синий"
 
 
 def estimate_file(path: str | Path) -> dict:
-    """Оценка файла .gcode или .3mf. Возвращает {minutes, grams} или {}."""
+    """Оценка файла .gcode или .3mf: {minutes, grams, material, color} или {}."""
     path = Path(path)
     if not path.exists():
         return {}
@@ -49,7 +74,16 @@ def estimate_file(path: str | Path) -> dict:
         if m:
             # метры → граммы: PLA ~1.24 г/м; это оценка, точность не критична
             grams = round(float(m.group(1)) * 1.24, 1)
-    return {"minutes": minutes, "grams": grams}
+    result = {"minutes": minutes, "grams": grams}
+    m = _TYPE_RE.search(text)
+    if m:
+        result["material"] = m.group(1).strip().upper()
+    m = _COLOR_HEX_RE.search(text)
+    if m:
+        name = _hex_to_name(m.group(1))
+        if name:
+            result["color"] = name
+    return result
 
 
 def _read_head(path: Path, limit: int = 4000) -> str:
