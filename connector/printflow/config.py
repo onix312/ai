@@ -20,6 +20,7 @@ else:
 
 DB_FILE = DATA_DIR / "printflow.sqlite3"
 UPLOAD_DIR = DATA_DIR / "uploads"
+PHOTO_DIR = DATA_DIR / "photos"
 LOG_FILE = DATA_DIR / "connector.log"
 
 # Тарифы и производственные константы. Пользователь меняет их в интерфейсе,
@@ -98,6 +99,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "guard_snapshot": True,         # сохранять кадр камеры в момент тревоги
     # --- Очередь и планирование -----------------------------------------
     "queue_check_filament": True,   # не запускать, если пластика не хватит
+    "queue_check_material": True,   # не запускать, если в AMS не тот материал
     "queue_group_material": True,   # подряд печатать задания одного материала
     "quiet_hours_enabled": False,   # не запускать печать ночью
     "quiet_from": "23:00",
@@ -118,7 +120,16 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_guard": True,         # тревоги сторожа печати
     "notify_maintenance": True,   # напоминания об обслуживании
     "notify_photo": True,         # прикладывать кадр камеры к сообщению
+    "notify_finish_remind_min": 10.0,  # напомнить о финише за N минут (0 = выкл)
     "filament_low_threshold": 15.0,  # % остатка катушки
+    "dry_humidity_threshold": 55.0,  # влажность AMS, выше которой пора сушить пластик
+    "restock_remind": True,       # напоминать о закупке пластика
+    "qc_checklist": ["Замерил размеры", "Сфотографировал изделие",
+                     "Проверил качество слоёв", "Упаковал"],  # чек-лист качества
+    "digest_time": "09:00",       # время утреннего дайджеста в Telegram
+    "reply_templates": [],        # шаблоны ответов клиентам [{id,title,text}]
+    "weekly_report_day": 1,       # день недели еженедельного отчёта (1 = понедельник)
+    "weekly_report_time": "20:00",
     # Интерфейс
     "theme": "system",
     "accent": "indigo",
@@ -211,6 +222,7 @@ def now_iso() -> str:
 def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    PHOTO_DIR.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(DATA_DIR, 0o700)
     except OSError:

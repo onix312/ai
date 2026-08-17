@@ -22,6 +22,13 @@ from .hms import decode_list, worst
 
 SEVERITY_ORDER = ["info", "warn", "error", "fatal"]
 
+# HMS-коды «закончился пластик»: печать встала на паузу, нужен человек.
+FILAMENT_RUNOUT_CODES = {
+    "05002001", "05002002", "05002003", "05002004",
+    "05002005", "05002006", "05002007", "05002008",
+    "05003001", "05003002",
+}
+
 
 def severity_at_least(level: str, minimum: str) -> bool:
     if not level:
@@ -93,6 +100,20 @@ class Watchdog:
                     acted.append("печать поставлена на паузу")
                 except Exception as exc:
                     acted.append(f"паузу отправить не удалось: {exc}")
+            # «Закончился пластик» — особый случай: печать уже стоит, нужен человек
+            # с новой катушкой. Пишем отдельное событие и шлём Telegram с кадром.
+            if item["code"] in FILAMENT_RUNOUT_CODES:
+                acted.append("нужна новая катушка")
+                alert["title"] = "Закончился пластик в AMS"
+                alert["advice"] = "Поставьте новую катушку и продолжите печать."
+                tray = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
+                if tray:
+                    alert["reason"] = f"{tray.get('label', 'Слот')}: филамент закончился"
+                self.db.add_event(
+                    "filament_low", "Закончился пластик в AMS",
+                    alert["reason"], printer.id,
+                    {"code": item["code"], "tray": (tray or {}).get("id", "")})
+                self._notify(printer, alert)
             shot = self._snapshot(printer, item["title"])
             if shot:
                 acted.append("сохранён кадр камеры")

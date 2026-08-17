@@ -46,12 +46,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("payer", "TEXT DEFAULT 'person'"),  # физлицо или юрлицо
         ("account_id", "TEXT"),
         ("design_minutes", "REAL DEFAULT 0"),
+        ("colors", "TEXT DEFAULT ''"),       # многоцвет: JSON [{material,color,grams}]
+        ("qc_done", "TEXT DEFAULT ''"),      # чек-лист качества: JSON {step: true}
     ],
-    "customers": [
-        ("kind", "TEXT DEFAULT 'person'"),   # person | company
-        ("inn", "TEXT DEFAULT ''"),
-        ("discount", "REAL DEFAULT 0"),
-        ("channel", "TEXT DEFAULT ''"),
+    "print_jobs": [
+        ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
+        ("est_grams", "REAL DEFAULT 0"),
     ],
     "catalog": [
         ("cost", "REAL DEFAULT 0"),
@@ -374,6 +374,99 @@ CREATE TABLE IF NOT EXISTS printer_stats (
     energy_kwh REAL DEFAULT 0,
     PRIMARY KEY (day, printer_id)
 );
+
+CREATE TABLE IF NOT EXISTS defects (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    printer_id TEXT,
+    job_id TEXT,
+    order_id TEXT,
+    code TEXT DEFAULT '',
+    phase TEXT DEFAULT '',       -- слой / фаза печати
+    reason TEXT DEFAULT '',      -- разбор причины
+    grams REAL DEFAULT 0,
+    loss REAL DEFAULT 0,
+    photo TEXT DEFAULT ''        -- путь к кадру камеры
+);
+
+CREATE TABLE IF NOT EXISTS ams_profiles (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    slots TEXT DEFAULT '[]',     -- JSON [{slot, material, color, label}]
+    note TEXT DEFAULT '',
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_commands (
+    id TEXT PRIMARY KEY,
+    at TEXT,                     -- когда выполнить (ISO)
+    printer_id TEXT,
+    command TEXT DEFAULT '',
+    value TEXT DEFAULT '',       -- JSON
+    note TEXT DEFAULT '',
+    done INTEGER DEFAULT 0,
+    result TEXT DEFAULT '',
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_commands(done, at);
+
+CREATE TABLE IF NOT EXISTS order_photos (
+    id TEXT PRIMARY KEY,
+    order_id TEXT,
+    at TEXT,
+    file TEXT DEFAULT '',        -- имя файла в DATA_DIR/photos/
+    note TEXT DEFAULT '',
+    kind TEXT DEFAULT 'upload'   -- upload | camera
+);
+CREATE INDEX IF NOT EXISTS idx_photos_order ON order_photos(order_id);
+
+CREATE TABLE IF NOT EXISTS price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    order_id TEXT,
+    product TEXT DEFAULT '',
+    price REAL DEFAULT 0,
+    catalog_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS drying_sessions (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    spool_id TEXT,
+    material TEXT DEFAULT '',
+    color_name TEXT DEFAULT '',
+    minutes REAL DEFAULT 0,
+    temp REAL DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS shelf_items (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    catalog_id TEXT,
+    qty REAL DEFAULT 0,            -- штук на стеллаже
+    price REAL DEFAULT 0,          -- цена ценника, ₽
+    cost_per_unit REAL DEFAULT 0,  -- себестоимость штуки, ₽
+    min_qty REAL DEFAULT 0,        -- минимальный остаток для предупреждения
+    photo TEXT DEFAULT '',         -- имя файла в DATA_DIR/photos/
+    note TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shelf_moves (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    item_id TEXT,
+    kind TEXT DEFAULT 'produce',   -- produce | sale | writeoff | inventory | online
+    qty REAL DEFAULT 0,            -- знак: + приход, − расход
+    price REAL DEFAULT 0,          -- цена продажи для sale
+    job_id TEXT,
+    tx_id TEXT,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shelf_moves_item ON shelf_moves(item_id, at);
 """
 
 

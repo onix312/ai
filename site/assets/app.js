@@ -2,7 +2,8 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
-  dateText, dateTimeText, agoText, toast, fail, confirmDanger, drawChart, legend, store } = U;
+  dateText, dateTimeText, agoText, toast, fail, confirmDanger, drawChart, legend, store,
+  openModal, closeModal } = U;
 const { get, post } = PF.api;
 
 let dashMode = 'money';
@@ -99,6 +100,13 @@ function renderDashboard() {
       + `<small>${esc(o.customer_name || 'без клиента')} · ${esc(st.name)}</small></div>`
       + `<span class="amt ${isLate ? 'neg' : ''}">${isLate ? 'просрочен' : isToday ? 'сегодня' : esc(dateText(o.due))}</span></div>`;
   }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>';
+
+  renderActivePrint();
+  renderGauge();
+  renderAmsPanel();
+  renderFilamentForecast();
+  renderTimeline();
+  applyWidgets();
 }
 
 function renderEvents() {
@@ -108,6 +116,278 @@ function renderEvents() {
     + `<b>${esc(e.title)}</b><small>${esc(e.detail || '')}</small></span>`
     + `<time title="${esc(dateTimeText(e.at))}">${esc(agoText(e.at))}</time></div>`).join('')
     : '<div class="empty compact"><span>Событий пока нет.</span></div>';
+}
+
+/* ================================================= виджеты панели */
+const DASH_WIDGETS = [
+  ['kpis', 'Показатели (KPI-ряд)'],
+  ['active', 'Активная печать'],
+  ['gauge', 'Прибыль за час печати'],
+  ['filament', 'Пластик на очередь'],
+  ['ams', 'AMS на главной'],
+  ['chart', 'Деньги и печать по дням'],
+  ['printers', 'Парк принтеров'],
+  ['due', 'Ближайшие сроки'],
+  ['events', 'Лента событий'],
+  ['timeline', 'Таймлайн печати за день'],
+];
+const WIDGET_KEY = 'pf_dash_widgets';
+function widgetPrefs() {
+  try {
+    const v = JSON.parse(store.get(WIDGET_KEY, 'null'));
+    if (Array.isArray(v) && v.length) return v.filter((id) => DASH_WIDGETS.some(([w]) => w === id));
+  } catch (e) { /* повреждённые настройки — вернём всё */ }
+  return DASH_WIDGETS.map(([id]) => id);
+}
+function saveWidgetPrefs(list) { store.set(WIDGET_KEY, JSON.stringify(list)); }
+function applyWidgets() {
+  const prefs = widgetPrefs();
+  $$('[data-widget]').forEach((el) => el.classList.toggle('hidden', !prefs.includes(el.dataset.widget)));
+}
+function renderWidgetsList() {
+  const prefs = widgetPrefs();
+  $('dash_widgets_list').innerHTML = DASH_WIDGETS.map(([id, label]) =>
+    `<label class="widget-check${prefs.includes(id) ? ' on' : ''}"><input type="checkbox" data-widget-check="${id}"${prefs.includes(id) ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
+}
+function dashEmpty(msg) { return `<div class="empty compact"><span>${esc(msg)}</span></div>`; }
+
+/* ================================================ большая карточка печати */
+function renderActivePrint() {
+  const host = $('dash_active');
+  const live = PF.state.live;
+  const snap = (live && (live.active || (live.printers || [])[0])) || null;
+  if (!snap) { host.innerHTML = dashEmpty('Принтер не добавлен — подключите его в разделе «Принтеры».'); return; }
+  const info = snap.printer || {};
+  const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(info.state);
+  if (!running) {
+    $('dash_active_sub').textContent = `${snap.name} · ${info.state_label || 'готов'}`;
+    host.innerHTML = `<div class="active-print idle">`
+      + `<div class="ap-main"><b class="ap-pct">—</b><div class="ap-info">`
+      + `<b>${esc(snap.name)} свободен</b><small>${esc(info.state_label || 'Готов к печати')}</small></div></div>`
+      + ((info.problems && info.problems.length) ? `<div class="ap-warn">⚠ ${esc(info.problems[0].title)}</div>` : '')
+      + '</div>';
+    return;
+  }
+  const job = snap.job || {};
+  const order = job.order || {};
+  const progress = clamp(num(info.progress), 0, 100);
+  const remaining = num(info.remaining_min);
+  const elapsed = num(info.elapsed_min);
+  const eta = info.eta ? String(info.eta).slice(11, 16) : '';
+  const facts = [];
+  if (info.layer) facts.push(`Слой ${info.layer} / ${info.total_layers || '—'}`);
+  if (remaining) facts.push(`Осталось ${minutesText(remaining)}`);
+  if (eta) facts.push(`Финиш в ${eta}`);
+  if (elapsed) facts.push(`Идёт ${minutesText(elapsed)}`);
+  $('dash_active_sub').textContent = `${snap.name} · ${info.state_label}`;
+  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}">`
+    + `<div class="ap-main"><b class="ap-pct">${Math.round(progress)}<small>%</small></b>`
+    + `<div class="ap-info"><b>${esc(info.task || 'Печать')}</b>`
+    + (order.number
+      ? `<small>Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</small>`
+      : `<small>${esc(snap.name)}</small>`)
+    + `<div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div></div></div>`
+    + `<div class="ap-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</div>`
+    + (num(job.spent)
+      ? `<div class="ap-money"><span>Потрачено <b>${money(job.spent)}</b></span>`
+        + (num(job.cost_total) ? `<span>Итого печать ≈ <b>${money(job.cost_total)}</b></span>` : '')
+        + (num(job.per_hour) ? `<span>Стоимость часа <b>${money(job.per_hour)}</b></span>` : '')
+        + '</div>'
+      : '')
+    + (info.state === 'PAUSE' ? '<div class="ap-warn">⚠ На паузе — проверьте принтер</div>' : '')
+    + '</div>';
+}
+
+/* ============================================== спидометр «прибыль за час» */
+function renderGauge() {
+  const host = $('dash_gauge');
+  const s = (PF.state.finance && PF.state.finance.summary) || PF.state.summary || {};
+  const value = num(s.profit_per_print_hour);
+  const target = num(PF.state.settings.target_profit_per_hour, 250);
+  $('dash_gauge_norm').textContent = money(target);
+  const max = Math.max(target * 1.5, value * 1.15, 1);
+  const L = Math.PI * 64;
+  const valP = clamp(value / max, 0, 1);
+  const tgtP = clamp(target / max, 0, 1);
+  const kind = value >= target ? 'ok' : value >= target * 0.4 ? 'warn' : 'bad';
+  const color = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)' }[kind];
+  const tgtX = 80 + 52 * Math.cos(Math.PI * (1 - tgtP));
+  const tgtY = 78 - 52 * Math.sin(Math.PI * (1 - tgtP));
+  const note = value >= target ? 'норма выполнена'
+    : value > 0 ? `до нормы ${money(target - value)}/ч` : 'пока нет прибыли за час';
+  host.innerHTML = `<svg viewBox="0 0 160 96" class="gauge">`
+    + `<path d="M 16 78 A 64 64 0 0 1 144 78" fill="none" stroke="var(--line)" stroke-width="13" stroke-linecap="round"/>`
+    + `<path d="M 16 78 A 64 64 0 0 1 144 78" fill="none" stroke="${color}" stroke-width="13" stroke-linecap="round" stroke-dasharray="${(L * valP).toFixed(1)} ${L.toFixed(1)}"/>`
+    + `<line x1="80" y1="78" x2="${tgtX.toFixed(1)}" y2="${tgtY.toFixed(1)}" stroke="var(--muted)" stroke-width="2" stroke-dasharray="3 3"/>`
+    + `<text x="80" y="56" text-anchor="middle" class="gauge-val ${kind}">${money(value)}</text>`
+    + `<text x="80" y="70" text-anchor="middle" class="gauge-unit">за час печати · за 30 дней</text>`
+    + `<text x="80" y="92" text-anchor="middle" class="gauge-target">норма ${money(target)}/ч · ${esc(note)}</text>`
+    + `</svg>`;
+}
+
+/* ====================================================== AMS на главной */
+function renderAmsPanel() {
+  const host = $('dash_ams');
+  const live = PF.state.live;
+  const snap = (live && (live.active || (live.printers || [])[0])) || null;
+  const ams = (snap && snap.ams) || {};
+  const trays = ams.trays || [];
+  $('dash_ams_env').textContent = (ams.temperature != null || ams.humidity != null)
+    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${ams.humidity ?? '—'}`
+    : 'Температура и влажность —';
+  if (!trays.length) { host.innerHTML = dashEmpty('AMS не обнаружен или принтер не на связи.'); return; }
+  const threshold = num(PF.state.settings.filament_low_threshold, 15);
+  host.innerHTML = trays.map((t) => {
+    const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
+    const warn = remain != null && remain < threshold;
+    return `<div class="ams-row${t.active ? ' active' : ''}">`
+      + `<span class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></span>`
+      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}</b>`
+      + `<small>${esc(t.type || 'Не задан')}${t.active ? ' · активен' : ''}</small></div>`
+      + (remain != null
+        ? `<div class="ams-remain${warn ? ' warn' : ''}"><div class="bar thin"><i style="width:${clamp(remain, 0, 100)}%"></i></div><small>${Math.round(remain)}%</small></div>`
+        : '<span class="muted">—</span>')
+      + '</div>';
+  }).join('');
+}
+
+/* ============================================== прогноз пластика на очередь */
+function renderFilamentForecast() {
+  const host = $('dash_filament');
+  const queue = (PF.state.jobs.queue || []).filter((j) => j.state === 'queued');
+  const need = {};
+  let jobsN = 0, totalNeed = 0;
+  queue.forEach((j) => {
+    let grams = num(j.grams);
+    let mat = String(j.material || '').trim().toUpperCase();
+    if (j.order_id) {
+      const o = PF.state.orders.find((x) => x.id === j.order_id);
+      if (o) {
+        grams = num(o.grams) * Math.max(1, num(o.qty, 1));
+        mat = String(o.material || mat).trim().toUpperCase();
+      }
+    }
+    if (grams > 0) { need[mat || '—'] = (need[mat || '—'] || 0) + grams; jobsN++; totalNeed += grams; }
+  });
+  if (!Object.keys(need).length) {
+    $('dash_filament_sub').textContent = 'Хватит ли катушек на задания';
+    host.innerHTML = dashEmpty('Очередь пуста — прогноз не нужен.');
+    return;
+  }
+  const avail = {};
+  (PF.state.spools || []).forEach((sp) => {
+    if (num(sp.archived)) return;
+    const m = String(sp.material || '').trim().toUpperCase() || '—';
+    avail[m] = (avail[m] || 0) + num(sp.remaining_grams);
+  });
+  $('dash_filament_sub').textContent = `${jobsN} заданий в очереди · нужно ~${nfmt(totalNeed)} г`;
+  host.innerHTML = Object.keys(need).map((m) => {
+    const n = need[m], a = num(avail[m]);
+    const covered = a ? clamp(a / n * 100, 0, 100) : 0;
+    const ok = a >= n;
+    return `<div class="fl-row">`
+      + `<div class="fl-info"><b>${esc(m || '—')}</b><small>нужно ${nfmt(n)} г</small></div>`
+      + `<div class="fl-right"><div class="bar thin"><i style="width:${covered}%;background:${ok ? 'var(--ok)' : 'var(--bad)'}"></i></div>`
+      + `<small class="${ok ? '' : 'neg'}">${a ? 'на складе ' + nfmt(a) + ' г' : 'нет на складе'}</small></div>`
+      + '</div>';
+  }).join('')
+    + `<div class="fl-total">Всего в очереди ${nfmt(totalNeed)} г · на складе ${nfmt(Object.values(avail).reduce((a, b) => a + b, 0))} г</div>`;
+}
+
+/* ==================================================== таймлайн печати за день */
+async function refreshTimeline() {
+  try {
+    const data = await get('/api/timeline', { day: U.todayISO() });
+    PF.state.timeline = data.jobs || [];
+    if (document.querySelector('#view-dashboard.on')) renderTimeline();
+  } catch (e) { /* офлайн — не критично */ }
+}
+function renderTimeline() {
+  const host = $('dash_timeline');
+  const jobs = PF.state.timeline || [];
+  if (!jobs.length) {
+    $('dash_timeline_sub').textContent = 'Сегодня печатей ещё не было';
+    host.innerHTML = dashEmpty('Сегодня печатей ещё не было.');
+    return;
+  }
+  const runningIds = (PF.state.jobs.queue || []).filter((j) => j.state === 'running').map((j) => j.id);
+  const rows = jobs.map((j) => {
+    const start = j.started_at || j.queued_at || j.created_at || '';
+    const isRunning = j.state === 'running' || j.state === 'starting' || runningIds.includes(j.id);
+    const end = j.finished_at || (isRunning ? null : start);
+    const dur = num(j.duration_min) || (start && end ? (new Date(end) - new Date(start)) / 60000 : 0);
+    return Object.assign({}, j, { start, end, dur, isRunning });
+  });
+  let idle = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1], b = rows[i];
+    if (a.printer_id && a.printer_id === b.printer_id && a.end && b.start) {
+      const gap = (new Date(b.start) - new Date(a.end)) / 60000;
+      if (gap > 1 && gap < 24 * 60) idle += gap;
+    }
+  }
+  const doneN = rows.filter((r) => r.state === 'done').length;
+  const failN = rows.filter((r) => r.state === 'failed').length;
+  $('dash_timeline_sub').textContent = `${rows.length} заданий · ${doneN} готово${failN ? ' · ' + failN + ' брак' : ''} · простой между ними ${minutesText(idle)}`;
+  const byPrinter = {};
+  rows.forEach((r) => { (byPrinter[r.printer_id || '—'] = byPrinter[r.printer_id || '—'] || []).push(r); });
+  const stMap = { done: ['ok', '✓'], failed: ['bad', '✕'], cancelled: ['', '○'], running: ['accent', '▶'], starting: ['accent', '▶'] };
+  host.innerHTML = Object.keys(byPrinter).map((pid) => {
+    const list = byPrinter[pid];
+    const name = PF.printer(pid) ? PF.printer(pid).name : 'Принтер';
+    return `<div class="tl-group"><div class="tl-pname">${esc(name)}</div>`
+      + list.map((j) => {
+        const t0 = j.start ? String(j.start).slice(11, 16) : '—';
+        const t1 = j.end ? String(j.end).slice(11, 16) : (j.isRunning ? '…' : '—');
+        const [stk, sti] = stMap[j.state] || ['', '•'];
+        const ord = j.order ? `№${j.order.number} · ${j.order.product}` : (j.name || j.file || 'Печать');
+        return `<div class="tl-row">`
+          + `<span class="tx-ic ${stk}">${sti}</span>`
+          + `<div class="tx-body"><b>${esc(ord)}</b>`
+          + `<small>${t0}—${t1} · ${nfmt(j.grams)} г · ${minutesText(j.duration_min)}</small></div>`
+          + `<span class="amt">${esc(String(j.result || j.state || ''))}</span></div>`;
+      }).join('')
+      + '</div>';
+  }).join('');
+}
+
+/* ================================================= браузерные уведомления */
+const NOTIFY_KINDS = new Set(['complete', 'error', 'guard', 'filament_low',
+  'maintenance', 'loss', 'defect', 'pause']);
+let notifyLastId = 0;
+function initBrowserNotify() {
+  if (!('Notification' in window)) return;
+  // разрешение можно запросить кнопкой в настройках (browser_notify_enabled)
+  if (Notification.permission === 'granted' && PF.state.settings.browser_notify_enabled) {
+    setInterval(checkNewEvents, 15000);
+  }
+}
+function checkNewEvents() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!PF.state.settings.browser_notify_enabled) return;
+  const list = PF.state.events || [];
+  if (!list.length) return;
+  const maxId = Math.max(...list.map((e) => Number(e.id) || 0));
+  if (!notifyLastId && maxId) { notifyLastId = maxId; return; } // стартовый прогон
+  const fresh = list.filter((e) => Number(e.id) > notifyLastId && NOTIFY_KINDS.has(e.kind));
+  fresh.forEach((e) => {
+    try {
+      const n = new Notification('PrintFlow · ' + (e.title || 'событие'), {
+        body: String(e.detail || ''),
+        tag: 'pf-' + e.id,
+      });
+      n.onclick = () => { window.focus(); n.close(); };
+    } catch (err) { /* уведомления не критичны */ }
+  });
+  notifyLastId = maxId;
+}
+function requestBrowserNotify() {
+  if (!('Notification' in window)) return fail(new Error('Браузер не поддерживает уведомления'));
+  if (Notification.permission === 'granted') return toast('Уведомления уже разрешены');
+  Notification.requestPermission().then((p) => {
+    if (p === 'granted') toast('Уведомления включены', 'События будут приходить сразу');
+    else toast('Уведомления не разрешены', 'Можно включить в настройках браузера', 'warn');
+  });
 }
 
 /* =========================================================== настройки */
@@ -214,6 +494,16 @@ const NOTIFY = [
   ['notify_maintenance', 'Пора обслужить принтер'],
   ['notify_photo', 'Прикладывать кадр с камеры'],
 ];
+const AUTO_EXTRA = [
+  ['restock_remind', 'Напоминать о закупке пластика', 'Раз в день: катушки ниже порога', 'bool'],
+  ['queue_check_material', 'Проверять материал в AMS', 'Не запускать PETG, если в слоте PLA', 'bool'],
+  ['dry_humidity_threshold', 'Влажность AMS для сушки, %', 'Выше порога — событие и Telegram', 'num', 1],
+  ['notify_finish_remind_min', 'Напомнить о финише за, мин', '0 — выключено', 'num', 1],
+  ['digest_time', 'Утренний дайджест, время', 'Например 09:00', 'text'],
+  ['weekly_report_day', 'День недельного отчёта', '1 = понедельник … 7 = воскресенье', 'num', 1],
+  ['weekly_report_time', 'Время недельного отчёта', 'Например 20:00', 'text'],
+  ['update_check_enabled', 'Проверять обновления', 'Спрашивать GitHub раз в 6 часов', 'bool'],
+];
 const GUARD = [
   ['guard_enabled', 'Сторож печати', 'Следит за ошибками, зависанием и температурой', 'bool'],
   ['guard_pause_on_error', 'Ставить на паузу при ошибке', 'Спасает деталь и пластик, пока вас нет', 'bool'],
@@ -294,6 +584,7 @@ function renderSettings() {
         .join('') || '<option value="cash">Наличные</option>'}</select>`);
   $('set_auto').innerHTML = AUTOS.map(([k, label, sub]) => settingRow(k, label, sub,
     `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('');
+  $('set_auto_extra').innerHTML = settingGroup(AUTO_EXTRA);
   $('set_guard').innerHTML = settingGroup(GUARD);
   $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
   $('set_upkeep').innerHTML = settingGroup(UPKEEP);
@@ -306,7 +597,10 @@ function renderSettings() {
     + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
       `<label class="switch"><input type="checkbox" data-setting="telegram_bot"${s.telegram_bot ? ' checked' : ''}><i></i></label>`)
     + NOTIFY.map(([k, label]) => settingRow(k, label, '',
-      `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('');
+      `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('')
+    + settingRow('browser_notify_enabled', 'Уведомления в браузере', 'Пока PrintFlow открыт вкладкой — события приходят сразу',
+      `<label class="switch"><input type="checkbox" data-setting="browser_notify_enabled"${s.browser_notify_enabled ? ' checked' : ''}><i></i></label>
+       <button class="btn sm" type="button" id="notify_perm_btn" style="margin-top:8px">Разрешить уведомления</button>`);
 
   $('set_theme').value = s.theme || 'system';
   $('set_accent').innerHTML = ACCENTS.map(([name, color]) =>
@@ -322,6 +616,33 @@ function renderSettings() {
 
   $('set_data_dir').textContent = navigator.platform.toLowerCase().includes('win')
     ? '%APPDATA%\\PrintFlow' : '~/.config/printflow';
+  renderUpdateInfo();
+}
+
+/* ============================================================ обновления */
+let updateInfo = null;
+async function checkUpdate(force) {
+  try {
+    const data = await get('/api/update-check');
+    updateInfo = data;
+    renderUpdateInfo();
+    return data;
+  } catch (e) { return null; }
+}
+function renderUpdateInfo() {
+  const host = $('set_update_info');
+  if (!host) return;
+  if (!updateInfo) { host.innerHTML = '<button class="btn sm" type="button" id="update_check_btn">Проверить обновления</button>'; }
+  else if (updateInfo.update && updateInfo.latest) {
+    host.innerHTML = `<div class="notice" style="border-color:var(--ok)"><span>⬆</span><span>
+      <b>Доступна версия ${esc(updateInfo.latest.version)}</b> — у вас ${esc(updateInfo.current)}.
+      <a href="${esc(updateInfo.latest.url)}" target="_blank" rel="noopener">Открыть релиз →</a></span></div>`;
+  } else {
+    host.innerHTML = `<span class="muted" style="font-size:12.4px">У вас актуальная версия ${esc(updateInfo.current)}</span>
+      <button class="btn sm" type="button" id="update_check_btn">Проверить</button>`;
+  }
+  const btn = $('update_check_btn');
+  if (btn) btn.addEventListener('click', async () => { await checkUpdate(true); toast('Проверка обновлений завершена'); });
 }
 
 /** Поиск по настройкам: ищет сразу по всем вкладкам и прячет лишнее. */
@@ -529,6 +850,69 @@ function initCopyButtons() {
     pre.appendChild(btn);
   });
 }
+/* ===================================================== шаблоны ответов */
+let replyTemplates = [];
+async function loadTemplates() {
+  try {
+    const data = await get('/api/templates');
+    replyTemplates = data.templates || [];
+    renderTemplates();
+  } catch (e) { /* офлайн */ }
+}
+function renderTemplates() {
+  const host = $('lib_templates');
+  if (!host) return;
+  host.innerHTML = replyTemplates.map((t, i) => `<div class="set-row" data-tpl-row="${i}">`
+    + `<div class="sinfo" style="flex:1;min-width:0"><b>${esc(t.title || 'Шаблон')}</b>`
+    + `<small style="white-space:pre-wrap">${esc(t.text || '')}</small></div>`
+    + `<button class="btn sm" type="button" data-tpl-copy="${i}">Копировать</button>`
+    + `<button class="icon-btn sm" type="button" data-tpl-del="${i}">×</button></div>`).join('')
+    || '<div class="empty compact"><span>Шаблонов пока нет — добавьте тексты для Авито и Telegram.</span></div>';
+}
+async function saveTemplates() {
+  try {
+    const res = await post('/api/templates/save', { templates: replyTemplates });
+    replyTemplates = res.templates || [];
+    renderTemplates();
+    toast('Шаблоны сохранены');
+  } catch (e) { fail(e); }
+}
+function initTemplatesEditor() {
+  const host = $('lib_templates');
+  if (!host) return;
+  host.addEventListener('click', (e) => {
+    const copy = e.target.closest('[data-tpl-copy]');
+    if (copy) {
+      const t = replyTemplates[+copy.dataset.tplCopy];
+      if (t) { navigator.clipboard.writeText(t.text); toast('Скопировано', t.title); }
+      return;
+    }
+    const del = e.target.closest('[data-tpl-del]');
+    if (del) {
+      replyTemplates.splice(+del.dataset.tplDel, 1);
+      renderTemplates();
+      saveTemplates();
+    }
+  });
+  const add = $('lib_tpl_add');
+  if (add) add.addEventListener('click', () => {
+    replyTemplates.push({ id: 't' + Date.now().toString(36), title: 'Новый шаблон', text: '' });
+    renderTemplates();
+    // простейшее редактирование: prompt'ом
+    const row = host.querySelector('[data-tpl-row="' + (replyTemplates.length - 1) + '"]');
+    if (row) {
+      const title = window.prompt('Название шаблона', 'Новый шаблон');
+      if (title == null) { replyTemplates.pop(); renderTemplates(); return; }
+      const text = window.prompt('Текст шаблона', 'Здравствуйте! Ваш заказ готов, можно забрать.');
+      if (text == null) { replyTemplates.pop(); renderTemplates(); return; }
+      replyTemplates[replyTemplates.length - 1].title = title;
+      replyTemplates[replyTemplates.length - 1].text = text;
+      renderTemplates();
+      saveTemplates();
+    }
+  });
+}
+
 function showArticle(name) {
   const articles = $$('#library-body .library-article');
   let shown = false;
@@ -539,6 +923,9 @@ function showArticle(name) {
   });
   $('lib_grid').hidden = shown;
   $('lib_back').hidden = !shown;
+  const tpl = $('lib_tpl_wrap');
+  if (tpl) tpl.hidden = name !== 'tpl';
+  if (name === 'tpl') loadTemplates();
 }
 
 /* ============================================================= события */
@@ -560,11 +947,29 @@ function bind() {
   });
   $('dash_refresh').addEventListener('click', async () => {
     try {
-      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents()]);
+      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline()]);
       toast('Обновлено');
     } catch (e) { fail(e); }
   });
   $('dash_events_refresh').addEventListener('click', () => PF.refreshEvents().catch(fail));
+  $('dash_widgets_btn').addEventListener('click', () => { renderWidgetsList(); openModal('dash_widgets_modal'); });
+  $('dash_widgets_list').addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-widget-check]');
+    if (!cb) return;
+    let prefs = widgetPrefs();
+    if (cb.checked) { if (!prefs.includes(cb.dataset.widgetCheck)) prefs.push(cb.dataset.widgetCheck); }
+    else prefs = prefs.filter((id) => id !== cb.dataset.widgetCheck);
+    saveWidgetPrefs(prefs);
+    applyWidgets();
+    renderWidgetsList();
+  });
+  $('dash_widgets_reset').addEventListener('click', () => {
+    saveWidgetPrefs(DASH_WIDGETS.map(([id]) => id));
+    renderWidgetsList();
+    applyWidgets();
+    toast('Все виджеты возвращены');
+  });
+  $('dash_pdf').addEventListener('click', () => window.print());
 
   $('settings_save').addEventListener('click', saveSettings);
   $('settings_reset').addEventListener('click', resetSettings);
@@ -599,6 +1004,8 @@ function bind() {
     const btn = e.target.closest('[data-printer-edit]');
     if (btn) PF.modules.printer.openPrinterModal(btn.dataset.printerEdit);
   });
+  const permBtn = $('notify_perm_btn');
+  if (permBtn) permBtn.addEventListener('click', requestBrowserNotify);
   $('tg_test').addEventListener('click', async () => {
     const token = $$('[data-setting="telegram_token"]')[0].value;
     const chat = $$('[data-setting="telegram_chat_id"]')[0].value;
@@ -629,6 +1036,12 @@ PF.on('ready', () => {
   renderSettings();
   initLibraryChecks();
   initCopyButtons();
+  initTemplatesEditor();
+  refreshTimeline();
+  loadTemplates();
+  initBrowserNotify();
+  checkUpdate(false);
+  setInterval(refreshTimeline, 60000);
 });
 PF.on('data', renderDashboard);
 PF.on('live', renderDashboard);

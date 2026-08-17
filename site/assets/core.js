@@ -302,6 +302,7 @@ const VIEWS = {
   queue: { title: 'Очередь печати', sub: 'Задания парка и журнал печати' },
   orders: { title: 'Заказы', sub: 'Канбан, сроки и экономика заказов' },
   customers: { title: 'Клиенты', sub: 'История покупок и сегменты' },
+  shelf: { title: 'Стеллаж', sub: 'Готовая продукция на полке магазина' },
   finance: { title: 'Финансы', sub: 'Автоматический учёт доходов и расходов' },
   inventory: { title: 'Склад пластика', sub: 'Остатки катушек и база изделий' },
   niches: { title: 'Ниши', sub: 'Проверка гипотез по фактическим заказам' },
@@ -312,6 +313,7 @@ const VIEWS = {
 /* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
 const VIEW_ALIASES = {
   spools: 'inventory', filament: 'inventory', stock: 'inventory', warehouse: 'inventory',
+  shelf2: 'shelf', store: 'shelf', polka: 'shelf',
   money: 'finance', finances: 'finance', accounting: 'finance',
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
   jobs: 'queue', print: 'queue', clients: 'customers',
@@ -544,6 +546,30 @@ async function refreshEvents() {
 }
 PF.refreshEvents = refreshEvents;
 
+/** Server-Sent Events: мгновенные обновления вместо чистого поллинга.
+    При каждом новом событии в базе сервер шлёт «refresh» — дёргаем данные.
+    Если SSE недоступен (прокси), поллинг продолжает работать как раньше. */
+let sseOk = false;
+function connectSSE() {
+  if (!window.EventSource || typeof EventSource === 'undefined') return;
+  let es;
+  try { es = new EventSource('/api/stream'); } catch (e) { return; }
+  es.addEventListener('refresh', () => {
+    if (offline) return;
+    poll();
+    refreshEvents().catch(() => {});
+    refreshCore().catch(() => {});
+  });
+  es.onopen = () => { sseOk = true; resizePolling(); };
+  es.onerror = () => { sseOk = false; resizePolling(); };
+}
+let pollTimer = 0;
+function resizePolling() {
+  const interval = sseOk ? 15000 : 2500;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
+  if (!pollTimer) pollTimer = setInterval(poll, interval);
+}
+
 /** Живое состояние принтеров — опрашивается часто и молча. */
 async function poll() {
   try {
@@ -577,7 +603,8 @@ async function start() {
   try { await refreshFinance(PF.state.financeDays); } catch (e) { /* офлайн */ }
   try { await refreshEvents(); } catch (e) { /* офлайн */ }
   poll();
-  setInterval(poll, 2500);
+  resizePolling();
+  connectSSE();
   setInterval(() => { if (!offline) refreshEvents().catch(() => {}); }, 20000);
   setInterval(() => { if (!offline) refreshCore().catch(() => {}); }, 45000);
 }

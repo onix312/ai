@@ -148,6 +148,8 @@ function renderAms(p) {
   text('pr_ams_env', ams.temperature != null || ams.humidity != null
     ? `Температура ${ams.temperature ?? '—'} °C · влажность ${ams.humidity ?? '—'}`
     : 'Температура и влажность —');
+  const pbtn = $('pr_ams_profiles');
+  if (pbtn) pbtn.hidden = !trays.length;
   const host = $('pr_ams');
   if (!trays.length) {
     host.innerHTML = '<div class="empty compact"><span>AMS не обнаружен или ещё не прислал данные.</span></div>';
@@ -378,6 +380,135 @@ function shotTime(at) {
 
 
 
+/* ======================================================== AMS-профили */
+let amsProfiles = [];
+async function loadAmsProfiles() {
+  try {
+    const data = await get('/api/ams-profiles');
+    amsProfiles = data.profiles || [];
+  } catch (e) { amsProfiles = []; }
+  return amsProfiles;
+}
+function renderAmsProfilesList() {
+  const list = $('ap_list');
+  if (!list) return;
+  list.innerHTML = amsProfiles.length ? amsProfiles.map((p) => {
+    let slots = [];
+    try { slots = JSON.parse(p.slots || '[]'); } catch (e) { slots = []; }
+    return `<div class="set-row"><div class="sinfo"><b>${esc(p.name)}</b>`
+      + `<small>${slots.map((sl) => `${esc(sl.type || '—')} ${esc(sl.color || '')}`).join(' · ') || 'пусто'}</small></div>`
+      + `<button class="btn sm" type="button" data-ap-apply="${esc(p.id)}">Применить</button>`
+      + `<button class="icon-btn sm danger" type="button" data-ap-del="${esc(p.id)}">×</button></div>`;
+  }).join('') : '<div class="empty compact"><span>Профилей пока нет. Настройте слоты AMS и нажмите «Захватить».</span></div>';
+}
+function captureAmsSlots() {
+  const snap = PF.livePrinter();
+  const trays = (snap && snap.ams && snap.ams.trays) || [];
+  const host = $('ap_slots');
+  if (!host) return;
+  host.innerHTML = trays.map((t) => `<div class="ams-profile-slot">`
+    + `<b>${esc(t.label)}</b>`
+    + `<input data-ap-slot-tray value="${t.slot}" type="hidden">`
+    + `<input data-ap-slot-type value="${esc(t.type || '')}" placeholder="Тип (PLA)">`
+    + `<input data-ap-slot-color value="${esc((t.color || '').replace('#', ''))}" placeholder="Цвет FFFFFF">`
+    + `</div>`).join('')
+    || '<div class="empty compact"><span>Слоты AMS не пришли — принтер не на связи.</span></div>';
+}
+async function openAmsProfiles() {
+  await loadAmsProfiles();
+  renderAmsProfilesList();
+  captureAmsSlots();
+  $('ap_name').value = '';
+  openModal('ams_profile_modal');
+}
+async function saveAmsProfile() {
+  const name = $('ap_name').value.trim();
+  if (!name) return fail(new Error('Укажите название профиля'));
+  const slots = $$('#ap_slots [data-ap-slot-tray]').map((el) => ({
+    tray: num(el.value), type: (el.parentElement.querySelector('[data-ap-slot-type]').value || '').trim().toUpperCase(),
+    color: (el.parentElement.querySelector('[data-ap-slot-color]').value || '').trim().toUpperCase(),
+  })).filter((x) => x.type);
+  try {
+    await post('/api/ams-profile/save', { name, slots });
+    closeModal('ams_profile_modal');
+    toast('Профиль сохранён', name);
+  } catch (e) { fail(e); }
+}
+function bindAmsProfiles() {
+  const btn = $('pr_ams_profiles');
+  if (btn) btn.addEventListener('click', openAmsProfiles);
+  const save = $('ap_save');
+  if (save) save.addEventListener('click', saveAmsProfile);
+  const cap = $('ap_capture');
+  if (cap) cap.addEventListener('click', captureAmsSlots);
+  const list = $('ap_list');
+  if (list) list.addEventListener('click', async (e) => {
+    const apply = e.target.closest('[data-ap-apply]');
+    if (apply) {
+      try {
+        await post('/api/ams-profile/apply', { id: apply.dataset.apApply, printer_id: PF.state.activePrinter });
+        toast('Профиль применён');
+      } catch (err) { fail(err); }
+      return;
+    }
+    const del = e.target.closest('[data-ap-del]');
+    if (del) {
+      await post('/api/ams-profile/delete', { id: del.dataset.apDel });
+      loadAmsProfiles().then(renderAmsProfilesList);
+    }
+  });
+}
+
+/* ================================================== отложенные команды */
+async function openSchedule() {
+  try {
+    const data = await get('/api/schedule');
+    const rows = data.commands || [];
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 10);
+    $('sch_at').value = now.toISOString().slice(0, 16);
+    $('sch_value').value = '';
+    $('sch_note').value = '';
+    $('sch_command').value = 'light';
+    $('sch_list').innerHTML = rows.length ? rows.map((c) => `<div class="tx-row">`
+      + `<span class="tx-ic ${c.done ? 'income' : 'outline'}">${c.done ? '✓' : '⏱'}</span>`
+      + `<div class="tx-body"><b>${esc(c.command)}${c.note ? ' · ' + esc(c.note) : ''}</b>`
+      + `<small>${esc(dateTimeText(c.at))}${c.done ? ' · ' + esc(c.result || 'выполнено') : ''}</small></div>`
+      + (!c.done ? `<button class="icon-btn sm danger" type="button" data-sch-del="${esc(c.id)}">×</button>` : '')
+      + `</div>`).join('') : '<div class="empty compact"><span>Отложенных команд нет.</span></div>';
+    openModal('schedule_modal');
+  } catch (e) { fail(e); }
+}
+async function saveSchedule() {
+  const at = $('sch_at').value;
+  if (!at) return fail(new Error('Укажите время выполнения'));
+  const command = $('sch_command').value;
+  const valueRaw = $('sch_value').value;
+  const value = command === 'load_filament' ? num(valueRaw)
+    : (command === 'nozzle_temp' || command === 'bed_temp') ? num(valueRaw) : undefined;
+  try {
+    await post('/api/schedule/command', {
+      printer_id: PF.state.activePrinter, command, value, at: new Date(at).toISOString(),
+      note: $('sch_note').value.trim(),
+    });
+    toast('Команда запланирована');
+    openSchedule();
+  } catch (e) { fail(e); }
+}
+function bindSchedule() {
+  const btn = $('pr_schedule_btn');
+  if (btn) btn.addEventListener('click', openSchedule);
+  const save = $('sch_save');
+  if (save) save.addEventListener('click', saveSchedule);
+  const list = $('sch_list');
+  if (list) list.addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-sch-del]');
+    if (!del) return;
+    await post('/api/schedule/delete', { id: del.dataset.schDel });
+    openSchedule();
+  });
+}
+
 /* ======================================================== режим «Стена»
    Полноэкранный вид парка для второго монитора или планшета в мастерской:
    крупный процент, кадр камеры и тревоги — читается с нескольких метров. */
@@ -465,6 +596,7 @@ function wallRender(data) {
       if (t.layer) facts.push(['Слой', `${t.layer}/${t.total_layers || '—'}`]);
       if (t.nozzle) facts.push(['Сопло', Math.round(num(t.nozzle)) + '°']);
       if (t.spent) facts.push(['Потрачено', money(t.spent)]);
+      if (t.ams_low) facts.push(['AMS', t.ams_low + ' слот(а) мало пластика']);
       if (t.maintenance_due) facts.push(['ТО', t.maintenance_due + ' просрочено']);
       el.querySelector('[data-facts]').innerHTML = facts
         .map(([k, v]) => `<span>${esc(k)} <b>${esc(String(v))}</b></span>`).join('');
@@ -611,7 +743,9 @@ function renderQueue() {
     return `<div class="queue-item${j.state === 'running' ? ' running' : ''}">`
       + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
       + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
-      + (order ? ` · заказ №${esc(order.number)}` : '') + '</small>'
+      + (order ? ` · заказ №${esc(order.number)}` : '')
+      + (num(j.est_minutes) ? ` · оценка ${minutesText(j.est_minutes)}${num(j.est_grams) ? ' · ~' + nfmt(j.est_grams) + ' г' : ''}` : '')
+      + '</small>'
       + (j.state === 'running' ? `<div class="bar thin" style="margin-top:6px"><i style="width:${clamp(num(j.progress), 0, 100)}%"></i></div>` : '')
       + '</div><div class="acts">'
       + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
@@ -619,13 +753,17 @@ function renderQueue() {
       + '</div></div>';
   }).join('') : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Добавьте задание или запустите файл с принтера.</span></div>';
 
-  $('queue_history').innerHTML = history.length ? history.slice(0, 24).map((j) => `<div class="tx-row">`
+  const hq = ($('history_search') || {}).value || '';
+  const hfiltered = hq ? history.filter((j) => String(j.name || j.file || '').toLowerCase().includes(hq.toLowerCase())) : history;
+  $('queue_history').innerHTML = hfiltered.length ? hfiltered.slice(0, 24).map((j) => `<div class="tx-row">`
     + `<span class="tx-ic ${j.state === 'done' ? 'income' : 'expense'}">${j.state === 'done' ? '✓' : '✕'}</span>`
     + `<div class="tx-body"><b>${esc(j.name || j.file || 'Печать')}</b>`
-    + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г</small></div>`
+    + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г`
+    + (num(j.est_minutes) ? ' · оценка была ' + minutesText(j.est_minutes) : '') + '</small></div>'
     + `<span class="amt">${money(j.cost)}</span></div>`).join('')
-    : '<div class="empty compact"><span>Завершённых печатей пока нет.</span></div>';
+    : '<div class="empty compact"><span>' + (hq ? 'Ничего не найдено.' : 'Завершённых печатей пока нет.') + '</span></div>';
 }
+$('history_search').addEventListener('input', U.debounce(renderQueue, 200));
 
 /* ==================================================== профиль принтера */
 function openPrinterModal(id) {
@@ -975,7 +1113,7 @@ async function loadEvents() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => {
+PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   bind();
   renderTabs();
   $('queue_auto').checked = !!PF.state.settings.auto_queue;

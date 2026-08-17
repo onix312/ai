@@ -661,10 +661,46 @@ function renderAll() {
   renderDirectories();
 }
 
+/* ======================================================== ABC-анализ */
+let abcDays = 30;
+async function loadAbc() {
+  try {
+    const data = await get('/api/abc', { days: abcDays });
+    const host = $('abc_body');
+    if (!host) return;
+    const items = data.items || [];
+    if (!items.length) {
+      host.innerHTML = '<div class="empty compact"><span>Заказов за период ещё нет.</span></div>';
+      return;
+    }
+    const CLS = { A: ['ok', 'A — ядро'], B: ['warn', 'B — поддержка'], C: ['', 'C — хвост'] };
+    host.innerHTML = `<div class="table-wrap"><table class="data"><thead><tr>`
+      + `<th>Класс</th><th>Изделие</th><th class="right">Штук</th><th class="right">Выручка</th>`
+      + `<th class="right">Прибыль</th><th class="right">Доля</th></tr></thead><tbody>`
+      + items.map((i) => `<tr><td><span class="chip ${CLS[i.cls][0]}">${esc(i.cls)}</span>`
+        + `<small class="muted">${esc(CLS[i.cls][1])}</small></td>`
+        + `<td><b>${esc(i.name)}</b><small class="muted">${i.orders} заказ(ов)</small></td>`
+        + `<td class="right tnum">${nfmt(i.qty)}</td>`
+        + `<td class="right tnum">${money(i.revenue)}</td>`
+        + `<td class="right tnum ${num(i.profit) >= 0 ? 'pos' : 'neg'}">${money(i.profit)}</td>`
+        + `<td class="right tnum">${pct(i.share)}</td></tr>`).join('')
+      + `</tbody></table></div>`;
+  } catch (e) { /* офлайн */ }
+}
+
 /* ================================================================ старт */
 PF.on('ready', () => {
   bind();
   refreshMoney().then(() => { renderAll(); refreshReport(); });
+  loadAbc();
+  const days = $('abc_days');
+  if (days) days.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-abc]');
+    if (!btn) return;
+    abcDays = +btn.dataset.abc;
+    $$('#abc_days button').forEach((b) => b.classList.toggle('on', b === btn));
+    loadAbc();
+  });
 });
 PF.on('money', renderAll);
 PF.on('finance', () => { if (PF.state.money) renderAll(); });

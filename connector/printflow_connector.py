@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from printflow import APP_VERSION  # noqa: E402
 from printflow.api import serve  # noqa: E402
+from printflow.logging_setup import setup_logging  # noqa: E402
 from printflow.config import DATA_DIR  # noqa: E402
 
 
@@ -145,6 +146,9 @@ def main() -> int:
         args.host = "0.0.0.0"
 
     flags = ["--verbose"] if args.verbose else []
+    setup_logging(args.verbose)
+    from printflow.logging_setup import log
+    log().info("PrintFlow %s стартует: %s:%s (данные: %s)", APP_VERSION, args.host, args.port, DATA_DIR)
     try:
         server = serve(args.host, args.port, flags)
     except OSError as exc:

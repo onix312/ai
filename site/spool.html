@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Катушка · PrintFlow</title>
+<style>
+ :root { --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b;
+   --ok:#0f9d58; --bad:#d63a3a; --accent:#4f46e5; --r:12px; }
+ @media (prefers-color-scheme: dark) {
+  :root { --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8; }
+ }
+ * { box-sizing: border-box; }
+ body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:420px; margin:0 auto; padding:20px 16px 40px; }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); }
+ .logo { text-align:center; margin-bottom:16px; font-weight:750; letter-spacing:.02em; }
+ .logo small { display:block; color:var(--muted); font-weight:500; font-size:11.5px; margin-top:2px; }
+ .name { font-size:17px; font-weight:700; margin:0 0 2px; }
+ .muted { color:var(--muted); font-size:12.5px; }
+ .rest { font-size:24px; font-weight:750; margin:8px 0; font-variant-numeric:tabular-nums; }
+ label { display:block; margin-top:12px; font-size:12.5px; color:var(--muted); }
+ select { width:100%; margin-top:6px; padding:12px; border:1px solid var(--line); border-radius:12px;
+   background:var(--bg); color:var(--text); font-size:15px; }
+ .btn { display:block; width:100%; margin-top:14px; padding:13px; border:0; border-radius:12px;
+   background:var(--accent); color:#fff; font-size:15px; font-weight:650; cursor:pointer; }
+ .btn:disabled { opacity:.5; cursor:default; }
+ .msg { display:none; margin-top:12px; padding:11px; border-radius:10px; font-size:13.5px; font-weight:600; }
+ .msg.ok { display:block; background:rgba(15,157,88,.14); color:var(--ok); }
+ .msg.err { display:block; background:rgba(214,58,58,.12); color:var(--bad); }
+ .hint { font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="logo">NOZZA · PrintFlow<small>Склад пластика</small></div>
+ <div class="card">
+  <p class="name" id="name">Загрузка…</p>
+  <p class="muted" id="mat"></p>
+  <div class="rest" id="rest">—</div>
+  <label>Установлена в AMS
+   <select id="slot"><option value="">Не выбрано</option></select>
+  </label>
+  <button class="btn" id="bindBtn" type="button" disabled>Привязать катушку к слоту</button>
+  <p class="hint">После привязки расход этой катушки будет списываться автоматически,
+  когда принтер печатает с этого слота.</p>
+  <div class="msg" id="msg"></div>
+ </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var id = new URLSearchParams(location.search).get('id') || '';
+  var spool = null;
+
+  function $(s) { return document.querySelector(s); }
+  function num(v, d) { var n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : (d || 0); }
+  function showMsg(text, ok) {
+    var m = $('#msg');
+    m.className = 'msg ' + (ok ? 'ok' : 'err');
+    m.textContent = text;
+    clearTimeout(showMsg._t);
+    showMsg._t = setTimeout(function () { m.className = 'msg'; }, 4000);
+  }
+
+  function load() {
+    fetch('/api/spools?all=1').then(function (r) { return r.json(); }).then(function (d) {
+      spool = (d.spools || []).find(function (x) { return x.id === id; });
+      if (!spool) { $('#name').textContent = 'Катушка не найдена'; return; }
+      $('#name').textContent = spool.material + ' ' + (spool.color_name || '');
+      $('#mat').textContent = (spool.brand || '') + (spool.ams_slot !== '' && spool.ams_slot != null
+        ? ' · AMS слот ' + spool.ams_slot : ' · не привязана');
+      $('#rest').textContent = Math.round(num(spool.remaining_grams)) + ' г из ' + Math.round(num(spool.total_grams)) + ' г';
+      var slots = [];
+      for (var u = 0; u < 4; u++) for (var t = 0; t < 4; t++) {
+        slots.push({ v: String(u * 4 + t), label: 'AMS ' + (u + 1) + ' · слот ' + (t + 1) });
+      }
+      $('#slot').innerHTML = '<option value="">Не выбрано</option>' + slots.map(function (s2) {
+        return '<option value="' + s2.v + '"' + (String(spool.ams_slot) === s2.v ? ' selected' : '') + '>' + s2.label + '</option>';
+      }).join('');
+      $('#bindBtn').disabled = false;
+    }).catch(function () {
+      $('#name').textContent = 'Нет связи с PrintFlow';
+      showMsg('Запустите коннектор PrintFlow', false);
+    });
+  }
+
+  $('#bindBtn').addEventListener('click', function () {
+    var slot = $('#slot').value;
+    if (!slot || !spool) return;
+    fetch('/api/spool/bind', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: spool.id, ams_slot: slot, printer_id: spool.printer_id || '' }),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) { showMsg('Катушка привязана к слоту ✓', true); $('#mat').textContent = '· AMS слот ' + slot; }
+      else showMsg(d.error || 'Не получилось', false);
+    }).catch(function () { showMsg('Нет связи с коннектором', false); });
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

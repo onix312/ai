@@ -92,9 +92,72 @@ function renderStock() {
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">Пополнить</button>`
       + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">Списать</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку">☀</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR для наклейки">◫</button>`
       + `<button class="icon-btn sm" type="button" data-spool-edit="${esc(s.id)}">✎</button>`
       + '</div></div></article>';
   }).join('') : '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Добавьте катушки, чтобы расход списывался автоматически.</span></div>';
+}
+
+/* ============================================== статистика расхода */
+async function loadFilamentStats() {
+  try {
+    const data = await get('/api/filament-stats', { days: 30 });
+    const row = (d) => `<div class="tx-row"><div class="tx-body"><b>${esc(d.material || '—')}</b>`
+      + `<small>${nfmt(d.uses)} списаний · ${money(d.cost)}</small></div>`
+      + `<span class="amt">${nfmt(d.grams)} г</span></div>`;
+    const mat = $('filament_by_mat');
+    if (mat) mat.innerHTML = (data.by_material || []).length
+      ? (data.by_material || []).slice(0, 8).map(row).join('')
+      : '<div class="empty compact"><span>Расхода ещё не было.</span></div>';
+    const col = $('filament_by_color');
+    if (col) col.innerHTML = (data.by_color || []).length
+      ? (data.by_color || []).slice(0, 8).map((d) => `<div class="tx-row"><div class="tx-body"><b>${esc(d.color)}</b>`
+        + `<small>${esc(d.material || '—')} · ${nfmt(d.uses)} списаний · ${money(d.cost)}</small></div>`
+        + `<span class="amt">${nfmt(d.grams)} г</span></div>`).join('')
+      : '<div class="empty compact"><span>Расхода ещё не было.</span></div>';
+  } catch (e) { /* офлайн */ }
+}
+
+/* ================================================== QR катушки и сушка */
+async function openSpoolQr(spoolId) {
+  const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
+  if (!spool) return;
+  const host = (location.host || '127.0.0.1:8080');
+  const url = location.protocol + '//' + host + '/spool.html?id=' + encodeURIComponent(spoolId);
+  const code = $('spool_qr_code');
+  code.innerHTML = (window.QR && window.QR.svg)
+    ? window.QR.svg(url, { size: 240, dark: '#111827', light: '#ffffff' })
+    : '<div class="empty compact"><span>QR недоступен</span></div>';
+  $('spool_qr_info').innerHTML = `<b>${esc(spool.material)} ${esc(spool.color_name)}</b>`
+    + `<small class="muted" style="display:block">${esc(url)}</small>`
+    + `<small class="muted">Наклейте на катушку. При установке в AMS отсканируйте — слот привяжется сам.</small>`;
+  openModal('spool_qr_modal');
+}
+async function spoolDry(spoolId) {
+  const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
+  if (!spool) return;
+  const minutes = window.prompt('Сколько минут сушить?', '240');
+  if (minutes == null) return;
+  const temp = window.prompt('Температура сушки, °C (PLA 50, PETG 65, TPU 55)', '55');
+  try {
+    await post('/api/spool/dry', { id: spoolId, minutes: num(minutes), temp: num(temp || 0) });
+    toast('Сушка записана', `${spool.material} ${spool.color_name} · ${minutes} мин`);
+  } catch (e) { fail(e); }
+}
+
+/* ===================================================== история цен */
+async function openPriceHistory(product) {
+  if (!product) return fail(new Error('Сначала сохраните позицию'));
+  try {
+    const data = await get('/api/price-history', { product });
+    const rows = data.history || [];
+    $('price_body').innerHTML = rows.length ? rows.map((r) => `<div class="tx-row">`
+      + `<span class="tx-ic income">₽</span>`
+      + `<div class="tx-body"><b>${money(r.price)}</b><small>${esc(dateTimeText(r.at))}</small></div>`
+      + `</div>`).join('') : '<div class="empty compact"><span>Истории цен пока нет — она пишется при сохранении заказов.</span></div>';
+    openModal('price_modal');
+  } catch (e) { fail(e); }
 }
 
 /* ============================================================ каталог */
@@ -391,6 +454,8 @@ function bind() {
       PF.refreshCore();
     } catch (e) { fail(e); }
   });
+  const phBtn = $('cf_price_history');
+  if (phBtn) phBtn.addEventListener('click', () => openPriceHistory($('cf_name').value.trim()));
   $('catalog_delete').addEventListener('click', async () => {
     if (!editingCatalog || !confirmDanger('Удалить позицию из базы изделий?')) return;
     try {
@@ -402,6 +467,10 @@ function bind() {
   });
 
   document.addEventListener('click', async (e) => {
+    const dry = e.target.closest('[data-spool-dry]');
+    if (dry) { spoolDry(dry.dataset.spoolDry); return; }
+    const qr = e.target.closest('[data-spool-qr]');
+    if (qr) { openSpoolQr(qr.dataset.spoolQr); return; }
     const edit = e.target.closest('[data-spool-edit]');
     if (edit) return openSpool(edit.dataset.spoolEdit);
     const restock = e.target.closest('[data-spool-restock]');
@@ -478,7 +547,7 @@ function bind() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { bind(); restoreCalc(); });
+PF.on('ready', () => { loadFilamentStats(); bind(); restoreCalc(); });
 PF.on('data', () => { renderStock(); renderCatalog(); });
 PF.on('finance', renderFinance);
 PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });
