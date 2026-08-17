@@ -502,7 +502,6 @@ const AUTO_EXTRA = [
   ['digest_time', 'Утренний дайджест, время', 'Например 09:00', 'text'],
   ['weekly_report_day', 'День недельного отчёта', '1 = понедельник … 7 = воскресенье', 'num', 1],
   ['weekly_report_time', 'Время недельного отчёта', 'Например 20:00', 'text'],
-  ['update_check_enabled', 'Проверять обновления', 'Спрашивать GitHub раз в 6 часов', 'bool'],
 ];
 const GUARD = [
   ['guard_enabled', 'Сторож печати', 'Следит за ошибками, зависанием и температурой', 'bool'],
@@ -621,6 +620,8 @@ function renderSettings() {
 
 /* ============================================================ обновления */
 let updateInfo = null;
+let updateBusy = false;
+
 async function checkUpdate(force) {
   try {
     const data = await get('/api/update-check');
@@ -629,20 +630,124 @@ async function checkUpdate(force) {
     return data;
   } catch (e) { return null; }
 }
+
+/** Установить обновление и дождаться, пока коннектор поднимется заново. */
+async function applyUpdate(force) {
+  if (updateBusy) return;
+  const latest = (updateInfo && updateInfo.latest) || {};
+  const what = latest.title ? `«${latest.title}»` : latest.short || 'обновление';
+  if (!confirmDanger(`Установить ${what}?\n\nПеред установкой будет сделана копия базы, `
+    + 'после — коннектор перезапустится. Печать в это время не должна идти.')) return;
+  updateBusy = true;
+  renderUpdateInfo();
+  try {
+    const res = await post('/api/update/apply', { force: !!force });
+    if (!res.changed) {
+      toast('Обновлять нечего', 'Файлы уже актуальны');
+      updateBusy = false;
+      await checkUpdate(true);
+      return;
+    }
+    toast('Обновление установлено', `${res.before} → ${res.after} · файлов: ${res.files}`);
+    if (res.restarting) await waitForRestart();
+    else updateBusy = false;
+  } catch (e) {
+    updateBusy = false;
+    fail(e);
+    renderUpdateInfo();
+  }
+}
+
+/** Пингуем коннектор, пока он не ответит после перезапуска, затем перезагружаем страницу. */
+async function waitForRestart() {
+  const host = $('set_update_info');
+  if (host) {
+    host.innerHTML = '<div class="notice"><span>⏳</span><span><b>Коннектор перезапускается…</b>'
+      + ' Страница обновится сама через несколько секунд.</span></div>';
+  }
+  const deadline = Date.now() + 90000;
+  // Сначала ждём, пока старый процесс действительно уйдёт.
+  await new Promise((r) => setTimeout(r, 2500));
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('/api/update-check', { cache: 'no-store' });
+      if (res.ok) {
+        toast('Готово', 'Перезагружаем интерфейс', 'ok');
+        setTimeout(() => location.reload(), 700);
+        return;
+      }
+    } catch (e) { /* ещё не поднялся */ }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  updateBusy = false;
+  toast('Коннектор не ответил', 'Перезапустите PrintFlow вручную', 'bad');
+  renderUpdateInfo();
+}
+
 function renderUpdateInfo() {
   const host = $('set_update_info');
   if (!host) return;
-  if (!updateInfo) { host.innerHTML = '<button class="btn sm" type="button" id="update_check_btn">Проверить обновления</button>'; }
-  else if (updateInfo.update && updateInfo.latest) {
-    host.innerHTML = `<div class="notice" style="border-color:var(--ok)"><span>⬆</span><span>
-      <b>Доступна версия ${esc(updateInfo.latest.version)}</b> — у вас ${esc(updateInfo.current)}.
-      <a href="${esc(updateInfo.latest.url)}" target="_blank" rel="noopener">Открыть релиз →</a></span></div>`;
+  const u = updateInfo;
+
+  if (updateBusy) {
+    host.innerHTML = '<div class="notice"><span>⏳</span><span><b>Устанавливаем обновление…</b>'
+      + ' Не закрывайте окно коннектора.</span></div>';
+  } else if (!u) {
+    host.innerHTML = '<button class="btn sm" type="button" id="update_check_btn">Проверить обновления</button>';
+  } else if (u.disabled) {
+    host.innerHTML = '<span class="muted" style="font-size:12.4px">Проверка обновлений выключена ниже.</span>';
+  } else if (u.error) {
+    host.innerHTML = `<div class="notice warn"><span>⚠</span><span><b>Не удалось проверить обновления.</b> ${esc(u.error)}</span></div>`
+      + '<button class="btn sm" type="button" id="update_check_btn" style="margin-top:8px">Повторить</button>';
+  } else if (u.update && u.latest) {
+    const commits = (u.commits || []).slice(0, 8);
+    host.innerHTML = `<div class="notice" style="border-color:var(--ok)"><span>⬆</span><span>`
+      + `<b>Доступно обновление ${esc(u.latest.short)}</b>`
+      + (u.latest.date ? ` от ${esc(dateText(u.latest.date))}` : '')
+      + ` — у вас ${esc(u.local || u.current)}.<br>${esc(u.latest.title || '')}`
+      + (u.latest.url ? ` <a href="${esc(u.latest.url)}" target="_blank" rel="noopener">Посмотреть на GitHub →</a>` : '')
+      + '</span></div>'
+      + (commits.length ? '<div class="upd-list">' + commits.map((c) =>
+        `<div class="upd-row"><code>${esc(c.short)}</code><span>${esc(c.title)}</span>`
+        + `<small class="muted">${esc(dateText(c.date))}</small></div>`).join('') + '</div>' : '')
+      + (u.busy_reason
+        ? `<div class="notice warn" style="margin-top:8px"><span>⚠</span><span>${esc(u.busy_reason)}. `
+          + 'Обновление можно поставить, когда принтеры освободятся.</span></div>'
+        : '')
+      + '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">'
+      + `<button class="btn primary sm" type="button" id="update_apply_btn"${u.can_apply ? '' : ' disabled'}>⬆ Установить и перезапустить</button>`
+      + '<button class="btn sm" type="button" id="update_check_btn">Проверить ещё раз</button>'
+      + '</div>';
   } else {
-    host.innerHTML = `<span class="muted" style="font-size:12.4px">У вас актуальная версия ${esc(updateInfo.current)}</span>
-      <button class="btn sm" type="button" id="update_check_btn">Проверить</button>`;
+    host.innerHTML = `<span class="muted" style="font-size:12.4px">У вас актуальная версия ${esc(u.current)}`
+      + (u.local ? ` · ${esc(u.local)}` : '') + (u.branch ? ` · ветка ${esc(u.branch)}` : '')
+      + (u.last_update_at ? ` · обновлено ${esc(dateTimeText(u.last_update_at))}` : '') + '</span>'
+      + ' <button class="btn sm" type="button" id="update_check_btn">Проверить</button>';
   }
-  const btn = $('update_check_btn');
-  if (btn) btn.addEventListener('click', async () => { await checkUpdate(true); toast('Проверка обновлений завершена'); });
+
+  const check = $('update_check_btn');
+  if (check) {
+    check.addEventListener('click', async () => {
+      check.disabled = true;
+      const data = await checkUpdate(true);
+      toast(data && data.update ? 'Есть обновление' : 'Обновлений нет',
+        data && data.update ? (data.latest.title || '') : 'У вас актуальная версия');
+    });
+  }
+  const apply = $('update_apply_btn');
+  if (apply) apply.addEventListener('click', () => applyUpdate(false));
+
+  // Настройки автообновления — рядом с карточкой.
+  const rows = $('set_update_rows');
+  if (rows) {
+    rows.innerHTML = settingGroup([
+      ['update_check_enabled', 'Проверять обновления', 'Спрашивать GitHub автоматически', 'bool'],
+      ['auto_update_enabled', 'Ставить обновления сами',
+        'Тихо обновляться, когда принтеры свободны, и перезапускаться', 'bool'],
+      ['update_check_hours', 'Как часто проверять, часов', 'Минимум — раз в 10 минут', 'num', 1],
+      ['update_branch', 'Ветка обновлений', 'Обычно main — стабильная версия', 'text'],
+    ]);
+  }
 }
 
 /** Поиск по настройкам: ищет сразу по всем вкладкам и прячет лишнее. */

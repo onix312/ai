@@ -866,6 +866,16 @@ class Database:
                 row["data"] = {}
         return rows
 
+    def backup_to(self, target) -> None:
+        """Консистентная копия базы через SQLite API (безопасна под нагрузкой)."""
+        import sqlite3
+        with self.lock:
+            dest = sqlite3.connect(str(target))
+            try:
+                self.conn.backup(dest)
+            finally:
+                dest.close()
+
     def close(self) -> None:
         with self.lock:
             self.conn.close()

@@ -1087,3 +1087,14 @@ table.data.compact td.right input { width: 96px; text-align: right; }
   .batch-layout { grid-template-columns: 1fr; }
   .prod-grid { grid-template-columns: 1fr; }
 }
+
+/* ==================================================== список обновлений */
+.upd-list { margin-top: 10px; border: 1px solid var(--line-soft); border-radius: var(--r); overflow: hidden; }
+.upd-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 11px; border-bottom: 1px solid var(--line-soft); font-size: 12.6px; }
+.upd-row:last-child { border-bottom: 0; }
+.upd-row code {
+  flex: none; font-size: 11.4px; padding: 1px 6px; border-radius: 5px;
+  background: var(--panel-3); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.upd-row span { flex: 1; min-width: 0; color: var(--text-2); }
+.upd-row small { flex: none; white-space: nowrap; }

@@ -103,7 +103,8 @@ class Api:
         self.batches = Batches(self.db, self.manager)
         self.manager.batches = self.batches
         from .updater import UpdateChecker
-        self.updater = UpdateChecker(APP_VERSION)
+        self.updater = UpdateChecker(APP_VERSION, self.db, self.manager)
+        self.updater.start_auto()
         self.last_host = ""
         self.started_at = time.time()
 
@@ -352,8 +353,6 @@ class Api:
         if path == "/api/settings":
             return 200, {"settings": self.db.settings()}
         if path == "/api/update-check":
-            if not self.db.setting("update_check_enabled", True):
-                return 200, {"current": APP_VERSION, "latest": None, "update": False}
             return 200, self.updater.report()
         if path == "/api/abc":
             return 200, self.acc.abc_report(int(num(one("days", "30"), 30)))
@@ -868,6 +867,17 @@ class Api:
             return 200, {"ok": True, "spool": spool}
         if path == "/api/update-check":
             return 200, self.updater.report(force=True)
+        if path == "/api/update/apply":
+            result = self.updater.apply(force=bool(body.get("force")))
+            if result.get("restart_required") and body.get("restart", True):
+                # Ответ уходит раньше перезапуска — интерфейс успеет его получить
+                # и сам дождётся, пока коннектор снова поднимется.
+                self.updater.restart(delay=1.5)
+                result["restarting"] = True
+            return 200, result
+        if path == "/api/update/restart":
+            self.updater.restart(delay=1.0)
+            return 200, {"ok": True, "restarting": True}
 
         if path == "/api/settings":
             return 200, {"ok": True, "settings": self.db.set_settings(body)}
