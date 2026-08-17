@@ -406,3 +406,138 @@ class Nomenclature:
             })
         out.sort(key=lambda x: (x["days_left"] if x["days_left"] is not None else 999))
         return out
+
+    # ----------------------------------------------- замороженный капитал
+    def frozen_capital(self, warehouse_id: str = "") -> dict[str, Any]:
+        """Отчёт «Замороженный капитал»: сколько денег лежит в остатках.
+
+        Группирует по группам номенклатуры и показывает:
+        • общую стоимость остатков;
+        • разбивку по группам;
+        • позиции с наибольшим замороженным капиталом;
+        • «мёртвый» сток (нет продаж 30+ дней).
+        """
+        items = self.items(warehouse_id=warehouse_id)
+        goods = [i for i in items if i.get("kind") in ("product", "kit", "semi")]
+        groups: dict[str, dict[str, Any]] = {}
+        by_item: list[dict[str, Any]] = []
+        dead: list[dict[str, Any]] = []
+        total_value = 0.0
+        total_qty = 0.0
+
+        for item in goods:
+            qty = num(item["qty"])
+            value = num(item["stock_value"])
+            if qty <= 0:
+                continue
+            total_value += value
+            total_qty += qty
+            group_id = item.get("group_id") or "_none"
+            group_name = (self.db.one("SELECT name FROM nom_groups WHERE id=?",
+                                      (group_id,)) or {}).get("name") or "Без группы"
+            if group_id not in groups:
+                groups[group_id] = {"name": group_name, "value": 0.0, "qty": 0.0, "items": 0}
+            groups[group_id]["value"] += value
+            groups[group_id]["qty"] += qty
+            groups[group_id]["items"] += 1
+            by_item.append({
+                "nom_id": item["id"], "name": item["name"],
+                "qty": qty, "value": value, "days_left": item.get("days_left"),
+                "status": item.get("status"),
+            })
+            if item.get("status") == "dead":
+                dead.append({
+                    "nom_id": item["id"], "name": item["name"],
+                    "qty": qty, "value": value,
+                    "last_sale": item.get("last_sale"),
+                })
+
+        by_item.sort(key=lambda x: -x["value"])
+        dead.sort(key=lambda x: -x["value"])
+        groups_list = sorted(groups.values(), key=lambda g: -g["value"])
+        return {
+            "total_value": round(total_value, 2),
+            "total_qty": round(total_qty, 1),
+            "items_count": len(goods),
+            "by_group": groups_list,
+            "top_items": by_item[:20],
+            "dead_stock": dead,
+            "dead_value": round(sum(d["value"] for d in dead), 2),
+            "dead_qty": len(dead),
+        }
+
+    # ----------------------------------------------- прогноз расхода пластика
+    def filament_forecast(self, days: int = 30) -> dict[str, Any]:
+        """Прогноз расхода пластика на основе плана производства.
+
+        Берёт позиции из replenishment (что нужно допечатать) и считает:
+        • сколько граммов каждого материала понадобится;
+        • хватит ли текущих остатков на складе;
+        • что нужно закупить.
+        """
+        plan = self.replenishment()
+        by_material: dict[str, dict[str, float]] = {}
+        total_grams = 0.0
+        for item in plan:
+            grams = num(item.get("grams"))
+            qty = num(item.get("plan_qty"))
+            if not grams or not qty:
+                continue
+            material = (item.get("material") or "PLA").upper()
+            need = grams * qty
+            total_grams += need
+            if material not in by_material:
+                by_material[material] = {"need": 0.0, "stock": 0.0, "deficit": 0.0}
+            by_material[material]["need"] += need
+
+        # Остатки пластика на складе
+        spools = self.db.query(
+            "SELECT material, SUM(remaining_grams) stock FROM spools"
+            " WHERE archived=0 GROUP BY material")
+        for row in spools:
+            mat = (row.get("material") or "PLA").upper()
+            if mat in by_material:
+                by_material[mat]["stock"] = num(row.get("stock"))
+
+        # Дефицит
+        for mat, data in by_material.items():
+            data["deficit"] = max(0.0, data["need"] - data["stock"])
+            data["need"] = round(data["need"], 1)
+            data["stock"] = round(data["stock"], 1)
+            data["deficit"] = round(data["deficit"], 1)
+
+        return {
+            "days": days,
+            "total_need": round(total_grams, 1),
+            "by_material": sorted(by_material.items(), key=lambda x: -x[1]["need"]),
+            "positions": len(plan),
+        }
+
+    # ----------------------------------------------- обновление себестоимости
+    def update_cost_from_batch(self, nom_id: str) -> dict[str, Any]:
+        """Обновить себестоимость номенклатуры из последней завершённой партии.
+
+        После приёмки партии фактическая себестоимость штуки записывается
+        в карточку товара — это точнее нормативной из граммов и часов.
+        """
+        batch = self.db.one(
+            "SELECT * FROM batches WHERE nom_id=? AND state IN ('done','partial')"
+            " ORDER BY datetime(at) DESC LIMIT 1", (nom_id,))
+        if not batch:
+            return {"ok": False, "reason": "Нет завершённых партий"}
+        qty_done = num(batch.get("qty_done"))
+        if qty_done <= 0:
+            return {"ok": False, "reason": "В партии нет готовых изделий"}
+        cost = num(batch.get("cost"))
+        if cost <= 0:
+            return {"ok": False, "reason": "Себестоимость партии неизвестна"}
+        cost_per_unit = round(cost / qty_done, 2)
+        self.db.execute(
+            "UPDATE nomenclature SET cost=?, updated_at=? WHERE id=?",
+            (cost_per_unit, now_iso(), nom_id))
+        return {
+            "ok": True,
+            "cost_per_unit": cost_per_unit,
+            "batch_id": batch["id"],
+            "qty_done": qty_done,
+        }

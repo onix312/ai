@@ -296,11 +296,22 @@ class Batches:
                               f"{batch.get('name')} · {int(done)} шт на складе",
                               data={"batch_id": batch_id})
             self._notify(f"✅ Партия готова: {batch.get('name')} — {int(done)} шт на складе")
+            # Автообновление себестоимости в номенклатуре
+            self._auto_update_cost(batch_id, batch["nom_id"], done, cost_total)
         elif scrap:
             self.db.add_event("batch", "Брак в партии",
                               f"{batch.get('name')} · −{int(scrap)} шт",
                               data={"batch_id": batch_id})
         return self.get(batch_id) or {}
+
+    def _auto_update_cost(self, batch_id: str, nom_id: str, qty: float, cost: float) -> None:
+        """Обновить себестоимость в номенклатуре из завершённой партии."""
+        if qty <= 0 or cost <= 0:
+            return
+        unit_cost = round(cost / qty, 2)
+        self.db.execute(
+            "UPDATE nomenclature SET cost=?, updated_at=? WHERE id=?",
+            (unit_cost, now_iso(), nom_id))
 
     def on_job_finished(self, job: dict) -> None:
         """Хук из менеджера печати: задание партии завершилось."""

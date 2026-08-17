@@ -1089,3 +1089,87 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
 .health-cash i { flex: 1; border-radius: 4px 4px 2px 2px; background: var(--accent); opacity: .85; min-height: 4px; }
 .health-cash.bad i { background: var(--bad); }
 .health-cash.warn i { background: var(--warn); }
+
+/* ========================================================= 6.0: калькулятор */
+.hint-i { display: inline-block; width: 15px; height: 15px; line-height: 15px; text-align: center;
+  border-radius: 50%; background: var(--line-soft); color: var(--muted); font-size: 10px;
+  font-style: normal; cursor: help; margin-left: 4px; vertical-align: middle; }
+.hint-i:hover { background: var(--accent); color: #fff; }
+.pos { color: var(--ok); } .neg { color: var(--bad); }
+.notice.compact { padding: 8px 12px; font-size: 12.8px; margin: 8px 0; }
+.notice.compact b { font-weight: 660; }
+.notice.compact .muted { font-size: 11.8px; }
+
+/* Раскладка на плите */
+.layout-grid { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.layout-grid svg { flex: 0 0 auto; }
+
+/* Минимальная партия — бары */
+.batch-bars { display: flex; flex-direction: column; gap: 6px; }
+.batch-row { display: flex; align-items: center; gap: 8px; font-size: 12.8px; }
+.batch-row .lbl { flex: 0 0 120px; color: var(--text-2); white-space: nowrap; }
+.batch-row .bar { flex: 1; height: 18px; background: var(--line-soft); border-radius: 3px; overflow: hidden; }
+.batch-row .bar i { display: block; height: 100%; border-radius: 3px; transition: width .3s; }
+.batch-row .bar.ok i { background: var(--ok); }
+.batch-row .bar.warn i { background: var(--warn); }
+.batch-row .bar.bad i { background: var(--bad); }
+.batch-row .val { flex: 0 0 180px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
+
+/* Сценарии */
+.scenario-row { margin-bottom: 12px; }
+.scenario-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.scenario-head b { font-size: 14px; }
+.scenario-row .bar { height: 14px; background: var(--line-soft); border-radius: 3px; overflow: hidden; }
+.scenario-row .bar i { display: block; height: 100%; border-radius: 3px; transition: width .3s; }
+.scenario-row .bar.ok i { background: var(--ok); }
+.scenario-row .bar.warn i { background: var(--warn); }
+.scenario-row .bar.bad i { background: var(--bad); }
+.scenario-row small { font-size: 11.8px; }
+
+/* Таймер подготовки */
+.btn.primary.pulse { animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(79,70,229,.4); } 50% { box-shadow: 0 0 0 8px rgba(79,70,229,0); } }
+
+/* Быстрые пресеты */
+.preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.preset-btn { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); color: var(--text-2); font-size: 12px; cursor: pointer; transition: all .15s; }
+.preset-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* OEE и эффективность */
+.oee-ring { display: inline-flex; align-items: center; gap: 12px; }
+.oee-ring svg { flex: 0 0 auto; }
+.oee-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0; }
+.oee-stat { text-align: center; padding: 8px; border-radius: 8px; background: var(--card-2); }
+.oee-stat b { display: block; font-size: 18px; }
+.oee-stat small { font-size: 11px; color: var(--muted); }
+
+/* Детектор аномалий */
+.anomaly-list { display: flex; flex-direction: column; gap: 8px; }
+.anomaly-item { display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line-soft); background: var(--card); }
+.anomaly-item.warn { border-color: var(--warn); background: var(--warn-soft); }
+.anomaly-item.bad { border-color: var(--bad); background: var(--bad-soft); }
+.anomaly-item .ic { flex: 0 0 28px; height: 28px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 14px; }
+.anomaly-item.warn .ic { background: var(--warn); color: #fff; }
+.anomaly-item.bad .ic { background: var(--bad); color: #fff; }
+.anomaly-body { flex: 1; }
+.anomaly-body b { display: block; margin-bottom: 2px; }
+.anomaly-body small { color: var(--text-2); }
+
+/* P&L по продуктам */
+.pnl-product { display: flex; align-items: center; gap: 8px; padding: 6px 0;
+  border-bottom: 1px dashed var(--line-soft); }
+.pnl-product:last-child { border-bottom: 0; }
+.pnl-product .name { flex: 1; font-weight: 600; }
+.pnl-product .nums { display: flex; gap: 12px; font-variant-numeric: tabular-nums; font-size: 12.8px; }
+.pnl-product .profit { font-weight: 640; }
+.pnl-product .profit.pos { color: var(--ok); }
+.pnl-product .profit.neg { color: var(--bad); }
+
+/* Инвестиционный калькулятор */
+.invest-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.invest-card { padding: 12px; border-radius: 8px; background: var(--card-2); text-align: center; }
+.invest-card b { display: block; font-size: 20px; margin-bottom: 4px; }
+.invest-card small { font-size: 11.8px; color: var(--muted); }

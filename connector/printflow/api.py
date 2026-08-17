@@ -459,6 +459,10 @@ class Api:
             return 200, {"groups": self.nom.groups()}
         if path == "/api/replenishment":
             return 200, {"rows": self.batches.plan_replenishment(one("warehouse_id"))}
+        if path == "/api/nomenclature/frozen-capital":
+            return 200, self.nom.frozen_capital(one("warehouse_id"))
+        if path == "/api/nomenclature/filament-forecast":
+            return 200, self.nom.filament_forecast(int(num(one("days", "30"), 30)))
         if path == "/api/plan/day":
             return 200, self.planner.day_plan()
         if path == "/api/insights":
@@ -547,6 +551,52 @@ class Api:
             return 200, self.updater.report()
         if path == "/api/abc":
             return 200, self.acc.abc_report(int(num(one("days", "30"), 30)))
+        if path == "/api/calc/materials":
+            return 200, self.acc.material_options()
+        if path == "/api/calc/real-stats":
+            return 200, self.acc.real_stats(
+                one("product"), one("material"),
+                int(num(one("days", "60"), 60)))
+        if path == "/api/calc/plate-layout":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, mr.plate_layout(
+                num(one("dim_x")), num(one("dim_y")),
+                num(one("gap")), num(one("plate_w")), num(one("plate_h")))
+        if path == "/api/models":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, {"models": mr.list(one("search"), one("nom_id")),
+                         "stats": mr.stats()}
+        if path == "/api/model":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            model = mr.get(one("id"))
+            return (200, model) if model else (404, {"error": "Модель не найдена"})
+        # ------------------------------------------------ 6.0: аналитика
+        if path == "/api/analytics/oee":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).oee(
+                int(num(one("days", "30"), 30)), one("printer_id"))
+        if path == "/api/analytics/correction":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).correction_factors(
+                int(num(one("days", "60"), 60)), one("material"))
+        if path == "/api/analytics/pnl-products":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).pnl_by_product(
+                int(num(one("days", "30"), 30)))
+        if path == "/api/analytics/anomalies":
+            from .analytics import Analytics
+            return 200, {"anomalies": Analytics(self.db).detect_anomalies(
+                int(num(one("days", "30"), 30)))}
+        if path == "/api/analytics/defects":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).defect_analysis(
+                int(num(one("days", "30"), 30)))
+        if path == "/api/analytics/smart-queue":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).smart_queue()
         if path == "/api/filament-stats":
             return 200, self.acc.filament_stats(int(num(one("days", "30"), 30)))
         if path == "/api/price-history":
@@ -781,7 +831,19 @@ class Api:
                 num(body.get("grams")), num(body.get("hours")),
                 num(body.get("spool_price")) or None, num(body.get("spool_weight")) or None,
                 num(body.get("manual_minutes")), num(body.get("qty"), 1),
-                num(body.get("design_minutes")), num(body.get("delivery")))
+                num(body.get("design_minutes")), num(body.get("delivery")),
+                num(body.get("color_swaps")),
+                material=body.get("material", ""),
+                quality=body.get("quality", "standard"),
+                supports_pct=num(body.get("supports_pct")),
+                plate_grams=num(body.get("plate_grams")),
+                plate_hours=num(body.get("plate_hours")),
+                fit_per_plate=num(body.get("fit_per_plate")),
+                warmup_minutes=num(body.get("warmup_minutes")),
+                remove_minutes=num(body.get("remove_minutes")),
+                sand_minutes=num(body.get("sand_minutes")),
+                paint_minutes=num(body.get("paint_minutes")),
+                model_prep_minutes=num(body.get("model_prep_minutes")))
         if path == "/api/calc/price":
             cost = num(body.get("cost"))
             breakdown = None
@@ -811,6 +873,73 @@ class Api:
                 saved.update({k: v for k, v in body.items() if k != "id" and v not in ("", None)})
                 order = saved
             return 200, self.acc.order_economics(order)
+        if path == "/api/calc/materials":
+            return 200, self.acc.material_options()
+        if path == "/api/calc/scenarios":
+            return 200, {"scenarios": self.acc.calc_scenarios(
+                body.get("base", {}), body.get("variants", []))}
+        if path == "/api/calc/payback":
+            return 200, self.acc.payback_calc(
+                num(body.get("model_cost")),
+                num(body.get("design_hours")),
+                num(body.get("profit_per_unit")),
+                num(body.get("sales_per_week"), 1))
+        if path == "/api/calc/real-stats":
+            return 200, self.acc.real_stats(
+                body.get("product", ""),
+                body.get("material", ""),
+                int(num(body.get("days"), 60)))
+        if path == "/api/calc/min-batch":
+            return 200, self.acc.min_profitable_batch(
+                plate_grams=num(body.get("plate_grams")),
+                plate_hours=num(body.get("plate_hours")),
+                fit_per_plate=num(body.get("fit_per_plate"), 1),
+                material=body.get("material", ""),
+                quality=body.get("quality", "standard"),
+                supports_pct=num(body.get("supports_pct")),
+                target_per_hour=num(body.get("target_per_hour")),
+                spool_price=num(body.get("spool_price")) or None,
+                markup=num(body.get("markup")))
+        # -------------------------------------------------------- 6.0: модели
+        if path == "/api/model/save":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, {"ok": True, "model": mr.save(body)}
+        if path == "/api/model/delete":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            mr.delete(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/model/prep-start":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, mr.start_prep_session(
+                body.get("model_id", ""), body.get("nom_id", ""),
+                body.get("order_id", ""))
+        if path == "/api/model/prep-finish":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, mr.finish_prep_session(
+                body.get("session_id", ""), body.get("stages"),
+                body.get("note", ""))
+        if path == "/api/model/repeat":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, mr.repeat_from_model(
+                body.get("model_id", ""), int(num(body.get("qty"), 1)),
+                body.get("printer_id", ""))
+        if path == "/api/model/clone-batch":
+            from .model_registry import ModelRegistry
+            mr = ModelRegistry(self.db)
+            return 200, mr.clone_batch(
+                body.get("batch_id", ""), int(num(body.get("qty"), 0)))
+        if path == "/api/analytics/investment":
+            from .analytics import Analytics
+            return 200, Analytics(self.db).investment_calc(
+                num(body.get("printer_cost")),
+                num(body.get("extra_hours_month")),
+                num(body.get("profit_per_hour")),
+                num(body.get("extra_costs_month")))
 
         # --- настройки, бэкап, уведомления
         # --- стеллаж магазина
@@ -858,6 +987,8 @@ class Api:
         if path == "/api/nomenclature/recalc-prices":
             return 200, self.nom.recalc_prices(body.get("price_type_id", ""),
                                                body.get("group_id", ""))
+        if path == "/api/nomenclature/update-cost":
+            return 200, self.nom.update_cost_from_batch(body.get("nom_id", ""))
         if path == "/api/nomenclature/photo":
             item_id = body.get("id", "")
             from .config import PHOTO_DIR
