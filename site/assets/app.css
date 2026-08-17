@@ -1119,3 +1119,16 @@ table.data.compact td.right input { width: 96px; text-align: right; }
 .health-cash i { flex: 1; border-radius: 4px 4px 2px 2px; background: var(--accent); opacity: .85; min-height: 4px; }
 .health-cash.bad i { background: var(--bad); }
 .health-cash.warn i { background: var(--warn); }
+
+/* ============================================================ полировка 5.1
+   Правила, которым нужен каскад после базовых стилей модулей. */
+
+/* Таблицы: акцентная линия под шапкой и едва заметная «зебра»;
+   ховер подсвечен фирменным цветом вместо серого. */
+table.data th { border-bottom: 2px solid var(--accent-line); }
+table.data tbody tr:nth-child(even) { background: color-mix(in srgb, var(--panel-2) 50%, transparent); }
+table.data tbody tr:hover,
+table.data tbody tr:nth-child(even):hover { background: var(--accent-soft); }
+
+/* Колонки канбана: лёгкая тень отделяет доску от фона. */
+.kan-col { box-shadow: var(--shadow-1); }
