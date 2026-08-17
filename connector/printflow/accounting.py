@@ -342,7 +342,7 @@ class Accounting:
         Формат: JSON-список [{"material":"PLA","color":"Белый","grams":40}].
         Возвращает список результатов consume_filament.
         """
-        order = self.db.one("SELECT colors FROM orders WHERE id=?",
+        order = self.db.one("SELECT colors,material FROM orders WHERE id=?",
                             (job.get("order_id") or "",)) if job.get("order_id") else None
         raw = (order or {}).get("colors") or ""
         try:
@@ -358,25 +358,27 @@ class Accounting:
             grams = num(item.get("grams"))
             if grams <= 0:
                 continue
-            material = str(item.get("material") or "").upper()
+            # Форма хранит материал на уровне заказа, а в элементах — только цвет.
+            material = str(item.get("material") or (order or {}).get("material") or "").upper()
             color = str(item.get("color") or "")
             spool = None
-            if material and color:
-                spool = self.db.one(
-                    "SELECT * FROM spools WHERE UPPER(material)=? AND pylower(color_name)=?"
-                    " AND archived=0 AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
-                    (material, color.lower()))
+            if color:
+                sql = ("SELECT * FROM spools WHERE pylower(color_name)=? AND archived=0"
+                       " AND remaining_grams>0")
+                params: list[Any] = [color.lower()]
+                if material:
+                    sql += " AND UPPER(material)=?"
+                    params.append(material)
+                spool = self.db.one(sql + " ORDER BY remaining_grams DESC LIMIT 1", params)
             if not spool and material:
                 spool = self.db.one(
                     "SELECT * FROM spools WHERE UPPER(material)=? AND archived=0"
                     " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
                     (material,))
-            if not spool:
-                continue
             result = self.consume_filament(
-                grams, spool_id=spool["id"], job_id=job.get("id", ""),
-                order_id=job.get("order_id") or "", auto=True,
-                note=f"цвет: {color or '—'} ({material})")
+                grams, spool_id=(spool or {}).get("id", ""), job_id=job.get("id", ""),
+                order_id=job.get("order_id") or "", auto=True, material=material,
+                note=f"цвет: {color or '—'} ({material or 'материал не указан'})")
             out.append({**result, "material": material, "color": color})
         return out
 
@@ -473,40 +475,18 @@ class Accounting:
         return self.db.one("SELECT * FROM transactions WHERE id=?", (tx_id,)) or {}
 
     def register_order_income(self, order: dict) -> dict | None:
-        """Доход по заказу при переводе в финальный статус (однократно)."""
+        """При закрытии записать только ещё не полученный остаток как платёж."""
         if not self.db.setting("auto_income_on_done", True):
             return None
-        exists = self.db.one(
-            "SELECT id FROM transactions WHERE order_id=? AND kind='income' AND category='order'",
-            (order["id"],))
-        if exists:
+        rest = round(max(0.0, num(order.get("price")) -
+                         max(num(order.get("paid")), num(order.get("prepaid")))), 2)
+        if rest <= 0:
             return None
-        price = num(order.get("price"))
-        if price <= 0:
-            return None
-        eco = self.order_economics(order)
-        tx = self.add_transaction(
-            "income", "order", price,
-            f"Заказ №{order.get('number','')} · {order.get('product','')}",
-            order_id=order["id"], auto=True,
-            account_id=order.get("account_id") or "",
-            customer_id=order.get("customer_id") or "",
-            channel=order.get("channel") or "",
-            payer=order.get("payer") or "person",
-            fee=eco["fee"])
-        # Деньги пришли в кассу — значит заказ оплачен и в долгах ему не место.
-        # Иначе одна и та же сумма показывалась бы и в остатке касс, и в долгах.
-        paid = num(order.get("paid"))
-        if paid < eco["price"]:
-            rest = round(eco["price"] - paid, 2)
-            self.db.execute(
-                "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,method,fee,note,tx_id)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (uid("pay"), now_iso(), order["id"], order.get("customer_id"), rest,
-                 "payment", order.get("account_id") or None, "автоматически", 0.0,
-                 "Оплата при закрытии заказа", tx.get("id")))
-            self.db.execute("UPDATE orders SET paid=? WHERE id=?", (eco["price"], order["id"]))
-        return tx
+        payment = self.add_payment(
+            order["id"], rest, "payment", order.get("account_id") or "",
+            "автоматически", "Оплата при закрытии заказа")
+        return self.db.one("SELECT * FROM transactions WHERE id=?",
+                           (payment.get("tx_id") or "",))
 
     def register_job_costs(self, job: dict) -> dict:
         """Учёт завершённой печати: пластик, энергия, себестоимость заказа."""
@@ -519,16 +499,24 @@ class Accounting:
         result["breakdown"] = breakdown
 
         if grams > 0 and self.db.setting("auto_consume_filament", True):
-            result["filament"] = self.consume_filament(
-                grams, spool_id=job.get("spool_id") or "", job_id=job.get("id", ""),
-                order_id=job.get("order_id") or "", note=job.get("name", ""),
-                printer_id=job.get("printer_id") or "",
-                ams_slot=str(job.get("ams_slot") or ""))
-            # многоцветная печать: дополнительный расход по цветам заказа
+            # Разбивка по цветам — это весь расход, а не добавка к общим граммам.
+            # Сначала пробуем её и только при отсутствии разбивки списываем одну катушку.
             try:
                 result["colors"] = self.consume_order_colors(job)
-            except Exception:
+            except (TypeError, ValueError):
                 result["colors"] = []
+            if result["colors"]:
+                result["filament"] = {
+                    "ok": True, "multi_color": True,
+                    "grams": round(sum(num(x.get("grams")) for x in result["colors"]), 1),
+                    "cost": round(sum(num(x.get("cost")) for x in result["colors"]), 2),
+                }
+            else:
+                result["filament"] = self.consume_filament(
+                    grams, spool_id=job.get("spool_id") or "", job_id=job.get("id", ""),
+                    order_id=job.get("order_id") or "", note=job.get("name", ""),
+                    printer_id=job.get("printer_id") or "",
+                    ams_slot=str(job.get("ams_slot") or ""))
 
         self.db.execute(
             "UPDATE print_jobs SET cost=?, energy_kwh=? WHERE id=?",
@@ -788,14 +776,22 @@ class Accounting:
         rows = self.db.query(
             "SELECT * FROM transactions WHERE at>=? AND at<?",
             (f"{year}-01-01", f"{year + 1}-01-01"))
-        income = sum(num(r["amount"]) for r in rows
-                     if r["kind"] == "income" and r["taxable"])
-        income_person = sum(num(r["amount"]) for r in rows
-                            if r["kind"] == "income" and r["taxable"] and r["payer"] != "company")
-        income_company = round(income - income_person, 2)
+        gross_person = sum(num(r["amount"]) for r in rows
+                           if r["kind"] == "income" and r["taxable"] and r["payer"] != "company")
+        gross_company = sum(num(r["amount"]) for r in rows
+                            if r["kind"] == "income" and r["taxable"] and r["payer"] == "company")
+        refund_person = sum(num(r["amount"]) for r in rows
+                            if r["kind"] == "expense" and r["category"] == "refund"
+                            and r["payer"] != "company")
+        refund_company = sum(num(r["amount"]) for r in rows
+                             if r["kind"] == "expense" and r["category"] == "refund"
+                             and r["payer"] == "company")
+        income_person = max(0.0, gross_person - refund_person)
+        income_company = max(0.0, gross_company - refund_company)
+        income = income_person + income_company
         expense = sum(num(r["amount"]) for r in rows
                       if r["kind"] == "expense" and r["deductible"]
-                      and r["category"] not in ("tax", "withdrawal"))
+                      and r["category"] not in ("tax", "withdrawal", "refund"))
         tax_paid = sum(num(r["amount"]) for r in rows
                        if r["kind"] == "expense" and r["category"] == "tax")
         insurance_paid = sum(num(r["amount"]) for r in rows
@@ -883,26 +879,47 @@ class Accounting:
 
     def _tax_quarters(self, year: int, mode: str) -> list[dict]:
         out = []
+        npd_bonus_left = num(self.db.setting("npd_bonus_left"))
         for q in range(1, 5):
             start_m = (q - 1) * 3 + 1
             start = f"{year}-{start_m:02d}-01"
             end = f"{year + 1}-01-01" if q == 4 else f"{year}-{start_m + 3:02d}-01"
             rows = self.db.query(
-                "SELECT kind,amount,taxable,deductible,category FROM transactions"
+                "SELECT kind,amount,taxable,deductible,category,payer FROM transactions"
                 " WHERE at>=? AND at<?", (start, end))
-            inc = sum(num(r["amount"]) for r in rows if r["kind"] == "income" and r["taxable"])
+            gross_person = sum(num(r["amount"]) for r in rows
+                               if r["kind"] == "income" and r["taxable"]
+                               and r["payer"] != "company")
+            gross_company = sum(num(r["amount"]) for r in rows
+                                if r["kind"] == "income" and r["taxable"]
+                                and r["payer"] == "company")
+            refund_person = sum(num(r["amount"]) for r in rows
+                                if r["kind"] == "expense" and r["category"] == "refund"
+                                and r["payer"] != "company")
+            refund_company = sum(num(r["amount"]) for r in rows
+                                 if r["kind"] == "expense" and r["category"] == "refund"
+                                 and r["payer"] == "company")
+            income_person = max(0.0, gross_person - refund_person)
+            income_company = max(0.0, gross_company - refund_company)
+            inc = income_person + income_company
             exp = sum(num(r["amount"]) for r in rows if r["kind"] == "expense"
-                      and r["deductible"] and r["category"] not in ("tax", "withdrawal"))
+                      and r["deductible"]
+                      and r["category"] not in ("tax", "withdrawal", "refund"))
             if mode == "usn15":
                 due = max(0.0, inc - exp) * num(self.db.setting("usn_profit_rate", 15)) / 100.0
             elif mode == "usn6":
                 due = inc * num(self.db.setting("usn_income_rate", 6)) / 100.0
             elif mode == "npd":
-                due = inc * num(self.db.setting("npd_rate_person", 4)) / 100.0
+                due = (income_person * num(self.db.setting("npd_rate_person", 4)) / 100.0 +
+                       income_company * num(self.db.setting("npd_rate_company", 6)) / 100.0)
+                bonus_use = min(npd_bonus_left,
+                                income_person / 100.0 + income_company * 2 / 100.0)
+                due -= bonus_use
+                npd_bonus_left -= bonus_use
             else:
                 due = 0.0
             out.append({"key": f"{year}-Q{q}", "income": round(inc, 2),
-                        "expense": round(exp, 2), "tax": round(due, 2)})
+                        "expense": round(exp, 2), "tax": round(max(0.0, due), 2)})
         return out
 
     # -------------------------------------------------------------- кассы и долги
@@ -912,8 +929,9 @@ class Accounting:
         total = 0.0
         for acc in self.db.query("SELECT * FROM accounts WHERE archived=0 ORDER BY position, name"):
             agg = self.db.one(
-                "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE -amount END),0) AS delta,"
-                " COUNT(*) AS n FROM transactions WHERE account_id=?", (acc["id"],)) or {}
+                "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount-COALESCE(fee,0)"
+                " ELSE -amount END),0) AS delta, COUNT(*) AS n"
+                " FROM transactions WHERE account_id=?", (acc["id"],)) or {}
             balance = num(acc["opening_balance"]) + num(agg.get("delta"))
             total += balance
             rows.append({**acc, "balance": round(balance, 2), "moves": int(num(agg.get("n")))})
@@ -950,25 +968,43 @@ class Accounting:
 
     def add_payment(self, order_id: str, amount: float, kind: str = "payment",
                     account_id: str = "", method: str = "", note: str = "") -> dict:
-        """Платёж по заказу: пишет и в кассу, и в долг клиента."""
+        """Атомарно записать платёж, кассовую проводку и новый остаток долга."""
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
+        if kind not in ("prepay", "payment", "refund"):
+            raise ValueError("Тип платежа: предоплата, оплата или возврат")
         amount = round(num(amount), 2)
         if amount <= 0:
             raise ValueError("Сумма платежа должна быть больше нуля")
+        if kind == "refund" and amount > max(num(order.get("paid")), num(order.get("prepaid"))):
+            raise ValueError("Возврат не может быть больше полученной суммы")
         acc = self.db.one("SELECT * FROM accounts WHERE id=?",
                           (account_id or self.db.setting("default_account", "cash"),)) or {}
-        fee = round(amount * num(acc.get("fee_percent")) / 100.0, 2)
-        pay_id = uid("pay")
-        self.db.execute(
-            "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,method,fee,note)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (pay_id, now_iso(), order_id, order.get("customer_id"), amount, kind,
-             acc.get("id"), method, fee, note))
-        sign = -1 if kind == "refund" else 1
-        self.db.execute("UPDATE orders SET paid=COALESCE(paid,0)+? WHERE id=?",
-                        (sign * amount, order_id))
+        if not acc:
+            raise ValueError("Касса не найдена")
+        fee = 0.0 if kind == "refund" else round(amount * num(acc.get("fee_percent")) / 100.0, 2)
+        stamp, pay_id = now_iso(), uid("pay")
+        title = (("Возврат" if kind == "refund" else
+                  "Предоплата" if kind == "prepay" else "Оплата") +
+                 f" · заказ №{order.get('number', '')}")
+        with self.db.transaction():
+            tx = self.add_transaction(
+                "expense" if kind == "refund" else "income",
+                "refund" if kind == "refund" else ("prepay" if kind == "prepay" else "order"),
+                amount, title, note=note, order_id=order_id, auto=(method == "автоматически"),
+                account_id=acc["id"], customer_id=order.get("customer_id") or "",
+                channel=order.get("channel") or "", payer=order.get("payer") or "person",
+                fee=fee, taxable=kind != "refund", deductible=kind == "refund", at=stamp)
+            self.db.execute(
+                "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,method,fee,note,tx_id)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (pay_id, stamp, order_id, order.get("customer_id"), amount, kind,
+                 acc["id"], method, fee, note, tx["id"]))
+            sign = -1 if kind == "refund" else 1
+            self.db.execute(
+                "UPDATE orders SET paid=MAX(0,COALESCE(paid,0)+?), updated_at=? WHERE id=?",
+                (sign * amount, stamp, order_id))
         return self.db.one("SELECT * FROM payments WHERE id=?", (pay_id,)) or {}
 
     # -------------------------------------------------------------- безубыточность

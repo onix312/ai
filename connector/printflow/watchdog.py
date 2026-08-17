@@ -14,11 +14,9 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
-from .accounting import num, uid
+from .accounting import num
 from .config import DEFAULT_MAINTENANCE, now_iso
-from .hms import decode_list, worst
 
 SEVERITY_ORDER = ["info", "warn", "error", "fatal"]
 

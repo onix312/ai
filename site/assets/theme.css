@@ -258,6 +258,13 @@ img.brand-logo { background: none; box-shadow: 0 8px 18px -10px var(--accent); }
 #views { flex: 1; padding: 22px 26px 60px; }
 .view { display: none; animation: viewIn .3s var(--ease); }
 .view.on { display: block; }
+/* Неактивные разделы полностью исключаются из раскладки. Без !important
+   браузер мог сохранить их блочное отображение при переходе по hash и
+   активный раздел оказывался ниже предыдущих секций. */
+@media screen {
+  .view:not(.on), .view[hidden] { display: none !important; }
+  .view.on:not([hidden]) { display: block !important; }
+}
 @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .view-head {
@@ -586,6 +593,7 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
   #cmd_open { display: none; }
   .live-pill { max-width: 52vw; }
   .live-pill small { display: none; }        /* имя принтера важнее статуса словом */
+  #toasts { left: 12px; right: 12px; bottom: 12px; max-width: none; }
 }
 
 @media print {

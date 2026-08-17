@@ -981,3 +981,11 @@ table.data tr.sum-row td {
   .fl-row { flex-wrap: wrap; }
   .fl-row .fl-right { width: 100%; }
 }
+
+@media (max-width: 460px) {
+  /* Поля настроек не должны сжимать подписи и выходить за край карточки. */
+  .set-row { flex-wrap: wrap; align-items: flex-start; }
+  .set-row > input[type=number], .set-row > input[type=text],
+  .set-row > input[type=password], .set-row > input[type=tel],
+  .set-row > input[type=email], .set-row > select { width: 100%; flex-basis: 100%; }
+}
