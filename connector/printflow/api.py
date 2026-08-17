@@ -92,6 +92,16 @@ class Api:
         self.manager = PrinterManager(self.db, self.repo)
         from .shelf import Shelf
         self.shelf = Shelf(self.db)
+        # --- учёт 3.0: номенклатура, склады, документы, партии
+        from .batches import Batches
+        from .documents import Documents
+        from .nomenclature import Nomenclature
+        from .stock import Stock
+        self.stock = Stock(self.db)
+        self.nom = Nomenclature(self.db)
+        self.docs = Documents(self.db)
+        self.batches = Batches(self.db, self.manager)
+        self.manager.batches = self.batches
         from .updater import UpdateChecker
         self.updater = UpdateChecker(APP_VERSION)
         self.last_host = ""
@@ -278,6 +288,64 @@ class Api:
             if not item:
                 return 404, {"error": "Позиция не найдена"}
             return 200, {"url": self.shelf.qr_link(one("id"), getattr(self, "last_host", ""))}
+        # ------------------------------------------------ учёт 3.0: номенклатура
+        if path == "/api/nomenclature":
+            return 200, {
+                "items": self.nom.items(one("group_id"), one("kind"), one("search"),
+                                        one("warehouse_id"),
+                                        one("archived") == "1"),
+                "summary": self.nom.summary(one("warehouse_id")),
+                "groups": self.nom.groups(),
+                "warehouses": self.db.query(
+                    "SELECT * FROM warehouses WHERE archived=0 ORDER BY position"),
+                "price_types": self.db.query(
+                    "SELECT * FROM price_types WHERE archived=0 ORDER BY position"),
+            }
+        if path == "/api/nomenclature/item":
+            item = self.nom.item(one("id"))
+            return (200, item) if item else (404, {"error": "Позиция не найдена"})
+        if path == "/api/nomenclature/groups":
+            return 200, {"groups": self.nom.groups()}
+        if path == "/api/replenishment":
+            return 200, {"rows": self.batches.plan_replenishment(one("warehouse_id"))}
+        # ------------------------------------------------------------- склады
+        if path == "/api/warehouses":
+            return 200, {"warehouses": self.stock.warehouse_totals(),
+                         "reserves": self.stock.reserves(),
+                         "reserved": round(sum(num(r.get("qty"))
+                                               for r in self.stock.reserves()), 1)}
+        if path == "/api/stock":
+            return 200, {"balances": self.stock.balances(one("warehouse_id")),
+                         "moves": self.stock.moves(one("nom_id"), one("warehouse_id"),
+                                                   int(num(one("limit", "80"), 80)))}
+        if path == "/api/stock/turnover":
+            return 200, {"rows": self.stock.turnover(one("from"), one("to"),
+                                                     one("warehouse_id"))}
+        if path == "/api/reserves":
+            return 200, {"reserves": self.stock.reserves()}
+        # ---------------------------------------------------------- документы
+        if path == "/api/documents":
+            return 200, {"documents": self.docs.list(
+                one("kind"), one("state"), one("warehouse_id"), one("search"),
+                int(num(one("limit", "200"), 200)))}
+        if path == "/api/document":
+            doc = self.docs.get(one("id"))
+            return (200, doc) if doc else (404, {"error": "Документ не найден"})
+        # ------------------------------------------------------------- партии
+        if path == "/api/batches":
+            return 200, {"batches": self.batches.list(
+                one("state"), int(num(one("limit", "100"), 100)))}
+        if path == "/api/batch":
+            batch = self.batches.get(one("id"))
+            return (200, batch) if batch else (404, {"error": "Партия не найдена"})
+        # --------------------------------------------------------------- цены
+        if path == "/api/price-types":
+            return 200, {"price_types": self.db.query(
+                "SELECT * FROM price_types WHERE archived=0 ORDER BY position")}
+        if path == "/api/audit":
+            return 200, {"rows": self.db.query(
+                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?",
+                (int(num(one("limit", "100"), 100)),))}
         if path == "/api/events":
             return 200, {"events": self.db.events(int(num(one("limit", "80"), 80)),
                                                   one("printer_id"), one("kind"))}
@@ -560,6 +628,139 @@ class Api:
             return 200, self.shelf_save_photo(body["id"], str(body["data"]))
 
         # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
+        # ------------------------------------------------ учёт 3.0: номенклатура
+        if path == "/api/nomenclature/save":
+            return 200, {"ok": True, "item": self.nom.save(body)}
+        if path == "/api/nomenclature/delete":
+            self.nom.delete(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/nomenclature/archive":
+            return 200, {"ok": True, "item": self.nom.archive(
+                body.get("id", ""), bool(body.get("archived", True)))}
+        if path == "/api/nomenclature/price":
+            return 200, {"ok": True, "price": self.nom.set_price(
+                body.get("nom_id", ""), num(body.get("price")),
+                body.get("price_type_id", ""), body.get("note", ""))}
+        if path == "/api/nomenclature/recalc-prices":
+            return 200, self.nom.recalc_prices(body.get("price_type_id", ""),
+                                               body.get("group_id", ""))
+        if path == "/api/nomenclature/photo":
+            item_id = body.get("id", "")
+            from .config import PHOTO_DIR
+            import base64
+            data_url = body.get("data", "")
+            if "," not in data_url:
+                return 400, {"error": "Не похоже на data URL"}
+            head, _, b64 = data_url.partition(",")
+            ext = "png" if "png" in head else "jpg"
+            raw = base64.b64decode(b64)
+            if len(raw) > 8 * 1024 * 1024:
+                return 400, {"error": "Фото больше 8 МБ"}
+            PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+            name = f"nom_{item_id}.{ext}"
+            (PHOTO_DIR / name).write_bytes(raw)
+            self.db.execute("UPDATE nomenclature SET photo=?, updated_at=? WHERE id=?",
+                            (name, now_iso(), item_id))
+            return 200, {"ok": True, "photo": name}
+        if path == "/api/nomenclature/group/save":
+            return 200, {"ok": True, "group": self.nom.save_group(body)}
+        if path == "/api/nomenclature/group/delete":
+            self.nom.delete_group(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/nomenclature/variant/save":
+            return 200, {"ok": True, "variant": self.nom.save_variant(body)}
+        if path == "/api/nomenclature/variant/delete":
+            self.nom.delete_variant(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/spec/save":
+            return 200, {"ok": True, "spec": self.nom.save_spec(body)}
+        if path == "/api/spec/delete":
+            self.nom.delete_spec(body.get("id", ""))
+            return 200, {"ok": True}
+        # ------------------------------------------------------------- склады
+        if path == "/api/warehouse/save":
+            # Фронтенд шлёт пустой id для новой записи — setdefault его не заменит.
+            if not body.get("id"):
+                body["id"] = uid("wh")
+                row = self.db.one(
+                    "SELECT COALESCE(MAX(position),0) p FROM warehouses") or {}
+                body.setdefault("position", int(num(row.get("p"))) + 1)
+            if not (body.get("name") or "").strip():
+                return 400, {"error": "Укажите название склада"}
+            return 200, {"ok": True, "warehouse": self.db.upsert("warehouses", body)}
+        if path == "/api/warehouse/delete":
+            wid = body.get("id", "")
+            left = self.db.one(
+                "SELECT COALESCE(SUM(qty),0) v FROM stock_moves WHERE warehouse_id=?",
+                (wid,)) or {}
+            if abs(num(left.get("v"))) > 0.001:
+                return 400, {"error": "На складе есть остатки — сначала переместите их"}
+            self.db.execute("UPDATE warehouses SET archived=1 WHERE id=?", (wid,))
+            return 200, {"ok": True}
+        if path == "/api/price-type/save":
+            if not body.get("id"):
+                body["id"] = uid("pt")
+                row = self.db.one(
+                    "SELECT COALESCE(MAX(position),0) p FROM price_types") or {}
+                body.setdefault("position", int(num(row.get("p"))) + 1)
+            if not (body.get("name") or "").strip():
+                return 400, {"error": "Укажите название типа цен"}
+            if body.get("is_base"):
+                self.db.execute("UPDATE price_types SET is_base=0")
+            return 200, {"ok": True, "price_type": self.db.upsert("price_types", body)}
+        if path == "/api/price-type/delete":
+            self.db.execute("UPDATE price_types SET archived=1 WHERE id=?",
+                            (body.get("id", ""),))
+            return 200, {"ok": True}
+        # ------------------------------------------------------------ резервы
+        if path == "/api/reserve":
+            return 200, {"ok": True, "reserve": self.stock.reserve(
+                body.get("nom_id", ""), num(body.get("qty")), body.get("order_id", ""),
+                body.get("warehouse_id", ""), body.get("note", ""))}
+        if path == "/api/reserve/release":
+            return 200, {"ok": True, "released": self.stock.release(
+                body.get("id", ""), body.get("order_id", ""))}
+        # ---------------------------------------------------------- документы
+        if path == "/api/document/save":
+            return 200, {"ok": True, "document": self.docs.save(body)}
+        if path == "/api/document/post":
+            return 200, {"ok": True, "document": self.docs.post(body.get("id", ""))}
+        if path == "/api/document/unpost":
+            return 200, {"ok": True, "document": self.docs.unpost(body.get("id", ""))}
+        if path == "/api/document/delete":
+            self.docs.delete(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/sale/quick":
+            return 200, {"ok": True, "document": self.docs.quick_sale(
+                body.get("rows") or [], body.get("warehouse_id", ""),
+                body.get("channel", "shop"), body.get("account_id", ""),
+                body.get("note", ""), num(body.get("discount")))}
+        if path == "/api/receipt/quick":
+            return 200, {"ok": True, "document": self.docs.quick_receipt(
+                body.get("nom_id", ""), num(body.get("qty")), num(body.get("cost")),
+                body.get("warehouse_id", ""), body.get("batch_id", ""),
+                body.get("note", ""))}
+        # ------------------------------------------------------------- партии
+        if path == "/api/batch/plan":
+            return 200, self.batches.plan(
+                body.get("nom_id", ""), num(body.get("qty")), body.get("mode", "full"),
+                int(num(body.get("plates"))), body.get("printer_id", ""),
+                body.get("spool_id", ""), num(body.get("price")))
+        if path == "/api/batch/create":
+            return 200, {"ok": True, "batch": self.batches.create(body)}
+        if path == "/api/batch/receive":
+            return 200, {"ok": True, "batch": self.batches.receive(
+                body.get("id", ""), num(body.get("qty")), num(body.get("scrap")),
+                body.get("job_id", ""), num(body.get("cost")), body.get("note", ""))}
+        if path == "/api/batch/cancel":
+            return 200, {"ok": True, "batch": self.batches.cancel(body.get("id", ""))}
+        if path == "/api/batch/repeat":
+            return 200, {"ok": True, "batch": self.batches.repeat(
+                body.get("id", ""), bool(body.get("start_now")))}
+        if path == "/api/batch/from-plan":
+            return 200, {"ok": True, "batches": self.batches.create_from_plan(
+                body.get("rows") or [], body.get("warehouse_id", ""),
+                bool(body.get("start_now")))}
         if path == "/api/defect/save":
             data = dict(body)
             data.setdefault("id", uid("df"))
@@ -734,6 +935,8 @@ class Handler(BaseHTTPRequestHandler):
                                        (query.get("id") or [""])[0])
             if path == "/api/shelf/photo.jpg":
                 return self.serve_shelf_photo((query.get("id") or [""])[0])
+            if path == "/api/nomenclature/photo.jpg":
+                return self.serve_nom_photo((query.get("id") or [""])[0])
             if path == "/api/order/photo.jpg":
                 return self.serve_order_photo((query.get("photo_id") or [""])[0])
             if path == "/api/stream":
@@ -819,6 +1022,11 @@ class Handler(BaseHTTPRequestHandler):
         """Фото позиции стеллажа из каталога данных."""
         item = self.api.db.one("SELECT photo FROM shelf_items WHERE id=?", (item_id,))
         return self.serve_photo_file((item or {}).get("photo") or "")
+
+    def serve_nom_photo(self, nom_id: str):
+        """Фото карточки номенклатуры."""
+        row = self.api.db.one("SELECT photo FROM nomenclature WHERE id=?", (nom_id,))
+        return self.serve_photo_file((row or {}).get("photo") or "")
 
     def serve_order_photo(self, photo_id: str):
         """Фото заказа по id записи order_photos."""
