@@ -184,6 +184,7 @@ def main() -> int:
             server.shutdown()
             handler_api = getattr(server.RequestHandlerClass, "api", None)
             if handler_api:
+                handler_api.updater.shutdown()
                 handler_api.manager.shutdown()
                 handler_api.db.close()
         except Exception:

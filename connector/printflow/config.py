@@ -130,6 +130,14 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "reply_templates": [],        # шаблоны ответов клиентам [{id,title,text}]
     "weekly_report_day": 1,       # день недели еженедельного отчёта (1 = понедельник)
     "weekly_report_time": "20:00",
+    # --- Обновления -------------------------------------------------------
+    "update_check_enabled": True,   # спрашивать GitHub о новых версиях
+    "auto_update_enabled": False,   # ставить обновления самостоятельно
+    "update_check_hours": 6.0,      # как часто проверять, часов
+    "update_branch": "main",        # ветка, за которой следим
+    "update_seen_sha": "",          # о какой версии уже сообщили
+    "installed_sha": "",            # что установлено (для режима без git)
+    "last_update_at": "",           # когда обновлялись в последний раз
     # Интерфейс
     "theme": "system",
     "accent": "indigo",

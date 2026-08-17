@@ -28,6 +28,8 @@ class PrinterManager:
         self.acc = Accounting(db)
         self.printers: dict[str, BambuPrinter] = {}
         self.guard = Watchdog(self)
+        # Учёт партий подключает api.py после создания менеджера (см. Api.__init__).
+        self.batches = None
         self.lock = threading.RLock()
         self._stop = threading.Event()
         # Память мониторинга: tray_uuid слотов, отчёты о расхождениях, напоминания
@@ -188,6 +190,14 @@ class PrinterManager:
                 self.guard.add_runtime(printer_id, duration, grams)
             except Exception as exc:
                 self.db.add_event("error", "Не удалось учесть наработку", str(exc), printer_id)
+        # Партия печати: годные штуки приходуются на склад, брак идёт в потери.
+        # Делает это коннектор, а не браузер, — печать ночью учтётся сама.
+        if job.get("batch_id") and getattr(self, "batches", None):
+            try:
+                self.batches.on_job_finished(job)
+            except Exception as exc:
+                self.db.add_event("error", "Партия: не удалось учесть задание", str(exc),
+                                  printer_id, {"job_id": job.get("id")})
         if state == "failed":
             self._register_failure(printer_id, job, duration, grams)
         if state == "done" and job.get("order_id"):

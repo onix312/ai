@@ -305,6 +305,10 @@ const VIEWS = {
   queue: { title: 'Очередь печати', sub: 'Задания парка и журнал печати' },
   orders: { title: 'Заказы', sub: 'Канбан, сроки и экономика заказов' },
   customers: { title: 'Клиенты', sub: 'История покупок и сегменты' },
+  products: { title: 'Товары', sub: 'Номенклатура, остатки, цены и экономика' },
+  batches: { title: 'Партии печати', sub: 'Производство на склад и автоприход' },
+  documents: { title: 'Документы', sub: 'Приход, продажа, перемещение, инвентаризация' },
+  warehouses: { title: 'Склады', sub: 'Остатки по местам хранения и оборотка' },
   shelf: { title: 'Стеллаж', sub: 'Готовая продукция на полке магазина' },
   finance: { title: 'Финансы', sub: 'Автоматический учёт доходов и расходов' },
   inventory: { title: 'Склад пластика', sub: 'Остатки катушек и база изделий' },
@@ -315,8 +319,13 @@ const VIEWS = {
 };
 /* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
 const VIEW_ALIASES = {
-  spools: 'inventory', filament: 'inventory', stock: 'inventory', warehouse: 'inventory',
+  spools: 'inventory', filament: 'inventory', stock: 'inventory',
   shelf2: 'shelf', store: 'shelf', polka: 'shelf',
+  nomenclature: 'products', goods: 'products', catalog: 'products', items: 'products',
+  tovary: 'products', product: 'products',
+  batch: 'batches', partii: 'batches', production: 'batches',
+  docs2: 'documents', document: 'documents', documenty: 'documents',
+  warehouse: 'warehouses', sklad: 'warehouses', wh: 'warehouses',
   money: 'finance', finances: 'finance', accounting: 'finance',
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
   jobs: 'queue', print: 'queue', clients: 'customers',

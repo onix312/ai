@@ -14,7 +14,7 @@ from typing import Any, Iterable, Iterator
 from .config import (DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS, DEFAULT_EXPENSE_CATEGORIES,
                      DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -53,6 +53,29 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
         ("est_grams", "REAL DEFAULT 0"),
+        ("batch_id", "TEXT"),                # к какой партии относится запуск
+        ("batch_qty", "REAL DEFAULT 0"),     # сколько годных штук даёт запуск
+    ],
+    "orders": [
+        ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
+        ("warehouse_id", "TEXT"),            # с какого склада отгружаем
+        ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
+    ],
+    "customers": [
+        ("kind", "TEXT DEFAULT 'person'"),   # person | company
+        ("inn", "TEXT DEFAULT ''"),
+        ("segment", "TEXT DEFAULT ''"),
+        ("discount", "REAL DEFAULT 0"),
+        ("price_type_id", "TEXT"),
+        ("credit_limit", "REAL DEFAULT 0"),
+        ("address", "TEXT DEFAULT ''"),
+        ("email", "TEXT DEFAULT ''"),
+    ],
+    "spools": [
+        ("warehouse_id", "TEXT"),            # где физически лежит катушка
+        ("cell", "TEXT DEFAULT ''"),         # адрес хранения
+        ("opened_at", "TEXT"),               # когда вскрыта
+        ("supplier", "TEXT DEFAULT ''"),
     ],
     "catalog": [
         ("cost", "REAL DEFAULT 0"),
@@ -487,8 +510,12 @@ class Database:
         # кириллице делаем средствами Python.
         self.conn.create_function("pylower", 1, lambda v: v.lower() if isinstance(v, str) else v)
         self.conn.executescript(SCHEMA)
+        from .schema_v3 import SCHEMA_V3
+        self.conn.executescript(SCHEMA_V3)
         self._migrate()
         self._seed()
+        self._seed_v3()
+        self._migrate_v3_data()
 
     # ------------------------------------------------------------------ ядро
     def _migrate(self) -> None:
@@ -539,6 +566,174 @@ class Database:
                     (key, json.dumps(value, ensure_ascii=False)),
                 )
             cur.commit()
+
+    def _seed_v3(self) -> None:
+        """Справочники версии 3.0: склады, типы цен, группы номенклатуры."""
+        from .schema_v3 import DEFAULT_NOM_GROUPS, DEFAULT_PRICE_TYPES, DEFAULT_WAREHOUSES
+        with self.lock:
+            cur = self.conn
+            for row in DEFAULT_WAREHOUSES:
+                cur.execute(
+                    "INSERT OR IGNORE INTO warehouses(id,name,kind,retail,position)"
+                    " VALUES(?,?,?,?,?)", row)
+            for row in DEFAULT_PRICE_TYPES:
+                cur.execute(
+                    "INSERT OR IGNORE INTO price_types(id,name,markup,is_base,position)"
+                    " VALUES(?,?,?,?,?)", row)
+            for row in DEFAULT_NOM_GROUPS:
+                cur.execute(
+                    "INSERT OR IGNORE INTO nom_groups(id,parent_id,name,code,niche_id,position)"
+                    " VALUES(?,?,?,?,?,?)", row)
+            cur.commit()
+
+    def _migrate_v3_data(self) -> None:
+        """Перенос catalog + shelf_items в номенклатуру и регистр остатков.
+
+        Выполняется один раз: признак — настройка `migrated_v3`. Старые таблицы
+        не удаляются, чтобы можно было сверить данные.
+        """
+        with self.lock:
+            done = self.conn.execute(
+                "SELECT value FROM settings WHERE key='migrated_v3'").fetchone()
+        if done and json.loads(done[0]) is True:
+            return
+        try:
+            self._do_migrate_v3()
+        except Exception as exc:  # миграция не должна ронять запуск
+            self.add_event("error", "Миграция данных 3.0 не завершена", str(exc))
+            return
+        self.execute(
+            "INSERT INTO settings(key,value) VALUES('migrated_v3','true')"
+            " ON CONFLICT(key) DO UPDATE SET value='true'")
+
+    def _do_migrate_v3(self) -> None:
+        from .config import now_iso as _now
+        import uuid as _uuid
+
+        def new_id(prefix: str) -> str:
+            return f"{prefix}_{_uuid.uuid4().hex[:10]}"
+
+        def fnum(value, default=0.0) -> float:
+            try:
+                result = float(str(value).replace(",", "."))
+                return result if result == result else default
+            except (TypeError, ValueError):
+                return default
+
+        groups = {
+            "pets": "g_pets", "home": "g_home", "business": "g_business",
+        }
+        base_type = "retail"
+        shelf_wh = "shelf"
+        counter = self.query("SELECT COUNT(*) n FROM nomenclature")
+        index = int(fnum((counter[0] if counter else {}).get("n")))
+
+        # 1) каталог моделей → номенклатура
+        catalog_map: dict[str, str] = {}
+        for row in self.query("SELECT * FROM catalog"):
+            exists = self.one("SELECT id FROM nomenclature WHERE legacy_catalog_id=?",
+                              (row["id"],))
+            if exists:
+                catalog_map[row["id"]] = exists["id"]
+                continue
+            index += 1
+            nom_id = new_id("nom")
+            self.upsert("nomenclature", {
+                "id": nom_id, "code": f"{index:06d}", "name": row.get("name") or "Без названия",
+                "group_id": groups.get(row.get("niche_id") or "", "g_products"),
+                "kind": "product", "unit": "шт", "niche_id": row.get("niche_id"),
+                "material": row.get("material") or "PLA",
+                "grams": fnum(row.get("grams")), "hours": fnum(row.get("hours")),
+                "fit_per_plate": max(1, int(fnum(row.get("fit_per_plate"), 1))),
+                "file": row.get("file") or "", "note": row.get("notes") or "",
+                "archived": int(fnum(row.get("archived"))),
+                "legacy_catalog_id": row["id"],
+                "created_at": row.get("created_at") or _now(), "updated_at": _now(),
+            })
+            catalog_map[row["id"]] = nom_id
+            if fnum(row.get("price")) > 0:
+                self.upsert("prices", {
+                    "id": new_id("prc"), "at": row.get("created_at") or _now(),
+                    "nom_id": nom_id, "price_type_id": base_type,
+                    "price": round(fnum(row.get("price")), 2), "note": "перенос из базы изделий"})
+
+        # 2) позиции стеллажа → номенклатура (или связь с уже перенесённой моделью)
+        shelf_map: dict[str, str] = {}
+        for row in self.query("SELECT * FROM shelf_items"):
+            exists = self.one("SELECT id FROM nomenclature WHERE legacy_shelf_id=?",
+                              (row["id"],))
+            if exists:
+                shelf_map[row["id"]] = exists["id"]
+                continue
+            linked = catalog_map.get(row.get("catalog_id") or "")
+            if linked:
+                nom_id = linked
+                self.execute(
+                    "UPDATE nomenclature SET legacy_shelf_id=?, min_qty=?, photo=?,"
+                    " updated_at=? WHERE id=?",
+                    (row["id"], fnum(row.get("min_qty")), row.get("photo") or "",
+                     _now(), nom_id))
+            else:
+                index += 1
+                nom_id = new_id("nom")
+                self.upsert("nomenclature", {
+                    "id": nom_id, "code": f"{index:06d}",
+                    "name": row.get("name") or "Позиция полки",
+                    "group_id": "g_products", "kind": "product", "unit": "шт",
+                    "min_qty": fnum(row.get("min_qty")), "photo": row.get("photo") or "",
+                    "note": row.get("note") or "", "legacy_shelf_id": row["id"],
+                    "archived": 0 if int(fnum(row.get("active"), 1)) else 1,
+                    "created_at": row.get("created_at") or _now(), "updated_at": _now(),
+                })
+            shelf_map[row["id"]] = nom_id
+            if fnum(row.get("price")) > 0:
+                self.upsert("prices", {
+                    "id": new_id("prc"), "at": row.get("updated_at") or _now(),
+                    "nom_id": nom_id, "price_type_id": base_type,
+                    "price": round(fnum(row.get("price")), 2), "note": "перенос со стеллажа"})
+
+        # 3) движения стеллажа → регистр остатков
+        kind_map = {"produce": "production", "sale": "sale", "online": "sale",
+                    "writeoff": "writeoff", "inventory": "inventory"}
+        for row in self.query("SELECT * FROM shelf_moves ORDER BY datetime(at)"):
+            nom_id = shelf_map.get(row.get("item_id") or "")
+            if not nom_id:
+                continue
+            if self.one("SELECT id FROM stock_moves WHERE note LIKE ? AND nom_id=?",
+                        (f"%перенос:{row['id']}%", nom_id)):
+                continue
+            qty = fnum(row.get("qty"))
+            item = self.one("SELECT cost_per_unit FROM shelf_items WHERE id=?",
+                            (row.get("item_id"),)) or {}
+            unit_cost = fnum(item.get("cost_per_unit"))
+            self.upsert("stock_moves", {
+                "id": new_id("mv"), "at": row.get("at") or _now(),
+                "doc_kind": kind_map.get(row.get("kind") or "", "receipt"),
+                "nom_id": nom_id, "warehouse_id": shelf_wh,
+                "qty": round(qty, 3), "cost": round(qty * unit_cost, 2),
+                "job_id": row.get("job_id"),
+                "note": f"перенос:{row['id']} {row.get('note') or ''}".strip()})
+
+        # 4) остатки, которые есть в карточке, но не набрались движениями
+        for legacy_id, nom_id in shelf_map.items():
+            item = self.one("SELECT * FROM shelf_items WHERE id=?", (legacy_id,)) or {}
+            want = fnum(item.get("qty"))
+            have_row = self.one(
+                "SELECT COALESCE(SUM(qty),0) v FROM stock_moves WHERE nom_id=? AND warehouse_id=?",
+                (nom_id, shelf_wh)) or {}
+            have = fnum(have_row.get("v"))
+            diff = round(want - have, 3)
+            if abs(diff) < 0.001:
+                continue
+            unit_cost = fnum(item.get("cost_per_unit"))
+            self.upsert("stock_moves", {
+                "id": new_id("mv"), "at": _now(), "doc_kind": "inventory",
+                "nom_id": nom_id, "warehouse_id": shelf_wh,
+                "qty": diff, "cost": round(diff * unit_cost, 2),
+                "note": "перенос: выравнивание остатка при переходе на 3.0"})
+
+        self.add_event("system", "Данные перенесены в учёт 3.0",
+                       f"Номенклатура: {len(set(list(catalog_map.values()) + list(shelf_map.values())))} позиций")
 
     def query(self, sql: str, params: Iterable = ()) -> list[dict]:
         with self.lock:
@@ -670,6 +865,16 @@ class Database:
             except json.JSONDecodeError:
                 row["data"] = {}
         return rows
+
+    def backup_to(self, target) -> None:
+        """Консистентная копия базы через SQLite API (безопасна под нагрузкой)."""
+        import sqlite3
+        with self.lock:
+            dest = sqlite3.connect(str(target))
+            try:
+                self.conn.backup(dest)
+            finally:
+                dest.close()
 
     def close(self) -> None:
         with self.lock:

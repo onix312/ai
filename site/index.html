@@ -6,8 +6,8 @@
 <title>NOZZA · PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
-<link rel="stylesheet" href="assets/theme.css?v=2.1.0">
-<link rel="stylesheet" href="assets/app.css?v=2.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=3.1.0">
+<link rel="stylesheet" href="assets/app.css?v=3.1.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -21,6 +21,11 @@
   <a class="nav-link" href="#queue" data-view="queue"><span class="ic">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
   <a class="nav-link" href="#orders" data-view="orders"><span class="ic">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
   <a class="nav-link" href="#customers" data-view="customers"><span class="ic">◎</span>Клиенты</a>
+  <div class="nav-group-title">Склад и товары</div>
+  <a class="nav-link" href="#products" data-view="products"><span class="ic">▩</span>Товары<span class="tag warn" id="nav_products_tag" hidden></span></a>
+  <a class="nav-link" href="#batches" data-view="batches"><span class="ic">⎙</span>Партии<span class="tag" id="nav_batches_tag" hidden></span></a>
+  <a class="nav-link" href="#documents" data-view="documents"><span class="ic">▤</span>Документы<span class="tag" id="nav_docs_tag" hidden></span></a>
+  <a class="nav-link" href="#warehouses" data-view="warehouses"><span class="ic">▥</span>Склады</a>
   <div class="nav-group-title">Экономика</div>
   <a class="nav-link" href="#finance" data-view="finance"><span class="ic">₽</span>Финансы</a>
   <a class="nav-link" href="#shelf" data-view="shelf"><span class="ic">▤</span>Стеллаж<span class="tag warn" id="nav_shelf_tag" hidden></span></a>
@@ -428,6 +433,111 @@
     <div id="rep_expenses"></div>
    </div>
   </div>
+ </div>
+</section>
+
+<!-- ================================================== ТОВАРЫ (номенклатура) -->
+<section class="view" id="view-products">
+ <div class="view-head">
+  <div><span class="eyebrow">Номенклатура · учёт 3.0</span><h1>Товары</h1><p>Модель, остаток по складам, цены и экономика — одной карточкой.</p></div>
+  <div class="head-actions">
+   <select id="prod_warehouse" title="Склад"><option value="">Все склады</option></select>
+   <button class="btn" id="prod_recalc" type="button" title="Пересчитать цены от себестоимости">↻ Цены</button>
+   <button class="btn" id="prod_plan_btn" type="button">⚑ План пополнения</button>
+   <button class="btn" id="prod_sale_btn" type="button">💰 Продажа</button>
+   <button class="btn primary" id="prod_add" type="button">+ Товар</button>
+  </div>
+ </div>
+ <div class="kpi-grid" id="prod_kpis"></div>
+ <div class="toolbar">
+  <div class="search-box"><input id="prod_search" type="search" placeholder="Название, артикул, код, штрихкод…"></div>
+  <select id="prod_group"><option value="">Все группы</option></select>
+  <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option></select>
+  <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
+  <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
+ </div>
+ <div class="prod-grid" id="prod_grid"></div>
+ <div class="table-wrap" id="prod_table" hidden><table class="data"><thead><tr>
+  <th>Код</th><th>Товар</th><th>Группа</th><th class="right">Остаток</th><th class="right">Резерв</th>
+  <th class="right">Свободно</th><th class="right">Цена</th><th class="right">С/с</th><th class="right">Маржа</th>
+  <th class="right">₽/час</th><th class="right">7 дн.</th><th>Статус</th><th></th></tr></thead>
+  <tbody id="prod_tbody"></tbody></table></div>
+</section>
+
+<!-- ================================================== ПАРТИИ ПЕЧАТИ -->
+<section class="view" id="view-batches">
+ <div class="view-head">
+  <div><span class="eyebrow">Производство</span><h1>Партии печати</h1><p>N штук → раскладка на плиты → задания → автоприход на склад.</p></div>
+  <div class="head-actions">
+   <button class="btn" id="batch_plan_btn" type="button">⚑ Собрать по плану</button>
+   <button class="btn primary" id="batch_add" type="button">⎙ Напечатать партию</button>
+  </div>
+ </div>
+ <div class="kpi-grid" id="batch_kpis"></div>
+ <div class="card">
+  <div class="card-head"><div><h2>Партии</h2><p id="batch_sub">—</p></div>
+   <div class="seg" id="batch_filter"><button data-state="" class="on">Все</button><button data-state="planned">План</button><button data-state="printing">В печати</button><button data-state="partial">Частично</button><button data-state="done">Готовы</button></div></div>
+  <div id="batch_list"></div>
+ </div>
+</section>
+
+<!-- ================================================== ДОКУМЕНТЫ -->
+<section class="view" id="view-documents">
+ <div class="view-head">
+  <div><span class="eyebrow">Складской учёт</span><h1>Документы</h1><p>Приход, продажа, перемещение, списание, инвентаризация. Проведение и отмена.</p></div>
+  <div class="head-actions">
+   <select id="doc_new_kind">
+    <option value="receipt">Приход</option><option value="sale">Продажа</option>
+    <option value="move">Перемещение</option><option value="writeoff">Списание</option>
+    <option value="inventory">Инвентаризация</option><option value="production">Производство</option>
+    <option value="return">Возврат</option><option value="pricing">Установка цен</option>
+   </select>
+   <button class="btn primary" id="doc_add" type="button">+ Создать</button>
+  </div>
+ </div>
+ <div class="toolbar">
+  <div class="search-box"><input id="doc_search" type="search" placeholder="Номер или комментарий…"></div>
+  <select id="doc_filter_kind"><option value="">Все виды</option>
+   <option value="receipt">Приход</option><option value="sale">Продажа</option>
+   <option value="move">Перемещение</option><option value="writeoff">Списание</option>
+   <option value="inventory">Инвентаризация</option><option value="production">Производство</option>
+   <option value="return">Возврат</option><option value="pricing">Установка цен</option></select>
+  <select id="doc_filter_state"><option value="">Все статусы</option><option value="draft">Черновики</option><option value="posted">Проведённые</option></select>
+ </div>
+ <div class="table-wrap"><table class="data"><thead><tr>
+  <th>Номер</th><th>Вид</th><th>Дата</th><th>Склад</th><th class="right">Строк</th>
+  <th class="right">Количество</th><th class="right">Сумма</th><th>Статус</th><th></th></tr></thead>
+  <tbody id="doc_tbody"></tbody></table></div>
+</section>
+
+<!-- ================================================== СКЛАДЫ -->
+<section class="view" id="view-warehouses">
+ <div class="view-head">
+  <div><span class="eyebrow">Структура хранения</span><h1>Склады</h1><p>Остатки по местам хранения и оборотно-сальдовая ведомость.</p></div>
+  <div class="head-actions">
+   <button class="btn" id="wh_types_btn" type="button">◫ Типы цен</button>
+   <button class="btn primary" id="wh_add" type="button">+ Склад</button>
+  </div>
+ </div>
+ <div class="kpi-grid" id="wh_kpis"></div>
+ <div class="wh-grid" id="wh_grid"></div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head">
+   <div><h2>Оборотно-сальдовая ведомость</h2><p id="turn_sub">Начальный остаток, приход, расход, конечный</p></div>
+   <div class="head-actions">
+    <select id="turn_warehouse"><option value="">Все склады</option></select>
+    <div class="seg" id="turn_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
+   </div></div>
+  <div class="table-wrap"><table class="data"><thead><tr>
+   <th>Код</th><th>Номенклатура</th>
+   <th class="right">Нач. кол-во</th><th class="right">Нач. сумма</th>
+   <th class="right">Приход</th><th class="right">Расход</th>
+   <th class="right">Кон. кол-во</th><th class="right">Кон. сумма</th></tr></thead>
+   <tbody id="turn_tbody"></tbody></table></div>
+ </div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Резервы</h2><p>Товар, отложенный под заказы</p></div></div>
+  <div id="wh_reserves"></div>
  </div>
 </section>
 
@@ -2497,8 +2607,9 @@
     <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Обновления</h2><p>Проверка новых версий PrintFlow</p></div></div>
+    <div class="card-head"><div><h2>Обновления</h2><p>Свежая версия PrintFlow с GitHub</p></div></div>
     <div id="set_update_info"></div>
+    <div id="set_update_rows"></div>
    </div>
    <div class="card" data-set-card>
     <div class="card-head"><div><h2>Данные</h2><p>Резервная копия и перенос из старой версии</p></div></div>
@@ -2805,6 +2916,213 @@
 
 <dialog id="cam_modal"><button class="icon-btn" type="button" data-close="cam_modal">×</button><img id="cam_full" alt="Камера принтера"></dialog>
 
+<!-- ============================================ КАРТОЧКА НОМЕНКЛАТУРЫ -->
+<dialog class="modal wide" id="nom_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Номенклатура</span><h2 id="nom_modal_title">Товар</h2><p id="nom_modal_sub">Нормативы производства, цены и остатки</p></div>
+  <button class="icon-btn" type="button" data-close="nom_modal">×</button></div>
+ <div class="seg tabs" id="nom_tabs">
+  <button type="button" data-pane="main" class="on">Основное</button>
+  <button type="button" data-pane="prod">Производство</button>
+  <button type="button" data-pane="price">Цены</button>
+  <button type="button" data-pane="spec">Состав</button>
+  <button type="button" data-pane="stock">Остатки</button>
+ </div>
+ <div class="modal-body">
+  <div class="pane on" id="nompane-main">
+   <div class="form-grid">
+    <label class="field span-2"><span>Наименование *</span><input id="nf_name" placeholder="Адресник «Кость»"></label>
+    <label class="field"><span>Код</span><input id="nf_code" readonly placeholder="присвоится автоматически"></label>
+    <label class="field"><span>Артикул</span><input id="nf_sku" placeholder="ADR-001"></label>
+    <label class="field"><span>Штрихкод</span><input id="nf_barcode" placeholder="2000000000015"></label>
+    <label class="field"><span>Вид</span><select id="nf_kind">
+     <option value="product">Товар</option><option value="semi">Полуфабрикат</option>
+     <option value="kit">Комплект</option><option value="material">Материал</option>
+     <option value="service">Услуга</option></select></label>
+    <label class="field"><span>Группа</span><select id="nf_group_id"></select></label>
+    <label class="field"><span>Ниша</span><select id="nf_niche_id"><option value="">—</option></select></label>
+    <label class="field"><span>Единица</span><input id="nf_unit" value="шт" list="units_datalist"></label>
+    <label class="field"><span>Мин. остаток</span><input id="nf_min_qty" type="number" min="0" step="any" placeholder="10"></label>
+    <label class="field"><span>Макс. остаток</span><input id="nf_max_qty" type="number" min="0" step="any"></label>
+    <label class="field"><span>НДС, %</span><input id="nf_vat" type="number" min="0" step="any" value="0"></label>
+    <label class="check"><input type="checkbox" id="nf_marked"> Подлежит маркировке</label>
+    <label class="field span-2"><span>Комментарий</span><input id="nf_note" placeholder="Заметка для себя"></label>
+    <div class="field span-2"><span>Фото</span>
+     <div class="photo-row"><img id="nf_photo_preview" alt="" hidden>
+      <button class="btn sm" type="button" id="nf_photo_btn">⬆ Загрузить фото</button>
+      <input type="file" id="nf_photo_file" accept="image/*" hidden></div></div>
+   </div>
+  </div>
+  <div class="pane" id="nompane-prod">
+   <div class="form-grid">
+    <label class="field"><span>Материал</span><input id="nf_material" placeholder="PLA" list="materials_datalist"></label>
+    <label class="field"><span>Вес изделия, г</span><input id="nf_grams" type="number" min="0" step="any"></label>
+    <label class="field"><span>Время печати, ч</span><input id="nf_hours" type="number" min="0" step="any"></label>
+    <label class="field"><span>Влезает на стол, шт</span><input id="nf_fit_per_plate" type="number" min="1" step="1" value="1"></label>
+    <label class="field"><span>Постобработка, мин</span><input id="nf_post_minutes" type="number" min="0" step="any"></label>
+    <label class="field"><span>Файл на принтере</span><input id="nf_file" placeholder="tag.3mf"></label>
+    <label class="field span-2"><span>Ссылка на модель</span><input id="nf_model_url" placeholder="https://…"></label>
+    <label class="field span-2"><span>Лицензия</span><input id="nf_license" placeholder="Своя модель / коммерческая лицензия"></label>
+   </div>
+   <div class="notice" id="nf_norm_hint"><span>ⓘ</span><span>Нормативы используются калькулятором партии: они определяют плиты, пластик и время.</span></div>
+  </div>
+  <div class="pane" id="nompane-price">
+   <div id="nf_prices"></div>
+   <div class="card-head" style="margin-top:14px"><div><h3>История цен</h3><p>Пишется при каждом изменении</p></div></div>
+   <div id="nf_price_history"></div>
+  </div>
+  <div class="pane" id="nompane-spec">
+   <p class="muted" style="margin-bottom:10px">Из чего состоит изделие. При производстве комплекта составляющие спишутся со склада автоматически.</p>
+   <div id="nf_spec_rows"></div>
+   <button class="btn sm" type="button" id="nf_spec_add">+ Строка состава</button>
+  </div>
+  <div class="pane" id="nompane-stock">
+   <div id="nf_stock_box"></div>
+   <div class="card-head" style="margin-top:14px"><div><h3>Движения</h3><p>Все приходы и расходы позиции</p></div></div>
+   <div id="nf_moves"></div>
+  </div>
+ </div>
+ <div class="modal-foot">
+  <button class="btn danger" type="button" id="nom_delete">Удалить</button>
+  <button class="btn" type="button" id="nom_batch">⎙ Напечатать партию</button>
+  <span class="spacer"></span>
+  <button class="btn" type="button" data-close="nom_modal">Отмена</button>
+  <button class="btn primary" type="button" id="nom_save">Сохранить</button>
+ </div>
+</form></dialog>
+
+<!-- ============================================ ПАРТИЯ ПЕЧАТИ -->
+<dialog class="modal wide" id="batch_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Производство</span><h2>Напечатать партию</h2><p id="batch_modal_sub">Расчёт обновляется на сервере при каждом изменении</p></div>
+  <button class="icon-btn" type="button" data-close="batch_modal">×</button></div>
+ <div class="modal-body">
+  <div class="batch-layout">
+   <div>
+    <div class="form-grid">
+     <label class="field span-2"><span>Товар *</span><select id="bf_nom"></select></label>
+     <label class="field"><span>Сколько штук нужно</span><input id="bf_qty" type="number" min="1" step="1" value="10"></label>
+     <label class="field"><span>Режим раскладки</span><select id="bf_mode">
+      <option value="full">Полные плиты</option><option value="exact">Ровно N</option>
+      <option value="manual">Вручную</option></select></label>
+     <label class="field" id="bf_plates_wrap" hidden><span>Запусков вручную</span><input id="bf_plates" type="number" min="1" step="1" value="1"></label>
+     <label class="field"><span>Склад прихода</span><select id="bf_warehouse"></select></label>
+     <label class="field"><span>Принтер</span><select id="bf_printer"><option value="">Любой свободный</option></select></label>
+     <label class="field"><span>Катушка</span><select id="bf_spool"><option value="">Определить автоматически</option></select></label>
+     <label class="field"><span>Приоритет</span><input id="bf_priority" type="number" step="1" value="0"></label>
+     <label class="field span-2"><span>Комментарий</span><input id="bf_note" placeholder="Запас на полку"></label>
+     <label class="check span-2"><input type="checkbox" id="bf_start"> Стартовать сразу, если принтер свободен</label>
+    </div>
+   </div>
+   <div class="batch-calc">
+    <div class="card">
+     <div class="card-head"><div><h3>Расчёт партии</h3><p id="bf_calc_sub">—</p></div></div>
+     <div id="bf_calc_rows"></div>
+     <div class="verdict" id="bf_verdict" style="margin-top:12px">Выберите товар и количество.</div>
+     <div id="bf_warnings"></div>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span>
+  <button class="btn" type="button" data-close="batch_modal">Отмена</button>
+  <button class="btn primary" type="button" id="bf_create">⎙ Напечатать партию</button>
+ </div>
+</form></dialog>
+
+<!-- ============================================ ПЛАН ПОПОЛНЕНИЯ -->
+<dialog class="modal wide" id="plan_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Автопартия</span><h2>План пополнения</h2><p>Что заканчивается по скорости продаж. Снимите лишнее и поставьте в очередь.</p></div>
+  <button class="icon-btn" type="button" data-close="plan_modal">×</button></div>
+ <div class="modal-body"><div id="plan_rows"></div></div>
+ <div class="modal-foot"><span id="plan_total" class="muted"></span><span class="spacer"></span>
+  <button class="btn" type="button" data-close="plan_modal">Отмена</button>
+  <button class="btn primary" type="button" id="plan_create">Создать партии</button></div>
+</form></dialog>
+
+<!-- ============================================ ДОКУМЕНТ -->
+<dialog class="modal wide" id="doc_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow" id="doc_modal_kind">Документ</span><h2 id="doc_modal_title">Новый документ</h2><p id="doc_modal_sub">Черновик не меняет остатки — движения появятся при проведении</p></div>
+  <button class="icon-btn" type="button" data-close="doc_modal">×</button></div>
+ <div class="modal-body">
+  <div class="form-grid">
+   <label class="field"><span>Номер</span><input id="df_number" readonly></label>
+   <label class="field"><span>Дата</span><input id="df_at" type="datetime-local"></label>
+   <label class="field" id="df_wh_wrap"><span id="df_wh_label">Склад</span><select id="df_warehouse"></select></label>
+   <label class="field" id="df_wh2_wrap" hidden><span>Склад-получатель</span><select id="df_warehouse_to"></select></label>
+   <label class="field" id="df_channel_wrap" hidden><span>Канал</span><select id="df_channel"></select></label>
+   <label class="field" id="df_account_wrap" hidden><span>Касса</span><select id="df_account"></select></label>
+   <label class="field" id="df_ptype_wrap" hidden><span>Тип цен</span><select id="df_price_type"></select></label>
+   <label class="field" id="df_reason_wrap" hidden><span>Причина</span><input id="df_reason" placeholder="Брак при постобработке"></label>
+   <label class="field span-2"><span>Комментарий</span><input id="df_note"></label>
+  </div>
+  <div class="card-head" style="margin-top:12px"><div><h3>Табличная часть</h3><p id="df_items_sub">Позиции документа</p></div>
+   <button class="btn sm" type="button" id="df_add_row">+ Строка</button></div>
+  <div class="table-wrap"><table class="data compact"><thead><tr>
+   <th style="width:38%">Номенклатура</th><th class="right">Количество</th>
+   <th class="right" id="df_th_fact" hidden>Факт</th>
+   <th class="right" id="df_th_price">Цена</th><th class="right">Сумма</th><th></th></tr></thead>
+   <tbody id="df_tbody"></tbody></table></div>
+  <div class="doc-total" id="df_total"></div>
+  <div id="df_moves_box"></div>
+ </div>
+ <div class="modal-foot">
+  <button class="btn danger" type="button" id="doc_delete">Удалить</button>
+  <button class="btn" type="button" id="doc_unpost" hidden>↩ Отменить проведение</button>
+  <span class="spacer"></span>
+  <button class="btn" type="button" data-close="doc_modal">Закрыть</button>
+  <button class="btn" type="button" id="doc_save">Записать</button>
+  <button class="btn primary" type="button" id="doc_post">✓ Провести</button>
+ </div>
+</form></dialog>
+
+<!-- ============================================ БЫСТРАЯ ПРОДАЖА -->
+<dialog class="modal wide" id="quicksale_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Касса</span><h2>Продажа с полки</h2><p>Отметьте количество — документ создастся и проведётся сам</p></div>
+  <button class="icon-btn" type="button" data-close="quicksale_modal">×</button></div>
+ <div class="modal-body">
+  <div class="form-grid">
+   <label class="field"><span>Склад</span><select id="qs_warehouse"></select></label>
+   <label class="field"><span>Канал</span><select id="qs_channel"></select></label>
+   <label class="field"><span>Касса</span><select id="qs_account"></select></label>
+   <label class="field"><span>Скидка, ₽</span><input id="qs_discount" type="number" min="0" step="any" value="0"></label>
+  </div>
+  <div class="search-box" style="margin:12px 0"><input id="qs_search" type="search" placeholder="Найти товар…"></div>
+  <div id="qs_rows"></div>
+ </div>
+ <div class="modal-foot"><b id="qs_total">0 ₽</b><span class="spacer"></span>
+  <button class="btn" type="button" data-close="quicksale_modal">Отмена</button>
+  <button class="btn primary" type="button" id="qs_save">💰 Продать</button></div>
+</form></dialog>
+
+<!-- ============================================ СКЛАД -->
+<dialog class="modal narrow" id="wh_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Хранение</span><h2 id="wh_modal_title">Склад</h2></div>
+  <button class="icon-btn" type="button" data-close="wh_modal">×</button></div>
+ <div class="modal-body"><div class="form-grid">
+  <label class="field span-2"><span>Название</span><input id="wf_name" placeholder="Полка магазина"></label>
+  <label class="field"><span>Вид</span><select id="wf_kind">
+   <option value="shelf">Полка магазина</option><option value="home">Домашний склад</option>
+   <option value="window">Витрина</option><option value="defect">Брак</option>
+   <option value="transit">В пути</option><option value="material">Материалы</option></select></label>
+  <label class="field"><span>Адрес / место</span><input id="wf_address" placeholder="ТЦ Север, 2 этаж"></label>
+  <label class="check span-2"><input type="checkbox" id="wf_retail"> Розничная точка — продажи идут отсюда по умолчанию</label>
+  <label class="field span-2"><span>Комментарий</span><input id="wf_note"></label>
+ </div></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="wh_delete">Удалить</button><span class="spacer"></span>
+  <button class="btn" type="button" data-close="wh_modal">Отмена</button>
+  <button class="btn primary" type="button" id="wh_save">Сохранить</button></div>
+</form></dialog>
+
+<!-- ============================================ ТИПЫ ЦЕН -->
+<dialog class="modal narrow" id="ptype_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Ценообразование</span><h2>Типы цен</h2><p>Розница, опт, B2B — своя наценка у каждого</p></div>
+  <button class="icon-btn" type="button" data-close="ptype_modal">×</button></div>
+ <div class="modal-body"><div id="ptype_rows"></div>
+  <button class="btn sm" type="button" id="ptype_add" style="margin-top:10px">+ Тип цен</button></div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn primary" type="button" data-close="ptype_modal">Готово</button></div>
+</form></dialog>
+
+<datalist id="units_datalist"><option value="шт"></option><option value="компл"></option><option value="г"></option><option value="кг"></option><option value="м"></option><option value="ч"></option></datalist>
+
 <dialog id="shelf_modal" class="modal">
  <div class="modal-head"><div><h3 id="shelf_modal_title">Позиция стеллажа</h3><p>Штуки на полке, цена ценника и себестоимость</p></div>
   <button class="icon-btn" type="button" data-close="shelf_modal">✕</button></div>
@@ -2998,12 +3316,13 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=2.1.0"></script>
-<script src="assets/core.js?v=2.1.0"></script>
-<script src="assets/printer.js?v=2.1.0"></script>
-<script src="assets/ops.js?v=2.1.0"></script>
-<script src="assets/money.js?v=2.1.0"></script>
-<script src="assets/finance.js?v=2.1.0"></script>
-<script src="assets/shelf.js?v=2.1.0"></script>
-<script src="assets/app.js?v=2.1.0"></script>
+<script src="assets/qr.js?v=3.1.0"></script>
+<script src="assets/core.js?v=3.1.0"></script>
+<script src="assets/printer.js?v=3.1.0"></script>
+<script src="assets/ops.js?v=3.1.0"></script>
+<script src="assets/money.js?v=3.1.0"></script>
+<script src="assets/finance.js?v=3.1.0"></script>
+<script src="assets/shelf.js?v=3.1.0"></script>
+<script src="assets/products.js?v=3.1.0"></script>
+<script src="assets/app.js?v=3.1.0"></script>
 </body></html>
