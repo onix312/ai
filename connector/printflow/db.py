@@ -49,17 +49,15 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("design_minutes", "REAL DEFAULT 0"),
         ("colors", "TEXT DEFAULT ''"),       # многоцвет: JSON [{material,color,grams}]
         ("qc_done", "TEXT DEFAULT ''"),      # чек-лист качества: JSON {step: true}
+        ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
+        ("warehouse_id", "TEXT"),            # с какого склада отгружаем
+        ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
     ],
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
         ("est_grams", "REAL DEFAULT 0"),
         ("batch_id", "TEXT"),                # к какой партии относится запуск
         ("batch_qty", "REAL DEFAULT 0"),     # сколько годных штук даёт запуск
-    ],
-    "orders": [
-        ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
-        ("warehouse_id", "TEXT"),            # с какого склада отгружаем
-        ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
     ],
     "customers": [
         ("kind", "TEXT DEFAULT 'person'"),   # person | company
@@ -491,6 +489,41 @@ CREATE TABLE IF NOT EXISTS shelf_moves (
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_shelf_moves_item ON shelf_moves(item_id, at);
+
+-- ------------------------------------------------- 5.0: конверты-накопления
+CREATE TABLE IF NOT EXISTS envelopes (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    pct REAL DEFAULT 0,            -- % с каждого дохода
+    goal REAL DEFAULT 0,           -- цель накопления, ₽
+    color TEXT DEFAULT '#4f46e5',
+    position INTEGER DEFAULT 0,
+    archived INTEGER DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS envelope_moves (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    envelope_id TEXT,
+    amount REAL DEFAULT 0,         -- + отложили, − забрали
+    note TEXT DEFAULT '',
+    tx_id TEXT,
+    order_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_envmoves_env ON envelope_moves(envelope_id, at);
+
+-- ------------------------------------------------- 5.0: история изменений
+CREATE TABLE IF NOT EXISTS order_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    order_id TEXT,
+    field TEXT DEFAULT '',
+    old_value TEXT DEFAULT '',
+    new_value TEXT DEFAULT '',
+    author TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_orderhist_order ON order_history(order_id, id);
 """
 
 

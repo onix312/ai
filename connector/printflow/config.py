@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import os
+import socket
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +99,16 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "guard_cold_minutes": 10.0,     # сопло холодное при статусе «печать» — тревога
     "guard_count_loss": True,       # записывать стоимость брака в расходы
     "guard_snapshot": True,         # сохранять кадр камеры в момент тревоги
+    # --- Спагетти-детект по камере ----------------------------------------
+    "spaghetti_enabled": False,     # следить за «мешаниной» в кадре (нужен pillow)
+    "spaghetti_sensitivity": 3.0,   # во сколько раз кромки должны превысить базу
+    # --- 5.0: конверты, ночная смена, окупаемость, авто-эжектор ----------
+    "envelope_auto": False,         # автоматически откладывать % с дохода в конверты
+    "printer_investment": 0.0,      # во что обошёлся принтер (для окупаемости)
+    "printer_invested_at": "",      # дата ввода в эксплуатацию
+    "night_shift_enabled": True,    # планировать длинное на ночь, срочное днём
+    "ejector_enabled": False,       # авто-эжектор (DIY): режим снятия деталей
+    "auto_backup_days": 1,          # автобэкап раз в N дней (0 = выключен)
     # --- Очередь и планирование -----------------------------------------
     "queue_check_filament": True,   # не запускать, если пластика не хватит
     "queue_check_material": True,   # не запускать, если в AMS не тот материал
@@ -225,6 +237,71 @@ DEFAULT_NICHES = [
 def now_iso() -> str:
     """Локальное время с таймзоной, секундная точность."""
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def get_local_ips() -> list[str]:
+    """IPv4-адреса этого ПК в локальной сети (для доступа с телефона/планшета).
+
+    При нескольких роутерах/подсетях полезно видеть все адреса: телефон может
+    сидеть в другой Wi-Fi сети, чем та, которую вы подумали первой.
+    """
+    ips: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        for ip in socket.gethostbyname_ex(hostname)[2]:
+            if ip and not ip.startswith("127.") and "." in ip:
+                ips.add(ip)
+    except Exception:
+        pass
+    for target in [("8.8.8.8", 80), ("1.1.1.1", 80), ("192.168.1.1", 80)]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.8)
+            s.connect(target)
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith("127.") and "." in ip:
+                ips.add(ip)
+        except Exception:
+            pass
+
+    def sort_key(ip: str):
+        if ip.startswith("192.168."):
+            return (0, ip)
+        if ip.startswith("10."):
+            return (1, ip)
+        if ip.startswith("172."):
+            try:
+                second = int(ip.split(".")[1])
+                if 16 <= second <= 31:
+                    return (2, ip)
+            except Exception:
+                pass
+        if ip.startswith("169.254."):
+            return (99, ip)
+        return (3, ip)
+
+    cleaned = [ip for ip in ips if not ip.startswith("169.254.")]
+    if not cleaned:
+        cleaned = list(ips)
+    return sorted(cleaned, key=sort_key)
+
+
+def tcp_reachable(host: str, port: int, timeout: float = 2.0) -> tuple[bool, float]:
+    """Проверить, что TCP-порт принтера отвечает. Возвращает (ok, время_мс).
+
+    Для MQTT/камеры/FTPS достаточно TCP-рукопожатия: если пакет доходит,
+    порт слушается; TLS-обмен при диагностике не нужен. Помогает разобраться,
+    в одной ли сети компьютер и принтер (частая беда при нескольких роутерах).
+    """
+    if not host:
+        return False, 0.0
+    started = time.time()
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True, round((time.time() - started) * 1000, 1)
+    except Exception:
+        return False, round((time.time() - started) * 1000, 1)
 
 
 def ensure_dirs() -> None:

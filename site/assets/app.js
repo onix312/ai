@@ -101,6 +101,8 @@ function renderDashboard() {
       + `<span class="amt ${isLate ? 'neg' : ''}">${isLate ? 'просрочен' : isToday ? 'сегодня' : esc(dateText(o.due))}</span></div>`;
   }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>';
 
+  renderPlan();
+  renderHealth();
   renderActivePrint();
   renderGauge();
   renderAmsPanel();
@@ -121,6 +123,8 @@ function renderEvents() {
 /* ================================================= виджеты панели */
 const DASH_WIDGETS = [
   ['kpis', 'Показатели (KPI-ряд)'],
+  ['plan', 'План на сегодня'],
+  ['health', 'Здоровье бизнеса'],
   ['active', 'Активная печать'],
   ['gauge', 'Прибыль за час печати'],
   ['filament', 'Пластик на очередь'],
@@ -294,6 +298,129 @@ function renderFilamentForecast() {
     + `<div class="fl-total">Всего в очереди ${nfmt(totalNeed)} г · на складе ${nfmt(Object.values(avail).reduce((a, b) => a + b, 0))} г</div>`;
 }
 
+/* =================================================== мастер-план производства */
+async function refreshPlan() {
+  try {
+    const data = await get('/api/plan/day');
+    PF.state.plan = data;
+    if (document.querySelector('#view-dashboard.on')) renderPlan();
+  } catch (e) { /* офлайн — не критично */ }
+}
+function renderPlan() {
+  const host = $('dash_plan');
+  if (!host) return;
+  const p = PF.state.plan;
+  if (!p) {
+    $('dash_plan_sub').textContent = 'Что печатать следующим — заказы и пополнение полки';
+    host.innerHTML = dashEmpty('План появится после загрузки данных.');
+    return;
+  }
+  const load = clamp(num(p.load_pct), 0, 999);
+  const barKind = p.verdict === 'bad' ? 'bad' : p.verdict === 'warn' ? 'warn' : '';
+  $('dash_plan_sub').textContent = p.verdict_text || 'Что печатать следующим';
+  const seq = p.sequence || [];
+  const suggestedId = p.suggested_next ? p.suggested_next.id : null;
+  let html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">'
+    + `<div class="bar" style="flex:1;min-width:120px"><i class="${barKind}" style="width:${clamp(load, 0, 100)}%"></i></div>`
+    + `<span class="chip ${barKind || 'ok'}">${nfmt(p.total_hours)} / ${nfmt(p.capacity_weekly)} ч в неделю</span></div>`;
+  if (p.suggested_next) {
+    const n = p.suggested_next;
+    html += `<div class="plan-next-callout">▶ Следующее: ${n.kind === 'order' ? 'заказ' : 'полка'} · ${esc(n.title)}`
+      + ` · ${hoursText(n.hours)}` + (n.due ? ` · до ${esc(dateText(n.due))}` : '') + '</div>';
+  }
+  if (!seq.length) {
+    html += dashEmpty('Печатать нечего: очередь пуста, а полка не просит пополнения.');
+  } else {
+    html += seq.slice(0, 8).map((t) => {
+      const isOrder = t.kind === 'order';
+      const title = isOrder ? `${esc(String(t.ref || 'заказ'))} · ${esc(t.title)}` : `Полка · ${esc(t.title)}`;
+      const parts = [];
+      if (isOrder && t.customer) parts.push(esc(t.customer));
+      if (isOrder && t.status) parts.push(esc(t.status));
+      if (isOrder && t.due) parts.push('до ' + esc(dateText(t.due)));
+      if (!isOrder) {
+        parts.push(t.days_left != null ? 'запас ' + Math.round(t.days_left) + ' дн' : 'нет продаж');
+        if (t.qty) parts.push('план ' + nfmt(t.qty) + ' шт');
+      }
+      const bad = (t.issues || []).filter((i) => i.level === 'bad').length;
+      const warn = (t.issues || []).filter((i) => i.level === 'warn').length;
+      const flag = bad ? ' ✕' : warn ? ' ⚠' : '';
+      const titleAttr = (t.issues || []).length
+        ? ` title="${esc(t.issues.map((i) => i.text).join('; '))}"` : '';
+      return `<div class="tx-row${t.id === suggestedId ? ' plan-next' : ''}"${titleAttr}>`
+        + `<span class="tx-ic ${isOrder ? 'income' : ''}">${isOrder ? '▦' : '▤'}</span>`
+        + `<div class="tx-body"><b>${title}</b>`
+        + (parts.length ? '<small>' + parts.join(' · ') + '</small>' : '')
+        + '</div>'
+        + `<span class="amt">${hoursText(t.hours)}${flag}</span></div>`;
+    }).join('');
+  }
+  host.innerHTML = html;
+}
+
+/* ==================================================== здоровье бизнеса */
+async function refreshInsights() {
+  try {
+    const data = await get('/api/insights');
+    PF.state.insights = data;
+    if (document.querySelector('#view-dashboard.on')) renderHealth();
+  } catch (e) { /* офлайн — не критично */ }
+}
+function renderHealth() {
+  const host = $('dash_health');
+  if (!host) return;
+  const ins = PF.state.insights;
+  if (!ins) {
+    $('dash_health_sub').textContent = 'Цель месяца, касса вперёд и налоги';
+    host.innerHTML = dashEmpty('Показатели появятся после загрузки данных.');
+    return;
+  }
+  const goal = ins.goal || {};
+  const cash = ins.cash || {};
+  const tax = ins.tax || {};
+  $('dash_health_sub').textContent = goal.verdict_text || 'Цель месяца, касса вперёд и налоги';
+
+  const gp = clamp(num(goal.pct), 0, 100);
+  const goalKind = goal.verdict === 'bad' ? 'bad' : goal.verdict === 'warn' ? 'warn' : 'ok';
+  const cashKind = cash.verdict === 'bad' ? 'bad' : cash.verdict === 'warn' ? 'warn' : 'ok';
+  const nxt = (tax.events || [])[0];
+  const limitWarn = num(tax.limit_used) >= 80;
+
+  let html = '<div class="health-grid">';
+
+  html += '<div class="health-cell">'
+    + '<span class="h-label">Цель месяца</span>'
+    + `<div class="bar ${goalKind}" style="margin:6px 0 4px"><i style="width:${clamp(gp, 0, 100)}%"></i></div>`
+    + `<b>${money(goal.profit)}</b><span class="muted"> из ${money(goal.goal)} · ${pct(goal.pct)}</span>`
+    + `<small class="muted" style="display:block">темп ведёт к ${money(goal.projected)}</small></div>`;
+
+  const pts = (cash.points || []).map((p) => p.cash);
+  const minC = Math.min(...pts.map((v) => num(v)));
+  const maxC = Math.max(...pts.map((v) => num(v)), 1);
+  html += '<div class="health-cell">'
+    + '<span class="h-label">Касса вперёд, 90 дней</span>'
+    + `<div class="health-cash ${cashKind}">`
+    + pts.map((v) => {
+      const h = clamp(14 + (num(v) - minC) / Math.max(1, maxC - minC) * 26, 4, 40);
+      return `<i style="height:${h}px" title="${money(v)}"></i>`;
+    }).join('')
+    + `</div><b>${money(cash.now)}</b><span class="muted"> сейчас${cash.runway_days != null ? ' · запас ' + Math.round(cash.runway_days) + ' дн' : ''}</span></div>`;
+
+  html += '<div class="health-cell">'
+    + '<span class="h-label">Налоги и лимит</span>'
+    + (nxt
+      ? `<b>${esc(nxt.title)}</b><small class="muted" style="display:block">${esc(nxt.due ? dateText(nxt.due) : '')} · ${money(nxt.amount)}</small>`
+      : '<b>Ближайших платежей нет</b>')
+    + (num(tax.limit) ? `<div class="bar ${limitWarn ? 'warn' : ''}" style="margin-top:6px"><i style="width:${clamp(num(tax.limit_used), 0, 100)}%"></i></div>`
+      + `<small class="muted" style="display:block">лимит режима ${pct(tax.limit_used)}` +
+        (tax.limit_days != null ? ` · хватит на ~${Math.round(tax.limit_days)} дн` : '') + '</small>'
+      : '<small class="muted" style="display:block">режим без лимита</small>')
+    + '</div>';
+
+  html += '</div>';
+  host.innerHTML = html;
+}
+
 /* ==================================================== таймлайн печати за день */
 async function refreshTimeline() {
   try {
@@ -409,6 +536,7 @@ const GOALS = [
   ['goal_profit_month', 'Цель по прибыли в месяц, ₽', 'От неё считается план продаж', 'num', 1000],
   ['target_profit_per_hour', 'Норма прибыли за час, ₽', 'Порог, ниже которого заказ невыгоден', 'num', 10],
   ['weekly_capacity_hours', 'Сколько часов печати в неделю', 'Реальный потолок вашего парка', 'num', 5],
+  ['printer_investment', 'Во сколько обошёлся принтер, ₽', 'Для расчёта окупаемости (виджет «Здоровье бизнеса»)', 'num', 10000],
 ];
 const COMPANY = [
   ['company_name', 'Название бренда', 'Подставляется в материалы и документы', 'text'],
@@ -477,6 +605,7 @@ const MONEY_RULES = [
   ['fixed_costs_auto', 'Начислять постоянные расходы автоматически', 'Проводки создаются по расписанию', 'bool'],
   ['debt_alert_days', 'Долг считается просроченным через, дней', 'После этого срока подсветим красным', 'num', 1],
   ['low_margin_alert', 'Предупреждать при марже ниже, %', 'Заказ подсветится как невыгодный', 'num', 1],
+  ['envelope_auto', 'Откладывать % с дохода в конверты', 'Конверты ниже: налог, пластик, принтер', 'bool'],
 ];
 const AUTOS = [
   ['auto_accounting', 'Автоматический учёт', 'Считать себестоимость по фактам печати'],
@@ -510,6 +639,8 @@ const GUARD = [
   ['guard_stall_minutes', 'Прогресс не растёт, мин', 'Через сколько считать печать зависшей', 'num', 1],
   ['guard_cold_minutes', 'Сопло не догревается, мин', 'Сколько ждать выхода на температуру', 'num', 1],
   ['guard_count_loss', 'Считать убыток от брака', 'Потраченный пластик и электричество — в расходы', 'bool'],
+  ['spaghetti_enabled', 'Спагетти-детект по камере', 'Ловит «мешанину» в кадре и ставит печать на паузу (нужен pillow)', 'bool'],
+  ['spaghetti_sensitivity', 'Чувствительность детекта, ×', 'Во сколько раз кромки должны превысить норму (2 — строже, 5 — мягче)', 'num', 0.5],
 ];
 const QUEUE_RULES = [
   ['queue_check_filament', 'Проверять остаток пластика', 'Не запускать печать, если катушки не хватит', 'bool'],
@@ -522,6 +653,9 @@ const UPKEEP = [
   ['maintenance_enabled', 'Регламент обслуживания', 'Напоминать о ТО по наработке часов', 'bool'],
   ['telemetry_enabled', 'История показателей', 'Графики температур и обдува', 'bool'],
   ['telemetry_keep_days', 'Хранить историю, дней', 'Старые точки удаляются автоматически', 'num', 1],
+  ['night_shift_enabled', 'Ночная смена', 'Планировать длинное на ночь, срочное — днём', 'bool'],
+  ['auto_backup_days', 'Автобэкап, раз в N дней', '0 — выключен. Хранятся 14 копий', 'num', 1],
+  ['ejector_enabled', 'Авто-эжектор (DIY)', 'Режим снятия деталей: напоминания и фиксация простоя', 'bool'],
 ];
 const ACCENTS = [
   ['indigo', '#4f46e5'], ['violet', '#7c3aed'], ['blue', '#2563eb'],
@@ -1018,6 +1152,72 @@ function initTemplatesEditor() {
   });
 }
 
+/* ==================================================== конверты-накопления */
+async function loadEnvelopes() {
+  try {
+    const data = await get('/api/envelopes');
+    PF.state.envelopes = data.envelopes || [];
+    renderEnvelopes();
+  } catch (e) { /* офлайн */ }
+}
+function renderEnvelopes() {
+  const host = $('set_envelopes');
+  if (!host) return;
+  const list = PF.state.envelopes || [];
+  host.innerHTML = list.length ? list.map((e) => `<div class="set-row" data-env-row>`
+    + `<div class="sinfo"><b>${esc(e.name)}</b>`
+    + `<small>${nfmt(e.pct, 0)}% с дохода${e.goal ? ' · цель ' + money(e.goal) : ''}</small></div>`
+    + `<div class="sinfo" style="text-align:right"><b>${money(e.balance)}</b>`
+    + `<small>${e.goal_progress != null ? pct(e.goal_progress) : 'копилка'}</small></div>`
+    + `<button class="btn sm" type="button" data-env-edit="${esc(e.id)}">✎</button>`
+    + `<button class="btn sm" type="button" data-env-out="${esc(e.id)}">Забрать</button>`
+    + `<button class="icon-btn sm danger" type="button" data-env-del="${esc(e.id)}">×</button></div>`).join('')
+    : '<div class="empty compact"><span>Конвертов нет. Добавьте «Налог 6%» или «Второй принтер».</span></div>';
+}
+async function envSave(id) {
+  const cur = (PF.state.envelopes || []).find((e) => e.id === id) || {};
+  const name = window.prompt('Название конверта', cur.name || '');
+  if (name == null) return;
+  const pct = window.prompt('Процент с дохода (0–100)', String(cur.pct ?? 0));
+  if (pct == null) return;
+  const goal = window.prompt('Цель накопления, ₽ (0 — без цели)', String(cur.goal || 0));
+  if (goal == null) return;
+  try {
+    await post('/api/envelope/save', { id: id || '', name, pct: num(pct), goal: num(goal) });
+    toast('Конверт сохранён', name);
+    loadEnvelopes();
+  } catch (e) { fail(e); }
+}
+async function envWithdraw(id) {
+  const cur = (PF.state.envelopes || []).find((e) => e.id === id);
+  if (!cur) return;
+  const amount = window.prompt(`Сколько забрать из «${cur.name}» (остаток ${money(cur.balance)})?`, '');
+  if (amount == null) return;
+  try {
+    await post('/api/envelope/withdraw', { id, amount: num(amount), note: 'изъятие' });
+    toast('Из конверта забрали', money(amount));
+    loadEnvelopes();
+  } catch (e) { fail(e); }
+}
+
+/* ==================================================== проверка данных */
+async function runDataCheck() {
+  const host = $('data_check_list');
+  if (!host) return;
+  host.innerHTML = '<div class="skeleton" style="height:36px"></div>';
+  try {
+    const data = await get('/api/data-check');
+    if (!data.count) {
+      host.innerHTML = '<div class="notice ok"><span>✓</span><span>Данные в порядке — хвостов нет.</span></div>';
+    } else {
+      host.innerHTML = `<div class="notice warn"><span>⚠</span><span>Найдено ${data.count} проблем:</span></div>`
+        + data.problems.slice(0, 20).map((p) => `<div class="tx-row">`
+          + `<span class="tx-ic expense">✕</span>`
+          + `<div class="tx-body"><b>${esc(p.title)}</b><small>${esc(p.detail || '')}</small></div></div>`).join('');
+    }
+  } catch (e) { host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`; }
+}
+
 function showArticle(name) {
   const articles = $$('#library-body .library-article');
   let shown = false;
@@ -1052,7 +1252,7 @@ function bind() {
   });
   $('dash_refresh').addEventListener('click', async () => {
     try {
-      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline()]);
+      await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline(), refreshPlan(), refreshInsights()]);
       toast('Обновлено');
     } catch (e) { fail(e); }
   });
@@ -1125,6 +1325,19 @@ function bind() {
   $('backup_restore').addEventListener('click', restoreBackup);
   $('backup_import_ls').addEventListener('click', importLocalStorage);
   $('backup_wipe').addEventListener('click', wipeData);
+  $('data_check_btn').addEventListener('click', runDataCheck);
+
+  $('env_add').addEventListener('click', () => envSave(''));
+  $('set_envelopes').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-env-edit]');
+    if (edit) { envSave(edit.dataset.envEdit); return; }
+    const out = e.target.closest('[data-env-out]');
+    if (out) { envWithdraw(out.dataset.envOut); return; }
+    const del = e.target.closest('[data-env-del]');
+    if (del && confirmDanger('Удалить конверт? Движения сохранятся в истории.')) {
+      post('/api/envelope/delete', { id: del.dataset.envDel }).then(() => loadEnvelopes()).catch(fail);
+    }
+  });
 
   $('lib_grid').addEventListener('click', (e) => {
     const card = e.target.closest('[data-article]');
@@ -1142,11 +1355,16 @@ PF.on('ready', () => {
   initLibraryChecks();
   initCopyButtons();
   initTemplatesEditor();
+  loadEnvelopes();
   refreshTimeline();
+  refreshPlan();
+  refreshInsights();
   loadTemplates();
   initBrowserNotify();
   checkUpdate(false);
   setInterval(refreshTimeline, 60000);
+  setInterval(refreshPlan, 60000);
+  setInterval(refreshInsights, 90000);
 });
 PF.on('data', renderDashboard);
 PF.on('live', renderDashboard);

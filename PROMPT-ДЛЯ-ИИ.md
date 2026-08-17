@@ -114,9 +114,11 @@ ai/
 │   └── printflow/
 │       ├── config.py  db.py  repo.py  accounting.py
 │       ├── bambu.py  camera.py  ftps.py
+│       ├── planner.py  insights.py  spaghetti.py   # 4.0
 │       └── manager.py  api.py
 ├── site/
 │   ├── index.html
+│   ├── order.html          # витрина и QR-заказ (4.0)
 │   ├── assets/
 │   │   ├── theme.css  app.css
 │   │   ├── core.js  printer.js  ops.js  money.js  app.js

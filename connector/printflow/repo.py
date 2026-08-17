@@ -19,7 +19,9 @@ ORDER_FIELDS = (
     # деньги и условия сделки
     "paid discount delivery fee rush payer account_id design_minutes "
     # многоцветная печать и чек-лист качества
-    "colors qc_done"
+    "colors qc_done "
+    # связь с номенклатурой и складом (3.0+)
+    "nom_id warehouse_id reserved"
 ).split()
 
 
@@ -106,6 +108,18 @@ class Repo:
             payload["customer_id"] = customer["id"]
 
         row = self.db.upsert("orders", payload)
+        # История изменений: фиксируем только реально поменявшиеся поля.
+        if existing:
+            for field, value in payload.items():
+                if field in ("id", "updated_at"):
+                    continue
+                old = existing.get(field)
+                if str(old) != str(value):
+                    self.db.execute(
+                        "INSERT INTO order_history(at,order_id,field,old_value,new_value,author)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (now_iso(), order_id, field, str(old or ""), str(value or ""),
+                         data.get("author", "user")))
         if payment_requested:
             current_paid = max(num(row.get("paid")), num(row.get("prepaid")))
             # Старое поле prepaid переносим в текущий счётчик без создания
@@ -135,6 +149,57 @@ class Repo:
                               f"№{row.get('number','')} · {row.get('product','')}",
                               data=({"order_id": order_id}))
         return self.order(order_id) or row
+
+    def duplicate_order(self, order_id: str) -> dict:
+        """«Повторить заказ»: копия с новым номером, статусом «Новая заявка» и датой.
+
+        Цена подтягивается текущая, закрытие и оплата не переносятся.
+        """
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        data = dict(order)
+        data.pop("id", None)
+        data["number"] = self.next_order_number()
+        data["status"] = "new"
+        data["created_at"] = now_iso()
+        data["updated_at"] = now_iso()
+        data["closed_at"] = ""
+        data["paid"] = 0.0
+        data["prepaid"] = 0.0
+        data["actual_grams"] = 0.0
+        data["actual_hours"] = 0.0
+        data["actual_cost"] = 0.0
+        data["notes"] = f"повтор заказа №{order.get('number')}" + (
+            f"\n{order.get('notes')}" if order.get("notes") else "")
+        data["author"] = "duplicate"
+        return self.save_order(data)
+
+    def order_history(self, order_id: str) -> list[dict]:
+        return self.db.query(
+            "SELECT * FROM order_history WHERE order_id=? ORDER BY id DESC LIMIT 100",
+            (order_id,))
+
+    def data_check(self) -> dict:
+        """Авто-проверка данных: заказы без цены, платежи без заказа, катушки без привязки."""
+        problems: list[dict] = []
+        finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        for o in self.db.query("SELECT * FROM orders"):
+            if o["status"] not in finals and num(o.get("price")) <= 0:
+                problems.append({"kind": "order_no_price", "id": o["id"],
+                                 "title": f"Заказ №{o.get('number')} без цены",
+                                 "detail": o.get("product") or ""})
+        for p in self.db.query("SELECT * FROM payments WHERE order_id IS NOT NULL"):
+            if not self.db.one("SELECT id FROM orders WHERE id=?", (p["order_id"],)):
+                problems.append({"kind": "payment_no_order", "id": p["id"],
+                                 "title": "Платёж без заказа",
+                                 "detail": f"{round(num(p.get('amount')))} ₽"})
+        for j in self.db.query("SELECT * FROM print_jobs WHERE state IN ('done','failed')"):
+            if not j.get("spool_id") and num(j.get("grams")) > 0:
+                problems.append({"kind": "job_no_spool", "id": j["id"],
+                                 "title": "Печать без катушки",
+                                 "detail": j.get("name") or j.get("file") or ""})
+        return {"count": len(problems), "problems": problems[:50]}
 
     def set_order_status(self, order_id: str, status: str) -> dict:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))

@@ -6,8 +6,8 @@
 <title>NOZZA · PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
-<link rel="stylesheet" href="assets/theme.css?v=3.1.0">
-<link rel="stylesheet" href="assets/app.css?v=3.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=5.0.0">
+<link rel="stylesheet" href="assets/app.css?v=5.0.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -67,6 +67,14 @@
   </div>
  </div>
  <div class="kpi-grid" id="dash_kpis" data-widget="kpis"></div>
+ <div class="card" data-widget="plan" style="margin-top:16px">
+  <div class="card-head"><div><h2>План на сегодня</h2><p id="dash_plan_sub">Что печатать следующим — заказы и пополнение полки</p></div><a href="#queue" data-view="queue">Очередь →</a></div>
+  <div id="dash_plan"></div>
+ </div>
+ <div class="card" data-widget="health" style="margin-top:16px">
+  <div class="card-head"><div><h2>Здоровье бизнеса</h2><p id="dash_health_sub">Цель месяца, касса вперёд и налоги</p></div><a href="#finance" data-view="finance">Финансы →</a></div>
+  <div id="dash_health"></div>
+ </div>
  <div class="grid g-2-1" style="margin-top:16px">
   <div class="card" data-widget="active">
    <div class="card-head"><div><h2>Активная печать</h2><p id="dash_active_sub">—</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
@@ -229,6 +237,10 @@
     <div class="card">
      <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health">Нет ошибок</span></div>
      <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>Связь</h2><p>Порты 8883/6000/990 и подсеть</p></div><button class="btn sm" id="pr_net_btn" type="button">Проверить</button></div>
+     <div id="pr_net"><div class="empty compact"><span>Нажмите «Проверить», чтобы узнать, отвечает ли принтер.</span></div></div>
     </div>
     <div class="card">
      <div class="card-head"><div><h2>Наработка и ТО</h2><p id="pr_runtime">Наработка —</p></div><span class="chip" id="pr_maint_badge">—</span></div>
@@ -547,6 +559,7 @@
  <div class="view-head">
   <div><span class="eyebrow">Магазин · полка NOZZA</span><h1>Стеллаж</h1><p>Готовая продукция: остатки, продажи и план пополнения.</p></div>
   <div class="head-actions">
+   <a class="btn" href="/order.html" target="_blank" rel="noopener">🛍 Витрина</a>
    <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
@@ -651,6 +664,16 @@
   <a class="lib-card" href="#library/legal" data-article="legal"><span class="ic">⚖</span><b>Юридика</b><small>Маркировка, права, учёт</small></a>
   <a class="lib-card" href="#library/mats" data-article="mats"><span class="ic">🖨</span><b>Материалы A4</b><small>Ценники и памятки</small></a>
   <a class="lib-card" href="#library/tpl" data-article="tpl"><span class="ic">✉</span><b>Шаблоны ответов</b><small>Тексты для Авито и Telegram</small></a>
+  <a class="lib-card" href="#library/night" data-article="night"><span class="ic">🌙</span><b>Ночная смена</b><small>Ноль простоя и автономность</small></a>
+  <a class="lib-card" href="#library/auto" data-article="auto"><span class="ic">🤖</span><b>Авто-эжектор</b><small>Снятие деталей без рук</small></a>
+  <a class="lib-card" href="#library/network" data-article="network"><span class="ic">📡</span><b>Сеть и доступ</b><small>Много роутеров, телефон, Telegram</small></a>
+  <a class="lib-card" href="#library/stock" data-article="stock"><span class="ic">🧵</span><b>Стартовый закуп</b><small>PLA: 8 катушек и приоритеты</small></a>
+  <a class="lib-card" href="#library/storefront" data-article="storefront"><span class="ic">🛍</span><b>Витрина и QR-заказ</b><small>Заявки с полки без продавца</small></a>
+  <a class="lib-card" href="#library/bot" data-article="bot"><span class="ic">🤖</span><b>Telegram-панель</b><small>Управление и продажи с телефона</small></a>
+  <a class="lib-card" href="#library/vitrina" data-article="vitrina"><span class="ic">🪧</span><b>3D-витрина</b><small>Что напечатать для самой полки</small></a>
+  <a class="lib-card" href="/design.html" target="_blank" rel="noopener"><span class="ic">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
+  <a class="lib-card" href="/m.html" target="_blank" rel="noopener"><span class="ic">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
+  <a class="lib-card" href="/track.html" target="_blank" rel="noopener"><span class="ic">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
  </div>
  <div id="lib_tpl_wrap" hidden>
   <div class="card">
@@ -2446,7 +2469,275 @@
 <li>[ ] Заказ и оплата отражены в учёте.</li>
 <li>[ ] Проведён контроль качества.</li>
 <li>[ ] Сделана свежая резервная копия.</li>
-</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий; два размера и пустые бланки</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Генераторы берут цены из «Базы изделий».</p></article>
+</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий; два размера и пустые бланки</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Генераторы берут цены из «Базы изделий». Для полки магазина добавлены <b>воблеры</b>, <b>прайс на подставку</b>, <b>таблички зон</b>, <b>карточки «как заказать»</b> и <b>плакат «закажи по QR»</b>.</p></article>
+
+<article data-article="night" class="library-article"><div class="sechead"><span class="secic">🌙</span><div><h1>Ночная смена</h1><p>Ноль простоя и автономность P1S</p></div></div><blockquote>
+<p>Один принтер зарабатывает, только когда печатает. Всё остальное время — простой. Задача этого раздела: сделать так, чтобы утром тебя ждала готовая работа, а не пустой стол.</p>
+</blockquote>
+<h2>1. Что печатать ночью, а что днём</h2>
+<ul>
+<li><strong>Ночь — длинные и партийные задания.</strong> Партия адресников, тираж номерков, долгие органайзеры. Запускаешь вечером — к утру готово.</li>
+<li><strong>День — короткие и срочные.</strong> То, что нужно снимать, проверять и выдавать в течение дня.</li>
+<li><strong>Правило одной смены:</strong> не оставляй на ночь задание, которое закончится в 02:40, если после него принтер будет простаивать до утра. Лучше добавить ещё одну плиту или сдвинуть старт.</li>
+</ul>
+<h2>2. Несколько гибких пластин — дешёвый «конвейер»</h2>
+<p>Главный источник простоя — ожидание остывания детали, пока её снимаешь. Решение проще, чем кажется:</p>
+<ul>
+<li>Пластина A печатает, с пластины B ты снимаешь деталь за 10 секунд.</li>
+<li>Меняешь пластину — и запускаешь следующее задание, не дожидаясь остывания.</li>
+<li>Для P1S это самая дешёвая «автоматизация»: две-три гибких пластины дают больше, чем любой сложный апгрейд.</li>
+</ul>
+<h2>3. Партии, а не одиночные изделия</h2>
+<ul>
+<li>20 адресников одной плитой — одно снятие вместо двадцати.</li>
+<li>Используй «Напечатать партию» как основной режим работы, а не исключение.</li>
+<li>Полные плиты вместо «ровно N»: лишняя штука на полке не пропадёт, а простой сократится.</li>
+</ul>
+<h2>4. Настройки, которые включают автономность</h2>
+<table>
+<thead><tr><th>Настройка</th><th>Что делает</th></tr></thead>
+<tbody>
+<tr><td>Автозапуск очереди</td><td>Следующее задание стартует само после завершения предыдущего</td></tr>
+<tr><td>Тихие часы</td><td>Ночью не запускаем шумные задания (настраивается интервал)</td></tr>
+<tr><td>Сторож печати</td><td>Пауза при ошибке, снимок камеры, Telegram</td></tr>
+<tr><td>Спагетти-детект</td><td>Ловит «мешанину» в кадре и ставит печать на паузу</td></tr>
+<tr><td>Напомнить о финише за N минут</td><td>Telegram-сообщение, когда пора подойти снять деталь</td></tr>
+</tbody>
+</table>
+<h2>5. Простой как KPI</h2>
+<ul>
+<li>Смотри «Таймлайн печати за день»: промежутки между заданиями — это потерянные деньги.</li>
+<li>Если простой стабильно больше времени печати — это сигнал думать о втором принтере или о партиях.</li>
+<li>Считай простой по фактам, а не по ощущениям: решение о масштабе принимается по данным.</li>
+</ul>
+<h2>6. Чек-лист вечерней смены</h2>
+<ul>
+<li>[ ] В AMS стоят нужные катушки, остатков хватит на всю ночь.</li>
+<li>[ ] Очередь собрана: длинные задания в конце, короткие — утром.</li>
+<li>[ ] Сторож и спагетти-детект включены, Telegram настроен.</li>
+<li>[ ] Первый слой очередного задания проверен до ухода.</li>
+</ul></article>
+
+<article data-article="auto" class="library-article"><div class="sechead"><span class="secic">🤖</span><div><h1>Авто-эжектор</h1><p>Снятие готовых деталей без рук — честный разбор</p></div></div><blockquote>
+<p>Сразу честно: у P1S нет штатного механизма снятия детали. Универсального способа «снял сам и не поцарапал» не существует. Но есть варианты от «почти само» до DIY, и часть из них мы колхозим осознанно.</p>
+</blockquote>
+<h2>1. Почему это сложно</h2>
+<p>FDM-деталь <strong>прилипает</strong> к столу — это залог качества первого слоя. Чтобы она упала сама, нужно либо преодолеть адгезию (механически — риск сломать и поцарапать поверхность), либо заставить её отлипнуть перепадом температур или усадкой. У персонализированных изделий (текст, имя) любые толкатели портят поверхность.</p>
+<h2>2. Что реально работает</h2>
+<table>
+<thead><tr><th>Способ</th><th>Материалы</th><th>Нюансы</th></tr></thead>
+<tbody>
+<tr><td><strong>Самоотлипание при остывании</strong></td><td>ABS, ASA, PC, нейлон</td><td>Усадка отрывает деталь от гладкой поверхности (G10, стекло). PLA/PETG с PEI так не отлипают.</td></tr>
+<tr><td><strong>Конвейерный принтер (belt)</strong></td><td>PLA, PETG</td><td>Деталь сама съезжает в корзину. Но только плоские/низкие изделия, хуже детализация текста, AMS не совместим.</td></tr>
+<tr><td><strong>Авто-эжектор (DIY)</strong></td><td>PLA, PETG</td><td>Серво-«дворник», который сгребает деталь после печати. Колхоз, но рабочий.</td></tr>
+<tr><td><strong>Робот-манипулятор</strong></td><td>любые</td><td>Снимает по-настоящему, но стоит как весь бизнес.</td></tr>
+</tbody>
+</table>
+<h2>3. Колхозим эжектор — осознанно</h2>
+<ul>
+<li><strong>Что это:</strong> штанга/дворник на сервоприводе, которая проезжает над столом после завершения и сбрасывает деталь в лоток.</li>
+<li><strong>Где брать:</strong> готовые решения (3DQue Quinly, Autodrop3D) рассчитаны на открытые Ender-подобные принтеры; для P1S — только DIY-моды.</li>
+<li><strong>Риски:</strong> удар по голове/датчикам, потеря гарантии, порча текста и поверхности. Для плоских деталей без критичного верха — сносный вариант; для адресников с текстом — нет.</li>
+</ul>
+<h2>4. Правила, если всё-таки колхозим</h2>
+<ul>
+<li>[ ] Эжектор ставится на отдельной пластине и только на партиях, где поверхность не важна.</li>
+<li>[ ] Перед каждым циклом — проверка парковки головы, чтобы дворник её не зацепил.</li>
+<li>[ ] Сначала 10 холостых прогонов, потом 5 тестовых деталей под присмотром.</li>
+<li>[ ] Камерный снимок до и после сброса — чтобы видеть, что пошло не так.</li>
+<li>[ ] Гарантия принтера — уже не гарантия: делаем на свой риск.</li>
+</ul>
+<h2>5. Что реально даёт «ноль рук» без эжектора</h2>
+<ul>
+<li><strong>Ночная смена</strong> — длинные задания на ночь, к утру готово (см. раздел «Ночная смена»).</li>
+<li><strong>Несколько гибких пластин</strong> — снял за 10 секунд, не ждёшь остывания.</li>
+<li><strong>Партии целиком</strong> — одно снятие на N изделий.</li>
+<li><strong>Напоминание «сними деталь»</strong> через N минут после финиша — простоя не будет.</li>
+</ul></article>
+
+<article data-article="network" class="library-article"><div class="sechead"><span class="secic">📡</span><div><h1>Сеть и доступ</h1><p>Много роутеров, телефон и управление откуда угодно</p></div></div><blockquote>
+<p>«Много роутеров с разной сетью» — самая частая причина, почему панель или принтер «не находятся». Здесь — как это устроено и как чинить за минуты.</p>
+</blockquote>
+<h2>1. Как всё связано</h2>
+<ul>
+<li>Принтер слушает три порта в локальной сети: MQTT <strong>8883</strong>, камера <strong>6000</strong>, файлы FTPS <strong>990</strong>.</li>
+<li>Панель PrintFlow — обычный сайт на порту <strong>8080</strong> (или другом).</li>
+<li>Для связи компьютер и принтер должны быть <strong>в одной подсети</strong> (одна Wi-Fi сеть, один роутер).</li>
+</ul>
+<h2>2. Почему «не находит» при нескольких роутерах</h2>
+<ul>
+<li>SSDP-поиск принтера работает только внутри своей подсети — через второй роутер он не пробивается.</li>
+<li>Если ПК в сети 192.168.<strong>1</strong>.x, а принтер в 192.168.<strong>2</strong>.x — они друг друга не видят, даже если роутеры рядом.</li>
+<li>VPN, гостевой Wi-Fi и изоляция клиентов тоже режут связь.</li>
+</ul>
+<h2>3. Как починить быстро</h2>
+<ol>
+<li><strong>Узнай IP принтера</strong>: на экране принтера → Настройки → Wi-Fi, смотри IP.</li>
+<li><strong>Сравни подсеть</strong>: у компьютера и принтера первые три числа IP должны совпадать (192.168.<strong>1</strong>.).</li>
+<li><strong>Проверь порты</strong> из PrintFlow (диагностика связи): 8883/6000/990 должны отвечать.</li>
+<li><strong>Закрепи IP</strong>: в настройках роутера сделай DHCP-резервирование, чтобы адрес принтера не «уезжал».</li>
+<li>Если подсети разные — пересади оба устройства в одну сеть или объедини сети.</li>
+</ol>
+<h2>4. Доступ с телефона и планшета</h2>
+<ul>
+<li>Запусти коннектор с <code>--host 0.0.0.0</code> (или через файлы запуска — они уже так делают).</li>
+<li>Открой на телефоне <code>http://IP-компьютера:8080/</code> — все адреса компьютера печатаются в окне запуска.</li>
+<li>Для продаж с полки используй <code>order.html</code> (витрина) и <code>shelf.html</code> (страница товара).</li>
+<li>Режим «Стена» — полноэкранный вид для второго монитора или планшета в мастерской.</li>
+</ul>
+<h2>5. Из-за пределов дома</h2>
+<ul>
+<li><strong>Не открывай порты в интернет.</strong> MQTT, камера и FTPS должны оставаться только в локальной сети.</li>
+<li><strong>Telegram-панель</strong> — основной способ управлять извне: бот сам ходит к Telegram, проброс портов не нужен (см. раздел «Telegram-панель»).</li>
+<li><strong>VPN</strong> (Tailscale/WireGuard) — если нужен полный доступ к панели с телефона из любого места. Работает через много роутеров и CGNAT.</li>
+</ul>
+<h2>6. Чек-лист, когда «не заходит»</h2>
+<ul>
+<li>[ ] Принтер включён и в LAN-режиме (Settings → WLAN, при защищённой прошивке LAN Only + Developer Mode).</li>
+<li>[ ] Компьютер и принтер в одной подсети.</li>
+<li>[ ] Порт 8080 разрешён в брандмауэре Windows/Firewall.</li>
+<li>[ ] VPN выключен.</li>
+<li>[ ] IP принтера не поменялся (проверь на экране принтера).</li>
+</ul></article>
+
+<article data-article="stock" class="library-article"><div class="sechead"><span class="secic">🧵</span><div><h1>Стартовый закуп пластика</h1><p>PLA: 8 катушек и порядок покупки</p></div></div><blockquote>
+<p>Решение принято: начинаем на чистом PLA. Один материал = любые цвета совместимы между собой в AMS, и пластик проще хранить, чем PETG.</p>
+</blockquote>
+<h2>1. Принцип набора</h2>
+<p>Три нейтрали закрывают ~70% работы, пять цветов дают персонализацию и живую полку. Порядок в списке — это приоритет закупки: если берёшь не все 8 сразу, останавливайся сверху вниз.</p>
+<h2>2. Восемь катушек по приоритету</h2>
+<table>
+<thead><tr><th>#</th><th>Цвет</th><th>Тип</th><th>Зачем (ниша)</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><strong>Чёрный</strong></td><td>Matte</td><td>База №1: текст, QR-стойки, ценникодержатели, номерки. Скрывает слои и грязь — выглядит «серьёзно» для B2B.</td></tr>
+<tr><td>2</td><td><strong>Белый</strong></td><td>Matte</td><td>Вторая половина персонализации: белый текст на чёрном, светлые таблички, логотипы.</td></tr>
+<tr><td>3</td><td><strong>Серый (графит)</strong></td><td>обычный</td><td>Нейтрал для дома и B2B, не пачкается, не бликует.</td></tr>
+<tr><td>4</td><td><strong>Оранжевый</strong></td><td>обычный</td><td>Питомцы: адресники и зона ухода, яркий и заметный.</td></tr>
+<tr><td>5</td><td><strong>Красный</strong></td><td>обычный</td><td>Акцент и видимость: брелоки, ценники «акция», надписи.</td></tr>
+<tr><td>6</td><td><strong>Тёмно-синий</strong></td><td>обычный</td><td>Корпоративный цвет для B2B, близок к бренду NOZZA.</td></tr>
+<tr><td>7</td><td><strong>Зелёный</strong></td><td>обычный</td><td>Дом и «природные» товары, второй базовый акцент.</td></tr>
+<tr><td>8</td><td><strong>Жёлтый</strong></td><td>обычный</td><td>Самый яркий контраст: предупреждающие надписи, детали «видно издалека».</td></tr>
+</tbody>
+</table>
+<h2>3. Как пользоваться набором</h2>
+<ul>
+<li><strong>Двухцветная персонализация</strong> — тёмная база + светлый текст: чёрный+белый, оранжевый+чёрный, красный+белый, синий+белый. Меняем только текст — минимум продувки (~12 г/смену в калькуляторе).</li>
+<li><strong>AMS:</strong> 4 катушки в слотах (чёрный, белый + два текущих акцента), остальные 4 — в закрытых пакетах с силикагелем.</li>
+<li><strong>Не оставляй катушки открытыми надолго</strong>: PLA тянет влагу медленнее PETG, но всё равно тянет.</li>
+</ul>
+<h2>4. Что не брать на старте</h2>
+<ul>
+<li><strong>Silk/металлик/светящиеся</strong> — хрупче и дороже, это «витрина для подарков», а не проверка ниш.</li>
+<li><strong>TPU</strong> — не идёт через AMS (заминается в трубке), докупать под подтверждённый заказ.</li>
+<li><strong>ASA/ABS</strong> — только под уличные заказы и с вытяжкой.</li>
+</ul>
+<h2>5. Бюджет-ориентир</h2>
+<p>PLA 1200–1900 ₽/кг, Matte 1600–2300 ₽/кг (ориентир 2026, РФ). 8 катушек ≈ <strong>10–16 тыс. ₽</strong> — разумный стартовый запас: меньше не хватит разнообразия на полке, больше — незамороженные деньги.</p></article>
+
+<article data-article="storefront" class="library-article"><div class="sechead"><span class="secic">🛍</span><div><h1>Витрина и QR-заказ</h1><p>Заявки с полки — даже без продавца</p></div></div><blockquote>
+<p>Цель: покупатель сканирует ценник или открывает витрину, оставляет заявку — и она сама попадает в PrintFlow статусом «Новая заявка». Без звонков и без продавца за кассой.</p>
+</blockquote>
+<h2>1. Как это устроено</h2>
+<ul>
+<li><strong>Витрина</strong> — <code>order.html</code>: каталог NOZZA с фото, ценами, остатками и формой заявки. Открывается с телефона.</li>
+<li><strong>Страница товара</strong> — <code>shelf.html?id=…</code>: одна позиция, цена, остаток, блок «Заказать».</li>
+<li><strong>QR на ценнике</strong> ведёт на страницу товара; QR на плакате — на витрину.</li>
+<li>Заявка создаёт заказ в PrintFlow с привязкой к товару, канал «Полка», статус «Новая заявка».</li>
+</ul>
+<h2>2. Что даёт</h2>
+<ul>
+<li>Продажи даже когда ты не на месте — заявка ждёт в списке.</li>
+<li>Меньше рутины: клиент сам пишет имя, контакт и цвет.</li>
+<li>Полка превращается в точку приёма заказов, а не только продажи готового.</li>
+</ul>
+<h2>3. Материалы для полки</h2>
+<p>В <code>materials/index.html</code> добавлены материалы витрины:</p>
+<ul>
+<li><strong>Воблеры</strong> — ярлыки с ценой и QR, нависают над полкой.</li>
+<li><strong>Прайс на подставку</strong> — товары и цены из базы PrintFlow, QR на витрину.</li>
+<li><strong>Таблички зон</strong> — «Питомцы / Для дома / Для бизнеса».</li>
+<li><strong>Карточки «как заказать»</strong> — фото → размеры → цвет → расчёт.</li>
+<li><strong>Плакат «закажи по QR»</strong> — «понравилось — сделаем такое для вас».</li>
+</ul>
+<h2>4. Киоск-режим</h2>
+<ul>
+<li>Планшет на полке: открой <code>order.html</code> в полноэкранном режиме.</li>
+<li>Покупатель листает каталог, жмёт «заказать» — заявка уходит в PrintFlow.</li>
+<li>Это не требует интернета: всё работает в локальной сети магазина.</li>
+</ul>
+<h2>5. Важно</h2>
+<ul>
+<li>Витрина локальная — порты в интернет не открываются.</li>
+<li>Для удалённого доступа — VPN или Telegram-панель.</li>
+<li>Персональные данные заявки хранятся только в твоей базе.</li>
+</ul></article>
+
+<article data-article="bot" class="library-article"><div class="sechead"><span class="secic">🤖</span><div><h1>Telegram-панель</h1><p>Принтер и продажи в кармане</p></div></div><blockquote>
+<p>Бот работает на long polling — белый IP и проброс портов не нужны. Он сам ходит к Telegram и спрашивает, есть ли новые сообщения. Отвечает только владельцу.</p>
+</blockquote>
+<h2>1. Что умеет бот</h2>
+<table>
+<thead><tr><th>Команда</th><th>Что делает</th></tr></thead>
+<tbody>
+<tr><td><code>статус</code></td><td>Что печатает каждый принтер: прогресс, слой, осталось, заказ</td></tr>
+<tr><td><code>кадр</code></td><td>Свежий снимок с камеры</td></tr>
+<tr><td><code>очередь</code></td><td>Что ждёт запуска</td></tr>
+<tr><td><code>деньги</code></td><td>Выручка, прибыль и долги за месяц</td></tr>
+<tr><td><code>день</code></td><td>Итоги сегодняшнего дня</td></tr>
+<tr><td><code>пауза / продолжить / свет</code></td><td>Управление печатью</td></tr>
+<tr><td><code>стоп</code></td><td>Остановка с подтверждением «стоп да»</td></tr>
+<tr><td><code>готов 1001</code></td><td>Заказ в статус «Готов» + текст для клиента</td></tr>
+</tbody>
+</table>
+<p>Команды понимаются без слэша и в любом регистре: «камера», «статус», «пауза» — с телефона так быстрее.</p>
+<h2>2. Настройка</h2>
+<ol>
+<li>Создай бота у <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, получи токен.</li>
+<li>Узнай свой chat_id (например, у бота @userinfobot).</li>
+<li>В PrintFlow: Настройки → Система → Telegram → вставь токен и chat_id, включи «Отвечать на команды».</li>
+</ol>
+<h2>3. Автоуведомления и расписания</h2>
+<ul>
+<li>Завершение, ошибка, пауза, низкий пластик, тревоги сторожа — с кадром камеры.</li>
+<li><strong>Утренний дайджест</strong> в заданное время: дедлайны, очередь, остатки, кому написать.</li>
+<li><strong>Недельный отчёт</strong>: деньги, печать, брак, пластик.</li>
+<li>«Готово через N минут» — напоминание подойти к принтеру.</li>
+</ul>
+<h2>4. Приватность и безопасность</h2>
+<ul>
+<li>Бот приватный: отвечает только по chat_id из настроек, посторонним — вежливый отказ.</li>
+<li>Токен хранится только в каталоге данных и не попадает в Git, HTML, JS и резервную копию.</li>
+<li>Стоп требует подтверждения — случайное «стоп» не прервёт печать.</li>
+</ul></article>
+
+<article data-article="vitrina" class="library-article"><div class="sechead"><span class="secic">🪧</span><div><h1>3D-витрина</h1><p>Что напечатать для самой полки</p></div></div><blockquote>
+<p>Витрина продаёт лучше, когда товар приподнят, подписан и сфотографирован. Всё ниже — печатается на твоём же P1S из обычного PLA.</p>
+</blockquote>
+<h2>1. Что печатать</h2>
+<table>
+<thead><tr><th>Изделие</th><th>Размер (ориентир)</th><th>Зачем</th></tr></thead>
+<tbody>
+<tr><td>Подставка-ступенька под образцы</td><td>200×80×40 мм</td><td>Задний ряд выше — все изделия видно</td></tr>
+<tr><td>Держатель ценника</td><td>под лист 62×38 мм</td><td>Ценник стоит, а не лежит</td></tr>
+<tr><td>Подставка под QR-плакат</td><td>под A6/A5</td><td>Витрина и «закажи по QR» всегда на виду</td></tr>
+<tr><td>Подставка под телефон-витрину</td><td>под ширину телефона</td><td>Планшет/телефон с <code>order.html</code> в режиме киоска</td></tr>
+<tr><td>Крючки-навески</td><td>30–40 мм</td><td>Брелоки и адресники висят, а не лежат кучей</td></tr>
+<tr><td>Табличка «зона» на подставке</td><td>90×55 мм</td><td>Держатель для печатной таблички зоны</td></tr>
+<tr><td>Лоток для ценников/наклеек</td><td>120×80×25 мм</td><td>Порядок у кассы</td></tr>
+</tbody>
+</table>
+<h2>2. Правила</h2>
+<ul>
+<li>Материал — PLA (Matte для чёрного/белого), витрина в помещении, без нагрузки и влаги.</li>
+<li>Печатай витрину в фирменных цветах NOZZA: индиго <code>#4f46e5</code>, фиолет <code>#7c3aed</code>, текст <code>#131a2b</code>.</li>
+<li>Проверяй коммерческую лицензию моделей подставок (CC0/CC BY — ок, NC — нет).</li>
+<li>Все размеры подгоняй под свою полку: главное — приподнять задний ряд и подписать цены.</li>
+</ul>
+<h2>3. Что не печатать</h2>
+<ul>
+<li>Несущие кронштейны и крепления полки (нагрузка, чужие стены).</li>
+<li>Детали, которые контактируют с продуктами, если ставишь витрину в кафе.</li>
+</ul></article>
  </div>
 </section>
 
@@ -2552,6 +2843,10 @@
     <div id="set_money_rules"></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Конверты-накопления</h2><p>Автоматически откладывать процент с дохода</p></div><button class="btn sm" id="env_add" type="button">+ Конверт</button></div>
+    <div id="set_envelopes"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Статьи расходов</h2><p>Группировка в отчётах</p></div><button class="btn sm" id="cat_expense_add" type="button">+</button></div>
     <div id="set_categories"></div>
    </div>
@@ -2612,7 +2907,7 @@
     <div id="set_update_rows"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Данные</h2><p>Резервная копия и перенос из старой версии</p></div></div>
+    <div class="card-head"><div><h2>Данные</h2><p>Резервная копия, проверка и перенос</p></div></div>
     <div class="notice"><span>ℹ</span><span>Копия содержит заказы, клиентов, склад, журнал печати и финансы. Секреты (Access Code, токен Telegram) в файл не попадают.</span></div>
     <div class="btn-grid">
      <button class="btn" id="backup_download" type="button">↓ Скачать копию</button>
@@ -2620,6 +2915,8 @@
      <button class="btn" id="backup_import_ls" type="button">Перенести из браузера</button>
      <button class="btn danger" id="backup_wipe" type="button">Стереть данные</button>
     </div>
+    <div class="card-head" style="margin-top:14px"><div><h3>Проверка данных</h3><p>Заказы без цены, платежи без заказа, печати без катушки</p></div><button class="btn sm" id="data_check_btn" type="button">Проверить</button></div>
+    <div id="data_check_list"></div>
     <input type="file" id="backup_file" accept="application/json,.json" hidden>
     <p class="muted" style="font-size:12px;margin-top:10px">Каталог данных: <code id="set_data_dir">%APPDATA%\PrintFlow</code></p>
    </div>
@@ -2636,7 +2933,7 @@
  <div class="modal-head"><div><span class="eyebrow">Карточка заказа</span><h2 id="order_modal_title">Новый заказ</h2><p id="order_modal_sub">Клиент создаётся автоматически по имени и телефону.</p></div><button class="icon-btn" type="button" data-close="order_modal">×</button></div>
  <div class="modal-body">
   <div class="form-section"><h3>Заказ</h3><div class="form-grid">
-   <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" required></label>
+   <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" list="products_datalist" required></label>
    <label class="field"><span>Статус</span><select id="of_status"></select></label>
    <label class="field"><span>Приоритет</span><select id="of_priority"><option value="low">Низкий</option><option value="normal" selected>Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label>
    <label class="field"><span>Ниша</span><select id="of_niche_id"></select></label>
@@ -2648,7 +2945,7 @@
    <label class="field"><span>Имя или компания</span><input id="of_customer_name" list="customers_datalist"></label>
    <label class="field"><span>Телефон</span><input id="of_phone" placeholder="+7…"></label>
    <label class="field span-2"><span>Мессенджер / контакт</span><input id="of_messenger" placeholder="@telegram, WhatsApp"></label>
-  </div><datalist id="customers_datalist"></datalist></div>
+  </div><datalist id="customers_datalist"></datalist><datalist id="products_datalist"></datalist></div>
   <div class="form-section"><h3>Производство</h3><div class="form-grid">
    <label class="field"><span>Материал</span><input id="of_material" placeholder="PLA, PETG, TPU" list="materials_datalist"></label>
    <label class="field"><span>Цвет</span><input id="of_color" placeholder="Чёрный + золотой"></label>
@@ -2687,7 +2984,7 @@
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">В очередь печати</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">В очередь печати</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>
 
 <dialog class="modal narrow" id="niche_modal"><form method="dialog">
@@ -3316,13 +3613,13 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=3.1.0"></script>
-<script src="assets/core.js?v=3.1.0"></script>
-<script src="assets/printer.js?v=3.1.0"></script>
-<script src="assets/ops.js?v=3.1.0"></script>
-<script src="assets/money.js?v=3.1.0"></script>
-<script src="assets/finance.js?v=3.1.0"></script>
-<script src="assets/shelf.js?v=3.1.0"></script>
-<script src="assets/products.js?v=3.1.0"></script>
-<script src="assets/app.js?v=3.1.0"></script>
+<script src="assets/qr.js?v=5.0.0"></script>
+<script src="assets/core.js?v=5.0.0"></script>
+<script src="assets/printer.js?v=5.0.0"></script>
+<script src="assets/ops.js?v=5.0.0"></script>
+<script src="assets/money.js?v=5.0.0"></script>
+<script src="assets/finance.js?v=5.0.0"></script>
+<script src="assets/shelf.js?v=5.0.0"></script>
+<script src="assets/products.js?v=5.0.0"></script>
+<script src="assets/app.js?v=5.0.0"></script>
 </body></html>

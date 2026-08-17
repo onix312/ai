@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA — статус заказа</title>
+<style>
+ :root { --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b; --accent:#4f46e5; }
+ @media (prefers-color-scheme: dark) {
+  :root { --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8; }
+ }
+ * { box-sizing:border-box; margin:0; padding:0; }
+ body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:420px; margin:0 auto; padding:28px 16px 50px; }
+ .logo { text-align:center; font-weight:750; letter-spacing:.02em; margin-bottom:4px; }
+ .logo small { display:block; color:var(--muted); font-weight:500; font-size:11.5px; margin-top:2px; }
+ .sub { text-align:center; color:var(--muted); font-size:12.5px; margin-bottom:18px; }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; }
+ input { width:100%; margin-top:6px; padding:12px; border:1px solid var(--line); border-radius:11px;
+   background:var(--bg); color:var(--text); font-size:15px; }
+ label { display:block; margin-top:12px; font-size:12.5px; color:var(--muted); }
+ .btn { display:block; width:100%; margin-top:16px; padding:13px; border:0; border-radius:12px;
+   background:var(--accent); color:#fff; font-size:15px; font-weight:650; cursor:pointer; }
+ .result { margin-top:16px; }
+ .status { display:flex; align-items:center; gap:9px; padding:13px; border-radius:12px; font-weight:650; }
+ .dot { width:12px; height:12px; border-radius:50%; }
+ .meta { margin-top:10px; font-size:13px; color:var(--muted); line-height:1.6; }
+ .err { margin-top:14px; padding:11px; border-radius:10px; background:rgba(214,58,58,.12); color:#d63a3a; font-size:13px; font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="logo">NOZZA<small>Там, где рождается форма</small></div>
+ <p class="sub">Проверьте статус вашего заказа</p>
+ <div class="card">
+  <label>Номер заказа<input id="number" inputmode="numeric" placeholder="Например: 1001"></label>
+  <label>Телефон (если оставляли)<input id="phone" placeholder="+7…"></label>
+  <button class="btn" id="check" type="button">Проверить статус</button>
+  <div class="result" id="result"></div>
+ </div>
+</div>
+<script>
+(function(){
+  function $(s){ return document.querySelector(s); }
+  function esc(s){ return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function check(){
+    var number=$('#number').value.trim(), phone=$('#phone').value.trim();
+    if(!number){ $('#result').innerHTML='<div class="err">Введите номер заказа</div>'; return; }
+    var q='/api/track/order?number='+encodeURIComponent(number)+(phone?'&phone='+encodeURIComponent(phone):'');
+    fetch(q).then(function(r){return r.json();}).then(function(d){
+      if(!d.found){ $('#result').innerHTML='<div class="err">'+esc(d.error||'Заказ не найден')+'</div>'; return; }
+      var col=d.status_color||'#64748b';
+      $('#result').innerHTML='<div class="status" style="background:'+col+'22;color:'+col+'"><span class="dot" style="background:'+col+'"></span>'
+        + esc(d.status)+'</div>'
+        + '<div class="meta">№'+esc(d.number)+' · '+esc(d.product)+'<br>'
+        + (d.qty>1?'Количество: '+d.qty+'<br>':'')
+        + (d.due?'Ожидаем к: '+esc(d.due):'') + '</div>'
+        + (d.photos&&d.photos.length?'<div class="meta">К заказу приложены фото — покажем при выдаче.</div>':'');
+    }).catch(function(){ $('#result').innerHTML='<div class="err">Нет связи с PrintFlow</div>'; });
+  }
+  $('#check').addEventListener('click', check);
+  $('#number').addEventListener('keydown', function(e){ if(e.key==='Enter') check(); });
+})();
+</script>
+</body>
+</html>

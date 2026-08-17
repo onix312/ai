@@ -142,6 +142,9 @@ function fillSelectors() {
   if (cf) cf.innerHTML = '<option value="">Без ниши</option>' + niches;
   $('customers_datalist').innerHTML = PF.state.customers
     .map((c) => `<option value="${esc(c.name)}">`).join('');
+  const pd = $('products_datalist');
+  if (pd) pd.innerHTML = (PF.state.catalog || [])
+    .map((c) => `<option value="${esc(c.name)}">`).join('');
   $('orders_filter_status').value = filters.status;
   $('orders_filter_niche').value = filters.niche;
 }
@@ -180,6 +183,14 @@ async function openOrder(id) {
     file: '', price: '', cost: '', prepaid: '', auto_cost: 1, quality: 'pending',
     quality_note: '', notes: '',
   };
+  // Умные значения по умолчанию: канал, ниша и материал — как в последнем заказе,
+  // а не с нуля. Экономит пару полей на каждом похожем заказе.
+  if (!id && PF.state.orders.length) {
+    const last = PF.state.orders[0];
+    if (last.channel) blank.channel = last.channel;
+    if (last.niche_id) blank.niche_id = last.niche_id;
+    if (last.material) blank.material = last.material;
+  }
   const data = Object.assign({}, blank, order || {});
   OF.forEach((k) => {
     const el = $('of_' + k);
@@ -198,6 +209,9 @@ async function openOrder(id) {
     : 'Клиент создаётся автоматически по имени и телефону.';
   $('order_delete').hidden = !id;
   $('order_queue').hidden = !id;
+  $('order_fulfill').hidden = !id;
+  $('order_duplicate').hidden = !id;
+  $('order_b2b').hidden = !id;
 
   const jobs = (order && order.jobs) || [];
   $('of_jobs_wrap').hidden = !jobs.length;
@@ -516,7 +530,59 @@ function bind() {
 
   ['grams', 'hours', 'price', 'cost', 'prepaid', 'qty', 'manual_minutes'].forEach((k) =>
     $('of_' + k).addEventListener('input', updateEconDebounced));
+  // Автоподстановка из базы изделий: выбрали позицию — вес, время, материал,
+  // цена и файл подставятся сами, если поля ещё пустые.
+  $('of_product').addEventListener('change', () => {
+    const name = $('of_product').value.trim().toLowerCase();
+    if (!name) return;
+    const item = (PF.state.catalog || []).find((c) => String(c.name || '').toLowerCase() === name);
+    if (!item) return;
+    if (!num($('of_grams').value) && num(item.grams)) $('of_grams').value = item.grams;
+    if (!num($('of_hours').value) && num(item.hours)) $('of_hours').value = item.hours;
+    if (!$('of_material').value.trim() && item.material) $('of_material').value = item.material;
+    if (!num($('of_price').value) && num(item.price)) $('of_price').value = item.price;
+    if (!$('of_file').value.trim() && item.file) $('of_file').value = item.file;
+    if (!$('of_niche_id').value && item.niche_id) $('of_niche_id').value = item.niche_id;
+    toast('Подставлено из базы', item.name);
+    updateEconDebounced();
+  });
   $('order_save').addEventListener('click', saveOrder);
+  $('order_duplicate').addEventListener('click', async () => {
+    if (!editingOrder) return;
+    try {
+      const res = await post('/api/order/duplicate', { id: editingOrder });
+      closeModal('order_modal');
+      toast('Заказ повторён', `№${res.order.number} · ${res.order.product}`);
+      await PF.refreshCore();
+      PF.refreshFinance();
+      PF.modules.ops.openOrder(res.order.id);
+    } catch (e) { fail(e); }
+  });
+  $('order_b2b').addEventListener('click', () => {
+    if (!editingOrder) return;
+    const kind = window.prompt('Документ: счёт (invoice), КП (cp) или товарный чек (receipt)?', 'invoice');
+    if (!kind) return;
+    window.open(`/api/b2b/doc?id=${encodeURIComponent(editingOrder)}&kind=${encodeURIComponent(kind)}`, '_blank');
+  });
+  $('order_fulfill').addEventListener('click', async () => {
+    if (!editingOrder) return;
+    const order = PF.state.orders.find((o) => o.id === editingOrder);
+    const left = order ? Math.max(0, num(order.price) - Math.max(num(order.paid), num(order.prepaid))) : 0;
+    const warn = left > 0 ? `\n\nОстаток ${money(left)} будет зачислен как оплата при выдаче.` : '';
+    if (!confirmDanger(`Выдать заказ?${warn}`)) return;
+    try {
+      const res = await post('/api/order/fulfill', { id: editingOrder });
+      closeModal('order_modal');
+      if (res.message && navigator.clipboard) {
+        navigator.clipboard.writeText(res.message).catch(() => {});
+      }
+      toast('Заказ выдан', res.collected
+        ? `зачислено ${money(res.collected)} · текст клиенту скопирован`
+        : 'текст клиенту скопирован');
+      await PF.refreshCore();
+      PF.refreshFinance();
+    } catch (e) { fail(e); }
+  });
   $('order_delete').addEventListener('click', async () => {
     if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо.')) return;
     try {

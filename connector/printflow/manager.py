@@ -11,10 +11,11 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
-from .config import now_iso
+from .config import DATA_DIR, now_iso
 from .db import Database
 from .repo import Repo
 from .telegram_bot import TelegramBot
@@ -28,6 +29,8 @@ class PrinterManager:
         self.acc = Accounting(db)
         self.printers: dict[str, BambuPrinter] = {}
         self.guard = Watchdog(self)
+        from .spaghetti import SpaghettiWatch
+        self.spaghetti = SpaghettiWatch(self)
         # Учёт партий подключает api.py после создания менеджера (см. Api.__init__).
         self.batches = None
         self.lock = threading.RLock()
@@ -39,6 +42,7 @@ class PrinterManager:
         self._restock_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync = 0.0
+        self._last_backup = time.time()
         self.reload()
         self._poller = threading.Thread(target=self._loop, name="pf-manager", daemon=True)
         self._poller.start()
@@ -287,16 +291,36 @@ class PrinterManager:
             "queued_at": now_iso(), "created_at": now_iso(),
         }
         # оценка печати до запуска: время и граммы из файла
+        estimate = {}
         try:
             from .config import UPLOAD_DIR
             from .estimate import estimate_file
             local = UPLOAD_DIR / (job.get("file") or "").rsplit("/", 1)[-1]
             if local.exists():
-                est = estimate_file(local)
-                job["est_minutes"] = est.get("minutes", 0)
-                job["est_grams"] = est.get("grams", 0)
+                estimate = estimate_file(local)
+                job["est_minutes"] = estimate.get("minutes", 0)
+                job["est_grams"] = estimate.get("grams", 0)
         except Exception:
             pass
+        # 3MF/G-code автозаполняет заказ: вес, время, материал и цвет, если пустые.
+        if job.get("order_id") and estimate:
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
+            if order:
+                fill = {
+                    "grams": estimate.get("grams") or 0.0,
+                    "hours": round(num(estimate.get("minutes"), 0) / 60.0, 2),
+                    "material": estimate.get("material") or "",
+                    "color": estimate.get("color") or "",
+                }
+                sets, params = [], []
+                for field, value in fill.items():
+                    if value and not str(order.get(field) or "").strip():
+                        sets.append(f"{field}=?")
+                        params.append(value if field in ("material", "color") else num(value))
+                if sets:
+                    self.db.execute(
+                        f"UPDATE orders SET {', '.join(sets)}, updated_at=? WHERE id=?",
+                        (*params, now_iso(), job["order_id"]))
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
@@ -669,6 +693,50 @@ class PrinterManager:
             "utilization": round(len(printing) / len(printers) * 100) if printers else 0,
         }
 
+    # ------------------------------------------- 5.0: автобэкап и снятие детали
+    def auto_backup_if_due(self) -> None:
+        """Раз в сутки (по настройке) — копия базы в папку backups, ротация 14."""
+        days = int(num(self.db.setting("auto_backup_days", 1), 1))
+        if days <= 0:
+            return
+        if time.time() - self._last_backup < days * 24 * 3600:
+            return
+        self._last_backup = time.time()
+        try:
+            backup_dir = DATA_DIR / "backups"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            stamp = now_iso()[:16].replace(":", "").replace("T", "-")
+            target = backup_dir / f"printflow-auto-{stamp}.sqlite3"
+            self.db.backup_to(target)
+            old = sorted(backup_dir.glob("printflow-auto-*.sqlite3"))[:-14]
+            for path in old:
+                path.unlink(missing_ok=True)
+            self.db.add_event("backup", "Автобэкап", f"Снимок базы: {target.name}")
+        except Exception as exc:
+            self.db.add_event("error", "Автобэкап не удался", str(exc))
+
+    def part_removed(self, printer_id: str = "") -> dict:
+        """«Деталь снята» — зафиксировать ручное действие и замерить простой."""
+        printer = self.get(printer_id)
+        job = self.db.one(
+            "SELECT * FROM print_jobs WHERE state='done' ORDER BY datetime(finished_at) DESC LIMIT 1")
+        idle = 0
+        if job and job.get("finished_at"):
+            try:
+                from datetime import datetime
+                done_at = datetime.fromisoformat(job["finished_at"])
+                idle = max(0, round((datetime.now().astimezone() - done_at).total_seconds() / 60, 1))
+            except Exception:
+                pass
+        name = printer.record.get("name", "Принтер") if printer else "Принтер"
+        self.db.add_event("production", "Деталь снята",
+                          f"{name} · простой после печати {idle} мин",
+                          printer_id, {"idle_min": idle})
+        if idle >= 5:
+            self.notify_async(f"PrintFlow · {name}\nДеталь снята.\n"
+                              f"Принтер простаивал {int(idle)} мин после завершения печати.")
+        return {"ok": True, "idle_min": idle}
+
     # ------------------------------------------------------------ мониторинг AMS
     def ams_monitor(self, printer: BambuPrinter, snap: dict) -> None:
         """Сверка остатков AMS со складом и история смены катушек в слотах.
@@ -839,6 +907,7 @@ class PrinterManager:
         """Раз в 30 секунд: прогресс, телеметрия, сторож и очередь."""
         while not self._stop.wait(30):
             try:
+                self.auto_backup_if_due()
                 with self.lock:
                     printers = list(self.printers.values())
                 for printer in printers:
@@ -861,6 +930,7 @@ class PrinterManager:
                     try:
                         self.guard.record_telemetry(printer, snap, job["id"] if job else "")
                         self.guard.check(printer, snap)
+                        self.spaghetti.check(printer, snap)
                     except Exception as exc:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
                     if snap["printer"]["state"] in ("IDLE", "FINISH"):

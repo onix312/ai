@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — карточки «как заказать»</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<style>
+  @page { size: A4 portrait; margin: 9mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: #12203c; background: #fff; }
+  .panel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+    background: #f3f6fd; border: 1px solid #dbe3f2; border-radius: 10px; padding: 10px 14px; margin-bottom: 6mm; }
+  .panel b { font-size: 13px; margin-right: 6px; }
+  .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
+  .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5mm; }
+  .card { border: 2px solid #dbe3f2; border-radius: 14px; padding: 6mm 5mm; display: flex; flex-direction: column; height: 92mm; }
+  .num { width: 11mm; height: 11mm; border-radius: 50%; background: #1f3864; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 15pt; font-weight: 900; }
+  .t { font-size: 14pt; font-weight: 900; margin: 3mm 0 2mm; }
+  .d { font-size: 10pt; color: #42506e; line-height: 1.45; }
+  .ex { margin-top: auto; background: #f3f6fd; border-radius: 9px; padding: 3mm 4mm; font-size: 9pt; color: #5d6b85; }
+  .ex b { color: #4f46e5; }
+  @media print { .panel { display: none; } }
+</style></head>
+<body>
+<div class="panel">
+  <b>Карточки «как заказать» — 4 штуки на листе</b>
+  <label>Срок ответа <input id="srok" value="1 день"></label>
+</div>
+<div class="grid" id="grid"></div>
+<script>
+(function(){
+  var STEPS = [
+    { t: 'Сфотографируйте', d: 'Место, образец или эскиз — то, что нужно сделать или повторить.' },
+    { t: 'Снимите размеры', d: 'Ширина, высота, глубина, отверстия. Линейка — лучший помощник.' },
+    { t: 'Выберите цвет и срок', d: 'Из палитры на витрине. Количество тоже подскажите.' },
+    { t: 'Получите расчёт', d: 'Цена, материал и дата — до печати. Потом согласуем макет.' },
+  ];
+  function el(id){ return document.getElementById(id); }
+  function draw(){
+    var srok = el('srok').value || '1 день';
+    var ex = ['адресник, табличка', 'органайзер, крепление', 'PLA: чёрный, белый, оранжевый…', 'ответ в течение ' + srok];
+    el('grid').innerHTML = STEPS.map(function(s, i){
+      return '<div class="card"><div class="num">' + (i+1) + '</div>'
+        + '<div class="t">' + s.t + '</div><div class="d">' + s.d + '</div>'
+        + '<div class="ex"><b>Пример:</b> ' + ex[i] + '</div></div>';
+    }).join('');
+  }
+  el('srok').addEventListener('input', draw);
+  draw();
+})();
+</script>
+</body></html>

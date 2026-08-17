@@ -102,6 +102,16 @@ class Api:
         self.docs = Documents(self.db)
         self.batches = Batches(self.db, self.manager)
         self.manager.batches = self.batches
+        from .planner import Planner
+        self.planner = Planner(self.db, self.batches)
+        from .insights import Insights
+        self.insights = Insights(self.db)
+        from .envelopes import Envelopes
+        self.envelopes = Envelopes(self.db)
+        from .clients import Clients
+        self.clients = Clients(self.db)
+        from .b2b import B2B
+        self.b2b = B2B(self.db)
         from .updater import UpdateChecker
         self.updater = UpdateChecker(APP_VERSION, self.db, self.manager)
         self.updater.start_auto()
@@ -149,6 +159,146 @@ class Api:
             "file": name, "note": note or ("кадр с камеры" if kind == "camera" else "фото"),
             "kind": kind})
         return {"ok": True, "photo": row}
+
+    # ---------------------------------------------------- витрина для покупателя
+    def public_catalog(self) -> dict:
+        """Каталог NOZZA для покупателя: товары с ценой, остатком и фото.
+
+        Используется страницами order.html и shelf.html — это честная витрина,
+        а не внутренний справочник: показываем только то, что продаётся.
+        """
+        groups = {r["id"]: r["name"] for r in self.db.query(
+            "SELECT id, name FROM nom_groups WHERE archived=0")}
+        niches = {r["id"]: {"name": r["name"], "icon": r["icon"], "color": r["color"]}
+                  for r in self.db.query("SELECT id, name, icon, color FROM niches")}
+        goods = []
+        for item in self.nom.items(kind="product"):
+            if num(item.get("price")) <= 0:
+                continue
+            goods.append({
+                "id": item["id"],
+                "name": item["name"],
+                "price": item["price"],
+                "qty": item["qty"],
+                "status": item["status"],
+                "photo": item.get("photo") or "",
+                "group": groups.get(item.get("group_id") or "", ""),
+                "niche_id": item.get("niche_id") or "",
+                "material": item.get("material") or "",
+            })
+        return {
+            "company": str(self.db.setting("company_name", "NOZZA") or "NOZZA"),
+            "currency": str(self.db.setting("currency", "₽") or "₽"),
+            "items": goods,
+            "niches": niches,
+        }
+
+    def public_order(self, body: dict) -> dict:
+        """Заявка с витрины (QR-заказ): создаёт заказ в статусе «Новая заявка».
+
+        Вход строго валидируется: минимум полей, никаких внутренних ссылок.
+        Клиент создаётся автоматически по имени и контакту.
+        """
+        name = str(body.get("name") or "").strip()
+        contact = str(body.get("phone") or body.get("messenger") or "").strip()
+        product = str(body.get("product") or "").strip()
+        if not name:
+            raise ValueError("Укажите имя")
+        if not contact:
+            raise ValueError("Оставьте телефон или мессенджер")
+        if not product:
+            raise ValueError("Укажите, что заказать")
+        qty = max(1, int(num(body.get("qty"), 1)))
+        color = str(body.get("color") or "").strip()
+        nom_id = str(body.get("nom_id") or "").strip()
+        niche_id = ""
+        if nom_id:
+            item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+            if item:
+                niche_id = item.get("niche_id") or ""
+        order = self.repo.save_order({
+            "product": product,
+            "customer_name": name,
+            "phone": str(body.get("phone") or "").strip(),
+            "messenger": str(body.get("messenger") or "").strip(),
+            "channel": str(body.get("channel") or "shop").strip() or "shop",
+            "niche_id": niche_id or None,
+            "status": "new",
+            "qty": qty,
+            "color": color,
+            "notes": str(body.get("note") or "").strip() or "Заявка с витрины",
+            "nom_id": nom_id or None,
+        })
+        self.db.add_event("lead", "Заявка с витрины",
+                          f"{product} · {name}" + (f" · {color}" if color else ""),
+                          data={"order_id": order.get("id"), "source": "storefront"})
+        return {"ok": True, "order_number": order.get("number"), "order_id": order.get("id")}
+
+    def fulfill_order(self, order_id: str, account_id: str = "") -> dict:
+        """«Заказ выдан» одной кнопкой: остаток оплаты → финальный статус → текст.
+
+        Принимает недополученные деньги в кассу (если автоучёт включён),
+        закрывает заказ и возвращает готовое сообщение клиенту.
+        """
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        final = self.db.one(
+            "SELECT id FROM statuses WHERE is_final=1 ORDER BY position LIMIT 1")
+        if not final:
+            raise ValueError("Не настроен финальный статус заказа")
+        if order.get("status") == final["id"]:
+            raise ValueError("Заказ уже выдан")
+        collected = 0.0
+        if self.db.setting("auto_income_on_done", True):
+            rest = round(max(0.0, num(order.get("price")) -
+                             max(num(order.get("paid")), num(order.get("prepaid")))), 2)
+            if rest > 0:
+                self.acc.add_payment(
+                    order_id, rest, "payment", account_id or order.get("account_id") or "",
+                    "выдача заказа", "Оплата при выдаче заказа")
+                collected = rest
+        saved = self.repo.save_order({"id": order_id, "status": final["id"]})
+        number = str(saved.get("number") or "")
+        message = (f"Здравствуйте! Ваш заказ №{number} готов, можно забирать. "
+                   f"Спасибо, что выбрали NOZZA!")
+        return {"ok": True, "order": saved, "collected": collected, "message": message}
+
+    def network_diagnose(self, host: str) -> dict:
+        from . import network
+        host = host or ""
+        if not host:
+            printers = self.repo.printers()
+            host = (printers[0] or {}).get("host") if printers else ""
+        if not host:
+            return {"error": "Укажите IP принтера", "host": ""}
+        return network.diagnose(host)
+
+    def track_order(self, number: str, phone: str) -> dict:
+        """Статус заказа для клиента по номеру и контактному телефону."""
+        number = (number or "").strip()
+        phone = (phone or "").strip()
+        if not number:
+            return {"found": False, "error": "Укажите номер заказа"}
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return {"found": False, "error": "Заказ не найден"}
+        if phone and phone not in (order.get("phone") or ""):
+            return {"found": False, "error": "Телефон не совпадает"}
+        status = self.db.one("SELECT * FROM statuses WHERE id=?", (order.get("status", ""),))
+        photos = self.db.query(
+            "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC LIMIT 4",
+            (order["id"],))
+        return {
+            "found": True,
+            "number": order.get("number"),
+            "product": order.get("product"),
+            "status": (status or {}).get("name") or order.get("status"),
+            "status_color": (status or {}).get("color") or "#64748b",
+            "due": order.get("due") or "",
+            "qty": order.get("qty"),
+            "photos": [p.get("id") for p in photos],
+        }
 
     def shelf_save_photo(self, item_id: str, data_url: str) -> dict:
         """Сохранить фото позиции стеллажа из data URL (jpeg/png)."""
@@ -309,6 +459,47 @@ class Api:
             return 200, {"groups": self.nom.groups()}
         if path == "/api/replenishment":
             return 200, {"rows": self.batches.plan_replenishment(one("warehouse_id"))}
+        if path == "/api/plan/day":
+            return 200, self.planner.day_plan()
+        if path == "/api/insights":
+            return 200, self.insights.all()
+        if path == "/api/payback":
+            return 200, self.insights.payback()
+        if path == "/api/tax-compare":
+            return 200, self.insights.tax_compare()
+        if path == "/api/cash-daily":
+            return 200, self.insights.cash_forecast_daily(int(num(one("days", "90"), 90)))
+        if path == "/api/public/catalog":
+            return 200, self.public_catalog()
+        # --------------------------------------------------------- 5.0: сеть
+        if path == "/api/network/diagnose":
+            return 200, self.network_diagnose(one("host"))
+        if path == "/api/network/ips":
+            from .config import get_local_ips
+            return 200, {"ips": get_local_ips()}
+        if path == "/api/network/scan":
+            from . import network
+            ranges = [r for r in one("ranges").split(",") if r.strip()]
+            return 200, {"found": network.scan_ranges(ranges)}
+        if path == "/api/network/mdns":
+            from . import network
+            return 200, {"found": network.mdns_discover()}
+        # ------------------------------------------------------- 5.0: конверты
+        if path == "/api/envelopes":
+            return 200, {"envelopes": self.envelopes.list(),
+                         "total": self.envelopes.total(),
+                         "auto": self.db.setting("envelope_auto", False)}
+        # -------------------------------------------------------- 5.0: клиенты
+        if path == "/api/clients/rfm":
+            return 200, {"rows": self.clients.rfm(int(num(one("days", "90"), 90)))}
+        if path == "/api/clients/duplicates":
+            return 200, {"groups": self.clients.duplicates()}
+        if path == "/api/data-check":
+            return 200, self.repo.data_check()
+        if path == "/api/order/history":
+            return 200, {"history": self.repo.order_history(one("id"))}
+        if path == "/api/track/order":
+            return 200, self.track_order(one("number"), one("phone"))
         # ------------------------------------------------------------- склады
         if path == "/api/warehouses":
             return 200, {"warehouses": self.stock.warehouse_totals(),
@@ -438,6 +629,8 @@ class Api:
         if path == "/api/printer/alerts/clear":
             self.manager.guard.clear(pid)
             return 200, {"ok": True}
+        if path == "/api/printer/part-removed":
+            return 200, self.manager.part_removed(pid)
 
         # --- очередь
         if path == "/api/jobs/enqueue":
@@ -463,6 +656,28 @@ class Api:
         if path == "/api/order/delete":
             self.repo.delete_order(body.get("id", ""))
             return 200, {"ok": True}
+        if path == "/api/order/fulfill":
+            return 200, self.fulfill_order(body.get("id", ""), body.get("account_id", ""))
+        if path == "/api/order/duplicate":
+            return 200, {"ok": True, "order": self.repo.duplicate_order(body.get("id", ""))}
+        if path == "/api/public/order":
+            return 200, self.public_order(body)
+        # --------------------------------------------------------- 5.0: конверты
+        if path == "/api/envelope/save":
+            return 200, {"ok": True, "envelope": self.envelopes.save(body)}
+        if path == "/api/envelope/delete":
+            self.envelopes.delete(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/envelope/withdraw":
+            return 200, {"ok": True, "move": self.envelopes.withdraw(
+                body.get("id", ""), num(body.get("amount")), body.get("note", ""))}
+        if path == "/api/envelope/auto":
+            self.db.set_settings({"envelope_auto": bool(body.get("enabled", True))})
+            return 200, {"ok": True, "auto": self.db.setting("envelope_auto", False)}
+        # -------------------------------------------------------- 5.0: клиенты
+        if path == "/api/clients/merge":
+            return 200, self.clients.merge(body.get("keep_id", ""),
+                                           body.get("drop_ids") or [])
         if path == "/api/customer/save":
             return 200, {"ok": True, "customer": self.repo.save_customer(body)}
         if path == "/api/customer/delete":
@@ -949,6 +1164,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_nom_photo((query.get("id") or [""])[0])
             if path == "/api/order/photo.jpg":
                 return self.serve_order_photo((query.get("photo_id") or [""])[0])
+            if path == "/api/design/stl":
+                return self.serve_design_stl(query)
+            if path == "/api/design/preview":
+                return self.serve_design_preview(query)
+            if path == "/api/b2b/doc":
+                return self.serve_b2b_doc(query)
             if path == "/api/stream":
                 return self.serve_sse()
             if path.startswith("/api/"):
@@ -1014,6 +1235,50 @@ class Handler(BaseHTTPRequestHandler):
             pass
         finally:
             self.close_connection = True
+
+    def _send_bytes(self, data: bytes, ctype: str, download: str = "") -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        if download:
+            from urllib.parse import quote
+            self.send_header("Content-Disposition",
+                             f"attachment; filename*=UTF-8''{quote(download)}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def serve_design_stl(self, query: dict):
+        """Генерация STL конструктором изделий (5.0) — скачивание файла."""
+        from .design import generate
+        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
+        shape = one("shape", "number_plate")
+        params = {"number": one("number", "1"), "width": num(one("width", "40")),
+                  "height": num(one("height", "24")), "thickness": num(one("thickness", "2")),
+                  "font_h": num(one("font_h", "1.4")), "diameter": num(one("diameter", "30")),
+                  "depth": num(one("depth", "40"))}
+        try:
+            data = generate(shape, params)
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        name = f"nozza-{shape}-{one('number', '1')}.stl"
+        self._send_bytes(data, "model/stl", download=name)
+
+    def serve_design_preview(self, query: dict):
+        from .design import preview_svg
+        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
+        shape = one("shape", "number_plate")
+        params = {"number": one("number", "1"), "width": num(one("width", "40")),
+                  "height": num(one("height", "24")), "diameter": num(one("diameter", "30")),
+                  "depth": num(one("depth", "40"))}
+        self._send_bytes(preview_svg(shape, params).encode("utf-8"),
+                         "image/svg+xml; charset=utf-8")
+
+    def serve_b2b_doc(self, query: dict):
+        """Документ B2B (счёт / КП / товарный чек) как печатная HTML-страница."""
+        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
+        html = self.api.b2b.document(one("id"), one("kind", "invoice"))
+        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_photo_file(self, name: str):
         from .config import PHOTO_DIR
@@ -1175,8 +1440,19 @@ class Handler(BaseHTTPRequestHandler):
             estimate = {}
         order_id = fields.get("order_id", "")
         if order_id:
-            self.api.db.execute("UPDATE orders SET file=?, updated_at=? WHERE id=?",
-                                (name, now_iso(), order_id))
+            # 3MF/G-code автозаполняет заказ: файл всегда, а вес/время/материал/
+            # цвет — только если поле пустое (ручные правки не перетираем).
+            sets, params = ["file=?", "updated_at=?"], [name, now_iso()]
+            order = self.api.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+            if order:
+                for field in ("grams", "hours", "material", "color"):
+                    value = estimate.get(field)
+                    if value and not (order.get(field) or "").strip():
+                        sets.append(f"{field}=?")
+                        params.append(value if field in ("material", "color")
+                                      else num(value))
+            params.append(order_id)
+            self.api.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", params)
         return self.send_json(200, {"ok": True, "estimate": estimate, **result})
 
 

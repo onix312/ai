@@ -472,7 +472,14 @@ class Accounting:
              account_id or None, customer_id or None, channel, payer,
              round(num(fee), 2), 1 if taxable else 0, 1 if deductible else 0,
              fixed_cost_id or None, month_key(at)))
-        return self.db.one("SELECT * FROM transactions WHERE id=?", (tx_id,)) or {}
+        row = self.db.one("SELECT * FROM transactions WHERE id=?", (tx_id,)) or {}
+        # Конверты-накопления: отложить проценты с дохода (5.0).
+        try:
+            from .envelopes import auto_allocate
+            auto_allocate(self.db, row)
+        except Exception:
+            pass
+        return row
 
     def register_order_income(self, order: dict) -> dict | None:
         """При закрытии записать только ещё не полученный остаток как платёж."""
