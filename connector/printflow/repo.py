@@ -68,6 +68,13 @@ class Repo:
         return str(1000 + int(num(row["n"])) + 1)
 
     def save_order(self, data: dict) -> dict:
+        data = dict(data)
+        # Поле «Оплачено» в карточке — удобный ввод, но источник правды здесь
+        # журнал payments. Прямую запись orders.paid больше не допускаем.
+        payment_requested = "paid" in data or "prepaid" in data
+        requested_paid = max(0.0, num(data.get("paid", data.get("prepaid", 0))))
+        data.pop("paid", None)
+        data.pop("prepaid", None)
         order_id = data.get("id") or uid("ord")
         existing = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if data.get("id") and not existing:
@@ -99,6 +106,22 @@ class Repo:
             payload["customer_id"] = customer["id"]
 
         row = self.db.upsert("orders", payload)
+        if payment_requested:
+            current_paid = max(num(row.get("paid")), num(row.get("prepaid")))
+            # Старое поле prepaid переносим в текущий счётчик без создания
+            # задним числом новой кассовой операции.
+            if num(row.get("prepaid")) > num(row.get("paid")):
+                self.db.execute("UPDATE orders SET paid=?, prepaid=0 WHERE id=?",
+                                (current_paid, order_id))
+            delta = round(requested_paid - current_paid, 2)
+            if delta > 0:
+                self.acc.add_payment(order_id, delta,
+                                     "prepay" if requested_paid < num(row.get("price")) else "payment",
+                                     row.get("account_id") or "", "карточка заказа")
+            elif delta < 0:
+                self.acc.add_payment(order_id, -delta, "refund",
+                                     row.get("account_id") or "", "карточка заказа")
+            row = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,)) or row
         status = row.get("status")
         final = self.db.one("SELECT is_final FROM statuses WHERE id=?", (status,))
         if final and final["is_final"]:
@@ -122,12 +145,13 @@ class Repo:
     def delete_order(self, order_id: str) -> None:
         if not order_id:
             raise ValueError("Не указан заказ")
-        self.db.delete("orders", order_id)
-        self.db.execute("UPDATE print_jobs SET order_id=NULL WHERE order_id=?", (order_id,))
-        # платежи без заказа исказили бы сверку касс и долги — удаляем вместе с ним,
-        # проводки же остаются в кассе, но теряют ссылку на заказ
-        self.db.execute("DELETE FROM payments WHERE order_id=?", (order_id,))
-        self.db.execute("UPDATE transactions SET order_id=NULL WHERE order_id=?", (order_id,))
+        # История движения денег должна пережить удаление карточки заказа:
+        # платежи и их проводки остаются связанными через tx_id, но отвязываются от заказа.
+        with self.db.transaction():
+            self.db.execute("UPDATE print_jobs SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.execute("UPDATE payments SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.execute("UPDATE transactions SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.delete("orders", order_id)
 
     # ---------------------------------------------------------------- клиенты
     def customers(self) -> list[dict]:
@@ -244,13 +268,19 @@ class Repo:
     def delete_transaction(self, tx_id: str) -> None:
         if not tx_id:
             raise ValueError("Не указана проводка")
-        self.db.delete("transactions", tx_id)
+        payment = self.db.one("SELECT id FROM payments WHERE tx_id=?", (tx_id,))
+        if payment:
+            self.delete_payment(payment["id"])
+        else:
+            self.db.delete("transactions", tx_id)
 
     def save_transaction_fields(self, data: dict) -> dict:
         """Правка проводки вручную (сумма, статья, касса, налоговые флаги)."""
         data = dict(data)
         if not data.get("id"):
             raise ValueError("Не указана проводка")
+        if self.db.one("SELECT id FROM payments WHERE tx_id=?", (data["id"],)):
+            raise ValueError("Эта проводка создана платежом; удалите платёж и запишите его заново")
         data.pop("auto", None)
         if "amount" in data:
             amount = abs(float(data.get("amount") or 0))
@@ -355,9 +385,14 @@ class Repo:
         if not row:
             raise ValueError("Платёж не найден")
         sign = -1 if row["kind"] == "refund" else 1
-        self.db.execute("UPDATE orders SET paid=COALESCE(paid,0)-? WHERE id=?",
-                        (sign * float(row["amount"] or 0), row["order_id"]))
-        self.db.delete("payments", payment_id)
+        with self.db.transaction():
+            if row.get("order_id"):
+                self.db.execute(
+                    "UPDATE orders SET paid=MAX(0,COALESCE(paid,0)-?), updated_at=? WHERE id=?",
+                    (sign * float(row["amount"] or 0), now_iso(), row["order_id"]))
+            self.db.delete("payments", payment_id)
+            if row.get("tx_id"):
+                self.db.delete("transactions", row["tx_id"])
 
     # --------------------------------------------------------------- принтеры
     def printers(self, include_secrets: bool = False) -> list[dict]:

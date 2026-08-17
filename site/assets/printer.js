@@ -466,7 +466,9 @@ async function openSchedule() {
     const rows = data.commands || [];
     const now = new Date();
     now.setMinutes(now.getMinutes() + 10);
-    $('sch_at').value = now.toISOString().slice(0, 16);
+    const pad = (v) => String(v).padStart(2, '0');
+    $('sch_at').value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+      + `T${pad(now.getHours())}:${pad(now.getMinutes())}`;
     $('sch_value').value = '';
     $('sch_note').value = '';
     $('sch_command').value = 'light';

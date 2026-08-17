@@ -12,8 +12,7 @@
 """
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from .accounting import Accounting, num, uid

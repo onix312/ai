@@ -11,7 +11,6 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from typing import Any
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
@@ -797,7 +796,8 @@ class PrinterManager:
     def run_scheduled(self) -> None:
         """Отложенные команды: выполнить те, чьё время наступило."""
         due = self.db.query(
-            "SELECT * FROM scheduled_commands WHERE done=0 AND at<=? ORDER BY at",
+            "SELECT * FROM scheduled_commands WHERE done=0 AND datetime(at)<=datetime(?)"
+            " ORDER BY datetime(at)",
             (now_iso(),))
         for cmd in due:
             printer = self.get(cmd.get("printer_id") or "")

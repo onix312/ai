@@ -47,8 +47,8 @@ class UpdateChecker:
             self._error = str(exc)
         return self._latest
 
-    def report(self) -> dict:
-        latest = self.check()
+    def report(self, force: bool = False) -> dict:
+        latest = self.check(force=force)
         if not latest:
             return {"current": self.current, "latest": None,
                     "update": False, "error": self._error}

@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import mimetypes
 import re
-import socketserver
 import threading
 import time
 import urllib.parse
@@ -33,6 +32,17 @@ ALLOWED_ORIGIN = re.compile(
     r")(:\d+)?$"
 )
 MAX_UPLOAD = 400 * 1024 * 1024  # 400 МБ — с запасом на крупные 3MF
+
+
+def safe_file(root: Path, name: str) -> Path | None:
+    """Вернуть путь только если он действительно находится внутри root."""
+    base = root.resolve()
+    target = (base / name).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return None
+    return target
 
 
 def parse_multipart(body: bytes, boundary: str) -> tuple[dict[str, str], tuple[str, bytes] | None]:
@@ -118,23 +128,6 @@ class Api:
             "file": name, "note": note or ("кадр с камеры" if kind == "camera" else "фото"),
             "kind": kind})
         return {"ok": True, "photo": row}
-
-    def serve_order_photo(self, photo_id: str):
-        """Отдать фото заказа по id записи order_photos."""
-        from .config import PHOTO_DIR
-        row = self.db.one("SELECT * FROM order_photos WHERE id=?", (photo_id,))
-        name = (row or {}).get("file") or ""
-        if not name:
-            return self.send_json(404, {"error": "Фото не найдено"})
-        target = (PHOTO_DIR / name).resolve()
-        if not str(target).startswith(str(PHOTO_DIR.resolve())) or not target.exists():
-            return self.send_json(404, {"error": "Фото не найдено"})
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(target.stat().st_size))
-        self.send_header("Cache-Control", "max-age=3600")
-        self.end_headers()
-        self.wfile.write(target.read_bytes())
 
     def shelf_save_photo(self, item_id: str, data_url: str) -> dict:
         """Сохранить фото позиции стеллажа из data URL (jpeg/png)."""
@@ -308,8 +301,6 @@ class Api:
             return 200, {"photos": self.db.query(
                 "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC",
                 (one("order_id"),))}
-        if path == "/api/order/photo.jpg":
-            return self.serve_order_photo(one("photo_id"))
         if path == "/api/search":
             return 200, {"results": self.repo.search(one("q"))}
         if path == "/api/backup":
@@ -711,7 +702,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def check_origin(self) -> bool:
         origin = self.headers.get("Origin")
-        return not origin or bool(ALLOWED_ORIGIN.match(origin))
+        if not origin or ALLOWED_ORIGIN.match(origin):
+            return True
+        # Доступ по локальному имени хоста (printflow.local, имя ПК и т. п.)
+        # безопасен, когда Origin в точности совпадает с Host текущего запроса.
+        parsed = urllib.parse.urlparse(origin)
+        return parsed.scheme in ("http", "https") and parsed.netloc == self.headers.get("Host", "")
 
     # ------------------------------------------------------------------- GET
     def do_GET(self):
@@ -728,6 +724,8 @@ class Handler(BaseHTTPRequestHandler):
                                        (query.get("id") or [""])[0])
             if path == "/api/shelf/photo.jpg":
                 return self.serve_shelf_photo((query.get("id") or [""])[0])
+            if path == "/api/order/photo.jpg":
+                return self.serve_order_photo((query.get("photo_id") or [""])[0])
             if path == "/api/stream":
                 return self.serve_sse()
             if path.startswith("/api/"):
@@ -794,22 +792,28 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self.close_connection = True
 
-    def serve_shelf_photo(self, item_id: str):
-        """Фото позиции стеллажа из каталога данных."""
+    def serve_photo_file(self, name: str):
         from .config import PHOTO_DIR
-        item = self.api.db.one("SELECT photo FROM shelf_items WHERE id=?", (item_id,))
-        name = (item or {}).get("photo") or ""
-        if not name:
+        target = safe_file(PHOTO_DIR, name) if name else None
+        if not target or not target.is_file():
             return self.send_json(404, {"error": "Фото не найдено"})
-        target = (PHOTO_DIR / name).resolve()
-        if not str(target).startswith(str(PHOTO_DIR.resolve())) or not target.exists():
-            return self.send_json(404, {"error": "Фото не найдено"})
+        data = target.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(target.stat().st_size))
+        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "max-age=3600")
         self.end_headers()
-        self.wfile.write(target.read_bytes())
+        self.wfile.write(data)
+
+    def serve_shelf_photo(self, item_id: str):
+        """Фото позиции стеллажа из каталога данных."""
+        item = self.api.db.one("SELECT photo FROM shelf_items WHERE id=?", (item_id,))
+        return self.serve_photo_file((item or {}).get("photo") or "")
+
+    def serve_order_photo(self, photo_id: str):
+        """Фото заказа по id записи order_photos."""
+        row = self.api.db.one("SELECT file FROM order_photos WHERE id=?", (photo_id,))
+        return self.serve_photo_file((row or {}).get("file") or "")
 
     def serve_shot(self, printer_id: str, shot_id: str):
         """Отдать сохранённый кадр из архива камеры."""
@@ -853,8 +857,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def serve_static(self, path: str):
         rel = urllib.parse.unquote(path.lstrip("/")) or "index.html"
-        target = (SITE / rel).resolve()
-        if not str(target).startswith(str(SITE.resolve())):
+        target = safe_file(SITE, rel)
+        if target is None:
             return self.send_error(403, "Forbidden")
         if target.is_dir():
             target = target / "index.html"

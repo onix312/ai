@@ -8,7 +8,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from typing import Any, Iterable
+from contextlib import contextmanager
+from typing import Any, Iterable, Iterator
 
 from .config import (DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS, DEFAULT_EXPENSE_CATEGORIES,
                      DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso)
@@ -477,6 +478,7 @@ class Database:
         ensure_dirs()
         self.path = path
         self.lock = threading.RLock()
+        self._local = threading.local()
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -547,16 +549,38 @@ class Database:
         rows = self.query(sql, params)
         return rows[0] if rows else None
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Атомарная группа операций; вложенные вызовы используют одну транзакцию."""
+        with self.lock:
+            depth = getattr(self._local, "transaction_depth", 0)
+            if depth == 0:
+                self.conn.execute("BEGIN IMMEDIATE")
+            self._local.transaction_depth = depth + 1
+            try:
+                yield
+            except Exception:
+                self._local.transaction_depth = depth
+                if depth == 0:
+                    self.conn.rollback()
+                raise
+            else:
+                self._local.transaction_depth = depth
+                if depth == 0:
+                    self.conn.commit()
+
     def execute(self, sql: str, params: Iterable = ()) -> sqlite3.Cursor:
         with self.lock:
             cur = self.conn.execute(sql, tuple(params))
-            self.conn.commit()
+            if not getattr(self._local, "transaction_depth", 0):
+                self.conn.commit()
             return cur
 
     def executemany(self, sql: str, seq: Iterable[Iterable]) -> None:
         with self.lock:
             self.conn.executemany(sql, [tuple(x) for x in seq])
-            self.conn.commit()
+            if not getattr(self._local, "transaction_depth", 0):
+                self.conn.commit()
 
     def upsert(self, table: str, data: dict[str, Any], key: str = "id") -> dict:
         """Вставить или обновить запись по первичному ключу."""

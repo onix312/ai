@@ -49,7 +49,10 @@ function agoText(iso) {
   if (sec < 86400) return `${Math.round(sec / 3600)} ч назад`;
   return dateText(iso);
 }
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => {
+  const d = new Date(), pad = (v) => String(v).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return '—';
@@ -321,26 +324,48 @@ const VIEW_ALIASES = {
 };
 let currentView = '';
 
+/** Сбросить именно прокрутку контента. В разных браузерах прокручиваемым
+    корнем бывает html либо body; дополнительные контейнеры обнуляем на случай
+    запуска в установленном приложении или WebView. */
+function resetViewScroll() {
+  window.scrollTo(0, 0);
+  const roots = [document.scrollingElement, document.documentElement, document.body,
+    $('main'), $('views')];
+  roots.forEach((el) => { if (el) { el.scrollTop = 0; el.scrollLeft = 0; } });
+}
+
 function showView(name, sub) {
   if (!VIEWS[name] && VIEW_ALIASES[name]) name = VIEW_ALIASES[name];
   if (!VIEWS[name]) name = 'dashboard';
   currentView = name;
-  $$('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + name));
+  $$('.view').forEach((v) => {
+    const active = v.id === 'view-' + name;
+    v.classList.toggle('on', active);
+    v.hidden = !active;
+  });
   $$('.nav-link').forEach((a) => a.classList.toggle('on', a.dataset.view === name));
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
   document.title = `${VIEWS[name].title} · NOZZA`;
-  window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+  resetViewScroll();
   $('side').classList.remove('show');
   const scrim = $('scrim'); if (scrim) scrim.remove();
   PF.emit('view', { view: name, sub });
+  // После перерисовки и обработки hash браузером повторно фиксируем начало.
+  requestAnimationFrame(resetViewScroll);
+  setTimeout(resetViewScroll, 0);
 }
 function routeFromHash() {
   const raw = (location.hash || '#dashboard').slice(1);
   const [name, sub] = raw.split('/');
   showView(name, sub);
 }
-PF.go = (view, sub) => { location.hash = '#' + view + (sub ? '/' + sub : ''); };
+PF.go = (view, sub) => {
+  const hash = '#' + view + (sub ? '/' + sub : '');
+  if (location.hash === hash) showView(view, sub);
+  else location.hash = hash;
+};
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', routeFromHash);
 
 /* ============================================================== тема */
