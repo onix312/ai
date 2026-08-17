@@ -6,8 +6,8 @@
 <title>NOZZA · PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
-<link rel="stylesheet" href="assets/theme.css?v=2.0.8">
-<link rel="stylesheet" href="assets/app.css?v=2.0.8">
+<link rel="stylesheet" href="assets/theme.css?v=2.1.0">
+<link rel="stylesheet" href="assets/app.css?v=2.1.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -88,6 +88,7 @@
  <div class="view-head">
   <div><span class="eyebrow">Bambu Lab · Live</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
   <div class="head-actions">
+   <button class="btn" id="pr_wall" type="button">▦ Стена</button>
    <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
    <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
    <button class="btn primary" id="pr_add" type="button">+ Принтер</button>
@@ -96,6 +97,7 @@
  <div class="printer-tabs" id="pr_tabs"></div>
  <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «+ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
  <div id="pr_workspace" hidden>
+  <div id="pr_alerts" class="alert-strip"></div>
   <div class="printer-grid">
    <div class="grid" style="gap:16px">
     <article class="job-card" id="pr_job">
@@ -113,6 +115,8 @@
       <div><span>Завершится</span><b id="pr_eta">—</b></div>
       <div><span>Скорость</span><b id="pr_speed">—</b></div>
       <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
+      <div><span>Потрачено</span><b id="pr_spent">—</b></div>
+      <div><span>Себестоимость</span><b id="pr_cost_total">—</b></div>
      </div>
     </article>
     <div class="telemetry">
@@ -128,6 +132,12 @@
       <div class="fan-row"><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div></div>
       <div class="fan-row"><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div></div>
      </div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>История показателей</h2><p id="pr_chart_sub">Температуры и обдув за последние часы</p></div>
+      <select id="pr_chart_range" class="mini-sel"><option value="60">1 час</option><option value="180" selected>3 часа</option><option value="720">12 часов</option><option value="1440">Сутки</option></select></div>
+     <div id="pr_chart" class="chart-box"><div class="empty compact"><span>Накапливаем историю — точки появятся через несколько минут.</span></div></div>
+     <div id="pr_chart_legend" class="legend"></div>
     </div>
     <div class="card">
      <div class="card-head"><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><span class="chip outline">только LAN</span></div>
@@ -171,9 +181,14 @@
 
    <div class="grid" style="gap:16px">
     <div class="card">
-     <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div>
+     <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div>
+      <div class="head-actions"><span class="chip warn" id="pr_cam_demo" hidden>Демо</span><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div></div>
      <div class="cam-frame"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span></div>
-     <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span><button class="btn sm ghost" id="pr_cam_full" type="button">Развернуть</button></div>
+     <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span>
+      <button class="btn sm ghost" id="pr_cam_shot" type="button">Снимок</button>
+      <button class="btn sm ghost" id="pr_cam_full" type="button">Развернуть</button></div>
+     <p class="muted shot-hint" id="pr_shots_empty" style="font-size:12px;margin:8px 0 0">Снимки сохраняются здесь: свой таймлапс печати. Сторож добавляет кадр сам, когда что-то пошло не так.</p>
+     <div class="shot-strip" id="pr_shots"></div>
     </div>
     <div class="card">
      <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><span class="chip" id="pr_ams_count">0 слотов</span></div>
@@ -182,6 +197,10 @@
     <div class="card">
      <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health">Нет ошибок</span></div>
      <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
+    </div>
+    <div class="card">
+     <div class="card-head"><div><h2>Наработка и ТО</h2><p id="pr_runtime">Наработка —</p></div><span class="chip" id="pr_maint_badge">—</span></div>
+     <div id="pr_maint"><div class="empty compact"><span>Список работ появится после подключения принтера.</span></div></div>
     </div>
    </div>
   </div>
@@ -2373,6 +2392,18 @@
     <div id="set_auto"></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Сторож печати</h2><p>Что делать, если печать пошла не так</p></div></div>
+    <div id="set_guard"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила очереди</h2><p>Когда и что запускать самому</p></div></div>
+    <div id="set_queue_rules"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Наработка и история</h2><p>Обслуживание и графики показателей</p></div></div>
+    <div id="set_upkeep"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">+</button></div>
     <div id="set_printers"></div>
    </div>
@@ -2496,6 +2527,9 @@
    <label class="field"><span>AMS подключён</span><select id="pf_has_ams"><option value="1">Да</option><option value="0">Нет</option></select></label>
    <label class="field"><span>Активен</span><select id="pf_enabled"><option value="1">Да</option><option value="0">Отключён</option></select></label>
    <label class="field"><span>Заметка</span><input id="pf_notes" placeholder="Где стоит, чем занят"></label>
+   <label class="field"><span>Сторож печати</span><select id="pf_guard"><option value="1">Следить за ошибками</option><option value="0">Выключен</option></select></label>
+   <label class="field"><span>Демо-камера</span><select id="pf_camera_demo"><option value="0">Выключена</option><option value="1">Показывать заготовленные кадры</option></select><small class="hint">Для проверки интерфейса без принтера. Кадр честно помечается плашкой «Демо».</small></label>
+   <label class="field"><span>Диаметр сопла, мм</span><input id="pf_nozzle_size" placeholder="0.4"></label>
   </div>
   <div id="pf_result" style="margin-top:12px"></div>
  </div>
@@ -2657,6 +2691,25 @@
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="job_modal">Отмена</button><button class="btn primary" type="button" id="job_save">Добавить в очередь</button></div>
 </form></dialog>
 
+<div id="wall" class="wall" hidden>
+ <div class="wall-head">
+  <div><span class="eyebrow">Живая стена</span><h1 id="wall_title">Парк принтеров</h1></div>
+  <div class="wall-stats" id="wall_stats"></div>
+  <div class="wall-acts"><span class="wall-clock" id="wall_clock">—</span><button class="btn" id="wall_close" type="button">Закрыть ✕</button></div>
+ </div>
+ <div class="wall-grid" id="wall_grid"></div>
+ <div class="wall-foot"><span id="wall_queue">Очередь пуста</span><span class="top-spacer"></span><span id="wall_note">Обновляется автоматически · Esc — выход</span></div>
+</div>
+
+<dialog class="modal narrow" id="maint_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Обслуживание</span><h2 id="mf_title">Работа по регламенту</h2><p>Отметьте выполнение — счётчик наработки начнётся заново.</p></div><button class="icon-btn" type="button" data-close="maint_modal">×</button></div>
+ <div class="modal-body">
+  <div id="mf_info" class="notice"><span>ⓘ</span><span>—</span></div>
+  <label class="field"><span>Заметка</span><input id="mf_note" placeholder="Что сделали, какие детали заменили"></label>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="maint_modal">Отмена</button><button class="btn primary" type="button" id="mf_done">Отметить выполненным</button></div>
+</form></dialog>
+
 <dialog id="cam_modal"><button class="icon-btn" type="button" data-close="cam_modal">×</button><img id="cam_full" alt="Камера принтера"></dialog>
 
 <dialog id="palette">
@@ -2667,11 +2720,11 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=2.0.8"></script>
-<script src="assets/core.js?v=2.0.8"></script>
-<script src="assets/printer.js?v=2.0.8"></script>
-<script src="assets/ops.js?v=2.0.8"></script>
-<script src="assets/money.js?v=2.0.8"></script>
-<script src="assets/finance.js?v=2.0.8"></script>
-<script src="assets/app.js?v=2.0.8"></script>
+<script src="assets/qr.js?v=2.1.0"></script>
+<script src="assets/core.js?v=2.1.0"></script>
+<script src="assets/printer.js?v=2.1.0"></script>
+<script src="assets/ops.js?v=2.1.0"></script>
+<script src="assets/money.js?v=2.1.0"></script>
+<script src="assets/finance.js?v=2.1.0"></script>
+<script src="assets/app.js?v=2.1.0"></script>
 </body></html>

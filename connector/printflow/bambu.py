@@ -25,6 +25,7 @@ except ImportError:  # интерфейс покажет понятную оши
 
 from .camera import CameraWorker
 from .ftps import PrinterFiles
+from .hms import decode_list, worst
 
 STATE_NAMES = {
     "IDLE": "Готов", "RUNNING": "Печать", "PREPARE": "Подготовка",
@@ -79,7 +80,8 @@ class BambuPrinter:
         self.previous_error = ""
         self.session: dict[str, Any] | None = None
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
-                                            "access_code": self.record.get("access_code")})
+                                            "access_code": self.record.get("access_code"),
+                                            "demo": bool(self.record.get("camera_demo"))})
         self._stop = threading.Event()
         self._watchdog: threading.Thread | None = None
 
@@ -153,7 +155,8 @@ class BambuPrinter:
         self.disconnect()
         self.camera.stop()
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
-                                            "access_code": self.record.get("access_code")})
+                                            "access_code": self.record.get("access_code"),
+                                            "demo": bool(self.record.get("camera_demo"))})
         if self.record.get("enabled", 1):
             self.camera.start()
             self.connect()
@@ -425,6 +428,10 @@ class BambuPrinter:
         light = next((x.get("mode", "off") for x in p.get("lights_report", []) or []
                       if x.get("node") == "chamber_light"), "off")
         hms = p.get("hms") if isinstance(p.get("hms"), list) else []
+        raw_error = p.get("print_error", 0)
+        problems = decode_list(hms)
+        if raw_error and str(raw_error) not in ("0", "0000-0000"):
+            problems = decode_list([raw_error]) + problems
         remaining = as_num(p.get("mc_remaining_time"))
         return {
             "id": self.id,
@@ -448,8 +455,13 @@ class BambuPrinter:
                 "speed_percent": int(as_num(p.get("spd_mag"), 100)),
                 "wifi": p.get("wifi_signal", ""), "firmware": firmware,
                 "print_error": p.get("print_error", 0), "hms": hms,
+                "problems": problems,
+                "severity": worst(problems),
                 "sdcard": bool(p.get("sdcard", False)),
                 "weight": as_num(p.get("print_weight")),
+                "started_ts": (self.session or {}).get("started_ts"),
+                "elapsed_min": round((time.time() - (self.session or {}).get("started_ts", 0)) / 60, 1)
+                if (self.session or {}).get("started_ts") else 0,
             },
             "temperature": {
                 "nozzle": as_num(p.get("nozzle_temper")),

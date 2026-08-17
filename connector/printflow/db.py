@@ -13,11 +13,19 @@ from typing import Any, Iterable
 from .config import (DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS, DEFAULT_EXPENSE_CATEGORIES,
                      DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
 ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "printers": [
+        ("camera_demo", "INTEGER DEFAULT 0"),      # показывать демо-поток без принтера
+        ("guard_enabled", "INTEGER DEFAULT 1"),    # сторож печати следит за ошибками
+        ("total_minutes", "REAL DEFAULT 0"),       # наработка, минуты
+        ("total_grams", "REAL DEFAULT 0"),         # израсходовано пластика, г
+        ("nozzle_size", "REAL DEFAULT 0.4"),
+        ("nozzle_type", "TEXT DEFAULT 'steel'"),
+    ],
     "transactions": [
         ("account_id", "TEXT"),
         ("customer_id", "TEXT"),
@@ -321,6 +329,39 @@ CREATE TABLE IF NOT EXISTS catalog (
     notes TEXT DEFAULT '',
     archived INTEGER DEFAULT 0,
     created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS telemetry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    printer_id TEXT,
+    job_id TEXT,
+    state TEXT DEFAULT '',
+    progress REAL DEFAULT 0,
+    layer INTEGER DEFAULT 0,
+    nozzle REAL DEFAULT 0,
+    nozzle_target REAL DEFAULT 0,
+    bed REAL DEFAULT 0,
+    bed_target REAL DEFAULT 0,
+    chamber REAL DEFAULT 0,
+    fan_part REAL DEFAULT 0,
+    fan_aux REAL DEFAULT 0,
+    speed REAL DEFAULT 0,
+    wifi TEXT DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_telemetry_printer ON telemetry(printer_id, at);
+
+CREATE TABLE IF NOT EXISTS maintenance (
+    id TEXT PRIMARY KEY,
+    printer_id TEXT,
+    task TEXT DEFAULT '',
+    every_hours REAL DEFAULT 0,
+    last_at TEXT,
+    last_hours REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS printer_stats (

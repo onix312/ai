@@ -102,6 +102,19 @@ class Api:
             return 200, {"printers": self.repo.printers()}
         if path == "/api/printer/discover":
             return 200, {"found": BambuPrinter.discover()}
+        if path == "/api/printer/telemetry":
+            return 200, {"points": self.manager.guard.telemetry(
+                one("printer_id"), int(num(one("minutes", "180"), 180)))}
+        if path == "/api/printer/maintenance":
+            return 200, {"tasks": self.manager.guard.maintenance(one("printer_id")),
+                         "hours": self.manager.guard.runtime_hours(one("printer_id"))}
+        if path == "/api/printer/alerts":
+            return 200, {"alerts": self.manager.guard.alerts(one("printer_id"))}
+        if path == "/api/printer/shots":
+            printer = self.printer_or_fail(one("printer_id"))
+            return 200, {"shots": printer.camera.snapshot_list()}
+        if path == "/api/wall":
+            return 200, self.manager.wall()
         if path == "/api/printer/files":
             printer = self.printer_or_fail(one("printer_id"))
             return 200, {"path": one("path", "/"),
@@ -219,6 +232,20 @@ class Api:
         if path == "/api/printer/ftps-test":
             printer = self.printer_or_fail(pid)
             return 200, printer.files.test()
+        if path == "/api/printer/snapshot":
+            printer = self.printer_or_fail(pid)
+            return 200, {"ok": True, "shot": printer.camera.snapshot(
+                body.get("note", "Снимок вручную"), body.get("job_id", ""))}
+        if path == "/api/printer/maintenance/done":
+            return 200, {"ok": True,
+                         "task": self.manager.guard.complete_maintenance(body.get("id", ""))}
+        if path == "/api/printer/maintenance/save":
+            body.setdefault("id", uid("maint"))
+            body.setdefault("printer_id", pid)
+            return 200, {"ok": True, "task": self.db.upsert("maintenance", body)}
+        if path == "/api/printer/alerts/clear":
+            self.manager.guard.clear(pid)
+            return 200, {"ok": True}
 
         # --- очередь
         if path == "/api/jobs/enqueue":
@@ -434,6 +461,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_camera_frame((query.get("printer_id") or [""])[0])
             if path == "/api/printer/camera.mjpeg":
                 return self.serve_camera_stream((query.get("printer_id") or [""])[0])
+            if path == "/api/printer/shot.jpg":
+                return self.serve_shot((query.get("printer_id") or [""])[0],
+                                       (query.get("id") or [""])[0])
             if path.startswith("/api/"):
                 code, payload = self.api.get(path, query)
                 return self.send_json(code, payload)
@@ -459,6 +489,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Content-Length", str(len(frame)))
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(frame)
+
+    def serve_shot(self, printer_id: str, shot_id: str):
+        """Отдать сохранённый кадр из архива камеры."""
+        printer = self.api.manager.get(printer_id)
+        frame = printer.camera.snapshot_frame(shot_id) if printer else None
+        if not frame:
+            return self.send_json(404, {"error": "Кадр не найден"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(frame)))
+        self.send_header("Cache-Control", "max-age=3600")
         self.end_headers()
         self.wfile.write(frame)
 

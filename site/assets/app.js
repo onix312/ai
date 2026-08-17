@@ -210,6 +210,29 @@ const NOTIFY = [
   ['notify_error', 'Ошибки и HMS'],
   ['notify_pause', 'Пауза'],
   ['notify_filament_low', 'Пластик заканчивается'],
+  ['notify_guard', 'Тревоги сторожа печати'],
+  ['notify_maintenance', 'Пора обслужить принтер'],
+  ['notify_photo', 'Прикладывать кадр с камеры'],
+];
+const GUARD = [
+  ['guard_enabled', 'Сторож печати', 'Следит за ошибками, зависанием и температурой', 'bool'],
+  ['guard_pause_on_error', 'Ставить на паузу при ошибке', 'Спасает деталь и пластик, пока вас нет', 'bool'],
+  ['guard_snapshot', 'Сохранять кадр при тревоге', 'Видно, что случилось, даже задним числом', 'bool'],
+  ['guard_stall_minutes', 'Прогресс не растёт, мин', 'Через сколько считать печать зависшей', 'num', 1],
+  ['guard_cold_minutes', 'Сопло не догревается, мин', 'Сколько ждать выхода на температуру', 'num', 1],
+  ['guard_count_loss', 'Считать убыток от брака', 'Потраченный пластик и электричество — в расходы', 'bool'],
+];
+const QUEUE_RULES = [
+  ['queue_check_filament', 'Проверять остаток пластика', 'Не запускать печать, если катушки не хватит', 'bool'],
+  ['queue_group_material', 'Группировать по материалу', 'Меньше перезаправок AMS подряд', 'bool'],
+  ['quiet_hours_enabled', 'Тихие часы', 'Ночью автозапуск откладывается до утра', 'bool'],
+  ['quiet_from', 'Тишина с', 'Например 23:00', 'text'],
+  ['quiet_to', 'Тишина до', 'Например 08:00', 'text'],
+];
+const UPKEEP = [
+  ['maintenance_enabled', 'Регламент обслуживания', 'Напоминать о ТО по наработке часов', 'bool'],
+  ['telemetry_enabled', 'История показателей', 'Графики температур и обдува', 'bool'],
+  ['telemetry_keep_days', 'Хранить историю, дней', 'Старые точки удаляются автоматически', 'num', 1],
 ];
 const ACCENTS = [
   ['indigo', '#4f46e5'], ['violet', '#7c3aed'], ['blue', '#2563eb'],
@@ -271,12 +294,17 @@ function renderSettings() {
         .join('') || '<option value="cash">Наличные</option>'}</select>`);
   $('set_auto').innerHTML = AUTOS.map(([k, label, sub]) => settingRow(k, label, sub,
     `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('');
+  $('set_guard').innerHTML = settingGroup(GUARD);
+  $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
+  $('set_upkeep').innerHTML = settingGroup(UPKEEP);
   $('set_tg').innerHTML = settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
     `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
     + settingRow('telegram_token', 'Bot Token', s.has_telegram_token ? 'Сохранён — оставьте пустым, чтобы не менять' : 'Получите у @BotFather',
       '<input type="password" autocomplete="new-password" data-setting="telegram_token" placeholder="' + (s.has_telegram_token ? '••••••••' : 'токен') + '">')
     + settingRow('telegram_chat_id', 'Chat ID', 'Ваш идентификатор в Telegram',
       `<input type="text" data-setting="telegram_chat_id" value="${esc(String(s.telegram_chat_id || ''))}">`)
+    + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
+      `<label class="switch"><input type="checkbox" data-setting="telegram_bot"${s.telegram_bot ? ' checked' : ''}><i></i></label>`)
     + NOTIFY.map(([k, label]) => settingRow(k, label, '',
       `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('');
 

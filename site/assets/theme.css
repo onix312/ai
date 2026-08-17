@@ -568,6 +568,24 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .form-grid .span-2 { grid-column: span 1; }
   .view-head h1 { font-size: 21px; }
+  /* Шапка на телефоне: заголовок не должен наезжать на плашку принтера. */
+  #topbar { gap: 8px; padding: 0 12px; }
+  .top-title b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live-pill {
+    max-width: 40vw; overflow: hidden; padding: 0 10px; gap: 6px;
+    white-space: nowrap; flex-wrap: nowrap;
+  }
+  .live-pill > span { display: flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; }
+  .live-pill b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .live-pill small { white-space: nowrap; flex: none; }
+  #quick_order .ic { margin: 0; }
+}
+@media (max-width: 460px) {
+  /* Совсем узкий экран: оставляем меню, принтер и кнопку заказа. */
+  .top-title { display: none; }
+  #cmd_open { display: none; }
+  .live-pill { max-width: 52vw; }
+  .live-pill small { display: none; }        /* имя принтера важнее статуса словом */
 }
 
 @media print {

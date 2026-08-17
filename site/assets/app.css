@@ -636,3 +636,182 @@ table.data tr.sum-row td {
   background: var(--panel-3);
   color: var(--text);
 }
+
+/* =================================================== сторож, ТО, графики */
+.alert-strip { display: grid; gap: 8px; margin-bottom: 14px; }
+.alert-strip:empty { display: none; }
+.alert-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px;
+  border-radius: var(--r); border: 1px solid var(--line);
+  background: var(--panel-2); font-size: 13px;
+}
+.alert-item .ic { font-size: 15px; line-height: 1.3; }
+.alert-item b { display: block; margin-bottom: 2px; }
+.alert-item small { color: var(--muted); display: block; margin-top: 3px; }
+.alert-item.warn { border-color: var(--warn); background: var(--warn-soft); }
+.alert-item.error, .alert-item.fatal { border-color: var(--bad); background: var(--bad-soft); }
+.alert-item .acts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+.chart-box { height: 190px; margin-top: 6px; }
+.chart-box svg { width: 100%; height: 100%; display: block; }
+.mini-sel {
+  height: 30px; padding: 0 8px; border-radius: 8px; font-size: 12px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+}
+
+.hms-item.sev-warn { border-left: 3px solid var(--warn); }
+.hms-item.sev-error, .hms-item.sev-fatal { border-left: 3px solid var(--bad); }
+.hms-item .why { color: var(--text-2); font-size: 12.4px; margin-top: 3px; }
+.hms-item .fix { color: var(--muted); font-size: 12.2px; margin-top: 3px; }
+.hms-item .fix::before { content: "→ "; color: var(--accent); }
+.hms-item a { color: var(--accent); font-size: 11.8px; }
+
+.maint-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 0;
+  border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.maint-row:last-child { border-bottom: 0; }
+.maint-row .name { flex: 1; min-width: 0; }
+.maint-row .name b { display: block; font-weight: 600; }
+.maint-row .name small { color: var(--muted); }
+.maint-row .bar { width: 84px; flex: none; }
+.maint-row.due .name b { color: var(--bad); }
+.maint-row.soon .name b { color: var(--warn); }
+
+.shot-strip { display: flex; gap: 6px; overflow-x: auto; margin-top: 10px; padding-bottom: 4px; }
+.shot-strip:empty { display: none; }
+.shot-strip img {
+  width: 74px; height: 56px; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--line); cursor: pointer; flex: none;
+  transition: transform .15s var(--ease), border-color .15s var(--ease);
+}
+.shot-strip img:hover { transform: translateY(-2px); border-color: var(--accent); }
+
+/* ========================================================= режим «Стена» */
+.wall {
+  position: fixed; inset: 0; z-index: 90; background: #05070e; color: #f2f5fb;
+  display: flex; flex-direction: column; padding: 22px 26px; gap: 16px;
+}
+.wall[hidden] { display: none; }
+.wall-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.wall-head h1 { font-size: 26px; margin: 0; color: #fff; }
+.wall-head .eyebrow { color: #8f9dbd; }
+.wall-stats { display: flex; gap: 22px; margin-left: auto; }
+.wall-stats div { text-align: right; }
+.wall-stats span { display: block; font-size: 11px; color: #8f9dbd; letter-spacing: .06em; text-transform: uppercase; }
+.wall-stats b { font-size: 21px; font-variant-numeric: tabular-nums; }
+.wall-acts { display: flex; align-items: center; gap: 14px; }
+.wall-clock { font-size: 21px; font-variant-numeric: tabular-nums; color: #cbd5e1; }
+.wall-grid {
+  flex: 1; display: grid; gap: 16px; min-height: 0;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  grid-auto-rows: minmax(240px, 1fr);
+  align-content: stretch; justify-content: center; overflow: auto;
+}
+.wall-tile {
+  position: relative; border-radius: 16px; overflow: hidden; background: #0b1120;
+  border: 1px solid #1e293b; display: flex; flex-direction: column; min-height: 250px;
+}
+/* Один-два принтера не должны растягиваться в узкую полосу через весь экран. */
+.wall-grid[data-count="1"] { grid-template-columns: minmax(0, min(100%, 900px)); }
+.wall-grid[data-count="2"] { grid-template-columns: repeat(2, minmax(0, min(50%, 760px))); }
+.wall-tile.running { border-color: #2563eb; }
+.wall-tile.alarm { border-color: #ef4444; box-shadow: 0 0 0 1px rgba(239, 68, 68, .35); }
+.wall-tile .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: .62; }
+.wall-tile .veil {
+  position: relative; flex: 1; display: flex; flex-direction: column; justify-content: space-between;
+  padding: 14px 16px; background: linear-gradient(180deg, rgba(5, 7, 14, .72) 0%, rgba(5, 7, 14, .3) 42%, rgba(5, 7, 14, .88) 100%);
+}
+.wall-tile .top { display: flex; align-items: center; gap: 8px; }
+.wall-tile .top b { font-size: 16px; }
+.wall-tile .top .st {
+  margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700;
+  background: rgba(148, 163, 184, .22); color: #e2e8f0; white-space: nowrap;
+}
+.wall-tile .top .st.running { background: rgba(37, 99, 235, .32); color: #bfdbfe; }
+.wall-tile .top .st.ok { background: rgba(16, 185, 129, .25); color: #a7f3d0; }
+.wall-tile .top .st.warn { background: rgba(245, 158, 11, .28); color: #fde68a; }
+.wall-tile .top .st.bad { background: rgba(239, 68, 68, .3); color: #fecaca; }
+.wall-tile .task { font-size: 13px; color: #cbd5e1; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wall-tile .pct { font-size: 42px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.wall-tile .pbar { height: 7px; border-radius: 999px; background: rgba(148, 163, 184, .25); overflow: hidden; margin: 8px 0 9px; }
+.wall-tile .pbar i { display: block; height: 100%; background: linear-gradient(90deg, #3b82f6, #22d3ee); transition: width .6s var(--ease); }
+.wall-tile .facts { display: flex; gap: 16px; font-size: 12.4px; color: #94a3b8; flex-wrap: wrap; }
+.wall-tile .facts b { color: #e2e8f0; font-variant-numeric: tabular-nums; }
+.wall-tile .alarm-line {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 7px 16px;
+  background: rgba(239, 68, 68, .92); color: #fff; font-size: 12.5px; font-weight: 600;
+}
+.wall-tile.alarm .veil { padding-bottom: 40px; }
+.wall-tile .demo-tag {
+  padding: 2px 8px; border-radius: 999px; background: rgba(245, 158, 11, .9);
+  color: #17202e; font-size: 10.5px; font-weight: 800; white-space: nowrap;
+}
+.wall-tile .demo-tag[hidden] { display: none; }
+.wall-foot { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: #7d8aa8; }
+.wall-empty { grid-column: 1 / -1; display: grid; place-items: center; color: #64748b; padding: 60px; text-align: center; }
+
+/* ============================================ мобильная вёрстка принтера */
+@media (max-width: 720px) {
+  .view-head { flex-direction: column; align-items: stretch; gap: 12px; }
+  .head-actions { flex-wrap: wrap; }
+  .head-actions .btn { flex: 1 1 auto; min-width: 0; }
+  .printer-grid, .grid.g2, .grid.g3, .telemetry { grid-template-columns: minmax(0, 1fr) !important; }
+  /* Список принтеров листается пальцем, край последней плитки виден — понятно, что есть ещё. */
+  .printer-tabs {
+    overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory; padding: 2px 14px 8px; margin: 0 -14px 12px;
+    scrollbar-width: none;
+  }
+  .printer-tabs::-webkit-scrollbar { display: none; }
+  .printer-tab { flex: none; scroll-snap-align: start; }
+  .head-actions .btn { flex: 1 1 calc(50% - 5px); }
+  .job-top { flex-direction: column-reverse; align-items: flex-start; gap: 14px; }
+  .orbit { align-self: center; }
+  .job-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cmd-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cmd-btn { min-height: 58px; font-size: 12.5px; }
+  .cmd-row { flex-wrap: wrap; }
+  .cmd-row .btn { width: 100%; }
+  .ams-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chart-box { height: 160px; }
+  /* Заголовок карточки и его управление — в столбик, иначе текст сжимается в лесенку. */
+  .card-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .card-head .mini-sel, .card-head select { width: 100%; height: 36px; }
+  .card-head .head-actions { margin-left: 0; }
+  .file-row { flex-wrap: wrap; row-gap: 6px; }
+  .file-row .fname { flex: 1 1 100%; order: -1; }
+  /* Стена на телефоне: шапка одной компактной строкой, плитки — колонкой. */
+  .wall { padding: 12px; gap: 10px; }
+  .wall-head { gap: 10px; }
+  .wall-head h1 { font-size: 18px; }
+  .wall-head .eyebrow { display: none; }
+  .wall-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+  .wall-stats { gap: 12px; width: 100%; margin-left: 0; justify-content: space-between; }
+  .wall-stats div { text-align: left; }
+  .wall-stats span { font-size: 9.5px; letter-spacing: .04em; }
+  .wall-stats b { font-size: 15px; }
+  .wall-acts { width: 100%; gap: 10px; }
+  .wall-acts .btn { margin-left: auto; }
+  .wall-clock { font-size: 17px; }
+  .wall-grid,
+  .wall-grid[data-count="1"],
+  .wall-grid[data-count="2"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto; align-content: start;
+  }
+  .wall-tile { min-height: 210px; }
+  .wall-tile.alarm { min-height: 250px; }   /* запас под полосу тревоги */
+  .wall-tile .pct { font-size: 34px; }
+  .wall-tile .facts { gap: 10px; font-size: 11.8px; }
+  /* Тревога встаёт в поток — на узкой плитке она в две строки и иначе накрыла бы факты. */
+  .wall-tile .alarm-line {
+    padding: 7px 14px; font-size: 12px;
+    white-space: normal; overflow-wrap: anywhere; line-height: 1.3;
+  }
+  /* Место под тревогу в две строки — на узкой плитке она длиннее. */
+  .wall-tile.alarm .veil { padding-bottom: 56px; }
+  .wall-foot { flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; }
+  .modal-foot { flex-wrap: wrap; }
+  .modal-foot .btn { flex: 1 1 auto; }
+}
