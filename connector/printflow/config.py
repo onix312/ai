@@ -8,11 +8,17 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+if getattr(sys, "frozen", False):
+    # Собранный PyInstaller-бинарь: ресурсы (папка site) распакованы во
+    # временный каталог _MEIPASS, а не лежат рядом с исходниками.
+    ROOT = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+else:
+    ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "site"
 
 if os.name == "nt":

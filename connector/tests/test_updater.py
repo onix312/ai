@@ -201,6 +201,24 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(self.db.setting("update_seen_sha", ""), head)
 
     # ------------------------------------------------------------------ отчёт
+    def test_frozen_mode_refuses_to_apply(self) -> None:
+        """Собранный exe не обновляет сам себя: режим frozen, apply отклонён."""
+        from unittest import mock
+
+        self._make_repo()
+        checker = self.checker()
+        with mock.patch("sys.frozen", True, create=True):
+            self.assertEqual(checker.mode, "frozen")
+            with self.assertRaises(ValueError):
+                checker.apply()
+            with mock.patch.object(checker, "check",
+                                   return_value={"sha": "abc1234", "branch": "main"}):
+                report = checker.report()
+            self.assertEqual(report["mode"], "frozen")
+            self.assertTrue(report["update"])
+            self.assertFalse(report["can_apply"])
+            self.assertIn("exe", report["busy_reason"])
+
     def test_report_hides_details_when_checks_disabled(self) -> None:
         self._make_repo()
         self.db.set_settings({"update_check_enabled": False})

@@ -359,12 +359,12 @@ function openDefect(orderId) {
   const jobs = PF.state.jobs.history || [];
   $('df_job').innerHTML = '<option value="">Без задания</option>' + jobs.slice(0, 20).map((j) =>
     `<option value="${esc(j.id)}">${esc(j.name || j.file || 'печать')} · ${esc(dateText(j.finished_at))}</option>`).join('');
-  $('df_reason').value = 'detached';
+  $('defect_reason').value = 'detached';
   $('df_phase').value = 'middle';
   $('df_code').value = '';
   $('df_grams').value = '';
   $('df_loss').value = '';
-  $('df_note').value = '';
+  $('defect_note').value = '';
   $('df_job').dataset.orderId = orderId || '';
   openModal('defect_modal');
 }
@@ -373,9 +373,9 @@ async function saveDefect() {
   try {
     const res = await post('/api/defect/save', {
       job_id, order_id: $('df_job').dataset.orderId || null,
-      reason: $('df_reason').value, phase: $('df_phase').value,
+      reason: $('defect_reason').value, phase: $('df_phase').value,
       code: $('df_code').value.trim(), grams: num($('df_grams').value),
-      loss: num($('df_loss').value), note: $('df_note').value.trim(),
+      loss: num($('df_loss').value), note: $('defect_note').value.trim(),
     });
     closeModal('defect_modal');
     toast('Брак записан', DEFECT_REASONS[res.defect.reason] || '');
@@ -460,7 +460,7 @@ function openNiche(id) {
   editingNiche = id || null;
   const n = id ? PF.niche(id) : null;
   const data = n || { name: '', icon: '◆', color: '#4f46e5', views: 0, leads: 0, hypothesis: '', target: '', active: 1 };
-  ['name', 'icon', 'color', 'views', 'leads', 'hypothesis', 'target'].forEach((k) => { $('nf_' + k).value = data[k] ?? ''; });
+  ['name', 'icon', 'color', 'views', 'leads', 'hypothesis', 'target'].forEach((k) => { $((k === 'name' ? 'niche_name' : 'nf_' + k)).value = data[k] ?? ''; });
   $('nf_active').value = String(num(data.active, 1) ? 1 : 0);
   $('niche_modal_title').textContent = id ? 'Настройка ниши' : 'Новая ниша';
   $('niche_delete').hidden = !id;
@@ -612,7 +612,7 @@ function bind() {
   $('niche_save').addEventListener('click', async () => {
     const payload = {
       id: editingNiche || '',
-      name: $('nf_name').value.trim(),
+      name: $('niche_name').value.trim(),
       icon: $('nf_icon').value.trim() || '◆',
       color: $('nf_color').value,
       views: num($('nf_views').value),

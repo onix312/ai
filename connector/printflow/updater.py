@@ -78,7 +78,9 @@ class UpdateChecker:
     # ------------------------------------------------------------ окружение
     @property
     def mode(self) -> str:
-        """Как установлено приложение: `git` или `archive`."""
+        """Как установлено приложение: `git`, `archive` или `frozen` (exe)."""
+        if getattr(sys, "frozen", False):
+            return "frozen"
         if (ROOT / ".git").exists() and _run(["git", "--version"])[0] == 0:
             return "git"
         return "archive"
@@ -210,7 +212,13 @@ class UpdateChecker:
             return {**base, "latest": None, "update": False,
                     "error": self._error, "can_apply": False, "busy_reason": ""}
         has_update = bool(latest["sha"]) and latest["sha"] != self.local_sha()
-        busy = self.busy_reason() if has_update else ""
+        busy = ""
+        if has_update:
+            if self.mode == "frozen":
+                busy = ("Это собранный exe: он не обновляет сам себя. "
+                        "Установите новую сборку PrintFlow.exe")
+            else:
+                busy = self.busy_reason()
         return {
             **base,
             "latest": latest,
@@ -224,6 +232,10 @@ class UpdateChecker:
     # -------------------------------------------------------------- установка
     def apply(self, force: bool = False) -> dict:
         """Установить обновление. Возвращает результат и нужен ли перезапуск."""
+        if self.mode == "frozen":
+            raise ValueError(
+                "Собранный exe не обновляет сам себя: скачайте и запустите "
+                "новую сборку PrintFlow.exe (данные при этом сохраняются).")
         with self._lock:
             if self._busy:
                 raise ValueError("Обновление уже выполняется")

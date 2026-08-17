@@ -6,8 +6,8 @@
 <title>NOZZA · PrintFlow — управление 3D-производством</title>
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
-<link rel="stylesheet" href="assets/theme.css?v=5.0.0">
-<link rel="stylesheet" href="assets/app.css?v=5.0.0">
+<link rel="stylesheet" href="assets/theme.css?v=5.2.0">
+<link rel="stylesheet" href="assets/app.css?v=5.2.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -2990,7 +2990,7 @@
 <dialog class="modal narrow" id="niche_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Гипотеза</span><h2 id="niche_modal_title">Ниша</h2></div><button class="icon-btn" type="button" data-close="niche_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
-  <label class="field"><span>Название</span><input id="nf_name"></label>
+  <label class="field"><span>Название</span><input id="niche_name"></label>
   <label class="field"><span>Значок</span><input id="nf_icon" maxlength="4"></label>
   <label class="field"><span>Цвет</span><input id="nf_color" type="color" value="#4f46e5"></label>
   <label class="field"><span>Активна</span><select id="nf_active"><option value="1">Да</option><option value="0">Нет</option></select></label>
@@ -3508,7 +3508,7 @@
    <label>Задание (печать)
     <select id="df_job"><option value="">Без задания</option></select></label>
    <label>Причина
-    <select id="df_reason">
+    <select id="defect_reason">
      <option value="detached">Деталь отклеилась</option>
      <option value="clog">Засор сопла</option>
      <option value="shift">Смещение слоёв</option>
@@ -3522,7 +3522,7 @@
    <label>Потеряно пластика, г<input id="df_grams" type="number" min="0" step="1"></label>
    <label>Потеря, ₽<input id="df_loss" type="number" min="0" step="10"></label>
   </div>
-  <label style="margin-top:10px">Комментарий<input id="df_note" placeholder="Что случилось и как не допустить снова"></label>
+  <label style="margin-top:10px">Комментарий<input id="defect_note" placeholder="Что случилось и как не допустить снова"></label>
   <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Кадр камеры в момент ошибки сторожа сохраняется автоматически.</span></div>
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="defect_modal">Отмена</button>
@@ -3613,13 +3613,13 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=5.0.0"></script>
-<script src="assets/core.js?v=5.0.0"></script>
-<script src="assets/printer.js?v=5.0.0"></script>
-<script src="assets/ops.js?v=5.0.0"></script>
-<script src="assets/money.js?v=5.0.0"></script>
-<script src="assets/finance.js?v=5.0.0"></script>
-<script src="assets/shelf.js?v=5.0.0"></script>
-<script src="assets/products.js?v=5.0.0"></script>
-<script src="assets/app.js?v=5.0.0"></script>
+<script src="assets/qr.js?v=5.2.0"></script>
+<script src="assets/core.js?v=5.2.0"></script>
+<script src="assets/printer.js?v=5.2.0"></script>
+<script src="assets/ops.js?v=5.2.0"></script>
+<script src="assets/money.js?v=5.2.0"></script>
+<script src="assets/finance.js?v=5.2.0"></script>
+<script src="assets/shelf.js?v=5.2.0"></script>
+<script src="assets/products.js?v=5.2.0"></script>
+<script src="assets/app.js?v=5.2.0"></script>
 </body></html>

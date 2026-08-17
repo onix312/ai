@@ -21,12 +21,16 @@ class _StructureParser(HTMLParser):
         self.errors: list[str] = []
         self.view_parents: dict[str, list[str]] = {}
         self.report_parents: dict[str, list[tuple[str, str]]] = {}
+        self.ids: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
         element_id = attributes.get("id") or ""
         classes = set((attributes.get("class") or "").split())
         parent_ids = [item[1].get("id") or "" for item in self.stack]
+
+        if element_id:
+            self.ids.append(element_id)
 
         if "view" in classes and element_id:
             self.view_parents[element_id] = parent_ids
@@ -70,6 +74,17 @@ class SiteMarkupTests(TestCase):
         if self.parser.stack:
             errors.append(f"не закрыты теги: {self.parser.stack[-5:]}")
         self.assertEqual(errors, [])
+
+    def test_no_duplicate_ids_across_all_pages(self):
+        """id в одном документе уникальны: getElementById всегда попадает
+        в нужный элемент, иначе JS читает значения из скрытых модалок."""
+        for html_file in sorted((ROOT / "site").glob("*.html")) + sorted(
+                (ROOT / "site").glob("materials/*.html")):
+            parser = _StructureParser()
+            parser.feed(html_file.read_text(encoding="utf-8"))
+            dupes = sorted({i for i in parser.ids if parser.ids.count(i) > 1})
+            with self.subTest(page=html_file.name):
+                self.assertEqual(dupes, [])
 
     def test_every_view_stays_inside_main_views_container(self):
         self.assertGreaterEqual(len(self.parser.view_parents), 12)
