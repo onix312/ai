@@ -106,15 +106,23 @@ class BambuPrinter:
             self._watchdog.start()
 
     def _watch(self) -> None:
-        """Переподключение, если принтер молчит дольше 90 секунд."""
+        """Переподключение, если принтер молчит дольше 90 секунд. 8.0: backoff."""
+        backoff = 1.0
+        import random
         while not self._stop.wait(20):
             if not self.record.get("enabled", 1):
                 continue
             if self.connected and self.last_message and time.time() - self.last_message > 90:
                 self.last_error = "Нет данных от принтера, переподключаемся"
                 self.reconnect()
+                backoff = min(backoff * 1.8, 30.0)
             elif not self.connected and not self.connecting and self.ready:
+                if backoff > 1.0:
+                    time.sleep(backoff + random.uniform(0, 1))
+                    backoff = min(backoff * 1.6, 30.0)
                 self.connect()
+            elif self.connected:
+                backoff = 1.0
 
     @property
     def ready(self) -> bool:
@@ -182,7 +190,12 @@ class BambuPrinter:
         ok = int(reason_code) == 0
         self.connected, self.connecting = ok, False
         if not ok:
-            self.last_error = f"Принтер отклонил подключение (код {reason_code}). Проверьте Access Code и серийный номер."
+            rc = int(reason_code)
+            if rc in (4, 5):
+                self.last_error = f"Принтер отклонил подключение (код {rc}). Включите LAN Only + Developer Mode в настройках принтера: Settings → WLAN → LAN Only → Developer Mode ON. Проверьте Access Code и серийный номер."
+                self.on_event("need_developer_mode", "Требуется Developer Mode", f"Код {rc} — включите LAN Only + Developer Mode", {"reason_code": rc})
+            else:
+                self.last_error = f"Принтер отклонил подключение (код {rc}). Проверьте Access Code и серийный номер."
             return
         self.last_error = ""
         client.subscribe(f"device/{self.record['serial']}/report")
@@ -495,6 +508,37 @@ class BambuPrinter:
             },
             "camera": self.camera.state(),
         }
+
+    def health(self) -> dict:
+        """Диагностика подключения для UI 8.0."""
+        # проверка портов
+        host = self.record.get("host","")
+        ports = {}
+        for label, port in [("mqtt", 8883), ("ftps", 990), ("camera", 6000)]:
+            if not host:
+                ports[label] = {"ok": False, "ms": 0}
+                continue
+            import socket, time
+            start = time.time()
+            try:
+                with socket.create_connection((host, port), timeout=1.5):
+                    ports[label] = {"ok": True, "ms": round((time.time()-start)*1000,1)}
+            except Exception:
+                ports[label] = {"ok": False, "ms": round((time.time()-start)*1000,1)}
+                # fallback 1883 для A1 mini
+                if label=="mqtt" and port==8883:
+                    try:
+                        start2=time.time()
+                        with socket.create_connection((host, 1883), timeout=1.0):
+                            ports["mqtt_fallback"]={"ok": True, "ms": round((time.time()-start2)*1000,1)}
+                    except Exception:
+                        pass
+        # firmware
+        ver = next((x.get("sw_ver","") for x in self.version if x.get("name")=="ota"),"")
+        needs_dev = False
+        if " 5" in self.last_error or "Developer Mode" in self.last_error:
+            needs_dev=True
+        return {"ports": ports, "firmware": ver, "needs_developer_mode": needs_dev, "connected": self.connected, "last_error": self.last_error}
 
     @staticmethod
     def discover(timeout: float = 3.0) -> list[dict]:

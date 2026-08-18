@@ -159,6 +159,54 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # Интерфейс
     "theme": "system",
     "accent": "indigo",
+    # --- 8.0: Мост Bambu Studio ------------------------------------------
+    "watch_folder_enabled": False,
+    "watch_folder_path": str(Path.home() / "PrintFlow-Inbox"),
+    "watch_auto_action": "notify",  # notify | queue | print
+    "watch_link_order": True,
+    "watch_create_order": False,
+    # --- 8.0: 3MF парсер --------------------------------------------------
+    "slicer_auto_create_order": False,
+    "slicer_filename_template": "{product}_№{number}_{material}",
+    # --- 8.0: Preflight ---------------------------------------------------
+    "preflight_enabled": True,
+    "preflight_block_idle": True,
+    "preflight_block_hms": True,
+    "preflight_block_material": True,
+    "preflight_block_filament": True,
+    "preflight_warn_sd": True,
+    "preflight_warn_nozzle": True,
+    "preflight_warn_humidity": True,
+    "preflight_warn_calibration": True,
+    # --- 8.0: FTPS --------------------------------------------------------
+    "ftps_timeout": 12,
+    "ftps_retries": 3,
+    "ftps_block_kb": 256,
+    "ftps_queue": True,
+    "ftps_dedup": True,
+    # --- 8.0: MQTT --------------------------------------------------------
+    "mqtt_keepalive": 30,
+    "mqtt_backoff": True,
+    "mqtt_fallback_1883": True,
+    # --- 8.0: Очередь и камера --------------------------------------------
+    "queue_smart_group": True,
+    "queue_smart_deadline": True,
+    "queue_offline_defer": True,
+    "camera_timelapse_interval": 2.5,
+    "camera_keep_shots": 60,
+    "camera_roi_center": 60,
+    # --- 8.0: AMS ---------------------------------------------------------
+    "ams_auto_map": True,
+    "ams_delta_e_threshold": 30,
+    # --- 8.0: Безопасность и система --------------------------------------
+    "encrypt_access_code": False,
+    "settings_profiles": [],  # снапшоты [{id, name, at, data}]
+    "ui_density": "normal",  # compact | normal
+    "ui_start_view": "dashboard",
+    "debug_verbose": False,
+    # --- 8.0: Бэкап 2.0 ---------------------------------------------------
+    "backup_keep": 20,
+    "backup_auto_export": False,
 }
 
 SECRET_SETTINGS = {"telegram_token"}

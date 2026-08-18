@@ -142,19 +142,34 @@ class PrinterFiles:
         local = Path(local_path)
         if not local.exists():
             raise FileNotFoundError("Файл не найден")
+        total = local.stat().st_size if local.exists() else 0
         sent = 0
-        ftp = self._connect()
-        try:
-            with local.open("rb") as fp:
-                def callback(block: bytes):
-                    nonlocal sent
-                    sent += len(block)
-                    if progress:
-                        progress(sent)
-                ftp.storbinary(f"STOR {remote_name}", fp, blocksize=262144, callback=callback)
-        finally:
-            self._quit(ftp)
-        return {"ok": True, "name": remote_name, "size": sent}
+        # 8.0: retries
+        last_exc = None
+        for attempt in range(3):
+            try:
+                ftp = self._connect()
+                try:
+                    with local.open("rb") as fp:
+                        def callback(block: bytes):
+                            nonlocal sent
+                            sent += len(block)
+                            if progress:
+                                try:
+                                    progress(sent, total)
+                                except TypeError:
+                                    progress(sent)
+                        ftp.storbinary(f"STOR {remote_name}", fp, blocksize=262144, callback=callback)
+                finally:
+                    self._quit(ftp)
+                return {"ok": True, "name": remote_name, "size": sent, "total": total, "sha": self.sha_short(local_path)}
+            except Exception as exc:
+                last_exc = exc
+                # retry on transient
+                import time
+                time.sleep(0.4 * (attempt+1))
+                continue
+        raise last_exc if last_exc else ConnectionError("FTPS upload failed")
 
     def upload_bytes(self, data: bytes, remote_name: str) -> dict:
         import io
@@ -164,6 +179,60 @@ class PrinterFiles:
         finally:
             self._quit(ftp)
         return {"ok": True, "name": remote_name, "size": len(data)}
+
+
+    def sha_short(self, local_path: str | Path) -> str:
+        """Короткий sha для дедупликации (первые 1МБ)."""
+        import hashlib
+        h=hashlib.sha256()
+        try:
+            with open(local_path,"rb") as f:
+                h.update(f.read(1024*1024))
+            return h.hexdigest()[:12]
+        except Exception:
+            return ""
+
+    def disk_usage(self, path: str = "/") -> dict:
+        """Попытка оценить занятость SD (не все прошивки отдают)."""
+        try:
+            ftp=self._connect()
+            try:
+                # PWD + LIST даёт размеры, суммируем
+                entries=self.list_files(path)
+                total=sum(e.get("size",0) for e in entries if not e.get("dir"))
+                return {"used": total, "entries": len(entries)}
+            finally:
+                self._quit(ftp)
+        except Exception as exc:
+            return {"used": 0, "error": str(exc)}
+
+    def list_tree(self, path: str = "/", depth: int = 1) -> list[dict]:
+        """Дерево до depth=2."""
+        root=self.list_files(path)
+        if depth<=1:
+            return root
+        out=[]
+        for e in root:
+            out.append(e)
+            if e.get("dir"):
+                try:
+                    children=self.list_files(e["path"])
+                    for c in children:
+                        c["parent"] = e["path"]
+                    out.extend(children)
+                except Exception:
+                    pass
+        return out
+
+    def batch_delete(self, paths: list[str]) -> dict:
+        ok=0; errors=[]
+        for pr in paths:
+            try:
+                self.delete(pr)
+                ok+=1
+            except Exception as exc:
+                errors.append(f"{pr}: {exc}")
+        return {"ok": ok, "errors": errors, "total": len(paths)}
 
     def delete(self, path: str) -> dict:
         ftp = self._connect()

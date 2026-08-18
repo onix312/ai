@@ -657,6 +657,44 @@ const UPKEEP = [
   ['auto_backup_days', 'Автобэкап, раз в N дней', '0 — выключен. Хранятся 14 копий', 'num', 1],
   ['ejector_enabled', 'Авто-эжектор (DIY)', 'Режим снятия деталей: напоминания и фиксация простоя', 'bool'],
 ];
+const WATCH = [
+  ['watch_folder_enabled', 'Watch Folder — авто-импорт', 'Следить за папкой с 3MF из Bambu Studio', 'bool'],
+  ['watch_folder_path', 'Путь к Watch Folder', 'Например ~/PrintFlow-Inbox или C:\\PrintFlow-Inbox', 'text'],
+  ['watch_auto_action', 'Авто-действие с новым файлом', 'notify — только тост, queue — в очередь', 'text'],
+  ['watch_link_order', 'Связывать с заказом по №', 'Искать № заказа в имени файла', 'bool'],
+  ['watch_create_order', 'Создавать черновик заказа', 'Если не нашли заказ — сделать новый', 'bool'],
+];
+const PREFLIGHT = [
+  ['preflight_enabled', 'Preflight — проверка перед стартом', 'Блокировать старт при проблемах', 'bool'],
+  ['preflight_block_material', 'Блок: не тот материал в AMS', 'PLA вместо PETG — брак', 'bool'],
+  ['preflight_block_filament', 'Блок: мало пластика', 'Сверять граммы с остатком катушки', 'bool'],
+  ['preflight_block_hms', 'Блок: HMS ошибки', 'Не давать старт при ошибке принтера', 'bool'],
+  ['preflight_warn_nozzle', 'Предупр.: сопло', 'Диаметр сопла в файле vs принтер', 'bool'],
+  ['preflight_warn_humidity', 'Предупр.: влажность AMS', 'Выше порога — сушить', 'bool'],
+];
+const FTPS = [
+  ['ftps_timeout', 'Таймаут FTPS, сек', 'Для заливки на принтер', 'num', 1],
+  ['ftps_retries', 'Ретраи FTPS', 'Сколько раз пробовать', 'num', 1],
+  ['ftps_queue', 'Очередь загрузок', 'Листы заливаются по очереди', 'bool'],
+  ['ftps_dedup', 'Дедупликация SHA', 'Не лить второй раз то же', 'bool'],
+];
+const MQTT = [
+  ['mqtt_keepalive', 'Keepalive MQTT, сек', 'Интервал heartbeat', 'num', 5],
+  ['mqtt_backoff', 'Backoff переподключений', 'Экспоненциальная задержка', 'bool'],
+  ['mqtt_fallback_1883', 'Fallback 1883', 'Для A1 mini', 'bool'],
+];
+const AMS_SETTINGS = [
+  ['ams_auto_map', 'Авто-маппинг AMS', 'Подбирать слоты по материалу+цвету', 'bool'],
+  ['ams_delta_e_threshold', 'Порог цвета ΔE', 'Чувствительность подбора', 'num', 5],
+  ['dry_humidity_threshold', 'Порог влажности AMS, %', 'Уже в Авто — дублируем тут', 'num', 1],
+];
+const SYSTEM2 = [
+  ['encrypt_access_code', 'Шифровать Access Code', 'Хранить в зашифрованном виде (эксперимент)', 'bool'],
+  ['backup_keep', 'Хранить бэкапов', 'Ротация в папке backups', 'num', 1],
+  ['ui_density', 'Плотность UI', 'compact или normal', 'text'],
+  ['debug_verbose', 'Verbose лог', 'Подробные логи в connector.log', 'bool'],
+];
+
 const ACCENTS = [
   ['indigo', '#4f46e5'], ['violet', '#7c3aed'], ['blue', '#2563eb'],
   ['emerald', '#059669'], ['amber', '#d97706'], ['rose', '#e11d48'],
@@ -721,6 +759,15 @@ function renderSettings() {
   $('set_guard').innerHTML = settingGroup(GUARD);
   $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
   $('set_upkeep').innerHTML = settingGroup(UPKEEP);
+  if ($('set_watch')) $('set_watch').innerHTML = settingGroup(WATCH);
+  if ($('set_preflight')) $('set_preflight').innerHTML = settingGroup(PREFLIGHT);
+  if ($('set_ftps')) $('set_ftps').innerHTML = settingGroup(FTPS);
+  if ($('set_mqtt')) $('set_mqtt').innerHTML = settingGroup(MQTT);
+  if ($('set_ams')) $('set_ams').innerHTML = settingGroup(AMS_SETTINGS);
+  if ($('set_system2')) $('set_system2').innerHTML = settingGroup(SYSTEM2);
+  // профили настроек
+  if ($('set_profiles')) renderProfiles();
+
   $('set_tg').innerHTML = settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
     `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
     + settingRow('telegram_token', 'Bot Token', s.has_telegram_token ? 'Сохранён — оставьте пустым, чтобы не менять' : 'Получите у @BotFather',
@@ -1200,6 +1247,19 @@ async function envWithdraw(id) {
   } catch (e) { fail(e); }
 }
 
+/* ==================================================== профили настроек 8.0 */
+async function renderProfiles(){
+  const host=$('set_profiles');
+  if (!host) return;
+  try{
+    const data=await get('/api/settings/profiles');
+    const list=data.profiles||[];
+    host.innerHTML = list.length ? list.map(p=>`<div class="set-row"><div class="sinfo"><b>${esc(p.name)}</b><small>${esc(p.at||'')}</small></div><button class="btn sm" data-prof-restore="${esc(p.id)}">Восстановить</button><button class="icon-btn sm danger" data-prof-del="${esc(p.id)}">×</button></div>`).join('') : '<div class="empty compact"><span>Снапшотов нет — сохраните текущий набор.</span></div>';
+    host.querySelectorAll('[data-prof-restore]').forEach(b=>b.addEventListener('click', async()=>{ if(!confirmDanger('Восстановить снапшот «'+b.dataset.profRestore+'»? Текущие настройки будут перезаписаны.')) return; try{ await post('/api/settings/profile/restore',{id:b.dataset.profRestore}); PF.state.settings=(await get('/api/settings')).settings; renderSettings(); toast('Настройки восстановлены'); }catch(e){fail(e);} }));
+    host.querySelectorAll('[data-prof-del]').forEach(b=>b.addEventListener('click', async()=>{ await post('/api/settings/profile/delete',{id:b.dataset.profDel}); renderProfiles(); }));
+  }catch(e){ host.innerHTML='<div class="notice bad"><span>✕</span><span>'+esc(e.message)+'</span></div>';}
+}
+
 /* ==================================================== проверка данных */
 async function runDataCheck() {
   const host = $('data_check_list');
@@ -1325,6 +1385,8 @@ function bind() {
   $('backup_restore').addEventListener('click', restoreBackup);
   $('backup_import_ls').addEventListener('click', importLocalStorage);
   $('backup_wipe').addEventListener('click', wipeData);
+  const profSave=$('prof_save');
+  if (profSave) profSave.addEventListener('click', async()=>{ const name=window.prompt('Название снапшота','Снапшот '+new Date().toLocaleString('ru-RU')); if(name==null) return; try{ await post('/api/settings/profile/save',{name}); renderProfiles(); toast('Снапшот сохранён', name);}catch(e){fail(e);} });
   $('data_check_btn').addEventListener('click', runDataCheck);
 
   $('env_add').addEventListener('click', () => envSave(''));

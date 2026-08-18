@@ -630,6 +630,78 @@ class Api:
             return 200, {"results": self.repo.search(one("q"))}
         if path == "/api/backup":
             return 200, self.repo.export_all()
+        # 8.0: Watch Folder
+        if path == "/api/watch/pending":
+            watch = getattr(self.manager, "watch", None)
+            return 200, {"items": watch.list_pending(int(num(one("limit","20"),20))) if watch else []}
+        if path == "/api/watch/status":
+            watch = getattr(self.manager, "watch", None)
+            return 200, {"enabled": bool(self.db.setting("watch_folder_enabled", False)), "path": str(self.db.setting("watch_folder_path","")), "pending": len(watch._pending) if watch else 0}
+        if path == "/api/slicer/thumbnail":
+            fid = one("fid")
+            name = one("name")
+            watch = getattr(self.manager, "watch", None)
+            if watch and fid:
+                info = watch.get_pending(fid) or {}
+                thumbs = info.get("thumbnails_full", {}) or info.get("thumbnails", {})
+                # name may be exact key or suffix
+                for k,v in thumbs.items():
+                    if k==name or k.endswith(name):
+                        import base64
+                        try:
+                            raw = base64.b64decode(v)
+                            return 200, {"ok": True, "b64": v}
+                        except Exception:
+                            pass
+                return 404, {"error": "Превью не найдено"}
+            return 404, {"error": "Нет данных"}
+        if path == "/api/printer/health":
+            printer = self.printer_or_fail(one("printer_id"))
+            return 200, printer.health() if hasattr(printer, "health") else {"ok": False}
+        if path == "/api/printer/preflight":
+            printer = self.printer_or_fail(one("printer_id"))
+            return 200, self.manager.preflight(printer.id, one("file"), int(num(one("plate"),1)), json.loads(one("mapping","[]") or "[]"))
+        if path == "/api/printer/files/tree":
+            printer = self.printer_or_fail(one("printer_id"))
+            depth = int(num(one("depth"), 1))
+            try:
+                files = printer.files.list_tree(one("path","/"), depth)
+            except Exception:
+                files = printer.files.list_files(one("path","/"))
+            return 200, {"path": one("path","/"), "files": files}
+        if path == "/api/printer/files/usage":
+            printer = self.printer_or_fail(one("printer_id"))
+            return 200, printer.files.disk_usage(one("path","/"))
+        if path == "/api/estimate":
+            fname = one("file")
+            from .config import UPLOAD_DIR
+            from .estimate import estimate_file, parse_3mf_complete
+            local = UPLOAD_DIR / fname
+            if not local.exists():
+                # also check watch folder
+                wp = Path(str(self.db.setting("watch_folder_path",""))).expanduser() / fname if self.db.setting("watch_folder_path","") else None
+                if wp and wp.exists():
+                    local = wp
+            if not local.exists():
+                return 404, {"error": "Файл не найден"}
+            if local.suffix.lower() == ".3mf":
+                try:
+                    detail = parse_3mf_complete(local)
+                    est = {}
+                    if detail.get("plates"):
+                        total_g = round(sum(p.get("grams",0) for p in detail["plates"]),1)
+                        total_m = round(sum(p.get("minutes",0) for p in detail["plates"]),1)
+                        est = dict(detail["plates"][0]) if detail["plates"] else {}
+                        est["total_grams"]=total_g; est["total_minutes"]=total_m
+                        est["plates"]=detail["plates"]; est["plate_count"]=len(detail["plates"])
+                    return 200, {"estimate": est, "detail": detail}
+                except Exception as exc:
+                    return 200, {"estimate": estimate_file(local)}
+            return 200, {"estimate": estimate_file(local)}
+        if path == "/api/settings/profiles":
+            return 200, {"profiles": self.db.setting("settings_profiles", [])}
+        if path == "/api/slicer/materials":
+            return 200, self.acc.material_options()
         return 404, {"error": "Неизвестный маршрут"}
 
     # ------------------------------------------------------------------ POST
@@ -1243,6 +1315,86 @@ class Api:
             return 200, {"ok": True, "imported": self.repo.import_backup(body)}
         if path == "/api/import/localstorage":
             return 200, {"ok": True, "imported": self.repo.import_local_storage(body)}
+        # 8.0: Watch / slicer
+        if path == "/api/slicer/push":
+            # from Bambu Studio post-processing: {file, plates, estimate}
+            watch = getattr(self.manager, "watch", None)
+            # just log event and return ok; watch will pick up file itself
+            self.db.add_event("slicer", "Bambu Studio push", str(body.get("file","")), "", body)
+            if self.manager and hasattr(self.manager, "watch") and body.get("file"):
+                # trigger immediate scan
+                try:
+                    from pathlib import Path as _P
+                    p=_P(str(body["file"]))
+                    if p.exists() and watch:
+                        watch._handle_file(p)
+                except Exception:
+                    pass
+            return 200, {"ok": True}
+        if path == "/api/watch/dismiss":
+            watch = getattr(self.manager, "watch", None)
+            if watch:
+                watch.dismiss(body.get("fid",""))
+            return 200, {"ok": True}
+        if path == "/api/watch/enqueue":
+            watch = getattr(self.manager, "watch", None)
+            fid = body.get("fid","")
+            info = watch.get_pending(fid) if watch else None
+            if not info:
+                raise ValueError("Файл не найден в Watch Folder")
+            self.manager.enqueue({"file": info.get("name") or Path(info.get("file","")).name, "order_id": info.get("order_id") or body.get("order_id",""), "plate": int(num(body.get("plate"),1)), "ams_mapping": body.get("ams_mapping", []), "printer_id": body.get("printer_id","")})
+            if watch:
+                watch.dismiss(fid)
+            return 200, {"ok": True}
+        if path == "/api/watch/create-order":
+            watch = getattr(self.manager, "watch", None)
+            fid = body.get("fid","")
+            info = watch.get_pending(fid) if watch else None
+            if not info:
+                raise ValueError("Файл не найден")
+            order = watch._create_order_from_info(info.get("name",""), info)
+            return 200, {"ok": True, "order": order}
+        if path == "/api/printer/preflight":
+            return 200, self.manager.preflight(body.get("printer_id",""), body.get("file",""), int(num(body.get("plate"),1)), body.get("ams_mapping") or body.get("mapping"))
+        if path == "/api/printer/files/batch-delete":
+            printer = self.printer_or_fail(pid or body.get("printer_id",""))
+            paths = body.get("paths") or body.get("files") or []
+            return 200, printer.files.batch_delete(paths)
+        if path == "/api/printer/ams/auto-map":
+            # required: [{type, color}] ; printer_id
+            printer = self.printer_or_fail(pid or body.get("printer_id",""))
+            snap = printer.snapshot()
+            trays = snap["ams"].get("trays", [])
+            req = body.get("required") or body.get("filaments") or []
+            from .estimate import auto_ams_map
+            mapping = auto_ams_map(req, trays)
+            return 200, {"mapping": mapping, "trays": trays, "required": req}
+        if path == "/api/settings/profile/save":
+            name = (body.get("name") or "").strip() or f"Снапшот {now_iso()[:16]}"
+            profiles = self.db.setting("settings_profiles", []) or []
+            profiles = [p for p in profiles if isinstance(p, dict)]
+            snap = {"id": uid("prof"), "name": name, "at": now_iso(), "settings": self.db.settings()}
+            profiles.append(snap)
+            profiles = profiles[-10:]  # keep last 10
+            self.db.set_settings({"settings_profiles": profiles})
+            return 200, {"ok": True, "profile": snap}
+        if path == "/api/settings/profile/restore":
+            pid2 = body.get("id","")
+            profiles = self.db.setting("settings_profiles", []) or []
+            prof = next((p for p in profiles if p.get("id")==pid2), None)
+            if not prof:
+                raise ValueError("Снапшот не найден")
+            self.db.set_settings(prof.get("settings", {}))
+            return 200, {"ok": True, "settings": self.db.settings()}
+        if path == "/api/settings/profile/delete":
+            pid2 = body.get("id","")
+            profiles = [p for p in (self.db.setting("settings_profiles", []) or []) if p.get("id")!=pid2]
+            self.db.set_settings({"settings_profiles": profiles})
+            return 200, {"ok": True}
+        if path == "/api/slicer/material-sync":
+            # {material, brand, price_per_kg}
+            self.db.add_event("slicer", "Синхронизация материала", f"{body.get('material')} {body.get('price_per_kg')}", "", body)
+            return 200, {"ok": True}
         return 404, {"error": "Неизвестный маршрут"}
 
 
@@ -1593,7 +1745,21 @@ class Handler(BaseHTTPRequestHandler):
         printer = self.api.manager.get(printer_id)
         if not printer:
             return self.send_json(400, {"error": "Принтер не настроен"})
-        result = printer.files.upload(local, name)
+        # 8.0: FTPS прогресс через шину
+        def _progress(sent, total=0):
+            try:
+                pct = round(sent / total * 100) if total else 0
+                self.api.bus.publish("upload_progress", {"name": name, "sent": sent, "total": total, "percent": pct})
+            except Exception:
+                pass
+        try:
+            result = printer.files.upload(local, name, progress=_progress)
+        except TypeError:
+            result = printer.files.upload(local, name)
+        try:
+            self.api.bus.publish("upload_progress", {"name": name, "sent": result.get("size",0), "total": result.get("total",0) or len(upload[1]), "percent": 100})
+        except Exception:
+            pass
         self.api.db.add_event("upload", "Файл загружен на принтер", name, printer.id, result)
         # оценка печати до запуска: время и граммы из 3MF/G-code
         estimate = {}
