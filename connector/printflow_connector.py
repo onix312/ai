@@ -11,6 +11,8 @@
     python connector/printflow_connector.py
     python connector/printflow_connector.py --host 0.0.0.0 --port 8080
     python connector/printflow_connector.py --lan  # то же что --host 0.0.0.0
+
+Обычный путь запуска — лаунчер в корне репозитория: ``python pf.py``.
 """
 from __future__ import annotations
 
@@ -60,10 +62,8 @@ def print_banner(host: str, port: int, data_dir: Path, lan_ips: list[str]) -> No
         print("    С других устройств по сетевому IP зайти НЕ получится.")
         print("    Для доступа по сети запустите:")
         print(f"      python connector/printflow_connector.py --host 0.0.0.0 --port {port}")
-        print("    Или используйте:")
-        print("      site/ЗАПУСТИТЬ-Windows.bat")
-        print("      site/ЗАПУСТИТЬ-Mac-Linux.command")
-        print("    (они уже запускают с --host 0.0.0.0)")
+        print("    Или проще — лаунчер (он уже запускает с --host 0.0.0.0):")
+        print("      python pf.py")
     else:
         print(f"  Сервер слушает {host}:{port} (все интерфейсы)" if host == "0.0.0.0" else f"  Сервер слушает {host}:{port}")
         print(f"  Если не открывается с другого устройства:")
@@ -86,6 +86,8 @@ def main() -> int:
     parser.add_argument("--lan", action="store_true",
                         help="короткий флаг для --host 0.0.0.0 (доступ по сети)")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
+    parser.add_argument("--no-banner", action="store_true",
+                        help="не печатать баннер с адресами (его показывает лаунчер pf.py)")
     parser.add_argument("--verbose", action="store_true", help="подробный журнал запросов")
     args = parser.parse_args()
 
@@ -106,7 +108,11 @@ def main() -> int:
 
     lan_ips = get_local_ips()
     url = f"http://localhost:{args.port}/"
-    print_banner(args.host, args.port, DATA_DIR, lan_ips)
+    if not args.no_banner:
+        print_banner(args.host, args.port, DATA_DIR, lan_ips)
+    else:
+        # Запуск из лаунчера: адреса и QR уже показаны им, здесь только факт старта.
+        print(f"  PrintFlow {APP_VERSION} слушает {args.host}:{args.port}", flush=True)
 
     # Открываем именно localhost — он всегда работает, даже если привязаны к 0.0.0.0
     if not args.no_browser:
@@ -116,7 +122,7 @@ def main() -> int:
             pass
 
     # Доп. подсказка: первый IP для быстрого копирования
-    if lan_ips and args.host == "0.0.0.0":
+    if lan_ips and args.host == "0.0.0.0" and not args.no_banner:
         print(f"  Быстрая ссылка для телефона в той же Wi-Fi сети:")
         print(f"  http://{lan_ips[0]}:{args.port}/")
         print()
