@@ -609,37 +609,145 @@
 <!-- ================================================== КАЛЬКУЛЯТОР -->
 <section class="view" id="view-calc">
  <div class="view-head">
-  <div><span class="eyebrow">Экономика заказа</span><h1>Калькулятор</h1><p>Считает по вашим тарифам из настроек: пластик, энергия, износ, труд и брак.</p></div>
-  <div class="head-actions"><button class="btn" id="calc_from_cat" type="button">Взять из базы изделий</button><button class="btn primary" id="calc_to_order" type="button">Создать заказ</button></div>
+  <div><span class="eyebrow">Экономика заказа</span><h1>Калькулятор</h1><p>Вес и время — со всей плиты как показал слайсер. Система пересчитает на штуку.</p></div>
+  <div class="head-actions">
+   <div class="preset-row" style="margin:0">
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('Адресник PLA')">📍 Адресник</button>
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('Табличка PETG')">🏷 Табличка</button>
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('Органайзер')">📦 Органайзер</button>
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('QR-стойка')">📱 QR-стойка</button>
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('Корпус ABS')">🔧 Корпус</button>
+    <button class="preset-btn" type="button" onclick="PF.modules.money.applyPreset('Ножки TPU')">🦶 Ножки</button>
+   </div>
+   <button class="btn" id="calc_from_cat" type="button">Взять из базы изделий</button>
+   <button class="btn ghost" id="calc_real_stats" type="button" title="Фактические данные из журнала печати">📊 Статистика</button>
+   <button class="btn ghost" id="calc_export" type="button" title="Скопировать расчёт в буфер обмена">📋 Экспорт</button>
+   <button class="btn primary" id="calc_to_order" type="button">Создать заказ</button>
+  </div>
  </div>
  <div class="calc-grid">
+  <!-- ======= ПАРАМЕТРЫ ======= -->
   <div class="card">
-   <div class="card-head"><div><h2>Параметры</h2><p>Данные из слайсера</p></div></div>
+   <div class="card-head"><div><h2>🖨 Плита (из слайсера)</h2><p>Данные слайсера на всю плиту целиком</p></div></div>
    <div class="form-grid">
     <label class="field span-2"><span>Изделие из базы</span><select id="calc_preset"><option value="">— свой расчёт —</option></select></label>
-    <label class="field"><span>Вес изделия, г</span><input type="number" id="calc_grams" step="any" min="0" value="60"></label>
-    <label class="field"><span>Время печати, ч</span><input type="number" id="calc_hours" step="any" min="0" value="2.5"></label>
+    <label class="field"><span>Вес плиты, г <i class="hint-i" title="Сколько весит ВСЯ плита из слайсера (все изделия + поддержки + брим)">?</i></span><input type="number" id="calc_plate_grams" step="any" min="0" value="60"></label>
+    <label class="field"><span>Время плиты, ч <i class="hint-i" title="Сколько часов печатается ВСЯ плита из слайсера">?</i></span><input type="number" id="calc_plate_hours" step="any" min="0" value="2.5"></label>
+    <label class="field"><span>Штук на плите <i class="hint-i" title="Сколько изделий помещается на одной плите">?</i></span><input type="number" id="calc_fit" step="1" min="1" value="1"></label>
     <label class="field"><span>Количество, шт</span><input type="number" id="calc_qty" step="1" min="1" value="1"></label>
-    <label class="field"><span>Влезает на стол, шт</span><input type="number" id="calc_fit" step="1" min="1" value="1"></label>
-    <label class="field"><span>Ручная работа, мин</span><input type="number" id="calc_minutes" step="any" min="0" value="10"></label>
-    <label class="field"><span>Цена катушки, ₽</span><input type="number" id="calc_spool_price" step="any" min="0"></label>
+    <label class="field"><span>Прогрев/калибр., мин <i class="hint-i" title="Время на прогрев стола и калибровку перед каждой плитой">?</i></span><input type="number" id="calc_warmup" step="any" min="0" value="7"></label>
+   </div>
+   <div id="calc_plate_info" class="notice compact" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ======= МАТЕРИАЛ И КАЧЕСТВО ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>🧪 Материал и качество</h2><p>Влияет на цену, скорость и свойства</p></div></div>
+   <div class="form-grid">
+    <label class="field"><span>Материал</span><select id="calc_material"><option value="PLA">PLA</option></select></label>
+    <label class="field"><span>Профиль качества</span><select id="calc_quality">
+      <option value="draft">Черновой (0.28 мм, ×0.6)</option>
+      <option value="standard" selected>Стандарт (0.20 мм, ×1.0)</option>
+      <option value="detail">Детальный (0.12 мм, ×1.8)</option>
+      <option value="strong">Прочный (0.20 мм, 5 стенок, ×1.3)</option>
+    </select></label>
+    <label class="field"><span>Поддержки, % <i class="hint-i" title="Доля поддержек в весе модели. 0% — без поддержек, 15% — средняя геометрия, 30%+ — много нависаний">?</i></span><input type="number" id="calc_supports" step="1" min="0" max="50" value="0"></label>
+    <label class="field"><span>Смен цвета (AMS) <i class="hint-i" title="Каждая смена цвета = 12 г продувки на плиту">?</i></span><input type="number" id="calc_color_swaps" step="1" min="0" value="0"></label>
+    <label class="field"><span>Цена катушки, ₽ <i class="hint-i" title="Подставляется автоматически при выборе материала. Можно изменить вручную.">?</i></span><input type="number" id="calc_spool_price" step="any" min="0"></label>
     <label class="field"><span>Вес катушки, г</span><input type="number" id="calc_spool_weight" step="any" min="1"></label>
+   </div>
+   <div id="calc_material_info" class="notice compact" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ======= РАБОТА И ОБРАБОТКА ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>🛠 Работа и обработка</h2><p>Ручное время на штуку</p></div></div>
+   <div class="form-grid">
+    <label class="field"><span>Снятие со стола, мин</span><input type="number" id="calc_remove" step="any" min="0" value="2"></label>
+    <label class="field"><span>Удаление поддержек, мин</span><input type="number" id="calc_sand" step="any" min="0" value="3"></label>
+    <label class="field"><span>Шлифовка/покраска, мин</span><input type="number" id="calc_paint" step="any" min="0" value="0"></label>
+    <label class="field"><span>Моделирование, мин</span><input type="number" id="calc_design" step="any" min="0" value="0"></label>
     <label class="field"><span>Наценка, %</span><input type="number" id="calc_markup" step="any" min="0" value="150"></label>
     <label class="field"><span>Комиссия канала, %</span><input type="number" id="calc_fee" step="any" min="0" value="0"></label>
     <label class="field"><span>Фикс. издержки, ₽</span><input type="number" id="calc_fix" step="any" min="0" value="0"></label>
+    <label class="field"><span>Доставка, ₽</span><input type="number" id="calc_delivery" step="any" min="0" value="0"></label>
    </div>
   </div>
+
+  <!-- ======= ПОДГОТОВКА МОДЕЛИ (6.0) ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>🧩 Подготовка модели</h2><p>Разовая работа — делится на партию</p></div>
+    <div style="display:flex;gap:8px">
+     <button class="btn sm ghost" id="calc_prep_timer" type="button" title="Засечь время подготовки">⏱ Таймер</button>
+     <button class="btn sm ghost" id="calc_prep_estimate" type="button" title="Автооценка по сложности">🤖 Авто</button>
+    </div>
+   </div>
+   <div class="form-grid">
+    <label class="field"><span>Сложность модели</span><select id="calc_complexity">
+      <option value="simple">Простая (адресник, диск)</option>
+      <option value="medium">Средняя (органайзер, корпус)</option>
+      <option value="complex">Сложная (поддержки, сборки)</option>
+    </select></label>
+    <label class="field"><span>Поиск/скачивание, мин</span><input type="number" id="calc_prep_find" step="any" min="0" value="5"></label>
+    <label class="field"><span>Ориентация на столе, мин</span><input type="number" id="calc_prep_orient" step="any" min="0" value="2"></label>
+    <label class="field"><span>Размножение на плите, мин</span><input type="number" id="calc_prep_dupe" step="any" min="0" value="2"></label>
+    <label class="field"><span>Профиль печати, мин</span><input type="number" id="calc_prep_profile" step="any" min="0" value="2"></label>
+    <label class="field"><span>Поддержки, мин</span><input type="number" id="calc_prep_supports" step="any" min="0" value="2"></label>
+    <label class="field"><span>Нарезка и проверка, мин</span><input type="number" id="calc_prep_slice" step="any" min="0" value="3"></label>
+   </div>
+   <div id="calc_prep_total" class="notice compact" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ======= РАСКЛАДКА НА ПЛИТЕ (6.0) ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>📐 Раскладка на плите</h2><p>Габариты модели → сколько влезет на 256×256 мм</p></div></div>
+   <div class="form-grid">
+    <label class="field"><span>Длина модели, мм</span><input type="number" id="calc_dim_x" step="any" min="0" value="0"></label>
+    <label class="field"><span>Ширина модели, мм</span><input type="number" id="calc_dim_y" step="any" min="0" value="0"></label>
+   </div>
+   <div id="calc_layout_result" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ======= РЕЗУЛЬТАТЫ ======= -->
   <div class="grid" style="gap:16px">
    <div class="card">
-    <div class="card-head"><div><h2>Себестоимость партии</h2><p id="calc_batch_sub">—</p></div></div>
+    <div class="card-head"><div><h2>📦 Себестоимость партии</h2><p id="calc_batch_sub">—</p></div></div>
     <div id="calc_rows"></div>
    </div>
    <div class="card">
-    <div class="card-head"><div><h2>Цена и прибыль</h2><p>Норма — от 250 ₽ чистыми за час печати</p></div></div>
+    <div class="card-head"><div><h2>💰 Цена и прибыль</h2><p>Норма — от 250 ₽ чистыми за час печати</p></div></div>
     <div class="big-num"><b id="calc_price">0 ₽</b><span>рекомендованная цена за штуку</span></div>
     <div id="calc_profit_rows"></div>
-    <div class="verdict" id="calc_verdict" style="margin-top:12px">Введите вес и время печати.</div>
+    <div class="verdict" id="calc_verdict" style="margin-top:12px">Введите вес и время плиты из слайсера.</div>
    </div>
+  </div>
+
+  <!-- ======= МИНИМАЛЬНАЯ ПАРТИЯ ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>📈 Минимальная рентабельная партия</h2><p>При каком количестве прибыль/час становится приемлемой</p></div></div>
+   <div id="calc_min_batch"></div>
+  </div>
+
+  <!-- ======= СЦЕНАРИИ ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>⚖️ Сценарии «Что если»</h2><p>Сравните разные материалы, партии и профили</p></div></div>
+   <div id="calc_scenarios"></div>
+   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn sm" id="calc_scenario_materials" type="button">Сравнить материалы</button>
+    <button class="btn sm" id="calc_scenario_batches" type="button">Сравнить партии</button>
+    <button class="btn sm" id="calc_scenario_quality" type="button">Сравнить качество</button>
+   </div>
+  </div>
+
+  <!-- ======= ОКУПАЕМОСТЬ ======= -->
+  <div class="card">
+   <div class="card-head"><div><h2>🔄 Окупаемость модели</h2><p>Сколько заказов нужно, чтобы отбить стоимость модели</p></div></div>
+   <div class="form-grid">
+    <label class="field"><span>Стоимость модели, ₽</span><input type="number" id="calc_model_cost" step="any" min="0" value="0"></label>
+    <label class="field"><span>Часы моделирования</span><input type="number" id="calc_design_hours" step="any" min="0" value="0"></label>
+    <label class="field"><span>Продаж в неделю</span><input type="number" id="calc_sales_week" step="any" min="0.1" value="3"></label>
+   </div>
+   <div id="calc_payback" style="margin-top:10px"></div>
   </div>
  </div>
 </section>

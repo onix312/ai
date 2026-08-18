@@ -549,6 +549,12 @@ class Database:
         self._seed()
         self._seed_v3()
         self._migrate_v3_data()
+        # Реестр моделей 6.0
+        try:
+            from .model_registry import ModelRegistry
+            ModelRegistry(self).ensure_schema()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ ядро
     def _migrate(self) -> None:

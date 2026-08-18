@@ -184,43 +184,127 @@ function renderCatalog() {
 }
 
 /* ========================================================= калькулятор */
-const CALC_KEY = 'pf_calc_v2';
+const CALC_KEY = 'pf_calc_v3';
+let calcMaterials = [], calcProfiles = [];
+
+async function loadCalcMaterials() {
+  try {
+    const data = await get('/api/calc/materials');
+    calcMaterials = data.materials || [];
+    calcProfiles = data.profiles || [];
+    const sel = $('calc_material');
+    if (sel && calcMaterials.length) {
+      const keep = sel.value;
+      sel.innerHTML = calcMaterials.map((m) =>
+        `<option value="${esc(m.key)}">${esc(m.name)} · ${nfmt(m.price_per_kg)} ₽/кг</option>`).join('');
+      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    }
+  } catch (e) { /* офлайн — используем дефолт */ }
+}
+
 function calcInputs() {
+  const prepStages = {
+    find: num($('calc_prep_find') ? $('calc_prep_find').value : 0),
+    orient: num($('calc_prep_orient') ? $('calc_prep_orient').value : 0),
+    duplicate: num($('calc_prep_dupe') ? $('calc_prep_dupe').value : 0),
+    profile: num($('calc_prep_profile') ? $('calc_prep_profile').value : 0),
+    supports: num($('calc_prep_supports') ? $('calc_prep_supports').value : 0),
+    slice: num($('calc_prep_slice') ? $('calc_prep_slice').value : 0),
+  };
+  const modelPrep = Object.values(prepStages).reduce((a, b) => a + b, 0);
   return {
-    grams: num($('calc_grams').value), hours: num($('calc_hours').value),
-    qty: Math.max(1, num($('calc_qty').value, 1)), fit: Math.max(1, num($('calc_fit').value, 1)),
-    minutes: num($('calc_minutes').value), spool_price: num($('calc_spool_price').value),
-    spool_weight: num($('calc_spool_weight').value), markup: num($('calc_markup').value),
-    fee: num($('calc_fee').value), fix: num($('calc_fix').value),
+    plate_grams: num($('calc_plate_grams').value),
+    plate_hours: num($('calc_plate_hours').value),
+    qty: Math.max(1, num($('calc_qty').value, 1)),
+    fit: Math.max(1, num($('calc_fit').value, 1)),
+    warmup: num($('calc_warmup').value),
+    material: $('calc_material').value || 'PLA',
+    quality: $('calc_quality').value || 'standard',
+    supports_pct: num($('calc_supports').value),
+    color_swaps: num($('calc_color_swaps').value),
+    spool_price: num($('calc_spool_price').value),
+    spool_weight: num($('calc_spool_weight').value),
+    remove: num($('calc_remove').value),
+    sand: num($('calc_sand').value),
+    paint: num($('calc_paint').value),
+    design: num($('calc_design').value),
+    markup: num($('calc_markup').value, 150),
+    fee: num($('calc_fee').value),
+    fix: num($('calc_fix').value),
+    delivery: num($('calc_delivery').value),
+    model_prep_minutes: modelPrep,
+    prep_stages: prepStages,
+    complexity: $('calc_complexity') ? $('calc_complexity').value : 'simple',
+    dim_x: num($('calc_dim_x') ? $('calc_dim_x').value : 0),
+    dim_y: num($('calc_dim_y') ? $('calc_dim_y').value : 0),
   };
 }
+
+function updateMaterialInfo() {
+  const mat = calcMaterials.find((m) => m.key === ($('calc_material').value || 'PLA'));
+  const info = $('calc_material_info');
+  if (!info || !mat) return;
+  info.innerHTML = `<span>💡 ${esc(mat.strengths)}<br>⚠ ${esc(mat.weaknesses)}<br>`
+    + `<small class="muted">Теплостойкость ${mat.heat_resistance}°C · Скорость ×${mat.speed_factor} · `
+    + `${mat.abrasive ? '⚠ абразивный — нужно закалённое сопло' : 'не абразивный'}</small></span>`;
+}
+
 async function runCalc() {
   const v = calcInputs();
   store.set(CALC_KEY, JSON.stringify(v));
+  updateMaterialInfo();
+
+  // Подсказка «вес/время на штуку»
+  const plateInfo = $('calc_plate_info');
+  if (v.plate_grams > 0 && v.fit > 0) {
+    const perUnit = (v.plate_grams / v.fit).toFixed(1);
+    const perUnitH = (v.plate_hours / v.fit * 60).toFixed(0);
+    plateInfo.innerHTML = `<span>📐 На штуку: <b>${perUnit} г</b> · <b>${perUnitH} мин</b> принтерного времени `
+      + `(${v.fit} шт делят плиту)</span>`;
+    plateInfo.hidden = false;
+  } else {
+    plateInfo.hidden = true;
+  }
+
   const plates = Math.ceil(v.qty / v.fit);
-  // Печать партией: на плите греется и калибруется один раз, поэтому часы
-  // считаются по числу запусков, а не по числу изделий.
-  const totalGrams = v.grams * v.qty;
-  const totalHours = v.hours * v.qty;
-  $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${plates} запуск(ов) по ${Math.min(v.fit, v.qty)} шт · ${hoursText(totalHours)} · ${nfmt(totalGrams)} г`;
+  const totalHours = v.plate_hours * plates + (v.warmup / 60) * plates;
+  const totalGrams = v.plate_grams * plates;
+  $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${plates} плит(а/ы) · `
+    + `${hoursText(totalHours)} · ${nfmt(totalGrams)} г`;
 
   let br;
   try {
     br = await post('/api/calc/cost', {
-      grams: totalGrams, hours: totalHours, manual_minutes: v.minutes * v.qty,
+      plate_grams: v.plate_grams, plate_hours: v.plate_hours,
+      fit_per_plate: v.fit, qty: v.qty,
+      warmup_minutes: v.warmup,
+      material: v.material, quality: v.quality,
+      supports_pct: v.supports_pct,
+      color_swaps: v.color_swaps,
       spool_price: v.spool_price, spool_weight: v.spool_weight,
+      remove_minutes: v.remove, sand_minutes: v.sand,
+      paint_minutes: v.paint, design_minutes: v.design,
+      delivery: v.delivery,
+      model_prep_minutes: v.model_prep_minutes,
     });
   } catch (e) {
     $('calc_rows').innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
     return;
   }
-  // Строки, которые реально входят в итог. Своя работа показывается отдельно
-  // и в сумму не попадает, пока в настройках не включено «считать её расходом».
+
+  // Обновить подготовку модели
+  updatePrepTotal(v);
+  // Раскладка на плите
+  updateLayout(v);
+
   const rows = [
-    ['Пластик', br.filament], ['Электричество', br.energy],
-    ['Амортизация', br.amortization], ['Обслуживание', br.maintenance],
+    ['Пластик (включая поддержку и продувку)', br.filament],
+    ['Электричество', br.energy],
+    ['Амортизация принтера', br.amortization],
+    ['Обслуживание', br.maintenance],
     ['Упаковка', br.packaging],
   ];
+  if (num(br.model_prep_cost)) rows.push(['Подготовка модели (' + nfmt(br.model_prep, 0) + ' мин)', br.model_prep_cost]);
   if (num(br.delivery)) rows.push(['Доставка', br.delivery]);
   if (num(br.overhead)) rows.push(['Доля постоянных расходов', br.overhead]);
   if (br.labor_counted) {
@@ -228,33 +312,41 @@ async function runCalc() {
     if (num(br.design)) rows.push(['Моделирование', br.design]);
   }
   rows.push(['Резерв на брак', br.failure_reserve]);
+
+  // Детальная разбивка
+  const detailRows = [];
+  if (num(br.support_grams)) detailRows.push(`Поддержки: ${nfmt(br.support_grams, 0)} г`);
+  if (num(br.purge_grams)) detailRows.push(`Продувка AMS: ${nfmt(br.purge_grams, 0)} г`);
+  if (br.plates > 1) detailRows.push(`${br.plates} плит × ${br.fit_per_plate} шт`);
+  const detail = detailRows.length
+    ? `<div class="res-row muted-row"><span class="lbl">${detailRows.join(' · ')}</span><span class="val"></span></div>` : '';
+
   const extra = !br.labor_counted && num(br.labor)
-    ? `<div class="res-row muted-row"><span class="lbl">Ваша работа ${nfmt(v.minutes * v.qty, 0)} мин `
-      + '<i class="hint-i" title="В настройках выключено «Считать свою работу расходом» — эти деньги остаются вашей прибылью">?</i>'
-      + `</span><span class="val">${money(br.labor, 2)} · вне себестоимости</span></div>`
-    : '';
+    ? `<div class="res-row muted-row"><span class="lbl">Ваша работа (снятие + обработка)`
+      + '<i class="hint-i" title="Не считается расходом — остаётся вашей прибылью">?</i>'
+      + `</span><span class="val">${money(br.labor, 2)} · вне себестоимости</span></div>` : '';
+
   $('calc_rows').innerHTML = rows.map(([l, val]) =>
     `<div class="res-row"><span class="lbl">${esc(l)}</span><span class="val">${money(val, 2)}</span></div>`).join('')
-    + extra
+    + detail + extra
     + `<div class="res-row total"><span class="lbl">Себестоимость партии</span><span class="val">${money(br.total, 2)}</span></div>`
-    + `<div class="res-row"><span class="lbl">За штуку</span><span class="val">${money(br.total / v.qty, 2)}</span></div>`
-    + `<div class="res-row muted-row"><span class="lbl">Расход электричества</span><span class="val">${nfmt(br.energy_kwh, 2)} кВт·ч</span></div>`;
+    + `<div class="res-row"><span class="lbl">За штуку</span><span class="val">${money(br.per_unit, 2)}</span></div>`
+    + `<div class="res-row muted-row"><span class="lbl">Электричества</span><span class="val">${nfmt(br.energy_kwh, 2)} кВт·ч</span></div>`
+    + `<div class="res-row muted-row"><span class="lbl">Материал: ${esc(br.material)} · ${esc(br.quality)}</span><span class="val"></span></div>`;
 
-  const unitCost = num(br.total) / v.qty;
+  const unitCost = br.per_unit;
   const feeK = v.fee < 100 ? 1 - v.fee / 100 : 1;
   const price = Math.ceil((unitCost * (1 + v.markup / 100) + v.fix) / feeK / 10) * 10;
   const feeAmt = price * v.fee / 100 + v.fix;
   const net = price - feeAmt;
   const profit = (net - unitCost) * v.qty;
-  const perHour = totalHours ? profit / totalHours : 0;
+  const totalH = br.total_hours;
+  const perHour = totalH ? profit / totalH : 0;
   const target = num(PF.state.settings.target_profit_per_hour, 250);
-  // налог считаем по выбранному режиму, а не по «запасной» ставке из настроек
   const taxAmt = PF.taxOf(price * v.qty, profit, 'person');
   const afterTax = profit - taxAmt;
   const taxMode = PF.taxLabel();
-  const taxRow = taxMode
-    ? `Прибыль после налога (${taxMode})`
-    : 'Прибыль после налога (режим не выбран)';
+  const taxRow = taxMode ? `Прибыль после налога (${taxMode})` : 'Прибыль после налога';
 
   $('calc_price').textContent = money(price);
   $('calc_profit_rows').innerHTML = [
@@ -263,41 +355,250 @@ async function runCalc() {
     ['Прибыль до налога', money(profit)],
     ['Налог с этой сделки', taxAmt ? '−' + money(taxAmt) : money(0)],
     [taxRow, money(afterTax)],
-    ['Прибыль за час печати', totalHours ? money(perHour) : '—'],
+    ['Прибыль за час печати', totalH ? money(perHour) : '—'],
     ['Минимальная разумная цена', money(Math.ceil((unitCost * 1.4 + v.fix) / feeK / 10) * 10)],
   ].map(([l, val]) => `<div class="res-row"><span class="lbl">${esc(l)}</span><span class="val">${val}</span></div>`).join('');
 
   const verdict = $('calc_verdict');
-  if (!totalHours || !totalGrams) {
+  if (!v.plate_grams || !v.plate_hours) {
     verdict.className = 'verdict';
-    verdict.textContent = 'Введите вес и время печати из слайсера.';
+    verdict.textContent = 'Введите вес и время плиты из слайсера.';
   } else if (perHour >= target) {
     verdict.className = 'verdict ok';
-    verdict.innerHTML = `<b>Выгодно.</b> ${money(perHour)} чистыми за час печати при норме ${money(target)}. Можно брать и масштабировать.`;
+    verdict.innerHTML = `<b>✅ Выгодно.</b> ${money(perHour)} чистыми за час при норме ${money(target)}. `
+      + `${br.plates > 1 ? `Партия ${v.qty} шт на ${br.plates} плитах — эффективно.` : ''}`;
   } else if (perHour >= target * 0.4) {
     verdict.className = 'verdict warn';
-    verdict.innerHTML = `<b>Слабовато.</b> ${money(perHour)} за час против нормы ${money(target)}. Поднимите цену, уменьшите время печати или печатайте большей партией.`;
+    const tips = [];
+    if (v.fit < 4) tips.push('увеличьте число штук на плите');
+    if (v.quality === 'detail') tips.push('переключитесь на «Стандарт»');
+    if (v.supports_pct > 20) tips.push('уменьшите поддержки (поверните модель)');
+    if (v.qty < 5) tips.push('печатайте большей партией');
+    verdict.innerHTML = `<b>⚠ Слабовато.</b> ${money(perHour)} за час против нормы ${money(target)}. `
+      + (tips.length ? `Советы: ${tips.join('; ')}.` : 'Поднимите цену или уменьшите время.');
   } else {
     verdict.className = 'verdict bad';
-    verdict.innerHTML = `<b>Невыгодно.</b> Всего ${money(perHour)} за час работы принтера. Поднимите цену, смените канал или откажитесь от заказа.`;
+    verdict.innerHTML = `<b>❌ Невыгодно.</b> Всего ${money(perHour)} за час. `
+      + `Поднимите цену, смените канал, печатайте большей партией или откажитесь от заказа.`;
+  }
+
+  // Кнопка "минимальная партия" и "сценарии" используют последние данные
+  runMinBatch(v);
+  runPayback(v, profit, v.qty);
+}
+
+// ------------------------------------------------------- минимальная партия
+async function runMinBatch(v) {
+  if (!v.plate_grams || !v.plate_hours) { $('calc_min_batch').innerHTML = ''; return; }
+  try {
+    const data = await post('/api/calc/min-batch', {
+      plate_grams: v.plate_grams, plate_hours: v.plate_hours,
+      fit_per_plate: v.fit, material: v.material, quality: v.quality,
+      supports_pct: v.supports_pct, target_per_hour: num(PF.state.settings.target_profit_per_hour, 250),
+      spool_price: v.spool_price, markup: v.markup,
+    });
+    const target = num(PF.state.settings.target_profit_per_hour, 250);
+    const rows = (data.table || []).filter((r) => r.qty <= 20);
+    if (!rows.length) { $('calc_min_batch').innerHTML = ''; return; }
+    const maxPPH = Math.max(1, ...rows.map((r) => Math.abs(r.profit_per_hour)));
+    $('calc_min_batch').innerHTML = (data.min_qty
+      ? `<div class="notice ok"><span>Минимальная рентабельная партия: <b>${data.min_qty} шт</b> `
+        + `(${data.min_plates} плит(а/ы)) для нормы ${money(target)}/ч</span></div>` : '')
+      + '<div class="batch-bars">' + rows.map((r) => {
+        const pct = clamp(Math.abs(r.profit_per_hour) / maxPPH * 100, 2, 100);
+        const cls = r.ok ? 'ok' : 'warn';
+        return `<div class="batch-row"><span class="lbl">${r.qty} шт (${r.plates} пл.)</span>`
+          + `<div class="bar ${cls}"><i style="width:${pct}%"></i></div>`
+          + `<span class="val">${money(r.profit_per_hour)}/ч · ${money(r.cost_unit)}/шт</span></div>`;
+      }).join('') + '</div>';
+  } catch (e) { /* тихо */ }
+}
+
+// ----------------------------------------------------- подготовка модели
+function updatePrepTotal(v) {
+  const el = $('calc_prep_total');
+  if (!el) return;
+  const total = v.model_prep_minutes;
+  const perUnit = v.qty > 0 ? (total / v.qty).toFixed(1) : '—';
+  el.innerHTML = `<span>⏱ Подготовка: <b>${nfmt(total, 0)} мин</b> на всю партию`
+    + ` (${perUnit} мин/шт) · Сложность: ${v.complexity}</span>`;
+}
+
+const PREP_DEFAULTS = {
+  simple:  { find: 5,  orient: 2,  duplicate: 2, profile: 2,  supports: 2,  slice: 3 },
+  medium:  { find: 10, orient: 5,  duplicate: 3, profile: 5,  supports: 10, slice: 5 },
+  complex: { find: 20, orient: 10, duplicate: 5, profile: 10, supports: 20, slice: 10 },
+};
+
+// Автооценка по сложности
+function autoPrepEstimate() {
+  const complexity = $('calc_complexity') ? $('calc_complexity').value : 'simple';
+  const defaults = PREP_DEFAULTS[complexity] || PREP_DEFAULTS.simple;
+  Object.entries(defaults).forEach(([key, val]) => {
+    const el = $('calc_prep_' + (key === 'duplicate' ? 'dupe' : key));
+    if (el) el.value = val;
+  });
+  runCalc();
+}
+
+// --------------------------------------------------------- таймер подготовки
+let prepTimerStart = null;
+function togglePrepTimer() {
+  const btn = $('calc_prep_timer');
+  if (!btn) return;
+  if (!prepTimerStart) {
+    prepTimerStart = Date.now();
+    btn.textContent = '⏱ Остановить';
+    btn.classList.add('primary');
+    toast('Таймер запущен', 'Засекаем время подготовки модели');
+  } else {
+    const elapsed = Math.round((Date.now() - prepTimerStart) / 60000 * 10) / 10;
+    prepTimerStart = null;
+    btn.textContent = '⏱ Таймер';
+    btn.classList.remove('primary');
+    // Распределяем время по этапам пропорционально дефолтам
+    const complexity = $('calc_complexity') ? $('calc_complexity').value : 'simple';
+    const defaults = PREP_DEFAULTS[complexity] || PREP_DEFAULTS.simple;
+    const totalDefault = Object.values(defaults).reduce((a, b) => a + b, 0);
+    const ratio = elapsed / totalDefault;
+    Object.entries(defaults).forEach(([key, val]) => {
+      const el = $('calc_prep_' + (key === 'duplicate' ? 'dupe' : key));
+      if (el) el.value = Math.round(val * ratio * 10) / 10;
+    });
+    toast('Таймер остановлен', `${nfmt(elapsed, 1)} мин — распределено по этапам`);
+    runCalc();
   }
 }
-const runCalcDebounced = debounce(runCalc, 320);
+
+// ------------------------------------------------------ раскладка на плите
+async function updateLayout(v) {
+  const el = $('calc_layout_result');
+  if (!el || !v.dim_x || !v.dim_y) { if (el) el.innerHTML = ''; return; }
+  try {
+    const data = await get('/api/calc/plate-layout', { dim_x: v.dim_x, dim_y: v.dim_y });
+    el.innerHTML = `<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">`
+      + `<div style="flex:0 0 200px">${data.svg}</div>`
+      + `<div><b>${data.fit_per_plate} шт</b> влезает на плиту<br>`
+      + `<small class="muted">${data.cols}×${data.rows} · ${data.rotated ? 'повёрнуты' : 'прямо'} · `
+      + `заполнение ${nfmt(data.utilization_pct, 0)}%</small><br>`
+      + `<button class="btn sm" type="button" onclick="document.getElementById('calc_fit').value=${data.fit_per_plate};runCalc();">`
+      + `Подставить в калькулятор</button></div></div>`;
+  } catch (e) { /* тихо */ }
+}
+
+// ------------------------------------------------------------ сценарии
+async function runScenarios(variants, title) {
+  const v = calcInputs();
+  const base = {
+    plate_grams: v.plate_grams, plate_hours: v.plate_hours,
+    fit_per_plate: v.fit, qty: v.qty,
+    warmup_minutes: v.warmup,
+    supports_pct: v.supports_pct,
+    spool_price: v.spool_price, spool_weight: v.spool_weight,
+    remove_minutes: v.remove, sand_minutes: v.sand,
+    paint_minutes: v.paint, design_minutes: v.design,
+    delivery: v.delivery,
+    markup: v.markup,
+  };
+  try {
+    const data = await post('/api/calc/scenarios', { base, variants });
+    const scenarios = data.scenarios || [];
+    if (!scenarios.length) return;
+    const maxProfit = Math.max(1, ...scenarios.map((s) => Math.abs(s.profit_per_hour)));
+    const target = num(PF.state.settings.target_profit_per_hour, 250);
+    $('calc_scenarios').innerHTML = `<h3 style="margin:0 0 8px">${esc(title || 'Сравнение')}</h3>`
+      + scenarios.map((s) => {
+        const pct = clamp(Math.abs(s.profit_per_hour) / maxProfit * 100, 2, 100);
+        const cls = s.profit_per_hour >= target ? 'ok' : s.profit_per_hour >= target * 0.4 ? 'warn' : 'bad';
+        return `<div class="scenario-row"><div class="scenario-head">`
+          + `<b>${esc(s.label)}</b>`
+          + `<span class="${cls === 'ok' ? 'pos' : cls === 'bad' ? 'neg' : ''}">${money(s.profit_per_hour)}/ч</span>`
+          + `</div><div class="bar ${cls}"><i style="width:${pct}%"></i></div>`
+          + `<small class="muted">${money(s.breakdown.per_unit)}/шт себестоимость · `
+          + `${money(s.price.price)} цена · ${nfmt(s.breakdown.total_hours, 1)} ч · `
+          + `маржа ${nfmt(s.margin, 0)}% · прибыль ${money(s.profit)}</small></div>`;
+      }).join('');
+  } catch (e) { fail(e); }
+}
+
+// ------------------------------------------------------------- окупаемость
+async function runPayback(v, profit, qty) {
+  const modelCost = num($('calc_model_cost').value);
+  const designHours = num($('calc_design_hours').value);
+  const salesWeek = num($('calc_sales_week').value, 3);
+  const profitPerUnit = qty > 0 ? profit / qty : 0;
+  if (modelCost <= 0 && designHours <= 0) {
+    $('calc_payback').innerHTML = '<small class="muted">Укажите стоимость модели или часы моделирования</small>';
+    return;
+  }
+  try {
+    const data = await post('/api/calc/payback', {
+      model_cost: modelCost, design_hours: designHours,
+      profit_per_unit: profitPerUnit, sales_per_week: salesWeek,
+    });
+    if (data.total_invest <= 0) {
+      $('calc_payback').innerHTML = '';
+      return;
+    }
+    $('calc_payback').innerHTML = `<div class="notice ${data.weeks_to_payback <= 4 ? 'ok' : data.weeks_to_payback <= 12 ? 'warn' : 'bad'}">`
+      + `<span>Вложения: <b>${money(data.total_invest)}</b>`
+      + (data.model_cost ? ` (модель ${money(data.model_cost)})` : '')
+      + (data.design_cost ? ` + моделирование ${money(data.design_cost)}` : '')
+      + `<br>Прибыль со штуки: ${money(data.profit_per_unit)}<br>`
+      + `Окупится за <b>${data.units_needed} продаж</b>`
+      + ` (${salesWeek}/нед → <b>${nfmt(data.weeks_to_payback, 1)} нед</b> · `
+      + `${nfmt(data.days_to_payback, 0)} дн.)</span></div>`;
+  } catch (e) { /* тихо */ }
+}
+
+// ------------------------------------------------------- реальная статистика
+async function showRealStats() {
+  const preset = ($('calc_preset').value || '');
+  const item = PF.state.catalog.find((c) => c.id === preset);
+  const product = item ? item.name : '';
+  const material = $('calc_material').value || '';
+  try {
+    const data = await get('/api/calc/real-stats', { product, material, days: 60 });
+    if (!data.found) {
+      toast('Нет данных', 'Похожих печатей за 60 дней не найдено');
+      return;
+    }
+    $('calc_plate_grams').value = data.median_grams;
+    $('calc_plate_hours').value = data.median_hours;
+    toast('Подставлено из журнала',
+      `Медиана: ${nfmt(data.median_grams)} г, ${nfmt(data.median_hours, 1)} ч (${data.count} печатей)`);
+    runCalc();
+  } catch (e) { fail(e); }
+}
 
 function restoreCalc() {
   let saved = {};
   try { saved = JSON.parse(store.get(CALC_KEY, '{}')) || {}; } catch (e) { saved = {}; }
   const map = {
-    grams: 'calc_grams', hours: 'calc_hours', qty: 'calc_qty', fit: 'calc_fit',
-    minutes: 'calc_minutes', spool_price: 'calc_spool_price', spool_weight: 'calc_spool_weight',
-    markup: 'calc_markup', fee: 'calc_fee', fix: 'calc_fix',
+    plate_grams: 'calc_plate_grams', plate_hours: 'calc_plate_hours',
+    qty: 'calc_qty', fit: 'calc_fit', warmup: 'calc_warmup',
+    material: 'calc_material', quality: 'calc_quality',
+    supports_pct: 'calc_supports', color_swaps: 'calc_color_swaps',
+    spool_price: 'calc_spool_price', spool_weight: 'calc_spool_weight',
+    remove: 'calc_remove', sand: 'calc_sand', paint: 'calc_paint',
+    design: 'calc_design', markup: 'calc_markup', fee: 'calc_fee',
+    fix: 'calc_fix', delivery: 'calc_delivery',
+    dim_x: 'calc_dim_x', dim_y: 'calc_dim_y',
   };
-  Object.entries(map).forEach(([k, id]) => { if (saved[k] != null && saved[k] !== '') $(id).value = saved[k]; });
+  Object.entries(map).forEach(([k, id]) => { if (saved[k] != null && saved[k] !== '' && $(id)) $(id).value = saved[k]; });
   if (!$('calc_spool_price').value) $('calc_spool_price').value = num(PF.state.settings.default_spool_price, 1600);
   if (!$('calc_spool_weight').value) $('calc_spool_weight').value = num(PF.state.settings.default_spool_weight, 1000);
+  // Подготовка модели: восстановить этапы
+  if (saved.prep_stages) {
+    Object.entries(saved.prep_stages).forEach(([key, val]) => {
+      const el = $('calc_prep_' + (key === 'duplicate' ? 'dupe' : key));
+      if (el) el.value = val;
+    });
+  }
+  if (saved.complexity && $('calc_complexity')) $('calc_complexity').value = saved.complexity;
 }
 
-/* ============================================================= диалоги */
+/* ============================================================ каталог */
 function openSpool(id) {
   editingSpool = id || null;
   const s = id ? PF.state.spools.find((x) => x.id === id) : null;
@@ -516,28 +817,100 @@ function bind() {
     }
   });
 
-  ['calc_grams', 'calc_hours', 'calc_qty', 'calc_fit', 'calc_minutes', 'calc_spool_price',
-    'calc_spool_weight', 'calc_markup', 'calc_fee', 'calc_fix']
-    .forEach((id) => $(id).addEventListener('input', runCalcDebounced));
+  ['calc_plate_grams', 'calc_plate_hours', 'calc_qty', 'calc_fit', 'calc_warmup',
+    'calc_material', 'calc_quality', 'calc_supports', 'calc_color_swaps',
+    'calc_spool_price', 'calc_spool_weight', 'calc_remove', 'calc_sand', 'calc_paint',
+    'calc_design', 'calc_markup', 'calc_fee', 'calc_fix', 'calc_delivery',
+    'calc_model_cost', 'calc_design_hours', 'calc_sales_week',
+    'calc_prep_find', 'calc_prep_orient', 'calc_prep_dupe',
+    'calc_prep_profile', 'calc_prep_supports', 'calc_prep_slice',
+    'calc_dim_x', 'calc_dim_y']
+    .forEach((id) => { const el = $(id); if (el) el.addEventListener('input', runCalcDebounced); });
+
+  // Сложность → автооценка подготовки
+  const complexityEl = $('calc_complexity');
+  if (complexityEl) complexityEl.addEventListener('change', autoPrepEstimate);
+
+  // Кнопка таймера
+  const timerBtn = $('calc_prep_timer');
+  if (timerBtn) timerBtn.addEventListener('click', togglePrepTimer);
+
+  // Кнопка автооценки
+  const estBtn = $('calc_prep_estimate');
+  if (estBtn) estBtn.addEventListener('click', autoPrepEstimate);
+
+  // При смене материала — подставляем цену катушки из справочника
+  const matSel = $('calc_material');
+  if (matSel) matSel.addEventListener('change', () => {
+    const mat = calcMaterials.find((m) => m.key === matSel.value);
+    if (mat && mat.price_per_kg) {
+      $('calc_spool_price').value = mat.price_per_kg;
+    }
+    updateMaterialInfo();
+    runCalc();
+  });
+
   $('calc_preset').addEventListener('change', (e) => {
     const item = PF.state.catalog.find((c) => c.id === e.target.value);
     if (!item) return;
-    $('calc_grams').value = item.grams;
-    $('calc_hours').value = item.hours;
+    if (item.grams) $('calc_plate_grams').value = item.grams;
+    if (item.hours) $('calc_plate_hours').value = item.hours;
     $('calc_fit').value = item.fit_per_plate || 1;
+    if (item.material) {
+      const m = calcMaterials.find((x) => x.name.toUpperCase() === (item.material || '').toUpperCase());
+      if (m) { $('calc_material').value = m.key; $('calc_spool_price').value = m.price_per_kg; }
+    }
     if (item.price) $('calc_markup').value = item.grams || item.hours ? $('calc_markup').value : 150;
     runCalc();
   });
+
+  const realBtn = $('calc_real_stats');
+  if (realBtn) realBtn.addEventListener('click', showRealStats);
+
+  const exportBtn = $('calc_export');
+  if (exportBtn) exportBtn.addEventListener('click', exportCalc);
+
   $('calc_from_cat').addEventListener('click', () => PF.go('inventory'));
+
+  // Сценарии
+  const scenMat = $('calc_scenario_materials');
+  if (scenMat) scenMat.addEventListener('click', () => {
+    const variants = ['PLA', 'PETG', 'ASA', 'TPU'].map((m) => ({
+      material: m, quality: $('calc_quality').value, label: m,
+    }));
+    runScenarios(variants, 'Сравнение материалов');
+  });
+  const scenBatch = $('calc_scenario_batches');
+  if (scenBatch) scenBatch.addEventListener('click', () => {
+    const variants = [1, 3, 5, 10, 20, 50].map((q) => ({
+      qty: q, material: $('calc_material').value,
+      quality: $('calc_quality').value, label: `${q} шт`,
+    }));
+    runScenarios(variants, 'Сравнение партий');
+  });
+  const scenQ = $('calc_scenario_quality');
+  if (scenQ) scenQ.addEventListener('click', () => {
+    const variants = [
+      { quality: 'draft', material: $('calc_material').value, label: 'Черновой' },
+      { quality: 'standard', material: $('calc_material').value, label: 'Стандарт' },
+      { quality: 'detail', material: $('calc_material').value, label: 'Детальный' },
+      { quality: 'strong', material: $('calc_material').value, label: 'Прочный' },
+    ];
+    runScenarios(variants, 'Сравнение качества');
+  });
+
   $('calc_to_order').addEventListener('click', () => {
     const v = calcInputs();
     const preset = PF.state.catalog.find((c) => c.id === $('calc_preset').value);
     PF.modules.ops.openOrder().then(() => {
       $('of_product').value = preset ? preset.name : '';
-      $('of_grams').value = v.grams;
-      $('of_hours').value = v.hours;
+      // Передаём вес/время на штуку (пересчитанные из плиты)
+      const unitGrams = v.fit > 0 ? (v.plate_grams / v.fit) : v.plate_grams;
+      const unitHours = v.fit > 0 ? (v.plate_hours / v.fit) : v.plate_hours;
+      $('of_grams').value = unitGrams.toFixed(1);
+      $('of_hours').value = unitHours.toFixed(2);
       $('of_qty').value = v.qty;
-      $('of_manual_minutes').value = v.minutes;
+      $('of_manual_minutes').value = v.remove + v.sand + v.paint;
       $('of_price').value = (($('calc_price').textContent || '').replace(/[^\d]/g, '') || '');
       if (preset && preset.niche_id) $('of_niche_id').value = preset.niche_id;
       if (preset && preset.file) $('of_file').value = preset.file;
@@ -547,10 +920,77 @@ function bind() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { loadFilamentStats(); bind(); restoreCalc(); });
+PF.on('ready', () => { loadFilamentStats(); loadCalcMaterials(); bind(); restoreCalc(); });
 PF.on('data', () => { renderStock(); renderCatalog(); });
 PF.on('finance', renderFinance);
 PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });
 
-PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance };
+// ------------------------------------------------------- экспорт расчёта
+function exportCalc() {
+  const v = calcInputs();
+  const price = ($('calc_price').textContent || '').replace(/\s/g, '');
+  const lines = [
+    `PrintFlow — Расчёт себестоимости`,
+    `Дата: ${new Date().toLocaleDateString('ru-RU')}`,
+    ``,
+    `Материал: ${v.material} · Качество: ${v.quality}`,
+    `Плита: ${v.plate_grams} г × ${v.plate_hours} ч (${v.fit} шт/плита)`,
+    `Партия: ${v.qty} шт (${Math.ceil(v.qty / v.fit)} плит)`,
+    `Поддержка: ${v.supports_pct}% · Смен цвета: ${v.color_swaps}`,
+    ``,
+    `Себестоимость за штуку: ${($('calc_rows').querySelector('.res-row:nth-last-child(2) .val') || {}).textContent || '—'}`,
+    `Рекомендованная цена: ${price}`,
+    ``,
+    `Подготовка модели: ${nfmt(v.model_prep_minutes, 0)} мин`,
+    `Наценка: ${v.markup}% · Комиссия: ${v.fee}%`,
+  ];
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(
+    () => toast('Скопировано', 'Расчёт в буфере обмена'),
+    () => toast('Ошибка', 'Не удалось скопировать'));
+}
+
+// ------------------------------------------------------- быстрые пресеты
+const CALC_PRESETS = {
+  'Адресник PLA': { plate_grams: 35, plate_hours: 0.8, fit: 6, qty: 6,
+    material: 'PLA', quality: 'standard', supports_pct: 0, complexity: 'simple',
+    remove: 1, sand: 1, paint: 0, dim_x: 30, dim_y: 20 },
+  'Табличка PETG': { plate_grams: 80, plate_hours: 2.5, fit: 4, qty: 4,
+    material: 'PETG', quality: 'standard', supports_pct: 10, complexity: 'medium',
+    remove: 2, sand: 3, paint: 0, dim_x: 60, dim_y: 40 },
+  'Органайзер': { plate_grams: 150, plate_hours: 5, fit: 2, qty: 2,
+    material: 'PETG', quality: 'standard', supports_pct: 20, complexity: 'medium',
+    remove: 3, sand: 5, paint: 0, dim_x: 100, dim_y: 80 },
+  'QR-стойка': { plate_grams: 120, plate_hours: 4, fit: 2, qty: 2,
+    material: 'PLA_MATTE', quality: 'detail', supports_pct: 5, complexity: 'medium',
+    remove: 2, sand: 5, paint: 5, dim_x: 60, dim_y: 40 },
+  'Корпус ABS': { plate_grams: 200, plate_hours: 6, fit: 1, qty: 1,
+    material: 'ABS', quality: 'strong', supports_pct: 25, complexity: 'complex',
+    remove: 3, sand: 10, paint: 10, dim_x: 120, dim_y: 80 },
+  'Ножки TPU': { plate_grams: 40, plate_hours: 3, fit: 8, qty: 8,
+    material: 'TPU', quality: 'standard', supports_pct: 0, complexity: 'simple',
+    remove: 1, sand: 0, paint: 0, dim_x: 20, dim_y: 20 },
+};
+
+function applyPreset(name) {
+  const p = CALC_PRESETS[name];
+  if (!p) return;
+  const map = {
+    plate_grams: 'calc_plate_grams', plate_hours: 'calc_plate_hours',
+    fit: 'calc_fit', qty: 'calc_qty', supports_pct: 'calc_supports',
+    remove: 'calc_remove', sand: 'calc_sand', paint: 'calc_paint',
+    dim_x: 'calc_dim_x', dim_y: 'calc_dim_y',
+  };
+  Object.entries(map).forEach(([k, id]) => { if (p[k] != null && $(id)) $(id).value = p[k]; });
+  if (p.material && $('calc_material')) $('calc_material').value = p.material;
+  if (p.quality && $('calc_quality')) $('calc_quality').value = p.quality;
+  if (p.complexity && $('calc_complexity')) {
+    $('calc_complexity').value = p.complexity;
+    autoPrepEstimate();
+  }
+  runCalc();
+  toast('Пресет', name);
+}
+
+PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset };
 })();

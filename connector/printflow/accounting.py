@@ -95,42 +95,134 @@ class Accounting:
     def cost_breakdown(self, grams: float, hours: float, spool_price: float | None = None,
                        spool_weight: float | None = None, manual_minutes: float = 0.0,
                        qty: float = 1.0, design_minutes: float = 0.0,
-                       delivery: float = 0.0, color_swaps: float = 0.0) -> dict[str, float]:
+                       delivery: float = 0.0, color_swaps: float = 0.0,
+                       material: str = "", quality: str = "standard",
+                       supports_pct: float = 0.0, plate_grams: float = 0.0,
+                       plate_hours: float = 0.0, fit_per_plate: float = 0.0,
+                       warmup_minutes: float = 0.0,
+                       remove_minutes: float = 0.0, sand_minutes: float = 0.0,
+                       paint_minutes: float = 0.0,
+                       model_prep_minutes: float = 0.0) -> dict[str, float]:
         """Полная раскладка себестоимости партии.
 
-        Своя работа по умолчанию расходом не считается (count_labor_in_cost),
-        но всегда показывается отдельной строкой как ориентир по трудозатратам.
-        color_swaps — сколько раз принтер сменит цвет/материал: на каждую смену
-        Bambu тратит ~10–15 г на продувку сопла, это реальный расход пластика.
-        """
-        s = self.db.settings()
-        grams = max(0.0, num(grams))
-        hours = max(0.0, num(hours))
-        qty = max(1.0, num(qty, 1))
-        price = num(spool_price if spool_price is not None else s["default_spool_price"], 1600)
-        weight = max(1.0, num(spool_weight if spool_weight is not None else s["default_spool_weight"], 1000))
+        Модель ввода «плита vs штука»:
+        • plate_grams / plate_hours — вес и время ВСЕЙ плиты из слайсера;
+        • fit_per_plate — сколько штук помещается на плите;
+        • qty — сколько штук нужно напечатать.
+        Система сама считает: plates = ceil(qty / fit),
+        total_grams = plate_grams × plates, total_hours = plate_hours × plates.
 
+        Если plate_grams не указан — используется старый режим (grams = на штуку,
+        hours = на плиту), qty × grams для совместимости.
+
+        Параметры материалов и качества:
+        • material — ключ из справочника (PLA, PETG, TPU…): корректирует
+          скорость печати и подсказывает цену катушки;
+        • quality — профиль (draft/standard/detail/strong): множитель времени
+          и расхода;
+        • supports_pct — процент поддержек (0–50): добавляет пластик и время;
+        • color_swaps — смен цвета через AMS: 12 г продувки на каждую смену
+          (на плиту);
+        • warmup_minutes — прогрев и калибровка на каждую плиту (5–10 мин);
+        • remove_minutes / sand_minutes / paint_minutes — постобработка
+          на штуку.
+
+        Своя работа по умолчанию расходом не считается (count_labor_in_cost),
+        но всегда показывается отдельной строкой как ориентир.
+        """
+        from .materials import get_material, get_profile
+        s = self.db.settings()
+        qty = max(1.0, num(qty, 1))
+
+        # --- справочник материала и профиля ---
+        mat = get_material(material)
+        profile = get_profile(quality)
+        speed_factor = num(mat.get("speed_factor"), 1.0)
+        time_factor = num(profile.get("time_factor"), 1.0)
+        filament_factor = num(profile.get("filament_factor"), 1.0)
+
+        # Цена катушки: если пользователь не указал — берём из справочника
+        # Приоритет: явное значение > справочник материала > настройка по умолчанию
+        if spool_price is not None and spool_price > 0:
+            price = num(spool_price)
+        else:
+            price = mat.get("price_per_kg", num(s["default_spool_price"], 1600))
+        weight = max(1.0, num(spool_weight if spool_weight is not None
+                              else s["default_spool_weight"], 1000))
+
+        # --- модель «плита vs штука» ---
+        fit = max(1.0, num(fit_per_plate, 1))
+        pg = num(plate_grams)
+        ph = num(plate_hours)
+
+        if pg > 0 and ph > 0:
+            # Новый режим: слайсер дал вес и время на плиту
+            plates = int(-(-int(qty) // int(fit)))  # ceil(qty / fit)
+            # Вес всей партии = вес плиты × число плит
+            # Поддержки добавляются к весу плиты (они уже часть плиты)
+            base_grams = pg * plates
+            # Время = время плиты × число плит + прогрев на каждую плиту
+            warmup = num(warmup_minutes, 7) / 60.0  # минут → часов
+            base_hours = (ph + warmup) * plates
+            # На одну штуку (для отображения)
+            unit_grams = pg / fit
+            unit_hours = ph / fit
+        else:
+            # Старый режим: grams = на штуку, hours = на плиту
+            plates = int(-(-int(qty) // int(fit)))
+            base_grams = num(grams) * qty
+            base_hours = num(hours) * plates
+            unit_grams = num(grams)
+            unit_hours = num(hours) / fit
+
+        # Применяем профиль качества к расходу и времени
+        base_grams *= filament_factor
+        base_hours *= time_factor
+        # Корректировка скорости материала (TPU медленнее в 4 раза)
+        if speed_factor > 0 and speed_factor != 1.0:
+            base_hours /= speed_factor
+
+        # --- поддержки: дополнительный пластик и время ---
+        sup_pct = max(0.0, min(50.0, num(supports_pct))) / 100.0
+        support_grams = base_grams * sup_pct
+        # Поддержки печатаются быстрее основного тела (~70% скорости)
+        support_hours = (support_grams / max(1.0, base_grams) * base_hours * 0.7) if base_grams else 0.0
+
+        total_grams = base_grams + support_grams
+        total_hours = base_hours + support_hours
+
+        # --- многоцветная печать: продувка AMS на каждую смену цвета ---
         swaps = max(0.0, num(color_swaps))
-        if swaps:
-            # продувка между цветами — это те же граммы пластика в отходы
-            grams += swaps * 12.0
-        filament = grams * price / weight
-        energy_kwh = hours * num(s["power_kw"], 0.15)
+        purge_grams = swaps * 12.0 * plates  # 12 г на смену × число плит
+        total_grams += purge_grams
+
+        # --- расчёт стоимости ---
+        filament = total_grams * price / weight
+        energy_kwh = total_hours * num(s["power_kw"], 0.15)
         energy = energy_kwh * num(s["energy_price"], 6)
-        amortization = hours * num(s["amortization_per_hour"], 12)
-        maintenance = hours * num(s["maintenance_per_hour"], 3)
-        labor = num(manual_minutes) / 60.0 * num(s["labor_rate"], 400)
+        amortization = total_hours * num(s["amortization_per_hour"], 12)
+        maintenance = total_hours * num(s["maintenance_per_hour"], 3)
+
+        # Ручная работа: основная + постобработка + подготовка модели
+        post_per_unit = num(remove_minutes) + num(sand_minutes) + num(paint_minutes)
+        # Подготовка модели: разовая работа, делится на всю партию
+        # Это РЕАЛЬНАЯ трата времени (не «своя работа») — всегда в себестоимости
+        model_prep = num(model_prep_minutes)
+        model_prep_cost = model_prep / 60.0 * num(s["labor_rate"], 400)
+        total_manual = (num(manual_minutes) + post_per_unit) * qty
+        labor = total_manual / 60.0 * num(s["labor_rate"], 400)
         design = num(design_minutes) / 60.0 * num(s.get("design_rate"), 800)
-        packaging = num(s["packaging_cost"], 15)
+        packaging = num(s["packaging_cost"], 15) * qty
         delivery = num(delivery) or num(s.get("delivery_cost"))
-        overhead = self.overhead_per_hour() * hours
+        overhead = self.overhead_per_hour() * total_hours
         counted_labor = (labor + design) if s.get("count_labor_in_cost") else 0.0
 
         subtotal = (filament + energy + amortization + maintenance
-                    + packaging + delivery + overhead + counted_labor)
+                    + packaging + delivery + overhead + counted_labor
+                    + model_prep_cost)
         failure = subtotal * num(s["failure_rate"], 5) / 100.0
         total = subtotal + failure
-        cash = total - overhead  # то, что реально уходит из кассы
+        cash = total - overhead
         return {
             "filament": round(filament, 2),
             "energy": round(energy, 2),
@@ -140,6 +232,8 @@ class Accounting:
             "labor": round(labor, 2),
             "design": round(design, 2),
             "labor_counted": bool(s.get("count_labor_in_cost")),
+            "model_prep": round(model_prep, 1),
+            "model_prep_cost": round(model_prep_cost, 2),
             "packaging": round(packaging, 2),
             "delivery": round(delivery, 2),
             "overhead": round(overhead, 2),
@@ -147,7 +241,20 @@ class Accounting:
             "total": round(total, 2),
             "cash_cost": round(cash, 2),
             "per_unit": round(total / qty, 2),
-            "per_hour": round(total / hours, 2) if hours else 0.0,
+            "per_hour": round(total / total_hours, 2) if total_hours else 0.0,
+            # --- новые поля для калькулятора ---
+            "plates": plates,
+            "fit_per_plate": int(fit),
+            "total_grams": round(total_grams, 1),
+            "total_hours": round(total_hours, 2),
+            "unit_grams": round(total_grams / qty, 1),
+            "unit_hours": round(total_hours / qty, 2),
+            "support_grams": round(support_grams, 1),
+            "purge_grams": round(purge_grams, 1),
+            "material": mat.get("name", "PLA"),
+            "quality": profile.get("name", "Стандарт"),
+            "speed_factor": speed_factor,
+            "time_factor": time_factor,
         }
 
     def suggest_price(self, cost_per_unit: float, qty: float = 1.0, channel: str = "",
@@ -185,6 +292,194 @@ class Accounting:
         if not channel_id:
             return {}
         return self.db.one("SELECT * FROM channels WHERE id=?", (channel_id,)) or {}
+
+    # ------------------------------------------------------- материалы и профили
+    def material_options(self) -> dict[str, Any]:
+        """Справочник материалов и профилей качества для калькулятора."""
+        from .materials import material_list, profile_list
+        return {
+            "materials": material_list(),
+            "profiles": profile_list(),
+        }
+
+    # -------------------------------------------------- сценарии «что если»
+    def calc_scenarios(self, base: dict, variants: list[dict]) -> list[dict]:
+        """Сравнение нескольких вариантов расчёта рядом.
+
+        base — общие параметры (grams, hours, qty, fit…).
+        variants — список отличий: [{material, quality, qty, …}].
+        Для каждого варианта считается cost_breakdown + suggest_price и
+        возвращается полная раскладка с вердиктом.
+        """
+        from .materials import get_material
+        results = []
+        for i, var in enumerate(variants):
+            params = {**base, **var}
+            br = self.cost_breakdown(
+                grams=num(params.get("grams")),
+                hours=num(params.get("hours")),
+                spool_price=num(params.get("spool_price")) or None,
+                spool_weight=num(params.get("spool_weight")) or None,
+                manual_minutes=num(params.get("manual_minutes")),
+                qty=num(params.get("qty"), 1),
+                design_minutes=num(params.get("design_minutes")),
+                delivery=num(params.get("delivery")),
+                color_swaps=num(params.get("color_swaps")),
+                material=params.get("material", ""),
+                quality=params.get("quality", "standard"),
+                supports_pct=num(params.get("supports_pct")),
+                plate_grams=num(params.get("plate_grams")),
+                plate_hours=num(params.get("plate_hours")),
+                fit_per_plate=num(params.get("fit_per_plate")),
+                warmup_minutes=num(params.get("warmup_minutes")),
+                remove_minutes=num(params.get("remove_minutes")),
+                sand_minutes=num(params.get("sand_minutes")),
+                paint_minutes=num(params.get("paint_minutes")),
+            )
+            sp = self.suggest_price(
+                br["per_unit"], num(params.get("qty"), 1),
+                params.get("channel", ""), bool(params.get("rush")))
+            mat = get_material(params.get("material", ""))
+            results.append({
+                "index": i,
+                "label": params.get("label") or mat.get("name", "PLA"),
+                "breakdown": br,
+                "price": sp,
+                "profit": round(
+                    (sp["price"] - br["per_unit"]) * num(params.get("qty"), 1), 2),
+                "profit_per_hour": round(
+                    (sp["price"] - br["per_unit"]) * num(params.get("qty"), 1)
+                    / br["total_hours"], 2) if br["total_hours"] else 0.0,
+                "margin": round(
+                    (sp["price"] - br["per_unit"]) / sp["price"] * 100, 1)
+                    if sp["price"] else 0.0,
+            })
+        return results
+
+    # ----------------------------------------------- калькулятор окупаемости
+    def payback_calc(self, model_cost: float = 0.0, design_hours: float = 0.0,
+                     profit_per_unit: float = 0.0, sales_per_week: float = 1.0) -> dict:
+        """Окупаемость модели или разработки.
+
+        • model_cost — стоимость покупки модели (Cults3D, Thangs, …);
+        • design_hours — часы на собственное моделирование;
+        • profit_per_unit — прибыль с одной штуки (из калькулятора);
+        • sales_per_week — сколько штук продаётся в неделю (оценка).
+        """
+        s = self.db.settings()
+        design_cost = num(design_hours) * num(s.get("design_rate"), 800)
+        total_invest = num(model_cost) + design_cost
+        ppu = max(0.01, num(profit_per_unit))
+        units_needed = int(total_invest / ppu) + 1 if total_invest > 0 else 0
+        spw = max(0.1, num(sales_per_week))
+        weeks = round(units_needed / spw, 1) if units_needed else 0.0
+        return {
+            "model_cost": round(num(model_cost), 2),
+            "design_cost": round(design_cost, 2),
+            "total_invest": round(total_invest, 2),
+            "profit_per_unit": round(ppu, 2),
+            "units_needed": units_needed,
+            "weeks_to_payback": weeks,
+            "days_to_payback": round(weeks * 7, 0),
+        }
+
+    # ------------------------------------------- реальная статистика из журнала
+    def real_stats(self, product: str = "", material: str = "",
+                   days: int = 60) -> dict[str, Any]:
+        """Фактические данные из журнала печати для калибровки калькулятора.
+
+        Ищет завершённые задания с похожим продуктом или материалом и
+        возвращает медианные вес/время — это точнее слайсера.
+        """
+        since = (datetime.now() - timedelta(days=max(1, days))).isoformat()
+        sql = ("SELECT j.*, o.product, o.material FROM print_jobs j"
+               " LEFT JOIN orders o ON o.id=j.order_id"
+               " WHERE j.state='done' AND j.finished_at>=?")
+        params: list[Any] = [since]
+        if product:
+            sql += " AND pylower(o.product)=?"
+            params.append(product.lower())
+        if material:
+            sql += " AND pylower(o.material)=?"
+            params.append(material.lower())
+        sql += " ORDER BY j.finished_at DESC LIMIT 200"
+        rows = self.db.query(sql, params)
+        if not rows:
+            return {"found": False, "count": 0}
+
+        grams_list = sorted([num(r.get("grams")) for r in rows if num(r.get("grams")) > 0])
+        hours_list = sorted([num(r.get("duration_min")) / 60.0
+                             for r in rows if num(r.get("duration_min")) > 0])
+
+        def median(lst):
+            if not lst:
+                return 0.0
+            n = len(lst)
+            return lst[n // 2] if n % 2 else (lst[n // 2 - 1] + lst[n // 2]) / 2
+
+        return {
+            "found": True,
+            "count": len(rows),
+            "median_grams": round(median(grams_list), 1),
+            "median_hours": round(median(hours_list), 2),
+            "min_grams": round(min(grams_list), 1) if grams_list else 0,
+            "max_grams": round(max(grams_list), 1) if grams_list else 0,
+            "min_hours": round(min(hours_list), 2) if hours_list else 0,
+            "max_hours": round(max(hours_list), 2) if hours_list else 0,
+            "days": days,
+        }
+
+    # ------------------------------------------ минимальная рентабельная партия
+    def min_profitable_batch(self, plate_grams: float = 0.0,
+                             plate_hours: float = 0.0,
+                             fit_per_plate: float = 1.0,
+                             material: str = "",
+                             quality: str = "standard",
+                             supports_pct: float = 0.0,
+                             target_per_hour: float = 0.0,
+                             spool_price: float | None = None,
+                             markup: float = 0.0) -> dict[str, Any]:
+        """При какой партии прибыль за час принтера становится приемлемой.
+
+        Перебирает qty от 1 до 100 и находит точку, где profit_per_hour
+        пересекает target. Одна штука на плите часто невыгодна из-за
+        прогрева и калибровки — этот метод это показывает.
+        """
+        s = self.db.settings()
+        target = num(target_per_hour) or num(s.get("target_profit_per_hour"), 250)
+        mk = num(markup) or num(s.get("default_markup"), 150)
+        results = []
+        best_qty = 0
+        for q in range(1, 101):
+            br = self.cost_breakdown(
+                grams=0, hours=0, qty=q,
+                plate_grams=num(plate_grams),
+                plate_hours=num(plate_hours),
+                fit_per_plate=num(fit_per_plate, 1),
+                material=material, quality=quality,
+                supports_pct=num(supports_pct),
+                spool_price=spool_price,
+            )
+            price = br["per_unit"] * (1 + mk / 100.0)
+            profit = (price - br["per_unit"]) * q
+            pph = profit / br["total_hours"] if br["total_hours"] else 0
+            results.append({
+                "qty": q, "plates": br["plates"],
+                "cost_unit": br["per_unit"],
+                "price_unit": round(price, 0),
+                "profit_total": round(profit, 2),
+                "profit_per_hour": round(pph, 2),
+                "total_hours": br["total_hours"],
+                "ok": pph >= target,
+            })
+            if pph >= target and not best_qty:
+                best_qty = q
+        return {
+            "target_per_hour": target,
+            "min_qty": best_qty,
+            "min_plates": results[best_qty - 1]["plates"] if best_qty else 0,
+            "table": results[:30],
+        }
 
     # -------------------------------------------------------------- налоги
     def tax_rate_for(self, payer: str = "person") -> float:
