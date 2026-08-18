@@ -1167,6 +1167,34 @@ def cmd_gui(args: argparse.Namespace) -> int:
     return run_window(args)
 
 
+def cmd_app(args: argparse.Namespace) -> int:
+    """Нативное окно как у 1С/Photoshop (pywebview)."""
+    try:
+        from connector.printflow.app_window import main as app_main
+    except ImportError as e:
+        fail(f"Не удалось загрузить нативное окно: {e}")
+        say("    Установите pywebview: pip install pywebview")
+        say("    Fallback — открываю в браузере…")
+        return cmd_start(args)
+    # пробуем pywebview, если нет — fallback в браузер
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        warn("pywebview не установлен — ставлю…")
+        try:
+            import subprocess, sys
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pywebview"], check=False)
+            import webview  # noqa: F401
+        except Exception:
+            warn("Не удалось поставить pywebview — открываю в браузере")
+            return cmd_start(args)
+    argv = []
+    argv += ["--port", str(args.port)]
+    if args.local:
+        argv += ["--local"]
+    return app_main(argv)
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     """Текстовое меню — запасной вариант, когда окно недоступно."""
     actions = [
@@ -1204,10 +1232,11 @@ def cmd_menu(args: argparse.Namespace) -> int:
 HELP = """
   ЗАПУСК
     python pf.py                    запустить панель (видна в локальной сети)
+    python pf.py app                нативное окно как у 1С/Photoshop (если установлен pywebview)
     python pf.py --local            только этот компьютер, без доступа по сети
     python pf.py --port 9000        другой порт
     python pf.py --background       запустить в фоне, консоль можно закрыть
-    python pf.py gui                окно управления вместо консоли
+    python pf.py gui                окно управления вместо консоли (tkinter)
 
   УПРАВЛЕНИЕ
     python pf.py status             работает ли сервер, на каком порту
@@ -1243,7 +1272,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pf", add_help=False,
         description="PrintFlow — запуск и обслуживание локальной системы 3D-производства")
     parser.add_argument("command", nargs="?", default="start",
-                        choices=["start", "gui", "menu", "stop", "status", "doctor",
+                        choices=["start", "gui", "app", "menu", "stop", "status", "doctor",
                                  "backup", "restore", "update", "deps", "build",
                                  "install", "uninstall", "logs", "help"])
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="порт панели")
@@ -1268,6 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
 COMMANDS = {
     "start": cmd_start,
     "gui": cmd_gui,
+    "app": cmd_app,
     "menu": cmd_menu,
     "stop": cmd_stop,
     "status": cmd_status,

@@ -44,6 +44,13 @@ class PrinterManager:
         self._last_ams_sync = 0.0
         self._last_backup = time.time()
         self.reload()
+        # 8.0: Watch Folder
+        try:
+            from .watch_folder import WatchFolder
+            self.watch = WatchFolder(self.db, self, getattr(self.db, 'bus', None))
+            self.watch.start()
+        except Exception:
+            self.watch = None
         self._poller = threading.Thread(target=self._loop, name="pf-manager", daemon=True)
         self._poller.start()
         self.bot = TelegramBot(self)
@@ -490,6 +497,14 @@ class PrinterManager:
         except Exception as exc:
             self.db.add_event("error", "Автозапуск задания не удался", str(exc), printer_id)
 
+    # 8.0: preflight wrapper
+    def preflight(self, printer_id: str, filename: str, plate: int = 1, ams_mapping=None) -> dict:
+        try:
+            from .preflight import check_preflight
+            return check_preflight(self.db, self, printer_id, filename, plate, ams_mapping)
+        except Exception as exc:
+            return {"ok": True, "blocks": [], "warns": [], "infos": [], "error": str(exc)}
+
     # ------------------------------------------------------------ уведомления
     def _notify(self, kind: str, title: str, detail: str, printer_id: str) -> None:
         settings = self.db.settings(include_secrets=True)
@@ -560,6 +575,12 @@ class PrinterManager:
             }
             snap["maintenance"] = self.maintenance_summary(snap["id"])
             snap["job"] = self.job_summary(snap)
+            # 8.0: health
+            try:
+                pr = self.get(snap["id"])
+                snap["health"] = pr.health() if pr else {}
+            except Exception:
+                snap["health"] = {}
         active_id = printer_id or (printers[0]["id"] if printers else "")
         active = next((p for p in printers if p["id"] == active_id), printers[0] if printers else None)
         return {

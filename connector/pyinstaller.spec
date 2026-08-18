@@ -19,7 +19,7 @@ a = Analysis(
     # Папка сайта целиком (включая materials/ и brand/) попадает внутрь
     # бинаря; в frozen-режиме config.py берёт её из sys._MEIPASS.
     datas=[(str(ROOT / 'site'), 'site')],
-    hiddenimports=['paho.mqtt.client'],
+    hiddenimports=['paho.mqtt.client', 'webview', 'webview.platforms.winforms', 'webview.platforms.cocoa', 'webview.platforms.qt', 'webview.platforms.gtk'],
     hookspath=[],
     runtime_hooks=[],
     excludes=['tkinter', 'unittest', 'pydoc', 'test'],
