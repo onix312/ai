@@ -2,7 +2,7 @@
 # Сборка Windows-бинаря PrintFlow одной командой (из корня репозитория):
 #   pip install pyinstaller
 #   pyinstaller connector/pyinstaller.spec --noconfirm
-# Или готовым скриптом: site/СОБРАТЬ-EXE-Windows.bat
+# Или одной командой из корня репозитория: python pf.py build
 # Результат: dist/PrintFlow/PrintFlow.exe — «двойной клик» без Python.
 #
 # Все пути привязаны к SPECPATH (каталог самого spec), поэтому команду

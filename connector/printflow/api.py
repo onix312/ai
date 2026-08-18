@@ -17,6 +17,7 @@ from pathlib import Path
 from . import APP_VERSION
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
+from .bus import EventBus, LiveBroadcaster
 from .config import SITE, UPLOAD_DIR, ensure_dirs, now_iso
 from .db import Database
 from .manager import PrinterManager
@@ -87,6 +88,10 @@ class Api:
     def __init__(self):
         ensure_dirs()
         self.db = Database()
+        # Шина событий: сервер сам сообщает вкладкам, что изменилось,
+        # вместо того чтобы каждая из них опрашивала его по таймеру.
+        self.bus = EventBus()
+        self.db.bus = self.bus
         self.repo = Repo(self.db)
         self.acc = Accounting(self.db)
         self.manager = PrinterManager(self.db, self.repo)
@@ -115,6 +120,8 @@ class Api:
         from .updater import UpdateChecker
         self.updater = UpdateChecker(APP_VERSION, self.db, self.manager)
         self.updater.start_auto()
+        self.live = LiveBroadcaster(self.bus, self.manager)
+        self.live.start()
         self.last_host = ""
         self.started_at = time.time()
 
@@ -1337,33 +1344,50 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(frame)
 
     def serve_sse(self):
-        """Server-Sent Events: поток «refresh» при появлении новых событий.
+        """Server-Sent Events: сервер сам присылает изменения.
 
-        Фронтенд слушает его и обновляет данные сразу, а не по таймеру.
-        Поллинг остаётся как запасной вариант (например, при проксировании).
+        Три вида сообщений:
+          * ``telemetry`` — новое состояние парка (шлётся, только когда принтер
+            действительно что-то прислал);
+          * ``event`` — новая запись в журнале: печать началась, заказ закрыт,
+            пластик списан;
+          * ``resync`` — вкладка отстала (спящий телефон), нужно перечитать всё.
+
+        Поллинг на стороне браузера остаётся страховкой на случай прокси,
+        который режет длинные соединения.
         """
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")  # nginx не должен буферизовать
         self.end_headers()
-        last_id = 0
+
+        def send(kind: str, payload: object) -> None:
+            data = json.dumps(payload, ensure_ascii=False, default=str)
+            self.wfile.write(f"event: {kind}\ndata: {data}\n\n".encode("utf-8"))
+            self.wfile.flush()
+
         try:
-            row = self.api.db.one("SELECT MAX(id) m FROM events")
-            last_id = int(num((row or {}).get("m") or 0))
-            deadline = time.time() + 12 * 3600  # поток живёт не дольше 12 часов
-            while time.time() < deadline:
-                row = self.api.db.one("SELECT MAX(id) m FROM events")
-                cur = int(num((row or {}).get("m") or 0))
-                if cur > last_id:
-                    last_id = cur
-                    self.wfile.write(b"event: refresh\ndata: {}\n\n")
-                else:
-                    self.wfile.write(b": ping\n\n")
-                self.wfile.flush()
-                time.sleep(2.5)
+            self.wfile.write(b"retry: 3000\n\n")  # переподключение через 3 с
+            send("telemetry", self.api.manager.snapshot())
+            with self.api.bus.subscription() as subscriber:
+                while True:
+                    message = subscriber.get(timeout=20.0)
+                    if message is None:
+                        self.wfile.write(b": ping\n\n")  # держим соединение живым
+                        self.wfile.flush()
+                        continue
+                    send(message[0], message[1])
         except CLIENT_DISCONNECT_ERRORS:
             pass
+        except Exception:
+            try:
+                from .logging_setup import log
+
+                log().debug("Поток событий закрыт", exc_info=True)
+            except Exception:
+                pass
         finally:
             self.close_connection = True
 
@@ -1486,10 +1510,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_error(403, "Forbidden")
         if target.is_dir():
             target = target / "index.html"
+        if not target.exists() and not target.suffix:
+            # Короткие адреса без расширения: /m, /order, /track, /shelf.
+            # Их проще диктовать вслух и печатать на ценнике.
+            alias = safe_file(SITE, rel + ".html")
+            if alias is not None and alias.exists():
+                target = alias
         if not target.exists():
             return self.send_error(404, "Not Found")
         ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
+        if target.suffix == ".webmanifest":   # mimetypes про него ещё не знает
+            ctype = "application/manifest+json"
+        if ctype.startswith("text/") or ctype in ("application/javascript", "application/json",
+                                                  "application/manifest+json"):
             ctype += "; charset=utf-8"
         data = target.read_bytes()
         self.send_response(200)

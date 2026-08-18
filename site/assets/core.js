@@ -580,45 +580,101 @@ async function refreshEvents() {
 }
 PF.refreshEvents = refreshEvents;
 
-/** Server-Sent Events: мгновенные обновления вместо чистого поллинга.
-    При каждом новом событии в базе сервер шлёт «refresh» — дёргаем данные.
-    Если SSE недоступен (прокси), поллинг продолжает работать как раньше. */
+/** Server-Sent Events: сервер сам присылает изменения, а не мы его дёргаем.
+
+    telemetry — новое состояние парка (только когда принтер что-то прислал);
+    event     — новая запись журнала (печать, заказ, склад);
+    resync    — вкладка отстала (спящий телефон), перечитываем всё.
+
+    Поллинг остаётся страховкой: если SSE недоступен (прокси, старый браузер),
+    интерфейс работает как раньше, просто с опросом каждые 2.5 секунды. */
 let sseOk = false;
+let coreTimer = 0;
+
+/** Изменения журнала, после которых имеет смысл перечитать заказы и склад. */
+const DATA_EVENTS = /^(complete|error|stop|start|order|payment|income|expense|stock|doc|shelf|batch|spool|defect|import|restore)/;
+
+function applyLive(data) {
+  if (!data) return;
+  // Рассылка идёт всем вкладкам сразу, поэтому активный принтер выбираем
+  // здесь: у каждой вкладки он может быть свой.
+  if (PF.state.activePrinter && Array.isArray(data.printers)) {
+    const mine = data.printers.find((p) => p.id === PF.state.activePrinter);
+    if (mine) data.active = mine;
+  }
+  PF.state.live = data;
+  // Профили принтеров приходят из /api/printers; здесь обновляем только
+  // имена, чтобы переименование было видно сразу.
+  (data.printers || []).forEach((p) => {
+    const known = PF.printer(p.id);
+    if (known) { known.name = p.name; known.model = p.model; }
+  });
+  setOffline(false);
+  PF.emit('live', data);
+}
+
+/** Заказы и склад перечитываем пачкой: несколько событий подряд — один запрос. */
+function scheduleCore() {
+  if (coreTimer) return;
+  coreTimer = setTimeout(() => {
+    coreTimer = 0;
+    if (!offline) refreshCore().catch(() => {});
+  }, 1200);
+}
+
 function connectSSE() {
   if (!window.EventSource || typeof EventSource === 'undefined') return;
   let es;
   try { es = new EventSource('/api/stream'); } catch (e) { return; }
+
+  es.addEventListener('telemetry', (msg) => {
+    if (offline) return;
+    try { applyLive(JSON.parse(msg.data)); } catch (e) { /* битый кадр — переживём */ }
+  });
+
+  es.addEventListener('event', (msg) => {
+    if (offline) return;
+    let row;
+    try { row = JSON.parse(msg.data); } catch (e) { return; }
+    PF.state.events = [row, ...(PF.state.events || [])].slice(0, 60);
+    PF.emit('events', PF.state.events);
+    if (DATA_EVENTS.test(row.kind || '')) scheduleCore();
+  });
+
+  es.addEventListener('resync', () => {
+    if (offline) return;
+    poll();
+    refreshEvents().catch(() => {});
+    refreshCore().catch(() => {});
+  });
+
+  // Совместимость со старым сервером, который слал пустой «refresh».
   es.addEventListener('refresh', () => {
     if (offline) return;
     poll();
     refreshEvents().catch(() => {});
     refreshCore().catch(() => {});
   });
+
   es.onopen = () => { sseOk = true; resizePolling(); };
   es.onerror = () => { sseOk = false; resizePolling(); };
 }
+
 let pollTimer = 0;
 function resizePolling() {
-  const interval = sseOk ? 15000 : 2500;
+  // При живом SSE опрос нужен только как страховка от разрыва соединения.
+  const interval = sseOk ? 20000 : 2500;
   if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
-  if (!pollTimer) pollTimer = setInterval(poll, interval);
+  pollTimer = setInterval(poll, interval);
 }
 
-/** Живое состояние принтеров — опрашивается часто и молча. */
+/** Живое состояние принтеров — запасной путь, когда SSE недоступен. */
 async function poll() {
   try {
     const data = await get('/api/state', { printer_id: PF.state.activePrinter });
-    PF.state.live = data;
-    // Профили принтеров приходят из /api/printers; здесь обновляем только
-    // имена, чтобы переименование было видно сразу.
-    (data.printers || []).forEach((p) => {
-      const known = PF.printer(p.id);
-      if (known) { known.name = p.name; known.model = p.model; }
-    });
-    setOffline(false);
-    PF.emit('live', data);
+    applyLive(data);
   } catch (e) {
-    setOffline(true, 'Запустите PrintFlow через файл запуска');
+    setOffline(true, 'Запустите PrintFlow: python pf.py');
     PF.emit('live', null);
   }
 }
@@ -630,7 +686,7 @@ async function start() {
   try {
     await bootstrap();
   } catch (e) {
-    setOffline(true, 'Запустите PrintFlow через файл запуска');
+    setOffline(true, 'Запустите PrintFlow: python pf.py');
   }
   PF.emit('ready');
   try { await refreshCore(); } catch (e) { /* офлайн */ }
@@ -639,8 +695,9 @@ async function start() {
   poll();
   resizePolling();
   connectSSE();
-  setInterval(() => { if (!offline) refreshEvents().catch(() => {}); }, 20000);
-  setInterval(() => { if (!offline) refreshCore().catch(() => {}); }, 45000);
+  // Периодическая сверка: при живом SSE она нужна редко — события приходят сами.
+  setInterval(() => { if (!offline && !sseOk) refreshEvents().catch(() => {}); }, 20000);
+  setInterval(() => { if (!offline) refreshCore().catch(() => {}); }, sseOk ? 180000 : 45000);
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
 else start();

@@ -535,6 +535,9 @@ class Database:
         self.path = path
         self.lock = threading.RLock()
         self._local = threading.local()
+        # Шину подключает сервер (api.py). Пока её нет — события просто
+        # пишутся в базу, поэтому база остаётся самостоятельной в тестах.
+        self.bus = None
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -883,8 +886,15 @@ class Database:
             (now_iso(), printer_id, kind, title, detail,
              json.dumps(data or {}, ensure_ascii=False)),
         )
-        return {"id": cur.lastrowid, "at": now_iso(), "kind": kind, "title": title,
-                "detail": detail, "printer_id": printer_id, "data": data or {}}
+        row = {"id": cur.lastrowid, "at": now_iso(), "kind": kind, "title": title,
+               "detail": detail, "printer_id": printer_id, "data": data or {}}
+        # Открытые вкладки узнают о событии сразу, без опроса по таймеру.
+        if self.bus is not None:
+            try:
+                self.bus.publish("event", row)
+            except Exception:
+                pass
+        return row
 
     def events(self, limit: int = 100, printer_id: str = "", kind: str = "") -> list[dict]:
         sql = "SELECT * FROM events WHERE 1=1"
