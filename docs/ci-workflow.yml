@@ -1,0 +1,67 @@
+# Готовый CI для GitHub Actions. Положите файл на место одной командой
+# (у Arena нет прав создавать workflow автоматически):
+#
+#     mkdir -p .github/workflows && cp docs/ci-workflow.yml .github/workflows/ci.yml
+#     git add .github/workflows/ci.yml && git commit -m "CI" && git push
+#
+# Проверка каждой правки: тесты коннектора и целостность интерфейса.
+# Зависимостей у тестов нет — стандартной библиотеки Python достаточно.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Тесты (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Зависимости коннектора
+        run: pip install -r connector/requirements.txt
+
+      - name: Тесты
+        run: python -m unittest discover -s connector/tests -v
+
+      - name: Лаунчер собирается и отвечает
+        run: |
+          python -m py_compile pf.py launcher_window.py
+          python pf.py help
+          python pf.py doctor || true
+
+  smoke:
+    name: Сервер поднимается и отдаёт панель
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r connector/requirements.txt
+
+      - name: Запуск и проверка API
+        run: |
+          python connector/printflow_connector.py --port 8099 --no-browser --no-banner &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8099/api/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8099/api/health | grep -q '"ok": true'
+          curl -sf http://127.0.0.1:8099/api/bootstrap > /dev/null
+          curl -sf http://127.0.0.1:8099/ | grep -q "PrintFlow"
+          curl -sf http://127.0.0.1:8099/manifest.webmanifest > /dev/null
+          timeout 5 curl -sN http://127.0.0.1:8099/api/stream | head -c 200 | grep -q "event: telemetry"
