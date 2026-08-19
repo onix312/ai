@@ -199,6 +199,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # --- 8.0: AMS ---------------------------------------------------------
     "ams_auto_map": True,
     "ams_delta_e_threshold": 30,
+    # --- 8.2: автосбор с принтера и AMS в базу -----------------------------
+    "printer_info_sync": True,    # прошивка, Wi-Fi, влажность → карточка принтера
+    "ams_auto_spools": True,      # заводить катушки из AMS на складе автоматически
+    "ams_sync_remaining": True,   # обновлять остаток катушки по датчику AMS
     # --- 8.0: Безопасность и система --------------------------------------
     "encrypt_access_code": False,
     "settings_profiles": [],  # снапшоты [{id, name, at, data}]

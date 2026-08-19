@@ -85,7 +85,8 @@ function renderStock() {
     return `<article class="spool ${cls}" data-spool="${esc(s.id)}">`
       + `<div class="reel" style="--spool:${esc(s.color_hex || '#4b5563')}">${Math.round(p)}%</div>`
       + `<div class="body"><b>${esc(s.material)} ${esc(s.color_name)}</b>`
-      + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}</small>`
+      + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}`
+      + `${num(s.ams_sync, 1) !== 0 && s.synced_at ? ' · <span title="Остаток обновляется автоматически из AMS. Отключается в карточке катушки.">⟳ из AMS</span>' : ''}</small>`
       + `<div class="nums"><em>${nfmt(s.remaining_grams)}</em><span class="muted">/ ${nfmt(s.total_grams)} г · ${money(s.value)}</span></div>`
       + `<div class="bar ${p < 15 ? 'warn' : 'ok'}"><i style="width:${p}%"></i></div>`
       + `<small class="muted" style="margin-top:5px">израсходовано ${nfmt(s.used_grams)} г`
@@ -629,9 +630,17 @@ function openSpool(id) {
     material: 'PLA', brand: '', color_name: '', color_hex: '#333333',
     total_grams: 1000, remaining_grams: 1000,
     price: num(PF.state.settings.default_spool_price, 1600), ams_slot: '', printer_id: '',
+    ams_sync: 1,
   };
   ['material', 'brand', 'color_name', 'color_hex', 'total_grams', 'remaining_grams', 'price', 'ams_slot']
     .forEach((k) => { $('sf_' + k).value = d[k] ?? ''; });
+  const syncBox = $('sf_ams_sync');
+  if (syncBox) syncBox.checked = num(d.ams_sync, 1) !== 0;
+  const syncedAt = $('sf_synced_at');
+  if (syncedAt) {
+    syncedAt.hidden = !d.synced_at;
+    if (d.synced_at) syncedAt.textContent = 'Данные из AMS обновлены: ' + dateText(d.synced_at);
+  }
   $('sf_printer_id').innerHTML = '<option value="">Не закреплена</option>' + PF.state.printers
     .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   $('sf_printer_id').value = d.printer_id || '';
@@ -741,6 +750,7 @@ function bind() {
       price: num($('sf_price').value),
       ams_slot: $('sf_ams_slot').value.trim(),
       printer_id: $('sf_printer_id').value,
+      ams_sync: $('sf_ams_sync') && $('sf_ams_sync').checked ? 1 : 0,
     };
     try {
       await post('/api/spool/save', payload);

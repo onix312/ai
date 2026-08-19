@@ -236,7 +236,7 @@
      <div class="shot-strip" id="pr_shots"></div>
     </div>
     <div class="card">
-     <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
+     <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
      <div class="ams-grid" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
     </div>
     <div class="card">
@@ -3214,6 +3214,8 @@
   <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>
   <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
   <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
+  <label class="check span-2"><span class="switch"><input type="checkbox" id="sf_ams_sync" checked><i></i></span>Обновлять остаток и слот из AMS <i class="hint-i" title="Принтер сам обновляет остаток и привязку к слоту. Выключите, если ведёте эту катушку вручную — тогда автосбор её не тронет.">?</i></label>
+  <small class="muted span-2" id="sf_synced_at" hidden></small>
  </div><datalist id="materials_datalist"><option>PLA</option><option>PLA+</option><option>PLA Silk</option><option>PLA Matte</option><option>PLA-CF</option><option>PETG</option><option>PETG-CF</option><option>TPU 95A</option><option>TPU 85A</option><option>ABS</option><option>ASA</option><option>PC</option><option>PAHT-CF</option><option>PET-CF</option><option>HIPS</option><option>PVA</option></datalist></div>
  <div class="modal-foot"><button class="btn danger" type="button" id="spool_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="spool_modal">Отмена</button><button class="btn primary" type="button" id="spool_save">Сохранить</button></div>
 </form></dialog>

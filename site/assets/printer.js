@@ -435,6 +435,18 @@ async function saveAmsProfile() {
   } catch (e) { fail(e); }
 }
 function bindAmsProfiles() {
+  const sync = $('pr_ams_sync');
+  if (sync) sync.addEventListener('click', async () => {
+    try {
+      const res = await post('/api/printer/ams/sync', { printer_id: PF.state.activePrinter });
+      const bits = [];
+      if (res.created) bits.push(`новых катушек: ${res.created}`);
+      if (res.updated) bits.push(`обновлено: ${res.updated}`);
+      if (res.unbound) bits.push(`отвязано: ${res.unbound}`);
+      toast('Данные AMS занесены в базу', bits.join(' · ') || 'Изменений нет');
+      PF.refreshCore();
+    } catch (e) { fail(e); }
+  });
   const btn = $('pr_ams_profiles');
   if (btn) btn.addEventListener('click', openAmsProfiles);
   const save = $('ap_save');
