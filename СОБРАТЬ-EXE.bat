@@ -1,39 +1,72 @@
 @echo off
-chcp 65001 >nul
-title NOZZA PrintFlow — сборка EXE
-echo.
-echo  ╔══════════════════════════════════════════╗
-echo  ║  NOZZA ^· PrintFlow 8.0 — сборка EXE     ║
-echo  ║  Нативное приложение как 1С / Photoshop  ║
-echo  ╚══════════════════════════════════════════╝
-echo.
-echo  [1/3] Проверяю Python...
-py --version >nul 2>&1
-if %errorlevel%==0 (set PY=py) else (set PY=python)
-%PY% --version
-if %errorlevel% neq 0 (
-  echo  ✗ Python не найден. Установите Python 3.10+ с python.org
-  echo    Обязательно поставьте галочку "Add to PATH"
-  pause
-  exit /b 1
+setlocal EnableExtensions
+cd /d "%~dp0"
+title NOZZA PrintFlow - build EXE
+
+rem ---- find a working Python (py -3, python, python3) ------------------
+set "PY="
+
+where py >nul 2>&1
+if not errorlevel 1 (
+  py -3 -c "import sys" >nul 2>&1
+  if not errorlevel 1 set "PY=py -3"
 )
-echo  [2/3] Собираю EXE (5-10 минут, нужен интернет)...
-echo        Команда: %PY% pf.py build
-echo.
-%PY% pf.py build
-if %errorlevel% neq 0 (
+if not defined PY (
+  where python >nul 2>&1
+  if not errorlevel 1 (
+    python -c "import sys" >nul 2>&1
+    if not errorlevel 1 set "PY=python"
+  )
+)
+if not defined PY (
+  where python3 >nul 2>&1
+  if not errorlevel 1 (
+    python3 -c "import sys" >nul 2>&1
+    if not errorlevel 1 set "PY=python3"
+  )
+)
+
+if not defined PY (
   echo.
-  echo  ✗ Сборка не удалась. Проверьте интернет и антивирус.
+  echo  Python not found.
+  echo  Install Python 3.10+ from https://www.python.org/downloads/
+  echo  Enable the checkbox: Add python.exe to PATH
+  echo.
   pause
   exit /b 1
 )
+
+if not exist "pf.py" (
+  echo.
+  echo  pf.py not found in this folder:
+  echo  %CD%
+  echo  Put this BAT next to pf.py
+  echo.
+  pause
+  exit /b 1
+)
+
 echo.
-echo  ──────────────────────────────────────────
-echo  ✓ Готово: dist\PrintFlow\PrintFlow.exe
-echo    Папку dist\PrintFlow можно целиком перенести
-echo    на другой ПК Windows — Python там не нужен.
-echo    Двойной клик по PrintFlow.exe — и панель откроется
-echo    как приложение (без браузера).
-echo  ──────────────────────────────────────────
+echo  [1/2] Python:
+%PY% --version
+echo.
+echo  [2/2] Building EXE. This can take 5-10 minutes.
+echo        Need internet on the first build.
+echo        Command: %PY% pf.py build
+echo.
+
+%PY% "pf.py" build
+if errorlevel 1 (
+  echo.
+  echo  Build failed. Check internet and antivirus.
+  echo.
+  pause
+  exit /b 1
+)
+
+echo.
+echo  Done: dist\PrintFlow\PrintFlow.exe
+echo  Copy the whole folder dist\PrintFlow to another PC.
+echo  Python is not needed there.
 echo.
 pause
