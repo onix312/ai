@@ -882,6 +882,15 @@ class Api:
         if path == "/api/printer/command":
             printer = self.printer_or_fail(pid)
             return 200, printer.command(body.get("command", ""), body.get("value"))
+        if path == "/api/printer/ams/sync":
+            # Ручной запуск автосбора: катушки AMS и данные принтера → база
+            printer = self.printer_or_fail(pid)
+            snap = printer.snapshot()
+            from .ams_sync import sync_ams_spools, sync_printer_info
+            info_ok = sync_printer_info(self.db, printer.id, snap)
+            counts = sync_ams_spools(self.db, printer.id, snap)
+            return 200, {"ok": True, "printer_info": info_ok, **counts,
+                         "spools": self.repo.spools()}
         if path == "/api/printer/print":
             printer = self.printer_or_fail(pid)
             result = printer.start_print(

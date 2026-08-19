@@ -772,6 +772,13 @@ class PrinterManager:
         if now - self._last_ams_sync < 300:
             return
         self._last_ams_sync = now
+        # Автосбор: карточка принтера и катушки AMS → база (можно править руками)
+        try:
+            from .ams_sync import sync_ams_spools, sync_printer_info
+            sync_printer_info(self.db, printer.id, snap)
+            sync_ams_spools(self.db, printer.id, snap)
+        except Exception as exc:
+            self.db.add_event("error", "Сбой автосинка AMS", str(exc), printer.id)
         trays = snap["ams"].get("trays", []) or []
         if not trays:
             return

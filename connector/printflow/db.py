@@ -26,6 +26,11 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("total_grams", "REAL DEFAULT 0"),         # израсходовано пластика, г
         ("nozzle_size", "REAL DEFAULT 0.4"),
         ("nozzle_type", "TEXT DEFAULT 'steel'"),
+        # автосбор с принтера: прошивка, Wi-Fi, влажность AMS, последняя связь
+        ("firmware", "TEXT DEFAULT ''"),
+        ("wifi", "TEXT DEFAULT ''"),
+        ("ams_humidity", "TEXT DEFAULT ''"),
+        ("last_seen", "TEXT"),
     ],
     "transactions": [
         ("account_id", "TEXT"),
@@ -74,6 +79,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("cell", "TEXT DEFAULT ''"),         # адрес хранения
         ("opened_at", "TEXT"),               # когда вскрыта
         ("supplier", "TEXT DEFAULT ''"),
+        ("ams_sync", "INTEGER DEFAULT 1"),   # обновлять остаток/слот из AMS
+        ("synced_at", "TEXT"),               # когда AMS последний раз обновлял
     ],
     "catalog": [
         ("cost", "REAL DEFAULT 0"),
