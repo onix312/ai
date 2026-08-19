@@ -260,6 +260,88 @@ class Api:
             raise ValueError("Принтер не настроен. Добавьте его в разделе «Принтеры».")
         return printer
 
+    # ---------------------------------------------------------- Bambu Cloud
+    def _cloud_session(self) -> tuple[str, str, str]:
+        """(token, uid, region) из настроек. Пустые строки, если входа не было."""
+        settings = self.db.settings(include_secrets=True)
+        return (str(settings.get("cloud_token") or ""),
+                str(settings.get("cloud_uid") or ""),
+                str(settings.get("cloud_region") or "global"))
+
+    def cloud_devices(self) -> list[dict]:
+        """Принтеры аккаунта Bambu Cloud (без Access Code — его подставляет сервер)."""
+        from . import bambu_cloud
+        token, uid, region = self._cloud_session()
+        if not token or not uid:
+            return []
+        try:
+            return bambu_cloud.get_devices(token, region)
+        except bambu_cloud.CloudError:
+            return []
+
+    def cloud_status(self) -> dict:
+        from . import bambu_cloud
+        from .cloud_bridge import CloudBridge
+        settings = self.db.settings(include_secrets=True)
+        token, uid, region = self._cloud_session()
+        logged = bool(token and uid)
+        status: dict = {
+            "configured": bool(settings.get("cloud_email")),
+            "email": str(settings.get("cloud_email") or ""),
+            "region": region,
+            "logged": logged,
+            "devices": self.cloud_devices() if logged else [],
+            "bridge": CloudBridge.state_all(),
+            "cloud_print_ok": logged,
+        }
+        if not logged and settings.get("cloud_email"):
+            status["hint"] = "Вход не выполнен или токен устарел — войдите заново"
+        return status
+
+    def cloud_tasks(self, printer_id: str = "") -> list[dict]:
+        """Облачная история печатей — вкладка «Файлы» облачного принтера."""
+        from . import bambu_cloud
+        token, uid, region = self._cloud_session()
+        if not token or not uid:
+            return []
+        device_id = ""
+        printer = self.manager.get(printer_id)
+        if printer:
+            device_id = printer.record.get("serial", "")
+        try:
+            return bambu_cloud.get_tasks(token, region, device_id, 20)
+        except bambu_cloud.CloudError:
+            return []
+
+    def _cloud_progress(self, name: str):
+        def progress(sent: int, total: int = 100) -> None:
+            try:
+                pct = round(sent / total * 100) if total else 0
+                self.bus.publish("upload_progress", {"name": name, "sent": sent,
+                                                     "total": total, "percent": pct})
+            except Exception:
+                pass
+        return progress
+
+    def _enrich_cloud_device(self, data: dict) -> dict:
+        """Добавление принтера из списка аккаунта: сервер сам подставляет
+        serial, имя, модель и LAN Access Code из облака (в браузер код не уходит)."""
+        serial = str(data.get("cloud_device") or "").strip()
+        if not serial:
+            return data
+        from . import bambu_cloud
+        token, uid, region = self._cloud_session()
+        if token and uid:
+            for device in bambu_cloud.get_devices(token, region):
+                if str(device.get("serial")) == serial:
+                    data.setdefault("serial", device.get("serial") or "")
+                    data.setdefault("name", device.get("name") or data.get("name") or "Принтер")
+                    data.setdefault("model", device.get("model") or data.get("model") or "P1S")
+                    data.setdefault("mode", "cloud")
+                    data.pop("cloud_device", None)
+                    break
+        return data
+
     def _templates(self) -> list[dict]:
         """Шаблоны ответов клиентам: список {id, title, text} из настроек."""
         try:
@@ -478,7 +560,15 @@ class Api:
         if path == "/api/printers":
             return 200, {"printers": self.repo.printers()}
         if path == "/api/printer/discover":
-            return 200, {"found": BambuPrinter.discover()}
+            # SSDP в локальной сети + принтеры аккаунта Bambu Cloud.
+            # Access Code облачных устройств в браузер не отдаётся: при
+            # добавлении из облака сервер подставляет его сам.
+            return 200, {"found": BambuPrinter.discover(),
+                         "cloud": self.cloud_devices()}
+        if path == "/api/cloud/status":
+            return 200, self.cloud_status()
+        if path == "/api/printer/cloud-files":
+            return 200, {"tasks": self.cloud_tasks(one("printer_id"))}
         if path == "/api/printer/telemetry":
             return 200, {"points": self.manager.guard.telemetry(
                 one("printer_id"), int(num(one("minutes", "180"), 180)))}
@@ -864,8 +954,48 @@ class Api:
     def post(self, path: str, body: dict, query: dict) -> tuple[int, object]:
         pid = body.get("printer_id") or (query.get("printer_id") or [""])[0]
 
+        # --- Bambu Cloud: вход, код, выход
+        if path == "/api/cloud/login":
+            from . import bambu_cloud
+            result = bambu_cloud.login(
+                body.get("email", ""), body.get("password", ""),
+                body.get("region", "global"), body.get("code", ""),
+                body.get("tfa_code", ""))
+            if result.get("status") == "ok":
+                self.db.set_settings({
+                    "cloud_email": str(body.get("email", "")).strip(),
+                    "cloud_region": str(body.get("region", "") or "global"),
+                    "cloud_token": result.get("token", ""),
+                    "cloud_uid": result.get("uid", ""),
+                })
+                self.manager.refresh_cloud()
+                self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/cloud/code":
+            from . import bambu_cloud
+            result = bambu_cloud.login(
+                str(self.db.setting("cloud_email", "")), "", 
+                str(self.db.setting("cloud_region", "global")),
+                body.get("code", ""))
+            if result.get("status") == "ok":
+                self.db.set_settings({
+                    "cloud_token": result.get("token", ""),
+                    "cloud_uid": result.get("uid", ""),
+                })
+                self.manager.refresh_cloud()
+                self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/cloud/logout":
+            from .cloud_bridge import CloudBridge
+            CloudBridge.shutdown_all()
+            self.db.clear_settings(["cloud_token", "cloud_uid"])
+            self.manager.refresh_cloud()
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "message": "Выход выполнен. Принтеры в облачном режиме отключены."}
+
         # --- принтеры и команды
         if path == "/api/printer/save":
+            body = self._enrich_cloud_device(dict(body))
             row = self.repo.save_printer(body)
             self.manager.reload()
             return 200, {"ok": True, "printer": {**row, "access_code": "",
@@ -893,16 +1023,33 @@ class Api:
                          "spools": self.repo.spools()}
         if path == "/api/printer/print":
             printer = self.printer_or_fail(pid)
-            result = printer.start_print(
-                body.get("file", ""), int(num(body.get("plate"), 1) or 1),
-                bool(body.get("use_ams", True)), body.get("ams_mapping"),
-                bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
-                bool(body.get("timelapse", False)), body.get("name", ""))
+            name = str(body.get("name") or body.get("file") or "")
+            if printer.mode == "cloud" and not body.get("local_force"):
+                # Облачный запуск: заливка + диспетчеризация /my/task —
+                # принтер качает файл сам, LAN Only Mode не нужен.
+                result = self.manager.start_print_cloud(
+                    printer, body.get("file", ""),
+                    int(num(body.get("plate"), 1) or 1),
+                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
+                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
+                    bool(body.get("timelapse", False)),
+                    progress=self._cloud_progress(name))
+            else:
+                result = printer.start_print(
+                    body.get("file", ""), int(num(body.get("plate"), 1) or 1),
+                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
+                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
+                    bool(body.get("timelapse", False)), name)
             job = self.manager.enqueue({**body, "printer_id": printer.id,
-                                       "source": "manual", "name": body.get("name") or body.get("file", "")})
+                                       "source": "manual", "name": name})
             self.db.execute("UPDATE print_jobs SET state='starting', started_at=? WHERE id=?",
                             (now_iso(), job["id"]))
+            self.db.add_event("print_start", "Запущена печать",
+                              f"{name} · облако: {result.get('cloud', False)}",
+                              printer.id, {"task_id": result.get("task_id")})
             return 200, {**result, "job_id": job["id"]}
+        if path == "/api/printer/sync-history":
+            return 200, self.manager.sync_cloud_history(pid)
         if path == "/api/printer/file/delete":
             printer = self.printer_or_fail(pid)
             return 200, printer.files.delete(body.get("path", ""))
@@ -1955,15 +2102,60 @@ class Handler(BaseHTTPRequestHandler):
                 self.api.bus.publish("upload_progress", {"name": name, "sent": sent, "total": total, "percent": pct})
             except Exception:
                 pass
-        try:
-            result = printer.files.upload(local, name, progress=_progress)
-        except TypeError:
-            result = printer.files.upload(local, name)
-        try:
-            self.api.bus.publish("upload_progress", {"name": name, "sent": result.get("size",0), "total": result.get("total",0) or len(upload[1]), "percent": 100})
-        except Exception:
-            pass
-        self.api.db.add_event("upload", "Файл загружен на принтер", name, printer.id, result)
+        # Облачный принтер: файл уходит в облачное хранилище Bambu, принтер
+        # скачает его сам при запуске (диспетчеризация через /my/task).
+        # При недоступности облака и живом LAN — прежний FTPS-путь.
+        if printer.mode == "cloud":
+            from . import bambu_cloud
+            token, uid, region = self.api._cloud_session()
+            cloud_error = ""
+            if token and uid:
+                try:
+                    manifest = bambu_cloud.upload_project(
+                        local, token, uid, region, progress=self.api._cloud_progress(name))
+                    manifest["at"] = now_iso()
+                    self.api.manager.cloud_manifest_path(name).write_text(
+                        json.dumps(manifest), encoding="utf-8")
+                    result = {"ok": True, "cloud": True, "name": name,
+                              "size": len(upload[1]), **manifest}
+                    self.api.db.add_event("upload", "Файл загружен в Bambu Cloud",
+                                          name, printer.id, {"bytes": len(upload[1])})
+                    cloud_sent = True
+                except bambu_cloud.CloudError as exc:
+                    cloud_error = str(exc)
+                    cloud_sent = False
+            else:
+                cloud_sent = False
+            if not cloud_sent:
+                if printer.record.get("host") and printer.record.get("access_code"):
+                    self.api.db.add_event("cloud", "Облачная заливка не удалась — FTPS",
+                                          cloud_error or "нет входа в Bambu Cloud",
+                                          printer.id, {"file": name})
+                    try:
+                        result = printer.files.upload(local, name, progress=_progress)
+                    except TypeError:
+                        result = printer.files.upload(local, name)
+                    self.api.bus.publish("upload_progress",
+                                         {"name": name, "sent": result.get("size", 0),
+                                          "total": result.get("total", 0) or len(upload[1]),
+                                          "percent": 100})
+                    self.api.db.add_event("upload", "Файл загружен на принтер (FTPS)",
+                                          name, printer.id, result)
+                else:
+                    return self.send_json(502, {
+                        "error": ("Не удалось загрузить файл: облако Bambu недоступно, "
+                                  "а локальная сеть принтера не настроена. "
+                                  + (cloud_error or "Выполните вход в Bambu Cloud."))})
+        else:
+            try:
+                result = printer.files.upload(local, name, progress=_progress)
+            except TypeError:
+                result = printer.files.upload(local, name)
+            try:
+                self.api.bus.publish("upload_progress", {"name": name, "sent": result.get("size",0), "total": result.get("total",0) or len(upload[1]), "percent": 100})
+            except Exception:
+                pass
+            self.api.db.add_event("upload", "Файл загружен на принтер", name, printer.id, result)
         # оценка печати до запуска: время и граммы из 3MF/G-code
         estimate = {}
         try:

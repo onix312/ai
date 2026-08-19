@@ -39,7 +39,9 @@ const active = () => PF.livePrinter();
 function requireLive() {
   const p = active();
   if (!p) throw new Error('Принтер ещё не добавлен');
-  if (!p.connection.connected) throw new Error('Принтер не подключён. Проверьте IP, серийный номер и Access Code.');
+  if (!p.connection.connected) throw new Error(p.connection.mode === 'cloud'
+    ? 'Принтер не подключён. Проверьте вход в Bambu Cloud (Настройки → Bambu Cloud).'
+    : 'Принтер не подключён. Проверьте IP, серийный номер и Access Code.');
   return p;
 }
 function bar(el, percent) { if (el) el.style.width = clamp(num(percent), 0, 100) + '%'; }
@@ -86,7 +88,9 @@ function renderLive() {
     $('conn_title').textContent = p.connection.connected ? 'Принтер на связи' : 'Принтер не в сети';
     $('conn_sub').textContent = p.connection.last_error
       ? String(p.connection.last_error).slice(0, 46)
-      : (p.connection.host || 'локальная сеть');
+      : (p.connection.mode === 'cloud'
+        ? `Bambu Cloud${p.connection.host ? ' · ' + p.connection.host : ''}`
+        : (p.connection.host || 'локальная сеть'));
   }
 
   const badge = $('pr_state');
@@ -661,6 +665,24 @@ async function loadFiles() {
   const p = active();
   const host = $('pr_files');
   if (!p) return;
+  if (p.connection.mode === 'cloud' && !p.connection.host) {
+    // Облачный принтер без локального IP: SD-карта недоступна по FTPS,
+    // показываем облачную историю (что принтер печатал).
+    host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
+    try {
+      const data = await get('/api/printer/cloud-files', { printer_id: p.id });
+      const tasks = data.tasks || [];
+      host.innerHTML = tasks.length ? tasks.map((t) => `<div class="file-row">`
+        + '<span class="fic">☁</span>'
+        + `<span class="fname" title="${esc(t.title || '')}">${esc(t.title || 'Без названия')}</span>`
+        + `<span class="fsize">${esc((t.mode || 'cloud') === 'lan_file' ? 'SD' : 'облако')}</span>`
+        + '<span class="acts"></span></div>').join('')
+        : '<div class="empty compact"><span>В облачной истории пока пусто. Загрузите 3MF перетаскиванием — он уйдёт в облако Bambu.</span></div>';
+    } catch (e) {
+      host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
+    }
+    return;
+  }
   if (!p.connection.connected) {
     // Не дёргаем FTPS впустую: недоступный принтер отвечает долгим таймаутом.
     host.innerHTML = '<div class="empty compact"><span>Принтер не на связи — список файлов недоступен.</span></div>';
@@ -691,7 +713,8 @@ async function uploadFile(file) {
   const form = new FormData();
   form.append('file', file);
   form.append('printer_id', p.id);
-  toast('Загружаем на принтер', file.name, 'info');
+  const cloud = p.connection.mode === 'cloud';
+  toast(cloud ? 'Загружаем в облако Bambu' : 'Загружаем на принтер', file.name, 'info');
   try {
     const res = await api('/api/printer/upload', { method: 'POST', body: form });
     const est = res && res.estimate ? res.estimate : {};
@@ -700,7 +723,8 @@ async function uploadFile(file) {
     if (num(est.grams)) bits.push('~' + nfmt(est.grams) + ' г');
     if (est.material) bits.push(est.material);
     if (est.color) bits.push(est.color);
-    toast('Файл загружен', bits.length ? 'Оценка из 3MF: ' + bits.join(' · ') : file.name);
+    toast(res && res.cloud ? 'Файл в облаке Bambu' : 'Файл загружен',
+      bits.length ? 'Оценка из 3MF: ' + bits.join(' · ') : file.name);
     loadFiles();
   } catch (e) { fail(e); }
 }
@@ -788,15 +812,17 @@ $('history_search').addEventListener('input', U.debounce(renderQueue, 200));
 /* ==================================================== профиль принтера */
 function openPrinterModal(id) {
   editingPrinter = id || null;
+  PF.tempCloudDevice = '';
   const p = id ? PF.printer(id) : null;
   $('printer_modal_title').textContent = p ? 'Настройка: ' + p.name : 'Новый принтер';
   $('pf_name').value = p ? p.name : 'Основной P1S';
   $('pf_model').value = (p && p.model) || 'P1S';
+  $('pf_mode').value = (p && (p.mode || 'cloud')) || 'cloud';
   $('pf_host').value = (p && p.host) || '';
   $('pf_serial').value = (p && p.serial) || '';
   $('pf_access_code').value = '';
   $('pf_access_code').placeholder = p && p.has_access_code
-    ? 'Сохранён · оставьте пустым, чтобы не менять' : '8 символов с экрана принтера';
+    ? 'Сохранён · оставьте пустым, чтобы не менять' : '8 символов с экрана принтера (нужен для режима «Локальная сеть»)';
   $('pf_has_ams').value = p ? String(p.has_ams ? 1 : 0) : '1';
   $('pf_enabled').value = p ? String(p.enabled ? 1 : 0) : '1';
   $('pf_notes').value = (p && p.notes) || '';
@@ -809,13 +835,16 @@ function openPrinterModal(id) {
   openModal('printer_modal');
 }
 async function savePrinter() {
+  const mode = $('pf_mode').value || 'cloud';
   const payload = {
     id: editingPrinter || '',
     name: $('pf_name').value.trim() || 'Принтер',
     model: $('pf_model').value,
+    mode,
     host: $('pf_host').value.trim(),
     serial: $('pf_serial').value.trim(),
     access_code: $('pf_access_code').value,
+    cloud_device: PF.tempCloudDevice || '',
     has_ams: +$('pf_has_ams').value,
     enabled: +$('pf_enabled').value,
     notes: $('pf_notes').value.trim(),
@@ -823,7 +852,9 @@ async function savePrinter() {
     camera_demo: +$('pf_camera_demo').value,
     nozzle_size: $('pf_nozzle_size').value.trim() || '0.4',
   };
-  if (!payload.host) return fail(new Error('Укажите IP-адрес принтера'));
+  if (mode !== 'cloud' && !payload.host) return fail(new Error('Для локальной сети укажите IP-адрес принтера'));
+  if (mode !== 'cloud' && !payload.serial) return fail(new Error('Укажите серийный номер принтера'));
+  if (mode === 'cloud' && !payload.serial && !payload.cloud_device) return fail(new Error('Укажите серийный номер или выберите принтер из облака'));
   $('pf_result').innerHTML = '<div class="notice"><span>⏳</span><span>Сохраняем и подключаемся…</span></div>';
   try {
     const res = await post('/api/printer/save', payload);
@@ -849,9 +880,20 @@ async function discover() {
   try {
     const data = await get('/api/printer/discover');
     const list = data.found || [];
-    box.innerHTML = list.length ? list.map((p) => `<button type="button" data-found='${esc(JSON.stringify(p))}'>`
-      + `<b>${esc(p.name || p.model || 'Bambu Lab')}</b><span>${esc(p.host)} · ${esc(p.serial || 'серийный номер не найден')}</span></button>`).join('')
-      : '<div class="notice"><span>ℹ</span><span>Автоматически не найдено. Введите IP и серийный номер вручную (Settings → WLAN на принтере).</span></div>';
+    const cloud = data.cloud || [];
+    let html = list.length ? list.map((p) => `<button type="button" data-found='${esc(JSON.stringify(p))}'>`
+      + `<b>${esc(p.name || p.model || 'Bambu Lab')}</b><span>${esc(p.host)} · ${esc(p.serial || 'серийный номер не найден')}</span></button>`).join('') : '';
+    if (cloud.length) {
+      html += `<div class="card-head" style="margin-top:12px"><h4>☁ Аккаунт Bambu Cloud</h4></div>`
+        + cloud.map((p) => `<button type="button" data-cloud='${esc(p.serial)}'>`
+          + `<b>☁ ${esc(p.name || 'Принтер')}</b><span>${esc(p.model || '')} · ${esc(p.serial)}${p.online ? ' · в сети' : ' · не в сети'}</span></button>`).join('');
+    } else {
+      html += '<div class="notice"><span>☁</span><span>Облачных принтеров нет: выполните вход в Bambu Cloud (Настройки → Bambu Cloud), а принтер должен быть привязан к аккаунту.</span></div>';
+    }
+    if (!list.length) {
+      html += '<div class="notice"><span>ℹ</span><span>В локальной сети автоматически не найдено. Введите IP и серийный номер вручную (Settings → WLAN на принтере).</span></div>';
+    }
+    box.innerHTML = html;
   } catch (e) {
     box.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
   }
@@ -940,6 +982,17 @@ function bind() {
       $('pf_serial').value = p.serial || '';
       if (p.name && !$('pf_name').value) $('pf_name').value = p.name;
       toast('Данные подставлены', 'Введите Access Code и сохраните');
+      return;
+    }
+    const cloudDev = e.target.closest('[data-cloud]');
+    if (cloudDev) {
+      // Принтер из аккаунта Bambu: IP и Access Code сервер подставит сам.
+      PF.tempCloudDevice = cloudDev.dataset.cloud;
+      $('pf_mode').value = 'cloud';
+      $('pf_serial').value = cloudDev.dataset.cloud;
+      $('pf_host').value = '';
+      if (!$('pf_name').value) $('pf_name').value = cloudDev.querySelector('b') ? cloudDev.querySelector('b').textContent.replace('☁ ', '') : '';
+      toast('Принтер из облака выбран', 'Access Code подставится автоматически — сохраните');
     }
   });
 

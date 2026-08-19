@@ -490,6 +490,15 @@ class Repo:
         if new:
             data.setdefault("created_at", now_iso())
             data.setdefault("name", "Принтер")
+        # Режим связи: новые принтеры — облако (без LAN Only Mode),
+        # у существующих режим сохраняется, если не передан явно.
+        if not data.get("mode"):
+            if new:
+                data["mode"] = "cloud"
+            else:
+                existing = self.db.one("SELECT mode FROM printers WHERE id=?",
+                                       (data["id"],))
+                data["mode"] = (existing or {}).get("mode") or "lan"
         data["updated_at"] = now_iso()
         if data.get("access_code") in ("", None, "••••••••"):
             data.pop("access_code", None)  # пустое поле не стирает сохранённый код

@@ -724,6 +724,87 @@ function settingGroup(list) {
   }).join('');
 }
 
+/* Bambu Cloud: вход в аккаунт для управления принтером без LAN Only Mode. */
+async function renderCloudSettings(s) {
+  const el = $('set_cloud');
+  if (!el) return;
+  let st = {};
+  try {
+    st = await get('/api/cloud/status');
+  } catch (e) { st = {}; }
+  const devices = st.devices || [];
+  const status = st.logged
+    ? `<div class="notice ok"><span>✓</span><span>Вход выполнен · аккаунт ${esc(st.email || '')} · принтеров: ${devices.length}${st.bridge && st.bridge.connected ? ' · облачный канал на связи' : ''}</span></div>`
+    : `<div class="notice warn"><span>⚠</span><span>Вход не выполнен — принтеры в режиме «Облако» не подключены.${st.hint ? ' ' + esc(st.hint) : ''}</span></div>`;
+  el.innerHTML = status
+    + settingRow('cloud_email', 'Email аккаунта Bambu', 'Тот же, что в Bambu Handy / MakerWorld',
+      `<input type="text" data-setting="cloud_email" value="${esc(String(s.cloud_email || ''))}" placeholder="you@mail.com">`)
+    + settingRow('cloud_region', 'Регион', 'Global — для большинства аккаунтов',
+      `<select data-setting="cloud_region"><option value="global"${(s.cloud_region || 'global') === 'global' ? ' selected' : ''}>Global</option><option value="china"${s.cloud_region === 'china' ? ' selected' : ''}>China</option></select>`)
+    + `<div class="set-row"><div class="sinfo"><b>Пароль</b><small>Только для входа, нигде не сохраняется. При истечении токена вход повторяется кодом с почты.</small></div>`
+    + `<input type="password" autocomplete="new-password" id="cloud_password" placeholder="пароль Bambu"></div>`
+    + `<div class="set-row" id="cloud_code_row" hidden><div class="sinfo"><b>Код из письма/SMS</b><small>Bambu прислал код для входа</small></div>`
+    + `<input id="cloud_code" placeholder="6 цифр"></div>`
+    + `<div class="set-row"><div class="sinfo"></div><span class="acts">`
+    + `<button class="btn sm" type="button" id="cloud_login_btn">Войти</button> `
+    + `<button class="btn sm" type="button" id="cloud_code_btn" hidden>Подтвердить код</button> `
+    + `<button class="btn sm" type="button" id="cloud_logout_btn"${st.logged ? '' : ' hidden'}>Выйти</button>`
+    + '</span></div>'
+    + (devices.length ? `<div class="set-row"><div class="sinfo"><b>Принтеры аккаунта</b><small>Добавляются в «Принтеры» → «＋ Принтер» → «Найти»</small></div>`
+      + `<span class="chip ok">${devices.length} шт</span></div>` : '');
+  el.querySelector('#cloud_login_btn').addEventListener('click', async () => {
+    const email = ($$('[data-setting="cloud_email"]')[0] || {}).value || '';
+    const region = ($$('[data-setting="cloud_region"]')[0] || {}).value || 'global';
+    const password = $('cloud_password').value || '';
+    if (!email) return toast('Укажите email аккаунта', '', 'warn');
+    try {
+      const res = await post('/api/cloud/login', { email, password, region });
+      if (res.status === 'ok') {
+        toast('Bambu Cloud подключён', 'Принтеры аккаунта добавятся в список');
+        $('cloud_password').value = '';
+        await PF.refreshCore();
+        renderSettings();
+      } else if (res.status === 'need_code') {
+        $('cloud_code_row').hidden = false;
+        $('cloud_code_btn').hidden = false;
+        toast('Код отправлен', 'Введите код из письма/SMS');
+      } else if (res.status === 'need_tfa') {
+        const code = window.prompt('Код из приложения-аутентификатора:', '');
+        if (!code) return;
+        const res2 = await post('/api/cloud/login', { email, region, tfa_code: code });
+        if (res2.status !== 'ok') return fail(new Error(res2.message || 'Не удалось войти'));
+        toast('Bambu Cloud подключён');
+        $('cloud_password').value = '';
+        await PF.refreshCore();
+        renderSettings();
+      } else {
+        fail(new Error(res.message || 'Не удалось войти'));
+      }
+    } catch (e) { fail(e); }
+  });
+  el.querySelector('#cloud_code_btn').addEventListener('click', async () => {
+    try {
+      const res = await post('/api/cloud/code', { code: $('cloud_code').value || '' });
+      if (res.status !== 'ok') return fail(new Error(res.message || 'Код не подошёл'));
+      toast('Bambu Cloud подключён', 'Принтеры аккаунта добавятся в список');
+      $('cloud_code').value = '';
+      $('cloud_code_row').hidden = true;
+      $('cloud_code_btn').hidden = true;
+      await PF.refreshCore();
+      renderSettings();
+    } catch (e) { fail(e); }
+  });
+  el.querySelector('#cloud_logout_btn').addEventListener('click', async () => {
+    if (!confirmDanger('Выйти из Bambu Cloud? Принтеры в облачном режиме отключатся.')) return;
+    try {
+      await post('/api/cloud/logout', {});
+      toast('Выход выполнен');
+      await PF.refreshCore();
+      renderSettings();
+    } catch (e) { fail(e); }
+  });
+}
+
 function renderSettings() {
   const s = PF.state.settings;
   $('set_rates').innerHTML = RATES.map(([k, label, sub, step]) => settingRow(k, label, sub,
@@ -786,6 +867,7 @@ function renderSettings() {
       `<label class="switch"><input type="checkbox" data-setting="browser_notify_enabled"${s.browser_notify_enabled ? ' checked' : ''}><i></i></label>
        <button class="btn sm" type="button" id="notify_perm_btn" style="margin-top:8px">Разрешить уведомления</button>`);
 
+  if ($('set_cloud')) renderCloudSettings(s);
   $('set_theme').value = s.theme || 'system';
   $('set_accent').innerHTML = ACCENTS.map(([name, color]) =>
     `<button type="button" data-accent="${name}" class="${(s.accent || 'indigo') === name ? 'on' : ''}" style="background:${color}" title="${name}"></button>`).join('');
