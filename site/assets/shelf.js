@@ -271,9 +271,15 @@ async function openQr(itemId) {
     } else {
       img.innerHTML = '<div class="empty compact"><span>QR недоступен</span></div>';
     }
+    const warn = res.reachable === false
+      ? '<div class="notice warn" style="margin-top:10px"><span>⚠</span><span>'
+        + 'В QR попал localhost — с телефона не откроется. Укажите LAN-адрес в '
+        + 'Настройки → Система → Адрес для QR.</span></div>'
+      : '';
     $('shelf_qr_info').innerHTML = `<b>${esc(item.name)}</b>`
       + `<div class="qr-price">${money(item.price)}</div>`
-      + `<small class="muted">${esc(url)}</small>`;
+      + `<small class="muted">${esc(url)}</small>`
+      + warn;
     openModal('shelf_qr_modal');
   } catch (e) { fail(e); }
 }

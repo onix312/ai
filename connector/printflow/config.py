@@ -10,6 +10,7 @@ import os
 import socket
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -204,6 +205,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "ui_density": "normal",  # compact | normal
     "ui_start_view": "dashboard",
     "debug_verbose": False,
+    # База для QR-наклеек (катушка, ценник). Пусто — берём LAN IP компьютера.
+    # Пример: http://192.168.1.50:8080 или Tailscale http://pc.tailnet.ts.net:8080
+    "public_url": "",
     # --- 8.0: Бэкап 2.0 ---------------------------------------------------
     "backup_keep": 20,
     "backup_auto_export": False,
@@ -339,6 +343,119 @@ def get_local_ips() -> list[str]:
     if not cleaned:
         cleaned = list(ips)
     return sorted(cleaned, key=sort_key)
+
+
+_LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})
+
+
+def host_name(host: str) -> str:
+    """Имя хоста без порта: ``192.168.1.50:8080`` → ``192.168.1.50``."""
+    host = (host or "").strip()
+    if host.startswith("["):
+        end = host.find("]")
+        return host[1:end].lower() if end > 0 else host.lower()
+    if host.count(":") == 1:
+        return host.split(":", 1)[0].lower()
+    return host.lower()
+
+
+def host_port(host: str, default: int = 8080) -> int:
+    """Порт из ``Host``-заголовка. Без порта — ``default``."""
+    host = (host or "").strip()
+    if host.startswith("["):
+        rest = host[host.find("]") + 1:]
+        if rest.startswith(":") and rest[1:].isdigit():
+            return int(rest[1:])
+        return default
+    if host.count(":") == 1:
+        tail = host.split(":", 1)[1]
+        if tail.isdigit():
+            return int(tail)
+    return default
+
+
+def is_loopback_host(host: str) -> bool:
+    """True, если адрес указывает на этот же компьютер, а не на LAN."""
+    name = host_name(host)
+    return name in _LOOPBACK_NAMES or name.startswith("127.")
+
+
+def normalize_base(url_or_host: str) -> str:
+    """``http://host:port`` без хвостового слэша. Пустая строка, если не разобрать."""
+    raw = (url_or_host or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urllib.parse.urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        return ""
+    netloc = parsed.netloc or parsed.path.split("/", 1)[0]
+    if not netloc:
+        return ""
+    return f"{parsed.scheme}://{netloc}"
+
+
+def public_base(host_header: str = "", public_url: str = "",
+                lan_ips: list[str] | None = None, listen_port: int = 8080) -> dict:
+    """Базовый URL для QR, который откроется с телефона в той же сети.
+
+    Приоритет:
+      1. Настройка ``public_url`` (свой IP, Tailscale, имя ПК).
+      2. ``Host`` запроса, если это не localhost.
+      3. Первый LAN-IP компьютера + порт панели.
+      4. localhost — только запасной вариант, ``reachable=False``.
+    """
+    ips = list(lan_ips) if lan_ips is not None else get_local_ips()
+    override = normalize_base(public_url)
+    if override:
+        parsed = urllib.parse.urlparse(override)
+        return {
+            "base": override,
+            "host": parsed.netloc,
+            "reachable": not is_loopback_host(parsed.netloc),
+            "source": "setting",
+            "ips": ips,
+        }
+    port = host_port(host_header, listen_port or 8080)
+    if host_header and not is_loopback_host(host_header):
+        base = normalize_base(host_header)
+        return {
+            "base": base,
+            "host": urllib.parse.urlparse(base).netloc,
+            "reachable": True,
+            "source": "request",
+            "ips": ips,
+        }
+    if ips:
+        host = f"{ips[0]}:{port}"
+        return {
+            "base": f"http://{host}",
+            "host": host,
+            "reachable": True,
+            "source": "lan",
+            "ips": ips,
+        }
+    fallback = (host_header or f"127.0.0.1:{port}").replace("http://", "").replace("https://", "")
+    return {
+        "base": f"http://{fallback}",
+        "host": fallback,
+        "reachable": False,
+        "source": "loopback",
+        "ips": ips,
+    }
+
+
+def public_page_url(path: str, query: str = "", host_header: str = "",
+                    public_url: str = "", lan_ips: list[str] | None = None,
+                    listen_port: int = 8080) -> dict:
+    """Полный URL страницы для QR-наклейки + служебные поля ``public_base``."""
+    info = public_base(host_header, public_url, lan_ips, listen_port)
+    path = path if str(path).startswith("/") else "/" + str(path)
+    url = info["base"] + path
+    if query:
+        url += ("&" if "?" in url else "?") + query
+    return {**info, "url": url}
 
 
 def tcp_reachable(host: str, port: int, timeout: float = 2.0) -> tuple[bool, float]:

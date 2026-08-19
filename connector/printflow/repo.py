@@ -273,20 +273,34 @@ class Repo:
         self.db.delete("niches", niche_id)
 
     # ------------------------------------------------------------------ склад
+    def _decorate_spool(self, row: dict) -> dict:
+        total = max(1.0, num(row["total_grams"], 1000))
+        row["percent"] = round(num(row["remaining_grams"]) / total * 100, 1)
+        row["value"] = round(num(row["remaining_grams"]) / total * num(row["price"]), 2)
+        usage = self.db.one(
+            "SELECT COALESCE(SUM(grams),0) g FROM filament_usage WHERE spool_id=?", (row["id"],))
+        row["used_grams"] = round(num((usage or {}).get("g")), 1)
+        dry = self.db.one(
+            "SELECT at, minutes, temp FROM drying_sessions WHERE spool_id=?"
+            " ORDER BY datetime(at) DESC LIMIT 1", (row["id"],))
+        row["last_dry"] = (dry or {}).get("at") or ""
+        row["last_dry_min"] = num((dry or {}).get("minutes"))
+        row["last_dry_temp"] = num((dry or {}).get("temp"))
+        return row
+
     def spools(self, include_archived: bool = False) -> list[dict]:
         sql = "SELECT * FROM spools"
         if not include_archived:
             sql += " WHERE archived=0"
         sql += " ORDER BY material, color_name"
-        rows = self.db.query(sql)
-        for row in rows:
-            total = max(1.0, num(row["total_grams"], 1000))
-            row["percent"] = round(num(row["remaining_grams"]) / total * 100, 1)
-            row["value"] = round(num(row["remaining_grams"]) / total * num(row["price"]), 2)
-            usage = self.db.one(
-                "SELECT COALESCE(SUM(grams),0) g FROM filament_usage WHERE spool_id=?", (row["id"],))
-            row["used_grams"] = round(num((usage or {}).get("g")), 1)
-        return rows
+        return [self._decorate_spool(row) for row in self.db.query(sql)]
+
+    def spool(self, spool_id: str) -> dict | None:
+        """Одна катушка по id — для страницы QR, без выгрузки всего склада."""
+        if not spool_id:
+            return None
+        row = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+        return self._decorate_spool(row) if row else None
 
     def save_spool(self, data: dict) -> dict:
         data = dict(data)
