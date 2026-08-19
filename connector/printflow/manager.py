@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
-from .config import DATA_DIR, now_iso
+from .config import DATA_DIR, UPLOAD_DIR, now_iso
 from .db import Database
 from .repo import Repo
 from .telegram_bot import TelegramBot
@@ -42,6 +42,7 @@ class PrinterManager:
         self._restock_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync = 0.0
+        self._last_cloud_sync: dict[str, float] = {}
         self._last_backup = time.time()
         self.reload()
         # 8.0: Watch Folder
@@ -59,15 +60,20 @@ class PrinterManager:
     def reload(self) -> None:
         """Синхронизировать список подключений с таблицей printers."""
         records = {r["id"]: r for r in self.db.query("SELECT * FROM printers")}
+        cloud = self._cloud_creds()
         with self.lock:
             for pid in list(self.printers):
                 if pid not in records:
                     self.printers.pop(pid).shutdown()
             for pid, record in records.items():
+                enriched = dict(record)
+                enriched["cloud_token"] = cloud.get("token", "")
+                enriched["cloud_uid"] = cloud.get("uid", "")
+                enriched["cloud_region"] = cloud.get("region", "global")
                 if pid in self.printers:
-                    self.printers[pid].update_record(record)
+                    self.printers[pid].update_record(enriched)
                 else:
-                    printer = BambuPrinter(record, self._make_handler(pid))
+                    printer = BambuPrinter(enriched, self._make_handler(pid))
                     self.printers[pid] = printer
                     if record.get("enabled", 1):
                         printer.start()
@@ -76,6 +82,22 @@ class PrinterManager:
                     self.guard.seed_maintenance(pid)
                 except Exception:
                     continue
+
+    def _cloud_creds(self) -> dict:
+        """Токен/uid/регион аккаунта Bambu из настроек (для облачных принтеров)."""
+        settings = self.db.settings(include_secrets=True)
+        return {
+            "token": str(settings.get("cloud_token") or ""),
+            "uid": str(settings.get("cloud_uid") or ""),
+            "region": str(settings.get("cloud_region") or "global"),
+        }
+
+    def refresh_cloud(self) -> None:
+        """Вход/выход из Bambu Cloud: перезапустить облачные подключения."""
+        from .cloud_bridge import CloudBridge
+        if not self._cloud_creds()["token"]:
+            CloudBridge.shutdown_all()
+        self.reload()
 
     def get(self, printer_id: str = "") -> BambuPrinter | None:
         with self.lock:
@@ -360,16 +382,241 @@ class PrinterManager:
             mapping = json.loads(job.get("ams_mapping") or "[]")
         except json.JSONDecodeError:
             mapping = []
-        printer.start_print(job["file"], plate=int(num(job.get("plate"), 1) or 1),
-                            use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
-                            bed_level=bool(job.get("bed_level", 1)),
-                            flow_cali=bool(job.get("flow_cali")),
-                            timelapse=bool(job.get("timelapse")),
-                            subtask_name=job.get("name", ""))
+        if printer.mode == "cloud":
+            # Облачный принтер: заливка + диспетчеризация /my/task.
+            self.start_print_cloud(printer, job["file"],
+                                   plate=int(num(job.get("plate"), 1) or 1),
+                                   use_ams=bool(job.get("use_ams", 1)),
+                                   ams_mapping=mapping,
+                                   bed_level=bool(job.get("bed_level", 1)),
+                                   flow_cali=bool(job.get("flow_cali")),
+                                   timelapse=bool(job.get("timelapse")))
+        else:
+            printer.start_print(job["file"], plate=int(num(job.get("plate"), 1) or 1),
+                                use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
+                                bed_level=bool(job.get("bed_level", 1)),
+                                flow_cali=bool(job.get("flow_cali")),
+                                timelapse=bool(job.get("timelapse")),
+                                subtask_name=job.get("name", ""))
         self.db.execute(
             "UPDATE print_jobs SET state='starting', printer_id=?, started_at=? WHERE id=?",
             (printer.id, now_iso(), job_id))
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
+
+    # ----------------------------------------------------- облачный запуск
+    @staticmethod
+    def cloud_manifest_path(name: str) -> Path:
+        return UPLOAD_DIR / f"{name}.cloud.json"
+
+    def cloud_manifest(self, name: str) -> dict:
+        """Сохранённый манифест облачной заливки, если файл не менялся."""
+        try:
+            manifest = json.loads(self.cloud_manifest_path(name).read_text("utf-8"))
+        except Exception:
+            return {}
+        local = UPLOAD_DIR / name
+        if not local.exists():
+            return {}
+        from . import bambu_cloud
+        if manifest.get("md5") != bambu_cloud.md5_hex_upper(local.read_bytes()):
+            return {}
+        return manifest
+
+    def start_print_cloud(self, printer: BambuPrinter, filename: str, plate: int = 1,
+                          use_ams: bool = True, ams_mapping: list[int] | None = None,
+                          bed_level: bool = True, flow_cali: bool = False,
+                          timelapse: bool = False,
+                          progress=None) -> dict:
+        """Запуск печати через Bambu Cloud (без LAN Only Mode).
+
+        Основной путь — облачная заливка + POST /my/task (как Bambu Studio).
+        Фолбэки: 1) FTPS на SD + /my/task с mode=lan_file (если LAN доступен);
+        2) для .gcode — FTPS в cache/ + MQTT-команда gcode_file.
+        """
+        from . import bambu_cloud
+        creds = self._cloud_creds()
+        token, uid, region = creds["token"], creds["uid"], creds["region"]
+        if not token or not uid:
+            raise ValueError("Не выполнен вход в Bambu Cloud (Настройки → Bambu Cloud)")
+        name = (filename or "").rsplit("/", 1)[-1]
+        local = UPLOAD_DIR / name
+        if not local.exists():
+            raise FileNotFoundError(f"Файл не найден локально: {name}")
+        device_id = printer.record.get("serial", "")
+        if not device_id:
+            raise ValueError("У принтера не задан серийный номер")
+        manifest = self.cloud_manifest(name)
+        try:
+            if manifest:
+                result = bambu_cloud.create_task(
+                    token, uid, region, manifest, device_id, plate=plate,
+                    use_ams=use_ams, ams_mapping=ams_mapping,
+                    bed_level=bed_level, flow_cali=flow_cali,
+                    vibration_cali=True, layer_inspect=True, timelapse=timelapse,
+                    mode="cloud_file")
+                result.update({"name": name, "cloud": True})
+                return result
+            result = bambu_cloud.upload_and_dispatch(
+                local, token, uid, region, device_id, plate=plate,
+                use_ams=use_ams, ams_mapping=ams_mapping,
+                bed_level=bed_level, flow_cali=flow_cali,
+                vibration_cali=True, layer_inspect=True, timelapse=timelapse,
+                progress=progress)
+            manifest = {k: result.get(k) for k in
+                        ("project_id", "model_id", "profile_id", "url", "md5", "name", "bytes")}
+            manifest["at"] = now_iso()
+            try:
+                self.cloud_manifest_path(name).write_text(
+                    json.dumps(manifest), encoding="utf-8")
+            except OSError:
+                pass
+            result.update({"name": name, "cloud": True})
+            return result
+        except bambu_cloud.CloudError as exc:
+            lan_ok = bool(printer.record.get("host") and printer.record.get("access_code"))
+            if not lan_ok:
+                raise ConnectionError(
+                    f"{exc}. Локальная сеть не настроена — принтер не сможет принять файл.") from None
+            # Фолбэк 1: FTPS на SD + диспетчеризация через /my/task (lan_file).
+            self.db.add_event("cloud", "Облачная заливка не удалась — пробуем по локальной сети",
+                              str(exc), printer.id, {"file": name})
+            try:
+                printer.files.upload(local, name)
+                manifest = bambu_cloud.upload_project(local, token, uid, region)
+                bambu_cloud.patch_project_url(token, uid, region, manifest,
+                                              f"ftp:///{name}")
+                result = bambu_cloud.create_task(
+                    token, uid, region, manifest, device_id, plate=plate,
+                    use_ams=use_ams, ams_mapping=ams_mapping,
+                    bed_level=bed_level, flow_cali=flow_cali,
+                    vibration_cali=True, layer_inspect=True, timelapse=timelapse,
+                    mode="lan_file")
+                result.update({"name": name, "cloud": False, "hybrid": True})
+                return result
+            except Exception as exc2:
+                if name.lower().endswith(".gcode"):
+                    # Фолбэк 2: G-code через cache/ + MQTT gcode_file.
+                    try:
+                        printer.files.upload(local, f"cache/{name}")
+                        printer.command("print_gcode", f"cache/{name}")
+                        return {"ok": True, "name": name, "gcode": True}
+                    except Exception as exc3:
+                        raise ConnectionError(
+                            f"Облачная печать не удалась ({exc}), локальная тоже "
+                            f"({exc2}); G-code: {exc3}") from None
+                raise ConnectionError(
+                    f"Облачная печать не удалась: {exc}. По локальной сети: {exc2}."
+                    f" Можно экспортировать файл как .gcode и повторить.") from None
+
+    def sync_cloud_history(self, printer_id: str) -> dict:
+        """Дополнить журнал печатями из облачной истории Bambu.
+
+        Ловит печати, запущенные из Bambu Handy / Studio: PrintFlow видит
+        их событиями MQTT, но фактические граммы/минуты/фото дозаписывает
+        из облака (startTime/endTime/weight/cover).
+        """
+        printer = self.get(printer_id)
+        if not printer or printer.mode != "cloud":
+            return {"ok": False, "error": "Принтер не в облачном режиме"}
+        creds = self._cloud_creds()
+        if not creds["token"] or not creds["uid"]:
+            return {"ok": False, "error": "Не выполнен вход в Bambu Cloud"}
+        from . import bambu_cloud
+        from datetime import datetime
+        try:
+            tasks = bambu_cloud.get_tasks(creds["token"], creds["region"],
+                                          printer.record.get("serial", ""), 20)
+        except bambu_cloud.CloudError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        def parse_ts(value) -> float:
+            if not value:
+                return 0.0
+            try:
+                return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                return 0.0
+
+        added = 0
+        for task in tasks:
+            state = {2: "done", 3: "failed"}.get(int(task.get("status") or 0))
+            if not state:
+                continue
+            name = str(task.get("title") or "").strip()
+            started_ts = parse_ts(task.get("startTime"))
+            if not name or not started_ts:
+                continue
+            dupe = False
+            for job in self.db.query("SELECT started_at FROM print_jobs WHERE name=?",
+                                     (name,)):
+                if abs(parse_ts(job.get("started_at")) - started_ts) < 300:
+                    dupe = True
+                    break
+            if dupe:
+                continue
+            end_ts = parse_ts(task.get("endTime")) or started_ts
+            duration = max(0.0, round((end_ts - started_ts) / 60, 1))
+            grams = round(sum(float(x.get("weight") or 0)
+                              for x in (task.get("amsDetailMapping") or [])), 1)
+            started_iso = datetime.fromtimestamp(started_ts).astimezone().isoformat(
+                timespec="seconds")
+            finished_iso = datetime.fromtimestamp(end_ts).astimezone().isoformat(
+                timespec="seconds")
+            order_id = self._guess_order(name)
+            job = self.db.upsert("print_jobs", {
+                "id": uid("job"), "printer_id": printer_id, "order_id": order_id,
+                "name": name, "file": name, "state": state, "source": "cloud",
+                "started_at": started_iso, "finished_at": finished_iso,
+                "duration_min": duration, "grams": grams,
+                "created_at": now_iso(),
+            })
+            added += 1
+            # Обложка из облачной истории — фото результата к заказу.
+            cover = str(task.get("cover") or "")
+            if cover.startswith("http") and order_id:
+                try:
+                    from .config import PHOTO_DIR
+                    from . import bambu_cloud as bc
+                    PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+                    photo_name = f"job_{job['id']}_cloud.jpg"
+                    req = __import__("urllib.request", fromlist=["Request"]).Request(
+                        cover, headers={"User-Agent": "Mozilla/5.0"})
+                    with __import__("urllib.request", fromlist=["urlopen"]).urlopen(
+                            req, timeout=20) as response:
+                        (PHOTO_DIR / photo_name).write_bytes(response.read())
+                    self.db.execute(
+                        "INSERT INTO order_photos(id,order_id,at,file,note,kind)"
+                        " VALUES(?,?,?,?,?,?)",
+                        (uid("ph"), order_id, now_iso(), photo_name,
+                         "обложка из облачной истории", "cloud"))
+                except Exception:
+                    pass
+        return {"ok": True, "added": added}
+
+    def maybe_sync_cloud_history(self) -> None:
+        """Фоновая сверка с облачной историей — не чаще раза в N минут."""
+        if not self.db.setting("cloud_history_sync", True):
+            return
+        try:
+            interval = max(1.0, float(self.db.setting("cloud_sync_minutes", 5.0)))
+        except (TypeError, ValueError):
+            interval = 5.0
+        now = time.time()
+        with self.lock:
+            printers = [p for p in self.printers.values() if p.mode == "cloud"]
+        for printer in printers:
+            if now - self._last_cloud_sync.get(printer.id, 0) < interval * 60:
+                continue
+            self._last_cloud_sync[printer.id] = now
+            try:
+                result = self.sync_cloud_history(printer.id)
+                if result.get("added"):
+                    self.db.add_event("cloud", "История Bambu Cloud",
+                                      f"Добавлено записей в журнал: {result['added']}",
+                                      printer.id, {})
+            except Exception as exc:
+                self.db.add_event("error", "Сбой сверки с облачной историей",
+                                  str(exc), printer.id)
 
     # ------------------------------------------------------- умная очередь
     def quiet_now(self) -> bool:
@@ -966,6 +1213,7 @@ class PrinterManager:
                 try:
                     self.run_scheduled()
                     self.check_filament_stock()
+                    self.maybe_sync_cloud_history()
                 except Exception:
                     continue
             except Exception:

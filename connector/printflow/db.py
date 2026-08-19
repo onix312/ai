@@ -31,6 +31,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("wifi", "TEXT DEFAULT ''"),
         ("ams_humidity", "TEXT DEFAULT ''"),
         ("last_seen", "TEXT"),
+        # режим связи: cloud (через аккаунт Bambu, без LAN Only Mode) | lan.
+        # Существующие принтеры остаются на 'lan' — поведение не меняется;
+        # новые принтеры по умолчанию создаются в 'cloud' (см. repo.save_printer).
+        ("mode", "TEXT DEFAULT 'lan'"),
     ],
     "transactions": [
         ("account_id", "TEXT"),
@@ -884,6 +888,11 @@ class Database:
                 (key, json.dumps(value, ensure_ascii=False)),
             )
         return self.settings()
+
+    def clear_settings(self, keys: Iterable[str]) -> None:
+        """Удалить настройки целиком — в т.ч. секреты (set_settings их не трогает)."""
+        for key in keys:
+            self.execute("DELETE FROM settings WHERE key=?", (key,))
 
     # ------------------------------------------------------------------ events
     def add_event(self, kind: str, title: str, detail: str = "",

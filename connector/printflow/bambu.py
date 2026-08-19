@@ -78,13 +78,24 @@ def fan_percent(raw: Any) -> int:
 
 
 class BambuPrinter:
-    """Подключение и телеметрия одного принтера."""
+    """Подключение и телеметрия одного принтера.
+
+    Режим связи (record["mode"]):
+      * "cloud" (по умолчанию для новых принтеров) — команды и телеметрия
+        идут через облачный брокер Bambu (CloudBridge). Принтер остаётся
+        в обычном облачном режиме, LAN Only Mode / Developer Mode не нужны.
+      * "lan" — локальный MQTT принтера:8883 (прежнее поведение).
+    """
 
     def __init__(self, record: dict, on_event: Callable[[str, str, str, dict], None] | None = None):
         self.id = record["id"]
         self.record = dict(record)
         self.on_event = on_event or (lambda *a, **k: None)
         self.lock = threading.RLock()
+        self.mode = str(record.get("mode") or "cloud")
+        self.bridge = None  # CloudBridge для режима cloud
+        self._bridge_report = None
+        self._bridge_status = None
         self.client = None
         self.connected = False
         self.connecting = False
@@ -108,8 +119,10 @@ class BambuPrinter:
         return PrinterFiles(self.record.get("host", ""), self.record.get("access_code", ""))
 
     def update_record(self, record: dict) -> None:
-        restart = any(self.record.get(k) != record.get(k)
-                      for k in ("host", "serial", "access_code", "enabled"))
+        keys = ["host", "serial", "access_code", "enabled", "mode"]
+        if str(record.get("mode") or "cloud") == "cloud":
+            keys += ["cloud_token", "cloud_uid", "cloud_region"]
+        restart = any(self.record.get(k) != record.get(k) for k in keys)
         self.record = dict(record)
         if restart:
             self.reconnect()
@@ -129,6 +142,12 @@ class BambuPrinter:
         while not self._stop.wait(20):
             if not self.record.get("enabled", 1):
                 continue
+            if self.mode == "cloud":
+                # Облачный мост (CloudBridge) держит соединение и
+                # переподключается сам; здесь только первичная подписка.
+                if not self.bridge and self.ready:
+                    self.connect()
+                continue
             if self.connected and self.last_message and time.time() - self.last_message > 90:
                 self.last_error = "Нет данных от принтера, переподключаемся"
                 self.reconnect()
@@ -143,6 +162,9 @@ class BambuPrinter:
 
     @property
     def ready(self) -> bool:
+        if self.mode == "cloud":
+            return bool(self.record.get("serial") and self.record.get("enabled", 1)
+                        and self.record.get("cloud_token"))
         return bool(self.record.get("host") and self.record.get("serial")
                     and self.record.get("access_code") and self.record.get("enabled", 1))
 
@@ -152,8 +174,54 @@ class BambuPrinter:
                                "или выполните: pip install -r connector/requirements.txt")
             return
         if not self.ready:
+            if self.mode == "cloud" and not self.record.get("cloud_token"):
+                self.last_error = ("Режим «Облако»: выполните вход в аккаунт Bambu "
+                                   "(Настройки → Bambu Cloud)")
             return
         self.disconnect()
+        if self.mode == "cloud":
+            self._connect_cloud()
+            return
+        self._connect_lan()
+
+    def _connect_cloud(self) -> None:
+        """Подключение через общий облачный мост аккаунта Bambu."""
+        from .cloud_bridge import CloudBridge
+        serial = self.record["serial"]
+        bridge = CloudBridge.shared(
+            str(self.record.get("cloud_region") or "global"),
+            str(self.record.get("cloud_uid") or ""),
+            str(self.record.get("cloud_token") or ""))
+        self.bridge = bridge
+        self._bridge_report = lambda _serial, payload: self.handle_report(payload)
+        self._bridge_status = self._on_cloud_status
+        bridge.attach(serial, self._bridge_report, self._bridge_status)
+        self.connected = bridge.connected
+        if not bridge.connected and not bridge.connecting:
+            bridge.connect()
+            self.connected = bridge.connected
+
+    def _on_cloud_status(self, connected: bool, error: str) -> None:
+        was = self.connected
+        self.connected = connected
+        if connected:
+            self.last_error = ""
+            try:
+                self.push_all()
+                self.publish({"info": {"sequence_id": self.next_seq(),
+                                       "command": "get_version"}})
+            except Exception:
+                pass
+            if not was:
+                self.on_event("online", "Принтер подключён (Bambu Cloud)",
+                              self.record.get("name", ""), {})
+        else:
+            self.last_error = error or self.last_error or "Облачное соединение потеряно"
+            if was:
+                self.on_event("offline", "Связь с принтером потеряна (Bambu Cloud)",
+                              self.record.get("name", ""), {})
+
+    def _connect_lan(self) -> None:
         try:
             self.connecting = True
             try:
@@ -196,6 +264,14 @@ class BambuPrinter:
                 old.loop_stop()
             except Exception:
                 pass
+        if self.bridge and self._bridge_report:
+            try:
+                self.bridge.detach(self.record.get("serial", ""))
+            except Exception:
+                pass
+            self._bridge_report = None
+            self._bridge_status = None
+            self.bridge = None
 
     def shutdown(self) -> None:
         self._stop.set()
@@ -235,6 +311,10 @@ class BambuPrinter:
             payload = json.loads(message.payload.decode("utf-8"))
         except Exception:
             return
+        self.handle_report(payload)
+
+    def handle_report(self, payload: dict) -> None:
+        """Разбор одного отчёта принтера — общий для LAN-MQTT и облака."""
         with self.lock:
             if isinstance(payload.get("print"), dict):
                 deep_merge(self.raw.setdefault("print", {}), payload["print"])
@@ -294,6 +374,11 @@ class BambuPrinter:
         return str(self.sequence)
 
     def publish(self, payload: dict) -> None:
+        if self.mode == "cloud":
+            if not (self.bridge and self.connected):
+                raise ConnectionError("Принтер не подключён (нет связи с облаком Bambu)")
+            self.bridge.publish(self.record["serial"], payload)
+            return
         if not (self.client and self.connected):
             raise ConnectionError("Принтер не подключён")
         result = self.client.publish(f"device/{self.record['serial']}/request",
@@ -385,6 +470,18 @@ class BambuPrinter:
         elif name == "timelapse":
             self.publish({"camera": {"sequence_id": seq, "command": "ipcam_timelapse",
                                      "control": "enable" if value else "disable"}})
+        elif name == "print_gcode":
+            # Запуск готового G-code с SD-карты (не требует подписи на
+            # защищённых прошивках — в отличие от project_file для 3MF).
+            path = str(value or "").strip()
+            if not path:
+                raise ValueError("Укажите путь к G-code на SD-карте")
+            if not path.lower().endswith(".gcode"):
+                raise ValueError("Ожидается файл .gcode")
+            if path.startswith("/"):
+                path = path.lstrip("/")
+            self.publish({"print": {"sequence_id": seq, "command": "gcode_file",
+                                    "param": path, "user_id": "printflow"}})
         elif name == "skip_objects":
             objects = [int(x) for x in (value or [])][:64]
             self.publish({"print": {"sequence_id": seq, "command": "skip_objects", "obj_list": objects}})
@@ -399,21 +496,35 @@ class BambuPrinter:
     def start_print(self, filename: str, plate: int = 1, use_ams: bool = True,
                     ams_mapping: list[int] | None = None, bed_level: bool = True,
                     flow_cali: bool = False, timelapse: bool = False,
-                    subtask_name: str = "") -> dict:
-        """Запуск печати файла, уже находящегося в памяти принтера."""
+                    subtask_name: str = "", cloud_url: str = "") -> dict:
+        """Запуск печати файла, уже находящегося в памяти принтера.
+
+        Для локального режима url = file://… на SD-карте. Если передан
+        cloud_url (файл залит в облачное хранилище Bambu), принтер скачает
+        его сам по своему облачному каналу.
+        """
         if not filename:
             raise ValueError("Не указан файл для печати")
         state = str(self.raw.get("print", {}).get("gcode_state", "")).upper()
         if state in ("RUNNING", "PREPARE", "PAUSE"):
             raise ValueError("Принтер занят: дождитесь завершения или остановите текущую печать")
         clean = filename if filename.startswith("/") else "/" + filename.lstrip("/")
+        if cloud_url:
+            url = cloud_url
+        elif self.mode == "cloud":
+            # В облачном режиме обычный запуск идёт через POST /my/task
+            # (manager/api вызывают bambu_cloud.create_task) — сюда попадаем
+            # только для файла, уже лежащего на SD (гибрид ftp://).
+            url = f"ftp://{clean}" if self.record.get("host") else f"file://{clean}"
+        else:
+            url = f"file://{clean}" if not clean.startswith("file:") else clean
         payload = {"print": {
             "sequence_id": self.next_seq(),
             "command": "project_file",
             "param": f"Metadata/plate_{max(1, int(plate))}.gcode",
             "project_id": "0", "profile_id": "0", "task_id": "0",
             "subtask_id": "0", "subtask_name": subtask_name or filename.rsplit("/", 1)[-1],
-            "url": f"file://{clean}" if not clean.startswith("file:") else clean,
+            "url": url,
             "timelapse": bool(timelapse),
             "bed_type": "auto",
             "bed_leveling": bool(bed_level),
@@ -484,6 +595,7 @@ class BambuPrinter:
                 "connected": self.connected, "connecting": self.connecting,
                 "configured": self.ready, "host": self.record.get("host", ""),
                 "last_message": self.last_message, "last_error": self.last_error,
+                "mode": self.mode,
             },
             "printer": {
                 "state": state, "state_label": STATE_NAMES.get(state, state),
@@ -530,34 +642,49 @@ class BambuPrinter:
 
     def health(self) -> dict:
         """Диагностика подключения для UI 8.0."""
-        # проверка портов
-        host = self.record.get("host","")
+        host = self.record.get("host", "")
+        # Облачный режим: главное — мост аккаунта, порты принтера не нужны.
+        if self.mode == "cloud":
+            from .cloud_bridge import CloudBridge
+            cloud = self.bridge.state() if self.bridge else {}
+            ports = {}
+            if host:  # локальные ускорители (камера/SD) — только если задан IP
+                for label, port in [("ftps", 990), ("camera", 6000)]:
+                    ports[label] = self._port_check(host, port)
+            return {"mode": "cloud", "cloud": cloud, "ports": ports,
+                    "connected": self.connected, "last_error": self.last_error,
+                    "firmware": self._firmware_version()}
+        # Локальный режим: проверка портов как раньше
         ports = {}
         for label, port in [("mqtt", 8883), ("ftps", 990), ("camera", 6000)]:
             if not host:
                 ports[label] = {"ok": False, "ms": 0}
                 continue
-            import socket, time
-            start = time.time()
-            try:
-                with socket.create_connection((host, port), timeout=1.5):
-                    ports[label] = {"ok": True, "ms": round((time.time()-start)*1000,1)}
-            except Exception:
-                ports[label] = {"ok": False, "ms": round((time.time()-start)*1000,1)}
-                # fallback 1883 для A1 mini
-                if label=="mqtt" and port==8883:
-                    try:
-                        start2=time.time()
-                        with socket.create_connection((host, 1883), timeout=1.0):
-                            ports["mqtt_fallback"]={"ok": True, "ms": round((time.time()-start2)*1000,1)}
-                    except Exception:
-                        pass
+            ports[label] = self._port_check(host, port)
+            # fallback 1883 для A1 mini
+            if label == "mqtt" and not ports[label]["ok"]:
+                ports["mqtt_fallback"] = self._port_check(host, 1883, timeout=1.0)
         # firmware
-        ver = next((x.get("sw_ver","") for x in self.version if x.get("name")=="ota"),"")
         needs_dev = False
         if " 5" in self.last_error or "Developer Mode" in self.last_error:
-            needs_dev=True
-        return {"ports": ports, "firmware": ver, "needs_developer_mode": needs_dev, "connected": self.connected, "last_error": self.last_error}
+            needs_dev = True
+        return {"mode": "lan", "ports": ports, "firmware": self._firmware_version(),
+                "needs_developer_mode": needs_dev, "connected": self.connected,
+                "last_error": self.last_error}
+
+    @staticmethod
+    def _port_check(host: str, port: int, timeout: float = 1.5) -> dict:
+        import socket as socket_mod
+        import time as time_mod
+        start = time_mod.time()
+        try:
+            with socket_mod.create_connection((host, port), timeout=timeout):
+                return {"ok": True, "ms": round((time_mod.time() - start) * 1000, 1)}
+        except Exception:
+            return {"ok": False, "ms": round((time_mod.time() - start) * 1000, 1)}
+
+    def _firmware_version(self) -> str:
+        return next((x.get("sw_ver", "") for x in self.version if x.get("name") == "ota"), "")
 
     @staticmethod
     def discover(timeout: float = 3.0) -> list[dict]:

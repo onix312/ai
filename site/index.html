@@ -3029,6 +3029,10 @@
  <div class="pane" id="setpane-system">
   <div class="set-grid">
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Bambu Cloud</h2><p>Управление принтером без LAN Only Mode — принтер остаётся в облачном режиме</p></div></div>
+    <div id="set_cloud"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Токен хранится локально и не попадает в бэкап</p></div></div>
     <div id="set_tg"></div>
     <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
@@ -3155,21 +3159,25 @@
 </form></dialog>
 
 <dialog class="modal" id="printer_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">Локальное подключение</span><h2 id="printer_modal_title">Принтер Bambu Lab</h2><p>Access Code сохраняется в каталоге данных и не попадает в браузер, Git или резервную копию.</p></div><button class="icon-btn" type="button" data-close="printer_modal">×</button></div>
+ <div class="modal-head"><div><span class="eyebrow">Подключение принтера</span><h2 id="printer_modal_title">Принтер Bambu Lab</h2><p>По умолчанию принтер подключается через аккаунт Bambu Cloud — включать LAN Only Mode / Developer Mode не нужно. Access Code сохраняется в каталоге данных и не попадает в браузер, Git или резервную копию.</p></div><button class="icon-btn" type="button" data-close="printer_modal">×</button></div>
  <div class="modal-body">
   <div class="setup-steps">
-   <div><b>1</b><span><strong>Принтер</strong>Settings → WLAN. Для защищённой прошивки включите LAN Only и Developer Mode.</span></div>
-   <div><b>2</b><span><strong>Сеть</strong>Компьютер и принтер — в одной локальной сети. Порты на роутере не открывайте.</span></div>
-   <div><b>3</b><span><strong>Реквизиты</strong>IP, серийный номер и Access Code вводятся только здесь.</span></div>
+   <div><b>1</b><span><strong>Принтер</strong>Обычный облачный режим. Bambu Handy продолжает работать. LAN Only Mode не требуется.</span></div>
+   <div><b>2</b><span><strong>Облако</strong>Войдите в аккаунт Bambu (Настройки → Bambu Cloud) — принтер появится в списке ниже.</span></div>
+   <div><b>3</b><span><strong>Реквизиты</strong>IP и Access Code нужны только для режима «Локальная сеть» и камеры.</span></div>
   </div>
-  <div class="card-head"><h3>Поиск в сети</h3><button class="btn sm" type="button" id="pf_discover">Найти принтеры</button></div>
+  <div class="card-head"><h3>Поиск принтеров</h3><button class="btn sm" type="button" id="pf_discover">Найти</button></div>
   <div class="discover-list" id="pf_discovered"></div>
   <div class="form-grid">
    <label class="field"><span>Название</span><input id="pf_name" placeholder="Основной P1S"></label>
    <label class="field"><span>Модель</span><select id="pf_model"><option>P1S</option><option>P1P</option><option>X1C</option><option>X1E</option><option>A1</option><option>A1 mini</option></select></label>
-   <label class="field"><span>IP-адрес</span><input id="pf_host" placeholder="192.168.1.100"></label>
+   <label class="field"><span>Связь</span><select id="pf_mode">
+     <option value="cloud">☁ Bambu Cloud — без LAN Only Mode</option>
+     <option value="lan">Локальная сеть (LAN + Developer Mode)</option>
+   </select><small class="hint">Облако: команды и файлы идут через аккаунт Bambu, принтер остаётся в обычном режиме. Локальная сеть — прежний способ.</small></label>
+   <label class="field"><span>IP-адрес (для камеры и локальной сети)</span><input id="pf_host" placeholder="192.168.1.100"></label>
    <label class="field"><span>Серийный номер</span><input id="pf_serial" placeholder="01P…"></label>
-   <label class="field"><span>LAN Access Code</span><input id="pf_access_code" type="password" autocomplete="new-password" placeholder="8 символов с экрана принтера"></label>
+   <label class="field"><span>LAN Access Code (для локальной сети)</span><input id="pf_access_code" type="password" autocomplete="new-password" placeholder="8 символов с экрана принтера"></label>
    <label class="field"><span>AMS подключён</span><select id="pf_has_ams"><option value="1">Да</option><option value="0">Нет</option></select></label>
    <label class="field"><span>Активен</span><select id="pf_enabled"><option value="1">Да</option><option value="0">Отключён</option></select></label>
    <label class="field"><span>Заметка</span><input id="pf_notes" placeholder="Где стоит, чем занят"></label>
