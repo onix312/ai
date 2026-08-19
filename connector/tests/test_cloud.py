@@ -132,6 +132,24 @@ class CloudLoginTests(unittest.TestCase):
         # первый шаг — логин с кодом, а не паролем
         self.assertEqual(calls[0][2], {"account": "a@b.c", "code": "123456"})
 
+    def test_login_with_code_pending_fallback(self):
+        bambu_cloud._PENDING.clear()
+        bambu_cloud._PENDING["fallback@bambu.com"] = {"region": "global"}
+        calls = []
+
+        def fake(method, url, **kwargs):
+            body = kwargs.get("body") or {}
+            calls.append((method, url, body))
+            if len(calls) == 1:
+                return {"accessToken": "T3", "loginType": ""}
+            return {"uidStr": "888"}
+
+        with mock.patch.object(bambu_cloud, "request", side_effect=fake):
+            result = bambu_cloud.login("", "", code="999888")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["uid"], "888")
+        self.assertEqual(calls[0][2], {"account": "fallback@bambu.com", "code": "999888"})
+
     def test_login_wrong_password_raises(self):
         def fail(*a, **k):
             raise bambu_cloud.CloudError("неверный логин")
@@ -433,6 +451,33 @@ class CloudApiTests(unittest.TestCase):
         self.assertEqual(data["name"], "x")  # имя пользователя не перетираем
         self.assertEqual(data["model"], "P1S")
         self.assertEqual(data["mode"], "cloud")
+
+    def test_login_need_code_flow_saves_email_and_confirms(self):
+        """Проверка цепочки: /api/cloud/login (need_code) -> /api/cloud/code (ok).
+        Email не теряется, даже если /api/cloud/code вызван только с {code}."""
+        from connector.printflow.bus import EventBus
+        self.api.bus = EventBus()
+        bambu_cloud._PENDING.clear()
+
+        # Шаг 1: login возвращает need_code
+        with mock.patch.object(bambu_cloud, "login", return_value={
+                "status": "need_code", "message": "Код отправлен"}):
+            code, resp = self.api.post("/api/cloud/login",
+                                       {"email": "mybambu@mail.com", "password": "pass", "region": "global"},
+                                       {})
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["status"], "need_code")
+        self.assertEqual(self.db.setting("cloud_email"), "mybambu@mail.com")
+
+        # Шаг 2: подтверждение кода без повторной передачи email
+        with mock.patch.object(bambu_cloud, "login", return_value={
+                "status": "ok", "token": "NEW_TOKEN", "uid": "999", "message": "Вход выполнен"}):
+            code, resp = self.api.post("/api/cloud/code", {"code": "654321"}, {})
+        self.assertEqual(code, 200)
+        self.assertEqual(resp["status"], "ok")
+        self.assertEqual(self.db.setting("cloud_email"), "mybambu@mail.com")
+        self.assertEqual(self.db.setting("cloud_token"), "NEW_TOKEN")
+        self.assertEqual(self.db.setting("cloud_uid"), "999")
 
 
 if __name__ == "__main__":

@@ -147,6 +147,10 @@ def login(email: str, password: str = "", region: str = "global", code: str = ""
     """
     email = (email or "").strip()
     region = region or "global"
+    if not email and _PENDING:
+        email = next(iter(_PENDING.keys()))
+        if not region or region == "global":
+            region = _PENDING[email].get("region", "global")
     if not email:
         raise CloudError("Укажите email аккаунта Bambu")
     base = api_host(region)
@@ -168,7 +172,7 @@ def login(email: str, password: str = "", region: str = "global", code: str = ""
         return {"status": "ok", "token": token, "uid": uid,
                 "message": "Вход выполнен"}
     if login_type == "verifyCode":
-        _PENDING.setdefault(email, {"region": region})
+        _PENDING[email] = {"region": region}
         send_code(email, region)
         return {"status": "need_code",
                 "message": "Bambu прислал код на почту/SMS. Введите его."}

@@ -957,14 +957,21 @@ class Api:
         # --- Bambu Cloud: вход, код, выход
         if path == "/api/cloud/login":
             from . import bambu_cloud
+            email = str(body.get("email", "")).strip()
+            region = str(body.get("region", "") or "global").strip()
+            if email:
+                self.db.set_settings({
+                    "cloud_email": email,
+                    "cloud_region": region,
+                })
             result = bambu_cloud.login(
-                body.get("email", ""), body.get("password", ""),
-                body.get("region", "global"), body.get("code", ""),
+                email, body.get("password", ""),
+                region, body.get("code", ""),
                 body.get("tfa_code", ""))
             if result.get("status") == "ok":
                 self.db.set_settings({
-                    "cloud_email": str(body.get("email", "")).strip(),
-                    "cloud_region": str(body.get("region", "") or "global"),
+                    "cloud_email": email or str(self.db.setting("cloud_email", "")),
+                    "cloud_region": region or str(self.db.setting("cloud_region", "global")),
                     "cloud_token": result.get("token", ""),
                     "cloud_uid": result.get("uid", ""),
                 })
@@ -973,12 +980,19 @@ class Api:
             return 200, result
         if path == "/api/cloud/code":
             from . import bambu_cloud
+            email = str(body.get("email") or self.db.setting("cloud_email", "")).strip()
+            region = str(body.get("region") or self.db.setting("cloud_region", "global")).strip()
+            if not email and bambu_cloud._PENDING:
+                email = next(iter(bambu_cloud._PENDING.keys()))
+                region = bambu_cloud._PENDING[email].get("region", region)
             result = bambu_cloud.login(
-                str(self.db.setting("cloud_email", "")), "", 
-                str(self.db.setting("cloud_region", "global")),
+                email, "", 
+                region,
                 body.get("code", ""))
             if result.get("status") == "ok":
                 self.db.set_settings({
+                    "cloud_email": email,
+                    "cloud_region": region,
                     "cloud_token": result.get("token", ""),
                     "cloud_uid": result.get("uid", ""),
                 })

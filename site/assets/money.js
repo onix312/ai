@@ -411,6 +411,8 @@ async function runCalc() {
   runPayback(v, profit, v.qty);
 }
 
+const runCalcDebounced = debounce(runCalc, 180);
+
 // ------------------------------------------------------- минимальная партия
 async function runMinBatch(v) {
   if (!v.plate_grams || !v.plate_hours) { $('calc_min_batch').innerHTML = ''; return; }
@@ -865,7 +867,13 @@ function bind() {
     'calc_prep_find', 'calc_prep_orient', 'calc_prep_dupe',
     'calc_prep_profile', 'calc_prep_supports', 'calc_prep_slice',
     'calc_dim_x', 'calc_dim_y']
-    .forEach((id) => { const el = $(id); if (el) el.addEventListener('input', runCalcDebounced); });
+    .forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.addEventListener('input', runCalcDebounced);
+        el.addEventListener('change', runCalcDebounced);
+      }
+    });
 
   // Сложность → автооценка подготовки
   const complexityEl = $('calc_complexity');
