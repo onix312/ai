@@ -752,6 +752,24 @@ async function renderCloudSettings(s) {
     + '</span></div>'
     + (devices.length ? `<div class="set-row"><div class="sinfo"><b>Принтеры аккаунта</b><small>Добавляются в «Принтеры» → «＋ Принтер» → «Найти»</small></div>`
       + `<span class="chip ok">${devices.length} шт</span></div>` : '');
+  const passInput = $('cloud_password');
+  if (passInput) {
+    passInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        el.querySelector('#cloud_login_btn').click();
+      }
+    });
+  }
+  const codeInput = $('cloud_code');
+  if (codeInput) {
+    codeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        el.querySelector('#cloud_code_btn').click();
+      }
+    });
+  }
   el.querySelector('#cloud_login_btn').addEventListener('click', async () => {
     const email = ($$('[data-setting="cloud_email"]')[0] || {}).value || '';
     const region = ($$('[data-setting="cloud_region"]')[0] || {}).value || 'global';
@@ -767,6 +785,7 @@ async function renderCloudSettings(s) {
       } else if (res.status === 'need_code') {
         $('cloud_code_row').hidden = false;
         $('cloud_code_btn').hidden = false;
+        $('cloud_code').focus();
         toast('Код отправлен', 'Введите код из письма/SMS');
       } else if (res.status === 'need_tfa') {
         const code = window.prompt('Код из приложения-аутентификатора:', '');
@@ -783,8 +802,12 @@ async function renderCloudSettings(s) {
     } catch (e) { fail(e); }
   });
   el.querySelector('#cloud_code_btn').addEventListener('click', async () => {
+    const email = ($$('[data-setting="cloud_email"]')[0] || {}).value || '';
+    const region = ($$('[data-setting="cloud_region"]')[0] || {}).value || 'global';
+    const code = ($('cloud_code').value || '').trim();
+    if (!code) return toast('Введите код', 'Код из письма/SMS', 'warn');
     try {
-      const res = await post('/api/cloud/code', { code: $('cloud_code').value || '' });
+      const res = await post('/api/cloud/code', { code, email, region });
       if (res.status !== 'ok') return fail(new Error(res.message || 'Код не подошёл'));
       toast('Bambu Cloud подключён', 'Принтеры аккаунта добавятся в список');
       $('cloud_code').value = '';
