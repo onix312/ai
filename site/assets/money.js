@@ -88,7 +88,11 @@ function renderStock() {
       + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}</small>`
       + `<div class="nums"><em>${nfmt(s.remaining_grams)}</em><span class="muted">/ ${nfmt(s.total_grams)} г · ${money(s.value)}</span></div>`
       + `<div class="bar ${p < 15 ? 'warn' : 'ok'}"><i style="width:${p}%"></i></div>`
-      + `<small class="muted" style="margin-top:5px">израсходовано ${nfmt(s.used_grams)} г</small>`
+      + `<small class="muted" style="margin-top:5px">израсходовано ${nfmt(s.used_grams)} г`
+      + (s.last_dry ? ` · сушка ${esc(dateText(s.last_dry))}`
+        + (num(s.last_dry_temp) ? ` ${nfmt(s.last_dry_temp)}°` : '')
+        + (num(s.last_dry_min) ? ` ${nfmt(s.last_dry_min)} мин` : '') : '')
+      + '</small>'
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">Пополнить</button>`
       + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">Списать</button>`
@@ -123,15 +127,34 @@ async function loadFilamentStats() {
 async function openSpoolQr(spoolId) {
   const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
   if (!spool) return;
-  const host = (location.host || '127.0.0.1:8080');
-  const url = location.protocol + '//' + host + '/spool.html?id=' + encodeURIComponent(spoolId);
+  let url = '';
+  let reachable = true;
+  let source = '';
+  try {
+    const res = await get('/api/spool/qr-link', { id: spoolId });
+    url = res.url || '';
+    reachable = res.reachable !== false;
+    source = res.source || '';
+  } catch (e) {
+    // офлайн: не подставляем localhost — телефон его не откроет
+    url = '';
+  }
   const code = $('spool_qr_code');
-  code.innerHTML = (window.QR && window.QR.svg)
+  code.innerHTML = (url && window.QR && window.QR.svg)
     ? window.QR.svg(url, { size: 240, dark: '#111827', light: '#ffffff' })
     : '<div class="empty compact"><span>QR недоступен</span></div>';
+  const warn = !reachable || !url
+    ? '<div class="notice warn" style="margin-top:10px"><span>⚠</span><span>'
+      + 'Ссылка для телефона не собралась: нет LAN-адреса. '
+      + 'Запустите PrintFlow с доступом по сети (python pf.py) и укажите IP в '
+      + 'Настройки → Система → Адрес для QR, например http://192.168.1.50:8080</span></div>'
+    : (source === 'lan'
+      ? '<small class="muted" style="display:block;margin-top:6px">Телефон должен быть в той же Wi-Fi сети.</small>'
+      : '');
   $('spool_qr_info').innerHTML = `<b>${esc(spool.material)} ${esc(spool.color_name)}</b>`
-    + `<small class="muted" style="display:block">${esc(url)}</small>`
-    + `<small class="muted">Наклейте на катушку. При установке в AMS отсканируйте — слот привяжется сам.</small>`;
+    + (url ? `<small class="muted" style="display:block">${esc(url)}</small>` : '')
+    + `<small class="muted">Наклейте на катушку. При установке в AMS отсканируйте — слот привяжется сам.</small>`
+    + warn;
   openModal('spool_qr_modal');
 }
 async function spoolDry(spoolId) {
@@ -701,6 +724,10 @@ function bind() {
     } catch (e) { fail(e); }
   });
 
+  const spoolLabels = $('spool_labels');
+  if (spoolLabels) spoolLabels.addEventListener('click', () => {
+    window.open('/labels.html?kind=spool', '_blank', 'noopener');
+  });
   $('spool_add').addEventListener('click', () => openSpool());
   $('spool_save').addEventListener('click', async () => {
     const payload = {
@@ -766,6 +793,9 @@ function bind() {
       PF.refreshCore();
     } catch (e) { fail(e); }
   });
+
+  const spoolQrPrint = $('spool_qr_print');
+  if (spoolQrPrint) spoolQrPrint.addEventListener('click', () => window.print());
 
   document.addEventListener('click', async (e) => {
     const dry = e.target.closest('[data-spool-dry]');

@@ -22,6 +22,8 @@
  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px; }
  .cam { width:100%; border-radius:12px; background:#0a0f1e; aspect-ratio:4/3; object-fit:cover; }
  .state { font-size:13px; font-weight:650; margin-top:8px; }
+ .lan { margin-top:8px; font-size:12px; color:var(--muted); word-break:break-all; }
+ .lan button { margin-left:8px; padding:4px 8px; border:0; border-radius:7px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer; }
  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
  .btn { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
    padding:18px 8px; border-radius:14px; border:1px solid var(--line); background:var(--panel);
@@ -35,6 +37,7 @@
  .order .t { flex:1; min-width:0; }
  .order b { font-size:13.5px; } .order small { display:block; color:var(--muted); font-size:11px; }
  .order button { padding:9px 12px; border-radius:9px; border:0; background:var(--ok); color:#fff; font-weight:700; cursor:pointer; }
+ .low { font-size:12.5px; color:var(--warn); margin-top:6px; }
  .msg { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:#fff; color:#12203c;
    padding:10px 16px; border-radius:10px; font-size:13px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
    opacity:0; pointer-events:none; transition:opacity .2s; }
@@ -48,16 +51,24 @@
  <div class="card">
   <img class="cam" id="cam" alt="Камера">
   <div class="state" id="state">—</div>
+  <div class="lan" id="lan"></div>
  </div>
 
  <div class="card">
-  <div class="order" style="padding-top:0"><div class="t"><b>Заказы к выдаче</b><small>первые активные по сроку</small></div></div>
+  <div class="order" style="padding-top:0"><div class="t"><b>Заказы к выдаче</b><small>готовые и ближайшие</small></div></div>
   <div id="orders"></div>
+ </div>
+
+ <div class="card" id="lowBox" hidden>
+  <div class="order" style="padding-top:0"><div class="t"><b>Пластик</b><small>ниже порога</small></div></div>
+  <div id="lows"></div>
  </div>
 
  <div class="grid">
   <button class="btn primary" id="b_cam" type="button"><span class="ic">📷</span>Кадр</button>
-  <button class="btn" id="b_status" type="button"><span class="ic">≡</span>Статусы</button>
+  <button class="btn" id="b_resume" type="button"><span class="ic">▶</span>Продолжить</button>
+  <button class="btn" id="b_light" type="button"><span class="ic">☀</span>Свет</button>
+  <button class="btn" id="b_next" type="button"><span class="ic">≡</span>Следующее</button>
   <button class="btn" id="b_removed" type="button"><span class="ic">✋</span>Снял деталь</button>
   <button class="btn danger" id="b_pause" type="button"><span class="ic">❙❙</span>Пауза</button>
  </div>
@@ -66,55 +77,106 @@
 <script>
 (function(){
   'use strict';
+  var ops = {};
   function $(s){ return document.querySelector(s); }
-  function toast(t){ var m=$('msg'); m.textContent=t; m.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(function(){m.classList.remove('on');},2400); }
+  function toast(t){ var m=$('#msg'); m.textContent=t; m.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(function(){m.classList.remove('on');},2400); }
   function post(p, body){ return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();}); }
   function num(v,d){ var n=parseFloat(String(v??'').replace(',','.')); return isFinite(n)?n:(d||0); }
+  function pid(){ return (ops.printer && ops.printer.id) || ''; }
+  function copy(text){
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ toast('Скопировано'); }, function(){ toast(text); });
+    } else toast(text);
+  }
+
+  function renderOps(d){
+    ops = d || {};
+    var p = ops.printer || {};
+    var running = ['RUNNING','PREPARE'].indexOf(p.state) >= 0;
+    $('#state').textContent = (p.name || 'Принтер') + ' — ' + (p.state_label || p.state || 'нет связи')
+      + (running ? ' · ' + Math.round(num(p.progress)) + '%' : '')
+      + (ops.next ? ' · далее ' + ops.next : '');
+    if (p.camera && p.id) {
+      $('#cam').src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
+    }
+    var lan = ops.lan || {};
+    var box = $('#lan');
+    if (lan.base) {
+      box.innerHTML = (lan.reachable === false
+        ? 'QR ведёт на localhost — укажите адрес в Настройках. '
+        : '') + lan.base + ' <button type="button" id="b_copy">Копировать</button>';
+      var c = $('#b_copy');
+      if (c) c.onclick = function(){ copy(lan.base); };
+    }
+    var ready = ops.ready || [];
+    $('#orders').innerHTML = ready.length ? ready.map(function(o){
+      return '<div class="order"><div class="t"><b>№' + o.number + ' · ' + (o.product || '') + '</b>'
+        + '<small>' + (o.due ? 'срок ' + o.due : 'без срока')
+        + (o.customer_name ? ' · ' + o.customer_name : '') + '</small></div>'
+        + '<button data-fulfill="' + o.id + '">Выдать</button></div>';
+    }).join('') : '<div class="order"><div class="t"><small>Готовых к выдаче нет.</small></div></div>';
+    var lows = [];
+    (ops.ams_low || []).forEach(function(t){
+      lows.push((t.label || 'слот') + ' · ' + Math.round(num(t.remain)) + '%');
+    });
+    (ops.low_spools || []).forEach(function(s){
+      lows.push((s.material || '') + ' ' + (s.color_name || '') + ' · ' + Math.round(num(s.remaining_grams)) + ' г');
+    });
+    $('#lowBox').hidden = !lows.length;
+    $('#lows').innerHTML = lows.map(function(x){ return '<div class="low">' + x + '</div>'; }).join('');
+  }
 
   function refresh(){
-    fetch('/api/state').then(function(r){return r.json();}).then(function(d){
-      var p=(d.printers||[])[0] || d.active;
-      if(!p){ $('#state').textContent='Принтер не добавлен'; return; }
-      var info=p.printer||{};
-      var running=['RUNNING','PREPARE'].indexOf(info.state)>=0;
-      $('#state').textContent = p.name+' — '+(info.state_label||info.state)
-        + (running ? ' · '+Math.round(num(info.progress))+'%' : '');
-      if(p.camera && p.camera.available){
-        $('#cam').src='/api/printer/camera.jpg?printer_id='+encodeURIComponent(p.id)+'&t='+Date.now();
-      }
-    }).catch(function(){});
-    fetch('/api/orders').then(function(r){return r.json();}).then(function(d){
-      var finals=[]; fetch('/api/statuses').then(function(r){return r.json();}).then(function(s){
-        finals=(s.statuses||[]).filter(function(x){return num(x.is_final);}).map(function(x){return x.id;});
-        var list=(d.orders||[]).filter(function(o){ return finals.indexOf(o.status)<0 && num(o.hours)>0; })
-          .sort(function(a,b){ return String(a.due||'9999').localeCompare(String(b.due||'9999')); }).slice(0,6);
-        $('#orders').innerHTML = list.length ? list.map(function(o){
-          return '<div class="order"><div class="t"><b>№'+o.number+' · '+o.product+'</b>'
-            + '<small>'+ (o.due?'срок '+o.due:'без срока') + (o.customer_name?' · '+o.customer_name:'') +'</small></div>'
-            + '<button data-fulfill="'+o.id+'">Выдать</button></div>';
-        }).join('') : '<div class="order"><div class="t"><small>Активных заказов нет.</small></div></div>';
-      });
+    fetch('/api/ops/today').then(function(r){ return r.json(); }).then(renderOps).catch(function(){
+      fetch('/api/state').then(function(r){ return r.json(); }).then(function(d){
+        var p = (d.printers || [])[0] || d.active || {};
+        var info = p.printer || {};
+        $('#state').textContent = (p.name || 'Принтер') + ' — ' + (info.state_label || info.state || '—');
+        if (p.camera && p.camera.available) {
+          $('#cam').src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
+        }
+      }).catch(function(){});
     });
   }
 
   document.addEventListener('click', function(e){
-    var f=e.target.closest('[data-fulfill]');
-    if(f){
-      if(!confirm('Выдать заказ? Остаток оплаты будет зачислен.')) return;
-      post('/api/order/fulfill',{id:f.dataset.fulfill}).then(function(d){
-        if(d.ok) toast('Выдан №'+d.order.number); else toast(d.error||'Ошибка');
+    var f = e.target.closest('[data-fulfill]');
+    if (f) {
+      if (!confirm('Выдать заказ? Остаток оплаты будет зачислен.')) return;
+      post('/api/order/fulfill', { id: f.dataset.fulfill }).then(function(d){
+        if (d.ok) toast('Выдан №' + d.order.number); else toast(d.error || 'Ошибка');
         refresh();
       });
       return;
     }
-    if(e.target.id==='b_cam'){ refresh(); return; }
-    if(e.target.id==='b_removed'){ post('/api/printer/part-removed',{}).then(function(d){ toast('Снято · простой '+d.idle_min+' мин'); }); return; }
-    if(e.target.id==='b_pause'){
-      if(!confirm('Пауза?')) return;
-      post('/api/printer/command',{command:'pause'}).then(function(){ toast('Пауза'); });
+    if (e.target.id === 'b_cam') { refresh(); return; }
+    if (e.target.id === 'b_removed') {
+      post('/api/printer/part-removed', { printer_id: pid() }).then(function(d){
+        toast('Снято · простой ' + (d.idle_min || 0) + ' мин');
+      });
       return;
     }
-    if(e.target.id==='b_status'){ location.href='/index.html#orders'; return; }
+    if (e.target.id === 'b_pause') {
+      if (!confirm('Пауза?')) return;
+      post('/api/printer/command', { command: 'pause', printer_id: pid() }).then(function(){ toast('Пауза'); });
+      return;
+    }
+    if (e.target.id === 'b_resume') {
+      post('/api/printer/command', { command: 'resume', printer_id: pid() }).then(function(){ toast('Продолжить'); });
+      return;
+    }
+    if (e.target.id === 'b_light') {
+      post('/api/printer/command', { command: 'light', value: true, printer_id: pid() }).then(function(){ toast('Свет'); });
+      return;
+    }
+    if (e.target.id === 'b_next') {
+      if (!ops.next_id) { toast(ops.queue ? 'Нет id задания' : 'Очередь пуста'); return; }
+      if (!confirm('Запустить следующее: ' + (ops.next || '') + '?')) return;
+      post('/api/jobs/start', { id: ops.next_id, printer_id: pid() }).then(function(d){
+        toast(d.ok ? 'Запущено' : (d.error || 'Не вышло'));
+        refresh();
+      });
+    }
   });
 
   refresh();
@@ -122,8 +184,6 @@
 })();
 </script>
 <script>
-/* Служебный воркер: мгновенный старт панели и работа при мигании сети.
-   Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -272,7 +272,16 @@ class Shelf:
         }
 
     # ------------------------------------------------------------- QR-ценник
-    def qr_link(self, item_id: str, host: str = "") -> str:
-        """URL страницы позиции для QR-ценника (телефон в той же сети)."""
-        host = (host or "127.0.0.1:8080").replace("http://", "").replace("https://", "")
-        return f"http://{host}/shelf.html?id={item_id}"
+    def qr_link(self, item_id: str, host: str = "", public_url: str = "",
+                listen_port: int = 8080) -> dict:
+        """URL страницы позиции для QR-ценника (телефон в той же сети).
+
+        Раньше подставлялся Host текущего запроса — если панель открыта как
+        localhost, в QR попадал localhost и телефон его не открывал.
+        Теперь берём LAN-IP (или настройку public_url).
+        """
+        from .config import public_page_url
+        from urllib.parse import quote
+        return public_page_url(
+            "/shelf.html", f"id={quote(str(item_id), safe='')}",
+            host_header=host, public_url=public_url, listen_port=listen_port)

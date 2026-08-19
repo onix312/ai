@@ -23,6 +23,8 @@
  label { display:block; margin-top:12px; font-size:12.5px; color:var(--muted); }
  select { width:100%; margin-top:6px; padding:12px; border:1px solid var(--line); border-radius:12px;
    background:var(--bg); color:var(--text); font-size:15px; }
+ .chk { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:13px; color:var(--text); }
+ .chk input { width:18px; height:18px; }
  .btn { display:block; width:100%; margin-top:14px; padding:13px; border:0; border-radius:12px;
    background:var(--accent); color:#fff; font-size:15px; font-weight:650; cursor:pointer; }
  .btn:disabled { opacity:.5; cursor:default; }
@@ -39,12 +41,18 @@
   <p class="name" id="name">Загрузка…</p>
   <p class="muted" id="mat"></p>
   <div class="rest" id="rest">—</div>
+  <p class="muted" id="dry"></p>
+  <label>Принтер
+   <select id="printer"><option value="">Не выбран</option></select>
+  </label>
   <label>Установлена в AMS
    <select id="slot"><option value="">Не выбрано</option></select>
   </label>
+  <p class="hint" id="suggest" hidden></p>
+  <label class="chk"><input type="checkbox" id="pushAms" checked> Записать тип и цвет в слот AMS</label>
   <button class="btn" id="bindBtn" type="button" disabled>Привязать катушку к слоту</button>
   <p class="hint">После привязки расход этой катушки будет списываться автоматически,
-  когда принтер печатает с этого слота.</p>
+  когда принтер печатает с этого слота. Телефон должен быть в той же Wi-Fi сети, что и PrintFlow.</p>
   <div class="msg" id="msg"></div>
  </div>
 </div>
@@ -53,6 +61,7 @@
   'use strict';
   var id = new URLSearchParams(location.search).get('id') || '';
   var spool = null;
+  var suggest = { slot: '', reason: '', trays: [] };
 
   function $(s) { return document.querySelector(s); }
   function num(v, d) { var n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : (d || 0); }
@@ -63,38 +72,107 @@
     clearTimeout(showMsg._t);
     showMsg._t = setTimeout(function () { m.className = 'msg'; }, 4000);
   }
+  function slotLabel(v) {
+    var n = parseInt(v, 10);
+    if (!isFinite(n) || n < 0) return String(v);
+    return 'AMS ' + (Math.floor(n / 4) + 1) + ' · слот ' + (n % 4 + 1);
+  }
+  function dryLine(s) {
+    if (!s.last_dry) return '';
+    var d = new Date(s.last_dry);
+    var when = isNaN(d) ? String(s.last_dry) : d.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    var extra = [];
+    if (num(s.last_dry_temp)) extra.push(Math.round(num(s.last_dry_temp)) + '°');
+    if (num(s.last_dry_min)) extra.push(Math.round(num(s.last_dry_min)) + ' мин');
+    return 'Сушка ' + when + (extra.length ? ' · ' + extra.join(' · ') : '');
+  }
+  function fillSlots(current) {
+    var slots = [];
+    for (var u = 0; u < 4; u++) for (var t = 0; t < 4; t++) {
+      slots.push({ v: String(u * 4 + t), label: 'AMS ' + (u + 1) + ' · слот ' + (t + 1) });
+    }
+    $('#slot').innerHTML = '<option value="">Не привязана</option>' + slots.map(function (s2) {
+      return '<option value="' + s2.v + '"' + (String(current) === s2.v ? ' selected' : '') + '>' + s2.label + '</option>';
+    }).join('');
+  }
+  function trayUuid(slot) {
+    var n = parseInt(slot, 10);
+    var trays = (suggest && suggest.trays) || [];
+    for (var i = 0; i < trays.length; i++) {
+      var t = trays[i];
+      if (num(t.unit) * 4 + num(t.slot) === n) return t.uuid || '';
+    }
+    return '';
+  }
+  function render(s, printers, sug) {
+    spool = s;
+    suggest = sug || suggest;
+    $('#name').textContent = (s.material || 'Катушка') + ' ' + (s.color_name || '');
+    var bound = s.ams_slot !== '' && s.ams_slot != null;
+    $('#mat').textContent = (s.brand || '') + (bound ? ' · ' + slotLabel(s.ams_slot) : ' · не привязана');
+    $('#rest').textContent = Math.round(num(s.remaining_grams)) + ' г из ' + Math.round(num(s.total_grams)) + ' г';
+    $('#dry').textContent = dryLine(s);
+    var pick = bound ? s.ams_slot : (suggest.slot || s.ams_slot);
+    fillSlots(pick);
+    var hint = $('#suggest');
+    if (!bound && suggest.slot) {
+      hint.hidden = false;
+      hint.textContent = 'Подсказка: ' + slotLabel(suggest.slot)
+        + (suggest.reason ? ' — ' + suggest.reason : '');
+    } else hint.hidden = true;
+    var list = printers || [];
+    $('#printer').innerHTML = '<option value="">Не выбран</option>' + list.map(function (p) {
+      return '<option value="' + p.id + '"' + (s.printer_id === p.id ? ' selected' : '') + '>'
+        + (p.name || p.id) + '</option>';
+    }).join('');
+    if (s.printer_id && !$('#printer').value) {
+      $('#printer').innerHTML += '<option value="' + s.printer_id + '" selected>Принтер</option>';
+    }
+    $('#bindBtn').disabled = false;
+  }
 
   function load() {
-    fetch('/api/spools?all=1').then(function (r) { return r.json(); }).then(function (d) {
-      spool = (d.spools || []).find(function (x) { return x.id === id; });
-      if (!spool) { $('#name').textContent = 'Катушка не найдена'; return; }
-      $('#name').textContent = spool.material + ' ' + (spool.color_name || '');
-      $('#mat').textContent = (spool.brand || '') + (spool.ams_slot !== '' && spool.ams_slot != null
-        ? ' · AMS слот ' + spool.ams_slot : ' · не привязана');
-      $('#rest').textContent = Math.round(num(spool.remaining_grams)) + ' г из ' + Math.round(num(spool.total_grams)) + ' г';
-      var slots = [];
-      for (var u = 0; u < 4; u++) for (var t = 0; t < 4; t++) {
-        slots.push({ v: String(u * 4 + t), label: 'AMS ' + (u + 1) + ' · слот ' + (t + 1) });
+    if (!id) { $('#name').textContent = 'В QR нет id катушки'; return; }
+    fetch('/api/spool?id=' + encodeURIComponent(id)).then(function (r) {
+      return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+    }).then(function (res) {
+      if (!res.ok || !res.d.spool) {
+        $('#name').textContent = (res.d && res.d.error) || 'Катушка не найдена';
+        return;
       }
-      $('#slot').innerHTML = '<option value="">Не выбрано</option>' + slots.map(function (s2) {
-        return '<option value="' + s2.v + '"' + (String(spool.ams_slot) === s2.v ? ' selected' : '') + '>' + s2.label + '</option>';
-      }).join('');
-      $('#bindBtn').disabled = false;
+      render(res.d.spool, res.d.printers, res.d.suggest);
     }).catch(function () {
-      $('#name').textContent = 'Нет связи с PrintFlow';
-      showMsg('Запустите коннектор PrintFlow', false);
+      fetch('/api/spools?all=1').then(function (r) { return r.json(); }).then(function (d) {
+        var found = (d.spools || []).find(function (x) { return x.id === id; });
+        if (!found) { $('#name').textContent = 'Катушка не найдена'; return; }
+        render(found, []);
+      }).catch(function () {
+        $('#name').textContent = 'Нет связи с PrintFlow';
+        showMsg('Откройте эту страницу с телефона в той же Wi-Fi сети. Если QR ведёт на localhost — перепечатайте наклейку из склада пластика.', false);
+      });
     });
   }
 
   $('#bindBtn').addEventListener('click', function () {
+    if (!spool) return;
     var slot = $('#slot').value;
-    if (!slot || !spool) return;
+    var printer = $('#printer').value;
     fetch('/api/spool/bind', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: spool.id, ams_slot: slot, printer_id: spool.printer_id || '' }),
+      body: JSON.stringify({
+        id: spool.id, ams_slot: slot,
+        printer_id: printer || spool.printer_id || '',
+        tray_uuid: trayUuid(slot),
+        push_ams: $('#pushAms').checked,
+      }),
     }).then(function (r) { return r.json(); }).then(function (d) {
-      if (d.ok) { showMsg('Катушка привязана к слоту ✓', true); $('#mat').textContent = '· AMS слот ' + slot; }
-      else showMsg(d.error || 'Не получилось', false);
+      if (d.ok) {
+        spool = d.spool || spool;
+        var note = slot ? 'Катушка привязана к слоту ✓' : 'Катушка отвязана ✓';
+        if (d.push_error) note += ' AMS: ' + d.push_error;
+        showMsg(note, true);
+        $('#mat').textContent = slot ? '· ' + slotLabel(slot) : '· не привязана';
+      } else showMsg(d.error || 'Не получилось', false);
     }).catch(function () { showMsg('Нет связи с коннектором', false); });
   });
 

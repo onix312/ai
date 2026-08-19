@@ -123,7 +123,135 @@ class Api:
         self.live = LiveBroadcaster(self.bus, self.manager)
         self.live.start()
         self.last_host = ""
+        self.listen_host = "127.0.0.1"
+        self.listen_port = 8080
         self.started_at = time.time()
+
+    def qr_target(self, path: str, query: str = "") -> dict:
+        """URL для QR-наклейки: LAN, а не localhost панели."""
+        from .config import public_page_url
+        return public_page_url(
+            path, query,
+            host_header=getattr(self, "last_host", ""),
+            public_url=str(self.db.setting("public_url", "") or ""),
+            listen_port=int(getattr(self, "listen_port", 8080) or 8080))
+
+    def _ams_slot_num(self, tray: dict) -> int:
+        return int(num(tray.get("unit"))) * 4 + int(num(tray.get("slot")))
+
+    def suggest_spool_slot(self, spool: dict) -> dict:
+        """Свободный или активный слот AMS — чтобы с телефона не угадывать номер."""
+        manager = getattr(self, "manager", None)
+        printer = manager.get(spool.get("printer_id") or "") if manager else None
+        if not printer:
+            return {"slot": "", "reason": "", "printer_id": "", "trays": []}
+        try:
+            snap = printer.snapshot()
+        except Exception:
+            return {"slot": "", "reason": "", "printer_id": printer.id, "trays": []}
+        trays = (snap.get("ams") or {}).get("trays") or []
+        empty = [t for t in trays if not t.get("type") or num(t.get("remain"), -1) == 0]
+        if empty:
+            return {"slot": str(self._ams_slot_num(empty[0])), "reason": "свободный слот",
+                    "printer_id": printer.id, "trays": trays}
+        need = str(spool.get("material") or "").upper()
+        same = [t for t in trays if need and str(t.get("type") or "").upper() == need]
+        if same:
+            return {"slot": str(self._ams_slot_num(same[0])), "reason": f"уже стоит {need}",
+                    "printer_id": printer.id, "trays": trays}
+        active = next((t for t in trays if t.get("active")), None)
+        if active:
+            return {"slot": str(self._ams_slot_num(active)), "reason": "активный слот",
+                    "printer_id": printer.id, "trays": trays}
+        return {"slot": "", "reason": "", "printer_id": printer.id, "trays": trays}
+
+    def labels(self, kind: str = "all") -> dict:
+        """Все ссылки для листа наклеек: катушки и ценники стеллажа."""
+        from urllib.parse import quote
+        kind = (kind or "all").strip().lower()
+        base = self.qr_target("/")
+        spools, shelf = [], []
+        if kind in ("", "all", "spool", "spools"):
+            for s in self.repo.spools():
+                info = self.qr_target("/spool.html", f"id={quote(str(s['id']), safe='')}")
+                spools.append({
+                    "id": s["id"], "url": info["url"],
+                    "material": s.get("material") or "",
+                    "color_name": s.get("color_name") or "",
+                    "brand": s.get("brand") or "",
+                    "color_hex": s.get("color_hex") or "#333333",
+                    "remaining_grams": s.get("remaining_grams"),
+                    "ams_slot": s.get("ams_slot"),
+                })
+        if kind in ("", "all", "shelf"):
+            for item in self.shelf.items():
+                info = self.shelf.qr_link(
+                    item["id"], getattr(self, "last_host", ""),
+                    str(self.db.setting("public_url", "") or ""),
+                    int(getattr(self, "listen_port", 8080) or 8080))
+                shelf.append({
+                    "id": item["id"], "url": info["url"],
+                    "name": item.get("name") or "",
+                    "price": item.get("price"),
+                    "qty": item.get("qty"),
+                })
+        return {"base": base["base"], "reachable": base["reachable"], "source": base["source"],
+                "spools": spools, "shelf": shelf}
+
+    def ops_today(self) -> dict:
+        """Сводка для телефона у станка: печать, выдача, пластик, LAN."""
+        lan = self.qr_target("/")
+        manager = getattr(self, "manager", None)
+        snap = manager.snapshot() if manager and hasattr(manager, "snapshot") else {}
+        active = snap.get("active") or {}
+        info = active.get("printer") or {}
+        trays = (active.get("ams") or {}).get("trays") or []
+        threshold = num(self.db.setting("filament_low_threshold", 15), 15)
+        ams_low = [t for t in trays
+                   if t.get("remain") is not None and num(t.get("remain")) < threshold]
+        ready_ids = [r["id"] for r in self.db.query(
+            "SELECT id FROM statuses WHERE is_final=0 AND"
+            " (id='ready' OR name LIKE 'Готов%')")]
+        ready = []
+        if ready_ids:
+            marks = ",".join("?" * len(ready_ids))
+            ready = self.db.query(
+                f"SELECT id, number, product, customer_name, due, price, paid, prepaid"
+                f" FROM orders WHERE status IN ({marks})"
+                f" ORDER BY COALESCE(due,'9999') LIMIT 8", ready_ids)
+        low_spools = []
+        for s in self.repo.spools():
+            if num(s.get("percent")) < threshold:
+                low_spools.append({
+                    "id": s["id"], "material": s.get("material"),
+                    "color_name": s.get("color_name"),
+                    "remaining_grams": s.get("remaining_grams"),
+                    "percent": s.get("percent"),
+                })
+            if len(low_spools) >= 6:
+                break
+        queued = [j for j in (snap.get("queue") or []) if j.get("state") == "queued"]
+        nxt = queued[0] if queued else {}
+        return {
+            "lan": lan,
+            "printer": {
+                "id": active.get("id") or "",
+                "name": active.get("name") or "",
+                "state": info.get("state") or "",
+                "state_label": info.get("state_label") or "",
+                "task": info.get("task") or "",
+                "progress": info.get("progress") or 0,
+                "remaining_min": info.get("remaining_min") or 0,
+                "camera": bool((active.get("camera") or {}).get("available")),
+            },
+            "ams_low": ams_low,
+            "ready": ready,
+            "queue": len(queued),
+            "next": nxt.get("name") or "",
+            "next_id": nxt.get("id") or "",
+            "low_spools": low_spools,
+            "quiet": bool(snap.get("quiet")),
+        }
 
     # --------------------------------------------------------------- хелперы
     def printer_or_fail(self, printer_id: str = "") -> BambuPrinter:
@@ -381,6 +509,24 @@ class Api:
             return 200, {"niches": self.repo.niches()}
         if path == "/api/spools":
             return 200, {"spools": self.repo.spools(one("all") == "1")}
+        if path == "/api/spool":
+            spool = self.repo.spool(one("id"))
+            if not spool:
+                return 404, {"error": "Катушка не найдена"}
+            suggest = self.suggest_spool_slot(spool)
+            return 200, {"spool": spool, "printers": self.repo.printers(),
+                         "suggest": suggest}
+        if path == "/api/spool/qr-link":
+            spool = self.repo.spool(one("id"))
+            if not spool:
+                return 404, {"error": "Катушка не найдена"}
+            from urllib.parse import quote
+            info = self.qr_target("/spool.html", f"id={quote(spool['id'], safe='')}")
+            return 200, {**info, "spool": {
+                "id": spool["id"], "material": spool.get("material"),
+                "color_name": spool.get("color_name"),
+                "brand": spool.get("brand") or "",
+            }}
         if path == "/api/catalog":
             return 200, {"catalog": self.repo.catalog()}
         if path == "/api/transactions":
@@ -445,7 +591,11 @@ class Api:
             item = self.shelf.item(one("id"))
             if not item:
                 return 404, {"error": "Позиция не найдена"}
-            return 200, {"url": self.shelf.qr_link(one("id"), getattr(self, "last_host", ""))}
+            info = self.shelf.qr_link(
+                one("id"), getattr(self, "last_host", ""),
+                str(self.db.setting("public_url", "") or ""),
+                int(getattr(self, "listen_port", 8080) or 8080))
+            return 200, info
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature":
             return 200, {
@@ -487,7 +637,13 @@ class Api:
             return 200, self.network_diagnose(one("host"))
         if path == "/api/network/ips":
             from .config import get_local_ips
-            return 200, {"ips": get_local_ips()}
+            info = self.qr_target("/")
+            return 200, {"ips": get_local_ips(), "base": info["base"],
+                         "reachable": info["reachable"], "source": info["source"]}
+        if path == "/api/labels":
+            return 200, self.labels(one("kind", "all"))
+        if path == "/api/ops/today":
+            return 200, self.ops_today()
         if path == "/api/network/scan":
             from . import network
             ranges = [r for r in one("ranges").split(",") if r.strip()]
@@ -1279,17 +1435,55 @@ class Api:
                               spool.get("printer_id") or "", {"spool_id": spool["id"]})
             return 200, {"ok": True}
         if path == "/api/spool/bind":
-            if not body.get("id") or body.get("ams_slot") is None:
+            spool_id = str(body.get("id") or "").strip()
+            if not spool_id or "ams_slot" not in body:
                 raise ValueError("Нужны id катушки и слот AMS")
-            printer_id = body.get("printer_id") or ""
+            spool = self.repo.spool(spool_id)
+            if not spool:
+                raise ValueError("Катушка не найдена")
+            raw_slot = body.get("ams_slot")
+            slot = "" if raw_slot in (None, "") else str(raw_slot).strip()
+            printer_id = str(body.get("printer_id") or spool.get("printer_id") or "").strip()
+            tray_uuid = str(body.get("tray_uuid") or "").strip()
+            push_ams = body.get("push_ams") not in (False, 0, "0", "false")
+            if not slot:
+                self.db.execute(
+                    "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
+                    (printer_id or None, now_iso(), spool_id))
+                self.db.add_event("spool", "Катушка отвязана от AMS",
+                                  f"{spool.get('material')} {spool.get('color_name')}",
+                                  printer_id, {"spool_id": spool_id})
+                return 200, {"ok": True, "spool": self.repo.spool(spool_id) or {}}
+            try:
+                slot_n = int(float(slot))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Слот AMS: 0–15") from exc
+            if not 0 <= slot_n <= 15:
+                raise ValueError("Слот AMS: 0–15")
+            slot = str(slot_n)
             self.db.execute(
-                "UPDATE spools SET printer_id=?, ams_slot=?, updated_at=? WHERE id=?",
-                (printer_id or None, str(body["ams_slot"]), now_iso(), body["id"]))
-            spool = self.db.one("SELECT * FROM spools WHERE id=?", (body["id"],)) or {}
+                "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, updated_at=? WHERE id=?",
+                (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
+            pushed, push_error = False, ""
+            manager = getattr(self, "manager", None)
+            printer = manager.get(printer_id) if manager and printer_id else None
+            if push_ams and printer:
+                try:
+                    printer.command("ams_filament", {
+                        "ams_id": slot_n // 4, "tray_id": slot_n % 4,
+                        "type": spool.get("material") or "PLA",
+                        "color": spool.get("color_hex") or "FFFFFFFF",
+                    })
+                    pushed = True
+                except Exception as exc:
+                    push_error = str(exc)
             self.db.add_event("spool", "Катушка привязана к слоту AMS",
-                              f"{spool.get('material')} {spool.get('color_name')} → слот {body['ams_slot']}",
-                              printer_id, {"spool_id": body["id"]})
-            return 200, {"ok": True, "spool": spool}
+                              f"{spool.get('material')} {spool.get('color_name')} → слот {slot}",
+                              printer_id, {"spool_id": spool_id, "pushed": pushed})
+            result = {"ok": True, "spool": self.repo.spool(spool_id) or {}, "pushed": pushed}
+            if push_error:
+                result["push_error"] = push_error
+            return 200, result
         if path == "/api/update-check":
             return 200, self.updater.report(force=True)
         if path == "/api/update/apply":
@@ -1794,6 +1988,8 @@ class Server(ThreadingHTTPServer):
 
 def serve(host: str = "127.0.0.1", port: int = 8765, flags: list[str] | None = None) -> Server:
     Handler.api = Api()
+    Handler.api.listen_host = host
+    Handler.api.listen_port = port
     server = Server((host, port), Handler)
     server.flags = flags or []
     thread = threading.Thread(target=server.serve_forever, name="pf-http", daemon=True)

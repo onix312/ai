@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Наклейки · PrintFlow</title>
+<style>
+ :root { --ink:#111827; --muted:#64748b; --line:#dbe2ee; --bg:#f4f6fb; }
+ * { box-sizing:border-box; }
+ body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   background:var(--bg); color:var(--ink); }
+ .bar { position:sticky; top:0; z-index:2; display:flex; flex-wrap:wrap; gap:8px;
+   align-items:center; padding:12px 16px; background:#fff; border-bottom:1px solid var(--line); }
+ .bar b { font-size:15px; }
+ .bar small { color:var(--muted); }
+ .bar .sp { flex:1; }
+ .bar a, .bar button { padding:8px 12px; border-radius:9px; border:1px solid var(--line);
+   background:#fff; color:var(--ink); font:inherit; font-weight:650; font-size:13px;
+   text-decoration:none; cursor:pointer; }
+ .bar button.primary { background:#4f46e5; border-color:transparent; color:#fff; }
+ .warn { margin:12px 16px; padding:10px 12px; border-radius:10px;
+   background:#fff7ed; color:#9a3412; font-size:13px; }
+ .sheet { padding:16px; display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; }
+ .tag { background:#fff; border:1px dashed #94a3b8; border-radius:12px; padding:10px;
+   break-inside:avoid; page-break-inside:avoid; }
+ .tag .qr { display:flex; justify-content:center; }
+ .tag .qr svg { width:132px; height:132px; }
+ .tag .sw { width:100%; height:8px; border-radius:4px; margin:6px 0 4px; }
+ .tag b { display:block; font-size:13px; line-height:1.25; }
+ .tag small { display:block; color:var(--muted); font-size:10.5px; word-break:break-all; margin-top:3px; }
+ .empty { grid-column:1/-1; padding:40px 16px; text-align:center; color:var(--muted); }
+ @media print {
+   body { background:#fff; }
+   .bar, .warn { display:none !important; }
+   .sheet { padding:0; gap:6mm; grid-template-columns:repeat(3, 1fr); }
+   .tag { border-style:solid; }
+ }
+</style>
+</head>
+<body>
+<div class="bar">
+ <div><b>Наклейки цеха</b><small id="sub">загрузка…</small></div>
+ <span class="sp"></span>
+ <a href="/labels.html?kind=spool">Катушки</a>
+ <a href="/labels.html?kind=shelf">Ценники</a>
+ <a href="/labels.html?kind=all">Всё</a>
+ <button class="primary" type="button" id="printBtn">Печать</button>
+</div>
+<div id="warn" class="warn" hidden></div>
+<div class="sheet" id="sheet"></div>
+<script src="/assets/qr.js"></script>
+<script>
+(function () {
+  'use strict';
+  var kind = new URLSearchParams(location.search).get('kind') || 'all';
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, function (c) {
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+    });
+  }
+  function qr(url) {
+    if (!url || !window.QR || !window.QR.svg) return '';
+    return window.QR.svg(url, { size: 132, dark: '#111827', light: '#ffffff' });
+  }
+  function card(title, rest, url, hex) {
+    return '<article class="tag">'
+      + '<div class="qr">' + qr(url) + '</div>'
+      + (hex ? '<div class="sw" style="background:' + esc(hex) + '"></div>' : '')
+      + '<b>' + esc(title) + '</b>'
+      + (rest ? '<small>' + esc(rest) + '</small>' : '')
+      + '<small>' + esc(url) + '</small></article>';
+  }
+  document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+  fetch('/api/labels?kind=' + encodeURIComponent(kind)).then(function (r) { return r.json(); }).then(function (d) {
+    var titles = { spool: 'QR катушек', spools: 'QR катушек', shelf: 'Ценники стеллажа', all: 'Катушки и ценники' };
+    document.getElementById('sub').textContent = titles[kind] || titles.all;
+    if (d.reachable === false) {
+      var w = document.getElementById('warn');
+      w.hidden = false;
+      w.textContent = 'Ссылки ведут на localhost — с телефона не откроются. '
+        + 'Укажите LAN-адрес в Настройки → Система → Адрес для QR.';
+    }
+    var html = [];
+    (d.spools || []).forEach(function (s) {
+      var rest = [s.brand, s.remaining_grams != null ? Math.round(s.remaining_grams) + ' г' : '']
+        .filter(Boolean).join(' · ');
+      html.push(card((s.material || '') + ' ' + (s.color_name || ''), rest, s.url, s.color_hex));
+    });
+    (d.shelf || []).forEach(function (i) {
+      var rest = (i.price != null ? Math.round(i.price) + ' ₽' : '')
+        + (i.qty != null ? ' · ' + i.qty + ' шт' : '');
+      html.push(card(i.name || 'Позиция', rest, i.url, ''));
+    });
+    document.getElementById('sheet').innerHTML = html.join('')
+      || '<div class="empty">Нечего печатать: склад и стеллаж пусты.</div>';
+  }).catch(function () {
+    document.getElementById('sheet').innerHTML = '<div class="empty">Нет связи с PrintFlow.</div>';
+  });
+})();
+</script>
+</body>
+</html>

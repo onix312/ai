@@ -565,6 +565,7 @@
   <div><span class="eyebrow">Магазин · полка NOZZA</span><h1>Стеллаж</h1><p>Готовая продукция: остатки, продажи и план пополнения.</p></div>
   <div class="head-actions">
    <a class="btn" href="/order.html" target="_blank" rel="noopener">🛍 Витрина</a>
+   <a class="btn" href="/labels.html?kind=shelf" target="_blank" rel="noopener">▣ Все ценники</a>
    <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
@@ -582,7 +583,10 @@
 <section class="view" id="view-inventory">
  <div class="view-head">
   <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
-  <div class="head-actions"><button class="btn primary" id="spool_add" type="button">+ Катушка</button></div>
+  <div class="head-actions">
+   <a class="btn" href="/labels.html?kind=spool" target="_blank" rel="noopener" id="spool_labels">QR всех катушек</a>
+   <button class="btn primary" id="spool_add" type="button">+ Катушка</button>
+  </div>
  </div>
  <div class="kpi-grid" id="stock_kpis"></div>
  <div class="spool-grid" id="spool_grid"></div>

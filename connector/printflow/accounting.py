@@ -481,6 +481,189 @@ class Accounting:
             "table": results[:30],
         }
 
+    def live_spool(self, material: str = "") -> dict[str, Any]:
+        """Остаток и цена катушек выбранного материала — для калькулятора."""
+        s = self.db.settings()
+        default = num(s.get("default_spool_price"), 1600)
+        sql = "SELECT * FROM spools WHERE archived=0"
+        params: list[Any] = []
+        if material:
+            sql += " AND UPPER(material)=?"
+            params.append(str(material).strip().upper())
+        rows = self.db.query(sql + " ORDER BY remaining_grams DESC", params)
+        remaining = sum(num(r.get("remaining_grams")) for r in rows)
+        value = 0.0
+        weight_price = 0.0
+        for r in rows:
+            left = num(r.get("remaining_grams"))
+            total = max(1.0, num(r.get("total_grams"), 1000))
+            price = num(r.get("price"), default)
+            value += left / total * price
+            weight_price += left * price
+        avg = round(weight_price / remaining, 2) if remaining else default
+        top = rows[0] if rows else {}
+        return {
+            "material": str(material or "").upper(),
+            "remaining": round(remaining, 1),
+            "count": len(rows),
+            "price": round(avg if remaining else default, 2),
+            "value": round(value, 2),
+            "color_name": top.get("color_name") or "",
+        }
+
+    def quote(self, grams: float = 0.0, hours: float = 0.0, qty: float = 1.0,
+              material: str = "", color_swaps: float = 0.0, channel: str = "",
+              rush: bool = False, spool_price: float | None = None,
+              plate_grams: float = 0.0, plate_hours: float = 0.0,
+              fit_per_plate: float = 1.0, quality: str = "standard") -> dict[str, Any]:
+        """Быстрая котировка: себестоимость, цена, ₽/час, налог, хватит ли склада."""
+        s = self.db.settings()
+        live = self.live_spool(material)
+        price_spool = num(spool_price) if spool_price else live.get("price")
+        qty = max(1.0, num(qty, 1))
+        br = self.cost_breakdown(
+            grams=num(grams), hours=num(hours), qty=qty,
+            spool_price=price_spool or None, material=material,
+            color_swaps=num(color_swaps), quality=quality or "standard",
+            plate_grams=num(plate_grams), plate_hours=num(plate_hours),
+            fit_per_plate=num(fit_per_plate, 1))
+        sp = self.suggest_price(br["per_unit"], qty, channel, rush)
+        profit = round((sp["price"] - br["per_unit"]) * qty, 2)
+        hours_total = num(br.get("total_hours"))
+        pph = round(profit / hours_total, 2) if hours_total else 0.0
+        tax = round(self.order_tax(sp["price"] * qty, profit, "person"), 2)
+        target = num(s.get("target_profit_per_hour"), 250)
+        need = num(br.get("total_grams"))
+        have = num(live.get("remaining"))
+        shortfall = round(max(0.0, need - have), 1)
+        if not hours_total:
+            verdict = ""
+        elif pph >= target:
+            verdict = "ok"
+        elif pph >= target * 0.4:
+            verdict = "warn"
+        else:
+            verdict = "bad"
+        return {
+            "cost": br["total"], "per_unit": br["per_unit"],
+            "price": sp["price"], "profit": profit,
+            "profit_per_hour": pph, "tax": tax,
+            "after_tax": round(profit - tax, 2),
+            "hours": hours_total, "grams": need,
+            "purge_grams": br.get("purge_grams") or 0,
+            "target": target, "verdict": verdict,
+            "stock": live, "shortfall": shortfall,
+            "tax_rate": self.tax_rate_for("person"),
+            "tax_mode": TAX_MODES.get(str(s.get("tax_mode") or "none"), ""),
+        }
+
+    def plan_vs_fact(self, days: int = 30) -> dict[str, Any]:
+        """Слайсер vs факт: во сколько раз дольше и тяжелее печатаем."""
+        since = (datetime.now() - timedelta(days=max(1, days))).isoformat()
+        rows = self.db.query(
+            "SELECT j.grams, j.duration_min, j.est_grams, j.est_minutes,"
+            " o.grams og, o.hours oh FROM print_jobs j"
+            " LEFT JOIN orders o ON o.id=j.order_id"
+            " WHERE j.state='done' AND j.finished_at>=? LIMIT 200", (since,))
+        h_ratios, g_ratios = [], []
+        for r in rows:
+            actual_h = num(r.get("duration_min")) / 60.0
+            plan_h = num(r.get("est_minutes")) / 60.0 or num(r.get("oh"))
+            actual_g = num(r.get("grams"))
+            plan_g = num(r.get("est_grams")) or num(r.get("og"))
+            if actual_h > 0 and plan_h > 0:
+                h_ratios.append(actual_h / plan_h)
+            if actual_g > 0 and plan_g > 0:
+                g_ratios.append(actual_g / plan_g)
+
+        def med(lst):
+            if not lst:
+                return 0.0
+            lst = sorted(lst)
+            n = len(lst)
+            return lst[n // 2] if n % 2 else (lst[n // 2 - 1] + lst[n // 2]) / 2
+
+        return {
+            "count": len(rows),
+            "hours_factor": round(med(h_ratios), 2),
+            "grams_factor": round(med(g_ratios), 2),
+        }
+
+    def purchase_hint(self) -> list[dict]:
+        """Чего не хватает на активные заказы — список закупки."""
+        finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        need: dict[str, float] = {}
+        for o in self.db.query("SELECT material, grams, qty, status FROM orders"):
+            if o.get("status") in finals:
+                continue
+            mat = str(o.get("material") or "PLA").strip().upper() or "PLA"
+            need[mat] = need.get(mat, 0.0) + num(o.get("grams")) * max(1.0, num(o.get("qty"), 1))
+        have: dict[str, float] = {}
+        for r in self.db.query(
+                "SELECT UPPER(material) m, SUM(remaining_grams) g FROM spools"
+                " WHERE archived=0 GROUP BY UPPER(material)"):
+            have[str(r.get("m") or "PLA")] = num(r.get("g"))
+        out = []
+        for mat, grams in sorted(need.items(), key=lambda x: -x[1]):
+            left = have.get(mat, 0.0)
+            short = round(max(0.0, grams - left), 1)
+            if short <= 0:
+                continue
+            out.append({"material": mat, "need": round(grams, 1),
+                        "have": round(left, 1), "shortfall": short,
+                        "spools": int(-(-short // 1000))})
+        return out[:8]
+
+    def weak_orders(self, limit: int = 8) -> list[dict]:
+        """Активные заказы ниже нормы ₽/час — не брать или поднять цену."""
+        s = self.db.settings()
+        target = num(s.get("target_profit_per_hour"), 250)
+        finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        rows = []
+        for o in self.db.query("SELECT * FROM orders ORDER BY datetime(created_at) DESC"):
+            if o.get("status") in finals:
+                continue
+            if not num(o.get("hours")) and not num(o.get("actual_hours")):
+                continue
+            eco = self.order_economics(o)
+            pph = num(eco.get("profit_per_hour"))
+            if pph >= target:
+                continue
+            rows.append({
+                "id": o["id"], "number": o.get("number"), "product": o.get("product"),
+                "profit_per_hour": pph, "price": eco["price"], "profit": eco["profit"],
+                "hours": eco["hours"], "verdict": "bad" if pph < target * 0.4 else "warn",
+            })
+            if len(rows) >= limit:
+                break
+        return rows
+
+    def calc_board(self) -> dict[str, Any]:
+        """Сводка для виджета «Экономика» на Обзоре."""
+        s = self.db.settings()
+        target = num(s.get("target_profit_per_hour"), 250)
+        goal = num(s.get("goal_profit_month"), 60000)
+        summary = self.summary(30)
+        month = self.pnl_month(month_key())
+        left = max(0.0, goal - num(month.get("profit")))
+        hours_to_goal = round(left / target, 1) if target else 0.0
+        pph = num(summary.get("profit_per_print_hour"))
+        if pph >= target:
+            verdict = "ok"
+        elif pph >= target * 0.4:
+            verdict = "warn"
+        else:
+            verdict = "bad"
+        return {
+            "target": target, "goal": goal,
+            "month_profit": round(num(month.get("profit")), 2),
+            "hours_to_goal": hours_to_goal,
+            "pph": pph, "verdict": verdict,
+            "weak": self.weak_orders(),
+            "buy": self.purchase_hint(),
+            "fact": self.plan_vs_fact(30),
+        }
+
     # -------------------------------------------------------------- налоги
     def tax_rate_for(self, payer: str = "person") -> float:
         """Действующая ставка налога с дохода, %."""

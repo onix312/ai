@@ -689,6 +689,7 @@ const AMS_SETTINGS = [
   ['dry_humidity_threshold', 'Порог влажности AMS, %', 'Уже в Авто — дублируем тут', 'num', 1],
 ];
 const SYSTEM2 = [
+  ['public_url', 'Адрес для QR', 'Пусто — LAN IP компьютера. Пример: http://192.168.1.50:8080', 'text'],
   ['encrypt_access_code', 'Шифровать Access Code', 'Хранить в зашифрованном виде (эксперимент)', 'bool'],
   ['backup_keep', 'Хранить бэкапов', 'Ротация в папке backups', 'num', 1],
   ['ui_density', 'Плотность UI', 'compact или normal', 'text'],
