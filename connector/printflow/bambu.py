@@ -52,6 +52,23 @@ def deep_merge(base: dict, patch: dict) -> dict:
     return base
 
 
+def rc_value(reason_code: Any) -> int:
+    """Код результата MQTT как число.
+
+    paho-mqtt 1.x передаёт в колбэки int, а 2.x — объект ReasonCode,
+    который нельзя привести через int(): получается TypeError прямо
+    внутри _on_connect, флаг connected не выставляется, и принтер
+    навсегда остаётся «не в сети», хотя соединение реально установлено.
+    """
+    if reason_code is None:
+        return 0
+    value = getattr(reason_code, "value", reason_code)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def fan_percent(raw: Any) -> int:
     """Bambu отдаёт скорость вентилятора либо 0..15, либо 0..255."""
     value = as_num(raw)
@@ -187,11 +204,13 @@ class BambuPrinter:
 
     # -------------------------------------------------------------- MQTT-события
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
-        ok = int(reason_code) == 0
+        rc = rc_value(reason_code)
+        ok = rc == 0
         self.connected, self.connecting = ok, False
         if not ok:
-            rc = int(reason_code)
-            if rc in (4, 5):
+            # paho 2.x отдаёт MQTT5-коды: 134 = неверный логин/пароль,
+            # 135 = не авторизован (аналог старых 4 и 5).
+            if rc in (4, 5, 134, 135):
                 self.last_error = f"Принтер отклонил подключение (код {rc}). Включите LAN Only + Developer Mode в настройках принтера: Settings → WLAN → LAN Only → Developer Mode ON. Проверьте Access Code и серийный номер."
                 self.on_event("need_developer_mode", "Требуется Developer Mode", f"Код {rc} — включите LAN Only + Developer Mode", {"reason_code": rc})
             else:
@@ -206,7 +225,7 @@ class BambuPrinter:
     def _on_disconnect(self, client, userdata, disconnect_flags=None, reason_code=0, properties=None):
         was = self.connected
         self.connected = False
-        if int(reason_code or 0) != 0:
+        if rc_value(reason_code) != 0:
             self.last_error = f"Соединение потеряно (код {reason_code})"
             if was:
                 self.on_event("offline", "Связь с принтером потеряна", self.record.get("name", ""), {})
