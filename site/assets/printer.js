@@ -145,6 +145,20 @@ function renderLive() {
   controls.forEach((b) => { b.disabled = !p.connection.connected; });
 }
 
+function amsColorName(hex) {
+  hex = String(hex || '').trim().replace('#', '');
+  if (hex.length < 6) return '';
+  const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+  if (mx - mn < 30) {
+    if (mx < 60) return 'Чёрный';
+    if (mx > 200) return 'Белый';
+    return 'Серый';
+  }
+  if (r >= g && r >= b) return g > 90 ? 'Оранжевый' : 'Красный';
+  if (g >= r && g >= b) return 'Зелёный';
+  return 'Синий';
+}
 function renderAms(p) {
   const ams = p.ams || { trays: [] };
   const trays = ams.trays || [];
@@ -161,14 +175,21 @@ function renderAms(p) {
   }
   host.innerHTML = trays.map((t) => {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
+    const human = amsColorName(t.color) || '';
+    let spoolHint = '';
+    try {
+      const sp = (PF.state.spools || []).find((s) => String(s.ams_slot) === String(t.slot) && String(s.printer_id) === String(p.id));
+      if (sp && sp.color_name) spoolHint = ' · ' + sp.color_name;
+    } catch(e) {}
     return `<div class="ams-slot${t.active ? ' active' : ''}">`
       + `<div class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></div>`
-      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}</b>`
-      + `<small>${esc(t.type || 'Не задан')}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
+      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}${human ? ' · ' + esc(human) : ''}</b>`
+      + `<small>${esc(t.type || 'Не задан')}${human ? ' · ' + esc(human) : ''}${spoolHint}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
       + (remain != null ? `<div class="bar thin${remain < 15 ? ' warn' : ''}"><i style="width:${clamp(remain, 0, 100)}%"></i></div>` : '')
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}">Тип</button>`
+      + (t.active ? `<span class="chip ok" style="margin-left:6px">активен</span>` : '')
       + '</div></div>';
   }).join('');
 }

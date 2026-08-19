@@ -171,6 +171,37 @@ function colorsToJson(str) {
   return JSON.stringify(out);
 }
 
+function amsHexToName(hex) {
+  hex = String(hex || '').trim().replace('#', '');
+  if (hex.length < 6) return '';
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  if (mx - mn < 30) {
+    if (mx < 60) return 'Чёрный';
+    if (mx > 200) return 'Белый';
+    return 'Серый';
+  }
+  if (r >= g && r >= b) return g > 90 ? 'Оранжевый' : 'Красный';
+  if (g >= r && g >= b) return 'Зелёный';
+  return 'Синий';
+}
+function currentAmsTray() {
+  try {
+    const live = PF.livePrinter();
+    if (!live || !live.ams || !live.ams.trays.length) return null;
+    return live.ams.trays.find((t) => t.active) || live.ams.trays[0] || null;
+  } catch (e) { return null; }
+}
+function fillFromAms() {
+  const tray = currentAmsTray();
+  if (!tray) return fail(new Error('AMS не на связи — нет данных о слотах'));
+  if (tray.type) $('of_material').value = tray.type;
+  const name = amsHexToName(tray.color) || tray.color || '';
+  if (name) $('of_color').value = name;
+  toast('Взято из AMS', `${tray.type || ''} ${name}`.trim() || tray.label || 'слот');
+  updateEconDebounced();
+}
+
 async function openOrder(id) {
   editingOrder = id || null;
   fillSelectors();
@@ -190,6 +221,17 @@ async function openOrder(id) {
     if (last.channel) blank.channel = last.channel;
     if (last.niche_id) blank.niche_id = last.niche_id;
     if (last.material) blank.material = last.material;
+  }
+  // AMS: если создаём новый заказ и принтер на связи — подставляем материал и цвет из активного слота AMS
+  if (!id && !blank.color) {
+    const tray = currentAmsTray();
+    if (tray) {
+      if (tray.type && !blank.material) blank.material = tray.type;
+      else if (tray.type) blank.material = tray.type;
+      const amsName = amsHexToName(tray.color);
+      if (amsName) blank.color = amsName;
+      else if (tray.color) blank.color = tray.color;
+    }
   }
   const data = Object.assign({}, blank, order || {});
   OF.forEach((k) => {
@@ -528,6 +570,14 @@ function bind() {
     if (ne) { openNiche(ne.dataset.nicheEdit); }
   });
 
+  const amsBtn = $('of_ams_btn');
+  if (amsBtn) amsBtn.addEventListener('click', fillFromAms);
+  // hint: показать текущий AMS цвет
+  const hintEl = $('of_ams_hint');
+  if (hintEl) {
+    const t = currentAmsTray();
+    if (t) hintEl.textContent = `AMS: ${t.type || ''} ${amsHexToName(t.color) || ''}`.trim() || t.label || '';
+  }
   ['grams', 'hours', 'price', 'cost', 'prepaid', 'qty', 'manual_minutes'].forEach((k) =>
     $('of_' + k).addEventListener('input', updateEconDebounced));
   // Автоподстановка из базы изделий: выбрали позицию — вес, время, материал,
