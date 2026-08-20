@@ -97,25 +97,32 @@ function renderStock() {
   $('spool_grid').innerHTML = spools.length ? spools.map((s) => {
     const p = clamp(num(s.percent), 0, 100);
     const cls = p <= 0 ? 'empty-spool' : p < num(PF.state.settings.filament_low_threshold, 15) ? 'low' : '';
+    const dryInfo = s.last_dry
+      ? ` · было: ${esc(dateText(s.last_dry))}`
+        + (num(s.last_dry_temp) ? ` ${nfmt(s.last_dry_temp)}°` : '')
+        + (num(s.last_dry_min) ? ` ${nfmt(s.last_dry_min)} мин` : '')
+      : '';
     return `<article class="spool ${cls}" data-spool="${esc(s.id)}">`
-      + `<div class="reel" style="--filament:${esc(s.color_hex || '#4b5563')}"><span class="reel-pct">${Math.round(p)}%</span></div>`
+      + `<div class="spool-top">`
+      + `<div class="reel" style="--filament:${esc(s.color_hex || '#4b5563')};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
       + `<div class="body"><b>${esc(s.material)} ${esc(s.color_name)}</b>`
       + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}`
       + `${num(s.ams_sync, 1) !== 0 && s.synced_at ? ' · <span title="Остаток обновляется автоматически из AMS. Отключается в карточке катушки.">⟳ из AMS</span>' : ''}</small>`
       + `<div class="nums"><em>${nfmt(s.remaining_grams)}</em><span class="muted">/ ${nfmt(s.total_grams)} г · ${money(s.value)}</span></div>`
       + `<div class="bar ${p < 15 ? 'warn' : 'ok'}"><i style="width:${p}%"></i></div>`
-      + `<small class="muted" style="margin-top:5px">израсходовано ${nfmt(s.used_grams)} г`
-      + (s.last_dry ? ` · сушка ${esc(dateText(s.last_dry))}`
-        + (num(s.last_dry_temp) ? ` ${nfmt(s.last_dry_temp)}°` : '')
-        + (num(s.last_dry_min) ? ` ${nfmt(s.last_dry_min)} мин` : '') : '')
+      + `<small class="muted used">израсходовано ${nfmt(s.used_grams)} г`
+      + (s.last_dry ? ` · сушка ${esc(dateText(s.last_dry))}` : '')
       + '</small>'
+      + '</div></div>'
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">Пополнить</button>`
       + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">Списать</button>`
-      + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку">☀</button>`
-      + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR для наклейки">◫</button>`
-      + `<button class="icon-btn sm" type="button" data-spool-edit="${esc(s.id)}">✎</button>`
-      + '</div></div></article>';
+      + '</div>'
+      + '<div class="acts tools">'
+      + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">☀ Сушка</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR-код для наклейки на катушку">◫ QR</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-edit="${esc(s.id)}" title="Карточка катушки">✎ Изменить</button>`
+      + '</div></article>';
   }).join('') : '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Добавьте катушки, чтобы расход списывался автоматически.</span></div>';
 }
 
