@@ -3373,6 +3373,9 @@
  <div class="modal-body">
   <div class="form-section"><h3>Заказ</h3><div class="form-grid">
    <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" list="products_datalist" required></label>
+   <label class="field span-2"><span>Готовый товар из базы</span><select id="of_nom_id"><option value="">Не выбран — заказ на печать / услугу</option></select><small class="hint" id="of_stock_hint">Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.</small></label>
+   <label class="field"><span>Склад готового товара</span><select id="of_warehouse_id"><option value="">Автоматически</option></select></label>
+   <label class="check"><input type="checkbox" id="of_reserved"> Взять готовое со склада и зарезервировать</label>
    <label class="field"><span>Статус</span><select id="of_status"></select></label>
    <label class="field"><span>Приоритет</span><select id="of_priority"><option value="low">Низкий</option><option value="normal" selected>Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label>
    <label class="field"><span>Ниша</span><select id="of_niche_id"></select></label>
@@ -3394,7 +3397,8 @@
     <div id="of_spool_rows"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
      <button class="btn sm ghost" type="button" id="of_spool_add">+ Катушка</button>
-     <small class="muted">Укажите конкретные катушки и граммы — расход спишется точно с них. Мультицвет: своя строка на каждый цвет.</small>
+     <button class="btn sm ghost" type="button" id="of_spool_auto">⟳ Катушки из AMS</button>
+     <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
    </div>
    <label class="field"><span>Пластик, г</span><input id="of_grams" type="number" min="0" step="any"></label>

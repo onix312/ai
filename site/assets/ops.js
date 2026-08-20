@@ -159,8 +159,15 @@ function fillSelectors() {
   $('customers_datalist').innerHTML = PF.state.customers
     .map((c) => `<option value="${esc(c.name)}">`).join('');
   const pd = $('products_datalist');
-  if (pd) pd.innerHTML = (PF.state.catalog || [])
+  if (pd) pd.innerHTML = [...(PF.state.nomenclature || []), ...(PF.state.catalog || [])]
     .map((c) => `<option value="${esc(c.name)}">`).join('');
+  const nom = $('of_nom_id');
+  if (nom) nom.innerHTML = '<option value="">Не выбран — заказ на печать / услугу</option>'
+    + (PF.state.nomenclature || []).map((i) => `<option value="${esc(i.id)}">`
+      + `${esc(i.name)} · готово ${nfmt(i.free)} шт${num(i.price) ? ' · ' + money(i.price) : ''}</option>`).join('');
+  const wh = $('of_warehouse_id');
+  if (wh) wh.innerHTML = '<option value="">Автоматически</option>'
+    + (PF.state.warehouses || []).map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
   $('orders_filter_status').value = filters.status;
   $('orders_filter_niche').value = filters.niche;
 }
@@ -168,7 +175,7 @@ function fillSelectors() {
 const OF = ['product', 'status', 'priority', 'niche_id', 'channel', 'qty', 'due',
   'customer_name', 'phone', 'messenger', 'material', 'color', 'grams', 'hours',
   'manual_minutes', 'file', 'price', 'cost', 'prepaid', 'auto_cost', 'quality',
-  'quality_note', 'notes', 'colors'];
+  'quality_note', 'notes', 'colors', 'nom_id', 'warehouse_id'];
 
 /* Многоцветный расход: JSON в базе <-> строка «Белый:40, Чёрный:15» в форме */
 function colorsToStr(json) {
@@ -228,6 +235,68 @@ function collectSpoolRows() {
   return JSON.stringify(out);
 }
 
+function distributeSpoolGrams() {
+  const rows = $$('#of_spool_rows .of-spool-row');
+  if (!rows.length) return;
+  const total = num($('of_grams').value) * Math.max(1, num($('of_qty').value, 1));
+  if (!total) return;
+  const colors = colorsToStr($('of_colors').value).split(',').map((part) => num(part.split(':')[1])).filter((g) => g > 0);
+  const colorTotal = colors.reduce((a, b) => a + b, 0);
+  rows.forEach((row, index) => {
+    const input = row.querySelector('[data-spool-grams]');
+    if (!input) return;
+    if (colors[index] && colorTotal) input.value = Math.round(total * colors[index] / colorTotal * 10) / 10;
+    else if (rows.length === 1) input.value = Math.round(total * 10) / 10;
+    else if (!num(input.value)) input.value = Math.round(total / rows.length * 10) / 10;
+  });
+}
+
+function autoSpoolsFromAms() {
+  const live = PF.livePrinter();
+  const trays = live && live.ams && live.ams.trays ? live.ams.trays.filter((t) => t.type || t.uuid) : [];
+  if (!trays.length) return fail(new Error('AMS не на связи — слоты определить не удалось'));
+  const rows = [];
+  trays.forEach((tray) => {
+    const spool = (PF.state.spools || []).find((s) => !num(s.archived)
+      && String(s.printer_id || '') === String(live.id || '')
+      && String(s.ams_slot) === String(tray.slot))
+      || (PF.state.spools || []).find((s) => !num(s.archived) && tray.uuid && s.tray_uuid === tray.uuid);
+    if (spool && !rows.some((r) => r.spool_id === spool.id)) rows.push({ spool_id: spool.id, grams: 0 });
+  });
+  if (!rows.length) return fail(new Error('Сначала синхронизируйте AMS со складом пластика'));
+  renderSpoolRows(JSON.stringify(rows));
+  distributeSpoolGrams();
+  toast('Катушки подставлены из AMS', `${rows.length} шт · граммы распределены автоматически`);
+}
+
+function updateReadyStockHint() {
+  const item = (PF.state.nomenclature || []).find((i) => i.id === ($('of_nom_id') || {}).value);
+  const hint = $('of_stock_hint');
+  if (!hint) return;
+  hint.textContent = item
+    ? `На складе ${nfmt(item.qty)} шт, свободно ${nfmt(item.free)} шт. При выдаче остаток спишется автоматически.`
+    : 'Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.';
+  hint.classList.toggle('neg', Boolean(item && num(item.free) < Math.max(1, num($('of_qty').value, 1))));
+}
+
+async function fillFromFileEstimate() {
+  const file = $('of_file').value.trim();
+  if (!file) return;
+  try {
+    const res = await get('/api/estimate', { file });
+    const est = res.estimate || {};
+    const grams = num(est.grams) || num(est.total_grams);
+    const minutes = num(est.minutes) || num(est.total_minutes);
+    if (grams) $('of_grams').value = grams;
+    if (minutes) $('of_hours').value = Math.round(minutes / 60 * 100) / 100;
+    if (est.material) $('of_material').value = est.material;
+    if (est.color) $('of_color').value = est.color;
+    distributeSpoolGrams();
+    updateEconDebounced();
+    toast('Данные печати подставлены', `${grams ? nfmt(grams) + ' г' : ''}${minutes ? ' · ' + U.minutesText(minutes) : ''}`);
+  } catch (e) { /* Файл может ещё не быть известен коннектору — ручной ввод остаётся доступен. */ }
+}
+
 function amsHexToName(hex) {
   hex = String(hex || '').trim().replace('#', '');
   if (hex.length < 6) return '';
@@ -269,7 +338,7 @@ async function openOrder(id) {
     niche_id: '', channel: 'Полка магазина', qty: 1, due: '', customer_name: '', phone: '',
     messenger: '', material: 'PLA', color: '', grams: '', hours: '', manual_minutes: '',
     file: '', price: '', cost: '', prepaid: '', auto_cost: 1, quality: 'pending',
-    quality_note: '', notes: '',
+    quality_note: '', notes: '', nom_id: '', warehouse_id: '', reserved: 0,
   };
   // Умные значения по умолчанию: канал, ниша и материал — как в последнем заказе,
   // а не с нуля. Экономит пару полей на каждом похожем заказе.
@@ -298,6 +367,8 @@ async function openOrder(id) {
     el.value = data[k] == null ? '' : String(data[k]);
   });
   renderSpoolRows(data.spools);
+  $('of_reserved').checked = Boolean(num(data.reserved));
+  updateReadyStockHint();
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
   // в поле показываем фактически полученные деньги: платежи пишутся в paid,
   // prepaid остался от старых заказов
@@ -363,7 +434,9 @@ async function saveOrder() {
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
   payload.spools = collectSpoolRows();
+  payload.reserved = $('of_reserved').checked ? 1 : 0;
   if (!payload.product.trim()) return fail(new Error('Укажите изделие или работу'));
+  if (payload.reserved && !payload.nom_id) return fail(new Error('Для резерва выберите готовый товар из базы'));
   ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
   // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
   payload.paid = payload.prepaid;
@@ -661,12 +734,20 @@ function bind() {
     renderSpoolRows(JSON.stringify(rows));
   });
   const spoolHost = $('of_spool_rows');
-  if (spoolHost) spoolHost.addEventListener('click', (e) => {
-    const del = e.target.closest('[data-spool-del]');
-    if (!del) return;
-    del.closest('.of-spool-row').remove();
-    if (!$$('#of_spool_rows .of-spool-row').length) renderSpoolRows('[]');
-  });
+  if (spoolHost) {
+    spoolHost.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-spool-del]');
+      if (!del) return;
+      del.closest('.of-spool-row').remove();
+      if (!$$('#of_spool_rows .of-spool-row').length) renderSpoolRows('[]');
+      distributeSpoolGrams();
+    });
+    spoolHost.addEventListener('change', (e) => {
+      if (e.target.matches('[data-spool-sel]')) distributeSpoolGrams();
+    });
+  }
+  const spoolAuto = $('of_spool_auto');
+  if (spoolAuto) spoolAuto.addEventListener('click', autoSpoolsFromAms);
 
   const amsBtn = $('of_ams_btn');
   if (amsBtn) amsBtn.addEventListener('click', fillFromAms);
@@ -677,22 +758,42 @@ function bind() {
     if (t) hintEl.textContent = `AMS: ${t.type || ''} ${amsHexToName(t.color) || ''}`.trim() || t.label || '';
   }
   ['grams', 'hours', 'price', 'cost', 'prepaid', 'qty', 'manual_minutes'].forEach((k) =>
-    $('of_' + k).addEventListener('input', updateEconDebounced));
-  // Автоподстановка из базы изделий: выбрали позицию — вес, время, материал,
-  // цена и файл подставятся сами, если поля ещё пустые.
+    $('of_' + k).addEventListener('input', () => {
+      updateEconDebounced();
+      if (k === 'grams' || k === 'qty') distributeSpoolGrams();
+      if (k === 'qty') updateReadyStockHint();
+    }));
+  $('of_file').addEventListener('change', fillFromFileEstimate);
+
+  function applyProduct(item, ready) {
+    if (!item) return;
+    $('of_product').value = item.name || $('of_product').value;
+    if (num(item.grams)) $('of_grams').value = item.grams;
+    if (num(item.hours)) $('of_hours').value = item.hours;
+    if (item.material) $('of_material').value = item.material;
+    if (num(item.price)) $('of_price').value = item.price;
+    if (item.file) $('of_file').value = item.file;
+    if (item.niche_id) $('of_niche_id').value = item.niche_id;
+    if (ready) $('of_reserved').checked = num(item.free) >= Math.max(1, num($('of_qty').value, 1));
+    distributeSpoolGrams();
+    updateReadyStockHint();
+    updateEconDebounced();
+    toast(ready ? 'Готовый товар добавлен' : 'Подставлено из базы', item.name);
+  }
+  $('of_nom_id').addEventListener('change', () => {
+    const item = (PF.state.nomenclature || []).find((i) => i.id === $('of_nom_id').value);
+    if (!item) { $('of_reserved').checked = false; updateReadyStockHint(); return; }
+    applyProduct(item, true);
+  });
+  // Автоподстановка поддерживает и новый справочник товаров, и старую базу изделий.
   $('of_product').addEventListener('change', () => {
     const name = $('of_product').value.trim().toLowerCase();
     if (!name) return;
-    const item = (PF.state.catalog || []).find((c) => String(c.name || '').toLowerCase() === name);
+    const item = [...(PF.state.nomenclature || []), ...(PF.state.catalog || [])]
+      .find((c) => String(c.name || '').toLowerCase() === name);
     if (!item) return;
-    if (!num($('of_grams').value) && num(item.grams)) $('of_grams').value = item.grams;
-    if (!num($('of_hours').value) && num(item.hours)) $('of_hours').value = item.hours;
-    if (!$('of_material').value.trim() && item.material) $('of_material').value = item.material;
-    if (!num($('of_price').value) && num(item.price)) $('of_price').value = item.price;
-    if (!$('of_file').value.trim() && item.file) $('of_file').value = item.file;
-    if (!$('of_niche_id').value && item.niche_id) $('of_niche_id').value = item.niche_id;
-    toast('Подставлено из базы', item.name);
-    updateEconDebounced();
+    if (item.id && (PF.state.nomenclature || []).some((i) => i.id === item.id)) $('of_nom_id').value = item.id;
+    applyProduct(item, Boolean(item.free));
   });
   $('order_save').addEventListener('click', saveOrder);
   $('order_duplicate').addEventListener('click', async () => {

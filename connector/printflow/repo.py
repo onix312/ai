@@ -179,6 +179,9 @@ class Repo:
         data["actual_grams"] = 0.0
         data["actual_hours"] = 0.0
         data["actual_cost"] = 0.0
+        # Резерв готового товара уникален для исходного заказа. Копия может
+        # повторно выбрать склад после проверки актуального остатка.
+        data["reserved"] = 0
         data["notes"] = f"повтор заказа №{order.get('number')}" + (
             f"\n{order.get('notes')}" if order.get("notes") else "")
         data["author"] = "duplicate"

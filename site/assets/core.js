@@ -157,8 +157,9 @@ function catName(id) {
 const PF = {
   state: {
     version: '', settings: {}, printers: [], statuses: [], niches: [], customers: [],
-    orders: [], spools: [], catalog: [], jobs: { queue: [], history: [] },
-    finance: null, live: null, activePrinter: '', events: [], financeDays: 30, dashDays: 7,
+    orders: [], spools: [], catalog: [], nomenclature: [], warehouses: [],
+    jobs: { queue: [], history: [] }, finance: null, live: null, activePrinter: '',
+    events: [], financeDays: 30, dashDays: 7,
   },
   api: { get, post, api },
   ui: {
@@ -563,15 +564,18 @@ async function bootstrap() {
 }
 
 async function refreshCore() {
-  const [orders, customers, spools, catalog, jobs] = await Promise.all([
+  const [orders, customers, spools, catalog, jobs, nomenclature] = await Promise.all([
     get('/api/orders'), get('/api/customers'), get('/api/spools'),
     get('/api/catalog'), get('/api/jobs', { limit: 60 }),
+    get('/api/nomenclature', { kind: 'product' }),
   ]);
   PF.state.orders = orders.orders || [];
   PF.state.customers = customers.customers || [];
   PF.state.spools = spools.spools || [];
   PF.state.catalog = catalog.catalog || [];
   PF.state.jobs = jobs || { queue: [], history: [] };
+  PF.state.nomenclature = nomenclature.items || [];
+  PF.state.warehouses = nomenclature.warehouses || [];
   PF.emit('data');
 }
 PF.refreshCore = refreshCore;

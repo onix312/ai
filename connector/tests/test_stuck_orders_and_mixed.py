@@ -12,9 +12,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.accounting import Accounting, num  # noqa: E402
+from connector.printflow.api import Api  # noqa: E402
 from connector.printflow.batches import Batches  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.repo import Repo, uid  # noqa: E402
+from connector.printflow.stock import Stock  # noqa: E402
 
 
 class PrinterStub:
@@ -96,6 +98,19 @@ class OrderSpoolsTests(Base):
         self.assertEqual(result["filament"].get("by"), "order_spools")
         self.assertEqual(num(self.repo.spool(s1["id"])["remaining_grams"]), 850)
 
+    def test_order_spools_scale_to_printer_actual_weight(self):
+        s1 = self.spool(remaining=800)
+        s2 = self.spool(remaining=500)
+        order = self.repo.save_order({
+            "product": "Факт с принтера", "grams": 100,
+            "spools": json.dumps([{"spool_id": s1["id"], "grams": 70},
+                                  {"spool_id": s2["id"], "grams": 30}])})
+        job = {"id": uid("job"), "order_id": order["id"], "grams": 110,
+               "name": "actual.3mf"}
+        self.acc.consume_order_spools(job)
+        self.assertEqual(num(self.repo.spool(s1["id"])["remaining_grams"]), 723)
+        self.assertEqual(num(self.repo.spool(s2["id"])["remaining_grams"]), 467)
+
     def test_colors_field_saved_through_order_fields(self):
         """orders.colors — многоцветная раскладка хранится в заказе."""
         order = self.repo.save_order({
@@ -103,6 +118,49 @@ class OrderSpoolsTests(Base):
         row = self.db.one("SELECT colors FROM orders WHERE id=?", (order["id"],))
         parsed = json.loads(row["colors"])
         self.assertEqual(parsed[0]["color"], "Белый")
+
+
+class ReadyProductOrderTests(Base):
+    """Готовый товар резервируется в заказе и списывается при выдаче."""
+
+    def setUp(self):
+        super().setUp()
+        self.stock = Stock(self.db)
+        self.api = Api.__new__(Api)
+        self.api.db = self.db
+        self.api.repo = self.repo
+        self.api.stock = self.stock
+        self.api.acc = self.acc
+        self.db.set_settings({"auto_income_on_done": False})
+        self.wh = self.db.upsert("warehouses", {
+            "id": uid("wh"), "name": "Полка", "kind": "retail", "retail": 1,
+            "archived": 0, "position": 0})
+        self.nom = self.db.upsert("nomenclature", {
+            "id": uid("nom"), "code": "000100", "name": "Готовый адресник",
+            "kind": "product", "unit": "шт", "archived": 0})
+        self.stock.add_move(self.nom["id"], self.wh["id"], 5, 500,
+                            doc_id="receipt", doc_kind="receipt")
+
+    def test_reserve_and_consume_ready_product(self):
+        result = self.api.save_order({
+            "product": self.nom["name"], "nom_id": self.nom["id"],
+            "warehouse_id": self.wh["id"], "qty": 2, "reserved": 1,
+            "price": 600})
+        order = result["order"]
+        self.assertEqual(self.stock.reserved(self.nom["id"], self.wh["id"]), 2)
+        self.assertEqual(self.stock.qty(self.nom["id"], self.wh["id"]), 5)
+        self.api.fulfill_order(order["id"])
+        self.assertEqual(self.stock.qty(self.nom["id"], self.wh["id"]), 3)
+        self.assertEqual(self.stock.reserved(self.nom["id"], self.wh["id"]), 0)
+        move = self.db.one("SELECT * FROM stock_moves WHERE doc_id=? AND doc_kind='sale'",
+                           (order["id"],))
+        self.assertEqual(num(move["qty"]), -2)
+
+    def test_failed_reserve_rolls_back_order_and_previous_reserve(self):
+        with self.assertRaises(ValueError):
+            self.api.save_order({"product": self.nom["name"], "nom_id": self.nom["id"],
+                                 "warehouse_id": self.wh["id"], "qty": 8, "reserved": 1})
+        self.assertIsNone(self.db.one("SELECT id FROM orders WHERE product=?", (self.nom["name"],)))
 
 
 class ReconcileTests(Base):

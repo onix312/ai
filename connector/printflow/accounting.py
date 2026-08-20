@@ -851,10 +851,15 @@ class Accounting:
         if not isinstance(spools, list):
             return []
         out: list[dict] = []
+        planned_total = sum(num(item.get("grams")) for item in spools if isinstance(item, dict))
+        actual_total = num(job.get("grams"))
+        # Поля заказа задают пропорцию между катушками. Итоговый вес берём из
+        # факта принтера, чтобы плановые 100 г не оставались 100 г при факте 107 г.
+        scale = actual_total / planned_total if actual_total > 0 and planned_total > 0 else 1.0
         for item in spools:
             if not isinstance(item, dict):
                 continue
-            grams = num(item.get("grams"))
+            grams = round(num(item.get("grams")) * scale, 1)
             spool_id = str(item.get("spool_id") or "")
             if grams <= 0 or not spool_id:
                 continue

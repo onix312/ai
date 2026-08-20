@@ -489,6 +489,30 @@ class Api:
                           data={"order_id": order.get("id"), "source": "storefront"})
         return {"ok": True, "order_number": order.get("number"), "order_id": order.get("id")}
 
+    def save_order(self, body: dict) -> dict:
+        """Сохранить заказ и синхронизировать резерв готового товара."""
+        with self.db.transaction():
+            order = self.repo.save_order(body)
+            # У заказа может быть только один актуальный резерв. При изменении
+            # количества/товара старую строку закрываем и создаём новую.
+            self.stock.release(order_id=order["id"])
+            if num(order.get("reserved")) and order.get("nom_id"):
+                warehouse_id = order.get("warehouse_id") or ""
+                if not warehouse_id:
+                    candidate = self.db.one(
+                        "SELECT warehouse_id, SUM(qty) balance FROM stock_moves"
+                        " WHERE nom_id=? GROUP BY warehouse_id HAVING balance>=?"
+                        " ORDER BY balance DESC LIMIT 1",
+                        (order["nom_id"], max(1.0, num(order.get("qty"), 1))))
+                    warehouse_id = (candidate or {}).get("warehouse_id") or ""
+                    if warehouse_id:
+                        self.db.execute("UPDATE orders SET warehouse_id=? WHERE id=?",
+                                        (warehouse_id, order["id"]))
+                self.stock.reserve(order["nom_id"], max(1.0, num(order.get("qty"), 1)),
+                                   order["id"], warehouse_id, "готовый товар заказа")
+            order = self.repo.order(order["id"]) or order
+        return {"ok": True, "order": order}
+
     def fulfill_order(self, order_id: str, account_id: str = "") -> dict:
         """«Заказ выдан» одной кнопкой: остаток оплаты → финальный статус → текст.
 
@@ -504,6 +528,17 @@ class Api:
             raise ValueError("Не настроен финальный статус заказа")
         if order.get("status") == final["id"]:
             raise ValueError("Заказ уже выдан")
+        # Проверяем готовый остаток до зачисления оплаты: при ошибке выдачи
+        # касса не должна измениться наполовину.
+        if num(order.get("reserved")) and order.get("nom_id"):
+            reserve_check = self.db.one(
+                "SELECT * FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
+                (order_id,))
+            check_wh = (reserve_check or {}).get("warehouse_id") or order.get("warehouse_id") or ""
+            check_qty = max(1.0, num((reserve_check or {}).get("qty"), num(order.get("qty"), 1)))
+            available = self.stock.qty(order["nom_id"], check_wh)
+            if available < check_qty:
+                raise ValueError(f"На складе только {round(available, 1)} шт, нужно {round(check_qty, 1)}")
         collected = 0.0
         if self.db.setting("auto_income_on_done", True):
             rest = round(max(0.0, num(order.get("price")) -
@@ -513,7 +548,28 @@ class Api:
                     order_id, rest, "payment", account_id or order.get("account_id") or "",
                     "выдача заказа", "Оплата при выдаче заказа")
                 collected = rest
-        saved = self.repo.save_order({"id": order_id, "status": final["id"]})
+        # Готовое изделие списывается именно при выдаче, а не при создании
+        # заказа. Повторный вызов безопасен: движение продажи уникализируем
+        # проверкой по order_id до изменения остатка.
+        if num(order.get("reserved")) and order.get("nom_id"):
+            already = self.db.one(
+                "SELECT id FROM stock_moves WHERE doc_id=? AND doc_kind='sale' LIMIT 1",
+                (order_id,))
+            if not already:
+                reserve = self.db.one(
+                    "SELECT * FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
+                    (order_id,))
+                warehouse_id = (reserve or {}).get("warehouse_id") or order.get("warehouse_id") or ""
+                qty = max(1.0, num((reserve or {}).get("qty"), num(order.get("qty"), 1)))
+                available = self.stock.qty(order["nom_id"], warehouse_id)
+                if available < qty:
+                    raise ValueError(f"На складе только {round(available, 1)} шт, нужно {round(qty, 1)}")
+                unit_cost = self.stock.avg_cost(order["nom_id"], warehouse_id)
+                self.stock.add_move(order["nom_id"], warehouse_id, -qty, -unit_cost * qty,
+                                    doc_id=order_id, doc_kind="sale",
+                                    note=f"выдача заказа №{order.get('number') or ''}")
+            self.stock.release(order_id=order_id)
+        saved = self.repo.save_order({"id": order_id, "status": final["id"], "reserved": 0})
         number = str(saved.get("number") or "")
         message = (f"Здравствуйте! Ваш заказ №{number} готов, можно забирать. "
                    f"Спасибо, что выбрали NOZZA!")
@@ -1012,6 +1068,17 @@ class Api:
                 if wp and wp.exists():
                     local = wp
             if not local.exists():
+                # Файл мог быть запущен прямо с SD/из Bambu Studio и потому не
+                # лежать в UPLOAD_DIR. Берём последний известный принтером факт
+                # или оценку: это точнее повторного ручного ввода в заказе.
+                base = Path(fname).name.lower()
+                known = next((j for j in self.manager.history(300) + self.manager.queue()
+                              if Path(str(j.get("file") or j.get("name") or "")).name.lower() == base), None)
+                if known:
+                    grams = num(known.get("grams")) or num(known.get("est_grams"))
+                    minutes = num(known.get("duration_min")) or num(known.get("est_minutes"))
+                    return 200, {"estimate": {"grams": grams, "minutes": minutes,
+                                               "source": "printer"}}
                 return 404, {"error": "Файл не найден"}
             if local.suffix.lower() == ".3mf":
                 try:
@@ -1208,11 +1275,12 @@ class Api:
 
         # --- заказы и справочники
         if path == "/api/order/save":
-            return 200, {"ok": True, "order": self.repo.save_order(body)}
+            return 200, self.save_order(body)
         if path == "/api/order/status":
             return 200, {"ok": True, "order": self.repo.set_order_status(
                 body.get("id", ""), body.get("status", ""))}
         if path == "/api/order/delete":
+            self.stock.release(order_id=body.get("id", ""))
             self.repo.delete_order(body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/order/fulfill":
