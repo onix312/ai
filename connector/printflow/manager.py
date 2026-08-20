@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from .accounting import Accounting, num, uid
@@ -205,7 +206,22 @@ class PrinterManager:
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state='running'", (printer_id,))
         if job:
-            return
+            # В базе висит «печатается», а принтер начал ДРУГУЮ задачу —
+            # старое задание зависло (событие конца потерялось). Закрываем
+            # его, иначе новая печать не отслеживается вовсе.
+            old = (job.get("name") or job.get("file") or "").strip().lower()
+            new = (name or "").strip().lower()
+            same = not new or not old or old == new or old in new.rsplit("/", 1)[-1] \
+                or new.rsplit("/", 1)[-1].startswith(old[:12])
+            if not same:
+                self.db.add_event(
+                    "job", "Предыдущее задание закрыто",
+                    f"«{job.get('name') or 'печать'}» не завершилось по событию — "
+                    f"принтер начал «{name}»", printer_id, {"job_id": job["id"]})
+                self._finalize_job(job, "cancelled", "replaced",
+                                   0.0, num(job.get("grams")), {})
+            else:
+                return
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state='starting'"
             " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
@@ -241,6 +257,19 @@ class PrinterManager:
                 "id": uid("job"), "printer_id": printer_id, "order_id": self._guess_order(name),
                 "name": name, "state": state, "source": "printer",
                 "started_at": now_iso(), "created_at": now_iso()})
+        self._finalize_job(job, state, kind, duration, grams, data)
+        self._maybe_start_next(printer_id)
+
+    def _finalize_job(self, job: dict, state: str, kind: str,
+                      duration: float, grams: float, data: dict | None = None) -> dict:
+        """Общий финиш задания: учёт, статус заказа, наработка принтера.
+
+        Вызывается и из события принтера, и из согласования зависших заданий
+        (когда событие окончания потерялось: перезапуск коннектора, остановка
+        с экрана, сбой питания).
+        """
+        data = data or {}
+        printer_id = job.get("printer_id") or ""
         self.db.execute(
             "UPDATE print_jobs SET state=?, finished_at=?, duration_min=?, grams=?,"
             " progress=?, layers=?, result=? WHERE id=?",
@@ -275,10 +304,78 @@ class PrinterManager:
                                   printer_id, {"job_id": job.get("id")})
         if state == "failed":
             self._register_failure(printer_id, job, duration, grams)
-        if state == "done" and job.get("order_id"):
-            self.db.execute("UPDATE orders SET status='post', updated_at=? WHERE id=? AND status='printing'",
-                            (now_iso(), job["order_id"]))
-        self._maybe_start_next(printer_id)
+        if job.get("order_id"):
+            if state == "done":
+                self.db.execute(
+                    "UPDATE orders SET status='post', updated_at=? WHERE id=? AND status='printing'",
+                    (now_iso(), job["order_id"]))
+            else:
+                # Сорвалась или остановлена: заказ не должен навсегда остаться
+                # в «печати» — возвращаем его в очередь на допечатку.
+                self._release_order(job["order_id"], kind)
+        return job
+
+    def _release_order(self, order_id: str, reason: str = "") -> None:
+        """Снять «в печати», если по заказу больше ничего не печатается."""
+        if not order_id:
+            return
+        order = self.db.one("SELECT status FROM orders WHERE id=?", (order_id,))
+        if not order or order.get("status") != "printing":
+            return
+        running = self.db.one(
+            "SELECT id FROM print_jobs WHERE order_id=? AND state IN ('running','starting')",
+            (order_id,))
+        if running:
+            return
+        target = self.db.one("SELECT id FROM statuses WHERE id='queue' AND is_final=0") \
+            or self.db.one("SELECT id FROM statuses WHERE is_final=0 ORDER BY position LIMIT 1")
+        if not target:
+            return
+        self.db.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
+                        (target["id"], now_iso(), order_id))
+        self.db.add_event(
+            "order", "Заказ вернулся в очередь",
+            "Печать не завершилась" + (f" ({reason})" if reason else "")
+            + " — статус «в печати» снят.", "", {"order_id": order_id})
+
+    def _reconcile_printer(self, printer, snap: dict) -> None:
+        """Согласовать задания с фактом: принтер свободен, а в базе «печатается».
+
+        Событие окончания может потеряться (перезапуск коннектора, сбой
+        питания, остановка с экрана принтера). Без сверки заказ навсегда
+        остаётся «в печати», а новое задание не отслеживается — старое
+        висит в running. Закрываем такие задания по фактам телеметрии.
+        """
+        state = snap["printer"].get("state")
+        if state not in ("IDLE", "FINISH", "FAILED"):
+            return
+        for job in self.db.query(
+                "SELECT * FROM print_jobs WHERE printer_id=? AND state IN ('running','starting')",
+                (printer.id,)):
+            started = 0.0
+            try:
+                started = datetime.fromisoformat(
+                    str(job.get("started_at") or job.get("created_at") or "")
+                    .replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                started = time.time()
+            age_min = max(0.0, (time.time() - started) / 60)
+            # Льготный период: между постановкой и стартом принтер может
+            # минуту показывать IDLE — только начатые задания не трогаем.
+            if age_min < 3:
+                continue
+            progress = num(job.get("progress"))
+            done = state == "FINISH" or progress >= 97
+            note = ("закрыто как выполненное — событие окончания потерялось"
+                    if done else "печать не отслежена: принтер свободен, задание висело")
+            self.db.add_event(
+                "job", "Задание закрыто автоматически",
+                f"{job.get('name') or 'печать'} · {note}", printer.id,
+                {"job_id": job["id"], "progress": progress})
+            self._finalize_job(job, "done" if done else "cancelled",
+                               "auto-done" if done else "lost", age_min,
+                               num(job.get("grams")) or num(job.get("est_grams")),
+                               {"progress": progress})
 
     def _register_failure(self, printer_id: str, job: dict, minutes: float, grams: float) -> None:
         """Сорванная печать — это потерянные пластик, время и электричество."""
@@ -409,6 +506,8 @@ class PrinterManager:
                 printer.command("stop")
         self.db.execute("UPDATE print_jobs SET state='cancelled', finished_at=? WHERE id=?",
                         (now_iso(), job_id))
+        # Заказ не должен остаться «в печати» после отмены задания вручную.
+        self._release_order(job.get("order_id") or "", "задание отменено")
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
 
     def start_job(self, job_id: str, printer_id: str = "") -> dict:
@@ -1096,6 +1195,7 @@ class PrinterManager:
         """Проверка при старте скрипта: если печать на стопе/паузе — продолжить сразу."""
         # Первые 60 секунд после запуска скрипта проверяем каждые 1.5 сек
         start = time.time()
+        reconciled = False
         while not self._stop.wait(1.5) and (time.time() - start < 60):
             with self.lock:
                 printers = list(self.printers.values())
@@ -1105,6 +1205,15 @@ class PrinterManager:
                 snap = printer.snapshot()
                 if snap["printer"].get("state") in ("PAUSE", "PAUSED"):
                     self.check_auto_resume(printer.id, snap)
+                if not reconciled:
+                    # Коннектор перезапусстили, а печать за это время
+                    # закончилась — события конца не будет. Сверяем сразу.
+                    try:
+                        self._reconcile_printer(printer, snap)
+                    except Exception:
+                        pass
+            if printers and all(p.connected for p in printers):
+                reconciled = True
 
     def _check_cost_limit(self, printer: BambuPrinter, snap: dict) -> None:
         """Лимит стоимости: пауза, если живая себестоимость перешла порог."""
@@ -1768,6 +1877,12 @@ class PrinterManager:
                         self.db.execute(
                             "UPDATE print_jobs SET progress=?, layers=? WHERE id=?",
                             (snap["printer"]["progress"], snap["printer"]["total_layers"], job["id"]))
+                    else:
+                        self._reconcile_printer(printer, snap)
+                    if job and snap["printer"]["state"] in ("IDLE", "FINISH", "FAILED"):
+                        # Задание ещё «печатается», а принтер уже свободен —
+                        # сверяем без ожидания следующего цикла.
+                        self._reconcile_printer(printer, snap)
                     try:
                         self.guard.record_telemetry(printer, snap, job["id"] if job else "")
                         self.guard.check(printer, snap)
@@ -1786,5 +1901,45 @@ class PrinterManager:
                     self.rules.check_debts()
                 except Exception:
                     continue
+                try:
+                    self._reconcile_orphan_orders()
+                except Exception:
+                    pass
             except Exception:
                 continue
+
+    def _reconcile_orphan_orders(self) -> None:
+        """Заказы «в печати», по которым ничего не печатается.
+
+        Бывает, когда задание удалили руками или связь заказа с заданием
+        потерялась: панель показывает «принтер готов», а заказ висит.
+        Работаем консервативно: снимаем статус только если принтеры на
+        связи и все свободны (значит, ничего не печатается в принципе),
+        и прошло больше 30 минут с изменения заказа — вручную поставленные
+        в «печать» заказы не дёргаем зря.
+        """
+        with self.lock:
+            printers = list(self.printers.values())
+        connected = [p for p in printers if p.connected]
+        if not connected:
+            return  # принтеры не на связи — реальность неизвестна
+        for printer in connected:
+            try:
+                if printer.snapshot()["printer"]["state"] in ("RUNNING", "PREPARE"):
+                    return  # что-то печатается — не вмешиваемся
+            except Exception:
+                continue
+        for order in self.db.query("SELECT id, updated_at FROM orders WHERE status='printing'"):
+            running = self.db.one(
+                "SELECT id FROM print_jobs WHERE order_id=? AND state IN ('running','starting')",
+                (order["id"],))
+            if running:
+                continue
+            try:
+                touched = datetime.fromisoformat(
+                    str(order.get("updated_at") or "").replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                continue
+            if time.time() - touched < 1800:
+                continue
+            self._release_order(order["id"], "нет активного задания")

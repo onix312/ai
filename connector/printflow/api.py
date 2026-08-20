@@ -1596,6 +1596,11 @@ class Api:
                 body.get("note", ""))}
         # ------------------------------------------------------------- партии
         if path == "/api/batch/plan":
+            if isinstance(body.get("items"), list) and body.get("items"):
+                return 200, self.batches.plan_multi(
+                    body.get("items"), num(body.get("plates"), 1),
+                    body.get("printer_id", ""), body.get("spool_id", ""),
+                    body.get("file", ""))
             return 200, self.batches.plan(
                 body.get("nom_id", ""), num(body.get("qty")), body.get("mode", "full"),
                 int(num(body.get("plates"))), body.get("printer_id", ""),
@@ -1605,7 +1610,8 @@ class Api:
         if path == "/api/batch/receive":
             return 200, {"ok": True, "batch": self.batches.receive(
                 body.get("id", ""), num(body.get("qty")), num(body.get("scrap")),
-                body.get("job_id", ""), num(body.get("cost")), body.get("note", ""))}
+                body.get("job_id", ""), num(body.get("cost")), body.get("note", ""),
+                body.get("items"))}
         if path == "/api/batch/cancel":
             return 200, {"ok": True, "batch": self.batches.cancel(body.get("id", ""))}
         if path == "/api/batch/repeat":

@@ -21,7 +21,8 @@ from .documents import Documents
 from .nomenclature import Nomenclature
 from .stock import Stock
 
-MODES = {"full": "Полные плиты", "exact": "Ровно N", "manual": "Вручную"}
+MODES = {"full": "Полные плиты", "exact": "Ровно N", "manual": "Вручную",
+         "mixed": "Разные товары на плите"}
 
 
 class Batches:
@@ -91,6 +92,84 @@ class Batches:
             "verdict": verdict, "warnings": warnings,
         }
 
+    def plan_multi(self, items: list, plates: float = 1, printer_id: str = "",
+                   spool_id: str = "", file: str = "") -> dict:
+        """План смешанной плиты: разные товары на одном столе.
+
+        ``items`` — [{nom_id, qty}] сколько штук каждого товара на ОДНУ плиту.
+        Вся плита печатается одним файлом (``file``), приходуется по завершении
+        каждой плиты: каждого товара — своё количество.
+        """
+        if not isinstance(items, list) or not items:
+            raise ValueError("Укажите хотя бы один товар")
+        rows: list[dict] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (it.get("nom_id") or "",))
+            if not nom:
+                raise ValueError(f"Товар не найден: {it.get('nom_id') or '—'}")
+            qty = int(num(it.get("qty")))
+            if qty <= 0:
+                continue
+            rows.append({
+                "nom_id": nom["id"], "name": nom.get("name") or "",
+                "qty_per_plate": qty,
+                "grams": round(num(nom.get("grams")) * qty, 1),
+                "hours": round(num(nom.get("hours")) * qty, 2),
+                "price": self.docs.price_of(nom["id"]),
+                "post_minutes": num(nom.get("post_minutes")),
+            })
+        if not rows:
+            raise ValueError("Укажите количество хотя бы одного товара")
+        plates_n = max(1, int(num(plates)))
+        grams = round(sum(r["grams"] for r in rows) * plates_n, 1)
+        hours = round(sum(r["hours"] for r in rows) * plates_n, 2)
+        manual = round(sum(r["post_minutes"] * r["qty_per_plate"] for r in rows) * plates_n, 1)
+        breakdown = self.acc.cost_breakdown(grams, hours, manual_minutes=manual,
+                                            qty=max(1.0, plates_n))
+        units_per_plate = sum(r["qty_per_plate"] for r in rows)
+        qty_real = units_per_plate * plates_n
+        revenue = round(sum(r["price"] * r["qty_per_plate"] for r in rows) * plates_n, 2)
+        profit = round(revenue - num(breakdown["total"]), 2)
+        target = num(self.db.setting("target_profit_per_hour", 250), 250)
+        per_hour = round(profit / hours, 2) if hours else 0.0
+        warnings = self._warnings_multi(rows, grams, spool_id, printer_id, file)
+        verdict = "ok" if hours and per_hour >= target else (
+            "warn" if hours and per_hour >= target * 0.4 else "bad")
+        if not hours:
+            verdict = "unknown"
+        eta = (datetime.now() + timedelta(hours=hours)).isoformat(timespec="minutes") if hours else ""
+        return {
+            "mixed": True, "items": rows, "plates": plates_n,
+            "units_per_plate": units_per_plate, "qty_real": qty_real,
+            "grams": grams, "hours": hours, "eta": eta, "file": file or "",
+            "cost": breakdown,
+            "cost_per_unit": round(num(breakdown["total"]) / max(1, qty_real), 2),
+            "revenue": revenue, "profit": profit,
+            "profit_per_hour": per_hour, "target_per_hour": target,
+            "verdict": verdict, "warnings": warnings,
+        }
+
+    def _warnings_multi(self, rows: list[dict], grams: float, spool_id: str,
+                        printer_id: str, file: str) -> list[dict]:
+        out: list[dict] = []
+        if not file:
+            out.append({"kind": "file", "level": "bad",
+                        "text": "Укажите файл плиты на принтере — без него задание не стартует"})
+        for r in rows:
+            if not num(r.get("hours")):
+                out.append({"kind": "norms", "level": "warn",
+                            "text": f"У «{r['name']}» не заполнено время печати — расчёт приблизительный"})
+        left = num((self.db.one(
+            "SELECT COALESCE(SUM(remaining_grams),0) v FROM spools"
+            " WHERE archived=0" + (" AND id=?" if spool_id else ""),
+            ((spool_id,) if spool_id else ())) or {}).get("v"))
+        if grams and left < grams:
+            out.append({"kind": "filament", "level": "warn",
+                        "text": f"Пластика на складе {round(left)} г — на партию нужно {round(grams)} г"})
+        return out
+
     def _warnings(self, item: dict, grams: float, spool_id: str,
                   printer_id: str, qty_real: float) -> list[dict]:
         out: list[dict] = []
@@ -140,6 +219,8 @@ class Batches:
     # -------------------------------------------------------------- создание
     def create(self, data: dict) -> dict:
         """Создать партию и поставить задания в очередь печати."""
+        if isinstance(data.get("items"), list) and data.get("items"):
+            return self._create_multi(data)
         nom_id = data.get("nom_id") or ""
         plan = self.plan(nom_id, num(data.get("qty")), data.get("mode", "full"),
                          int(num(data.get("plates"))), data.get("printer_id", ""),
@@ -198,6 +279,64 @@ class Batches:
                                   str(exc), data={"batch_id": row["id"]})
         return self.get(row["id"]) or {}
 
+    def _create_multi(self, data: dict) -> dict:
+        """Смешанная партия: несколько разных товаров на одной плите."""
+        plan = self.plan_multi(data.get("items") or [], num(data.get("plates"), 1),
+                               data.get("printer_id", ""), data.get("spool_id", ""),
+                               data.get("file", ""))
+        if not plan["file"]:
+            raise ValueError("Укажите файл плиты на принтере")
+        warehouse_id = data.get("warehouse_id") or self._default_warehouse()
+        name = " + ".join(f"{r['name']}×{r['qty_per_plate']}" for r in plan["items"])
+        batch = {
+            "id": uid("bat"), "number": self.docs.next_number("production"),
+            "at": now_iso(), "nom_id": plan["items"][0]["nom_id"],
+            "warehouse_id": warehouse_id,
+            "order_id": data.get("order_id") or None,
+            "name": name,
+            "qty_planned": plan["qty_real"], "qty_done": 0, "qty_scrap": 0,
+            "fit_per_plate": plan["units_per_plate"], "plates": plan["plates"],
+            "mode": "mixed", "file": plan["file"],
+            "printer_id": data.get("printer_id") or None,
+            "spool_id": data.get("spool_id") or None,
+            "material": data.get("material", ""),
+            "est_grams": plan["grams"], "est_minutes": round(plan["hours"] * 60, 1),
+            "cost": 0.0, "state": "planned", "note": data.get("note", ""),
+            "items": json.dumps(plan["items"], ensure_ascii=False),
+        }
+        with self.db.transaction():
+            row = self.db.upsert("batches", batch)
+            jobs: list[str] = []
+            if self.manager:
+                per_plate_g = round(plan["grams"] / max(1, plan["plates"]), 1)
+                per_plate_m = round(plan["hours"] * 60 / max(1, plan["plates"]), 1)
+                for index in range(plan["plates"]):
+                    job = self.manager.enqueue({
+                        "name": f"{name} · плита {index + 1}/{plan['plates']}",
+                        "file": plan["file"],
+                        "printer_id": data.get("printer_id", ""),
+                        "order_id": data.get("order_id", ""),
+                        "spool_id": data.get("spool_id", ""),
+                        "priority": int(num(data.get("priority"))),
+                        "source": "batch",
+                    })
+                    self.db.execute(
+                        "UPDATE print_jobs SET batch_id=?, batch_qty=?,"
+                        " est_grams=COALESCE(NULLIF(est_grams,0),?),"
+                        " est_minutes=COALESCE(NULLIF(est_minutes,0),?) WHERE id=?",
+                        (row["id"], plan["units_per_plate"], per_plate_g, per_plate_m, job["id"]))
+                    jobs.append(job["id"])
+        self.db.add_event("batch", "Смешанная партия создана",
+                          f"{name} · {plan['plates']} плита(ит)", data={"batch_id": row["id"]})
+        if data.get("start_now") and jobs and self.manager:
+            try:
+                self.manager.start_job(jobs[0], data.get("printer_id", ""))
+                self.db.execute("UPDATE batches SET state='printing' WHERE id=?", (row["id"],))
+            except Exception as exc:
+                self.db.add_event("batch", "Партия создана, но старт не удался",
+                                  str(exc), data={"batch_id": row["id"]})
+        return self.get(row["id"]) or {}
+
     def _default_warehouse(self) -> str:
         row = self.db.one(
             "SELECT id FROM warehouses WHERE archived=0 AND retail=1 ORDER BY position LIMIT 1"
@@ -220,6 +359,7 @@ class Batches:
         rows = self.db.query(sql, params)
         for row in rows:
             row["mode_label"] = MODES.get(row.get("mode") or "full", "")
+            row["items_list"] = self._mixed_rows(row)
             row["progress"] = round(num(row["qty_done"]) / max(1.0, num(row["qty_planned"])) * 100, 1)
         return rows
 
@@ -232,6 +372,7 @@ class Batches:
             return None
         row["mode_label"] = MODES.get(row.get("mode") or "full", "")
         row["progress"] = round(num(row["qty_done"]) / max(1.0, num(row["qty_planned"])) * 100, 1)
+        row["items_list"] = self._mixed_rows(row)
         row["jobs"] = self.db.query(
             "SELECT * FROM print_jobs WHERE batch_id=? ORDER BY datetime(created_at)",
             (batch_id,))
@@ -242,8 +383,14 @@ class Batches:
 
     # ------------------------------------------------------------- приёмка
     def receive(self, batch_id: str, qty: float, scrap: float = 0.0,
-                job_id: str = "", cost: float = 0.0, note: str = "") -> dict:
-        """Оприходовать готовое на склад документом производства."""
+                job_id: str = "", cost: float = 0.0, note: str = "",
+                items: list | None = None) -> dict:
+        """Оприходовать готовое на склад документом производства.
+
+        ``items`` — состав смешанной плиты [{nom_id, qty}]: документ
+        приходует каждый товар своим количеством. ``qty`` при этом —
+        суммарное число штук.
+        """
         batch = self.db.one("SELECT * FROM batches WHERE id=?", (batch_id,))
         if not batch:
             raise ValueError("Партия не найдена")
@@ -251,6 +398,8 @@ class Batches:
         scrap = num(scrap)
         if qty <= 0 and scrap <= 0:
             raise ValueError("Укажите количество")
+        items = [it for it in (items or [])
+                 if isinstance(it, dict) and it.get("nom_id") and num(it.get("qty")) > 0]
 
         doc = None
         if qty > 0:
@@ -259,18 +408,38 @@ class Batches:
                 job = self.db.one("SELECT cost FROM print_jobs WHERE id=?", (job_id,))
                 if job and num(job.get("cost")) > 0:
                     unit_cost = num(job["cost"]) / qty
+            rows = self._mixed_rows(batch) if items else []
             if not unit_cost:
-                item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (batch["nom_id"],))
-                br = self.acc.cost_breakdown(
-                    num((item or {}).get("grams")) * qty,
-                    num((item or {}).get("hours")) * qty, qty=qty)
-                unit_cost = round(num(br["total"]) / qty, 2)
+                if rows:
+                    br = self.acc.cost_breakdown(
+                        sum(num(r.get("grams")) for r in rows),
+                        sum(num(r.get("hours")) for r in rows), qty=max(1.0, qty))
+                else:
+                    item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (batch["nom_id"],))
+                    br = self.acc.cost_breakdown(
+                        num((item or {}).get("grams")) * qty,
+                        num((item or {}).get("hours")) * qty, qty=qty)
+                unit_cost = round(num(br["total"]) / max(1.0, qty), 2)
+            if items:
+                # Смешанная плита: себестоимость делится по доле граммов
+                # товара из состава партии (нет нормативов — поровну).
+                total_g = sum(num(r.get("grams")) for r in rows) or float(len(rows))
+                share_total = round(unit_cost * qty, 2)
+                lines = []
+                for it in items:
+                    row = next((r for r in rows if r["nom_id"] == it["nom_id"]), {})
+                    share_g = num(row.get("grams")) or (total_g / max(1, len(rows)))
+                    per_unit = round(share_total * share_g / total_g / max(1.0, num(it["qty"])), 2)
+                    lines.append({"nom_id": it["nom_id"], "variant_id": batch.get("variant_id") or "",
+                                  "qty": num(it["qty"]), "cost": per_unit, "price": per_unit})
+            else:
+                lines = [{"nom_id": batch["nom_id"], "variant_id": batch.get("variant_id") or "",
+                          "qty": qty, "cost": unit_cost, "price": unit_cost}]
             doc = self.docs.save({
                 "kind": "production", "warehouse_id": batch.get("warehouse_id"),
                 "batch_id": batch_id, "at": now_iso(),
                 "note": note or f"Партия {batch.get('number') or batch_id}",
-                "items": [{"nom_id": batch["nom_id"], "variant_id": batch.get("variant_id") or "",
-                           "qty": qty, "cost": unit_cost, "price": unit_cost}]})
+                "items": lines})
             doc = self.docs.post(doc["id"])
 
         done = num(batch["qty_done"]) + qty
@@ -304,9 +473,32 @@ class Batches:
                               data={"batch_id": batch_id})
         return self.get(batch_id) or {}
 
+    def _mixed_rows(self, batch: dict) -> list[dict]:
+        """Состав смешанной партии из batches.items (JSON)."""
+        try:
+            rows = json.loads(str(batch.get("items") or "") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            rows = []
+        if not isinstance(rows, list):
+            return []
+        return [r for r in rows if isinstance(r, dict) and r.get("nom_id")]
+
     def _auto_update_cost(self, batch_id: str, nom_id: str, qty: float, cost: float) -> None:
         """Обновить себестоимость в номенклатуре из завершённой партии."""
         if qty <= 0 or cost <= 0:
+            return
+        batch = self.db.one("SELECT items FROM batches WHERE id=?", (batch_id,)) or {}
+        rows = self._mixed_rows(batch)
+        if rows:
+            # Смешанная партия: себестоимость каждого товара — по доле
+            # граммов, чтобы не задирать цену лёгким позициям.
+            total_g = sum(num(r.get("grams")) for r in rows) or float(len(rows))
+            for r in rows:
+                share_g = num(r.get("grams")) or total_g / len(rows)
+                per_unit = round(cost * share_g / total_g / max(1.0, num(r.get("qty_per_plate"), 1)), 2)
+                if per_unit > 0:
+                    self.db.execute("UPDATE nomenclature SET cost=?, updated_at=? WHERE id=?",
+                                    (per_unit, now_iso(), r["nom_id"]))
             return
         unit_cost = round(cost / qty, 2)
         self.db.execute(
@@ -321,6 +513,7 @@ class Batches:
         batch = self.db.one("SELECT * FROM batches WHERE id=?", (batch_id,))
         if not batch or batch["state"] in ("done", "cancelled"):
             return
+        rows = self._mixed_rows(batch)
         qty = num(job.get("batch_qty")) or num(batch.get("fit_per_plate"), 1)
         state = job.get("state")
         try:
@@ -329,7 +522,10 @@ class Batches:
                 if num(job.get("cost")) > 0 and qty:
                     unit_cost = num(job["cost"]) / qty
                 self.receive(batch_id, qty, 0.0, job.get("id", ""), unit_cost,
-                             note=f"Печать {job.get('name') or ''}".strip())
+                             note=f"Печать {job.get('name') or ''}".strip(),
+                             items=[{"nom_id": r["nom_id"],
+                                     "qty": num(r.get("qty_per_plate"), 1)} for r in rows]
+                             if rows else None)
             elif state in ("failed", "cancelled"):
                 self.receive(batch_id, 0.0, qty, job.get("id", ""),
                              note=f"Брак: {job.get('name') or ''}".strip())
@@ -360,6 +556,16 @@ class Batches:
         batch = self.db.one("SELECT * FROM batches WHERE id=?", (batch_id,))
         if not batch:
             raise ValueError("Партия не найдена")
+        rows = self._mixed_rows(batch)
+        if rows:
+            return self.create({
+                "items": [{"nom_id": r["nom_id"], "qty": num(r.get("qty_per_plate"), 1)}
+                          for r in rows],
+                "plates": int(num(batch.get("plates"), 1)),
+                "file": batch.get("file") or "",
+                "warehouse_id": batch.get("warehouse_id"),
+                "printer_id": batch.get("printer_id") or "", "spool_id": batch.get("spool_id") or "",
+                "start_now": start_now, "note": "повтор партии " + (batch.get("number") or "")})
         return self.create({
             "nom_id": batch["nom_id"], "qty": num(batch["qty_planned"]),
             "mode": batch.get("mode") or "full", "warehouse_id": batch.get("warehouse_id"),

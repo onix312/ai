@@ -833,6 +833,40 @@ class Accounting:
         return self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,)) or {}
 
     # --------------------------------------------------- многоцветная печать
+    def consume_order_spools(self, job: dict) -> list[dict]:
+        """Списать пластик по катушкам, привязанным к заказу (orders.spools).
+
+        Формат: JSON-список [{"spool_id":"sp_...","grams":120,"note":"корпус"}].
+        Это явное указание мастера «чем печатали» — точнее авто-подбора
+        по цвету, поддерживает мультицвет (несколько катушек на заказ).
+        """
+        if not job.get("order_id"):
+            return []
+        order = self.db.one("SELECT spools FROM orders WHERE id=?", (job["order_id"],))
+        raw = (order or {}).get("spools") or ""
+        try:
+            spools = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            spools = []
+        if not isinstance(spools, list):
+            return []
+        out: list[dict] = []
+        for item in spools:
+            if not isinstance(item, dict):
+                continue
+            grams = num(item.get("grams"))
+            spool_id = str(item.get("spool_id") or "")
+            if grams <= 0 or not spool_id:
+                continue
+            spool = self.db.one("SELECT * FROM spools WHERE id=? AND archived=0", (spool_id,))
+            note = str(item.get("note") or "").strip()
+            result = self.consume_filament(
+                grams, spool_id=spool["id"] if spool else "", job_id=job.get("id", ""),
+                order_id=job.get("order_id") or "", auto=True,
+                note=(note or "катушка заказа") + ("" if spool else " (катушка не найдена)"))
+            out.append({**result, "spool_id": spool_id})
+        return out
+
     def consume_order_colors(self, job: dict) -> list[dict]:
         """Списать расход по цветам заказа (поле orders.colors).
 
@@ -846,6 +880,18 @@ class Accounting:
             colors = json.loads(raw) if raw else []
         except json.JSONDecodeError:
             colors = []
+        if not isinstance(colors, list) and raw:
+            # старый текстовый формат «Белый:40, Чёрный:15» — понимаем тоже
+            colors = []
+            for part in raw.split(","):
+                name, _, value = part.partition(":")
+                name = name.strip()
+                try:
+                    grams = float(str(value).strip().replace(",", "."))
+                except ValueError:
+                    continue
+                if name and grams > 0:
+                    colors.append({"color": name, "grams": grams})
         if not isinstance(colors, list):
             return []
         out = []
@@ -1024,24 +1070,37 @@ class Accounting:
         result["purge_grams"] = breakdown.get("purge_grams", 0)
 
         if grams > 0 and self.db.setting("auto_consume_filament", True):
-            # Разбивка по цветам — это весь расход, а не добавка к общим граммам.
-            # Сначала пробуем её и только при отсутствии разбивки списываем одну катушку.
+            # Порядок точности: 1) катушки, явно указанные в заказе
+            # (orders.spools — конкретные катушки со склада, мультицвет);
+            # 2) раскладка по цветам (orders.colors); 3) одна катушка по
+            # AMS/материалу. Раскладка — весь расход, а не добавка к граммам.
             try:
-                result["colors"] = self.consume_order_colors(job)
+                result["spools"] = self.consume_order_spools(job)
             except (TypeError, ValueError):
-                result["colors"] = []
-            if result["colors"]:
+                result["spools"] = []
+            if result["spools"]:
                 result["filament"] = {
-                    "ok": True, "multi_color": True,
-                    "grams": round(sum(num(x.get("grams")) for x in result["colors"]), 1),
-                    "cost": round(sum(num(x.get("cost")) for x in result["colors"]), 2),
+                    "ok": True, "multi_color": True, "by": "order_spools",
+                    "grams": round(sum(num(x.get("grams")) for x in result["spools"]), 1),
+                    "cost": round(sum(num(x.get("cost")) for x in result["spools"]), 2),
                 }
             else:
-                result["filament"] = self.consume_filament(
-                    grams, spool_id=job.get("spool_id") or "", job_id=job.get("id", ""),
-                    order_id=job.get("order_id") or "", note=job.get("name", ""),
-                    printer_id=job.get("printer_id") or "",
-                    ams_slot=str(job.get("ams_slot") or ""))
+                try:
+                    result["colors"] = self.consume_order_colors(job)
+                except (TypeError, ValueError):
+                    result["colors"] = []
+                if result["colors"]:
+                    result["filament"] = {
+                        "ok": True, "multi_color": True,
+                        "grams": round(sum(num(x.get("grams")) for x in result["colors"]), 1),
+                        "cost": round(sum(num(x.get("cost")) for x in result["colors"]), 2),
+                    }
+                else:
+                    result["filament"] = self.consume_filament(
+                        grams, spool_id=job.get("spool_id") or "", job_id=job.get("id", ""),
+                        order_id=job.get("order_id") or "", note=job.get("name", ""),
+                        printer_id=job.get("printer_id") or "",
+                        ams_slot=str(job.get("ams_slot") or ""))
 
         self.db.execute(
             "UPDATE print_jobs SET cost=?, energy_kwh=? WHERE id=?",

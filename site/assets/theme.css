@@ -18,11 +18,14 @@
   --accent-line: rgba(79, 70, 229, .30);
 
   /* поверхности */
-  --bg: #f3f5fa;
-  --bg-grad: none;               /* плоский фон — меньше шума */
+  --bg: #eef1f8;
+  /* лёгкий «воздух» сверху: две едва заметные акцентные засветки */
+  --bg-grad:
+    radial-gradient(1100px 460px at 14% -12%, rgba(79, 70, 229, .06), transparent 62%),
+    radial-gradient(900px 420px at 108% 2%, rgba(124, 58, 237, .05), transparent 58%);
   --panel: #ffffff;
-  --panel-2: #f8fafd;            /* мягкая подложка внутри карточек */
-  --panel-3: #eef1f7;            /* ховеры, заполнения */
+  --panel-2: #f7f9fd;            /* мягкая подложка внутри карточек */
+  --panel-3: #ebeff7;            /* ховеры, заполнения */
   --line: #e3e8f2;
   --line-soft: #edf1f8;
 
@@ -41,14 +44,14 @@
   --info: #2b7fd4;
   --info-soft: rgba(43, 127, 212, .12);
 
-  /* геометрия */
+  /* геометрия — чуть круглее: интерфейс мягче, «плиточность» уходит */
   --r-xs: 7px;
   --r-sm: 10px;
-  --r: 12px;
-  --r-lg: 16px;
-  --r-xl: 20px;
-  --shadow-1: 0 1px 2px rgba(16, 24, 48, .05), 0 4px 14px -6px rgba(16, 24, 48, .10);
-  --shadow-2: 0 6px 16px -6px rgba(16, 24, 48, .14), 0 18px 40px -24px rgba(16, 24, 48, .24);
+  --r: 13px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+  --shadow-1: 0 1px 2px rgba(16, 24, 48, .04), 0 6px 18px -8px rgba(16, 24, 48, .10);
+  --shadow-2: 0 6px 18px -8px rgba(16, 24, 48, .16), 0 22px 48px -28px rgba(16, 24, 48, .26);
   --shadow-3: 0 24px 70px -28px rgba(14, 20, 44, .40);
   --side-w: 252px;
   --top-h: 60px;
@@ -61,7 +64,9 @@ html[data-theme="dark"] {
   --accent-soft: rgba(129, 140, 248, .16);
   --accent-line: rgba(129, 140, 248, .38);
   --bg: #0d1220;
-  --bg-grad: none;
+  --bg-grad:
+    radial-gradient(1100px 460px at 14% -12%, rgba(129, 140, 248, .07), transparent 62%),
+    radial-gradient(900px 420px at 108% 2%, rgba(167, 109, 255, .05), transparent 58%);
   --panel: #131a2b;
   --panel-2: #161e33;
   --panel-3: #1d2740;
@@ -172,15 +177,14 @@ img.brand-logo { background: none; box-shadow: none; }
 .nav-link:hover { background: var(--panel-3); color: var(--text); text-decoration: none; transform: translateX(2px); }
 .nav-link .ic { width: 20px; text-align: center; font-size: 15px; opacity: .85; flex: none; }
 .nav-link.on {
-  background: linear-gradient(90deg, var(--accent-soft), transparent 92%);
-  box-shadow: inset 0 0 0 1px var(--accent-line);
+  background: var(--accent-soft);
   color: var(--accent); font-weight: 620;
 }
 .nav-link.on .ic { opacity: 1; }
 .nav-link.on::before {
-  content: ""; position: absolute; left: -12px; top: 10px; bottom: 10px;
-  width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
-  box-shadow: 0 0 8px 0 var(--accent);
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px;
+  width: 3px; border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
 }
 .nav-link .tag {
   margin-left: auto; font-size: 11px; font-weight: 700;
@@ -311,20 +315,20 @@ img.brand-logo { background: none; box-shadow: none; }
 /* ------------------------------------------------------------ кнопки */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  height: 40px; padding: 0 16px; border-radius: 11px;
+  height: 40px; padding: 0 16px; border-radius: 12px;
   border: 1px solid var(--line); background: var(--panel);
   color: var(--text); font-size: 13.8px; font-weight: 580;
   transition: transform .12s var(--ease), background .16s var(--ease),
               border-color .16s var(--ease), box-shadow .16s var(--ease);
   white-space: nowrap;
 }
-.btn:hover { background: var(--panel-3); border-color: var(--accent-line); }
+.btn:hover { background: var(--panel-3); border-color: var(--accent-line); box-shadow: var(--shadow-1); }
 .btn:active { transform: scale(.98); }
 .btn:disabled { opacity: .5; pointer-events: none; }
 .btn.primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   border-color: transparent; color: var(--accent-ink);
-  box-shadow: 0 8px 18px -10px var(--accent);
+  box-shadow: 0 8px 18px -10px var(--accent), inset 0 1px 0 rgba(255, 255, 255, .22);
   transition: transform .14s var(--ease), box-shadow .2s var(--ease), filter .16s var(--ease);
 }
 .btn.primary:hover { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 12px 24px -12px var(--accent); }
@@ -363,12 +367,14 @@ img.brand-logo { background: none; box-shadow: none; }
 .card.pad-0 { padding: 0; }
 .card-head {
   display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 14px; margin-bottom: 14px;
+  gap: 12px 14px; flex-wrap: wrap; margin-bottom: 14px;
 }
 .card-head h2 { font-size: 15.5px; font-weight: 640; }
 .card-head h3 { font-size: 14px; font-weight: 620; }
 .card-head p { font-size: 12.4px; color: var(--muted); margin-top: 2px; }
+/* кнопки в заголовке карточки никогда не наезжают на заголовок */
 .card-head .head-actions { margin-left: auto; }
+.card-head > div:has(> .btn) { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
 
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -420,7 +426,7 @@ img.brand-logo { background: none; box-shadow: none; }
 input[type=text], input[type=number], input[type=date], input[type=password],
 input[type=search], input:not([type]), select, textarea {
   width: 100%; min-height: 40px; padding: 8px 11px;
-  border-radius: 11px; border: 1px solid var(--line);
+  border-radius: 12px; border: 1px solid var(--line);
   background: var(--panel-2); color: var(--text); font-size: 13.8px;
   transition: border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
 }
@@ -464,10 +470,10 @@ input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-colo
 table.data { width: 100%; border-collapse: collapse; font-size: 13.3px; }
 table.data th {
   position: sticky; top: 0; z-index: 1;
-  text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .07em;
+  text-align: left; font-size: 10.8px; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted);
   padding: 11px 13px; background: var(--panel-2);
-  border-bottom: 2px solid var(--accent-line); white-space: nowrap;
+  border-bottom: 1px solid var(--accent-line); white-space: nowrap;
 }
 /* .right проигрывал по специфичности правилу выше — заголовок числовой
    колонки уезжал влево от своих значений */
@@ -516,7 +522,7 @@ dialog.modal {
 }
 dialog.modal.narrow { width: min(520px, calc(100vw - 32px)); }
 dialog.modal.wide { width: min(1040px, calc(100vw - 32px)); }
-dialog.modal::backdrop { background: rgba(9, 13, 26, .5); backdrop-filter: blur(4px); }
+dialog.modal::backdrop { background: rgba(9, 13, 26, .55); backdrop-filter: blur(6px); }
 dialog.modal[open] { animation: modalIn .2s var(--ease); }
 @keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
 .modal form { display: flex; flex-direction: column; max-height: inherit; }

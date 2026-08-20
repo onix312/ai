@@ -23,6 +23,15 @@ SCHEMA_VERSION = 4
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
 ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "nomenclature": [
+        # фактическая себестоимость штуки из завершённых партий
+        ("cost", "REAL DEFAULT 0"),
+    ],
+    "batches": [
+        # смешанная плита: разные товары на одном столе, JSON-состав
+        # [{"nom_id": "...", "qty_per_plate": 3, "grams": 40, "hours": 1.2}]
+        ("items", "TEXT DEFAULT ''"),
+    ],
     "printers": [
         ("camera_demo", "INTEGER DEFAULT 0"),      # показывать демо-поток без принтера
         ("guard_enabled", "INTEGER DEFAULT 1"),    # сторож печати следит за ошибками
@@ -61,6 +70,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("account_id", "TEXT"),
         ("design_minutes", "REAL DEFAULT 0"),
         ("colors", "TEXT DEFAULT ''"),       # многоцвет: JSON [{material,color,grams}]
+        ("spools", "TEXT DEFAULT ''"),       # катушки заказа: JSON [{spool_id,grams,note}]
         ("qc_done", "TEXT DEFAULT ''"),      # чек-лист качества: JSON {step: true}
         ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
         ("warehouse_id", "TEXT"),            # с какого склада отгружаем

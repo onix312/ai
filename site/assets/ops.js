@@ -168,21 +168,62 @@ function fillSelectors() {
 const OF = ['product', 'status', 'priority', 'niche_id', 'channel', 'qty', 'due',
   'customer_name', 'phone', 'messenger', 'material', 'color', 'grams', 'hours',
   'manual_minutes', 'file', 'price', 'cost', 'prepaid', 'auto_cost', 'quality',
-  'quality_note', 'notes'];
+  'quality_note', 'notes', 'colors'];
 
 /* Многоцветный расход: JSON в базе <-> строка «Белый:40, Чёрный:15» в форме */
 function colorsToStr(json) {
+  const raw = String(json || '').trim();
+  if (!raw) return '';
   try {
-    const list = JSON.parse(json || '[]');
-    if (!Array.isArray(list)) return '';
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return raw;   // старый текстовый формат — как есть
     return list.map((c) => `${c.color || c.material || ''}:${num(c.grams)}`).filter(Boolean).join(', ');
-  } catch (e) { return ''; }
+  } catch (e) { return raw; }               // не JSON — показываем как есть
 }
 function colorsToJson(str) {
   const out = [];
   String(str || '').split(',').forEach((part) => {
     const [name, grams] = part.split(':').map((x) => (x || '').trim());
     if (name && num(grams) > 0) out.push({ color: name, material: '', grams: num(grams) });
+  });
+  return JSON.stringify(out);
+}
+
+/* ===== катушки заказа: чем печатаем и с чего спишется пластик ===== */
+function spoolRowsFromJson(json) {
+  let rows = [];
+  try { rows = JSON.parse(json || '[]'); } catch (e) { rows = []; }
+  if (!Array.isArray(rows)) rows = [];
+  return rows.filter((r) => r && typeof r === 'object' && (r.spool_id || num(r.grams) > 0));
+}
+function spoolLabel(s) {
+  const slot = s.ams_slot !== '' && s.ams_slot != null ? ` · слот ${s.ams_slot}` : '';
+  return `${s.material} ${s.color_name}${slot}`;
+}
+function renderSpoolRows(json) {
+  const host = $('of_spool_rows');
+  if (!host) return;
+  const rows = spoolRowsFromJson(json);
+  const spools = (PF.state.spools || []).filter((s) => !num(s.archived));
+  if (!spools.length) {
+    host.innerHTML = '<small class="muted">Склад пуст — добавьте катушки в разделе «Склад пластика».</small>';
+    return;
+  }
+  const options = (selected) => '<option value="">— выбрать катушку —</option>'
+    + spools.map((s) => `<option value="${esc(s.id)}"${s.id === selected ? ' selected' : ''}>`
+      + `${esc(spoolLabel(s))} · ${nfmt(s.remaining_grams)} г</option>`).join('');
+  const rowHtml = (r) => '<div class="of-spool-row">'
+    + `<select data-spool-sel>${options(r.spool_id || '')}</select>`
+    + `<input type="number" min="0" step="any" placeholder="граммы" data-spool-grams value="${r.grams != null ? esc(String(r.grams)) : ''}" title="Сколько граммов спишется с этой катушки">`
+    + '<button class="icon-btn sm danger" type="button" data-spool-del title="Убрать катушку">×</button></div>';
+  host.innerHTML = (rows.length ? rows : [{}]).map(rowHtml).join('');
+}
+function collectSpoolRows() {
+  const out = [];
+  $$('#of_spool_rows .of-spool-row').forEach((row) => {
+    const id = (row.querySelector('[data-spool-sel]') || {}).value || '';
+    const grams = num((row.querySelector('[data-spool-grams]') || {}).value);
+    if (id && grams > 0) out.push({ spool_id: id, grams });
   });
   return JSON.stringify(out);
 }
@@ -256,6 +297,7 @@ async function openOrder(id) {
     if (k === 'colors') { if (el) el.value = colorsToStr(data.colors); return; }
     el.value = data[k] == null ? '' : String(data[k]);
   });
+  renderSpoolRows(data.spools);
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
   // в поле показываем фактически полученные деньги: платежи пишутся в paid,
   // prepaid остался от старых заказов
@@ -320,6 +362,7 @@ async function saveOrder() {
   const payload = { id: editingOrder || '' };
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
+  payload.spools = collectSpoolRows();
   if (!payload.product.trim()) return fail(new Error('Укажите изделие или работу'));
   ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
   // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
@@ -605,6 +648,24 @@ function bind() {
     if (card && !e.target.closest('button')) { openOrder(card.dataset.order); return; }
     const ne = e.target.closest('[data-niche-edit]');
     if (ne) { openNiche(ne.dataset.nicheEdit); }
+  });
+
+  const spoolAdd = $('of_spool_add');
+  if (spoolAdd) spoolAdd.addEventListener('click', () => {
+    const host = $('of_spool_rows');
+    if (!host) return;
+    const current = collectSpoolRows();
+    let rows = [];
+    try { rows = JSON.parse(current || '[]'); } catch (e) { rows = []; }
+    rows.push({});
+    renderSpoolRows(JSON.stringify(rows));
+  });
+  const spoolHost = $('of_spool_rows');
+  if (spoolHost) spoolHost.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-spool-del]');
+    if (!del) return;
+    del.closest('.of-spool-row').remove();
+    if (!$$('#of_spool_rows .of-spool-row').length) renderSpoolRows('[]');
   });
 
   const amsBtn = $('of_ams_btn');

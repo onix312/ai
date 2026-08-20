@@ -18,6 +18,42 @@ let docRows = [];
 let planRows = [];
 let viewMode = 'cards';
 let batchPlan = null;
+let mixedRows = [{ nom_id: '', qty: 1 }];
+
+/* ===================== смешанная плита: разные товары на одном столе ==== */
+function renderMixedRows() {
+  const host = $('bf_item_rows');
+  if (!host) return;
+  const noms = data.items.filter((i) => !num(i.archived));
+  if (!noms.length) {
+    host.innerHTML = '<small class="muted">Сначала добавьте товары в номенклатуру.</small>';
+    return;
+  }
+  const options = (selected) => noms.map((n) =>
+    `<option value="${esc(n.id)}"${n.id === selected ? ' selected' : ''}>`
+    + `${esc(n.name)}${num(n.grams) ? ` · ${nfmt(n.grams)} г` : ''}</option>`).join('');
+  host.innerHTML = mixedRows.map((r, i) => `<div class="of-spool-row">`
+    + `<select data-mixed-nom><option value="">— товар —</option>${options(r.nom_id)}</select>`
+    + `<input type="number" min="1" step="1" data-mixed-qty value="${num(r.qty) || 1}" title="Сколько штук этого товара на одной плите" placeholder="шт">`
+    + `<button class="icon-btn sm danger" type="button" data-mixed-del="${i}" title="Убрать">×</button></div>`).join('');
+}
+function collectMixedRows() {
+  mixedRows = $$('#bf_item_rows .of-spool-row').map((row) => ({
+    nom_id: (row.querySelector('[data-mixed-nom]') || {}).value || '',
+    qty: Math.max(0, Math.round(num((row.querySelector('[data-mixed-qty]') || {}).value))),
+  }));
+  return mixedRows.filter((r) => r.nom_id && r.qty > 0);
+}
+function toggleBatchMode() {
+  const mixed = $('bf_mode').value === 'mixed';
+  $('bf_mixed_wrap').hidden = !mixed;
+  $('bf_plates_wrap').hidden = !($('bf_mode').value === 'manual' || mixed);
+  const nomField = $('bf_nom').closest('.field');
+  const qtyField = $('bf_qty').closest('.field');
+  if (nomField) nomField.hidden = mixed;
+  if (qtyField) qtyField.hidden = mixed;
+  if (mixed) renderMixedRows();
+}
 
 const KIND_LABEL = { product: 'Товар', semi: 'Полуфабрикат', kit: 'Комплект',
   material: 'Материал', service: 'Услуга' };
@@ -395,10 +431,16 @@ function renderBatches() {
     const label = { planned: 'План', printing: 'Печатает', partial: 'Частично',
       done: 'Готова', cancelled: 'Отменена' }[b.state] || b.state;
     const rest = Math.max(0, num(b.qty_planned) - num(b.qty_done));
+    const mixedList = (b.items_list || []);
+    const mixedChips = mixedList.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0">` + mixedList.map((r) =>
+          `<span class="chip outline">${esc(r.name || '')} ×${nfmt(r.qty_per_plate)}/плита</span>`).join('') + `</div>`
+      : '';
     return `<div class="batch-item ${b.state}">`
       + `<div class="bhead"><b>${esc(b.nom_name || b.name)}</b>`
       + `<span class="chip ${cls}">${esc(label)}</span>`
       + `<small class="muted">${esc(b.number || '')} · ${esc(dateTimeText(b.at))}</small></div>`
+      + mixedChips
       + `<div class="bbar"><i style="width:${Math.min(100, num(b.progress))}%"></i></div>`
       + '<div class="bfacts">'
       + `<span>Готово <b>${nfmt(b.qty_done)} / ${nfmt(b.qty_planned)} шт</b></span>`
@@ -425,9 +467,11 @@ async function openBatch(nomId) {
   const item = data.items.find((i) => i.id === ($('bf_nom').value));
   $('bf_qty').value = item && num(item.plan_qty) ? Math.round(num(item.plan_qty)) : 10;
   $('bf_mode').value = 'full';
-  $('bf_plates_wrap').hidden = true;
   $('bf_note').value = '';
   $('bf_start').checked = false;
+  $('bf_file').value = '';
+  mixedRows = [{ nom_id: '', qty: 1 }];
+  toggleBatchMode();
   const retail = data.warehouses.find((w) => num(w.retail));
   if (retail) $('bf_warehouse').value = retail.id;
   openModal('batch_modal');
@@ -435,6 +479,7 @@ async function openBatch(nomId) {
 }
 
 const runPlan = debounce(async () => {
+  if ($('bf_mode').value === 'mixed') return runMixedPlan();
   const nom_id = $('bf_nom').value;
   if (!nom_id) return;
   try {
@@ -478,7 +523,75 @@ const runPlan = debounce(async () => {
   }
 }, 300);
 
+async function runMixedPlan() {
+  const items = collectMixedRows();
+  if (!items.length) {
+    $('bf_calc_rows').innerHTML = '';
+    $('bf_calc_sub').textContent = 'добавьте товары в состав плиты';
+    $('bf_verdict').className = 'verdict';
+    $('bf_verdict').innerHTML = 'Выберите хотя бы один товар и количество.';
+    $('bf_warnings').innerHTML = '';
+    return;
+  }
+  try {
+    const res = await post('/api/batch/plan', {
+      items, plates: num($('bf_plates').value, 1), file: $('bf_file').value.trim(),
+      printer_id: $('bf_printer').value, spool_id: $('bf_spool').value,
+    });
+    batchPlan = res;
+    const c = res.cost || {};
+    $('bf_calc_sub').textContent =
+      `${res.plates} плит × ${res.units_per_plate} шт = ${res.qty_real} шт (${res.items.length} товар(ов))`;
+    const rows = res.items.map((r) =>
+      `<div class="res-row"><span class="lbl">${esc(r.name)} ×${r.qty_per_plate}/плита</span>`
+      + `<span class="val">${nfmt(r.grams)} г${r.hours ? ` · ${hoursText(r.hours)}` : ''}</span></div>`).join('');
+    $('bf_calc_rows').innerHTML = rows + [
+      ['Время печати всего', hoursText(res.hours)],
+      ['Финиш примерно', res.eta ? dateTimeText(res.eta) : '—'],
+      ['Пластик', `${nfmt(res.grams)} г`],
+      ['Себестоимость партии', money(c.total, 2)],
+      ['Выручка', money(res.revenue)],
+      ['Прибыль', money(res.profit)],
+      ['Прибыль за час печати', res.hours ? money(res.profit_per_hour) : '—'],
+    ].map(([l, v]) => `<div class="res-row"><span class="lbl">${esc(l)}</span><span class="val">${v}</span></div>`).join('');
+    const verdict = $('bf_verdict');
+    const map = {
+      ok: ['verdict ok', `<b>Выгодно.</b> ${money(res.profit_per_hour)} чистыми за час печати при норме ${money(res.target_per_hour)}.`],
+      warn: ['verdict warn', `<b>Слабовато.</b> ${money(res.profit_per_hour)} за час против нормы ${money(res.target_per_hour)}.`],
+      bad: ['verdict bad', `<b>Невыгодно.</b> Всего ${money(res.profit_per_hour)} за час работы принтера.`],
+      unknown: ['verdict', 'Заполните время печати в карточках товаров.'],
+    };
+    const [cls, html] = map[res.verdict] || map.unknown;
+    verdict.className = cls;
+    verdict.innerHTML = html;
+    $('bf_warnings').innerHTML = (res.warnings || []).map((w) =>
+      `<div class="notice ${w.level === 'bad' ? 'bad' : w.level === 'info' ? '' : 'warn'}">`
+      + `<span>${w.level === 'bad' ? '✕' : w.level === 'info' ? 'ⓘ' : '⚠'}</span><span>${esc(w.text)}</span></div>`).join('');
+  } catch (e) {
+    $('bf_calc_rows').innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
+  }
+}
+
 async function createBatch() {
+  if ($('bf_mode').value === 'mixed') {
+    const items = collectMixedRows();
+    if (!items.length) return fail(new Error('Добавьте хотя бы один товар в состав плиты'));
+    if (!$('bf_file').value.trim()) return fail(new Error('Укажите файл плиты на принтере'));
+    try {
+      const res = await post('/api/batch/create', {
+        items, plates: num($('bf_plates').value, 1), file: $('bf_file').value.trim(),
+        warehouse_id: $('bf_warehouse').value,
+        printer_id: $('bf_printer').value, spool_id: $('bf_spool').value,
+        priority: num($('bf_priority').value), note: $('bf_note').value.trim(),
+        start_now: $('bf_start').checked,
+      });
+      closeModal('batch_modal');
+      await Promise.all([refreshBatches(), refresh()]);
+      PF.refreshCore && PF.refreshCore();
+      toast('Смешанная партия создана', `${res.batch.number} · ${nfmt(res.batch.qty_planned)} шт · ${nfmt(res.batch.plates)} плиты`);
+    } catch (e) { fail(e); }
+    return;
+  }
   const nom_id = $('bf_nom').value;
   if (!nom_id) return fail(new Error('Выберите товар'));
   try {
@@ -955,11 +1068,25 @@ function bind() {
   // --- партии
   $('batch_add').addEventListener('click', () => openBatch());
   $('batch_plan_btn').addEventListener('click', openPlan);
-  ['bf_nom', 'bf_qty', 'bf_mode', 'bf_plates', 'bf_printer', 'bf_spool'].forEach((id) =>
-    $(id).addEventListener('input', () => {
-      $('bf_plates_wrap').hidden = $('bf_mode').value !== 'manual';
-      runPlan();
-    }));
+  ['bf_nom', 'bf_qty', 'bf_plates', 'bf_printer', 'bf_spool', 'bf_file'].forEach((id) =>
+    $(id).addEventListener('input', runPlan));
+  $('bf_mode').addEventListener('input', () => { toggleBatchMode(); runPlan(); });
+  $('bf_item_add').addEventListener('click', () => {
+    collectMixedRows();
+    mixedRows.push({ nom_id: '', qty: 1 });
+    renderMixedRows();
+  });
+  $('bf_item_rows').addEventListener('input', runPlan);
+  $('bf_item_rows').addEventListener('change', runPlan);
+  $('bf_item_rows').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-mixed-del]');
+    if (!del) return;
+    collectMixedRows();
+    mixedRows.splice(+del.dataset.mixedDel, 1);
+    if (!mixedRows.length) mixedRows = [{ nom_id: '', qty: 1 }];
+    renderMixedRows();
+    runPlan();
+  });
   $('bf_create').addEventListener('click', createBatch);
   $('batch_filter').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-state]');
@@ -971,6 +1098,26 @@ function bind() {
     const recv = e.target.closest('[data-batch-receive]');
     if (recv) {
       const b = batchData.find((x) => x.id === recv.dataset.batchReceive);
+      const mixedList = b.items_list || [];
+      if (mixedList.length) {
+        // Смешанная партия: принимаем целыми плитами — каждый товар своим количеством.
+        const perPlate = mixedList.reduce((s, r) => s + num(r.qty_per_plate), 0);
+        const maxPlates = Math.max(1, Math.ceil(Math.max(0, num(b.qty_planned) - num(b.qty_done)) / Math.max(1, perPlate)));
+        const answer = window.prompt(`Сколько ПЛИТ оприходовать? (на плите ${perPlate} шт, осталось ~${maxPlates})`, '1');
+        if (answer == null) return;
+        const plates = Math.min(maxPlates, Math.max(0, Math.round(num(answer))));
+        if (!plates) return;
+        try {
+          await post('/api/batch/receive', {
+            id: b.id, qty: plates * perPlate, job_id: '',
+            note: 'приёмка вручную (плитами)',
+            items: mixedList.map((r) => ({ nom_id: r.nom_id, qty: num(r.qty_per_plate) * plates })),
+          });
+          toast('Плиты оприходованы', `${plates} шт · ${plates * perPlate} изделий на складе`);
+          await Promise.all([refreshBatches(), refresh()]);
+        } catch (err) { fail(err); }
+        return;
+      }
       const rest = Math.max(0, num(b.qty_planned) - num(b.qty_done));
       const answer = window.prompt(
         `Сколько годных штук принять на склад?\nОсталось по плану: ${rest} шт`, String(rest));
