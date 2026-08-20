@@ -97,6 +97,17 @@ def main() -> int:
     flags = ["--verbose"] if args.verbose else []
     setup_logging(args.verbose)
     from printflow.logging_setup import log
+    # Отложенное восстановление базы: маркер из панели «Настройки → Данные».
+    # Выполняется до открытия базы, чтобы не подменять файл под живым соединением.
+    from printflow.db import apply_pending_restore
+    restore = apply_pending_restore()
+    if restore is not None:
+        if restore.get("error"):
+            log().error("Откат базы не удался: %s", restore["error"])
+            print(f"  ❌ Откат базы не удался: {restore['error']}")
+        else:
+            log().info("База восстановлена из копии %s", restore["restored"])
+            print(f"  ✓ База восстановлена из копии {restore['restored']}")
     log().info("PrintFlow %s стартует: %s:%s (данные: %s)", APP_VERSION, args.host, args.port, DATA_DIR)
     try:
         server = serve(args.host, args.port, flags)

@@ -28,6 +28,8 @@ else:
     DATA_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "printflow"
 
 DB_FILE = DATA_DIR / "printflow.sqlite3"
+BACKUP_DIR = DATA_DIR / "backups"
+RESTORE_REQUEST = DATA_DIR / "restore.request"  # маркер отложенного восстановления
 UPLOAD_DIR = DATA_DIR / "uploads"
 PHOTO_DIR = DATA_DIR / "photos"
 LOG_FILE = DATA_DIR / "connector.log"
@@ -117,6 +119,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "printer_invested_at": "",      # дата ввода в эксплуатацию
     "night_shift_enabled": True,    # планировать длинное на ночь, срочное днём
     "ejector_enabled": False,       # авто-эжектор (DIY): режим снятия деталей
+    "month_close": {},              # журнал шагов мастера «Закрыть месяц» по месяцам
     "auto_backup_days": 1,          # автобэкап раз в N дней (0 = выключен)
     # --- Очередь и планирование -----------------------------------------
     "queue_check_filament": True,   # не запускать, если пластика не хватит

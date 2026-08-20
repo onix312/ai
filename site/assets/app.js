@@ -1210,6 +1210,40 @@ function restoreBackup() {
   };
   input.click();
 }
+/** Полные SQLite-копии базы: список и откат одной кнопкой (10.12). */
+async function loadDbBackups() {
+  const host = $('db_backups_list');
+  if (!host) return;
+  try {
+    const res = await get('/api/system/backups');
+    const items = res.backups || [];
+    if (res.pending && res.pending.file) {
+      host.innerHTML = `<div class="notice warn"><span>⏳</span><span>Запланирован откат к копии <code>${esc(res.pending.file)}</code> — выполнится после перезапуска приложения.</span></div>`;
+      return;
+    }
+    if (!items.length) {
+      host.innerHTML = '<p class="muted" style="font-size:12px;margin-top:8px">Копий пока нет. Нажмите «Копия сейчас» — и перед каждой миграцией схемы копия делается сама.</p>';
+      return;
+    }
+    host.innerHTML = items.slice(0, 8).map((b) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line,#e5e7eb)">
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><code>${esc(b.name)}</code><br><small class="muted">${esc(b.at)} · ${(b.size / 1048576).toFixed(1)} МБ</small></span>
+        <button class="btn sm ghost" data-db-restore="${esc(b.name)}" type="button">Откатить</button>
+      </div>`).join('');
+    host.querySelectorAll('[data-db-restore]').forEach((btn) => {
+      btn.addEventListener('click', () => restoreDbFile(btn.dataset.dbRestore));
+    });
+  } catch (e) { host.innerHTML = '<p class="muted" style="font-size:12px">Список недоступен: коннектор не запущен.</p>'; }
+}
+async function restoreDbFile(name) {
+  if (!confirmDanger(`Откатить базу к копии ${name}?\n\nТекущая база будет сохранена в before-restore-*.sqlite3, приложение перезапустится.`)) return;
+  try {
+    await post('/api/system/restore', { file: name });
+    toast('Откат запланирован', 'Приложение перезапускается…');
+    setTimeout(() => location.reload(), 2500);
+  } catch (e) { fail(e); }
+}
+
 /** Перенос данных старой браузерной версии PrintFlow. */
 async function importLocalStorage() {
   const KEYS = ['ops_orders1', 'ops_customers1', 'ops_statuses1', 'ops_niches1',
@@ -1594,6 +1628,15 @@ function bind() {
   $('backup_restore').addEventListener('click', restoreBackup);
   $('backup_import_ls').addEventListener('click', importLocalStorage);
   $('backup_wipe').addEventListener('click', wipeData);
+  $('db_backup_now').addEventListener('click', async () => {
+    try {
+      const res = await post('/api/system/backup', {});
+      if (!res.ok) return fail(new Error(res.error || 'Копия не создалась'));
+      toast('Копия базы создана', res.file);
+      loadDbBackups();
+    } catch (e) { fail(e); }
+  });
+  loadDbBackups();
   const profSave=$('prof_save');
   if (profSave) profSave.addEventListener('click', async()=>{ const name=window.prompt('Название снапшота','Снапшот '+new Date().toLocaleString('ru-RU')); if(name==null) return; try{ await post('/api/settings/profile/save',{name}); renderProfiles(); toast('Снапшот сохранён', name);}catch(e){fail(e);} });
   $('data_check_btn').addEventListener('click', runDataCheck);

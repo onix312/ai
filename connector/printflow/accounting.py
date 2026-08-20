@@ -949,14 +949,22 @@ class Accounting:
                         payer: str = "", fee: float = 0.0, taxable: bool = True,
                         deductible: bool = True, customer_id: str = "",
                         fixed_cost_id: str = "", at: str = "") -> dict:
-        if kind not in ("income", "expense"):
-            raise ValueError("Тип проводки: income или expense")
-        # сумма всегда положительная: знак задаёт вид проводки, иначе в списке «−−5 ₽»
-        amount = abs(num(amount))
-        if amount <= 0:
-            raise ValueError("Сумма проводки должна быть больше нуля")
-        # без статьи проводка выпадает из отчётов и показывается как «Без статьи»
-        category = str(category or "").strip() or ("sale" if kind == "income" else "other")
+        if kind not in ("income", "expense", "correction"):
+            raise ValueError("Тип проводки: income, expense или correction")
+        if kind == "correction":
+            # Корректировка кассы: сумма со знаком (факт − система).
+            # В P&L и налоговую базу не попадает (taxable=deductible=0).
+            amount = round(num(amount), 2)
+            if amount == 0:
+                raise ValueError("Сумма корректировки должна быть не нулевой")
+            category = str(category or "").strip() or "correction"
+        else:
+            # сумма всегда положительная: знак задаёт вид проводки, иначе в списке «−−5 ₽»
+            amount = abs(num(amount))
+            if amount <= 0:
+                raise ValueError("Сумма проводки должна быть больше нуля")
+            # без статьи проводка выпадает из отчётов и показывается как «Без статьи»
+            category = str(category or "").strip() or ("sale" if kind == "income" else "other")
         tx_id = uid("tx")
         at = at or now_iso()
         account_id = account_id or str(self.db.setting("default_account", "cash") or "")
@@ -1172,13 +1180,14 @@ class Accounting:
         return rows
 
     # ------------------------------------------------------- постоянные расходы
-    def run_fixed_costs(self, today: str = "") -> list[dict]:
+    def run_fixed_costs(self, today: str = "", force: bool = False) -> list[dict]:
         """Начисляет постоянные расходы за текущий период (идемпотентно).
 
         Каждый расход начисляется один раз в месяц/квартал/год: повторный вызов
-        ничего не сделает, пока не наступит следующий период.
+        ничего не сделает, пока не наступит следующий период. ``force=True``
+        использует мастер «Закрыть месяц» — флаг автоначисления не обязателен.
         """
-        if not self.db.setting("fixed_costs_auto", True):
+        if not force and not self.db.setting("fixed_costs_auto", True):
             return []
         stamp = today or date.today().isoformat()
         cur_month = month_key(stamp)
@@ -1447,6 +1456,7 @@ class Accounting:
         for acc in self.db.query("SELECT * FROM accounts WHERE archived=0 ORDER BY position, name"):
             agg = self.db.one(
                 "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount-COALESCE(fee,0)"
+                " WHEN kind='correction' THEN amount"
                 " ELSE -amount END),0) AS delta, COUNT(*) AS n"
                 " FROM transactions WHERE account_id=?", (acc["id"],)) or {}
             balance = num(acc["opening_balance"]) + num(agg.get("delta"))

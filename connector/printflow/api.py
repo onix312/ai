@@ -115,6 +115,8 @@ class Api:
         self.envelopes = Envelopes(self.db)
         from .shopping import ShoppingList
         self.shopping = ShoppingList(self.db)
+        from .month_close import MonthClose
+        self.month_close = MonthClose(self.db)
         from .clients import Clients
         self.clients = Clients(self.db)
         from .b2b import B2B
@@ -128,6 +130,15 @@ class Api:
         self.listen_host = "127.0.0.1"
         self.listen_port = 8080
         self.started_at = time.time()
+
+    def restart_process(self) -> None:
+        """Перезапустить процесс (маркер восстановления применится на старте)."""
+        import os
+        import sys
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception:
+            pass  # перезапуск вручную: python pf.py
 
     def qr_target(self, path: str, query: str = "") -> dict:
         """URL для QR-наклейки: LAN, а не localhost панели."""
@@ -572,6 +583,20 @@ class Api:
         if path == "/api/health":
             return 200, {"ok": True, "version": APP_VERSION,
                          "uptime": round(time.time() - self.started_at)}
+        if path == "/api/month-close":
+            return 200, self.month_close.state(one("key"))
+        if path == "/api/system/backups":
+            from .db import list_backups, pending_restore
+            db_stat = None
+            from .config import DB_FILE
+            if DB_FILE.exists():
+                stat = DB_FILE.stat()
+                db_stat = {"size": stat.st_size,
+                           "at": time.strftime("%Y-%m-%d %H:%M:%S",
+                                               time.localtime(stat.st_mtime))}
+            return 200, {"backups": list_backups(),
+                         "db": db_stat,
+                         "pending": pending_restore()}
         if path == "/api/bootstrap":
             return 200, {
                 "version": APP_VERSION,
@@ -1754,6 +1779,28 @@ class Api:
             return 200, {"ok": True, "fired": [r["id"] for r in fired]}
         if path == "/api/settings/reset":
             return 200, {"ok": True, "settings": self.repo.reset_settings(body.get("keys"))}
+        if path == "/api/system/backup":
+            from .db import make_backup
+            result = make_backup()
+            if result.get("ok"):
+                self.db.add_event("backup", "Ручная копия базы", result["file"], "", {})
+            return 200, result
+        if path == "/api/system/restore":
+            from .db import request_restore
+            result = request_restore(str(body.get("file") or ""))
+            self.db.add_event("backup", "Запрошен откат базы",
+                              f"из копии {result['file']}; приложение перезапустится",
+                              "", result)
+            threading.Timer(1.5, self.restart_process).start()
+            return 200, {**result, "restarting": True}
+        if path == "/api/month-close/step":
+            result = self.month_close.run(
+                str(body.get("key") or ""), str(body.get("step") or ""),
+                {"accounts": body.get("accounts") or []})
+            self.db.add_event("finance", f"Закрытие месяца: {body.get('step')}",
+                              str(result.get("message") or ""), "", result)
+            self.bus.publish("resync", {})
+            return 200, result
         if path == "/api/telegram/test":
             self.db.set_settings({k: v for k, v in body.items() if k.startswith("telegram")})
             return 200, self.manager.send_telegram("PrintFlow: проверка уведомлений прошла успешно.")

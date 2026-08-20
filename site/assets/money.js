@@ -51,13 +51,18 @@ function renderFinance() {
     : '<div class="empty compact"><span>Данных по нишам пока нет.</span></div>';
 
   const tx = data.transactions || [];
-  $('fin_tx').innerHTML = tx.length ? tx.slice(0, 30).map((t) => `<div class="tx-row">`
-    + `<span class="tx-ic ${esc(t.kind)}">${t.kind === 'income' ? '↑' : '↓'}</span>`
+  $('fin_tx').innerHTML = tx.length ? tx.slice(0, 30).map((t) => {
+    const isInc = t.kind === 'income', isCorr = t.kind === 'correction';
+    const sign = isCorr ? (num(t.amount) >= 0 ? '+' : '−') : (isInc ? '+' : '−');
+    const arrow = isCorr ? '±' : (isInc ? '↑' : '↓');
+    return `<div class="tx-row">`
+    + `<span class="tx-ic ${esc(t.kind)}">${arrow}</span>`
     + `<div class="tx-body"><b>${esc(t.title || t.category)}</b>`
     + `<small>${esc(dateTimeText(t.at))} · ${esc(catName(t.category))}${num(t.auto) ? ' · ⚙ авто' : ''}</small></div>`
-    + `<span class="amt ${t.kind === 'income' ? 'pos' : 'neg'}">${t.kind === 'income' ? '+' : '−'}${money(Math.abs(num(t.amount)))}</span>`
+    + `<span class="amt ${isCorr ? '' : (isInc ? 'pos' : 'neg')}">${sign}${money(Math.abs(num(t.amount)))}</span>`
     + (num(t.auto) ? '' : `<button class="icon-btn sm danger" type="button" data-tx-del="${esc(t.id)}">×</button>`)
-    + '</div>').join('')
+    + '</div>';
+  }).join('')
     : '<div class="empty compact"><span>Проводок пока нет. Они появятся сами при закрытии заказов.</span></div>';
 }
 
@@ -770,6 +775,76 @@ function openTx(kind) {
 
 /* ============================================================= события */
 function bind() {
+  /* ===================== мастер «Закрыть месяц» (H4) ===================== */
+  let mcState = null;
+  async function openMonthClose() {
+    try { mcState = await get('/api/month-close'); } catch (e) { return fail(e); }
+    $('mc_key').value = mcState.key;
+    renderMc();
+    openModal('month_close_modal');
+  }
+  function renderMc() {
+    const s = mcState;
+    if (!s) return;
+    $('mc_sub').textContent = s.next
+      ? 'Шаги выполняются по порядку, повторный запуск шага в этом месяце данные не задвоит.'
+      : 'Все шаги этого месяца выполнены. Следующее закрытие — в новом месяце.';
+    $('mc_steps').innerHTML = s.order.map((step) => {
+      const done = s.done[step];
+      const log = (s.log || {})[step] || {};
+      const extra = log.count !== undefined ? ` · начислено: ${log.count}`
+        : log.adjustments !== undefined ? ` · корректировок: ${log.adjustments}`
+        : log.amount !== undefined ? ` · отложено: ${money(num(log.amount))}`
+        : (log.file ? ` · ${esc(log.file)}` : '');
+      const sub = step === 'cash' && !done
+        ? `<div style="margin-top:8px">${(s.accounts || []).map((a) => `
+          <label class="field" style="margin:6px 0"><span>${esc(a.name)} — в системе ${money(num(a.balance))}</span>
+          <input type="number" step="any" data-mc-fact="${esc(a.id)}" placeholder="факт наличными" value="${num(a.balance)}"></label>`).join('')}</div>`
+        : `<small class="muted">${log.at ? esc(log.at.slice(0, 10)) + extra : ''}</small>`;
+      const action = done
+        ? '<span class="state-badge ok">✓ готово</span>'
+        : (s.next === step
+          ? `<button class="btn sm primary" data-mc-run="${step}" type="button">Выполнить</button>`
+          : '<small class="muted">после предыдущих</small>');
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line,#e5e7eb)">
+        <div style="min-width:0"><b>${esc(s.titles[step] || step)}</b><br>${sub}</div>
+        <div style="flex:0 0 auto">${action}</div></div>`;
+    }).join('');
+    $('mc_result').innerHTML = '';
+    $('mc_steps').querySelectorAll('[data-mc-run]').forEach((b) => {
+      b.addEventListener('click', () => runMcStep(b.dataset.mcRun));
+    });
+  }
+  async function runMcStep(step) {
+    const payload = { key: mcState.key, step, accounts: [] };
+    if (step === 'cash') {
+      document.querySelectorAll('[data-mc-fact]').forEach((input) => {
+        payload.accounts.push({ id: input.dataset.mcFact, fact: parseFloat(input.value) || 0 });
+      });
+    }
+    try {
+      const res = await post('/api/month-close/step', payload);
+      if (!res.ok) toast('Шаг не выполнен', res.error || '', 'warn');
+      else {
+        toast('Шаг выполнен', res.message || '');
+        if (step === 'report' && res.report && res.report.pnl) {
+          const r = res.report.pnl;
+          $('mc_result').innerHTML = `<div class="notice ok"><span>📄</span><span><b>${esc(mcState.key)}:</b> доход ${money(num(r.income))}, расход ${money(num(r.expense))}, прибыль <b>${money(num(r.profit))}</b> · налог (оценка) ${money(num(res.report.tax.tax))} · долги клиентов ${money(num(res.report.debts.total))}</span></div>`;
+        }
+      }
+      mcState = await get('/api/month-close');
+      renderMc();
+      try { await PF.refreshFinance(); } catch (e) { /* офлайн */ }
+    } catch (e) { fail(e); }
+  }
+  $('mc_key').addEventListener('change', async () => {
+    try {
+      mcState = await get('/api/month-close?key=' + encodeURIComponent($('mc_key').value));
+      renderMc();
+    } catch (e) { fail(e); }
+  });
+  $('fin_month_close').addEventListener('click', openMonthClose);
+
   $('fin_period').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;
