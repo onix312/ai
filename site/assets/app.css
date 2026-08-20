@@ -837,6 +837,14 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
   .wall-foot { flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; }
   .modal-foot { flex-wrap: wrap; }
   .modal-foot .btn { flex: 1 1 auto; }
+  /* В карточке заказа много действий. Раньше они занимали несколько строк и
+     выталкивали «Сохранить» за нижний край телефона. Основные кнопки всегда
+     видны слева, остальные доступны горизонтальным свайпом. */
+  #order_modal .modal-foot { flex-wrap: nowrap; overflow-x: auto; padding: 10px 12px; }
+  #order_modal .modal-foot .btn { flex: 0 0 auto; white-space: nowrap; }
+  #order_modal .modal-foot .spacer { display: none; }
+  #order_save { order: -20; position: sticky; left: 0; z-index: 2; }
+  #order_modal [data-close="order_modal"] { order: -19; }
 }
 
 /* ==================================================== виджеты панели */
