@@ -230,6 +230,16 @@ function renderGauge() {
 }
 
 /* ====================================================== AMS на главной */
+function amsHexToName(hex){
+  hex=String(hex||'').trim().replace('#','');
+  if(hex.length<6) return '';
+  const r=parseInt(hex.slice(0,2),16),g=parseInt(hex.slice(2,4),16),b=parseInt(hex.slice(4,6),16);
+  const mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+  if(mx-mn<30){ if(mx<60) return 'Чёрный'; if(mx>200) return 'Белый'; return 'Серый'; }
+  if(r>=g&&r>=b) return g>90?'Оранжевый':'Красный';
+  if(g>=r&&g>=b) return 'Зелёный';
+  return 'Синий';
+}
 function renderAmsPanel() {
   const host = $('dash_ams');
   const live = PF.state.live;
@@ -244,10 +254,11 @@ function renderAmsPanel() {
   host.innerHTML = trays.map((t) => {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
     const warn = remain != null && remain < threshold;
+    const cname = amsHexToName(t.color) || '';
     return `<div class="ams-row${t.active ? ' active' : ''}">`
       + `<span class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></span>`
-      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}</b>`
-      + `<small>${esc(t.type || 'Не задан')}${t.active ? ' · активен' : ''}</small></div>`
+      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}${cname ? ' · ' + esc(cname) : ''}</b>`
+      + `<small>${esc(t.type || 'Не задан')}${cname ? ' · ' + esc(cname) : ''}${t.active ? ' · активен' : ''}</small></div>`
       + (remain != null
         ? `<div class="ams-remain${warn ? ' warn' : ''}"><div class="bar thin"><i style="width:${clamp(remain, 0, 100)}%"></i></div><small>${Math.round(remain)}%</small></div>`
         : '<span class="muted">—</span>')

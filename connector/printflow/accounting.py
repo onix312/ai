@@ -14,6 +14,8 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import math
+
 from .config import now_iso
 from .db import Database
 
@@ -143,12 +145,15 @@ class Accounting:
 
         # Цена катушки: если пользователь не указал — берём из справочника
         # Приоритет: явное значение > справочник материала > настройка по умолчанию
-        if spool_price is not None and spool_price > 0:
-            price = num(spool_price)
+        sp_price = num(spool_price) if spool_price is not None else 0
+        if sp_price > 0:
+            price = sp_price
         else:
             price = mat.get("price_per_kg", num(s["default_spool_price"], 1600))
-        weight = max(1.0, num(spool_weight if spool_weight is not None
-                              else s["default_spool_weight"], 1000))
+        sw = num(spool_weight) if spool_weight not in (None, "") else 0
+        if sw <= 1:
+            sw = num(s.get("default_spool_weight"), 1000) or 1000
+        weight = max(1.0, sw)
 
         # --- модель «плита vs штука» ---
         fit = max(1.0, num(fit_per_plate, 1))
@@ -157,19 +162,22 @@ class Accounting:
 
         if pg > 0 and ph > 0:
             # Новый режим: слайсер дал вес и время на плиту
-            plates = int(-(-int(qty) // int(fit)))  # ceil(qty / fit)
+            plates = max(1, math.ceil(qty / fit))  # ceil(qty / fit)
             # Вес всей партии = вес плиты × число плит
             # Поддержки добавляются к весу плиты (они уже часть плиты)
             base_grams = pg * plates
             # Время = время плиты × число плит + прогрев на каждую плиту
             warmup = num(warmup_minutes, 7) / 60.0  # минут → часов
+            # если warmup передали 0 — это «нет прогрева», не подменяем на 7
+            if warmup_minutes is not None and str(warmup_minutes).strip() != "" and num(warmup_minutes, -1) == 0:
+                warmup = 0.0
             base_hours = (ph + warmup) * plates
             # На одну штуку (для отображения)
             unit_grams = pg / fit
             unit_hours = ph / fit
         else:
             # Старый режим: grams = на штуку, hours = на плиту
-            plates = int(-(-int(qty) // int(fit)))
+            plates = max(1, math.ceil(qty / fit))
             base_grams = num(grams) * qty
             base_hours = num(hours) * plates
             unit_grams = num(grams)

@@ -145,6 +145,20 @@ function renderLive() {
   controls.forEach((b) => { b.disabled = !p.connection.connected; });
 }
 
+function amsColorName(hex) {
+  hex = String(hex || '').trim().replace('#', '');
+  if (hex.length < 6) return '';
+  const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+  if (mx - mn < 30) {
+    if (mx < 60) return 'Чёрный';
+    if (mx > 200) return 'Белый';
+    return 'Серый';
+  }
+  if (r >= g && r >= b) return g > 90 ? 'Оранжевый' : 'Красный';
+  if (g >= r && g >= b) return 'Зелёный';
+  return 'Синий';
+}
 function renderAms(p) {
   const ams = p.ams || { trays: [] };
   const trays = ams.trays || [];
@@ -161,14 +175,21 @@ function renderAms(p) {
   }
   host.innerHTML = trays.map((t) => {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
+    const human = amsColorName(t.color) || '';
+    let spoolHint = '';
+    try {
+      const sp = (PF.state.spools || []).find((s) => String(s.ams_slot) === String(t.slot) && String(s.printer_id) === String(p.id));
+      if (sp && sp.color_name) spoolHint = ' · ' + sp.color_name;
+    } catch(e) {}
     return `<div class="ams-slot${t.active ? ' active' : ''}">`
       + `<div class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></div>`
-      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}</b>`
-      + `<small>${esc(t.type || 'Не задан')}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
+      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}${human ? ' · ' + esc(human) : ''}</b>`
+      + `<small>${esc(t.type || 'Не задан')}${human ? ' · ' + esc(human) : ''}${spoolHint}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
       + (remain != null ? `<div class="bar thin${remain < 15 ? ' warn' : ''}"><i style="width:${clamp(remain, 0, 100)}%"></i></div>` : '')
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}">Тип</button>`
+      + (t.active ? `<span class="chip ok" style="margin-left:6px">активен</span>` : '')
       + '</div></div>';
   }).join('');
 }
@@ -321,14 +342,25 @@ function renderCamera(p) {
   const cam = p.camera || {};
   const demo = !!cam.demo;
   const img = $('pr_cam');
-  text('pr_cam_status', cam.available
-    ? (demo ? 'Демо-режим: заготовленные кадры' : 'Прямой эфир')
-    : (cam.error || 'Нет сигнала'));
+  const isCloudNoIP = p.connection && p.connection.mode === 'cloud' && !p.connection.host;
+  let statusText = cam.available ? (demo ? 'Демо-режим: заготовленные кадры' : 'Прямой эфир') : (cam.error || 'Нет сигнала');
+  if (isCloudNoIP && !cam.available) statusText = 'Камера — только по локальной сети (укажите IP)';
+  text('pr_cam_status', statusText);
   text('pr_cam_age', cam.available
     ? (demo ? 'Принтер не подключён' : (cam.age < 3 ? 'Кадр только что' : `Кадр ${Math.round(cam.age)} сек. назад`))
-    : '—');
+    : (isCloudNoIP ? 'Добавьте IP в Настройках → Принтеры' : '—'));
   $('pr_cam_demo').hidden = !demo;
-  $('pr_cam_empty').hidden = !!cam.available;
+  const emptyEl = $('pr_cam_empty');
+  if (isCloudNoIP && !cam.available) {
+    emptyEl.innerHTML = '<span class="big">◉</span>Камера в облачном режиме недоступна<br><small>Принтер управляется через Bambu Cloud, а камера — только по локальной сети (порт 6000).<br>Решение: укажите IP принтера в Настройках → Принтеры → поле «IP-адрес» (посмотрите в Настройки → WLAN на экране принтера). После этого камера появится даже в облачном режиме. Или включите Демо-камеру для проверки интерфейса.</small><br><button class="btn sm" type="button" onclick="PF.modules.printer.openPrinterModal(PF.state.activePrinter)">Указать IP</button>';
+    emptyEl.hidden = false;
+  } else if (!cam.available && p.connection.mode === 'cloud' && p.connection.connected) {
+    emptyEl.innerHTML = '<span class="big">◉</span>Облако подключено, камера ищет локальную сеть<br><small>порт 6000 · проверьте что ПК и принтер в одной Wi-Fi сети (192.168.x.x)</small>';
+    emptyEl.hidden = false;
+  } else {
+    if (emptyEl.dataset.cloudHtml) emptyEl.innerHTML = '<span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small>';
+    emptyEl.hidden = !!cam.available;
+  }
   img.classList.toggle('on', !!cam.available);
 
   if (!cam.available) {

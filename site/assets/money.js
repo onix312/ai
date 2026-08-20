@@ -236,32 +236,63 @@ function calcInputs() {
     slice: num($('calc_prep_slice') ? $('calc_prep_slice').value : 0),
   };
   const modelPrep = Object.values(prepStages).reduce((a, b) => a + b, 0);
+  // вес/цена катушки: пустое поле → дефолт из настроек, не 0/1
+  let spPrice = num($('calc_spool_price').value);
+  if (!spPrice) spPrice = num(PF.state.settings.default_spool_price, 1600);
+  let spWeight = num($('calc_spool_weight').value);
+  if (!spWeight || spWeight < 10) spWeight = num(PF.state.settings.default_spool_weight, 1000) || 1000;
+  // прогрев: пусто → 7 мин, но явный 0 оставляем как 0
+  const warmEl = $('calc_warmup');
+  let warm = warmEl ? warmEl.value : '7';
+  warm = String(warm).trim() === '' ? 7 : num(warm, 7);
   return {
-    plate_grams: num($('calc_plate_grams').value),
-    plate_hours: num($('calc_plate_hours').value),
-    qty: Math.max(1, num($('calc_qty').value, 1)),
-    fit: Math.max(1, num($('calc_fit').value, 1)),
-    warmup: num($('calc_warmup').value),
-    material: $('calc_material').value || 'PLA',
+    plate_grams: Math.max(0, num($('calc_plate_grams').value)),
+    plate_hours: Math.max(0, num($('calc_plate_hours').value)),
+    qty: Math.max(1, Math.min(1000, num($('calc_qty').value, 1) || 1)),
+    fit: Math.max(1, Math.min(256, num($('calc_fit').value, 1) || 1)),
+    warmup: warm,
+    material: ($('calc_material').value || 'PLA').toUpperCase(),
     quality: $('calc_quality').value || 'standard',
-    supports_pct: num($('calc_supports').value),
-    color_swaps: num($('calc_color_swaps').value),
-    spool_price: num($('calc_spool_price').value),
-    spool_weight: num($('calc_spool_weight').value),
-    remove: num($('calc_remove').value),
-    sand: num($('calc_sand').value),
-    paint: num($('calc_paint').value),
-    design: num($('calc_design').value),
-    markup: num($('calc_markup').value, 150),
-    fee: num($('calc_fee').value),
-    fix: num($('calc_fix').value),
-    delivery: num($('calc_delivery').value),
-    model_prep_minutes: modelPrep,
+    supports_pct: clamp(num($('calc_supports').value), 0, 50),
+    color_swaps: clamp(num($('calc_color_swaps').value), 0, 50),
+    spool_price: spPrice,
+    spool_weight: spWeight,
+    remove: clamp(num($('calc_remove').value), 0, 240),
+    sand: clamp(num($('calc_sand').value), 0, 240),
+    paint: clamp(num($('calc_paint').value), 0, 240),
+    design: clamp(num($('calc_design').value), 0, 600),
+    markup: clamp(num($('calc_markup').value, 150), 0, 1000),
+    fee: clamp(num($('calc_fee').value), 0, 99),
+    fix: clamp(num($('calc_fix').value), 0, 10000),
+    delivery: clamp(num($('calc_delivery').value), 0, 5000),
+    model_prep_minutes: clamp(modelPrep, 0, 600),
     prep_stages: prepStages,
     complexity: $('calc_complexity') ? $('calc_complexity').value : 'simple',
-    dim_x: num($('calc_dim_x') ? $('calc_dim_x').value : 0),
-    dim_y: num($('calc_dim_y') ? $('calc_dim_y').value : 0),
+    dim_x: clamp(num($('calc_dim_x') ? $('calc_dim_x').value : 0), 0, 256),
+    dim_y: clamp(num($('calc_dim_y') ? $('calc_dim_y').value : 0), 0, 256),
   };
+}
+function currentAmsForCalc() {
+  try {
+    const live = PF.livePrinter();
+    if (!live || !live.ams || !live.ams.trays.length) return null;
+    return live.ams.trays.find((t) => t.active) || live.ams.trays[0] || null;
+  } catch (e) { return null; }
+}
+function applyAmsToCalc() {
+  const tray = currentAmsForCalc();
+  if (!tray) return fail(new Error('AMS не на связи'));
+  if (tray.type) {
+    const key = String(tray.type).toUpperCase().replace(' ', '_');
+    const mat = calcMaterials.find((m) => m.key === key || m.name.toUpperCase() === tray.type.toUpperCase());
+    if (mat) $('calc_material').value = mat.key;
+    else $('calc_material').value = tray.type;
+  }
+  // цену берём из справочника материала, если доступна
+  const m2 = calcMaterials.find((mm) => mm.key === $('calc_material').value);
+  if (m2) $('calc_spool_price').value = m2.price_per_kg;
+  toast('Взято из AMS', `${tray.type || ''} ${tray.color || ''}`.trim());
+  runCalc();
 }
 
 function updateMaterialInfo() {
@@ -275,8 +306,18 @@ function updateMaterialInfo() {
 
 async function runCalc() {
   const v = calcInputs();
-  store.set(CALC_KEY, JSON.stringify(v));
+  try { store.set(CALC_KEY, JSON.stringify(v)); } catch (e) { /* storage may be blocked */ }
   updateMaterialInfo();
+  // AMS hint
+  const amsHint = $('calc_ams_hint');
+  if (amsHint) {
+    const tray = currentAmsForCalc();
+    if (tray) {
+      amsHint.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px">AMS: <span class="swatch" style="--filament:${esc(tray.color || '#cbd5e1')};width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid #e5e7eb"></span> ${esc(tray.type || '')} ${esc(tray.color || '')} · ${Math.round(num(tray.remain))}%`
+        + ` <button class="btn sm ghost" type="button" onclick="PF.modules.money.applyAmsToCalc()" style="margin-left:6px">В калькулятор</button></span>`;
+      amsHint.hidden = false;
+    } else if (amsHint) amsHint.hidden = true;
+  }
 
   // Подсказка «вес/время на штуку»
   const plateInfo = $('calc_plate_info');
@@ -290,11 +331,8 @@ async function runCalc() {
     plateInfo.hidden = true;
   }
 
-  const plates = Math.ceil(v.qty / v.fit);
-  const totalHours = v.plate_hours * plates + (v.warmup / 60) * plates;
-  const totalGrams = v.plate_grams * plates;
-  $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${plates} плит(а/ы) · `
-    + `${hoursText(totalHours)} · ${nfmt(totalGrams)} г`;
+  // предварительный текст — до ответа сервера (без поддержек/продувки)
+  $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${Math.ceil(v.qty / v.fit)} плит(а/ы) · ожидание расчёта…`;
 
   let br;
   try {
@@ -315,6 +353,12 @@ async function runCalc() {
     $('calc_rows').innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
     return;
   }
+
+  // уточнить=batch_sub по фактам сервера (с поддержками/продувкой/скоростью материала)
+  $('calc_batch_sub').textContent = `${nfmt(v.qty)} шт · ${br.plates} плит(а/ы) · `
+    + `${hoursText(br.total_hours)} · ${nfmt(br.total_grams)} г`
+    + (br.support_grams ? ` · поддержки ${nfmt(br.support_grams)} г` : '')
+    + (br.purge_grams ? ` · продувка ${nfmt(br.purge_grams)} г` : '');
 
   // Обновить подготовку модели
   updatePrepTotal(v);
@@ -1040,5 +1084,5 @@ function applyPreset(name) {
   toast('Пресет', name);
 }
 
-PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset };
+PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset, applyAmsToCalc };
 })();

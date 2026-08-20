@@ -27,6 +27,36 @@ from .config import now_iso
 ZERO_UUID = "0" * 32
 
 
+def _hex_to_name(value: str) -> str:
+    """Hex #RRGGBB → человеческое имя (упрощённая палитра)."""
+    value = (value or "").strip().lstrip("#")
+    if len(value) < 6:
+        return ""
+    try:
+        r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return ""
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx - mn < 30:
+        if mx < 60:
+            return "Чёрный"
+        if mx > 200:
+            return "Белый"
+        return "Серый"
+    if r >= g and r >= b:
+        return "Оранжевый" if g > 90 else "Красный"
+    if g >= r and g >= b:
+        return "Зелёный"
+    return "Синий"
+
+
+def _normalize_hex(value: str) -> str:
+    v = str(value or "").strip().lstrip("#")
+    if len(v) >= 6:
+        return "#" + v[:6].upper()
+    return ""
+
+
 def _clean_uuid(value: Any) -> str:
     text = str(value or "").strip()
     return "" if not text or set(text) == {"0"} else text
@@ -67,7 +97,7 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
         slot = "" if tray.get("slot") is None else str(tray.get("slot"))
         label = tray.get("label") or (f"Слот {slot}" if slot else "AMS")
         remain = tray.get("remain")
-        color = str(tray.get("color") or "").strip()
+        color = _normalize_hex(str(tray.get("color") or ""))
 
         # 1) ищем катушку по RFID-метке, затем по привязке принтер+слот
         spool = None
@@ -115,6 +145,20 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 if abs(fresh - num(spool.get("remaining_grams"))) > 1.0:
                     updates.append("remaining_grams=?")
                     params.append(fresh)
+            # цвет из AMS: заполняем только если у катушки пустое имя/hex-дефолт
+            if color:
+                cur_hex = _normalize_hex(str(spool.get("color_hex") or ""))
+                cur_name = str(spool.get("color_name") or "").strip()
+                if (not cur_name) or cur_hex in ("", "#4B5563", "#333333", "#CBD5E1"):
+                    # не затираем ручной выбор, но пустые/дефолтные — заполняем
+                    if cur_hex != color:
+                        updates.append("color_hex=?")
+                        params.append(color)
+                    if not cur_name:
+                        cname = _hex_to_name(color)
+                        if cname:
+                            updates.append("color_name=?")
+                            params.append(cname)
             updates.append("synced_at=?")
             params.append(now_iso())
             db.execute(
@@ -127,12 +171,14 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
             remaining = total
             if remain is not None and num(remain, -1) >= 0:
                 remaining = round(min(100.0, max(0.0, num(remain))) / 100.0 * total, 1)
+            hex_norm = color or "#4b5563"
+            cname = _hex_to_name(hex_norm) if hex_norm != "#4b5563" else ""
             row = db.upsert("spools", {
                 "id": uid("sp"),
                 "material": material,
                 "brand": "",
-                "color_name": "",
-                "color_hex": color or "#4b5563",
+                "color_name": cname,
+                "color_hex": hex_norm,
                 "total_grams": total,
                 "remaining_grams": remaining,
                 "price": num(db.setting("default_spool_price", 1600), 1600),
