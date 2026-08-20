@@ -590,26 +590,6 @@ class Api:
             return 200, job_passport(self.db, one("id"))
         if path == "/api/catalog/recalc":
             return 200, self.acc.recalc_catalog(False)
-        if path == "/api/debt/remind":
-            order = self.db.one("SELECT * FROM orders WHERE id=?",
-                                (one("id") or one("order_id"),))
-            if not order:
-                raise ValueError("Заказ не найден")
-            debt = self.acc.order_economics(order)["debt"]
-            name = (order.get("customer_name") or "").strip()
-            hello = f", {name}," if name else ","
-            text = (f"Здравствуйте{hello} напоминаем о заказе "
-                    f"№{order.get('number')} «{order.get('product') or ''}»: "
-                    f"остаток к оплате {round(debt)} ₽. Спасибо!")
-            self.db.execute(
-                "UPDATE orders SET reminded_at=?, updated_at=? WHERE id=?",
-                (now_iso(), now_iso(), order["id"]))
-            self.db.add_event("order", "Напомнили о долге",
-                              f"№{order.get('number')}", "",
-                              {"order_id": order["id"]})
-            self.bus.publish("resync", {})
-            return 200, {"ok": True, "text": text, "debt": round(debt, 2),
-                         "number": order.get("number")}
         if path == "/api/camera/diagnose":
             from .camera import diagnose
             return 200, diagnose(self.printer_or_fail(one("printer_id")))
@@ -1867,6 +1847,26 @@ class Api:
                               f"{updated} заказов → {status}", "", {})
             self.bus.publish("resync", {})
             return 200, {"ok": True, "updated": updated}
+        if path == "/api/debt/remind":
+            order = self.db.one("SELECT * FROM orders WHERE id=?",
+                                (body.get("id") or body.get("order_id") or "",))
+            if not order:
+                raise ValueError("Заказ не найден")
+            debt = self.acc.order_economics(order)["debt"]
+            name = (order.get("customer_name") or "").strip()
+            hello = f", {name}," if name else ","
+            text = (f"Здравствуйте{hello} напоминаем о заказе "
+                    f"№{order.get('number')} «{order.get('product') or ''}»: "
+                    f"остаток к оплате {round(debt)} ₽. Спасибо!")
+            self.db.execute(
+                "UPDATE orders SET reminded_at=?, updated_at=? WHERE id=?",
+                (now_iso(), now_iso(), order["id"]))
+            self.db.add_event("order", "Напомнили о долге",
+                              f"№{order.get('number')}", "",
+                              {"order_id": order["id"]})
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "text": text, "debt": round(debt, 2),
+                         "number": order.get("number")}
         if path == "/api/bank/import-preview":
             from .bank_import import preview
             return 200, preview(self.db, str(body.get("text") or ""))
