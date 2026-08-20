@@ -472,6 +472,9 @@ table.data th {
 /* .right проигрывал по специфичности правилу выше — заголовок числовой
    колонки уезжал влево от своих значений */
 table.data th.right { text-align: right; }
+table.data th.w-check { width: 40px; text-align: center; padding: 11px 8px; }
+table.data td.w-check { text-align: center; padding: 11px 8px; }
+.w-check input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; display: block; margin: 0 auto; }
 table.data th.center { text-align: center; }
 table.data td { padding: 11px 13px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 table.data tbody tr:last-child td { border-bottom: 0; }

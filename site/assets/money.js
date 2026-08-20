@@ -98,7 +98,7 @@ function renderStock() {
     const p = clamp(num(s.percent), 0, 100);
     const cls = p <= 0 ? 'empty-spool' : p < num(PF.state.settings.filament_low_threshold, 15) ? 'low' : '';
     return `<article class="spool ${cls}" data-spool="${esc(s.id)}">`
-      + `<div class="reel" style="--spool:${esc(s.color_hex || '#4b5563')}">${Math.round(p)}%</div>`
+      + `<div class="reel" style="--filament:${esc(s.color_hex || '#4b5563')}"><span class="reel-pct">${Math.round(p)}%</span></div>`
       + `<div class="body"><b>${esc(s.material)} ${esc(s.color_name)}</b>`
       + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}`
       + `${num(s.ams_sync, 1) !== 0 && s.synced_at ? ' · <span title="Остаток обновляется автоматически из AMS. Отключается в карточке катушки.">⟳ из AMS</span>' : ''}</small>`
