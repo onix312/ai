@@ -25,6 +25,10 @@
 .chart-wrap { position: relative; }
 .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.9px; color: var(--muted); margin-top: 10px; }
 .chart-legend i, .chart-legend .lg i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+/* для #pr_chart_legend */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.9px; color: var(--muted); margin-top: 10px; }
+.legend .lg { display: inline-flex; align-items: center; gap: 5px; }
+.legend .lg i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .chart-tip {
   position: absolute; pointer-events: none; z-index: 5;
   padding: 7px 10px; border-radius: 9px; font-size: 12px; line-height: 1.45;
@@ -172,6 +176,19 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
 .cmd-btn:disabled { opacity: .45; pointer-events: none; }
 .cmd-row { display: flex; align-items: flex-end; gap: 9px; margin-top: 12px; flex-wrap: wrap; }
 .cmd-row .field { flex: 1; min-width: 120px; }
+
+/* раскрывающиеся секции (details/summary) в командах принтера */
+details.adv { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+details.adv summary {
+  padding: 10px 14px; cursor: pointer;
+  font-size: 12.8px; font-weight: 580; color: var(--text-2);
+  background: var(--panel-2);
+  transition: background .15s var(--ease), color .15s var(--ease);
+  user-select: none;
+}
+details.adv summary:hover { background: var(--panel-3); color: var(--text); }
+details.adv[open] summary { background: var(--accent-soft); color: var(--accent); border-bottom: 1px solid var(--line-soft); }
+details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 
 .jog { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; justify-content: center; }
 .jog button {
@@ -324,9 +341,20 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
   border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-1);
 }
 .spool .reel {
-  width: 44px; height: 44px; border-radius: 50%; flex: none;
+  width: 48px; height: 48px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
   background: var(--filament, #cbd5e1);
-  box-shadow: inset 0 0 0 8px var(--panel), inset 0 0 0 9px rgba(0, 0, 0, .12);
+  box-shadow: inset 0 0 0 5px var(--panel), inset 0 0 0 7px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.08);
+  font-size: 11px; font-weight: 700; color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  position: relative;
+}
+.spool .reel .reel-pct {
+  position: relative; z-index: 1;
+  font-size: 11px; font-weight: 700;
+  color: var(--text-2);
+  line-height: 1;
+  text-shadow: 0 0 4px var(--panel), 0 0 8px var(--panel);
 }
 .spool .body { flex: 1; min-width: 0; }
 .spool b { display: block; font-size: 13.6px; font-weight: 630; }
@@ -512,6 +540,7 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
   border-radius: var(--r); overflow-x: auto;
 }
 .library-article pre code { background: none; padding: 0; color: var(--text); font-size: 12.9px; }
+.library-article pre code.language-text { display: block; white-space: pre-wrap; word-break: break-word; color: var(--text-2); }
 .library-article pre .copy {
   position: absolute; top: 8px; right: 8px; opacity: 0;
   transition: opacity .15s var(--ease);
