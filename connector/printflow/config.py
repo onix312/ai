@@ -137,6 +137,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "telegram_bot": True,
     "telegram_token": "",
     "telegram_chat_id": "",
+    "telegram_quiet_from": "23:00",  # тихие часы бота: не шлём некритичное
+    "telegram_quiet_to": "07:00",
     # Bambu Cloud: управление принтером без LAN Only Mode / Developer Mode.
     # Токен и uid — секреты (маскируются, как telegram_token); email хранится
     # для повторного входа, пароль не хранится — при истечении токена Bambu
@@ -153,6 +155,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_pause": True,
     "notify_filament_low": True,
     "notify_guard": True,         # тревоги сторожа печати
+    "notify_firmware": True,      # сообщать об обновлении прошивки принтера
     "notify_maintenance": True,   # напоминания об обслуживании
     "notify_photo": True,         # прикладывать кадр камеры к сообщению
     "notify_finish_remind_min": 10.0,  # напомнить о финише за N минут (0 = выкл)

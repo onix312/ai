@@ -220,7 +220,7 @@ class MonthClose:
 
     # ------------------------------------------------------------- запуск шага
     def run(self, key: str, step: str, payload: dict | None = None) -> dict[str, Any]:
-        key = _valid_key(key)
+        key = _valid_key(key) if key else month_key(now_iso()[:10])
         if step not in STEP_ORDER:
             raise ValueError("Неизвестный шаг")
         payload = payload or {}

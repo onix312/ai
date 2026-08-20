@@ -238,8 +238,11 @@
       <div class="head-actions"><span class="chip warn" id="pr_cam_demo" hidden>Демо</span><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div></div>
      <div class="cam-frame"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span></div>
      <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span>
+      <button class="btn sm ghost" id="pr_cam_diag" type="button">Диагностика</button>
+      <button class="btn sm ghost" id="pr_cam_rtsp" type="button">RTSP</button>
       <button class="btn sm ghost" id="pr_cam_shot" type="button">Снимок</button>
       <button class="btn sm ghost" id="pr_cam_full" type="button">Развернуть</button></div>
+     <div id="pr_cam_diag_out" style="margin-top:8px"></div>
      <p class="muted shot-hint" id="pr_shots_empty" style="font-size:12px;margin:8px 0 0">Снимки сохраняются здесь: свой таймлапс печати. Сторож добавляет кадр сам, когда что-то пошло не так.</p>
      <div class="shot-strip" id="pr_shots"></div>
     </div>
@@ -3518,6 +3521,10 @@
  <div class="modal-foot"><button class="btn danger" type="button" id="catalog_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="catalog_modal">Отмена</button><button class="btn primary" type="button" id="catalog_save">Сохранить</button></div>
 </form></dialog>
 
+<dialog class="modal" id="job_passport_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Паспорт печати</span><h2 id="jp_title">Печать</h2><p id="jp_sub"></p></div><button class="icon-btn" type="button" data-close="job_passport_modal">×</button></div>
+ <div class="modal-body" id="jp_body"></div>
+</form></dialog>
 <dialog class="modal" id="month_close_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Раз в месяц</span><h2>Закрыть месяц</h2><p id="mc_sub">Пять шагов в правильном порядке — данные не задвоятся.</p></div><button class="icon-btn" type="button" data-close="month_close_modal">×</button></div>
  <div class="modal-body">

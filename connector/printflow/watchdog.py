@@ -278,7 +278,8 @@ class Watchdog:
             lines.append("Сделано: " + ", ".join(alert["actions"]))
         text = "\n".join(x for x in lines if x)
         photo = printer.camera.frame if self.db.setting("notify_photo", True) else None
-        self.manager.notify_async(text, photo)
+        # Тревоги сторожа критичны: приходят даже в тихие часы бота.
+        self.manager.notify_async(text, photo, critical=True)
 
     def alerts(self, printer_id: str = "") -> list[dict]:
         if printer_id:

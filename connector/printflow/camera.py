@@ -214,3 +214,131 @@ class CameraWorker:
         if "закрыла соединение" in raw:
             return "Камера разорвала соединение, переподключаемся"
         return self.error
+
+
+# ------------------------------------------------- диагностика (роадмап 0.4)
+
+def port_open(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Открыт ли TCP-порт принтера."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def tls_handshake(host: str, port: int, timeout: float = 4.0) -> tuple[bool, str]:
+    """TLS-рукопожатие с камерой (сертификат не проверяем — принтер свой)."""
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((host, port), timeout=timeout) as raw:
+            with context.wrap_socket(raw, server_hostname=host):
+                return True, "камера отвечает по TLS"
+    except OSError as exc:
+        return False, str(exc)
+
+
+def grab_frame(host: str, code: str, timeout: float = 6.0) -> tuple[bool, str]:
+    """Авторизация и ожидание первого JPEG-кадра — честная проверка «до конца»."""
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((host, 6000), timeout=timeout) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as sock:
+                sock.settimeout(timeout)
+                sock.sendall(CameraWorker._auth_packet(code))
+                buf = bytearray()
+                deadline = time.time() + timeout
+                while time.time() < deadline:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        return False, "камера закрыла соединение до кадра"
+                    buf.extend(chunk)
+                    if buf.find(b"\xff\xd9") >= 0:
+                        return True, "первый кадр получен"
+                return False, "соединение есть, но кадр не пришёл за отведённое время"
+    except OSError as exc:
+        return False, str(exc)
+
+
+def diagnose(printer) -> dict:
+    """Пошаговая диагностика камеры: каждый этап — честный вердикт.
+
+    Этапы: данные для подключения → TCP-порт 6000 → TLS-рукопожатие →
+    авторизация и первый кадр. Возвращает список шагов и сводку.
+    """
+    record = dict(getattr(printer, "record", {}) or {})
+    host = str(record.get("host") or "").strip()
+    code = str(record.get("access_code") or "").strip()
+    steps: list[dict] = []
+
+    steps.append({
+        "step": "IP-адрес принтера", "ok": bool(host),
+        "text": (f"указан: {host}" if host else
+                 "не указан. Камера работает только по LAN (порт 6000). "
+                 "Посмотрите IP на экране принтера (Настройки → WLAN) и "
+                 "впишите его в карточку принтера.")})
+    steps.append({
+        "step": "Access Code", "ok": bool(code),
+        "text": ("сохранён на сервере" if code else
+                 "не сохранён — добавьте в карточку принтера. "
+                 "Находится на экране принтера: Настройки → WLAN.")})
+    if not host:
+        steps.append({"step": "TCP-порт 6000", "ok": False, "text": "пропущено — нет IP"})
+        steps.append({"step": "TLS-рукопожатие", "ok": False, "text": "пропущено — нет IP"})
+    else:
+        open_port = port_open(host, 6000)
+        steps.append({
+            "step": "TCP-порт 6000", "ok": open_port,
+            "text": ("порт открыт" if open_port else
+                     "порт закрыт: принтер не в сети, выключен, или камера "
+                     "отключена (на принтере: Настройки → Камера / LAN Liveview).")})
+        if open_port:
+            ok_tls, text_tls = tls_handshake(host, 6000)
+            steps.append({"step": "TLS-рукопожатие", "ok": ok_tls,
+                          "text": text_tls if ok_tls else f"не удалось: {text_tls}"})
+        else:
+            steps.append({"step": "TLS-рукопожатие", "ok": False,
+                          "text": "пропущено — порт не открылся"})
+    if host and code and open_port and ok_tls:
+        ok_frame, text_frame = grab_frame(host, code)
+        steps.append({"step": "Первый кадр", "ok": ok_frame, "text": text_frame})
+    elif host and code and open_port:
+        steps.append({"step": "Первый кадр", "ok": False, "text": "пропущено — TLS не прошёл"})
+    else:
+        steps.append({"step": "Первый кадр", "ok": False,
+                      "text": "пропущено — не хватает IP, кода или порта"})
+
+    camera = getattr(printer, "camera", None)
+    live = bool(camera and camera.frame)
+    if live:
+        steps.append({"step": "Живой поток в панели", "ok": True,
+                      "text": "кадры уже идут — интерфейс показывает камеру"})
+    ok_all = all(step["ok"] for step in steps)
+    # X1 и новые прошивки отдают RTSP на порту 322 — подсказываем как запасной путь.
+    if host:
+        rtsp_open = port_open(host, 322)
+        steps.append({
+            "step": "RTSP (порт 322, фолбэк)", "ok": rtsp_open,
+            "text": ("порт открыт — можно смотреть поток в VLC (кнопка RTSP)" if rtsp_open else
+                     "не обязателен для P1S: RTSP-поток есть на X1 и новых прошивках")})
+    return {"ok": ok_all, "steps": steps,
+            "summary": ("Камера полностью исправна" if ok_all
+                        else "Найдены проблемы — смотрите шаги выше")}
+
+
+def rtsp_link(printer) -> str | None:
+    """Ссылка на RTSP-поток для внешнего плеера (X1 / новые прошивки).
+
+    Содержит Access Code — отдаётся только по явному запросу, не попадает
+    в bootstrap и обычные ответы API.
+    """
+    record = dict(getattr(printer, "record", {}) or {})
+    host = str(record.get("host") or "").strip()
+    code = str(record.get("access_code") or "").strip()
+    if not host or not code:
+        return None
+    return f"rtsps://bblp:{code}@{host}:322/streaming/live/1"

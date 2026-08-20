@@ -585,6 +585,24 @@ class Api:
                          "uptime": round(time.time() - self.started_at)}
         if path == "/api/month-close":
             return 200, self.month_close.state(one("key"))
+        if path == "/api/job/passport":
+            from .passport import job_passport
+            return 200, job_passport(self.db, one("id"))
+        if path == "/api/camera/diagnose":
+            from .camera import diagnose
+            return 200, diagnose(self.printer_or_fail(one("printer_id")))
+        if path == "/api/printer/rtsp-link":
+            # Ссылка содержит Access Code — отдаём только по явному запросу.
+            from .camera import rtsp_link
+            printer = self.printer_or_fail(one("printer_id"))
+            link = rtsp_link(printer)
+            if not link:
+                return 200, {"link": "", "error":
+                             "Нужны IP и Access Code в карточке принтера"}
+            self.db.add_event("printer", "Запрошена RTSP-ссылка",
+                              printer.record.get("name") or "Принтер",
+                              printer.id, {})
+            return 200, {"link": link}
         if path == "/api/system/backups":
             from .db import list_backups, pending_restore
             db_stat = None
