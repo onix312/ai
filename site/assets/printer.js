@@ -342,14 +342,25 @@ function renderCamera(p) {
   const cam = p.camera || {};
   const demo = !!cam.demo;
   const img = $('pr_cam');
-  text('pr_cam_status', cam.available
-    ? (demo ? 'Демо-режим: заготовленные кадры' : 'Прямой эфир')
-    : (cam.error || 'Нет сигнала'));
+  const isCloudNoIP = p.connection && p.connection.mode === 'cloud' && !p.connection.host;
+  let statusText = cam.available ? (demo ? 'Демо-режим: заготовленные кадры' : 'Прямой эфир') : (cam.error || 'Нет сигнала');
+  if (isCloudNoIP && !cam.available) statusText = 'Камера — только по локальной сети (укажите IP)';
+  text('pr_cam_status', statusText);
   text('pr_cam_age', cam.available
     ? (demo ? 'Принтер не подключён' : (cam.age < 3 ? 'Кадр только что' : `Кадр ${Math.round(cam.age)} сек. назад`))
-    : '—');
+    : (isCloudNoIP ? 'Добавьте IP в Настройках → Принтеры' : '—'));
   $('pr_cam_demo').hidden = !demo;
-  $('pr_cam_empty').hidden = !!cam.available;
+  const emptyEl = $('pr_cam_empty');
+  if (isCloudNoIP && !cam.available) {
+    emptyEl.innerHTML = '<span class="big">◉</span>Камера в облачном режиме недоступна<br><small>Принтер управляется через Bambu Cloud, а камера — только по локальной сети (порт 6000).<br>Решение: укажите IP принтера в Настройках → Принтеры → поле «IP-адрес» (посмотрите в Настройки → WLAN на экране принтера). После этого камера появится даже в облачном режиме. Или включите Демо-камеру для проверки интерфейса.</small><br><button class="btn sm" type="button" onclick="PF.modules.printer.openPrinterModal(PF.state.activePrinter)">Указать IP</button>';
+    emptyEl.hidden = false;
+  } else if (!cam.available && p.connection.mode === 'cloud' && p.connection.connected) {
+    emptyEl.innerHTML = '<span class="big">◉</span>Облако подключено, камера ищет локальную сеть<br><small>порт 6000 · проверьте что ПК и принтер в одной Wi-Fi сети (192.168.x.x)</small>';
+    emptyEl.hidden = false;
+  } else {
+    if (emptyEl.dataset.cloudHtml) emptyEl.innerHTML = '<span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small>';
+    emptyEl.hidden = !!cam.available;
+  }
   img.classList.toggle('on', !!cam.available);
 
   if (!cam.available) {
