@@ -37,6 +37,10 @@
  .order .t { flex:1; min-width:0; }
  .order b { font-size:13.5px; } .order small { display:block; color:var(--muted); font-size:11px; }
  .order button { padding:9px 12px; border-radius:9px; border:0; background:var(--ok); color:#fff; font-weight:700; cursor:pointer; }
+ .cost { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+ .cost > div { background:#0a0f1e; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+ .cost span { display:block; font-size:10.5px; color:var(--muted); }
+ .cost b { display:block; font-size:14px; font-weight:700; margin-top:2px; }
  .low { font-size:12.5px; color:var(--warn); margin-top:6px; }
  .msg { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:#fff; color:#12203c;
    padding:10px 16px; border-radius:10px; font-size:13px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
@@ -51,6 +55,7 @@
  <div class="card">
   <img class="cam" id="cam" alt="Камера">
   <div class="state" id="state">—</div>
+  <div class="cost" id="cost" hidden></div>
   <div class="lan" id="lan"></div>
  </div>
 
@@ -66,6 +71,7 @@
 
  <div class="grid">
   <button class="btn primary" id="b_cam" type="button"><span class="ic">📷</span>Кадр</button>
+  <button class="btn" id="b_to_order" type="button"><span class="ic">▦</span>В заказ</button>
   <button class="btn" id="b_resume" type="button"><span class="ic">▶</span>Продолжить</button>
   <button class="btn" id="b_light" type="button"><span class="ic">☀</span>Свет</button>
   <button class="btn" id="b_next" type="button"><span class="ic">≡</span>Следующее</button>
@@ -98,6 +104,23 @@
     $('#state').textContent = (p.name || 'Принтер') + ' — ' + (p.state_label || p.state || 'нет связи')
       + (running ? ' · ' + Math.round(num(p.progress)) + '%' : '')
       + (ops.next ? ' · далее ' + ops.next : '');
+    var costBox = $('#cost');
+    var spent = num(p.spent), total = num(p.cost_total), suggest = num(p.suggested_price);
+    if (costBox) {
+      if (spent || total || suggest) {
+        costBox.hidden = false;
+        costBox.innerHTML =
+          '<div><span>Потрачено</span><b>' + Math.round(spent) + ' ₽</b></div>'
+          + '<div><span>Итого печать</span><b>' + Math.round(total) + ' ₽</b></div>'
+          + '<div><span>Ещё уйдёт</span><b>' + Math.round(num(p.remaining_cost)) + ' ₽</b></div>'
+          + '<div><span>Если продать</span><b>' + Math.round(suggest) + ' ₽</b></div>';
+      } else {
+        costBox.hidden = true;
+        costBox.innerHTML = '';
+      }
+    }
+    var toOrder = $('#b_to_order');
+    if (toOrder) toOrder.hidden = !!p.has_order || (!running && p.state !== 'PAUSE' && !p.job_id);
     if (p.camera && p.id) {
       $('#cam').src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
     }
@@ -152,6 +175,20 @@
       return;
     }
     if (e.target.id === 'b_cam') { refresh(); return; }
+    if (e.target.closest && e.target.closest('#b_to_order')) {
+      var pr = ops.printer || {};
+      if (pr.has_order) { toast('У печати уже есть заказ'); return; }
+      if (!pr.job_id && ['RUNNING','PREPARE','PAUSE'].indexOf(pr.state) < 0) {
+        toast('Сейчас ничего не печатается'); return;
+      }
+      if (!confirm('Создать заказ из текущей печати?')) return;
+      post('/api/print/to-order', { printer_id: pid(), job_id: pr.job_id || '' }).then(function(d){
+        if (d.ok && d.order) toast('Заказ №' + d.order.number);
+        else toast(d.error || 'Не вышло');
+        refresh();
+      }).catch(function(){ toast('Ошибка'); });
+      return;
+    }
     if (e.target.id === 'b_removed') {
       post('/api/printer/part-removed', { printer_id: pid() }).then(function(d){
         toast('Снято · простой ' + (d.idle_min || 0) + ' мин');

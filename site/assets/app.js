@@ -166,13 +166,21 @@ function renderActivePrint() {
   if (!snap) { host.innerHTML = dashEmpty('Принтер не добавлен — подключите его в разделе «Принтеры».'); return; }
   const info = snap.printer || {};
   const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(info.state);
+  const queued = ((live && live.queue) || []).filter((j) => j.state === 'queued');
+  const nxt = queued[0];
+  const lost = num((live && live.farm && live.farm.idle && live.farm.idle.lost_profit) || 0);
   if (!running) {
     $('dash_active_sub').textContent = `${snap.name} · ${info.state_label || 'готов'}`;
-    host.innerHTML = `<div class="active-print idle">`
+    host.innerHTML = `<div class="active-print idle" data-printer="${esc(snap.id || '')}">`
       + `<div class="ap-main"><b class="ap-pct">—</b><div class="ap-info">`
       + `<b>${esc(snap.name)} свободен</b><small>${esc(info.state_label || 'Готов к печати')}</small></div></div>`
+      + (nxt ? `<div class="ap-facts"><span>Далее: ${esc(nxt.name || nxt.file || 'задание')}</span></div>` : '')
+      + (lost > 0 ? `<div class="ap-idle-lost">Простой · упущено ≈ ${money(lost)}</div>` : '')
       + ((info.problems && info.problems.length) ? `<div class="ap-warn">⚠ ${esc(info.problems[0].title)}</div>` : '')
-      + '</div>';
+      + '<div class="ap-actions">'
+      + (nxt ? `<button class="btn sm primary" type="button" data-ap="next" data-job="${esc(nxt.id)}">▶ Запустить следующее</button>` : '')
+      + `<button class="btn sm" type="button" data-ap="light">☀ Свет</button>`
+      + '</div></div>';
     return;
   }
   const job = snap.job || {};
@@ -181,30 +189,47 @@ function renderActivePrint() {
   const remaining = num(info.remaining_min);
   const elapsed = num(info.elapsed_min);
   const eta = info.eta ? String(info.eta).slice(11, 16) : '';
+  const ring = (283 - 283 * progress / 100).toFixed(1);
   const facts = [];
   if (info.layer) facts.push(`Слой ${info.layer} / ${info.total_layers || '—'}`);
   if (remaining) facts.push(`Осталось ${minutesText(remaining)}`);
   if (eta) facts.push(`Финиш в ${eta}`);
   if (elapsed) facts.push(`Идёт ${minutesText(elapsed)}`);
+  if (job.material || job.color) facts.push([job.material, job.color].filter(Boolean).join(' · '));
+  const showMoney = num(job.spent) || num(job.cost_total) || num(job.suggested_price);
   $('dash_active_sub').textContent = `${snap.name} · ${info.state_label}`;
-  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}">`
-    + `<div class="ap-main"><b class="ap-pct">${Math.round(progress)}<small>%</small></b>`
+  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}" data-printer="${esc(snap.id || '')}" data-job="${esc(job.job_id || '')}">`
+    + `<div class="ap-main"><div class="ap-orbit"><svg viewBox="0 0 104 104"><circle class="track" cx="52" cy="52" r="45"></circle>`
+    + `<circle class="fill" cx="52" cy="52" r="45" stroke-dasharray="283" stroke-dashoffset="${ring}"></circle></svg>`
+    + `<div class="cap"><b>${Math.round(progress)}%</b><span>готово</span></div></div>`
     + `<div class="ap-info"><b>${esc(info.task || 'Печать')}</b>`
     + (order.number
       ? `<small>Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</small>`
-      : `<small>${esc(snap.name)}</small>`)
+      : `<small>${esc(snap.name)} · без заказа</small>`)
     + `<div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div></div></div>`
     + `<div class="ap-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</div>`
-    + (num(job.spent)
-      ? `<div class="ap-money"><span>Потрачено <b>${money(job.spent)}</b></span>`
-        + (num(job.cost_total) ? `<span>Итого печать ≈ <b>${money(job.cost_total)}</b></span>` : '')
-        + (job.profit != null && num(job.price) ? `<span>Прибыль <b class="${num(job.profit) >= 0 ? 'pos' : 'neg'}">${money(job.profit)}</b></span>` : '')
-        + (job.break_even_pct != null ? `<span>Затраты съели <b>${nfmt(job.break_even_pct)}%</b> цены</span>` : '')
-        + (num(job.per_hour) ? `<span>Стоимость часа <b>${money(job.per_hour)}</b></span>` : '')
-        + '</div>'
-      : '')
+    + (showMoney ? `<div class="ap-cost">`
+      + `<div><span>Потрачено</span><b>${money(job.spent)}</b></div>`
+      + `<div><span>Ещё уйдёт</span><b>${money(job.remaining_cost)}</b></div>`
+      + `<div><span>Итого печать</span><b>${money(job.cost_total)}</b></div>`
+      + `<div><span>Если продать</span><b>${money(job.suggested_price)}</b></div>`
+      + (job.profit != null && num(job.price)
+        ? `<div><span>Прибыль заказа</span><b class="${num(job.profit) >= 0 ? 'pos' : 'neg'}">${money(job.profit)}</b></div>`
+        : (job.profit_if_sold != null
+          ? `<div><span>Прибыль если продать</span><b class="${num(job.profit_if_sold) >= 0 ? 'pos' : 'neg'}">${money(job.profit_if_sold)}</b></div>`
+          : ''))
+      + '</div>' : '')
     + (info.state === 'PAUSE' ? '<div class="ap-warn">⚠ На паузе — проверьте принтер</div>' : '')
-    + '</div>';
+    + '<div class="ap-actions">'
+    + (info.state === 'PAUSE'
+      ? `<button class="btn sm primary" type="button" data-ap="resume">▶ Продолжить</button>`
+      : `<button class="btn sm" type="button" data-ap="pause">❙❙ Пауза</button>`)
+    + `<button class="btn sm" type="button" data-ap="light">☀ Свет</button>`
+    + `<button class="btn sm" type="button" data-ap="shot">📷 Снимок</button>`
+    + (order.id
+      ? `<button class="btn sm" type="button" data-ap="open-order" data-order="${esc(order.id)}">Открыть заказ</button>`
+      : `<button class="btn sm primary" type="button" data-ap="to-order">В заказ</button>`)
+    + '</div></div>';
 }
 
 /* ============================================== спидометр «прибыль за час» */
@@ -1542,6 +1567,46 @@ function bind() {
     toast('Все виджеты возвращены');
   });
   $('dash_pdf').addEventListener('click', () => window.print());
+  $('dash_active').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-ap]');
+    if (!btn) return;
+    const card = btn.closest('[data-printer]') || $('dash_active');
+    const printerId = (card && card.dataset.printer) || '';
+    const jobId = (card && card.dataset.job) || '';
+    const act = btn.dataset.ap;
+    try {
+      if (act === 'pause') {
+        if (!confirmDanger('Поставить печать на паузу?')) return;
+        await post('/api/printer/command', { printer_id: printerId, command: 'pause' });
+        toast('Пауза');
+      } else if (act === 'resume') {
+        await post('/api/printer/command', { printer_id: printerId, command: 'resume' });
+        toast('Продолжить');
+      } else if (act === 'light') {
+        await post('/api/printer/command', { printer_id: printerId, command: 'light', value: true });
+        toast('Свет');
+      } else if (act === 'shot') {
+        await post('/api/printer/snapshot', { printer_id: printerId, note: 'Снимок с панели' });
+        toast('Кадр сохранён');
+      } else if (act === 'next') {
+        const nextId = btn.dataset.job;
+        if (!nextId) return toast('Нет следующего задания', '', 'warn');
+        if (!confirmDanger('Запустить следующее задание? Принтер начнёт нагрев и движение.')) return;
+        const res = await post('/api/jobs/start', { id: nextId, printer_id: printerId });
+        toast(res.ok ? 'Запущено' : (res.error || 'Не вышло'));
+      } else if (act === 'to-order') {
+        if (PF.modules.printer) {
+          PF.modules.printer.openPrintOrderModal({ printer_id: printerId, job_id: jobId });
+        }
+        return;
+      } else if (act === 'open-order') {
+        const oid = btn.dataset.order;
+        if (oid && PF.modules.ops) { PF.go('orders'); PF.modules.ops.openOrder(oid); }
+        return;
+      }
+      setTimeout(PF.poll, 600);
+    } catch (err) { fail(err); }
+  });
 
   $('settings_save').addEventListener('click', saveSettings);
   $('settings_reset').addEventListener('click', resetSettings);

@@ -99,10 +99,23 @@ function renderLive() {
   $('pr_job').classList.toggle('running', kind === 'running');
   text('pr_task', p.printer.task || 'Нет активной печати');
 
+  const liveJob = p.job || {};
   const job = (PF.state.jobs.queue || []).find((j) => j.printer_id === p.id && j.state === 'running');
-  const order = job && job.order;
+  const order = (liveJob.order) || (job && job.order);
   text('pr_order', order ? `Заказ №${order.number} · ${order.product}`
     : (p.connection.connected ? 'Не связано с заказом' : (p.connection.last_error || 'Нет подключения')));
+  const toOrder = $('pr_to_order');
+  const openOrd = $('pr_open_order');
+  const printing = ['RUNNING', 'PAUSE', 'PREPARE'].includes(p.printer.state);
+  if (toOrder) {
+    toOrder.hidden = !printing || !!order;
+    toOrder.dataset.jobId = liveJob.job_id || (job && job.id) || '';
+    toOrder.dataset.printerId = p.id || '';
+  }
+  if (openOrd) {
+    openOrd.hidden = !order;
+    if (order) openOrd.dataset.orderId = order.id;
+  }
 
   const progress = clamp(num(p.printer.progress), 0, 100);
   text('pr_progress', Math.round(progress) + '%');
@@ -266,18 +279,28 @@ function dateTextSafe(v) { try { return U.dateText(v); } catch (e) { return Stri
 /* ------------------------------------------------ во что обходится печать */
 function renderJobCost(p) {
   const j = p.job || {};
-  if (!j.spent && !j.cost_total) {
+  const has = num(j.spent) || num(j.cost_total) || num(j.suggested_price);
+  if (!has) {
     text('pr_spent', '—');
     text('pr_cost_total', '—');
+    text('pr_remaining_cost', '—');
+    text('pr_suggest', '—');
+    const emptyProfit = $('pr_job_profit');
+    if (emptyProfit) emptyProfit.textContent = '';
     return;
   }
   text('pr_spent', money(j.spent));
   text('pr_cost_total', `${money(j.cost_total)} · ${nfmt(j.grams)} г`);
+  text('pr_remaining_cost', money(j.remaining_cost));
+  text('pr_suggest', money(j.suggested_price));
   const profitEl = $('pr_job_profit');
   if (profitEl) {
     if (j.profit != null && num(j.price)) {
       profitEl.textContent = `${money(j.profit)} · ${nfmt(j.break_even_pct || 0)}% цены съедено`;
       profitEl.className = num(j.profit) >= 0 ? 'pos' : 'neg';
+    } else if (j.profit_if_sold != null) {
+      profitEl.textContent = `если продать: ${money(j.profit_if_sold)}`;
+      profitEl.className = num(j.profit_if_sold) >= 0 ? 'pos' : 'neg';
     } else {
       profitEl.textContent = '';
     }
@@ -845,8 +868,63 @@ function renderQueue() {
     + `<div class="tx-body"><b>${esc(j.name || j.file || 'Печать')}</b>`
     + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г`
     + (num(j.est_minutes) ? ' · оценка была ' + minutesText(j.est_minutes) : '') + '</small></div>'
-    + `<span class="amt">${money(j.cost)}</span></div>`).join('')
+    + `<span class="amt">${money(j.cost)}</span>`
+    + (j.order_id
+      ? `<button class="btn sm" type="button" data-job-open-order="${esc(j.order_id)}">Заказ</button>`
+      : `<button class="btn sm" type="button" data-job-to-order="${esc(j.id)}">В заказ</button>`)
+    + '</div>').join('')
     : '<div class="empty compact"><span>' + (hq ? 'Ничего не найдено.' : 'Завершённых печатей пока нет.') + '</span></div>';
+}
+
+function printOrderMode(mode) {
+  const create = mode !== 'link';
+  $('po_create_fields').hidden = !create;
+  $('po_link_fields').hidden = create;
+  $('po_mode_create').classList.toggle('on', create);
+  $('po_mode_link').classList.toggle('on', !create);
+  $('po_save').textContent = create ? 'Создать заказ' : 'Привязать';
+}
+
+function openPrintOrderModal(opts) {
+  opts = opts || {};
+  $('po_job_id').value = opts.job_id || '';
+  $('po_printer_id').value = opts.printer_id || PF.state.activePrinter || '';
+  $('po_customer').value = '';
+  $('po_price').value = '0';
+  const open = (PF.state.orders || []).filter((o) => !PF.isFinal(o));
+  $('po_order').innerHTML = '<option value="">Выберите заказ</option>' + open
+    .map((o) => `<option value="${esc(o.id)}">№${esc(o.number)} · ${esc(o.product)}</option>`).join('');
+  printOrderMode('create');
+  openModal('print_order_modal');
+}
+
+async function savePrintOrder() {
+  const jobId = $('po_job_id').value;
+  const printerId = $('po_printer_id').value;
+  const link = $('po_mode_link').classList.contains('on');
+  try {
+    let res;
+    if (link) {
+      const orderId = $('po_order').value;
+      if (!orderId) return fail(new Error('Выберите заказ'));
+      res = await post('/api/jobs/link-order', { job_id: jobId, order_id: orderId });
+    } else {
+      res = await post('/api/print/to-order', {
+        printer_id: printerId, job_id: jobId,
+        customer_name: $('po_customer').value.trim(),
+        channel: $('po_channel').value,
+        price: num($('po_price').value),
+      });
+    }
+    closeModal('print_order_modal');
+    toast(res.created === false ? 'Заказ уже был связан' : 'Заказ из печати',
+      res.order ? ('№' + res.order.number) : '');
+    await PF.refreshCore();
+    if (res.order && PF.modules.ops) {
+      PF.go('orders');
+      PF.modules.ops.openOrder(res.order.id);
+    }
+  } catch (e) { fail(e); }
 }
 $('history_search').addEventListener('input', U.debounce(renderQueue, 200));
 
@@ -1015,6 +1093,17 @@ function bind() {
       if (!confirmDanger('Отменить задание? Если оно печатается — печать будет остановлена.')) return;
       post('/api/jobs/cancel', { id: jc.dataset.jobCancel })
         .then(() => { toast('Задание отменено'); PF.refreshCore(); }).catch(fail);
+      return;
+    }
+    const toOrder = e.target.closest('[data-job-to-order]');
+    if (toOrder) {
+      openPrintOrderModal({ job_id: toOrder.dataset.jobToOrder });
+      return;
+    }
+    const openOrdHist = e.target.closest('[data-job-open-order]');
+    if (openOrdHist) {
+      PF.go('orders');
+      PF.modules.ops && PF.modules.ops.openOrder(openOrdHist.dataset.jobOpenOrder);
       return;
     }
     const found = e.target.closest('[data-found]');
@@ -1214,6 +1303,21 @@ function bind() {
   });
 
   $('pr_events_refresh').addEventListener('click', loadEvents);
+  if ($('pr_to_order')) $('pr_to_order').addEventListener('click', () => {
+    openPrintOrderModal({
+      printer_id: $('pr_to_order').dataset.printerId,
+      job_id: $('pr_to_order').dataset.jobId,
+    });
+  });
+  if ($('pr_open_order')) $('pr_open_order').addEventListener('click', () => {
+    const id = $('pr_open_order').dataset.orderId;
+    if (id && PF.modules.ops) { PF.go('orders'); PF.modules.ops.openOrder(id); }
+  });
+  if ($('po_mode')) $('po_mode').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-po-mode]');
+    if (btn) printOrderMode(btn.dataset.poMode);
+  });
+  if ($('po_save')) $('po_save').addEventListener('click', savePrintOrder);
 
   // Диагностика связи (5.0): порты принтера и сравнение подсети.
   $('pr_net_btn').addEventListener('click', async () => {
@@ -1269,5 +1373,5 @@ PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); }
 });
 
-PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal };
+PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, openPrintOrderModal };
 })();

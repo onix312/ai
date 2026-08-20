@@ -234,6 +234,7 @@ class Api:
                 break
         queued = [j for j in (snap.get("queue") or []) if j.get("state") == "queued"]
         nxt = queued[0] if queued else {}
+        job = active.get("job") or {}
         return {
             "lan": lan,
             "printer": {
@@ -245,6 +246,12 @@ class Api:
                 "progress": info.get("progress") or 0,
                 "remaining_min": info.get("remaining_min") or 0,
                 "camera": bool((active.get("camera") or {}).get("available")),
+                "spent": job.get("spent") or 0,
+                "cost_total": job.get("cost_total") or 0,
+                "remaining_cost": job.get("remaining_cost") or 0,
+                "suggested_price": job.get("suggested_price") or 0,
+                "job_id": job.get("job_id") or "",
+                "has_order": bool(job.get("has_order") or job.get("order")),
             },
             "ams_low": ams_low,
             "ready": ready,
@@ -1146,6 +1153,17 @@ class Api:
         if path == "/api/jobs/delete":
             self.db.delete("print_jobs", body.get("id", ""))
             return 200, {"ok": True}
+        if path == "/api/print/to-order":
+            return 200, self.manager.order_from_print(
+                str(body.get("printer_id") or pid or ""),
+                str(body.get("job_id") or ""),
+                customer_name=str(body.get("customer_name") or ""),
+                channel=str(body.get("channel") or "shop"),
+                price=num(body.get("price")))
+        if path == "/api/jobs/link-order":
+            return 200, self.manager.link_job_to_order(
+                str(body.get("job_id") or ""),
+                str(body.get("order_id") or ""))
 
         # --- заказы и справочники
         if path == "/api/order/save":

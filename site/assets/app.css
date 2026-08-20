@@ -98,6 +98,7 @@ html[data-theme="dark"] .chart-tip b { color: #11162a; }
 .job-facts span { display: block; font-size: 11.2px; color: var(--muted); }
 .job-facts b { display: block; font-size: 15px; font-weight: 640; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .job-facts > .wide { grid-column: 1 / -1; }
+.job-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 
 .telemetry { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .temp-row, .fan-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.2px; }
@@ -809,6 +810,28 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
 .active-print .ap-money { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.2px; color: var(--muted); padding-top: 10px; border-top: 1px dashed var(--line); }
 .active-print .ap-money b { color: var(--text); font-weight: 700; }
 .active-print .ap-warn { font-size: 12.4px; font-weight: 600; color: var(--bad); background: var(--bad-soft); border-radius: var(--r); padding: 8px 11px; }
+.active-print .ap-orbit { position: relative; width: 88px; height: 88px; flex: none; }
+.active-print .ap-orbit svg { transform: rotate(-90deg); width: 88px; height: 88px; }
+.active-print .ap-orbit .track { fill: none; stroke: var(--panel-3); stroke-width: 8; }
+.active-print .ap-orbit .fill {
+  fill: none; stroke: url(#pfgrad); stroke-width: 8; stroke-linecap: round;
+  transition: stroke-dashoffset .8s var(--ease);
+}
+.active-print .ap-orbit .cap { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.active-print .ap-orbit .cap b { display: block; font-size: 18px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.active-print .ap-orbit .cap span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.active-print .ap-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.active-print .ap-cost {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px; padding-top: 4px;
+}
+.active-print .ap-cost > div {
+  padding: 8px 10px; border-radius: var(--r); background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+}
+.active-print .ap-cost span { display: block; font-size: 10.8px; color: var(--muted); }
+.active-print .ap-cost b { display: block; font-size: 14.2px; font-weight: 680; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.active-print .ap-idle-lost { font-size: 12.2px; color: var(--warn); font-weight: 600; }
 
 .gauge-wrap { display: flex; justify-content: center; }
 .gauge { width: 100%; max-width: 230px; height: auto; }

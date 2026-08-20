@@ -11,8 +11,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/theme.css?v=8.0.0">
-<link rel="stylesheet" href="assets/app.css?v=8.0.0">
+<link rel="stylesheet" href="assets/theme.css?v=8.1.0">
+<link rel="stylesheet" href="assets/app.css?v=8.1.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -162,7 +162,13 @@
       <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
       <div><span>Потрачено</span><b id="pr_spent">—</b></div>
       <div><span>Себестоимость</span><b id="pr_cost_total">—</b></div>
+      <div><span>Ещё потратится</span><b id="pr_remaining_cost">—</b></div>
+      <div><span>Цена если продать</span><b id="pr_suggest">—</b></div>
       <div class="wide"><span>Прибыль / окупаемость</span><b id="pr_job_profit">—</b></div>
+     </div>
+     <div class="job-actions" id="pr_job_actions">
+      <button class="btn sm primary" id="pr_to_order" type="button" hidden>В заказ</button>
+      <button class="btn sm" id="pr_open_order" type="button" hidden>Открыть заказ</button>
      </div>
     </article>
     <div class="telemetry">
@@ -4036,6 +4042,35 @@
  <div class="modal-foot"><button class="btn" type="button" data-close="price_modal">Закрыть</button></div>
 </dialog>
 
+<dialog class="modal narrow" id="print_order_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Печать → заказ</span><h2 id="po_title">Заказ из печати</h2><p id="po_sub">Создать карточку или привязать к существующему заказу.</p></div><button class="icon-btn" type="button" data-close="print_order_modal">×</button></div>
+ <div class="modal-body">
+  <input type="hidden" id="po_job_id">
+  <input type="hidden" id="po_printer_id">
+  <div class="seg" id="po_mode">
+   <button type="button" class="on" id="po_mode_create" data-po-mode="create">Создать новый</button>
+   <button type="button" id="po_mode_link" data-po-mode="link">Привязать к заказу</button>
+  </div>
+  <div id="po_create_fields" class="form-grid" style="margin-top:12px">
+   <label class="field"><span>Клиент</span><input id="po_customer" placeholder="Имя или компания"></label>
+   <label class="field"><span>Канал</span>
+    <select id="po_channel">
+     <option value="shop">Витрина NOZZA</option>
+     <option value="telegram">Telegram</option>
+     <option value="avito">Авито</option>
+     <option value="direct">Напрямую</option>
+     <option value="b2b">B2B</option>
+    </select>
+   </label>
+   <label class="field span-2"><span>Цена, ₽ (0 — подставить рекомендованную)</span><input id="po_price" type="number" min="0" step="any" value="0"></label>
+  </div>
+  <div id="po_link_fields" class="form-grid" hidden style="margin-top:12px">
+   <label class="field span-2"><span>Заказ</span><select id="po_order"><option value="">Выберите заказ</option></select></label>
+  </div>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="print_order_modal">Отмена</button><button class="btn primary" type="button" id="po_save">Создать заказ</button></div>
+</form></dialog>
+
 <dialog id="palette">
  <div class="palette-input"><span>⌕</span><input id="palette_input" placeholder="Команда, раздел, заказ или клиент…" autocomplete="off"></div>
  <div class="palette-list" id="palette_list"></div>
@@ -4056,16 +4091,16 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=8.0.0"></script>
-<script src="assets/core.js?v=8.0.0"></script>
-<script src="assets/printer.js?v=8.0.0"></script>
-<script src="assets/ops.js?v=8.0.0"></script>
-<script src="assets/money.js?v=8.0.0"></script>
-<script src="assets/finance.js?v=8.0.0"></script>
-<script src="assets/shelf.js?v=8.0.0"></script>
-<script src="assets/products.js?v=8.0.0"></script>
-<script src="assets/bridge.js?v=8.0.0"></script>
-<script src="assets/app.js?v=8.0.0"></script>
+<script src="assets/qr.js?v=8.1.0"></script>
+<script src="assets/core.js?v=8.1.0"></script>
+<script src="assets/printer.js?v=8.1.0"></script>
+<script src="assets/ops.js?v=8.1.0"></script>
+<script src="assets/money.js?v=8.1.0"></script>
+<script src="assets/finance.js?v=8.1.0"></script>
+<script src="assets/shelf.js?v=8.1.0"></script>
+<script src="assets/products.js?v=8.1.0"></script>
+<script src="assets/bridge.js?v=8.1.0"></script>
+<script src="assets/app.js?v=8.1.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */

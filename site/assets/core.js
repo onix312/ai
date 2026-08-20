@@ -413,6 +413,7 @@ function baseCommands() {
     { group: 'Действия', icon: '+', title: 'Новая катушка', sub: 'Добавить пластик на склад', run: () => PF.modules.money && PF.modules.money.openSpool() },
     { group: 'Действия', icon: '+', title: 'Новая проводка', sub: 'Доход или расход вручную', run: () => PF.modules.money && PF.modules.money.openTx() },
     { group: 'Действия', icon: '+', title: 'Задание в очередь', sub: 'Печать файла с принтера', run: () => PF.modules.printer && PF.modules.printer.openJob() },
+    { group: 'Действия', icon: '▦', title: 'Создать заказ из печати', sub: 'Текущее задание → карточка заказа', run: () => PF.modules.printer && PF.modules.printer.openPrintOrderModal({ printer_id: PF.state.activePrinter }) },
     { group: 'Принтер', icon: '❙❙', title: 'Пауза печати', sub: 'Активный принтер', run: () => PF.modules.printer && PF.modules.printer.command('pause') },
     { group: 'Принтер', icon: '▶', title: 'Продолжить печать', sub: 'Активный принтер', run: () => PF.modules.printer && PF.modules.printer.command('resume') },
     { group: 'Принтер', icon: '☀', title: 'Свет камеры', sub: 'Включить или выключить', run: () => PF.modules.printer && PF.modules.printer.command('light') },

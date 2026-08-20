@@ -22,6 +22,36 @@ from .telegram_bot import TelegramBot
 from .watchdog import Watchdog
 
 
+def _color_name(hex_color: str) -> str:
+    """Грубое имя цвета по HEX AMS — для заказа без ручного ввода."""
+    raw = str(hex_color or "").strip().lstrip("#")
+    if len(raw) < 6:
+        return ""
+    try:
+        r, g, b = int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+    except ValueError:
+        return ""
+    mx, mn = max(r, g, b), min(r, g, b)
+    if mx - mn < 30:
+        if mx < 60:
+            return "Чёрный"
+        if mx > 200:
+            return "Белый"
+        return "Серый"
+    if r >= g and r >= b:
+        return "Оранжевый" if g > 90 else "Красный"
+    if g >= r and g >= b:
+        return "Зелёный"
+    return "Синий"
+
+
+def _print_product_name(name: str) -> str:
+    """Имя изделия из имени файла печати."""
+    stem = Path(str(name or "")).name.rsplit(".", 1)[0]
+    stem = stem.replace("_", " ").replace("-", " ").strip()
+    return (stem[:80] if stem else "Печать без заказа")
+
+
 class PrinterManager:
     def __init__(self, db: Database, repo: Repo):
         self.db = db
@@ -214,6 +244,11 @@ class PrinterManager:
             order = self.db.one("SELECT grams, qty FROM orders WHERE id=?", (job["order_id"],))
             if order:
                 grams = num(order["grams"]) * max(1.0, num(order["qty"], 1))
+        # Печать без заказа тоже должна иметь вес: оценка слайсера лучше, чем ноль.
+        if not grams and job:
+            grams = num(job.get("est_grams"))
+        if not duration and job:
+            duration = num(job.get("est_minutes"))
         if not job:
             job = self.db.upsert("print_jobs", {
                 "id": uid("job"), "printer_id": printer_id, "order_id": self._guess_order(name),
@@ -695,6 +730,8 @@ class PrinterManager:
             if order:
                 need = num(order.get("grams")) * max(1.0, num(order.get("qty"), 1))
         if not need:
+            need = num(job.get("est_grams"))
+        if not need:
             return True, ""
         active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
         if not active:
@@ -1069,9 +1106,9 @@ class PrinterManager:
     def job_summary(self, snap: dict) -> dict:
         """Во что обходится текущая печать прямо сейчас (живой расчёт).
 
-        Считает по факту с принтера: граммы из телеметрии, цену — из реальной
-        катушки активного слота AMS (а не тариф по умолчанию), плюс прогноз
-        остатка, прибыль и точку безубыточности. Обновляется на каждом снимке.
+        Считает и без заказа: граммы из телеметрии, заказа или оценки слайсера,
+        цену — из реальной катушки активного слота AMS, плюс прогноз остатка,
+        рекомендованную цену продажи и прибыль «если продать».
         """
         info = snap.get("printer") or {}
         if info.get("state") not in ("RUNNING", "PAUSE", "PREPARE"):
@@ -1080,8 +1117,8 @@ class PrinterManager:
         progress = max(0.0, min(100.0, num(info.get("progress"))))
         elapsed_h = num(info.get("elapsed_min")) / 60
         remaining_h = num(info.get("remaining_min")) / 60
-        total_h = elapsed_h + remaining_h
         grams = num(info.get("weight"))
+        grams_source = "printer" if grams > 0 else ""
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state='running'", (snap["id"],))
         order = None
@@ -1090,9 +1127,24 @@ class PrinterManager:
                 "SELECT id, number, product, customer_name, price, due, colors, grams, qty"
                 " FROM orders WHERE id=?", (job["order_id"],))
 
-        # Если принтер ещё не отдал вес — прикидываем из сметы заказа по прогрессу.
-        if grams <= 0 and order:
-            grams = num(order.get("grams")) * max(1.0, num(order.get("qty"), 1)) * progress / 100
+        order_grams = 0.0
+        if order:
+            order_grams = num(order.get("grams")) * max(1.0, num(order.get("qty"), 1))
+        est_grams = num(job.get("est_grams")) if job else 0.0
+        est_minutes = num(job.get("est_minutes")) if job else 0.0
+
+        if grams <= 0 and order_grams > 0:
+            grams = order_grams * progress / 100 if progress else 0.0
+            grams_source = "order"
+        if grams <= 0 and est_grams > 0:
+            grams = est_grams * progress / 100 if progress else 0.0
+            grams_source = "estimate"
+
+        if remaining_h <= 0 and est_minutes > 0:
+            remaining_h = est_minutes / 60 * max(0.0, 100.0 - progress) / 100.0
+        if elapsed_h <= 0 and est_minutes > 0:
+            elapsed_h = est_minutes / 60 * progress / 100.0
+        total_h = elapsed_h + remaining_h
 
         # Катушка активного слота AMS (или привязанная к заданию) — реальная цена.
         spool = None
@@ -1133,9 +1185,11 @@ class PrinterManager:
                      + num(settings.get("maintenance_per_hour"), 3.0))
         time_rate = energy_rate + wear_rate
 
-        # Прогноз полного веса по прогрессу (вес в телеметрии — уже напечатанный).
         remaining_grams = 0.0
-        if grams > 0 and progress > 0:
+        if grams_source in ("order", "estimate"):
+            full = order_grams if grams_source == "order" else est_grams
+            remaining_grams = max(0.0, full * (100.0 - progress) / 100.0)
+        elif grams > 0 and progress > 0:
             remaining_grams = max(0.0, grams * (100.0 - progress) / progress)
 
         spent = round(grams * per_gram + elapsed_h * time_rate, 2)
@@ -1145,12 +1199,32 @@ class PrinterManager:
         price = num(order.get("price")) if order else 0.0
         profit = round(price - total, 2) if price else None
         margin = round(profit / price * 100, 1) if profit is not None and price else None
-        # Точка безубыточности: сколько % цены уже «съедено» текущими затратами.
         break_even_pct = round(spent / price * 100, 1) if price else None
+
+        suggested = 0.0
+        try:
+            base_cost = total if total else spent
+            if base_cost > 0:
+                suggested = num(self.acc.suggest_price(base_cost, 1).get("price"))
+        except Exception:
+            suggested = 0.0
+        profit_if_sold = round(suggested - total, 2) if suggested else None
+
+        material = (spool_info or {}).get("material") or ""
+        color = (spool_info or {}).get("color") or ""
+        if not material or not color:
+            active = next((t for t in (snap.get("ams") or {}).get("trays", [])
+                           if t.get("active")), None)
+            if active:
+                material = material or (active.get("type") or "")
+                color = color or _color_name(active.get("color") or "")
+
         return {
             "job_id": job["id"] if job else "",
             "order": order,
+            "has_order": bool(order),
             "grams": round(grams, 1),
+            "grams_source": grams_source or ("none" if grams <= 0 else "printer"),
             "remaining_grams": round(remaining_grams, 1),
             "purge_grams": round(purge_grams, 1),
             "spent": spent,
@@ -1162,10 +1236,196 @@ class PrinterManager:
             "profit": profit,
             "margin_pct": margin,
             "break_even_pct": break_even_pct,
+            "suggested_price": suggested,
+            "profit_if_sold": profit_if_sold,
             "spool": spool_info,
-            "elapsed_min": round(num(info.get("elapsed_min"))),
-            "remaining_min": round(num(info.get("remaining_min"))),
+            "material": material,
+            "color": color,
+            "elapsed_min": round(num(info.get("elapsed_min")) or elapsed_h * 60),
+            "remaining_min": round(num(info.get("remaining_min")) or remaining_h * 60),
         }
+
+    def _repo(self) -> Repo:
+        """Репозиторий заказов: в тестах менеджер иногда создаётся без repo."""
+        if self.repo is not None:
+            return self.repo
+        return Repo(self.db)
+
+    def _current_job(self, printer_id: str = "", job_id: str = "") -> dict | None:
+        """Текущее или последнее задание: для кнопки «в заказ» и истории."""
+        if job_id:
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if job:
+                return job
+        if printer_id:
+            job = self.db.one(
+                "SELECT * FROM print_jobs WHERE printer_id=? AND state IN ('running','starting')"
+                " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
+            if job:
+                return job
+            return self.db.one(
+                "SELECT * FROM print_jobs WHERE printer_id=?"
+                " ORDER BY datetime(COALESCE(finished_at, started_at, created_at)) DESC LIMIT 1",
+                (printer_id,))
+        return self.db.one(
+            "SELECT * FROM print_jobs WHERE state IN ('running','starting')"
+            " ORDER BY datetime(created_at) DESC LIMIT 1")
+
+    def order_from_print(self, printer_id: str = "", job_id: str = "",
+                         customer_name: str = "", channel: str = "shop",
+                         price: float = 0.0) -> dict:
+        """Превратить текущую или прошлую печать в карточку заказа."""
+        job = self._current_job(printer_id, job_id)
+        if not job:
+            raise ValueError("Нет задания печати, из которого создать заказ")
+        if job.get("order_id"):
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
+            return {"ok": True, "created": False, "order": order or {}, "job": job}
+
+        snap: dict = {"id": printer_id or job.get("printer_id") or "",
+                      "printer": {}, "ams": {"trays": []}}
+        printer = self.get(snap["id"])
+        if printer:
+            try:
+                snap = printer.snapshot()
+            except Exception:
+                pass
+        info = snap.get("printer") or {}
+        job_sum: dict = {}
+        if info.get("state") in ("RUNNING", "PAUSE", "PREPARE"):
+            try:
+                job_sum = self.job_summary(snap) or {}
+            except Exception:
+                job_sum = {}
+
+        product = _print_product_name(
+            job.get("name") or job.get("file") or info.get("task") or "")
+        grams = (num(job.get("grams")) or num(job.get("est_grams"))
+                 or num(job_sum.get("grams")) or num(info.get("weight")))
+        minutes = (num(job.get("duration_min")) or num(job.get("est_minutes"))
+                   or num(info.get("elapsed_min")))
+        hours = round(minutes / 60.0, 2) if minutes else 0.0
+
+        spool_info = job_sum.get("spool") or {}
+        material = spool_info.get("material") or job_sum.get("material") or ""
+        color = spool_info.get("color") or job_sum.get("color") or ""
+        if not material or not color:
+            active = next((t for t in (snap.get("ams") or {}).get("trays", [])
+                           if t.get("active")), None)
+            if active:
+                material = material or (active.get("type") or "")
+                color = color or _color_name(active.get("color") or "")
+
+        cost = num(job.get("cost")) or num(job_sum.get("cost_total"))
+        suggest = num(price) or num(job_sum.get("suggested_price"))
+        if not suggest and cost > 0:
+            try:
+                suggest = num(self.acc.suggest_price(cost, 1, channel or "shop").get("price"))
+            except Exception:
+                suggest = 0.0
+
+        if job.get("state") == "done":
+            status = "post"
+        elif job.get("state") in ("running", "starting") or info.get("state") in (
+                "RUNNING", "PAUSE", "PREPARE"):
+            status = "printing"
+        else:
+            status = "queue"
+
+        order = self._repo().save_order({
+            "product": product,
+            "status": status,
+            "customer_name": (customer_name or "").strip(),
+            "channel": channel or "shop",
+            "grams": grams,
+            "hours": hours,
+            "material": material,
+            "color": color,
+            "file": job.get("file") or job.get("name") or "",
+            "price": suggest or 0,
+            "cost": cost,
+            "notes": f"Создан из печати «{job.get('name') or job.get('id')}»",
+            "auto_cost": 1,
+        })
+        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?",
+                        (order["id"], job["id"]))
+        if job.get("state") == "done" and (grams or hours or cost):
+            self.db.execute(
+                "UPDATE orders SET actual_grams=actual_grams+?, actual_hours=actual_hours+?,"
+                " actual_cost=actual_cost+?, updated_at=? WHERE id=?",
+                (grams, round(hours, 3), cost, now_iso(), order["id"]))
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (order["id"],)) or order
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or job
+        self.db.add_event(
+            "order", "Заказ из печати",
+            f"№{order.get('number', '')} · {product}",
+            printer_id or job.get("printer_id") or "",
+            {"order_id": order.get("id"), "job_id": job.get("id")})
+        return {"ok": True, "created": True, "order": order, "job": job}
+
+    def link_job_to_order(self, job_id: str, order_id: str) -> dict:
+        """Привязать задание печати к существующему заказу (из истории тоже)."""
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+        if not job:
+            raise ValueError("Задание не найдено")
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order_id, job_id))
+        sets, params = [], []
+        if job.get("state") == "done":
+            if (order.get("status") or "") in ("new", "estimate", "prepay", "queue", "printing"):
+                sets.append("status=?")
+                params.append("post")
+            grams = num(job.get("grams"))
+            hours = num(job.get("duration_min")) / 60.0
+            cost = num(job.get("cost"))
+            if grams:
+                sets.append("actual_grams=actual_grams+?")
+                params.append(grams)
+            if hours:
+                sets.append("actual_hours=actual_hours+?")
+                params.append(round(hours, 3))
+            if cost:
+                sets.append("actual_cost=actual_cost+?")
+                params.append(cost)
+            if not num(order.get("grams")) and grams:
+                sets.append("grams=?")
+                params.append(grams)
+            if not num(order.get("hours")) and hours:
+                sets.append("hours=?")
+                params.append(round(hours, 2))
+            if not str(order.get("file") or "").strip() and (job.get("file") or job.get("name")):
+                sets.append("file=?")
+                params.append(job.get("file") or job.get("name"))
+            if not str(order.get("material") or "").strip():
+                spool = None
+                if job.get("spool_id"):
+                    spool = self.db.one("SELECT material, color_name FROM spools WHERE id=?",
+                                        (job["spool_id"],))
+                if spool and spool.get("material"):
+                    sets.append("material=?")
+                    params.append(spool["material"])
+                    if spool.get("color_name") and not str(order.get("color") or "").strip():
+                        sets.append("color=?")
+                        params.append(spool["color_name"])
+        elif job.get("state") in ("running", "starting"):
+            if (order.get("status") or "") in ("new", "estimate", "prepay", "queue"):
+                sets.append("status=?")
+                params.append("printing")
+        if sets:
+            sets.append("updated_at=?")
+            params.append(now_iso())
+            params.append(order_id)
+            self.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", params)
+        updated = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,)) or order
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or job
+        self.db.add_event(
+            "order", "Печать привязана к заказу",
+            f"№{updated.get('number', '')} · {job.get('name') or ''}",
+            job.get("printer_id") or "",
+            {"order_id": order_id, "job_id": job_id})
+        return {"ok": True, "order": updated, "job": job}
 
     def farm_stats(self, printers: list[dict] | None = None) -> dict:
         printers = printers if printers is not None else [p.snapshot() for p in self.printers.values()]
