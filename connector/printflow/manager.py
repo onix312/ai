@@ -727,14 +727,30 @@ class PrinterManager:
         return True, ""
 
     def next_job(self, printer_id: str, snap: dict | None = None) -> dict | None:
-        """Выбрать следующее задание с учётом материала в AMS."""
+        """Выбрать следующее задание с учётом материала в AMS.
+
+        Ночная смена (9.3.1): при включённом ``night_shift_enabled`` в тихие
+        часы вперёд идут самые длинные задания — принтер работает до утра;
+        днём — по сроку и приоритету, чтобы срочное не ждало ночи.
+        """
         jobs = self.db.query(
-            "SELECT j.* FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
+            "SELECT j.*, o.hours AS order_hours, o.due AS due"
+            " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
-            " AND j.file<>'' ORDER BY COALESCE(o.due,'9999-12-31'),"
-            " j.priority DESC, datetime(j.created_at)", (printer_id,))
+            " AND j.file<>''", (printer_id,))
         if not jobs:
             return None
+        night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()
+        if night:
+            # длинное — на ночь: сортировка по оценке часов из заказа
+            jobs.sort(key=lambda j: (-num(j.get("order_hours")),
+                                     -int(num(j.get("priority"))),
+                                     str(j.get("created_at") or "")))
+        else:
+            # срочное — днём: по сроку, затем по приоритету
+            jobs.sort(key=lambda j: (str(j.get("due") or "9999-12-31"),
+                                     -int(num(j.get("priority"))),
+                                     str(j.get("created_at") or "")))
         if not self.db.setting("queue_group_material", True) or not snap:
             return jobs[0]
         loaded = {str(t.get("type") or "").upper()

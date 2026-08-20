@@ -91,6 +91,33 @@ class TelegramTextTests(unittest.TestCase):
         self.assertIn("14:30", self.bot.text_ask("когда закончит"))
         self.assertIn("адресник", self.bot.text_ask("что печатает"))
 
+    def test_queue_reorder(self):
+        self._order("1001", 500, 500, product="длинное")
+        self._order("1002", 500, 500, product="срочное")
+        self._order("1003", 500, 500, product="запасное")
+        self.db.upsert("print_jobs", {
+            "id": "j1", "order_id": "o1001", "name": "длинное", "state": "queued",
+            "file": "a.3mf", "priority": 3, "created_at": "2026-08-10T10:00:00"})
+        self.db.upsert("print_jobs", {
+            "id": "j2", "order_id": "o1002", "name": "срочное", "state": "queued",
+            "file": "b.3mf", "priority": 2, "created_at": "2026-08-10T10:01:00"})
+        self.db.upsert("print_jobs", {
+            "id": "j3", "order_id": "o1003", "name": "запасное", "state": "queued",
+            "file": "c.3mf", "priority": 1, "created_at": "2026-08-10T10:02:00"})
+
+        # заказ 1003 последний → «выше 1003» ставит его выше 1002
+        result = self.bot._reorder_queue("выше 1003", "выше")
+        self.assertIn("передвинуто выше", result)
+        jobs = self.db.query("SELECT j.name, j.priority FROM print_jobs j"
+                             " WHERE j.state='queued' ORDER BY j.priority DESC")
+        self.assertEqual(jobs[0]["name"], "длинное")
+        self.assertEqual(jobs[1]["name"], "запасное")
+
+        edge = self.bot._reorder_queue("выше 1001", "выше")
+        self.assertIn("уже первое", edge)
+        missing = self.bot._reorder_queue("выше 9999", "выше")
+        self.assertIn("не стоит в очереди", missing)
+
     def test_month_close_command_text(self):
         text = self.bot._month_close("закрыть месяц")
         self.assertIn("Закрыть месяц", text)

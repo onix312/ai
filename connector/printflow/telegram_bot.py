@@ -46,6 +46,7 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 • принтер — список парка · принтер 2 — выбрать принтер
 • пауза / продолжить / свет — управление
 • пропустить 2 — исключить объект N из печати
+• выше 1001 · ниже 1001 — порядок заданий в очереди
 • поток 90 — процент подачи филамента (50–150%)
 • повторить / повторить 1001 — снова в очередь сорванное задание
 • следи 1001 — прогресс заказа каждые 10%
@@ -310,6 +311,38 @@ class TelegramBot:
         except Exception as exc:
             return f"Не удалось запустить: {exc}"
 
+    def _reorder_queue(self, text: str, direction: str) -> str:
+        """«выше 1001» / «ниже 1001» — передвинуть задание в очереди печати."""
+        number = next((w for w in text.split()[1:] if w.isdigit()), "")
+        if not number:
+            return f"Формат: «{direction} 1001» — передвинуть задание заказа №1001 в очереди."
+        jobs = self.db.query(
+            "SELECT j.*, o.number AS order_number FROM print_jobs j"
+            " LEFT JOIN orders o ON o.id=j.order_id"
+            " WHERE j.state='queued'"
+            " ORDER BY j.priority DESC, datetime(j.created_at)")
+        if len(jobs) < 2:
+            return "В очереди меньше двух заданий — двигать нечего."
+        index = next((i for i, j in enumerate(jobs)
+                      if str(j.get("order_number") or "") == number), None)
+        if index is None:
+            return f"Заказ №{number} не стоит в очереди."
+        neighbor_index = index - 1 if direction == "выше" else index + 1
+        if neighbor_index < 0:
+            return "Задание уже первое в очереди."
+        if neighbor_index >= len(jobs):
+            return "Задание уже последнее в очереди."
+        target, neighbor = jobs[index], jobs[neighbor_index]
+        step = 1 if direction == "выше" else -1
+        new_priority = int(num(neighbor.get("priority"))) + step
+        self.db.execute("UPDATE print_jobs SET priority=? WHERE id=?",
+                        (new_priority, target["id"]))
+        self.db.add_event("queue", "Очередь: задание передвинуто",
+                          f"{target.get('name') or ''} {direction}",
+                          "", {"job_id": target["id"], "direction": direction})
+        return (f"Задание заказа №{number} «{target.get('name') or ''}» "
+                f"передвинуто {direction}.")
+
     def _watch_order(self, chat: str, number: str) -> str:
         """«следи 1001» — уведомления о прогрессе заказа каждые 10%."""
         if not number:
@@ -450,6 +483,8 @@ class TelegramBot:
             return self.stop_live(chat)
         if word in ("очередь", "queue"):
             return self._reply(chat, self.text_queue())
+        if word in ("выше", "ниже"):
+            return self._reply(chat, self._reorder_queue(text, word))
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
         if word in ("день", "сегодня", "итоги"):

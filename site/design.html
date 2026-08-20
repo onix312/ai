@@ -45,7 +45,7 @@
      <option value="qr_stand_base">Основание QR-стойки</option>
     </select></label>
    <div id="plateParams">
-    <label>Номер / текст (только цифры)<input id="number" value="12"></label>
+    <label>Номер / текст (цифры и кириллица)<input id="number" value="12"></label>
     <label>Ширина, мм<input id="width" type="number" value="40"></label>
     <label>Высота, мм<input id="height" type="number" value="24"></label>
    </div>
@@ -57,7 +57,7 @@
     <label>Глубина, мм<input id="sdepth" type="number" value="40"></label>
    </div>
    <button class="btn" id="download" type="button">Скачать STL</button>
-   <p class="hint">Кириллический текст в этом срезе не поддерживается — только цифры, «-», «.», «/». Шрифты с кириллицей и больше форм — следующий шаг.</p>
+   <p class="hint">Текст: цифры, кириллица (строчные станут заглавными), «-», «.», «/», пробел. Латинские буквы не поддерживаются. Шрифт — растровый 5×7, на табличке лучше смотрится 3–6 символов.</p>
   </div>
   <div class="card">
    <h2>Предпросмотр</h2>
