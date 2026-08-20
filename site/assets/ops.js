@@ -66,10 +66,19 @@ function renderKanban(list) {
   bindDrag();
 }
 
+let bulkSelected = new Set();
+function updateBulkBar() {
+  const bar = $('bulk_bar');
+  bar.hidden = orderView !== 'table' || !bulkSelected.size;
+  $('bulk_count').textContent = `Выбрано ${bulkSelected.size}`;
+  if (!bulkSelected.size) $('orders_tbody').querySelectorAll('[data-bulk]').forEach((c) => { c.checked = false; });
+}
 function renderTable(list) {
   $('orders_tbody').innerHTML = list.length ? list.map((o) => {
     const st = PF.status(o.status), n = PF.niche(o.niche_id), econ = o.economics || {};
+    const checked = bulkSelected.has(o.id) ? ' checked' : '';
     return `<tr class="clickable" data-order="${esc(o.id)}">`
+      + `<td class="w-check" onclick="event.stopPropagation()"><input type="checkbox" data-bulk="${esc(o.id)}"${checked}></td>`
       + `<td class="strong">№${esc(o.number)}</td>`
       + `<td><b>${esc(o.product)}</b>${o.file ? `<br><small class="muted">${esc(o.file)}</small>` : ''}</td>`
       + `<td>${esc(o.customer_name || '—')}${o.phone ? `<br><small class="muted">${esc(o.phone)}</small>` : ''}</td>`
@@ -93,9 +102,16 @@ function renderOrders() {
   const late = PF.state.orders.filter(overdue).length;
   tag.className = 'tag' + (late ? ' warn' : '');
 
+  const bs = $('bulk_status');
+  if (bs && bs.options.length !== PF.state.statuses.length + 1) {
+    bs.innerHTML = '<option value="">Статус…</option>' + PF.state.statuses
+      .map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  }
+
   $('orders_kanban').hidden = orderView !== 'kanban';
   $('orders_table').hidden = orderView !== 'table';
   if (orderView === 'kanban') renderKanban(list); else renderTable(list);
+  updateBulkBar();
 }
 function text(id, v) { const el = $(id); if (el) el.textContent = v; }
 
@@ -553,6 +569,27 @@ function exportCsv() {
 function bind() {
   $('orders_new').addEventListener('click', () => openOrder());
   $('orders_export').addEventListener('click', exportCsv);
+  $('orders_tbody').addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-bulk]');
+    if (!cb) return;
+    if (cb.checked) bulkSelected.add(cb.dataset.bulk);
+    else bulkSelected.delete(cb.dataset.bulk);
+    updateBulkBar();
+  });
+  $('bulk_clear').addEventListener('click', () => { bulkSelected.clear(); updateBulkBar(); });
+  $('bulk_apply').addEventListener('click', async () => {
+    const status = $('bulk_status').value;
+    const label = ($('bulk_status').selectedOptions[0] || {}).textContent || status;
+    if (!status || !bulkSelected.size) return;
+    if (!confirmDanger(`Сменить статус у ${bulkSelected.size} заказов на «${label}»?`)) return;
+    try {
+      const res = await post('/api/orders/bulk-status', { ids: [...bulkSelected], status });
+      toast('Готово', `Статус сменён у ${res.updated} заказов`);
+      bulkSelected.clear();
+      await PF.refreshCore();
+      renderOrders();
+    } catch (e) { fail(e); }
+  });
   $('orders_search').addEventListener('input', debounce((e) => { filters.q = e.target.value; renderOrders(); }, 180));
   $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; renderOrders(); });
   $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; renderOrders(); });

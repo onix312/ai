@@ -840,15 +840,52 @@ function renderQueue() {
 
   const hq = ($('history_search') || {}).value || '';
   const hfiltered = hq ? history.filter((j) => String(j.name || j.file || '').toLowerCase().includes(hq.toLowerCase())) : history;
-  $('queue_history').innerHTML = hfiltered.length ? hfiltered.slice(0, 24).map((j) => `<div class="tx-row">`
+  $('queue_history').innerHTML = hfiltered.length ? hfiltered.slice(0, 24).map((j) => `<div class="tx-row" data-passport="${esc(j.id)}" title="Паспорт печати — план против факта">`
     + `<span class="tx-ic ${j.state === 'done' ? 'income' : 'expense'}">${j.state === 'done' ? '✓' : '✕'}</span>`
     + `<div class="tx-body"><b>${esc(j.name || j.file || 'Печать')}</b>`
     + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г`
     + (num(j.est_minutes) ? ' · оценка была ' + minutesText(j.est_minutes) : '') + '</small></div>'
     + `<span class="amt">${money(j.cost)}</span></div>`).join('')
     : '<div class="empty compact"><span>' + (hq ? 'Ничего не найдено.' : 'Завершённых печатей пока нет.') + '</span></div>';
+  $$('#queue_history [data-passport]').forEach((row) => {
+    row.addEventListener('click', () => openPassport(row.dataset.passport));
+  });
 }
 $('history_search').addEventListener('input', U.debounce(renderQueue, 200));
+
+/* ==================================================== паспорт печати */
+async function openPassport(jobId) {
+  try {
+    const p = await get('/api/job/passport?id=' + encodeURIComponent(jobId));
+    const j = p.job || {};
+    $('jp_title').textContent = j.name || j.file || 'Печать';
+    $('jp_sub').textContent = p.order && p.order.number
+      ? `Заказ №${p.order.number} · ${p.order.product || ''}` : 'Без привязки к заказу';
+    const pvf = p.plan_vs_fact || {};
+    const parts = [];
+    parts.push(`<table class="data"><thead><tr><th>Параметр</th><th class="right">План (слайсер)</th><th class="right">Факт</th><th class="right">Отклонение</th></tr></thead><tbody>
+      <tr><td>Время печати</td><td class="right">${pvf.minutes ? minutesText(pvf.minutes.plan) : '—'}</td><td class="right">${minutesText(num(j.duration_min))}</td><td class="right">${pvf.minutes ? pvf.minutes.diff_pct + '%' : '—'}</td></tr>
+      <tr><td>Пластик</td><td class="right">${pvf.grams ? nfmt(pvf.grams.plan, 1) + ' г' : '—'}</td><td class="right">${nfmt(num(j.grams), 1)} г</td><td class="right">${pvf.grams ? pvf.grams.diff_pct + '%' : '—'}</td></tr>
+      </tbody></table>`);
+    if (pvf.minutes) parts.push(`<p class="muted">${esc(pvf.minutes.verdict)} · ${esc(pvf.grams.verdict)}</p>`);
+    if (p.error_decoded && p.error_decoded.title) {
+      parts.push(`<div class="notice bad"><span>✕</span><span><b>${esc(p.error_decoded.title)}</b><br>${esc(p.error_decoded.advice || '')}</span></div>`);
+    }
+    if ((p.guard || []).length) {
+      parts.push('<h3 style="margin:12px 0 4px">Сторож за время печати</h3>');
+      p.guard.forEach((g) => {
+        const actions = g.data && g.data.actions && g.data.actions.length ? '<br><small>Сделано: ' + esc(g.data.actions.join(', ')) + '</small>' : '';
+        parts.push(`<div class="notice warn"><span>⚠</span><span><b>${esc(g.title)}</b>${g.detail ? '<br>' + esc(g.detail) : ''}${actions}</span></div>`);
+      });
+    }
+    if ((p.photos || []).length) {
+      parts.push('<h3 style="margin:12px 0 4px">Фото</h3><div style="display:flex;gap:8px;flex-wrap:wrap">'
+        + p.photos.map((ph) => `<img src="/api/order/photo.jpg?photo_id=${esc(ph.id)}" style="width:120px;border-radius:8px" alt="">`).join('') + '</div>');
+    }
+    $('jp_body').innerHTML = parts.join('');
+    openModal('job_passport_modal');
+  } catch (e) { fail(e); }
+}
 
 /* ==================================================== профиль принтера */
 function openPrinterModal(id) {
@@ -1095,6 +1132,29 @@ function bind() {
       shotsKey = '';                       // лента изменилась — перечитать архив
       toast('Кадр сохранён', 'Появится в ленте под камерой');
       PF.poll();
+    } catch (e) { fail(e); }
+  });
+  $('pr_cam_diag').addEventListener('click', async () => {
+    const out = $('pr_cam_diag_out');
+    const p = active();
+    if (!p) return fail(new Error('Принтер ещё не добавлен'));
+    out.innerHTML = '<p class="muted" style="font-size:12px">Проверяю порт 6000, TLS и первый кадр…</p>';
+    try {
+      const res = await get('/api/camera/diagnose?printer_id=' + encodeURIComponent(p.id));
+      out.innerHTML = (res.steps || []).map((s) => `<div style="padding:3px 0;font-size:12.5px">
+        <b style="color:${s.ok ? 'var(--ok)' : 'var(--bad)'}">${s.ok ? '✓' : '✕'}</b> ${esc(s.step)} — ${esc(s.text)}</div>`).join('')
+        + `<p class="muted" style="font-size:12px;margin-top:6px"><b>${esc(res.summary)}</b></p>`;
+    } catch (e) { fail(e); }
+  });
+  $('pr_cam_rtsp').addEventListener('click', async () => {
+    const p = active();
+    if (!p) return fail(new Error('Принтер ещё не добавлен'));
+    try {
+      const res = await get('/api/printer/rtsp-link?printer_id=' + encodeURIComponent(p.id));
+      if (!res.link) return toast('RTSP недоступен', res.error || 'Нужны IP и Access Code', 'warn');
+      const out = $('pr_cam_diag_out');
+      out.innerHTML = `<div class="notice"><span>🎥</span><span>RTSP-поток для внешнего плеера (VLC: Медиа → Открыть сетевой адрес):<br><code style="word-break:break-all">${esc(res.link)}</code><br><small class="muted">Ссылка содержит Access Code — не передавайте её посторонним.</small></span></div>`;
+      try { await navigator.clipboard.writeText(res.link); toast('RTSP-ссылка скопирована', 'Вставьте в VLC'); } catch (e) { /* без буфера обмена */ }
     } catch (e) { fail(e); }
   });
   $('pr_shots').addEventListener('click', (e) => {

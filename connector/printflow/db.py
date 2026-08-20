@@ -6,13 +6,17 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from .config import (DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS, DEFAULT_EXPENSE_CATEGORIES,
-                     DEFAULT_NICHES, DEFAULT_SETTINGS, DEFAULT_STATUSES, ensure_dirs, now_iso)
+from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
+                     DEFAULT_EXPENSE_CATEGORIES, DEFAULT_NICHES, DEFAULT_SETTINGS,
+                     DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso)
 
 SCHEMA_VERSION = 4
 
@@ -60,6 +64,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("qc_done", "TEXT DEFAULT ''"),      # чек-лист качества: JSON {step: true}
         ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
         ("warehouse_id", "TEXT"),            # с какого склада отгружаем
+        ("reminded_at", "TEXT DEFAULT ''"),  # когда напоминали о долге (B4)
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
     ],
     "print_jobs": [
@@ -602,17 +607,36 @@ class Database:
 
     # ------------------------------------------------------------------ ядро
     def _migrate(self) -> None:
-        """Догоняющие миграции: новые колонки добавляются без потери данных."""
+        """Догоняющие миграции: новые колонки добавляются без потери данных.
+
+        Перед любым изменением схемы делается страховочная копия файла базы в
+        `backups/pre-migration-*.sqlite3` — откат одной командой, даже если
+        миграция оборвётся на середине.
+        """
         with self.lock:
             version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            pending: dict[str, list[tuple[str, str]]] = {}
             for table, columns in ADDED_COLUMNS.items():
                 existing = {r["name"] for r in
                             self.conn.execute(f"PRAGMA table_info({table})").fetchall()}
                 if not existing:
                     continue  # таблицы ещё нет — её создаст SCHEMA
-                for name, decl in columns:
-                    if name not in existing:
-                        self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+                missing = [(name, decl) for name, decl in columns
+                           if name not in existing]
+                if missing:
+                    pending[table] = missing
+            if version < SCHEMA_VERSION or pending:
+                # Страховка: копия файла до миграции. Ошибка копирования не
+                # должна блокировать саму миграцию.
+                try:
+                    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    self.backup_to(BACKUP_DIR / f"pre-migration-{stamp}.sqlite3")
+                except Exception:
+                    pass
+            for table, missing in pending.items():
+                for name, decl in missing:
+                    self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
             if version < SCHEMA_VERSION:
                 self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self.conn.commit()
@@ -989,3 +1013,115 @@ class Database:
     def close(self) -> None:
         with self.lock:
             self.conn.close()
+
+
+# ------------------------------------------------------- копии и откат базы
+
+def list_backups() -> list[dict]:
+    """Список файлов-копий базы в каталоге backups (новые сверху)."""
+    if not BACKUP_DIR.exists():
+        return []
+    items: list[dict] = []
+    for path in BACKUP_DIR.glob("*.sqlite3"):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append({
+            "name": path.name,
+            "size": stat.st_size,
+            "mtime": int(stat.st_mtime),
+            "at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+        })
+    items.sort(key=lambda item: (item["mtime"], item["name"]), reverse=True)
+    return items
+
+
+def make_backup(prefix: str = "printflow-manual") -> dict:
+    """Консистентная копия базы файлом (безопасна при работающем сервере)."""
+    ensure_dirs()
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    target = BACKUP_DIR / f"{prefix}-{stamp}.sqlite3"
+    if not DB_FILE.exists():
+        return {"ok": False, "error": "База ещё не создана"}
+    source = sqlite3.connect(str(DB_FILE))
+    dest = sqlite3.connect(str(target))
+    try:
+        source.backup(dest)
+    finally:
+        dest.close()
+        source.close()
+    return {"ok": True, "file": target.name}
+
+
+def request_restore(filename: str) -> dict:
+    """Запланировать откат: страховочная копия текущей базы + маркер.
+
+    Сам откат выполняет `apply_pending_restore()` при следующем запуске —
+    до открытия базы, поэтому файл никогда не подменяется под живым
+    соединением.
+    """
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    if filename != Path(filename).name or not filename.endswith(".sqlite3"):
+        raise ValueError("Недопустимое имя копии")
+    source = BACKUP_DIR / filename
+    if not source.is_file():
+        raise ValueError("Копия не найдена")
+    safety = ""
+    if DB_FILE.exists():
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        safety_file = BACKUP_DIR / f"before-restore-{stamp}.sqlite3"
+        src = sqlite3.connect(str(DB_FILE))
+        dest = sqlite3.connect(str(safety_file))
+        try:
+            src.backup(dest)
+        finally:
+            dest.close()
+            src.close()
+        safety = safety_file.name
+    RESTORE_REQUEST.write_text(
+        json.dumps({"file": filename, "at": now_iso()}, ensure_ascii=False),
+        encoding="utf-8")
+    return {"ok": True, "file": filename, "safety": safety}
+
+
+def pending_restore() -> dict | None:
+    """Прочитать маркер отложенного восстановления (без выполнения)."""
+    if not RESTORE_REQUEST.exists():
+        return None
+    try:
+        data = json.loads(RESTORE_REQUEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def apply_pending_restore() -> dict | None:
+    """Выполнить отложенное восстановление базы из копии.
+
+    Вызывается при старте, до открытия `Database`. Возвращает итог или None,
+    если восстанавливать нечего. Маркер удаляется в любом случае.
+    """
+    request = pending_restore()
+    if request is None:
+        return None
+    filename = str(request.get("file") or "")
+    result: dict = {"restored": ""}
+    if filename == Path(filename).name and filename.endswith(".sqlite3"):
+        source = BACKUP_DIR / filename
+        if source.is_file():
+            try:
+                shutil.copyfile(source, DB_FILE)
+                result["restored"] = filename
+            except OSError as exc:
+                result["error"] = str(exc)
+        else:
+            result["error"] = f"копия {filename} не найдена"
+    else:
+        result["error"] = "недопустимое имя копии в маркере"
+    try:
+        RESTORE_REQUEST.unlink()
+    except OSError:
+        pass
+    return result

@@ -639,6 +639,23 @@ class PrinterManager:
                                   str(exc), printer.id)
 
     # ------------------------------------------------------- умная очередь
+    def _watch_firmware(self, printer: BambuPrinter, snap: dict) -> None:
+        """Контроль прошивки (B.1.3): заметить обновление и сообщить о нём."""
+        firmware = str(snap["printer"].get("firmware") or "")
+        if not firmware or firmware == str(printer.record.get("firmware") or ""):
+            return
+        old = str(printer.record.get("firmware") or "")
+        self.repo.save_printer({"id": printer.id, "firmware": firmware})
+        printer.record["firmware"] = firmware
+        self.db.add_event("printer", "Прошивка обновлена",
+                          f"{printer.record.get('name') or 'Принтер'}: "
+                          f"{old or '—'} → {firmware}",
+                          printer.id, {"old": old, "new": firmware})
+        if old and self.db.setting("notify_firmware", True):
+            self.notify_async(
+                f"PrintFlow · {printer.record.get('name') or 'Принтер'}\n"
+                f"Прошивка обновлена: {old} → {firmware}")
+
     def quiet_now(self) -> bool:
         """Идут ли тихие часы: ночью принтер не запускаем."""
         if not self.db.setting("quiet_hours_enabled", False):
@@ -710,14 +727,30 @@ class PrinterManager:
         return True, ""
 
     def next_job(self, printer_id: str, snap: dict | None = None) -> dict | None:
-        """Выбрать следующее задание с учётом материала в AMS."""
+        """Выбрать следующее задание с учётом материала в AMS.
+
+        Ночная смена (9.3.1): при включённом ``night_shift_enabled`` в тихие
+        часы вперёд идут самые длинные задания — принтер работает до утра;
+        днём — по сроку и приоритету, чтобы срочное не ждало ночи.
+        """
         jobs = self.db.query(
-            "SELECT j.* FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
+            "SELECT j.*, o.hours AS order_hours, o.due AS due"
+            " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
-            " AND j.file<>'' ORDER BY COALESCE(o.due,'9999-12-31'),"
-            " j.priority DESC, datetime(j.created_at)", (printer_id,))
+            " AND j.file<>''", (printer_id,))
         if not jobs:
             return None
+        night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()
+        if night:
+            # длинное — на ночь: сортировка по оценке часов из заказа
+            jobs.sort(key=lambda j: (-num(j.get("order_hours")),
+                                     -int(num(j.get("priority"))),
+                                     str(j.get("created_at") or "")))
+        else:
+            # срочное — днём: по сроку, затем по приоритету
+            jobs.sort(key=lambda j: (str(j.get("due") or "9999-12-31"),
+                                     -int(num(j.get("priority"))),
+                                     str(j.get("created_at") or "")))
         if not self.db.setting("queue_group_material", True) or not snap:
             return jobs[0]
         loaded = {str(t.get("type") or "").upper()
@@ -903,17 +936,42 @@ class PrinterManager:
         self.notify_async(text, photo, buttons=buttons or None)
 
     def notify_async(self, text: str, photo: bytes | None = None,
-                     buttons: list[tuple[str, str]] | None = None) -> None:
+                     buttons: list[tuple[str, str]] | None = None,
+                     critical: bool = False) -> None:
         """Отправить сообщение в фоне, чтобы не тормозить поток телеметрии."""
-        threading.Thread(target=self.send_telegram, args=(text, photo, buttons),
+        threading.Thread(target=self.send_telegram,
+                         args=(text, photo, buttons, critical),
                          daemon=True).start()
 
+    def tg_quiet_now(self) -> bool:
+        """Тихие часы бота: ночью некритичные уведомления не уходят.
+
+        Своя маска, независимая от тихих часов принтера (автозапуск).
+        Пустые или равные границы — тихие часы выключены.
+        """
+        try:
+            start = str(self.db.setting("telegram_quiet_from", "") or "").strip()
+            end = str(self.db.setting("telegram_quiet_to", "") or "").strip()
+            if not start or not end or start == end:
+                return False
+            time.strptime(start, "%H:%M")
+            time.strptime(end, "%H:%M")
+            now = time.strftime("%H:%M")
+            if start <= end:
+                return start <= now < end
+            return now >= start or now < end  # интервал через полночь
+        except Exception:
+            return False
+
     def send_telegram(self, text: str, photo: bytes | None = None,
-                      buttons: list[tuple[str, str]] | None = None) -> dict:
+                      buttons: list[tuple[str, str]] | None = None,
+                      critical: bool = False) -> dict:
         settings = self.db.settings(include_secrets=True)
         token, chat = settings.get("telegram_token"), settings.get("telegram_chat_id")
         if not token or not chat:
             return {"ok": False, "error": "Не заданы токен или chat_id"}
+        if not critical and self.tg_quiet_now():
+            return {"ok": True, "skipped": "quiet"}
         reply_markup = ""
         if buttons:
             reply_markup = json.dumps({"inline_keyboard": [
@@ -1432,6 +1490,7 @@ class PrinterManager:
                         self.ams_monitor(printer, snap)
                         self.check_dry_humidity(printer, snap)
                         self.remind_finish(printer, snap)
+                        self._watch_firmware(printer, snap)
                     except Exception as exc:
                         self.db.add_event("error", "Сбой мониторинга AMS", str(exc), printer.id)
                     job = self.db.one(

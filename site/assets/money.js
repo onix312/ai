@@ -33,6 +33,16 @@ function renderFinance() {
     kpi('Склад пластика', nfmt(s.stock_grams) + ' г', `на ${money(s.stock_value)}`),
   ].join('');
 
+  const hc = data.hour_cost;
+  const hcHost = $('fin_hour_cost');
+  if (hcHost) {
+    if (hc && num(hc.hours) > 0 && Math.abs(num(hc.diff_pct)) > 10) {
+      hcHost.innerHTML = `<div class="notice ${num(hc.diff_pct) > 0 ? 'warn' : 'ok'}"><span>🧮</span><span>Фактическая стоимость часа печати <b>${money(hc.per_hour)}</b> против тарифа ${money(hc.tariff)} — ${esc(hc.verdict)}. Проверьте тарифы в Настройках → Производство.</span></div>`;
+    } else {
+      hcHost.innerHTML = '';
+    }
+  }
+
   const keys = [
     { key: 'income', label: 'Доход', color: 'var(--ok)', type: 'bar', fmt: (v) => money(v) },
     { key: 'expense', label: 'Расход', color: 'var(--bad)', type: 'bar', opacity: .6, fmt: (v) => money(v) },
@@ -51,13 +61,18 @@ function renderFinance() {
     : '<div class="empty compact"><span>Данных по нишам пока нет.</span></div>';
 
   const tx = data.transactions || [];
-  $('fin_tx').innerHTML = tx.length ? tx.slice(0, 30).map((t) => `<div class="tx-row">`
-    + `<span class="tx-ic ${esc(t.kind)}">${t.kind === 'income' ? '↑' : '↓'}</span>`
+  $('fin_tx').innerHTML = tx.length ? tx.slice(0, 30).map((t) => {
+    const isInc = t.kind === 'income', isCorr = t.kind === 'correction';
+    const sign = isCorr ? (num(t.amount) >= 0 ? '+' : '−') : (isInc ? '+' : '−');
+    const arrow = isCorr ? '±' : (isInc ? '↑' : '↓');
+    return `<div class="tx-row">`
+    + `<span class="tx-ic ${esc(t.kind)}">${arrow}</span>`
     + `<div class="tx-body"><b>${esc(t.title || t.category)}</b>`
     + `<small>${esc(dateTimeText(t.at))} · ${esc(catName(t.category))}${num(t.auto) ? ' · ⚙ авто' : ''}</small></div>`
-    + `<span class="amt ${t.kind === 'income' ? 'pos' : 'neg'}">${t.kind === 'income' ? '+' : '−'}${money(Math.abs(num(t.amount)))}</span>`
+    + `<span class="amt ${isCorr ? '' : (isInc ? 'pos' : 'neg')}">${sign}${money(Math.abs(num(t.amount)))}</span>`
     + (num(t.auto) ? '' : `<button class="icon-btn sm danger" type="button" data-tx-del="${esc(t.id)}">×</button>`)
-    + '</div>').join('')
+    + '</div>';
+  }).join('')
     : '<div class="empty compact"><span>Проводок пока нет. Они появятся сами при закрытии заказов.</span></div>';
 }
 
@@ -770,6 +785,117 @@ function openTx(kind) {
 
 /* ============================================================= события */
 function bind() {
+  /* ===================== мастер «Закрыть месяц» (H4) ===================== */
+  let mcState = null;
+  async function openMonthClose() {
+    try { mcState = await get('/api/month-close'); } catch (e) { return fail(e); }
+    $('mc_key').value = mcState.key;
+    renderMc();
+    openModal('month_close_modal');
+  }
+  function renderMc() {
+    const s = mcState;
+    if (!s) return;
+    $('mc_sub').textContent = s.next
+      ? 'Шаги выполняются по порядку, повторный запуск шага в этом месяце данные не задвоит.'
+      : 'Все шаги этого месяца выполнены. Следующее закрытие — в новом месяце.';
+    $('mc_steps').innerHTML = s.order.map((step) => {
+      const done = s.done[step];
+      const log = (s.log || {})[step] || {};
+      const extra = log.count !== undefined ? ` · начислено: ${log.count}`
+        : log.adjustments !== undefined ? ` · корректировок: ${log.adjustments}`
+        : log.amount !== undefined ? ` · отложено: ${money(num(log.amount))}`
+        : (log.file ? ` · ${esc(log.file)}` : '');
+      const sub = step === 'cash' && !done
+        ? `<div style="margin-top:8px">${(s.accounts || []).map((a) => `
+          <label class="field" style="margin:6px 0"><span>${esc(a.name)} — в системе ${money(num(a.balance))}</span>
+          <input type="number" step="any" data-mc-fact="${esc(a.id)}" placeholder="факт наличными" value="${num(a.balance)}"></label>`).join('')}</div>`
+        : `<small class="muted">${log.at ? esc(log.at.slice(0, 10)) + extra : ''}</small>`;
+      const action = done
+        ? '<span class="state-badge ok">✓ готово</span>'
+        : (s.next === step
+          ? `<button class="btn sm primary" data-mc-run="${step}" type="button">Выполнить</button>`
+          : '<small class="muted">после предыдущих</small>');
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line,#e5e7eb)">
+        <div style="min-width:0"><b>${esc(s.titles[step] || step)}</b><br>${sub}</div>
+        <div style="flex:0 0 auto">${action}</div></div>`;
+    }).join('');
+    $('mc_result').innerHTML = '';
+    $('mc_steps').querySelectorAll('[data-mc-run]').forEach((b) => {
+      b.addEventListener('click', () => runMcStep(b.dataset.mcRun));
+    });
+  }
+  async function runMcStep(step) {
+    const payload = { key: mcState.key, step, accounts: [] };
+    if (step === 'cash') {
+      document.querySelectorAll('[data-mc-fact]').forEach((input) => {
+        payload.accounts.push({ id: input.dataset.mcFact, fact: parseFloat(input.value) || 0 });
+      });
+    }
+    try {
+      const res = await post('/api/month-close/step', payload);
+      if (!res.ok) toast('Шаг не выполнен', res.error || '', 'warn');
+      else {
+        toast('Шаг выполнен', res.message || '');
+        if (step === 'report' && res.report && res.report.pnl) {
+          const r = res.report.pnl;
+          $('mc_result').innerHTML = `<div class="notice ok"><span>📄</span><span><b>${esc(mcState.key)}:</b> доход ${money(num(r.income))}, расход ${money(num(r.expense))}, прибыль <b>${money(num(r.profit))}</b> · налог (оценка) ${money(num(res.report.tax.tax))} · долги клиентов ${money(num(res.report.debts.total))}</span></div>`;
+        }
+      }
+      mcState = await get('/api/month-close');
+      renderMc();
+      try { await PF.refreshFinance(); } catch (e) { /* офлайн */ }
+    } catch (e) { fail(e); }
+  }
+  $('mc_key').addEventListener('change', async () => {
+    try {
+      mcState = await get('/api/month-close?key=' + encodeURIComponent($('mc_key').value));
+      renderMc();
+    } catch (e) { fail(e); }
+  });
+  $('fin_month_close').addEventListener('click', openMonthClose);
+
+  /* ===================== импорт банковской выписки (M1) ===================== */
+  let bankPreview = [];
+  $('bank_file_btn').addEventListener('click', () => $('bank_file').click());
+  $('bank_file').addEventListener('change', async () => {
+    const file = $('bank_file').files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = await post('/api/bank/import-preview', { text });
+      bankPreview = res.rows || [];
+      const out = $('bank_import_out');
+      if (!bankPreview.length) {
+        out.innerHTML = '<div class="notice warn"><span>⚠</span><span>В файле не нашлось строк с датой, суммой и назначением — проверьте формат CSV.</span></div>';
+        return;
+      }
+      out.innerHTML = `<p class="muted" style="font-size:12px;margin-top:8px">Распознано строк: ${bankPreview.length} · по правилам: ${res.matched} · без правила: ${res.unmatched} · дублей: ${res.duplicates}.</p>
+        <div class="table-wrap"><table class="data"><thead><tr><th class="w-check"></th><th>Дата</th><th class="right">Сумма</th><th>Назначение</th><th>Проводка</th></tr></thead><tbody>
+        ${bankPreview.slice(0, 60).map((r, i) => `<tr>
+          <td class="w-check"><input type="checkbox" data-bank-row="${i}" ${r.matched && !r.duplicate ? 'checked' : 'disabled'}></td>
+          <td>${esc(r.date)}</td>
+          <td class="right tnum ${num(r.amount) >= 0 ? 'neg' : 'pos'}">${num(r.amount) >= 0 ? '−' : '+'}${money(Math.abs(num(r.amount)))}</td>
+          <td><small>${esc(r.description)}</small></td>
+          <td>${r.matched ? (r.kind === 'income' ? '↑ ' : '↓ ') + esc(r.title || '') + (r.duplicate ? ' <span class="pill bad">дубль</span>' : '') : '<span class="pill warn">без правила</span>'}</td>
+        </tr>`).join('')}
+        </tbody></table></div>
+        <div style="margin-top:10px"><button class="btn primary sm" id="bank_apply" type="button">Импортировать отмеченные</button></div>`;
+      $('bank_apply').addEventListener('click', async () => {
+        const rows = [...document.querySelectorAll('[data-bank-row]:checked')]
+          .map((cb) => bankPreview[+cb.dataset.bankRow]);
+        if (!rows.length) return toast('Ничего не выбрано', 'Отметьте строки для импорта', 'warn');
+        try {
+          const done = await post('/api/bank/import-apply', { rows });
+          toast('Импорт завершён', `Проведено: ${done.imported}, пропущено: ${done.skipped}`);
+          out.innerHTML = '<p class="muted" style="font-size:12px">Готово — проводки появились в списке финансов.</p>';
+          try { await PF.refreshFinance(); } catch (e) { /* офлайн */ }
+        } catch (e) { fail(e); }
+      });
+    } catch (e) { fail(e); }
+    $('bank_file').value = '';
+  });
+
   $('fin_period').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;
@@ -848,6 +974,18 @@ function bind() {
   });
 
   $('cat_add').addEventListener('click', () => openCatalog());
+  $('cat_recalc').addEventListener('click', async () => {
+    try {
+      const res = await get('/api/catalog/recalc');
+      if (!res.count) return toast('Пересчитывать нечего', 'В базе изделий нет позиций с весом и временем', 'warn');
+      const preview = res.items.slice(0, 8).map((i) =>
+        `· ${i.name}: ${money(i.old_price)} → ${money(i.new_price)}`).join('\n');
+      if (!confirmDanger(`Пересчитать цены ${res.count} позиций по текущим тарифам?\nИзменится: ${res.changed}.\n\n${preview}\n${res.count > 8 ? '…и ещё ' + (res.count - 8) : ''}`)) return;
+      const applied = await post('/api/catalog/recalc-apply', {});
+      toast('Цены пересчитаны', `Обновлено позиций: ${applied.changed}`);
+      renderCatalog();
+    } catch (e) { fail(e); }
+  });
   $('catalog_save').addEventListener('click', async () => {
     const payload = {
       id: editingCatalog || '',

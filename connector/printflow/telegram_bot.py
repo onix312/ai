@@ -34,6 +34,9 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 • таймлапс · кадры — последние снимки печати одним сообщением
 • живой — автообновляемый дашборд (стоп живой — выключить)
 • деньги · день — финансы
+• итоги недели · итоги месяца — отчёты по запросу
+• долги · брак · рейтинг — должники, потери на браке, ABC изделий
+• сколько осталось / что печатает / когда закончит / сколько заработал
 • план — что печатать сегодня
 • продажа — продать со стеллажа (−1 шт)
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
@@ -43,6 +46,7 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 • принтер — список парка · принтер 2 — выбрать принтер
 • пауза / продолжить / свет — управление
 • пропустить 2 — исключить объект N из печати
+• выше 1001 · ниже 1001 — порядок заданий в очереди
 • поток 90 — процент подачи филамента (50–150%)
 • повторить / повторить 1001 — снова в очередь сорванное задание
 • следи 1001 — прогресс заказа каждые 10%
@@ -307,6 +311,38 @@ class TelegramBot:
         except Exception as exc:
             return f"Не удалось запустить: {exc}"
 
+    def _reorder_queue(self, text: str, direction: str) -> str:
+        """«выше 1001» / «ниже 1001» — передвинуть задание в очереди печати."""
+        number = next((w for w in text.split()[1:] if w.isdigit()), "")
+        if not number:
+            return f"Формат: «{direction} 1001» — передвинуть задание заказа №1001 в очереди."
+        jobs = self.db.query(
+            "SELECT j.*, o.number AS order_number FROM print_jobs j"
+            " LEFT JOIN orders o ON o.id=j.order_id"
+            " WHERE j.state='queued'"
+            " ORDER BY j.priority DESC, datetime(j.created_at)")
+        if len(jobs) < 2:
+            return "В очереди меньше двух заданий — двигать нечего."
+        index = next((i for i, j in enumerate(jobs)
+                      if str(j.get("order_number") or "") == number), None)
+        if index is None:
+            return f"Заказ №{number} не стоит в очереди."
+        neighbor_index = index - 1 if direction == "выше" else index + 1
+        if neighbor_index < 0:
+            return "Задание уже первое в очереди."
+        if neighbor_index >= len(jobs):
+            return "Задание уже последнее в очереди."
+        target, neighbor = jobs[index], jobs[neighbor_index]
+        step = 1 if direction == "выше" else -1
+        new_priority = int(num(neighbor.get("priority"))) + step
+        self.db.execute("UPDATE print_jobs SET priority=? WHERE id=?",
+                        (new_priority, target["id"]))
+        self.db.add_event("queue", "Очередь: задание передвинуто",
+                          f"{target.get('name') or ''} {direction}",
+                          "", {"job_id": target["id"], "direction": direction})
+        return (f"Задание заказа №{number} «{target.get('name') or ''}» "
+                f"передвинуто {direction}.")
+
     def _watch_order(self, chat: str, number: str) -> str:
         """«следи 1001» — уведомления о прогрессе заказа каждые 10%."""
         if not number:
@@ -409,6 +445,8 @@ class TelegramBot:
 
         if word in ("start", "help", "старт", "помощь", "меню", "?"):
             return self._reply_keyboard(chat, HELP)
+        if text.startswith("закрыть месяц"):
+            return self._reply(chat, self._month_close(text))
         if word in ("панель", "panel", "дашборд"):
             return self._reply_keyboard(chat, self.text_panel())
         if word in ("план", "plan", "печатать"):
@@ -445,10 +483,26 @@ class TelegramBot:
             return self.stop_live(chat)
         if word in ("очередь", "queue"):
             return self._reply(chat, self.text_queue())
+        if word in ("выше", "ниже"):
+            return self._reply(chat, self._reorder_queue(text, word))
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
         if word in ("день", "сегодня", "итоги"):
+            if "недел" in text:
+                return self._reply(chat, self.text_weekly())
+            if "месяц" in text:
+                return self._reply(chat, self.text_month_report())
             return self._reply(chat, self.text_today())
+        if word in ("долги", "должники", "debt", "долг"):
+            return self._reply(chat, self.text_debts())
+        if word in ("брак", "дефект", "defect", "дефекты"):
+            return self._reply(chat, self.text_defects())
+        if word in ("рейтинг", "топ", "abc", "изделия"):
+            return self._reply(chat, self.text_rating())
+        if word in ("хвосты", "хвост", "дыры", "проверка"):
+            return self._reply(chat, self.text_loose_ends())
+        if word in ("сколько", "что", "когда", "заработал", "заработано"):
+            return self._reply(chat, self.text_ask(text))
         if word in ("филамент", "пластик", "катушки", "спул"):
             return self._reply(chat, self.text_filament())
         if word in ("закупить", "закупка", "закупки", "шоппинг", "покупки"):
@@ -615,6 +669,26 @@ class TelegramBot:
             f"Напечатано заданий: {int(num(job.get('n')))}, пластика {round(num(job.get('g')))} г, "
             f"время печати {_hm(num(job.get('m')))}",
         ]
+        # Хвосты учёта: заказы без цены и т.п. — чтобы не копились до конца месяца.
+        try:
+            from .repo import Repo
+            problems = Repo(self.db).data_check().get("problems") or []
+        except Exception:
+            problems = []
+        if problems:
+            lines.append(f"⚠ Хвосты учёта: {len(problems)} — «хвосты» покажет список")
+        return "\n".join(lines)
+
+    def text_loose_ends(self) -> str:
+        """«хвосты» — незакрытые дыры в учёте: заказы без цены и т.п."""
+        from .repo import Repo
+        problems = Repo(self.db).data_check().get("problems") or []
+        if not problems:
+            return "✅ Хвостов нет — учёт чистый."
+        lines = [f"⚠ Хвосты учёта: {len(problems)}"]
+        for problem in problems[:12]:
+            lines.append(f"· {problem.get('title')}"
+                         + (f" — {problem.get('detail')}" if problem.get("detail") else ""))
         return "\n".join(lines)
 
     def text_filament(self) -> str:
@@ -746,6 +820,150 @@ class TelegramBot:
         if num(debts.get("total")) > 0:
             lines.append(f"💰 Долги: {_money(debts['total'])}")
         return "\n".join(lines)
+
+    # ------------------------------------------------- отчётность по запросу
+    def _month_close(self, text: str) -> str:
+        """«закрыть месяц» — состояние мастера; «закрыть месяц fixed» — шаг."""
+        from .month_close import MonthClose, STEP_ORDER
+        master = MonthClose(self.db)
+        parts = text.split()
+        if len(parts) > 2 and parts[2] in STEP_ORDER:
+            step = parts[2]
+            result = master.run("", step)
+            if not result.get("ok") and result.get("done"):
+                return f"Шаг «{step}» уже выполнен в этом месяце."
+            if not result.get("ok"):
+                return f"Шаг не выполнен: {result.get('error')}"
+            return f"✅ {result.get('message') or 'готово'}"
+        state = master.state()
+        lines = [f"🧾 Закрыть месяц {state['key']}:"]
+        for step in state["order"]:
+            mark = "✅" if state["done"][step] else ("▸" if state["next"] == step else "·")
+            lines.append(f"{mark} {state['titles'][step]}")
+        if state["next"]:
+            lines.append(f"\nШаг: «закрыть месяц {state['next']}»")
+        return "\n".join(lines)
+
+    def text_debts(self) -> str:
+        """«долги» — кто и сколько должен, с просрочкой."""
+        debts = self.manager.acc.debts()
+        if not debts.get("rows"):
+            return "💰 Долгов нет — всё оплачено."
+        lines = [f"💰 Долги клиентов: {_money(debts['total'])} "
+                 f"по {debts.get('count', 0)} заказам"]
+        if num(debts.get("overdue")) > 0:
+            lines.append(f"Просрочено: {_money(debts['overdue'])}")
+        for row in debts["rows"][:10]:
+            who = (row.get("customer") or "").strip() or "без имени"
+            age = f" · {row['days']} дн" if row.get("days") else ""
+            lines.append(f"· №{row.get('number')} {who} — {_money(row['debt'])}{age}")
+        return "\n".join(lines)
+
+    def text_defects(self, days: int = 30) -> str:
+        """«брак» — сорванные печати и сколько денег они съели."""
+        since = (datetime.now() - timedelta(days=max(1, int(days)))).isoformat()
+        jobs = self.db.query(
+            "SELECT * FROM print_jobs WHERE state='failed' AND finished_at>=?"
+            " ORDER BY finished_at DESC", (since,))
+        lines = [f"❌ Брак за {int(days)} дней: {len(jobs)} печатей"]
+        grams = sum(num(job.get("grams")) for job in jobs)
+        minutes = sum(num(job.get("duration_min")) for job in jobs)
+        spool_price = num(self.db.setting("default_spool_price"), 1600)
+        overhead = (num(self.db.setting("amortization_per_hour"), 12)
+                    + num(self.db.setting("energy_price"), 6)
+                    * num(self.db.setting("power_kw"), 0.15))
+        lost = grams / 1000.0 * spool_price + minutes / 60.0 * overhead
+        lines.append(f"Потеряно: {round(grams)} г пластика, {_hm(minutes)} времени")
+        lines.append(f"≈ {_money(lost)} по тарифам (пластик, износ, энергия)")
+        for job in jobs[:6]:
+            error = str(job.get("error") or "").strip()[:70]
+            lines.append(f"· {job.get('name') or 'без названия'}"
+                         + (f" — {error}" if error else ""))
+        return "\n".join(lines)
+
+    def text_rating(self) -> str:
+        """«рейтинг» — ABC изделий: что приносит деньги, что висит балластом."""
+        items = self.manager.acc.abc_report(30).get("items", [])
+        if not items:
+            return "За 30 дней продаж не было — рейтинг пуст."
+        lines = ["🏆 Рейтинг изделий (30 дней):"]
+        for item in items[:10]:
+            lines.append(
+                f"{item.get('cls', '')} · {item.get('name')} — {_money(item.get('revenue'))}"
+                f" ({item.get('share')}%), прибыль {_money(item.get('profit'))}")
+        return "\n".join(lines)
+
+    def text_month_report(self) -> str:
+        """«итоги месяца» — P&L месяца, печать, брак, долги."""
+        key = now_iso()[:7]
+        pnl = self.manager.acc.pnl_month(key)
+        jobs = self.db.query(
+            "SELECT state, COUNT(*) n, COALESCE(SUM(grams),0) g,"
+            " COALESCE(SUM(duration_min),0) m FROM print_jobs"
+            " WHERE finished_at>=? GROUP BY state",
+            (f"{key}-01",))
+        by_state = {row["state"]: row for row in jobs}
+        done = by_state.get("done") or {}
+        failed = by_state.get("failed") or {}
+        lines = [
+            f"📊 Итоги месяца {key}:",
+            f"Выручка {_money(pnl.get('income'))}, расход {_money(pnl.get('expense'))}",
+            f"Прибыль {_money(pnl.get('profit'))} (маржа {round(num(pnl.get('margin')))}%)",
+            f"Печать: {int(num(done.get('n')))} заданий, {round(num(done.get('g')))} г,"
+            f" {_hm(num(done.get('m')))}",
+        ]
+        if int(num(failed.get("n"))):
+            lines.append(f"⚠ Брак: {int(num(failed.get('n')))} печатей")
+        debts = self.manager.acc.debts()
+        if num(debts.get("total")) > 0:
+            lines.append(f"💰 Долги: {_money(debts['total'])}")
+        tax = self.month_tax_estimate(key)
+        if num(tax) > 0:
+            lines.append(f"🧾 Налог месяца (оценка): {_money(tax)}")
+        return "\n".join(lines)
+
+    def month_tax_estimate(self, key: str) -> float:
+        """Оценка налога месяца — из мастера «Закрыть месяц»."""
+        try:
+            from .month_close import MonthClose
+            return num(MonthClose(self.db).month_tax(key).get("tax"))
+        except Exception:
+            return 0.0
+
+    def text_ask(self, text: str) -> str:
+        """«Спроси принтер»: сколько осталось / что печатает / когда закончит /
+        сколько заработал — разбор по ключевым словам, без ИИ."""
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        printer = next((p for p in printers
+                        if p["printer"]["state"] in ("RUNNING", "PAUSE", "PREPARE")), None)
+        if "заработал" in text or "заработано" in text or "прибыль" in text:
+            summary = self.manager.acc.summary(1)
+            return (f"Сегодня: приход {_money(summary.get('income'))}, "
+                    f"прибыль {_money(summary.get('profit'))}, "
+                    f"часов печати {round(num(summary.get('print_hours')), 1)}")
+        if not printer:
+            return "Сейчас ничего не печатается."
+        info = printer["printer"]
+        if "когда" in text or "закончит" in text or "во сколько" in text:
+            if num(info.get("remaining_min")):
+                eta = str(info.get("eta") or "")
+                return (f"Готово через {_hm(info['remaining_min'])}"
+                        + (f", примерно в {eta[11:16]}" if eta else ""))
+            return "Прогноз времени пока не готов — печать только началась."
+        if "осталось" in text or "сколько" in text or "прогресс" in text:
+            return (f"{printer['name']}: {round(num(info.get('progress')))}% · "
+                    f"слой {info.get('layer')} из {info.get('total_layers') or '—'}"
+                    + (f" · осталось {_hm(info['remaining_min'])}"
+                       if num(info.get("remaining_min")) else ""))
+        if "печатает" in text or "задание" in text or "задача" in text:
+            job = printer.get("job") or {}
+            order = job.get("order") or {}
+            extra = f" · заказ №{order.get('number')}" if order else ""
+            return (f"{printer['name']} печатает «{info.get('task') or job.get('name') or '—'}»{extra}"
+                    f" · {round(num(info.get('progress')))}%")
+        # не распознали вопрос — покажем компактный статус
+        return self.text_status()
 
     def send_frame(self, chat: str) -> None:
         printer = self._pick_printer(chat)

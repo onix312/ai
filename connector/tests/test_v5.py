@@ -27,10 +27,13 @@ class DesignTests(unittest.TestCase):
         from connector.printflow.design import tag_disc
         self.assertGreater(len(tag_disc(30, 2)), 84)
 
-    def test_cyrillic_rejected(self):
+    def test_cyrillic_now_supported(self):
         from connector.printflow.design import generate
+        stl = generate("number_plate", {"number": "БАРСИК"})
+        self.assertGreater(len(stl), 84)
+        # латиница по-прежнему честно отклоняется
         with self.assertRaises(ValueError):
-            generate("number_plate", {"number": "Барсик"})
+            generate("number_plate", {"number": "Barsik"})
 
     def test_preview_svg(self):
         from connector.printflow.design import preview_svg

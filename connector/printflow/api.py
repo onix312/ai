@@ -115,6 +115,8 @@ class Api:
         self.envelopes = Envelopes(self.db)
         from .shopping import ShoppingList
         self.shopping = ShoppingList(self.db)
+        from .month_close import MonthClose
+        self.month_close = MonthClose(self.db)
         from .clients import Clients
         self.clients = Clients(self.db)
         from .b2b import B2B
@@ -128,6 +130,15 @@ class Api:
         self.listen_host = "127.0.0.1"
         self.listen_port = 8080
         self.started_at = time.time()
+
+    def restart_process(self) -> None:
+        """Перезапустить процесс (маркер восстановления применится на старте)."""
+        import os
+        import sys
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception:
+            pass  # перезапуск вручную: python pf.py
 
     def qr_target(self, path: str, query: str = "") -> dict:
         """URL для QR-наклейки: LAN, а не localhost панели."""
@@ -572,6 +583,40 @@ class Api:
         if path == "/api/health":
             return 200, {"ok": True, "version": APP_VERSION,
                          "uptime": round(time.time() - self.started_at)}
+        if path == "/api/month-close":
+            return 200, self.month_close.state(one("key"))
+        if path == "/api/job/passport":
+            from .passport import job_passport
+            return 200, job_passport(self.db, one("id"))
+        if path == "/api/catalog/recalc":
+            return 200, self.acc.recalc_catalog(False)
+        if path == "/api/camera/diagnose":
+            from .camera import diagnose
+            return 200, diagnose(self.printer_or_fail(one("printer_id")))
+        if path == "/api/printer/rtsp-link":
+            # Ссылка содержит Access Code — отдаём только по явному запросу.
+            from .camera import rtsp_link
+            printer = self.printer_or_fail(one("printer_id"))
+            link = rtsp_link(printer)
+            if not link:
+                return 200, {"link": "", "error":
+                             "Нужны IP и Access Code в карточке принтера"}
+            self.db.add_event("printer", "Запрошена RTSP-ссылка",
+                              printer.record.get("name") or "Принтер",
+                              printer.id, {})
+            return 200, {"link": link}
+        if path == "/api/system/backups":
+            from .db import list_backups, pending_restore
+            db_stat = None
+            from .config import DB_FILE
+            if DB_FILE.exists():
+                stat = DB_FILE.stat()
+                db_stat = {"size": stat.st_size,
+                           "at": time.strftime("%Y-%m-%d %H:%M:%S",
+                                               time.localtime(stat.st_mtime))}
+            return 200, {"backups": list_backups(),
+                         "db": db_stat,
+                         "pending": pending_restore()}
         if path == "/api/bootstrap":
             return 200, {
                 "version": APP_VERSION,
@@ -652,6 +697,7 @@ class Api:
             days = int(num(one("days", "30"), 30))
             self.acc.run_fixed_costs()
             return 200, {"summary": self.acc.summary(days),
+                         "hour_cost": self.acc.actual_hour_cost(max(days, 30)),
                          "series": self.acc.daily_series(days),
                          "transactions": self.repo.transactions(50),
                          "niches": self.acc.niche_report(),
@@ -1714,7 +1760,15 @@ class Api:
             return 200, {"ok": True, "restarting": True}
 
         if path == "/api/settings":
-            return 200, {"ok": True, "settings": self.db.set_settings(body)}
+            patch = dict(body)
+            # bank_rules приходит из textarea строкой JSON — превращаем в список
+            if "bank_rules" in patch and isinstance(patch["bank_rules"], str):
+                try:
+                    parsed = json.loads(patch["bank_rules"] or "[]")
+                    patch["bank_rules"] = parsed if isinstance(parsed, list) else []
+                except json.JSONDecodeError:
+                    patch["bank_rules"] = []
+            return 200, {"ok": True, "settings": self.db.set_settings(patch)}
         if path == "/api/shopping/add":
             return 200, {"ok": True, "item": self.shopping.add(body)}
         if path == "/api/shopping/toggle":
@@ -1754,6 +1808,73 @@ class Api:
             return 200, {"ok": True, "fired": [r["id"] for r in fired]}
         if path == "/api/settings/reset":
             return 200, {"ok": True, "settings": self.repo.reset_settings(body.get("keys"))}
+        if path == "/api/system/backup":
+            from .db import make_backup
+            result = make_backup()
+            if result.get("ok"):
+                self.db.add_event("backup", "Ручная копия базы", result["file"], "", {})
+            return 200, result
+        if path == "/api/system/restore":
+            from .db import request_restore
+            result = request_restore(str(body.get("file") or ""))
+            self.db.add_event("backup", "Запрошен откат базы",
+                              f"из копии {result['file']}; приложение перезапустится",
+                              "", result)
+            threading.Timer(1.5, self.restart_process).start()
+            return 200, {**result, "restarting": True}
+        if path == "/api/month-close/step":
+            result = self.month_close.run(
+                str(body.get("key") or ""), str(body.get("step") or ""),
+                {"accounts": body.get("accounts") or []})
+            self.db.add_event("finance", f"Закрытие месяца: {body.get('step')}",
+                              str(result.get("message") or ""), "", result)
+            self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/catalog/recalc-apply":
+            result = self.acc.recalc_catalog(True)
+            self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/orders/bulk-status":
+            ids = [str(x) for x in (body.get("ids") or [])]
+            status = str(body.get("status") or "")
+            updated = 0
+            for oid in ids:
+                if not self.db.one("SELECT id FROM orders WHERE id=?", (oid,)):
+                    continue
+                self.repo.set_order_status(oid, status)
+                updated += 1
+            self.db.add_event("order", "Пакетная смена статуса",
+                              f"{updated} заказов → {status}", "", {})
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "updated": updated}
+        if path == "/api/debt/remind":
+            order = self.db.one("SELECT * FROM orders WHERE id=?",
+                                (body.get("id") or body.get("order_id") or "",))
+            if not order:
+                raise ValueError("Заказ не найден")
+            debt = self.acc.order_economics(order)["debt"]
+            name = (order.get("customer_name") or "").strip()
+            hello = f", {name}," if name else ","
+            text = (f"Здравствуйте{hello} напоминаем о заказе "
+                    f"№{order.get('number')} «{order.get('product') or ''}»: "
+                    f"остаток к оплате {round(debt)} ₽. Спасибо!")
+            self.db.execute(
+                "UPDATE orders SET reminded_at=?, updated_at=? WHERE id=?",
+                (now_iso(), now_iso(), order["id"]))
+            self.db.add_event("order", "Напомнили о долге",
+                              f"№{order.get('number')}", "",
+                              {"order_id": order["id"]})
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "text": text, "debt": round(debt, 2),
+                         "number": order.get("number")}
+        if path == "/api/bank/import-preview":
+            from .bank_import import preview
+            return 200, preview(self.db, str(body.get("text") or ""))
+        if path == "/api/bank/import-apply":
+            from .bank_import import apply_rows
+            result = apply_rows(self.db, body.get("rows") or [])
+            self.bus.publish("resync", {})
+            return 200, result
         if path == "/api/telegram/test":
             self.db.set_settings({k: v for k, v in body.items() if k.startswith("telegram")})
             return 200, self.manager.send_telegram("PrintFlow: проверка уведомлений прошла успешно.")

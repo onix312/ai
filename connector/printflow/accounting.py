@@ -949,14 +949,22 @@ class Accounting:
                         payer: str = "", fee: float = 0.0, taxable: bool = True,
                         deductible: bool = True, customer_id: str = "",
                         fixed_cost_id: str = "", at: str = "") -> dict:
-        if kind not in ("income", "expense"):
-            raise ValueError("Тип проводки: income или expense")
-        # сумма всегда положительная: знак задаёт вид проводки, иначе в списке «−−5 ₽»
-        amount = abs(num(amount))
-        if amount <= 0:
-            raise ValueError("Сумма проводки должна быть больше нуля")
-        # без статьи проводка выпадает из отчётов и показывается как «Без статьи»
-        category = str(category or "").strip() or ("sale" if kind == "income" else "other")
+        if kind not in ("income", "expense", "correction"):
+            raise ValueError("Тип проводки: income, expense или correction")
+        if kind == "correction":
+            # Корректировка кассы: сумма со знаком (факт − система).
+            # В P&L и налоговую базу не попадает (taxable=deductible=0).
+            amount = round(num(amount), 2)
+            if amount == 0:
+                raise ValueError("Сумма корректировки должна быть не нулевой")
+            category = str(category or "").strip() or "correction"
+        else:
+            # сумма всегда положительная: знак задаёт вид проводки, иначе в списке «−−5 ₽»
+            amount = abs(num(amount))
+            if amount <= 0:
+                raise ValueError("Сумма проводки должна быть больше нуля")
+            # без статьи проводка выпадает из отчётов и показывается как «Без статьи»
+            category = str(category or "").strip() or ("sale" if kind == "income" else "other")
         tx_id = uid("tx")
         at = at or now_iso()
         account_id = account_id or str(self.db.setting("default_account", "cash") or "")
@@ -1069,6 +1077,95 @@ class Accounting:
              1 if done else 0, 1 if failed else 0, round(num(energy), 3)))
 
     # ------------------------------------------------------------------ отчёты
+    def defects_cost(self, days: int = 30) -> dict[str, Any]:
+        """Сколько денег съел брак за период (идея C10): пластик + время."""
+        since = (datetime.now() - timedelta(days=max(1, int(days)))
+                 ).isoformat(timespec="seconds")
+        jobs = self.db.query(
+            "SELECT * FROM print_jobs WHERE state='failed' AND finished_at>=?",
+            (since,))
+        grams = sum(num(job.get("grams")) for job in jobs)
+        minutes = sum(num(job.get("duration_min")) for job in jobs)
+        spool_price = num(self.db.setting("default_spool_price"), 1600)
+        overhead = (num(self.db.setting("amortization_per_hour"), 12)
+                    + num(self.db.setting("maintenance_per_hour"), 3)
+                    + num(self.db.setting("energy_price"), 6)
+                    * num(self.db.setting("power_kw"), 0.15))
+        cost = grams / 1000.0 * spool_price + minutes / 60.0 * overhead
+        return {"count": len(jobs), "grams": round(grams, 1),
+                "minutes": round(minutes, 1), "cost": round(cost, 2)}
+
+    def actual_hour_cost(self, days: int = 30) -> dict[str, Any]:
+        """Фактическая стоимость часа печати против тарифа (идея C3).
+
+        Факт — из реальных расходов на пластик, энергию и оборудование за
+        период, делённых на фактические часы печати. Если факт сильно
+        расходится с тарифом из настроек — себестоимость считается неверно.
+        """
+        since = (datetime.now() - timedelta(days=max(1, int(days)))
+                 ).isoformat(timespec="seconds")
+        minutes = num((self.db.one(
+            "SELECT COALESCE(SUM(duration_min),0) m FROM print_jobs"
+            " WHERE state='done' AND finished_at>=?", (since,)) or {}).get("m"))
+        hours = minutes / 60.0
+        rows = self.db.query(
+            "SELECT COALESCE(SUM(amount),0) v FROM transactions"
+            " WHERE kind='expense' AND at>=? AND category IN"
+            " ('filament','energy','equipment','packaging')", (since,))
+        spent = num((rows[0] if rows else {}).get("v"))
+        per_hour = round(spent / hours, 2) if hours else 0.0
+        tariff = (num(self.db.setting("amortization_per_hour"), 12)
+                  + num(self.db.setting("maintenance_per_hour"), 3)
+                  + num(self.db.setting("energy_price"), 6)
+                  * num(self.db.setting("power_kw"), 0.15))
+        diff_pct = round((per_hour - tariff) / tariff * 100, 1) if tariff else 0.0
+        if hours <= 0:
+            verdict = "нет часов печати за период — сравнение позже"
+        elif abs(diff_pct) <= 10:
+            verdict = "тариф близок к факту — расчёты честные"
+        elif diff_pct > 0:
+            verdict = f"факт выше тарифа на {diff_pct}% — себестоимость недооценена"
+        else:
+            verdict = f"факт ниже тарифа на {abs(diff_pct)}% — тариф можно снизить"
+        return {"days": int(days), "hours": round(hours, 1),
+                "spent": round(spent, 2), "per_hour": per_hour,
+                "tariff": round(tariff, 2), "diff_pct": diff_pct,
+                "verdict": verdict}
+
+    def recalc_catalog(self, apply: bool = False) -> dict[str, Any]:
+        """Массовый пересчёт цен базы изделий по текущим тарифам (идея C11).
+
+        Сначала — предпросмотр (apply=False): для каждой позиции считается
+        новая себестоимость по текущим тарифам и рекомендованная цена.
+        apply=True пишет новые цены в базу изделий.
+        """
+        items: list[dict] = []
+        for row in self.db.query("SELECT * FROM catalog WHERE archived=0"):
+            grams = num(row.get("grams"))
+            hours = num(row.get("hours"))
+            if grams <= 0 and hours <= 0:
+                continue
+            breakdown = self.cost_breakdown(
+                grams, hours, material=str(row.get("material") or "PLA"))
+            cost = num(breakdown.get("per_unit"))
+            suggestion = self.suggest_price(cost)
+            new_price = num(suggestion.get("price"))
+            items.append({
+                "id": row["id"], "name": row.get("name"),
+                "old_price": round(num(row.get("price")), 2),
+                "new_price": round(new_price, 2),
+                "cost": round(cost, 2),
+                "changed": abs(new_price - num(row.get("price"))) >= 0.5,
+            })
+        if apply:
+            for item in items:
+                self.db.execute("UPDATE catalog SET price=? WHERE id=?",
+                                (item["new_price"], item["id"]))
+            self.db.add_event("catalog", "Пересчитаны цены базы изделий",
+                              f"{len(items)} позиций по новым тарифам", "", {})
+        return {"items": items, "count": len(items),
+                "changed": sum(1 for item in items if item["changed"])}
+
     def summary(self, days: int = 30) -> dict[str, Any]:
         since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
         income = num(self.db.one(
@@ -1108,6 +1205,7 @@ class Accounting:
             "failure_rate": round(failed / (done_jobs + failed) * 100, 1) if (done_jobs + failed) else 0.0,
             "active_orders": len(active),
             "pipeline": round(pipeline, 2),
+            "defects_cost": self.defects_cost(days)["cost"],
             "stock_grams": round(num((self.db.one(
                 "SELECT COALESCE(SUM(remaining_grams),0) v FROM spools WHERE archived=0") or {}).get("v")), 1),
             "stock_value": round(num((self.db.one(
@@ -1172,13 +1270,14 @@ class Accounting:
         return rows
 
     # ------------------------------------------------------- постоянные расходы
-    def run_fixed_costs(self, today: str = "") -> list[dict]:
+    def run_fixed_costs(self, today: str = "", force: bool = False) -> list[dict]:
         """Начисляет постоянные расходы за текущий период (идемпотентно).
 
         Каждый расход начисляется один раз в месяц/квартал/год: повторный вызов
-        ничего не сделает, пока не наступит следующий период.
+        ничего не сделает, пока не наступит следующий период. ``force=True``
+        использует мастер «Закрыть месяц» — флаг автоначисления не обязателен.
         """
-        if not self.db.setting("fixed_costs_auto", True):
+        if not force and not self.db.setting("fixed_costs_auto", True):
             return []
         stamp = today or date.today().isoformat()
         cur_month = month_key(stamp)
@@ -1447,6 +1546,7 @@ class Accounting:
         for acc in self.db.query("SELECT * FROM accounts WHERE archived=0 ORDER BY position, name"):
             agg = self.db.one(
                 "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount-COALESCE(fee,0)"
+                " WHEN kind='correction' THEN amount"
                 " ELSE -amount END),0) AS delta, COUNT(*) AS n"
                 " FROM transactions WHERE account_id=?", (acc["id"],)) or {}
             balance = num(acc["opening_balance"]) + num(agg.get("delta"))

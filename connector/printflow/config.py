@@ -28,6 +28,8 @@ else:
     DATA_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "printflow"
 
 DB_FILE = DATA_DIR / "printflow.sqlite3"
+BACKUP_DIR = DATA_DIR / "backups"
+RESTORE_REQUEST = DATA_DIR / "restore.request"  # маркер отложенного восстановления
 UPLOAD_DIR = DATA_DIR / "uploads"
 PHOTO_DIR = DATA_DIR / "photos"
 LOG_FILE = DATA_DIR / "connector.log"
@@ -117,6 +119,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "printer_invested_at": "",      # дата ввода в эксплуатацию
     "night_shift_enabled": True,    # планировать длинное на ночь, срочное днём
     "ejector_enabled": False,       # авто-эжектор (DIY): режим снятия деталей
+    "month_close": {},              # журнал шагов мастера «Закрыть месяц» по месяцам
+    "bank_rules": [],               # правила импорта банковской выписки (M1)
     "auto_backup_days": 1,          # автобэкап раз в N дней (0 = выключен)
     # --- Очередь и планирование -----------------------------------------
     "queue_check_filament": True,   # не запускать, если пластика не хватит
@@ -134,6 +138,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "telegram_bot": True,
     "telegram_token": "",
     "telegram_chat_id": "",
+    "telegram_quiet_from": "23:00",  # тихие часы бота: не шлём некритичное
+    "telegram_quiet_to": "07:00",
     # Bambu Cloud: управление принтером без LAN Only Mode / Developer Mode.
     # Токен и uid — секреты (маскируются, как telegram_token); email хранится
     # для повторного входа, пароль не хранится — при истечении токена Bambu
@@ -150,6 +156,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_pause": True,
     "notify_filament_low": True,
     "notify_guard": True,         # тревоги сторожа печати
+    "notify_firmware": True,      # сообщать об обновлении прошивки принтера
     "notify_maintenance": True,   # напоминания об обслуживании
     "notify_photo": True,         # прикладывать кадр камеры к сообщению
     "notify_finish_remind_min": 10.0,  # напомнить о финише за N минут (0 = выкл)
