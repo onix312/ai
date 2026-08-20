@@ -64,6 +64,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("qc_done", "TEXT DEFAULT ''"),      # чек-лист качества: JSON {step: true}
         ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
         ("warehouse_id", "TEXT"),            # с какого склада отгружаем
+        ("reminded_at", "TEXT DEFAULT ''"),  # когда напоминали о долге (B4)
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
     ],
     "print_jobs": [

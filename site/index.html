@@ -314,8 +314,14 @@
   <select id="orders_filter_niche"><option value="">Все ниши</option></select>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
  </div>
+ <div class="toolbar" id="bulk_bar" hidden>
+  <span class="chip" id="bulk_count">Выбрано 0</span>
+  <select id="bulk_status"></select>
+  <button class="btn sm" id="bulk_apply" type="button">Применить</button>
+  <button class="btn sm ghost" id="bulk_clear" type="button">Снять выбор</button>
+ </div>
  <div id="orders_kanban" class="kanban"></div>
- <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th class="right">Часы</th><th class="right">Граммы</th><th class="right">Цена</th><th class="right">Прибыль</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
+ <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th class="w-check"></th><th>№</th><th>Изделие</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th class="right">Часы</th><th class="right">Граммы</th><th class="right">Цена</th><th class="right">Прибыль</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
 </section>
 
 <!-- ================================================== КЛИЕНТЫ -->
@@ -350,6 +356,7 @@
  <!-- ---------------------------------------------------------- обзор -->
  <div class="pane on" id="finpane-overview">
   <div class="kpi-grid" id="fin_kpis"></div>
+  <div id="fin_hour_cost" style="margin-top:10px"></div>
   <div class="grid g-2-1">
    <div class="card">
     <div class="card-head"><div><h2>Прибыль по дням</h2><p>Доход минус расход</p></div></div>
@@ -427,6 +434,12 @@
 
  <!-- -------------------------------------------------------- отчёты -->
  <div class="pane" id="finpane-reports">
+  <div class="card">
+   <div class="card-head"><div><h2>Импорт банковской выписки</h2><p>CSV из банка → проводки по статьям автоматически (по ключевым словам в назначении)</p></div>
+    <button class="btn sm" id="bank_file_btn" type="button">Выбрать CSV</button>
+    <input type="file" id="bank_file" accept=".csv,text/csv" hidden></div>
+   <div id="bank_import_out"><p class="muted" style="font-size:12px">Правила разнесения можно подправить в Настройки → Учёт денег (bank_rules). Дубли по дате+сумме+названию пропускаются.</p></div>
+  </div>
   <div class="card">
    <div class="card-head">
     <div><h2>Отчёт за период</h2><p id="rep_label">—</p></div>
@@ -617,7 +630,7 @@
   </div>
  </div>
  <div class="card" style="margin-top:16px">
-  <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><button class="btn sm" id="cat_add" type="button">+ Позиция</button></div>
+  <div class="card-head"><div><h2>База изделий</h2><p>Вес, часы и цена — подставляются в калькулятор и заказы</p></div><div><button class="btn sm ghost" id="cat_recalc" type="button">Пересчитать цены</button> <button class="btn sm" id="cat_add" type="button">+ Позиция</button></div></div>
   <div class="table-wrap"><table class="data"><thead><tr><th>Название</th><th>Материал</th><th class="right">Граммы</th><th class="right">Часы</th><th class="right">На стол</th><th class="right">Цена</th><th class="right">₽/час</th><th></th></tr></thead><tbody id="cat_tbody"></tbody></table></div>
  </div>
 </section>

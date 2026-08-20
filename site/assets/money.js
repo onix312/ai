@@ -33,6 +33,16 @@ function renderFinance() {
     kpi('Склад пластика', nfmt(s.stock_grams) + ' г', `на ${money(s.stock_value)}`),
   ].join('');
 
+  const hc = data.hour_cost;
+  const hcHost = $('fin_hour_cost');
+  if (hcHost) {
+    if (hc && num(hc.hours) > 0 && Math.abs(num(hc.diff_pct)) > 10) {
+      hcHost.innerHTML = `<div class="notice ${num(hc.diff_pct) > 0 ? 'warn' : 'ok'}"><span>🧮</span><span>Фактическая стоимость часа печати <b>${money(hc.per_hour)}</b> против тарифа ${money(hc.tariff)} — ${esc(hc.verdict)}. Проверьте тарифы в Настройках → Производство.</span></div>`;
+    } else {
+      hcHost.innerHTML = '';
+    }
+  }
+
   const keys = [
     { key: 'income', label: 'Доход', color: 'var(--ok)', type: 'bar', fmt: (v) => money(v) },
     { key: 'expense', label: 'Расход', color: 'var(--bad)', type: 'bar', opacity: .6, fmt: (v) => money(v) },
@@ -845,6 +855,47 @@ function bind() {
   });
   $('fin_month_close').addEventListener('click', openMonthClose);
 
+  /* ===================== импорт банковской выписки (M1) ===================== */
+  let bankPreview = [];
+  $('bank_file_btn').addEventListener('click', () => $('bank_file').click());
+  $('bank_file').addEventListener('change', async () => {
+    const file = $('bank_file').files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = await post('/api/bank/import-preview', { text });
+      bankPreview = res.rows || [];
+      const out = $('bank_import_out');
+      if (!bankPreview.length) {
+        out.innerHTML = '<div class="notice warn"><span>⚠</span><span>В файле не нашлось строк с датой, суммой и назначением — проверьте формат CSV.</span></div>';
+        return;
+      }
+      out.innerHTML = `<p class="muted" style="font-size:12px;margin-top:8px">Распознано строк: ${bankPreview.length} · по правилам: ${res.matched} · без правила: ${res.unmatched} · дублей: ${res.duplicates}.</p>
+        <div class="table-wrap"><table class="data"><thead><tr><th class="w-check"></th><th>Дата</th><th class="right">Сумма</th><th>Назначение</th><th>Проводка</th></tr></thead><tbody>
+        ${bankPreview.slice(0, 60).map((r, i) => `<tr>
+          <td class="w-check"><input type="checkbox" data-bank-row="${i}" ${r.matched && !r.duplicate ? 'checked' : 'disabled'}></td>
+          <td>${esc(r.date)}</td>
+          <td class="right tnum ${num(r.amount) >= 0 ? 'neg' : 'pos'}">${num(r.amount) >= 0 ? '−' : '+'}${money(Math.abs(num(r.amount)))}</td>
+          <td><small>${esc(r.description)}</small></td>
+          <td>${r.matched ? (r.kind === 'income' ? '↑ ' : '↓ ') + esc(r.title || '') + (r.duplicate ? ' <span class="pill bad">дубль</span>' : '') : '<span class="pill warn">без правила</span>'}</td>
+        </tr>`).join('')}
+        </tbody></table></div>
+        <div style="margin-top:10px"><button class="btn primary sm" id="bank_apply" type="button">Импортировать отмеченные</button></div>`;
+      $('bank_apply').addEventListener('click', async () => {
+        const rows = [...document.querySelectorAll('[data-bank-row]:checked')]
+          .map((cb) => bankPreview[+cb.dataset.bankRow]);
+        if (!rows.length) return toast('Ничего не выбрано', 'Отметьте строки для импорта', 'warn');
+        try {
+          const done = await post('/api/bank/import-apply', { rows });
+          toast('Импорт завершён', `Проведено: ${done.imported}, пропущено: ${done.skipped}`);
+          out.innerHTML = '<p class="muted" style="font-size:12px">Готово — проводки появились в списке финансов.</p>';
+          try { await PF.refreshFinance(); } catch (e) { /* офлайн */ }
+        } catch (e) { fail(e); }
+      });
+    } catch (e) { fail(e); }
+    $('bank_file').value = '';
+  });
+
   $('fin_period').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;
@@ -923,6 +974,18 @@ function bind() {
   });
 
   $('cat_add').addEventListener('click', () => openCatalog());
+  $('cat_recalc').addEventListener('click', async () => {
+    try {
+      const res = await get('/api/catalog/recalc');
+      if (!res.count) return toast('Пересчитывать нечего', 'В базе изделий нет позиций с весом и временем', 'warn');
+      const preview = res.items.slice(0, 8).map((i) =>
+        `· ${i.name}: ${money(i.old_price)} → ${money(i.new_price)}`).join('\n');
+      if (!confirmDanger(`Пересчитать цены ${res.count} позиций по текущим тарифам?\nИзменится: ${res.changed}.\n\n${preview}\n${res.count > 8 ? '…и ещё ' + (res.count - 8) : ''}`)) return;
+      const applied = await post('/api/catalog/recalc-apply', {});
+      toast('Цены пересчитаны', `Обновлено позиций: ${applied.changed}`);
+      renderCatalog();
+    } catch (e) { fail(e); }
+  });
   $('catalog_save').addEventListener('click', async () => {
     const payload = {
       id: editingCatalog || '',

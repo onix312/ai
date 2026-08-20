@@ -899,7 +899,16 @@ function renderSettings() {
 
   // --- учёт денег
   const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
+  const BANK_RULES_SAMPLE = [
+    { match: 'ozon', kind: 'income', category: 'sale', title: 'Продажа (Ozon)' },
+    { match: 'пластик|филамент|petg|pla|abs|tpu', kind: 'expense', category: 'filament', title: 'Закупка пластика' },
+    { match: 'электроэнергия|энергосбыт', kind: 'expense', category: 'energy', title: 'Электричество' },
+    { match: 'налог', kind: 'expense', category: 'tax', title: 'Налог' },
+  ];
+  const bankRules = Array.isArray(s.bank_rules) && s.bank_rules.length ? s.bank_rules : BANK_RULES_SAMPLE;
   $('set_money_rules').innerHTML = settingGroup(MONEY_RULES)
+    + settingRow('bank_rules', 'Правила импорта выписки', 'JSON: match — регулярное выражение по назначению платежа, kind: income|expense, category — статья, title — название проводки.',
+      `<textarea data-setting="bank_rules" rows="7" style="width:100%;font-family:ui-monospace,monospace;font-size:12px">${esc(JSON.stringify(bankRules, null, 1))}</textarea>`)
     + settingRow('default_account', 'Касса по умолчанию', 'Куда попадают деньги без уточнения',
       `<select data-setting="default_account">${accounts.map((a) =>
         `<option value="${esc(a.id)}"${(s.default_account || 'cash') === a.id ? ' selected' : ''}>${esc(a.name)}</option>`)

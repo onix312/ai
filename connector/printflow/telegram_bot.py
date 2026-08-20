@@ -464,6 +464,8 @@ class TelegramBot:
             return self._reply(chat, self.text_defects())
         if word in ("рейтинг", "топ", "abc", "изделия"):
             return self._reply(chat, self.text_rating())
+        if word in ("хвосты", "хвост", "дыры", "проверка"):
+            return self._reply(chat, self.text_loose_ends())
         if word in ("сколько", "что", "когда", "заработал", "заработано"):
             return self._reply(chat, self.text_ask(text))
         if word in ("филамент", "пластик", "катушки", "спул"):
@@ -632,6 +634,26 @@ class TelegramBot:
             f"Напечатано заданий: {int(num(job.get('n')))}, пластика {round(num(job.get('g')))} г, "
             f"время печати {_hm(num(job.get('m')))}",
         ]
+        # Хвосты учёта: заказы без цены и т.п. — чтобы не копились до конца месяца.
+        try:
+            from .repo import Repo
+            problems = Repo(self.db).data_check().get("problems") or []
+        except Exception:
+            problems = []
+        if problems:
+            lines.append(f"⚠ Хвосты учёта: {len(problems)} — «хвосты» покажет список")
+        return "\n".join(lines)
+
+    def text_loose_ends(self) -> str:
+        """«хвосты» — незакрытые дыры в учёте: заказы без цены и т.п."""
+        from .repo import Repo
+        problems = Repo(self.db).data_check().get("problems") or []
+        if not problems:
+            return "✅ Хвостов нет — учёт чистый."
+        lines = [f"⚠ Хвосты учёта: {len(problems)}"]
+        for problem in problems[:12]:
+            lines.append(f"· {problem.get('title')}"
+                         + (f" — {problem.get('detail')}" if problem.get("detail") else ""))
         return "\n".join(lines)
 
     def text_filament(self) -> str:

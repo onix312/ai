@@ -240,7 +240,7 @@ function renderCash() {
     + `<td class="right tnum">${money(d.paid)}</td>`
     + `<td class="right tnum neg">${money(d.debt)}</td>`
     + `<td class="right tnum">${nfmt(d.days)}${d.overdue ? ' <span class="pill bad">просрочка</span>' : ''}</td>`
-    + `<td class="right"><button class="btn sm" type="button" data-pay-order="${esc(d.id)}">Оплата</button></td></tr>`).join('')
+    + `<td class="right"><button class="btn sm ghost" type="button" data-remind-order="${esc(d.id)}">Напомнить</button> <button class="btn sm" type="button" data-pay-order="${esc(d.id)}">Оплата</button></td></tr>`).join('')
     : '<tr><td colspan="7"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
 }
 
@@ -650,8 +650,18 @@ function bind() {
     if (ct) return openExpCat(ct.dataset.cat2Edit);
     const pay = e.target.closest('[data-pay-order]');
     if (pay) return openPayment(pay.dataset.payOrder);
+    const remind = e.target.closest('[data-remind-order]');
+    if (remind) return remindDebt(remind.dataset.remindOrder);
     return undefined;
   });
+
+async function remindDebt(orderId) {
+  try {
+    const res = await post('/api/debt/remind', { id: orderId });
+    try { await navigator.clipboard.writeText(res.text); } catch (e) { /* без буфера */ }
+    toast('Текст напоминания скопирован', `Заказ №${res.number}, остаток ${money(res.debt)}`);
+  } catch (e) { fail(e); }
+}
 }
 
 function renderAll() {

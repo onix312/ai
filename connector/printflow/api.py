@@ -588,6 +588,28 @@ class Api:
         if path == "/api/job/passport":
             from .passport import job_passport
             return 200, job_passport(self.db, one("id"))
+        if path == "/api/catalog/recalc":
+            return 200, self.acc.recalc_catalog(False)
+        if path == "/api/debt/remind":
+            order = self.db.one("SELECT * FROM orders WHERE id=?",
+                                (one("id") or one("order_id"),))
+            if not order:
+                raise ValueError("Заказ не найден")
+            debt = self.acc.order_economics(order)["debt"]
+            name = (order.get("customer_name") or "").strip()
+            hello = f", {name}," if name else ","
+            text = (f"Здравствуйте{hello} напоминаем о заказе "
+                    f"№{order.get('number')} «{order.get('product') or ''}»: "
+                    f"остаток к оплате {round(debt)} ₽. Спасибо!")
+            self.db.execute(
+                "UPDATE orders SET reminded_at=?, updated_at=? WHERE id=?",
+                (now_iso(), now_iso(), order["id"]))
+            self.db.add_event("order", "Напомнили о долге",
+                              f"№{order.get('number')}", "",
+                              {"order_id": order["id"]})
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "text": text, "debt": round(debt, 2),
+                         "number": order.get("number")}
         if path == "/api/camera/diagnose":
             from .camera import diagnose
             return 200, diagnose(self.printer_or_fail(one("printer_id")))
@@ -695,6 +717,7 @@ class Api:
             days = int(num(one("days", "30"), 30))
             self.acc.run_fixed_costs()
             return 200, {"summary": self.acc.summary(days),
+                         "hour_cost": self.acc.actual_hour_cost(max(days, 30)),
                          "series": self.acc.daily_series(days),
                          "transactions": self.repo.transactions(50),
                          "niches": self.acc.niche_report(),
@@ -1757,7 +1780,15 @@ class Api:
             return 200, {"ok": True, "restarting": True}
 
         if path == "/api/settings":
-            return 200, {"ok": True, "settings": self.db.set_settings(body)}
+            patch = dict(body)
+            # bank_rules приходит из textarea строкой JSON — превращаем в список
+            if "bank_rules" in patch and isinstance(patch["bank_rules"], str):
+                try:
+                    parsed = json.loads(patch["bank_rules"] or "[]")
+                    patch["bank_rules"] = parsed if isinstance(parsed, list) else []
+                except json.JSONDecodeError:
+                    patch["bank_rules"] = []
+            return 200, {"ok": True, "settings": self.db.set_settings(patch)}
         if path == "/api/shopping/add":
             return 200, {"ok": True, "item": self.shopping.add(body)}
         if path == "/api/shopping/toggle":
@@ -1817,6 +1848,31 @@ class Api:
                 {"accounts": body.get("accounts") or []})
             self.db.add_event("finance", f"Закрытие месяца: {body.get('step')}",
                               str(result.get("message") or ""), "", result)
+            self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/catalog/recalc-apply":
+            result = self.acc.recalc_catalog(True)
+            self.bus.publish("resync", {})
+            return 200, result
+        if path == "/api/orders/bulk-status":
+            ids = [str(x) for x in (body.get("ids") or [])]
+            status = str(body.get("status") or "")
+            updated = 0
+            for oid in ids:
+                if not self.db.one("SELECT id FROM orders WHERE id=?", (oid,)):
+                    continue
+                self.repo.set_order_status(oid, status)
+                updated += 1
+            self.db.add_event("order", "Пакетная смена статуса",
+                              f"{updated} заказов → {status}", "", {})
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "updated": updated}
+        if path == "/api/bank/import-preview":
+            from .bank_import import preview
+            return 200, preview(self.db, str(body.get("text") or ""))
+        if path == "/api/bank/import-apply":
+            from .bank_import import apply_rows
+            result = apply_rows(self.db, body.get("rows") or [])
             self.bus.publish("resync", {})
             return 200, result
         if path == "/api/telegram/test":
