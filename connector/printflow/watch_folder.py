@@ -58,9 +58,9 @@ class WatchFolder:
 
     def _loop(self):
         while not self._stop.wait(3):
-            if not self._enabled():
-                continue
             try:
+                if not self._enabled():
+                    continue
                 self._scan()
             except Exception:
                 continue

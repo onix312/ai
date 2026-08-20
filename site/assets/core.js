@@ -410,6 +410,7 @@ function baseCommands() {
   }));
   return nav.concat([
     { group: 'Действия', icon: '+', title: 'Новый заказ', sub: 'Создать карточку заказа', run: () => PF.modules.ops && PF.modules.ops.openOrder() },
+    { group: 'Действия', icon: '✨', title: 'Преобразовать активную печать в заказ', sub: 'Создать заказ из текущей печати', run: () => PF.modules.printer && PF.modules.printer.convertActiveToOrder() },
     { group: 'Действия', icon: '+', title: 'Новая катушка', sub: 'Добавить пластик на склад', run: () => PF.modules.money && PF.modules.money.openSpool() },
     { group: 'Действия', icon: '+', title: 'Новая проводка', sub: 'Доход или расход вручную', run: () => PF.modules.money && PF.modules.money.openTx() },
     { group: 'Действия', icon: '+', title: 'Задание в очередь', sub: 'Печать файла с принтера', run: () => PF.modules.printer && PF.modules.printer.openJob() },
@@ -509,6 +510,24 @@ document.addEventListener('keydown', (e) => {
 
 /* ====================================================== навигация UI */
 document.addEventListener('click', (e) => {
+  const ordLink = e.target.closest('[data-order-open]');
+  if (ordLink) {
+    e.preventDefault();
+    const orderId = ordLink.dataset.orderOpen;
+    if (orderId && PF.modules.ops && PF.modules.ops.openOrder) {
+      PF.go('orders');
+      PF.modules.ops.openOrder(orderId);
+    }
+    return;
+  }
+  const convBtn = e.target.closest('[data-convert-order]');
+  if (convBtn) {
+    e.preventDefault();
+    if (PF.modules.printer && PF.modules.printer.convertActiveToOrder) {
+      PF.modules.printer.convertActiveToOrder(convBtn.dataset.convertOrder || PF.state.activePrinter);
+    }
+    return;
+  }
   const link = e.target.closest('a[data-view]');
   if (!link) return;
   e.preventDefault();

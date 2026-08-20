@@ -342,6 +342,12 @@ class BambuPrinter:
                 }
                 self.on_event("start", "Печать началась", name, dict(self.session))
             elif state == "PAUSE":
+                if not self.session:
+                    self.session = {
+                        "started_ts": time.time(), "task": name,
+                        "total_layers": int(as_num(p.get("total_layer_num"))),
+                        "ams_tray": (p.get("ams") or {}).get("tray_now") if isinstance(p.get("ams"), dict) else None,
+                    }
                 self.on_event("pause", "Печать приостановлена", name, self._session_data(p))
             elif state == "FINISH":
                 self.on_event("complete", "Печать завершена", name, self._session_data(p))
