@@ -51,6 +51,10 @@ class PrinterManager:
         self._last_ams_sync = 0.0
         self._last_cloud_sync: dict[str, float] = {}
         self._last_backup = time.time()
+        # Авто-продолжение при сбое питания (Крым): трекинг пауз и попыток
+        self._user_paused: dict[str, float] = {}
+        self._auto_resume_attempts: dict[str, dict] = {}
+        self._startup_ts = time.time()
         self.reload()
         # 8.0: Watch Folder
         try:
@@ -61,6 +65,9 @@ class PrinterManager:
             self.watch = None
         self._poller = threading.Thread(target=self._loop, name="pf-manager", daemon=True)
         self._poller.start()
+        # Мгновенная проверка при запуске скрипта для авто-продолжения печати
+        self._startup_thread = threading.Thread(target=self._startup_auto_resume_loop, name="pf-auto-resume", daemon=True)
+        self._startup_thread.start()
         self.bot = TelegramBot(self)
 
     # ------------------------------------------------------------- управление
@@ -125,6 +132,11 @@ class PrinterManager:
 
     def shutdown(self) -> None:
         self._stop.set()
+        if getattr(self, "watch", None):
+            try:
+                self.watch.stop()
+            except Exception:
+                pass
         bot = getattr(self, "bot", None)
         if bot:
             bot.shutdown()
@@ -144,9 +156,15 @@ class PrinterManager:
     def _handle_event(self, printer_id: str, kind: str, title: str, detail: str, data: dict) -> None:
         self.db.add_event(kind, title, detail, printer_id, data)
         if kind == "start":
+            self._auto_resume_attempts.pop(printer_id, None)
             self._on_print_start(printer_id, detail, data)
         elif kind in ("complete", "error", "stop"):
+            self._auto_resume_attempts.pop(printer_id, None)
+            if kind in ("complete", "stop"):
+                self.clear_user_paused(printer_id)
             self._on_print_end(printer_id, kind, detail, data)
+        elif kind == "pause":
+            self._on_print_pause(printer_id, detail, data)
         if kind in ("start", "complete", "error", "pause"):
             self._auto_photo(printer_id, kind, detail)
         # Конструктор правил: событие принтера может запустить правила.
@@ -155,6 +173,10 @@ class PrinterManager:
         except Exception as exc:
             self.db.add_event("error", "Правила: сбой обработки", str(exc), printer_id)
         self._notify(kind, title, detail, printer_id)
+
+    def _on_print_pause(self, printer_id: str, name: str, data: dict) -> None:
+        """Событие паузы: проверяем авто-продолжение (Крым / сбой питания)."""
+        self.check_auto_resume(printer_id)
 
     def _auto_photo(self, printer_id: str, kind: str, note: str) -> None:
         """Авто-снимок камеры при событиях печати: кадр прикрепляется к заданию."""
@@ -838,6 +860,252 @@ class PrinterManager:
             raise ValueError("Нет сорванных заданий для повтора")
         return self.reprint_job(rows[0]["id"])
 
+    # ------------------------------------------------------------- преобразование печати в заказ
+    def convert_active_to_order(self, printer_id: str = "", extra: dict | None = None) -> dict:
+        """Преобразовать активную/текущую печать принтера в заказ."""
+        printer = self.get(printer_id)
+        if not printer:
+            raise ValueError("Принтер не найден")
+        snap = printer.snapshot()
+        task = snap["printer"].get("task") or ""
+        job = self.db.one(
+            "SELECT * FROM print_jobs WHERE printer_id=? AND state IN ('running','starting','queued')"
+            " ORDER BY datetime(created_at) DESC LIMIT 1", (printer.id,))
+        if not task and job:
+            task = job.get("name") or job.get("file") or ""
+        if not task:
+            task = f"Печать {printer.record.get('name', 'Bambu Lab')}"
+
+        # Если задание уже связано с заказом — возвращаем его
+        if job and job.get("order_id"):
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
+            if order:
+                return {"ok": True, "order": order, "job": job, "created": False}
+
+        # Очищаем имя для названия изделия
+        clean = task.rsplit("/", 1)[-1]
+        for ext in (".gcode.3mf", ".3mf", ".gcode"):
+            if clean.lower().endswith(ext):
+                clean = clean[:-len(ext)]
+        product_name = clean.replace("_", " ").strip() or "Изделие из печати"
+
+        # Материал и цвет из AMS или катушки
+        active_tray = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
+        if not active_tray and snap["ams"].get("trays"):
+            active_tray = snap["ams"]["trays"][0]
+        material = (active_tray.get("type") or "PLA") if active_tray else "PLA"
+        color = (active_tray.get("color") or "") if active_tray else ""
+
+        spool = None
+        if active_tray:
+            spool = self.acc.pick_spool(printer.id, str(active_tray.get("slot")),
+                                        active_tray.get("type"), active_tray.get("uuid"))
+        if spool:
+            if spool.get("material"):
+                material = spool["material"]
+            if spool.get("color_name"):
+                color = spool["color_name"]
+
+        # Вес и время печати
+        grams = num(snap["printer"].get("weight"))
+        elapsed_min = num(snap["printer"].get("elapsed_min"))
+        remaining_min = num(snap["printer"].get("remaining_min"))
+        total_min = elapsed_min + remaining_min
+        hours = round(total_min / 60.0, 2) if total_min else 0.5
+
+        # Попытка уточнить данные по локальному файлу 3MF/gcode
+        try:
+            from .estimate import estimate_file
+            from .config import UPLOAD_DIR
+            local_file = UPLOAD_DIR / task.rsplit("/", 1)[-1]
+            if local_file.exists():
+                est = estimate_file(local_file)
+                if not grams and est.get("grams"):
+                    grams = num(est["grams"])
+                if not total_min and est.get("minutes"):
+                    hours = round(num(est["minutes"]) / 60.0, 2)
+                if not material and est.get("material"):
+                    material = est["material"]
+                if not color and est.get("color"):
+                    color = est["color"]
+        except Exception:
+            pass
+
+        if grams <= 0:
+            grams = 30.0
+        if hours <= 0:
+            hours = 0.5
+
+        # Обеспечиваем наличие записи в print_jobs
+        if not job:
+            job = self.db.upsert("print_jobs", {
+                "id": uid("job"),
+                "printer_id": printer.id,
+                "name": task,
+                "file": task,
+                "state": "running" if snap["printer"].get("state") in ("RUNNING", "PREPARE", "PAUSE") else "queued",
+                "source": "printer",
+                "started_at": now_iso(),
+                "created_at": now_iso(),
+                "grams": grams,
+                "duration_min": round(elapsed_min, 1),
+                "progress": num(snap["printer"].get("progress")),
+                "layers": int(num(snap["printer"].get("total_layers"))),
+            })
+
+        order_data = {
+            "product": (extra or {}).get("product") or product_name,
+            "material": (extra or {}).get("material") or material,
+            "color": (extra or {}).get("color") or color,
+            "grams": num((extra or {}).get("grams"), grams),
+            "hours": num((extra or {}).get("hours"), hours),
+            "qty": max(1, int(num((extra or {}).get("qty"), 1))),
+            "file": task,
+            "status": "printing",
+            "customer_name": (extra or {}).get("customer_name") or "",
+            "phone": (extra or {}).get("phone") or "",
+            "price": num((extra or {}).get("price")),
+            "channel": (extra or {}).get("channel") or "Полка магазина",
+            "niche_id": (extra or {}).get("niche_id") or "",
+            "notes": f"Преобразовано из активной печати на {printer.record.get('name', 'Bambu Lab')}",
+            "auto_cost": 1,
+        }
+        order = self.repo.save_order(order_data)
+        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order["id"], job["id"]))
+        job["order_id"] = order["id"]
+        self.db.add_event(
+            "order", "Печать преобразована в заказ",
+            f"Заказ №{order.get('number')} · {order.get('product')}",
+            printer.id, {"order_id": order["id"], "job_id": job["id"]})
+        return {"ok": True, "order": order, "job": job, "created": True}
+
+    def convert_job_to_order(self, job_id: str, extra: dict | None = None) -> dict:
+        """Преобразовать задание из очереди или истории в заказ."""
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+        if not job:
+            raise ValueError("Задание не найдено")
+        if job.get("order_id"):
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
+            if order:
+                return {"ok": True, "order": order, "job": job, "created": False}
+        task = job.get("name") or job.get("file") or "Задание печати"
+        clean = task.rsplit("/", 1)[-1]
+        for ext in (".gcode.3mf", ".3mf", ".gcode"):
+            if clean.lower().endswith(ext):
+                clean = clean[:-len(ext)]
+        product_name = clean.replace("_", " ").strip() or "Изделие из задания"
+        grams = num(job.get("grams")) or num(job.get("est_grams")) or 30.0
+        minutes = num(job.get("duration_min")) or num(job.get("est_minutes")) or 30.0
+        hours = round(minutes / 60.0, 2)
+        material = self._job_material(job) or "PLA"
+        status = "printing" if job.get("state") == "running" else "new"
+        order_data = {
+            "product": (extra or {}).get("product") or product_name,
+            "material": (extra or {}).get("material") or material,
+            "color": (extra or {}).get("color") or "",
+            "grams": num((extra or {}).get("grams"), grams),
+            "hours": num((extra or {}).get("hours"), hours),
+            "qty": max(1, int(num((extra or {}).get("qty"), 1))),
+            "file": job.get("file") or task,
+            "status": status,
+            "customer_name": (extra or {}).get("customer_name") or "",
+            "phone": (extra or {}).get("phone") or "",
+            "price": num((extra or {}).get("price")),
+            "channel": (extra or {}).get("channel") or "Полка магазина",
+            "niche_id": (extra or {}).get("niche_id") or "",
+            "notes": f"Преобразовано из задания {job.get('id')}",
+            "auto_cost": 1,
+        }
+        order = self.repo.save_order(order_data)
+        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order["id"], job["id"]))
+        job["order_id"] = order["id"]
+        self.db.add_event(
+            "order", "Задание преобразовано в заказ",
+            f"Заказ №{order.get('number')} · {order.get('product')}",
+            job.get("printer_id") or "", {"order_id": order["id"], "job_id": job["id"]})
+        return {"ok": True, "order": order, "job": job, "created": True}
+
+    # ------------------------------------------------------------- авто-продолжение (Крым / сбои питания)
+    def mark_user_paused(self, printer_id: str) -> None:
+        """Пользователь вручную нажал «Пауза» в интерфейсе."""
+        self._user_paused[printer_id] = time.time()
+
+    def clear_user_paused(self, printer_id: str) -> None:
+        """Пользователь вручную нажал «Продолжить» или печать завершена."""
+        self._user_paused.pop(printer_id, None)
+
+    def is_user_paused(self, printer_id: str) -> bool:
+        """Была ли ручная пауза за последние 5 минут."""
+        last = self._user_paused.get(printer_id, 0.0)
+        return (time.time() - last) < 300.0
+
+    def check_auto_resume(self, printer_id: str, snap: dict | None = None) -> bool:
+        """Автоматическое возобновление печати при паузе/сбое питания без ручных команд."""
+        if not self.db.setting("auto_resume_paused", True):
+            return False
+        printer = self.get(printer_id)
+        if not printer or not printer.connected:
+            return False
+        if snap is None:
+            snap = printer.snapshot()
+        state = snap["printer"].get("state", "")
+        if state not in ("PAUSE", "PAUSED"):
+            return False
+        # Если паузу нажал сам пользователь — не вмешиваемся
+        if self.is_user_paused(printer_id):
+            return False
+        # Проверяем, нет ли критической блокировки: закончившейся катушки
+        from .watchdog import FILAMENT_RUNOUT_CODES
+        problems = snap["printer"].get("problems") or []
+        for prob in problems:
+            code = str(prob.get("code") or "")
+            if code in FILAMENT_RUNOUT_CODES:
+                return False
+            if prob.get("severity") == "fatal":
+                return False
+        # Ограничиваем частоту попыток (не чаще раза в 4 секунды, до 5 раз на инцидент)
+        now = time.time()
+        task = snap["printer"].get("task") or "Печать"
+        attempt_info = self._auto_resume_attempts.setdefault(printer_id, {"count": 0, "last_ts": 0.0, "task": task})
+        if attempt_info.get("task") != task:
+            attempt_info["count"] = 0
+            attempt_info["task"] = task
+        if now - attempt_info.get("last_ts", 0.0) < 4.0:
+            return False
+        if attempt_info.get("count", 0) >= 5:
+            return False
+        attempt_info["count"] += 1
+        attempt_info["last_ts"] = now
+        try:
+            printer.command("resume")
+            self.db.add_event(
+                "printer", "⚡ Авто-продолжение печати",
+                f"Принтер «{printer.record.get('name', 'Принтер')}»: печать «{task}» продолжена автоматически (восстановление питания / Крым)",
+                printer_id, {"task": task, "progress": snap["printer"].get("progress", 0), "attempt": attempt_info["count"]})
+            self.notify_async(
+                f"⚡ PrintFlow · {printer.record.get('name', 'Принтер')}\n"
+                f"Восстановление питания (Крым / авто-продолжение)\n"
+                f"Печать «{task}» ({round(num(snap['printer'].get('progress')))}%) автоматически продолжена!",
+                None)
+            return True
+        except Exception as exc:
+            self.db.add_event("error", "Сбой авто-продолжения печати", str(exc), printer_id)
+            return False
+
+    def _startup_auto_resume_loop(self) -> None:
+        """Проверка при старте скрипта: если печать на стопе/паузе — продолжить сразу."""
+        # Первые 60 секунд после запуска скрипта проверяем каждые 1.5 сек
+        start = time.time()
+        while not self._stop.wait(1.5) and (time.time() - start < 60):
+            with self.lock:
+                printers = list(self.printers.values())
+            for printer in printers:
+                if not printer.connected:
+                    continue
+                snap = printer.snapshot()
+                if snap["printer"].get("state") in ("PAUSE", "PAUSED"):
+                    self.check_auto_resume(printer.id, snap)
+
     def _check_cost_limit(self, printer: BambuPrinter, snap: dict) -> None:
         """Лимит стоимости: пауза, если живая себестоимость перешла порог."""
         limit = num(self.db.setting("guard_cost_limit", 0.0))
@@ -1509,6 +1777,8 @@ class PrinterManager:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
                     if snap["printer"]["state"] in ("IDLE", "FINISH"):
                         self._maybe_start_next(printer.id)
+                    elif snap["printer"]["state"] in ("PAUSE", "PAUSED"):
+                        self.check_auto_resume(printer.id, snap)
                 try:
                     self.run_scheduled()
                     self.check_filament_stock()

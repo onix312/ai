@@ -67,6 +67,7 @@
  <div class="grid">
   <button class="btn primary" id="b_cam" type="button"><span class="ic">📷</span>Кадр</button>
   <button class="btn" id="b_resume" type="button"><span class="ic">▶</span>Продолжить</button>
+  <button class="btn" id="b_convert_order" type="button"><span class="ic">✨</span>В заказ</button>
   <button class="btn" id="b_light" type="button"><span class="ic">☀</span>Свет</button>
   <button class="btn" id="b_next" type="button"><span class="ic">≡</span>Следующее</button>
   <button class="btn" id="b_removed" type="button"><span class="ic">✋</span>Снял деталь</button>
@@ -165,6 +166,17 @@
     }
     if (e.target.id === 'b_resume') {
       post('/api/printer/command', { command: 'resume', printer_id: pid() }).then(function(){ toast('Продолжить'); });
+      return;
+    }
+    if (e.target.id === 'b_convert_order' || e.target.closest('#b_convert_order')) {
+      post('/api/printer/convert-to-order', { printer_id: pid() }).then(function(d){
+        if (d && d.order) {
+          toast(d.created ? 'Создан заказ №' + d.order.number : 'Заказ №' + d.order.number);
+          refresh();
+        } else {
+          toast('Не удалось создать заказ');
+        }
+      }).catch(function(err){ toast(err.message || 'Ошибка'); });
       return;
     }
     if (e.target.id === 'b_light') {

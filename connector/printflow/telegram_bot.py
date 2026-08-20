@@ -1338,6 +1338,10 @@ class TelegramBot:
             return "Принтеры не добавлены."
         if not printer.connected:
             return f"{printer.record.get('name', 'Принтер')} не на связи."
+        if command == "pause":
+            self.manager.mark_user_paused(printer.id)
+        elif command == "resume":
+            self.manager.clear_user_paused(printer.id)
         printer.command(command, value)
         self.db.add_event("command", f"Telegram: {command}", ok_text, printer.id, {})
         return f"{ok_text} — {printer.record.get('name', 'принтер')}."

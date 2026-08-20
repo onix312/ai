@@ -100,9 +100,17 @@ function renderLive() {
   text('pr_task', p.printer.task || 'Нет активной печати');
 
   const job = (PF.state.jobs.queue || []).find((j) => j.printer_id === p.id && j.state === 'running');
-  const order = job && job.order;
-  text('pr_order', order ? `Заказ №${order.number} · ${order.product}`
-    : (p.connection.connected ? 'Не связано с заказом' : (p.connection.last_error || 'Нет подключения')));
+  const order = (job && job.order) || (p.job && p.job.order);
+  const orderEl = $('pr_order');
+  if (orderEl) {
+    if (order && order.number) {
+      orderEl.innerHTML = `<a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}</a>`;
+    } else if (p.connection.connected && (kind === 'running' || p.printer.state === 'PAUSE' || p.printer.task)) {
+      orderEl.innerHTML = `Не связано с заказом <button class="btn sm primary" type="button" data-convert-order="${esc(p.id)}" style="margin-left:8px;padding:2px 10px;font-size:12px"><span class="ic">✨</span>В заказ</button>`;
+    } else {
+      orderEl.textContent = p.connection.connected ? 'Не связано с заказом' : (p.connection.last_error || 'Нет подключения');
+    }
+  }
 
   const progress = clamp(num(p.printer.progress), 0, 100);
   text('pr_progress', Math.round(progress) + '%');
@@ -828,11 +836,12 @@ function renderQueue() {
     return `<div class="queue-item${j.state === 'running' ? ' running' : ''}">`
       + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
       + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
-      + (order ? ` · заказ №${esc(order.number)}` : '')
+      + (order ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">заказ №${esc(order.number)}</a>` : '')
       + (num(j.est_minutes) ? ` · оценка ${minutesText(j.est_minutes)}${num(j.est_grams) ? ' · ~' + nfmt(j.est_grams) + ' г' : ''}` : '')
       + '</small>'
       + (j.state === 'running' ? `<div class="bar thin" style="margin-top:6px"><i style="width:${clamp(num(j.progress), 0, 100)}%"></i></div>` : '')
       + '</div><div class="acts">'
+      + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Преобразовать задание в заказ">В заказ</button>` : '')
       + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
       + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
       + '</div></div>';
@@ -1072,6 +1081,26 @@ function bind() {
       $('pf_host').value = '';
       if (!$('pf_name').value) $('pf_name').value = cloudDev.querySelector('b') ? cloudDev.querySelector('b').textContent.replace('☁ ', '') : '';
       toast('Принтер из облака выбран', 'Access Code подставится автоматически — сохраните');
+      return;
+    }
+    const convOrder = e.target.closest('[data-convert-order]');
+    if (convOrder) {
+      convertActiveToOrder(convOrder.dataset.convertOrder || PF.state.activePrinter);
+      return;
+    }
+    const jobConv = e.target.closest('[data-job-convert]');
+    if (jobConv) {
+      convertJobToOrder(jobConv.dataset.jobConvert);
+      return;
+    }
+    const ordOpen = e.target.closest('[data-order-open]');
+    if (ordOpen) {
+      const orderId = ordOpen.dataset.orderOpen;
+      if (orderId && PF.modules.ops && PF.modules.ops.openOrder) {
+        PF.go('orders');
+        PF.modules.ops.openOrder(orderId);
+      }
+      return;
     }
   });
 
@@ -1312,6 +1341,37 @@ async function loadEvents() {
   }
 }
 
+async function convertActiveToOrder(printerId) {
+  printerId = printerId || PF.state.activePrinter;
+  try {
+    toast('Создаём заказ из печати...', '', 'info');
+    const res = await post('/api/printer/convert-to-order', { printer_id: printerId });
+    if (res && res.order) {
+      toast(res.created ? 'Заказ создан из печати' : 'Заказ уже привязан', `Заказ №${res.order.number} · ${res.order.product || ''}`);
+      await PF.refreshCore();
+      if (PF.modules.ops && PF.modules.ops.openOrder) {
+        PF.go('orders');
+        PF.modules.ops.openOrder(res.order.id);
+      }
+    }
+  } catch (e) { fail(e); }
+}
+
+async function convertJobToOrder(jobId) {
+  try {
+    toast('Создаём заказ из задания...', '', 'info');
+    const res = await post('/api/jobs/convert-to-order', { job_id: jobId });
+    if (res && res.order) {
+      toast(res.created ? 'Заказ создан из задания' : 'Заказ уже привязан', `Заказ №${res.order.number} · ${res.order.product || ''}`);
+      await PF.refreshCore();
+      if (PF.modules.ops && PF.modules.ops.openOrder) {
+        PF.go('orders');
+        PF.modules.ops.openOrder(res.order.id);
+      }
+    }
+  } catch (e) { fail(e); }
+}
+
 /* =============================================================== старт */
 PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   bind();
@@ -1329,5 +1389,5 @@ PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); }
 });
 
-PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal };
+PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, convertActiveToOrder, convertJobToOrder };
 })();

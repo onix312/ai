@@ -1108,7 +1108,20 @@ class Api:
             return 200, {"ok": True}
         if path == "/api/printer/command":
             printer = self.printer_or_fail(pid)
-            return 200, printer.command(body.get("command", ""), body.get("value"))
+            cmd = body.get("command", "")
+            if cmd == "pause":
+                self.manager.mark_user_paused(printer.id)
+            elif cmd == "resume":
+                self.manager.clear_user_paused(printer.id)
+            return 200, printer.command(cmd, body.get("value"))
+        if path == "/api/printer/convert-to-order":
+            printer_id = pid or body.get("printer_id", "")
+            return 200, self.manager.convert_active_to_order(printer_id, body)
+        if path == "/api/jobs/convert-to-order":
+            job_id = body.get("job_id") or body.get("id", "")
+            if not job_id and (pid or body.get("printer_id")):
+                return 200, self.manager.convert_active_to_order(pid or body.get("printer_id", ""), body)
+            return 200, self.manager.convert_job_to_order(job_id, body)
         if path == "/api/printer/reprint":
             # Повтор сорванного задания: по id задания или по номеру заказа.
             order_number = str(body.get("order_number") or "").strip()

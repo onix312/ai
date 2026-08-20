@@ -191,8 +191,8 @@ function renderActivePrint() {
     + `<div class="ap-main"><b class="ap-pct">${Math.round(progress)}<small>%</small></b>`
     + `<div class="ap-info"><b>${esc(info.task || 'Печать')}</b>`
     + (order.number
-      ? `<small>Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</small>`
-      : `<small>${esc(snap.name)}</small>`)
+      ? `<small><a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</a></small>`
+      : `<small>${esc(snap.name)} · <button class="btn xs primary" type="button" data-convert-order="${esc(snap.id)}" style="padding:1px 8px;font-size:11px"><span class="ic">✨</span>В заказ</button></small>`)
     + `<div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div></div></div>`
     + `<div class="ap-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</div>`
     + (num(job.spent)
@@ -654,6 +654,7 @@ const AUTOS = [
   ['auto_consume_filament', 'Списывать пластик', 'С катушки, которая стояла в AMS'],
   ['auto_income_on_done', 'Доход при закрытии заказа', 'Проводка создаётся автоматически'],
   ['auto_queue', 'Автозапуск очереди', 'Следующее задание стартует само'],
+  ['auto_resume_paused', 'Авто-продолжение при сбое питания (Крым)', 'При запуске скрипта и выходе из паузы печать продолжается автоматически без ручных команд', 'bool'],
 ];
 const NOTIFY = [
   ['notify_complete', 'Завершение печати'],
