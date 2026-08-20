@@ -273,6 +273,15 @@ function renderJobCost(p) {
   }
   text('pr_spent', money(j.spent));
   text('pr_cost_total', `${money(j.cost_total)} · ${nfmt(j.grams)} г`);
+  const profitEl = $('pr_job_profit');
+  if (profitEl) {
+    if (j.profit != null && num(j.price)) {
+      profitEl.textContent = `${money(j.profit)} · ${nfmt(j.break_even_pct || 0)}% цены съедено`;
+      profitEl.className = num(j.profit) >= 0 ? 'pos' : 'neg';
+    } else {
+      profitEl.textContent = '';
+    }
+  }
 }
 
 /* --------------------------------------------- графики истории показателей */
@@ -970,7 +979,8 @@ function bind() {
     }
     const set = e.target.closest('[data-set]');
     if (set) {
-      const map = { nozzle_temp: 'pr_set_nozzle', bed_temp: 'pr_set_bed', part_fan: 'pr_set_fan' };
+      const map = { nozzle_temp: 'pr_set_nozzle', bed_temp: 'pr_set_bed', part_fan: 'pr_set_fan',
+                    speed_pct: 'pr_set_speed', flow: 'pr_set_flow' };
       command(set.dataset.set, num($(map[set.dataset.set]).value), { label: set.dataset.set });
       return;
     }
@@ -1030,6 +1040,10 @@ function bind() {
 
   $('pr_speed_apply').addEventListener('click', () =>
     command('speed', num($('pr_speed_sel').value, 2), { label: 'скорость' }));
+  $('pr_skip_apply').addEventListener('click', () =>
+    command('skip_objects', [num($('pr_skip_obj').value, 1)], {
+      confirm: 'Исключить этот объект из печати? Он больше не будет печататься.',
+      label: 'пропустить объект' }));
   $('pr_reconnect').addEventListener('click', async () => {
     try {
       await post('/api/printer/connect', { printer_id: PF.state.activePrinter });

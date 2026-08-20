@@ -43,6 +43,9 @@ function renderDashboard() {
     kpi('Ждём оплату', money(pipeline), 'по активным заказам'),
     kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}`, num(s.profit) >= 0 ? 'ok' : 'bad'),
     kpi('Сегодня напечатано', `${nfmt(farm.today_hours, 1)} ч`, `${nfmt(farm.today_grams)} г · ${nfmt(farm.today_jobs)} задан.`),
+    kpi('Простой парка', `${nfmt((farm.idle && farm.idle.idle_hours) || 0, 1)} ч`,
+      `упущено ≈ ${money((farm.idle && farm.idle.lost_profit) || 0)}`,
+      num((farm.idle && farm.idle.lost_profit) || 0) > 0 ? 'warn' : 'ok'),
     kpi('Нужно пластика', `${nfmt(needGrams)} г`, `на складе ${nfmt(stock)} г`,
       needGrams > stock ? 'warn' : 'ok'),
   ].join('');
@@ -195,6 +198,8 @@ function renderActivePrint() {
     + (num(job.spent)
       ? `<div class="ap-money"><span>Потрачено <b>${money(job.spent)}</b></span>`
         + (num(job.cost_total) ? `<span>Итого печать ≈ <b>${money(job.cost_total)}</b></span>` : '')
+        + (job.profit != null && num(job.price) ? `<span>Прибыль <b class="${num(job.profit) >= 0 ? 'pos' : 'neg'}">${money(job.profit)}</b></span>` : '')
+        + (job.break_even_pct != null ? `<span>Затраты съели <b>${nfmt(job.break_even_pct)}%</b> цены</span>` : '')
         + (num(job.per_hour) ? `<span>Стоимость часа <b>${money(job.per_hour)}</b></span>` : '')
         + '</div>'
       : '')
@@ -492,31 +497,56 @@ function renderTimeline() {
 /* ================================================= браузерные уведомления */
 const NOTIFY_KINDS = new Set(['complete', 'error', 'guard', 'filament_low',
   'maintenance', 'loss', 'defect', 'pause']);
+// События, клик по которым ведёт в раздел принтеров (а не просто фокусирует окно).
+const NOTIFY_PRINTER_KINDS = new Set(['complete', 'error', 'guard', 'pause']);
 let notifyLastId = 0;
+let notifySeeded = false;
 function initBrowserNotify() {
   if (!('Notification' in window)) return;
-  // разрешение можно запросить кнопкой в настройках (browser_notify_enabled)
   if (Notification.permission === 'granted' && PF.state.settings.browser_notify_enabled) {
-    setInterval(checkNewEvents, 15000);
+    // Страховочный опрос остаётся: если SSE не работает (прокси), события
+    // догоняем по журналу. При живом SSE срабатывает мгновенно через notifyEvent.
+    setInterval(checkNewEvents, 30000);
   }
+  // Подписка на события: SSE кладёт запись в журнал — показываем сразу.
+  PF.on('notify', (row) => notifyEvent(row));
+}
+function notifyEnabled() {
+  return 'Notification' in window && Notification.permission === 'granted'
+    && PF.state.settings.browser_notify_enabled;
+}
+function notifyEvent(e) {
+  if (!e || !notifyEnabled()) return;
+  const id = Number(e.id) || 0;
+  if (!id) return;
+  if (!notifySeeded) { notifyLastId = id; notifySeeded = true; return; } // стартовый прогон
+  if (id <= notifyLastId || !NOTIFY_KINDS.has(e.kind)) return;
+  notifyLastId = id;
+  try {
+    const icon = NOTIFY_PRINTER_KINDS.has(e.kind) && e.printer_id
+      ? `/api/printer/camera.jpg?printer_id=${encodeURIComponent(e.printer_id)}`
+      : '/assets/brand/nozza-mark.svg';
+    const n = new Notification('PrintFlow · ' + (e.title || 'событие'), {
+      body: String(e.detail || ''),
+      tag: 'pf-' + e.id,
+      icon,
+    });
+    n.onclick = () => {
+      window.focus();
+      if (NOTIFY_PRINTER_KINDS.has(e.kind) && typeof PF.go === 'function') PF.go('printers');
+      n.close();
+    };
+  } catch (err) { /* уведомления не критичны */ }
 }
 function checkNewEvents() {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  if (!PF.state.settings.browser_notify_enabled) return;
+  if (!notifyEnabled()) return;
   const list = PF.state.events || [];
   if (!list.length) return;
   const maxId = Math.max(...list.map((e) => Number(e.id) || 0));
-  if (!notifyLastId && maxId) { notifyLastId = maxId; return; } // стартовый прогон
-  const fresh = list.filter((e) => Number(e.id) > notifyLastId && NOTIFY_KINDS.has(e.kind));
-  fresh.forEach((e) => {
-    try {
-      const n = new Notification('PrintFlow · ' + (e.title || 'событие'), {
-        body: String(e.detail || ''),
-        tag: 'pf-' + e.id,
-      });
-      n.onclick = () => { window.focus(); n.close(); };
-    } catch (err) { /* уведомления не критичны */ }
-  });
+  if (!notifySeeded) { notifyLastId = maxId; notifySeeded = true; return; }
+  // Догоняем только то, что не пришло по SSE.
+  list.filter((e) => Number(e.id) > notifyLastId && NOTIFY_KINDS.has(e.kind))
+    .forEach(notifyEvent);
   notifyLastId = maxId;
 }
 function requestBrowserNotify() {
@@ -653,6 +683,8 @@ const GUARD = [
   ['guard_stall_minutes', 'Прогресс не растёт, мин', 'Через сколько считать печать зависшей', 'num', 1],
   ['guard_cold_minutes', 'Сопло не догревается, мин', 'Сколько ждать выхода на температуру', 'num', 1],
   ['guard_count_loss', 'Считать убыток от брака', 'Потраченный пластик и электричество — в расходы', 'bool'],
+  ['guard_cost_limit', 'Лимит стоимости печати, ₽', 'Пауза, если живая себестоимость перешла порог (0 — выключено)', 'num', 1],
+  ['guard_overrun_pct', 'Перерасход пластика, %', 'Тревога, если расход превысил смету слайсера (0 — выключено)', 'num', 1],
   ['spaghetti_enabled', 'Спагетти-детект по камере', 'Ловит «мешанину» в кадре и ставит печать на паузу (нужен pillow)', 'bool'],
   ['spaghetti_sensitivity', 'Чувствительность детекта, ×', 'Во сколько раз кромки должны превысить норму (2 — строже, 5 — мягче)', 'num', 0.5],
 ];
@@ -886,6 +918,8 @@ function renderSettings() {
   if ($('set_system2')) $('set_system2').innerHTML = settingGroup(SYSTEM2);
   // профили настроек
   if ($('set_profiles')) renderProfiles();
+  // правила «если-то»
+  if ($('set_rules')) renderRules();
 
   $('set_tg').innerHTML = settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
     `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
@@ -1380,6 +1414,59 @@ async function renderProfiles(){
   }catch(e){ host.innerHTML='<div class="notice bad"><span>✕</span><span>'+esc(e.message)+'</span></div>';}
 }
 
+/* ============================================== правила «если — то» */
+async function renderRules(){
+  const host=$('set_rules');
+  if (!host) return;
+  try{
+    const data=await get('/api/rules');
+    const rules=data.rules||[];
+    const trig=data.triggers||{}, acts=data.actions||{};
+    host.innerHTML = rules.length ? rules.map(r=>{
+      const cfg=r.config||{};
+      const detail = r.event==='debt_overdue' ? `дней: ${num(cfg.days,14)}`
+        : r.event==='order_status' ? `статус: ${esc(cfg.status||'')}`
+        : (cfg.template ? `шаблон: ${esc(String(cfg.template).slice(0,60))}` : '');
+      return `<div class="set-row"><div class="sinfo"><b>${esc(r.name)}</b>`
+        + `<small>${esc(trig[r.event]||r.event)} → ${esc(acts[r.action]||r.action)}${detail?' · '+detail:''}${num(r.fires)?' · сработало '+nfmt(r.fires):''}</small></div>`
+        + `<label class="switch"><input type="checkbox" data-rule-toggle="${esc(r.id)}"${num(r.enabled)?' checked':''}><i></i></label>`
+        + `<button class="btn sm" data-rule-test="${esc(r.id)}" type="button">▶</button>`
+        + `<button class="icon-btn sm danger" data-rule-del="${esc(r.id)}">×</button></div>`;
+    }).join('') : '<div class="empty compact"><span>Правил нет — добавьте первое.</span></div>';
+
+    host.querySelectorAll('[data-rule-toggle]').forEach(b=>b.addEventListener('change', async()=>{
+      try{ await post('/api/rules/toggle',{id:b.dataset.ruleToggle, enabled:b.checked}); renderRules(); }
+      catch(e){ fail(e); }
+    }));
+    host.querySelectorAll('[data-rule-del]').forEach(b=>b.addEventListener('click', async()=>{
+      if(!confirmDanger('Удалить правило?')) return;
+      try{ await post('/api/rules/delete',{id:b.dataset.ruleDel}); renderRules(); }catch(e){ fail(e); }
+    }));
+    host.querySelectorAll('[data-rule-test]').forEach(b=>b.addEventListener('click', async()=>{
+      try{ await post('/api/rules/run',{id:b.dataset.ruleTest}); toast('Правило выполнено','Проверьте Telegram/журнал'); }
+      catch(e){ fail(e); }
+    }));
+  }catch(e){ host.innerHTML='<div class="notice bad"><span>✕</span><span>'+esc(e.message)+'</span></div>'; }
+}
+
+function openRuleModal(){
+  openModal('rule_modal');
+  if ($('rl_event').options.length) return;
+  get('/api/rules').then(d=>{
+    $('rl_event').innerHTML=Object.entries(d.triggers||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
+    $('rl_action').innerHTML=Object.entries(d.actions||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
+  });
+}
+function saveRule(){
+  const event=$('rl_event').value, action=$('rl_action').value;
+  const config={template:$('rl_template').value.trim()};
+  if(event==='debt_overdue') config.days=14;
+  if(event==='order_status') config.status='ready';
+  post('/api/rules/save',{name:$('rl_name').value.trim()||'Новое правило',event,action,config,enabled:1})
+    .then(()=>{ closeModal('rule_modal'); renderRules(); toast('Правило сохранено'); })
+    .catch(fail);
+}
+
 /* ==================================================== проверка данных */
 async function runDataCheck() {
   const host = $('data_check_list');
@@ -1485,6 +1572,8 @@ function bind() {
     PF.applyTheme();
   });
   $('set_printer_add').addEventListener('click', () => PF.modules.printer.openPrinterModal());
+  if ($('rule_add')) $('rule_add').addEventListener('click', openRuleModal);
+  if ($('rule_save')) $('rule_save').addEventListener('click', saveRule);
   $('set_printers').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-printer-edit]');
     if (btn) PF.modules.printer.openPrinterModal(btn.dataset.printerEdit);

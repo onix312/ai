@@ -63,6 +63,7 @@ class Watchdog:
         alerts += self._check_problems(printer, snap)
         alerts += self._check_stall(printer, snap)
         alerts += self._check_filament(printer, snap)
+        alerts += self._check_overrun(printer, snap)
         self._alerts[printer.id] = alerts
         return alerts
 
@@ -208,6 +209,55 @@ class Watchdog:
                               alert["reason"], printer.id, {"tray": tray.get("id")})
             self._notify(printer, alert)
         return alerts
+
+    def _check_overrun(self, printer, snap: dict) -> list[dict]:
+        """Перерасход пластика против сметы слайсера посреди печати.
+
+        Если к текущему проценту прогресса израсходовано заметно больше
+        граммов, чем обещал слайсер, — ранний признак спагетти/поддержек/
+        неверного профиля. Предупреждаем до того, как деталь и пластик пропадут.
+        """
+        if snap["printer"]["state"] != "RUNNING":
+            return []
+        threshold = num(self.db.setting("guard_overrun_pct", 15.0), 15.0)
+        if threshold <= 0:
+            return []
+        progress = num(snap["printer"].get("progress"))
+        if progress <= 5:
+            return []
+        job = self.db.one(
+            "SELECT id, est_grams FROM print_jobs WHERE printer_id=? AND state='running'",
+            (printer.id,))
+        if not job or not num(job.get("est_grams")):
+            return []
+        est = num(job["est_grams"])
+        actual = num(snap["printer"].get("weight"))
+        if actual <= 0:
+            return []
+        # Проецируем фактический расход на полную печать и сравниваем со сметой.
+        projected = actual * 100.0 / progress
+        overrun = (projected - est) / est * 100.0
+        if overrun < threshold:
+            return []
+        key = f"overrun:{job['id']}"
+        if key in self._reported.setdefault(printer.id, set()):
+            return []
+        self._reported[printer.id].add(key)
+        alert = {
+            "kind": "overrun", "code": "overrun",
+            "title": "Расход пластика выше сметы",
+            "reason": (f"Смета {est:.0f} г, по темпу выйдет ≈{projected:.0f} г "
+                       f"(+{overrun:.0f}%)."),
+            "advice": "Проверьте камеру: возможны спагетти, лишние поддержки или неверный профиль.",
+            "severity": "warn", "at": now_iso(), "actions": [],
+        }
+        if self._snapshot(printer, "Перерасход пластика"):
+            alert["actions"].append("сохранён кадр камеры")
+        self.db.add_event("guard", "Сторож: перерасход пластика",
+                          alert["reason"], printer.id,
+                          {"job_id": job["id"], "est": est, "projected": round(projected, 1)})
+        self._notify(printer, alert)
+        return [alert]
 
     # --------------------------------------------------------------- помощь
     def _snapshot(self, printer, note: str) -> bool:

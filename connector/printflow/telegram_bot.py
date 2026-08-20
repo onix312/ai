@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import re as _re
 import threading
 import time
 import urllib.error
@@ -28,6 +29,10 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 Кнопки внизу или команды (без слэша, в любом регистре):
 • панель — всё сразу: печать, деньги, план, долги
 • статус · кадр · очередь — что происходит сейчас
+• филамент · пластик — остатки катушек и прогноз закупки
+• закупка — список покупок · закупка авто — автозаполнить · закупка купил 2
+• таймлапс · кадры — последние снимки печати одним сообщением
+• живой — автообновляемый дашборд (стоп живой — выключить)
 • деньги · день — финансы
 • план — что печатать сегодня
 • продажа — продать со стеллажа (−1 шт)
@@ -35,7 +40,14 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 • оплата 1500 по 1001 — принять оплату
 • статус 1001 печать — сменить статус заказа
 • новый адресник 2шт 900р Мария — заказ из текста
+• принтер — список парка · принтер 2 — выбрать принтер
 • пауза / продолжить / свет — управление
+• пропустить 2 — исключить объект N из печати
+• поток 90 — процент подачи филамента (50–150%)
+• повторить / повторить 1001 — снова в очередь сорванное задание
+• следи 1001 — прогресс заказа каждые 10%
+• простой — сколько простаивает принтер и что теряем
+• фото — прикрепить фото к заказу (или «фото 1001»)
 • стоп — прервать печать (подтверждение: стоп да)
 
 Можно писать без слэша и в любом регистре."""
@@ -81,6 +93,9 @@ class TelegramBot:
         self._stop = threading.Event()
         self._offset = 0
         self._pending_stop: dict[str, float] = {}
+        self._live: dict[str, dict] = {}  # chat -> {message_id, text} живого дашборда
+        self._printer_choice: dict[str, str] = {}  # chat -> printer_id
+        self._watched: dict[str, dict] = {}  # chat -> {number, last_milestone}
         self._thread = threading.Thread(target=self._loop, name="pf-bot", daemon=True)
         self._thread.start()
 
@@ -138,6 +153,8 @@ class TelegramBot:
                     self._handle(update, str(settings.get("telegram_chat_id")))
                 self._maybe_digest(settings)
                 self._maybe_weekly(settings)
+                self._maybe_live()
+                self._maybe_watch()
             except Exception:
                 self._stop.wait(10)
 
@@ -180,14 +197,25 @@ class TelegramBot:
             return self._handle_callback(callback, owner)
         message = update.get("message") or {}
         chat = str((message.get("chat") or {}).get("id", ""))
-        text = (message.get("text") or "").strip()
-        if not chat or not text:
+        if not chat:
             return
         if chat != owner:
             # Чужой чат: вежливо отказываем и пишем в журнал.
+            text = (message.get("text") or "").strip()
             self._reply(chat, "Этот бот приватный и отвечает только владельцу.")
             self.db.add_event("bot", "Посторонний в Telegram-боте",
                               f"chat_id {chat}: {text[:80]}", "", {})
+            return
+        # Фото без подписи: прикрепляем к последнему активному заказу.
+        photo = message.get("photo")
+        text = (message.get("text") or "").strip()
+        caption = (message.get("caption") or "").strip()
+        if photo and not text:
+            try:
+                return self._attach_photo(chat, photo, caption)
+            except Exception as exc:
+                return self._reply(chat, f"Не получилось: {exc}")
+        if not text:
             return
         try:
             self._dispatch(chat, text)
@@ -228,11 +256,11 @@ class TelegramBot:
     def _run_command(self, command: str, chat: str = "") -> str:
         """Выполнить команду (текстовую или inline-кнопки) и вернуть ответ."""
         if command == "pause":
-            return self.do_command("pause", "Печать поставлена на паузу")
+            return self.do_command("pause", "Печать поставлена на паузу", chat=chat)
         if command == "resume":
-            return self.do_command("resume", "Печать продолжена")
+            return self.do_command("resume", "Печать продолжена", chat=chat)
         if command == "light":
-            return self.do_command("light", "Подсветка переключена")
+            return self.do_command("light", "Подсветка переключена", chat=chat)
         if command == "stop":
             return self.do_stop(chat or "", "стоп" if chat else "стоп да")
         if command == "frame" or command == "кадр":
@@ -240,6 +268,18 @@ class TelegramBot:
                 self.send_frame(chat)
                 return "Кадр отправлен."
             return "Кадр недоступен"
+        if command == "next":
+            return self._start_next(chat)
+        if command == "removed":
+            printer = self._pick_printer(chat)
+            result = self.manager.part_removed(printer.id if printer else "")
+            return f"✅ Деталь снята. Простой после печати {result.get('idle_min', 0)} мин."
+        if command == "reprint":
+            try:
+                row = self.manager.reprint_last_failed()
+                return f"↻ Задание «{row.get('name')}» снова в очереди."
+            except Exception as exc:
+                return f"Не получилось повторить: {exc}"
         if command == "panel":
             return self.text_panel()
         if command == "plan":
@@ -247,6 +287,118 @@ class TelegramBot:
         if command.startswith("sell:"):
             return self.do_sell(command.split(":", 1)[1])
         return "Не понял команду."
+
+    def _start_next(self, chat: str) -> str:
+        """Запустить следующее задание очереди на свободном принтере."""
+        printer = self._pick_printer(chat)
+        if not printer:
+            return "Принтеры не добавлены."
+        if not printer.connected:
+            return f"{printer.record.get('name', 'Принтер')} не на связи."
+        snap = printer.snapshot()
+        if snap["printer"]["state"] not in ("IDLE", "FINISH"):
+            return "Принтер занят — сначала завершите или остановите печать."
+        job = self.manager.next_job(printer.id, snap)
+        if not job:
+            return "Очередь пуста — запускать нечего."
+        try:
+            self.manager.start_job(job["id"], printer.id)
+            return f"▶ Запускаю «{job.get('name')}»."
+        except Exception as exc:
+            return f"Не удалось запустить: {exc}"
+
+    def _watch_order(self, chat: str, number: str) -> str:
+        """«следи 1001» — уведомления о прогрессе заказа каждые 10%."""
+        if not number:
+            return "Формат: «следи 1001» — пришлю прогресс каждые 10%."
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return f"Заказ №{number} не найден."
+        self._watched[chat] = {"number": number, "last_milestone": 0}
+        return f"👁 Слежу за заказом №{number}. Прогресс буду присылать каждые 10%."
+
+    def _maybe_watch(self) -> None:
+        """Разослать уведомления о прогрессе заказов, за которыми следят."""
+        if not self._watched:
+            return
+        for chat, sub in list(self._watched.items()):
+            number = sub.get("number", "")
+            order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+            if not order:
+                self._watched.pop(chat, None)
+                self._reply(chat, f"Заказ №{number} не найден — слежка снята.")
+                continue
+            job = self.db.one(
+                "SELECT * FROM print_jobs WHERE order_id=? AND state='running' LIMIT 1",
+                (order["id"],))
+            if not job:
+                continue
+            progress = int(num(job.get("progress") or 0))
+            milestone = progress // 10 * 10
+            if milestone <= sub.get("last_milestone", 0):
+                continue
+            sub["last_milestone"] = milestone
+            self.manager.notify_async(
+                f"PrintFlow · заказ №{number}\nПрогресс {milestone}% — {order.get('product') or ''}",
+                None)
+            # По завершении снимаем слежку.
+            if progress >= 100:
+                self._watched.pop(chat, None)
+
+    def _attach_photo(self, chat: str, photo: list, caption: str = "") -> None:
+        """Прислал фото — прикрепляем к заказу (по подписи или последнему активному)."""
+        order_id = ""
+        caption = (caption or "").strip()
+        number = next((w for w in caption.split() if w.isdigit()), "")
+        if number:
+            order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+            order_id = order["id"] if order else ""
+        if not order_id:
+            order = self.db.one(
+                "SELECT * FROM orders WHERE status NOT IN"
+                " (SELECT id FROM statuses WHERE is_final=1)"
+                " ORDER BY datetime(updated_at) DESC LIMIT 1")
+            if not order:
+                return self._reply(chat, "Нет активного заказа — укажите номер: «фото 1001».")
+            order_id = order["id"]
+        # Скачиваем самый крупный из присланных размеров.
+        file_id = str((photo[-1] or {}).get("file_id") or "")
+        if not file_id:
+            return self._reply(chat, "Не удалось получить фото.")
+        raw = self._download_file(file_id)
+        if not raw:
+            return self._reply(chat, "Не удалось скачать фото.")
+        from .config import PHOTO_DIR
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"order_{order_id}_{int(time.time())}.jpg"
+        (PHOTO_DIR / name).write_bytes(raw)
+        self.db.upsert("order_photos", {
+            "id": f"ph{int(time.time() * 1000)}", "order_id": order_id, "at": now_iso(),
+            "file": name, "note": "фото из Telegram", "kind": "upload"})
+        self.db.add_event("order", "Фото к заказу (Telegram)",
+                          f"Заказ {self._order_number(order_id)}", "",
+                          {"order_id": order_id})
+        self._reply(chat, f"📷 Фото прикреплено к заказу №{self._order_number(order_id)}.")
+
+    def _order_number(self, order_id: str) -> str:
+        order = self.db.one("SELECT number FROM orders WHERE id=?", (order_id,))
+        return str((order or {}).get("number") or "")
+
+    def _download_file(self, file_id: str) -> bytes | None:
+        """Скачать файл из Telegram (getFile → скачивание)."""
+        token = self._settings().get("telegram_token", "")
+        if not token:
+            return None
+        try:
+            info = self._call("getFile", {"file_id": file_id})
+            path = str((info.get("result") or {}).get("file_path") or "")
+            if not path:
+                return None
+            url = f"https://api.telegram.org/file/bot{token}/{path}"
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return response.read()
+        except Exception:
+            return None
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е")
@@ -266,7 +418,15 @@ class TelegramBot:
         if word in ("оплата", "оплатить", "payment"):
             return self._reply(chat, self._pay(text))
         if word in ("статус", "status", "принтер", "принтеры"):
-            # «статус 1001 печать» — смена статуса; иначе состояние принтеров
+            # «принтер 2» — выбрать принтер для команд; «статус 1001 печать» —
+            # смена статуса заказа; иначе состояние принтеров.
+            if word in ("принтер", "принтеры"):
+                number = next((w for w in text.split()[1:] if w.isdigit()), "")
+                if number:
+                    return self._reply(chat, self._select_printer(chat, int(number)))
+                if any(w.isdigit() for w in text.split()[1:]):
+                    return self._reply(chat, self._set_status(text))
+                return self._reply(chat, self._list_printers(chat))
             digits = any(w.isdigit() for w in text.split()[1:])
             return self._reply(chat, self._set_status(text) if digits else self.text_status())
         if word in ("выдать", "выдал", "закрыть"):
@@ -277,18 +437,57 @@ class TelegramBot:
             return self._reply(chat, self._new_order(text))
         if word in ("кадр", "камера", "фото", "photo", "cam"):
             return self.send_frame(chat)
+        if word in ("таймлапс", "кадры", "гиф", "timelapse", "видео"):
+            return self.send_timelapse(chat)
+        if word in ("живой", "live", "дашборд"):
+            return self.start_live(chat)
+        if word in ("стоп-живой", "стопживой", "стоп живой"):
+            return self.stop_live(chat)
         if word in ("очередь", "queue"):
             return self._reply(chat, self.text_queue())
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
         if word in ("день", "сегодня", "итоги"):
             return self._reply(chat, self.text_today())
+        if word in ("филамент", "пластик", "катушки", "спул"):
+            return self._reply(chat, self.text_filament())
+        if word in ("закупить", "закупка", "закупки", "шоппинг", "покупки"):
+            return self._reply(chat, self._shopping(text))
         if word in ("пауза", "pause"):
-            return self._reply(chat, self.do_command("pause", "Печать поставлена на паузу"))
+            return self._reply(chat, self.do_command("pause", "Печать поставлена на паузу", chat=chat))
         if word in ("продолжить", "resume", "старт-печати"):
-            return self._reply(chat, self.do_command("resume", "Печать продолжена"))
+            return self._reply(chat, self.do_command("resume", "Печать продолжена", chat=chat))
         if word in ("свет", "light"):
-            return self._reply(chat, self.do_command("light", "Подсветка переключена"))
+            return self._reply(chat, self.do_command("light", "Подсветка переключена", chat=chat))
+        if word in ("пропустить", "скип", "исключить", "skip"):
+            number = next((w for w in text.split()[1:] if w.isdigit()), "")
+            if not number:
+                return self._reply(chat, "Формат: «пропустить 2» — исключить объект N из печати.")
+            return self._reply(chat, self.do_command("skip_objects", [int(number)],
+                                                     f"Объект {number} исключён из печати", chat=chat))
+        if word in ("поток", "flow"):
+            m = _re.search(r"(\d+)", text)
+            if not m:
+                return self._reply(chat, "Формат: «поток 90» — процент подачи филамента (50–150%).")
+            return self._reply(chat, self.do_command("flow", int(m.group(1)),
+                                                     f"Поток {m.group(1)}%", chat=chat))
+        if word in ("повторить", "перепечатать", "reprint", "повтор"):
+            number = next((w for w in text.split()[1:] if w.isdigit()), "")
+            try:
+                row = self.manager.reprint_last_failed(number)
+                return self._reply(chat, f"↻ Задание «{row.get('name')}» снова в очереди.")
+            except Exception as exc:
+                return self._reply(chat, f"Не получилось повторить: {exc}")
+        if word in ("простой", "idle"):
+            stats = self.manager.idle_stats()
+            return self._reply(chat,
+                f"⏳ Простой: {stats.get('idle_hours')} ч "
+                f"({stats.get('idle_minutes')} мин)\n"
+                f"Упущено ~{_money(stats.get('lost_profit'))} "
+                f"по норме {_money(stats.get('rate_per_hour'))}/ч")
+        if word in ("следи", "подпишись", "watch", "следить"):
+            number = next((w for w in text.split()[1:] if w.isdigit()), "")
+            return self._reply(chat, self._watch_order(chat, number))
         if word in ("снял", "снято", "забрал"):
             result = self.manager.part_removed()
             return self._reply(chat, f"✅ Деталь снята. Простой после печати {result.get('idle_min', 0)} мин.")
@@ -347,8 +546,14 @@ class TelegramBot:
                 order = job.get("order") or {}
                 if order:
                     lines.append(f"Заказ №{order.get('number')} · {order.get('product') or ''}")
-                if job.get("spent"):
-                    lines.append(f"Потрачено материалов на {_money(job['spent'])}")
+                if num(job.get("spent")):
+                    lines.append(f"Потрачено {_money(job['spent'])}"
+                                 + (f", всего будет ≈ {_money(job['cost_total'])}"
+                                    if num(job.get("cost_total")) else ""))
+                if job.get("profit") is not None and num(job.get("price")):
+                    lines.append(f"Прибыль {_money(job['profit'])}"
+                                 + (f" ({round(num(job.get('margin_pct')))}%)"
+                                    if job.get("margin_pct") is not None else ""))
             lines.append(f"Сопло {round(num(snap['temperature'].get('nozzle')))}°, "
                          f"стол {round(num(snap['temperature'].get('bed')))}°")
             for alert in (snap.get("guard") or {}).get("alerts", [])[:3]:
@@ -411,6 +616,69 @@ class TelegramBot:
             f"время печати {_hm(num(job.get('m')))}",
         ]
         return "\n".join(lines)
+
+    def text_filament(self) -> str:
+        """Остатки филамента на складе и в AMS: граммы, %, прогноз окончания."""
+        spools = self.db.query("SELECT * FROM spools WHERE archived=0 ORDER BY remaining_grams DESC")
+        if not spools:
+            return "Катушек на складе нет — добавьте через раздел «Склад»."
+        threshold = num(self.db.setting("filament_low_threshold", 15.0), 15.0)
+        lines = ["🧵 Филамент на складе:"]
+        for s in spools[:12]:
+            total = max(1.0, num(s.get("total_grams"), 1000))
+            left = num(s.get("remaining_grams"))
+            pct = left / total * 100
+            mark = "⚠" if pct <= threshold else "·"
+            slot = f" · AMS слот {s.get('ams_slot')}" if str(s.get("ams_slot") or "") != "" else ""
+            lines.append(f"{mark} {s.get('material')} {s.get('color_name') or ''} — "
+                         f"{round(left)} г ({round(pct)}%){slot}")
+        # Прогноз закупки по темпу расхода за 30 дней
+        usage = self.db.one(
+            "SELECT UPPER(material) m, SUM(grams) g FROM filament_usage"
+            " WHERE at>=? GROUP BY UPPER(material) ORDER BY g DESC LIMIT 3",
+            ((datetime.now() - timedelta(days=30)).isoformat(),))
+        hints = []
+        for row in usage or []:
+            rate = num(row.get("g")) / 30.0  # г/день
+            stock = num(self.db.one(
+                "SELECT COALESCE(SUM(remaining_grams),0) v FROM spools"
+                " WHERE archived=0 AND UPPER(material)=?", (row.get("m"),))["v"])
+            if rate > 0:
+                days = stock / rate
+                hints.append(f"{row.get('m')}: хватит на ~{int(days)} дн (темп {round(rate)} г/дн)")
+        if hints:
+            lines.append("\nПрогноз:")
+            lines.extend("  " + h for h in hints)
+        return "\n".join(lines)
+
+    def _shopping(self, text: str) -> str:
+        """Список закупок: показать, автозаполнить или добавить вручную."""
+        from .shopping import ShoppingList
+        shop = ShoppingList(self.db)
+        words = text.lower().replace("ё", "е").split()
+        # «закупка авто» — автозаполнение из низких катушек и темпа расхода
+        if len(words) > 1 and words[1] in ("авто", "обновить", "заполнить"):
+            result = shop.auto_fill()
+            if result.get("count"):
+                return f"🛒 Добавлено в закупку: {result['count']} позиций.\n\n" + shop.text()
+            return "🛒 Добавлять нечего — катушки и запас в порядке.\n\n" + shop.text()
+        # «закупка купил <id/позиция>» — отметить купленным (по номеру строки)
+        if len(words) > 1 and words[1] == "купил":
+            index = next((w for w in words[2:] if w.isdigit()), "")
+            items = shop.items()
+            if index and 1 <= int(index) <= len(items):
+                item = items[int(index) - 1]
+                shop.toggle(item["id"], True)
+                return f"✅ Отмечено купленным: {item.get('name') or item.get('material')}."
+            return "Укажите номер строки: «закупка купил 2»."
+        # «закупка <материал> <qty>» — добавить вручную
+        if len(words) > 1 and words[1] not in ("авто", "купил", "обновить", "заполнить"):
+            material = words[1].upper()
+            qty = next((w for w in words[2:] if w.isdigit()), "1")
+            shop.add({"name": material, "material": material, "qty": float(qty),
+                      "unit": "кг", "source": "manual"})
+            return f"🛒 Добавлено: {material} {qty} кг.\n\n" + shop.text()
+        return shop.text()
 
     def text_digest(self) -> str:
         """Утренний дайджест: дедлайны, очередь, остатки, кому написать."""
@@ -480,7 +748,7 @@ class TelegramBot:
         return "\n".join(lines)
 
     def send_frame(self, chat: str) -> None:
-        printer = self.manager.get()
+        printer = self._pick_printer(chat)
         if not printer:
             return self._reply(chat, "Принтеры не добавлены.")
         frame = printer.camera.frame
@@ -502,6 +770,98 @@ class TelegramBot:
             printer.camera.snapshot(note="Запрос из Telegram")
         except Exception as exc:
             self._reply(chat, f"Не удалось отправить кадр: {exc}")
+
+    def send_timelapse(self, chat: str) -> None:
+        """Отправить последние кадры печати как медиа-группу (мини-таймлапс)."""
+        printer = self._pick_printer(chat)
+        if not printer:
+            return self._reply(chat, "Принтеры не добавлены.")
+        shots = printer.camera.snapshot_list()
+        # Берём последние кадры в прямом хронологическом порядке.
+        frames = [s for s in shots if s.get("at")][:10]
+        if not frames:
+            return self._reply(chat, "Снимков пока нет. Камера делает их по событиям "
+                                     "печати и по запросу «кадр».")
+        photos = []
+        for shot in reversed(frames):
+            frame = printer.camera.snapshot_frame(shot["id"])
+            if frame:
+                photos.append(frame)
+        if not photos:
+            return self._reply(chat, "Не удалось прочитать сохранённые кадры.")
+        token = self._settings().get("telegram_token", "")
+        if len(photos) == 1:
+            self.manager._send_photo(token, chat, "Последний кадр печати", photos[0])
+            return None
+        self._send_media_group(token, chat, photos)
+
+    def _send_media_group(self, token: str, chat: str, photos: list[bytes]) -> None:
+        """Несколько фото одним сообщением (sendMediaGroup, multipart)."""
+        boundary = "----printflow" + uid("b").replace("b_", "")
+        parts: list[bytes] = []
+        media = []
+        for i in range(len(photos)):
+            attach = f"attach://photo{i}"
+            media.append({"type": "photo", "media": attach})
+            parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo{i}\";"
+                f" filename=\"frame{i}.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode())
+            parts.append(photos[i])
+            parts.append(b"\r\n")
+        head = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n"
+                f"{chat}\r\n"
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"media\"\r\n\r\n"
+                f"{json.dumps(media)}\r\n").encode()
+        tail = f"--{boundary}--\r\n".encode()
+        body = head + b"".join(parts) + tail
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMediaGroup", data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response.read()
+
+    # ----------------------------------------------------- живой дашборд
+    def start_live(self, chat: str) -> str:
+        """Включить автообновляющийся дашборд-сообщение на время печати."""
+        printer = self._pick_printer(chat)
+        if not printer:
+            return "Принтеры не добавлены."
+        self._live[chat] = {"message_id": 0, "text": ""}
+        text = self.text_status()
+        token = self._settings().get("telegram_token", "")
+        try:
+            sent = self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
+                                              "disable_web_page_preview": "true"}, timeout=15)
+            message_id = sent.get("result", {}).get("message_id", 0)
+            self._live[chat] = {"message_id": message_id, "text": text}
+            return ("Дашборд включён — будет обновляться во время печати.\n"
+                    "Выключить: «стоп живой».")
+        except Exception:
+            self._live.pop(chat, None)
+            return "Не удалось запустить дашборд."
+
+    def stop_live(self, chat: str) -> str:
+        self._live.pop(chat, None)
+        return "Дашборд выключен."
+
+    def _maybe_live(self) -> None:
+        """Обновить живые дашборды, если печать активна и текст изменился."""
+        if not self._live:
+            return
+        token = self._settings().get("telegram_token", "")
+        for chat, state in list(self._live.items()):
+            text = self.text_status()
+            if text == state.get("text"):
+                continue
+            message_id = state.get("message_id", 0)
+            state["text"] = text
+            if message_id:
+                try:
+                    self._call("editMessageText", {"chat_id": chat,
+                                                   "message_id": str(message_id),
+                                                   "text": text[:3800]}, timeout=15)
+                except Exception:
+                    pass
 
     # -------------------------------------------------- 5.0: панель и продажи
     def text_panel(self) -> str:
@@ -718,13 +1078,49 @@ class TelegramBot:
                 + (f" · {parsed['client']}" if parsed["client"] else ""))
 
     # -------------------------------------------------------------- команды
-    def do_command(self, command: str, ok_text: str) -> str:
-        printer = self.manager.get()
+    def _pick_printer(self, chat: str = ""):
+        """Выбранный принтер чата или первый подключённый (мультипринтер)."""
+        printer_id = self._printer_choice.get(chat, "") if chat else ""
+        if printer_id:
+            printer = self.manager.get(printer_id)
+            if printer and printer.connected:
+                return printer
+        return self.manager.get()
+
+    def _list_printers(self, chat: str) -> str:
+        """Список принтеров с номерами для выбора команды «принтер N»."""
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        if not printers:
+            return "Принтеры не добавлены."
+        chosen = self._printer_choice.get(chat, "")
+        lines = ["🖨 Принтеры (выбор: «принтер N»):"]
+        for i, snap in enumerate(printers, 1):
+            info = snap["printer"]
+            mark = "◉" if snap["id"] == chosen else "·"
+            lines.append(f"{mark} {i}. {snap['name']} — "
+                         f"{STATE_RU.get(info['state'], info.get('state_label') or info['state'])}"
+                         + (" · нет связи" if not snap["connection"]["connected"] else ""))
+        return "\n".join(lines)
+
+    def _select_printer(self, chat: str, index: int) -> str:
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        if not printers:
+            return "Принтеры не добавлены."
+        if index < 1 or index > len(printers):
+            return f"Номер от 1 до {len(printers)}."
+        snap = printers[index - 1]
+        self._printer_choice[chat] = snap["id"]
+        return f"◉ Выбран {snap['name']}. Команды (пауза/кадр/свет…) теперь идут на него."
+
+    def do_command(self, command: str, ok_text: str, value=None, chat: str = "") -> str:
+        printer = self._pick_printer(chat)
         if not printer:
             return "Принтеры не добавлены."
         if not printer.connected:
             return f"{printer.record.get('name', 'Принтер')} не на связи."
-        printer.command(command)
+        printer.command(command, value)
         self.db.add_event("command", f"Telegram: {command}", ok_text, printer.id, {})
         return f"{ok_text} — {printer.record.get('name', 'принтер')}."
 

@@ -108,6 +108,13 @@ class Repo:
             payload["customer_id"] = customer["id"]
 
         row = self.db.upsert("orders", payload)
+        # Конструктор правил: переход заказа между статусами.
+        hook = getattr(self, "_on_status_change", None)
+        if hook and existing and (existing.get("status") or "") != (payload.get("status") or ""):
+            try:
+                hook(row, existing.get("status") or "", payload.get("status") or "")
+            except Exception:
+                pass
         # История изменений: фиксируем только реально поменявшиеся поля.
         if existing:
             for field, value in payload.items():
@@ -476,8 +483,11 @@ class Repo:
     # --------------------------------------------------------------- принтеры
     def printers(self, include_secrets: bool = False) -> list[dict]:
         rows = self.db.query("SELECT * FROM printers ORDER BY position, name")
-        if not include_secrets:
-            for row in rows:
+        from .crypto import decrypt, is_encrypted
+        for row in rows:
+            if include_secrets and is_encrypted(row.get("access_code") or ""):
+                row["access_code"] = decrypt(row["access_code"])
+            if not include_secrets:
                 row["has_access_code"] = bool(row.get("access_code"))
                 row["access_code"] = ""
         return rows
@@ -502,6 +512,11 @@ class Repo:
         data["updated_at"] = now_iso()
         if data.get("access_code") in ("", None, "••••••••"):
             data.pop("access_code", None)  # пустое поле не стирает сохранённый код
+        elif data.get("access_code") and self.db.setting("encrypt_access_code", False):
+            # Access Code хранится зашифрованным (роадмап 10.10) — опционально,
+            # чтобы не менять поведение существующих LAN-установок без запроса.
+            from .crypto import encrypt
+            data["access_code"] = encrypt(str(data["access_code"]))
         if data.get("serial") == "••••••••":
             data.pop("serial", None)
         return self.db.upsert("printers", data)

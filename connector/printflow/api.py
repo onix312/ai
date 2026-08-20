@@ -113,6 +113,8 @@ class Api:
         self.insights = Insights(self.db)
         from .envelopes import Envelopes
         self.envelopes = Envelopes(self.db)
+        from .shopping import ShoppingList
+        self.shopping = ShoppingList(self.db)
         from .clients import Clients
         self.clients = Clients(self.db)
         from .b2b import B2B
@@ -275,9 +277,14 @@ class Api:
         if not token or not uid:
             return []
         try:
-            return bambu_cloud.get_devices(token, region)
+            devices = bambu_cloud.get_devices(token, region)
         except bambu_cloud.CloudError:
             return []
+        # Access Code — секрет: в браузер он не уходит, сервер подставит его
+        # сам при добавлении принтера (см. _enrich_cloud_device).
+        for device in devices:
+            device.pop("access_code", None)
+        return devices
 
     def cloud_status(self) -> dict:
         from . import bambu_cloud
@@ -325,22 +332,42 @@ class Api:
 
     def _enrich_cloud_device(self, data: dict) -> dict:
         """Добавление принтера из списка аккаунта: сервер сам подставляет
-        serial, имя, модель и LAN Access Code из облака (в браузер код не уходит)."""
+        serial, имя, модель, LAN Access Code и IP из облака (в браузер код не уходит)."""
         serial = str(data.get("cloud_device") or "").strip()
         if not serial:
             return data
         from . import bambu_cloud
         token, uid, region = self._cloud_session()
         if token and uid:
-            for device in bambu_cloud.get_devices(token, region):
+            for device in bambu_cloud.get_devices(token, region, include_access_code=True):
                 if str(device.get("serial")) == serial:
                     data.setdefault("serial", device.get("serial") or "")
                     data.setdefault("name", device.get("name") or data.get("name") or "Принтер")
                     data.setdefault("model", device.get("model") or data.get("model") or "P1S")
                     data.setdefault("mode", "cloud")
+                    # Access Code и IP подставляются сервером — камера (6000) и
+                    # FTPS (990) заработают по локальной сети даже в облачном режиме.
+                    if device.get("access_code"):
+                        data.setdefault("access_code", device["access_code"])
+                    host = device.get("host") or self._discover_host(serial)
+                    if host:
+                        data.setdefault("host", host)
                     data.pop("cloud_device", None)
                     break
         return data
+
+    def _discover_host(self, serial: str) -> str:
+        """Локальный IP принтера по серийному номеру (SSDP) — для камеры/FTPS."""
+        if not serial:
+            return ""
+        try:
+            from .bambu import BambuPrinter
+            for found in BambuPrinter.discover(timeout=2.0):
+                if str(found.get("serial") or "") == serial and found.get("host"):
+                    return str(found["host"])
+        except Exception:
+            pass
+        return ""
 
     def _templates(self) -> list[dict]:
         """Шаблоны ответов клиентам: список {id, title, text} из настроек."""
@@ -800,6 +827,16 @@ class Api:
                                                   one("printer_id"), one("kind"))}
         if path == "/api/settings":
             return 200, {"settings": self.db.settings()}
+        if path == "/api/rules":
+            from .rules import ACTIONS, TRIGGERS
+            return 200, {"rules": self.manager.rules.rules(),
+                         "triggers": TRIGGERS, "actions": ACTIONS}
+        if path == "/api/shopping":
+            return 200, {"items": self.shopping.items(one("all") == "1"),
+                         "summary": self.shopping.summary(),
+                         "filament_stats": self.acc.filament_stats(int(num(one("days", "30"), 30)))}
+        if path == "/api/purchase-hint":
+            return 200, {"hint": self.acc.purchase_hint()}
         if path == "/api/update-check":
             return 200, self.updater.report()
         if path == "/api/abc":
@@ -1026,6 +1063,14 @@ class Api:
         if path == "/api/printer/command":
             printer = self.printer_or_fail(pid)
             return 200, printer.command(body.get("command", ""), body.get("value"))
+        if path == "/api/printer/reprint":
+            # Повтор сорванного задания: по id задания или по номеру заказа.
+            order_number = str(body.get("order_number") or "").strip()
+            if body.get("id"):
+                row = self.manager.reprint_job(str(body["id"]), str(body.get("printer_id") or ""))
+            else:
+                row = self.manager.reprint_last_failed(order_number)
+            return 200, {"ok": True, "job": row}
         if path == "/api/printer/ams/sync":
             # Ручной запуск автосбора: катушки AMS и данные принтера → база
             printer = self.printer_or_fail(pid)
@@ -1670,6 +1715,43 @@ class Api:
 
         if path == "/api/settings":
             return 200, {"ok": True, "settings": self.db.set_settings(body)}
+        if path == "/api/shopping/add":
+            return 200, {"ok": True, "item": self.shopping.add(body)}
+        if path == "/api/shopping/toggle":
+            return 200, {"ok": True, "item": self.shopping.toggle(
+                body.get("id", ""), bool(body.get("done", True)))}
+        if path == "/api/shopping/delete":
+            self.shopping.delete(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/shopping/auto":
+            return 200, self.shopping.auto_fill(bool(body.get("dry_run")))
+        if path == "/api/shopping/clear-done":
+            return 200, {"ok": True, "removed": self.shopping.clear_done()}
+        if path == "/api/rules/save":
+            return 200, {"ok": True, "rule": self.manager.rules.save_rule(body)}
+        if path == "/api/rules/delete":
+            self.manager.rules.delete_rule(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/rules/toggle":
+            return 200, {"ok": True, "rule": self.manager.rules.toggle(
+                body.get("id", ""), bool(body.get("enabled", True)))}
+        if path == "/api/rules/run":
+            # Ручной тест правила: выполнить его сейчас (для проверки шаблона).
+            rule = self.db.one("SELECT * FROM automation_rules WHERE id=?",
+                               (body.get("id", ""),))
+            if not rule:
+                raise ValueError("Правило не найдено")
+            try:
+                rule["config"] = json.loads(rule.get("config") or "{}")
+            except json.JSONDecodeError:
+                rule["config"] = {}
+            fired = self.manager.rules.run(str(rule["event"]), {
+                "name": "тест", "detail": "проверка правила", "printer": "PrintFlow",
+                "order": "1001", "number": "1001", "product": "тест",
+                "material": "PLA", "color": "чёрный", "grams": 50, "pct": 10,
+                "status": (rule.get("config") or {}).get("status", ""),
+                "total": 1000, "count": 1, "days": 14})
+            return 200, {"ok": True, "fired": [r["id"] for r in fired]}
         if path == "/api/settings/reset":
             return 200, {"ok": True, "settings": self.repo.reset_settings(body.get("keys"))}
         if path == "/api/telegram/test":

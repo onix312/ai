@@ -793,7 +793,18 @@ class Accounting:
                 (round(remaining, 1), now_iso(), spool["id"]))
             spool_id = spool["id"]
             threshold = num(self.db.setting("filament_low_threshold", 15))
-            if remaining / weight * 100 <= threshold:
+            if remaining <= 0.5:
+                # Катушка опустела — архивируем сами, чтобы склад не висел
+                # с «0 г, но в работе», и заводим событие «замените катушку».
+                self.db.execute(
+                    "UPDATE spools SET archived=1, remaining_grams=0, updated_at=? WHERE id=?",
+                    (now_iso(), spool["id"]))
+                self.db.add_event(
+                    "filament_low", "Катушка закончилась",
+                    f"{spool['material']} {spool['color_name']}: расходована полностью — "
+                    f"поставьте новую катушку.",
+                    printer_id, {"spool_id": spool_id, "remaining": 0})
+            elif remaining / weight * 100 <= threshold:
                 self.db.add_event(
                     "filament_low", "Пластик заканчивается",
                     f"{spool['material']} {spool['color_name']}: осталось {round(remaining)} г",
@@ -988,8 +999,21 @@ class Accounting:
             return result
         grams = num(job.get("grams"))
         hours = num(job.get("duration_min")) / 60.0
-        breakdown = self.cost_breakdown(grams, hours)
+        # Многоцветная печать: продувка AMS при смене цвета (~12 г на смену).
+        # Число смен берём из раскладки цветов заказа.
+        color_swaps = 0
+        if job.get("order_id"):
+            order = self.db.one("SELECT colors FROM orders WHERE id=?",
+                                (job.get("order_id"),)) if job.get("order_id") else None
+            try:
+                colors = json.loads(str((order or {}).get("colors") or ""))
+                if isinstance(colors, list) and len(colors) > 1:
+                    color_swaps = max(0, len(colors) - 1)
+            except (json.JSONDecodeError, TypeError):
+                color_swaps = 0
+        breakdown = self.cost_breakdown(grams, hours, color_swaps=color_swaps)
         result["breakdown"] = breakdown
+        result["purge_grams"] = breakdown.get("purge_grams", 0)
 
         if grams > 0 and self.db.setting("auto_consume_filament", True):
             # Разбивка по цветам — это весь расход, а не добавка к общим граммам.

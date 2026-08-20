@@ -124,6 +124,29 @@ async function loadFilamentStats() {
   } catch (e) { /* офлайн */ }
 }
 
+/* ================================================== список закупок */
+async function loadShopping() {
+  const host = $('shopping_list');
+  if (!host) return;
+  try {
+    const data = await get('/api/shopping');
+    const items = data.items || [];
+    host.innerHTML = items.length ? items.map((i, idx) => {
+      return `<div class="tx-row"><div class="tx-body"><b>${esc(i.name || i.material)}</b>`
+        + `<small>${esc(i.reason || '')} · ${nfmt(i.qty)} ${esc(i.unit || 'кг')}</small></div>`
+        + `<button class="btn sm" type="button" data-shop-done="${esc(i.id)}">✓</button>`
+        + `<button class="icon-btn sm" type="button" data-shop-del="${esc(i.id)}">×</button></div>`;
+    }).join('') : '<div class="empty compact"><span>Список пуст — нажмите «Автозаполнить» или добавьте вручную.</span></div>';
+
+    host.querySelectorAll('[data-shop-done]').forEach((b) => b.addEventListener('click', async () => {
+      try { await post('/api/shopping/toggle', { id: b.dataset.shopDone, done: true }); loadShopping(); toast('Отмечено купленным'); } catch (e) { fail(e); }
+    }));
+    host.querySelectorAll('[data-shop-del]').forEach((b) => b.addEventListener('click', async () => {
+      try { await post('/api/shopping/delete', { id: b.dataset.shopDel }); loadShopping(); } catch (e) { fail(e); }
+    }));
+  } catch (e) { host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`; }
+}
+
 /* ================================================== QR катушки и сушка */
 async function openSpoolQr(spoolId) {
   const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
@@ -784,6 +807,14 @@ function bind() {
     window.open('/labels.html?kind=spool', '_blank', 'noopener');
   });
   $('spool_add').addEventListener('click', () => openSpool());
+  const shoppingAuto = $('shopping_auto');
+  if (shoppingAuto) shoppingAuto.addEventListener('click', async () => {
+    try {
+      const result = await post('/api/shopping/auto', {});
+      toast('Закупка пополнена', `Добавлено ${result.count || 0} позиций`);
+      loadShopping();
+    } catch (e) { fail(e); }
+  });
   $('spool_save').addEventListener('click', async () => {
     const payload = {
       id: editingSpool || '',
@@ -1012,7 +1043,7 @@ function bind() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { loadFilamentStats(); loadCalcMaterials(); bind(); restoreCalc(); });
+PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); });
 PF.on('data', () => { renderStock(); renderCatalog(); });
 PF.on('finance', renderFinance);
 PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });

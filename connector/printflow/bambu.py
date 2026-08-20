@@ -109,7 +109,8 @@ class BambuPrinter:
         self.session: dict[str, Any] | None = None
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
                                             "access_code": self.record.get("access_code"),
-                                            "demo": bool(self.record.get("camera_demo"))})
+                                            "demo": bool(self.record.get("camera_demo")),
+                                            "cloud": self.mode == "cloud"})
         self._stop = threading.Event()
         self._watchdog: threading.Thread | None = None
 
@@ -249,7 +250,8 @@ class BambuPrinter:
         self.camera.stop()
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
                                             "access_code": self.record.get("access_code"),
-                                            "demo": bool(self.record.get("camera_demo"))})
+                                            "demo": bool(self.record.get("camera_demo")),
+                                            "cloud": self.mode == "cloud"})
         if self.record.get("enabled", 1):
             self.camera.start()
             self.connect()
@@ -423,6 +425,14 @@ class BambuPrinter:
             percent = max(0, min(100, int(as_num(value))))
             pin = {"part_fan": 1, "aux_fan": 2, "chamber_fan": 3}[name]
             self.gcode(f"M106 P{pin} S{round(percent * 255 / 100)}")
+        elif name == "flow":
+            # Поток филамента, % (M221): меньше — тоньше слой, больше — заливка.
+            percent = max(50, min(150, int(as_num(value, 100))))
+            self.gcode(f"M221 S{percent}")
+        elif name == "speed_pct":
+            # Скорость печати в процентах (M220) — тоньше, чем 4 режима.
+            percent = max(10, min(400, int(as_num(value, 100))))
+            self.gcode(f"M220 S{percent}")
         elif name == "home":
             self.gcode("G28")
         elif name == "move":
