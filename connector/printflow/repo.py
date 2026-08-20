@@ -20,6 +20,8 @@ ORDER_FIELDS = (
     "paid discount delivery fee rush payer account_id design_minutes "
     # многоцветная печать и чек-лист качества
     "colors qc_done "
+    # катушки со склада, привязанные к заказу: [{spool_id, grams, note}]
+    "spools "
     # связь с номенклатурой и складом (3.0+)
     "nom_id warehouse_id reserved"
 ).split()

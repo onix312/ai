@@ -12,7 +12,7 @@
    по обычному http с телефона браузер его не разрешает — это ограничение
    браузеров, а не PrintFlow. Панель на телефоне работает и без него. */
 
-const CACHE = 'printflow-shell-v9';
+const CACHE = 'printflow-shell-v10';
 const SHELL = [
   '/',
   '/index.html',

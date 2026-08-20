@@ -376,6 +376,11 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .spool .acts.tools { margin-top: 6px; gap: 5px; }
 .spool .acts.tools .btn { height: 27px; font-size: 12px; padding: 0 5px; border-radius: 8px; font-weight: 540; }
 
+/* ---- катушки в карточке заказа: select + граммы + удалить ---- */
+.of-spool-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.of-spool-row select { flex: 1 1 auto; min-width: 0; }
+.of-spool-row input[type=number] { width: 104px; flex: none; }
+
 /* ============================================================= финансы */
 .tx-row { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.2px; }
 .tx-row:last-child { border-bottom: 0; }

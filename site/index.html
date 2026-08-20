@@ -11,8 +11,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/theme.css?v=8.1.0">
-<link rel="stylesheet" href="assets/app.css?v=8.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=8.2.0">
+<link rel="stylesheet" href="assets/app.css?v=8.2.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -3389,6 +3389,14 @@
    <label class="field"><span>Материал <button class="btn sm ghost" type="button" id="of_ams_btn" title="Взять материал и цвет из AMS" style="margin-left:6px;padding:2px 6px;font-size:11px">⟳ AMS</button></span><input id="of_material" placeholder="PLA, PETG, TPU" list="materials_datalist"></label>
    <label class="field"><span>Цвет <small class="muted" id="of_ams_hint" style="margin-left:4px;font-weight:normal"></small></span><input id="of_color" placeholder="Чёрный + золотой"></label>
    <label class="field span-2"><span>Расход по цветам (многоцветная печать)</span><input id="of_colors" placeholder="Белый:40, Чёрный:15"></label>
+   <div class="span-2 field">
+    <span>Катушки со склада — спишутся по завершении печати</span>
+    <div id="of_spool_rows"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+     <button class="btn sm ghost" type="button" id="of_spool_add">+ Катушка</button>
+     <small class="muted">Укажите конкретные катушки и граммы — расход спишется точно с них. Мультицвет: своя строка на каждый цвет.</small>
+    </div>
+   </div>
    <label class="field"><span>Пластик, г</span><input id="of_grams" type="number" min="0" step="any"></label>
    <label class="field"><span>Печать, ч</span><input id="of_hours" type="number" min="0" step="any"></label>
    <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
@@ -3756,8 +3764,17 @@
      <label class="field"><span>Сколько штук нужно</span><input id="bf_qty" type="number" min="1" step="1" value="10"></label>
      <label class="field"><span>Режим раскладки</span><select id="bf_mode">
       <option value="full">Полные плиты</option><option value="exact">Ровно N</option>
-      <option value="manual">Вручную</option></select></label>
-     <label class="field" id="bf_plates_wrap" hidden><span>Запусков вручную</span><input id="bf_plates" type="number" min="1" step="1" value="1"></label>
+      <option value="manual">Вручную</option>
+      <option value="mixed">Разные товары на плите</option></select></label>
+     <label class="field" id="bf_plates_wrap" hidden><span>Сколько плит печатать</span><input id="bf_plates" type="number" min="1" step="1" value="1"></label>
+     <div class="span-2" id="bf_mixed_wrap" hidden>
+      <div class="form-grid" style="margin-bottom:8px">
+       <label class="field span-2"><span>Файл плиты на принтере *</span><input id="bf_file" placeholder="smeshannaya-plita.3mf"></label>
+      </div>
+      <div style="font-size:12.2px;font-weight:580;color:var(--text-2);margin-bottom:2px">Состав одной плиты</div>
+      <div id="bf_item_rows"></div>
+      <button class="btn sm ghost" type="button" id="bf_item_add" style="margin-top:6px">+ Товар на плиту</button>
+     </div>
      <label class="field"><span>Склад прихода</span><select id="bf_warehouse"></select></label>
      <label class="field"><span>Принтер</span><select id="bf_printer"><option value="">Любой свободный</option></select></label>
      <label class="field"><span>Катушка</span><select id="bf_spool"><option value="">Определить автоматически</option></select></label>
@@ -4087,16 +4104,16 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=8.1.0"></script>
-<script src="assets/core.js?v=8.1.0"></script>
-<script src="assets/printer.js?v=8.1.0"></script>
-<script src="assets/ops.js?v=8.1.0"></script>
-<script src="assets/money.js?v=8.1.0"></script>
-<script src="assets/finance.js?v=8.1.0"></script>
-<script src="assets/shelf.js?v=8.1.0"></script>
-<script src="assets/products.js?v=8.1.0"></script>
-<script src="assets/bridge.js?v=8.1.0"></script>
-<script src="assets/app.js?v=8.1.0"></script>
+<script src="assets/qr.js?v=8.2.0"></script>
+<script src="assets/core.js?v=8.2.0"></script>
+<script src="assets/printer.js?v=8.2.0"></script>
+<script src="assets/ops.js?v=8.2.0"></script>
+<script src="assets/money.js?v=8.2.0"></script>
+<script src="assets/finance.js?v=8.2.0"></script>
+<script src="assets/shelf.js?v=8.2.0"></script>
+<script src="assets/products.js?v=8.2.0"></script>
+<script src="assets/bridge.js?v=8.2.0"></script>
+<script src="assets/app.js?v=8.2.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
