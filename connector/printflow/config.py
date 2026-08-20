@@ -106,6 +106,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "guard_cold_minutes": 10.0,     # сопло холодное при статусе «печать» — тревога
     "guard_count_loss": True,       # записывать стоимость брака в расходы
     "guard_snapshot": True,         # сохранять кадр камеры в момент тревоги
+    "guard_cost_limit": 0.0,        # стоп/пауза, если живая себестоимость выше ₽ (0=выкл)
+    "guard_overrun_pct": 15.0,      # перерасход пластика против сметы, % — тревога
     # --- Спагетти-детект по камере ----------------------------------------
     "spaghetti_enabled": False,     # следить за «мешаниной» в кадре (нужен pillow)
     "spaghetti_sensitivity": 3.0,   # во сколько раз кромки должны превысить базу
@@ -151,7 +153,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_maintenance": True,   # напоминания об обслуживании
     "notify_photo": True,         # прикладывать кадр камеры к сообщению
     "notify_finish_remind_min": 10.0,  # напомнить о финише за N минут (0 = выкл)
-    "filament_low_threshold": 15.0,  # % остатка катушки
+    "filament_low_threshold": 15.0,   # % остатка катушки, ниже — тревога
+    "shopping_runout_days": 7.0,    # «материал кончится через N дней» → в закупку
     "dry_humidity_threshold": 55.0,  # влажность AMS, выше которой пора сушить пластик
     "restock_remind": True,       # напоминать о закупке пластика
     "qc_checklist": ["Замерил размеры", "Сфотографировал изделие",

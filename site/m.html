@@ -71,6 +71,8 @@
   <button class="btn" id="b_next" type="button"><span class="ic">≡</span>Следующее</button>
   <button class="btn" id="b_removed" type="button"><span class="ic">✋</span>Снял деталь</button>
   <button class="btn danger" id="b_pause" type="button"><span class="ic">❙❙</span>Пауза</button>
+  <button class="btn" id="b_speed" type="button"><span class="ic">⚡</span>Скорость</button>
+  <button class="btn danger" id="b_stop" type="button"><span class="ic">■</span>Стоп</button>
  </div>
 </div>
 <div class="msg" id="msg"></div>
@@ -176,6 +178,23 @@
         toast(d.ok ? 'Запущено' : (d.error || 'Не вышло'));
         refresh();
       });
+      return;
+    }
+    if (e.target.id === 'b_speed') {
+      var p = ops.printer || {};
+      var lvl = num(p.speed_level, 2);
+      var next = lvl >= 4 ? 1 : lvl + 1;
+      post('/api/printer/command', { command: 'speed', value: next, printer_id: pid() }).then(function(){
+        toast('Скорость: ' + next);
+      });
+      return;
+    }
+    if (e.target.id === 'b_stop') {
+      if (!confirm('Остановить печать? Деталь придётся печатать заново.')) return;
+      post('/api/printer/command', { command: 'stop', printer_id: pid() }).then(function(){
+        toast('Стоп'); refresh();
+      });
+      return;
     }
   });
 

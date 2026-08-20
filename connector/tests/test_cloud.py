@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow import bambu_cloud  # noqa: E402
+from connector.printflow.accounting import num  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 
 
@@ -170,6 +171,16 @@ class CloudLoginTests(unittest.TestCase):
         # Access Code в результат не попадает — секрет наружу не уходит
         self.assertNotIn("access_code", devices[0])
         self.assertNotIn("SECRET", json.dumps(devices))
+
+    def test_devices_include_access_code(self):
+        """Сервер может запросить Access Code отдельно (для камеры/FTPS)."""
+        payload = {"devices": [{"dev_id": "01P123", "name": "Мой P1S",
+                                "dev_product_name": "P1S", "online": True,
+                                "dev_access_code": "SECRET", "dev_ip": "10.0.0.7"}]}
+        with mock.patch.object(bambu_cloud, "request", return_value=payload):
+            devices = bambu_cloud.get_devices("tok", include_access_code=True)
+        self.assertEqual(devices[0]["access_code"], "SECRET")
+        self.assertEqual(devices[0]["host"], "10.0.0.7")
 
 
 class CloudUploadTests(unittest.TestCase):
@@ -445,12 +456,27 @@ class CloudApiTests(unittest.TestCase):
     def test_enrich_cloud_device(self):
         self.db.set_settings({"cloud_token": "TOK", "cloud_uid": "42"})
         with mock.patch.object(bambu_cloud, "get_devices", return_value=[
-                {"serial": "01P999", "name": "Мой", "model": "P1S"}]):
+                {"serial": "01P999", "name": "Мой", "model": "P1S",
+                 "access_code": "LANCODE", "host": "10.0.0.9"}]):
             data = self.api._enrich_cloud_device({"cloud_device": "01P999", "name": "x"})
         self.assertEqual(data["serial"], "01P999")
         self.assertEqual(data["name"], "x")  # имя пользователя не перетираем
         self.assertEqual(data["model"], "P1S")
         self.assertEqual(data["mode"], "cloud")
+        # Камера/FTPS по локальной сети: сервер подставляет код и IP сам.
+        self.assertEqual(data["access_code"], "LANCODE")
+        self.assertEqual(data["host"], "10.0.0.9")
+
+    def test_enrich_cloud_device_without_secrets(self):
+        """Нет Access Code в ответе — подстановки не происходит, ничего не падает."""
+        self.db.set_settings({"cloud_token": "TOK", "cloud_uid": "42"})
+        with mock.patch.object(bambu_cloud, "get_devices", return_value=[
+                {"serial": "01P999", "name": "Мой", "model": "P1S"}]), \
+             mock.patch.object(self.api, "_discover_host", return_value=""):
+            data = self.api._enrich_cloud_device({"cloud_device": "01P999", "name": "x"})
+        self.assertEqual(data["serial"], "01P999")
+        self.assertNotIn("access_code", data)
+        self.assertNotIn("host", data)
 
     def test_login_need_code_flow_saves_email_and_confirms(self):
         """Проверка цепочки: /api/cloud/login (need_code) -> /api/cloud/code (ok).
@@ -480,5 +506,579 @@ class CloudApiTests(unittest.TestCase):
         self.assertEqual(self.db.setting("cloud_uid"), "999")
 
 
+class FilamentAutoAccountTests(unittest.TestCase):
+    """Автоматизация учёта филамента: автоархив пустой катушки и живая стоимость."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _spool(self, remaining: float, price: float = 1600.0, total: float = 1000.0) -> str:
+        row = self.db.upsert("spools", {
+            "id": "sp1", "material": "PLA", "color_name": "Чёрный",
+            "total_grams": total, "remaining_grams": remaining,
+            "price": price, "archived": 0})
+        return row["id"]
+
+    def test_consume_filament_archives_empty_spool(self):
+        from connector.printflow.accounting import Accounting
+        acc = Accounting(self.db)
+        spool_id = self._spool(remaining=5.0)
+        result = acc.consume_filament(10.0, spool_id=spool_id, job_id="j1")
+        self.assertTrue(result["ok"])
+        spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+        self.assertEqual(spool["archived"], 1)
+        self.assertEqual(spool["remaining_grams"], 0)
+        # событие «катушка закончилась» в журнале
+        events = self.db.query("SELECT * FROM events WHERE kind='filament_low'")
+        self.assertTrue(any("закончилась" in (e.get("title") or "") for e in events))
+
+    def test_consume_filament_keeps_spool_below_threshold(self):
+        from connector.printflow.accounting import Accounting
+        acc = Accounting(self.db)
+        spool_id = self._spool(remaining=300.0)
+        acc.consume_filament(250.0, spool_id=spool_id, job_id="j1")
+        spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+        self.assertEqual(spool["archived"], 0)  # ещё не пустая
+        self.assertEqual(spool["remaining_grams"], 50.0)
+
+    def test_register_job_costs_adds_purge_for_multicolor(self):
+        from connector.printflow.accounting import Accounting
+        acc = Accounting(self.db)
+        self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
+                                  "status": "new", "price": 1000, "qty": 1,
+                                  "colors": '[{"color":"Белый","grams":30},'
+                                            '{"color":"Чёрный","grams":30}]'})
+        job = {"id": "j1", "order_id": "o1", "grams": 60, "duration_min": 120,
+               "state": "done", "printer_id": "p1"}
+        result = acc.register_job_costs(job)
+        self.assertGreater(result["purge_grams"], 0)
+        self.assertGreater(result["breakdown"]["purge_grams"], 0)
+
+    def test_reprint_job_clones_failed_into_queue(self):
+        from connector.printflow.manager import PrinterManager
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            self.db.upsert("print_jobs", {"id": "j1", "printer_id": "p1",
+                                          "order_id": None, "name": "деталь.3mf",
+                                          "state": "failed", "source": "printer",
+                                          "file": "деталь.3mf", "finished_at": "2026-08-20T10:00:00",
+                                          "grams": 20, "duration_min": 60, "cost": 5.0})
+            row = manager.reprint_job("j1")
+            self.assertEqual(row["state"], "queued")
+            self.assertEqual(row["source"], "reprint")
+            self.assertEqual(row["name"], "деталь.3mf (повтор)")
+            # сброс счётчиков: у клона граммы/время/стоимость обнулены
+            self.assertEqual(row.get("grams"), 0.0)
+            self.assertEqual(row.get("duration_min"), 0.0)
+            self.assertEqual(row.get("cost"), 0.0)
+        finally:
+            manager.shutdown()
+
+    def test_reprint_last_failed_by_order(self):
+        from connector.printflow.manager import PrinterManager
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
+                                      "status": "new"})
+            self.db.upsert("print_jobs", {"id": "j9", "printer_id": "p1",
+                                          "order_id": "o1", "name": "z.3mf",
+                                          "state": "failed", "source": "printer",
+                                          "finished_at": "2026-08-20T11:00:00"})
+            row = manager.reprint_last_failed("1001")
+            self.assertEqual(row["state"], "queued")
+            self.assertEqual(row["order_id"], "o1")
+            with self.assertRaises(ValueError):
+                manager.reprint_last_failed("9999")
+        finally:
+            manager.shutdown()
+
+    def test_flow_and_speed_pct_commands(self):
+        from connector.printflow.bambu import BambuPrinter
+        printer = BambuPrinter({"id": "p1", "name": "P", "serial": "S",
+                                "enabled": 1, "mode": "cloud"})
+        sent = {}
+        printer.publish = lambda payload: sent.update(payload)
+        printer.command("flow", 90)
+        self.assertIn("M221 S90", sent.get("print", {}).get("param", ""))
+        printer.command("speed_pct", 120)
+        self.assertIn("M220 S120", sent.get("print", {}).get("param", ""))
+
+    def test_job_summary_live_cost_uses_real_spool_price(self):
+        from connector.printflow.manager import PrinterManager
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            self._spool(remaining=500.0, price=2000.0, total=1000.0)  # 2 ₽/г
+            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
+                                      "status": "printing", "price": 1000,
+                                      "grams": 100, "qty": 1})
+            self.db.upsert("print_jobs", {"id": "j1", "printer_id": "p1",
+                                          "order_id": "o1", "state": "running",
+                                          "spool_id": "sp1", "name": "x.3mf"})
+            snap = {
+                "id": "p1",
+                "printer": {"state": "RUNNING", "weight": 50, "progress": 50,
+                            "elapsed_min": 60, "remaining_min": 60},
+                "ams": {"trays": []},
+            }
+            summary = manager.job_summary(snap)
+            # Реальная цена катушки 2 ₽/г: 50 г = 100 ₽ филамента (не тариф).
+            self.assertGreaterEqual(summary["spent"], 100.0)
+            self.assertEqual(summary["spool"]["material"], "PLA")
+            self.assertEqual(summary["spool"]["price"], 2000.0)
+            self.assertGreater(summary["cost_total"], summary["spent"])
+            self.assertGreater(summary["remaining_grams"], 0)
+            # прибыль = цена − полная себестоимость; точка безубыточности есть.
+            self.assertIsNotNone(summary["profit"])
+            self.assertIsNotNone(summary["break_even_pct"])
+        finally:
+            manager.shutdown()
+
+
+class GuardAndTelegramTests(unittest.TestCase):
+    """Сторож (перерасход) и новые команды Telegram (callback/медиагруппа)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_overrun_alert_when_projected_exceeds_estimate(self):
+        from connector.printflow.watchdog import Watchdog
+        from connector.printflow.manager import PrinterManager
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            guard = Watchdog(manager)
+            self.db.upsert("print_jobs", {"id": "j1", "printer_id": "p1",
+                                          "state": "running", "name": "x.3mf",
+                                          "est_grams": 100})
+            snap = {"printer": {"state": "RUNNING", "progress": 50,
+                                "weight": 70, "problems": []},
+                    "ams": {"trays": []},
+                    "temperature": {"nozzle": 220, "nozzle_target": 220, "bed": 55,
+                                    "bed_target": 55, "chamber": 30},
+                    "fans": {"part": 0, "aux": 0}}
+            alerts = guard._check_overrun(manager.get("p1") or _FakePrinter(), snap)
+            # 70 г к 50% → проецируется 140 г против сметы 100 (+40% > 15%)
+            self.assertTrue(any(a["code"] == "overrun" for a in alerts))
+        finally:
+            manager.shutdown()
+
+    def test_overrun_silent_when_within_tolerance(self):
+        from connector.printflow.watchdog import Watchdog
+        from connector.printflow.manager import PrinterManager
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            guard = Watchdog(manager)
+            self.db.upsert("print_jobs", {"id": "j1", "printer_id": "p1",
+                                          "state": "running", "name": "x.3mf",
+                                          "est_grams": 100})
+            snap = {"printer": {"state": "RUNNING", "progress": 50,
+                                "weight": 52, "problems": []},
+                    "ams": {"trays": []},
+                    "temperature": {"nozzle": 220, "nozzle_target": 220, "bed": 55,
+                                    "bed_target": 55, "chamber": 30},
+                    "fans": {"part": 0, "aux": 0}}
+            alerts = guard._check_overrun(_FakePrinter(), snap)
+            self.assertEqual(alerts, [])
+        finally:
+            manager.shutdown()
+
+    def test_telegram_printer_selection(self):
+        from connector.printflow.manager import PrinterManager
+        from connector.printflow.telegram_bot import TelegramBot
+        from connector.printflow.bambu import BambuPrinter
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            bot = TelegramBot.__new__(TelegramBot)
+            bot.manager = manager
+            bot.db = self.db
+            bot._printer_choice = {}
+            # Два принтера в парке
+            manager.printers["p1"] = BambuPrinter({"id": "p1", "name": "Первый",
+                                                   "serial": "S1", "enabled": 1, "mode": "cloud"})
+            manager.printers["p2"] = BambuPrinter({"id": "p2", "name": "Второй",
+                                                   "serial": "S2", "enabled": 1, "mode": "cloud"})
+            listing = bot._list_printers("chat1")
+            self.assertIn("Первый", listing)
+            self.assertIn("Второй", listing)
+            result = bot._select_printer("chat1", 2)
+            self.assertIn("Второй", result)
+            self.assertEqual(bot._printer_choice.get("chat1"), "p2")
+            self.assertIn("1 до 2", bot._select_printer("chat1", 9))
+        finally:
+            manager.shutdown()
+
+    def test_telegram_run_command_next_and_reprint(self):
+        from connector.printflow.manager import PrinterManager
+        from connector.printflow.telegram_bot import TelegramBot
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        try:
+            bot = TelegramBot.__new__(TelegramBot)
+            bot.manager = manager
+            bot.db = self.db
+            # reprint без failed-заданий — честная ошибка
+            self.assertIn("Нет сорванных", bot._run_command("reprint"))
+            self.assertIn("Принтеры не добавлены", bot._run_command("next"))
+            self.assertIn("Деталь снята", bot._run_command("removed"))
+        finally:
+            manager.shutdown()
+
+
+class _FakePrinter:
+    id = "p1"
+    record = {"name": "Принтер"}
+
+    class _Camera:
+        frame = None
+
+        def snapshot(self, note=""):
+            raise ValueError("no frame")
+
+    camera = _Camera()
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class RulesEngineTests(unittest.TestCase):
+    """Конструктор правил «если-то»: триггеры, шаблоны, действия."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _engine(self):
+        from connector.printflow.manager import PrinterManager
+        from connector.printflow.rules import RulesEngine
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        return manager, manager.rules
+
+    def test_seed_defaults_creates_rules(self):
+        manager, engine = self._engine()
+        try:
+            rules = engine.rules()
+            self.assertGreaterEqual(len(rules), 6)
+            events = {r["event"] for r in rules}
+            self.assertIn("print_failed", events)
+            self.assertIn("debt_overdue", events)
+            self.assertIn("order_status", events)
+            # все стартовые правила выключены
+            self.assertTrue(all(not int(num(r.get("enabled"))) for r in rules))
+        finally:
+            manager.shutdown()
+
+    def test_template_render(self):
+        from connector.printflow.rules import _render
+        self.assertEqual(_render("Привет, {name}!", {"name": "Мир"}), "Привет, Мир!")
+        self.assertEqual(_render("{missing} {x}", {"x": 1}), " 1")
+
+    def test_run_fires_matching_rule(self):
+        manager, engine = self._engine()
+        try:
+            rule = engine.save_rule({
+                "name": "Тест", "event": "print_failed", "action": "event",
+                "config": {"template": "Ошибка: {name}"}, "enabled": 1})
+            fired = engine.run("print_failed", {"name": "деталь.3mf", "detail": "x"})
+            self.assertEqual(len(fired), 1)
+            self.assertEqual(fired[0]["id"], rule["id"])
+            # событие записано в журнал с подставленным шаблоном
+            events = self.db.events(50, kind="rule")
+            self.assertTrue(any("деталь.3mf" in (e.get("detail") or "") for e in events))
+            # счётчик срабатываний вырос
+            saved = self.db.one("SELECT fires FROM automation_rules WHERE id=?", (rule["id"],))
+            self.assertEqual(int(num(saved["fires"])), 1)
+        finally:
+            manager.shutdown()
+
+    def test_run_skips_disabled_and_wrong_event(self):
+        manager, engine = self._engine()
+        try:
+            engine.save_rule({"name": "A", "event": "print_failed", "action": "event",
+                              "enabled": 0})
+            engine.save_rule({"name": "B", "event": "print_complete", "action": "event",
+                              "enabled": 1})
+            fired = engine.run("print_failed", {"name": "x"})
+            self.assertEqual(fired, [])
+        finally:
+            manager.shutdown()
+
+    def test_order_status_trigger_via_repo_hook(self):
+        from connector.printflow.repo import Repo
+        from connector.printflow.manager import PrinterManager
+        from connector.printflow.rules import RulesEngine
+        manager = PrinterManager(self.db, Repo(self.db))  # type: ignore[arg-type]
+        try:
+            engine = manager.rules
+            engine.save_rule({"name": "Готов", "event": "order_status", "action": "event",
+                              "config": {"status": "ready", "template": "№{number}"},
+                              "enabled": 1})
+            repo = manager.repo
+            order = repo.save_order({"product": "адресник", "status": "new",
+                                     "customer_name": "Мария"})
+            repo.save_order({"id": order["id"], "status": "ready"})
+            events = self.db.events(50, kind="rule")
+            self.assertTrue(any(("№" + order["number"]) in (e.get("detail") or "")
+                                for e in events))
+        finally:
+            manager.shutdown()
+
+    def test_toggle_and_delete(self):
+        manager, engine = self._engine()
+        try:
+            rule = engine.save_rule({"name": "T", "event": "print_pause",
+                                     "action": "notify", "enabled": 1})
+            engine.toggle(rule["id"], False)
+            row = self.db.one("SELECT enabled FROM automation_rules WHERE id=?",
+                              (rule["id"],))
+            self.assertEqual(int(num(row["enabled"])), 0)
+            engine.delete_rule(rule["id"])
+            self.assertIsNone(self.db.one("SELECT 1 FROM automation_rules WHERE id=?",
+                                          (rule["id"],)))
+        finally:
+            manager.shutdown()
+
+
+class SecretEncryptionTests(unittest.TestCase):
+    """Шифрование секретов в базе (роадмап 10.10): stdlib, прозрачная миграция."""
+
+    def test_crypto_roundtrip(self):
+        from connector.printflow import crypto
+        secret = "tok_AbCd1234-очень-секретный"
+        token = crypto.encrypt(secret)
+        self.assertTrue(token.startswith("enc:v1:"))
+        self.assertNotIn(secret, token)
+        self.assertEqual(crypto.decrypt(token), secret)
+        # пустая строка остаётся пустой, старый текст читается как есть
+        self.assertEqual(crypto.encrypt(""), "")
+        self.assertEqual(crypto.decrypt("plain-old-value"), "plain-old-value")
+
+    def test_crypto_tamper_detected(self):
+        from connector.printflow import crypto
+        token = crypto.encrypt("topsecret")
+        # подменяем последний символ — целостность должна нарушиться
+        tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+        # decrypt не должен вернуть исходный секрет (пусто или повреждён)
+        result = crypto.decrypt(tampered)
+        self.assertNotEqual(result, "topsecret")
+
+    def test_settings_secrets_encrypted_at_rest(self):
+        import tempfile, pathlib
+        from connector.printflow.db import Database
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            db = Database(pathlib.Path(tmp.name) / "t.sqlite3")
+            db.set_settings({"telegram_token": "BOT_SECRET_123", "cloud_token": "CLOUD_SECRET_456"})
+            # в таблице — зашифровано, не открытым текстом
+            raw = db.one("SELECT value FROM settings WHERE key='telegram_token'")
+            self.assertNotIn("BOT_SECRET_123", str(raw))
+            # чтение через API настроек расшифровывает
+            secret_settings = db.settings(include_secrets=True)
+            self.assertEqual(secret_settings["telegram_token"], "BOT_SECRET_123")
+            self.assertEqual(secret_settings["cloud_token"], "CLOUD_SECRET_456")
+            # публичное чтение — маска, без секрета
+            public = db.settings()
+            self.assertEqual(public["telegram_token"], "••••••••")
+            self.assertTrue(public["has_telegram_token"])
+            db.close()
+        finally:
+            tmp.cleanup()
+
+    def test_legacy_plaintext_secret_still_readable(self):
+        import tempfile, pathlib, json
+        from connector.printflow.db import Database
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            db = Database(pathlib.Path(tmp.name) / "t.sqlite3")
+            # имитируем старую установку: секрет открытым текстом в базе
+            db.execute("INSERT INTO settings(key,value) VALUES('cloud_token', ?)"
+                       " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                       (json.dumps("OLD_PLAIN_TOKEN"),))
+            self.assertEqual(db.settings(include_secrets=True)["cloud_token"],
+                             "OLD_PLAIN_TOKEN")
+            db.close()
+        finally:
+            tmp.cleanup()
+
+    def test_access_code_encryption_opt_in(self):
+        import tempfile, pathlib
+        from connector.printflow.db import Database
+        from connector.printflow.repo import Repo
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            db = Database(pathlib.Path(tmp.name) / "t.sqlite3")
+            repo = Repo(db)
+            db.set_settings({"encrypt_access_code": True})
+            row = repo.save_printer({"name": "P", "host": "1.2.3.4",
+                                     "serial": "S1", "access_code": "LANCODE123"})
+            raw = db.one("SELECT access_code FROM printers WHERE id=?", (row["id"],))
+            self.assertNotIn("LANCODE123", str(raw["access_code"]))
+            self.assertTrue(str(raw["access_code"]).startswith("enc:v1:"))
+            # repo.printers(include_secrets=True) расшифровывает
+            secret_row = repo.printers(include_secrets=True)
+            self.assertEqual(secret_row[0]["access_code"], "LANCODE123")
+            # публичное чтение — маска
+            public_row = repo.printers()
+            self.assertEqual(public_row[0]["access_code"], "")
+            self.assertTrue(public_row[0]["has_access_code"])
+            db.close()
+        finally:
+            tmp.cleanup()
+
+
+class TelegramPhotoAndWatchTests(unittest.TestCase):
+    """«фото N» и «следи N» в Telegram: привязка фото, слежка за прогрессом."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _bot(self):
+        from connector.printflow.manager import PrinterManager
+        from connector.printflow.telegram_bot import TelegramBot
+        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        bot = TelegramBot.__new__(TelegramBot)
+        bot.manager = manager
+        bot.db = self.db
+        bot._watched = {}
+        bot._printer_choice = {}
+        bot._live = {}
+        bot._pending_stop = {}
+        return manager, bot
+
+    def test_watch_order_registers(self):
+        manager, bot = self._bot()
+        try:
+            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
+                                      "status": "printing"})
+            reply = bot._watch_order("chat1", "1001")
+            self.assertIn("Слежу", reply)
+            self.assertEqual(bot._watched["chat1"]["number"], "1001")
+            self.assertEqual(bot._watched["chat1"]["last_milestone"], 0)
+        finally:
+            manager.shutdown()
+
+    def test_watch_order_missing(self):
+        manager, bot = self._bot()
+        try:
+            self.assertIn("не найден", bot._watch_order("chat1", "9999"))
+            self.assertEqual(bot._watched, {})
+        finally:
+            manager.shutdown()
+
+    def test_maybe_watch_sends_on_milestone(self):
+        manager, bot = self._bot()
+        try:
+            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "адресник",
+                                      "status": "printing"})
+            self.db.upsert("print_jobs", {"id": "j1", "order_id": "o1", "state": "running",
+                                          "progress": 25})
+            sent = []
+            manager.notify_async = lambda text, photo=None: sent.append(text)
+            bot._watched["chat1"] = {"number": "1001", "last_milestone": 0}
+            bot._maybe_watch()
+            self.assertTrue(any("20%" in t for t in sent))
+            self.assertEqual(bot._watched["chat1"]["last_milestone"], 20)
+        finally:
+            manager.shutdown()
+
+    def test_attach_photo_to_latest_active_order(self):
+        manager, bot = self._bot()
+        try:
+            self.db.upsert("orders", {"id": "o9", "number": "1009", "product": "органайзер",
+                                      "status": "printing"})
+            bot._download_file = lambda file_id: b"\xff\xd8\xff\xd9JPEGDATA"
+            bot._reply = lambda chat, text: None
+            bot._attach_photo("chat1", [{"file_id": "abc123"}], "")
+            photos = self.db.query("SELECT * FROM order_photos WHERE order_id='o9'")
+            self.assertEqual(len(photos), 1)
+            self.assertEqual(photos[0]["note"], "фото из Telegram")
+            # файл реально записан в каталог фото
+            from connector.printflow.config import PHOTO_DIR
+            saved = PHOTO_DIR / photos[0]["file"]
+            self.assertTrue(saved.exists())
+        finally:
+            manager.shutdown()
+
+
+class ShoppingListTests(unittest.TestCase):
+    """Список закупок: ручной + автозаполнение по катушкам и темпу расхода."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_add_and_toggle_and_delete(self):
+        from connector.printflow.shopping import ShoppingList
+        shop = ShoppingList(self.db)
+        item = shop.add({"name": "PLA чёрный", "material": "PLA", "qty": 2,
+                         "unit": "кг"})
+        self.assertEqual(len(shop.items()), 1)
+        shop.toggle(item["id"], True)
+        self.assertEqual(len(shop.items()), 0)  # купленное не в открытом списке
+        self.assertEqual(len(shop.items(include_done=True)), 1)
+        shop.delete(item["id"])
+        self.assertEqual(len(shop.items(include_done=True)), 0)
+
+    def test_auto_fill_low_spool(self):
+        from connector.printflow.shopping import ShoppingList
+        shop = ShoppingList(self.db)
+        self.db.upsert("spools", {"id": "sp1", "material": "PLA", "color_name": "Чёрный",
+                                  "total_grams": 1000, "remaining_grams": 80,
+                                  "price": 1600, "archived": 0})
+        result = shop.auto_fill()
+        self.assertEqual(result["count"], 1)
+        item = shop.items()[0]
+        self.assertEqual(item["material"], "PLA")
+        self.assertEqual(item["source"], "auto")
+        self.assertIn("осталось", item["reason"])
+        # повторный запуск не дублирует
+        again = shop.auto_fill()
+        self.assertEqual(again["count"], 0)
+
+    def test_auto_fill_runout_rate(self):
+        from connector.printflow.shopping import ShoppingList
+        from connector.printflow.config import now_iso
+        shop = ShoppingList(self.db)
+        self.db.set_settings({"shopping_runout_days": 14.0})
+        # расход 600 г за 30 дней = 20 г/день, на складе 200 г (20%, выше порога
+        # «мало пластика») → хватит на 10 дней < 14 → попадает по темпу расхода.
+        self.db.upsert("spools", {"id": "sp2", "material": "PETG", "color_name": "Белый",
+                                  "total_grams": 1000, "remaining_grams": 200,
+                                  "price": 1800, "archived": 0})
+        self.db.execute(
+            "INSERT INTO filament_usage(at,spool_id,grams,cost) VALUES(?,?,?,?)",
+            (now_iso(), "sp2", 600.0, 10.0))
+        result = shop.auto_fill()
+        self.assertTrue(any(i["material"] == "PETG" for i in result["added"]))
+        self.assertTrue(any("темп" in (i.get("reason") or "") for i in result["added"]))
+
+    def test_auto_fill_dry_run(self):
+        from connector.printflow.shopping import ShoppingList
+        shop = ShoppingList(self.db)
+        self.db.upsert("spools", {"id": "sp3", "material": "ABS", "color_name": "Серый",
+                                  "total_grams": 1000, "remaining_grams": 50,
+                                  "price": 1500, "archived": 0})
+        result = shop.auto_fill(dry_run=True)
+        self.assertTrue(result["added"])
+        self.assertEqual(len(shop.items()), 0)  # dry_run ничего не записал

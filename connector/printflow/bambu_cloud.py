@@ -211,8 +211,14 @@ def get_uid(token: str, region: str = "global") -> str:
     return str(uid)
 
 
-def get_devices(token: str, region: str = "global") -> list[dict]:
-    """Список принтеров аккаунта. Без Access Code — он наружу не отдаётся."""
+def get_devices(token: str, region: str = "global",
+                include_access_code: bool = False) -> list[dict]:
+    """Список принтеров аккаунта.
+
+    Access Code — секрет: по умолчанию наружу не отдаётся. Сервер запрашивает
+    его отдельно (include_access_code=True), чтобы подставить в карточку
+    принтера для локальных камеры/FTPS, не показывая в браузере.
+    """
     base = api_host(region)
     devices: list[dict] = []
     for path in (f"{base}/v1/iot-service/api/user/bind",
@@ -227,13 +233,19 @@ def get_devices(token: str, region: str = "global") -> list[dict]:
             break
     out = []
     for dev in devices or []:
-        out.append({
+        item = {
             "serial": str(dev.get("dev_id") or ""),
             "name": str(dev.get("name") or "Bambu Lab"),
             "model": str(dev.get("dev_product_name") or dev.get("dev_model_name") or ""),
             "online": bool(dev.get("online")),
             "print_status": str(dev.get("print_status") or ""),
-        })
+            # Локальный IP есть не во всех ответах; иначе его даёт SSDP-скан.
+            "host": str(dev.get("dev_ip") or dev.get("ip") or dev.get("lan_ip")
+                        or dev.get("device_ip") or ""),
+        }
+        if include_access_code:
+            item["access_code"] = str(dev.get("dev_access_code") or "")
+        out.append(item)
     return [d for d in out if d["serial"]]
 
 

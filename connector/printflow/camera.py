@@ -50,6 +50,7 @@ class CameraWorker:
         self.error = ""
         self.fps = 0.0
         self.demo = False          # показываем заготовленные кадры
+        self._no_lan = False       # облачный режим без локального IP
         self.snapshots: list[dict] = []  # архив кадров печати (таймлапс)
         self._demo_index = 0
         self._frames_window: list[float] = []
@@ -114,11 +115,15 @@ class CameraWorker:
             cfg = self.get_config() or {}
             host, code = cfg.get("host"), cfg.get("access_code")
             if not host or not code:
+                # Облачный режим без локального IP: камера физически работает
+                # только по LAN (порт 6000) — объясняем это честно в статусе.
+                self._no_lan = bool(cfg.get("cloud")) and not host
                 if self._demo_tick():
                     continue
                 self.demo = False
                 self._stop.wait(3)
                 continue
+            self._no_lan = False
             try:
                 context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
                 context.check_hostname = False
@@ -182,13 +187,17 @@ class CameraWorker:
             return next((s["frame"] for s in self.snapshots if s["id"] == shot_id), None)
 
     def state(self) -> dict:
+        error = "" if self.demo else self.friendly_error()
+        if not error and not self.frame and self._no_lan:
+            error = ("Камера работает по локальной сети (порт 6000). "
+                     "Укажите IP принтера в карточке или включите демо-режим.")
         return {
             "available": bool(self.frame),
             "age": round(time.time() - self.frame_at, 1) if self.frame_at else None,
             "fps": self.fps,
             "demo": self.demo,
             "shots": len(self.snapshots),
-            "error": "" if self.demo else self.friendly_error(),
+            "error": error,
         }
 
     def friendly_error(self) -> str:

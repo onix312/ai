@@ -162,6 +162,7 @@
       <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
       <div><span>Потрачено</span><b id="pr_spent">—</b></div>
       <div><span>Себестоимость</span><b id="pr_cost_total">—</b></div>
+      <div class="wide"><span>Прибыль / окупаемость</span><b id="pr_job_profit">—</b></div>
      </div>
     </article>
     <div class="telemetry">
@@ -196,6 +197,13 @@
      <div class="cmd-row">
       <label class="field"><span>Скорость печати</span><select id="pr_speed_sel"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Ludicrous</option></select></label>
       <button class="btn" id="pr_speed_apply" type="button">Применить</button>
+     </div>
+     <div class="cmd-row">
+      <label class="field"><span>Скорость, % (10–400)</span><input type="number" id="pr_set_speed" min="10" max="400" value="100"></label><button class="btn" data-set="speed_pct" type="button">Задать</button>
+      <label class="field"><span>Поток, % (50–150)</span><input type="number" id="pr_set_flow" min="50" max="150" value="100"></label><button class="btn" data-set="flow" type="button">Задать</button>
+     </div>
+     <div class="cmd-row">
+      <label class="field"><span>Исключить объект №</span><input type="number" id="pr_skip_obj" min="1" max="64" value="1"></label><button class="btn" id="pr_skip_apply" type="button">Пропустить</button>
      </div>
      <details class="adv"><summary>Температуры и вентиляторы</summary><div class="adv-body">
       <div class="cmd-row"><label class="field"><span>Сопло, °C</span><input type="number" id="pr_set_nozzle" min="0" max="300" value="0"></label><button class="btn" data-set="nozzle_temp" type="button">Задать</button></div>
@@ -590,6 +598,10 @@
  </div>
  <div class="kpi-grid" id="stock_kpis"></div>
  <div class="spool-grid" id="spool_grid"></div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Список закупок</h2><p>Что докупить — авто и вручную</p></div><button class="btn sm" id="shopping_auto" type="button">Автозаполнить</button></div>
+  <div id="shopping_list"></div>
+ </div>
  <div class="grid g2" style="margin-top:16px">
   <div class="card">
    <div class="card-head"><div><h2>Расход пластика по материалам</h2><p>За 30 дней — для закупок</p></div></div>
@@ -3244,6 +3256,10 @@
     <div id="set_guard"></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила «если — то»</h2><p>Настраиваемая автоматизация: событие → действие</p></div><button class="btn sm" id="rule_add" type="button">+ Правило</button></div>
+    <div id="set_rules"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Правила очереди</h2><p>Когда и что запускать самому</p></div></div>
     <div id="set_queue_rules"></div>
    </div>
@@ -3964,6 +3980,23 @@
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="schedule_modal">Закрыть</button>
   <button class="btn primary" type="button" id="sch_save">Запланировать</button></div>
+</dialog>
+
+<!-- ================================================ правило «если — то» -->
+<dialog id="rule_modal" class="modal">
+ <div class="modal-head"><div><h3>Новое правило</h3><p>Событие → действие, выполняется автоматически</p></div>
+  <button class="icon-btn" type="button" data-close="rule_modal">✕</button></div>
+ <div class="modal-body">
+  <div class="frm-grid">
+   <label class="wide">Название<input id="rl_name" placeholder="Например: ошибка печати → Telegram"></label>
+   <label>Событие<select id="rl_event"></select></label>
+   <label>Действие<select id="rl_action"></select></label>
+   <label class="wide">Шаблон сообщения<textarea id="rl_template" rows="3" placeholder="{name} · {detail}"></textarea></label>
+  </div>
+  <p class="muted" style="font-size:12px">Подстановки: {name} {detail} {printer} {order} {number} {product} {material} {color} {grams} {pct} {total} {count} {days} {status}</p>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="rule_modal">Закрыть</button>
+  <button class="btn primary" type="button" id="rule_save">Создать</button></div>
 </dialog>
 
 <!-- ================================================== AMS-профили -->

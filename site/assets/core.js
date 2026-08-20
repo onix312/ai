@@ -638,6 +638,8 @@ function connectSSE() {
     try { row = JSON.parse(msg.data); } catch (e) { return; }
     PF.state.events = [row, ...(PF.state.events || [])].slice(0, 60);
     PF.emit('events', PF.state.events);
+    // Браузерное уведомление — мгновенно, не дожидаясь опроса.
+    PF.emit('notify', row);
     if (DATA_EVENTS.test(row.kind || '')) scheduleCore();
   });
 

@@ -462,6 +462,20 @@ CREATE TABLE IF NOT EXISTS price_history (
     catalog_id TEXT
 );
 
+CREATE TABLE IF NOT EXISTS shopping_items (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    material TEXT DEFAULT '',
+    qty REAL DEFAULT 1,           -- сколько закупить (катушек/кг)
+    unit TEXT DEFAULT 'кг',       -- кг | шт | катушка
+    reason TEXT DEFAULT '',       -- авто-причина: «осталось N г» / «темп N г/дн»
+    source TEXT DEFAULT 'manual', -- manual | auto
+    done INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shopping_done ON shopping_items(done, created_at);
+
 CREATE TABLE IF NOT EXISTS drying_sessions (
     id TEXT PRIMARY KEY,
     at TEXT,
@@ -535,6 +549,22 @@ CREATE TABLE IF NOT EXISTS order_history (
     author TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_orderhist_order ON order_history(order_id, id);
+
+-- ------------------------------------------- 8.2: конструктор правил «если-то»
+CREATE TABLE IF NOT EXISTS automation_rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    event TEXT DEFAULT '',
+    config TEXT DEFAULT '{}',
+    action TEXT DEFAULT 'notify',
+    enabled INTEGER DEFAULT 1,
+    position INTEGER DEFAULT 0,
+    last_fired TEXT DEFAULT '',
+    fires INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_rules_event ON automation_rules(event);
 """
 
 
@@ -859,8 +889,14 @@ class Database:
                 data[row["key"]] = json.loads(row["value"])
             except json.JSONDecodeError:
                 data[row["key"]] = row["value"]
-        if not include_secrets:
-            from .config import SECRET_SETTINGS
+        from .config import SECRET_SETTINGS
+        if include_secrets:
+            # Расшифровываем секреты только явно запрошенным читателям.
+            from .crypto import decrypt
+            for key in SECRET_SETTINGS:
+                if key in data and isinstance(data[key], str):
+                    data[key] = decrypt(data[key])
+        else:
             for key in SECRET_SETTINGS:
                 data[f"has_{key}"] = bool(data.get(key))
                 data[key] = "••••••••" if data.get(key) else ""
@@ -870,18 +906,27 @@ class Database:
         row = self.one("SELECT value FROM settings WHERE key=?", (key,))
         if not row:
             return DEFAULT_SETTINGS.get(key, default)
+        value = row["value"]
         try:
-            return json.loads(row["value"])
+            value = json.loads(value)
         except json.JSONDecodeError:
-            return row["value"]
+            pass
+        from .config import SECRET_SETTINGS
+        if key in SECRET_SETTINGS and isinstance(value, str):
+            from .crypto import decrypt
+            value = decrypt(value)
+        return value
 
     def set_settings(self, patch: dict[str, Any]) -> dict:
         from .config import SECRET_SETTINGS
+        from .crypto import encrypt
         for key, value in patch.items():
             if key not in DEFAULT_SETTINGS:
                 continue
             if key in SECRET_SETTINGS and (value == "" or value == "••••••••"):
                 continue  # пустое поле означает «не менять сохранённый секрет»
+            if key in SECRET_SETTINGS and isinstance(value, str) and value:
+                value = encrypt(value)  # секрет в базе — только зашифрованным
             self.execute(
                 "INSERT INTO settings(key,value) VALUES(?,?)"
                 " ON CONFLICT(key) DO UPDATE SET value=excluded.value",

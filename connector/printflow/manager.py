@@ -27,6 +27,12 @@ class PrinterManager:
         self.db = db
         self.repo = repo
         self.acc = Accounting(db)
+        # Конструктор правил «если-то»: настраиваемая автоматизация поверх событий.
+        from .rules import RulesEngine
+        self.rules = RulesEngine(self)
+        # Хук перехода заказа между статусами (repo не знает о менеджере).
+        if self.repo is not None:
+            self.repo._on_status_change = self.rules.on_order_status
         self.printers: dict[str, BambuPrinter] = {}
         self.guard = Watchdog(self)
         from .spaghetti import SpaghettiWatch
@@ -40,6 +46,7 @@ class PrinterManager:
         self._ams_reported: dict[str, set[str]] = {}
         self._finish_reminded: set[str] = set()
         self._restock_reported: set[str] = set()
+        self._cost_limit_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync = 0.0
         self._last_cloud_sync: dict[str, float] = {}
@@ -60,6 +67,14 @@ class PrinterManager:
     def reload(self) -> None:
         """Синхронизировать список подключений с таблицей printers."""
         records = {r["id"]: r for r in self.db.query("SELECT * FROM printers")}
+        # Access Code может лежать зашифрованным — расшифровываем для подключения.
+        try:
+            from .crypto import decrypt, is_encrypted
+            for record in records.values():
+                if is_encrypted(record.get("access_code") or ""):
+                    record["access_code"] = decrypt(record["access_code"])
+        except Exception:
+            pass
         cloud = self._cloud_creds()
         with self.lock:
             for pid in list(self.printers):
@@ -134,6 +149,11 @@ class PrinterManager:
             self._on_print_end(printer_id, kind, detail, data)
         if kind in ("start", "complete", "error", "pause"):
             self._auto_photo(printer_id, kind, detail)
+        # Конструктор правил: событие принтера может запустить правила.
+        try:
+            self.rules.on_print_event(kind, title, detail, printer_id, data)
+        except Exception as exc:
+            self.db.add_event("error", "Правила: сбой обработки", str(exc), printer_id)
         self._notify(kind, title, detail, printer_id)
 
     def _auto_photo(self, printer_id: str, kind: str, note: str) -> None:
@@ -744,6 +764,107 @@ class PrinterManager:
         except Exception as exc:
             self.db.add_event("error", "Автозапуск задания не удался", str(exc), printer_id)
 
+    def reprint_job(self, job_id: str, printer_id: str = "") -> dict:
+        """Клонировать завершённое/сорванное задание в очередь для повтора."""
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+        if not job:
+            raise ValueError("Задание не найдено")
+        clone = dict(job)
+        for key in ("started_at", "finished_at", "duration_min", "grams",
+                    "progress", "layers", "result", "error", "cost", "energy_kwh",
+                    "batch_id", "batch_qty"):
+            clone.pop(key, None)
+        clone["id"] = uid("job")
+        clone["state"] = "queued"
+        clone["source"] = "reprint"
+        clone["queued_at"] = now_iso()
+        clone["created_at"] = now_iso()
+        if printer_id:
+            clone["printer_id"] = printer_id
+        base = (job.get("name") or "").rstrip()
+        if base.endswith(" (повтор)"):
+            base = base[: -len(" (повтор)")]
+        clone["name"] = base + " (повтор)"
+        row = self.db.upsert("print_jobs", clone)
+        self.db.add_event("queue", "Задание отправлено на повтор", row["name"],
+                          clone["printer_id"] or "", {"job_id": row["id"]})
+        return row
+
+    def reprint_last_failed(self, order_number: str = "") -> dict:
+        """Повторить последнее сорванное задание (по номеру заказа, если задан)."""
+        if order_number:
+            rows = self.db.query(
+                "SELECT j.* FROM print_jobs j JOIN orders o ON o.id=j.order_id"
+                " WHERE j.state='failed' AND o.number=? ORDER BY datetime(j.finished_at) DESC LIMIT 1",
+                (order_number,))
+        else:
+            rows = self.db.query(
+                "SELECT * FROM print_jobs WHERE state='failed'"
+                " ORDER BY datetime(finished_at) DESC LIMIT 1")
+        if not rows:
+            raise ValueError("Нет сорванных заданий для повтора")
+        return self.reprint_job(rows[0]["id"])
+
+    def _check_cost_limit(self, printer: BambuPrinter, snap: dict) -> None:
+        """Лимит стоимости: пауза, если живая себестоимость перешла порог."""
+        limit = num(self.db.setting("guard_cost_limit", 0.0))
+        if limit <= 0 or snap["printer"]["state"] != "RUNNING":
+            return
+        job = snap.get("job") or {}
+        spent = num(job.get("spent"))
+        job_id = job.get("job_id") or ""
+        if spent < limit or not job_id or job_id in self._cost_limit_reported:
+            return
+        self._cost_limit_reported.add(job_id)
+        if len(self._cost_limit_reported) > 200:
+            self._cost_limit_reported.clear()
+        try:
+            printer.command("pause")
+            acted = "печать поставлена на паузу"
+        except Exception as exc:
+            acted = f"паузу отправить не удалось: {exc}"
+        detail = f"Потрачено {spent:.0f} ₽ при лимите {limit:.0f} ₽ — {acted}"
+        self.db.add_event("guard", "Сторож: превышен лимит стоимости",
+                          detail, printer.id,
+                          {"job_id": job_id, "spent": spent, "limit": limit})
+        self.notify_async(
+            f"PrintFlow · {printer.record.get('name', 'Принтер')}\n"
+            f"⚠ Превышен лимит стоимости печати\n{detail}", None)
+
+    def idle_stats(self) -> dict:
+        """Простой принтеров и упущенная прибыль (норма × часы простоя)."""
+        target = num(self.db.setting("target_profit_per_hour", 250.0), 250.0)
+        rows = self.db.query(
+            "SELECT printer_id, MAX(finished_at) last_done FROM print_jobs"
+            " WHERE state='done' GROUP BY printer_id")
+        last_done = {r["printer_id"]: r["last_done"] for r in rows}
+        idle_minutes = 0.0
+        detail = []
+        from datetime import datetime
+        for printer in self.printers.values():
+            snap = printer.snapshot()
+            if snap["printer"]["state"] not in ("IDLE", "FINISH", "OFFLINE"):
+                continue
+            last = last_done.get(printer.id)
+            if not last:
+                continue
+            try:
+                done_at = datetime.fromisoformat(last)
+                minutes = max(0.0, (datetime.now().astimezone() - done_at).total_seconds() / 60)
+            except (ValueError, TypeError):
+                continue
+            idle_minutes += minutes
+            detail.append({"printer": printer.record.get("name", "Принтер"),
+                           "minutes": round(minutes, 1),
+                           "lost": round(minutes / 60 * target, 2)})
+        return {
+            "idle_minutes": round(idle_minutes, 1),
+            "idle_hours": round(idle_minutes / 60, 2),
+            "lost_profit": round(idle_minutes / 60 * target, 2),
+            "rate_per_hour": target,
+            "printers": detail,
+        }
+
     # 8.0: preflight wrapper
     def preflight(self, printer_id: str, filename: str, plate: int = 1, ams_mapping=None) -> dict:
         try:
@@ -770,27 +891,66 @@ class PrinterManager:
         if (printer and kind in ("complete", "error")
                 and settings.get("notify_photo", True)):
             photo = printer.camera.frame
-        self.notify_async(text, photo)
+        # Уведомления с действиями: к завершению/ошибке добавляем inline-кнопки,
+        # чтобы реагировать не выходя из чата.
+        buttons = []
+        if kind == "complete":
+            buttons = [("📷 Кадр", "cmd:frame"), ("▶ Следующее", "cmd:next"),
+                       ("🤚 Снял", "cmd:removed")]
+        elif kind == "error":
+            buttons = [("📷 Кадр", "cmd:frame"), ("↻ Повторить", "cmd:reprint"),
+                       ("▶ Продолжить", "cmd:resume")]
+        self.notify_async(text, photo, buttons=buttons or None)
 
-    def notify_async(self, text: str, photo: bytes | None = None) -> None:
+    def notify_async(self, text: str, photo: bytes | None = None,
+                     buttons: list[tuple[str, str]] | None = None) -> None:
         """Отправить сообщение в фоне, чтобы не тормозить поток телеметрии."""
-        threading.Thread(target=self.send_telegram, args=(text, photo), daemon=True).start()
+        threading.Thread(target=self.send_telegram, args=(text, photo, buttons),
+                         daemon=True).start()
 
-    def send_telegram(self, text: str, photo: bytes | None = None) -> dict:
+    def send_telegram(self, text: str, photo: bytes | None = None,
+                      buttons: list[tuple[str, str]] | None = None) -> dict:
         settings = self.db.settings(include_secrets=True)
         token, chat = settings.get("telegram_token"), settings.get("telegram_chat_id")
         if not token or not chat:
             return {"ok": False, "error": "Не заданы токен или chat_id"}
+        reply_markup = ""
+        if buttons:
+            reply_markup = json.dumps({"inline_keyboard": [
+                [{"text": t, "callback_data": d} for t, d in buttons]]})
         try:
             if photo:
-                return self._send_photo(token, str(chat), text, photo)
-            data = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
+                return self._send_photo(token, str(chat), text, photo, reply_markup)
+            data = urllib.parse.urlencode({"chat_id": chat, "text": text,
+                                           "reply_markup": reply_markup,
+                                           "disable_web_page_preview": "true"}).encode()
             request = urllib.request.Request(
                 f"https://api.telegram.org/bot{token}/sendMessage", data=data)
             with urllib.request.urlopen(request, timeout=10) as response:
                 return {"ok": response.status == 200}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _send_photo(token: str, chat: str, caption: str, photo: bytes,
+                    reply_markup: str = "") -> dict:
+        """Кадр камеры прямо в сообщении: видно, что происходит, без захода в дом."""
+        boundary = "----printflow" + uid("b").replace("b_", "")
+        parts: list[bytes] = []
+        for name, value in (("chat_id", chat), ("caption", caption[:1000]),
+                            ("reply_markup", reply_markup)):
+            parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+                         f"{value}\r\n".encode())
+        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\";"
+                     " filename=\"frame.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode())
+        parts.append(photo)
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        body = b"".join(parts)
+        request = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendPhoto", data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return {"ok": response.status == 200}
 
     @staticmethod
     def _send_photo(token: str, chat: str, caption: str, photo: bytes) -> dict:
@@ -907,38 +1067,102 @@ class PrinterManager:
         }
 
     def job_summary(self, snap: dict) -> dict:
-        """Во что обходится текущая печать прямо сейчас."""
+        """Во что обходится текущая печать прямо сейчас (живой расчёт).
+
+        Считает по факту с принтера: граммы из телеметрии, цену — из реальной
+        катушки активного слота AMS (а не тариф по умолчанию), плюс прогноз
+        остатка, прибыль и точку безубыточности. Обновляется на каждом снимке.
+        """
         info = snap.get("printer") or {}
         if info.get("state") not in ("RUNNING", "PAUSE", "PREPARE"):
             return {}
         settings = self.db.settings()
+        progress = max(0.0, min(100.0, num(info.get("progress"))))
         elapsed_h = num(info.get("elapsed_min")) / 60
         remaining_h = num(info.get("remaining_min")) / 60
         total_h = elapsed_h + remaining_h
         grams = num(info.get("weight"))
-        per_gram = (num(settings.get("default_spool_price"), 1600)
-                    / max(1.0, num(settings.get("default_spool_weight"), 1000)))
-        energy_rate = num(settings.get("power_kw"), 0.15) * num(settings.get("energy_price"), 6.0)
-        wear_rate = (num(settings.get("amortization_per_hour"), 12.0)
-                     + num(settings.get("maintenance_per_hour"), 3.0))
-        spent = round(grams * per_gram * (num(info.get("progress")) / 100)
-                      + elapsed_h * (energy_rate + wear_rate), 2)
-        total = round(grams * per_gram + total_h * (energy_rate + wear_rate), 2)
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state='running'", (snap["id"],))
         order = None
         if job and job.get("order_id"):
             order = self.db.one(
-                "SELECT id, number, product, customer_name, price, due FROM orders WHERE id=?",
-                (job["order_id"],))
+                "SELECT id, number, product, customer_name, price, due, colors, grams, qty"
+                " FROM orders WHERE id=?", (job["order_id"],))
+
+        # Если принтер ещё не отдал вес — прикидываем из сметы заказа по прогрессу.
+        if grams <= 0 and order:
+            grams = num(order.get("grams")) * max(1.0, num(order.get("qty"), 1)) * progress / 100
+
+        # Катушка активного слота AMS (или привязанная к заданию) — реальная цена.
+        spool = None
+        if job and job.get("spool_id"):
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (job["spool_id"],))
+        if not spool:
+            active = next((t for t in (snap.get("ams") or {}).get("trays", [])
+                           if t.get("active")), None)
+            if active:
+                spool = self.acc.pick_spool(snap["id"], str(active.get("slot")),
+                                            active.get("type"), active.get("uuid"))
+        if spool:
+            per_gram = num(spool.get("price")) / max(1.0, num(spool.get("total_grams"), 1000))
+            spool_info = {
+                "material": spool.get("material") or "",
+                "color": spool.get("color_name") or "",
+                "price": num(spool.get("price")),
+                "total_grams": num(spool.get("total_grams"), 1000),
+                "remaining_grams": num(spool.get("remaining_grams")),
+            }
+        else:
+            per_gram = (num(settings.get("default_spool_price"), 1600)
+                        / max(1.0, num(settings.get("default_spool_weight"), 1000)))
+            spool_info = None
+
+        # Продувка AMS при многоцветной печати: смена цвета ≈ 12 г (на плиту).
+        purge_grams = 0.0
+        if order:
+            try:
+                colors = json.loads(str(order.get("colors") or ""))
+                if isinstance(colors, list) and len(colors) > 1:
+                    purge_grams = max(0, len(colors) - 1) * 12.0
+            except (json.JSONDecodeError, TypeError):
+                purge_grams = 0.0
+
+        energy_rate = num(settings.get("power_kw"), 0.15) * num(settings.get("energy_price"), 6.0)
+        wear_rate = (num(settings.get("amortization_per_hour"), 12.0)
+                     + num(settings.get("maintenance_per_hour"), 3.0))
+        time_rate = energy_rate + wear_rate
+
+        # Прогноз полного веса по прогрессу (вес в телеметрии — уже напечатанный).
+        remaining_grams = 0.0
+        if grams > 0 and progress > 0:
+            remaining_grams = max(0.0, grams * (100.0 - progress) / progress)
+
+        spent = round(grams * per_gram + elapsed_h * time_rate, 2)
+        remaining_cost = round(remaining_grams * per_gram + remaining_h * time_rate, 2)
+        total = round(spent + remaining_cost, 2)
+
+        price = num(order.get("price")) if order else 0.0
+        profit = round(price - total, 2) if price else None
+        margin = round(profit / price * 100, 1) if profit is not None and price else None
+        # Точка безубыточности: сколько % цены уже «съедено» текущими затратами.
+        break_even_pct = round(spent / price * 100, 1) if price else None
         return {
             "job_id": job["id"] if job else "",
             "order": order,
             "grams": round(grams, 1),
+            "remaining_grams": round(remaining_grams, 1),
+            "purge_grams": round(purge_grams, 1),
             "spent": spent,
+            "remaining_cost": remaining_cost,
             "cost_total": total,
             "energy_kwh": round(total_h * num(settings.get("power_kw"), 0.15), 2),
-            "per_hour": round(energy_rate + wear_rate, 2),
+            "per_hour": round(time_rate, 2),
+            "price": price,
+            "profit": profit,
+            "margin_pct": margin,
+            "break_even_pct": break_even_pct,
+            "spool": spool_info,
             "elapsed_min": round(num(info.get("elapsed_min"))),
             "remaining_min": round(num(info.get("remaining_min"))),
         }
@@ -950,6 +1174,11 @@ class PrinterManager:
         today = self.db.one(
             "SELECT COALESCE(SUM(print_minutes),0) m, COALESCE(SUM(grams),0) g,"
             " COALESCE(SUM(jobs_done),0) d FROM printer_stats WHERE day=date('now','localtime')") or {}
+        idle = {}
+        try:
+            idle = self.idle_stats()
+        except Exception:
+            idle = {}
         return {
             "total": len(printers),
             "online": len(online),
@@ -959,6 +1188,7 @@ class PrinterManager:
             "today_grams": round(num(today.get("g")), 1),
             "today_jobs": int(num(today.get("d"))),
             "utilization": round(len(printing) / len(printers) * 100) if printers else 0,
+            "idle": idle,
         }
 
     # ------------------------------------------- 5.0: автобэкап и снятие детали
@@ -1095,6 +1325,15 @@ class PrinterManager:
                 f"{spool.get('material')} {spool.get('color_name')}: "
                 f"осталось {round(num(spool.get('remaining_grams')))} г ({round(pct)}%)",
                 spool.get("printer_id") or "", {"spool_id": spool["id"]})
+            # Конструктор правил: событие «пластик ниже порога».
+            try:
+                self.rules.run("filament_low", {
+                    "material": spool.get("material"), "color": spool.get("color_name"),
+                    "grams": round(num(spool.get("remaining_grams"))),
+                    "pct": round(pct), "printer_id": spool.get("printer_id") or "",
+                })
+            except Exception:
+                pass
             if self.db.setting("notify_filament_low", True):
                 self.notify_async(
                     f"PrintFlow · закупка пластика\n"
@@ -1206,6 +1445,7 @@ class PrinterManager:
                         self.guard.record_telemetry(printer, snap, job["id"] if job else "")
                         self.guard.check(printer, snap)
                         self.spaghetti.check(printer, snap)
+                        self._check_cost_limit(printer, snap)
                     except Exception as exc:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
                     if snap["printer"]["state"] in ("IDLE", "FINISH"):
@@ -1214,6 +1454,7 @@ class PrinterManager:
                     self.run_scheduled()
                     self.check_filament_stock()
                     self.maybe_sync_cloud_history()
+                    self.rules.check_debts()
                 except Exception:
                     continue
             except Exception:
