@@ -429,8 +429,13 @@ async function refreshOrderGrams(manual) {
   let grams = 0, hours = 0, minutes = 0, source = '';
   const materialEl = $('of_material'), colorEl = $('of_color'), fileEl = $('of_file');
 
-  // 1) Файл на принтере — самый точный источник: вся плита из слайсера.
-  const file = fileEl ? fileEl.value.trim() : '';
+  // 1) Локальная копия / история.
+  const live = PF.livePrinter();
+  let file = fileEl ? fileEl.value.trim() : '';
+  if (!file && live && live.printer && live.printer.task) {
+    file = String(live.printer.task).split('/').pop();
+    if (fileEl && file) fileEl.value = file;
+  }
   if (file) {
     try {
       const res = await get('/api/estimate', { file });
@@ -441,28 +446,40 @@ async function refreshOrderGrams(manual) {
       if (m) minutes = m;
       if (est.material && materialEl && (!materialEl.value || manual)) materialEl.value = est.material;
       if (est.color && colorEl && (!colorEl.value || manual)) colorEl.value = est.color;
-    } catch (e) { /* нет файла в базе — попробуем другие источники */ }
+    } catch (e) { /* нет локальной копии — скачаем с принтера */ }
   }
 
-  // 2) Живое задание принтера: print_weight из слайсера, который прошит в задание.
-  //    Это как раз «граммы самого стола» — вес всей плиты, что печатается прямо сейчас.
+  // 2) Скачать 3MF/G-code с SD принтера в uploads и разобрать вес плиты.
+  if (!grams && (file || (live && live.id))) {
+    try {
+      const res = await post('/api/estimate/pull', {
+        file, printer_id: (live && live.id) || '',
+      });
+      const g = num(res.grams) || num((res.estimate || {}).total_grams) || num((res.estimate || {}).grams);
+      const m = num(res.minutes) || num((res.estimate || {}).total_minutes) || num((res.estimate || {}).minutes);
+      if (res.file && fileEl) fileEl.value = res.file;
+      if (g) { grams = g; source = res.source === 'printer' ? `скачан с принтера · ${res.file || file}` : `uploads · ${res.file || file}`; }
+      if (m) minutes = m;
+      if (res.material && materialEl && (!materialEl.value || manual)) materialEl.value = res.material;
+      if (res.color && colorEl && (!colorEl.value || manual)) colorEl.value = res.color;
+    } catch (e) {
+      if (manual && e && e.message) { /* покажем в конце, если ничего не нашлось */ }
+    }
+  }
+
+  // 3) Факт принтера — только после FINISH (во время печати print_weight частичный).
   if (!grams) {
     try {
-      const live = PF.livePrinter();
       const p = live && live.printer;
       const w = p ? num(p.weight) : 0;
-      if (w > 0) {
+      if (w > 0 && String(p.state || '') === 'FINISH') {
         grams = w;
         source = `принтер ${live.name || ''}`.trim();
-      }
-      if (!minutes && p) {
-        const elapsed = num(p.elapsed_min), remain = num(p.remaining_min);
-        if (elapsed + remain > 0) minutes = elapsed + remain;
       }
     } catch (e) { /* принтер не на связи — не критично */ }
   }
 
-  // 3) База товаров: если заказ на готовое изделие, берём норматив «грамм на штуку».
+  // 4) База товаров: если заказ на готовое изделие, берём норматив «грамм на штуку».
   if (!grams) {
     const nomId = ($('of_nom_id') || {}).value || '';
     const item = nomId && (PF.state.nomenclature || []).find((i) => i.id === nomId);
@@ -473,15 +490,19 @@ async function refreshOrderGrams(manual) {
     }
   }
 
-  if (!grams && !minutes && !hours) {
-    if (manual) fail(new Error('Не нашёл граммы: нет файла, принтер офлайн и товар не выбран'));
+  if (!grams) {
+    if (manual) fail(new Error('Не нашёл граммы: скачайте файл с принтера, выберите 3MF/G-code с компьютера или укажите товар из базы'));
     return null;
   }
 
   // Форсим перезапись только когда пользователь нажал кнопку; при
   // автоподстановке уважаем ручной ввод и заполняем только пустые поля.
+  // Часы — побочный бонус той же оценки. Без граммов их не трогаем:
+  // кнопка «Обновить граммы» иначе выглядела так, будто вместо веса
+  // подставилось время печати (elapsed+remaining с принтера).
   const shouldWriteGrams = grams > 0 && (manual || !num(gramsEl.value));
-  const shouldWriteHours = (hours > 0 || minutes > 0) && hoursEl && (manual || !num(hoursEl.value));
+  const shouldWriteHours = shouldWriteGrams && (hours > 0 || minutes > 0)
+    && hoursEl && (manual || !num(hoursEl.value));
   if (shouldWriteGrams) gramsEl.value = Math.round(grams * 10) / 10;
   if (shouldWriteHours) {
     const h = hours > 0 ? hours : minutes / 60;
@@ -1640,6 +1661,66 @@ function bind() {
   });
   $('niche_delete').addEventListener('click', async () => {
     if (!editingNiche || !confirmDanger('Удалить нишу? Заказы останутся, но потеряют привязку.')) return;
+    try {
+      await post('/api/niche/delete', { id: editingNiche });
+      closeModal('niche_modal');
+      await PF.refreshLists();
+      fillSelectors();
+      renderNiches();
+      toast('Ниша удалена');
+    } catch (e) { fail(e); }
+  });
+
+  $('orders_statuses').addEventListener('click', () => {
+    statusDraft = PF.state.statuses.map((s) => Object.assign({}, s));
+    renderStatusEditor();
+    openModal('status_modal');
+  });
+  $('status_add').addEventListener('click', () => {
+    readStatusEditor();
+    statusDraft.push({ id: 'st_' + Date.now().toString(36), name: 'Новый статус', color: '#64748b', is_final: 0 });
+    renderStatusEditor();
+  });
+  $('status_editor').addEventListener('click', (e) => {
+    const up = e.target.closest('[data-st-up]'), down = e.target.closest('[data-st-down]'), del = e.target.closest('[data-st-del]');
+    if (!up && !down && !del) return;
+    readStatusEditor();
+    if (up) { const i = +up.dataset.stUp; [statusDraft[i - 1], statusDraft[i]] = [statusDraft[i], statusDraft[i - 1]]; }
+    if (down) { const i = +down.dataset.stDown; [statusDraft[i + 1], statusDraft[i]] = [statusDraft[i], statusDraft[i + 1]]; }
+    if (del) {
+      const i = +del.dataset.stDel;
+      const used = PF.state.orders.filter((o) => o.status === statusDraft[i].id).length;
+      if (used) return fail(new Error(`Статус используют ${used} заказ(ов). Сначала переведите их.`));
+      statusDraft.splice(i, 1);
+    }
+    renderStatusEditor();
+  });
+  $('status_save').addEventListener('click', async () => {
+    readStatusEditor();
+    try {
+      for (let i = 0; i < statusDraft.length; i++) {
+        await post('/api/status/save', Object.assign({}, statusDraft[i], { position: i }));
+      }
+      const removed = PF.state.statuses.filter((s) => !statusDraft.some((d) => d.id === s.id));
+      for (const s of removed) await post('/api/status/delete', { id: s.id });
+      closeModal('status_modal');
+      await PF.refreshLists();
+      fillSelectors();
+      renderOrders();
+      toast('Статусы сохранены');
+    } catch (e) { fail(e); }
+  });
+}
+
+/* =============================================================== старт */
+PF.on('ready', () => { bind(); fillSelectors(); renderNiches(); });
+PF.on('data', () => { fillSelectors(); renderOrders(); renderCustomers(); });
+PF.on('finance', () => { renderNiches(); });
+PF.on('view', (detail) => { if (detail.view === 'customers') loadAftercare(); });
+
+PF.modules.ops = { openOrder, openNiche, renderOrders, fillSelectors, loadAftercare };
+})();
+) return;
     try {
       await post('/api/niche/delete', { id: editingNiche });
       closeModal('niche_modal');

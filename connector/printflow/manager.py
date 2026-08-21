@@ -1417,6 +1417,106 @@ class PrinterManager:
 
         return {"grams": 0.0, "minutes": 0.0, "material": "", "color": "", "source": ""}
 
+    def _find_remote_print_file(self, printer, name: str) -> str:
+        """Путь к 3MF/G-code на SD: точное имя, корень, cache/, поиск по списку."""
+        clean = Path(name or "").name.strip()
+        if not clean:
+            return ""
+        low = clean.lower()
+        guessed = clean
+        try:
+            entries = printer.files.list_files("/")
+        except Exception:
+            entries = []
+        matches: list[str] = []
+        dirs: list[str] = []
+        for item in entries or []:
+            if item.get("dir"):
+                dirs.append(str(item.get("path") or item.get("name") or ""))
+                continue
+            fn = str(item.get("name") or "")
+            path = str(item.get("path") or ("/" + fn))
+            fn_low = fn.lower()
+            if fn_low == low or fn_low.endswith(low) or low in fn_low:
+                matches.append(path)
+        if not matches:
+            for folder in dirs[:8]:
+                try:
+                    nested = printer.files.list_files(folder)
+                except Exception:
+                    nested = []
+                for item in nested or []:
+                    if item.get("dir"):
+                        continue
+                    fn = str(item.get("name") or "")
+                    if fn.lower() == low or low in fn.lower():
+                        matches.append(str(item.get("path") or fn))
+                        break
+                if matches:
+                    break
+        return matches[0] if matches else guessed
+
+    def pull_print_file(self, printer_id: str = "", filename: str = "",
+                        save_dir: Path | None = None) -> dict:
+        """Скачать файл печати с принтера в uploads и прочитать вес/время слайсера.
+
+        Нужен LAN/FTPS (IP + Access Code). 3MF качается целиком (до 100 МБ),
+        у G-code достаточно шапки. Повторный вызов использует уже скачанную копию.
+        """
+        from .config import UPLOAD_DIR, ensure_dirs
+        from .estimate import estimate_file
+
+        printer = self.get(printer_id)
+        if not printer:
+            raise ValueError("Принтер не найден")
+        snap = printer.snapshot()
+        task = (filename or "").strip() or str(snap["printer"].get("task") or "")
+        name = Path(task).name.strip()
+        if not name:
+            raise ValueError("Нет имени файла: укажите «Файл на принтере» или дождитесь печати")
+        ensure_dirs()
+        dest = Path(save_dir) if save_dir else UPLOAD_DIR
+        dest.mkdir(parents=True, exist_ok=True)
+        local = dest / name
+        source = "uploads"
+        if not local.exists() or local.stat().st_size < 80:
+            if not printer.record.get("host") or not printer.record.get("access_code"):
+                raise ValueError("Чтобы скачать файл с принтера, укажите IP и Access Code в карточке принтера")
+            remote = self._find_remote_print_file(printer, name)
+            is_plain_gcode = name.lower().endswith(".gcode") and not name.lower().endswith(".gcode.3mf")
+            data = b""
+            try:
+                if is_plain_gcode and hasattr(printer.files, "read_head"):
+                    data = printer.files.read_head(remote, max_bytes=400_000) or b""
+                if (not data or len(data) < 80) and hasattr(printer.files, "download"):
+                    data = printer.files.download(remote, max_bytes=100 * 1024 * 1024) or b""
+            except Exception as exc:
+                raise ValueError(f"Не удалось скачать {name} с принтера: {exc}") from exc
+            if not data or len(data) < 50:
+                raise ValueError(f"Файл {name} не найден на SD-карте принтера")
+            local.write_bytes(data)
+            source = "printer"
+        est = estimate_file(local) or {}
+        grams = num(est.get("total_grams")) or num(est.get("grams"))
+        minutes = num(est.get("total_minutes")) or num(est.get("minutes"))
+        if grams and not est.get("total_grams"):
+            est["total_grams"] = grams
+        if minutes and not est.get("total_minutes"):
+            est["total_minutes"] = minutes
+        return {
+            "ok": True,
+            "file": name,
+            "saved": local.name,
+            "bytes": local.stat().st_size if local.exists() else 0,
+            "source": source,
+            "grams": grams,
+            "minutes": minutes,
+            "hours": round(minutes / 60.0, 2) if minutes else 0.0,
+            "material": est.get("material") or "",
+            "color": est.get("color") or "",
+            "estimate": est,
+        }
+
     def convert_active_to_order(self, printer_id: str = "", extra: dict | None = None) -> dict:
         """Преобразовать активную/текущую печать принтера в заказ."""
         printer = self.get(printer_id)
