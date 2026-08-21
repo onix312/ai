@@ -339,7 +339,49 @@ async function openNom(id) {
   $('nom_batch').hidden = !id;
   switchPane('nom_tabs', 'nompane', 'main');
   openModal('nom_modal');
+  updateNomCost();
 }
+
+const updateNomCost = debounce(async () => {
+  const hint = $('nf_norm_hint');
+  if (!hint) return;
+  const grams = num(($('nf_grams') || {}).value);
+  const hours = num(($('nf_hours') || {}).value);
+  const fit = Math.max(1, Math.round(num(($('nf_fit_per_plate') || {}).value, 1)) || 1);
+  const post = num(($('nf_post_minutes') || {}).value);
+  const material = (($('nf_material') || {}).value || '').trim();
+  if (!grams && !hours) {
+    hint.innerHTML = '<span>ⓘ</span><span>Нормативы используются калькулятором партии: они определяют плиты, пластик и время.</span>';
+    return;
+  }
+  try {
+    const payload = {
+      grams, hours, material,
+      manual_minutes: post,
+      fit_per_plate: fit,
+      qty: 1,
+    };
+    // Нормативы карточки — на штуку: считаем полную плиту и берём с/с штуки.
+    if (grams > 0 && hours > 0) {
+      payload.plate_grams = grams * fit;
+      payload.plate_hours = hours * fit;
+      payload.qty = fit;
+      payload.warmup_minutes = 0;
+    }
+    const br = await post('/api/calc/cost', payload);
+    const cost = num(br.per_unit) || num(br.total);
+    hint.innerHTML = `<span>ⓘ</span><span>Себестоимость ≈ <b>${money(cost)}</b>/шт`
+      + (material ? ` · ${esc(material)}` : '')
+      + '. Сохранится в карточке при записи.</span>';
+    const retail = $('nf_prices') && $('nf_prices').querySelector('[data-price="retail"]');
+    if (retail && retail.value === '' && cost > 0) {
+      try {
+        const pr = await post('/api/calc/price', { cost });
+        if (num(pr.price)) retail.placeholder = String(pr.price);
+      } catch (e) { /* цена — подсказка */ }
+    }
+  } catch (e) { /* офлайн — подсказку не ломаем */ }
+}, 300);
 
 function moveRow(m) {
   const positive = num(m.qty) > 0;
@@ -1063,6 +1105,10 @@ function bind() {
   $('nf_spec_rows').addEventListener('click', (e) => {
     const del = e.target.closest('[data-spec-del]');
     if (del) { specRows.splice(+del.dataset.specDel, 1); renderSpec(); }
+  });
+  ['nf_grams', 'nf_hours', 'nf_material', 'nf_fit_per_plate', 'nf_post_minutes'].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener('input', updateNomCost);
   });
 
   // --- партии

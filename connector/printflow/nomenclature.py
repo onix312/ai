@@ -71,7 +71,8 @@ class Nomenclature:
         reserved = self.stock.reserved(nom_id, warehouse_id)
         item_prices = prices.get(nom_id, {})
         price = num(item_prices.get(self._base_type()))
-        cost = num(bal["cost"]) or self._norm_cost(row)
+        # Остаток со склада → записанная с/с карточки → норматив по граммам/часам.
+        cost = num(bal["cost"]) or num(row.get("cost")) or self._norm_cost(row)
         margin = price - cost if price else 0.0
         hours = num(row.get("hours"))
         profit_per_hour = round(margin / hours, 2) if hours else 0.0
@@ -99,14 +100,30 @@ class Nomenclature:
         }
 
     def _norm_cost(self, row: dict) -> float:
-        """Нормативная себестоимость по граммам и часам, если факта ещё нет."""
+        """Нормативная себестоимость по граммам и часам, если факта ещё нет.
+
+        Нормативы карточки — на штуку. Если заданы вес, время и вместимость
+        плиты, считаем полную плиту и берём себестоимость штуки: так материал
+        и часы печати делятся на fit, а цена катушки берётся из справочника.
+        """
         grams = num(row.get("grams"))
         hours = num(row.get("hours"))
         if not grams and not hours:
             return 0.0
-        br = self.acc.cost_breakdown(grams, hours,
-                                     manual_minutes=num(row.get("post_minutes")))
-        return round(num(br.get("total")), 2)
+        fit = max(1, int(num(row.get("fit_per_plate"), 1) or 1))
+        kwargs = {
+            "manual_minutes": num(row.get("post_minutes")),
+            "material": str(row.get("material") or ""),
+            "qty": 1.0,
+            "fit_per_plate": fit,
+        }
+        if grams > 0 and hours > 0:
+            kwargs["plate_grams"] = grams * fit
+            kwargs["plate_hours"] = hours * fit
+            kwargs["qty"] = float(fit)
+            kwargs["warmup_minutes"] = 0.0
+        br = self.acc.cost_breakdown(grams, hours, **kwargs)
+        return round(num(br.get("per_unit") or br.get("total")), 2)
 
     def _base_type(self) -> str:
         row = self.db.one("SELECT id FROM price_types WHERE is_base=1 LIMIT 1")
@@ -197,6 +214,20 @@ class Nomenclature:
                 data[key] = round(num(data[key]), 3)
         if "fit_per_plate" in data:
             data["fit_per_plate"] = max(1, int(num(data["fit_per_plate"], 1)))
+
+        # Нормативная с/с, пока нет факта с партии. После приёмки партии
+        # update_cost_from_batch пишет фактическую — её не затираем.
+        prev = {} if new else (self.db.one(
+            "SELECT * FROM nomenclature WHERE id=?", (data["id"],)) or {})
+        if num(data.get("cost")) <= 0:
+            has_fact = False
+            if not new:
+                fact = self._fact_stats(data["id"])
+                has_fact = int(fact.get("batches") or 0) > 0 and num(prev.get("cost")) > 0
+            if has_fact:
+                data.pop("cost", None)
+            else:
+                data["cost"] = self._norm_cost({**prev, **data})
 
         with self.db.transaction():
             row = self.db.upsert("nomenclature", data)

@@ -201,7 +201,9 @@ function spoolRowsFromJson(json) {
   let rows = [];
   try { rows = JSON.parse(json || '[]'); } catch (e) { rows = []; }
   if (!Array.isArray(rows)) rows = [];
-  return rows.filter((r) => r && typeof r === 'object' && (r.spool_id || num(r.grams) > 0));
+  // Пустые строки и катушка без граммов тоже нужны: иначе «+ Катушка»
+  // и сохранение выбранного слота теряются до заполнения веса.
+  return rows.filter((r) => r && typeof r === 'object');
 }
 function spoolLabel(s) {
   const slot = s.ams_slot !== '' && s.ams_slot != null ? ` · слот ${s.ams_slot}` : '';
@@ -230,12 +232,22 @@ function collectSpoolRows() {
   $$('#of_spool_rows .of-spool-row').forEach((row) => {
     const id = (row.querySelector('[data-spool-sel]') || {}).value || '';
     const grams = num((row.querySelector('[data-spool-grams]') || {}).value);
-    if (id && grams > 0) out.push({ spool_id: id, grams });
+    if (id) out.push({ spool_id: id, grams });
   });
   return JSON.stringify(out);
 }
 
-function distributeSpoolGrams() {
+function snapshotSpoolRows() {
+  return $$('#of_spool_rows .of-spool-row').map((row) => {
+    const gramsEl = row.querySelector('[data-spool-grams]');
+    return {
+      spool_id: (row.querySelector('[data-spool-sel]') || {}).value || '',
+      grams: gramsEl ? gramsEl.value : '',
+    };
+  });
+}
+
+function distributeSpoolGrams(force) {
   const rows = $$('#of_spool_rows .of-spool-row');
   if (!rows.length) return;
   // У мультизаказа «Пластик, г» — уже вся плита, на количество не умножаем.
@@ -247,9 +259,11 @@ function distributeSpoolGrams() {
   rows.forEach((row, index) => {
     const input = row.querySelector('[data-spool-grams]');
     if (!input) return;
+    const filled = num(input.value) > 0;
+    if (!force && filled) return;
     if (colors[index] && colorTotal) input.value = Math.round(total * colors[index] / colorTotal * 10) / 10;
     else if (rows.length === 1) input.value = Math.round(total * 10) / 10;
-    else if (!num(input.value)) input.value = Math.round(total / rows.length * 10) / 10;
+    else input.value = Math.round(total / rows.length * 10) / 10;
   });
 }
 
@@ -431,6 +445,7 @@ async function openOrder(id) {
     el.value = data[k] == null ? '' : String(data[k]);
   });
   renderSpoolRows(data.spools);
+  distributeSpoolGrams();
   renderOrderItems(data.items || []);
   renderItemsEcon(data.items_economics || []);
   $('of_reserved').checked = Boolean(num(data.reserved));
@@ -503,6 +518,7 @@ async function saveOrder() {
   const payload = { id: editingOrder || '' };
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
+  distributeSpoolGrams();
   payload.spools = collectSpoolRows();
   payload.reserved = $('of_reserved').checked ? 1 : 0;
   payload.items = collectOrderItems();
@@ -801,9 +817,7 @@ function bind() {
   if (spoolAdd) spoolAdd.addEventListener('click', () => {
     const host = $('of_spool_rows');
     if (!host) return;
-    const current = collectSpoolRows();
-    let rows = [];
-    try { rows = JSON.parse(current || '[]'); } catch (e) { rows = []; }
+    const rows = snapshotSpoolRows();
     rows.push({});
     renderSpoolRows(JSON.stringify(rows));
   });
@@ -874,14 +888,18 @@ function bind() {
   function applyProduct(item, ready) {
     if (!item) return;
     $('of_product').value = item.name || $('of_product').value;
-    if (num(item.grams)) $('of_grams').value = item.grams;
-    if (num(item.hours)) $('of_hours').value = item.hours;
+    const fit = Math.max(1, Math.round(num(item.fit_per_plate, 1)) || 1);
+    const qty = Math.max(1, num(($('of_qty') || {}).value, 1));
+    const plates = Math.max(1, Math.ceil(qty / fit));
+    // Поля заказа — вес и время всей плиты, нормативы карточки — на штуку.
+    if (num(item.grams)) $('of_grams').value = Math.round(num(item.grams) * fit * plates * 10) / 10;
+    if (num(item.hours)) $('of_hours').value = Math.round(num(item.hours) * fit * plates * 100) / 100;
     if (item.material) $('of_material').value = item.material;
     if (num(item.price)) $('of_price').value = item.price;
     if (item.file) $('of_file').value = item.file;
     if (item.niche_id) $('of_niche_id').value = item.niche_id;
     if (ready) $('of_reserved').checked = num(item.free) >= Math.max(1, num($('of_qty').value, 1));
-    distributeSpoolGrams();
+    distributeSpoolGrams(true);
     updateReadyStockHint();
     updateEconDebounced();
     toast(ready ? 'Готовый товар добавлен' : 'Подставлено из базы', item.name);
