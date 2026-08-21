@@ -37,7 +37,7 @@ function orderCard(o) {
   if (overdue(o)) cls.push('late');
   return `<article class="${cls.join(' ')}" draggable="true" data-order="${esc(o.id)}">`
     + `<div class="strip" style="background:${esc(st.color)}"></div>`
-    + `<div class="num">№${esc(o.number)}${o.qty > 1 ? ` · ${nfmt(o.qty)} шт` : ''}</div>`
+    + `<div class="num">№${esc(o.number)}${o.qty > 1 ? ` · ${nfmt(o.qty)} шт` : ''}${o.items_count ? ` · ${nfmt(o.items_count)} поз.` : ''}</div>`
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
     + `<div class="who">${esc(o.customer_name || 'Без клиента')}</div>`
     + '<div class="meta">'
@@ -238,7 +238,9 @@ function collectSpoolRows() {
 function distributeSpoolGrams() {
   const rows = $$('#of_spool_rows .of-spool-row');
   if (!rows.length) return;
-  const total = num($('of_grams').value) * Math.max(1, num($('of_qty').value, 1));
+  // У мультизаказа «Пластик, г» — уже вся плита, на количество не умножаем.
+  const k = orderIsMulti() ? 1 : Math.max(1, num($('of_qty').value, 1));
+  const total = num($('of_grams').value) * k;
   if (!total) return;
   const colors = colorsToStr($('of_colors').value).split(',').map((part) => num(part.split(':')[1])).filter((g) => g > 0);
   const colorTotal = colors.reduce((a, b) => a + b, 0);
@@ -279,14 +281,76 @@ function updateReadyStockHint() {
   hint.classList.toggle('neg', Boolean(item && num(item.free) < Math.max(1, num($('of_qty').value, 1))));
 }
 
+/* ===== состав заказа: разные товары на одной плите (мультизаказ) =====
+   Цена заказа = сумма позиций (цены из базы товаров, можно править).
+   Вес/время плиты — поля заказа (с принтера/слайсера), вес позиции — из базы. */
+function itemNomOptions(selected) {
+  return '<option value="">— из базы товаров —</option>'
+    + (PF.state.nomenclature || []).map((i) => `<option value="${esc(i.id)}"${i.id === selected ? ' selected' : ''}>`
+      + `${esc(i.name)}${num(i.price) ? ' · ' + money(i.price) : ''}${num(i.grams) ? ' · ' + nfmt(i.grams) + ' г/шт' : ''}</option>`).join('');
+}
+function renderOrderItems(items) {
+  const host = $('of_items');
+  if (!host) return;
+  const rows = (items && items.length ? items : [{}]);
+  host.innerHTML = rows.map((r) => `<div class="of-item-row">`
+    + `<select data-item-nom>${itemNomOptions(r.nom_id || '')}</select>`
+    + `<input data-item-name value="${esc(r.name || '')}" placeholder="Название">`
+    + `<input type="number" min="1" step="1" data-item-qty value="${r.qty != null ? esc(String(r.qty)) : '1'}" title="Количество">`
+    + `<input type="number" min="0" step="any" data-item-price value="${num(r.price) ? esc(String(r.price)) : ''}" placeholder="цена, ₽">`
+    + `<input type="number" min="0" step="any" data-item-grams value="${num(r.grams) ? esc(String(r.grams)) : ''}" placeholder="г/шт из базы" title="Вес штуки — подставляется из базы товаров">`
+    + '<button class="icon-btn sm danger" type="button" data-item-del title="Убрать позицию">×</button></div>').join('');
+}
+function collectOrderItems() {
+  const out = [];
+  $$('#of_items .of-item-row').forEach((row) => {
+    const name = ((row.querySelector('[data-item-name]') || {}).value || '').trim();
+    if (!name) return;
+    out.push({
+      nom_id: (row.querySelector('[data-item-nom]') || {}).value || '',
+      name,
+      qty: Math.max(1, num((row.querySelector('[data-item-qty]') || {}).value, 1)),
+      price: num((row.querySelector('[data-item-price]') || {}).value),
+      grams: num((row.querySelector('[data-item-grams]') || {}).value),
+    });
+  });
+  return out;
+}
+function orderIsMulti() { return collectOrderItems().length > 0; }
+function renderItemsEcon(list) {
+  const host = $('of_items_econ');
+  if (!host) return;
+  host.innerHTML = (list && list.length) ? `<div class="verdict">` + list.map((i) =>
+    `<div class="tx-row"><span class="tx-ic accent">▣</span>`
+    + `<div class="tx-body"><b>${esc(i.name)} ×${nfmt(i.qty)}</b>`
+    + `<small>доля ${nfmt(i.share * 100, 0)}% · себестоимость ${money(i.cost)} · прибыль ${money(i.profit)}</small></div>`
+    + `<span class="amt">${money(i.price)}</span></div>`).join('')
+    + '</div>' : '';
+}
+function updateOrderItemsSummary() {
+  const items = collectOrderItems();
+  if (!items.length) return;
+  const total = items.reduce((a, i) => a + i.price * i.qty, 0);
+  const units = items.reduce((a, i) => a + i.qty, 0);
+  const product = ($('of_product').value || '').trim();
+  $('of_price').value = String(Math.round(total * 100) / 100);
+  $('of_qty').value = String(units);
+  if (!product) {
+    $('of_product').value = items.map((i) => `${i.name} ×${i.qty}`).join(', ');
+  }
+  distributeSpoolGrams();
+  updateEconDebounced();
+}
+
 async function fillFromFileEstimate() {
   const file = $('of_file').value.trim();
   if (!file) return;
   try {
     const res = await get('/api/estimate', { file });
     const est = res.estimate || {};
-    const grams = num(est.grams) || num(est.total_grams);
-    const minutes = num(est.minutes) || num(est.total_minutes);
+    // Многоплитный проект: сумма по всем плитам, а не первая плита.
+    const grams = num(est.total_grams) || num(est.grams);
+    const minutes = num(est.total_minutes) || num(est.minutes);
     if (grams) $('of_grams').value = grams;
     if (minutes) $('of_hours').value = Math.round(minutes / 60 * 100) / 100;
     if (est.material) $('of_material').value = est.material;
@@ -367,6 +431,8 @@ async function openOrder(id) {
     el.value = data[k] == null ? '' : String(data[k]);
   });
   renderSpoolRows(data.spools);
+  renderOrderItems(data.items || []);
+  renderItemsEcon(data.items_economics || []);
   $('of_reserved').checked = Boolean(num(data.reserved));
   updateReadyStockHint();
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
@@ -404,17 +470,21 @@ async function updateEcon() {
   const grams = num($('of_grams').value), hours = num($('of_hours').value);
   const price = num($('of_price').value), prepaid = num($('of_prepaid').value);
   const manual = num($('of_manual_minutes').value), qty = Math.max(1, num($('of_qty').value, 1));
+  // У мультизаказа граммы/часы — уже вся плита, qty — сумма единиц по позициям.
+  const multi = orderIsMulti();
+  const k = multi ? 1 : qty;
   let cost = num($('of_cost').value);
   let auto = null;
   if (!cost && (grams || hours)) {
     try {
-      auto = await post('/api/calc/cost', { grams: grams * qty, hours: hours * qty, manual_minutes: manual });
+      auto = await post('/api/calc/cost', { grams: grams * k, hours: hours * k, manual_minutes: manual });
       cost = num(auto.total);
     } catch (e) { /* офлайн — оставим 0 */ }
   }
-  const total = price * qty;
+  // Для мультизаказа цена уже сумма позиций, а часы — вся плита целиком.
+  const total = multi ? price : price * qty;
   const profit = total - cost;
-  const perHour = hours * qty ? profit / (hours * qty) : 0;
+  const perHour = hours * k ? profit / (hours * k) : 0;
   const left = Math.max(0, total - prepaid);
   const target = num(PF.state.settings.target_profit_per_hour, 250);
   const kind = !hours ? '' : perHour >= target ? 'ok' : perHour >= target * 0.4 ? 'warn' : 'bad';
@@ -435,7 +505,11 @@ async function saveOrder() {
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
   payload.spools = collectSpoolRows();
   payload.reserved = $('of_reserved').checked ? 1 : 0;
-  if (!payload.product.trim()) return fail(new Error('Укажите изделие или работу'));
+  payload.items = collectOrderItems();
+  if (!payload.product.trim()) {
+    if (payload.items.length) payload.product = payload.items.map((i) => `${i.name} ×${i.qty}`).join(', ');
+    else return fail(new Error('Укажите изделие или работу'));
+  }
   if (payload.reserved && !payload.nom_id) return fail(new Error('Для резерва выберите готовый товар из базы'));
   ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
   // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
@@ -748,6 +822,38 @@ function bind() {
   }
   const spoolAuto = $('of_spool_auto');
   if (spoolAuto) spoolAuto.addEventListener('click', autoSpoolsFromAms);
+
+  /* ---- состав заказа (мультизаказ) ---- */
+  const itemAdd = $('of_item_add');
+  if (itemAdd) itemAdd.addEventListener('click', () => {
+    const current = collectOrderItems();
+    current.push({});
+    renderOrderItems(current);
+  });
+  const itemsHost = $('of_items');
+  if (itemsHost) {
+    itemsHost.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-item-del]');
+      if (!del) return;
+      del.closest('.of-item-row').remove();
+      if (!$$('#of_items .of-item-row').length) renderOrderItems([{}]);
+      updateOrderItemsSummary();
+    });
+    itemsHost.addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-item-nom]');
+      if (sel) {
+        const item = (PF.state.nomenclature || []).find((i) => i.id === sel.value);
+        const row = sel.closest('.of-item-row');
+        if (item && row) {
+          if (item.name) row.querySelector('[data-item-name]').value = item.name;
+          if (num(item.price)) row.querySelector('[data-item-price]').value = item.price;
+          if (num(item.grams)) row.querySelector('[data-item-grams]').value = item.grams;
+        }
+      }
+      updateOrderItemsSummary();
+    });
+    itemsHost.addEventListener('input', debounce(updateOrderItemsSummary, 200));
+  }
 
   const amsBtn = $('of_ams_btn');
   if (amsBtn) amsBtn.addEventListener('click', fillFromAms);

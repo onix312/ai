@@ -251,7 +251,12 @@ class PrinterManager:
         if not grams and job and job.get("order_id"):
             order = self.db.one("SELECT grams, qty FROM orders WHERE id=?", (job["order_id"],))
             if order:
-                grams = num(order["grams"]) * max(1.0, num(order["qty"], 1))
+                # У мультизаказа grams — вся плита: на количество не умножаем.
+                has_items = self.db.one(
+                    "SELECT id FROM order_items WHERE order_id=? LIMIT 1",
+                    (job["order_id"],)) is not None
+                grams = num(order["grams"]) * (1 if has_items
+                                               else max(1.0, num(order.get("qty"), 1)))
         if not job:
             job = self.db.upsert("print_jobs", {
                 "id": uid("job"), "printer_id": printer_id, "order_id": self._guess_order(name),
@@ -466,17 +471,22 @@ class PrinterManager:
             local = UPLOAD_DIR / (job.get("file") or "").rsplit("/", 1)[-1]
             if local.exists():
                 estimate = estimate_file(local)
-                job["est_minutes"] = estimate.get("minutes", 0)
-                job["est_grams"] = estimate.get("grams", 0)
+                # Многоплитные проекты: сумма по всем плитам, а не первая плита.
+                job["est_minutes"] = (num(estimate.get("total_minutes"))
+                                      or num(estimate.get("minutes")))
+                job["est_grams"] = (num(estimate.get("total_grams"))
+                                    or num(estimate.get("grams")))
         except Exception:
             pass
         # 3MF/G-code автозаполняет заказ: вес, время, материал и цвет, если пустые.
         if job.get("order_id") and estimate:
             order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
             if order:
+                total_g = num(estimate.get("total_grams")) or num(estimate.get("grams"))
+                total_m = num(estimate.get("total_minutes")) or num(estimate.get("minutes"))
                 fill = {
-                    "grams": estimate.get("grams") or 0.0,
-                    "hours": round(num(estimate.get("minutes"), 0) / 60.0, 2),
+                    "grams": total_g,
+                    "hours": round(total_m / 60.0, 2),
                     "material": estimate.get("material") or "",
                     "color": estimate.get("color") or "",
                 }
@@ -827,11 +837,16 @@ class PrinterManager:
         """Хватит ли пластика в активном слоте на это задание."""
         if not self.db.setting("queue_check_filament", True):
             return True, ""
-        need = 0.0
-        if job.get("order_id"):
+        need = num(job.get("est_grams"))  # оценка слайсера — самый точный план
+        if not need and job.get("order_id"):
             order = self.db.one("SELECT grams, qty FROM orders WHERE id=?", (job["order_id"],))
             if order:
-                need = num(order.get("grams")) * max(1.0, num(order.get("qty"), 1))
+                # У мультизаказа grams — вся плита, qty — сумма единиц позиций.
+                has_items = self.db.one(
+                    "SELECT id FROM order_items WHERE order_id=? LIMIT 1",
+                    (job["order_id"],)) is not None
+                need = num(order.get("grams")) * (1 if has_items
+                                                  else max(1.0, num(order.get("qty"), 1)))
         if not need:
             return True, ""
         active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
@@ -960,6 +975,63 @@ class PrinterManager:
         return self.reprint_job(rows[0]["id"])
 
     # ------------------------------------------------------------- преобразование печати в заказ
+    def _slicer_estimate(self, printer, task: str) -> dict:
+        """Оценка веса и времени из файла печати, без выдуманных значений.
+
+        Порядок источников:
+        1) локальная копия файла (uploads и папка наблюдения);
+        2) шапка G-code прямо с SD-карты принтера по FTPS — только для .gcode,
+           у .3mf шапка лежит внутри zip и частичным чтением не достаётся;
+        3) ничего не нашли — {grams: 0, minutes: 0, source: ""}, заказ создаётся
+           с честным нулём и пометкой, а не с магическим «30 г».
+
+        Вернуть: {"grams": float, "minutes": float, "material": str, "color": str, "source": str}
+        """
+        from .config import UPLOAD_DIR
+        from .estimate import estimate_file, _parse_gcode_head
+
+        name = (task or "").rsplit("/", 1)[-1].strip()
+        if not name:
+            return {"grams": 0.0, "minutes": 0.0, "material": "", "color": "", "source": ""}
+        # 1) локальная копия
+        candidates = [UPLOAD_DIR / name]
+        watch = str(self.db.setting("watch_folder_path", "") or "").strip()
+        if watch:
+            candidates.append(Path(watch).expanduser() / name)
+        for local in candidates:
+            try:
+                if local.exists():
+                    est = estimate_file(local)
+                    # Многоплитный 3MF: сумма по всем плитам, не первая плита.
+                    total_g = num(est.get("total_grams")) or num(est.get("grams"))
+                    total_m = num(est.get("total_minutes")) or num(est.get("minutes"))
+                    if total_g or total_m:
+                        return {"grams": total_g, "minutes": total_m,
+                                "material": est.get("material", ""),
+                                "color": est.get("color", ""), "source": "file"}
+                    if est.get("material") or est.get("color"):
+                        return {"grams": 0.0, "minutes": 0.0,
+                                "material": est.get("material", ""),
+                                "color": est.get("color", ""), "source": "file"}
+            except Exception:
+                continue
+        # 2) шапка G-code с SD-карты (только .gcode: у 3MF данные внутри zip)
+        if name.lower().endswith(".gcode") and printer is not None:
+            try:
+                head = printer.files.read_head("/" + name, max_bytes=131072)
+                if head:
+                    est = _parse_gcode_head(head.decode("utf-8", "ignore"))
+                    if est.get("grams") or est.get("minutes"):
+                        est["source"] = "sd"
+                        return est
+                    if est.get("material") or est.get("color"):
+                        return {"grams": 0.0, "minutes": 0.0,
+                                "material": est.get("material", ""),
+                                "color": est.get("color", ""), "source": "sd"}
+            except Exception:
+                pass
+        return {"grams": 0.0, "minutes": 0.0, "material": "", "color": "", "source": ""}
+
     def convert_active_to_order(self, printer_id: str = "", extra: dict | None = None) -> dict:
         """Преобразовать активную/текущую печать принтера в заказ."""
         printer = self.get(printer_id)
@@ -1005,35 +1077,36 @@ class PrinterManager:
             if spool.get("color_name"):
                 color = spool["color_name"]
 
-        # Вес и время печати
-        grams = num(snap["printer"].get("weight"))
+        # Вес и время печати. Порядок: оценка из файла (локальная копия или
+        # шапка G-code с SD) → факт принтера. Пока печать идёт, print_weight —
+        # частичный расход, а не полный вес изделия, поэтому его используем
+        # только для завершённой печати. Никаких «30 г по умолчанию»: если
+        # данных нет — заказ создаётся с нулём и честной пометкой.
+        est = self._slicer_estimate(printer, task)
+        grams = num(est.get("grams"))
+        minutes = num(est.get("minutes"))
+        grams_source = est.get("source") or ""
+        if not grams and snap["printer"].get("state") == "FINISH":
+            grams = num(snap["printer"].get("weight"))
+            if grams:
+                grams_source = "printer"
         elapsed_min = num(snap["printer"].get("elapsed_min"))
         remaining_min = num(snap["printer"].get("remaining_min"))
-        total_min = elapsed_min + remaining_min
-        hours = round(total_min / 60.0, 2) if total_min else 0.5
+        if not minutes and (elapsed_min or remaining_min):
+            minutes = round(elapsed_min + remaining_min, 1)
+            grams_source = grams_source or "printer"
+        hours = round(minutes / 60.0, 2) if minutes else 0.0
+        if est.get("material") and not material:
+            material = est["material"]
+        if est.get("color") and not color:
+            color = est["color"]
 
-        # Попытка уточнить данные по локальному файлу 3MF/gcode
-        try:
-            from .estimate import estimate_file
-            from .config import UPLOAD_DIR
-            local_file = UPLOAD_DIR / task.rsplit("/", 1)[-1]
-            if local_file.exists():
-                est = estimate_file(local_file)
-                if not grams and est.get("grams"):
-                    grams = num(est["grams"])
-                if not total_min and est.get("minutes"):
-                    hours = round(num(est["minutes"]) / 60.0, 2)
-                if not material and est.get("material"):
-                    material = est["material"]
-                if not color and est.get("color"):
-                    color = est["color"]
-        except Exception:
-            pass
-
-        if grams <= 0:
-            grams = 30.0
-        if hours <= 0:
-            hours = 0.5
+        grams_note = ""
+        if not grams:
+            grams_note = ("Вес печати неизвестен — данные слайсера не найдены; укажите "
+                          "вручную или возьмётся с принтера по завершении печати.")
+        elif grams_source and grams_source != "printer":
+            grams_note = f"Оценка из слайсера: {grams} г / {hours} ч."
 
         # Обеспечиваем наличие записи в print_jobs
         if not job:
@@ -1066,7 +1139,9 @@ class PrinterManager:
             "price": num((extra or {}).get("price")),
             "channel": (extra or {}).get("channel") or "Полка магазина",
             "niche_id": (extra or {}).get("niche_id") or "",
-            "notes": f"Преобразовано из активной печати на {printer.record.get('name', 'Bambu Lab')}",
+            "notes": ("Преобразовано из активной печати на "
+                      f"{printer.record.get('name', 'Bambu Lab')}"
+                      + (f". {grams_note}" if grams_note else "")),
             "auto_cost": 1,
         }
         order = self.repo.save_order(order_data)
@@ -1093,9 +1168,16 @@ class PrinterManager:
             if clean.lower().endswith(ext):
                 clean = clean[:-len(ext)]
         product_name = clean.replace("_", " ").strip() or "Изделие из задания"
-        grams = num(job.get("grams")) or num(job.get("est_grams")) or 30.0
-        minutes = num(job.get("duration_min")) or num(job.get("est_minutes")) or 30.0
-        hours = round(minutes / 60.0, 2)
+        grams = num(job.get("grams")) or num(job.get("est_grams"))
+        minutes = num(job.get("duration_min")) or num(job.get("est_minutes"))
+        # Если факта нет — пробуем оценку из файла на SD/локально, а не «30 г».
+        if not grams and not minutes:
+            printer = self.get(job.get("printer_id") or "")
+            est = self._slicer_estimate(printer, task) if printer else {
+                "grams": 0.0, "minutes": 0.0, "source": ""}
+            grams = num(est.get("grams"))
+            minutes = num(est.get("minutes"))
+        hours = round(minutes / 60.0, 2) if minutes else 0.0
         material = self._job_material(job) or "PLA"
         status = "printing" if job.get("state") == "running" else "new"
         order_data = {
@@ -1374,25 +1456,6 @@ class PrinterManager:
         parts: list[bytes] = []
         for name, value in (("chat_id", chat), ("caption", caption[:1000]),
                             ("reply_markup", reply_markup)):
-            parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
-                         f"{value}\r\n".encode())
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\";"
-                     " filename=\"frame.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".encode())
-        parts.append(photo)
-        parts.append(f"\r\n--{boundary}--\r\n".encode())
-        body = b"".join(parts)
-        request = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/sendPhoto", data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return {"ok": response.status == 200}
-
-    @staticmethod
-    def _send_photo(token: str, chat: str, caption: str, photo: bytes) -> dict:
-        """Кадр камеры прямо в сообщении: видно, что происходит, без захода в дом."""
-        boundary = "----printflow" + uid("b").replace("b_", "")
-        parts: list[bytes] = []
-        for name, value in (("chat_id", chat), ("caption", caption[:1000])):
             parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n"
                          f"{value}\r\n".encode())
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\";"

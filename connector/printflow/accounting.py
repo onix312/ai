@@ -137,7 +137,9 @@ class Accounting:
         qty = max(1.0, num(qty, 1))
 
         # --- справочник материала и профиля ---
-        mat = get_material(material)
+        # Свои пластики из базы (таблица materials) имеют приоритет над
+        # встроенным справочником.
+        mat = get_material(material, db=self.db)
         profile = get_profile(quality)
         speed_factor = num(mat.get("speed_factor"), 1.0)
         time_factor = num(profile.get("time_factor"), 1.0)
@@ -149,7 +151,7 @@ class Accounting:
         if sp_price > 0:
             price = sp_price
         else:
-            price = mat.get("price_per_kg", num(s["default_spool_price"], 1600))
+            price = num(mat.get("price_per_kg")) or num(s["default_spool_price"], 1600)
         sw = num(spool_weight) if spool_weight not in (None, "") else 0
         if sw <= 1:
             sw = num(s.get("default_spool_weight"), 1000) or 1000
@@ -303,10 +305,19 @@ class Accounting:
 
     # ------------------------------------------------------- материалы и профили
     def material_options(self) -> dict[str, Any]:
-        """Справочник материалов и профилей качества для калькулятора."""
-        from .materials import material_list, profile_list
+        """Справочник материалов и профилей качества для калькулятора.
+
+        Встроенные типы пластика + свои из базы (custom=True) + профили
+        качества. Свои материалы видны и в настройках, и в калькуляторе.
+        """
+        from .materials import (material_list, material_full_list, profile_list,
+                                seed_builtin_materials)
+        # Каталог пластиков живёт в базе (таблица materials): при первом
+        # обращении заносим встроенные типы, дальше они правятся под себя.
+        seed_builtin_materials(self.db)
         return {
-            "materials": material_list(),
+            "materials": material_list(self.db),
+            "materials_full": material_full_list(self.db),
             "profiles": profile_list(),
         }
 
@@ -347,7 +358,7 @@ class Accounting:
             sp = self.suggest_price(
                 br["per_unit"], num(params.get("qty"), 1),
                 params.get("channel", ""), bool(params.get("rush")))
-            mat = get_material(params.get("material", ""))
+            mat = get_material(params.get("material", ""), db=self.db)
             results.append({
                 "index": i,
                 "label": params.get("label") or mat.get("name", "PLA"),
@@ -704,11 +715,18 @@ class Accounting:
         price = num(order.get("price")) - num(order.get("discount"))
         hours = num(order.get("actual_hours")) or num(order.get("hours"))
         grams = num(order.get("actual_grams")) or num(order.get("grams"))
+        # У мультизаказа grams — уже вся плита, а qty — сумма единиц по всем
+        # позициям; умножать вес плиты на количество нельзя.
+        has_items = (num(order.get("items_count")) > 0
+                     or bool(order.get("items"))
+                     or self.db.one("SELECT id FROM order_items WHERE order_id=?"
+                                    " LIMIT 1", (order.get("id") or "",)) is not None)
+        qty = 1.0 if has_items else num(order.get("qty"), 1)
         cost = num(order.get("actual_cost")) or num(order.get("cost"))
         if not cost:
             cost = self.cost_breakdown(grams, hours,
                                        manual_minutes=num(order.get("manual_minutes")),
-                                       qty=num(order.get("qty"), 1),
+                                       qty=qty,
                                        design_minutes=num(order.get("design_minutes")),
                                        delivery=num(order.get("delivery")))["total"]
 
@@ -745,6 +763,52 @@ class Accounting:
             "debt": round(max(0.0, price - paid), 2),
             "low_margin": bool(price) and (profit / price * 100) < num(s.get("low_margin_alert"), 20),
         }
+
+    def order_items_economics(self, order: dict) -> list[dict]:
+        """Экономика позиций мультизаказа: себестоимость плиты делится по доле граммов.
+
+        Вес плиты — фактический с принтера (order.actual_grams → order.grams),
+        вес каждой позиции — норматив из базы товаров (order_items.grams).
+        Если ни у одной позиции нет граммов, доля считается по цене.
+        """
+        if not order or not order.get("id"):
+            return []
+        items = self.db.query(
+            "SELECT * FROM order_items WHERE order_id=? ORDER BY position",
+            (order.get("id"),))
+        if not items:
+            return []
+        eco = self.order_economics(order)
+        weight_total = sum(num(i.get("grams")) * max(0.0, num(i.get("qty"), 1))
+                           for i in items)
+        price_total = sum(num(i.get("price")) * max(0.0, num(i.get("qty"), 1))
+                          for i in items)
+        out: list[dict] = []
+        for it in items:
+            qty = num(it.get("qty"), 1)
+            qty = qty if qty > 0 else 1.0
+            weight = num(it.get("grams")) * qty
+            price = round(num(it.get("price")) * qty, 2)
+            if weight_total > 0:
+                share = weight / weight_total
+            elif price_total > 0:
+                share = num(it.get("price")) * qty / price_total
+            else:
+                share = 1.0 / len(items)
+            cost = round(num(eco.get("cost")) * share, 2)
+            out.append({
+                "id": it.get("id"), "nom_id": it.get("nom_id"),
+                "name": it.get("name"), "qty": qty,
+                "unit_price": num(it.get("price")),
+                "price": price,
+                "grams": num(it.get("grams")),      # норматив на штуку
+                "total_grams": round(weight, 1),
+                "hours": num(it.get("hours")),
+                "share": round(share, 4),
+                "cost": cost,
+                "profit": round(price - cost, 2),
+            })
+        return out
 
     # ------------------------------------------------------------------ склад
     def pick_spool(self, printer_id: str = "", ams_slot: str = "",
@@ -1119,6 +1183,17 @@ class Accounting:
                     "UPDATE orders SET actual_grams=actual_grams+?, actual_hours=actual_hours+?,"
                     " actual_cost=actual_cost+?, updated_at=? WHERE id=?",
                     (grams, round(hours, 3), breakdown["total"], now_iso(), order_id))
+                # Планового веса не было (например, заказ из печати без сметы
+                # слайсера) — факт с принтера становится планом: в карточке
+                # заказа появляется реальный вес плиты, а не пустота.
+                if num(order.get("grams")) <= 0:
+                    fact = self.db.one(
+                        "SELECT actual_grams, actual_hours FROM orders WHERE id=?",
+                        (order_id,))
+                    if fact and num(fact.get("actual_grams")) > 0:
+                        self.db.execute(
+                            "UPDATE orders SET grams=?, hours=? WHERE id=?",
+                            (num(fact["actual_grams"]), num(fact["actual_hours"]), order_id))
                 result["order_updated"] = order_id
         self.bump_stats(job.get("printer_id") or "", hours * 60, grams,
                         done=job.get("state") == "done",

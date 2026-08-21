@@ -3306,6 +3306,11 @@
     <div id="set_ams"></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Материалы для печати</h2><p>Все типы пластика встроены; свои — со своими температурами, скоростью и ценой</p></div><button class="btn sm" id="mat_add" type="button">+ Свой пластик</button></div>
+    <div id="set_materials"></div>
+    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Свои материалы появляются в калькуляторе, в оценке себестоимости и в подсказках AMS наравне со встроенными.</span></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">+</button></div>
     <div id="set_printers"></div>
    </div>
@@ -3401,11 +3406,20 @@
      <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
    </div>
-   <label class="field"><span>Пластик, г</span><input id="of_grams" type="number" min="0" step="any"></label>
-   <label class="field"><span>Печать, ч</span><input id="of_hours" type="number" min="0" step="any"></label>
+   <label class="field"><span>Пластик, г <small class="muted" style="font-weight:normal">(вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"></label>
+   <label class="field"><span>Печать, ч <small class="muted" style="font-weight:normal">(вся плита)</small></span><input id="of_hours" type="number" min="0" step="any"></label>
    <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
    <label class="field"><span>Файл на принтере</span><input id="of_file" placeholder="adresnik-v2.3mf"></label>
   </div></div>
+  <div class="form-section">
+   <h3>Состав заказа <small class="muted" style="font-weight:normal">разные товары на одной плите</small></h3>
+   <div id="of_items"></div>
+   <div id="of_items_econ" style="margin-top:8px"></div>
+   <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+    <button class="btn sm ghost" type="button" id="of_item_add">+ Позиция</button>
+    <small class="muted" id="of_items_hint">Цена заказа = сумма позиций. Вес и время плиты — с принтера, вес каждой позиции — из базы товаров. Себестоимость плиты делится по доле граммов.</small>
+   </div>
+  </div>
   <div class="form-section"><h3>Экономика</h3><div class="form-grid">
    <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
    <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
@@ -3436,6 +3450,40 @@
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
  <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">В очередь печати</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal" id="material_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Справочник пластиков</span><h2 id="material_modal_title">Свой материал</h2></div><button class="icon-btn" data-close="material_modal">×</button></div>
+ <div class="modal-body">
+  <div class="form-grid">
+   <label class="field span-2"><span>Название</span><input id="mat_name" placeholder="Например: PETG прозрачный красный"></label>
+   <label class="field"><span>Ключ (для AMS и формул)</span><input id="mat_key" placeholder="MY_PETG_RED"><small class="hint">Только буквы, цифры и «_»</small></label>
+   <label class="field"><span>Шаблон параметров</span><select id="mat_base"><option value="">— без шаблона —</option></select><small class="hint">Пустые поля заполнятся из шаблона</small></label>
+   <label class="field"><span>Цена катушки 1 кг, ₽</span><input id="mat_price_per_kg" type="number" min="0" step="any"><small class="hint">Используется в расчёте себестоимости</small></label>
+   <label class="field"><span>Скорость печати, ×</span><input id="mat_speed_factor" type="number" min="0.05" step="0.05"><small class="hint">1 = как PLA, 0.25 = в 4 раза медленнее</small></label>
+   <label class="field"><span>Сопло, °C (мин–макс)</span><div style="display:flex;gap:6px"><input id="mat_nozzle_min" type="number" min="0" max="450"><input id="mat_nozzle_max" type="number" min="0" max="450"></div></label>
+   <label class="field"><span>Стол, °C (мин–макс)</span><div style="display:flex;gap:6px"><input id="mat_bed_min" type="number" min="0" max="200"><input id="mat_bed_max" type="number" min="0" max="200"></div></label>
+   <label class="field"><span>Обдув, %</span><input id="mat_fan" type="number" min="0" max="100"></label>
+   <label class="field"><span>Камера</span><select id="mat_chamber"><option value="open">Открытая</option><option value="closed">Закрытая</option><option value="closed_hot">Закрытая, горячая</option></select></label>
+   <label class="field"><span>Плотность, г/см³</span><input id="mat_density" type="number" min="0.3" step="0.01"></label>
+   <label class="field"><span>Усадка, %</span><input id="mat_shrinkage" type="number" min="0" step="0.05"></label>
+   <label class="field"><span>Сушка, °C</span><input id="mat_dry_temp" type="number" min="0" max="150"></label>
+   <label class="field"><span>Сушка, часов</span><input id="mat_dry_hours" type="number" min="0" step="0.5"></label>
+   <label class="field"><span>Теплостойкость, °C</span><input id="mat_heat_resistance" type="number" min="0" max="400"></label>
+   <label class="field"><span>Доля поддержек</span><input id="mat_support_factor" type="number" min="0" step="0.05" max="1"></label>
+   <label class="field span-2"><span>Полное название</span><input id="mat_full_name" placeholder="Химическое название"></label>
+   <label class="field span-2"><span>Сильные стороны</span><input id="mat_strengths"></label>
+   <label class="field span-2"><span>Слабости / риски</span><input id="mat_weaknesses"></label>
+   <label class="field span-2"><span>Где применять</span><input id="mat_use_cases"></label>
+   <label class="field span-2"><span>Заметка</span><input id="mat_note"></label>
+   <div class="field span-2"><span>Свойства</span><div style="display:flex;gap:16px;flex-wrap:wrap">
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mat_abrasive">Абразивный — нужно закалённое сопло</label>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mat_uv_resistant">УФ-стойкий (для улицы)</label>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="mat_food_safe">Пищевой</label>
+   </div></div>
+  </div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" id="mat_reset" hidden>⟲ К заводским</button><button class="btn" type="button" data-close="material_modal">Отмена</button><button class="btn primary" type="button" id="mat_save">Сохранить</button></div>
 </form></dialog>
 
 <dialog class="modal narrow" id="niche_modal"><form method="dialog">

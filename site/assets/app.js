@@ -25,8 +25,10 @@ function renderDashboard() {
   const late = activeOrders.filter((o) => o.due && o.due <= today);
   const paidOf = (o) => Math.max(num(o.paid), num(o.prepaid));
   const pipeline = activeOrders.reduce((a, o) => a + Math.max(0, num(o.price) - paidOf(o)), 0);
-  const needGrams = activeOrders.reduce((a, o) => a + num(o.grams) * Math.max(1, num(o.qty, 1)), 0);
-  const needHours = activeOrders.reduce((a, o) => a + num(o.hours) * Math.max(1, num(o.qty, 1)), 0);
+  // У мультизаказа граммы/часы — уже вся плита, qty — сумма единиц позиций.
+  const plateK = (o) => (num(o.items_count) ? 1 : Math.max(1, num(o.qty, 1)));
+  const needGrams = activeOrders.reduce((a, o) => a + num(o.grams) * plateK(o), 0);
+  const needHours = activeOrders.reduce((a, o) => a + num(o.hours) * plateK(o), 0);
   const capacity = num(PF.state.settings.weekly_capacity_hours, 110);
   const load = capacity ? clamp(needHours / capacity * 100, 0, 999) : 0;
   const stock = num(s.stock_grams);
@@ -283,7 +285,8 @@ function renderFilamentForecast() {
     if (j.order_id) {
       const o = PF.state.orders.find((x) => x.id === j.order_id);
       if (o) {
-        grams = num(o.grams) * Math.max(1, num(o.qty, 1));
+        // У мультизаказа граммы — вся плита, на количество не умножаем.
+        grams = num(o.grams) * (num(o.items_count) ? 1 : Math.max(1, num(o.qty, 1)));
         mat = String(o.material || mat).trim().toUpperCase();
       }
     }
@@ -870,6 +873,153 @@ async function renderCloudSettings(s) {
       renderSettings();
     } catch (e) { fail(e); }
   });
+}
+
+/* ==================================================== материалы (свои пластики) */
+let materialsFull = [];
+let editingMaterial = '';
+async function loadMaterials() {
+  try {
+    const data = await get('/api/materials');
+    materialsFull = data.materials_full || [];
+  } catch (e) { materialsFull = []; }
+  renderMaterials();
+}
+function renderMaterials() {
+  const host = $('set_materials');
+  if (!host) return;
+  const custom = materialsFull.filter((m) => !m.builtin);
+  const builtin = materialsFull.filter((m) => m.builtin);
+  host.innerHTML = (custom.length ? custom.map((m) => `<div class="set-row">`
+    + `<div class="sinfo"><b>${esc(m.name)}</b><small>${esc(m.full_name || '')} · сопло ${m.temp_nozzle[0]}–${m.temp_nozzle[1]}°C · стол ${m.temp_bed[0]}–${m.temp_bed[1]}°C · скорость ×${m.speed_factor}`
+    + (m.price_per_kg ? ` · ${money(m.price_per_kg)}/кг` : ' · цена: из шаблона')
+    + (m.abrasive ? ' · абразивный' : '') + (m.uv_resistant ? ' · УФ-стойкий' : '') + '</small></div>'
+    + `<div class="row-actions"><button class="btn sm" data-mat-edit="${esc(m.id)}" type="button">Править</button>`
+    + `<button class="btn sm danger" data-mat-del="${esc(m.id)}" type="button" title="Убрать">×</button></div></div>`).join('')
+    : '<div class="empty compact"><span>Своих пластиков пока нет — добавьте материал со своими температурами, скоростью и ценой.</span></div>')
+    + `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:12.5px;color:var(--muted)">База пластиков — ${builtin.length} типов (нажмите на тип, чтобы настроить под себя)</summary>`
+    + `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">`
+    + builtin.map((m) => (m.id
+      ? `<button class="tag" data-mat-edit="${esc(m.id)}" type="button" style="cursor:pointer" title="Настроить: ${esc(m.full_name || '')} · сопло ${m.temp_nozzle[0]}–${m.temp_nozzle[1]}°C · стол ${m.temp_bed[0]}–${m.temp_bed[1]}°C · ${m.price_per_kg} ₽/кг${m.abrasive ? ' · абразивный' : ''}">${esc(m.name)}</button>`
+      : `<span class="tag">${esc(m.name)}</span>`)).join('')
+    + '</div></details>';
+}
+function openMaterial(id) {
+  editingMaterial = id || '';
+  const m = id ? materialsFull.find((x) => x.id === id) : null;
+  const isBuiltin = Boolean(m && m.builtin);
+  const catalog = materialsFull.filter((x) => x.builtin);
+  $('mat_base').innerHTML = '<option value="">— без шаблона —</option>'
+    + catalog.map((b) => `<option value="${esc(b.key)}">${esc(b.name)}</option>`).join('');
+  // У встроенного типа ключ не меняется — он и есть имя типа.
+  const keyEl = $('mat_key');
+  if (keyEl) { keyEl.readOnly = isBuiltin; keyEl.disabled = isBuiltin; }
+  const resetBtn = $('mat_reset');
+  if (resetBtn) resetBtn.hidden = !isBuiltin;
+  const set = (k, v) => { const el = $('mat_' + k); if (el) el.value = v == null ? '' : String(v); };
+  set('name', m ? m.name : '');
+  set('key', m ? m.key : '');
+  set('base', m ? (m.base || '') : '');
+  set('full_name', m ? m.full_name : '');
+  set('price_per_kg', m ? (m.price_per_kg || '') : '');
+  set('speed_factor', m ? m.speed_factor : '');
+  set('nozzle_min', m ? m.temp_nozzle[0] : '');
+  set('nozzle_max', m ? m.temp_nozzle[1] : '');
+  set('bed_min', m ? m.temp_bed[0] : '');
+  set('bed_max', m ? m.temp_bed[1] : '');
+  set('fan', m ? m.fan : '');
+  set('chamber', m ? (m.chamber || 'open') : 'open');
+  set('density', m ? m.density : '');
+  set('shrinkage', m ? m.shrinkage : '');
+  set('dry_temp', m ? m.dry_temp : '');
+  set('dry_hours', m ? m.dry_hours : '');
+  set('heat_resistance', m ? m.heat_resistance : '');
+  set('support_factor', m ? m.support_factor : '');
+  set('strengths', m ? m.strengths : '');
+  set('weaknesses', m ? m.weaknesses : '');
+  set('use_cases', m ? m.use_cases : '');
+  set('note', m ? m.note : '');
+  $('mat_abrasive').checked = Boolean(m && m.abrasive);
+  $('mat_uv_resistant').checked = Boolean(m && m.uv_resistant);
+  $('mat_food_safe').checked = Boolean(m && m.food_safe);
+  $('material_modal_title').textContent = m
+    ? (m.builtin ? `Встроенный материал · ${m.name}` : `Свой материал · ${m.name}`)
+    : 'Новый материал';
+  openModal('material_modal');
+}
+function fillMaterialFromBase(key) {
+  const m = materialsFull.find((x) => x.key === key && !x.custom);
+  if (!m) return;
+  const setIfEmpty = (k, v) => { const el = $('mat_' + k); if (el && !el.value) el.value = String(v); };
+  setIfEmpty('price_per_kg', m.price_per_kg);
+  setIfEmpty('speed_factor', m.speed_factor);
+  setIfEmpty('nozzle_min', m.temp_nozzle[0]);
+  setIfEmpty('nozzle_max', m.temp_nozzle[1]);
+  setIfEmpty('bed_min', m.temp_bed[0]);
+  setIfEmpty('bed_max', m.temp_bed[1]);
+  setIfEmpty('fan', m.fan);
+  setIfEmpty('chamber', m.chamber);
+  setIfEmpty('density', m.density);
+  setIfEmpty('shrinkage', m.shrinkage);
+  setIfEmpty('dry_temp', m.dry_temp);
+  setIfEmpty('dry_hours', m.dry_hours);
+  setIfEmpty('heat_resistance', m.heat_resistance);
+  setIfEmpty('support_factor', m.support_factor);
+  setIfEmpty('full_name', m.full_name);
+  setIfEmpty('strengths', m.strengths);
+  setIfEmpty('weaknesses', m.weaknesses);
+  setIfEmpty('use_cases', m.use_cases);
+  if (!$('mat_abrasive').checked) $('mat_abrasive').checked = Boolean(m.abrasive);
+  if (!$('mat_uv_resistant').checked) $('mat_uv_resistant').checked = Boolean(m.uv_resistant);
+}
+async function saveMaterial() {
+  const payload = {
+    id: editingMaterial || '',
+    name: $('mat_name').value.trim(),
+    key: $('mat_key').value.trim(),
+    base: $('mat_base').value,
+    full_name: $('mat_full_name').value.trim(),
+    price_per_kg: num($('mat_price_per_kg').value),
+    speed_factor: num($('mat_speed_factor').value),
+    temp_nozzle_min: num($('mat_nozzle_min').value),
+    temp_nozzle_max: num($('mat_nozzle_max').value),
+    temp_bed_min: num($('mat_bed_min').value),
+    temp_bed_max: num($('mat_bed_max').value),
+    fan: num($('mat_fan').value),
+    chamber: $('mat_chamber').value,
+    density: num($('mat_density').value),
+    shrinkage: num($('mat_shrinkage').value),
+    dry_temp: num($('mat_dry_temp').value),
+    dry_hours: num($('mat_dry_hours').value),
+    heat_resistance: num($('mat_heat_resistance').value),
+    support_factor: num($('mat_support_factor').value),
+    abrasive: $('mat_abrasive').checked ? 1 : 0,
+    uv_resistant: $('mat_uv_resistant').checked ? 1 : 0,
+    food_safe: $('mat_food_safe').checked ? 1 : 0,
+    strengths: $('mat_strengths').value.trim(),
+    weaknesses: $('mat_weaknesses').value.trim(),
+    use_cases: $('mat_use_cases').value.trim(),
+    note: $('mat_note').value.trim(),
+  };
+  if (!payload.name) return fail(new Error('Укажите название материала'));
+  try {
+    await post('/api/materials/save', payload);
+    closeModal('material_modal');
+    toast('Материал сохранён', payload.name);
+    await loadMaterials();
+    if (PF.modules.money && PF.modules.money.loadCalcMaterials) PF.modules.money.loadCalcMaterials();
+  } catch (e) { fail(e); }
+}
+async function deleteMaterial(id) {
+  const m = materialsFull.find((x) => x.id === id);
+  if (!m) return;
+  if (!confirmDanger(`Убрать «${m.name}» из справочника? История и прошлые расчёты не пострадают.`)) return;
+  try {
+    await post('/api/materials/delete', { id });
+    toast('Материал убран', m.name);
+    await loadMaterials();
+    if (PF.modules.money && PF.modules.money.loadCalcMaterials) PF.modules.money.loadCalcMaterials();
+  } catch (e) { fail(e); }
 }
 
 function renderSettings() {
@@ -1589,6 +1739,27 @@ function bind() {
 
   $('settings_save').addEventListener('click', saveSettings);
   $('settings_reset').addEventListener('click', resetSettings);
+  $('mat_add').addEventListener('click', () => openMaterial(''));
+  $('mat_save').addEventListener('click', saveMaterial);
+  $('mat_reset').addEventListener('click', async () => {
+    const m = materialsFull.find((x) => x.id === editingMaterial);
+    if (!m || !m.builtin) return;
+    if (!confirmDanger(`Вернуть «${m.name}» к заводским параметрам каталога?`)) return;
+    try {
+      await post('/api/materials/reset', { id: m.id });
+      closeModal('material_modal');
+      toast('Материал сброшен', `${m.name} — параметры каталога`);
+      await loadMaterials();
+      if (PF.modules.money && PF.modules.money.loadCalcMaterials) PF.modules.money.loadCalcMaterials();
+    } catch (e) { fail(e); }
+  });
+  $('set_materials').addEventListener('click', (e) => {
+    const edit = e.target.closest('[data-mat-edit]');
+    const del = e.target.closest('[data-mat-del]');
+    if (edit) return openMaterial(edit.dataset.matEdit);
+    if (del) return deleteMaterial(del.dataset.matDel);
+  });
+  $('mat_base').addEventListener('change', (e) => fillMaterialFromBase(e.target.value));
   $('set_tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-pane]');
     if (!btn) return;
@@ -1699,7 +1870,7 @@ PF.on('bootstrap', renderSettings);
 PF.on('money', () => { if (document.querySelector('#view-settings.on')) renderSettings(); });
 PF.on('view', (d) => {
   if (d.view === 'library') showArticle(d.sub || '');
-  if (d.view === 'settings') renderSettings();
+  if (d.view === 'settings') { renderSettings(); loadMaterials(); }
   if (d.view === 'dashboard') renderDashboard();
 });
 window.addEventListener('resize', U.debounce(() => {

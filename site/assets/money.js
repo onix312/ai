@@ -265,7 +265,7 @@ async function loadCalcMaterials() {
     if (sel && calcMaterials.length) {
       const keep = sel.value;
       sel.innerHTML = calcMaterials.map((m) =>
-        `<option value="${esc(m.key)}">${esc(m.name)} · ${nfmt(m.price_per_kg)} ₽/кг</option>`).join('');
+        `<option value="${esc(m.key)}">${esc(m.name)}${m.custom ? ' ★' : ''}${num(m.price_per_kg) ? ` · ${nfmt(m.price_per_kg)} ₽/кг` : ''}</option>`).join('');
       if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
     }
   } catch (e) { /* офлайн — используем дефолт */ }
@@ -1260,5 +1260,5 @@ function applyPreset(name) {
   toast('Пресет', name);
 }
 
-PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset, applyAmsToCalc };
+PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset, applyAmsToCalc, loadCalcMaterials };
 })();

@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from .accounting import num
+from .accounting import num, uid
 from .config import now_iso
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -374,9 +374,12 @@ class TelegramBot:
             if milestone <= sub.get("last_milestone", 0):
                 continue
             sub["last_milestone"] = milestone
-            self.manager.notify_async(
-                f"PrintFlow · заказ №{number}\nПрогресс {milestone}% — {order.get('product') or ''}",
-                None)
+            # Прогресс уходит в тот же чат, из которого попросили следить, —
+            # раньше уведомление шло через manager.notify_async в чат по умолчанию,
+            # и слежка из другого чата молчала.
+            self._reply(chat,
+                        f"PrintFlow · заказ №{number}\n"
+                        f"Прогресс {milestone}% — {order.get('product') or ''}")
             # По завершении снимаем слежку.
             if progress >= 100:
                 self._watched.pop(chat, None)

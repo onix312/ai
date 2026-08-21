@@ -73,15 +73,30 @@ class B2B:
         product = order.get("product") or "Изделие"
         qty = max(1.0, num(order.get("qty"), 1))
         price = num(order.get("price"))
-        total = round(price * qty, 2)
         customer = order.get("customer_name") or ""
         due = (order.get("due") or "")[:10]
         date = (order.get("created_at") or now_iso())[:10]
 
-        rows = (f"<tr><td>{_esc(product)}</td>"
-                f"<td class=\"r\">{int(qty)}</td>"
-                f"<td class=\"r\">{_fmt(price)}</td>"
-                f"<td class=\"r\">{_fmt(total)}</td></tr>")
+        # Мультизаказ: строки документа — состав заказа, а не одна строка.
+        # Цена заказа уже итоговая, умножать её на количество нельзя.
+        items = self.db.query(
+            "SELECT name, qty, price FROM order_items WHERE order_id=? ORDER BY position",
+            (order_id,))
+        if items:
+            rows = "".join(
+                f"<tr><td>{_esc(it.get('name') or 'Позиция')}</td>"
+                f"<td class=\"r\">{int(max(1.0, num(it.get('qty'), 1)))}</td>"
+                f"<td class=\"r\">{_fmt(num(it.get('price')))}</td>"
+                f"<td class=\"r\">{_fmt(round(num(it.get('price')) * num(it.get('qty'), 1), 2))}</td></tr>"
+                for it in items)
+            total = round(sum(num(it.get("price")) * num(it.get("qty"), 1)
+                              for it in items), 2)
+        else:
+            total = round(price * qty, 2)
+            rows = (f"<tr><td>{_esc(product)}</td>"
+                    f"<td class=\"r\">{int(qty)}</td>"
+                    f"<td class=\"r\">{_fmt(price)}</td>"
+                    f"<td class=\"r\">{_fmt(total)}</td></tr>")
 
         if kind == "receipt":
             title = "Товарный чек"

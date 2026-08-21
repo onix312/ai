@@ -945,6 +945,8 @@ class Api:
             return 200, self.acc.abc_report(int(num(one("days", "30"), 30)))
         if path == "/api/calc/materials":
             return 200, self.acc.material_options()
+        if path == "/api/materials":
+            return 200, self.acc.material_options()
         if path == "/api/calc/real-stats":
             return 200, self.acc.real_stats(
                 one("product"), one("material"),
@@ -1274,6 +1276,14 @@ class Api:
             return 200, {"ok": True}
 
         # --- заказы и справочники
+        if path == "/api/materials/save":
+            return 200, {"ok": True, "material": self.repo.save_material(body)}
+        if path == "/api/materials/delete":
+            self.repo.delete_material(body.get("id", ""))
+            return 200, {"ok": True}
+        if path == "/api/materials/reset":
+            self.repo.reset_material(body.get("id", ""))
+            return 200, {"ok": True}
         if path == "/api/order/save":
             return 200, self.save_order(body)
         if path == "/api/order/status":
@@ -2304,7 +2314,7 @@ class Handler(BaseHTTPRequestHandler):
                                  + f"Content-Length: {len(frame)}\r\n\r\n".encode())
                 self.wfile.write(frame)
                 self.wfile.write(b"\r\n")
-        except CLIENT_DISCONNECT_ERRORS:
+        except (CLIENT_DISCONNECT_ERRORS, TimeoutError, OSError):
             pass
         finally:
             printer.camera.unsubscribe(event)
