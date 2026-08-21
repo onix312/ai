@@ -14,6 +14,10 @@ from typing import Callable
 PRINT_EXT = (".3mf", ".gcode", ".gcode.3mf")
 
 
+class _HeadLimit(Exception):
+    """Внутреннее исключение: достигнут лимит чтения шапки файла с SD."""
+
+
 class ImplicitFTPS(ftplib.FTP_TLS):
     """FTP_TLS с implicit TLS: соединение шифруется с первого байта."""
 
@@ -241,3 +245,37 @@ class PrinterFiles:
         finally:
             self._quit(ftp)
         return {"ok": True}
+
+    def read_head(self, path: str, max_bytes: int = 131072) -> bytes:
+        """Прочитать первые байты файла с SD-карты, не качая его целиком.
+
+        Шапка G-code (;TIME, ;Filament used, материал/цвет) лежит в первых
+        килобайтах — этого достаточно для оценки веса и времени печати.
+        Чтение обрывается после max_bytes через исключение в callback —
+        соединение закрывается, но полученные байты сохраняются.
+        """
+        if not path:
+            return b""
+        chunks: list[bytes] = []
+
+        def cb(block: bytes) -> None:
+            chunks.append(block)
+            if sum(len(c) for c in chunks) >= max_bytes:
+                raise _HeadLimit()
+
+        ftp = None
+        try:
+            ftp = self._connect()
+            try:
+                ftp.retrbinary(f"RETR {path}", cb, blocksize=16384)
+            except (_HeadLimit, ftplib.error_temp, ftplib.error_perm,
+                    OSError, TimeoutError):
+                # лимит достигнут или сервер режет неполное чтение —
+                # используем то, что успели получить
+                pass
+        except Exception:
+            pass
+        finally:
+            if ftp is not None:
+                self._quit(ftp)
+        return b"".join(chunks)[:max_bytes]

@@ -96,6 +96,33 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(plan["sequence"], [])
         self.assertIsNone(plan["suggested_next"])
 
+    def test_multi_order_plate_grams_not_multiplied_by_qty(self):
+        # Мультизаказ: grams/hours — вся плита, qty — сумма единиц по позициям.
+        _order(self.db, "ord-multi", qty=7, hours=2.0, grams=213.0)
+        self.db.upsert("order_items", {
+            "id": "it-1", "order_id": "ord-multi", "position": 1,
+            "nom_id": "", "name": "Смок-адресник", "qty": 3,
+            "price": 350.0, "grams": 40.0, "hours": 0.0,
+        })
+        plan = self.planner.day_plan()
+        task = next(t for t in plan["sequence"] if t["id"] == "ord-multi")
+        # Вся плита, а не 213×7=1491 г и не 2×7=14 ч.
+        self.assertEqual(task["grams"], 213.0)
+        self.assertEqual(task["hours"], 2.0)
+
+    def test_multi_order_in_progress_hours_not_multiplied(self):
+        _order(self.db, "ord-multi-q", qty=5, hours=3.0)
+        self.db.upsert("order_items", {
+            "id": "it-2", "order_id": "ord-multi-q", "position": 1,
+            "nom_id": "", "name": "Крючок", "qty": 5, "price": 120.0,
+            "grams": 12.0, "hours": 0.0,
+        })
+        # Задание в очереди без оценки слайсера: часы заказа — вся плита.
+        self.db.upsert("print_jobs", {"id": "job-multi", "order_id": "ord-multi-q",
+                                      "state": "queued", "est_minutes": 0})
+        plan = self.planner.day_plan()
+        self.assertEqual(plan["in_progress_hours"], 3.0)
+
 
 if __name__ == "__main__":
     unittest.main()

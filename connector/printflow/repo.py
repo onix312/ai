@@ -50,6 +50,14 @@ class Repo:
         rows = self.db.query(sql, params)
         for row in rows:
             row["economics"] = self.acc.order_economics(row)
+        if rows:
+            marks = ",".join("?" for _ in rows)
+            counts = {r["order_id"]: int(num(r["n"])) for r in self.db.query(
+                f"SELECT order_id, COUNT(*) n FROM order_items"
+                f" WHERE order_id IN ({marks}) GROUP BY order_id",
+                [r["id"] for r in rows])}
+            for row in rows:
+                row["items_count"] = counts.get(row["id"], 0)
         return rows
 
     def order(self, order_id: str) -> dict | None:
@@ -57,6 +65,9 @@ class Repo:
         if not row:
             return None
         row["economics"] = self.acc.order_economics(row)
+        row["items"] = self.db.query(
+            "SELECT * FROM order_items WHERE order_id=? ORDER BY position", (order_id,))
+        row["items_economics"] = self.acc.order_items_economics(row)
         row["jobs"] = self.db.query(
             "SELECT * FROM print_jobs WHERE order_id=? ORDER BY datetime(created_at) DESC", (order_id,))
         row["transactions"] = self.db.query(
@@ -70,6 +81,59 @@ class Repo:
     def next_order_number(self) -> str:
         row = self.db.one("SELECT COUNT(*) n FROM orders") or {"n": 0}
         return str(1000 + int(num(row["n"])) + 1)
+
+    def _save_order_items(self, order_id: str, items: list | None) -> dict:
+        """Сохранить состав заказа (мультизаказ: разные товары на одной плите).
+
+        Цена заказа = сумма цен позиций; количество = сумма количеств.
+        Недостающие у позиции название/цена/граммы/часы добираются из базы
+        товаров по nom_id — база остаётся источником веса каждой позиции.
+        Возвращает {"total_price": ..., "total_qty": ..., "names": [...]}.
+        """
+        summary: dict = {"total_price": 0.0, "total_qty": 0.0, "names": []}
+        if items is None:
+            return summary
+        if not isinstance(items, list):
+            raise ValueError("Состав заказа должен быть списком позиций")
+        self.db.execute("DELETE FROM order_items WHERE order_id=?", (order_id,))
+        for index, raw in enumerate(items):
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip()
+            nom_id = str(raw.get("nom_id") or "").strip()
+            qty = num(raw.get("qty"), 1)
+            if qty <= 0:
+                continue
+            price = num(raw.get("price"))
+            grams = num(raw.get("grams"))
+            hours = num(raw.get("hours"))
+            if nom_id and (not name or not grams or not hours):
+                nom = self.db.one(
+                    "SELECT name, grams, hours FROM nomenclature WHERE id=?",
+                    (nom_id,))
+                if nom:
+                    name = name or str(nom.get("name") or "")
+                    grams = grams or num(nom.get("grams"))
+                    hours = hours or num(nom.get("hours"))
+            if nom_id and not price:
+                row = self.db.one(
+                    "SELECT p.price FROM prices p"
+                    " JOIN price_types t ON t.id=p.price_type_id"
+                    " WHERE p.nom_id=? AND t.is_base=1"
+                    " ORDER BY datetime(p.at) DESC LIMIT 1", (nom_id,))
+                price = num(row.get("price")) if row else 0.0
+            if not name:
+                continue
+            self.db.upsert("order_items", {
+                "id": uid("oit"), "order_id": order_id, "position": index,
+                "nom_id": nom_id, "name": name, "qty": qty, "price": price,
+                "grams": grams, "hours": hours,
+                "note": str(raw.get("note") or "")})
+            summary["total_price"] += round(price * qty, 2)
+            summary["total_qty"] += qty
+            summary["names"].append(f"{name} ×{qty:g}")
+        summary["total_price"] = round(summary["total_price"], 2)
+        return summary
 
     def save_order(self, data: dict) -> dict:
         data = dict(data)
@@ -108,6 +172,18 @@ class Repo:
                     "id": uid("cus"), "name": name, "phone": phone,
                     "messenger": payload.get("messenger", ""), "created_at": now_iso()})
             payload["customer_id"] = customer["id"]
+
+        # Состав заказа (мультизаказ): позиции сохраняются отдельно, а цена и
+        # количество заказа пересчитываются из них — источником цены позиций
+        # служит база товаров, сервер не верит сумме, присланной браузером.
+        if "items" in data:
+            items_summary = self._save_order_items(order_id, data.get("items"))
+            if items_summary["names"]:
+                payload["price"] = items_summary["total_price"]
+                payload["qty"] = items_summary["total_qty"]
+                if not (payload.get("product") or "").strip():
+                    payload["product"] = ", ".join(items_summary["names"])
+            data.pop("items", None)
 
         row = self.db.upsert("orders", payload)
         # Конструктор правил: переход заказа между статусами.
@@ -185,6 +261,12 @@ class Repo:
         data["notes"] = f"повтор заказа №{order.get('number')}" + (
             f"\n{order.get('notes')}" if order.get("notes") else "")
         data["author"] = "duplicate"
+        # Мультизаказ: состав копируется вместе с карточкой.
+        items = self.db.query(
+            "SELECT nom_id, name, qty, price, grams, hours, note"
+            " FROM order_items WHERE order_id=? ORDER BY position", (order_id,))
+        if items:
+            data["items"] = items
         return self.save_order(data)
 
     def order_history(self, order_id: str) -> list[dict]:
@@ -228,6 +310,7 @@ class Repo:
             self.db.execute("UPDATE print_jobs SET order_id=NULL WHERE order_id=?", (order_id,))
             self.db.execute("UPDATE payments SET order_id=NULL WHERE order_id=?", (order_id,))
             self.db.execute("UPDATE transactions SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.execute("DELETE FROM order_items WHERE order_id=?", (order_id,))
             self.db.delete("orders", order_id)
 
     # ---------------------------------------------------------------- клиенты
@@ -299,6 +382,139 @@ class Repo:
         row["last_dry_min"] = num((dry or {}).get("minutes"))
         row["last_dry_temp"] = num((dry or {}).get("temp"))
         return row
+
+    # ------------------------------------------------------------- материалы
+    def materials(self) -> list[dict]:
+        """Все материалы из базы: каталог (builtin=1) + свои (builtin=0)."""
+        from .materials import material_from_row, seed_builtin_materials
+        seed_builtin_materials(self.db)
+        rows = self.db.query(
+            "SELECT * FROM materials WHERE archived=0 ORDER BY builtin DESC, name")
+        return [material_from_row(row) for row in rows]
+
+    def save_material(self, data: dict) -> dict:
+        """Создать/изменить свой пластик или настроить встроенный под себя.
+
+        Пустые поля добираются из шаблона (base — ключ встроенного материала),
+        поэтому можно «скопировать PETG» и поменять только температуру и цену.
+        Встроенный материал можно править (цена, температуры…) — его ключ
+        остаётся каталогным, а «⟲ Сбросить» вернёт заводские значения.
+        """
+        from .materials import MATERIALS, _norm_key, material_from_row
+        data = dict(data)
+        name = str(data.get("name") or "").strip()
+        if not name:
+            raise ValueError("Укажите название материала")
+        key = _norm_key(str(data.get("key") or name))
+        if not key:
+            key = f"MY_{uid('mat').upper()}"
+
+        editing = None
+        if data.get("id"):
+            editing = self.db.one(
+                "SELECT * FROM materials WHERE id=?", (str(data["id"]),))
+        is_builtin = bool((editing or {}).get("builtin"))
+        if is_builtin:
+            # Встроенный: ключ не меняется, запись остаётся «каталожной».
+            key = str(editing["key"])
+            base_key = _norm_key(str(data.get("base") or "")) or key
+        else:
+            base_key = _norm_key(str(data.get("base") or ""))
+        if key in MATERIALS and not is_builtin:
+            raise ValueError(
+                f"Ключ {key} занят встроенным материалом — "
+                f"выберите другой (например, MY_{key})")
+        base = MATERIALS.get(base_key, {})
+
+        def pick(field: str, default):
+            value = data.get(field)
+            if value is None or value == "":
+                return base.get(field, default)
+            return num(value)
+
+        def pick_pair(min_field: str, max_field: str, base_key: str,
+                      fallback: tuple) -> tuple:
+            b = tuple(base.get(base_key) or fallback)
+            vmin = data.get(min_field)
+            vmax = data.get(max_field)
+            return (num(vmin) if vmin not in (None, "") else b[0],
+                    num(vmax) if vmax not in (None, "") else b[1])
+
+        existing = self.db.one(
+            "SELECT * FROM materials WHERE key=?", (key,))
+        if existing and existing.get("id") != str(data.get("id") or ""):
+            # Архивная запись с тем же ключом — «оживляем» её: пользователь
+            # пересоздаёт убранный материал, а не получает конфликт UNIQUE.
+            if not num(existing.get("archived")):
+                raise ValueError(
+                    f"Материал с ключом {key} уже есть — измените его или выберите другой ключ")
+        mat_id = (existing or {}).get("id") or str(data.get("id") or "") or uid("mat")
+        nozzle = pick_pair("temp_nozzle_min", "temp_nozzle_max",
+                           "temp_nozzle", (210, 240))
+        bed = pick_pair("temp_bed_min", "temp_bed_max", "temp_bed", (45, 65))
+        row = {
+            "id": mat_id,
+            "key": key,
+            "name": name,
+            "builtin": 1 if is_builtin else 0,
+            "full_name": str(data.get("full_name") or base.get("full_name") or ""),
+            "base": base_key,
+            "density": pick("density", 1.24),
+            "speed_factor": pick("speed_factor", 1.0),
+            "support_factor": pick("support_factor", 0.10),
+            "price_per_kg": pick("price_per_kg", 0),
+            "temp_nozzle_min": nozzle[0],
+            "temp_nozzle_max": nozzle[1],
+            "temp_bed_min": bed[0],
+            "temp_bed_max": bed[1],
+            "chamber": str(data.get("chamber") or base.get("chamber") or "open"),
+            "fan": pick("fan", 100),
+            "shrinkage": pick("shrinkage", 0.25),
+            "dry_temp": pick("dry_temp", 50),
+            "dry_hours": pick("dry_hours", 5),
+            "heat_resistance": pick("heat_resistance", 58),
+            "uv_resistant": 1 if data.get("uv_resistant") else 0,
+            "food_safe": 1 if data.get("food_safe") else 0,
+            "abrasive": 1 if data.get("abrasive") else 0,
+            "strengths": str(data.get("strengths") or ""),
+            "weaknesses": str(data.get("weaknesses") or ""),
+            "use_cases": str(data.get("use_cases") or ""),
+            "note": str(data.get("note") or ""),
+            "archived": 0,
+            "created_at": (existing or {}).get("created_at") or now_iso(),
+            "updated_at": now_iso(),
+        }
+        saved = self.db.upsert("materials", row)
+        self.db.add_event("mat", "Материал сохранён",
+                          f"{name} ({key})", "", {"material_id": saved["id"]})
+        return material_from_row(saved)
+
+    def reset_material(self, mat_id: str) -> None:
+        """Вернуть встроенному материалу заводские параметры каталога."""
+        row = self.db.one("SELECT * FROM materials WHERE id=?", (mat_id,))
+        if not row:
+            raise ValueError("Материал не найден")
+        if not num(row.get("builtin")):
+            raise ValueError("Сбросить можно только встроенный материал")
+        # Удаляем строку — справочник снова возьмёт значения из каталога.
+        self.db.delete("materials", mat_id)
+        self.db.add_event("mat", "Материал возвращён к заводским параметрам",
+                          str(row.get("name") or ""), "", {"material_id": mat_id})
+
+    def delete_material(self, mat_id: str) -> None:
+        """Убрать материал. Свой — архивируем; встроенный — удаляем настройку
+        (каталог вернёт заводские значения, сам тип остаётся в справочнике)."""
+        row = self.db.one("SELECT * FROM materials WHERE id=?", (mat_id,))
+        if not row:
+            raise ValueError("Материал не найден")
+        if num(row.get("builtin")):
+            self.db.delete("materials", mat_id)
+        else:
+            self.db.execute(
+                "UPDATE materials SET archived=1, updated_at=? WHERE id=?",
+                (now_iso(), mat_id))
+        self.db.add_event("mat", "Материал убран из справочника",
+                          str(row.get("name") or ""), "", {"material_id": mat_id})
 
     def spools(self, include_archived: bool = False) -> list[dict]:
         sql = "SELECT * FROM spools"
@@ -545,10 +761,10 @@ class Repo:
 
     # --------------------------------------------------------- бэкап и импорт
     def export_all(self) -> dict:
-        tables = ["settings", "statuses", "niches", "customers", "orders", "spools",
-                  "print_jobs", "transactions", "filament_usage", "catalog", "printer_stats",
-                  "accounts", "channels", "expense_categories", "fixed_costs", "payments",
-                  "tax_periods"]
+        tables = ["settings", "statuses", "niches", "customers", "orders", "order_items",
+                  "spools", "print_jobs", "transactions", "filament_usage", "catalog",
+                  "printer_stats", "accounts", "channels", "expense_categories",
+                  "fixed_costs", "payments", "tax_periods"]
         data: dict[str, Any] = {"format": "printflow-backup", "version": 2, "exported_at": now_iso()}
         for table in tables:
             data[table] = self.db.query(f"SELECT * FROM {table}")
@@ -572,10 +788,10 @@ class Repo:
 
     def _import_native(self, payload: dict) -> dict:
         stats: dict[str, int] = {}
-        for table in ("statuses", "niches", "customers", "orders", "spools",
-                      "catalog", "accounts", "channels", "expense_categories",
-                      "fixed_costs", "transactions", "payments", "print_jobs",
-                      "tax_periods"):
+        for table in ("statuses", "niches", "customers", "orders", "order_items",
+                      "spools", "catalog", "accounts", "channels",
+                      "expense_categories", "fixed_costs", "transactions",
+                      "payments", "print_jobs", "tax_periods"):
             rows = payload.get(table)
             if not isinstance(rows, list):
                 continue

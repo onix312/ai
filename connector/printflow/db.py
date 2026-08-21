@@ -23,6 +23,10 @@ SCHEMA_VERSION = 4
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
 ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "materials": [
+        # встроенный тип из каталога (можно править под себя; 0 — свой материал)
+        ("builtin", "INTEGER DEFAULT 0"),
+    ],
     "nomenclature": [
         # фактическая себестоимость штуки из завершённых партий
         ("cost", "REAL DEFAULT 0"),
@@ -195,6 +199,53 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(number);
+
+CREATE TABLE IF NOT EXISTS order_items (
+    id TEXT PRIMARY KEY,
+    order_id TEXT DEFAULT '',
+    position INTEGER DEFAULT 0,
+    nom_id TEXT DEFAULT '',      -- позиция номенклатуры (база товаров)
+    name TEXT DEFAULT '',
+    qty REAL DEFAULT 1,
+    price REAL DEFAULT 0,        -- цена за штуку
+    grams REAL DEFAULT 0,        -- норматив пластика на штуку (из базы)
+    hours REAL DEFAULT 0,        -- норматив печати на штуку (из базы)
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
+
+CREATE TABLE IF NOT EXISTS materials (
+    id TEXT PRIMARY KEY,
+    key TEXT UNIQUE,                -- короткий ключ: PLA, PETG, MY_PETG (для формул и AMS)
+    name TEXT DEFAULT '',           -- как показывать в списках
+    full_name TEXT DEFAULT '',
+    base TEXT DEFAULT '',           -- шаблон: ключ встроенного материала или ''
+    builtin INTEGER DEFAULT 0,      -- 1 = встроенный тип из каталога (можно править под себя)
+    density REAL DEFAULT 1.24,      -- г/см³
+    speed_factor REAL DEFAULT 1.0,  -- во сколько раз медленнее PLA
+    support_factor REAL DEFAULT 0.10,
+    price_per_kg REAL DEFAULT 0,    -- стоимость кг (0 = из справочника-шаблона)
+    temp_nozzle_min REAL DEFAULT 210,
+    temp_nozzle_max REAL DEFAULT 240,
+    temp_bed_min REAL DEFAULT 45,
+    temp_bed_max REAL DEFAULT 65,
+    chamber TEXT DEFAULT 'open',    -- open | closed | closed_hot
+    fan INTEGER DEFAULT 100,        -- % обдува
+    shrinkage REAL DEFAULT 0.25,    -- усадка, %
+    dry_temp REAL DEFAULT 50,
+    dry_hours REAL DEFAULT 5,
+    heat_resistance REAL DEFAULT 58,
+    uv_resistant INTEGER DEFAULT 0,
+    food_safe INTEGER DEFAULT 0,
+    abrasive INTEGER DEFAULT 0,
+    strengths TEXT DEFAULT '',
+    weaknesses TEXT DEFAULT '',
+    use_cases TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    archived INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
 
 CREATE TABLE IF NOT EXISTS spools (
     id TEXT PRIMARY KEY,

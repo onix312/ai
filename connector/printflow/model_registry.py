@@ -399,7 +399,7 @@ class ModelRegistry:
             " FROM model_prep_sessions WHERE result='done'") or {}
         return {
             "total_models": int(num(total.get("n"))),
-            "linked_to_products": int(num(withnom.get("n"))),
+            "linked_to_products": int(num(with_nom.get("n"))),
             "avg_prep_minutes": round(num(avg_prep.get("v")), 1),
             "prep_sessions": int(num(sessions.get("n"))),
             "avg_session_minutes": round(num(sessions.get("avg")), 1),

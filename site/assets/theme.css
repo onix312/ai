@@ -529,6 +529,13 @@ dialog.modal[open] { animation: modalIn .2s var(--ease); }
 /* Длинная карточка заказа получает реальную flex-высоту: тело прокручивается,
    а нижняя панель с сохранением остаётся на экране. Короткие окна не растягиваем. */
 #order_modal form { height: min(88dvh, 900px); }
+/* В карточке заказа много действий (для заказа из печати — все 8 кнопок).
+   Окно шириной 760px не вмещает их в одну строку, а dialog обрезает
+   переполнение — «Сохранить» уезжал за край и его не было видно.
+   Кнопки переносятся на вторую строку; «Сохранить» всегда на экране. */
+#order_modal .modal-foot { flex-wrap: wrap; }
+#order_modal .modal-foot .spacer { display: none; }
+#order_modal .modal-foot .btn { flex: 0 0 auto; white-space: nowrap; }
 .modal-head {
   display: flex; align-items: flex-start; gap: 14px;
   padding: 18px 20px 14px; border-bottom: 1px solid var(--line-soft);

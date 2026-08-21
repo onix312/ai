@@ -990,10 +990,13 @@ class TelegramPhotoAndWatchTests(unittest.TestCase):
             self.db.upsert("print_jobs", {"id": "j1", "order_id": "o1", "state": "running",
                                           "progress": 25})
             sent = []
-            manager.notify_async = lambda text, photo=None: sent.append(text)
+            # Прогресс уходит в тот же чат, из которого попросили следить, —
+            # а не в чат по умолчанию через manager.notify_async.
+            bot._reply = lambda chat, text: sent.append((chat, text))
             bot._watched["chat1"] = {"number": "1001", "last_milestone": 0}
             bot._maybe_watch()
-            self.assertTrue(any("20%" in t for t in sent))
+            self.assertTrue(any("20%" in t for _, t in sent))
+            self.assertEqual([c for c, _ in sent], ["chat1"])
             self.assertEqual(bot._watched["chat1"]["last_milestone"], 20)
         finally:
             manager.shutdown()

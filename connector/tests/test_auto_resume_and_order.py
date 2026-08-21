@@ -89,6 +89,18 @@ class MockPrinter:
         pass
 
 
+class SdFilesStub:
+    """Заглушка files.read_head: отдаёт шапку G-code, как с SD-карты."""
+
+    def __init__(self, head: bytes = b""):
+        self.head = head
+        self.calls = []
+
+    def read_head(self, path, max_bytes=131072):
+        self.calls.append(path)
+        return self.head
+
+
 class ConvertPrintToOrderTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -119,7 +131,13 @@ class ConvertPrintToOrderTests(unittest.TestCase):
         self.assertEqual(order["material"], "PETG")
         self.assertEqual(order["status"], "printing")
         self.assertEqual(order["file"], "Organizer Box_v2.3mf".replace(" ", "_"))
-        self.assertAlmostEqual(order["grams"], 35.5)
+        # Печать идёт: print_weight — частичный расход, а не вес изделия.
+        # Раньше сюда молча писалось «30 г» или частичный вес — теперь честный 0
+        # с пометкой в заметках, факт приедет по завершении печати.
+        self.assertEqual(order["grams"], 0.0)
+        self.assertIn("неизвестен", order["notes"].lower())
+        # Время печати — из телеметрии: уже прошло 30 + осталось 40 минут.
+        self.assertAlmostEqual(order["hours"], 70 / 60, places=2)
 
         # Проверяем связь задания с заказом
         job = self.db.one("SELECT * FROM print_jobs WHERE order_id=?", (order["id"],))
@@ -131,6 +149,35 @@ class ConvertPrintToOrderTests(unittest.TestCase):
         self.assertTrue(res2["ok"])
         self.assertFalse(res2["created"])
         self.assertEqual(res2["order"]["id"], order["id"])
+
+    def test_convert_active_uses_sd_gcode_head(self):
+        # Слайсер насчитал 213 г, файл лежит только на SD принтера (.gcode):
+        # шапка G-code подтягивается по FTPS, а не подменяется «30 г».
+        self.mock_pr.files = SdFilesStub(
+            b"; Filament used [g]: 213.0\n; TIME: 9600\n; filament_type: PLA\n")
+        self.mock_pr.state = "RUNNING"
+        self.mock_pr.task = "Bowl_213g.gcode"
+        res = self.manager.convert_active_to_order("pr_test")
+        order = res["order"]
+        self.assertAlmostEqual(order["grams"], 213.0)
+        self.assertAlmostEqual(order["hours"], 160 / 60, places=2)
+        self.assertIn("213.0", order["notes"])
+
+    def test_convert_active_finished_uses_printer_weight(self):
+        # Завершённая печать: print_weight — уже факт, его и берём.
+        self.mock_pr.state = "FINISH"
+        res = self.manager.convert_active_to_order("pr_test")
+        self.assertEqual(res["order"]["grams"], 35.5)
+
+    def test_convert_active_without_sources_no_fake_30(self):
+        # Ни локального файла, ни SD, ни факта принтера — честный ноль и
+        # пометка, а не магическое «30 г».
+        self.mock_pr.files = SdFilesStub(b"")
+        self.mock_pr.state = "RUNNING"
+        self.mock_pr.task = "Unknown_Thing.3mf"
+        res = self.manager.convert_active_to_order("pr_test")
+        self.assertEqual(res["order"]["grams"], 0.0)
+        self.assertIn("неизвестен", res["order"]["notes"].lower())
 
     def test_api_convert_active_to_order(self):
         code, body = self.api.post("/api/printer/convert-to-order", {"printer_id": "pr_test"}, {})
@@ -223,6 +270,59 @@ class AutoResumePowerLossTests(unittest.TestCase):
         acted = self.manager.check_auto_resume("pr_crimea", snap)
         self.assertFalse(acted)
         self.assertEqual(self.mock_pr.state, "PAUSE")
+
+
+class FinishFactFillsOrderTests(unittest.TestCase):
+    """Факт завершённой печати заполняет вес плиты в заказе, где сметы не было."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = pathlib.Path(self.tmp.name) / "test.sqlite3"
+        self.db = Database(self.db_path)
+        self.repo = Repo(self.db)
+        self.db.set_settings({"auto_accounting": True, "auto_consume_filament": False})
+        from connector.printflow.accounting import Accounting
+        self.acc = Accounting(self.db)
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_finish_fact_fills_plan_grams_when_unknown(self):
+        # Заказ из печати: сметы слайсера не было (grams == 0).
+        order = self.repo.save_order({
+            "product": "Тяжёлая деталь", "qty": 1, "status": "printing",
+            "grams": 0.0, "hours": 0.0,
+        })
+        job = self.db.upsert("print_jobs", {
+            "id": "job_fact", "order_id": order["id"], "printer_id": "pr_x",
+            "name": "Heavy.gcode", "file": "Heavy.gcode", "state": "done",
+            "grams": 213.0, "duration_min": 160.0,
+        })
+        self.acc.register_job_costs(job)
+        updated = self.db.one("SELECT grams, hours, actual_grams, actual_hours"
+                              " FROM orders WHERE id=?", (order["id"],))
+        self.assertAlmostEqual(updated["actual_grams"], 213.0)
+        self.assertAlmostEqual(updated["actual_hours"], 160.0 / 60.0, places=3)
+        # Плановый вес появился из факта — в карточке заказа теперь 213 г.
+        self.assertAlmostEqual(updated["grams"], 213.0)
+        self.assertAlmostEqual(updated["hours"], 160.0 / 60.0, places=3)
+
+    def test_finish_fact_does_not_overwrite_existing_plan(self):
+        # Если смета была (например, 213 г из слайсера) — факт её не затирает.
+        order = self.repo.save_order({
+            "product": "Деталь со сметой", "qty": 1, "status": "printing",
+            "grams": 213.0, "hours": 2.5,
+        })
+        job = self.db.upsert("print_jobs", {
+            "id": "job_fact2", "order_id": order["id"], "printer_id": "pr_x",
+            "name": "Planned.gcode", "file": "Planned.gcode", "state": "done",
+            "grams": 215.0, "duration_min": 150.0,
+        })
+        self.acc.register_job_costs(job)
+        updated = self.db.one("SELECT grams, hours FROM orders WHERE id=?", (order["id"],))
+        self.assertAlmostEqual(updated["grams"], 213.0)
+        self.assertAlmostEqual(updated["hours"], 2.5)
 
 
 if __name__ == "__main__":

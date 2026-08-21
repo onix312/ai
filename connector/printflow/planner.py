@@ -62,7 +62,7 @@ class Planner:
     def _in_progress_hours(self) -> float:
         """Часы уже занятых слотов парка: печать, старт и очередь."""
         rows = self.db.query(
-            "SELECT j.est_minutes, o.hours, o.qty FROM print_jobs j"
+            "SELECT j.est_minutes, o.hours, o.qty, o.id order_id FROM print_jobs j"
             " LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state IN ('queued','starting','running')")
         total = 0.0
@@ -71,8 +71,18 @@ class Planner:
             if est > 0:
                 total += est / 60.0
             else:
-                total += num(row.get("hours")) * max(1.0, num(row.get("qty"), 1))
+                # Мультизаказ: hours — вся плита, qty — сумма единиц; на qty не умножаем.
+                k = 1.0 if self._has_items(row.get("order_id")) \
+                    else max(1.0, num(row.get("qty"), 1))
+                total += num(row.get("hours")) * k
         return round(total, 2)
+
+    def _has_items(self, order_id: str | None) -> bool:
+        if not order_id:
+            return False
+        row = self.db.one(
+            "SELECT 1 FROM order_items WHERE order_id=? LIMIT 1", (order_id,))
+        return bool(row)
 
     def _filament_left(self, material: str) -> float:
         if not material or not str(material).strip():
@@ -85,9 +95,13 @@ class Planner:
 
     # ----------------------------------------------------------------- задачи
     def _order_task(self, order: dict) -> dict:
+        # Мультизаказ: hours/grams — вся плита целиком, qty — сумма единиц
+        # по позициям. Умножать на qty нельзя, иначе план дня раздуется.
+        k = 1.0 if self._has_items(order.get("id")) \
+            else max(1.0, num(order.get("qty"), 1))
         qty = max(1.0, num(order.get("qty"), 1))
-        hours = round(num(order.get("hours")) * qty, 2)
-        grams = round(num(order.get("grams")) * qty, 1)
+        hours = round(num(order.get("hours")) * k, 2)
+        grams = round(num(order.get("grams")) * k, 1)
         material = (order.get("material") or "").strip()
         file = (order.get("file") or "").strip()
         issues = self._issues(file, material, grams)

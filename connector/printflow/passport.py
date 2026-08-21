@@ -60,9 +60,11 @@ def job_passport(db, job_id: str) -> dict[str, Any]:
                 estimate = {}
     out["estimate"] = estimate
     # --- план против факта
-    plan_min = num(estimate.get("minutes"))
+    # Многоплитный проект: план — сумма по плитам (total_×), а не первая плита,
+    # иначе факт всей печати сравнится с планом одной плиты.
+    plan_min = num(estimate.get("total_minutes")) or num(estimate.get("minutes"))
     fact_min = num(job.get("duration_min"))
-    plan_grams = num(estimate.get("grams"))
+    plan_grams = num(estimate.get("total_grams")) or num(estimate.get("grams"))
     fact_grams = num(job.get("grams"))
     out["plan_vs_fact"] = {
         "minutes": {"plan": round(plan_min, 1), "fact": round(fact_min, 1),

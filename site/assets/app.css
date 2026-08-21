@@ -381,6 +381,12 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .of-spool-row select { flex: 1 1 auto; min-width: 0; }
 .of-spool-row input[type=number] { width: 104px; flex: none; }
 
+/* Состав заказа (мультизаказ): позиции товаров на одной плите */
+.of-item-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.of-item-row select { flex: 1 1 200px; min-width: 0; }
+.of-item-row input[data-item-name] { flex: 2 1 160px; min-width: 0; }
+.of-item-row input[type=number] { width: 92px; flex: none; }
+
 /* ============================================================= финансы */
 .tx-row { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 13.2px; }
 .tx-row:last-child { border-bottom: 0; }
