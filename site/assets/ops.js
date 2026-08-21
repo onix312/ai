@@ -541,6 +541,9 @@ function applyFileEstimate(res, fallbackName) {
   if (color && $('of_color') && !$('of_color').value.trim()) $('of_color').value = color;
   distributeSpoolGrams(true);
   updateEconDebounced();
+  // Возвращаем, удалось ли вытащить вес — вызывающий код покажет
+  // понятное предупреждение, а не молчаливо «ничего не произошло».
+  return { grams, minutes, material, color, name };
 }
 
 /** «Выбрать файл»: 3MF/G-code с компьютера → uploads, вес и время — из слайсера. */
@@ -553,11 +556,18 @@ async function pickOrderFile(file) {
   toast('Читаем файл', file.name, 'info');
   try {
     const res = await api('/api/estimate/upload', { method: 'POST', body: form });
-    applyFileEstimate(res, file.name);
+    const applied = applyFileEstimate(res, file.name);
     const bits = [res.file || file.name];
-    if (num(res.grams)) bits.push(`${nfmt(res.grams)} г`);
-    if (num(res.minutes)) bits.push(U.minutesText ? U.minutesText(res.minutes) : U.hoursText(num(res.hours)));
-    toast('Файл сохранён в uploads', bits.join(' · '));
+    if (num(applied.grams)) bits.push(`${nfmt(applied.grams)} г`);
+    if (num(applied.minutes)) bits.push(U.minutesText ? U.minutesText(applied.minutes) : U.hoursText(num(res.hours)));
+    if (num(applied.grams)) {
+      toast('Файл сохранён в uploads', bits.join(' · '));
+    } else {
+      // Файл загрузился, но слайсер не оставил в нём вес — показываем, что
+      // делать, вместо молчаливого «ничего не подставилось».
+      toast('Файл сохранён, но вес не найден',
+        'Впишите граммы вручную или скачайте файл с принтера кнопкой «Скачать с принтера»', 'warn');
+    }
   } catch (e) { fail(e); }
 }
 
@@ -575,9 +585,15 @@ async function pullFileFromPrinter(live, file) {
   toast('Скачиваем с принтера', `${live.name} · ${name}`, 'info');
   try {
     const res = await post('/api/estimate/pull', { printer_id: live.id, file: String(file || '') });
-    applyFileEstimate(res, name);
-    toast(res.source === 'printer' ? 'Файл скачан с принтера' : 'Использована копия из uploads',
-      [res.file, num(res.grams) ? `${nfmt(res.grams)} г` : ''].filter(Boolean).join(' · '));
+    const applied = applyFileEstimate(res, name);
+    const title = res.source === 'printer' ? 'Файл скачан с принтера' : 'Использована копия из uploads';
+    if (num(applied.grams)) {
+      const bits = [res.file, `${nfmt(applied.grams)} г`];
+      if (num(applied.minutes)) bits.push(U.minutesText ? U.minutesText(applied.minutes) : '');
+      toast(title, bits.filter(Boolean).join(' · '));
+    } else {
+      toast(title, `${res.file || name} · вес в файле не найден — впишите граммы вручную`, 'warn');
+    }
     return true;
   } catch (e) { fail(e); return false; }
 }
