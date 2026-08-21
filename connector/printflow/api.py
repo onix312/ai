@@ -1091,6 +1091,17 @@ class Api:
                     minutes = num(known.get("duration_min")) or num(known.get("est_minutes"))
                     return 200, {"estimate": {"grams": grams, "minutes": minutes,
                                                "source": "printer"}}
+                # Файл может существовать только на SD-карте принтера. В этом
+                # случае нельзя ограничиваться history: для G-code в его
+                # заголовке уже есть ;Filament used [g]. Это особенно важно
+                # для имён Bambu Studio с пробелами и запятыми.
+                try:
+                    for printer in self.manager.printers.values():
+                        est = self.manager._slicer_estimate(printer, fname)
+                        if num(est.get("grams")) or num(est.get("minutes")):
+                            return 200, {"estimate": est}
+                except Exception:
+                    pass
                 return 404, {"error": "Файл не найден"}
             if local.suffix.lower() == ".3mf":
                 try:
