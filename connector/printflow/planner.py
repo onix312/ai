@@ -64,7 +64,7 @@ class Planner:
         rows = self.db.query(
             "SELECT j.est_minutes, o.hours, o.qty, o.id order_id FROM print_jobs j"
             " LEFT JOIN orders o ON o.id=j.order_id"
-            " WHERE j.state IN ('queued','starting','running')")
+            " WHERE j.state IN ('queued','uploading','starting','running')")
         total = 0.0
         for row in rows:
             est = num(row.get("est_minutes"))

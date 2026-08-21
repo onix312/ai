@@ -15,7 +15,7 @@ from .config import UPLOAD_DIR, now_iso
 from .db import Database
 
 _PRIORITY = {"urgent": 100, "high": 50, "normal": 0, "low": -10}
-_ACTIVE_JOB_STATES = ("queued", "starting", "running")
+_ACTIVE_JOB_STATES = ("queued", "uploading", "starting", "running")
 
 
 def _norm(value: object) -> str:
@@ -136,7 +136,7 @@ class ProductionPreparation:
         requirements = self._requirements(order)
         active = self.db.one(
             "SELECT * FROM print_jobs WHERE order_id=?"
-            " AND state IN ('queued','starting','running')"
+            " AND state IN ('queued','uploading','starting','running')"
             " ORDER BY datetime(created_at) LIMIT 1", (order_id,))
         printers = self._printers()
         reserved = self._reserved_grams()

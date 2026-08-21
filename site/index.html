@@ -3836,7 +3836,8 @@
  <div class="modal-head"><div><span class="eyebrow">Очередь</span><h2>Задание печати</h2></div><button class="icon-btn" type="button" data-close="job_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
   <label class="field span-2"><span>Название</span><input id="jf_name"></label>
-  <label class="field span-2"><span>Файл на принтере</span><input id="jf_file" placeholder="model.3mf"></label>
+  <label class="field span-2"><span>Файл для печати</span><input id="jf_file" placeholder="model.3mf или выберите файл ниже"><small class="hint">Можно указать имя файла на SD-карте или выбрать 3MF/G-code с компьютера — при старте PrintFlow загрузит его на принтер.</small></label>
+  <label class="field span-2"><span>Файл с компьютера</span><input id="jf_local_file" type="file" accept=".3mf,.gcode"><small class="hint" id="jf_file_hint">Файл сохранится локально и попадёт в очередь без предварительной загрузки на принтер.</small></label>
   <label class="field"><span>Принтер</span><select id="jf_printer_id"><option value="">Любой свободный</option></select></label>
   <label class="field"><span>Заказ</span><select id="jf_order_id"><option value="">Без заказа</option></select></label>
   <label class="field"><span>Плита</span><input id="jf_plate" type="number" min="1" value="1"></label>
