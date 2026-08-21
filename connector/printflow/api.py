@@ -1201,6 +1201,21 @@ class Api:
             if not job_id and (pid or body.get("printer_id")):
                 return 200, self.manager.convert_active_to_order(pid or body.get("printer_id", ""), body)
             return 200, self.manager.convert_job_to_order(job_id, body)
+        if path == "/api/printer/link-to-order":
+            # Привязать текущую печать к уже существующему заказу — нужно
+            # после сбоя питания или ручной распечатки, когда файл не
+            # сопоставился автоматически.
+            printer_id = pid or body.get("printer_id", "")
+            order_id = str(body.get("order_id") or "").strip()
+            if not order_id:
+                raise ValueError("Нужен order_id")
+            return 200, self.manager.link_active_to_order(printer_id, order_id)
+        if path == "/api/jobs/link-to-order":
+            job_id = str(body.get("job_id") or body.get("id") or "").strip()
+            order_id = str(body.get("order_id") or "").strip()
+            if not job_id or not order_id:
+                raise ValueError("Нужны job_id и order_id")
+            return 200, self.manager.link_job_to_order(job_id, order_id)
         if path == "/api/printer/reprint":
             # Подготовка повтора — явное подтверждение; физический старт всё
             # равно выполняется отдельно. Для failed нужна записанная причина.

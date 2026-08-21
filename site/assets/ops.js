@@ -408,6 +408,101 @@ function fillFromAms() {
   updateEconDebounced();
 }
 
+/**
+ * Обновить граммы заказа: подтянуть вес плиты и время печати из активного
+ * задания принтера, из файла .3mf/.gcode либо из базы товаров. Значение,
+ * которое попадает в поле «Пластик, г», сразу распределяется по катушкам
+ * (то есть по столбцу «граммы» рядом с каждой выбранной катушкой — это и
+ * есть граммы к списанию со склада). Пользователь дёргает эту функцию
+ * кнопкой «⟳ Обновить граммы» рядом с полем, но она же вызывается
+ * автоматически при открытии заказа, если веса ещё нет.
+ *
+ * Возвращает { grams, hours, source } или null, если ни один источник не
+ * дал данных. При manual=true (нажатие кнопки) — форсим перезапись даже
+ * если поле уже заполнено вручную.
+ */
+async function refreshOrderGrams(manual) {
+  const gramsEl = $('of_grams');
+  const hoursEl = $('of_hours');
+  if (!gramsEl) return null;
+
+  let grams = 0, hours = 0, minutes = 0, source = '';
+  const materialEl = $('of_material'), colorEl = $('of_color'), fileEl = $('of_file');
+
+  // 1) Файл на принтере — самый точный источник: вся плита из слайсера.
+  const file = fileEl ? fileEl.value.trim() : '';
+  if (file) {
+    try {
+      const res = await get('/api/estimate', { file });
+      const est = (res && res.estimate) || {};
+      const g = num(est.total_grams) || num(est.grams);
+      const m = num(est.total_minutes) || num(est.minutes);
+      if (g) { grams = g; source = `файл ${file}`; }
+      if (m) minutes = m;
+      if (est.material && materialEl && (!materialEl.value || manual)) materialEl.value = est.material;
+      if (est.color && colorEl && (!colorEl.value || manual)) colorEl.value = est.color;
+    } catch (e) { /* нет файла в базе — попробуем другие источники */ }
+  }
+
+  // 2) Живое задание принтера: print_weight из слайсера, который прошит в задание.
+  //    Это как раз «граммы самого стола» — вес всей плиты, что печатается прямо сейчас.
+  if (!grams) {
+    try {
+      const live = PF.livePrinter();
+      const p = live && live.printer;
+      const w = p ? num(p.weight) : 0;
+      if (w > 0) {
+        grams = w;
+        source = `принтер ${live.name || ''}`.trim();
+      }
+      if (!minutes && p) {
+        const elapsed = num(p.elapsed_min), remain = num(p.remaining_min);
+        if (elapsed + remain > 0) minutes = elapsed + remain;
+      }
+    } catch (e) { /* принтер не на связи — не критично */ }
+  }
+
+  // 3) База товаров: если заказ на готовое изделие, берём норматив «грамм на штуку».
+  if (!grams) {
+    const nomId = ($('of_nom_id') || {}).value || '';
+    const item = nomId && (PF.state.nomenclature || []).find((i) => i.id === nomId);
+    if (item && num(item.grams)) {
+      grams = num(item.grams);
+      if (num(item.hours)) hours = num(item.hours);
+      source = `база товаров · ${item.name || ''}`.trim();
+    }
+  }
+
+  if (!grams && !minutes && !hours) {
+    if (manual) fail(new Error('Не нашёл граммы: нет файла, принтер офлайн и товар не выбран'));
+    return null;
+  }
+
+  // Форсим перезапись только когда пользователь нажал кнопку; при
+  // автоподстановке уважаем ручной ввод и заполняем только пустые поля.
+  const shouldWriteGrams = grams > 0 && (manual || !num(gramsEl.value));
+  const shouldWriteHours = (hours > 0 || minutes > 0) && hoursEl && (manual || !num(hoursEl.value));
+  if (shouldWriteGrams) gramsEl.value = Math.round(grams * 10) / 10;
+  if (shouldWriteHours) {
+    const h = hours > 0 ? hours : minutes / 60;
+    hoursEl.value = Math.round(h * 100) / 100;
+  }
+
+  // Раздать граммы по строкам катушек — это и есть «граммы на вычет из катушки».
+  // При ручном обновлении перезаполняем все строки, при авто — только пустые.
+  distributeSpoolGrams(Boolean(manual));
+  updateEconDebounced();
+
+  if (manual) {
+    const parts = [];
+    if (shouldWriteGrams) parts.push(`${nfmt(gramsEl.value)} г`);
+    if (shouldWriteHours) parts.push(U.hoursText(num(hoursEl.value)));
+    if (source) parts.push(source);
+    toast('Граммы обновлены', parts.join(' · ') || 'из источника печати');
+  }
+  return { grams, hours: hours || minutes / 60, source };
+}
+
 async function openOrder(id, intakeDraft, intakeMeta) {
   editingOrder = id || null;
   fillSelectors();
@@ -514,6 +609,11 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   if (id) {
     loadOrderReadiness(id);
     loadOrderCompletion(id);
+  }
+  // Автоподстановка граммов: если поле пустое, попробуем взять вес плиты
+  // с принтера / файла / базы товаров. Ручной ввод не перезаписываем.
+  if (!num(($('of_grams') || {}).value)) {
+    refreshOrderGrams(false).catch(() => { /* тихо: пользователь всегда может нажать кнопку */ });
   }
 }
 
@@ -1313,6 +1413,11 @@ function bind() {
 
   const amsBtn = $('of_ams_btn');
   if (amsBtn) amsBtn.addEventListener('click', fillFromAms);
+  const gramsRefreshBtn = $('of_grams_refresh');
+  if (gramsRefreshBtn) gramsRefreshBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    refreshOrderGrams(true).catch(fail);
+  });
   // hint: показать текущий AMS цвет
   const hintEl = $('of_ams_hint');
   if (hintEl) {

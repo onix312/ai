@@ -3426,7 +3426,7 @@
      <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
    </div>
-   <label class="field"><span>Пластик, г <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"></label>
+   <label class="field"><span>Пластик, г <button class="btn sm ghost" type="button" id="of_grams_refresh" title="Взять граммы из активного задания принтера, файла или базы товаров и распределить их по катушкам" style="margin-left:6px;padding:2px 6px;font-size:11px">⟳ Обновить граммы</button> <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"><small class="hint" id="of_grams_hint">Заполняется автоматически при выборе товара из базы, файла на принтере или живого задания. Списание с катушек считается от этой цифры.</small></label>
    <label class="field"><span>Печать, ч <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_hours" type="number" min="0" step="any"></label>
    <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
    <label class="field"><span>Файл на принтере</span><input id="of_file" placeholder="adresnik-v2.3mf"></label>
@@ -3611,6 +3611,16 @@
   </div>
  </div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" id="pj_queue">В очередь</button><button class="btn" type="button" data-close="print_modal">Отмена</button><button class="btn primary" type="button" id="pj_start">Печатать сейчас</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="link_order_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Печать и заказ</span><h2 id="link_order_title">Привязать печать к заказу</h2><p id="link_order_sub" class="muted"></p></div><button class="icon-btn" type="button" data-close="link_order_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice info"><span>i</span><span>Пропала связь после сбоя питания или файл не совпал с заказом? Выберите нужный заказ — печать и статус «в печати» подхватятся сразу.</span></div>
+  <label class="field" style="margin-top:10px"><span>Поиск</span><input id="link_order_search" placeholder="Номер, товар или клиент" autocomplete="off"></label>
+  <div id="link_order_list" class="list" style="max-height:340px;overflow:auto;margin-top:10px"><div class="empty compact"><span>Загружаем активные заказы…</span></div></div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="link_order_modal">Отмена</button><button class="btn primary" type="button" id="link_order_submit" disabled>Привязать выбранный заказ</button></div>
 </form></dialog>
 
 <dialog class="modal narrow" id="spool_modal"><form method="dialog">

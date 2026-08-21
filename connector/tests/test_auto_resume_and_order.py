@@ -269,6 +269,211 @@ class AutoResumePowerLossTests(unittest.TestCase):
         self.assertEqual(self.mock_pr.state, "PAUSE")
 
 
+class PowerLossReconcileTests(unittest.TestCase):
+    """Сбой питания не должен рвать связку «печать ↔ заказ»."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = pathlib.Path(self.tmp.name) / "test.sqlite3"
+        self.db = Database(self.db_path)
+        self.repo = Repo(self.db)
+        self.manager = PrinterManager(self.db, self.repo)
+        # Принтер только что подключился (свежий connected_since имитирует
+        # ситуацию сразу после power-on): первая телеметрия пустая, до
+        # реального RUNNING остаётся 10–60 секунд.
+        self.mock_pr = MockPrinter("pr_power", "P1S Power", "IDLE", "")
+        self.mock_pr.connected_since = __import__("time").time()
+        self.manager.printers["pr_power"] = self.mock_pr
+
+    def tearDown(self):
+        self.manager.shutdown()
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_fresh_connection_does_not_close_running_job(self):
+        # Заказ ⇄ печать: до сбоя питания работало корректно.
+        order = self.repo.save_order({
+            "product": "Кронштейн", "qty": 1, "status": "printing",
+            "grams": 120.0, "hours": 3.0,
+        })
+        # Задание печатается уже 2 часа — реальный сценарий сбоя питания.
+        import time as _time
+        started_ago = _time.strftime(
+            "%Y-%m-%dT%H:%M:%S", _time.localtime(_time.time() - 7200))
+        job = self.db.upsert("print_jobs", {
+            "id": "job_run", "printer_id": "pr_power", "order_id": order["id"],
+            "name": "Bracket.gcode", "file": "Bracket.gcode",
+            "state": "running", "source": "printer",
+            "started_at": started_ago, "created_at": started_ago,
+            "progress": 45,
+        })
+
+        # Первая телеметрия после boot принтера: пустой gcode_state.
+        snap = self.mock_pr.snapshot()
+        snap["printer"]["state"] = "IDLE"
+        snap["printer"]["task"] = ""
+        self.manager._reconcile_printer(self.mock_pr, snap)
+
+        # Связка должна остаться на месте, задание не закрывается.
+        still = self.db.one("SELECT state, order_id FROM print_jobs WHERE id=?", (job["id"],))
+        self.assertEqual(still["state"], "running")
+        self.assertEqual(still["order_id"], order["id"])
+
+    def test_same_task_on_printer_does_not_close_job(self):
+        # Прошло больше 90 секунд с подключения — но принтер уже показывает
+        # тот же файл. Bambu Power Loss Recovery сам возобновит печать.
+        self.mock_pr.connected_since = __import__("time").time() - 300
+        order = self.repo.save_order({
+            "product": "Ваза", "qty": 1, "status": "printing",
+            "grams": 200.0, "hours": 5.0,
+        })
+        import time as _time
+        started_ago = _time.strftime(
+            "%Y-%m-%dT%H:%M:%S", _time.localtime(_time.time() - 3600))
+        self.db.upsert("print_jobs", {
+            "id": "job_same", "printer_id": "pr_power", "order_id": order["id"],
+            "name": "Vase_Tall.3mf", "file": "Vase_Tall.3mf",
+            "state": "running", "source": "printer",
+            "started_at": started_ago, "created_at": started_ago,
+            "progress": 60,
+        })
+
+        snap = self.mock_pr.snapshot()
+        snap["printer"]["state"] = "IDLE"  # мигнуло между PAUSE и RUNNING
+        snap["printer"]["task"] = "Vase_Tall.3mf"
+        self.manager._reconcile_printer(self.mock_pr, snap)
+
+        still = self.db.one("SELECT state, order_id FROM print_jobs WHERE id=?", ("job_same",))
+        self.assertEqual(still["state"], "running")
+        self.assertEqual(still["order_id"], order["id"])
+
+    def test_print_start_after_reboot_restores_order_link(self):
+        # Сценарий: реконсиляция ошибочно закрыла задание как «lost»,
+        # но потом принтер прислал RUNNING с тем же remote_task_id.
+        # Задание должно ожить и оставить прежний заказ, а не создать новое.
+        order = self.repo.save_order({
+            "product": "Держатель", "qty": 1, "status": "printing",
+            "grams": 60.0, "hours": 1.5,
+        })
+        import time as _time
+        recent = _time.strftime(
+            "%Y-%m-%dT%H:%M:%S", _time.localtime(_time.time() - 120))
+        self.db.upsert("print_jobs", {
+            "id": "job_lost", "printer_id": "pr_power", "order_id": order["id"],
+            "name": "Holder.gcode", "file": "Holder.gcode",
+            "remote_task_id": "task_42",
+            "state": "cancelled", "result": "lost", "source": "printer",
+            "started_at": recent, "created_at": recent, "finished_at": recent,
+            "progress": 45,
+        })
+
+        # Принтер снова стартует ту же печать.
+        self.manager._on_print_start("pr_power", "Holder.gcode",
+                                     {"remote_task_id": "task_42"})
+
+        rows = self.db.query("SELECT * FROM print_jobs WHERE printer_id=?", ("pr_power",))
+        self.assertEqual(len(rows), 1, "не должно появляться новое задание")
+        job = rows[0]
+        self.assertEqual(job["state"], "running")
+        self.assertEqual(job["order_id"], order["id"])
+
+
+class LinkToOrderTests(unittest.TestCase):
+    """Ручная привязка печати к существующему заказу."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = pathlib.Path(self.tmp.name) / "test.sqlite3"
+        self.db = Database(self.db_path)
+        self.repo = Repo(self.db)
+        self.manager = PrinterManager(self.db, self.repo)
+        self.mock_pr = MockPrinter("pr_link", "P1S Link", "RUNNING", "Custom.gcode")
+        self.manager.printers["pr_link"] = self.mock_pr
+
+    def tearDown(self):
+        self.manager.shutdown()
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_link_active_to_existing_order(self):
+        order = self.repo.save_order({
+            "product": "Индивидуальный", "qty": 1, "status": "new",
+            "grams": 80.0, "hours": 2.0,
+        })
+        # Печать идёт, но без привязки — типичная ситуация после сбоя.
+        job = self.db.upsert("print_jobs", {
+            "id": "job_free", "printer_id": "pr_link",
+            "name": "Custom.gcode", "file": "Custom.gcode",
+            "state": "running", "source": "printer",
+            "started_at": now_iso_helper(), "created_at": now_iso_helper(),
+        })
+
+        res = self.manager.link_active_to_order("pr_link", order["id"])
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["order"]["id"], order["id"])
+        # Заказ перешёл в статус «в печати».
+        self.assertEqual(res["order"]["status"], "printing")
+        # Связка проставлена.
+        linked = self.db.one("SELECT order_id FROM print_jobs WHERE id=?", (job["id"],))
+        self.assertEqual(linked["order_id"], order["id"])
+
+    def test_link_active_without_running_job_creates_stub(self):
+        # На принтере что-то печатается, но события _on_print_start ещё
+        # не было — задание создаётся из телеметрии, связка сразу проставлена.
+        order = self.repo.save_order({"product": "Срочный", "qty": 1, "status": "new"})
+        res = self.manager.link_active_to_order("pr_link", order["id"])
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["order"]["status"], "printing")
+        job = self.db.one("SELECT * FROM print_jobs WHERE printer_id=?", ("pr_link",))
+        self.assertIsNotNone(job)
+        self.assertEqual(job["order_id"], order["id"])
+
+    def test_link_active_rejects_when_no_job_and_no_task(self):
+        # Принтер простаивает — привязывать нечего.
+        self.mock_pr.state = "IDLE"
+        self.mock_pr.task = ""
+        self.mock_pr.raw["print"]["gcode_state"] = "IDLE"
+        self.mock_pr.raw["print"]["subtask_name"] = ""
+        order = self.repo.save_order({"product": "Пусто", "qty": 1, "status": "new"})
+        with self.assertRaises(ValueError):
+            self.manager.link_active_to_order("pr_link", order["id"])
+
+    def test_link_job_to_order(self):
+        # Задание из очереди можно привязать к заказу отдельным вызовом.
+        job = self.manager.enqueue({
+            "name": "Queued.3mf", "file": "Queued.3mf", "printer_id": "pr_link",
+        })
+        order = self.repo.save_order({"product": "Очередь", "qty": 1, "status": "new"})
+        res = self.manager.link_job_to_order(job["id"], order["id"])
+        self.assertTrue(res["ok"])
+        linked = self.db.one("SELECT order_id FROM print_jobs WHERE id=?", (job["id"],))
+        self.assertEqual(linked["order_id"], order["id"])
+
+    def test_api_link_active_to_order(self):
+        from connector.printflow.api import Api
+        api = Api.__new__(Api)
+        api.db = self.db
+        api.repo = self.repo
+        api.manager = self.manager
+        order = self.repo.save_order({"product": "Через API", "qty": 1, "status": "new"})
+        self.db.upsert("print_jobs", {
+            "id": "job_api", "printer_id": "pr_link",
+            "name": "Custom.gcode", "file": "Custom.gcode",
+            "state": "running", "source": "printer",
+            "started_at": now_iso_helper(), "created_at": now_iso_helper(),
+        })
+        code, body = api.post("/api/printer/link-to-order",
+                              {"printer_id": "pr_link", "order_id": order["id"]}, {})
+        self.assertEqual(code, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["order"]["status"], "printing")
+
+
+def now_iso_helper():
+    from connector.printflow.db import now_iso
+    return now_iso()
+
+
 class FinishFactFillsOrderTests(unittest.TestCase):
     """Факт завершённой печати заполняет вес плиты в заказе, где сметы не было."""
 
