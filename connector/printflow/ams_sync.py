@@ -181,12 +181,16 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 "color_hex": hex_norm,
                 "total_grams": total,
                 "remaining_grams": remaining,
-                "price": num(db.setting("default_spool_price", 1600), 1600),
+                # Нельзя считать неизвестную RFID-катушку оплаченной/оценённой:
+                # цена и масса уточняются оператором перед производством.
+                "price": 0,
                 "printer_id": printer_id,
                 "ams_slot": slot,
                 "tray_uuid": tray_uuid,
                 "ams_sync": 1,
                 "synced_at": now_iso(),
+                "verified": 0,
+                "note": "Импортировано из AMS: проверьте массу, цену, бренд и цвет",
                 "archived": 0,
                 "created_at": now_iso(),
                 "updated_at": now_iso(),

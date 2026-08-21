@@ -18,6 +18,9 @@ const STATE_KIND = {
 };
 const SPEED_LABEL = { 1: 'Тихая', 2: 'Обычная', 3: 'Спорт', 4: 'Ludicrous' };
 const DANGER = {
+  pause: 'Поставить печать на паузу? Оператор должен контролировать состояние принтера.',
+  resume: 'Продолжить печать? Принтер снова нагреется и продолжит движение.',
+  load_filament: 'Подать филамент? Сопло нагреется и AMS сменит материал.',
   stop: 'Остановить печать? Задание будет прервано, деталь придётся печатать заново.',
   bed_level: 'Запустить калибровку стола? Принтер начнёт движение и нагрев.',
   calibration: 'Запустить полную калибровку? Займёт несколько минут.',
@@ -514,8 +517,9 @@ function bindAmsProfiles() {
   if (list) list.addEventListener('click', async (e) => {
     const apply = e.target.closest('[data-ap-apply]');
     if (apply) {
+      if (!confirmDanger('Профиль отправит настройки материалов в AMS. Подтвердить физическое действие?')) return;
       try {
-        await post('/api/ams-profile/apply', { id: apply.dataset.apApply, printer_id: PF.state.activePrinter });
+        await post('/api/ams-profile/apply', { id: apply.dataset.apApply, printer_id: PF.state.activePrinter, confirmed: true });
         toast('Профиль применён');
       } catch (err) { fail(err); }
       return;
@@ -699,7 +703,9 @@ async function command(name, value, opts) {
     const p = requireLive();
     const ask = opts.confirm || DANGER[name];
     if (ask && !confirmDanger(ask)) return;
-    await post('/api/printer/command', { printer_id: p.id, command: name, value });
+    await post('/api/printer/command', {
+      printer_id: p.id, command: name, value, confirmed: Boolean(ask),
+    });
     toast('Команда отправлена', opts.label || name);
     setTimeout(PF.poll, 500);
   } catch (e) { fail(e); }
@@ -876,16 +882,29 @@ function renderQueue() {
 }
 $('history_search').addEventListener('input', U.debounce(renderQueue, 200));
 
+async function preflightAndConfirmJob(job, printerId) {
+  const check = await post('/api/printer/preflight', {
+    printer_id: printerId, file: job.file || job.name || '', plate: num(job.plate, 1) || 1,
+    ams_mapping: (() => { try { return JSON.parse(job.ams_mapping || '[]'); } catch (e) { return []; } })(),
+  });
+  const blocks = check.blocks || [];
+  if (blocks.length) throw new Error('Preflight блокирует старт: ' + blocks.map((x) => x.title || x.detail).join('; '));
+  const warns = (check.warns || []).map((x) => `⚠ ${x.title || x.detail}`).join('\n');
+  const text = `Запустить «${job.name || job.file || 'задание'}»? Принтер начнёт нагрев и движение.`
+    + (warns ? `\n\nPreflight предупреждения:\n${warns}\n\nПодтвердите, что оператор проверил их.` : '');
+  if (!confirmDanger(text)) return false;
+  return true;
+}
+
 async function startNextJob() {
   const next = (PF.state.jobs.queue || []).find((j) => j.state === 'queued');
   if (!next) return toast('Очередь пуста');
   const printerId = next.printer_id || PF.state.activePrinter || '';
   if (!printerId) return fail(new Error('Сначала выберите или добавьте принтер'));
-  const target = PF.state.printers.find((p) => p.id === printerId);
-  const printerName = target ? target.name : 'выбранный принтер';
-  if (!confirmDanger(`Запустить «${next.name || next.file || 'задание'}» на ${printerName}? Принтер начнёт нагрев и движение.`)) return;
   try {
-    await post('/api/jobs/start', { id: next.id, printer_id: printerId });
+    if (!await preflightAndConfirmJob(next, printerId)) return;
+    await post('/api/jobs/start', { id: next.id, printer_id: printerId,
+      confirmed: true, preflight_acknowledged: true });
     toast('Следующее задание запущено', next.name || next.file || 'Печать');
     await PF.refreshCore();
     setTimeout(PF.poll, 1200);
@@ -1043,7 +1062,7 @@ function bind() {
     loadEvents();
   });
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const cmd = e.target.closest('[data-cmd]');
     if (cmd) {
       const value = cmd.dataset.value !== undefined ? num(cmd.dataset.value) : undefined;
@@ -1071,7 +1090,7 @@ function bind() {
       const type = window.prompt('Тип пластика в слоте (PLA, PETG, ABS, TPU…):', amsEdit.dataset.type || 'PLA');
       if (!type) return;
       command('ams_filament', { ams_id: num(unit), tray_id: num(tray), type: type.toUpperCase(), color: amsEdit.dataset.color },
-        { confirm: '', label: 'AMS ' + type });
+        { confirm: `Записать материал ${type.toUpperCase()} в слот AMS?`, label: 'AMS ' + type });
       return;
     }
     const pf = e.target.closest('[data-print-file]');
@@ -1085,8 +1104,15 @@ function bind() {
     }
     const js = e.target.closest('[data-job-start]');
     if (js) {
-      post('/api/jobs/start', { id: js.dataset.jobStart, printer_id: PF.state.activePrinter })
-        .then(() => { toast('Задание запущено'); PF.refreshCore(); }).catch(fail);
+      const job = (PF.state.jobs.queue || []).find((x) => x.id === js.dataset.jobStart)
+        || (PF.state.jobs.history || []).find((x) => x.id === js.dataset.jobStart);
+      if (!job) return fail(new Error('Задание не найдено в текущем списке'));
+      try {
+        if (!await preflightAndConfirmJob(job, PF.state.activePrinter || job.printer_id || '')) return;
+        await post('/api/jobs/start', { id: job.id, printer_id: PF.state.activePrinter || job.printer_id || '',
+          confirmed: true, preflight_acknowledged: true });
+        toast('Задание запущено'); PF.refreshCore();
+      } catch (err) { fail(err); }
       return;
     }
     const jc = e.target.closest('[data-job-cancel]');
@@ -1297,9 +1323,17 @@ function bind() {
   });
 
   $('pj_start').addEventListener('click', async () => {
-    if (!confirmDanger('Запустить печать? Принтер немедленно начнёт нагрев и движение.')) return;
     try {
-      await post('/api/printer/print', printPayload());
+      const payload = printPayload();
+      const check = await post('/api/printer/preflight', payload);
+      if ((check.blocks || []).length) throw new Error(
+        'Preflight блокирует старт: ' + check.blocks.map((x) => x.title || x.detail).join('; '));
+      const warns = (check.warns || []).map((x) => `⚠ ${x.title || x.detail}`).join('\n');
+      if (!confirmDanger('Запустить печать? Принтер немедленно начнёт нагрев и движение.'
+        + (warns ? `\n\nPreflight предупреждения:\n${warns}\n\nПодтвердите проверку.` : ''))) return;
+      payload.confirmed = true;
+      payload.preflight_acknowledged = true;
+      await post('/api/printer/print', payload);
       closeModal('print_modal');
       toast('Печать запущена', pendingFile);
       PF.refreshCore();

@@ -18,7 +18,8 @@ PF.state.report = null;
 
 let repPeriod = 'month', repOffset = 0;
 let editingAccount = null, editingChannel = null, editingFixed = null,
-  editingCat = null, payingOrder = null, payingDebt = 0, paymentRequestId = '',
+  editingCat = null, payingOrder = null, payingDebt = 0, payingPaid = 0,
+  payingOrderUpdatedAt = '', paymentRequestId = '',
   reminderDraft = null;
 
 const MODE_HINTS = {
@@ -414,26 +415,43 @@ function openExpCat(id) {
   $('expcat_delete').hidden = !c.id;
   openModal('expcat_modal');
 }
+function syncPaymentKind() {
+  const kind = $('pf_kind').value || 'payment';
+  const limit = kind === 'refund' ? payingPaid : payingDebt;
+  $('pf_amount').max = limit > 0 ? String(limit) : '0';
+  if (num($('pf_amount').value) > limit) $('pf_amount').value = limit || '';
+  const title = kind === 'refund' ? 'Сумма возврата' : kind === 'prepay' ? 'Сумма предоплаты' : 'Сумма оплаты';
+  const label = $('pf_amount').closest('.field')?.querySelector('span');
+  if (label) label.textContent = `${title}, ₽`;
+  const info = $('pay_info').lastElementChild;
+  if (info) {
+    info.textContent = kind === 'refund'
+      ? `Получено ранее ${money(payingPaid)} · доступный возврат до ${money(payingPaid)}.`
+      : `${kind === 'prepay' ? 'Предоплата' : 'Оплата'}: доступно до ${money(payingDebt)}.`;
+  }
+}
+
 function openPayment(orderId) {
   fillSelects();
   const debts = (PF.state.money && PF.state.money.debts && PF.state.money.debts.rows) || [];
   const d = debts.find((x) => x.id === orderId)
     || (PF.state.orders || []).find((o) => o.id === orderId) || {};
   payingOrder = orderId;
-  const debt = num(d.debt) || Math.max(0, num(d.price) - Math.max(num(d.paid), num(d.prepaid)));
-  payingDebt = debt;
+  payingDebt = num(d.debt) || Math.max(0, num(d.price) - Math.max(num(d.paid), num(d.prepaid)));
+  payingPaid = Math.max(num(d.paid), num(d.prepaid));
+  payingOrderUpdatedAt = String(d.updated_at || '');
   paymentRequestId = (window.crypto && window.crypto.randomUUID)
-    ? window.crypto.randomUUID() : `debt-${orderId}-${Date.now()}`;
-  $('pay_title').textContent = `Получить оплату по заказу №${d.number || ''}`.trim();
-  $('pay_info').lastElementChild.textContent = debt
-    ? `${d.customer || d.customer_name || 'Клиент'} · цена ${money(d.price)}, оплачено ${money(d.paid)}, остаток ${money(debt)}.`
-    : 'Заказ оплачен полностью — можно записать возврат или доплату.';
-  $('pf_amount').value = debt || '';
-  $('pf_amount').max = debt || '';
-  $('pf_kind').value = 'payment';
-  $('pf_kind').disabled = true;
+    ? window.crypto.randomUUID() : `payment-${orderId}-${Date.now()}`;
+  $('pay_title').textContent = `Платёж по заказу №${d.number || ''}`.trim();
+  $('pay_info').lastElementChild.textContent = payingDebt
+    ? `${d.customer || d.customer_name || 'Клиент'} · цена ${money(d.price)}, оплачено ${money(payingPaid)}, остаток ${money(payingDebt)}.`
+    : `Заказ оплачен полностью · получено ${money(payingPaid)}. Можно оформить возврат.`;
+  $('pf_kind').value = payingDebt ? 'payment' : 'refund';
+  $('pf_kind').disabled = false;
+  $('pf_amount').value = payingDebt || payingPaid || '';
   $('pf_method').value = '';
   $('pf_note').value = '';
+  syncPaymentKind();
   openModal('payment_modal');
 }
 
@@ -630,28 +648,34 @@ function bind() {
   });
 
   btn('payment_save', async () => {
+    const kind = $('pf_kind').value || 'payment';
     const amount = num($('pf_amount').value);
+    const limit = kind === 'refund' ? payingPaid : payingDebt;
     if (amount <= 0) return fail(new Error('Укажите сумму больше нуля'));
-    if (amount > payingDebt + 0.005) return fail(new Error(`Осталось получить только ${money(payingDebt)}`));
+    if (amount > limit + 0.005) return fail(new Error(
+      `${kind === 'refund' ? 'Можно вернуть' : 'Осталось получить'} только ${money(limit)}`));
     if (!$('pf_method').value) return fail(new Error('Выберите способ оплаты'));
+    if (kind === 'refund' && !confirmDanger(`Подтвердить возврат ${money(amount)} по этому заказу?`)) return;
     try {
-      const result = await post('/api/debt/settle', {
-        id: payingOrder, amount, payment_confirmed: true,
-        account_id: $('pf_account').value, payment_method: $('pf_method').value,
-        request_id: paymentRequestId,
+      const result = await post('/api/payment/save', {
+        order_id: payingOrder, amount, kind,
+        account_id: $('pf_account').value, method: $('pf_method').value,
+        note: $('pf_note').value.trim(), request_id: paymentRequestId,
+        expected_updated_at: payingOrderUpdatedAt,
       });
+      const payment = result.payment || {};
       closeModal('payment_modal');
-      let copied = false;
-      if (result.message_after_payment && navigator.clipboard) {
-        try { await navigator.clipboard.writeText(result.message_after_payment); copied = true; } catch (e) { /* текст не отправляется */ }
-      }
-      toast(result.already_recorded ? 'Оплата уже была записана' : 'Оплата записана',
-        `${money(result.received)}${copied ? ' · подтверждение клиенту скопировано' : ''}`);
+      toast(payment.already_recorded ? 'Операция уже была записана'
+        : kind === 'refund' ? 'Возврат записан' : kind === 'prepay' ? 'Предоплата записана' : 'Оплата записана',
+        money(payment.amount || amount));
       await Promise.all([refreshMoney(), PF.refreshCore()]);
       renderAll();
       PF.refreshFinance();
     } catch (e) { fail(e); }
   });
+
+  const paymentKind = $('pf_kind');
+  if (paymentKind) paymentKind.addEventListener('change', syncPaymentKind);
 
   btn('debt_reminder_copy', async () => {
     if (!reminderDraft || !reminderDraft.text) return;

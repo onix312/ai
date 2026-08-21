@@ -851,6 +851,12 @@ class Accounting:
             spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
         if not spool:
             spool = self.pick_spool(printer_id, ams_slot, material, tray_uuid)
+        if spool and auto and not int(num(spool.get("verified"), 1)):
+            self.db.add_event(
+                "security", "Автосписание остановлено: катушка не проверена",
+                f"{spool.get('material') or 'материал'} · подтвердите массу и цену в складе",
+                printer_id, {"spool_id": spool.get("id"), "job_id": job_id})
+            return {"ok": False, "reason": "Катушка из AMS не подтверждена оператором", "spool": spool}
         cost = 0.0
         if spool:
             weight = max(1.0, num(spool["total_grams"], 1000))
@@ -1790,7 +1796,7 @@ class Accounting:
 
     def add_payment(self, order_id: str, amount: float, kind: str = "payment",
                     account_id: str = "", method: str = "", note: str = "",
-                    request_id: str = "") -> dict:
+                    request_id: str = "", expected_updated_at: str = "") -> dict:
         """Идемпотентно записать платёж, проводку и остаток долга."""
         request_id = str(request_id or "").strip()[:120]
         with self.db.transaction():
@@ -1806,17 +1812,21 @@ class Accounting:
                     existing["already_recorded"] = True
                     return existing
             row = self._add_payment_once(
-                order_id, amount, kind, account_id, method, note, request_id
+                order_id, amount, kind, account_id, method, note, request_id,
+                expected_updated_at
             )
             row["already_recorded"] = False
             return row
 
     def _add_payment_once(self, order_id: str, amount: float, kind: str = "payment",
                           account_id: str = "", method: str = "", note: str = "",
-                          request_id: str = "") -> dict:
+                          request_id: str = "", expected_updated_at: str = "") -> dict:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
+        expected_updated_at = str(expected_updated_at or "").strip()
+        if expected_updated_at and expected_updated_at != str(order.get("updated_at") or ""):
+            raise ValueError("Заказ уже изменён — обновите карточку перед записью платежа")
         if kind not in ("prepay", "payment", "refund"):
             raise ValueError("Тип платежа: предоплата, оплата или возврат")
         amount = round(num(amount), 2)
@@ -1847,9 +1857,9 @@ class Accounting:
                 fee=fee, taxable=kind != "refund", deductible=kind == "refund", at=stamp)
             self.db.execute(
                 "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,"
-                "method,fee,note,tx_id,request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "method,fee,note,tx_id,request_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pay_id, stamp, order_id, order.get("customer_id"), amount, kind,
-                 acc["id"], method, fee, note, tx["id"], request_id))
+                 acc["id"], method, fee, note, tx["id"], request_id, stamp))
             sign = -1 if kind == "refund" else 1
             self.db.execute(
                 "UPDATE orders SET paid=MAX(0,COALESCE(paid,0)+?), updated_at=? WHERE id=?",

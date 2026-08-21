@@ -6,7 +6,7 @@ const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeTe
   todayISO, initials, debounce, toast, fail, openModal, closeModal, confirmDanger } = U;
 const { get, post, api } = PF.api;
 
-let editingOrder = null, editingNiche = null, statusDraft = [];
+let editingOrder = null, editingOrderUpdatedAt = '', editingNiche = null, statusDraft = [];
 let fulfillmentDraft = null;
 let aftercareItems = [], aftercareCurrent = null;
 let filters = { q: '', status: '', niche: '' };
@@ -158,6 +158,13 @@ function fillSelectors() {
   $('orders_filter_niche').innerHTML = '<option value="">Все ниши</option>' + niches;
   const cf = $('cf_niche_id');
   if (cf) cf.innerHTML = '<option value="">Без ниши</option>' + niches;
+  const channels = (PF.state.channels || []).filter((c) => num(c.active));
+  const ch = $('of_channel');
+  if (ch && channels.length) {
+    const keepChannel = ch.value;
+    ch.innerHTML = channels.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+    if (keepChannel && channels.some((c) => c.id === keepChannel)) ch.value = keepChannel;
+  }
   $('customers_datalist').innerHTML = PF.state.customers
     .map((c) => `<option value="${esc(c.name)}">`).join('');
   const pd = $('products_datalist');
@@ -176,7 +183,7 @@ function fillSelectors() {
 
 const OF = ['product', 'status', 'priority', 'niche_id', 'channel', 'qty', 'due',
   'customer_name', 'phone', 'messenger', 'material', 'color', 'grams', 'hours',
-  'manual_minutes', 'file', 'price', 'cost', 'prepaid', 'auto_cost', 'quality',
+  'manual_minutes', 'file', 'price', 'cost', 'auto_cost', 'quality',
   'quality_note', 'notes', 'colors', 'nom_id', 'warehouse_id'];
 
 /* Многоцветный расход: JSON в базе <-> строка «Белый:40, Чёрный:15» в форме */
@@ -315,6 +322,7 @@ function renderOrderItems(items) {
     + `<input type="number" min="1" step="1" data-item-qty value="${r.qty != null ? esc(String(r.qty)) : '1'}" title="Количество">`
     + `<input type="number" min="0" step="any" data-item-price value="${num(r.price) ? esc(String(r.price)) : ''}" placeholder="цена, ₽">`
     + `<input type="number" min="0" step="any" data-item-grams value="${num(r.grams) ? esc(String(r.grams)) : ''}" placeholder="г/шт из базы" title="Вес штуки — подставляется из базы товаров">`
+    + `<input type="number" min="0" step="any" data-item-hours value="${num(r.hours) ? esc(String(r.hours)) : ''}" placeholder="ч/шт из базы" title="Время печати штуки — подставляется из базы товаров">`
     + '<button class="icon-btn sm danger" type="button" data-item-del title="Убрать позицию">×</button></div>').join('');
 }
 function collectOrderItems() {
@@ -328,6 +336,7 @@ function collectOrderItems() {
       qty: Math.max(1, num((row.querySelector('[data-item-qty]') || {}).value, 1)),
       price: num((row.querySelector('[data-item-price]') || {}).value),
       grams: num((row.querySelector('[data-item-grams]') || {}).value),
+      hours: num((row.querySelector('[data-item-hours]') || {}).value),
     });
   });
   return out;
@@ -343,16 +352,34 @@ function renderItemsEcon(list) {
     + `<span class="amt">${money(i.price)}</span></div>`).join('')
     + '</div>' : '';
 }
+function syncCompositionFields(active) {
+  const override = Boolean($('of_items_override') && $('of_items_override').checked);
+  const derivedIds = ['of_product', 'of_qty', 'of_price', 'of_grams', 'of_hours', 'of_cost'];
+  derivedIds.forEach((id) => {
+    const el = $(id);
+    if (el) el.readOnly = active && !override;
+  });
+  const hint = $('of_items_hint');
+  if (hint && active) hint.textContent = override
+    ? 'Override включён: итоговые поля можно поправить вручную; состав остаётся сохранённым отдельно.'
+    : 'Итоги состава вычисляются автоматически. Для ручной правки включите «Переопределить итоги состава».';
+}
 function updateOrderItemsSummary() {
   const items = collectOrderItems();
-  if (!items.length) return;
+  const active = items.length > 0;
+  syncCompositionFields(active);
+  if (!active) return;
+  const override = Boolean($('of_items_override') && $('of_items_override').checked);
   const total = items.reduce((a, i) => a + i.price * i.qty, 0);
   const units = items.reduce((a, i) => a + i.qty, 0);
-  const product = ($('of_product').value || '').trim();
-  $('of_price').value = String(Math.round(total * 100) / 100);
-  $('of_qty').value = String(units);
-  if (!product) {
+  const totalGrams = items.reduce((a, i) => a + num(i.grams) * i.qty, 0);
+  const totalHours = items.reduce((a, i) => a + num(i.hours) * i.qty, 0);
+  if (!override) {
+    $('of_price').value = String(Math.round(total * 100) / 100);
+    $('of_qty').value = String(units);
     $('of_product').value = items.map((i) => `${i.name} ×${i.qty}`).join(', ');
+    if (totalGrams > 0) $('of_grams').value = String(Math.round(totalGrams * 10) / 10);
+    if (totalHours > 0) $('of_hours').value = String(Math.round(totalHours * 100) / 100);
   }
   distributeSpoolGrams();
   updateEconDebounced();
@@ -685,6 +712,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
     }
   }
   const data = Object.assign({}, blank, order || {}, intakeDraft || {});
+  editingOrderUpdatedAt = id ? String(data.updated_at || '') : '';
   // Старые версии сохраняли подпись канала вместо его id. Нормализуем при
   // открытии, чтобы комиссии и аналитика снова находили справочник.
   const channelAliases = {
@@ -701,14 +729,20 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   renderSpoolRows(data.spools);
   distributeSpoolGrams();
   renderOrderItems(data.items || []);
+  if ($('of_items_override')) $('of_items_override').checked = Boolean(num(data.items_override));
   renderItemsEcon(data.items_economics || []);
+  updateOrderItemsSummary();
   $('of_reserved').checked = Boolean(num(data.reserved));
   updateReadyStockHint();
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
-  // в поле показываем фактически полученные деньги: платежи пишутся в paid,
-  // prepaid остался от старых заказов
+  // Оплата — только через единый журнал платежей. В карточке показываем
+  // справочное значение, но оно не входит в payload сохранения заказа.
   const paidNow = Math.max(num(data.paid), num(data.prepaid));
-  $('of_prepaid').value = paidNow ? String(paidNow) : '';
+  const paidField = $('of_prepaid');
+  if (paidField) {
+    paidField.value = paidNow ? String(paidNow) : '';
+    paidField.readOnly = true;
+  }
   $('order_modal_title').textContent = id ? `Заказ №${data.number}` : 'Новый заказ';
   $('order_modal_sub').textContent = id
     ? `Создан ${dateTimeText(data.created_at)}${data.closed_at ? ' · закрыт ' + dateTimeText(data.closed_at) : ''}`
@@ -729,6 +763,8 @@ async function openOrder(id, intakeDraft, intakeMeta) {
       + '<br><small>Проверьте поля и нажмите «Сохранить» — до этого база не меняется.</small>';
   }
   $('order_delete').hidden = !id;
+  const paymentBtn = $('order_payment');
+  if (paymentBtn) paymentBtn.hidden = !id;
   $('order_queue').hidden = !id;
   $('order_queue').disabled = false;
   $('order_queue').textContent = 'Сохранить и подготовить';
@@ -937,6 +973,9 @@ async function updateEcon() {
     try {
       auto = await post('/api/calc/cost', { grams: grams * k, hours: hours * k, manual_minutes: manual });
       cost = num(auto.total);
+      if (orderIsMulti() && !($('of_items_override') && $('of_items_override').checked)) {
+        $('of_cost').value = String(cost);
+      }
     } catch (e) { /* офлайн — оставим 0 */ }
   }
   // Цена одинакова во всех режимах: это сумма заказа, не цена за штуку.
@@ -959,25 +998,28 @@ const updateEconDebounced = debounce(updateEcon, 350);
 
 async function saveOrder(prepareAfter) {
   const payload = { id: editingOrder || '' };
+  if (editingOrderUpdatedAt) payload.expected_updated_at = editingOrderUpdatedAt;
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
   distributeSpoolGrams();
   payload.spools = collectSpoolRows();
   payload.reserved = $('of_reserved').checked ? 1 : 0;
   payload.items = collectOrderItems();
+  payload.items_override = $('of_items_override') && $('of_items_override').checked ? 1 : 0;
   if (!payload.product.trim()) {
     if (payload.items.length) payload.product = payload.items.map((i) => `${i.name} ×${i.qty}`).join(', ');
     else return fail(new Error('Укажите изделие или работу'));
   }
   if (payload.reserved && !payload.nom_id) return fail(new Error('Для резерва выберите готовый товар из базы'));
-  ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost', 'prepaid'].forEach((k) => { payload[k] = num(payload[k]); });
-  // поле «Оплачено» ведёт основной счётчик оплаты, prepaid оставляем для совместимости
-  payload.paid = payload.prepaid;
+  ['qty', 'grams', 'hours', 'manual_minutes', 'price', 'cost'].forEach((k) => { payload[k] = num(payload[k]); });
+  // paid/prepaid намеренно не отправляем: изменение оплаты выполняется
+  // отдельной подтверждаемой операцией через /api/payment/save.
   payload.auto_cost = +$('of_auto_cost').value;
   const wasEditing = Boolean(editingOrder);
   try {
     const res = await post('/api/order/save', payload);
     editingOrder = res.order.id;
+    editingOrderUpdatedAt = String(res.order.updated_at || '');
     if (prepareAfter) {
       try {
         const prepared = await post('/api/order/prepare', {
@@ -1535,7 +1577,10 @@ function bind() {
     const current = collectOrderItems();
     current.push({});
     renderOrderItems(current);
+    updateOrderItemsSummary();
   });
+  const itemsOverride = $('of_items_override');
+  if (itemsOverride) itemsOverride.addEventListener('change', updateOrderItemsSummary);
   const itemsHost = $('of_items');
   if (itemsHost) {
     itemsHost.addEventListener('click', (e) => {
@@ -1554,6 +1599,7 @@ function bind() {
           if (item.name) row.querySelector('[data-item-name]').value = item.name;
           if (num(item.price)) row.querySelector('[data-item-price]').value = item.price;
           if (num(item.grams)) row.querySelector('[data-item-grams]').value = item.grams;
+          if (num(item.hours)) row.querySelector('[data-item-hours]').value = item.hours;
         }
       }
       updateOrderItemsSummary();
@@ -1640,6 +1686,12 @@ function bind() {
   });
   $('order_save').addEventListener('click', () => saveOrder(false));
   $('order_save_prepare').addEventListener('click', () => saveOrder(true));
+  const orderPayment = $('order_payment');
+  if (orderPayment) orderPayment.addEventListener('click', () => {
+    if (!editingOrder) return fail(new Error('Сначала сохраните заказ'));
+    if (PF.modules.finance && PF.modules.finance.openPayment) PF.modules.finance.openPayment(editingOrder);
+    else fail(new Error('Раздел платежей ещё не загружен'));
+  });
   $('order_duplicate').addEventListener('click', async () => {
     if (!editingOrder) return;
     try {

@@ -758,8 +758,9 @@ const AUTOS = [
   ['auto_accounting', 'Автоматический учёт', 'Считать себестоимость по фактам печати'],
   ['auto_link_orders', 'Связывать печать с заказом', 'По имени файла и номеру заказа'],
   ['auto_consume_filament', 'Списывать пластик', 'С катушки, которая стояла в AMS'],
-  ['auto_queue', 'Автозапуск очереди', 'Следующее задание стартует само'],
-  ['auto_resume_paused', 'Авто-продолжение при сбое питания (Крым)', 'При запуске скрипта и выходе из паузы печать продолжается автоматически без ручных команд', 'bool'],
+  ['auto_queue', 'Автозапуск очереди', 'Следующее задание стартует само только при включённом safety-gate'],
+  ['auto_resume_paused', 'Авто-продолжение при сбое питания', 'Работает только при включённом safety-gate и не вмешивается в ручную паузу', 'bool'],
+  ['unattended_dangerous_actions', 'Разрешить опасные действия без оператора', 'Safety-gate для автозапуска, расписаний, нагрева, подачи филамента и авто-возобновления. По умолчанию выключено.', 'bool'],
 ];
 const NOTIFY = [
   ['notify_complete', 'Завершение печати'],
@@ -811,7 +812,7 @@ const UPKEEP = [
 const WATCH = [
   ['watch_folder_enabled', 'Watch Folder — авто-импорт', 'Следить за папкой с 3MF из Bambu Studio', 'bool'],
   ['watch_folder_path', 'Путь к Watch Folder', 'Например ~/PrintFlow-Inbox или C:\\PrintFlow-Inbox', 'text'],
-  ['watch_auto_action', 'Авто-действие с новым файлом', 'notify — только тост, queue — в очередь', 'text'],
+  ['watch_auto_action', 'Действие Watch Folder', 'notify — уведомление, queue — очередь без запуска. Значение print устарело и принудительно сводится к notify.', 'text'],
   ['watch_link_order', 'Связывать с заказом по №', 'Искать № заказа в имени файла', 'bool'],
   ['watch_create_order', 'Создавать черновик заказа', 'Если не нашли заказ — сделать новый', 'bool'],
 ];
@@ -982,6 +983,11 @@ async function loadMaterials() {
 }
 function renderMaterials() {
   const host = $('set_materials');
+  const datalist = $('materials_datalist');
+  if (datalist) {
+    const names = [...new Set(materialsFull.map((m) => m.name || m.key).filter(Boolean))];
+    datalist.innerHTML = names.map((name) => `<option value="${esc(name)}">`).join('');
+  }
   if (!host) return;
   const custom = materialsFull.filter((m) => !m.builtin);
   const builtin = materialsFull.filter((m) => m.builtin);

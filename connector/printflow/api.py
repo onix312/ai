@@ -19,7 +19,8 @@ from . import APP_VERSION
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
-from .config import SITE, UPLOAD_DIR, ensure_dirs, now_iso
+from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
+                     ensure_dirs, now_iso)
 from .db import Database
 from .manager import PrinterManager
 from .repo import Repo
@@ -615,7 +616,16 @@ class Api:
                 "order_ids": order_ids, "order_numbers": numbers, "count": len(numbers)}
 
     def save_order(self, body: dict) -> dict:
-        """Сохранить заказ и синхронизировать резерв готового товара."""
+        """Сохранить заказ и синхронизировать резерв готового товара.
+
+        Денежные поля не принимаются из формы заказа: старые значения остаются
+        читаемыми для совместимости, а новые операции проходят через единый
+        журнал ``/api/payment/save``.
+        """
+        if "paid" in body or "prepaid" in body:
+            raise ValueError(
+                "Оплата не редактируется в карточке заказа; используйте журнал платежей"
+            )
         with self.db.transaction():
             order = self.repo.save_order(body)
             # У заказа может быть только один актуальный резерв. При изменении
@@ -1339,7 +1349,9 @@ class Api:
             return 200, {"ok": True}
         if path == "/api/printer/command":
             printer = self.printer_or_fail(pid)
-            cmd = body.get("command", "")
+            cmd = str(body.get("command") or "").strip()
+            if cmd in DANGEROUS_AUTOMATION_COMMANDS and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физическую команду оператора")
             if cmd == "pause":
                 self.manager.mark_user_paused(printer.id)
             elif cmd == "resume":
@@ -1395,10 +1407,20 @@ class Api:
             return 200, {"ok": True, "printer_info": info_ok, **counts,
                          "spools": self.repo.spools()}
         if path == "/api/printer/print":
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск печати")
             printer = self.printer_or_fail(pid)
             name = str(body.get("name") or body.get("file") or "").strip()
             if not body.get("file"):
                 raise ValueError("Не указан файл для печати")
+            check = self.manager.preflight(
+                printer.id, str(body.get("file") or ""), int(num(body.get("plate"), 1) or 1),
+                body.get("ams_mapping") or body.get("mapping"))
+            if check.get("blocks"):
+                raise ValueError("Preflight блокирует старт: " + "; ".join(
+                    str(x.get("title") or x.get("detail") or "") for x in check["blocks"]))
+            if check.get("warns") and body.get("preflight_acknowledged") is not True:
+                raise ValueError("Подтвердите предупреждения Preflight перед стартом")
             # Сначала создаём starting-задание, затем посылаем команду. Это
             # устраняет гонку: быстрый MQTT START больше не превращается в
             # отдельное безымянное задание до записи строки в базе.
@@ -1448,7 +1470,23 @@ class Api:
         if path == "/api/jobs/enqueue":
             return 200, {"ok": True, "job": self.manager.enqueue(body)}
         if path == "/api/jobs/start":
-            return 200, {"ok": True, "job": self.manager.start_job(body.get("id", ""), pid)}
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск печати")
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (body.get("id", ""),))
+            if not job:
+                raise ValueError("Задание не найдено")
+            printer_id = pid or job.get("printer_id") or ""
+            check = self.manager.preflight(
+                printer_id, str(job.get("file") or job.get("name") or ""),
+                int(num(job.get("plate"), 1) or 1),
+                json.loads(job.get("ams_mapping") or "[]") if job.get("ams_mapping") else [],
+            )
+            if check.get("blocks"):
+                raise ValueError("Preflight блокирует старт: " + "; ".join(
+                    str(x.get("title") or x.get("detail") or "") for x in check["blocks"]))
+            if check.get("warns") and body.get("preflight_acknowledged") is not True:
+                raise ValueError("Подтвердите предупреждения Preflight перед стартом")
+            return 200, {"ok": True, "job": self.manager.start_job(job["id"], printer_id)}
         if path == "/api/jobs/cancel":
             return 200, {"ok": True, "job": self.manager.cancel_job(body.get("id", ""))}
         if path == "/api/jobs/save":
@@ -1624,7 +1662,7 @@ class Api:
                 body.get("order_id", ""), num(body.get("amount")),
                 body.get("kind", "payment"), body.get("account_id", ""),
                 body.get("method", ""), body.get("note", ""),
-                body.get("request_id", ""))
+                body.get("request_id", ""), body.get("expected_updated_at", ""))
             return 200, {"ok": True, "payment": payment,
                          "order": self.repo.order(body.get("order_id", ""))}
         if path == "/api/payment/delete":
@@ -1797,6 +1835,11 @@ class Api:
             return 200, {"ok": True, "price": self.nom.set_price(
                 body.get("nom_id", ""), num(body.get("price")),
                 body.get("price_type_id", ""), body.get("note", ""))}
+        if path == "/api/nomenclature/recalc-price":
+            if not body.get("nom_id"):
+                raise ValueError("Не указана позиция для пересчёта")
+            return 200, self.nom.recalc_price(
+                body.get("nom_id", ""), body.get("price_type_id", ""))
         if path == "/api/nomenclature/recalc-prices":
             return 200, self.nom.recalc_prices(body.get("price_type_id", ""),
                                                body.get("group_id", ""))
@@ -1910,6 +1953,8 @@ class Api:
                 int(num(body.get("plates"))), body.get("printer_id", ""),
                 body.get("spool_id", ""), num(body.get("price")))
         if path == "/api/batch/create":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск партии")
             return 200, {"ok": True, "batch": self.batches.create(body)}
         if path == "/api/batch/receive":
             return 200, {"ok": True, "batch": self.batches.receive(
@@ -1919,9 +1964,13 @@ class Api:
         if path == "/api/batch/cancel":
             return 200, {"ok": True, "batch": self.batches.cancel(body.get("id", ""))}
         if path == "/api/batch/repeat":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск повтора партии")
             return 200, {"ok": True, "batch": self.batches.repeat(
                 body.get("id", ""), bool(body.get("start_now")))}
         if path == "/api/batch/from-plan":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск партий из плана")
             return 200, {"ok": True, "batches": self.batches.create_from_plan(
                 body.get("rows") or [], body.get("warehouse_id", ""),
                 bool(body.get("start_now")))}
@@ -2013,6 +2062,8 @@ class Api:
             self.db.delete("ams_profiles", body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/ams-profile/apply":
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите отправку профиля в AMS")
             profile = self.db.one("SELECT * FROM ams_profiles WHERE id=?", (body.get("id", ""),))
             if not profile:
                 raise ValueError("Профиль не найден")
@@ -2035,8 +2086,14 @@ class Api:
                               printer.id, {"profile_id": profile["id"], "sent": sent})
             return 200, {"ok": True, "sent": sent}
         if path == "/api/schedule/command":
-            if not body.get("command") or not body.get("at"):
+            command = str(body.get("command") or "").strip()
+            if not command or not body.get("at"):
                 raise ValueError("Нужны команда и время")
+            if (command in DANGEROUS_AUTOMATION_COMMANDS
+                    and not self.db.setting("unattended_dangerous_actions", False)):
+                raise ValueError(
+                    "Команда заблокирована safety-gate: включите явное разрешение опасных автоматических действий"
+                )
             self.db.upsert("scheduled_commands", {
                 "id": uid("sch"), "at": body["at"], "printer_id": body.get("printer_id") or "",
                 "command": body["command"], "value": json.dumps(body.get("value"), ensure_ascii=False),
@@ -2092,6 +2149,8 @@ class Api:
             pushed, push_error = False, ""
             manager = getattr(self, "manager", None)
             printer = manager.get(printer_id) if manager and printer_id else None
+            if push_ams and printer and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите отправку материала в AMS")
             if push_ams and printer:
                 try:
                     printer.command("ams_filament", {

@@ -3454,13 +3454,14 @@
    <div id="of_items_econ" style="margin-top:8px"></div>
    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
     <button class="btn sm ghost" type="button" id="of_item_add">+ Позиция</button>
-    <small class="muted" id="of_items_hint">Цена заказа = сумма позиций. Вес и время плиты — с принтера, вес каждой позиции — из базы товаров. Себестоимость плиты делится по доле граммов.</small>
+    <label class="check"><input type="checkbox" id="of_items_override"> Переопределить итоги состава</label>
+    <small class="muted" id="of_items_hint">При составе количество, изделие, цена, нормативы и себестоимость считаются из позиций. Ручной override включайте только осознанно.</small>
    </div>
   </div>
   <div class="form-section"><h3>Экономика</h3><div class="form-grid">
    <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
    <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
-   <label class="field"><span>Оплачено, ₽</span><input id="of_prepaid" type="number" min="0" step="any"><small class="hint">Предоплата или полная оплата. Остаток попадёт в «Долги клиентов».</small></label>
+   <label class="field"><span>Получено по журналу, ₽</span><input id="of_prepaid" type="number" min="0" step="any" readonly><small class="hint">Только просмотр. Предоплата, оплата и возврат записываются отдельными операциями в разделе «Деньги».</small></label>
    <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
    <div class="span-2" id="of_econ"></div>
   </div></div>
@@ -3506,7 +3507,7 @@
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>
 
 <dialog class="modal" id="fulfillment_modal"><form method="dialog">
@@ -3653,6 +3654,7 @@
   <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
   <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
   <label class="check span-2"><span class="switch"><input type="checkbox" id="sf_ams_sync" checked><i></i></span>Обновлять остаток и слот из AMS <i class="hint-i" title="Принтер сам обновляет остаток и привязку к слоту. Выключите, если ведёте эту катушку вручную — тогда автосбор её не тронет.">?</i></label>
+  <label class="check span-2"><span class="switch"><input type="checkbox" id="sf_verified" checked><i></i></span>Проверена оператором <small class="hint">Непроверенная катушка из AMS не используется для автоматического списания.</small></label>
   <small class="muted span-2" id="sf_synced_at" hidden></small>
  </div><datalist id="materials_datalist"><option>PLA</option><option>PLA+</option><option>PLA Silk</option><option>PLA Matte</option><option>PLA-CF</option><option>PETG</option><option>PETG-CF</option><option>TPU 95A</option><option>TPU 85A</option><option>ABS</option><option>ASA</option><option>PC</option><option>PAHT-CF</option><option>PET-CF</option><option>HIPS</option><option>PVA</option></datalist></div>
  <div class="modal-foot"><button class="btn danger" type="button" id="spool_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="spool_modal">Отмена</button><button class="btn primary" type="button" id="spool_save">Сохранить</button></div>
@@ -3681,7 +3683,7 @@
 </form></dialog>
 
 <dialog class="modal narrow" id="catalog_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">База изделий</span><h2 id="catalog_modal_title">Позиция</h2></div><button class="icon-btn" type="button" data-close="catalog_modal">×</button></div>
+ <div class="modal-head"><div><span class="eyebrow">Legacy-зеркало номенклатуры</span><h2 id="catalog_modal_title">Позиция</h2><p class="hint">Редактирование синхронизирует каноническую «Номенклатуру»; отдельной второй карточки не создаётся.</p></div><button class="icon-btn" type="button" data-close="catalog_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
   <label class="field span-2"><span>Название</span><input id="cf_name"></label>
   <label class="field"><span>Ниша</span><select id="cf_niche_id"></select></label>
@@ -3908,6 +3910,7 @@
       <button class="btn sm" type="button" id="nf_photo_btn">⬆ Загрузить фото</button>
       <input type="file" id="nf_photo_file" accept="image/*" hidden></div></div>
    </div>
+   <div class="notice info" id="nf_card_summary" style="margin-top:12px"><span>ⓘ</span><span>Заполните карточку — здесь появится сводка цены, маржи и запаса.</span></div>
   </div>
   <div class="pane" id="nompane-prod">
    <div class="form-grid">
@@ -3923,6 +3926,11 @@
    <div class="notice" id="nf_norm_hint"><span>ⓘ</span><span>Нормативы используются калькулятором партии: они определяют плиты, пластик и время.</span></div>
   </div>
   <div class="pane" id="nompane-price">
+   <div class="notice info"><span>↻</span><span>Пересчёт изменяет только цены этой карточки и сохраняет старые значения в истории.</span></div>
+   <div style="display:flex;align-items:center;gap:8px;margin:10px 0;flex-wrap:wrap">
+    <button class="btn primary" type="button" id="nf_recalc_prices">↻ Пересчитать цены этого товара</button>
+    <small class="muted">Используются текущие себестоимость, наценка, норма ₽/час и округление.</small>
+   </div>
    <div id="nf_prices"></div>
    <div class="card-head" style="margin-top:14px"><div><h3>История цен</h3><p>Пишется при каждом изменении</p></div></div>
    <div id="nf_price_history"></div>

@@ -104,7 +104,11 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # явного выбора «оплата получена» / «в долг», поэтому по умолчанию выключен.
     "auto_income_on_done": False,
     "auto_queue": False,          # автозапуск следующего задания очереди
-    "auto_resume_paused": True,   # авто-продолжение печати при сбое питания (Крым / восстановление после стопа)
+    # Единый safety-gate: без явного включения в настройках расписания,
+    # автозапуск очереди и авто-возобновление не могут выполнять физические
+    # действия. Старые флаги сохраняются для совместимости, но не обходят gate.
+    "unattended_dangerous_actions": False,
+    "auto_resume_paused": False,  # только после явного включения safety-gate
     # --- Сторож печати ---------------------------------------------------
     "guard_enabled": True,          # реагировать на ошибки принтера
     "guard_pause_on_error": True,   # ставить печать на паузу при серьёзной ошибке
@@ -256,6 +260,13 @@ DEFAULT_ACCOUNTS = [
 
 # Каналы продаж со своей комиссией и стоимостью привлечения.
 # (id, название, комиссия %, фикс. сбор ₽, реклама ₽/заказ, плательщик: person|company)
+# Команды, которые нельзя выполнять в фоне без отдельного safety-gate.
+DANGEROUS_AUTOMATION_COMMANDS = frozenset({
+    "pause", "resume", "stop", "nozzle_temp", "bed_temp", "load_filament", "unload_filament",
+    "extrude", "ams_filament", "home", "move", "bed_level", "calibration",
+    "print_gcode", "project_file", "start", "start_job",
+})
+
 DEFAULT_CHANNELS = [
     ("direct", "Напрямую / сарафан", 0.0, 0.0, 0.0, "person"),
     ("shop", "Витрина NOZZA", 0.0, 0.0, 0.0, "person"),
@@ -324,8 +335,12 @@ DEFAULT_NICHES = [
 
 
 def now_iso() -> str:
-    """Локальное время с таймзоной, секундная точность."""
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    """Локальное время с таймзоной.
+
+    Микросекунды нужны не только для журнала, но и как optimistic-locking
+    маркер: два сохранения в одну секунду обязаны получать разные версии.
+    """
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="microseconds")
 
 
 def backup_keep(value: object = DEFAULT_BACKUP_KEEP) -> int:

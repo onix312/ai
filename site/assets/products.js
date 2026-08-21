@@ -11,6 +11,7 @@ let data = { items: [], summary: {}, groups: [], warehouses: [], priceTypes: [] 
 let docsData = [];
 let batchData = [];
 let editingNom = null;
+let editingNomUpdatedAt = '';
 let editingDoc = null;
 let editingWh = null;
 let specRows = [];
@@ -246,6 +247,7 @@ function renderCards(list) {
       + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">убыточный</span>' : '')
       + '<span class="spacer"></span>'
       + (num(i.plan_qty) ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)}</span>` : '')
+      + `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену только этого товара">↻</button>`
       + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
       + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`
       + '</div></article>';
@@ -270,7 +272,7 @@ function renderTable(list) {
       + `<td class="right tnum ${unprofit ? 'neg' : ''}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</td>`
       + `<td class="right tnum">${nfmt(i.sold_7)}</td>`
       + `<td><span class="chip ${STATUS_CLASS[i.status] || ''}">${esc(STATUS_LABEL[i.status] || i.status)}</span></td>`
-      + `<td class="right"><button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button></td></tr>`;
+      + `<td class="right"><button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button></td></tr>`;
   }).join('') : `<tr><td colspan="13">${emptyBox('▩', 'Ничего не найдено', 'Измените фильтры или добавьте товар.')}</td></tr>`;
 }
 
@@ -280,6 +282,51 @@ function emptyBox(icon, title, text) {
 }
 
 /* ======================================================= карточка товара */
+function renderNomSummary(item) {
+  const host = $('nf_card_summary');
+  if (!host) return;
+  if (!item || !item.id) {
+    host.className = 'notice info';
+    host.innerHTML = '<span>ⓘ</span><span>Заполните и сохраните карточку — сводка появится после расчёта нормативов.</span>';
+    return;
+  }
+  const low = item.status === 'low' || item.status === 'out';
+  const unprofitable = item.profitable === false;
+  const price = num(item.price);
+  const cost = num(item.cost);
+  const margin = price - cost;
+  const statusText = STATUS_LABEL[item.status] || item.status || 'без статуса';
+  host.className = `notice ${low || unprofitable ? 'warn' : 'ok'}`;
+  host.innerHTML = '<span>' + (low || unprofitable ? '⚠' : '✓') + '</span><span>'
+    + `<b>Цена ${money(price)}</b> · с/с ${money(cost)} · маржа ${money(margin)}`
+    + (price ? ` (${nfmt(margin / price * 100, 1)}%)` : '')
+    + ` · прибыль/час ${num(item.hours) ? money(item.profit_per_hour) : '—'}`
+    + ` · запас: ${nfmt(item.free)} ${esc(item.unit || 'шт')}`
+    + (num(item.reserved) ? `, резерв ${nfmt(item.reserved)}` : '')
+    + ` · ${esc(statusText)}`
+    + (item.days_left != null ? ` · хватит на ${nfmt(item.days_left, 1)} дн.` : '')
+    + (unprofitable ? '<br><small>Цена ниже целевой прибыли за час — используйте пересчёт или проверьте нормативы.</small>' : '')
+    + '</span>';
+}
+
+async function recalcNomPrices(nomId) {
+  const targetId = nomId || editingNom;
+  if (!targetId) return fail(new Error('Сначала сохраните товар'));
+  if (!confirmDanger('Пересчитать цены только для этого товара? Старые значения останутся в истории.')) return;
+  try {
+    const result = await post('/api/nomenclature/recalc-price', { nom_id: targetId });
+    const changed = Object.values(result.prices || {}).filter((p) => p.changed).length;
+    const currentPane = [...$$('#nom_tabs button')].find((b) => b.classList.contains('on'))?.dataset.pane || 'price';
+    await refresh();
+    if (editingNom === targetId && $('nom_modal')?.open) {
+      await openNom(targetId);
+      switchPane('nom_tabs', 'nompane', currentPane);
+    }
+    toast(changed ? 'Цена товара пересчитана' : 'Цена товара уже актуальна',
+      changed ? `Изменено типов цен: ${changed}` : (result.reason || 'Изменений нет'));
+  } catch (e) { fail(e); }
+}
+
 async function openNom(id) {
   editingNom = id || null;
   let item = null;
@@ -287,6 +334,7 @@ async function openNom(id) {
     try { item = await get('/api/nomenclature/item', { id }); } catch (e) { return fail(e); }
   }
   const d = item || { name: '', kind: 'product', unit: 'шт', fit_per_plate: 1, code: '' };
+  editingNomUpdatedAt = id ? String(d.updated_at || '') : '';
   const setv = (key, value) => { const el = $('nf_' + key); if (el) el.value = value ?? ''; };
   ['name', 'code', 'sku', 'barcode', 'kind', 'unit', 'min_qty', 'max_qty', 'vat', 'note',
     'material', 'grams', 'hours', 'fit_per_plate', 'post_minutes', 'file',
@@ -335,6 +383,7 @@ async function openNom(id) {
   $('nom_modal_sub').textContent = id
     ? `${d.code || ''} · остаток ${nfmt(d.qty)} ${d.unit || 'шт'} · себестоимость ${money(d.cost)}`
     : 'Нормативы производства, цены и остатки';
+  renderNomSummary(d);
   $('nom_delete').hidden = !id;
   $('nom_batch').hidden = !id;
   switchPane('nom_tabs', 'nompane', 'main');
@@ -410,6 +459,7 @@ function renderSpec() {
 async function saveNom() {
   const payload = {
     id: editingNom || '',
+    ...(editingNomUpdatedAt ? { expected_updated_at: editingNomUpdatedAt } : {}),
     name: $('nf_name').value.trim(),
     sku: $('nf_sku').value.trim(), barcode: $('nf_barcode').value.trim(),
     kind: $('nf_kind').value, unit: $('nf_unit').value.trim() || 'шт',
@@ -431,6 +481,7 @@ async function saveNom() {
   });
   try {
     const res = await post('/api/nomenclature/save', payload);
+    editingNomUpdatedAt = String(res.item.updated_at || '');
     const id = res.item.id;
     // состав
     const rows = specRows.filter((r) => r.nom_id);
@@ -615,6 +666,8 @@ async function runMixedPlan() {
 }
 
 async function createBatch() {
+  const startNow = $('bf_start').checked;
+  if (startNow && !confirmDanger('Партия будет физически запущена сразу после создания. Пройти Preflight и начать печать?')) return;
   if ($('bf_mode').value === 'mixed') {
     const items = collectMixedRows();
     if (!items.length) return fail(new Error('Добавьте хотя бы один товар в состав плиты'));
@@ -625,7 +678,8 @@ async function createBatch() {
         warehouse_id: $('bf_warehouse').value,
         printer_id: $('bf_printer').value, spool_id: $('bf_spool').value,
         priority: num($('bf_priority').value), note: $('bf_note').value.trim(),
-        start_now: $('bf_start').checked,
+        start_now: startNow, confirmed: startNow,
+        preflight_acknowledged: startNow,
       });
       closeModal('batch_modal');
       await Promise.all([refreshBatches(), refresh()]);
@@ -642,7 +696,8 @@ async function createBatch() {
       plates: num($('bf_plates').value), warehouse_id: $('bf_warehouse').value,
       printer_id: $('bf_printer').value, spool_id: $('bf_spool').value,
       priority: num($('bf_priority').value), note: $('bf_note').value.trim(),
-      start_now: $('bf_start').checked,
+      start_now: startNow, confirmed: startNow,
+      preflight_acknowledged: startNow,
     });
     closeModal('batch_modal');
     await Promise.all([refreshBatches(), refresh()]);
@@ -1038,7 +1093,9 @@ function bind() {
 
   const gridClick = async (e) => {
     // Кнопки внутри строки проверяем раньше самой строки: иначе клик по
-    // «Напечатать партию» в таблице открывал бы карточку товара.
+    // действию товара открывал бы карточку вместо выполнения действия.
+    const recalc = e.target.closest('[data-nom-recalc]');
+    if (recalc) { e.stopPropagation(); return recalcNomPrices(recalc.dataset.nomRecalc); }
     const batch = e.target.closest('[data-nom-batch]');
     if (batch) { e.stopPropagation(); return openBatch(batch.dataset.nomBatch); }
     const sell = e.target.closest('[data-nom-sell]');
@@ -1068,6 +1125,7 @@ function bind() {
     if (btn) switchPane('nom_tabs', 'nompane', btn.dataset.pane);
   });
   $('nom_save').addEventListener('click', saveNom);
+  $('nf_recalc_prices').addEventListener('click', recalcNomPrices);
   $('nom_batch').addEventListener('click', () => {
     closeModal('nom_modal');
     openBatch(editingNom);

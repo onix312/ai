@@ -16,7 +16,8 @@ from pathlib import Path
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
-from .config import BACKUP_DIR, UPLOAD_DIR, now_iso, rotate_backups
+from .config import (BACKUP_DIR, DANGEROUS_AUTOMATION_COMMANDS, UPLOAD_DIR,
+                     now_iso, rotate_backups)
 from .db import Database
 from .repo import Repo
 from .telegram_bot import TelegramBot
@@ -757,7 +758,9 @@ class PrinterManager:
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
-        if self.db.setting("auto_queue", False) and data.get("allow_auto_start", True):
+        if (self.db.setting("auto_queue", False)
+                and self.db.setting("unattended_dangerous_actions", False)
+                and data.get("allow_auto_start", True)):
             self._maybe_start_next(job["printer_id"] or "")
         # Автозапуск может синхронно перевести это задание в starting/running.
         # Не возвращаем устаревшую копию «queued» — UI должен показывать факт.
@@ -1173,6 +1176,8 @@ class PrinterManager:
                                     active.get("type"), active.get("uuid"))
         if not spool:
             return True, ""
+        if not int(num(spool.get("verified"), 1)):
+            return False, "Катушка из AMS не подтверждена оператором в карточке склада"
         left = num(spool.get("remaining_grams"))
         if left and left < need:
             return False, (f"Нужно {need:.0f} г, в катушке «{spool.get('name', '')}» "
@@ -1222,7 +1227,8 @@ class PrinterManager:
         return same[0] if same else jobs[0]
 
     def _maybe_start_next(self, printer_id: str) -> None:
-        if not self.db.setting("auto_queue", False):
+        if (not self.db.setting("auto_queue", False)
+                or not self.db.setting("unattended_dangerous_actions", False)):
             return
         printer = self.get(printer_id)
         if not printer or not printer.connected:
@@ -1794,7 +1800,8 @@ class PrinterManager:
 
     def check_auto_resume(self, printer_id: str, snap: dict | None = None) -> bool:
         """Автоматическое возобновление печати при паузе/сбое питания без ручных команд."""
-        if not self.db.setting("auto_resume_paused", True):
+        if (not self.db.setting("auto_resume_paused", False)
+                or not self.db.setting("unattended_dangerous_actions", False)):
             return False
         printer = self.get(printer_id)
         if not printer or not printer.connected:
@@ -2510,6 +2517,20 @@ class PrinterManager:
             " ORDER BY datetime(at)",
             (now_iso(),))
         for cmd in due:
+            command_name = str(cmd.get("command") or "").strip()
+            if (command_name in DANGEROUS_AUTOMATION_COMMANDS
+                    and not self.db.setting("unattended_dangerous_actions", False)):
+                ok, err = False, "Заблокировано safety-gate: опасные действия без оператора запрещены"
+                self.db.execute(
+                    "UPDATE scheduled_commands SET done=1, result=? WHERE id=?",
+                    (err, cmd["id"]))
+                self.db.add_event(
+                    "security", "Отложенная команда заблокирована",
+                    f"{command_name} · {cmd.get('note') or ''}",
+                    cmd.get("printer_id") or "", {"ok": False, "blocked": True, "command": command_name})
+                if self.db.setting("notify_guard", True):
+                    self.notify_async(f"PrintFlow: опасная отложенная команда заблокирована\n{command_name}", None)
+                continue
             printer = self.get(cmd.get("printer_id") or "")
             ok, err = False, "Принтер не найден"
             if printer:

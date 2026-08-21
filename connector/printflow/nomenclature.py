@@ -200,7 +200,14 @@ class Nomenclature:
     def save(self, data: dict) -> dict:
         data = dict(data)
         prices = data.pop("prices", None)
+        expected_updated_at = str(data.pop("expected_updated_at", "") or "").strip()
         new = not data.get("id")
+        if not new and expected_updated_at:
+            current = self.db.one("SELECT updated_at FROM nomenclature WHERE id=?", (data["id"],))
+            if not current:
+                raise ValueError("Позиция номенклатуры не найдена")
+            if expected_updated_at != str(current.get("updated_at") or ""):
+                raise ValueError("Позиция уже изменена — обновите карточку перед сохранением")
         if new:
             data["id"] = uid("nom")
             data["created_at"] = now_iso()
@@ -235,6 +242,19 @@ class Nomenclature:
                     if value in ("", None):
                         continue
                     self.set_price(row["id"], num(value), type_id)
+        # Legacy catalog — зеркало, а не второй источник. При редактировании
+        # canonical карточки поддерживаем старый экран синхронным.
+        legacy = self.db.one("SELECT id, price FROM catalog WHERE nom_id=? OR id=("
+                             "SELECT legacy_catalog_id FROM nomenclature WHERE id=?) LIMIT 1",
+                             (row["id"], row["id"]))
+        if legacy:
+            self.db.execute(
+                "UPDATE catalog SET name=?, niche_id=?, grams=?, hours=?, fit_per_plate=?,"
+                " material=?, file=?, notes=?, nom_id=?, updated_at=? WHERE id=?",
+                (row.get("name") or "", row.get("niche_id") or "", num(row.get("grams")),
+                 num(row.get("hours")), max(1, int(num(row.get("fit_per_plate"), 1))),
+                 row.get("material") or "", row.get("file") or "", row.get("note") or "",
+                 row["id"], now_iso(), legacy["id"]))
         self.db.add_event("nom", "Номенклатура создана" if new else "Номенклатура изменена",
                           row.get("name") or "", data={"nom_id": row["id"]})
         return self.item(row["id"]) or row
@@ -269,38 +289,74 @@ class Nomenclature:
             "variant_id": variant_id or None, "price_type_id": price_type_id,
             "price": round(num(price), 2), "note": note})
 
-    def recalc_prices(self, price_type_id: str = "", group_id: str = "") -> dict:
-        """Пересчитать цены от себестоимости, наценки и нормы прибыли за час.
+    def _suggest_price(self, item: dict, ptype: dict, price_type_id: str,
+                       base_type: str) -> float:
+        """Рассчитать одну цену без записи в БД."""
+        cost = num(item.get("cost"))
+        if cost <= 0:
+            return 0.0
+        group = self.db.one("SELECT markup FROM nom_groups WHERE id=?",
+                            (item.get("group_id"),)) if item.get("group_id") else None
+        markup = num((group or {}).get("markup")) or num(ptype.get("markup"))
+        raw = cost * (1 + markup / 100.0)
+        # Целевую прибыль за час применяем только к основной розничной цене.
+        hours = num(item.get("hours"))
+        if hours and price_type_id == base_type:
+            raw = max(raw, cost + num(self.db.setting("target_profit_per_hour", 250), 250) * hours)
+        rounding = max(1.0, num(self.db.setting("price_rounding", 10), 10))
+        return round(-(-raw // rounding) * rounding, 2)
 
-        Одной наценки мало: у быстрой мелочи она даёт копейки за час работы
-        принтера, а у долгих изделий — наоборот, задирает цену. Поэтому берём
-        максимум из двух цен: «себестоимость + наценка» и «себестоимость плюс
-        целевая прибыль за занятые часы печати». Итог округляем вверх до шага.
+    def recalc_price(self, nom_id: str, price_type_id: str = "") -> dict:
+        """Пересчитать цену одной позиции и записать изменение в историю.
+
+        Пустой ``price_type_id`` означает все активные типы цен этой позиции.
+        Это отдельная операция от массового пересчёта: карточка товара не может
+        случайно изменить остальные товары.
         """
+        item = self.item(str(nom_id or ""))
+        if not item:
+            raise ValueError("Позиция номенклатуры не найдена")
+        if item.get("kind") == "service":
+            return {"ok": True, "changed": 0, "prices": {}, "reason": "Услуга не пересчитывается по себестоимости"}
+        cost = num(item.get("cost"))
+        if cost <= 0:
+            return {"ok": True, "changed": 0, "prices": {},
+                    "reason": "Нет себестоимости: укажите нормативы или проведите партию"}
+        if price_type_id:
+            types = [self.db.one("SELECT * FROM price_types WHERE id=? AND archived=0",
+                                 (price_type_id,))]
+            if not types[0]:
+                raise ValueError("Тип цен не найден")
+        else:
+            types = self.db.query("SELECT * FROM price_types WHERE archived=0 ORDER BY position, id")
+        base_type = self._base_type()
+        prices: dict[str, dict[str, float]] = {}
+        changed = 0
+        for ptype in types:
+            suggested = self._suggest_price(item, ptype, ptype["id"], base_type)
+            if suggested <= 0:
+                continue
+            old = num(item.get("prices", {}).get(ptype["id"]))
+            if abs(suggested - old) >= 0.01:
+                self.set_price(item["id"], suggested, ptype["id"], "автопересчёт одной позиции")
+                changed += 1
+            prices[ptype["id"]] = {"old": old, "price": suggested,
+                                    "changed": abs(suggested - old) >= 0.01}
+        return {"ok": True, "changed": changed, "prices": prices,
+                "nom_id": item["id"], "cost": cost}
+
+    def recalc_prices(self, price_type_id: str = "", group_id: str = "") -> dict:
+        """Пересчитать цены от себестоимости и нормы прибыли массово."""
         price_type_id = price_type_id or self._base_type()
-        ptype = self.db.one("SELECT * FROM price_types WHERE id=?", (price_type_id,))
+        ptype = self.db.one("SELECT * FROM price_types WHERE id=? AND archived=0", (price_type_id,))
         if not ptype:
             raise ValueError("Тип цен не найден")
-        rounding = max(1.0, num(self.db.setting("price_rounding", 10), 10))
-        target = num(self.db.setting("target_profit_per_hour", 250), 250)
         base_type = self._base_type()
         changed = 0
         for item in self.items(group_id=group_id):
-            if item.get("kind") in ("service",):
+            if item.get("kind") in ("service",) or num(item.get("cost")) <= 0:
                 continue
-            cost = num(item.get("cost"))
-            if cost <= 0:
-                continue
-            group = self.db.one("SELECT markup FROM nom_groups WHERE id=?",
-                                (item.get("group_id"),)) if item.get("group_id") else None
-            markup = num((group or {}).get("markup")) or num(ptype.get("markup"))
-            raw = cost * (1 + markup / 100.0)
-            # Норму прибыли за час держим только по основной цене продажи:
-            # опт и B2B сознательно дешевле розницы.
-            hours = num(item.get("hours"))
-            if hours and price_type_id == base_type:
-                raw = max(raw, cost + target * hours)
-            price = round(-(-raw // rounding) * rounding, 2)
+            price = self._suggest_price(item, ptype, price_type_id, base_type)
             if abs(price - num(item.get("prices", {}).get(price_type_id))) >= 0.01:
                 self.set_price(item["id"], price, price_type_id, "автопересчёт")
                 changed += 1

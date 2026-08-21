@@ -217,6 +217,12 @@ class AutoResumePowerLossTests(unittest.TestCase):
         self.manager = PrinterManager(self.db, self.repo)
         self.mock_pr = MockPrinter("pr_crimea", "P1S Crimea", "PAUSE", "Vase_Tall_PLA.3mf")
         self.manager.printers["pr_crimea"] = self.mock_pr
+        # Опасное авто-возобновление проверяется только в явно разрешённой
+        # политике; безопасный default не должен отправлять resume сам.
+        self.db.set_settings({
+            "auto_resume_paused": True,
+            "unattended_dangerous_actions": True,
+        })
 
     def tearDown(self):
         self.manager.shutdown()
