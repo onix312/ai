@@ -668,8 +668,9 @@ class PrinterManager:
     # ----------------------------------------------------------------- очередь
     def queue(self) -> list[dict]:
         rows = self.db.query(
-            "SELECT * FROM print_jobs WHERE state IN ('queued','starting','running')"
-            " ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'starting' THEN 1 ELSE 2 END,"
+            "SELECT * FROM print_jobs WHERE state IN ('queued','uploading','starting','running')"
+            " ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'starting' THEN 1"
+            " WHEN 'uploading' THEN 2 ELSE 3 END,"
             " priority DESC, datetime(created_at)")
         for row in rows:
             if row.get("order_id"):
@@ -684,12 +685,13 @@ class PrinterManager:
             " ORDER BY datetime(finished_at) DESC LIMIT ?", (int(limit),))
 
     def enqueue(self, data: dict) -> dict:
+        file_value = str(data.get("file") or "").strip()
         job = {
             "id": uid("job"),
             "printer_id": data.get("printer_id") or None,
             "order_id": data.get("order_id") or None,
-            "name": data.get("name") or (data.get("file") or "").rsplit("/", 1)[-1],
-            "file": data.get("file", ""),
+            "name": data.get("name") or file_value.rsplit("/", 1)[-1],
+            "file": file_value,
             "state": "queued",
             "source": data.get("source", "queue"),
             "plate": int(num(data.get("plate"), 1) or 1),
@@ -731,6 +733,11 @@ class PrinterManager:
                     "material": estimate.get("material") or "",
                     "color": estimate.get("color") or "",
                 }
+                # Если файл привязали к заказу из окна очереди, карточка
+                # заказа тоже должна знать о нём — иначе планировщик продолжит
+                # показывать ложный блокер «нет файла».
+                if not str(order.get("file") or "").strip() and file_value:
+                    fill["file"] = file_value
                 sets, params = [], []
                 for field, value in fill.items():
                     if value and not str(order.get(field) or "").strip():
@@ -740,59 +747,129 @@ class PrinterManager:
                     self.db.execute(
                         f"UPDATE orders SET {', '.join(sets)}, updated_at=? WHERE id=?",
                         (*params, now_iso(), job["order_id"]))
+        # Связь файла не должна зависеть от того, удалось ли разобрать смету.
+        # Даже «пустой» G-code остаётся файлом заказа, а не осиротевшей печатью.
+        if job.get("order_id") and file_value:
+            self.db.execute(
+                "UPDATE orders SET file=?, updated_at=? WHERE id=?"
+                " AND COALESCE(file,'')=''",
+                (file_value, now_iso(), job["order_id"]))
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
         if self.db.setting("auto_queue", False) and data.get("allow_auto_start", True):
             self._maybe_start_next(job["printer_id"] or "")
-        return row
+        # Автозапуск может синхронно перевести это задание в starting/running.
+        # Не возвращаем устаревшую копию «queued» — UI должен показывать факт.
+        return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or row
 
     def cancel_job(self, job_id: str) -> dict:
         job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
         if not job:
             raise ValueError("Задание не найдено")
-        if job["state"] == "running":
+        if job.get("state") in ("done", "failed", "cancelled"):
+            return job  # повторный клик не меняет историю и не освобождает её повторно
+        if job.get("state") == "running":
             printer = self.get(job["printer_id"] or "")
             if printer:
                 printer.command("stop")
-        self.db.execute("UPDATE print_jobs SET state='cancelled', finished_at=? WHERE id=?",
-                        (now_iso(), job_id))
+            # Событие STOP может прийти синхронно или из другого потока.
+            # Не затираем его результат отменой после успешной финализации.
+            current = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if current and current.get("state") not in ("running", "starting"):
+                return current
+        self.db.execute(
+            "UPDATE print_jobs SET state='cancelled', finished_at=?, accounted_at=?"
+            " WHERE id=? AND state IN ('queued','uploading','starting','running')",
+            (now_iso(), now_iso(), job_id),
+        )
         # Заказ не должен остаться «в печати» после отмены задания вручную.
         self._release_order(job.get("order_id") or "", "задание отменено")
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
+
+    def _local_job_file(self, filename: str) -> Path | None:
+        """Локальная копия задания, если она загружена в uploads."""
+        name = Path(str(filename or "").replace("\\", "/")).name
+        if not name:
+            return None
+        candidate = (UPLOAD_DIR / name).resolve()
+        try:
+            candidate.relative_to(UPLOAD_DIR.resolve())
+        except ValueError:
+            return None
+        return candidate if candidate.is_file() else None
 
     def start_job(self, job_id: str, printer_id: str = "") -> dict:
         job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
         if not job:
             raise ValueError("Задание не найдено")
+        if job.get("state") != "queued":
+            raise ValueError("Запустить можно только задание из очереди")
         printer = self.get(printer_id or job.get("printer_id") or "")
         if not printer:
             raise ValueError("Нет доступного принтера")
         if not job.get("file"):
-            raise ValueError("В задании не указан файл на принтере")
+            raise ValueError("В задании не указан файл")
         try:
             mapping = json.loads(job.get("ams_mapping") or "[]")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             mapping = []
-        if printer.mode == "cloud":
-            # Облачный принтер: заливка + диспетчеризация /my/task.
-            self.start_print_cloud(printer, job["file"],
-                                   plate=int(num(job.get("plate"), 1) or 1),
-                                   use_ams=bool(job.get("use_ams", 1)),
-                                   ams_mapping=mapping,
-                                   bed_level=bool(job.get("bed_level", 1)),
-                                   flow_cali=bool(job.get("flow_cali")),
-                                   timelapse=bool(job.get("timelapse")))
-        else:
-            printer.start_print(job["file"], plate=int(num(job.get("plate"), 1) or 1),
-                                use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
-                                bed_level=bool(job.get("bed_level", 1)),
-                                flow_cali=bool(job.get("flow_cali")),
-                                timelapse=bool(job.get("timelapse")),
-                                subtask_name=job.get("name", ""))
-        self.db.execute(
-            "UPDATE print_jobs SET state='starting', printer_id=?, started_at=? WHERE id=?",
-            (printer.id, now_iso(), job_id))
+
+        local = self._local_job_file(job["file"])
+        remote_name = Path(str(job["file"]).replace("\\", "/")).name or job["file"]
+        # Большой файл может грузиться дольше трёх минут. Отдельное состояние
+        # uploading не даёт reconcile принять принтер за свободный и отменить
+        # реальное задание, пока SD ещё получает модель.
+        claim_state = "uploading" if local is not None else "starting"
+        claimed = self.db.execute(
+            f"UPDATE print_jobs SET state=?, printer_id=?, started_at=? WHERE id=?"
+            " AND state='queued'", (claim_state, printer.id, now_iso(), job_id))
+        if claimed.rowcount != 1:
+            raise ValueError("Задание уже запускается или не стоит в очереди")
+        try:
+            if printer.mode == "cloud" and local is not None:
+                # Облачный запуск сам использует uploads и не требует FTPS.
+                self.start_print_cloud(printer, local.name,
+                                       plate=int(num(job.get("plate"), 1) or 1),
+                                       use_ams=bool(job.get("use_ams", 1)),
+                                       ams_mapping=mapping,
+                                       bed_level=bool(job.get("bed_level", 1)),
+                                       flow_cali=bool(job.get("flow_cali")),
+                                       timelapse=bool(job.get("timelapse")))
+                transitioned = self.db.execute(
+                    "UPDATE print_jobs SET state='starting' WHERE id=?"
+                    " AND state='uploading'", (job_id,))
+                if transitioned.rowcount != 1:
+                    raise ValueError("Задание отменено во время облачной загрузки")
+            else:
+                if local is not None:
+                    # Файл с компьютера становится доступным принтеру только
+                    # после явной загрузки на его SD-карту.
+                    printer.files.upload(local, remote_name)
+                elif printer.mode == "cloud" and not printer.record.get("host"):
+                    raise FileNotFoundError(
+                        "Облачному принтеру нужна локальная копия файла. "
+                        "Загрузите файл с компьютера в очередь заново.")
+                if local is not None:
+                    # MQTT START должен видеть уже starting, а не uploading:
+                    # иначе обработчик не найдёт задание для восстановления.
+                    transitioned = self.db.execute(
+                        "UPDATE print_jobs SET state='starting' WHERE id=?"
+                        " AND state='uploading'", (job_id,))
+                    if transitioned.rowcount != 1:
+                        raise ValueError("Задание отменено во время загрузки файла")
+                printer.start_print(remote_name, plate=int(num(job.get("plate"), 1) or 1),
+                                    use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
+                                    bed_level=bool(job.get("bed_level", 1)),
+                                    flow_cali=bool(job.get("flow_cali")),
+                                    timelapse=bool(job.get("timelapse")),
+                                    subtask_name=job.get("name", ""))
+        except Exception:
+            # Ошибка загрузки/старта не должна оставлять задание в процессе.
+            self.db.execute(
+                "UPDATE print_jobs SET state='queued', started_at=NULL WHERE id=?"
+                " AND state IN ('uploading','starting')", (job_id,))
+            raise
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
 
     # ----------------------------------------------------- облачный запуск
@@ -1106,8 +1183,8 @@ class PrinterManager:
         """Выбрать следующее задание с учётом материала в AMS.
 
         Ночная смена (9.3.1): при включённом ``night_shift_enabled`` в тихие
-        часы вперёд идут самые длинные задания — принтер работает до утра;
-        днём — по сроку и приоритету, чтобы срочное не ждало ночи.
+        часы вперёд идут самые длинные задания внутри ручного приоритета —
+        принтер работает до утра; днём сначала учитывается приоритет, затем срок.
         """
         jobs = self.db.query(
             "SELECT j.*, o.hours AS order_hours, o.due AS due"
@@ -1119,14 +1196,18 @@ class PrinterManager:
             return None
         night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()
         if night:
-            # длинное — на ночь: сортировка по оценке часов из заказа
-            jobs.sort(key=lambda j: (-num(j.get("order_hours")),
-                                     -int(num(j.get("priority"))),
+            # Ручной приоритет — первый ключ: кнопки «выше/ниже» и экран
+            # очереди должны менять именно фактический порядок запуска. Внутри
+            # одного приоритета ночью выгоднее закрывать длинные задания.
+            jobs.sort(key=lambda j: (-int(num(j.get("priority"))),
+                                     -num(j.get("order_hours")),
                                      str(j.get("created_at") or "")))
         else:
-            # срочное — днём: по сроку, затем по приоритету
-            jobs.sort(key=lambda j: (str(j.get("due") or "9999-12-31"),
-                                     -int(num(j.get("priority"))),
+            # Дедлайн уточняет порядок только внутри одного приоритета. Раньше
+            # экран показывал priority DESC, а диспетчер запускал сначала
+            # более ранний due — пользователь видел противоречивый порядок.
+            jobs.sort(key=lambda j: (-int(num(j.get("priority"))),
+                                     str(j.get("due") or "9999-12-31"),
                                      str(j.get("created_at") or "")))
         if not self.db.setting("queue_group_material", True) or not snap:
             return jobs[0]

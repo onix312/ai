@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import re
@@ -96,6 +97,53 @@ def parse_multipart(body: bytes, boundary: str) -> tuple[dict[str, str], tuple[s
         else:
             fields[name_match.group(1)] = data.decode("utf-8", "ignore")
     return fields, upload
+
+
+def _upload_filename(raw_name: str) -> str:
+    """Нормализовать имя файла из multipart независимо от ОС клиента."""
+    # Браузер Windows иногда присылает полный путь с обратными слешами.
+    name = Path(str(raw_name or "").replace("\\", "/")).name.strip()
+    if not name or name in {".", ".."} or "\x00" in name:
+        raise ValueError("Некорректное имя файла")
+    return name
+
+
+def save_upload(name: str, data: bytes) -> tuple[str, Path, bool]:
+    """Сохранить модель в uploads и не затереть другой файл с тем же именем.
+
+    Возвращает фактическое имя, путь и признак создания нового файла. Файлы
+    с одинаковым именем, но разным содержимым получают короткий суффикс хеша:
+    задания в очереди никогда не начинают печатать содержимое чужой загрузки.
+    """
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    requested = _upload_filename(name)
+    suffix = Path(requested).suffix
+    stem = requested[:-len(suffix)] if suffix else requested
+    target = UPLOAD_DIR / requested
+    digest = hashlib.sha256(data).hexdigest()[:10]
+    if target.exists():
+        try:
+            same = target.stat().st_size == len(data) and hashlib.sha256(
+                target.read_bytes()).hexdigest()[:10] == digest
+        except OSError:
+            same = False
+        if not same:
+            target = UPLOAD_DIR / f"{stem}-{digest}{suffix}"
+            # Коллизия хеша крайне маловероятна, но не затираем файл и при ней.
+            counter = 2
+            while target.exists():
+                target = UPLOAD_DIR / f"{stem}-{digest}-{counter}{suffix}"
+                counter += 1
+    created = not target.exists()
+    if created:
+        target.write_bytes(data)
+    return target.name, target, created
+
+
+def _form_bool(value: object, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    return str(value).strip().casefold() in {"1", "true", "yes", "on", "да"}
 
 
 class Api:
@@ -1348,31 +1396,24 @@ class Api:
                          "spools": self.repo.spools()}
         if path == "/api/printer/print":
             printer = self.printer_or_fail(pid)
-            name = str(body.get("name") or body.get("file") or "")
-            if printer.mode == "cloud" and not body.get("local_force"):
-                # Облачный запуск: заливка + диспетчеризация /my/task —
-                # принтер качает файл сам, LAN Only Mode не нужен.
-                result = self.manager.start_print_cloud(
-                    printer, body.get("file", ""),
-                    int(num(body.get("plate"), 1) or 1),
-                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
-                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
-                    bool(body.get("timelapse", False)),
-                    progress=self._cloud_progress(name))
-            else:
-                result = printer.start_print(
-                    body.get("file", ""), int(num(body.get("plate"), 1) or 1),
-                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
-                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
-                    bool(body.get("timelapse", False)), name)
+            name = str(body.get("name") or body.get("file") or "").strip()
+            if not body.get("file"):
+                raise ValueError("Не указан файл для печати")
+            # Сначала создаём starting-задание, затем посылаем команду. Это
+            # устраняет гонку: быстрый MQTT START больше не превращается в
+            # отдельное безымянное задание до записи строки в базе.
             job = self.manager.enqueue({**body, "printer_id": printer.id,
-                                       "source": "manual", "name": name})
-            self.db.execute("UPDATE print_jobs SET state='starting', started_at=? WHERE id=?",
-                            (now_iso(), job["id"]))
-            self.db.add_event("print_start", "Запущена печать",
-                              f"{name} · облако: {result.get('cloud', False)}",
-                              printer.id, {"task_id": result.get("task_id")})
-            return 200, {**result, "job_id": job["id"]}
+                                        "source": "manual", "name": name,
+                                        "allow_auto_start": False})
+            try:
+                started = self.manager.start_job(job["id"], printer.id)
+            except Exception:
+                # start_job возвращает запись в очередь после неудачного старта;
+                # ошибка всё равно уходит клиенту, а повтор можно сделать вручную.
+                raise
+            self.db.add_event("print_start", "Запущена печать", name,
+                              printer.id, {"job_id": job["id"]})
+            return 200, {"ok": True, "job_id": job["id"], "job": started}
         if path == "/api/printer/sync-history":
             return 200, self.manager.sync_cloud_history(pid)
         if path == "/api/estimate/pull":
@@ -2603,6 +2644,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/printer/upload":
                 return self.handle_upload(query)
+            if path == "/api/jobs/upload":
+                return self.handle_job_upload()
             if path == "/api/estimate/upload":
                 return self.handle_estimate_upload()
             length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
@@ -2642,6 +2685,66 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._send_bytes(target.read_bytes(), ctype, download=target.name)
 
+    def _multipart_upload(self) -> tuple[dict[str, str], tuple[str, bytes] | None]:
+        """Прочитать один multipart-файл с общей проверкой размера и boundary."""
+        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
+        if too_large:
+            raise ValueError("Файл слишком большой")
+        content_type = self.headers.get("Content-Type", "")
+        boundary = ""
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:].strip('"')
+        if not boundary:
+            raise ValueError("Ожидается multipart/form-data")
+        return parse_multipart(self.rfile.read(length), boundary)
+
+    def handle_job_upload(self):
+        """Сохранить локальный файл и сразу поставить его в очередь.
+
+        Очередь не должна требовать, чтобы модель сначала лежала на SD-карте:
+        при ручном старте менеджер сам загрузит локальную копию на выбранный
+        принтер (или передаст её Bambu Cloud)."""
+        fields, upload = self._multipart_upload()
+        if not upload:
+            return self.send_json(400, {"error": "Файл не передан"})
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
+            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
+        name, local, created = save_upload(requested_name, upload[1])
+        payload = {
+            "name": str(fields.get("name") or Path(name).stem).strip() or Path(name).stem,
+            "file": name,
+            "printer_id": str(fields.get("printer_id") or "").strip(),
+            "order_id": str(fields.get("order_id") or "").strip(),
+            "plate": max(1, int(num(fields.get("plate"), 1) or 1)),
+            "priority": int(num(fields.get("priority"), 0)),
+            "use_ams": _form_bool(fields.get("use_ams"), True),
+            "bed_level": _form_bool(fields.get("bed_level"), True),
+            "flow_cali": _form_bool(fields.get("flow_cali"), False),
+            "timelapse": _form_bool(fields.get("timelapse"), False),
+            "source": "local-upload",
+            "allow_auto_start": _form_bool(fields.get("allow_auto_start"), True),
+        }
+        try:
+            job = self.api.manager.enqueue(payload)
+        except Exception:
+            # Если именно эта загрузка не стала заданием, не оставляем мусор.
+            if created:
+                try:
+                    local.unlink()
+                except OSError:
+                    pass
+            raise
+        return self.send_json(200, {"ok": True, "file": name, "saved": name,
+                                    "job": job, "source": "upload"})
+
     def handle_estimate_upload(self):
         """Сохранить выбранный 3MF/G-code в uploads и вернуть вес плиты."""
         length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
@@ -2658,12 +2761,15 @@ class Handler(BaseHTTPRequestHandler):
         fields, upload = parse_multipart(self.rfile.read(length), boundary)
         if not upload:
             return self.send_json(400, {"error": "Файл не передан"})
-        name = Path(upload[0]).name
-        if not name.lower().endswith((".3mf", ".gcode")):
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        ensure_dirs()
-        local = UPLOAD_DIR / name
-        local.write_bytes(upload[1])
+        name, local, _created = save_upload(requested_name, upload[1])
         estimate = {}
         try:
             from .estimate import estimate_file
@@ -2710,12 +2816,15 @@ class Handler(BaseHTTPRequestHandler):
         fields, upload = parse_multipart(self.rfile.read(length), boundary)
         if not upload:
             return self.send_json(400, {"error": "Файл не передан"})
-        name = Path(upload[0]).name
-        if not name.lower().endswith((".3mf", ".gcode")):
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        ensure_dirs()
-        local = UPLOAD_DIR / name
-        local.write_bytes(upload[1])
+        name, local, _created = save_upload(requested_name, upload[1])
         printer_id = fields.get("printer_id", "") or (query.get("printer_id") or [""])[0]
         printer = self.api.manager.get(printer_id)
         if not printer:

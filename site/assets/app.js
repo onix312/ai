@@ -25,10 +25,23 @@ function renderDashboard() {
   const late = activeOrders.filter((o) => o.due && o.due <= today);
   const paidOf = (o) => Math.max(num(o.paid), num(o.prepaid));
   const pipeline = activeOrders.reduce((a, o) => a + Math.max(0, num(o.price) - paidOf(o)), 0);
-  // У мультизаказа граммы/часы — уже вся плита, qty — сумма единиц позиций.
-  const plateK = (o) => (num(o.items_count) ? 1 : Math.max(1, num(o.qty, 1)));
-  const needGrams = activeOrders.reduce((a, o) => a + num(o.grams) * plateK(o), 0);
-  const needHours = activeOrders.reduce((a, o) => a + num(o.hours) * plateK(o), 0);
+  // В KPI «Очередь» должны попадать задания, а не весь объём незавершённых заказов:
+  // иначе оператор видит часы заказа, который ещё даже не прошёл подготовку.
+  const queue = (PF.state.jobs && PF.state.jobs.queue) || [];
+  const queuedJobs = queue.filter((j) => !['done', 'failed', 'cancelled'].includes(j.state));
+  const jobOrder = (j) => j.order || orders.find((o) => o.id === j.order_id) || {};
+  const jobScale = (j) => {
+    const o = jobOrder(j);
+    return num(o.items_count) ? 1 : Math.max(1, num(o.qty, 1));
+  };
+  const needGrams = queuedJobs.reduce((a, j) => {
+    const o = jobOrder(j);
+    return a + (num(j.est_grams || j.grams) || num(o.grams) * jobScale(j));
+  }, 0);
+  const needHours = queuedJobs.reduce((a, j) => {
+    const o = jobOrder(j);
+    return a + (num(j.est_minutes || j.minutes) || num(o.hours) * jobScale(j) * 60) / 60;
+  }, 0);
   const capacity = num(PF.state.settings.weekly_capacity_hours, 110);
   const load = capacity ? clamp(needHours / capacity * 100, 0, 999) : 0;
   const stock = num(s.stock_grams);
@@ -37,10 +50,10 @@ function renderDashboard() {
     kpi('Печатает сейчас', `${nfmt(farm.printing)} / ${nfmt(farm.total)}`,
       `${nfmt(farm.online)} на связи · загрузка ${nfmt(farm.utilization)}%`,
       num(farm.printing) ? 'ok' : ''),
-    kpi('Очередь печати', hoursText(needHours), `${pct(load)} от ${nfmt(capacity)} ч в неделю`,
+    kpi('Очередь печати', hoursText(needHours), `${nfmt(queuedJobs.length)} заданий · ${pct(load)} от ${nfmt(capacity)} ч в неделю`,
       load > 100 ? 'bad' : load > 85 ? 'warn' : '',
       `<div class="bar ${load > 100 ? 'bad' : load > 85 ? 'warn' : ''}"><i style="width:${clamp(load, 0, 100)}%"></i></div>`),
-    kpi('Активные заказы', String(activeOrders.length), `${nfmt(farm.queued)} заданий в очереди`),
+    kpi('Активные заказы', String(activeOrders.length), `${nfmt(farm.queued)} заданий в производстве`),
     kpi('Требуют внимания', String(late.length), 'срок сегодня или прошёл', late.length ? 'bad' : 'ok'),
     kpi('Ждём оплату', money(pipeline), 'по активным заказам'),
     kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}`, num(s.profit) >= 0 ? 'ok' : 'bad'),
@@ -106,6 +119,7 @@ function renderDashboard() {
       + `<span class="amt ${isLate ? 'neg' : ''}">${isLate ? 'просрочен' : isToday ? 'сегодня' : esc(dateText(o.due))}</span></div>`;
   }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>';
 
+  renderOperatorFocus();
   renderPlan();
   renderHealth();
   renderActivePrint();
@@ -114,6 +128,94 @@ function renderDashboard() {
   renderFilamentForecast();
   renderTimeline();
   applyWidgets();
+}
+
+function renderOperatorFocus() {
+  const host = $('operator_focus');
+  if (!host) return;
+  const live = PF.state.live || {};
+  const queue = (PF.state.jobs && PF.state.jobs.queue) || [];
+  const history = (PF.state.jobs && PF.state.jobs.history) || [];
+  const orders = PF.state.orders || [];
+  const finals = PF.finalStatusIds();
+  const activeOrders = orders.filter((o) => !finals.includes(o.status));
+  const today = U.todayISO();
+  const items = [];
+  const add = (priority, icon, title, detail, button, attrs) => items.push({ priority, icon, title, detail, button, attrs: attrs || '' });
+  const route = (name, id) => `data-focus-route="${name}"${id ? ` data-focus-id="${esc(id)}"` : ''}`;
+
+  const failed = history.filter((j) => {
+    if (j.state !== 'failed') return false;
+    const at = Date.parse(j.finished_at || j.created_at || '');
+    return !Number.isFinite(at) || Date.now() - at <= 48 * 60 * 60 * 1000;
+  }).slice(0, 3);
+  if (failed.length) {
+    add(1, '✕', `${failed.length} печать${failed.length === 1 ? '' : 'и'} завершилась браком`,
+      failed.map((j) => j.name || j.file || 'Без имени').join(' · '), 'Открыть журнал', route('queue'));
+  }
+
+  const broken = (live.printers || []).filter((p) => !p.connection || !p.connection.connected
+    || (p.printer && p.printer.problems && p.printer.problems.length));
+  broken.slice(0, 3).forEach((p) => {
+    const reason = p.connection && p.connection.connected
+      ? ((p.printer.problems || [])[0] || {}).title || 'Проверьте состояние'
+      : (p.connection && p.connection.last_error) || 'Нет связи';
+    add(1, '⚠', `${p.name}: требуется проверка`, reason, 'Открыть принтер', route('printers', p.id));
+  });
+
+  const stale = queue.filter((j) => ['uploading', 'starting'].includes(j.state)
+    && j.created_at && Date.now() - Date.parse(j.created_at) > 10 * 60 * 1000);
+  if (stale.length) {
+    add(1, '⏳', `${stale.length} задание${stale.length === 1 ? ' зависло' : ' зависли'} на подготовке`,
+      'Файл не запускается автоматически — проверьте связь и повторите действие.', 'Открыть очередь', route('queue'));
+  }
+
+  const ready = activeOrders.filter((o) => {
+    const name = String(PF.status(o.status).name || '').toLowerCase();
+    return o.status === 'ready' || name.includes('готов');
+  });
+  if (ready.length) {
+    const first = ready[0];
+    add(2, '✓', `${ready.length} заказ${ready.length === 1 ? '' : 'а'} готовы к выдаче`,
+      ready.slice(0, 2).map((o) => `№${o.number}`).join(' · '), 'Открыть выдачу',
+      `data-focus-fulfill="${esc(first.id)}"`);
+  }
+
+  const overdue = activeOrders.filter((o) => o.due && o.due <= today);
+  if (overdue.length) {
+    add(2, '!', `${overdue.length} заказ${overdue.length === 1 ? '' : 'а'} требуют срока`,
+      overdue.slice(0, 2).map((o) => `№${o.number} · ${dateText(o.due)}`).join(' · '), 'Открыть заказы', route('orders'));
+  }
+
+  const unassigned = queue.filter((j) => j.state === 'queued' && !j.printer_id);
+  if (unassigned.length) {
+    add(2, '↗', `${unassigned.length} заданию не назначен принтер`,
+      'Назначьте принтер перед стартом, чтобы не искать ошибку в момент запуска.', 'Открыть очередь', route('queue'));
+  }
+
+  const low = (PF.state.spools || []).filter((s) => !num(s.archived)
+    && num(s.percent) < num(PF.state.settings.filament_low_threshold, 15));
+  if (low.length) {
+    add(3, '◒', `${low.length} катуш${low.length === 1 ? 'ка' : 'ки'} заканчивается`,
+      low.slice(0, 2).map((s) => `${s.material || 'пластик'} ${nfmt(s.percent, 0)}%`).join(' · '), 'Открыть склад', route('stock'));
+  }
+
+  const next = queue.find((j) => j.state === 'queued');
+  if (next && !unassigned.length) {
+    add(3, '▶', 'Можно запускать следующее задание',
+      `${next.name || next.file || 'Без имени'}${next.printer_id ? '' : ' · принтер определится при запуске'}`,
+      'Открыть очередь', route('queue'));
+  }
+
+  items.sort((a, b) => a.priority - b.priority);
+  $('operator_focus_sub').textContent = items.length
+    ? `${items.length} ${items.length === 1 ? 'действие' : 'действий'} · сначала критичное`
+    : 'Очередь, принтеры и выдача без срочных проблем';
+  host.innerHTML = items.length
+    ? items.slice(0, 7).map((item) => `<div class="focus-row priority-${item.priority}">`
+      + `<span class="focus-icon">${item.icon}</span><div class="focus-body"><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></div>`
+      + `<button class="btn sm ${item.priority === 1 ? 'danger' : ''}" type="button" ${item.attrs}>${item.button}</button></div>`).join('')
+    : '<div class="focus-empty"><span class="focus-ok">✓</span><div><b>Срочных действий нет</b><small>Можно продолжать плановую печать или открыть любой раздел.</small></div><button class="btn sm" type="button" data-focus-route="queue">Открыть очередь</button></div>';
 }
 
 function renderEvents() {
@@ -128,6 +230,7 @@ function renderEvents() {
 /* ================================================= виджеты панели */
 const DASH_WIDGETS = [
   ['kpis', 'Показатели (KPI-ряд)'],
+  ['operator_focus', 'Сейчас нужно сделать'],
   ['plan', 'План на сегодня'],
   ['health', 'Здоровье бизнеса'],
   ['active', 'Активная печать'],
@@ -1710,6 +1813,29 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('dash_events_refresh').addEventListener('click', () => PF.refreshEvents().catch(fail));
+  $('operator_focus_refresh').addEventListener('click', async () => {
+    const button = $('operator_focus_refresh');
+    button.disabled = true;
+    try {
+      await Promise.all([PF.refreshCore(), PF.poll()]);
+      toast('Центр действий обновлён');
+    } catch (e) { fail(e); }
+    finally { button.disabled = false; }
+  });
+  $('operator_focus').addEventListener('click', (e) => {
+    const fulfill = e.target.closest('[data-focus-fulfill]');
+    if (fulfill) {
+      if (PF.modules.ops && PF.modules.ops.openOrderFulfillment) PF.modules.ops.openOrderFulfillment(fulfill.dataset.focusFulfill);
+      else if (PF.modules.ops && PF.modules.ops.openOrder) {
+        PF.go('orders'); PF.modules.ops.openOrder(fulfill.dataset.focusFulfill);
+      }
+      return;
+    }
+    const action = e.target.closest('[data-focus-route]');
+    if (!action) return;
+    if (action.dataset.focusRoute === 'printers' && action.dataset.focusId) PF.state.activePrinter = action.dataset.focusId;
+    PF.go(action.dataset.focusRoute);
+  });
   $('dash_widgets_btn').addEventListener('click', () => { renderWidgetsList(); openModal('dash_widgets_modal'); });
   $('dash_widgets_list').addEventListener('change', (e) => {
     const cb = e.target.closest('[data-widget-check]');

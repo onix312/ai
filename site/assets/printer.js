@@ -28,7 +28,8 @@ const DANGER = {
   bed_temp: 'Задать температуру стола? Принтер начнёт нагрев.',
 };
 
-let filesCache = [], pendingFile = null, editingPrinter = null;
+let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null;
+let queueFilter = 'all';
 let camStream = '', camSession = Date.now();     // ключ живого MJPEG-соединения
 let shotsKey = '';                              // чтобы не перезапрашивать архив зря
 let chartCache = { id: '', minutes: 0, at: 0, points: [] };
@@ -817,7 +818,8 @@ function printPayload() {
 /* ============================================================ очередь */
 function jobStateChip(state) {
   const map = {
-    queued: ['outline', 'В очереди'], starting: ['accent', 'Стартует'], running: ['accent', 'Печатает'],
+    queued: ['outline', 'В очереди'], uploading: ['accent', 'Загрузка файла'],
+    starting: ['accent', 'Стартует'], running: ['accent', 'Печатает'],
     done: ['ok', 'Готово'], failed: ['bad', 'Брак'], cancelled: ['warn', 'Отменено'],
   };
   const [cls, label] = map[state] || ['outline', state];
@@ -833,7 +835,13 @@ function renderQueue() {
   tag.textContent = String(queue.length);
   tag.className = 'tag' + (running ? ' live' : '');
 
-  $('queue_list').innerHTML = queue.length ? queue.map((j, i) => {
+  const shownQueue = queue.filter((j) => queueFilter === 'all'
+    || (queueFilter === 'queued' && j.state === 'queued')
+    || (queueFilter === 'active' && ['uploading', 'starting', 'running'].includes(j.state))
+    || (queueFilter === 'unassigned' && j.state === 'queued' && !j.printer_id));
+  $$('#queue_filter button').forEach((b) => b.classList.toggle('on', b.dataset.filter === queueFilter));
+  $('queue_list').innerHTML = shownQueue.length ? shownQueue.map((j) => {
+    const i = queue.indexOf(j);
     const printer = PF.state.printers.find((p) => p.id === j.printer_id);
     const order = j.order;
     return `<div class="queue-item${j.state === 'running' ? ' running' : ''}">`
@@ -849,7 +857,9 @@ function renderQueue() {
       + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
       + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
       + '</div></div>';
-  }).join('') : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Добавьте задание или запустите файл с принтера.</span></div>';
+  }).join('') : (queue.length
+    ? '<div class="empty compact"><span>В этом фильтре заданий нет.</span></div>'
+    : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Добавьте задание или запустите файл с принтера.</span></div>');
 
   const hq = ($('history_search') || {}).value || '';
   const hfiltered = hq ? history.filter((j) => String(j.name || j.file || '').toLowerCase().includes(hq.toLowerCase())) : history;
@@ -865,6 +875,22 @@ function renderQueue() {
   });
 }
 $('history_search').addEventListener('input', U.debounce(renderQueue, 200));
+
+async function startNextJob() {
+  const next = (PF.state.jobs.queue || []).find((j) => j.state === 'queued');
+  if (!next) return toast('Очередь пуста');
+  const printerId = next.printer_id || PF.state.activePrinter || '';
+  if (!printerId) return fail(new Error('Сначала выберите или добавьте принтер'));
+  const target = PF.state.printers.find((p) => p.id === printerId);
+  const printerName = target ? target.name : 'выбранный принтер';
+  if (!confirmDanger(`Запустить «${next.name || next.file || 'задание'}» на ${printerName}? Принтер начнёт нагрев и движение.`)) return;
+  try {
+    await post('/api/jobs/start', { id: next.id, printer_id: printerId });
+    toast('Следующее задание запущено', next.name || next.file || 'Печать');
+    await PF.refreshCore();
+    setTimeout(PF.poll, 1200);
+  } catch (e) { fail(e); }
+}
 
 /* ==================================================== паспорт печати */
 async function openPassport(jobId) {
@@ -992,8 +1018,11 @@ async function discover() {
 
 /* ====================================================== задание вручную */
 function openJob() {
+  queueLocalFile = null;
   $('jf_name').value = '';
   $('jf_file').value = '';
+  $('jf_local_file').value = '';
+  $('jf_file_hint').textContent = 'Файл сохранится локально и попадёт в очередь без предварительной загрузки на принтер.';
   $('jf_plate').value = '1';
   $('jf_priority').value = '0';
   $('jf_printer_id').innerHTML = '<option value="">Любой свободный</option>' + PF.state.printers
@@ -1287,21 +1316,51 @@ function bind() {
   });
 
   $('queue_add').addEventListener('click', openJob);
+  $('queue_next').addEventListener('click', startNextJob);
+  $('queue_filter').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-filter]');
+    if (!button) return;
+    queueFilter = button.dataset.filter || 'all';
+    renderQueue();
+  });
+  $('jf_local_file').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    queueLocalFile = file || null;
+    if (file) {
+      $('jf_file').value = file.name;
+      $('jf_file_hint').textContent = `${file.name} · сохранится в локальную очередь (${Math.round(file.size / 1024)} КБ)`;
+    } else {
+      $('jf_file_hint').textContent = 'Файл сохранится локально и попадёт в очередь без предварительной загрузки на принтер.';
+    }
+  });
   $('job_save').addEventListener('click', async () => {
     const file = $('jf_file').value.trim();
-    if (!file) return fail(new Error('Укажите имя файла на принтере'));
+    if (!file && !queueLocalFile) return fail(new Error('Выберите файл с компьютера или укажите имя файла на SD-карте'));
+    if (queueLocalFile && !/\.(3mf|gcode)$/i.test(queueLocalFile.name)) {
+      return fail(new Error('Поддерживаются только 3MF и G-code'));
+    }
+    const values = {
+      name: $('jf_name').value.trim() || file || (queueLocalFile && queueLocalFile.name),
+      file,
+      printer_id: $('jf_printer_id').value,
+      order_id: $('jf_order_id').value,
+      plate: num($('jf_plate').value, 1) || 1,
+      priority: num($('jf_priority').value),
+      use_ams: $('jf_use_ams').checked,
+      bed_level: $('jf_bed_level').checked,
+      source: queueLocalFile ? 'local-upload' : 'manual',
+    };
     try {
-      await post('/api/jobs/enqueue', {
-        name: $('jf_name').value.trim() || file,
-        file,
-        printer_id: $('jf_printer_id').value,
-        order_id: $('jf_order_id').value,
-        plate: num($('jf_plate').value, 1) || 1,
-        priority: num($('jf_priority').value),
-        use_ams: $('jf_use_ams').checked,
-        bed_level: $('jf_bed_level').checked,
-        source: 'manual',
-      });
+      if (queueLocalFile) {
+        const form = new FormData();
+        form.append('file', queueLocalFile);
+        Object.entries(values).forEach(([key, value]) => form.append(key, String(value ?? '')));
+        form.append('allow_auto_start', 'true');
+        await api('/api/jobs/upload', { method: 'POST', body: form });
+      } else {
+        await post('/api/jobs/enqueue', values);
+      }
+      queueLocalFile = null;
       closeModal('job_modal');
       toast('Задание добавлено');
       PF.refreshCore();
@@ -1387,7 +1446,7 @@ async function convertJobToOrder(jobId) {
 }
 
 /* -------------- Привязка печати/задания к существующему заказу --------------
- * Нужен ��тдельный экран, потому что после сбоя питания или ручной распечатки
+ * Нужен отдельный экран, потому что после сбоя питания или ручной распечатки
  * автоматическое сопоставление файла с заказом часто промахивается: файл
  * называется иначе, заказа ещё не было в базе или его номер не попал в имя.
  * «Новый заказ» здесь не помогает — тогда получается дубль, а исходный

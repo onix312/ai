@@ -72,6 +72,10 @@
   </div>
  </div>
  <div class="kpi-grid" id="dash_kpis" data-widget="kpis"></div>
+ <div class="card operator-focus" data-widget="operator_focus" style="margin-top:16px">
+  <div class="card-head"><div><h2>Сейчас нужно сделать</h2><p id="operator_focus_sub">Сначала опасное и срочное, потом плановая работа</p></div><button class="btn sm ghost" id="operator_focus_refresh" type="button">↻</button></div>
+  <div id="operator_focus"></div>
+ </div>
  <div class="card" data-widget="plan" style="margin-top:16px">
   <div class="card-head"><div><h2>План на сегодня</h2><p id="dash_plan_sub">Что печатать следующим — заказы и пополнение полки</p></div><a href="#queue" data-view="queue">Очередь →</a></div>
   <div id="dash_plan"></div>
@@ -284,11 +288,11 @@
 <section class="view" id="view-queue">
  <div class="view-head">
   <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
-  <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
+  <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn" id="queue_next" type="button">▶ Запустить следующее</button><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
  </div>
  <div class="grid g-2-1">
   <div class="card">
-   <div class="card-head"><div><h2>В работе и в очереди</h2><p id="queue_sub">—</p></div></div>
+   <div class="card-head"><div><h2>В работе и в очереди</h2><p id="queue_sub">—</p></div><div class="seg" id="queue_filter"><button type="button" data-filter="all" class="on">Все</button><button type="button" data-filter="queued">Ожидают</button><button type="button" data-filter="active">В работе</button><button type="button" data-filter="unassigned">Без принтера</button></div></div>
    <div id="queue_list"></div>
   </div>
   <div class="card">
@@ -3836,7 +3840,8 @@
  <div class="modal-head"><div><span class="eyebrow">Очередь</span><h2>Задание печати</h2></div><button class="icon-btn" type="button" data-close="job_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
   <label class="field span-2"><span>Название</span><input id="jf_name"></label>
-  <label class="field span-2"><span>Файл на принтере</span><input id="jf_file" placeholder="model.3mf"></label>
+  <label class="field span-2"><span>Файл для печати</span><input id="jf_file" placeholder="model.3mf или выберите файл ниже"><small class="hint">Можно указать имя файла на SD-карте или выбрать 3MF/G-code с компьютера — при старте PrintFlow загрузит его на принтер.</small></label>
+  <label class="field span-2"><span>Файл с компьютера</span><input id="jf_local_file" type="file" accept=".3mf,.gcode"><small class="hint" id="jf_file_hint">Файл сохранится локально и попадёт в очередь без предварительной загрузки на принтер.</small></label>
   <label class="field"><span>Принтер</span><select id="jf_printer_id"><option value="">Любой свободный</option></select></label>
   <label class="field"><span>Заказ</span><select id="jf_order_id"><option value="">Без заказа</option></select></label>
   <label class="field"><span>Плита</span><input id="jf_plate" type="number" min="1" value="1"></label>

@@ -1871,5 +1871,5 @@ PF.on('data', () => { fillSelectors(); renderOrders(); renderCustomers(); });
 PF.on('finance', () => { renderNiches(); });
 PF.on('view', (detail) => { if (detail.view === 'customers') loadAftercare(); });
 
-PF.modules.ops = { openOrder, openNiche, renderOrders, fillSelectors, loadAftercare };
+PF.modules.ops = { openOrder, openOrderFulfillment, openNiche, renderOrders, fillSelectors, loadAftercare };
 })();
