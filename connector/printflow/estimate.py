@@ -10,6 +10,13 @@ BambuStudio кладёт в начало G-code служебные строки:
 катушку и предупредить, что пластика может не хватить.
 
 8.0 расширяет: парсит все плиты, thumbnails, slice_info, project_settings.
+8.2.1: более гибкий парсер — поддержка Orca/Bambu форматов:
+  ; total_filament_used: 8.42g
+  ; total filament used [g] = 12.3
+  ; filament used [g] = 5.1g
+  ; estimated_time: 47m 12s
+  + разбор Metadata/slice_info.config (XML) — самый надёжный источник
+    веса и времени для .3mf/.gcode.3mf (weight/prediction + used_g).
 """
 from __future__ import annotations
 
@@ -19,14 +26,48 @@ import re
 import zipfile
 from pathlib import Path
 
-_TIME_RE = re.compile(r";\s*TIME\s*:\s*(\d+)")
-_GRAMS_RE = re.compile(r";\s*Filament used \[g\]\s*:\s*([\d.]+)")
-_METERS_RE = re.compile(r";\s*Filament used\s*:\s*([\d.]+)")
-_TYPE_RE = re.compile(r";\s*filament[_ ]type\s*[:=]\s*([A-Za-z0-9+\-]+)")
-_COLOR_HEX_RE = re.compile(r";\s*filament[_ ](?:colour|color)\s*[:=]\s*#?([0-9A-Fa-f]{6,8})")
-_BED_RE = re.compile(r";\s*bed[_ ]type\s*[:=]\s*([^\r\n;]+)")
-_NOZZLE_RE = re.compile(r";\s*nozzle[_ ]diamete?r?\s*[:=]\s*([\d.]+)")
-_PLATE_RE = re.compile(r"plate_(\d+)\.gcode")
+# --- базовые старые паттерны (совместимость) ---
+_TIME_RE = re.compile(r";\s*TIME\s*:\s*(\d+)", re.IGNORECASE)
+_GRAMS_RE = re.compile(r";\s*Filament used \[g\]\s*:\s*([\d.]+)", re.IGNORECASE)
+_METERS_RE = re.compile(r";\s*Filament used\s*:\s*([\d.]+)", re.IGNORECASE)
+_TYPE_RE = re.compile(r";\s*filament[_ ]type\s*[:=]\s*([A-Za-z0-9+\-]+)", re.IGNORECASE)
+_COLOR_HEX_RE = re.compile(r";\s*filament[_ ](?:colour|color)\s*[:=]\s*#?([0-9A-Fa-f]{6,8})", re.IGNORECASE)
+_BED_RE = re.compile(r";\s*bed[_ ]type\s*[:=]\s*([^\r\n;]+)", re.IGNORECASE)
+_NOZZLE_RE = re.compile(r";\s*nozzle[_ ]diamete?r?\s*[:=]\s*([\d.]+)", re.IGNORECASE)
+_PLATE_RE = re.compile(r"plate_(\d+)\.gcode", re.IGNORECASE)
+
+# --- расширенные паттерны для современных слайсеров ---
+# Время: "estimated_time: 47m 12s", "total estimated time: 1h 20m", "model printing time: 1d 2h"
+_TIME_HUMAN_RE = re.compile(
+    r";\s*(?:total\s+)?(?:model\s+)?(?:estimated_?time|printing\s+time|estimated\s+printing\s+time)\s*[:=]\s*([^\r\n]+)",
+    re.IGNORECASE,
+)
+# Альтернативно: "; prediction: 4823" (секунды) из некоторых экспортов
+_PREDICTION_RE = re.compile(r";\s*prediction\s*[:=]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+
+# Граммы — много вариантов, все case-insensitive, ":" или "=", с [g] или без, с "g" суффиксом, с "_" или пробелом
+# Приоритет: total -> filament
+_GRAMS_PATTERNS = [
+    # total filament used [g] : 8.42 / = 8.42g
+    re.compile(r";\s*total\s+filament\s+used\s*\[g\]\s*[:=]\s*([\d.]+)\s*g?\b", re.IGNORECASE),
+    # total filament used: 8.42g
+    re.compile(r";\s*total\s+filament\s+used\s*[:=]\s*([\d.]+)\s*g\b", re.IGNORECASE),
+    # total_filament_used: 8.42g / = 8.42
+    re.compile(r";\s*total_filament_used\s*[:=]\s*([\d.]+)\s*g?\b", re.IGNORECASE),
+    # filament used [g] = 5.1 / : 5.1g
+    re.compile(r";\s*filament\s+used\s*\[g\]\s*[:=]\s*([\d.]+)\s*g?\b", re.IGNORECASE),
+    # filament used: 12.3g (с g — считаем что это граммы, а не метры, если есть g)
+    re.compile(r";\s*filament\s+used\s*[:=]\s*([\d.]+)\s*g\b", re.IGNORECASE),
+]
+
+# Метры / мм фолбэки
+_METERS_PATTERNS = [
+    re.compile(r";\s*filament\s+used\s*\[mm\]\s*[:=]\s*([\d.]+)", re.IGNORECASE),
+    re.compile(r";\s*filament\s+used\s*:\s*([\d.]+)\s*m\b", re.IGNORECASE),  # без [g] и без g суффикса — метры
+    re.compile(r";\s*filament\s+used\s*[:=]\s*([\d.]+)\s*mm\b", re.IGNORECASE),
+]
+
+_HUMAN_TIME_TOKEN_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([dhms])", re.IGNORECASE)
 
 
 def _hex_to_name(value: str) -> str:
@@ -50,19 +91,284 @@ def _hex_to_name(value: str) -> str:
     return "Синий"
 
 
+def _parse_human_time_to_minutes(text: str) -> float:
+    """Парсит '47m 12s', '1h 20m', '1d 2h', '02:10:30', '1h 20m 30s' -> минуты."""
+    if not text:
+        return 0.0
+    s = text.strip().lower()
+    # Формат HH:MM:SS или MM:SS
+    if re.match(r"^\d+:\d+(:\d+)?$", s):
+        parts = s.split(":")
+        try:
+            if len(parts) == 3:
+                h, m, sec = map(float, parts)
+                return round(h * 60 + m + sec / 60, 1)
+            elif len(parts) == 2:
+                m, sec = map(float, parts)
+                return round(m + sec / 60, 1)
+        except Exception:
+            pass
+    # Токены вида 1d 2h 3m 4s
+    total_sec = 0.0
+    found = False
+    for val, unit in _HUMAN_TIME_TOKEN_RE.findall(s):
+        try:
+            v = float(val)
+        except ValueError:
+            continue
+        found = True
+        if unit.lower() == "d":
+            total_sec += v * 86400
+        elif unit.lower() == "h":
+            total_sec += v * 3600
+        elif unit.lower() == "m":
+            total_sec += v * 60
+        elif unit.lower() == "s":
+            total_sec += v
+    if found and total_sec > 0:
+        return round(total_sec / 60.0, 1)
+    # Если просто число секунд (>100) — считаем секунды
+    # Если число маленькое (<1000) и без единиц — может быть минуты? Но по умолчанию секунды как в TIME
+    m = re.search(r"(\d+(?:\.\d+)?)", s)
+    if m:
+        try:
+            num = float(m.group(1))
+            # Если в строке есть 'm' без 's' и число < 1000, возможно это уже минуты
+            # Эвристика: если есть буква 'h' или 'm' в тексте, а токенов не нашли, пробуем другое
+            if "h" in s or "m" in s:
+                # Если число > 100, скорее секунды
+                if num > 300:
+                    return round(num / 60.0, 1)
+                return round(num, 1)
+            # Иначе считаем секунды
+            if num > 300:  # >5 мин — явно секунды
+                return round(num / 60.0, 1)
+        except ValueError:
+            pass
+    return 0.0
+
+
+def _extract_grams_from_text(text: str) -> float:
+    """Ищет граммы по всем расширенным паттернам. Суммирует per-filament если total не найден.
+    Поддерживает строки вида "filament used [g] = 12.34, 3.2" (сумма).
+    """
+    if not text:
+        return 0.0
+    # 1) total — приоритет, берём первое найденное значение
+    for pat in _GRAMS_PATTERNS[:3]:
+        m = pat.search(text)
+        if m:
+            try:
+                # в total может быть список через запятую — суммируем
+                # но обычно одно число
+                return round(float(m.group(1)), 1)
+            except ValueError:
+                continue
+    # 1b) total через общий разбор строки (на случай "total filament used: 8.42g, 2.1g")
+    for line in text.splitlines():
+        ll = line.lower()
+        if "total" in ll and "filament" in ll and "used" in ll:
+            # граммы ли?
+            if "[g]" in ll or "total_filament_used" in ll or re.search(r"\d\s*g\b", ll):
+                part_match = re.search(r"[:=]\s*(.+)$", line)
+                if part_match:
+                    part = part_match.group(1)
+                    nums = re.findall(r"(\d+(?:\.\d+)?)", part)
+                    if nums:
+                        try:
+                            # если несколько чисел — сумма (редкий случай, но безопасно)
+                            vals = [float(n) for n in nums]
+                            # эвристика: если первое число >1000 и второе маленькое — это не список
+                            # но для total обычно одно
+                            if len(vals) == 1:
+                                return round(vals[0], 1)
+                            # если несколько и все <500 — считаем суммой
+                            if all(v < 5000 for v in vals):
+                                return round(sum(vals), 1)
+                            return round(vals[0], 1)
+                        except ValueError:
+                            pass
+
+    # 2) все filament used [g] — суммируем по всем строкам и по запятой
+    total = 0.0
+    found = False
+    # сначала через паттерны (быстро)
+    for pat in _GRAMS_PATTERNS[3:]:
+        for mm in pat.finditer(text):
+            try:
+                total += float(mm.group(1))
+                found = True
+            except ValueError:
+                continue
+    # затем через построчный разбор с запятыми (покрывает "12.34, 3.2")
+    for line in text.splitlines():
+        ll = line.lower()
+        if "filament" not in ll or "used" not in ll:
+            continue
+        # это граммы?
+        is_grams = ("[g]" in ll) or ("total_filament_used" in ll) or re.search(r"filament\s+used\s*\[g\]", ll) or re.search(r"filament\s+used\s*[:=].*g\b", ll)
+        # также строка вида "; filament used [g] = 5.1" без g суффикса но с [g] уже покрыта
+        # для совместимости: если есть [g] — граммы
+        if not is_grams:
+            # если строка содержит [g] — уже граммы, иначе проверяем наличие 'g' рядом с числом и отсутствие 'mm'/'m' как метров
+            if "[g]" not in ll:
+                continue
+        # извлечь часть после : или =
+        m = re.search(r"[:=]\s*(.+)$", line)
+        if not m:
+            continue
+        part = m.group(1)
+        # убрать комментарии в скобках типа (PLA Basic)
+        part = re.sub(r"\(.*?\)", "", part)
+        nums = re.findall(r"(\d+(?:\.\d+)?)", part)
+        if not nums:
+            continue
+        # если мы уже нашли через паттерн точное первое число, а тут список — нужно добавить недостающие
+        # чтобы не дублировать, если found и total уже содержит первое число из этой строки, вычитаем
+        # Проще: если в строке запятая — суммируем все числа из part
+        if "," in part:
+            try:
+                s = sum(float(n) for n in nums)
+                # если pat уже добавил первое число, добавим только остальные
+                # проверим: если total уже включает первое число этой строки — вычесть его из суммы
+                # эвристика: если found и s>0, а первое число уже в total, мы пересчитаем заново всю сумму через строки
+                # поэтому для строк с запятой — считаем отдельно и позже пересоберём
+                pass
+            except ValueError:
+                pass
+        # для строк без запятой — уже посчитано паттерном, пропустим чтобы не дублировать
+        # но для строк с запятой — нужно учесть все числа
+        if "," in part:
+            try:
+                # если эта строка ещё не учтена полностью (pat взял только первое), добавим остальные
+                # найдём сколько уже добавлено из этой строки через pat (первое число)
+                first = float(nums[0]) if nums else 0
+                # проверим, содержит ли total уже first (приблизительно)
+                # просто пересчитаем total заново через все строки с запятой для надёжности позже
+                pass
+            except ValueError:
+                pass
+
+    # Пересчёт через все строки с учётом запятых — самый надёжный для многоцвета
+    total2 = 0.0
+    found2 = False
+    for line in text.splitlines():
+        ll = line.lower()
+        if "filament" not in ll or "used" not in ll:
+            continue
+        if "[g]" not in ll and "total_filament_used" not in ll and "filament used" in ll:
+            # если нет [g] и нет g суффикса — это могут быть метры, пропустим (обработается в meters)
+            # но если есть g буква рядом с числом — считаем граммами
+            if not re.search(r"\d\s*g\b", ll):
+                if "[g]" not in ll:
+                    # проверим паттерн total_filament_used без [g] но с g
+                    if "total_filament_used" not in ll:
+                        continue
+        # часть после : =
+        m = re.search(r"[:=]\s*(.+)$", line)
+        if not m:
+            continue
+        part = m.group(1)
+        part = re.sub(r"\(.*?\)", "", part)
+        # если есть запятая — суммируем все числа
+        nums = re.findall(r"(\d+(?:\.\d+)?)", part)
+        if not nums:
+            continue
+        # для total — берём первое и выходим (приоритет)
+        if "total" in ll:
+            try:
+                # если уже нашли total выше, не перезаписываем, но этот блок для случая когда total паттерн не сработал
+                if not total2:
+                    total2 = float(nums[0])
+                    found2 = True
+                    # если в total несколько чисел через запятую — сумма
+                    if "," in part and len(nums) > 1:
+                        total2 = sum(float(n) for n in nums)
+                    # total найден — возвращаем сразу (приоритет над filament)
+                    return round(total2, 1)
+            except ValueError:
+                continue
+        else:
+            try:
+                # filament used [g] — суммируем все числа в строке
+                s = sum(float(n) for n in nums)
+                total2 += s
+                found2 = True
+            except ValueError:
+                continue
+
+    if found2 and total2 > 0:
+        return round(total2, 1)
+    if found and total > 0:
+        return round(total, 1)
+    m = _GRAMS_RE.search(text)
+    if m:
+        try:
+            return round(float(m.group(1)), 1)
+        except ValueError:
+            pass
+    return 0.0
+
+
+def _extract_meters_as_grams(text: str) -> float:
+    """Фолбэк: метры/мм -> граммы."""
+    if not text:
+        return 0.0
+    # Сначала ищем mm
+    for pat in _METERS_PATTERNS:
+        m = pat.search(text)
+        if m:
+            try:
+                val = float(m.group(1))
+                # если паттерн был mm — конвертим mm->g (PLA ~0.002976 g/mm)
+                if "mm" in pat.pattern.lower():
+                    return round(val * 0.002976, 1)
+                else:
+                    # метры -> граммы (старая эвристика 1.24 г/м)
+                    # но если значение большое (>1000) — это мм, а не метры
+                    if val > 1000:
+                        return round(val * 0.002976, 1)
+                    return round(val * 1.24, 1)
+            except ValueError:
+                continue
+    # старый паттерн
+    m = _METERS_RE.search(text)
+    if m:
+        try:
+            return round(float(m.group(1)) * 1.24, 1)
+        except ValueError:
+            pass
+    return 0.0
+
+
 def _parse_gcode_head(text: str) -> dict:
     minutes = 0.0
     grams = 0.0
+
+    # --- время ---
     m = _TIME_RE.search(text)
     if m:
-        minutes = round(int(m.group(1)) / 60.0, 1)
-    m = _GRAMS_RE.search(text)
-    if m:
-        grams = round(float(m.group(1)), 1)
-    else:
-        m = _METERS_RE.search(text)
+        try:
+            minutes = round(int(m.group(1)) / 60.0, 1)
+        except ValueError:
+            pass
+    if not minutes:
+        m = _PREDICTION_RE.search(text)
         if m:
-            grams = round(float(m.group(1)) * 1.24, 1)
+            try:
+                minutes = round(float(m.group(1)) / 60.0, 1)
+            except ValueError:
+                pass
+    if not minutes:
+        m = _TIME_HUMAN_RE.search(text)
+        if m:
+            minutes = _parse_human_time_to_minutes(m.group(1))
+
+    # --- граммы ---
+    grams = _extract_grams_from_text(text)
+    if not grams:
+        grams = _extract_meters_as_grams(text)
+
     result = {"minutes": minutes, "grams": grams}
     m = _TYPE_RE.search(text)
     if m:
@@ -86,7 +392,10 @@ def _parse_gcode_head(text: str) -> dict:
     types = _TYPE_RE.findall(text)
     colors = _COLOR_HEX_RE.findall(text)
     if types:
-        result["filaments"] = [{"type": t.upper(), "color": "#" + (colors[i] if i < len(colors) else "CCCCCC").lstrip("#")[:6]} for i, t in enumerate(types)]
+        result["filaments"] = [
+            {"type": t.upper(), "color": "#" + (colors[i] if i < len(colors) else "CCCCCC").lstrip("#")[:6]}
+            for i, t in enumerate(types)
+        ]
     return result
 
 
@@ -117,6 +426,45 @@ def estimate_3mf(path: Path) -> dict:
     except Exception:
         return {}
     plates = detail.get("plates", [])
+    # Если gcode-плиты пустые, но есть данные из slice_info — используем их
+    if not plates:
+        slice_info = detail.get("slice_info", {})
+        si_plates = slice_info.get("plates") if isinstance(slice_info, dict) else None
+        if si_plates:
+            for sp in si_plates:
+                try:
+                    grams = float(sp.get("weight") or 0)
+                    # prediction в секундах
+                    minutes = round(float(sp.get("prediction") or 0) / 60.0, 1)
+                    idx = int(sp.get("index") or len(plates) + 1)
+                    filaments = []
+                    for f in sp.get("filaments", []):
+                        try:
+                            fg = float(f.get("used_g") or 0)
+                            if fg:
+                                filaments.append(
+                                    {
+                                        "type": str(f.get("type") or "").upper(),
+                                        "color": str(f.get("color") or "#CCCCCC"),
+                                        "grams": fg,
+                                    }
+                                )
+                        except Exception:
+                            continue
+                    # если weight пустой, суммируем used_g
+                    if not grams and filaments:
+                        grams = round(sum(x.get("grams", 0) for x in filaments), 1)
+                    plates.append(
+                        {
+                            "minutes": minutes,
+                            "grams": grams,
+                            "plate_index": idx,
+                            "filaments": filaments,
+                            "source": "slice_info",
+                        }
+                    )
+                except Exception:
+                    continue
     if not plates:
         return {}
     # суммарно по всем плитам, но основное — первая плита для совместимости
@@ -142,6 +490,69 @@ def estimate_3mf(path: Path) -> dict:
     return result
 
 
+def _parse_slice_info_xml(raw: str) -> dict:
+    """Разобрать Metadata/slice_info.config (XML) в структуру."""
+    out: dict = {"raw": raw[:5000], "plates": []}
+    if not raw or "<" not in raw:
+        return out
+    # Попытка через ElementTree
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(raw)
+        plates = []
+        for plate_elem in root.findall(".//plate"):
+            meta = {}
+            for md in plate_elem.findall("metadata"):
+                k = md.get("key")
+                v = md.get("value")
+                if k:
+                    meta[k] = v
+            # также header_item внутри header — не плита, но может содержать версию
+            filaments = []
+            for fil in plate_elem.findall("filament"):
+                # сохранить все атрибуты
+                filaments.append(dict(fil.attrib))
+            if meta or filaments:
+                # нормализуем ключи
+                plate_info = dict(meta)
+                plate_info["filaments"] = filaments
+                plates.append(plate_info)
+        if plates:
+            out["plates"] = plates
+            # также попробуем вытащить версию из header
+            for hi in root.findall(".//header_item"):
+                if hi.get("key") == "X-BBL-Client-Version":
+                    out["slicer_version"] = hi.get("value")
+            return out
+    except Exception:
+        pass
+
+    # Фолбэк: regex парсинг
+    try:
+        plate_blocks = re.findall(r"<plate>(.*?)</plate>", raw, re.DOTALL | re.IGNORECASE)
+        plates = []
+        for block in plate_blocks:
+            meta = {}
+            for k, v in re.findall(
+                r'<metadata\s+key="([^"]+)"\s+value="([^"]*)"', block, re.IGNORECASE
+            ):
+                meta[k] = v
+            filaments = []
+            for fil_match in re.finditer(r"<filament\s+([^>]+)/?>", block, re.IGNORECASE):
+                attr_str = fil_match.group(1)
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', attr_str))
+                filaments.append(attrs)
+            if meta or filaments:
+                meta["filaments"] = filaments
+                plates.append(meta)
+        if plates:
+            out["plates"] = plates
+    except Exception:
+        pass
+    return out
+
+
 def parse_3mf_complete(path: str | Path) -> dict:
     """Достать всё полезное из 3MF-архива.
 
@@ -155,7 +566,7 @@ def parse_3mf_complete(path: str | Path) -> dict:
     bounding_box: dict = {}
     with zipfile.ZipFile(path) as zf:
         names = zf.namelist()
-        # плиты
+        # плиты — парсим gcode заголовки
         for name in sorted(names):
             if name.startswith("Metadata/") and name.endswith(".gcode"):
                 try:
@@ -183,19 +594,81 @@ def parse_3mf_complete(path: str | Path) -> dict:
                         thumbnails[name] = base64.b64encode(raw).decode("ascii")
                 except Exception:
                     continue
-        # slice_info.config
+        # slice_info.config — самый надёжный источник веса/времени
         for cand in ("Metadata/slice_info.config", "Metadata/slice_info.config "):
             if cand.strip() in names:
                 try:
                     raw = zf.read(cand.strip()).decode("utf-8", "ignore")
-                    # формат может быть json или ini-like
+                    # формат XML, но может быть json в старых версиях
                     try:
                         slice_info = json.loads(raw)
                     except json.JSONDecodeError:
-                        slice_info = {"raw": raw[:5000]}
+                        slice_info = _parse_slice_info_xml(raw)
                     break
                 except Exception:
                     pass
+        # дополнить плиты данными из slice_info если gcode дал 0
+        if slice_info and isinstance(slice_info, dict) and slice_info.get("plates"):
+            si_by_index = {}
+            for sp in slice_info["plates"]:
+                try:
+                    idx = int(sp.get("index") or 0)
+                    if idx:
+                        si_by_index[idx] = sp
+                except Exception:
+                    continue
+            for p in plates:
+                idx = p.get("plate_index")
+                si = si_by_index.get(idx) if idx else None
+                if not si:
+                    continue
+                # если граммы 0 — берём из slice_info
+                if not p.get("grams"):
+                    try:
+                        w = float(si.get("weight") or 0)
+                        if w:
+                            p["grams"] = round(w, 1)
+                        else:
+                            # суммируем used_g по филаментам
+                            total_g = 0.0
+                            for f in si.get("filaments", []):
+                                try:
+                                    total_g += float(f.get("used_g") or 0)
+                                except Exception:
+                                    pass
+                            if total_g:
+                                p["grams"] = round(total_g, 1)
+                    except Exception:
+                        pass
+                if not p.get("minutes"):
+                    try:
+                        pred = float(si.get("prediction") or 0)
+                        if pred:
+                            p["minutes"] = round(pred / 60.0, 1)
+                    except Exception:
+                        pass
+                # филаменты из slice_info если нет
+                if not p.get("filaments") and si.get("filaments"):
+                    try:
+                        fils = []
+                        for f in si["filaments"]:
+                            fils.append(
+                                {
+                                    "type": str(f.get("type") or "").upper(),
+                                    "color": str(f.get("color") or "#CCCCCC"),
+                                    "grams": float(f.get("used_g") or 0),
+                                }
+                            )
+                        if fils:
+                            p["filaments"] = fils
+                            # также material/color для совместимости — первый филамент
+                            if not p.get("material") and fils[0].get("type"):
+                                p["material"] = fils[0]["type"]
+                            if not p.get("color_hex") and fils[0].get("color"):
+                                p["color_hex"] = fils[0]["color"]
+                    except Exception:
+                        pass
+
         # project_settings
         for cand in ("Metadata/project_settings.config", "Metadata/print_settings.config"):
             if cand in names:
@@ -214,15 +687,19 @@ def parse_3mf_complete(path: str | Path) -> dict:
                 raw = zf.read("3D/3dmodel.model").decode("utf-8", "ignore")
                 # искать <vertex x=".." y=".." z="..">
                 import re as _re
+
                 vals = _re.findall(r'x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"', raw)
                 if vals:
                     xs = [float(v[0]) for v in vals]
                     ys = [float(v[1]) for v in vals]
                     zs = [float(v[2]) for v in vals]
                     bounding_box = {
-                        "min_x": min(xs), "max_x": max(xs),
-                        "min_y": min(ys), "max_y": max(ys),
-                        "min_z": min(zs), "max_z": max(zs),
+                        "min_x": min(xs),
+                        "max_x": max(xs),
+                        "min_y": min(ys),
+                        "max_y": max(ys),
+                        "min_z": min(zs),
+                        "max_z": max(zs),
                         "size_x": round(max(xs) - min(xs), 1),
                         "size_y": round(max(ys) - min(ys), 1),
                         "size_z": round(max(zs) - min(zs), 1),
@@ -231,7 +708,14 @@ def parse_3mf_complete(path: str | Path) -> dict:
                 pass
     # сортировать плиты по индексу
     plates.sort(key=lambda p: p.get("plate_index", 99))
-    return {"plates": plates, "thumbnails": thumbnails, "slice_info": slice_info, "project_settings": project_settings, "bounding_box": bounding_box, "plate_count": len(plates)}
+    return {
+        "plates": plates,
+        "thumbnails": thumbnails,
+        "slice_info": slice_info,
+        "project_settings": project_settings,
+        "bounding_box": bounding_box,
+        "plate_count": len(plates),
+    }
 
 
 def _read_head(path: Path, limit: int = 4000) -> str:

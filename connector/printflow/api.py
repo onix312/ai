@@ -1070,53 +1070,102 @@ class Api:
             printer = self.printer_or_fail(one("printer_id"))
             return 200, printer.files.disk_usage(one("path","/"))
         if path == "/api/estimate":
-            fname = one("file")
+            fname = one("file").strip()
+            if not fname:
+                return 400, {"error": "Не указано имя файла"}
             from .config import UPLOAD_DIR
             from .estimate import estimate_file, parse_3mf_complete
-            local = UPLOAD_DIR / fname
+            safe_name = Path(fname).name
+            local = safe_file(UPLOAD_DIR, safe_name) or (UPLOAD_DIR / safe_name)
             if not local.exists():
-                # also check watch folder
-                wp = Path(str(self.db.setting("watch_folder_path",""))).expanduser() / fname if self.db.setting("watch_folder_path","") else None
-                if wp and wp.exists():
-                    local = wp
+                try:
+                    low = safe_name.lower()
+                    for pat in ("*.3mf", "*.gcode", "*.gcode.3mf"):
+                        for pp in UPLOAD_DIR.glob(pat):
+                            nlow = pp.name.lower()
+                            if nlow == low or low in nlow or nlow in low or pp.stem.lower() in low:
+                                local = pp
+                                break
+                        if local.exists():
+                            break
+                except Exception:
+                    pass
             if not local.exists():
-                # Файл мог быть запущен прямо с SD/из Bambu Studio и потому не
-                # лежать в UPLOAD_DIR. Берём последний известный принтером факт
-                # или оценку: это точнее повторного ручного ввода в заказе.
-                base = Path(fname).name.lower()
-                known = next((j for j in self.manager.history(300) + self.manager.queue()
-                              if Path(str(j.get("file") or j.get("name") or "")).name.lower() == base), None)
+                try:
+                    watch_root = str(self.db.setting("watch_folder_path", "") or "").strip()
+                    if watch_root:
+                        wp = Path(watch_root).expanduser() / safe_name
+                        if wp.exists():
+                            local = wp
+                        else:
+                            for pp in Path(watch_root).expanduser().glob("*.3mf"):
+                                if pp.name.lower() == safe_name.lower():
+                                    local = pp
+                                    break
+                except Exception:
+                    pass
+            if local.exists():
+                is_3mf = local.name.lower().endswith(".3mf")
+                if is_3mf:
+                    try:
+                        est = estimate_file(local)
+                        try:
+                            detail = parse_3mf_complete(local)
+                        except Exception:
+                            detail = {}
+                        if (not est.get("grams") and not est.get("total_grams")) and detail.get("plates"):
+                            total_g = round(sum(float(p.get("grams") or 0) for p in detail["plates"]), 1)
+                            total_m = round(sum(float(p.get("minutes") or 0) for p in detail["plates"]), 1)
+                            if detail["plates"]:
+                                est = dict(detail["plates"][0])
+                                est["total_grams"] = total_g
+                                est["total_minutes"] = total_m
+                                est["plates"] = detail["plates"]
+                                est["plate_count"] = len(detail["plates"])
+                        return 200, {"estimate": est, "detail": detail if 'detail' in locals() else {}}
+                    except Exception:
+                        return 200, {"estimate": estimate_file(local)}
+                else:
+                    return 200, {"estimate": estimate_file(local)}
+            base = Path(fname).name.lower()
+            base_variants = {base}
+            if base.endswith(".gcode.3mf"):
+                base_variants.add(base[:-10] + ".3mf")
+                base_variants.add(base[:-10])
+            if base.endswith(".3mf"):
+                base_variants.add(base[:-4])
+            known = None
+            try:
+                for job in self.manager.history(500) + self.manager.queue():
+                    job_name = Path(str(job.get("file") or job.get("name") or "")).name.lower()
+                    if job_name in base_variants or base in job_name or any(v in job_name for v in base_variants):
+                        if num(job.get("grams")) or num(job.get("est_grams")):
+                            known = job
+                            break
+                        if known is None:
+                            known = job
                 if known:
                     grams = num(known.get("grams")) or num(known.get("est_grams"))
                     minutes = num(known.get("duration_min")) or num(known.get("est_minutes"))
-                    return 200, {"estimate": {"grams": grams, "minutes": minutes,
-                                               "source": "printer"}}
-                # Файл может существовать только на SD-карте принтера. В этом
-                # случае нельзя ограничиваться history: для G-code в его
-                # заголовке уже есть ;Filament used [g]. Это особенно важно
-                # для имён Bambu Studio с пробелами и запятыми.
-                try:
-                    for printer in self.manager.printers.values():
-                        est = self.manager._slicer_estimate(printer, fname)
-                        if num(est.get("grams")) or num(est.get("minutes")):
-                            return 200, {"estimate": est}
-                except Exception:
-                    pass
-                return 404, {"error": "Файл не найден"}
-            if local.suffix.lower() == ".3mf":
-                try:
-                    detail = parse_3mf_complete(local)
-                    est = {}
-                    if detail.get("plates"):
-                        total_g = round(sum(p.get("grams",0) for p in detail["plates"]),1)
-                        total_m = round(sum(p.get("minutes",0) for p in detail["plates"]),1)
-                        est = dict(detail["plates"][0]) if detail["plates"] else {}
-                        est["total_grams"]=total_g; est["total_minutes"]=total_m
-                        est["plates"]=detail["plates"]; est["plate_count"]=len(detail["plates"])
-                    return 200, {"estimate": est, "detail": detail}
-                except Exception:
-                    return 200, {"estimate": estimate_file(local)}
-            return 200, {"estimate": estimate_file(local)}
+                    if grams or minutes:
+                        return 200, {"estimate": {"grams": grams, "minutes": minutes,
+                                                   "total_grams": grams, "total_minutes": minutes,
+                                                   "source": "history"}}
+            except Exception:
+                pass
+            try:
+                for printer in self.manager.printers.values():
+                    est = self.manager._slicer_estimate(printer, fname)
+                    if num(est.get("grams")) or num(est.get("minutes")) or est.get("material") or est.get("color"):
+                        if est.get("grams") and not est.get("total_grams"):
+                            est["total_grams"] = est["grams"]
+                        if est.get("minutes") and not est.get("total_minutes"):
+                            est["total_minutes"] = est["minutes"]
+                        return 200, {"estimate": est}
+            except Exception:
+                pass
+            return 404, {"error": f"Файл не найден: {safe_name}"}
+
         if path == "/api/settings/profiles":
             return 200, {"profiles": self.db.setting("settings_profiles", [])}
         if path == "/api/slicer/materials":
