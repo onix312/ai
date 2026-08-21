@@ -173,5 +173,52 @@ class TestNavigationTargetsExist(unittest.TestCase):
                 f"data-view={target} не имеет раздела с таким id в index.html")
 
 
+class TestOrderFileButtonsWired(unittest.TestCase):
+    """Кнопки файла печати в карточке заказа.
+
+    Однажды эти кнопки появились в HTML без обработчиков в JS и молча
+    не работали. Тест следит за обоими концами проводки: элементы есть
+    в разметке, и ops.js их навешивает.
+    """
+
+    BUTTONS = {
+        "of_file_pick": "«Выбрать файл» — выбрать 3MF/G-code с компьютера",
+        "of_file_pull": "«Скачать с принтера» — файл с SD-карты в uploads",
+        "of_file_download": "«На диск» — копия из uploads на компьютер",
+    }
+
+    def test_buttons_exist_in_index(self):
+        _, _, body = serve("/")
+        parser = parse_page(body)
+        for element_id in list(self.BUTTONS) + ["of_file_local", "pull_file_modal", "pull_file_list"]:
+            self.assertIn(element_id, parser.ids,
+                          f"index.html: нет элемента с id={element_id}")
+
+    def test_ops_js_wires_every_button(self):
+        js = (SITE / "assets" / "ops.js").read_text(encoding="utf-8")
+        for element_id in self.BUTTONS:
+            # ищем именно привязку обработчика, а не простое упоминание id
+            self.assertRegex(
+                js, rf"\$\('{element_id}'\)\s*&&\s*\$\('{element_id}'\)\.addEventListener"
+                   rf"|\$\('{element_id}'\)\.addEventListener",
+                f"ops.js: кнопка {element_id} не имеет обработчика")
+        self.assertIn("$('of_file_local').addEventListener('change'", js.replace(" ", ""),
+                      "ops.js: выбор файла с компьютера не обрабатывается")
+        self.assertIn("pickOrderFile(file)", js.replace(" ", ""),
+                      "ops.js: нет вызова pickOrderFile")
+        self.assertIn("pullOrderFile()", js.replace(" ", ""),
+                      "ops.js: нет вызова pullOrderFile")
+        self.assertIn("downloadOrderFile()", js.replace(" ", ""),
+                      "ops.js: нет вызова downloadOrderFile")
+        self.assertIn("[data-pull-file]", js,
+                      "ops.js: список файлов принтера не обрабатывает выбор")
+
+    def test_order_modal_keeps_file_input(self):
+        _, _, body = serve("/")
+        html = body.decode("utf-8", errors="replace")
+        self.assertIn('accept=".3mf,.gcode,.gcode.3mf"', html,
+                      "index.html: input файла потерял допустимые расширения")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@
 'use strict';
 const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeText,
   todayISO, initials, debounce, toast, fail, openModal, closeModal, confirmDanger } = U;
-const { get, post } = PF.api;
+const { get, post, api } = PF.api;
 
 let editingOrder = null, editingNiche = null, statusDraft = [];
 let fulfillmentDraft = null;
@@ -522,6 +522,119 @@ async function refreshOrderGrams(manual) {
     toast('Граммы обновлены', parts.join(' · ') || 'из источника печати');
   }
   return { grams, hours: hours || minutes / 60, source };
+}
+
+/* ================================================= файл печати в заказе */
+/** Записать результат чтения файла (upload/pull) в поля заказа. */
+function applyFileEstimate(res, fallbackName) {
+  const fileEl = $('of_file'), gramsEl = $('of_grams'), hoursEl = $('of_hours');
+  const est = res.estimate || {};
+  const name = res.file || res.saved || fallbackName || '';
+  if (name && fileEl) fileEl.value = String(name).split('/').pop();
+  const grams = num(res.grams) || num(est.total_grams) || num(est.grams);
+  const minutes = num(res.minutes) || num(est.total_minutes) || num(est.minutes);
+  if (grams && gramsEl) gramsEl.value = Math.round(grams * 10) / 10;
+  if (minutes && hoursEl && !num(hoursEl.value)) hoursEl.value = Math.round(minutes / 60 * 100) / 100;
+  const material = res.material || est.material || '';
+  const color = res.color || est.color || '';
+  if (material && $('of_material') && !$('of_material').value.trim()) $('of_material').value = material;
+  if (color && $('of_color') && !$('of_color').value.trim()) $('of_color').value = color;
+  distributeSpoolGrams(true);
+  updateEconDebounced();
+}
+
+/** «Выбрать файл»: 3MF/G-code с компьютера → uploads, вес и время — из слайсера. */
+async function pickOrderFile(file) {
+  if (!file) return;
+  if (!/\.(3mf|gcode)$/i.test(file.name)) return fail(new Error('Поддерживаются только 3MF и G-code'));
+  const form = new FormData();
+  form.append('file', file);
+  if (editingOrder) form.append('order_id', editingOrder);
+  toast('Читаем файл', file.name, 'info');
+  try {
+    const res = await api('/api/estimate/upload', { method: 'POST', body: form });
+    applyFileEstimate(res, file.name);
+    const bits = [res.file || file.name];
+    if (num(res.grams)) bits.push(`${nfmt(res.grams)} г`);
+    if (num(res.minutes)) bits.push(U.minutesText ? U.minutesText(res.minutes) : U.hoursText(num(res.hours)));
+    toast('Файл сохранён в uploads', bits.join(' · '));
+  } catch (e) { fail(e); }
+}
+
+/** «Скачать с принтера»: файл из поля заказа или выбор из списка SD-карты. */
+async function pullOrderFile() {
+  const live = PF.livePrinter();
+  if (!live) return fail(new Error('Нет принтера на связи — настройте принтер в разделе «Принтеры»'));
+  const file = ($('of_file') || {}).value.trim();
+  if (!file) return openPullFilePicker(live);
+  await pullFileFromPrinter(live, file);
+}
+
+async function pullFileFromPrinter(live, file) {
+  const name = String(file || '').split('/').pop();
+  toast('Скачиваем с принтера', `${live.name} · ${name}`, 'info');
+  try {
+    const res = await post('/api/estimate/pull', { printer_id: live.id, file: String(file || '') });
+    applyFileEstimate(res, name);
+    toast(res.source === 'printer' ? 'Файл скачан с принтера' : 'Использована копия из uploads',
+      [res.file, num(res.grams) ? `${nfmt(res.grams)} г` : ''].filter(Boolean).join(' · '));
+    return true;
+  } catch (e) { fail(e); return false; }
+}
+
+/** Список файлов SD-карты — выбрать, какой скачать в uploads. */
+async function openPullFilePicker(live) {
+  const list = $('pull_file_list');
+  const sub = $('pull_file_sub');
+  if (sub) sub.textContent = `${live.name}: читаем список файлов SD-карты…`;
+  list.innerHTML = '<div class="skeleton" style="height:60px"></div>';
+  openModal('pull_file_modal');
+  let files = [];
+  try {
+    const data = await get('/api/printer/files', { printer_id: live.id });
+    files = (data.files || []).filter((f) => !f.dir && /\.(3mf|gcode)$/i.test(String(f.name || '')));
+  } catch (e) {
+    list.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
+    if (sub) sub.textContent = 'Не удалось прочитать список файлов.';
+    return;
+  }
+  if (sub) sub.textContent = `${live.name} · ${files.length} файл(ов). Выберите, какой скачать в uploads.`;
+  if (!files.length) {
+    list.innerHTML = '<div class="empty compact"><span>На SD-карте нет 3MF и G-code файлов. Загрузите файл с компьютера кнопкой «Выбрать файл».</span></div>';
+    return;
+  }
+  const icon = (n) => /\.3mf$/i.test(n) ? '🧊' : '⚙️';
+  const sizeText = (b) => num(b) >= 1024 * 1024 ? `${(num(b) / 1024 / 1024).toFixed(1)} МБ` : `${Math.round(num(b) / 1024)} КБ`;
+  list.innerHTML = files.map((f) => {
+    const name = String(f.name || '');
+    return `<button class="file-pick" type="button" data-pull-file="${esc(f.path || f.name)}">`
+      + `<span class="fic">${icon(name)}</span>`
+      + `<span class="fname" title="${esc(f.path || f.name)}">${esc(name)}</span>`
+      + (num(f.size) ? `<span class="fsize">${esc(sizeText(num(f.size)))}</span>` : '')
+      + '<span class="pull">Скачать →</span></button>';
+  }).join('');
+}
+
+/** «На диск»: сохранить копию файла из uploads на компьютер. */
+async function downloadOrderFile() {
+  const file = ($('of_file') || {}).value.trim();
+  if (!file) return fail(new Error('Сначала выберите файл с компьютера или скачайте его с принтера'));
+  const name = file.split('/').pop();
+  toast('Готовим файл', name, 'info');
+  try {
+    const res = await fetch('/api/uploads?file=' + encodeURIComponent(name));
+    if (!res.ok) throw new Error('Файл не найден в uploads — скачайте его с принтера или выберите с компьютера');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('Файл сохранён на диск', name);
+  } catch (e) { fail(e); }
 }
 
 async function openOrder(id, intakeDraft, intakeMeta) {
@@ -1439,6 +1552,30 @@ function bind() {
     e.preventDefault();
     refreshOrderGrams(true).catch(fail);
   });
+  /* ---- файл печати: выбрать с компьютера / скачать с принтера / на диск ---- */
+  if ($('of_file_pick') && $('of_file_local')) {
+    $('of_file_pick').addEventListener('click', () => $('of_file_local').click());
+    $('of_file_local').addEventListener('change', () => {
+      const file = $('of_file_local').files && $('of_file_local').files[0];
+      $('of_file_local').value = '';
+      if (file) pickOrderFile(file).catch(fail);
+    });
+  }
+  if ($('of_file_pull')) {
+    $('of_file_pull').addEventListener('click', () => pullOrderFile().catch(fail));
+  }
+  if ($('of_file_download')) {
+    $('of_file_download').addEventListener('click', () => downloadOrderFile().catch(fail));
+  }
+  if ($('pull_file_list')) {
+    $('pull_file_list').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-pull-file]');
+      if (!btn) return;
+      const live = PF.livePrinter();
+      const ok = await pullFileFromPrinter(live, btn.dataset.pullFile);
+      if (ok) closeModal('pull_file_modal');
+    });
+  }
   // hint: показать текущий AMS цвет
   const hintEl = $('of_ams_hint');
   if (hintEl) {
