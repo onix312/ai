@@ -46,8 +46,10 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     est = {}
     upload_path = None
     plates = []
+    detail = {}
     try:
         from .config import UPLOAD_DIR
+        from .estimate import estimate_file
         cand = UPLOAD_DIR / Path(filename).name
         if cand.exists():
             upload_path = cand
@@ -55,33 +57,51 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
             cand2 = Path(str(db.setting("watch_folder_path", ""))).expanduser() / Path(filename).name if db.setting("watch_folder_path", "") else None
             if cand2 and cand2.exists():
                 upload_path = cand2
-        if upload_path and upload_path.suffix.lower() == ".3mf":
-            detail = parse_3mf_complete(upload_path)
-            plates = detail.get("plates", [])
-            if plates and 0 < plate <= len(plates):
-                est = plates[plate - 1]
-            elif plates:
-                est = plates[0]
-            # slice_info for nozzle/bed
-            slice_info = detail.get("slice_info", {})
-            # bed type
-            bed_need = est.get("bed_type") or (slice_info.get("bed_type") if isinstance(slice_info, dict) else None)
-            if bed_need and db.setting("preflight_warn_nozzle", True):
-                # пока info
-                infos.append({"code": "bed", "title": "Тип стола в файле", "detail": str(bed_need)})
-            # nozzle diameter
-            nd = est.get("nozzle_diameter")
-            printer_nozzle = None
+        if upload_path:
+            is_3mf = upload_path.name.lower().endswith(".3mf")
+            if is_3mf:
+                detail = parse_3mf_complete(upload_path)
+                plates = detail.get("plates", [])
+                if plates and 0 < plate <= len(plates):
+                    est = plates[plate - 1]
+                elif plates:
+                    est = plates[0]
+                # если grams 0 но есть estimate_file с slice_info — взять оттуда
+                if not est.get("grams"):
+                    ef = estimate_file(upload_path)
+                    if ef.get("grams") or ef.get("total_grams"):
+                        # сохранить total для проверки остатка
+                        est["grams"] = ef.get("total_grams") or ef.get("grams")
+                        est["minutes"] = ef.get("total_minutes") or ef.get("minutes")
+                        if not plates and ef.get("plates"):
+                            plates = ef["plates"]
+                slice_info = detail.get("slice_info", {})
+                bed_need = est.get("bed_type") or (slice_info.get("bed_type") if isinstance(slice_info, dict) else None)
+                if bed_need and db.setting("preflight_warn_nozzle", True):
+                    infos.append({"code": "bed", "title": "Тип стола в файле", "detail": str(bed_need)})
+                nd = est.get("nozzle_diameter")
+                printer_nozzle = None
+                try:
+                    printer_nozzle = float(snap.get("printer", {}).get("nozzle_size") or printer.record.get("nozzle_size") or 0.4)
+                except Exception:
+                    printer_nozzle = 0.4
+                if nd and db.setting("preflight_warn_nozzle", True):
+                    if abs(nd - printer_nozzle) > 0.05:
+                        warns.append({"code": "nozzle", "title": "Диаметр сопла не совпадает", "detail": f"В файле {nd}мм, в принтере {printer_nozzle}мм — детализация пострадает"})
+            else:
+                # .gcode
+                text = _read_head(upload_path)
+                est = _parse_gcode_head(text) if text else {}
+        else:
+            # локальной копии нет — пробуем оценить с SD карты принтера (важно для имён с запятой/пробелом)
             try:
-                printer_nozzle = float(snap.get("printer", {}).get("nozzle_size") or printer.record.get("nozzle_size") or 0.4)
+                if manager:
+                    sd_est = manager._slicer_estimate(printer, filename)
+                    if sd_est.get("grams") or sd_est.get("minutes"):
+                        est = {"grams": sd_est.get("grams"), "minutes": sd_est.get("minutes"),
+                               "material": sd_est.get("material", ""), "color": sd_est.get("color", "")}
             except Exception:
-                printer_nozzle = 0.4
-            if nd and db.setting("preflight_warn_nozzle", True):
-                if abs(nd - printer_nozzle) > 0.05:
-                    warns.append({"code": "nozzle", "title": "Диаметр сопла не совпадает", "detail": f"В файле {nd}мм, в принтере {printer_nozzle}мм — детализация пострадает"})
-        elif upload_path and upload_path.suffix.lower() == ".gcode":
-            text = _read_head(upload_path)
-            est = _parse_gcode_head(text) if text else {}
+                pass
     except Exception as exc:
         infos.append({"code": "estimate", "title": "Не удалось прочитать оценку", "detail": str(exc)})
 

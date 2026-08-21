@@ -251,6 +251,32 @@ class PrinterFiles:
             self._quit(ftp)
         return {"ok": True}
 
+    def download(self, path: str, max_bytes: int = 0) -> bytes:
+        """Скачать файл с SD-карты целиком (или до max_bytes если >0)."""
+        if not path:
+            return b""
+        chunks: list[bytes] = []
+
+        def cb(block: bytes) -> None:
+            chunks.append(block)
+            if max_bytes and sum(len(c) for c in chunks) >= max_bytes:
+                raise _HeadLimit()
+
+        ftp = None
+        try:
+            ftp = self._connect()
+            try:
+                ftp.retrbinary(f"RETR {path}", cb, blocksize=16384)
+            except (_HeadLimit, ftplib.error_temp, ftplib.error_perm, OSError, TimeoutError):
+                pass
+        except Exception:
+            pass
+        finally:
+            if ftp is not None:
+                self._quit(ftp)
+        data = b"".join(chunks)
+        return data[:max_bytes] if max_bytes else data
+
     def read_head(self, path: str, max_bytes: int = 131072) -> bytes:
         """Прочитать первые байты файла с SD-карты, не качая его целиком.
 

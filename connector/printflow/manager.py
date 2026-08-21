@@ -1302,9 +1302,10 @@ class PrinterManager:
 
         Порядок источников:
         1) локальная копия файла (uploads и папка наблюдения);
-        2) шапка G-code прямо с SD-карты принтера по FTPS — только для .gcode,
-           у .3mf шапка лежит внутри zip и частичным чтением не достаётся;
-        3) ничего не нашли — {grams: 0, minutes: 0, source: ""}, заказ создаётся
+        2) шапка G-code прямо с SD-карты принтера по FTPS — для .gcode;
+           для .3mf — скачиваем файл целиком (если <100МБ) и парсим slice_info.config;
+        3) телеметрия принтера (print_weight) если принтер печатает этот файл;
+        4) ничего не нашли — {grams: 0, minutes: 0, source: ""}, заказ создаётся
            с честным нулём и пометкой, а не с магическим «30 г».
 
         Вернуть: {"grams": float, "minutes": float, "material": str, "color": str, "source": str}
@@ -1320,11 +1321,25 @@ class PrinterManager:
         watch = str(self.db.setting("watch_folder_path", "") or "").strip()
         if watch:
             candidates.append(Path(watch).expanduser() / name)
-        for local in candidates:
+        # также пробуем найти файл по подстроке: имя на принтере может быть
+        # "model @ 0.2mm layer, 3 walls, 15% infill" а локально "model.3mf"
+        # — ищем в UPLOAD_DIR все файлы, чьё имя содержится в task или наоборот
+        extra_candidates = []
+        try:
+            base_lower = name.lower()
+            for p in UPLOAD_DIR.glob("*.3mf"):
+                if p.name.lower() in base_lower or base_lower in p.name.lower() or p.stem.lower() in base_lower:
+                    extra_candidates.append(p)
+            for p in UPLOAD_DIR.glob("*.gcode"):
+                if p.name.lower() in base_lower or base_lower in p.name.lower() or p.stem.lower() in base_lower:
+                    extra_candidates.append(p)
+        except Exception:
+            pass
+
+        for local in candidates + extra_candidates:
             try:
                 if local.exists():
                     est = estimate_file(local)
-                    # Многоплитный 3MF: сумма по всем плитам, не первая плита.
                     total_g = num(est.get("total_grams")) or num(est.get("grams"))
                     total_m = num(est.get("total_minutes")) or num(est.get("minutes"))
                     if total_g or total_m:
@@ -1337,21 +1352,69 @@ class PrinterManager:
                                 "color": est.get("color", ""), "source": "file"}
             except Exception:
                 continue
-        # 2) шапка G-code с SD-карты (только .gcode: у 3MF данные внутри zip)
-        if name.lower().endswith(".gcode") and printer is not None:
+
+        # 2) попытка с SD-карты принтера
+        if printer is not None:
             try:
-                head = printer.files.read_head("/" + name, max_bytes=131072)
-                if head:
-                    est = _parse_gcode_head(head.decode("utf-8", "ignore"))
-                    if est.get("grams") or est.get("minutes"):
-                        est["source"] = "sd"
-                        return est
-                    if est.get("material") or est.get("color"):
-                        return {"grams": 0.0, "minutes": 0.0,
-                                "material": est.get("material", ""),
-                                "color": est.get("color", ""), "source": "sd"}
+                # G-code — читаем шапку
+                if name.lower().endswith(".gcode"):
+                    head = printer.files.read_head("/" + name, max_bytes=131072)
+                    if head:
+                        est = _parse_gcode_head(head.decode("utf-8", "ignore"))
+                        if est.get("grams") or est.get("minutes"):
+                            est["source"] = "sd"
+                            return est
+                        if est.get("material") or est.get("color"):
+                            return {"grams": 0.0, "minutes": 0.0,
+                                    "material": est.get("material", ""),
+                                    "color": est.get("color", ""), "source": "sd"}
+                # 3MF — пробуем скачать целиком (до 100МБ) и распарсить
+                elif name.lower().endswith(".3mf"):
+                    # ограничение 100МБ чтобы не забивать память
+                    data = printer.files.download("/" + name, max_bytes=100 * 1024 * 1024)
+                    if data and len(data) > 100:
+                        import tempfile
+                        # записать во временный файл и вызвать estimate_3mf
+                        with tempfile.NamedTemporaryFile(suffix=".3mf", delete=False) as tf:
+                            tf.write(data)
+                            tmp_path = Path(tf.name)
+                        try:
+                            est = estimate_file(tmp_path)
+                            total_g = num(est.get("total_grams")) or num(est.get("grams"))
+                            total_m = num(est.get("total_minutes")) or num(est.get("minutes"))
+                            if total_g or total_m:
+                                return {"grams": total_g, "minutes": total_m,
+                                        "material": est.get("material", ""),
+                                        "color": est.get("color", ""), "source": "sd-3mf"}
+                            if est.get("material") or est.get("color"):
+                                return {"grams": 0.0, "minutes": 0.0,
+                                        "material": est.get("material", ""),
+                                        "color": est.get("color", ""), "source": "sd-3mf"}
+                        finally:
+                            try:
+                                tmp_path.unlink()
+                            except Exception:
+                                pass
             except Exception:
                 pass
+
+            # 3) телеметрия принтера как фолбэк: print_weight — полный вес плиты
+            try:
+                snap = printer.snapshot()
+                task_snap = str(snap["printer"].get("task") or "").lower()
+                # только если задача совпадает с запрашиваемой (или запрашиваемая — часть снапшота)
+                if name.lower() in task_snap or task_snap in name.lower():
+                    w = num(snap["printer"].get("weight"))
+                    if w:
+                        # время из elapsed+remaining
+                        elapsed = num(snap["printer"].get("elapsed_min"))
+                        remaining = num(snap["printer"].get("remaining_min"))
+                        minutes = elapsed + remaining if (elapsed or remaining) else 0.0
+                        return {"grams": w, "minutes": minutes,
+                                "material": "", "color": "", "source": "printer"}
+            except Exception:
+                pass
+
         return {"grams": 0.0, "minutes": 0.0, "material": "", "color": "", "source": ""}
 
     def convert_active_to_order(self, printer_id: str = "", extra: dict | None = None) -> dict:
