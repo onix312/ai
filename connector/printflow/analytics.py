@@ -6,11 +6,10 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from .accounting import Accounting, num
-from .config import now_iso
 from .db import Database
 
 
@@ -468,7 +467,6 @@ class Analytics:
         • дедлайны заказов;
         • группировку по материалу.
         """
-        from .manager import PrinterManager
         s = self.db.settings()
         queued = self.db.query(
             "SELECT j.*, o.material, o.due, o.product, o.number, o.customer_name"

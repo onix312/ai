@@ -137,6 +137,10 @@ class Repo:
 
     def save_order(self, data: dict) -> dict:
         data = dict(data)
+        # Служебные разрешения доступны только серверным процессам. Обычный
+        # редактор/канбан не может закрыть заказ в обход подтверждения выдачи.
+        allow_final_status = bool(data.pop("_allow_final_status", False))
+        skip_auto_income = bool(data.pop("_skip_auto_income", False))
         # Поле «Оплачено» в карточке — удобный ввод, но источник правды здесь
         # журнал payments. Прямую запись orders.paid больше не допускаем.
         payment_requested = "paid" in data or "prepaid" in data
@@ -185,6 +189,18 @@ class Repo:
                     payload["product"] = ", ".join(items_summary["names"])
             data.pop("items", None)
 
+        target_status = payload.get("status") or (existing or {}).get("status") or ""
+        status_changed = bool(existing) and target_status != (existing or {}).get("status")
+        target_meta = self.db.one("SELECT is_final FROM statuses WHERE id=?", (target_status,))
+        final_without_handoff = (
+            target_meta and num(target_meta.get("is_final")) and not allow_final_status
+            and (not existing or status_changed)
+        )
+        if final_without_handoff:
+            raise ValueError(
+                "Финальный статус ставится через «Выдать заказ» с подтверждением оплаты"
+            )
+
         row = self.db.upsert("orders", payload)
         # Конструктор правил: переход заказа между статусами.
         hook = getattr(self, "_on_status_change", None)
@@ -226,7 +242,8 @@ class Repo:
         if final and final["is_final"]:
             if not row.get("closed_at"):
                 self.db.execute("UPDATE orders SET closed_at=? WHERE id=?", (now_iso(), order_id))
-            self.acc.register_order_income(row)
+            if not skip_auto_income:
+                self.acc.register_order_income(row)
         elif row.get("closed_at"):
             self.db.execute("UPDATE orders SET closed_at='' WHERE id=?", (order_id,))
         if not existing:

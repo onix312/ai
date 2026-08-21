@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import platform
 import ssl
 import sys
 import time

@@ -45,11 +45,14 @@ class ImplicitFTPS(ftplib.FTP_TLS):
 class PrinterFiles:
     """Тонкая обёртка: каждое действие открывает и закрывает соединение."""
 
-    def __init__(self, host: str, access_code: str, port: int = 990, timeout: int = 8):
+    def __init__(self, host: str, access_code: str, port: int = 990,
+                 timeout: int = 8, retries: int = 3, block_size: int = 262144):
         self.host = host
         self.access_code = access_code
         self.port = port
-        self.timeout = timeout
+        self.timeout = max(1, min(120, int(timeout)))
+        self.retries = max(1, min(10, int(retries)))
+        self.block_size = max(16 * 1024, min(4 * 1024 * 1024, int(block_size)))
 
     def _connect(self) -> ImplicitFTPS:
         if not self.host or not self.access_code:
@@ -148,9 +151,11 @@ class PrinterFiles:
             raise FileNotFoundError("Файл не найден")
         total = local.stat().st_size if local.exists() else 0
         sent = 0
-        # 8.0: retries
         last_exc = None
-        for attempt in range(3):
+        for attempt in range(self.retries):
+            # После частичного обрыва новый прогресс начинается с нуля: байты
+            # не дозаливаются, а весь файл отправляется повторно.
+            sent = 0
             try:
                 ftp = self._connect()
                 try:
@@ -163,23 +168,23 @@ class PrinterFiles:
                                     progress(sent, total)
                                 except TypeError:
                                     progress(sent)
-                        ftp.storbinary(f"STOR {remote_name}", fp, blocksize=262144, callback=callback)
+                        ftp.storbinary(f"STOR {remote_name}", fp,
+                                       blocksize=self.block_size, callback=callback)
                 finally:
                     self._quit(ftp)
                 return {"ok": True, "name": remote_name, "size": sent, "total": total, "sha": self.sha_short(local_path)}
             except Exception as exc:
                 last_exc = exc
-                # retry on transient
-                import time
-                time.sleep(0.4 * (attempt+1))
-                continue
+                if attempt + 1 < self.retries:
+                    import time
+                    time.sleep(0.4 * (attempt + 1))
         raise last_exc if last_exc else ConnectionError("FTPS upload failed")
 
     def upload_bytes(self, data: bytes, remote_name: str) -> dict:
         import io
         ftp = self._connect()
         try:
-            ftp.storbinary(f"STOR {remote_name}", io.BytesIO(data), blocksize=262144)
+            ftp.storbinary(f"STOR {remote_name}", io.BytesIO(data), blocksize=self.block_size)
         finally:
             self._quit(ftp)
         return {"ok": True, "name": remote_name, "size": len(data)}

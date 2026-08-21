@@ -1,7 +1,6 @@
 """Тесты реестра моделей: раскладка, подготовка, повторная печать."""
 from __future__ import annotations
 
-import json
 import pathlib
 import sys
 import unittest
@@ -12,7 +11,6 @@ sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.model_registry import (  # noqa: E402
     ModelRegistry, DEFAULT_PREP_TIMES, PREP_STAGE_NAMES,
-    PLATE_USABLE_MM,
 )
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.accounting import Accounting  # noqa: E402

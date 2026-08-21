@@ -7,7 +7,6 @@ warn = можно но с подтверждением, info = просто за
 """
 from __future__ import annotations
 
-from typing import Any
 
 from .estimate import parse_3mf_complete, _parse_gcode_head, _read_head
 from pathlib import Path
@@ -48,7 +47,7 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     upload_path = None
     plates = []
     try:
-        from .config import UPLOAD_DIR, DATA_DIR
+        from .config import UPLOAD_DIR
         cand = UPLOAD_DIR / Path(filename).name
         if cand.exists():
             upload_path = cand
@@ -162,7 +161,6 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     if db.setting("preflight_warn_calibration", True):
         try:
             # проверить maintenance due
-            from .watchdog import Watchdog
             # просто смотрим snapshot maintenance
             maint = snap.get("maintenance") or {}
             if maint.get("due", 0) > 0:

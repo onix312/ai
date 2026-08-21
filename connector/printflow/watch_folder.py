@@ -9,14 +9,13 @@
 """
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import threading
 import time
 from pathlib import Path
 
-from .config import DATA_DIR, UPLOAD_DIR, now_iso
+from .config import UPLOAD_DIR, now_iso
 
 DEFAULT_WATCH = Path.home() / "PrintFlow-Inbox"
 
@@ -113,7 +112,7 @@ class WatchFolder:
 
     def _handle_file(self, path: Path):
         try:
-            from .estimate import estimate_3mf, parse_3mf_complete, _read_head, _parse_gcode_head
+            from .estimate import parse_3mf_complete, _read_head
         except ImportError:
             return
         info: dict = {"file": str(path), "name": path.name, "size": path.stat().st_size if path.exists() else 0}
@@ -144,8 +143,11 @@ class WatchFolder:
         except Exception as exc:
             info["error"] = str(exc)
 
-        # попытка найти order_id по имени файла
-        order_id = self._find_order_id(path.name, info)
+        # Попытка найти order_id по имени файла отключается настройкой. Раньше
+        # переключатель ``watch_link_order`` был декоративным: связь искалась
+        # всегда, несмотря на выбор пользователя.
+        order_id = (self._find_order_id(path.name, info)
+                    if self.db.setting("watch_link_order", True) else "")
         info["order_id"] = order_id
         info["at"] = now_iso()
 
@@ -168,8 +170,11 @@ class WatchFolder:
             for k in oldest:
                 self._pending.pop(k, None)
 
-        # событие
+        # Автопечать без подтверждения и preflight небезопасна и пока не
+        # поддерживается. Старое значение ``print`` мягко сводим к уведомлению.
         action = str(self.db.setting("watch_auto_action", "notify"))
+        if action not in {"notify", "queue"}:
+            action = "notify"
         self.db.add_event("watch", "Новый файл из Bambu Studio", f"{path.name} · {info.get('total_grams') or info.get('grams') or 0}г · {info.get('total_minutes') or info.get('minutes') or 0}мин", "", {"file": path.name, "order_id": order_id, "action": action, "fid": fid})
         if self.bus:
             try:
@@ -196,12 +201,6 @@ class WatchFolder:
         if action == "queue":
             try:
                 self._enqueue(path.name, info, order_id)
-            except Exception:
-                pass
-        elif action == "print":
-            try:
-                # отложенная печать — только если есть принтер и файл уже на SD не нужен? отложим до FTPS
-                pass
             except Exception:
                 pass
 

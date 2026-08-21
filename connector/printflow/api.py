@@ -23,16 +23,8 @@ from .db import Database
 from .manager import PrinterManager
 from .repo import Repo
 
-ALLOWED_ORIGIN = re.compile(
-    r"^https?://"
-    r"(localhost|127\.0\.0\.1|"
-    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-    r"192\.168\.\d{1,3}\.\d{1,3}|"
-    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|"
-    r"\[::1\]|::1"
-    r")(:\d+)?$"
-)
 MAX_UPLOAD = 400 * 1024 * 1024  # 400 МБ — с запасом на крупные 3MF
+MAX_JSON = 2 * 1024 * 1024      # JSON не содержит моделей и не должен занимать сотни МБ
 
 # Браузер штатно закрывает долгие SSE/MJPEG-соединения при обновлении страницы,
 # закрытии вкладки и переходе в сон. На разных ОС это проявляется разными
@@ -54,6 +46,30 @@ def safe_file(root: Path, name: str) -> Path | None:
     except ValueError:
         return None
     return target
+
+
+def request_length(raw: str | None, limit: int) -> tuple[int, bool]:
+    """Проверить Content-Length до чтения тела: ``(размер, превышен_ли)``."""
+    try:
+        length = int(raw or 0)
+    except (TypeError, ValueError):
+        raise ValueError("Некорректный Content-Length") from None
+    if length < 0:
+        raise ValueError("Некорректный Content-Length")
+    return length, length > limit
+
+
+def request_origin_allowed(origin: str | None, host: str | None) -> bool:
+    """Разрешить API-клиент без Origin или браузер строго с того же Host.
+
+    Разрешение любого адреса из частной подсети недостаточно: вредоносная
+    страница на соседнем устройстве иначе могла бы управлять принтером.
+    """
+    if not origin:
+        return True
+    parsed = urllib.parse.urlparse(origin)
+    return (parsed.scheme in ("http", "https") and bool(host)
+            and parsed.netloc.casefold() == host.strip().casefold())
 
 
 def parse_multipart(body: bytes, boundary: str) -> tuple[dict[str, str], tuple[str, bytes] | None]:
@@ -119,6 +135,20 @@ class Api:
         self.month_close = MonthClose(self.db)
         from .clients import Clients
         self.clients = Clients(self.db)
+        from .order_intake import OrderIntake
+        self.order_intake = OrderIntake(self.db)
+        from .production import ProductionPreparation
+        self.production = ProductionPreparation(self.db, self.manager)
+        from .completion import OrderCompletion
+        self.completion = OrderCompletion(self.db, self.repo)
+        from .fulfillment import OrderFulfillment
+        self.fulfillment = OrderFulfillment(self.db, self.repo, self.stock, self.acc)
+        from .receivables import Receivables
+        self.receivables = Receivables(self.db, self.repo, self.acc)
+        from .defect_recovery import DefectRecovery
+        self.defect_recovery = DefectRecovery(self.db, self.manager)
+        from .aftercare import CustomerAftercare
+        self.aftercare = CustomerAftercare(self.db, self.repo)
         from .b2b import B2B
         self.b2b = B2B(self.db)
         from .updater import UpdateChecker
@@ -298,7 +328,6 @@ class Api:
         return devices
 
     def cloud_status(self) -> dict:
-        from . import bambu_cloud
         from .cloud_bridge import CloudBridge
         settings = self.db.settings(include_secrets=True)
         token, uid, region = self._cloud_session()
@@ -466,21 +495,25 @@ class Api:
         qty = max(1, int(num(body.get("qty"), 1)))
         color = str(body.get("color") or "").strip()
         nom_id = str(body.get("nom_id") or "").strip()
-        niche_id = ""
-        if nom_id:
-            item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
-            if item:
-                niche_id = item.get("niche_id") or ""
+        item = self.nom.item(nom_id) if nom_id else None
+        if nom_id and not item:
+            raise ValueError("Товар из заявки не найден")
         order = self.repo.save_order({
-            "product": product,
+            "product": (item or {}).get("name") or product,
             "customer_name": name,
             "phone": str(body.get("phone") or "").strip(),
             "messenger": str(body.get("messenger") or "").strip(),
             "channel": str(body.get("channel") or "shop").strip() or "shop",
-            "niche_id": niche_id or None,
+            "niche_id": (item or {}).get("niche_id") or None,
             "status": "new",
             "qty": qty,
+            "material": (item or {}).get("material") or "",
             "color": color,
+            "grams": num((item or {}).get("grams")),
+            "hours": num((item or {}).get("hours")),
+            "manual_minutes": num((item or {}).get("post_minutes")),
+            "file": (item or {}).get("file") or "",
+            "price": round(num((item or {}).get("price")) * qty, 2),
             "notes": str(body.get("note") or "").strip() or "Заявка с витрины",
             "nom_id": nom_id or None,
         })
@@ -513,67 +546,27 @@ class Api:
             order = self.repo.order(order["id"]) or order
         return {"ok": True, "order": order}
 
-    def fulfill_order(self, order_id: str, account_id: str = "") -> dict:
-        """«Заказ выдан» одной кнопкой: остаток оплаты → финальный статус → текст.
-
-        Принимает недополученные деньги в кассу (если автоучёт включён),
-        закрывает заказ и возвращает готовое сообщение клиенту.
-        """
-        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
-        if not order:
-            raise ValueError("Заказ не найден")
-        final = self.db.one(
-            "SELECT id FROM statuses WHERE is_final=1 ORDER BY position LIMIT 1")
-        if not final:
-            raise ValueError("Не настроен финальный статус заказа")
-        if order.get("status") == final["id"]:
-            raise ValueError("Заказ уже выдан")
-        # Проверяем готовый остаток до зачисления оплаты: при ошибке выдачи
-        # касса не должна измениться наполовину.
-        if num(order.get("reserved")) and order.get("nom_id"):
-            reserve_check = self.db.one(
-                "SELECT * FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
-                (order_id,))
-            check_wh = (reserve_check or {}).get("warehouse_id") or order.get("warehouse_id") or ""
-            check_qty = max(1.0, num((reserve_check or {}).get("qty"), num(order.get("qty"), 1)))
-            available = self.stock.qty(order["nom_id"], check_wh)
-            if available < check_qty:
-                raise ValueError(f"На складе только {round(available, 1)} шт, нужно {round(check_qty, 1)}")
-        collected = 0.0
-        if self.db.setting("auto_income_on_done", True):
-            rest = round(max(0.0, num(order.get("price")) -
-                             max(num(order.get("paid")), num(order.get("prepaid")))), 2)
-            if rest > 0:
-                self.acc.add_payment(
-                    order_id, rest, "payment", account_id or order.get("account_id") or "",
-                    "выдача заказа", "Оплата при выдаче заказа")
-                collected = rest
-        # Готовое изделие списывается именно при выдаче, а не при создании
-        # заказа. Повторный вызов безопасен: движение продажи уникализируем
-        # проверкой по order_id до изменения остатка.
-        if num(order.get("reserved")) and order.get("nom_id"):
-            already = self.db.one(
-                "SELECT id FROM stock_moves WHERE doc_id=? AND doc_kind='sale' LIMIT 1",
-                (order_id,))
-            if not already:
-                reserve = self.db.one(
-                    "SELECT * FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
-                    (order_id,))
-                warehouse_id = (reserve or {}).get("warehouse_id") or order.get("warehouse_id") or ""
-                qty = max(1.0, num((reserve or {}).get("qty"), num(order.get("qty"), 1)))
-                available = self.stock.qty(order["nom_id"], warehouse_id)
-                if available < qty:
-                    raise ValueError(f"На складе только {round(available, 1)} шт, нужно {round(qty, 1)}")
-                unit_cost = self.stock.avg_cost(order["nom_id"], warehouse_id)
-                self.stock.add_move(order["nom_id"], warehouse_id, -qty, -unit_cost * qty,
-                                    doc_id=order_id, doc_kind="sale",
-                                    note=f"выдача заказа №{order.get('number') or ''}")
-            self.stock.release(order_id=order_id)
-        saved = self.repo.save_order({"id": order_id, "status": final["id"], "reserved": 0})
-        number = str(saved.get("number") or "")
-        message = (f"Здравствуйте! Ваш заказ №{number} готов, можно забирать. "
-                   f"Спасибо, что выбрали NOZZA!")
-        return {"ok": True, "order": saved, "collected": collected, "message": message}
+    def fulfill_order(
+        self,
+        order_id: str,
+        account_id: str = "",
+        *,
+        handoff_confirmed: bool = False,
+        payment_action: str = "",
+        payment_method: str = "",
+    ) -> dict:
+        """Совместимый вход в единый сервис подтверждаемой выдачи."""
+        service = getattr(self, "fulfillment", None)
+        if service is None:
+            from .fulfillment import OrderFulfillment
+            service = OrderFulfillment(self.db, self.repo, self.stock, self.acc)
+        return service.fulfill(
+            order_id,
+            handoff_confirmed=handoff_confirmed,
+            payment_action=payment_action,
+            account_id=account_id,
+            payment_method=payment_method,
+        )
 
     def network_diagnose(self, host: str) -> dict:
         from . import network
@@ -719,6 +712,19 @@ class Api:
         if path == "/api/order":
             order = self.repo.order(one("id"))
             return (200, order) if order else (404, {"error": "Заказ не найден"})
+        if path == "/api/order/readiness":
+            return 200, self.production.readiness(
+                one("id"), one("printer_id"), one("spool_id"))
+        if path == "/api/order/completion":
+            return 200, self.completion.summary(one("id"))
+        if path == "/api/order/fulfillment":
+            return 200, self.fulfillment.summary(one("id"))
+        if path == "/api/debt/summary":
+            return 200, self.receivables.summary(one("id"))
+        if path == "/api/aftercare/queue":
+            return 200, self.aftercare.queue(int(num(one("limit", "80"), 80)))
+        if path == "/api/aftercare/summary":
+            return 200, self.aftercare.summary(one("id"))
         if path == "/api/customers":
             return 200, {"customers": self.repo.customers()}
         if path == "/api/statuses":
@@ -1001,6 +1007,10 @@ class Api:
                 "SELECT d.*, j.name job_name FROM defects d"
                 " LEFT JOIN print_jobs j ON j.id=d.job_id"
                 " ORDER BY datetime(d.at) DESC LIMIT ?", (int(num(one("limit", "100"), 100)),))}
+        if path == "/api/defect/recovery":
+            return 200, self.defect_recovery.summary(
+                one("id") or one("job_id"), num(one("grams")), one("reason")
+            )
         if path == "/api/schedule":
             return 200, {"commands": self.db.query(
                 "SELECT * FROM scheduled_commands ORDER BY done, datetime(at) LIMIT ?",
@@ -1036,7 +1046,7 @@ class Api:
                     if k==name or k.endswith(name):
                         import base64
                         try:
-                            raw = base64.b64decode(v)
+                            base64.b64decode(v, validate=True)
                             return 200, {"ok": True, "b64": v}
                         except Exception:
                             pass
@@ -1093,7 +1103,7 @@ class Api:
                         est["total_grams"]=total_g; est["total_minutes"]=total_m
                         est["plates"]=detail["plates"]; est["plate_count"]=len(detail["plates"])
                     return 200, {"estimate": est, "detail": detail}
-                except Exception as exc:
+                except Exception:
                     return 200, {"estimate": estimate_file(local)}
             return 200, {"estimate": estimate_file(local)}
         if path == "/api/settings/profiles":
@@ -1138,7 +1148,7 @@ class Api:
                 email = next(iter(bambu_cloud._PENDING.keys()))
                 region = bambu_cloud._PENDING[email].get("region", region)
             result = bambu_cloud.login(
-                email, "", 
+                email, "",
                 region,
                 body.get("code", ""))
             if result.get("status") == "ok":
@@ -1192,12 +1202,21 @@ class Api:
                 return 200, self.manager.convert_active_to_order(pid or body.get("printer_id", ""), body)
             return 200, self.manager.convert_job_to_order(job_id, body)
         if path == "/api/printer/reprint":
-            # Повтор сорванного задания: по id задания или по номеру заказа.
+            # Подготовка повтора — явное подтверждение; физический старт всё
+            # равно выполняется отдельно. Для failed нужна записанная причина.
+            confirmed = body.get("reprint_confirmed") is True
+            request_id = str(body.get("request_id") or "")
             order_number = str(body.get("order_number") or "").strip()
             if body.get("id"):
-                row = self.manager.reprint_job(str(body["id"]), str(body.get("printer_id") or ""))
+                row = self.manager.reprint_job(
+                    str(body["id"]), str(body.get("printer_id") or ""),
+                    confirmed=confirmed, request_id=request_id,
+                    defect_id=str(body.get("defect_id") or ""),
+                )
             else:
-                row = self.manager.reprint_last_failed(order_number)
+                row = self.manager.reprint_last_failed(
+                    order_number, confirmed=confirmed, request_id=request_id,
+                )
             return 200, {"ok": True, "job": row}
         if path == "/api/printer/ams/sync":
             # Ручной запуск автосбора: катушки AMS и данные принтера → база
@@ -1284,6 +1303,18 @@ class Api:
         if path == "/api/materials/reset":
             self.repo.reset_material(body.get("id", ""))
             return 200, {"ok": True}
+        if path == "/api/order/intake/preview":
+            return 200, self.order_intake.preview(
+                str(body.get("text") or ""), str(body.get("channel") or ""))
+        if path == "/api/order/prepare":
+            return 200, self.production.prepare(
+                str(body.get("id") or ""), str(body.get("printer_id") or ""),
+                str(body.get("spool_id") or ""))
+        if path == "/api/order/accept":
+            return 200, self.completion.accept(
+                str(body.get("id") or ""),
+                quality_confirmed=body.get("quality_confirmed") is True,
+            )
         if path == "/api/order/save":
             return 200, self.save_order(body)
         if path == "/api/order/status":
@@ -1294,9 +1325,38 @@ class Api:
             self.repo.delete_order(body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/order/fulfill":
-            return 200, self.fulfill_order(body.get("id", ""), body.get("account_id", ""))
+            return 200, self.fulfill_order(
+                str(body.get("id") or ""),
+                str(body.get("account_id") or ""),
+                handoff_confirmed=body.get("handoff_confirmed") is True,
+                payment_action=str(body.get("payment_action") or ""),
+                payment_method=str(body.get("payment_method") or ""),
+            )
         if path == "/api/order/duplicate":
             return 200, {"ok": True, "order": self.repo.duplicate_order(body.get("id", ""))}
+        if path == "/api/aftercare/request/confirm":
+            return 200, self.aftercare.confirm_request(
+                str(body.get("id") or ""),
+                sent_confirmed=body.get("sent_confirmed") is True,
+                force=body.get("force") is True,
+                request_id=str(body.get("request_id") or ""),
+            )
+        if path == "/api/aftercare/response":
+            return 200, self.aftercare.record_response(
+                str(body.get("id") or ""),
+                response_received=body.get("response_received") is True,
+                rating=body.get("rating") or 0,
+                text=str(body.get("text") or ""),
+                publish_permission=str(body.get("publish_permission") or "not_asked"),
+                repeat_interest=str(body.get("repeat_interest") or "not_asked"),
+                request_id=str(body.get("request_id") or ""),
+            )
+        if path == "/api/aftercare/repeat":
+            return 200, self.aftercare.prepare_repeat(
+                str(body.get("id") or ""),
+                repeat_confirmed=body.get("repeat_confirmed") is True,
+                request_id=str(body.get("request_id") or ""),
+            )
         if path == "/api/public/order":
             return 200, self.public_order(body)
         # --------------------------------------------------------- 5.0: конверты
@@ -1398,7 +1458,8 @@ class Api:
             payment = self.acc.add_payment(
                 body.get("order_id", ""), num(body.get("amount")),
                 body.get("kind", "payment"), body.get("account_id", ""),
-                body.get("method", ""), body.get("note", ""))
+                body.get("method", ""), body.get("note", ""),
+                body.get("request_id", ""))
             return 200, {"ok": True, "payment": payment,
                          "order": self.repo.order(body.get("order_id", ""))}
         if path == "/api/payment/delete":
@@ -1699,19 +1760,60 @@ class Api:
             return 200, {"ok": True, "batches": self.batches.create_from_plan(
                 body.get("rows") or [], body.get("warehouse_id", ""),
                 bool(body.get("start_now")))}
+        if path == "/api/defect/recover":
+            return 200, self.defect_recovery.recover(
+                str(body.get("id") or body.get("job_id") or ""),
+                defect_confirmed=body.get("defect_confirmed") is True,
+                reason=str(body.get("reason") or ""),
+                phase=str(body.get("phase") or "unknown"),
+                code=str(body.get("code") or ""),
+                note=str(body.get("note") or ""),
+                lost_grams=num(body.get("grams")),
+                reprint_confirmed=body.get("reprint_confirmed") is True,
+                repeat_risk_confirmed=body.get("repeat_risk_confirmed") is True,
+                printer_id=str(body.get("printer_id") or ""),
+                request_id=str(body.get("request_id") or ""),
+            )
         if path == "/api/defect/save":
+            # Совместимый адрес: связанный с печатью брак всегда проходит
+            # через расчёт по фактам и идемпотентное подтверждение.
+            if body.get("job_id"):
+                result = self.defect_recovery.recover(
+                    str(body.get("job_id") or ""),
+                    defect_confirmed=body.get("defect_confirmed") is True,
+                    reason=str(body.get("reason") or ""),
+                    phase=str(body.get("phase") or "unknown"),
+                    code=str(body.get("code") or ""),
+                    note=str(body.get("note") or ""),
+                    lost_grams=num(body.get("grams")),
+                    request_id=str(body.get("request_id") or ""),
+                )
+                return 200, {"ok": True, "defect": result["defect"]}
+            if body.get("defect_confirmed") is not True:
+                raise ValueError("Подтвердите причину и фактический брак")
+            request_id = str(body.get("request_id") or "").strip()[:120]
+            if not request_id:
+                raise ValueError("Не указан ключ операции разбора брака")
+            existing = self.db.one("SELECT * FROM defects WHERE request_id=?", (request_id,))
+            if existing:
+                return 200, {"ok": True, "defect": existing, "already_recorded": True}
             data = dict(body)
             data.setdefault("id", uid("df"))
             data.setdefault("at", now_iso())
-            if data.get("job_id"):
-                job = self.db.one("SELECT order_id FROM print_jobs WHERE id=?", (data["job_id"],))
-                if job and not data.get("order_id"):
-                    data["order_id"] = job["order_id"]
+            data["confirmed_at"] = now_iso()
+            data["request_id"] = request_id
             row = self.db.upsert("defects", data)
-            self.db.add_event("defect", "Записан брак", f"{row.get('reason') or ''} · {row.get('code') or ''}",
-                              row.get("printer_id") or "", {"defect_id": row["id"], "order_id": row.get("order_id")})
-            return 200, {"ok": True, "defect": row}
+            self.db.add_event(
+                "defect", "Записан брак без задания",
+                f"{row.get('reason') or ''} · {row.get('code') or ''}",
+                row.get("printer_id") or "",
+                {"defect_id": row["id"], "order_id": row.get("order_id")},
+            )
+            return 200, {"ok": True, "defect": row, "already_recorded": False}
         if path == "/api/defect/delete":
+            defect = self.db.one("SELECT * FROM defects WHERE id=?", (body.get("id", ""),))
+            if defect and defect.get("confirmed_at"):
+                raise ValueError("Подтверждённый разбор брака нельзя удалить из аудита")
             self.db.delete("defects", body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/order/photo":
@@ -1865,12 +1967,33 @@ class Api:
                     patch["bank_rules"] = parsed if isinstance(parsed, list) else []
                 except json.JSONDecodeError:
                     patch["bank_rules"] = []
-            return 200, {"ok": True, "settings": self.db.set_settings(patch)}
+            settings = self.db.set_settings(patch)
+            if set(patch) & {"ftps_timeout", "ftps_retries", "ftps_block_kb",
+                             "mqtt_keepalive", "mqtt_backoff"}:
+                self.manager.reload()
+            return 200, {"ok": True, "settings": settings}
         if path == "/api/shopping/add":
             return 200, {"ok": True, "item": self.shopping.add(body)}
         if path == "/api/shopping/toggle":
             return 200, {"ok": True, "item": self.shopping.toggle(
                 body.get("id", ""), bool(body.get("done", True)))}
+        if path == "/api/shopping/receive":
+            return 200, self.shopping.receive(
+                str(body.get("id") or ""),
+                received_confirmed=body.get("received_confirmed") is True,
+                payment_confirmed=body.get("payment_confirmed") is True,
+                material=str(body.get("material") or ""),
+                color_name=str(body.get("color_name") or ""),
+                color_hex=str(body.get("color_hex") or ""),
+                brand=str(body.get("brand") or ""),
+                spool_count=num(body.get("spool_count"), 1),
+                spool_grams=num(body.get("spool_grams"), 1000),
+                total_amount=num(body.get("total_amount")),
+                account_id=str(body.get("account_id") or ""),
+                supplier=str(body.get("supplier") or ""),
+                warehouse_id=str(body.get("warehouse_id") or ""),
+                request_id=str(body.get("request_id") or ""),
+            )
         if path == "/api/shopping/delete":
             self.shopping.delete(body.get("id", ""))
             return 200, {"ok": True}
@@ -1945,25 +2068,27 @@ class Api:
             self.bus.publish("resync", {})
             return 200, {"ok": True, "updated": updated}
         if path == "/api/debt/remind":
-            order = self.db.one("SELECT * FROM orders WHERE id=?",
-                                (body.get("id") or body.get("order_id") or "",))
-            if not order:
-                raise ValueError("Заказ не найден")
-            debt = self.acc.order_economics(order)["debt"]
-            name = (order.get("customer_name") or "").strip()
-            hello = f", {name}," if name else ","
-            text = (f"Здравствуйте{hello} напоминаем о заказе "
-                    f"№{order.get('number')} «{order.get('product') or ''}»: "
-                    f"остаток к оплате {round(debt)} ₽. Спасибо!")
-            self.db.execute(
-                "UPDATE orders SET reminded_at=?, updated_at=? WHERE id=?",
-                (now_iso(), now_iso(), order["id"]))
-            self.db.add_event("order", "Напомнили о долге",
-                              f"№{order.get('number')}", "",
-                              {"order_id": order["id"]})
-            self.bus.publish("resync", {})
-            return 200, {"ok": True, "text": text, "debt": round(debt, 2),
-                         "number": order.get("number")}
+            # Предпросмотр ничего не отмечает отправленным: копирование текста
+            # ещё не доказывает внешнюю отправку клиенту.
+            result = self.receivables.summary(
+                str(body.get("id") or body.get("order_id") or "")
+            )
+            return 200, {**result, "text": result.get("message") or ""}
+        if path == "/api/debt/remind/confirm":
+            return 200, self.receivables.mark_reminded(
+                str(body.get("id") or body.get("order_id") or ""),
+                sent_confirmed=body.get("sent_confirmed") is True,
+                force=body.get("force") is True,
+            )
+        if path == "/api/debt/settle":
+            return 200, self.receivables.settle(
+                str(body.get("id") or body.get("order_id") or ""),
+                payment_confirmed=body.get("payment_confirmed") is True,
+                amount=num(body.get("amount")),
+                account_id=str(body.get("account_id") or ""),
+                payment_method=str(body.get("payment_method") or ""),
+                request_id=str(body.get("request_id") or ""),
+            )
         if path == "/api/bank/import-preview":
             from .bank_import import preview
             return 200, preview(self.db, str(body.get("text") or ""))
@@ -2091,13 +2216,8 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
 
     def check_origin(self) -> bool:
-        origin = self.headers.get("Origin")
-        if not origin or ALLOWED_ORIGIN.match(origin):
-            return True
-        # Доступ по локальному имени хоста (printflow.local, имя ПК и т. п.)
-        # безопасен, когда Origin в точности совпадает с Host текущего запроса.
-        parsed = urllib.parse.urlparse(origin)
-        return parsed.scheme in ("http", "https") and parsed.netloc == self.headers.get("Host", "")
+        return request_origin_allowed(
+            self.headers.get("Origin"), self.headers.get("Host"))
 
     # ------------------------------------------------------------------- GET
     def do_GET(self):
@@ -2357,7 +2477,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/printer/upload":
                 return self.handle_upload(query)
-            length = int(self.headers.get("Content-Length") or 0)
+            length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
+            if too_large:
+                return self.send_json(413, {"error": "JSON-запрос слишком большой"})
             raw = self.rfile.read(length) if length else b"{}"
             try:
                 body = json.loads(raw.decode("utf-8") or "{}")
@@ -2385,8 +2507,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_upload(self, query: dict):
         """Приём файла модели и отправка его на принтер по FTPS."""
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_UPLOAD:
+        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
+        if too_large:
             return self.send_json(413, {"error": "Файл слишком большой"})
         content_type = self.headers.get("Content-Type", "")
         boundary = ""
@@ -2501,7 +2623,7 @@ class Server(ThreadingHTTPServer):
     flags: list[str] = []
 
 
-def serve(host: str = "127.0.0.1", port: int = 8765, flags: list[str] | None = None) -> Server:
+def serve(host: str = "127.0.0.1", port: int = 8080, flags: list[str] | None = None) -> Server:
     Handler.api = Api()
     Handler.api.listen_host = host
     Handler.api.listen_port = port

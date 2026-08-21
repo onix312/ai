@@ -157,7 +157,6 @@ class Insights:
     def payback(self) -> dict[str, Any]:
         """Сколько принтер уже отбил и когда окупится полностью."""
         investment = num(self.db.setting("printer_investment", 0), 0)
-        invested_at = str(self.db.setting("printer_invested_at", "") or "")
         income = num(self.acc.summary(365).get("profit"))
         if investment <= 0:
             return {"investment": 0.0, "paid_back": 0.0, "pct": None,
@@ -217,7 +216,7 @@ class Insights:
             # НПД: платёж до 28 числа месяца, следующего за отчётным
             due_month = today.replace(day=28) + timedelta(days=31)
             due = due_month.replace(day=28)
-            amount = tax_due_month = num(tax.get("tax_due"))
+            amount = num(tax.get("tax_due"))
             events.append({"title": "Налог НПД", "due": due.isoformat(),
                            "amount": round(amount, 2),
                            "kind": "tax", "note": "До 28 числа следующего месяца"})

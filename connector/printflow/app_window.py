@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Нативное окно PrintFlow 8.1 — как у 1С/Photoshop.
+"""Нативное окно PrintFlow — как у 1С/Photoshop.
 
 Открывает локальный сервер и показывает панель в системном WebView
 (Windows WebView2, macOS WKWebView, Linux WebKitGTK). Если pywebview
 не установлен — падает в обычный браузер.
 
-Запуск:  python -m printflow.app_window  или  python pf.py app
+Запуск:  python pf.py app
 
 Требует: pip install pywebview
 """
 from __future__ import annotations
 
-import os
 import sys
 import time
-import threading
 import subprocess
 import socket
 import webbrowser
 from pathlib import Path
+
+from . import APP_VERSION
 
 # пути как в pf.py
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,10 +27,9 @@ DEFAULT_PORT = 8080
 
 
 def find_free_port(start=DEFAULT_PORT):
-    import socket as s
     for p in range(start, start+20):
         try:
-            with s.create_connection(("127.0.0.1", p), timeout=0.3):
+            with socket.create_connection(("127.0.0.1", p), timeout=0.3):
                 continue
         except OSError:
             return p
@@ -38,7 +37,6 @@ def find_free_port(start=DEFAULT_PORT):
 
 
 def wait_for_port(port, timeout=15):
-    import socket, time
     end = time.time() + timeout
     while time.time() < end:
         try:
@@ -66,15 +64,15 @@ def start_server(port, lan=True):
     return proc
 
 
-def open_native_window(url: str, title: str = "NOZZA · PrintFlow 8.0"):
+def open_native_window(url: str, title: str | None = None):
     try:
         import webview  # pywebview
     except ImportError:
         webbrowser.open(url)
         return 0
     # нативное окно
-    window = webview.create_window(
-        title,
+    webview.create_window(
+        title or f"NOZZA · PrintFlow {APP_VERSION}",
         url,
         width=1280,
         height=840,

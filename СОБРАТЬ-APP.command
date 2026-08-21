@@ -1,8 +1,9 @@
 #!/bin/bash
-# NOZZA PrintFlow 8.0 — сборка приложения (macOS / Linux)
+# NOZZA PrintFlow 8.2 — сборка приложения (macOS / Linux)
+set -e
 cd "$(dirname "$0")"
 echo "╔══════════════════════════════════════════╗"
-echo "║  NOZZA · PrintFlow 8.0 — сборка APP     ║"
+echo "║  NOZZA · PrintFlow 8.2 — сборка APP     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 if ! command -v python3 &> /dev/null; then echo "✗ python3 не найден"; exit 1; fi

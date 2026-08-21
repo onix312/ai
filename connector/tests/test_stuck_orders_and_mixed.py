@@ -145,11 +145,13 @@ class ReadyProductOrderTests(Base):
         result = self.api.save_order({
             "product": self.nom["name"], "nom_id": self.nom["id"],
             "warehouse_id": self.wh["id"], "qty": 2, "reserved": 1,
-            "price": 600})
+            "price": 600, "status": "ready"})
         order = result["order"]
         self.assertEqual(self.stock.reserved(self.nom["id"], self.wh["id"]), 2)
         self.assertEqual(self.stock.qty(self.nom["id"], self.wh["id"]), 5)
-        self.api.fulfill_order(order["id"])
+        self.api.fulfill_order(
+            order["id"], handoff_confirmed=True, payment_action="debt"
+        )
         self.assertEqual(self.stock.qty(self.nom["id"], self.wh["id"]), 3)
         self.assertEqual(self.stock.reserved(self.nom["id"], self.wh["id"]), 0)
         move = self.db.one("SELECT * FROM stock_moves WHERE doc_id=? AND doc_kind='sale'",
@@ -168,7 +170,6 @@ class ReconcileTests(Base):
 
     def setUp(self):
         super().setUp()
-        from connector.printflow.config import now_iso
 
     def _stale_job(self, printer_id, order_id, progress=45):
         return self.db.upsert("print_jobs", {
@@ -228,7 +229,7 @@ class ReconcileTests(Base):
 
     def test_failed_print_releases_order(self):
         order = self.repo.save_order({"product": "Срыв", "status": "printing"})
-        job = self.db.upsert("print_jobs", {
+        self.db.upsert("print_jobs", {
             "id": uid("job"), "printer_id": "p1", "order_id": order["id"],
             "state": "running", "name": "y.3mf", "started_at": "2026-01-01T00:00:00+00:00",
             "created_at": "2026-01-01T00:00:00"})
@@ -343,7 +344,6 @@ class OrphanOrderSweepTests(Base):
     """Заказ «в печати» без заданий — панель говорит «готов», заказ висит."""
 
     def test_orphan_released_when_printers_idle(self):
-        from connector.printflow.config import now_iso
         order = self.repo.save_order({"product": "Висяк", "status": "printing"})
         # время последнего изменения — больше 30 минут назад
         self.db.execute(

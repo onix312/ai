@@ -66,10 +66,10 @@ def print_banner(host: str, port: int, data_dir: Path, lan_ips: list[str]) -> No
         print("      python pf.py")
     else:
         print(f"  Сервер слушает {host}:{port} (все интерфейсы)" if host == "0.0.0.0" else f"  Сервер слушает {host}:{port}")
-        print(f"  Если не открывается с другого устройства:")
-        print(f"    - проверьте что оба устройства в одной Wi-Fi сети")
+        print("  Если не открывается с другого устройства:")
+        print("    - проверьте что оба устройства в одной Wi-Fi сети")
         print(f"    - разрешите порт {port} в Брандмауэре Windows / Firewall")
-        print(f"    - попробуйте выключить VPN")
+        print("    - попробуйте выключить VPN")
     print()
     print(f"  {line}")
     print("  Не закрывайте это окно: без него сайт не сохраняет данные.")
@@ -113,8 +113,8 @@ def main() -> int:
         server = serve(args.host, args.port, flags)
     except OSError as exc:
         print(f"\n  ❌ Не удалось занять {args.host}:{args.port}: {exc}")
-        print(f"  Возможно, PrintFlow уже запущен. Закройте старое окно или укажите --port.")
-        print(f"  Пример: --port 9000")
+        print("  Возможно, PrintFlow уже запущен. Закройте старое окно или укажите --port.")
+        print("  Пример: --port 9000")
         return 1
 
     lan_ips = get_local_ips()
@@ -134,7 +134,7 @@ def main() -> int:
 
     # Доп. подсказка: первый IP для быстрого копирования
     if lan_ips and args.host == "0.0.0.0" and not args.no_banner:
-        print(f"  Быстрая ссылка для телефона в той же Wi-Fi сети:")
+        print("  Быстрая ссылка для телефона в той же Wi-Fi сети:")
         print(f"  http://{lan_ips[0]}:{args.port}/")
         print()
 

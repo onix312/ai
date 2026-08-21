@@ -117,10 +117,15 @@ class BambuPrinter:
     # ------------------------------------------------------------- жизненный цикл
     @property
     def files(self) -> PrinterFiles:
-        return PrinterFiles(self.record.get("host", ""), self.record.get("access_code", ""))
+        return PrinterFiles(
+            self.record.get("host", ""), self.record.get("access_code", ""),
+            timeout=int(self.record.get("ftps_timeout") or 8),
+            retries=int(self.record.get("ftps_retries") or 3),
+            block_size=int(self.record.get("ftps_block_kb") or 256) * 1024,
+        )
 
     def update_record(self, record: dict) -> None:
-        keys = ["host", "serial", "access_code", "enabled", "mode"]
+        keys = ["host", "serial", "access_code", "enabled", "mode", "mqtt_keepalive"]
         if str(record.get("mode") or "cloud") == "cloud":
             keys += ["cloud_token", "cloud_uid", "cloud_region"]
         restart = any(self.record.get(k) != record.get(k) for k in keys)
@@ -154,10 +159,13 @@ class BambuPrinter:
                 self.reconnect()
                 backoff = min(backoff * 1.8, 30.0)
             elif not self.connected and not self.connecting and self.ready:
-                if backoff > 1.0:
+                use_backoff = bool(self.record.get("mqtt_backoff", True))
+                if use_backoff and backoff > 1.0:
                     time.sleep(backoff + random.uniform(0, 1))
                     backoff = min(backoff * 1.6, 30.0)
                 self.connect()
+                if not use_backoff:
+                    backoff = 1.0
             elif self.connected:
                 backoff = 1.0
 
@@ -239,7 +247,8 @@ class BambuPrinter:
             client.on_disconnect = self._on_disconnect
             client.on_message = self._on_message
             self.client = client
-            client.connect_async(self.record["host"], 8883, keepalive=30)
+            keepalive = max(10, min(300, int(self.record.get("mqtt_keepalive") or 30)))
+            client.connect_async(self.record["host"], 8883, keepalive=keepalive)
             client.loop_start()
         except Exception as exc:
             self.connecting = False
@@ -337,6 +346,7 @@ class BambuPrinter:
             if state in ("RUNNING", "PREPARE") and not self.session:
                 self.session = {
                     "started_ts": time.time(), "task": name,
+                    "remote_task_id": str(p.get("subtask_id") or p.get("task_id") or ""),
                     "total_layers": int(as_num(p.get("total_layer_num"))),
                     "ams_tray": (p.get("ams") or {}).get("tray_now") if isinstance(p.get("ams"), dict) else None,
                 }
@@ -345,6 +355,7 @@ class BambuPrinter:
                 if not self.session:
                     self.session = {
                         "started_ts": time.time(), "task": name,
+                        "remote_task_id": str(p.get("subtask_id") or p.get("task_id") or ""),
                         "total_layers": int(as_num(p.get("total_layer_num"))),
                         "ams_tray": (p.get("ams") or {}).get("tray_now") if isinstance(p.get("ams"), dict) else None,
                     }
@@ -372,6 +383,9 @@ class BambuPrinter:
             "layer": int(as_num(p.get("layer_num"))),
             "total_layers": int(as_num(p.get("total_layer_num"))),
             "task": p.get("subtask_name") or p.get("gcode_file") or data.get("task", ""),
+            "remote_task_id": str(
+                p.get("subtask_id") or p.get("task_id") or data.get("remote_task_id") or ""
+            ),
             "weight": as_num(p.get("print_weight")),
         })
         return data
@@ -661,7 +675,6 @@ class BambuPrinter:
         host = self.record.get("host", "")
         # Облачный режим: главное — мост аккаунта, порты принтера не нужны.
         if self.mode == "cloud":
-            from .cloud_bridge import CloudBridge
             cloud = self.bridge.state() if self.bridge else {}
             ports = {}
             if host:  # локальные ускорители (камера/SD) — только если задан IP

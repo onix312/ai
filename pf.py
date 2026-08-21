@@ -257,13 +257,22 @@ def local_ips() -> list[str]:
         if ip.startswith("10."):
             return (1, ip)
         if ip.startswith("172."):
-            return (2, ip)
-        if ip.startswith("169.254."):
-            return (9, ip)
-        return (3, ip)
+            try:
+                if 16 <= int(ip.split(".")[1]) <= 31:
+                    return (2, ip)
+            except (IndexError, ValueError):
+                pass
+        if ip.startswith("100."):
+            try:
+                if 64 <= int(ip.split(".")[1]) <= 127:
+                    return (3, ip)  # CGNAT/Tailscale
+            except (IndexError, ValueError):
+                pass
+        return (99, ip)
 
-    usable = [ip for ip in found if not ip.startswith("169.254.")] or list(found)
-    return sorted(usable, key=rank)
+    # Не показываем APIPA 169.254/16 и публичные интерфейсы как адрес панели:
+    # первый означает сломанный DHCP, второй нельзя рекламировать для LAN-сервера.
+    return sorted((ip for ip in found if rank(ip)[0] < 99), key=rank)
 
 
 def port_busy(port: int, host: str = "127.0.0.1") -> bool:
@@ -481,7 +490,7 @@ def start_background(command: list[str], host: str, port: int, args: argparse.Na
         say(f"    Панель:     http://localhost:{port}/")
         for ip in (local_ips() if host == "0.0.0.0" else []):
             say(f"    С телефона: http://{ip}:{port}/")
-        say(f"    Остановить: python pf.py stop", Style.DIM)
+        say("    Остановить: python pf.py stop", Style.DIM)
         if not args.no_browser:
             webbrowser.open(f"http://localhost:{port}/")
         return 0
@@ -715,6 +724,41 @@ def read_printers() -> list[dict]:
         return []
 
 
+def configured_backup_keep() -> int:
+    """Лимит копий из SQLite; без базы или при ошибке — безопасный default."""
+    value: object = BACKUP_KEEP
+    if DB_FILE.exists():
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+            try:
+                row = conn.execute(
+                    "SELECT value FROM settings WHERE key='backup_keep'").fetchone()
+                if row:
+                    value = json.loads(row[0])
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    try:
+        return max(1, min(200, int(float(value))))
+    except (TypeError, ValueError, OverflowError):
+        return BACKUP_KEEP
+
+
+def rotate_backups(keep: int | None = None) -> list[Path]:
+    """Единый лимит для ручных, автоматических и страховочных копий."""
+    keep = configured_backup_keep() if keep is None else max(1, int(keep))
+    items = sorted(
+        BACKUP_DIR.glob("*.sqlite3"),
+        key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+    removed = items[keep:]
+    for old in removed:
+        old.unlink(missing_ok=True)
+    return removed
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     header("Резервная копия базы")
     if not DB_FILE.exists():
@@ -735,12 +779,10 @@ def cmd_backup(args: argparse.Namespace) -> int:
     ok(f"Копия готова: {target}")
     say(f"    Размер: {target.stat().st_size / 1048576:.1f} МБ")
 
-    extra = sorted(BACKUP_DIR.glob("printflow-*.sqlite3"),
-                   key=lambda p: p.stat().st_mtime)[:-BACKUP_KEEP]
-    for old in extra:
-        old.unlink(missing_ok=True)
+    keep = configured_backup_keep()
+    extra = rotate_backups(keep)
     if extra:
-        step(f"Удалил старых копий: {len(extra)} (держим последние {BACKUP_KEEP})")
+        step(f"Удалил старых копий: {len(extra)} (держим последние {keep})")
     say()
     return 0
 
@@ -801,10 +843,26 @@ def cmd_update(args: argparse.Namespace) -> int:
         fail("Не найден git")
         return 1
 
-    subprocess.run(["git", "fetch", "--quiet"], cwd=str(ROOT))
-    behind = subprocess.run(["git", "rev-list", "--count", "HEAD..@{u}"],
-                            cwd=str(ROOT), capture_output=True, text=True).stdout.strip()
-    if behind in ("", "0"):
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
+                           capture_output=True, text=True).stdout.strip()
+    if dirty:
+        fail("Есть незакоммиченные изменения — обновление остановлено")
+        say("    Сохраните или отмените их; список покажет: git status")
+        return 1
+
+    fetched = subprocess.run(["git", "fetch", "--quiet"], cwd=str(ROOT))
+    if fetched.returncode != 0:
+        fail("Не удалось получить сведения об обновлении")
+        say("    Проверьте интернет и настройку git remote -v")
+        return 1
+    count = subprocess.run(["git", "rev-list", "--count", "HEAD..@{u}"],
+                           cwd=str(ROOT), capture_output=True, text=True)
+    behind = count.stdout.strip()
+    if count.returncode != 0 or not behind.isdigit():
+        fail("У текущей ветки не настроена ветка обновлений")
+        say("    Проверьте: git branch -vv")
+        return 1
+    if behind == "0":
         ok("У вас последняя версия")
         say()
         return 0
@@ -820,16 +878,18 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     if DB_FILE.exists():
         cmd_backup(args)
-    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=str(ROOT),
-                           capture_output=True, text=True).stdout.strip()
-    if dirty:
-        warn("Есть незакоммиченные правки — обновление их не тронет")
     result = subprocess.run(["git", "pull", "--ff-only"], cwd=str(ROOT))
     if result.returncode != 0:
         fail("Не удалось обновиться автоматически (расходятся ветки)")
         say("    Разберитесь вручную: git status")
         return 1
     ensure_venv(force_deps=True)
+    installed = (DEPS_MARKER.read_text(encoding="utf-8").strip()
+                 if DEPS_MARKER.exists() else "")
+    if installed != requirements_fingerprint():
+        fail("Код обновлён, но зависимости не установились")
+        say("    До перезапуска выполните: python pf.py deps")
+        return 1
     ok(f"Обновлено до версии {app_version()}")
     if running_port():
         warn("Перезапустите PrintFlow, чтобы изменения вступили в силу:")
@@ -841,7 +901,12 @@ def cmd_update(args: argparse.Namespace) -> int:
 def cmd_deps(args: argparse.Namespace) -> int:
     header("Переустановка зависимостей")
     ensure_venv(force_deps=True)
+    installed = (DEPS_MARKER.read_text(encoding="utf-8").strip()
+                 if DEPS_MARKER.exists() else "")
     say()
+    if installed != requirements_fingerprint():
+        fail("Зависимости не установлены")
+        return 1
     return 0
 
 
@@ -960,7 +1025,6 @@ def cmd_install(args: argparse.Namespace) -> int:
 def install_windows(args: argparse.Namespace) -> list[str]:
     done = []
     command = launcher_command("gui")
-    target, arguments = command[0], subprocess.list2cmdline(command[1:])
     desktop = desktop_dir()
     shortcuts = {}
     if desktop:

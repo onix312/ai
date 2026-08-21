@@ -1,4 +1,4 @@
-/* PrintFlow 8.0 — Мост Bambu Studio: Watch Folder, 3MF превью, AMS-маппинг, Preflight, FTPS прогресс, Health */
+/* PrintFlow — Мост Bambu Studio: Watch Folder, 3MF превью, AMS-маппинг, Preflight, FTPS прогресс, Health */
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, toast, fail, openModal, closeModal } = U;

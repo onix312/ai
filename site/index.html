@@ -305,6 +305,7 @@
   <div class="head-actions">
    <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
    <button class="btn" id="orders_statuses" type="button">Статусы</button>
+   <button class="btn" id="orders_intake" type="button">✦ Заказ из текста</button>
    <button class="btn primary" id="orders_new" type="button">+ Новый заказ</button>
   </div>
  </div>
@@ -329,6 +330,11 @@
  <div class="view-head">
   <div><span class="eyebrow">CRM</span><h1>Клиенты</h1><p>История покупок собирается автоматически из заказов.</p></div>
   <div class="head-actions" id="customers_kpi"></div>
+ </div>
+ <div class="card" style="margin-bottom:14px">
+  <div class="card-head"><div><h2>После продажи</h2><p>Подходящие заказы находятся сами. Сообщения готовятся, но не отправляются без вас.</p></div><button class="btn sm" id="aftercare_refresh" type="button">Обновить</button></div>
+  <div class="kpis compact" id="aftercare_kpi"></div>
+  <div id="aftercare_list"><div class="empty">Проверяем завершённые заказы…</div></div>
  </div>
  <div class="toolbar"><div class="search-box"><input id="customers_search" type="search" placeholder="Имя, телефон, мессенджер…"></div></div>
  <div class="table-wrap"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
@@ -3027,7 +3033,7 @@
 <h2>5. Производство — сердце системы</h2>
 <table><tr><th>Группа</th><th>Что важно изменить первым</th></tr>
 <tr><td>Тарифы производства</td><td><code>power_kw</code> 0.15кВт, <code>energy_price</code> 6₽/кВт·ч, <code>amortization_per_hour</code> 12₽/ч, <code>maintenance_per_hour</code> 3₽/ч, <code>labor_rate</code> 400₽/ч — основа всей себестоимости. Проверь по своему счётчику.</td></tr>
-<tr><td>Автоматизация</td><td><code>auto_accounting</code> — считать себестоимость по факту печати, <code>auto_consume_filament</code> — списывать пластик с катушки AMS, <code>auto_link_orders</code> — связывать печать с заказом по имени файла, <code>auto_income_on_done</code> — доход в кассу при закрытии.</td></tr>
+<tr><td>Автоматизация</td><td><code>auto_accounting</code> — считать себестоимость по факту печати, <code>auto_consume_filament</code> — списывать пластик с катушки AMS, <code>auto_link_orders</code> — связывать печать с заказом по имени файла. Оплата записывается только при подтверждённой выдаче.</td></tr>
 <tr><td>AMS</td><td><code>ams_auto_spools</code> — заводить катушки из AMS автоматом, <code>ams_sync_remaining</code> — обновлять остаток (только у катушек с галочкой ⟳), <code>dry_humidity_threshold</code> 55% — сигнал сушить, <code>restock_remind</code> — напоминать о закупке.</td></tr>
 <tr><td>Сторож печати</td><td><code>guard_enabled</code> — пауза при HMS-ошибках, <code>guard_pause_on_error</code>, <code>spaghetti_enabled</code> — детект «макарон» по камере (нужен Pillow), чувствительность 3×.</td></tr>
 <tr><td>Очередь</td><td><code>queue_check_material/filament</code> — не стартовать если не тот материал/мало пластика, <code>queue_group_material</code> — группировать по материалу, <code>quiet_hours</code> 23:00–08:00 — не шуметь ночью, <code>auto_queue</code> — автозапуск следующего.</td></tr>
@@ -3373,9 +3379,23 @@
 </div>
 
 <!-- ================================================== ДИАЛОГИ -->
+<dialog class="modal" id="order_intake_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Без повторного ввода</span><h2>Заказ из сообщения</h2><p>Вставьте текст из Telegram, Авито или другого канала. Данные обрабатываются локально.</p></div><button class="icon-btn" type="button" data-close="order_intake_modal">×</button></div>
+ <div class="modal-body">
+  <div class="form-grid">
+   <label class="field"><span>Источник</span><select id="intake_channel"><option value="telegram">Telegram</option><option value="avito">Авито</option><option value="shop">Витрина / QR</option><option value="direct">Напрямую / рекомендация</option><option value="ozon">Маркетплейс</option><option value="b2b">B2B</option></select></label>
+   <div class="field"><span>Что будет заполнено</span><small class="hint">Клиент, товар, количество, сумма, срок, материал и цвет. Неуверенные поля останутся на проверку.</small></div>
+   <label class="field span-2"><span>Сообщение клиента</span><textarea id="intake_text" rows="8" maxlength="10000" placeholder="Например: Нужно 20 адресников, PETG чёрный, для Марии, до пятницы. Бюджет 3600 ₽, телефон +7…"></textarea></label>
+  </div>
+  <div class="verdict" id="intake_privacy"><b>Локально:</b> текст не отправляется внешним ИИ-сервисам.</div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="order_intake_modal">Отмена</button><button class="btn primary" type="button" id="intake_preview">Разобрать и заполнить</button></div>
+</form></dialog>
+
 <dialog class="modal" id="order_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Карточка заказа</span><h2 id="order_modal_title">Новый заказ</h2><p id="order_modal_sub">Клиент создаётся автоматически по имени и телефону.</p></div><button class="icon-btn" type="button" data-close="order_modal">×</button></div>
  <div class="modal-body">
+  <div class="verdict" id="of_intake_hint" hidden></div>
   <div class="form-section"><h3>Заказ</h3><div class="form-grid">
    <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" list="products_datalist" required></label>
    <label class="field span-2"><span>Готовый товар из базы</span><select id="of_nom_id"><option value="">Не выбран — заказ на печать / услугу</option></select><small class="hint" id="of_stock_hint">Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.</small></label>
@@ -3384,7 +3404,7 @@
    <label class="field"><span>Статус</span><select id="of_status"></select></label>
    <label class="field"><span>Приоритет</span><select id="of_priority"><option value="low">Низкий</option><option value="normal" selected>Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label>
    <label class="field"><span>Ниша</span><select id="of_niche_id"></select></label>
-   <label class="field"><span>Канал</span><select id="of_channel"><option>Полка магазина</option><option>Telegram</option><option>Авито</option><option>B2B</option><option>Рекомендация</option><option>Другое</option></select></label>
+   <label class="field"><span>Канал</span><select id="of_channel"><option value="direct">Напрямую / рекомендация</option><option value="shop">Витрина / полка</option><option value="telegram">Telegram</option><option value="avito">Авито</option><option value="ozon">Маркетплейс</option><option value="b2b">B2B</option></select></label>
    <label class="field"><span>Количество</span><input id="of_qty" type="number" min="1" step="1" value="1"></label>
    <label class="field"><span>Срок</span><input id="of_due" type="date"></label>
   </div></div>
@@ -3406,8 +3426,8 @@
      <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
    </div>
-   <label class="field"><span>Пластик, г <small class="muted" style="font-weight:normal">(вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"></label>
-   <label class="field"><span>Печать, ч <small class="muted" style="font-weight:normal">(вся плита)</small></span><input id="of_hours" type="number" min="0" step="any"></label>
+   <label class="field"><span>Пластик, г <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"></label>
+   <label class="field"><span>Печать, ч <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_hours" type="number" min="0" step="any"></label>
    <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
    <label class="field"><span>Файл на принтере</span><input id="of_file" placeholder="adresnik-v2.3mf"></label>
   </div></div>
@@ -3427,6 +3447,14 @@
    <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
    <div class="span-2" id="of_econ"></div>
   </div></div>
+  <div class="form-section" id="of_production_wrap" hidden>
+   <h3>Готовность производства</h3>
+   <div id="of_production_ready" class="verdict">Проверяем файл, принтер и пластик…</div>
+   <div class="form-grid" id="of_production_choices" style="margin-top:10px">
+    <label class="field"><span>Принтер</span><select id="of_prepare_printer"></select></label>
+    <label class="field"><span>Катушка</span><select id="of_prepare_spool"></select></label>
+   </div>
+  </div>
   <div class="form-section"><h3>Качество и заметки</h3><div class="form-grid">
    <label class="field"><span>Проверка качества</span><select id="of_quality"><option value="pending">Не проверено</option><option value="passed">Проверено — всё хорошо</option><option value="rework">Нужна переделка</option></select></label>
    <label class="field"><span>Результат / упаковка</span><input id="of_quality_note"></label>
@@ -3437,6 +3465,18 @@
    <h3 style="display:flex;align-items:center;gap:10px">Чек-лист качества
     <button class="btn sm ghost" type="button" id="order_defect_btn">✕ Записать брак</button></h3>
    <div id="of_qc" style="display:flex;flex-wrap:wrap;gap:6px 18px"></div>
+  </div>
+  <div class="form-section" id="of_completion_wrap" hidden>
+   <h3>Завершение и приёмка</h3>
+   <div id="of_completion_summary" class="verdict">Проверяем результаты печати…</div>
+   <div id="of_completion_message_wrap" hidden style="margin-top:10px">
+    <label class="field"><span>Текст клиенту — подготовлен, но не отправлен</span><textarea id="of_completion_message" rows="4" readonly></textarea></label>
+    <button class="btn sm" type="button" id="order_copy_ready_message">Копировать текст</button>
+   </div>
+   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <button class="btn ok" type="button" id="order_accept_result">✓ Принять результат и подготовить сообщение</button>
+    <small class="muted">Подтверждает визуальное качество и ставит статус «Готов». Ничего не отправляет автоматически.</small>
+   </div>
   </div>
   <div class="form-section" id="of_photos_wrap" hidden>
    <h3>Фото</h3>
@@ -3449,7 +3489,21 @@
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">В очередь печати</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal" id="fulfillment_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Подтверждаемое действие</span><h2>Выдать заказ</h2><p>Оплата попадёт в кассу только после явного выбора.</p></div><button class="icon-btn" type="button" data-close="fulfillment_modal">×</button></div>
+ <div class="modal-body">
+  <div id="fulfillment_summary" class="verdict">Проверяем заказ, оплату и склад…</div>
+  <div class="form-grid" style="margin-top:12px">
+   <label class="field span-2" id="hf_payment_action_wrap"><span>Оставшаяся оплата</span><select id="hf_payment_action"><option value="">Выберите действие…</option><option value="received">Оплата получена сейчас</option><option value="debt">Выдать в долг — оплату не записывать</option></select><small class="hint">Статус «Выдан» сам по себе больше не создаёт платёж.</small></label>
+   <label class="field" id="hf_account_wrap"><span>Касса</span><select id="hf_account"></select></label>
+   <label class="field" id="hf_method_wrap"><span>Способ оплаты</span><select id="hf_method"><option value="cash">Наличные</option><option value="card">Карта / эквайринг</option><option value="transfer">Перевод</option><option value="other">Другое</option></select></label>
+   <label class="check span-2"><input type="checkbox" id="hf_handoff_confirmed"> Изделие физически передано клиенту</label>
+  </div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="fulfillment_modal">Отмена</button><button class="btn ok" type="button" id="fulfillment_confirm">✓ Подтвердить выдачу</button></div>
 </form></dialog>
 
 <dialog class="modal" id="material_modal"><form method="dialog">
@@ -3577,6 +3631,28 @@
  <div class="modal-foot"><button class="btn danger" type="button" id="spool_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="spool_modal">Отмена</button><button class="btn primary" type="button" id="spool_save">Сохранить</button></div>
 </form></dialog>
 
+<dialog class="modal" id="shopping_receive_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Подтверждённый приход</span><h2>Принять пластик на склад</h2><p id="sr_item_name"></p></div><button class="icon-btn" type="button" data-close="shopping_receive_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice info"><span>i</span><span>Каждая физическая катушка появится на складе отдельно. Расход в кассе будет записан один раз.</span></div>
+  <div class="form-grid">
+   <label class="field"><span>Материал</span><input id="sr_material" list="materials_datalist" placeholder="PLA"></label>
+   <label class="field"><span>Цвет</span><input id="sr_color_name" placeholder="Чёрный"></label>
+   <label class="field"><span>Бренд</span><input id="sr_brand" placeholder="Bambu Lab"></label>
+   <label class="field"><span>Поставщик</span><input id="sr_supplier" placeholder="Магазин или контрагент"></label>
+   <label class="field"><span>Количество катушек</span><input id="sr_spool_count" type="number" min="1" max="100" step="1" value="1"></label>
+   <label class="field"><span>Вес одной, г</span><input id="sr_spool_grams" type="number" min="1" max="10000" step="any" value="1000"></label>
+   <label class="field"><span>Общая сумма, ₽</span><input id="sr_total_amount" type="number" min="0" step="any" value="0"><small class="hint">0 — принять без финансовой проводки</small></label>
+   <label class="field"><span>Оплачено из кассы</span><select id="sr_account"></select></label>
+   <label class="field"><span>Склад</span><select id="sr_warehouse"><option value="">Без привязки</option></select></label>
+   <label class="field"><span>Оттенок</span><input id="sr_color_hex" type="color" value="#4b5563"></label>
+   <div class="notice span-2" id="sr_summary"><span>→</span><span></span></div>
+   <label class="check span-2"><input type="checkbox" id="sr_confirmed"> Катушки физически получены, количество и сумма проверены</label>
+  </div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="shopping_receive_modal">Отмена</button><button class="btn primary" type="button" id="sr_submit">Подтвердить приём</button></div>
+</form></dialog>
+
 <dialog class="modal narrow" id="catalog_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">База изделий</span><h2 id="catalog_modal_title">Позиция</h2></div><button class="icon-btn" type="button" data-close="catalog_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">
@@ -3687,11 +3763,50 @@
    <label class="field"><span>Сумма, ₽</span><input id="pf_amount" type="number" min="0" step="any"></label>
    <label class="field"><span>Тип</span><select id="pf_kind"><option value="payment">Оплата</option><option value="prepay">Предоплата</option><option value="refund">Возврат</option></select></label>
    <label class="field"><span>Касса</span><select id="pf_account"></select></label>
-   <label class="field"><span>Способ</span><input id="pf_method" placeholder="наличные, перевод"></label>
+   <label class="field"><span>Способ</span><select id="pf_method"><option value="">Выберите…</option><option value="cash">Наличные</option><option value="card">Карта / эквайринг</option><option value="transfer">Перевод</option><option value="other">Другое</option></select></label>
    <label class="field span-2"><span>Комментарий</span><input id="pf_note"></label>
   </div>
  </div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="payment_modal">Отмена</button><button class="btn primary" type="button" id="payment_save">Записать</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="debt_reminder_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Без автоотправки</span><h2 id="debt_reminder_title">Напоминание об оплате</h2><p>PrintFlow подготовит текст, но не отправит его клиенту.</p></div><button class="icon-btn" type="button" data-close="debt_reminder_modal">×</button></div>
+ <div class="modal-body">
+  <div class="verdict" id="debt_reminder_info"></div>
+  <label class="field" style="margin-top:12px"><span>Текст клиенту</span><textarea id="debt_reminder_text" rows="6" readonly></textarea></label>
+  <small class="muted">Сначала скопируйте и отправьте текст в нужном канале. После этого отдельно отметьте отправку.</small>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="debt_reminder_modal">Закрыть</button><span class="spacer"></span><button class="btn" type="button" id="debt_reminder_copy">Копировать</button><button class="btn ok" type="button" id="debt_reminder_sent">✓ Отметить отправленным</button></div>
+</form></dialog>
+
+<dialog class="modal narrow" id="aftercare_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">После продажи</span><h2 id="aftercare_title">Обратная связь</h2><p id="aftercare_sub"></p></div><button class="icon-btn" type="button" data-close="aftercare_modal">×</button></div>
+ <div class="modal-body">
+  <div class="verdict" id="aftercare_info"></div>
+  <div id="aftercare_request_block" hidden style="margin-top:14px">
+   <label class="field"><span>Текст клиенту — подготовлен, но не отправлен</span><textarea id="aftercare_request_text" rows="7" readonly></textarea></label>
+   <div class="notice info" style="margin-top:10px"><span>i</span><span>Копирование не считается отправкой. Сначала отправьте текст во внешнем приложении.</span></div>
+   <label class="check" style="margin-top:12px"><input type="checkbox" id="aftercare_sent_confirmed"> Я действительно отправил этот запрос клиенту</label>
+   <div class="row-actions" style="margin-top:12px"><button class="btn" type="button" id="aftercare_copy_request">Копировать</button><button class="btn ok" type="button" id="aftercare_confirm_sent">✓ Подтвердить отправку</button></div>
+  </div>
+  <div id="aftercare_response_block" hidden style="margin-top:14px">
+   <div class="form-grid">
+    <label class="field"><span>Оценка клиента</span><select id="aftercare_rating"><option value="">Выберите…</option><option value="5">5 — отлично</option><option value="4">4 — хорошо</option><option value="3">3 — есть замечания</option><option value="2">2 — плохо</option><option value="1">1 — проблема</option></select></label>
+    <label class="field"><span>Разрешение на публикацию</span><select id="aftercare_publish"><option value="not_asked">Не спрашивали</option><option value="granted">Разрешил</option><option value="denied">Не разрешил</option></select><small class="hint">Разрешение только сохраняется; публикации не будет.</small></label>
+    <label class="field span-2"><span>Текст ответа клиента</span><textarea id="aftercare_response_text" rows="5" placeholder="Запишите ответ без домыслов"></textarea></label>
+    <label class="field span-2"><span>Интерес к повторному заказу</span><select id="aftercare_repeat_interest"><option value="not_asked">Не обсуждали</option><option value="yes">Клиент подтвердил интерес</option><option value="no">Не нужен</option></select></label>
+   </div>
+   <label class="check" style="margin-top:12px"><input type="checkbox" id="aftercare_response_confirmed"> Я действительно получил этот ответ от клиента</label>
+   <div class="row-actions" style="margin-top:12px"><button class="btn primary" type="button" id="aftercare_save_response">Сохранить ответ</button></div>
+  </div>
+  <div id="aftercare_done_block" hidden style="margin-top:14px">
+   <div id="aftercare_feedback_view"></div>
+   <label class="field" id="aftercare_reply_wrap" style="margin-top:12px"><span>Ответ клиенту — подготовлен, но не отправлен</span><textarea id="aftercare_reply_text" rows="4" readonly></textarea></label>
+   <div class="row-actions" style="margin-top:12px"><button class="btn" type="button" id="aftercare_copy_reply">Копировать ответ</button><button class="btn primary" type="button" id="aftercare_prepare_repeat" hidden>Создать черновик повтора</button></div>
+  </div>
+ </div>
+ <div class="modal-foot"><span class="muted">Никакой автоотправки или автопубликации</span><span class="spacer"></span><button class="btn" type="button" data-close="aftercare_modal">Закрыть</button></div>
 </form></dialog>
 
 <dialog class="modal narrow" id="job_modal"><form method="dialog">
@@ -4027,12 +4142,12 @@
 
 <!-- ================================================== модалка брака -->
 <dialog id="defect_modal" class="modal">
- <div class="modal-head"><div><h3>Брак</h3><p>Запишите, что пошло не так — через месяц будет видно, что чинить</p></div>
+ <div class="modal-head"><div><span class="eyebrow">Разбор без двойного списания</span><h3>Брак и повторная печать</h3><p>Причина подтверждается человеком, а потери берутся из фактов задания.</p></div>
   <button class="icon-btn" type="button" data-close="defect_modal">✕</button></div>
  <div class="modal-body">
   <div class="frm-grid">
    <label>Задание (печать)
-    <select id="df_job"><option value="">Без задания</option></select></label>
+    <select id="df_job"><option value="">Выберите завершённую печать</option></select></label>
    <label>Причина
     <select id="defect_reason">
      <option value="detached">Деталь отклеилась</option>
@@ -4040,19 +4155,26 @@
      <option value="shift">Смещение слоёв</option>
      <option value="runout">Закончился пластик</option>
      <option value="warp">Деформация/подгиб</option>
+     <option value="quality">Не прошло контроль качества</option>
+     <option value="support">Ошибка поддержек</option>
+     <option value="wrong_material">Неверный материал</option>
+     <option value="power">Сбой питания/связи</option>
      <option value="other">Другое</option>
     </select></label>
    <label>Фаза печати
     <select id="df_phase"><option value="first">Первый слой</option><option value="middle">Середина</option><option value="end">Конец</option><option value="unknown">Не знаю</option></select></label>
    <label>Код ошибки (если был)<input id="df_code" placeholder="05002001"></label>
-   <label>Потеряно пластика, г<input id="df_grams" type="number" min="0" step="1"></label>
-   <label>Потеря, ₽<input id="df_loss" type="number" min="0" step="10"></label>
+   <label>Потеряно пластика, г<input id="df_grams" type="number" min="0" step="1"><small class="hint">Подставляется факт; уменьшите, если часть изделий годная</small></label>
+   <label>Расчётная потеря, ₽<input id="df_loss" type="number" min="0" step="any" readonly><small class="hint">Пластик, энергия и износ — повторно не списываются</small></label>
   </div>
-  <label style="margin-top:10px">Комментарий<input id="defect_note" placeholder="Что случилось и как не допустить снова"></label>
-  <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Кадр камеры в момент ошибки сторожа сохраняется автоматически.</span></div>
+  <label style="margin-top:10px">Комментарий<input id="defect_note" placeholder="Что исправили перед повтором"></label>
+  <div class="notice info" id="df_summary" style="margin-top:10px"><span>→</span><span>Выберите задание — PrintFlow подставит фактические потери.</span></div>
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="df_confirmed"> Я проверил результат и подтверждаю причину брака</label>
+  <label class="check" style="margin-top:8px"><input type="checkbox" id="df_reprint"> Подготовить один повтор в очередь без автоматического запуска</label>
+  <label class="check" id="df_risk_wrap" style="margin-top:8px" hidden><input type="checkbox" id="df_risk_confirmed"> Причина повторяется: модель или профиль исправлены</label>
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="defect_modal">Отмена</button>
-  <button class="btn primary" type="button" id="defect_save">Записать брак</button></div>
+  <button class="btn primary" type="button" id="defect_save">Подтвердить разбор</button></div>
 </dialog>
 
 <!-- ================================================== отложенные команды -->

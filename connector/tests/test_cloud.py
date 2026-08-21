@@ -117,7 +117,6 @@ class CloudLoginTests(unittest.TestCase):
 
     def test_login_with_code(self):
         calls = []
-        real_request = bambu_cloud.request
 
         def fake(method, url, **kwargs):
             body = kwargs.get("body") or {}
@@ -568,9 +567,15 @@ class FilamentAutoAccountTests(unittest.TestCase):
                                           "state": "failed", "source": "printer",
                                           "file": "деталь.3mf", "finished_at": "2026-08-20T10:00:00",
                                           "grams": 20, "duration_min": 60, "cost": 5.0})
-            row = manager.reprint_job("j1")
+            self.db.upsert("defects", {
+                "id": "d1", "job_id": "j1", "reason": "detached",
+                "confirmed_at": "2026-08-20T10:01:00", "request_id": "defect-j1",
+            })
+            row = manager.reprint_job(
+                "j1", confirmed=True, request_id="reprint-j1", defect_id="d1"
+            )
             self.assertEqual(row["state"], "queued")
-            self.assertEqual(row["source"], "reprint")
+            self.assertEqual(row["source"], "defect-recovery")
             self.assertEqual(row["name"], "деталь.3mf (повтор)")
             # сброс счётчиков: у клона граммы/время/стоимость обнулены
             self.assertEqual(row.get("grams"), 0.0)
@@ -586,10 +591,16 @@ class FilamentAutoAccountTests(unittest.TestCase):
             self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
                                       "status": "new"})
             self.db.upsert("print_jobs", {"id": "j9", "printer_id": "p1",
-                                          "order_id": "o1", "name": "z.3mf",
+                                          "order_id": "o1", "name": "z.3mf", "file": "z.3mf",
                                           "state": "failed", "source": "printer",
                                           "finished_at": "2026-08-20T11:00:00"})
-            row = manager.reprint_last_failed("1001")
+            self.db.upsert("defects", {
+                "id": "d9", "job_id": "j9", "order_id": "o1", "reason": "clog",
+                "confirmed_at": "2026-08-20T11:01:00", "request_id": "defect-j9",
+            })
+            row = manager.reprint_last_failed(
+                "1001", confirmed=True, request_id="reprint-j9"
+            )
             self.assertEqual(row["state"], "queued")
             self.assertEqual(row["order_id"], "o1")
             with self.assertRaises(ValueError):
@@ -762,7 +773,6 @@ class RulesEngineTests(unittest.TestCase):
 
     def _engine(self):
         from connector.printflow.manager import PrinterManager
-        from connector.printflow.rules import RulesEngine
         manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
         return manager, manager.rules
 
@@ -803,6 +813,22 @@ class RulesEngineTests(unittest.TestCase):
         finally:
             manager.shutdown()
 
+    def test_reprint_rule_requests_confirmation_instead_of_cloning(self):
+        manager, engine = self._engine()
+        try:
+            manager.notify_async = mock.Mock()
+            manager.reprint_last_failed = mock.Mock()
+            engine.save_rule({
+                "name": "Безопасный повтор", "event": "print_failed",
+                "action": "reprint", "enabled": 1,
+            })
+            engine.run("print_failed", {"job_id": "j1", "name": "деталь"})
+            manager.reprint_last_failed.assert_not_called()
+            events = self.db.events(20, kind="rule")
+            self.assertTrue(any("требуется подтверждение" in e["title"] for e in events))
+        finally:
+            manager.shutdown()
+
     def test_run_skips_disabled_and_wrong_event(self):
         manager, engine = self._engine()
         try:
@@ -818,7 +844,6 @@ class RulesEngineTests(unittest.TestCase):
     def test_order_status_trigger_via_repo_hook(self):
         from connector.printflow.repo import Repo
         from connector.printflow.manager import PrinterManager
-        from connector.printflow.rules import RulesEngine
         manager = PrinterManager(self.db, Repo(self.db))  # type: ignore[arg-type]
         try:
             engine = manager.rules
@@ -1031,15 +1056,15 @@ class ShoppingListTests(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def test_add_and_toggle_and_delete(self):
+    def test_add_requires_receipt_to_close_and_open_item_can_be_deleted(self):
         from connector.printflow.shopping import ShoppingList
         shop = ShoppingList(self.db)
         item = shop.add({"name": "PLA чёрный", "material": "PLA", "qty": 2,
                          "unit": "кг"})
         self.assertEqual(len(shop.items()), 1)
-        shop.toggle(item["id"], True)
-        self.assertEqual(len(shop.items()), 0)  # купленное не в открытом списке
-        self.assertEqual(len(shop.items(include_done=True)), 1)
+        with self.assertRaisesRegex(ValueError, "подтверждённого приёма"):
+            shop.toggle(item["id"], True)
+        self.assertEqual(len(shop.items()), 1)
         shop.delete(item["id"])
         self.assertEqual(len(shop.items(include_done=True)), 0)
 

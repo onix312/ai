@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "connector"))
@@ -203,8 +204,6 @@ class UpdaterTests(unittest.TestCase):
     # ------------------------------------------------------------------ отчёт
     def test_frozen_mode_refuses_to_apply(self) -> None:
         """Собранный exe не обновляет сам себя: режим frozen, apply отклонён."""
-        from unittest import mock
-
         self._make_repo()
         checker = self.checker()
         with mock.patch("sys.frozen", True, create=True):
@@ -229,6 +228,16 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse(report["update"])
         self.assertIsNone(report["latest"])
         self.assertFalse(report["can_apply"])
+
+    def test_backup_failure_stops_update_before_files_change(self) -> None:
+        work = self._make_repo()
+        checker = self.checker()
+        with mock.patch.object(
+                checker, "_backup_db", side_effect=ValueError("диск заполнен")):
+            with self.assertRaisesRegex(ValueError, "диск заполнен"):
+                checker.apply()
+        self.assertEqual((work / "site" / "app.js").read_text(encoding="utf-8"),
+                         "версия 1")
 
     def test_backup_creates_readable_database_copy(self) -> None:
         self._make_repo()

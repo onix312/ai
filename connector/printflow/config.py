@@ -29,6 +29,7 @@ else:
 
 DB_FILE = DATA_DIR / "printflow.sqlite3"
 BACKUP_DIR = DATA_DIR / "backups"
+DEFAULT_BACKUP_KEEP = 20
 RESTORE_REQUEST = DATA_DIR / "restore.request"  # маркер отложенного восстановления
 UPLOAD_DIR = DATA_DIR / "uploads"
 PHOTO_DIR = DATA_DIR / "photos"
@@ -92,13 +93,16 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "allocate_fixed_costs": False,  # разносить постоянные расходы на час печати
     "fixed_costs_auto": True,     # начислять постоянные расходы по расписанию
     "debt_alert_days": 14,        # через сколько дней долг считается просроченным
-    "low_margin_alert": 20.0,     # % маржи, ниже которого заказ подсвечивается
+    "debt_reminder_cooldown_days": 3,  # не напоминать одному заказу слишком часто
+    "low_margin_alert": 20.0,      # % маржи, ниже которого заказ подсвечивается
     "goal_profit_month": 60000.0,  # цель по прибыли за месяц
     # Автоматизация
     "auto_accounting": True,      # писать себестоимость и расход по факту печати
     "auto_link_orders": True,     # связывать печать с заказом по имени файла
     "auto_consume_filament": True,
-    "auto_income_on_done": True,  # доход в кассу при переводе заказа в финальный статус
+    # Устаревший режим для серверного импорта. Обычная выдача всегда требует
+    # явного выбора «оплата получена» / «в долг», поэтому по умолчанию выключен.
+    "auto_income_on_done": False,
     "auto_queue": False,          # автозапуск следующего задания очереди
     "auto_resume_paused": True,   # авто-продолжение печати при сбое питания (Крым / восстановление после стопа)
     # --- Сторож печати ---------------------------------------------------
@@ -169,6 +173,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
                      "Проверил качество слоёв", "Упаковал"],  # чек-лист качества
     "digest_time": "09:00",       # время утреннего дайджеста в Telegram
     "reply_templates": [],        # шаблоны ответов клиентам [{id,title,text}]
+    "feedback_delay_days": 2,     # через сколько дней после выдачи просить отзыв
     "weekly_report_day": 1,       # день недели еженедельного отчёта (1 = понедельник)
     "weekly_report_time": "20:00",
     # --- Обновления -------------------------------------------------------
@@ -226,7 +231,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "ams_auto_spools": True,      # заводить катушки из AMS на складе автоматически
     "ams_sync_remaining": True,   # обновлять остаток катушки по датчику AMS
     # --- 8.0: Безопасность и система --------------------------------------
-    "encrypt_access_code": False,
+    "encrypt_access_code": True,
     "settings_profiles": [],  # снапшоты [{id, name, at, data}]
     "ui_density": "normal",  # compact | normal
     "ui_start_view": "dashboard",
@@ -235,7 +240,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # Пример: http://192.168.1.50:8080 или Tailscale http://pc.tailnet.ts.net:8080
     "public_url": "",
     # --- 8.0: Бэкап 2.0 ---------------------------------------------------
-    "backup_keep": 20,
+    "backup_keep": DEFAULT_BACKUP_KEEP,
     "backup_auto_export": False,
 }
 
@@ -323,6 +328,42 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
+def backup_keep(value: object = DEFAULT_BACKUP_KEEP) -> int:
+    """Безопасный лимит ротации копий из настройки пользователя."""
+    try:
+        return max(1, min(200, int(float(value))))
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_BACKUP_KEEP
+
+
+def rotate_backups(directory: Path = BACKUP_DIR,
+                   keep: object = DEFAULT_BACKUP_KEEP) -> list[Path]:
+    """Оставить последние ``keep`` SQLite-копий независимо от их источника.
+
+    Ручные копии, автобэкапы, снимки перед обновлением/миграцией и страховки
+    отката лежат в одной папке. Единая ротация не даёт разным механизмам
+    спорить между лимитами 10/14/20 и бесконтрольно расходовать диск.
+    """
+    if not directory.exists():
+        return []
+    items: list[tuple[int, str, Path]] = []
+    for path in directory.glob("*.sqlite3"):
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            continue
+        items.append((mtime, path.name, path))
+    items.sort(reverse=True)
+    removed: list[Path] = []
+    for _, _, path in items[backup_keep(keep):]:
+        try:
+            path.unlink()
+            removed.append(path)
+        except OSError:
+            continue
+    return removed
+
+
 def get_local_ips() -> list[str]:
     """IPv4-адреса этого ПК в локальной сети (для доступа с телефона/планшета).
 
@@ -359,16 +400,20 @@ def get_local_ips() -> list[str]:
                 second = int(ip.split(".")[1])
                 if 16 <= second <= 31:
                     return (2, ip)
-            except Exception:
+            except (IndexError, ValueError):
                 pass
-        if ip.startswith("169.254."):
-            return (99, ip)
-        return (3, ip)
+        if ip.startswith("100."):  # CGNAT, в том числе Tailscale
+            try:
+                second = int(ip.split(".")[1])
+                if 64 <= second <= 127:
+                    return (3, ip)
+            except (IndexError, ValueError):
+                pass
+        return (99, ip)
 
-    cleaned = [ip for ip in ips if not ip.startswith("169.254.")]
-    if not cleaned:
-        cleaned = list(ips)
-    return sorted(cleaned, key=sort_key)
+    # APIPA 169.254/16 появляется, когда DHCP не выдал адрес. Такой QR почти
+    # всегда бесполезен для телефона и не должен выглядеть как исправная LAN.
+    return sorted((ip for ip in ips if sort_key(ip)[0] < 99), key=sort_key)
 
 
 _LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})

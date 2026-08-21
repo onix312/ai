@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
-from .config import DATA_DIR, UPLOAD_DIR, now_iso
+from .config import BACKUP_DIR, UPLOAD_DIR, now_iso, rotate_backups
 from .db import Database
 from .repo import Repo
 from .telegram_bot import TelegramBot
@@ -51,7 +51,8 @@ class PrinterManager:
         self._dry_reported: float = 0.0
         self._last_ams_sync = 0.0
         self._last_cloud_sync: dict[str, float] = {}
-        self._last_backup = time.time()
+        self._last_backup = 0.0
+        self._last_backup_attempt = 0.0
         # Авто-продолжение при сбое питания (Крым): трекинг пауз и попыток
         self._user_paused: dict[str, float] = {}
         self._auto_resume_attempts: dict[str, dict] = {}
@@ -84,6 +85,13 @@ class PrinterManager:
         except Exception:
             pass
         cloud = self._cloud_creds()
+        runtime = {
+            key: self.db.setting(key, default)
+            for key, default in (
+                ("ftps_timeout", 8), ("ftps_retries", 3), ("ftps_block_kb", 256),
+                ("mqtt_keepalive", 30), ("mqtt_backoff", True),
+            )
+        }
         with self.lock:
             for pid in list(self.printers):
                 if pid not in records:
@@ -93,6 +101,7 @@ class PrinterManager:
                 enriched["cloud_token"] = cloud.get("token", "")
                 enriched["cloud_uid"] = cloud.get("uid", "")
                 enriched["cloud_region"] = cloud.get("region", "global")
+                enriched.update(runtime)
                 if pid in self.printers:
                     self.printers[pid].update_record(enriched)
                 else:
@@ -185,7 +194,7 @@ class PrinterManager:
             printer = self.get(printer_id)
             if not printer or not printer.camera.frame:
                 return
-            shot = printer.camera.snapshot(note=f"авто: {note}")
+            printer.camera.snapshot(note=f"авто: {note}")
             job = self.db.one(
                 "SELECT id, order_id FROM print_jobs WHERE printer_id=?"
                 " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
@@ -203,6 +212,11 @@ class PrinterManager:
             pass
 
     def _on_print_start(self, printer_id: str, name: str, data: dict) -> None:
+        remote_task_id = str(
+            data.get("remote_task_id") or data.get("subtask_id") or data.get("task_id") or ""
+        ).strip()
+        if remote_task_id == "0":
+            remote_task_id = ""
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state='running'", (printer_id,))
         if job:
@@ -228,12 +242,14 @@ class PrinterManager:
         order_id = job.get("order_id") if job else self._guess_order(name)
         if job:
             self.db.execute(
-                "UPDATE print_jobs SET state='running', started_at=?, name=? WHERE id=?",
-                (now_iso(), name or job.get("name", ""), job["id"]))
+                "UPDATE print_jobs SET state='running', started_at=?, name=?, remote_task_id=?"
+                " WHERE id=?",
+                (now_iso(), name or job.get("name", ""), remote_task_id, job["id"]))
         else:
             self.db.upsert("print_jobs", {
                 "id": uid("job"), "printer_id": printer_id, "order_id": order_id,
                 "name": name, "file": name, "state": "running", "source": "printer",
+                "remote_task_id": remote_task_id,
                 "started_at": now_iso(), "created_at": now_iso()})
         if order_id:
             printing = self.db.one("SELECT id FROM statuses WHERE id='printing'")
@@ -242,10 +258,40 @@ class PrinterManager:
                                 (now_iso(), order_id))
 
     def _on_print_end(self, printer_id: str, kind: str, name: str, data: dict) -> None:
+        remote_task_id = str(
+            data.get("remote_task_id") or data.get("subtask_id") or data.get("task_id") or ""
+        ).strip()
+        if remote_task_id == "0":
+            remote_task_id = ""
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE printer_id=? AND state IN ('running','starting')"
             " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
         state = {"complete": "done", "error": "failed", "stop": "cancelled"}[kind]
+        if not job:
+            # При переподключении принтер способен прислать тот же FINISH ещё
+            # раз. Сначала используем стабильный task id, а для старых прошивок
+            # — короткое окно по имени. Это не даёт создать вторую «печать».
+            if remote_task_id:
+                duplicate = self.db.one(
+                    "SELECT id FROM print_jobs WHERE printer_id=?"
+                    " AND state IN ('done','failed','cancelled')"
+                    " AND (remote_task_id=? OR (COALESCE(remote_task_id,'')=''"
+                    " AND lower(COALESCE(name,file,''))=lower(?)"
+                    " AND datetime(finished_at)>=datetime('now','-30 seconds')))"
+                    " ORDER BY datetime(finished_at) DESC LIMIT 1",
+                    (printer_id, remote_task_id, name or ""),
+                )
+            else:
+                duplicate = self.db.one(
+                    "SELECT id FROM print_jobs WHERE printer_id=?"
+                    " AND state IN ('done','failed','cancelled')"
+                    " AND lower(COALESCE(name,file,''))=lower(?)"
+                    " AND datetime(finished_at)>=datetime('now','-30 seconds')"
+                    " ORDER BY datetime(finished_at) DESC LIMIT 1",
+                    (printer_id, name or ""),
+                )
+            if duplicate:
+                return
         duration = num(data.get("duration_min"))
         grams = num(data.get("weight"))
         if not grams and job and job.get("order_id"):
@@ -261,64 +307,100 @@ class PrinterManager:
             job = self.db.upsert("print_jobs", {
                 "id": uid("job"), "printer_id": printer_id, "order_id": self._guess_order(name),
                 "name": name, "state": state, "source": "printer",
+                "remote_task_id": remote_task_id,
                 "started_at": now_iso(), "created_at": now_iso()})
+        elif remote_task_id and not job.get("remote_task_id"):
+            self.db.execute(
+                "UPDATE print_jobs SET remote_task_id=? WHERE id=?",
+                (remote_task_id, job["id"]),
+            )
+            job["remote_task_id"] = remote_task_id
         self._finalize_job(job, state, kind, duration, grams, data)
         self._maybe_start_next(printer_id)
 
     def _finalize_job(self, job: dict, state: str, kind: str,
                       duration: float, grams: float, data: dict | None = None) -> dict:
-        """Общий финиш задания: учёт, статус заказа, наработка принтера.
+        """Атомарно и идемпотентно завершить задание.
 
-        Вызывается и из события принтера, и из согласования зависших заданий
-        (когда событие окончания потерялось: перезапуск коннектора, остановка
-        с экрана, сбой питания).
+        Статус, списание пластика, фактическая себестоимость, статистика,
+        наработка и связанные складские операции входят в одну транзакцию.
+        ``accounted_at`` является маркером полностью завершённой операции.
         """
         data = data or {}
-        printer_id = job.get("printer_id") or ""
-        self.db.execute(
-            "UPDATE print_jobs SET state=?, finished_at=?, duration_min=?, grams=?,"
-            " progress=?, layers=?, result=? WHERE id=?",
-            (state, now_iso(), round(duration, 1), round(grams, 1),
-             num(data.get("progress")), int(num(data.get("total_layers"))), kind, job["id"]))
-        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or job
-        if state in ("done", "failed"):
-            printer = self.get(printer_id)
-            if printer and not job.get("spool_id"):
-                snapshot = printer.snapshot()
-                active = next((t for t in snapshot["ams"]["trays"] if t["active"]), None)
-                if active:
-                    spool = self.acc.pick_spool(printer_id, str(active["slot"]),
-                                                active["type"], active["uuid"])
-                    if spool:
-                        self.db.execute("UPDATE print_jobs SET spool_id=? WHERE id=?",
-                                        (spool["id"], job["id"]))
-                        job["spool_id"] = spool["id"]
-            self.acc.register_job_costs(job)
-            # Наработка принтера — основа напоминаний об обслуживании.
-            try:
-                self.guard.add_runtime(printer_id, duration, grams)
-            except Exception as exc:
-                self.db.add_event("error", "Не удалось учесть наработку", str(exc), printer_id)
-        # Партия печати: годные штуки приходуются на склад, брак идёт в потери.
-        # Делает это коннектор, а не браузер, — печать ночью учтётся сама.
-        if job.get("batch_id") and getattr(self, "batches", None):
-            try:
-                self.batches.on_job_finished(job)
-            except Exception as exc:
-                self.db.add_event("error", "Партия: не удалось учесть задание", str(exc),
-                                  printer_id, {"job_id": job.get("id")})
-        if state == "failed":
-            self._register_failure(printer_id, job, duration, grams)
-        if job.get("order_id"):
-            if state == "done":
-                self.db.execute(
-                    "UPDATE orders SET status='post', updated_at=? WHERE id=? AND status='printing'",
-                    (now_iso(), job["order_id"]))
+        job_id = str(job.get("id") or "")
+        if not job_id:
+            raise ValueError("Не указано задание печати")
+        with self.db.transaction():
+            stored = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if not stored:
+                raise ValueError("Задание печати не найдено")
+            # Второй FINISH или повторное согласование после успешного commit.
+            if (stored.get("state") in ("done", "failed", "cancelled")
+                    and stored.get("accounted_at")):
+                return stored
+
+            printer_id = stored.get("printer_id") or ""
+            self.db.execute(
+                "UPDATE print_jobs SET state=?, finished_at=?, duration_min=?, grams=?,"
+                " progress=?, layers=?, result=? WHERE id=?",
+                (state, now_iso(), round(duration, 1), round(grams, 1),
+                 num(data.get("progress")), int(num(data.get("total_layers"))), kind, job_id))
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or stored
+            if state in ("done", "failed"):
+                printer = self.get(printer_id)
+                if printer and not job.get("spool_id"):
+                    snapshot = printer.snapshot()
+                    active = next(
+                        (tray for tray in snapshot["ams"]["trays"] if tray["active"]), None
+                    )
+                    if active:
+                        spool = self.acc.pick_spool(
+                            printer_id, str(active["slot"]), active["type"], active["uuid"]
+                        )
+                        if spool:
+                            self.db.execute(
+                                "UPDATE print_jobs SET spool_id=? WHERE id=?",
+                                (spool["id"], job_id),
+                            )
+                            job["spool_id"] = spool["id"]
+                self.acc.register_job_costs(job)
+                # Наработка принтера — основа напоминаний об обслуживании.
+                try:
+                    self.guard.add_runtime(printer_id, duration, grams)
+                except Exception as exc:
+                    self.db.add_event(
+                        "error", "Не удалось учесть наработку", str(exc), printer_id
+                    )
             else:
-                # Сорвалась или остановлена: заказ не должен навсегда остаться
-                # в «печати» — возвращаем его в очередь на допечатку.
-                self._release_order(job["order_id"], kind)
-        return job
+                # Для отмены нет расходов, но нужен тот же маркер завершения.
+                self.db.execute(
+                    "UPDATE print_jobs SET accounted_at=? WHERE id=?",
+                    (now_iso(), job_id),
+                )
+
+            # Партия печати: годные штуки приходуются на склад, брак идёт в потери.
+            if job.get("batch_id") and getattr(self, "batches", None):
+                try:
+                    self.batches.on_job_finished(job)
+                except Exception as exc:
+                    self.db.add_event(
+                        "error", "Партия: не удалось учесть задание", str(exc),
+                        printer_id, {"job_id": job_id},
+                    )
+            if state == "failed":
+                self._register_failure(printer_id, job, duration, grams)
+            if job.get("order_id"):
+                if state == "done":
+                    self.db.execute(
+                        "UPDATE orders SET status='post', updated_at=?"
+                        " WHERE id=? AND status='printing'",
+                        (now_iso(), job["order_id"]),
+                    )
+                else:
+                    # Сорвалась или остановлена: заказ не должен навсегда
+                    # остаться в «печати» — возвращаем его в очередь.
+                    self._release_order(job["order_id"], kind)
+            return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or job
 
     def _release_order(self, order_id: str, reason: str = "") -> None:
         """Снять «в печати», если по заказу больше ничего не печатается."""
@@ -461,6 +543,8 @@ class PrinterManager:
             "ams_mapping": json.dumps(data.get("ams_mapping") or []),
             "priority": int(num(data.get("priority"))),
             "spool_id": data.get("spool_id") or None,
+            "est_minutes": max(0.0, num(data.get("est_minutes"))),
+            "est_grams": max(0.0, num(data.get("est_grams"))),
             "queued_at": now_iso(), "created_at": now_iso(),
         }
         # оценка печати до запуска: время и граммы из файла
@@ -502,7 +586,7 @@ class PrinterManager:
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
-        if self.db.setting("auto_queue", False):
+        if self.db.setting("auto_queue", False) and data.get("allow_auto_start", True):
             self._maybe_start_next(job["printer_id"] or "")
         return row
 
@@ -727,7 +811,6 @@ class PrinterManager:
             if cover.startswith("http") and order_id:
                 try:
                     from .config import PHOTO_DIR
-                    from . import bambu_cloud as bc
                     PHOTO_DIR.mkdir(parents=True, exist_ok=True)
                     photo_name = f"job_{job['id']}_cloud.jpg"
                     req = __import__("urllib.request", fromlist=["Request"]).Request(
@@ -873,7 +956,8 @@ class PrinterManager:
             "SELECT j.*, o.hours AS order_hours, o.due AS due"
             " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
-            " AND j.file<>''", (printer_id,))
+            " AND j.file<>'' AND COALESCE(j.source,'')"
+            " NOT IN ('order-prepared','defect-recovery','reprint-confirmed')", (printer_id,))
         if not jobs:
             return None
         night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()
@@ -933,34 +1017,113 @@ class PrinterManager:
         except Exception as exc:
             self.db.add_event("error", "Автозапуск задания не удался", str(exc), printer_id)
 
-    def reprint_job(self, job_id: str, printer_id: str = "") -> dict:
-        """Клонировать завершённое/сорванное задание в очередь для повтора."""
-        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
-        if not job:
-            raise ValueError("Задание не найдено")
-        clone = dict(job)
-        for key in ("started_at", "finished_at", "duration_min", "grams",
-                    "progress", "layers", "result", "error", "cost", "energy_kwh",
-                    "batch_id", "batch_qty"):
-            clone.pop(key, None)
-        clone["id"] = uid("job")
-        clone["state"] = "queued"
-        clone["source"] = "reprint"
-        clone["queued_at"] = now_iso()
-        clone["created_at"] = now_iso()
-        if printer_id:
-            clone["printer_id"] = printer_id
-        base = (job.get("name") or "").rstrip()
-        if base.endswith(" (повтор)"):
-            base = base[: -len(" (повтор)")]
-        clone["name"] = base + " (повтор)"
-        row = self.db.upsert("print_jobs", clone)
-        self.db.add_event("queue", "Задание отправлено на повтор", row["name"],
-                          clone["printer_id"] or "", {"job_id": row["id"]})
-        return row
+    def reprint_job(
+        self,
+        job_id: str,
+        printer_id: str = "",
+        *,
+        confirmed: bool = False,
+        request_id: str = "",
+        defect_id: str = "",
+    ) -> dict:
+        """Идемпотентно подготовить подтверждённый повтор, но не запускать его.
 
-    def reprint_last_failed(self, order_number: str = "") -> dict:
-        """Повторить последнее сорванное задание (по номеру заказа, если задан)."""
+        Сорванное задание можно повторить только после фиксации причины брака.
+        Источник очереди исключён из автостарта: физический запуск остаётся
+        отдельным действием оператора.
+        """
+        if not confirmed:
+            raise ValueError("Подтвердите подготовку повторной печати")
+        request_id = str(request_id or "").strip()[:120]
+        if not request_id:
+            raise ValueError("Не указан ключ операции повтора")
+        with self.db.transaction():
+            by_request = self.db.one(
+                "SELECT * FROM print_jobs WHERE reprint_request_id=?", (request_id,)
+            )
+            if by_request:
+                if by_request.get("reprint_of_job_id") != job_id:
+                    raise ValueError("Ключ операции уже использован для другого повтора")
+                by_request["already_prepared"] = True
+                return by_request
+
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if not job:
+                raise ValueError("Задание не найдено")
+            if job.get("state") not in ("failed", "done"):
+                raise ValueError("Повтор доступен только после завершения печати")
+            if not str(job.get("file") or "").strip():
+                raise ValueError("У задания нет файла для повторной печати")
+
+            defect = None
+            if defect_id:
+                defect = self.db.one(
+                    "SELECT * FROM defects WHERE id=? AND job_id=? AND confirmed_at<>''",
+                    (defect_id, job_id),
+                )
+                if not defect:
+                    raise ValueError("Подтверждённый разбор брака не найден")
+            elif job.get("state") == "failed":
+                defect = self.db.one(
+                    "SELECT * FROM defects WHERE job_id=? AND confirmed_at<>''"
+                    " ORDER BY datetime(confirmed_at) DESC LIMIT 1", (job_id,)
+                )
+                if not defect:
+                    raise ValueError("Сначала подтвердите причину брака")
+                defect_id = defect["id"]
+
+            existing = self.db.one(
+                "SELECT * FROM print_jobs WHERE reprint_of_job_id=?", (job_id,)
+            )
+            if existing:
+                existing["already_prepared"] = True
+                return existing
+
+            clone = dict(job)
+            for key in (
+                "started_at", "finished_at", "duration_min", "grams", "progress",
+                "layers", "result", "error", "cost", "energy_kwh", "batch_id",
+                "batch_qty", "remote_task_id", "accounted_at", "reprint_of_job_id",
+                "reprint_request_id", "defect_id",
+            ):
+                clone.pop(key, None)
+            clone["id"] = uid("job")
+            clone["state"] = "queued"
+            clone["source"] = "defect-recovery" if defect_id else "reprint-confirmed"
+            clone["reprint_of_job_id"] = job_id
+            clone["reprint_request_id"] = request_id
+            clone["defect_id"] = defect_id
+            clone["queued_at"] = now_iso()
+            clone["created_at"] = now_iso()
+            if printer_id:
+                clone["printer_id"] = printer_id
+            base = (job.get("name") or "").rstrip()
+            if base.endswith(" (повтор)"):
+                base = base[: -len(" (повтор)")]
+            clone["name"] = base + " (повтор)"
+            row = self.db.upsert("print_jobs", clone)
+            if defect_id:
+                self.db.execute(
+                    "UPDATE defects SET reprint_requested=1,reprint_job_id=? WHERE id=?",
+                    (row["id"], defect_id),
+                )
+            self.db.add_event(
+                "queue", "Повтор подготовлен — нужен ручной запуск", row["name"],
+                clone["printer_id"] or "",
+                {"job_id": row["id"], "source_job_id": job_id,
+                 "defect_id": defect_id, "auto_start": False},
+            )
+            row["already_prepared"] = False
+            return row
+
+    def reprint_last_failed(
+        self,
+        order_number: str = "",
+        *,
+        confirmed: bool = False,
+        request_id: str = "",
+    ) -> dict:
+        """Подготовить повтор последнего сорванного задания после разбора причины."""
         if order_number:
             rows = self.db.query(
                 "SELECT j.* FROM print_jobs j JOIN orders o ON o.id=j.order_id"
@@ -972,7 +1135,9 @@ class PrinterManager:
                 " ORDER BY datetime(finished_at) DESC LIMIT 1")
         if not rows:
             raise ValueError("Нет сорванных заданий для повтора")
-        return self.reprint_job(rows[0]["id"])
+        return self.reprint_job(
+            rows[0]["id"], confirmed=confirmed, request_id=request_id
+        )
 
     # ------------------------------------------------------------- преобразование печати в заказ
     def _slicer_estimate(self, printer, task: str) -> dict:
@@ -1691,22 +1856,33 @@ class PrinterManager:
 
     # ------------------------------------------- 5.0: автобэкап и снятие детали
     def auto_backup_if_due(self) -> None:
-        """Раз в сутки (по настройке) — копия базы в папку backups, ротация 14."""
+        """Сделать плановую копию и применить общий лимит ``backup_keep``."""
         days = int(num(self.db.setting("auto_backup_days", 1), 1))
         if days <= 0:
             return
-        if time.time() - self._last_backup < days * 24 * 3600:
-            return
-        self._last_backup = time.time()
+        now = time.time()
+        last = self._last_backup
         try:
-            backup_dir = DATA_DIR / "backups"
-            backup_dir.mkdir(parents=True, exist_ok=True)
+            latest = max(BACKUP_DIR.glob("printflow-auto-*.sqlite3"),
+                         key=lambda path: path.stat().st_mtime, default=None)
+            if latest is not None:
+                last = max(last, latest.stat().st_mtime)
+        except OSError:
+            pass
+        if now - last < days * 24 * 3600:
+            return
+        # Не спамим диск/журнал каждые 30 секунд при постоянной ошибке, но и
+        # не откладываем следующую попытку на целые сутки.
+        if now - self._last_backup_attempt < 3600:
+            return
+        self._last_backup_attempt = now
+        try:
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
             stamp = now_iso()[:16].replace(":", "").replace("T", "-")
-            target = backup_dir / f"printflow-auto-{stamp}.sqlite3"
+            target = BACKUP_DIR / f"printflow-auto-{stamp}.sqlite3"
             self.db.backup_to(target)
-            old = sorted(backup_dir.glob("printflow-auto-*.sqlite3"))[:-14]
-            for path in old:
-                path.unlink(missing_ok=True)
+            rotate_backups(BACKUP_DIR, self.db.setting("backup_keep", 20))
+            self._last_backup = now
             self.db.add_event("backup", "Автобэкап", f"Снимок базы: {target.name}")
         except Exception as exc:
             self.db.add_event("error", "Автобэкап не удался", str(exc))

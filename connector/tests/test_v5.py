@@ -80,8 +80,8 @@ class ClientsTests(unittest.TestCase):
     def test_duplicates_and_merge(self):
         from connector.printflow.clients import Clients
         c = Clients(self.db)
-        a = self.db.upsert("customers", {"id": "c1", "name": "Анна", "phone": "+7910"})
-        b = self.db.upsert("customers", {"id": "c2", "name": "Анна", "phone": "+7910"})
+        self.db.upsert("customers", {"id": "c1", "name": "Анна", "phone": "+7910"})
+        self.db.upsert("customers", {"id": "c2", "name": "Анна", "phone": "+7910"})
         groups = c.duplicates()
         self.assertTrue(any(len(g) >= 2 for g in groups))
         self.db.upsert("orders", {"id": "o1", "customer_id": "c2", "product": "x",
