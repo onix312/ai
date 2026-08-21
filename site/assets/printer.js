@@ -3,7 +3,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, hoursText, minutesText,
-  dateTimeText, agoText, toast, fail, openModal, closeModal, confirmDanger } = U;
+  dateText, dateTimeText, agoText, toast, fail, openModal, closeModal, confirmDanger } = U;
 const { get, post, api } = PF.api;
 
 const STATE_LABEL = {
@@ -104,9 +104,12 @@ function renderLive() {
   const orderEl = $('pr_order');
   if (orderEl) {
     if (order && order.number) {
-      orderEl.innerHTML = `<a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}</a>`;
+      orderEl.innerHTML = `<a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}</a>`
+        + ` <button class="btn sm ghost" type="button" data-link-order="${esc(p.id)}" title="Перепривязать эту печать к другому заказу" style="margin-left:8px;padding:2px 8px;font-size:11px">🔗 Другой заказ</button>`;
     } else if (p.connection.connected && (kind === 'running' || p.printer.state === 'PAUSE' || p.printer.task)) {
-      orderEl.innerHTML = `Не связано с заказом <button class="btn sm primary" type="button" data-convert-order="${esc(p.id)}" style="margin-left:8px;padding:2px 10px;font-size:12px"><span class="ic">✨</span>В заказ</button>`;
+      orderEl.innerHTML = `Не связано с заказом`
+        + ` <button class="btn sm primary" type="button" data-link-order="${esc(p.id)}" title="Привязать эту печать к уже существующему заказу" style="margin-left:8px;padding:2px 10px;font-size:12px"><span class="ic">🔗</span>Привязать к заказу</button>`
+        + ` <button class="btn sm ghost" type="button" data-convert-order="${esc(p.id)}" title="Создать новый заказ из этой печати" style="margin-left:6px;padding:2px 10px;font-size:12px"><span class="ic">✨</span>Новый заказ</button>`;
     } else {
       orderEl.textContent = p.connection.connected ? 'Не связано с заказом' : (p.connection.last_error || 'Нет подключения');
     }
@@ -841,7 +844,8 @@ function renderQueue() {
       + '</small>'
       + (j.state === 'running' ? `<div class="bar thin" style="margin-top:6px"><i style="width:${clamp(num(j.progress), 0, 100)}%"></i></div>` : '')
       + '</div><div class="acts">'
-      + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Преобразовать задание в заказ">В заказ</button>` : '')
+      + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу">🔗 К заказу</button>` : '')
+      + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания">✨ Новый</button>` : '')
       + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
       + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
       + '</div></div>';
@@ -1091,6 +1095,16 @@ function bind() {
     const jobConv = e.target.closest('[data-job-convert]');
     if (jobConv) {
       convertJobToOrder(jobConv.dataset.jobConvert);
+      return;
+    }
+    const linkOrder = e.target.closest('[data-link-order]');
+    if (linkOrder) {
+      openLinkOrder({ printerId: linkOrder.dataset.linkOrder || PF.state.activePrinter });
+      return;
+    }
+    const jobLink = e.target.closest('[data-job-link]');
+    if (jobLink) {
+      openLinkOrder({ jobId: jobLink.dataset.jobLink });
       return;
     }
     const ordOpen = e.target.closest('[data-order-open]');
@@ -1372,9 +1386,116 @@ async function convertJobToOrder(jobId) {
   } catch (e) { fail(e); }
 }
 
+/* -------------- Привязка печати/задания к существующему заказу --------------
+ * Нужен ��тдельный экран, потому что после сбоя питания или ручной распечатки
+ * автоматическое сопоставление файла с заказом часто промахивается: файл
+ * называется иначе, заказа ещё не было в базе или его номер не попал в имя.
+ * «Новый заказ» здесь не помогает — тогда получается дубль, а исходный
+ * заказ так и остаётся без печати. Кнопки «🔗 Привязать к заказу» открывают
+ * этот пикер и вызывают /api/printer/link-to-order или /api/jobs/link-to-order. */
+
+let linkOrderTarget = null; // {printerId} или {jobId}
+let linkOrderChoice = ''; // выбранный order_id
+
+function renderLinkOrderList(query) {
+  const host = $('link_order_list');
+  if (!host) return;
+  const q = String(query || '').trim().toLowerCase();
+  const orders = (PF.state.orders || []).filter((o) => !PF.isFinal(o));
+  const matched = q
+    ? orders.filter((o) => [o.number, o.product, o.customer_name, o.phone, o.file, o.notes]
+        .some((v) => String(v || '').toLowerCase().includes(q)))
+    : orders;
+  if (!matched.length) {
+    host.innerHTML = q
+      ? '<div class="empty compact"><span>Ничего не найдено. Уберите фильтр или заведите новый заказ.</span></div>'
+      : '<div class="empty compact"><span>Активных заказов нет. Создайте заказ или используйте «✨ Новый заказ».</span></div>';
+    return;
+  }
+  // Топ-30 самых свежих — этого достаточно и не тормозит на большой базе.
+  host.innerHTML = matched.slice(0, 30).map((o) => {
+    const sel = o.id === linkOrderChoice ? ' selected' : '';
+    const due = o.due ? ` · срок ${dateText(o.due)}` : '';
+    const cust = o.customer_name ? ` · ${esc(o.customer_name)}` : '';
+    return `<label class="pick-row${sel}" data-pick-order="${esc(o.id)}" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;cursor:pointer${sel ? ';background:var(--accent-soft)' : ''}">`
+      + `<input type="radio" name="pick_order" value="${esc(o.id)}"${sel ? ' checked' : ''} style="margin:0">`
+      + `<div style="flex:1;min-width:0"><b>№${esc(o.number)} · ${esc(o.product || 'без названия')}</b>`
+      + `<small class="muted" style="display:block">${esc((PF.status(o.status) || {}).name || o.status || '')}${cust}${due}</small></div>`
+      + `</label>`;
+  }).join('');
+}
+
+function openLinkOrder(target) {
+  linkOrderTarget = target || null;
+  linkOrderChoice = '';
+  $('link_order_submit').disabled = true;
+  const search = $('link_order_search');
+  if (search) search.value = '';
+  const title = $('link_order_title');
+  const sub = $('link_order_sub');
+  if (target && target.printerId) {
+    const p = PF.state.printers.find((x) => x.id === target.printerId);
+    const live = PF.livePrinter(target.printerId);
+    const task = (live && live.printer && live.printer.task) || '';
+    if (title) title.textContent = 'Привязать текущую печать к заказу';
+    if (sub) sub.textContent = `${p ? p.name : 'Принтер'}${task ? ' · ' + task : ''}`;
+  } else if (target && target.jobId) {
+    const j = (PF.state.jobs.queue || []).concat(PF.state.jobs.history || []).find((x) => x.id === target.jobId);
+    if (title) title.textContent = 'Привязать задание к заказу';
+    if (sub) sub.textContent = j ? (j.name || j.file || 'Задание') : 'Задание';
+  }
+  renderLinkOrderList('');
+  openModal('link_order_modal');
+}
+
+async function submitLinkOrder() {
+  if (!linkOrderTarget || !linkOrderChoice) return;
+  try {
+    let res;
+    if (linkOrderTarget.printerId) {
+      res = await post('/api/printer/link-to-order', {
+        printer_id: linkOrderTarget.printerId, order_id: linkOrderChoice,
+      });
+    } else if (linkOrderTarget.jobId) {
+      res = await post('/api/jobs/link-to-order', {
+        job_id: linkOrderTarget.jobId, order_id: linkOrderChoice,
+      });
+    }
+    if (res && res.order) {
+      closeModal('link_order_modal');
+      toast('Печать привязана к заказу', `Заказ №${res.order.number} · ${res.order.product || ''}`);
+      await PF.refreshCore();
+      if (PF.modules.ops && PF.modules.ops.openOrder) {
+        PF.go('orders');
+        PF.modules.ops.openOrder(res.order.id);
+      }
+    }
+  } catch (e) { fail(e); }
+}
+
+function bindLinkOrder() {
+  const list = $('link_order_list');
+  if (list) {
+    list.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-pick-order]');
+      if (!row) return;
+      linkOrderChoice = row.dataset.pickOrder;
+      $('link_order_submit').disabled = !linkOrderChoice;
+      renderLinkOrderList(($('link_order_search') || {}).value || '');
+    });
+  }
+  const search = $('link_order_search');
+  if (search) {
+    search.addEventListener('input', U.debounce(() => renderLinkOrderList(search.value), 120));
+  }
+  const submit = $('link_order_submit');
+  if (submit) submit.addEventListener('click', (e) => { e.preventDefault(); submitLinkOrder(); });
+}
+
 /* =============================================================== старт */
 PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   bind();
+  bindLinkOrder();
   renderTabs();
   $('queue_auto').checked = !!PF.state.settings.auto_queue;
   const tag = $('nav_printers_tag');

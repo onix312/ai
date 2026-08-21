@@ -3613,6 +3613,16 @@
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" id="pj_queue">В очередь</button><button class="btn" type="button" data-close="print_modal">Отмена</button><button class="btn primary" type="button" id="pj_start">Печатать сейчас</button></div>
 </form></dialog>
 
+<dialog class="modal narrow" id="link_order_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Печать и заказ</span><h2 id="link_order_title">Привязать печать к заказу</h2><p id="link_order_sub" class="muted"></p></div><button class="icon-btn" type="button" data-close="link_order_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice info"><span>i</span><span>Пропала связь после сбоя питания или файл не совпал с заказом? Выберите нужный заказ — печать и статус «в печати» подхватятся сразу.</span></div>
+  <label class="field" style="margin-top:10px"><span>Поиск</span><input id="link_order_search" placeholder="Номер, товар или клиент" autocomplete="off"></label>
+  <div id="link_order_list" class="list" style="max-height:340px;overflow:auto;margin-top:10px"><div class="empty compact"><span>Загружаем активные заказы…</span></div></div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="link_order_modal">Отмена</button><button class="btn primary" type="button" id="link_order_submit" disabled>Привязать выбранный заказ</button></div>
+</form></dialog>
+
 <dialog class="modal narrow" id="spool_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Склад</span><h2 id="spool_modal_title">Катушка</h2></div><button class="icon-btn" type="button" data-close="spool_modal">×</button></div>
  <div class="modal-body"><div class="form-grid">

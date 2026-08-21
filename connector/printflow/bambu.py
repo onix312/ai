@@ -99,6 +99,11 @@ class BambuPrinter:
         self.client = None
         self.connected = False
         self.connecting = False
+        # Момент последнего подключения. Нужен менеджеру, чтобы не считать
+        # «свежая связь + пустая телеметрия» поводом закрыть висящий заказ:
+        # после сбоя питания принтер сначала присылает пустой gcode_state,
+        # а факт печати приходит уже через несколько секунд.
+        self.connected_since = 0.0
         self.last_error = ""
         self.last_message = 0.0
         self.raw: dict[str, Any] = {}
@@ -205,14 +210,22 @@ class BambuPrinter:
         self._bridge_report = lambda _serial, payload: self.handle_report(payload)
         self._bridge_status = self._on_cloud_status
         bridge.attach(serial, self._bridge_report, self._bridge_status)
+        was = self.connected
         self.connected = bridge.connected
+        if self.connected and not was:
+            self.connected_since = time.time()
         if not bridge.connected and not bridge.connecting:
             bridge.connect()
+            was = self.connected
             self.connected = bridge.connected
+            if self.connected and not was:
+                self.connected_since = time.time()
 
     def _on_cloud_status(self, connected: bool, error: str) -> None:
         was = self.connected
         self.connected = connected
+        if connected and not was:
+            self.connected_since = time.time()
         if connected:
             self.last_error = ""
             try:
@@ -293,7 +306,10 @@ class BambuPrinter:
     def _on_connect(self, client, userdata, flags, reason_code, properties=None):
         rc = rc_value(reason_code)
         ok = rc == 0
+        was = self.connected
         self.connected, self.connecting = ok, False
+        if ok and not was:
+            self.connected_since = time.time()
         if not ok:
             # paho 2.x отдаёт MQTT5-коды: 134 = неверный логин/пароль,
             # 135 = не авторизован (аналог старых 4 и 5).
