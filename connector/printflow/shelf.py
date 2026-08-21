@@ -44,6 +44,7 @@ class Shelf:
             qty = num(row["qty"])
             sold7 = num(self._sum_sold(row["id"], since7))
             sold30 = num(self._sum_sold(row["id"], since30))
+            sold_dead = num(self._sum_sold(row["id"], since_dead))
             last = self.db.one(
                 "SELECT MAX(at) a FROM shelf_moves WHERE item_id=? AND kind IN ('sale','online')",
                 (row["id"],)) or {}
@@ -51,7 +52,7 @@ class Shelf:
             rate = sold7 / SALE_DAYS if sold7 else 0.0
             days_left = round(qty / rate, 1) if rate and qty > 0 else None
             cost = num(row["cost_per_unit"])
-            dead = qty > 0 and sold30 <= 0
+            dead = qty > 0 and sold_dead <= 0
             low = qty > 0 and num(row["min_qty"]) > 0 and qty <= num(row["min_qty"])
             status = "dead" if dead else ("low" if low else ("ok" if qty > 0 else "empty"))
             # план пополнения: сколько напечатать, чтобы хватило на PLAN_DAYS

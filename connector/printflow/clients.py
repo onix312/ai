@@ -1,8 +1,7 @@
 """Аналитика клиентов PrintFlow 5.0: RFM-сегменты, дубли и объединение."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from .accounting import num
 from .db import Database
@@ -15,12 +14,12 @@ class Clients:
     # ------------------------------------------------------------------ RFM
     def rfm(self, days: int = 90) -> list[dict]:
         """Recency / Frequency / Monetary по клиентам за период."""
-        since = datetime.now().isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=max(1, days))).isoformat()
         rows = self.db.query("SELECT * FROM customers ORDER BY name")
         out = []
         for c in rows:
             orders = self.db.query(
-                "SELECT * FROM orders WHERE customer_id=? AND created_at>=?",
+                "SELECT * FROM orders WHERE customer_id=? AND datetime(created_at)>=datetime(?)",
                 (c["id"], since))
             paid = sum(num(o.get("paid")) or num(o.get("prepaid")) for o in orders)
             last = max((o.get("created_at") or "") for o in orders) if orders else ""
@@ -41,9 +40,13 @@ class Clients:
             return "Новый"
         if count >= 3 and paid > 0:
             return "Постоянный"
-        if last and (datetime.now() - datetime.fromisoformat(last)).days <= 30:
+        parsed = datetime.fromisoformat(last.replace("Z", "+00:00")) if last else None
+        if parsed and parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).days if parsed else 0
+        if parsed and age <= 30:
             return "Активный"
-        if last and (datetime.now() - datetime.fromisoformat(last)).days > 90:
+        if parsed and age > 90:
             return "Потерянный"
         return "Затухающий"
 
@@ -85,7 +88,7 @@ class Clients:
                     continue
                 if not self.db.one("SELECT id FROM customers WHERE id=?", (drop_id,)):
                     continue
-                for table in ("orders", "payments", "transactions"):
+                for table in ("orders", "payments", "transactions", "customer_feedback"):
                     self.db.execute(
                         f"UPDATE {table} SET customer_id=? WHERE customer_id=?",
                         (keep_id, drop_id))

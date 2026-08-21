@@ -174,16 +174,11 @@ class Accounting:
             if warmup_minutes is not None and str(warmup_minutes).strip() != "" and num(warmup_minutes, -1) == 0:
                 warmup = 0.0
             base_hours = (ph + warmup) * plates
-            # На одну штуку (для отображения)
-            unit_grams = pg / fit
-            unit_hours = ph / fit
         else:
             # Старый режим: grams = на штуку, hours = на плиту
             plates = max(1, math.ceil(qty / fit))
             base_grams = num(grams) * qty
             base_hours = num(hours) * plates
-            unit_grams = num(grams)
-            unit_hours = num(hours) / fit
 
         # Применяем профиль качества к расходу и времени
         base_grams *= filament_factor
@@ -301,7 +296,16 @@ class Accounting:
     def channel(self, channel_id: str) -> dict:
         if not channel_id:
             return {}
-        return self.db.one("SELECT * FROM channels WHERE id=?", (channel_id,)) or {}
+        raw = str(channel_id).strip()
+        aliases = {
+            "полка магазина": "shop", "витрина": "shop", "другое": "direct",
+            "рекомендация": "direct", "напрямую": "direct",
+            "telegram": "telegram", "авито": "avito", "b2b": "b2b",
+        }
+        key = aliases.get(raw.casefold(), raw)
+        return self.db.one(
+            "SELECT * FROM channels WHERE id=? OR pylower(name)=? LIMIT 1",
+            (key, raw.casefold())) or {}
 
     # ------------------------------------------------------- материалы и профили
     def material_options(self) -> dict[str, Any]:
@@ -1105,8 +1109,7 @@ class Accounting:
         """При закрытии записать только ещё не полученный остаток как платёж."""
         if not self.db.setting("auto_income_on_done", True):
             return None
-        rest = round(max(0.0, num(order.get("price")) -
-                         max(num(order.get("paid")), num(order.get("prepaid")))), 2)
+        rest = round(num(self.order_economics(order).get("debt")), 2)
         if rest <= 0:
             return None
         payment = self.add_payment(
@@ -1116,7 +1119,45 @@ class Accounting:
                            (payment.get("tx_id") or "",))
 
     def register_job_costs(self, job: dict) -> dict:
-        """Учёт завершённой печати: пластик, энергия, себестоимость заказа."""
+        """Идемпотентно учесть завершённую печать.
+
+        Маркер ``print_jobs.accounted_at`` записывается в одной транзакции со
+        списанием катушки, фактом заказа и статистикой. Повторный FINISH больше
+        не может второй раз изменить остатки или себестоимость.
+        """
+        job_id = str(job.get("id") or "")
+        if not job_id:
+            raise ValueError("Не указано задание печати")
+        with self.db.transaction():
+            stored = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if not stored:
+                # Обратная совместимость для импортов и интеграций, которые
+                # передавали завершённое задание напрямую, без предварительной
+                # записи в очередь. Сначала материализуем его — дальше действует
+                # тот же идемпотентный маркер.
+                stored = self.db.upsert("print_jobs", {
+                    **job,
+                    "id": job_id,
+                    "created_at": job.get("created_at") or now_iso(),
+                })
+            if stored.get("accounted_at"):
+                return {
+                    "job_id": job_id,
+                    "already_accounted": True,
+                    "accounted_at": stored.get("accounted_at"),
+                }
+            result = self._register_job_costs_once(stored)
+            accounted_at = now_iso()
+            self.db.execute(
+                "UPDATE print_jobs SET accounted_at=? WHERE id=?",
+                (accounted_at, job_id),
+            )
+            result["already_accounted"] = False
+            result["accounted_at"] = accounted_at
+            return result
+
+    def _register_job_costs_once(self, job: dict) -> dict:
+        """Внутренняя часть учёта; выполняется под транзакцией-маркером."""
         result: dict[str, Any] = {"job_id": job.get("id")}
         if not self.db.setting("auto_accounting", True):
             return result
@@ -1221,16 +1262,33 @@ class Accounting:
         since = (datetime.now() - timedelta(days=max(1, int(days)))
                  ).isoformat(timespec="seconds")
         jobs = self.db.query(
-            "SELECT * FROM print_jobs WHERE state='failed' AND finished_at>=?",
+            "SELECT j.*,d.loss AS defect_loss,d.grams AS defect_grams,"
+            " d.confirmed_at AS defect_confirmed_at"
+            " FROM print_jobs j LEFT JOIN defects d ON d.job_id=j.id"
+            " AND d.confirmed_at<>''"
+            " WHERE j.state='failed' AND j.finished_at>=?",
             (since,))
-        grams = sum(num(job.get("grams")) for job in jobs)
-        minutes = sum(num(job.get("duration_min")) for job in jobs)
+        grams = 0.0
+        minutes = 0.0
+        cost = 0.0
         spool_price = num(self.db.setting("default_spool_price"), 1600)
         overhead = (num(self.db.setting("amortization_per_hour"), 12)
                     + num(self.db.setting("maintenance_per_hour"), 3)
                     + num(self.db.setting("energy_price"), 6)
                     * num(self.db.setting("power_kw"), 0.15))
-        cost = grams / 1000.0 * spool_price + minutes / 60.0 * overhead
+        for job in jobs:
+            actual_grams = num(job.get("grams"))
+            lost_grams = (num(job.get("defect_grams"))
+                          if job.get("defect_confirmed_at") else actual_grams)
+            ratio = min(1.0, lost_grams / actual_grams) if actual_grams > 0 else 1.0
+            lost_minutes = num(job.get("duration_min")) * ratio
+            grams += lost_grams
+            minutes += lost_minutes
+            if job.get("defect_confirmed_at"):
+                cost += num(job.get("defect_loss"))
+            else:
+                cost += (lost_grams / 1000.0 * spool_price
+                         + lost_minutes / 60.0 * overhead)
         return {"count": len(jobs), "grams": round(grams, 1),
                 "minutes": round(minutes, 1), "cost": round(cost, 2)}
 
@@ -1606,7 +1664,11 @@ class Accounting:
 
         due_total = round(tax_due + insurance_due - tax_paid - insurance_paid, 2)
         # Резерв — это то, что ещё предстоит заплатить, а не вся годовая сумма.
-        reserve = max(0.0, due_total) + num(s.get("tax_reserve_extra")) * income / 100.0
+        # Выключатель раньше отображался в настройках, но расчёт его игнорировал.
+        reserve = 0.0
+        if s.get("tax_reserve_enabled", True):
+            reserve = (max(0.0, due_total)
+                       + num(s.get("tax_reserve_extra")) * income / 100.0)
         reserve_rate = reserve / income * 100 if income else 0.0
         if insurance_due and not insurance_paid:
             notes.append(
@@ -1703,9 +1765,12 @@ class Accounting:
             eco = self.order_economics(o)
             if eco["debt"] <= 0.5:
                 continue
-            created = (o.get("created_at") or "")[:10]
+            # Для выданного в долг заказа возраст долга начинается с выдачи,
+            # а не с даты создания карточки (иначе старый заказ сразу становился
+            # «просроченным» в момент передачи клиенту).
+            debt_since = (o.get("closed_at") or o.get("created_at") or "")[:10]
             try:
-                days = (today - date.fromisoformat(created)).days if created else 0
+                days = (today - date.fromisoformat(debt_since)).days if debt_since else 0
             except ValueError:
                 days = 0
             rows.append({
@@ -1713,6 +1778,7 @@ class Accounting:
                 "product": o.get("product"), "price": eco["price"], "paid": eco["paid"],
                 "debt": eco["debt"], "days": days, "overdue": days > alert_days,
                 "done": o.get("status") in finals, "phone": o.get("phone"),
+                "messenger": o.get("messenger"), "reminded_at": o.get("reminded_at") or "",
             })
         rows.sort(key=lambda r: (-r["debt"]))
         return {
@@ -1723,8 +1789,31 @@ class Accounting:
         }
 
     def add_payment(self, order_id: str, amount: float, kind: str = "payment",
-                    account_id: str = "", method: str = "", note: str = "") -> dict:
-        """Атомарно записать платёж, кассовую проводку и новый остаток долга."""
+                    account_id: str = "", method: str = "", note: str = "",
+                    request_id: str = "") -> dict:
+        """Идемпотентно записать платёж, проводку и остаток долга."""
+        request_id = str(request_id or "").strip()[:120]
+        with self.db.transaction():
+            if request_id:
+                existing = self.db.one(
+                    "SELECT * FROM payments WHERE request_id=?", (request_id,)
+                )
+                if existing:
+                    if (existing.get("order_id") != order_id
+                            or existing.get("kind") != kind
+                            or abs(num(existing.get("amount")) - num(amount)) > 0.005):
+                        raise ValueError("Ключ запроса уже использован для другого платежа")
+                    existing["already_recorded"] = True
+                    return existing
+            row = self._add_payment_once(
+                order_id, amount, kind, account_id, method, note, request_id
+            )
+            row["already_recorded"] = False
+            return row
+
+    def _add_payment_once(self, order_id: str, amount: float, kind: str = "payment",
+                          account_id: str = "", method: str = "", note: str = "",
+                          request_id: str = "") -> dict:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
@@ -1733,7 +1822,11 @@ class Accounting:
         amount = round(num(amount), 2)
         if amount <= 0:
             raise ValueError("Сумма платежа должна быть больше нуля")
-        if kind == "refund" and amount > max(num(order.get("paid")), num(order.get("prepaid"))):
+        paid = max(num(order.get("paid")), num(order.get("prepaid")))
+        due = round(max(0.0, num(order.get("price")) - num(order.get("discount")) - paid), 2)
+        if kind in ("prepay", "payment") and num(order.get("price")) > 0 and amount > due + 0.005:
+            raise ValueError(f"Платёж больше остатка: осталось {due:g} ₽")
+        if kind == "refund" and amount > paid:
             raise ValueError("Возврат не может быть больше полученной суммы")
         acc = self.db.one("SELECT * FROM accounts WHERE id=?",
                           (account_id or self.db.setting("default_account", "cash"),)) or {}
@@ -1753,10 +1846,10 @@ class Accounting:
                 channel=order.get("channel") or "", payer=order.get("payer") or "person",
                 fee=fee, taxable=kind != "refund", deductible=kind == "refund", at=stamp)
             self.db.execute(
-                "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,method,fee,note,tx_id)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO payments(id,at,order_id,customer_id,amount,kind,account_id,"
+                "method,fee,note,tx_id,request_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pay_id, stamp, order_id, order.get("customer_id"), amount, kind,
-                 acc["id"], method, fee, note, tx["id"]))
+                 acc["id"], method, fee, note, tx["id"], request_id))
             sign = -1 if kind == "refund" else 1
             self.db.execute(
                 "UPDATE orders SET paid=MAX(0,COALESCE(paid,0)+?), updated_at=? WHERE id=?",

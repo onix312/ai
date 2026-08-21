@@ -45,7 +45,11 @@ class Watchdog:
         self.db = manager.db
         # Память по каждому принтеру: последний прогресс и время его роста.
         self._progress: dict[str, tuple[float, float]] = {}
+        # HMS-коды живут отдельно от производных тревог. Иначе отсутствие HMS
+        # на каждом тике сбрасывало low/cold/overrun и уведомления повторялись.
+        self._problem_codes: dict[str, set[str]] = {}
         self._reported: dict[str, set[str]] = {}
+        self._cold_since: dict[str, float] = {}
         self._alerts: dict[str, list[dict]] = {}
         self._last_telemetry = 0.0
         self._last_cleanup = 0.0
@@ -71,9 +75,10 @@ class Watchdog:
         """Ошибки, о которых сообщил сам принтер."""
         problems = snap["printer"].get("problems") or []
         if not problems:
-            self._reported.pop(printer.id, None)
+            self._problem_codes.pop(printer.id, None)
             return []
-        seen = self._reported.setdefault(printer.id, set())
+        seen = self._problem_codes.setdefault(printer.id, set())
+        seen.intersection_update({str(item.get("code") or "") for item in problems})
         alerts = []
         minimum = str(self.db.setting("guard_pause_severity", "error"))
         for item in problems:
@@ -130,6 +135,8 @@ class Watchdog:
         state = snap["printer"]["state"]
         if state not in ("RUNNING",):
             self._progress.pop(printer.id, None)
+            self._cold_since.pop(printer.id, None)
+            self._reported.setdefault(printer.id, set()).discard(f"cold:{printer.id}")
             return []
         progress = num(snap["printer"].get("progress"))
         layer = num(snap["printer"].get("layer"))
@@ -160,24 +167,34 @@ class Watchdog:
             self.db.add_event("guard", "Сторож: печать не двигается",
                               alert["reason"], printer.id, {"progress": progress})
             self._notify(printer, alert)
-        # Холодное сопло при активной печати — верный признак сбоя.
+        # Холодное сопло при активной печати — тревога только после заданной
+        # выдержки. Раньше ``guard_cold_minutes`` показывался в UI, но не
+        # использовался: уведомление приходило на первом же тике прогрева.
         nozzle = num(snap["temperature"].get("nozzle"))
         target = num(snap["temperature"].get("nozzle_target"))
-        if target > 100 and nozzle < target - 40:
-            key = f"cold:{printer.id}"
-            if key not in self._reported.setdefault(printer.id, set()):
-                self._reported[printer.id].add(key)
-                alert = {
-                    "kind": "cold", "code": "cold",
-                    "title": "Сопло не догревается",
-                    "reason": f"Задано {round(target)} °C, фактически {round(nozzle)} °C.",
-                    "advice": "Проверьте нагреватель и термистор: печать пойдёт с браком.",
-                    "severity": "error", "at": now_iso(), "actions": [],
-                }
-                alerts.append(alert)
-                self.db.add_event("guard", "Сторож: сопло не догревается",
-                                  alert["reason"], printer.id, {})
-                self._notify(printer, alert)
+        key = f"cold:{printer.id}"
+        cold = target > 100 and nozzle < target - 40
+        if not cold:
+            self._cold_since.pop(printer.id, None)
+            self._reported.setdefault(printer.id, set()).discard(key)
+            return alerts
+        since = self._cold_since.setdefault(printer.id, now)
+        limit = max(0.0, num(self.db.setting("guard_cold_minutes", 10.0), 10.0))
+        cold_min = (now - since) / 60
+        if cold_min >= limit and key not in self._reported.setdefault(printer.id, set()):
+            self._reported[printer.id].add(key)
+            alert = {
+                "kind": "cold", "code": "cold",
+                "title": "Сопло не догревается",
+                "reason": (f"Задано {round(target)} °C, фактически {round(nozzle)} °C "
+                           f"уже {max(1, round(cold_min))} мин."),
+                "advice": "Проверьте нагреватель и термистор: печать пойдёт с браком.",
+                "severity": "error", "at": now_iso(), "actions": [],
+            }
+            alerts.append(alert)
+            self.db.add_event("guard", "Сторож: сопло не догревается",
+                              alert["reason"], printer.id, {})
+            self._notify(printer, alert)
         return alerts
 
     def _check_filament(self, printer, snap: dict) -> list[dict]:
@@ -291,7 +308,9 @@ class Watchdog:
         return out
 
     def clear(self, printer_id: str) -> None:
+        self._problem_codes.pop(printer_id, None)
         self._reported.pop(printer_id, None)
+        self._cold_since.pop(printer_id, None)
         self._alerts.pop(printer_id, None)
 
     # ----------------------------------------------------------- телеметрия

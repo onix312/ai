@@ -18,7 +18,8 @@ PF.state.report = null;
 
 let repPeriod = 'month', repOffset = 0;
 let editingAccount = null, editingChannel = null, editingFixed = null,
-  editingCat = null, payingOrder = null;
+  editingCat = null, payingOrder = null, payingDebt = 0, paymentRequestId = '',
+  reminderDraft = null;
 
 const MODE_HINTS = {
   none: 'Налог не считается. Подходит, пока вы только пробуете и продаёте знакомым.',
@@ -239,8 +240,9 @@ function renderCash() {
     + `<td class="right tnum">${money(d.price)}</td>`
     + `<td class="right tnum">${money(d.paid)}</td>`
     + `<td class="right tnum neg">${money(d.debt)}</td>`
-    + `<td class="right tnum">${nfmt(d.days)}${d.overdue ? ' <span class="pill bad">просрочка</span>' : ''}</td>`
-    + `<td class="right"><button class="btn sm ghost" type="button" data-remind-order="${esc(d.id)}">Напомнить</button> <button class="btn sm" type="button" data-pay-order="${esc(d.id)}">Оплата</button></td></tr>`).join('')
+    + `<td class="right tnum">${nfmt(d.days)}${d.overdue ? ' <span class="pill bad">просрочка</span>' : ''}`
+      + `${d.reminded_at ? `<small class="muted">напомнили ${esc(dateText(d.reminded_at))}</small>` : ''}</td>`
+    + `<td class="right"><button class="btn sm ghost" type="button" data-remind-order="${esc(d.id)}">Напомнить</button> <button class="btn sm" type="button" data-pay-order="${esc(d.id)}">Получить оплату</button></td></tr>`).join('')
     : '<tr><td colspan="7"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
 }
 
@@ -419,12 +421,17 @@ function openPayment(orderId) {
     || (PF.state.orders || []).find((o) => o.id === orderId) || {};
   payingOrder = orderId;
   const debt = num(d.debt) || Math.max(0, num(d.price) - Math.max(num(d.paid), num(d.prepaid)));
-  $('pay_title').textContent = `Платёж по заказу №${d.number || ''}`.trim();
+  payingDebt = debt;
+  paymentRequestId = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID() : `debt-${orderId}-${Date.now()}`;
+  $('pay_title').textContent = `Получить оплату по заказу №${d.number || ''}`.trim();
   $('pay_info').lastElementChild.textContent = debt
     ? `${d.customer || d.customer_name || 'Клиент'} · цена ${money(d.price)}, оплачено ${money(d.paid)}, остаток ${money(debt)}.`
     : 'Заказ оплачен полностью — можно записать возврат или доплату.';
   $('pf_amount').value = debt || '';
+  $('pf_amount').max = debt || '';
   $('pf_kind').value = 'payment';
+  $('pf_kind').disabled = true;
   $('pf_method').value = '';
   $('pf_note').value = '';
   openModal('payment_modal');
@@ -625,17 +632,50 @@ function bind() {
   btn('payment_save', async () => {
     const amount = num($('pf_amount').value);
     if (amount <= 0) return fail(new Error('Укажите сумму больше нуля'));
+    if (amount > payingDebt + 0.005) return fail(new Error(`Осталось получить только ${money(payingDebt)}`));
+    if (!$('pf_method').value) return fail(new Error('Выберите способ оплаты'));
     try {
-      await post('/api/payment/save', {
-        order_id: payingOrder, amount, kind: $('pf_kind').value,
-        account_id: $('pf_account').value, method: $('pf_method').value.trim(),
-        note: $('pf_note').value.trim(),
+      const result = await post('/api/debt/settle', {
+        id: payingOrder, amount, payment_confirmed: true,
+        account_id: $('pf_account').value, payment_method: $('pf_method').value,
+        request_id: paymentRequestId,
       });
       closeModal('payment_modal');
-      toast('Платёж записан', money(amount));
+      let copied = false;
+      if (result.message_after_payment && navigator.clipboard) {
+        try { await navigator.clipboard.writeText(result.message_after_payment); copied = true; } catch (e) { /* текст не отправляется */ }
+      }
+      toast(result.already_recorded ? 'Оплата уже была записана' : 'Оплата записана',
+        `${money(result.received)}${copied ? ' · подтверждение клиенту скопировано' : ''}`);
       await Promise.all([refreshMoney(), PF.refreshCore()]);
       renderAll();
       PF.refreshFinance();
+    } catch (e) { fail(e); }
+  });
+
+  btn('debt_reminder_copy', async () => {
+    if (!reminderDraft || !reminderDraft.text) return;
+    try {
+      await navigator.clipboard.writeText(reminderDraft.text);
+      toast('Текст скопирован', 'PrintFlow ничего не отправлял автоматически');
+    } catch (e) { fail(new Error('Не удалось скопировать текст')); }
+  });
+  btn('debt_reminder_sent', async () => {
+    if (!reminderDraft) return;
+    let force = false;
+    if (num(reminderDraft.cooldown_left_days) > 0) {
+      force = confirmDanger(`Напоминание уже отмечали недавно. Отметить повторную отправку сейчас?`);
+      if (!force) return;
+    }
+    try {
+      const result = await post('/api/debt/remind/confirm', {
+        id: reminderDraft.order_id, sent_confirmed: true, force,
+      });
+      reminderDraft = result;
+      closeModal('debt_reminder_modal');
+      toast('Отправка отмечена', `Заказ №${result.number} · PrintFlow сам сообщение не отправлял`);
+      await refreshMoney();
+      renderAll();
     } catch (e) { fail(e); }
   });
 
@@ -657,9 +697,17 @@ function bind() {
 
 async function remindDebt(orderId) {
   try {
-    const res = await post('/api/debt/remind', { id: orderId });
-    try { await navigator.clipboard.writeText(res.text); } catch (e) { /* без буфера */ }
-    toast('Текст напоминания скопирован', `Заказ №${res.number}, остаток ${money(res.debt)}`);
+    const result = await post('/api/debt/remind', { id: orderId });
+    reminderDraft = result;
+    $('debt_reminder_title').textContent = `Напоминание · заказ №${result.number}`;
+    $('debt_reminder_text').value = result.text || '';
+    const cooldown = num(result.cooldown_left_days);
+    $('debt_reminder_info').className = `verdict ${cooldown ? 'warn' : 'ok'}`;
+    $('debt_reminder_info').innerHTML = `<b>Остаток ${money(result.debt)}</b>`
+      + `<br>${esc(result.customer || 'Клиент')}`
+      + `${result.messenger ? ` · ${esc(result.messenger)}` : result.phone ? ` · ${esc(result.phone)}` : ''}`
+      + (cooldown ? `<br>⚠ Отправку уже отмечали недавно. Рекомендуемый повтор через ${nfmt(cooldown)} дн.` : '');
+    openModal('debt_reminder_modal');
   } catch (e) { fail(e); }
 }
 }

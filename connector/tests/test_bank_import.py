@@ -80,7 +80,6 @@ class ImportTests(unittest.TestCase):
         applied = bank_import.apply_rows(self.db, preview["rows"])
         self.assertEqual(applied["imported"], 3)
         self.assertEqual(applied["skipped"], 1)
-        from connector.printflow.accounting import Accounting
         txs = self.db.query("SELECT * FROM transactions")
         kinds = {row["kind"] for row in txs}
         self.assertIn("income", kinds)

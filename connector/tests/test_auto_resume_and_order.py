@@ -4,9 +4,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import tempfile
-import time
 import unittest
-from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -15,7 +13,6 @@ sys.path.insert(0, str(ROOT / "connector"))
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.repo import Repo  # noqa: E402
 from connector.printflow.manager import PrinterManager  # noqa: E402
-from connector.printflow.bambu import BambuPrinter  # noqa: E402
 
 
 class MockPrinter:

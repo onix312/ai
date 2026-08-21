@@ -16,8 +16,7 @@ import io
 import re
 from typing import Any
 
-from .accounting import num, uid
-from .config import now_iso
+from .accounting import num
 
 # Стартовые правила: ключевые слова в назначении → вид и статья проводки.
 DEFAULT_BANK_RULES: list[dict[str, Any]] = [

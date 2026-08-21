@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 from connector.printflow.accounting import Accounting  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.manager import PrinterManager  # noqa: E402
+from connector.printflow.repo import Repo  # noqa: E402
 from connector.printflow.telegram_bot import TelegramBot  # noqa: E402
 
 
@@ -27,6 +28,7 @@ class FakeManager:
     def __init__(self, db, snapshot=None):
         self.db = db
         self.acc = Accounting(db)
+        self.repo = Repo(db)
         self._snapshot = snapshot or {"printers": []}
 
     def snapshot(self, printer_id: str = "") -> dict:
@@ -61,6 +63,20 @@ class TelegramTextTests(unittest.TestCase):
         self.assertIn("1001", text)
         self.assertNotIn("1002", text)
         self.assertIn("1 000 ₽", text)
+
+    def test_fulfill_requires_explicit_payment_choice(self):
+        self._order("1003", 1000, 300, status="ready")
+        self.db.execute("UPDATE orders SET paid=300,prepaid=0 WHERE number='1003'")
+        pending = self.bot._fulfill("выдать 1003")
+        self.assertIn("оплачен", pending)
+        self.assertIn("в долг", pending)
+        self.assertEqual(self.db.one("SELECT status FROM orders WHERE number='1003'")["status"],
+                         "ready")
+        done = self.bot._fulfill("выдать 1003 оплачен перевод")
+        self.assertIn("получено", done)
+        self.assertEqual(self.db.one("SELECT status FROM orders WHERE number='1003'")["status"],
+                         "done")
+        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM payments WHERE order_id='o1003'")["n"], 1)
 
     def test_defects_counts_failed_jobs(self):
         self.db.upsert("print_jobs", {

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import math
 import struct
-from typing import Callable
 
 Tri = tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
 

@@ -16,9 +16,10 @@ from typing import Any, Iterable, Iterator
 
 from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_EXPENSE_CATEGORIES, DEFAULT_NICHES, DEFAULT_SETTINGS,
-                     DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso)
+                     DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso,
+                     rotate_backups)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 7
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -53,6 +54,24 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # новые принтеры по умолчанию создаются в 'cloud' (см. repo.save_printer).
         ("mode", "TEXT DEFAULT 'lan'"),
     ],
+    "payments": [
+        # Клиентский ключ запроса: повторный клик/сетевой retry не создаёт
+        # вторую оплату по тому же подтверждению.
+        ("request_id", "TEXT DEFAULT ''"),
+    ],
+    "shopping_items": [
+        # Фактический приход закупки: одна подтверждённая операция создаёт
+        # отдельные катушки и финансовый расход, сетевой retry её не дублирует.
+        ("color_name", "TEXT DEFAULT ''"),
+        ("brand", "TEXT DEFAULT ''"),
+        ("received_at", "TEXT DEFAULT ''"),
+        ("receipt_request_id", "TEXT DEFAULT ''"),
+        ("receipt_spool_ids", "TEXT DEFAULT ''"),
+        ("receipt_amount", "REAL DEFAULT 0"),
+        ("receipt_tx_id", "TEXT DEFAULT ''"),
+        ("received_qty", "INTEGER DEFAULT 0"),
+        ("received_spool_grams", "REAL DEFAULT 0"),
+    ],
     "transactions": [
         ("account_id", "TEXT"),
         ("customer_id", "TEXT"),
@@ -86,6 +105,25 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("est_grams", "REAL DEFAULT 0"),
         ("batch_id", "TEXT"),                # к какой партии относится запуск
         ("batch_qty", "REAL DEFAULT 0"),     # сколько годных штук даёт запуск
+        # Идентификатор задания, который сообщает принтер. Нужен, чтобы
+        # повторное MQTT-событие FINISH не создало вторую завершённую печать.
+        ("remote_task_id", "TEXT DEFAULT ''"),
+        # Ставится в той же транзакции, что списание пластика и себестоимости.
+        # Пока поле пусто, оборванную финализацию можно безопасно повторить.
+        ("accounted_at", "TEXT DEFAULT ''"),
+        # Подтверждённый повтор: связь с исходным заданием/браком и ключ,
+        # который не даст двойному клику создать несколько клонов.
+        ("reprint_of_job_id", "TEXT DEFAULT ''"),
+        ("reprint_request_id", "TEXT DEFAULT ''"),
+        ("defect_id", "TEXT DEFAULT ''"),
+    ],
+    "defects": [
+        ("note", "TEXT DEFAULT ''"),
+        ("confirmed_at", "TEXT DEFAULT ''"),
+        ("request_id", "TEXT DEFAULT ''"),
+        ("loss_source", "TEXT DEFAULT ''"),
+        ("reprint_requested", "INTEGER DEFAULT 0"),
+        ("reprint_job_id", "TEXT DEFAULT ''"),
     ],
     "customers": [
         ("kind", "TEXT DEFAULT 'person'"),   # person | company
@@ -291,6 +329,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     cost REAL DEFAULT 0,
     energy_kwh REAL DEFAULT 0,
     spool_id TEXT,
+    remote_task_id TEXT DEFAULT '',
+    accounted_at TEXT DEFAULT '',
+    reprint_of_job_id TEXT DEFAULT '',
+    reprint_request_id TEXT DEFAULT '',
+    defect_id TEXT DEFAULT '',
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON print_jobs(state);
@@ -387,7 +430,8 @@ CREATE TABLE IF NOT EXISTS payments (
     method TEXT DEFAULT '',
     fee REAL DEFAULT 0,
     note TEXT DEFAULT '',
-    tx_id TEXT
+    tx_id TEXT,
+    request_id TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pay_order ON payments(order_id);
 
@@ -485,8 +529,44 @@ CREATE TABLE IF NOT EXISTS defects (
     reason TEXT DEFAULT '',      -- разбор причины
     grams REAL DEFAULT 0,
     loss REAL DEFAULT 0,
-    photo TEXT DEFAULT ''        -- путь к кадру камеры
+    photo TEXT DEFAULT '',       -- путь к кадру камеры
+    note TEXT DEFAULT '',
+    confirmed_at TEXT DEFAULT '',
+    request_id TEXT DEFAULT '',
+    loss_source TEXT DEFAULT '',
+    reprint_requested INTEGER DEFAULT 0,
+    reprint_job_id TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS customer_feedback (
+    id TEXT PRIMARY KEY,
+    order_id TEXT,
+    customer_id TEXT,
+    order_number TEXT DEFAULT '',
+    product TEXT DEFAULT '',
+    customer_name TEXT DEFAULT '',
+    request_message TEXT DEFAULT '',
+    request_sent_at TEXT DEFAULT '',
+    request_id TEXT DEFAULT '',
+    rating INTEGER DEFAULT 0,
+    feedback_text TEXT DEFAULT '',
+    feedback_received_at TEXT DEFAULT '',
+    response_request_id TEXT DEFAULT '',
+    publish_permission TEXT DEFAULT 'not_asked',
+    repeat_interest TEXT DEFAULT 'not_asked',
+    repeat_order_id TEXT DEFAULT '',
+    repeat_request_id TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_order
+    ON customer_feedback(order_id) WHERE order_id IS NOT NULL AND order_id<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_request
+    ON customer_feedback(request_id) WHERE request_id<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_response_request
+    ON customer_feedback(response_request_id) WHERE response_request_id<>'';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_feedback_repeat_request
+    ON customer_feedback(repeat_request_id) WHERE repeat_request_id<>'';
 
 CREATE TABLE IF NOT EXISTS ams_profiles (
     id TEXT PRIMARY KEY,
@@ -532,11 +612,20 @@ CREATE TABLE IF NOT EXISTS shopping_items (
     id TEXT PRIMARY KEY,
     name TEXT DEFAULT '',
     material TEXT DEFAULT '',
+    color_name TEXT DEFAULT '',
+    brand TEXT DEFAULT '',
     qty REAL DEFAULT 1,           -- сколько закупить (катушек/кг)
     unit TEXT DEFAULT 'кг',       -- кг | шт | катушка
     reason TEXT DEFAULT '',       -- авто-причина: «осталось N г» / «темп N г/дн»
     source TEXT DEFAULT 'manual', -- manual | auto
     done INTEGER DEFAULT 0,
+    received_at TEXT DEFAULT '',
+    receipt_request_id TEXT DEFAULT '',
+    receipt_spool_ids TEXT DEFAULT '',
+    receipt_amount REAL DEFAULT 0,
+    receipt_tx_id TEXT DEFAULT '',
+    received_qty INTEGER DEFAULT 0,
+    received_spool_grams REAL DEFAULT 0,
     created_at TEXT,
     updated_at TEXT
 );
@@ -695,9 +784,61 @@ class Database:
                     self.backup_to(BACKUP_DIR / f"pre-migration-{stamp}.sqlite3")
                 except Exception:
                     pass
+            # Старые завершённые задания уже были учтены кодом прежней версии.
+            # Запоминаем сам факт добавления маркера: выполнять backfill на каждом
+            # старте нельзя — пустое поле у нового задания означает незавершённую
+            # транзакцию, которую менеджер должен восстановить.
+            add_accounted_marker = any(
+                name == "accounted_at"
+                for name, _decl in pending.get("print_jobs", [])
+            )
+            add_shopping_receipt_marker = any(
+                name == "received_at"
+                for name, _decl in pending.get("shopping_items", [])
+            )
             for table, missing in pending.items():
                 for name, decl in missing:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+            if add_accounted_marker:
+                self.conn.execute(
+                    "UPDATE print_jobs SET accounted_at=COALESCE(finished_at,created_at,'migrated')"
+                    " WHERE state IN ('done','failed','cancelled')"
+                    " AND COALESCE(accounted_at,'')=''"
+                )
+            if add_shopping_receipt_marker:
+                # Старые галочки означали «куплено» без складского прихода.
+                # Оставляем архив закрытым, но явно помечаем его как legacy,
+                # чтобы новый API не мог случайно создать по нему катушки.
+                self.conn.execute(
+                    "UPDATE shopping_items SET received_at='legacy'"
+                    " WHERE done=1 AND COALESCE(received_at,'')=''"
+                )
+            # Индексы создаём после догоняющего ALTER: у старой базы ключевых
+            # колонок ещё не было во время первоначального executescript.
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pay_request"
+                " ON payments(request_id) WHERE request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopping_receipt_request"
+                " ON shopping_items(receipt_request_id) WHERE receipt_request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_defect_request"
+                " ON defects(request_id) WHERE request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_defect_confirmed_job"
+                " ON defects(job_id) WHERE job_id<>'' AND confirmed_at<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_reprint_request"
+                " ON print_jobs(reprint_request_id) WHERE reprint_request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_reprint_source"
+                " ON print_jobs(reprint_of_job_id) WHERE reprint_of_job_id<>''"
+            )
             if version < SCHEMA_VERSION:
                 self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self.conn.commit()
@@ -1098,8 +1239,8 @@ def list_backups() -> list[dict]:
     return items
 
 
-def make_backup(prefix: str = "printflow-manual") -> dict:
-    """Консистентная копия базы файлом (безопасна при работающем сервере)."""
+def make_backup(prefix: str = "printflow-manual", keep: object | None = None) -> dict:
+    """Консистентная копия базы с единой ротацией всех снимков."""
     ensure_dirs()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -1110,9 +1251,17 @@ def make_backup(prefix: str = "printflow-manual") -> dict:
     dest = sqlite3.connect(str(target))
     try:
         source.backup(dest)
+        if keep is None:
+            try:
+                row = source.execute(
+                    "SELECT value FROM settings WHERE key='backup_keep'").fetchone()
+                keep = json.loads(row[0]) if row else DEFAULT_SETTINGS["backup_keep"]
+            except (sqlite3.Error, json.JSONDecodeError, TypeError):
+                keep = DEFAULT_SETTINGS["backup_keep"]
     finally:
         dest.close()
         source.close()
+    rotate_backups(BACKUP_DIR, keep)
     return {"ok": True, "file": target.name}
 
 

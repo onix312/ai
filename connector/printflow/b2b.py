@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from .accounting import num, rub
+from .accounting import num
 from .config import now_iso
 from .db import Database
 

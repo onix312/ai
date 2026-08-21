@@ -17,7 +17,6 @@ import sys
 import threading
 import tkinter as tk
 import webbrowser
-from pathlib import Path
 from tkinter import messagebox, ttk
 
 import pf

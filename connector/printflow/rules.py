@@ -48,7 +48,7 @@ TRIGGERS = {
 ACTIONS = {
     "notify": "Сообщение в Telegram",
     "event": "Запись в журнал",
-    "reprint": "Повторить задание",
+    "reprint": "Запросить подтверждение повтора",
     "pause": "Пауза печати",
 }
 
@@ -60,7 +60,7 @@ DEFAULT_RULES = [
         "config": {"template": "⚠ Печать сорвалась: {name}\n{detail}"},
     },
     {
-        "id": "rule_print_failed_reprint", "name": "Ошибка печати → авто-повтор",
+        "id": "rule_print_failed_reprint", "name": "Ошибка печати → запрос повтора",
         "event": "print_failed", "action": "reprint", "enabled": 0, "position": 2,
         "config": {},
     },
@@ -107,6 +107,12 @@ class RulesEngine:
         self._lock = threading.RLock()
         self._debt_reported: dict[str, str] = {}  # rule_id -> day
         self.seed_defaults()
+        self.db.execute(
+            "UPDATE automation_rules SET name=?,updated_at=?"
+            " WHERE id='rule_print_failed_reprint' AND name=?",
+            ("Ошибка печати → запрос повтора", now_iso(),
+             "Ошибка печати → авто-повтор"),
+        )
 
     # ------------------------------------------------------------- хранилище
     def seed_defaults(self) -> None:
@@ -191,16 +197,17 @@ class RulesEngine:
                               text or _render("{name} {detail}", ctx), ctx.get("printer_id", ""),
                               {"rule_id": rule["id"], "event": rule["event"]})
         elif action == "reprint":
-            try:
-                row = self.manager.reprint_last_failed(str(ctx.get("order_number") or ""))
-                self.db.add_event("rule", f"Правило: {rule['name']}",
-                                  f"Задание «{row.get('name')}» повторено автоматически",
-                                  "", {"rule_id": rule["id"]})
-                if text:
-                    self.manager.notify_async(f"PrintFlow · правило «{rule['name']}»\n{text}")
-            except Exception as exc:
-                self.db.add_event("rule", f"Правило: {rule['name']} не сработало",
-                                  str(exc), "", {"rule_id": rule["id"]})
+            # Повтор после брака — исключение, а не безопасная типовая операция:
+            # правило лишь поднимает задачу, причину и очередь подтверждает мастер.
+            detail = "Нужен разбор причины и подтверждение повтора в карточке заказа"
+            self.db.add_event(
+                "rule", f"Правило: {rule['name']} — требуется подтверждение",
+                detail, str(ctx.get("printer_id") or ""),
+                {"rule_id": rule["id"], "job_id": ctx.get("job_id") or ""},
+            )
+            self.manager.notify_async(
+                f"PrintFlow · {rule['name']}\n{detail}" + (f"\n{text}" if text else "")
+            )
         elif action == "pause":
             printer = self.manager.get(ctx.get("printer_id") or "")
             if printer:

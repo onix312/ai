@@ -83,6 +83,7 @@
   var ops = {};
   function $(s){ return document.querySelector(s); }
   function toast(t){ var m=$('#msg'); m.textContent=t; m.classList.add('on'); clearTimeout(toast._t); toast._t=setTimeout(function(){m.classList.remove('on');},2400); }
+  function get(p){ return fetch(p).then(function(r){return r.json();}); }
   function post(p, body){ return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();}); }
   function num(v,d){ var n=parseFloat(String(v??'').replace(',','.')); return isFinite(n)?n:(d||0); }
   function pid(){ return (ops.printer && ops.printer.id) || ''; }
@@ -145,11 +146,23 @@
   document.addEventListener('click', function(e){
     var f = e.target.closest('[data-fulfill]');
     if (f) {
-      if (!confirm('Выдать заказ? Остаток оплаты будет зачислен.')) return;
-      post('/api/order/fulfill', { id: f.dataset.fulfill }).then(function(d){
-        if (d.ok) toast('Выдан №' + d.order.number); else toast(d.error || 'Ошибка');
+      get('/api/order/fulfillment?id=' + encodeURIComponent(f.dataset.fulfill)).then(function(info){
+        if (!info.can_fulfill) { toast((info.blocks || []).map(function(x){ return x.text; }).join('; ')); return; }
+        var due = num((info.payment || {}).due);
+        if (due) {
+          toast('Остаток ' + due + ' ₽ — выберите кассу или долг в основной панели.');
+          return;
+        }
+        if (!confirm('Заказ полностью оплачен. Подтвердить физическую передачу клиенту?')) return;
+        return post('/api/order/fulfill', {
+          id: f.dataset.fulfill, handoff_confirmed: true,
+          payment_action: 'none', payment_method: ''
+        });
+      }).then(function(d){
+        if (!d) return;
+        if (d.ok) toast('Выдан №' + d.number); else toast(d.error || 'Ошибка');
         refresh();
-      });
+      }).catch(function(err){ toast(err.message || 'Ошибка'); });
       return;
     }
     if (e.target.id === 'b_cam') { refresh(); return; }

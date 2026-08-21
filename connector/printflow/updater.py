@@ -28,13 +28,11 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from .config import DATA_DIR, ROOT, now_iso
+from .config import BACKUP_DIR, ROOT, now_iso, rotate_backups
 
 REPO = "onix312/ai"
 DEFAULT_BRANCH = "main"
 CACHE_SECONDS = 6 * 3600
-BACKUP_DIR = DATA_DIR / "backups"
-BACKUP_KEEP = 10
 GIT_TIMEOUT = 120
 
 # Что никогда не перезаписываем архивом: пользовательское и служебное.
@@ -340,12 +338,16 @@ class UpdateChecker:
             changed = bool(out.strip()) if code == 0 else True
         if not changed:
             return False
-        code, _ = _run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                        "-q", "-r", str(requirements)], timeout=600)
-        return code == 0
+        code, out = _run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                          "-q", "-r", str(requirements)], timeout=600)
+        if code != 0:
+            raise ValueError(
+                "Файлы обновлены, но зависимости установить не удалось. "
+                f"Запустите python pf.py deps перед перезапуском: {out[:300]}")
+        return True
 
     def _backup_db(self) -> Path | None:
-        """Копия базы перед обновлением. Держим последние BACKUP_KEEP штук."""
+        """Копия базы перед обновлением с общей настраиваемой ротацией."""
         from .config import DB_FILE
         if not Path(DB_FILE).is_file():
             return None
@@ -358,12 +360,11 @@ class UpdateChecker:
                 self.db.backup_to(target)
             else:
                 shutil.copy2(DB_FILE, target)
-            old = sorted(BACKUP_DIR.glob("printflow-*.sqlite3"))[:-BACKUP_KEEP]
-            for path in old:
-                path.unlink(missing_ok=True)
+            keep = self._setting("backup_keep", 20)
+            rotate_backups(BACKUP_DIR, keep)
             return target
-        except Exception:
-            return None
+        except Exception as exc:
+            raise ValueError(f"Не удалось сделать копию базы перед обновлением: {exc}") from exc
 
     def _set_setting(self, key: str, value) -> None:
         if not self.db:

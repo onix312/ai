@@ -17,7 +17,7 @@ import json
 import ssl
 import threading
 import time
-from typing import Any, Callable
+from typing import Callable
 
 try:
     import paho.mqtt.client as mqtt

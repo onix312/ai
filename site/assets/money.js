@@ -7,7 +7,8 @@ const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, dateText
   drawChart, legend, store, catName } = U;
 const { get, post } = PF.api;
 
-let editingSpool = null, editingCatalog = null;
+let editingSpool = null, editingCatalog = null, receivingShoppingItem = null;
+let receivingShoppingRequestId = '';
 
 /* ============================================================ финансы */
 function kpi(label, value, sub, kind, extra) {
@@ -155,18 +156,98 @@ async function loadShopping() {
     const items = data.items || [];
     host.innerHTML = items.length ? items.map((i, idx) => {
       return `<div class="tx-row"><div class="tx-body"><b>${esc(i.name || i.material)}</b>`
-        + `<small>${esc(i.reason || '')} · ${nfmt(i.qty)} ${esc(i.unit || 'кг')}</small></div>`
-        + `<button class="btn sm" type="button" data-shop-done="${esc(i.id)}">✓</button>`
+        + `<small>${esc(i.reason || '')} · план ${nfmt(i.qty)} ${esc(i.unit || 'кг')}</small></div>`
+        + `<button class="btn sm primary" type="button" data-shop-receive="${esc(i.id)}">Принять</button>`
         + `<button class="icon-btn sm" type="button" data-shop-del="${esc(i.id)}">×</button></div>`;
     }).join('') : '<div class="empty compact"><span>Список пуст — нажмите «Автозаполнить» или добавьте вручную.</span></div>';
 
-    host.querySelectorAll('[data-shop-done]').forEach((b) => b.addEventListener('click', async () => {
-      try { await post('/api/shopping/toggle', { id: b.dataset.shopDone, done: true }); loadShopping(); toast('Отмечено купленным'); } catch (e) { fail(e); }
+    host.querySelectorAll('[data-shop-receive]').forEach((b) => b.addEventListener('click', () => {
+      const item = items.find((row) => row.id === b.dataset.shopReceive);
+      if (item) openShoppingReceive(item);
     }));
     host.querySelectorAll('[data-shop-del]').forEach((b) => b.addEventListener('click', async () => {
       try { await post('/api/shopping/delete', { id: b.dataset.shopDel }); loadShopping(); } catch (e) { fail(e); }
     }));
   } catch (e) { host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`; }
+}
+
+function shoppingReceiptSummary() {
+  const count = Math.max(0, Math.round(num($('sr_spool_count').value)));
+  const grams = Math.max(0, num($('sr_spool_grams').value));
+  const amount = Math.max(0, num($('sr_total_amount').value));
+  const target = $('sr_summary').querySelector('span:last-child');
+  target.innerHTML = `Будет создано <b>${nfmt(count)} катушек</b>, всего <b>${nfmt(count * grams)} г</b>`
+    + (amount ? `; расход <b>${money(amount)}</b>` : '; без финансовой проводки');
+}
+
+function openShoppingReceive(item) {
+  receivingShoppingItem = item;
+  receivingShoppingRequestId = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : `shopping-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  $('sr_item_name').textContent = item.name || item.material || 'Позиция закупки';
+  $('sr_material').value = item.material || 'PLA';
+  $('sr_color_name').value = item.color_name || '';
+  $('sr_brand').value = item.brand || '';
+  $('sr_supplier').value = '';
+  $('sr_spool_count').value = Math.max(1, Math.round(num(item.qty, 1)));
+  $('sr_spool_grams').value = 1000;
+  $('sr_total_amount').value = Math.max(0,
+    num(PF.state.settings.default_spool_price, 1600)
+      * Math.max(1, Math.round(num(item.qty, 1))));
+  $('sr_color_hex').value = '#4b5563';
+  $('sr_confirmed').checked = false;
+
+  const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
+  $('sr_account').innerHTML = accounts.map((a) =>
+    `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  const defaultAccount = PF.state.settings.default_account || '';
+  if ([...$('sr_account').options].some((o) => o.value === defaultAccount)) {
+    $('sr_account').value = defaultAccount;
+  }
+  $('sr_warehouse').innerHTML = '<option value="">Без привязки</option>'
+    + (PF.state.warehouses || []).filter((w) => !num(w.archived)).map((w) =>
+      `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+  shoppingReceiptSummary();
+  openModal('shopping_receive_modal');
+}
+
+async function submitShoppingReceive() {
+  if (!receivingShoppingItem) return;
+  const confirmed = $('sr_confirmed').checked;
+  if (!confirmed) return fail(new Error('Подтвердите фактическое получение и сумму'));
+  const amount = num($('sr_total_amount').value);
+  const button = $('sr_submit');
+  button.disabled = true;
+  try {
+    const result = await post('/api/shopping/receive', {
+      id: receivingShoppingItem.id,
+      received_confirmed: true,
+      payment_confirmed: amount > 0,
+      material: $('sr_material').value.trim(),
+      color_name: $('sr_color_name').value.trim(),
+      color_hex: $('sr_color_hex').value,
+      brand: $('sr_brand').value.trim(),
+      supplier: $('sr_supplier').value.trim(),
+      spool_count: num($('sr_spool_count').value),
+      spool_grams: num($('sr_spool_grams').value),
+      total_amount: amount,
+      account_id: $('sr_account').value,
+      warehouse_id: $('sr_warehouse').value,
+      request_id: receivingShoppingRequestId,
+    });
+    closeModal('shopping_receive_modal');
+    receivingShoppingItem = null;
+    toast(result.already_received ? 'Приход уже был записан' : 'Пластик принят',
+      `${nfmt((result.spools || []).length)} катушек · ${nfmt(result.received_grams)} г`);
+    await PF.refreshCore();
+    PF.refreshFinance();
+    await loadShopping();
+  } catch (e) {
+    fail(e);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 /* ================================================== QR катушки и сушка */
@@ -948,6 +1029,10 @@ function bind() {
       loadShopping();
     } catch (e) { fail(e); }
   });
+  ['sr_spool_count', 'sr_spool_grams', 'sr_total_amount'].forEach((id) => {
+    $(id).addEventListener('input', shoppingReceiptSummary);
+  });
+  $('sr_submit').addEventListener('click', submitShoppingReceive);
   $('spool_save').addEventListener('click', async () => {
     const payload = {
       id: editingSpool || '',

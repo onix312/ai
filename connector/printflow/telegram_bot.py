@@ -24,13 +24,13 @@ from .config import now_iso
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = """PrintFlow 5.0 — панель в кармане.
+HELP = """PrintFlow 8.2 — панель в кармане.
 
 Кнопки внизу или команды (без слэша, в любом регистре):
 • панель — всё сразу: печать, деньги, план, долги
 • статус · кадр · очередь — что происходит сейчас
 • филамент · пластик — остатки катушек и прогноз закупки
-• закупка — список покупок · закупка авто — автозаполнить · закупка купил 2
+• закупка — список покупок · закупка авто — автозаполнить
 • таймлапс · кадры — последние снимки печати одним сообщением
 • живой — автообновляемый дашборд (стоп живой — выключить)
 • деньги · день — финансы
@@ -48,7 +48,7 @@ HELP = """PrintFlow 5.0 — панель в кармане.
 • пропустить 2 — исключить объект N из печати
 • выше 1001 · ниже 1001 — порядок заданий в очереди
 • поток 90 — процент подачи филамента (50–150%)
-• повторить / повторить 1001 — снова в очередь сорванное задание
+• повторить / повторить 1001 — подготовить повтор после разбора брака
 • следи 1001 — прогресс заказа каждые 10%
 • простой — сколько простаивает принтер и что теряем
 • фото — прикрепить фото к заказу (или «фото 1001»)
@@ -280,10 +280,12 @@ class TelegramBot:
             return f"✅ Деталь снята. Простой после печати {result.get('idle_min', 0)} мин."
         if command == "reprint":
             try:
-                row = self.manager.reprint_last_failed()
-                return f"↻ Задание «{row.get('name')}» снова в очереди."
+                row = self.manager.reprint_last_failed(
+                    confirmed=True, request_id=uid("tg-reprint")
+                )
+                return f"↻ Повтор «{row.get('name')}» подготовлен. Запуск подтвердите отдельно."
             except Exception as exc:
-                return f"Не получилось повторить: {exc}"
+                return f"Не получилось подготовить повтор: {exc}"
         if command == "panel":
             return self.text_panel()
         if command == "plan":
@@ -470,10 +472,8 @@ class TelegramBot:
                 return self._reply(chat, self._list_printers(chat))
             digits = any(w.isdigit() for w in text.split()[1:])
             return self._reply(chat, self._set_status(text) if digits else self.text_status())
-        if word in ("выдать", "выдал", "закрыть"):
-            number = next((w for w in text.split()[1:] if w.isdigit()), "")
-            return self._reply(chat, self._fulfill(number) if number
-                               else "Укажите номер: «выдать 1001».")
+        if word in ("выдать", "выдал", "выдан", "закрыть"):
+            return self._reply(chat, self._fulfill(text))
         if word in ("новый", "заказ", "создать"):
             return self._reply(chat, self._new_order(text))
         if word in ("кадр", "камера", "фото", "photo", "cam"):
@@ -531,10 +531,15 @@ class TelegramBot:
         if word in ("повторить", "перепечатать", "reprint", "повтор"):
             number = next((w for w in text.split()[1:] if w.isdigit()), "")
             try:
-                row = self.manager.reprint_last_failed(number)
-                return self._reply(chat, f"↻ Задание «{row.get('name')}» снова в очереди.")
+                row = self.manager.reprint_last_failed(
+                    number, confirmed=True, request_id=uid("tg-reprint")
+                )
+                return self._reply(
+                    chat,
+                    f"↻ Повтор «{row.get('name')}» подготовлен. Запуск подтвердите отдельно.",
+                )
             except Exception as exc:
-                return self._reply(chat, f"Не получилось повторить: {exc}")
+                return self._reply(chat, f"Не получилось подготовить повтор: {exc}")
         if word in ("простой", "idle"):
             stats = self.manager.idle_stats()
             return self._reply(chat,
@@ -550,34 +555,36 @@ class TelegramBot:
             return self._reply(chat, f"✅ Деталь снята. Простой после печати {result.get('idle_min', 0)} мин.")
         if word in ("стоп", "stop"):
             return self._reply(chat, self.do_stop(chat, text))
-        if word in ("готов", "ready", "выдан"):
+        if word in ("готов", "ready"):
             return self._reply(chat, self.order_ready(text))
         self._reply(chat, "Не понял команду. Напишите «помощь» — покажу список.")
 
     # -------------------------------------------------------------- ответы
     def order_ready(self, raw: str) -> str:
-        """«готов 1001» — перевести заказ в статус ready и дать шаблон клиенту."""
+        """«готов 1001» — подтвердить приёмку через общий сервис завершения."""
         words = raw.lower().replace("ё", "е").split()
         number = next((w for w in words[1:] if w.isdigit()), "")
         if not number:
             return ("Укажите номер заказа: «готов 1001».\n"
-                    "Заказ перейдёт в статус «Готов», я пришлю текст для клиента.")
+                    "Команда подтвердит визуальную приёмку и подготовит текст клиенту.")
         order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
         if not order:
             return f"Заказ №{number} не найден."
-        ready = self.db.one("SELECT id FROM statuses WHERE id='ready'")
-        if ready and order.get("status") != "ready":
-            self.db.execute("UPDATE orders SET status='ready', updated_at=? WHERE id=?",
-                            (now_iso(), order["id"]))
-            self.db.add_event("order", "Заказ готов (Telegram)",
-                              f"№{order.get('number')} · {order.get('product')}",
-                              data={"order_id": order["id"]})
-        name = (order.get("customer_name") or "").strip()
-        hello = f", {name}," if name else ","
-        return (f"Заказ №{order.get('number')} готов ✓\n\nШаблон для клиента:\n"
-                f"Здравствуйте{hello} ваш заказ «{order.get('product') or ''}» готов.\n"
-                f"Можно забрать {order.get('due') or 'в удобное время'}. Спасибо!")
-        """Отправить сообщение в канал клиента PrintFlow не может — это шаблон для копирования."""
+        from .completion import OrderCompletion
+        try:
+            result = OrderCompletion(self.db, self.manager.repo).accept(
+                order["id"], quality_confirmed=True
+            )
+        except ValueError as exc:
+            return f"Не получилось принять заказ №{number}: {exc}"
+        actual = result.get("actual") or {}
+        repeated = " (уже был принят)" if result.get("already_accepted") else ""
+        return (
+            f"Заказ №{number} готов ✓{repeated}\n"
+            f"Факт: {round(num(actual.get('grams')), 1)} г · "
+            f"{round(num(actual.get('hours')), 2)} ч · {_money(actual.get('cost'))}\n\n"
+            f"Текст для клиента (не отправлен):\n{result.get('message') or ''}"
+        )
 
     def text_status(self) -> str:
         state = self.manager.snapshot()
@@ -739,15 +746,11 @@ class TelegramBot:
             if result.get("count"):
                 return f"🛒 Добавлено в закупку: {result['count']} позиций.\n\n" + shop.text()
             return "🛒 Добавлять нечего — катушки и запас в порядке.\n\n" + shop.text()
-        # «закупка купил <id/позиция>» — отметить купленным (по номеру строки)
-        if len(words) > 1 and words[1] == "купил":
-            index = next((w for w in words[2:] if w.isdigit()), "")
-            items = shop.items()
-            if index and 1 <= int(index) <= len(items):
-                item = items[int(index) - 1]
-                shop.toggle(item["id"], True)
-                return f"✅ Отмечено купленным: {item.get('name') or item.get('material')}."
-            return "Укажите номер строки: «закупка купил 2»."
+        # Одной команды недостаточно для честной приёмки: нужны фактические
+        # количество/вес, сумма и касса. Не закрываем строку без этих данных.
+        if len(words) > 1 and words[1] in ("купил", "получил", "принял"):
+            return ("Оформите приём в панели: Склад пластика → Список закупок → «Принять». "
+                    "Там PrintFlow создаст катушки и запишет подтверждённый расход без дублей.")
         # «закупка <материал> <qty>» — добавить вручную
         if len(words) > 1 and words[1] not in ("авто", "купил", "обновить", "заполнить"):
             material = words[1].upper()
@@ -868,16 +871,15 @@ class TelegramBot:
         jobs = self.db.query(
             "SELECT * FROM print_jobs WHERE state='failed' AND finished_at>=?"
             " ORDER BY finished_at DESC", (since,))
+        facts = self.manager.acc.defects_cost(days)
         lines = [f"❌ Брак за {int(days)} дней: {len(jobs)} печатей"]
-        grams = sum(num(job.get("grams")) for job in jobs)
-        minutes = sum(num(job.get("duration_min")) for job in jobs)
-        spool_price = num(self.db.setting("default_spool_price"), 1600)
-        overhead = (num(self.db.setting("amortization_per_hour"), 12)
-                    + num(self.db.setting("energy_price"), 6)
-                    * num(self.db.setting("power_kw"), 0.15))
-        lost = grams / 1000.0 * spool_price + minutes / 60.0 * overhead
-        lines.append(f"Потеряно: {round(grams)} г пластика, {_hm(minutes)} времени")
-        lines.append(f"≈ {_money(lost)} по тарифам (пластик, износ, энергия)")
+        lines.append(
+            f"Потеряно: {round(num(facts.get('grams')))} г пластика, "
+            f"{_hm(num(facts.get('minutes')))} времени"
+        )
+        lines.append(
+            f"≈ {_money(num(facts.get('cost')))}; подтверждённые разборы взяты по факту"
+        )
         for job in jobs[:6]:
             error = str(job.get("error") or "").strip()[:70]
             lines.append(f"· {job.get('name') or 'без названия'}"
@@ -1049,7 +1051,6 @@ class TelegramBot:
             return "Принтеры не добавлены."
         self._live[chat] = {"message_id": 0, "text": ""}
         text = self.text_status()
-        token = self._settings().get("telegram_token", "")
         try:
             sent = self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                               "disable_web_page_preview": "true"}, timeout=15)
@@ -1069,7 +1070,6 @@ class TelegramBot:
         """Обновить живые дашборды, если печать активна и текст изменился."""
         if not self._live:
             return
-        token = self._settings().get("telegram_token", "")
         for chat, state in list(self._live.items()):
             text = self.text_status()
             if text == state.get("text"):
@@ -1173,7 +1173,6 @@ class TelegramBot:
 
     def do_sell(self, nom_id: str) -> str:
         from .documents import Documents
-        from .nomenclature import Nomenclature
         item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         if not item:
             return "Позиция не найдена."
@@ -1195,30 +1194,50 @@ class TelegramBot:
         row = self.db.one("SELECT id FROM statuses WHERE is_final=1 ORDER BY position LIMIT 1")
         return (row or {}).get("id")
 
-    def _fulfill(self, number: str) -> str:
+    def _fulfill(self, raw: str) -> str:
+        """Подтверждаемая выдача: «выдать 1001 оплачен» или «… в долг»."""
+        words = raw.lower().replace("ё", "е").split()
+        number = next((word for word in words[1:] if word.isdigit()), "")
+        if not number:
+            return "Укажите номер: «выдать 1001 оплачен» или «выдать 1001 в долг»."
         order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
         if not order:
             return f"Заказ №{number} не найден."
-        final = self._final_status_id()
-        if not final:
-            return "Не настроен финальный статус."
-        if order.get("status") == final:
-            return f"Заказ №{number} уже выдан."
-        rest = round(max(0.0, num(order.get("price")) -
-                          max(num(order.get("paid")), num(order.get("prepaid")))), 2)
-        if rest > 0 and self.db.setting("auto_income_on_done", True):
-            self.manager.acc.add_payment(order["id"], rest, "payment",
-                                         order.get("account_id") or "", "выдача из Telegram")
-        self.db.execute("UPDATE orders SET status=?, closed_at=?, updated_at=? WHERE id=?",
-                        (final, now_iso(), now_iso(), order["id"]))
-        self.db.add_event("order", "Заказ выдан (Telegram)",
-                          f"№{order.get('number')} · {order.get('product')}",
-                          data={"order_id": order["id"]})
-        name = (order.get("customer_name") or "").strip()
-        return (f"✅ Заказ №{order.get('number')} выдан."
-                + (f" Зачислено {_money(rest)}." if rest > 0 else "")
-                + (f"\n\nТекст клиенту:\nЗдравствуйте{', ' + name if name else ''}! "
-                   f"Ваш заказ «{order.get('product') or ''}» готов, можно забирать. Спасибо!"))
+        paid_confirmed = any(token in words for token in (
+            "оплачен", "оплачено", "оплата", "получено", "получена",
+        ))
+        debt_confirmed = "долг" in words
+        due = self.manager.acc.order_economics(order).get("debt", 0)
+        if num(due) > 0 and not (paid_confirmed or debt_confirmed):
+            return (f"По заказу №{number} осталось {_money(due)}.\n"
+                    f"Подтвердите: «выдать {number} оплачен» или «выдать {number} в долг».")
+        if num(due) <= 0:
+            action = "none"
+        else:
+            action = "received" if paid_confirmed else "debt"
+        method = ("cash" if any("налич" in word for word in words) else
+                  "card" if any("карт" in word for word in words) else
+                  "transfer" if any("перевод" in word for word in words) else "other")
+        from .fulfillment import OrderFulfillment
+        from .stock import Stock
+        try:
+            result = OrderFulfillment(
+                self.db, self.manager.repo, Stock(self.db), self.manager.acc
+            ).fulfill(
+                order["id"],
+                handoff_confirmed=True,
+                payment_action=action,
+                payment_method=method if action == "received" else "",
+            )
+        except ValueError as exc:
+            return f"Не получилось выдать заказ №{number}: {exc}"
+        repeated = " (уже был выдан)" if result.get("already_fulfilled") else ""
+        money = (f"получено {_money(result.get('collected'))}"
+                 if num(result.get("collected")) > 0 else
+                 f"оставлен долг {_money(result.get('debt'))}"
+                 if num(result.get("debt")) > 0 else "оплачен ранее")
+        return (f"✅ Заказ №{number} выдан{repeated} · {money}.\n\n"
+                f"Текст клиенту (не отправлен):\n{result.get('message') or ''}")
 
     def _pay(self, text: str) -> str:
         import re as _re
@@ -1234,8 +1253,13 @@ class TelegramBot:
             return f"Заказ №{number} не найден."
         if amount <= 0:
             return "Сумма должна быть больше нуля."
-        self.manager.acc.add_payment(order["id"], amount, "payment",
-                                     order.get("account_id") or "", "оплата из Telegram")
+        try:
+            self.manager.acc.add_payment(
+                order["id"], amount, "payment",
+                order.get("account_id") or "", "other", "оплата из Telegram",
+            )
+        except ValueError as exc:
+            return f"Не получилось записать оплату: {exc}"
         left = max(0.0, num(order.get("price")) -
                    (max(num(order.get("paid")), num(order.get("prepaid"))) + amount))
         return f"💰 Принято {_money(amount)} по заказу №{number}." + \
@@ -1264,39 +1288,23 @@ class TelegramBot:
         return f"✅ Заказ №{number} → «{status['id']}»."
 
     def _parse_new_order(self, text: str) -> dict:
-        import re as _re
-        body = text.split(None, 1)[1] if " " in text else ""
-        price = 0.0
-        m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)", body)
-        if m:
-            price = num(m.group(1).replace(" ", "").replace(",", "."))
-            body = body.replace(m.group(0), " ")
-        qty = 1.0
-        m = _re.search(r"(\d+)\s*шт", body)
-        if m:
-            qty = float(m.group(1))
-            body = body.replace(m.group(0), " ")
-        tokens = [t for t in body.split() if t.strip()]
-        product, client = " ".join(tokens), ""
-        if len(tokens) >= 2 and tokens[-1].isalpha() and len(tokens[-1]) > 1:
-            client = tokens[-1]
-            product = " ".join(tokens[:-1])
-        return {"product": product.strip() or "Заказ", "client": client,
-                "price": price, "qty": qty}
+        """Единый локальный парсер для Telegram и панели «Заказ из текста»."""
+        from .order_intake import parse_order_text
+        parsed = parse_order_text(text)
+        return {**parsed, "client": parsed.get("client", "")}
 
     def _new_order(self, text: str) -> str:
-        parsed = self._parse_new_order(text)
-        if not parsed["product"]:
+        from .order_intake import OrderIntake
+        preview = OrderIntake(self.db).preview(text, "telegram")
+        parsed = preview["parsed"]
+        draft = preview["draft"]
+        if not draft["product"]:
             return "Формат: «новый адресник 2шт 900р Мария»."
-        order = self.manager.repo.save_order({
-            "product": parsed["product"], "customer_name": parsed["client"],
-            "status": "new", "qty": parsed["qty"], "price": parsed["price"],
-            "channel": "telegram", "notes": "заказ из Telegram",
-        })
-        return (f"📝 Создан заказ №{order.get('number')} «{parsed['product']}»"
+        order = self.manager.repo.save_order(draft)
+        return (f"📝 Создан заказ №{order.get('number')} «{draft['product']}»"
                 + (f" · {int(parsed['qty'])} шт" if parsed["qty"] > 1 else "")
-                + (f" · {_money(parsed['price'])}" if parsed["price"] else "")
-                + (f" · {parsed['client']}" if parsed["client"] else ""))
+                + (f" · {_money(draft['price'])}" if draft["price"] else "")
+                + (f" · {draft['customer_name']}" if draft["customer_name"] else ""))
 
     # -------------------------------------------------------------- команды
     def _pick_printer(self, chat: str = ""):

@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-from typing import Any
 
 from .accounting import num, uid
 from .config import now_iso
