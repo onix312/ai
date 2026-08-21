@@ -37,13 +37,25 @@ _NOZZLE_RE = re.compile(r";\s*nozzle[_ ]diamete?r?\s*[:=]\s*([\d.]+)", re.IGNORE
 _PLATE_RE = re.compile(r"plate_(\d+)\.gcode", re.IGNORECASE)
 
 # --- расширенные паттерны для современных слайсеров ---
-# Время: "estimated_time: 47m 12s", "total estimated time: 1h 20m", "model printing time: 1d 2h"
+# Время: "estimated_time: 47m 12s", "total estimated time: 1h 20m",
+# "estimated printing time (normal mode) = 284m 19s" (Bambu/Orca/Prusa),
+# "total estimated time (silent mode) = 1h 20m", "model printing time: 1d 2h",
+# "print time = ...", "print_time = ...". В скобках может быть режим (normal/silent/sport).
+# Ключевые слова допускают варианты estimated_time/estimated time/print_time/print time.
 _TIME_HUMAN_RE = re.compile(
-    r";\s*(?:total\s+)?(?:model\s+)?(?:estimated_?time|printing\s+time|estimated\s+printing\s+time)\s*[:=]\s*([^\r\n]+)",
+    r";\s*"
+    r"(?:total\s+)?"
+    r"(?:model\s+)?"
+    r"(?:estimated[\s_]?(?:printing[\s_]?)?time|print(?:ing)?[\s_]?time|estimated[\s_]?time)"
+    r"(?:\s*\([^)]*\))?"
+    r"\s*[:=]\s*"
+    r"([^\r\n;]+)",
     re.IGNORECASE,
 )
 # Альтернативно: "; prediction: 4823" (секунды) из некоторых экспортов
 _PREDICTION_RE = re.compile(r";\s*prediction\s*[:=]\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
+# Плейсхолдер для отметки того, что паттерн времени уже учитывает режим в скобках
+# — оставлен для совместимость с импортами из старых тестов.
 
 # Граммы — много вариантов, все case-insensitive, ":" или "=", с [g] или без, с "g" суффиксом, с "_" или пробелом
 # Приоритет: total -> filament
@@ -213,41 +225,9 @@ def _extract_grams_from_text(text: str) -> float:
             # если строка содержит [g] — уже граммы, иначе проверяем наличие 'g' рядом с числом и отсутствие 'mm'/'m' как метров
             if "[g]" not in ll:
                 continue
-        # извлечь часть после : или =
-        m = re.search(r"[:=]\s*(.+)$", line)
-        if not m:
-            continue
-        part = m.group(1)
-        # убрать комментарии в скобках типа (PLA Basic)
-        part = re.sub(r"\(.*?\)", "", part)
-        nums = re.findall(r"(\d+(?:\.\d+)?)", part)
-        if not nums:
-            continue
-        # если мы уже нашли через паттерн точное первое число, а тут список — нужно добавить недостающие
-        # чтобы не дублировать, если found и total уже содержит первое число из этой строки, вычитаем
-        # Проще: если в строке запятая — суммируем все числа из part
-        if "," in part:
-            try:
-                s = sum(float(n) for n in nums)
-                # если pat уже добавил первое число, добавим только остальные
-                # проверим: если total уже включает первое число этой строки — вычесть его из суммы
-                # эвристика: если found и s>0, а первое число уже в total, мы пересчитаем заново всю сумму через строки
-                # поэтому для строк с запятой — считаем отдельно и позже пересоберём
-                pass
-            except ValueError:
-                pass
-        # для строк без запятой — уже посчитано паттерном, пропустим чтобы не дублировать
-        # но для строк с запятой — нужно учесть все числа
-        if "," in part:
-            try:
-                # если эта строка ещё не учтена полностью (pat взял только первое), добавим остальные
-                # найдём сколько уже добавлено из этой строки через pat (первое число)
-                first = float(nums[0]) if nums else 0
-                # проверим, содержит ли total уже first (приблизительно)
-                # просто пересчитаем total заново через все строки с запятой для надёжности позже
-                pass
-            except ValueError:
-                pass
+        # Извлечь часть после : или = — числа паттерны уже учли выше;
+        # этот проход оставлен для совместимости, фактическое суммирование
+        # выполняется ниже в total2 (см. «пересчёт через все строки»).
 
     # Пересчёт через все строки с учётом запятых — самый надёжный для многоцвета
     total2 = 0.0
@@ -428,36 +408,35 @@ def estimate_3mf(path: Path) -> dict:
     plates = detail.get("plates", [])
     # Если gcode-плиты пустые, но есть данные из slice_info — используем их
     if not plates:
-        slice_info = detail.get("slice_info", {})
+        slice_info = normalize_slice_info(detail.get("slice_info", {}))
         si_plates = slice_info.get("plates") if isinstance(slice_info, dict) else None
         if si_plates:
-            for sp in si_plates:
+            for i, sp in enumerate(si_plates, start=1):
                 try:
-                    grams = float(sp.get("weight") or 0)
+                    grams = _float(sp.get("weight"))
                     # prediction в секундах
-                    minutes = round(float(sp.get("prediction") or 0) / 60.0, 1)
-                    idx = int(sp.get("index") or len(plates) + 1)
+                    minutes = round(_float(sp.get("prediction")) / 60.0, 1)
+                    idx = int(sp.get("index") or i)
                     filaments = []
                     for f in sp.get("filaments", []):
-                        try:
-                            fg = float(f.get("used_g") or 0)
-                            if fg:
-                                filaments.append(
-                                    {
-                                        "type": str(f.get("type") or "").upper(),
-                                        "color": str(f.get("color") or "#CCCCCC"),
-                                        "grams": fg,
-                                    }
-                                )
-                        except Exception:
+                        if not isinstance(f, dict):
                             continue
+                        fg = _float(f.get("used_g"))
+                        if fg:
+                            filaments.append(
+                                {
+                                    "type": str(f.get("type") or "").upper(),
+                                    "color": str(f.get("color") or "#CCCCCC"),
+                                    "grams": round(fg, 2),
+                                }
+                            )
                     # если weight пустой, суммируем used_g
                     if not grams and filaments:
                         grams = round(sum(x.get("grams", 0) for x in filaments), 1)
                     plates.append(
                         {
                             "minutes": minutes,
-                            "grams": grams,
+                            "grams": round(grams, 1) if grams else 0.0,
                             "plate_index": idx,
                             "filaments": filaments,
                             "source": "slice_info",
@@ -488,6 +467,154 @@ def estimate_3mf(path: Path) -> dict:
     if all_fils:
         result["filaments"] = all_fils
     return result
+
+
+# Плотность пластика по умолчанию для пересчёта метров -> граммы, когда в
+# slice_info.config нет used_g, а есть только used_m (PLA ~1.24 г/см³,
+# 1.75 мм → ~2.98 мг/мм ≈ 2.98 г/м). Совпадает с константой для фолбэка.
+_MM_TO_GRAMS_PLA = 0.002976
+
+
+def _float(value, default: float = 0.0) -> float:
+    """Безопасное приведение к float: строки/числа/мусор -> float или default."""
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_slice_plate(raw: dict) -> dict | None:
+    """Привести одну запись плиты к единому виду.
+
+    Унифицирует разнобой форматов Bambu/Orca/старых сборок:
+      - ключ списка филаментов: ``filaments`` или ``filament``;
+      - вес плиты: ``weight`` (иногда строка), иначе сумма ``used_g``;
+      - если ``used_g`` пуст/0, но есть ``used_m`` — оценить граммы по PLA;
+      - время: ``prediction`` в секундах;
+      - индекс плиты: ``index``/``plate_index``/``plate`` (1-based).
+    """
+    if not isinstance(raw, dict):
+        return None
+    raw_fils = raw.get("filaments")
+    if raw_fils is None:
+        raw_fils = raw.get("filament")
+    if isinstance(raw_fils, dict):
+        # {"1": {...}} или одиночный объект
+        try:
+            raw_fils = list(raw_fils.values())
+        except Exception:
+            raw_fils = [raw_fils]
+    if not isinstance(raw_fils, list):
+        raw_fils = []
+
+    filaments: list[dict] = []
+    total_g = 0.0
+    for f in raw_fils:
+        if not isinstance(f, dict):
+            continue
+        used_g = _float(f.get("used_g"))
+        used_m = _float(f.get("used_m"))
+        # Bambu иногда отдаёт used_g=0, а used_m заполнен — пересчитываем
+        # по плотности PLA (лучше честная оценка, чем 0 и «граммы не найдены»).
+        if used_g <= 0 and used_m > 0:
+            used_g = round(used_m * 1000.0 * _MM_TO_GRAMS_PLA, 2)
+        if used_g > 0:
+            total_g += used_g
+        filaments.append({
+            "type": str(f.get("type") or f.get("filament_type") or "").strip().upper(),
+            "color": str(f.get("color") or f.get("filament_color") or "#CCCCCC").strip() or "#CCCCCC",
+            "used_g": round(used_g, 3),
+            "used_m": round(used_m, 3),
+            "tray_info_idx": str(f.get("tray_info_idx") or ""),
+        })
+
+    weight = _float(raw.get("weight"))
+    if weight <= 0 and total_g > 0:
+        weight = round(total_g, 2)
+    prediction = _float(raw.get("prediction"))
+    idx = _float(raw.get("index", raw.get("plate_index", raw.get("plate", 0))))
+    plate = {
+        "index": int(idx) if idx else 0,
+        "prediction": prediction,
+        "weight": round(weight, 3) if weight else 0.0,
+        "minutes": round(prediction / 60.0, 1) if prediction else 0.0,
+        "grams": round(weight, 1) if weight else 0.0,
+        "filaments": filaments,
+    }
+    # Сохранить остальные полезные поля как есть (printer_model_id, support_used и т.п.)
+    for k, v in raw.items():
+        if k not in plate and k not in ("filament", "filaments"):
+            plate[k] = v
+    return plate
+
+
+def normalize_slice_info(slice_info: object) -> dict:
+    """Привести содержимое ``Metadata/slice_info.config`` к виду ``{"plates": [...]}``.
+
+    Поддерживает:
+      * актуальный XML-формат Bambu Studio (``<plate>``), который уже
+        возвращает :func:`_parse_slice_info_xml`;
+      * старый/JSON-формат с ключом ``plate`` (dict или list);
+      * JSON-формат с ключом ``plates``;
+      * различные вложенные структуры старых сборок (``plate_1``, ``plate: {}``).
+    Ничего не ломает: если структура не распознана, возвращает исходный объект
+    как есть под ключом ``raw``.
+    """
+    if not isinstance(slice_info, dict):
+        return {"plates": [], "raw": slice_info}
+
+    # Уже нормализовано XML-парсером?
+    if isinstance(slice_info.get("plates"), list) and slice_info["plates"]:
+        # Все равно нормализуем каждую запись, чтобы добить единообразие
+        plates = []
+        for p in slice_info["plates"]:
+            np = _normalize_slice_plate(p)
+            if np:
+                plates.append(np)
+        out = dict(slice_info)
+        out["plates"] = plates
+        return out
+
+    plate_source = None
+    for key in ("plates", "plate", "Plate", "plate_list"):
+        if key in slice_info:
+            plate_source = slice_info[key]
+            break
+    if plate_source is None:
+        # старый формат: {"plate_count": N, "plate_1": {...}, "plate_2": {...}}
+        plate_kv = []
+        for k, v in slice_info.items():
+            if isinstance(k, str) and k.lower().startswith("plate_") and isinstance(v, dict):
+                plate_kv.append((k, v))
+        if plate_kv:
+            plate_kv.sort(key=lambda kv: kv[0])
+            plate_source = [v for _, v in plate_kv]
+
+    plates: list[dict] = []
+    if isinstance(plate_source, dict):
+        # одиночная плита или словарь { "1": {...}, "2": {...} }
+        if any(k.isdigit() for k in plate_source.keys() if isinstance(k, str)):
+            ordered = sorted(
+                ((k, v) for k, v in plate_source.items() if isinstance(v, dict)),
+                key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 999,
+            )
+            plate_source = [v for _, v in ordered]
+        else:
+            plate_source = [plate_source]
+    if isinstance(plate_source, list):
+        for i, p in enumerate(plate_source, start=1):
+            np = _normalize_slice_plate(p)
+            if not np:
+                continue
+            if not np.get("index"):
+                np["index"] = i
+            plates.append(np)
+
+    out = dict(slice_info)
+    out["plates"] = plates
+    return out
 
 
 def _parse_slice_info_xml(raw: str) -> dict:
@@ -601,9 +728,10 @@ def parse_3mf_complete(path: str | Path) -> dict:
                     raw = zf.read(cand.strip()).decode("utf-8", "ignore")
                     # формат XML, но может быть json в старых версиях
                     try:
-                        slice_info = json.loads(raw)
+                        parsed = json.loads(raw)
                     except json.JSONDecodeError:
-                        slice_info = _parse_slice_info_xml(raw)
+                        parsed = _parse_slice_info_xml(raw)
+                    slice_info = normalize_slice_info(parsed)
                     break
                 except Exception:
                     pass
@@ -624,39 +752,32 @@ def parse_3mf_complete(path: str | Path) -> dict:
                     continue
                 # если граммы 0 — берём из slice_info
                 if not p.get("grams"):
-                    try:
-                        w = float(si.get("weight") or 0)
-                        if w:
-                            p["grams"] = round(w, 1)
-                        else:
-                            # суммируем used_g по филаментам
-                            total_g = 0.0
-                            for f in si.get("filaments", []):
-                                try:
-                                    total_g += float(f.get("used_g") or 0)
-                                except Exception:
-                                    pass
-                            if total_g:
-                                p["grams"] = round(total_g, 1)
-                    except Exception:
-                        pass
+                    w = _float(si.get("weight"))
+                    if w:
+                        p["grams"] = round(w, 1)
+                    else:
+                        # суммируем used_g по филаментам (нормализатор уже пересчитал used_m)
+                        total_g = 0.0
+                        for f in si.get("filaments", []):
+                            total_g += _float(f.get("used_g") if isinstance(f, dict) else 0)
+                        if total_g:
+                            p["grams"] = round(total_g, 1)
                 if not p.get("minutes"):
-                    try:
-                        pred = float(si.get("prediction") or 0)
-                        if pred:
-                            p["minutes"] = round(pred / 60.0, 1)
-                    except Exception:
-                        pass
+                    pred = _float(si.get("prediction"))
+                    if pred:
+                        p["minutes"] = round(pred / 60.0, 1)
                 # филаменты из slice_info если нет
                 if not p.get("filaments") and si.get("filaments"):
                     try:
                         fils = []
                         for f in si["filaments"]:
+                            if not isinstance(f, dict):
+                                continue
                             fils.append(
                                 {
                                     "type": str(f.get("type") or "").upper(),
                                     "color": str(f.get("color") or "#CCCCCC"),
-                                    "grams": float(f.get("used_g") or 0),
+                                    "grams": round(_float(f.get("used_g")), 2),
                                 }
                             )
                         if fils:
