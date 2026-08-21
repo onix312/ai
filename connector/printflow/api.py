@@ -1331,6 +1331,11 @@ class Api:
             return 200, {**result, "job_id": job["id"]}
         if path == "/api/printer/sync-history":
             return 200, self.manager.sync_cloud_history(pid)
+        if path == "/api/estimate/pull":
+            return 200, self.manager.pull_print_file(
+                pid or body.get("printer_id", ""),
+                str(body.get("file") or body.get("name") or ""),
+            )
         if path == "/api/printer/file/delete":
             printer = self.printer_or_fail(pid)
             return 200, printer.files.delete(body.get("path", ""))
@@ -2321,6 +2326,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_b2b_doc(query)
             if path == "/api/stream":
                 return self.serve_sse()
+            if path == "/api/uploads":
+                return self.serve_upload((query.get("file") or query.get("name") or [""])[0])
             if path.startswith("/api/"):
                 code, payload = self.api.get(path, query)
                 return self.send_json(code, payload)
@@ -2552,6 +2559,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/printer/upload":
                 return self.handle_upload(query)
+            if path == "/api/estimate/upload":
+                return self.handle_estimate_upload()
             length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
             if too_large:
                 return self.send_json(413, {"error": "JSON-запрос слишком большой"})
@@ -2579,6 +2588,67 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             return self.send_json(500, {"error": str(exc)})
+
+    def serve_upload(self, name: str):
+        """Скачать сохранённый 3MF/G-code из папки uploads."""
+        safe_name = Path(name or "").name
+        target = safe_file(UPLOAD_DIR, safe_name) if safe_name else None
+        if not target or not target.is_file():
+            return self.send_json(404, {"error": "Файл не найден в uploads"})
+        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self._send_bytes(target.read_bytes(), ctype, download=target.name)
+
+    def handle_estimate_upload(self):
+        """Сохранить выбранный 3MF/G-code в uploads и вернуть вес плиты."""
+        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
+        if too_large:
+            return self.send_json(413, {"error": "Файл слишком большой"})
+        content_type = self.headers.get("Content-Type", "")
+        boundary = ""
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:].strip('"')
+        if not boundary:
+            return self.send_json(400, {"error": "Ожидается multipart/form-data"})
+        fields, upload = parse_multipart(self.rfile.read(length), boundary)
+        if not upload:
+            return self.send_json(400, {"error": "Файл не передан"})
+        name = Path(upload[0]).name
+        if not name.lower().endswith((".3mf", ".gcode")):
+            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
+        ensure_dirs()
+        local = UPLOAD_DIR / name
+        local.write_bytes(upload[1])
+        estimate = {}
+        try:
+            from .estimate import estimate_file
+            estimate = estimate_file(local) or {}
+        except Exception:
+            estimate = {}
+        grams = num(estimate.get("total_grams")) or num(estimate.get("grams"))
+        minutes = num(estimate.get("total_minutes")) or num(estimate.get("minutes"))
+        order_id = (fields or {}).get("order_id", "")
+        if order_id:
+            order = self.api.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+            if order:
+                sets, params = ["file=?", "updated_at=?"], [name, now_iso()]
+                if grams and not num(order.get("grams")):
+                    sets.append("grams=?")
+                    params.append(grams)
+                if minutes and not num(order.get("hours")):
+                    sets.append("hours=?")
+                    params.append(round(minutes / 60.0, 2))
+                params.append(order_id)
+                self.api.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", params)
+        return self.send_json(200, {
+            "ok": True, "file": name, "saved": name, "source": "upload",
+            "grams": grams, "minutes": minutes,
+            "hours": round(minutes / 60.0, 2) if minutes else 0.0,
+            "material": estimate.get("material") or "",
+            "color": estimate.get("color") or "",
+            "estimate": estimate,
+        })
 
     def handle_upload(self, query: dict):
         """Приём файла модели и отправка его на принтер по FTPS."""

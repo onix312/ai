@@ -3426,10 +3426,17 @@
      <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
    </div>
-   <label class="field"><span>Пластик, г <button class="btn sm ghost" type="button" id="of_grams_refresh" title="Взять граммы из активного задания принтера, файла или базы товаров и распределить их по катушкам" style="margin-left:6px;padding:2px 6px;font-size:11px">⟳ Обновить граммы</button> <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"><small class="hint" id="of_grams_hint">Заполняется автоматически при выборе товара из базы, файла на принтере или живого задания. Списание с катушек считается от этой цифры.</small></label>
+   <label class="field"><span>Пластик, г <button class="btn sm ghost" type="button" id="of_grams_refresh" title="Скачать 3MF/G-code с принтера в папку uploads и прочитать вес плиты. Можно выбрать файл с компьютера." style="margin-left:6px;padding:2px 6px;font-size:11px">⟳ Обновить граммы</button> <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_grams" type="number" min="0" step="any"><small class="hint" id="of_grams_hint">Кнопка скачивает файл печати с принтера (нужны IP и Access Code) в папку uploads коннектора и читает граммы слайсера. Частичный вес с принтера во время печати не подставляется.</small></label>
    <label class="field"><span>Печать, ч <small class="muted" style="font-weight:normal">(на единицу; для состава — вся плита)</small></span><input id="of_hours" type="number" min="0" step="any"></label>
    <label class="field"><span>Ручная работа, мин</span><input id="of_manual_minutes" type="number" min="0" step="any"></label>
-   <label class="field"><span>Файл на принтере</span><input id="of_file" placeholder="adresnik-v2.3mf"></label>
+   <label class="field span-2"><span>Файл на принтере
+     <button class="btn sm ghost" type="button" id="of_file_pick" title="Загрузить 3MF/G-code с компьютера в uploads" style="margin-left:6px;padding:2px 6px;font-size:11px">Выбрать файл</button>
+     <button class="btn sm ghost" type="button" id="of_file_pull" title="Скачать файл с SD-карты принтера в uploads" style="margin-left:4px;padding:2px 6px;font-size:11px">Скачать с принтера</button>
+     <button class="btn sm ghost" type="button" id="of_file_download" title="Сохранить копию из uploads на компьютер" style="margin-left:4px;padding:2px 6px;font-size:11px">На диск</button>
+   </span>
+   <input id="of_file" placeholder="adresnik-v2.3mf">
+   <input type="file" id="of_file_local" accept=".3mf,.gcode,.gcode.3mf" hidden>
+   <small class="hint">«Обновить граммы» и «Скачать с принтера» кладут файл в папку uploads коннектора и читают вес плиты. Можно выбрать файл с компьютера.</small></label>
   </div></div>
   <div class="form-section">
    <h3>Состав заказа <small class="muted" style="font-weight:normal">разные товары на одной плите</small></h3>
