@@ -211,6 +211,22 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .file-row .fsize { font-size: 11.6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .file-row .acts { display: flex; gap: 5px; }
 
+/* Кнопка-строка: выбор файла на SD-карте принтера (в карточке заказа). */
+.file-pick {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: none;
+  color: var(--text-1); font-size: 13.2px; font-family: inherit;
+  text-align: left; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease);
+}
+.file-pick:hover { background: var(--panel-2); border-color: var(--line-soft); }
+.file-pick .fic { font-size: 16px; opacity: .7; }
+.file-pick .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-pick .fsize { font-size: 11.6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.file-pick .pull { font-size: 11.4px; color: var(--accent); opacity: 0; transition: opacity .15s var(--ease); }
+.file-pick:hover .pull { opacity: 1; }
+
 .dropzone {
   display: grid; place-items: center; gap: 6px;
   padding: 26px 16px; border-radius: var(--r);

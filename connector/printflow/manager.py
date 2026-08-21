@@ -1398,18 +1398,24 @@ class PrinterManager:
             except Exception:
                 pass
 
-            # 3) телеметрия принтера как фолбэк: print_weight — полный вес плиты
+            # 3) телеметрия принтера как фолбэк. print_weight — полный вес плиты
+            # только после FINISH: во время печати это частичный расход, и его
+            # нельзя выдавать за вес изделия (иначе в заказ молча уезжает
+            # «35 г» вместо честного нуля с пометкой). Время печати
+            # (elapsed+remaining) можно использовать в любом состоянии.
             try:
                 snap = printer.snapshot()
                 task_snap = str(snap["printer"].get("task") or "").lower()
                 # только если задача совпадает с запрашиваемой (или запрашиваемая — часть снапшота)
                 if name.lower() in task_snap or task_snap in name.lower():
+                    state = str(snap["printer"].get("state") or "")
                     w = num(snap["printer"].get("weight"))
-                    if w:
-                        # время из elapsed+remaining
-                        elapsed = num(snap["printer"].get("elapsed_min"))
-                        remaining = num(snap["printer"].get("remaining_min"))
-                        minutes = elapsed + remaining if (elapsed or remaining) else 0.0
+                    if state != "FINISH":
+                        w = 0.0
+                    elapsed = num(snap["printer"].get("elapsed_min"))
+                    remaining = num(snap["printer"].get("remaining_min"))
+                    minutes = elapsed + remaining if (elapsed or remaining) else 0.0
+                    if w or minutes:
                         return {"grams": w, "minutes": minutes,
                                 "material": "", "color": "", "source": "printer"}
             except Exception:
