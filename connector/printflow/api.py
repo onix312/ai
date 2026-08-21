@@ -481,46 +481,90 @@ class Api:
         """Заявка с витрины (QR-заказ): создаёт заказ в статусе «Новая заявка».
 
         Вход строго валидируется: минимум полей, никаких внутренних ссылок.
-        Клиент создаётся автоматически по имени и контакту.
+        Клиент создаётся автоматически по имени и контакту. Поддерживает
+        корзину: ``items: [{nom_id, qty, color}]`` — создаётся по заказу
+        на каждую позицию, все привязываются к одному клиенту. Старый
+        формат с одним ``nom_id`` сохранён.
         """
         name = str(body.get("name") or "").strip()
         contact = str(body.get("phone") or body.get("messenger") or "").strip()
-        product = str(body.get("product") or "").strip()
         if not name:
             raise ValueError("Укажите имя")
         if not contact:
             raise ValueError("Оставьте телефон или мессенджер")
-        if not product:
-            raise ValueError("Укажите, что заказать")
-        qty = max(1, int(num(body.get("qty"), 1)))
-        color = str(body.get("color") or "").strip()
-        nom_id = str(body.get("nom_id") or "").strip()
-        item = self.nom.item(nom_id) if nom_id else None
-        if nom_id and not item:
-            raise ValueError("Товар из заявки не найден")
-        order = self.repo.save_order({
-            "product": (item or {}).get("name") or product,
-            "customer_name": name,
-            "phone": str(body.get("phone") or "").strip(),
-            "messenger": str(body.get("messenger") or "").strip(),
-            "channel": str(body.get("channel") or "shop").strip() or "shop",
-            "niche_id": (item or {}).get("niche_id") or None,
-            "status": "new",
-            "qty": qty,
-            "material": (item or {}).get("material") or "",
-            "color": color,
-            "grams": num((item or {}).get("grams")),
-            "hours": num((item or {}).get("hours")),
-            "manual_minutes": num((item or {}).get("post_minutes")),
-            "file": (item or {}).get("file") or "",
-            "price": round(num((item or {}).get("price")) * qty, 2),
-            "notes": str(body.get("note") or "").strip() or "Заявка с витрины",
-            "nom_id": nom_id or None,
-        })
+        phone = str(body.get("phone") or "").strip()
+        messenger = str(body.get("messenger") or "").strip()
+        channel = str(body.get("channel") or "shop").strip() or "shop"
+        note = str(body.get("note") or "").strip()
+
+        # Собираем позиции: новый формат items[] или старый — единичный nom_id.
+        items = body.get("items")
+        if not items and body.get("nom_id"):
+            items = [{"nom_id": body.get("nom_id"),
+                      "qty": body.get("qty", 1),
+                      "color": body.get("color", "")}]
+        # Третий путь: индивидуальный заказ (custom:true) — старые заявки
+        # без nom_id создавались как «свободный» текст, поддерживаем.
+        if not items and str(body.get("custom") or "").lower() in ("1", "true", "yes"):
+            text = str(body.get("product") or body.get("note") or "Индивидуальный заказ").strip()
+            order = self.repo.save_order({
+                "product": text, "customer_name": name, "phone": phone,
+                "messenger": messenger, "channel": channel, "status": "new",
+                "qty": max(1, int(num(body.get("qty"), 1))),
+                "notes": note or "Заявка с витрины",
+            })
+            self.db.add_event("lead", "Заявка с витрины",
+                              f"{text} · {name}", data={"order_id": order.get("id"),
+                                                        "source": "storefront"})
+            return {"ok": True, "order_number": order.get("number"),
+                    "order_id": order.get("id"), "count": 1}
+        if not isinstance(items, list) or not items:
+            raise ValueError("Добавьте хотя бы одну позицию")
+        rows = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            nom_id = str(raw.get("nom_id") or "").strip()
+            if not nom_id:
+                continue
+            item = self.nom.item(nom_id)
+            if not item:
+                raise ValueError("Товар из заявки не найден")
+            qty = max(1, int(num(raw.get("qty"), 1)))
+            color = str(raw.get("color") or "").strip()
+            rows.append({"item": item, "qty": qty, "color": color, "nom_id": nom_id})
+        if not rows:
+            raise ValueError("Добавьте хотя бы одну позицию")
+
+        order_ids, numbers = [], []
+        for row in rows:
+            item, qty, color, nom_id = row["item"], row["qty"], row["color"], row["nom_id"]
+            order = self.repo.save_order({
+                "product": item.get("name") or "",
+                "customer_name": name,
+                "phone": phone, "messenger": messenger, "channel": channel,
+                "niche_id": item.get("niche_id") or None,
+                "status": "new",
+                "qty": qty,
+                "material": item.get("material") or "",
+                "color": color,
+                "grams": num(item.get("grams")),
+                "hours": num(item.get("hours")),
+                "manual_minutes": num(item.get("post_minutes")),
+                "file": item.get("file") or "",
+                "price": round(num(item.get("price")) * qty, 2),
+                "notes": note or "Заявка с витрины",
+                "nom_id": nom_id or None,
+            })
+            order_ids.append(order.get("id"))
+            numbers.append(order.get("number"))
+        first = numbers[0] if numbers else ""
+        title = f"{first} (+{len(numbers) - 1})" if len(numbers) > 1 else first
         self.db.add_event("lead", "Заявка с витрины",
-                          f"{product} · {name}" + (f" · {color}" if color else ""),
-                          data={"order_id": order.get("id"), "source": "storefront"})
-        return {"ok": True, "order_number": order.get("number"), "order_id": order.get("id")}
+                          f"{len(numbers)} поз. · {name}" + (f" · {phone}" if phone else ""),
+                          data={"order_ids": order_ids, "source": "storefront"})
+        return {"ok": True, "order_number": title, "order_id": order_ids[0] if order_ids else None,
+                "order_ids": order_ids, "order_numbers": numbers, "count": len(numbers)}
 
     def save_order(self, body: dict) -> dict:
         """Сохранить заказ и синхронизировать резерв готового товара."""
