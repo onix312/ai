@@ -82,6 +82,17 @@ class GcodeHeaderTests(unittest.TestCase):
         )
         self.assertAlmostEqual(head["grams"], 92.2, places=1)
 
+    def test_generic_weight_header_fallback(self):
+        # Prusa/Orca иногда пишут просто «; weight: 92.18g» без слова filament.
+        # Раньше «Обновить граммы» не находило вес — добавляем фолбэк.
+        head = _parse_gcode_head(
+            "; estimated printing time = 2h 42m\n"
+            "; weight: 92.18g\n"
+        )
+        self.assertAlmostEqual(head["grams"], 92.2, places=1)
+        head2 = _parse_gcode_head("; estimated weight: 12.5g\n")
+        self.assertAlmostEqual(head2["grams"], 12.5, places=1)
+
     def test_multicolor_comma_values_sum(self):
         head = _parse_gcode_head(
             "; filament used [g] = 12.34, 3.20\n"
