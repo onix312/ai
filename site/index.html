@@ -3617,7 +3617,7 @@
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><button class="btn" type="button" id="order_brand_card" hidden>✒ Бренд-карточка</button><button class="btn" type="button" id="order_pack_card" hidden>▦ Карточка упаковки</button><button class="btn" type="button" id="order_thread" hidden>〰 Нить изделия</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><button class="btn" type="button" id="order_brand_card" hidden>✒ Бренд-карточка</button><button class="btn" type="button" id="order_pack_card" hidden>▦ Карточка упаковки</button><button class="btn" type="button" id="order_thread" hidden>〰 Нить изделия</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn" type="button" id="order_to_warehouse" hidden>▦ На склад</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>
 
 <dialog class="modal" id="fulfillment_modal"><form method="dialog">
@@ -3632,6 +3632,16 @@
   </div>
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="fulfillment_modal">Отмена</button><button class="btn ok" type="button" id="fulfillment_confirm">✓ Подтвердить выдачу</button></div>
+</form></dialog>
+
+<dialog class="modal" id="stock_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Оприходование на склад</span><h2>Положить на склад</h2><p>Готовое изделие попадёт в учётный регистр склада 3.0, заказ будет закрыт как «На складе». Оплата и долг не записываются автоматически.</p></div><button class="icon-btn" type="button" data-close="stock_modal">×</button></div>
+ <div class="modal-body">
+  <div id="stock_summary" class="verdict">Проверяем заказ и готовое изделие…</div>
+  <label class="field" style="margin-top:12px"><span>Склад</span><select id="stk_warehouse_id"></select></label>
+  <label class="field" style="margin-top:10px"><span>Заметка</span><input id="stk_note" placeholder="Например: допечатка на склад"></label>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="stock_modal">Отмена</button><button class="btn primary" type="button" id="stock_confirm">✓ Положить на склад</button></div>
 </form></dialog>
 
 <dialog class="modal" id="material_modal"><form method="dialog">

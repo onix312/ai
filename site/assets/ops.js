@@ -795,6 +795,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   $('order_queue').textContent = 'Сохранить и подготовить';
   $('order_save_prepare').hidden = Boolean(id);
   $('order_fulfill').hidden = !id || data.status !== 'ready';
+  $('order_to_warehouse').hidden = !id || data.status !== 'ready';
   $('order_duplicate').hidden = !id;
   $('order_b2b').hidden = !id;
   $('of_production_wrap').hidden = !id;
@@ -903,6 +904,55 @@ function updateFulfillmentPaymentFields() {
   const received = $('hf_payment_action').value === 'received';
   $('hf_account_wrap').hidden = !received;
   $('hf_method_wrap').hidden = !received;
+}
+
+let stockDraft = null;
+async function openOrderStock(orderId) {
+  if (!orderId) return;
+  try {
+    const result = await get('/api/order/stock', { id: orderId });
+    if (result.stocked) {
+      toast('Заказ уже на складе');
+      return;
+    }
+    if (!result.can_stock) {
+      throw new Error((result.blocks || []).map((item) => item.text).join('; ') || 'Заказ нельзя положить на склад');
+    }
+    stockDraft = result;
+    const items = result.items || [];
+    const names = items.map((it) => `${esc(it.name || it.nom_id)} ×${nfmt(it.qty)}`).join('<br>');
+    $('stock_summary').className = 'verdict ok';
+    $('stock_summary').innerHTML = `<b>Заказ №${esc(result.number)}</b><br>`
+      + `Готовое изделие: <br>${names || '—'}`
+      + `<br>Всего ${nfmt(result.quantity)} шт`;
+    $('stk_warehouse_id').innerHTML = (result.warehouses || []).map((w) =>
+      `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('')
+      || '<option value="">Не настроен склад</option>';
+    $('stk_warehouse_id').value = result.warehouse_id || '';
+    $('stk_note').value = '';
+    openModal('stock_modal');
+  } catch (e) { fail(e); }
+}
+
+async function confirmOrderStock() {
+  if (!stockDraft) return;
+  const button = $('stock_confirm');
+  button.disabled = true;
+  try {
+    const result = await post('/api/order/stock-to-warehouse', {
+      id: stockDraft.order_id,
+      warehouse_id: $('stk_warehouse_id').value || '',
+      note: $('stk_note').value || '',
+    });
+    closeModal('stock_modal');
+    closeModal('order_modal');
+    const doc = result.document || {};
+    toast('Заказ на складе', `${doc.number || ''} · ${nfmt(result.quantity)} шт`.trim());
+    stockDraft = null;
+    await PF.refreshCore();
+    PF.refreshFinance();
+  } catch (e) { fail(e); }
+  finally { button.disabled = false; }
 }
 
 async function confirmOrderFulfillment() {
@@ -1888,6 +1938,7 @@ function bind() {
       $('of_completion_message_wrap').hidden = false;
       $('order_accept_result').hidden = true;
       $('order_fulfill').hidden = false;
+      $('order_to_warehouse').hidden = false;
       let copied = false;
       if (result.message && navigator.clipboard) {
         try { await navigator.clipboard.writeText(result.message); copied = true; } catch (e) { /* текст остаётся в поле */ }
@@ -1908,8 +1959,10 @@ function bind() {
     } catch (e) { fail(new Error('Не удалось скопировать текст')); }
   });
   $('order_fulfill').addEventListener('click', () => openOrderFulfillment(editingOrder));
+  $('order_to_warehouse').addEventListener('click', () => openOrderStock(editingOrder));
   $('hf_payment_action').addEventListener('change', updateFulfillmentPaymentFields);
   $('fulfillment_confirm').addEventListener('click', confirmOrderFulfillment);
+  $('stock_confirm').addEventListener('click', confirmOrderStock);
   $('order_delete').addEventListener('click', async () => {
     if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо.')) return;
     try {
@@ -2125,5 +2178,5 @@ PF.on('data', () => { fillSelectors(); renderOrders(); renderCustomers(); });
 PF.on('finance', () => { renderNiches(); });
 PF.on('view', (detail) => { if (detail.view === 'customers') loadAftercare(); });
 
-PF.modules.ops = { openOrder, openOrderFulfillment, openNiche, renderOrders, fillSelectors, loadAftercare };
+PF.modules.ops = { openOrder, openOrderFulfillment, openOrderStock, openNiche, renderOrders, fillSelectors, loadAftercare };
 })();
