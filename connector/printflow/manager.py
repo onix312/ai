@@ -647,6 +647,14 @@ class PrinterManager:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
+        # Нельзя «оживить» закрытый заказ. Если печать относится к
+        # завершённому заказу — это ошибка привязки, а не повод вернуть
+        # его в работу.
+        status = self.db.one("SELECT is_final FROM statuses WHERE id=?",
+                             (order.get("status"),)) or {}
+        if num(status.get("is_final")):
+            raise ValueError(
+                "Заказ уже закрыт — привязать текущее задание к закрытому заказу нельзя")
         # Ищем именно активное задание, а не завершённое: привязка меняет
         # текущий процесс. Если running нет — берём последнее по времени.
         job = self.db.one(
@@ -693,6 +701,11 @@ class PrinterManager:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
+        status = self.db.one("SELECT is_final FROM statuses WHERE id=?",
+                             (order.get("status"),)) or {}
+        if num(status.get("is_final")):
+            raise ValueError(
+                "Заказ уже закрыт — привязать задание к закрытому заказу нельзя")
         self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order_id, job_id))
         if job.get("state") in ("running", "starting") and \
                 self.db.one("SELECT id FROM statuses WHERE id='printing'"):
@@ -707,11 +720,18 @@ class PrinterManager:
 
     # ----------------------------------------------------------------- очередь
     def queue(self) -> list[dict]:
+        # Не показываем задания, привязанные к уже закрытому (финальному)
+        # заказу: заказ «на складе»/«выдан» не должен держать активную печать
+        # в очереди, иначе остаётся «печать, которая уже закончилась».
         rows = self.db.query(
-            "SELECT * FROM print_jobs WHERE state IN ('queued','uploading','starting','running')"
-            " ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'starting' THEN 1"
+            "SELECT j.* FROM print_jobs j"
+            " LEFT JOIN orders o ON o.id=j.order_id"
+            " LEFT JOIN statuses st ON st.id=o.status"
+            " WHERE j.state IN ('queued','uploading','starting','running')"
+            " AND (j.order_id IS NULL OR j.order_id='' OR COALESCE(st.is_final,0)=0)"
+            " ORDER BY CASE j.state WHEN 'running' THEN 0 WHEN 'starting' THEN 1"
             " WHEN 'uploading' THEN 2 ELSE 3 END,"
-            " priority DESC, datetime(created_at)")
+            " j.priority DESC, datetime(j.created_at)")
         for row in rows:
             if row.get("order_id"):
                 order = self.db.one("SELECT number, product, customer_name FROM orders WHERE id=?",

@@ -72,6 +72,11 @@ _GRAMS_PATTERNS = [
     re.compile(r";\s*filament\s+used\s*[:=]\s*([\d.]+)\s*g\b", re.IGNORECASE),
 ]
 
+# Общий вес модели/детали: некоторые слайсеры (Prusa, Orca) пишут
+# «; weight: 92.18g» или «; estimated weight: 92.18g» без слова «filament».
+# Это тот же вес в граммах — хороший фолбэк, когда остальные паттерны не сработали.
+_WEIGHT_RE = re.compile(r";\s*(?:estimated\s+)?weight\s*[:=]\s*([\d.]+)\s*g\b", re.IGNORECASE)
+
 # Метры / мм фолбэки
 _METERS_PATTERNS = [
     re.compile(r";\s*filament\s+used\s*\[mm\]\s*[:=]\s*([\d.]+)", re.IGNORECASE),
@@ -282,6 +287,14 @@ def _extract_grams_from_text(text: str) -> float:
     if found and total > 0:
         return round(total, 1)
     m = _GRAMS_RE.search(text)
+    if m:
+        try:
+            return round(float(m.group(1)), 1)
+        except ValueError:
+            pass
+    # Последний фолбэк: общий вес модели («; weight: 92.18g»), когда
+    # специфичные «filament used»-строки отсутствуют.
+    m = _WEIGHT_RE.search(text)
     if m:
         try:
             return round(float(m.group(1)), 1)

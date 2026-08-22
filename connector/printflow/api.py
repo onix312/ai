@@ -192,6 +192,8 @@ class Api:
         self.completion = OrderCompletion(self.db, self.repo)
         from .fulfillment import OrderFulfillment
         self.fulfillment = OrderFulfillment(self.db, self.repo, self.stock, self.acc)
+        from .stocking import OrderStocker
+        self.stocker = OrderStocker(self.db, self.repo, self.stock, self.docs, self.acc)
         from .receivables import Receivables
         self.receivables = Receivables(self.db, self.repo, self.acc)
         from .defect_recovery import DefectRecovery
@@ -821,6 +823,8 @@ class Api:
             return 200, self.completion.summary(one("id"))
         if path == "/api/order/fulfillment":
             return 200, self.fulfillment.summary(one("id"))
+        if path == "/api/order/stock":
+            return 200, self.stocker.summary(one("id"))
         if path == "/api/debt/summary":
             return 200, self.receivables.summary(one("id"))
         if path == "/api/aftercare/queue":
@@ -1670,6 +1674,12 @@ class Api:
             )
         if path == "/api/order/duplicate":
             return 200, {"ok": True, "order": self.repo.duplicate_order(body.get("id", ""))}
+        if path == "/api/order/stock-to-warehouse":
+            return 200, self.stocker.stock_to_warehouse(
+                str(body.get("id") or ""),
+                warehouse_id=str(body.get("warehouse_id") or ""),
+                note=str(body.get("note") or ""),
+            )
         if path == "/api/aftercare/request/confirm":
             return 200, self.aftercare.confirm_request(
                 str(body.get("id") or ""),
@@ -3231,7 +3241,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, created = save_upload(requested_name, upload[1])
         payload = {
@@ -3283,7 +3293,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, _created = save_upload(requested_name, upload[1])
         estimate = {}
@@ -3338,7 +3348,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, _created = save_upload(requested_name, upload[1])
         printer_id = fields.get("printer_id", "") or (query.get("printer_id") or [""])[0]

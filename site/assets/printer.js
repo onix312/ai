@@ -775,7 +775,10 @@ async function loadFiles() {
   host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
   try {
     const data = await get('/api/printer/files', { printer_id: p.id });
-    filesCache = data.files || [];
+    // Показываем только печатные файлы: папки и прочие объекты в списке
+    // пропускаем, иначе «Печать» предлагается для директорий файловой системы.
+    filesCache = (data.files || []).filter((f) =>
+      !f.dir && /\\.(3mf|gcode(?:\\.3mf)?)$/i.test(String(f.name || '')));
     host.innerHTML = filesCache.length ? filesCache.map((f) => `<div class="file-row">`
       + `<span class="fic">${fileIcon(f.name)}</span>`
       + `<span class="fname" title="${esc(f.path || f.name)}">${esc(f.name)}</span>`
@@ -793,7 +796,7 @@ async function loadFiles() {
 async function uploadFile(file) {
   const p = active();
   if (!p) return fail(new Error('Сначала добавьте принтер'));
-  if (!/\.(3mf|gcode)$/i.test(file.name)) return fail(new Error('Поддерживаются только 3MF и G-code'));
+  if (!/\.(3mf|gcode(?:\.3mf)?)$/i.test(file.name)) return fail(new Error('Поддерживаются только 3MF и G-code'));
   const form = new FormData();
   form.append('file', file);
   form.append('printer_id', p.id);
@@ -1268,12 +1271,12 @@ function bind() {
     }
     const linkOrder = e.target.closest('[data-link-order]');
     if (linkOrder) {
-      openLinkOrder({ printerId: linkOrder.dataset.linkOrder || PF.state.activePrinter });
+      openLinkOrder({ printerId: linkOrder.dataset.linkOrder || PF.state.activePrinter }).catch(() => {});
       return;
     }
     const jobLink = e.target.closest('[data-job-link]');
     if (jobLink) {
-      openLinkOrder({ jobId: jobLink.dataset.jobLink });
+      openLinkOrder({ jobId: jobLink.dataset.jobLink }).catch(() => {});
       return;
     }
     const ordOpen = e.target.closest('[data-order-open]');
@@ -1484,7 +1487,7 @@ function bind() {
   $('job_save').addEventListener('click', async () => {
     const file = $('jf_file').value.trim();
     if (!file && !queueLocalFile) return fail(new Error('Выберите файл с компьютера или укажите имя файла на SD-карте'));
-    if (queueLocalFile && !/\.(3mf|gcode)$/i.test(queueLocalFile.name)) {
+    if (queueLocalFile && !/\.(3mf|gcode(?:\.3mf)?)$/i.test(queueLocalFile.name)) {
       return fail(new Error('Поддерживаются только 3MF и G-code'));
     }
     const values = {
@@ -1604,11 +1607,25 @@ async function convertJobToOrder(jobId) {
 let linkOrderTarget = null; // {printerId} или {jobId}
 let linkOrderChoice = ''; // выбранный order_id
 
-function renderLinkOrderList(query) {
+let linkOrdersCache = [];
+let linkOrdersLoaded = false;
+async function renderLinkOrderList(query) {
   const host = $('link_order_list');
   if (!host) return;
   const q = String(query || '').trim().toLowerCase();
-  const orders = (PF.state.orders || []).filter((o) => !PF.isFinal(o));
+  // Свежий список незакрытых заказов прямо с коннектора: иначе в списке
+  // может застрять уже удалённый/закрытый заказ, и привязка дала бы
+  // «Заказ не найден» или оживила бы закрытый заказ.
+  if (!linkOrdersLoaded) {
+    try {
+      const fresh = await get('/api/orders', {});
+      linkOrdersCache = (fresh.orders || []).filter((o) => !PF.isFinal(o));
+    } catch (e) {
+      linkOrdersCache = (PF.state.orders || []).filter((o) => !PF.isFinal(o));
+    }
+    linkOrdersLoaded = true;
+  }
+  const orders = linkOrdersCache;
   const matched = q
     ? orders.filter((o) => [o.number, o.product, o.customer_name, o.phone, o.file, o.notes]
         .some((v) => String(v || '').toLowerCase().includes(q)))
@@ -1632,9 +1649,11 @@ function renderLinkOrderList(query) {
   }).join('');
 }
 
-function openLinkOrder(target) {
+async function openLinkOrder(target) {
   linkOrderTarget = target || null;
   linkOrderChoice = '';
+  linkOrdersCache = [];
+  linkOrdersLoaded = false;
   $('link_order_submit').disabled = true;
   const search = $('link_order_search');
   if (search) search.value = '';
@@ -1651,7 +1670,7 @@ function openLinkOrder(target) {
     if (title) title.textContent = 'Привязать задание к заказу';
     if (sub) sub.textContent = j ? (j.name || j.file || 'Задание') : 'Задание';
   }
-  renderLinkOrderList('');
+  await renderLinkOrderList('');
   openModal('link_order_modal');
 }
 
@@ -1688,7 +1707,7 @@ function bindLinkOrder() {
       if (!row) return;
       linkOrderChoice = row.dataset.pickOrder;
       $('link_order_submit').disabled = !linkOrderChoice;
-      renderLinkOrderList(($('link_order_search') || {}).value || '');
+      renderLinkOrderList(($('link_order_search') || {}).value || '').catch(() => {});
     });
   }
   const search = $('link_order_search');

@@ -82,6 +82,17 @@ class GcodeHeaderTests(unittest.TestCase):
         )
         self.assertAlmostEqual(head["grams"], 92.2, places=1)
 
+    def test_generic_weight_header_fallback(self):
+        # Prusa/Orca иногда пишут просто «; weight: 92.18g» без слова filament.
+        # Раньше «Обновить граммы» не находило вес — добавляем фолбэк.
+        head = _parse_gcode_head(
+            "; estimated printing time = 2h 42m\n"
+            "; weight: 92.18g\n"
+        )
+        self.assertAlmostEqual(head["grams"], 92.2, places=1)
+        head2 = _parse_gcode_head("; estimated weight: 12.5g\n")
+        self.assertAlmostEqual(head2["grams"], 12.5, places=1)
+
     def test_multicolor_comma_values_sum(self):
         head = _parse_gcode_head(
             "; filament used [g] = 12.34, 3.20\n"
@@ -251,6 +262,28 @@ class ThreeMFEstimateTests(unittest.TestCase):
             })
             est = estimate_file(path)
             self.assertGreater(est["grams"], 0)
+
+    def test_gcode_3mf_double_extension_parses_as_3mf(self):
+        # Bambu экспортирует .gcode.3mf — это обычный 3MF-архив. Раньше
+        # валидация загрузки и выбор файла отклоняли такое расширение,
+        # хотя по факту это печатный файл.
+        with tempfile.TemporaryDirectory() as td:
+            tmp = pathlib.Path(td)
+            si = {
+                "plate": [{
+                    "index": 1, "prediction": 4823, "weight": 23.45,
+                    "filament": [{"used_g": 23.45, "type": "PLA"}],
+                }],
+            }
+            src = _write_3mf(tmp, {
+                "Metadata/slice_info.config": json.dumps(si),
+                "Metadata/plate_1.gcode": "G1\n",
+            })
+            dst = tmp / "Bowl.gcode.3mf"
+            src.rename(dst)
+            est = estimate_file(dst)
+            self.assertAlmostEqual(est["grams"], 23.4, places=1)
+            self.assertAlmostEqual(est["total_grams"], 23.4, places=1)
 
 
 if __name__ == "__main__":

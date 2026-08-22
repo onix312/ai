@@ -16,8 +16,8 @@ from typing import Any, Iterable, Iterator
 
 from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_EXPENSE_CATEGORIES, DEFAULT_NICHES, DEFAULT_SETTINGS,
-                     DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso,
-                     rotate_backups)
+                     DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
+                     now_iso, rotate_backups)
 
 SCHEMA_VERSION = 10
 
@@ -899,6 +899,13 @@ class Database:
                     "INSERT INTO statuses(id,name,color,position,is_final) VALUES(?,?,?,?,?)",
                     DEFAULT_STATUSES,
                 )
+            # Догоняющие статусы (например, «На складе»): в готовую базу не
+            # встраиваются через DEFAULT_STATUSES, поэтому добавляем точечно и
+            # идемпотентно — существующую колонку пользователя не трогаем.
+            for row in EXTRA_STATUSES:
+                cur.execute(
+                    "INSERT OR IGNORE INTO statuses(id,name,color,position,is_final)"
+                    " VALUES(?,?,?,?,?)", row)
             if not cur.execute("SELECT 1 FROM niches LIMIT 1").fetchone():
                 cur.executemany(
                     "INSERT INTO niches(id,name,icon,color,hypothesis,target,views,leads,active,position)"
