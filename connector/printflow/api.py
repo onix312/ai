@@ -473,6 +473,55 @@ class Api:
             pass
         return ""
 
+    def _ensure_lan_access(self, printer) -> bool:
+        """Дозаполнить IP и Access Code облачного принтера для FTPS/камеры.
+
+        Файлы SD-карты доступны только по локальной сети (порт 990). У
+        принтера, добавленного из облака, часто нет IP или кода: IP ищем
+        SSDP-сканом, Access Code берём из облачного списка устройств.
+        Найденное сохраняется в базе, чтобы не искать каждый раз.
+        Возвращает True, если у принтера в итоге есть и IP, и код.
+        """
+        record = printer.record
+        host = str(record.get("host") or "")
+        code = str(record.get("access_code") or "")
+        if host and code:
+            return True
+        serial = str(record.get("serial") or "")
+        if not serial:
+            return False
+        updates: dict = {}
+        if not code:
+            from . import bambu_cloud
+            token, uid, region = self._cloud_session()
+            if token and uid:
+                try:
+                    for device in bambu_cloud.get_devices(
+                            token, region, include_access_code=True):
+                        if str(device.get("serial")) == serial:
+                            if device.get("access_code"):
+                                updates["access_code"] = str(device["access_code"])
+                            if not host and device.get("host"):
+                                host = str(device["host"])
+                                updates["host"] = host
+                            break
+                except bambu_cloud.CloudError:
+                    pass
+        if not host:
+            found = self._discover_host(serial)
+            if found:
+                host = found
+                updates["host"] = host
+        if updates:
+            try:
+                self.repo.save_printer({"id": printer.id, **updates})
+                self.manager.reload()
+            except Exception:
+                printer.record.update(updates)
+        refreshed = self.manager.get(printer.id)
+        record = refreshed.record if refreshed else printer.record
+        return bool(record.get("host") and record.get("access_code"))
+
     def _templates(self) -> list[dict]:
         """Шаблоны ответов клиентам: список {id, title, text} из настроек."""
         try:
@@ -822,6 +871,16 @@ class Api:
             return 200, self.manager.wall()
         if path == "/api/printer/files":
             printer = self.printer_or_fail(one("printer_id"))
+            # Файлы SD — это FTPS по локальной сети. У облачного принтера
+            # IP/Access Code могли не заполниться при добавлении: пробуем
+            # дозаполнить (облачный список устройств + SSDP) прямо сейчас.
+            if not (printer.record.get("host") and printer.record.get("access_code")):
+                if not self._ensure_lan_access(printer):
+                    return 200, {"path": one("path", "/"), "files": [],
+                                 "error": ("Файлы SD-карты доступны только по локальной "
+                                           "сети: укажите IP принтера (экран → Настройки → "
+                                           "WLAN) и Access Code в карточке принтера.")}
+                printer = self.printer_or_fail(one("printer_id"))
             return 200, {"path": one("path", "/"),
                          "files": printer.files.list_files(one("path", "/"))}
         if path == "/api/orders":
@@ -928,6 +987,10 @@ class Api:
         if path == "/api/shelf/item":
             item = self.shelf.item(one("id"))
             return (200, item) if item else (404, {"error": "Позиция не найдена"})
+        if path == "/api/shelf/stock-available":
+            # Товары учётных складов с остатком ≥ 1 шт — их можно
+            # переместить на стеллаж (0 и «хвосты» меньше штуки не показываем).
+            return 200, {"items": self.shelf.stock_available()}
         if path == "/api/shelf/moves":
             return 200, {"moves": self.shelf.moves(one("item_id"),
                                                    int(num(one("limit", "100"), 100)))}
@@ -1179,6 +1242,9 @@ class Api:
             return 200, self.manager.preflight(printer.id, one("file"), int(num(one("plate"),1)), json.loads(one("mapping","[]") or "[]"))
         if path == "/api/printer/files/tree":
             printer = self.printer_or_fail(one("printer_id"))
+            if not (printer.record.get("host") and printer.record.get("access_code")):
+                self._ensure_lan_access(printer)
+                printer = self.printer_or_fail(one("printer_id"))
             depth = int(num(one("depth"), 1))
             try:
                 files = printer.files.list_tree(one("path","/"), depth)
@@ -1959,6 +2025,13 @@ class Api:
             return 200, self.shelf.produce(body.get("item_id", ""), num(body.get("qty")),
                                            body.get("job_id", ""), body.get("note", ""),
                                            num(body.get("cost_per_unit")))
+        if path == "/api/shelf/transfer":
+            # Перемещение готового товара со склада на стеллаж: только
+            # целые штуки и только в пределах остатка (минимум 1).
+            return 200, self.shelf.transfer_from_stock(
+                body.get("nom_id", ""), body.get("warehouse_id", ""),
+                num(body.get("qty")), body.get("item_id", ""),
+                body.get("note", ""))
         if path == "/api/shelf/sale":
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),
@@ -3414,6 +3487,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 cloud_sent = False
             if not cloud_sent:
+                # Прежде чем сдаться, пробуем дозаполнить IP/Access Code
+                # облачного принтера — тогда FTPS-фолбэк сработает.
+                if not (printer.record.get("host") and printer.record.get("access_code")):
+                    try:
+                        self.api._ensure_lan_access(printer)
+                        printer = self.api.manager.get(printer_id) or printer
+                    except Exception:
+                        pass
                 if printer.record.get("host") and printer.record.get("access_code"):
                     self.api.db.add_event("cloud", "Облачная заливка не удалась — FTPS",
                                           cloud_error or "нет входа в Bambu Cloud",

@@ -323,6 +323,119 @@ class Shelf:
                 "new": [slim(i) for i in news],
                 "last": [slim(i) for i in last]}
 
+    # ------------------------------------------------- перемещение со склада
+    def stock_available(self) -> list[dict]:
+        """Товары учётных складов с остатком ≥ 1 шт — кандидаты на стеллаж.
+
+        Позиции с нулевым или дробным «хвостом» меньше единицы не показываем:
+        переместить на полку можно только целую штуку, которая реально есть.
+        Полка магазина (склад kind='shelf') исключается — оттуда не «перемещают
+        на стеллаж», это и есть стеллаж.
+        """
+        rows = self.db.query(
+            "SELECT m.nom_id, m.warehouse_id, COALESCE(w.name,'Склад') warehouse_name,"
+            " n.name, n.photo, n.unit,"
+            " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
+            " FROM stock_moves m"
+            " JOIN nomenclature n ON n.id=m.nom_id AND n.archived=0"
+            " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
+            " WHERE COALESCE(w.kind,'') != 'shelf'"
+            " GROUP BY m.nom_id, m.warehouse_id HAVING q >= 1"
+            " ORDER BY n.name")
+        out = []
+        for row in rows:
+            qty = num(row["q"])
+            out.append({
+                "nom_id": row["nom_id"], "name": row["name"] or "Без названия",
+                "photo": row.get("photo") or "", "unit": row.get("unit") or "шт",
+                "warehouse_id": row["warehouse_id"] or "",
+                "warehouse_name": row["warehouse_name"],
+                "qty": round(qty, 2),
+                "avg_cost": round(max(0.0, num(row["c"])) / qty, 2) if qty > 0 else 0.0,
+            })
+        return out
+
+    def transfer_from_stock(self, nom_id: str, warehouse_id: str, qty: float,
+                            item_id: str = "", note: str = "") -> dict:
+        """Переместить готовый товар с учётного склада на стеллаж магазина.
+
+        Правила:
+        • перемещать можно только то, что есть: остаток на складе-источнике
+          должен быть ≥ 1 шт, а запрошенное количество — целое, от 1 и не
+          больше остатка;
+        • регистр остатков получает пару движений «перемещение» (расход со
+          склада + приход на склад-полку) — учёт 3.0 остаётся честным;
+        • стеллаж получает приход штук с себестоимостью по средней складской.
+
+        Позиция стеллажа находится по item_id, по связке nomenclature.
+        legacy_shelf_id или по имени; если её нет — создаётся автоматически.
+        """
+        nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        if not nom:
+            raise ValueError("Товар не найден в номенклатуре")
+        if not warehouse_id:
+            raise ValueError("Укажите склад-источник")
+        qty = num(qty)
+        if qty < 1 or abs(qty - round(qty)) > 1e-9:
+            raise ValueError("Перемещать можно целыми штуками: минимум 1")
+        qty = float(round(qty))
+        from .stock import Stock
+        stock = Stock(self.db)
+        available = stock.qty(nom_id, warehouse_id)
+        if available < 1:
+            raise ValueError("На складе меньше 1 шт — перемещать нечего")
+        if qty > available:
+            raise ValueError(f"На складе только {round(available, 1)} шт, "
+                             f"а переместить просят {round(qty)}")
+        unit_cost = stock.avg_cost(nom_id, warehouse_id)
+        cost = round(unit_cost * qty, 2)
+        # 1) регистр остатков: расход со склада + приход на полку магазина
+        shelf_wh = (self.db.one(
+            "SELECT id FROM warehouses WHERE kind='shelf' AND archived=0"
+            " ORDER BY position LIMIT 1") or {}).get("id") or "shelf"
+        stock.add_move(nom_id, warehouse_id, -qty, -cost, doc_kind="move",
+                       note=note or "перемещение на стеллаж")
+        stock.add_move(nom_id, shelf_wh, qty, cost, doc_kind="move",
+                       note=note or "перемещение на стеллаж")
+        # 2) позиция стеллажа: найти или создать
+        item = None
+        if item_id:
+            item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not item and nom.get("legacy_shelf_id"):
+            item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                               (nom["legacy_shelf_id"],))
+        if not item:
+            item = self.db.one(
+                "SELECT * FROM shelf_items WHERE active=1 AND lower(name)=lower(?)",
+                (str(nom.get("name") or ""),))
+        if not item:
+            from .nomenclature import Nomenclature
+            price = 0.0
+            try:
+                prices = Nomenclature(self.db)._all_prices().get(nom_id) or {}
+                price = num(prices.get(Nomenclature(self.db)._base_type()))
+            except Exception:
+                price = 0.0
+            item = self.save_item({
+                "name": nom.get("name") or "Товар со склада",
+                "price": price, "cost_per_unit": unit_cost,
+                "photo": nom.get("photo") or "",
+                "note": "создано перемещением со склада",
+            })
+        if unit_cost and not num(item.get("cost_per_unit")):
+            self.db.execute("UPDATE shelf_items SET cost_per_unit=? WHERE id=?",
+                            (round(unit_cost, 2), item["id"]))
+        move = self._move(item["id"], "produce", qty,
+                          note=(note or f"перемещение со склада "
+                                        f"«{warehouse_id}»").strip())
+        self.db.add_event("shelf", "Перемещение со склада на стеллаж",
+                          f"{nom.get('name') or ''} +{round(qty)} шт",
+                          data={"nom_id": nom_id, "warehouse_id": warehouse_id,
+                                "item_id": item["id"], "qty": qty, "cost": cost})
+        return {"ok": True, "move": move, "qty": qty, "cost": cost,
+                "item": self.db.one("SELECT * FROM shelf_items WHERE id=?",
+                                    (item["id"],))}
+
     # ------------------------------------------------------------- QR-ценник
     def qr_link(self, item_id: str, host: str = "", public_url: str = "",
                 listen_port: int = 8080) -> dict:

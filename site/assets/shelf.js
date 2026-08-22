@@ -245,6 +245,56 @@ async function saveProduce() {
   } catch (e) { fail(e); }
 }
 
+/* ============================================== перемещение со склада */
+let stockAvail = [];
+
+async function openTransfer() {
+  try {
+    const data = await get('/api/shelf/stock-available');
+    stockAvail = data.items || [];
+  } catch (e) { return fail(e); }
+  if (!stockAvail.length) {
+    return fail(new Error('На учётных складах нет товара с остатком от 1 шт — перемещать нечего.'));
+  }
+  $('stf_item').innerHTML = stockAvail.map((i, idx) =>
+    `<option value="${idx}">${esc(i.name)} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} шт</option>`).join('');
+  $('stf_shelf_item').innerHTML = '<option value="">Найти по названию / создать автоматически</option>'
+    + (shelfData.items || []).map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  $('stf_qty').value = 1;
+  $('stf_note').value = '';
+  updateTransferInfo();
+  openModal('shelf_transfer_modal');
+}
+
+function updateTransferInfo() {
+  const row = stockAvail[Number($('stf_item').value)] || null;
+  const info = $('stf_info');
+  if (!row) { info.hidden = true; return; }
+  const max = Math.floor(num(row.qty));
+  $('stf_qty').max = max;
+  if (num($('stf_qty').value) > max) $('stf_qty').value = max;
+  $('stf_info_text').textContent = `Доступно на «${row.warehouse_name}»: ${nfmt(row.qty)} шт`
+    + (row.avg_cost ? ` · себестоимость ~${money(row.avg_cost)}/шт` : '');
+  info.hidden = false;
+}
+
+async function saveTransfer() {
+  const row = stockAvail[Number($('stf_item').value)] || null;
+  if (!row) return fail(new Error('Выберите товар'));
+  const qty = num($('stf_qty').value);
+  if (qty < 1 || qty !== Math.round(qty)) return fail(new Error('Количество — целое число, минимум 1'));
+  if (qty > Math.floor(num(row.qty))) return fail(new Error(`На складе только ${nfmt(row.qty)} шт`));
+  try {
+    await post('/api/shelf/transfer', {
+      nom_id: row.nom_id, warehouse_id: row.warehouse_id, qty,
+      item_id: $('stf_shelf_item').value, note: $('stf_note').value.trim(),
+    });
+    closeModal('shelf_transfer_modal');
+    await refreshShelf();
+    toast('Перемещено на стеллаж', `${esc(row.name)} +${nfmt(qty)} шт`);
+  } catch (e) { fail(e); }
+}
+
 /* ============================================================== продажи */
 function openSales() {
   const items = (shelfData.items || []).filter((i) => num(i.qty) > 0);
@@ -395,6 +445,11 @@ function bind() {
       $('spf_cost').value = round2(num(job.cost) / qty);
     }
   });
+
+  $('shelf_transfer_btn').addEventListener('click', openTransfer);
+  $('shelf_transfer_save').addEventListener('click', saveTransfer);
+  $('stf_item').addEventListener('change', updateTransferInfo);
+  $('stf_qty').addEventListener('input', updateTransferInfo);
 
   $('shelf_sale_btn').addEventListener('click', openSales);
   $('shelf_sale_save').addEventListener('click', saveSales);

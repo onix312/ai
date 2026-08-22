@@ -633,6 +633,7 @@
    <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
+   <button class="btn" id="shelf_transfer_btn" type="button">📦 Со склада</button>
    <button class="btn primary" id="shelf_add" type="button">+ Позиция</button>
   </div>
  </div>
@@ -4296,6 +4297,21 @@
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="shelf_produce_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_produce_save">Положить на стеллаж</button></div>
+</dialog>
+
+<dialog id="shelf_transfer_modal" class="modal">
+ <div class="modal-head"><div><h3>Со склада на стеллаж</h3><p>Только товары с остатком от 1 шт — перемещаются целыми штуками</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_transfer_modal">✕</button></div>
+ <div class="modal-body">
+  <label>Товар на складе<select id="stf_item"></select></label>
+  <div class="notice" id="stf_info" style="margin-top:10px" hidden><span>ℹ</span><span id="stf_info_text"></span></div>
+  <label style="margin-top:10px">Количество, шт<input id="stf_qty" type="number" min="1" step="1" value="1"></label>
+  <label style="margin-top:10px">Положить в позицию стеллажа
+   <select id="stf_shelf_item"><option value="">Найти по названию / создать автоматически</option></select></label>
+  <label style="margin-top:10px">Заметка<input id="stf_note" placeholder="например: пополнение витрины"></label>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="shelf_transfer_modal">Отмена</button>
+  <button class="btn primary" type="button" id="shelf_transfer_save">Переместить на стеллаж</button></div>
 </dialog>
 
 <dialog id="shelf_sale_modal" class="modal">
