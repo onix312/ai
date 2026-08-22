@@ -143,6 +143,8 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
                 acc = Accounting(db)
                 spool = acc.pick_spool(printer.id, str(active.get("slot")), active.get("type"), active.get("uuid"))
                 if spool:
+                    if not int(float(spool.get("verified", 1) or 0)):
+                        blocks.append({"code": "spool_unverified", "title": "Катушка AMS не проверена", "detail": "Уточните массу и цену катушки в складе перед стартом"})
                     remain_g = float(spool.get("remaining_grams") or 0)
                     if remain_g and remain_g < need_g * 1.15:
                         blocks.append({"code": "filament", "title": "Мало пластика", "detail": f"Нужно ~{need_g:.0f}г (+15% запас), в катушке {remain_g:.0f}г — замените"})

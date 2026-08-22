@@ -23,7 +23,7 @@ ORDER_FIELDS = (
     # катушки со склада, привязанные к заказу: [{spool_id, grams, note}]
     "spools "
     # связь с номенклатурой и складом (3.0+)
-    "nom_id warehouse_id reserved"
+    "nom_id warehouse_id reserved items_override"
 ).split()
 
 
@@ -90,7 +90,8 @@ class Repo:
         товаров по nom_id — база остаётся источником веса каждой позиции.
         Возвращает {"total_price": ..., "total_qty": ..., "names": [...]}.
         """
-        summary: dict = {"total_price": 0.0, "total_qty": 0.0, "names": []}
+        summary: dict = {"total_price": 0.0, "total_qty": 0.0,
+                        "total_grams": 0.0, "total_hours": 0.0, "names": []}
         if items is None:
             return summary
         if not isinstance(items, list):
@@ -131,6 +132,8 @@ class Repo:
                 "note": str(raw.get("note") or "")})
             summary["total_price"] += round(price * qty, 2)
             summary["total_qty"] += qty
+            summary["total_grams"] += grams * qty
+            summary["total_hours"] += hours * qty
             summary["names"].append(f"{name} ×{qty:g}")
         summary["total_price"] = round(summary["total_price"], 2)
         return summary
@@ -141,6 +144,7 @@ class Repo:
         # редактор/канбан не может закрыть заказ в обход подтверждения выдачи.
         allow_final_status = bool(data.pop("_allow_final_status", False))
         skip_auto_income = bool(data.pop("_skip_auto_income", False))
+        expected_updated_at = str(data.pop("expected_updated_at", "") or "").strip()
         # Поле «Оплачено» в карточке — удобный ввод, но источник правды здесь
         # журнал payments. Прямую запись orders.paid больше не допускаем.
         payment_requested = "paid" in data or "prepaid" in data
@@ -153,6 +157,8 @@ class Repo:
             # правка несуществующего заказа — это ошибка вызова, а не повод
             # молча завести новый заказ с чужим идентификатором
             raise ValueError("Заказ не найден")
+        if existing and expected_updated_at and expected_updated_at != str(existing.get("updated_at") or ""):
+            raise ValueError("Заказ уже изменён — обновите карточку перед сохранением")
         payload: dict[str, Any] = {"id": order_id}
         for field in ORDER_FIELDS:
             if field in data:
@@ -177,14 +183,19 @@ class Repo:
                     "messenger": payload.get("messenger", ""), "created_at": now_iso()})
             payload["customer_id"] = customer["id"]
 
-        # Состав заказа (мультизаказ): позиции сохраняются отдельно, а цена и
-        # количество заказа пересчитываются из них — источником цены позиций
-        # служит база товаров, сервер не верит сумме, присланной браузером.
+        # Состав заказа (мультизаказ): по умолчанию позиции — источник цены,
+        # количества и нормативов. Ручной override хранится явно, чтобы не
+        # было скрытого второго ввода тех же итогов.
         if "items" in data:
             items_summary = self._save_order_items(order_id, data.get("items"))
             if items_summary["names"]:
-                payload["price"] = items_summary["total_price"]
-                payload["qty"] = items_summary["total_qty"]
+                if not bool(num(data.get("items_override"), 0)):
+                    payload["price"] = items_summary["total_price"]
+                    payload["qty"] = items_summary["total_qty"]
+                    if items_summary["total_grams"] > 0:
+                        payload["grams"] = round(items_summary["total_grams"], 3)
+                    if items_summary["total_hours"] > 0:
+                        payload["hours"] = round(items_summary["total_hours"], 3)
                 if not (payload.get("product") or "").strip():
                     payload["product"] = ", ".join(items_summary["names"])
             data.pop("items", None)
@@ -316,7 +327,27 @@ class Repo:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
-        return self.save_order({"id": order_id, "status": status})
+        target = str(status or "").strip()
+        if not self.db.one("SELECT id FROM statuses WHERE id=?", (target,)):
+            raise ValueError("Неизвестный статус заказа")
+        current = str(order.get("status") or "new")
+        if current == target:
+            return order
+        allowed = {
+            "new": {"estimate", "prepay", "queue"},
+            "estimate": {"new", "prepay", "queue"},
+            "prepay": {"new", "queue"},
+            "queue": {"new", "printing"},
+            "printing": {"queue", "post"},
+            "post": {"printing", "ready"},
+            "ready": {"post"},
+            "done": set(),
+        }
+        if target not in allowed.get(current, set()):
+            raise ValueError(f"Переход «{current}» → «{target}» запрещён; используйте допустимый следующий этап")
+        # done — финальный статус: сохранить его можно только через выдачу с
+        # подтверждением передачи/оплаты, а не перетаскиванием карточки.
+        return self.save_order({"id": order_id, "status": target})
 
     def delete_order(self, order_id: str) -> None:
         if not order_id:
@@ -549,7 +580,14 @@ class Repo:
 
     def save_spool(self, data: dict) -> dict:
         data = dict(data)
+        expected_updated_at = str(data.pop("expected_updated_at", "") or "").strip()
         new = not data.get("id")
+        if not new and expected_updated_at:
+            current = self.db.one("SELECT updated_at FROM spools WHERE id=?", (data["id"],))
+            if not current:
+                raise ValueError("Катушка не найдена")
+            if expected_updated_at != str(current.get("updated_at") or ""):
+                raise ValueError("Катушка уже изменена — обновите склад перед сохранением")
         if not data.get("id"):
             data["id"] = uid("sp")
         if new:
@@ -565,24 +603,108 @@ class Repo:
 
     # ---------------------------------------------------------------- каталог
     def catalog(self) -> list[dict]:
-        rows = self.db.query("SELECT * FROM catalog WHERE archived=0 ORDER BY name")
+        # Legacy catalog остаётся совместимым представлением канонической
+        # nomenclature. Если миграция уже связала строку, отдаём свежие данные
+        # canonical, чтобы два экрана не показывали разные нормативы.
+        rows = self.db.query(
+            "SELECT c.*, n.id AS canonical_id, n.updated_at AS canonical_updated_at"
+            " FROM catalog c LEFT JOIN nomenclature n"
+            " ON n.id=COALESCE(NULLIF(c.nom_id,''),"
+            " (SELECT id FROM nomenclature WHERE legacy_catalog_id=c.id LIMIT 1))"
+            " WHERE c.archived=0 ORDER BY c.name")
         for row in rows:
+            nom_id = row.get("canonical_id") or ""
+            if nom_id:
+                nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,)) or {}
+                row["nom_id"] = nom_id
+                row["name"] = nom.get("name") or row.get("name")
+                row["niche_id"] = nom.get("niche_id") or row.get("niche_id")
+                row["material"] = nom.get("material") or row.get("material")
+                row["grams"] = num(nom.get("grams"))
+                row["hours"] = num(nom.get("hours"))
+                row["fit_per_plate"] = max(1, int(num(nom.get("fit_per_plate"), 1)))
+                row["file"] = nom.get("file") or row.get("file")
+                row["notes"] = nom.get("note") or row.get("notes")
             economics = self.acc.order_economics({
                 "price": row["price"], "grams": row["grams"], "hours": row["hours"], "qty": 1})
             row["economics"] = economics
         return rows
 
     def save_catalog_item(self, data: dict) -> dict:
+        """Сохранить legacy-запись и её каноническую nomenclature-позицию.
+
+        Старый экран остаётся рабочим для импорта/совместимости, но не создаёт
+        вторую сущность: у каждой строки есть ``nom_id``. Режимы:
+        ``sync`` (по умолчанию) зеркалит введённые legacy-поля в canonical;
+        ``canonical`` только обновляет legacy-зеркало из уже изменённой
+        nomenclature-карточки.
+        """
         data = dict(data)
-        if not data.get("id"):
-            data["id"] = uid("cat")
-        data.setdefault("created_at", now_iso())
-        return self.db.upsert("catalog", data)
+        mode = str(data.pop("sync_mode", "sync") or "sync").strip().lower()
+        expected_updated_at = str(data.pop("expected_updated_at", "") or "").strip()
+        item_id = str(data.get("id") or uid("cat"))
+        legacy = self.db.one("SELECT * FROM catalog WHERE id=?", (item_id,))
+        if legacy and expected_updated_at and expected_updated_at != str(legacy.get("updated_at") or ""):
+            raise ValueError("База изделий уже изменена — обновите карточку перед сохранением")
+        nom = self.db.one(
+            "SELECT * FROM nomenclature WHERE id=? OR legacy_catalog_id=? LIMIT 1",
+            (legacy.get("nom_id") if legacy else "", item_id),
+        )
+        nom_id = (legacy or {}).get("nom_id") or (nom or {}).get("id") or uid("nom")
+        now = now_iso()
+        if mode == "canonical" and nom:
+            data.update({
+                "name": nom.get("name") or data.get("name") or "",
+                "niche_id": nom.get("niche_id") or data.get("niche_id") or "",
+                "material": nom.get("material") or data.get("material") or "PLA",
+                "grams": num(nom.get("grams")), "hours": num(nom.get("hours")),
+                "fit_per_plate": max(1, int(num(nom.get("fit_per_plate"), 1))),
+                "file": nom.get("file") or data.get("file") or "",
+                "notes": nom.get("note") or data.get("notes") or "",
+            })
+        else:
+            if not str(data.get("name") or "").strip():
+                raise ValueError("Укажите название позиции")
+            nom_payload = {
+                "id": nom_id, "name": data.get("name"), "niche_id": data.get("niche_id") or "",
+                "kind": "product", "unit": "шт", "material": data.get("material") or "PLA",
+                "grams": num(data.get("grams")), "hours": num(data.get("hours")),
+                "fit_per_plate": max(1, int(num(data.get("fit_per_plate"), 1))),
+                "file": data.get("file") or "", "note": data.get("notes") or "",
+                "legacy_catalog_id": item_id,
+                "created_at": (nom or {}).get("created_at") or now, "updated_at": now,
+            }
+            self.db.upsert("nomenclature", nom_payload)
+        data["id"] = item_id
+        data["nom_id"] = nom_id
+        data["created_at"] = (legacy or {}).get("created_at") or now
+        data["updated_at"] = now
+        data.setdefault("archived", 0)
+        # У канонической карточки цена хранится в таблице prices; legacy
+        # `price` остаётся зеркалом для старых расчётов.
+        saved = self.db.upsert("catalog", data)
+        if mode != "canonical" and num(data.get("price")) > 0:
+            self.db.upsert("prices", {
+                "id": uid("prc"), "at": now, "nom_id": nom_id,
+                "price_type_id": "retail", "price": round(num(data["price"]), 2),
+                "note": "синхронизация legacy catalog"})
+        self.db.add_event("catalog", "Позиция изделий синхронизирована",
+                          str(saved.get("name") or ""), data={"catalog_id": item_id, "nom_id": nom_id})
+        return saved
 
     def delete_catalog_item(self, item_id: str) -> None:
         if not item_id:
             raise ValueError("Не указана позиция")
-        self.db.delete("catalog", item_id)
+        row = self.db.one("SELECT * FROM catalog WHERE id=?", (item_id,))
+        if not row:
+            raise ValueError("Позиция не найдена")
+        now = now_iso()
+        # Не удаляем canonical-источник: архивирование сохраняет историю и
+        # не оставляет двойную запись при следующем импорте.
+        nom_id = row.get("nom_id") or ""
+        if nom_id:
+            self.db.execute("UPDATE nomenclature SET archived=1, updated_at=? WHERE id=?", (now, nom_id))
+        self.db.execute("UPDATE catalog SET archived=1, updated_at=? WHERE id=?", (now, item_id))
 
     # ------------------------------------------------------------------ касса
     def transactions(self, limit: int = 200) -> list[dict]:

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.repo import Repo  # noqa: E402
 from connector.printflow.manager import PrinterManager  # noqa: E402
+from connector.printflow.config import now_iso  # noqa: E402
 
 
 class MockPrinter:
@@ -23,6 +24,7 @@ class MockPrinter:
         self.state = state
         self.task = task
         self.commands = []
+        self.power_loss_recovery = True
         self.raw = {
             "print": {
                 "gcode_state": state,
@@ -63,6 +65,7 @@ class MockPrinter:
                 "total_layers": 300,
                 "weight": 35.5,
                 "problems": [],
+                "power_loss_recovery": self.power_loss_recovery,
             },
             "ams": {
                 "trays": [{
@@ -217,6 +220,28 @@ class AutoResumePowerLossTests(unittest.TestCase):
         self.manager = PrinterManager(self.db, self.repo)
         self.mock_pr = MockPrinter("pr_crimea", "P1S Crimea", "PAUSE", "Vase_Tall_PLA.3mf")
         self.manager.printers["pr_crimea"] = self.mock_pr
+        # Авто-resume требует устойчивой связки «принтер ↔ то же задание»
+        # и marker потери питания; одного статуса PAUSE недостаточно.
+        self.db.upsert("spools", {
+            "id": "spool_power_loss", "material": "PETG", "printer_id": "pr_crimea",
+            "ams_slot": "0", "remaining_grams": 900, "verified": 1,
+        })
+        self.db.upsert("print_jobs", {
+            "id": "job_power_loss", "printer_id": "pr_crimea",
+            "name": self.mock_pr.task, "file": self.mock_pr.task,
+            "spool_id": "spool_power_loss", "est_grams": 50,
+            "state": "running", "source": "queue", "resume_eligible": 1,
+            "manual_paused": 0, "power_loss_at": now_iso(),
+            "resume_reason": "power_loss_confirmed", "created_at": now_iso(),
+        })
+        # Опасное авто-возобновление проверяется только в явно разрешённой
+        # политике; безопасный default не должен отправлять resume сам.
+        self.db.set_settings({
+            "auto_resume_paused": True,
+            # Специальный power-loss recovery не использует общий gate;
+            # обычные unattended-команды при этом остаются запрещены.
+            "unattended_dangerous_actions": False,
+        })
 
     def tearDown(self):
         self.manager.shutdown()
@@ -233,7 +258,7 @@ class AutoResumePowerLossTests(unittest.TestCase):
 
         # Событие записано в журнал
         events = self.db.events(limit=5, kind="printer")
-        resume_events = [e for e in events if "Авто-продолжение" in e["title"]]
+        resume_events = [e for e in events if "Авто-resume" in e["title"]]
         self.assertTrue(len(resume_events) > 0)
 
     def test_manual_user_pause_is_respected(self):
@@ -252,6 +277,41 @@ class AutoResumePowerLossTests(unittest.TestCase):
     def test_auto_resume_setting_disabled(self):
         self.db.set_settings({"auto_resume_paused": False})
         acted = self.manager.check_auto_resume("pr_crimea")
+        self.assertFalse(acted)
+        self.assertEqual(self.mock_pr.state, "PAUSE")
+
+    def test_pause_without_power_loss_marker_is_not_resumed(self):
+        self.db.execute(
+            "UPDATE print_jobs SET power_loss_at='', resume_reason='manual_pause'"
+            " WHERE id='job_power_loss'")
+        acted = self.manager.check_auto_resume("pr_crimea")
+        self.assertFalse(acted)
+        self.assertEqual(self.mock_pr.state, "PAUSE")
+
+    def test_offline_creates_persistent_candidate_but_manual_pause_wins(self):
+        self.manager._handle_event("pr_crimea", "offline", "offline", "", {})
+        row = self.db.one("SELECT power_loss_at, resume_reason FROM print_jobs WHERE id=?",
+                          ("job_power_loss",))
+        self.assertTrue(row["power_loss_at"])
+        self.assertEqual(row["resume_reason"], "connection_lost")
+        self.mock_pr.power_loss_recovery = False
+        self.assertFalse(self.manager.check_auto_resume("pr_crimea"))
+        self.assertEqual(self.mock_pr.commands, [])
+
+        self.manager.mark_user_paused("pr_crimea")
+        self.manager._handle_event("pr_crimea", "offline", "offline", "", {})
+        row = self.db.one("SELECT power_loss_at, manual_paused FROM print_jobs WHERE id=?",
+                          ("job_power_loss",))
+        self.assertEqual(row["power_loss_at"], "")
+        self.assertEqual(row["manual_paused"], 1)
+
+    def test_changed_remote_task_is_not_resumed(self):
+        self.db.execute(
+            "UPDATE print_jobs SET remote_task_id='saved-task', file_version='saved-task'"
+            " WHERE id='job_power_loss'")
+        snap = self.mock_pr.snapshot()
+        snap["printer"]["remote_task_id"] = "different-task"
+        acted = self.manager.check_auto_resume("pr_crimea", snap)
         self.assertFalse(acted)
         self.assertEqual(self.mock_pr.state, "PAUSE")
 

@@ -100,6 +100,7 @@ class Watchdog:
                     and snap["printer"]["state"] in ("RUNNING", "PREPARE")
                     and item["blocking"]):
                 try:
+                    self.manager.mark_non_resumable_pause(printer.id, "watchdog_pause")
                     printer.command("pause")
                     acted.append("печать поставлена на паузу")
                 except Exception as exc:

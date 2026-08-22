@@ -161,6 +161,7 @@ class SpaghettiWatch:
             }
             if self.db.setting("guard_pause_on_error", True):
                 try:
+                    self.manager.mark_non_resumable_pause(printer.id, "spaghetti_pause")
                     printer.command("pause")
                     alert["actions"].append("печать поставлена на паузу")
                 except Exception as exc:

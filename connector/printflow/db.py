@@ -19,7 +19,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso,
                      rotate_backups)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 9
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -58,6 +58,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # Клиентский ключ запроса: повторный клик/сетевой retry не создаёт
         # вторую оплату по тому же подтверждению.
         ("request_id", "TEXT DEFAULT ''"),
+        ("updated_at", "TEXT DEFAULT ''"),
     ],
     "shopping_items": [
         # Фактический приход закупки: одна подтверждённая операция создаёт
@@ -99,6 +100,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("warehouse_id", "TEXT"),            # с какого склада отгружаем
         ("reminded_at", "TEXT DEFAULT ''"),  # когда напоминали о долге (B4)
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
+        ("items_override", "INTEGER DEFAULT 0"),  # явное переопределение состава
     ],
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
@@ -116,6 +118,18 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reprint_of_job_id", "TEXT DEFAULT ''"),
         ("reprint_request_id", "TEXT DEFAULT ''"),
         ("defect_id", "TEXT DEFAULT ''"),
+        # Восстановление только после подтверждённой потери связи/питания.
+        ("resume_eligible", "INTEGER DEFAULT 1"),
+        ("manual_paused", "INTEGER DEFAULT 0"),
+        ("power_loss_at", "TEXT DEFAULT ''"),
+        ("resume_attempts", "INTEGER DEFAULT 0"),
+        ("resume_reason", "TEXT DEFAULT ''"),
+        ("file_version", "TEXT DEFAULT ''"),
+        ("power_loss_state", "TEXT DEFAULT ''"),
+        ("power_loss_progress", "REAL DEFAULT 0"),
+        ("power_loss_layer", "INTEGER DEFAULT 0"),
+        ("power_loss_total_layers", "INTEGER DEFAULT 0"),
+        ("power_loss_task", "TEXT DEFAULT ''"),
     ],
     "defects": [
         ("note", "TEXT DEFAULT ''"),
@@ -142,10 +156,14 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("supplier", "TEXT DEFAULT ''"),
         ("ams_sync", "INTEGER DEFAULT 1"),   # обновлять остаток/слот из AMS
         ("synced_at", "TEXT"),               # когда AMS последний раз обновлял
+        ("verified", "INTEGER DEFAULT 1"),   # импорт AMS требует проверки бренда/цены/веса
     ],
     "catalog": [
+        # Старые финансовые поля плюс связь с canonical nomenclature.
         ("cost", "REAL DEFAULT 0"),
         ("sold", "INTEGER DEFAULT 0"),
+        ("nom_id", "TEXT DEFAULT ''"),
+        ("updated_at", "TEXT DEFAULT ''"),
     ],
 }
 
@@ -233,7 +251,8 @@ CREATE TABLE IF NOT EXISTS orders (
     actual_grams REAL DEFAULT 0,
     actual_hours REAL DEFAULT 0,
     actual_cost REAL DEFAULT 0,
-    auto_cost INTEGER DEFAULT 1
+    auto_cost INTEGER DEFAULT 1,
+    items_override INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(number);
@@ -298,6 +317,7 @@ CREATE TABLE IF NOT EXISTS spools (
     ams_slot TEXT DEFAULT '',
     tray_uuid TEXT DEFAULT '',
     archived INTEGER DEFAULT 0,
+    verified INTEGER DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
 );
@@ -334,6 +354,17 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     reprint_of_job_id TEXT DEFAULT '',
     reprint_request_id TEXT DEFAULT '',
     defect_id TEXT DEFAULT '',
+    resume_eligible INTEGER DEFAULT 1,
+    manual_paused INTEGER DEFAULT 0,
+    power_loss_at TEXT DEFAULT '',
+    resume_attempts INTEGER DEFAULT 0,
+    resume_reason TEXT DEFAULT '',
+    file_version TEXT DEFAULT '',
+    power_loss_state TEXT DEFAULT '',
+    power_loss_progress REAL DEFAULT 0,
+    power_loss_layer INTEGER DEFAULT 0,
+    power_loss_total_layers INTEGER DEFAULT 0,
+    power_loss_task TEXT DEFAULT '',
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON print_jobs(state);
@@ -431,7 +462,8 @@ CREATE TABLE IF NOT EXISTS payments (
     fee REAL DEFAULT 0,
     note TEXT DEFAULT '',
     tx_id TEXT,
-    request_id TEXT DEFAULT ''
+    request_id TEXT DEFAULT '',
+    updated_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_pay_order ON payments(order_id);
 
@@ -471,7 +503,9 @@ CREATE TABLE IF NOT EXISTS catalog (
     file TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     archived INTEGER DEFAULT 0,
-    created_at TEXT
+    created_at TEXT,
+    nom_id TEXT DEFAULT '',
+    updated_at TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS telemetry (

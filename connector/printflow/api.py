@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import re
@@ -18,7 +19,8 @@ from . import APP_VERSION
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
-from .config import SITE, UPLOAD_DIR, ensure_dirs, now_iso
+from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
+                     ensure_dirs, now_iso)
 from .db import Database
 from .manager import PrinterManager
 from .repo import Repo
@@ -96,6 +98,53 @@ def parse_multipart(body: bytes, boundary: str) -> tuple[dict[str, str], tuple[s
         else:
             fields[name_match.group(1)] = data.decode("utf-8", "ignore")
     return fields, upload
+
+
+def _upload_filename(raw_name: str) -> str:
+    """Нормализовать имя файла из multipart независимо от ОС клиента."""
+    # Браузер Windows иногда присылает полный путь с обратными слешами.
+    name = Path(str(raw_name or "").replace("\\", "/")).name.strip()
+    if not name or name in {".", ".."} or "\x00" in name:
+        raise ValueError("Некорректное имя файла")
+    return name
+
+
+def save_upload(name: str, data: bytes) -> tuple[str, Path, bool]:
+    """Сохранить модель в uploads и не затереть другой файл с тем же именем.
+
+    Возвращает фактическое имя, путь и признак создания нового файла. Файлы
+    с одинаковым именем, но разным содержимым получают короткий суффикс хеша:
+    задания в очереди никогда не начинают печатать содержимое чужой загрузки.
+    """
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    requested = _upload_filename(name)
+    suffix = Path(requested).suffix
+    stem = requested[:-len(suffix)] if suffix else requested
+    target = UPLOAD_DIR / requested
+    digest = hashlib.sha256(data).hexdigest()[:10]
+    if target.exists():
+        try:
+            same = target.stat().st_size == len(data) and hashlib.sha256(
+                target.read_bytes()).hexdigest()[:10] == digest
+        except OSError:
+            same = False
+        if not same:
+            target = UPLOAD_DIR / f"{stem}-{digest}{suffix}"
+            # Коллизия хеша крайне маловероятна, но не затираем файл и при ней.
+            counter = 2
+            while target.exists():
+                target = UPLOAD_DIR / f"{stem}-{digest}-{counter}{suffix}"
+                counter += 1
+    created = not target.exists()
+    if created:
+        target.write_bytes(data)
+    return target.name, target, created
+
+
+def _form_bool(value: object, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    return str(value).strip().casefold() in {"1", "true", "yes", "on", "да"}
 
 
 class Api:
@@ -567,7 +616,16 @@ class Api:
                 "order_ids": order_ids, "order_numbers": numbers, "count": len(numbers)}
 
     def save_order(self, body: dict) -> dict:
-        """Сохранить заказ и синхронизировать резерв готового товара."""
+        """Сохранить заказ и синхронизировать резерв готового товара.
+
+        Денежные поля не принимаются из формы заказа: старые значения остаются
+        читаемыми для совместимости, а новые операции проходят через единый
+        журнал ``/api/payment/save``.
+        """
+        if "paid" in body or "prepaid" in body:
+            raise ValueError(
+                "Оплата не редактируется в карточке заказа; используйте журнал платежей"
+            )
         with self.db.transaction():
             order = self.repo.save_order(body)
             # У заказа может быть только один актуальный резерв. При изменении
@@ -1291,12 +1349,18 @@ class Api:
             return 200, {"ok": True}
         if path == "/api/printer/command":
             printer = self.printer_or_fail(pid)
-            cmd = body.get("command", "")
+            cmd = str(body.get("command") or "").strip()
+            if cmd in DANGEROUS_AUTOMATION_COMMANDS and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физическую команду оператора")
+            # Для pause marker ставится ДО MQTT-команды, чтобы асинхронный
+            # report PAUSE не успел запустить recovery. При ошибке команды
+            # оставляем безопасную ручную блокировку до явного решения оператора.
             if cmd == "pause":
                 self.manager.mark_user_paused(printer.id)
-            elif cmd == "resume":
+            result = printer.command(cmd, body.get("value"))
+            if cmd == "resume":
                 self.manager.clear_user_paused(printer.id)
-            return 200, printer.command(cmd, body.get("value"))
+            return 200, result
         if path == "/api/printer/convert-to-order":
             printer_id = pid or body.get("printer_id", "")
             return 200, self.manager.convert_active_to_order(printer_id, body)
@@ -1347,32 +1411,35 @@ class Api:
             return 200, {"ok": True, "printer_info": info_ok, **counts,
                          "spools": self.repo.spools()}
         if path == "/api/printer/print":
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск печати")
             printer = self.printer_or_fail(pid)
-            name = str(body.get("name") or body.get("file") or "")
-            if printer.mode == "cloud" and not body.get("local_force"):
-                # Облачный запуск: заливка + диспетчеризация /my/task —
-                # принтер качает файл сам, LAN Only Mode не нужен.
-                result = self.manager.start_print_cloud(
-                    printer, body.get("file", ""),
-                    int(num(body.get("plate"), 1) or 1),
-                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
-                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
-                    bool(body.get("timelapse", False)),
-                    progress=self._cloud_progress(name))
-            else:
-                result = printer.start_print(
-                    body.get("file", ""), int(num(body.get("plate"), 1) or 1),
-                    bool(body.get("use_ams", True)), body.get("ams_mapping"),
-                    bool(body.get("bed_level", True)), bool(body.get("flow_cali", False)),
-                    bool(body.get("timelapse", False)), name)
+            name = str(body.get("name") or body.get("file") or "").strip()
+            if not body.get("file"):
+                raise ValueError("Не указан файл для печати")
+            check = self.manager.preflight(
+                printer.id, str(body.get("file") or ""), int(num(body.get("plate"), 1) or 1),
+                body.get("ams_mapping") or body.get("mapping"))
+            if check.get("blocks"):
+                raise ValueError("Preflight блокирует старт: " + "; ".join(
+                    str(x.get("title") or x.get("detail") or "") for x in check["blocks"]))
+            if check.get("warns") and body.get("preflight_acknowledged") is not True:
+                raise ValueError("Подтвердите предупреждения Preflight перед стартом")
+            # Сначала создаём starting-задание, затем посылаем команду. Это
+            # устраняет гонку: быстрый MQTT START больше не превращается в
+            # отдельное безымянное задание до записи строки в базе.
             job = self.manager.enqueue({**body, "printer_id": printer.id,
-                                       "source": "manual", "name": name})
-            self.db.execute("UPDATE print_jobs SET state='starting', started_at=? WHERE id=?",
-                            (now_iso(), job["id"]))
-            self.db.add_event("print_start", "Запущена печать",
-                              f"{name} · облако: {result.get('cloud', False)}",
-                              printer.id, {"task_id": result.get("task_id")})
-            return 200, {**result, "job_id": job["id"]}
+                                        "source": "manual", "name": name,
+                                        "allow_auto_start": False})
+            try:
+                started = self.manager.start_job(job["id"], printer.id)
+            except Exception:
+                # start_job возвращает запись в очередь после неудачного старта;
+                # ошибка всё равно уходит клиенту, а повтор можно сделать вручную.
+                raise
+            self.db.add_event("print_start", "Запущена печать", name,
+                              printer.id, {"job_id": job["id"]})
+            return 200, {"ok": True, "job_id": job["id"], "job": started}
         if path == "/api/printer/sync-history":
             return 200, self.manager.sync_cloud_history(pid)
         if path == "/api/estimate/pull":
@@ -1407,7 +1474,23 @@ class Api:
         if path == "/api/jobs/enqueue":
             return 200, {"ok": True, "job": self.manager.enqueue(body)}
         if path == "/api/jobs/start":
-            return 200, {"ok": True, "job": self.manager.start_job(body.get("id", ""), pid)}
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск печати")
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (body.get("id", ""),))
+            if not job:
+                raise ValueError("Задание не найдено")
+            printer_id = pid or job.get("printer_id") or ""
+            check = self.manager.preflight(
+                printer_id, str(job.get("file") or job.get("name") or ""),
+                int(num(job.get("plate"), 1) or 1),
+                json.loads(job.get("ams_mapping") or "[]") if job.get("ams_mapping") else [],
+            )
+            if check.get("blocks"):
+                raise ValueError("Preflight блокирует старт: " + "; ".join(
+                    str(x.get("title") or x.get("detail") or "") for x in check["blocks"]))
+            if check.get("warns") and body.get("preflight_acknowledged") is not True:
+                raise ValueError("Подтвердите предупреждения Preflight перед стартом")
+            return 200, {"ok": True, "job": self.manager.start_job(job["id"], printer_id)}
         if path == "/api/jobs/cancel":
             return 200, {"ok": True, "job": self.manager.cancel_job(body.get("id", ""))}
         if path == "/api/jobs/save":
@@ -1583,7 +1666,7 @@ class Api:
                 body.get("order_id", ""), num(body.get("amount")),
                 body.get("kind", "payment"), body.get("account_id", ""),
                 body.get("method", ""), body.get("note", ""),
-                body.get("request_id", ""))
+                body.get("request_id", ""), body.get("expected_updated_at", ""))
             return 200, {"ok": True, "payment": payment,
                          "order": self.repo.order(body.get("order_id", ""))}
         if path == "/api/payment/delete":
@@ -1756,6 +1839,11 @@ class Api:
             return 200, {"ok": True, "price": self.nom.set_price(
                 body.get("nom_id", ""), num(body.get("price")),
                 body.get("price_type_id", ""), body.get("note", ""))}
+        if path == "/api/nomenclature/recalc-price":
+            if not body.get("nom_id"):
+                raise ValueError("Не указана позиция для пересчёта")
+            return 200, self.nom.recalc_price(
+                body.get("nom_id", ""), body.get("price_type_id", ""))
         if path == "/api/nomenclature/recalc-prices":
             return 200, self.nom.recalc_prices(body.get("price_type_id", ""),
                                                body.get("group_id", ""))
@@ -1869,6 +1957,8 @@ class Api:
                 int(num(body.get("plates"))), body.get("printer_id", ""),
                 body.get("spool_id", ""), num(body.get("price")))
         if path == "/api/batch/create":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск партии")
             return 200, {"ok": True, "batch": self.batches.create(body)}
         if path == "/api/batch/receive":
             return 200, {"ok": True, "batch": self.batches.receive(
@@ -1878,9 +1968,13 @@ class Api:
         if path == "/api/batch/cancel":
             return 200, {"ok": True, "batch": self.batches.cancel(body.get("id", ""))}
         if path == "/api/batch/repeat":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск повтора партии")
             return 200, {"ok": True, "batch": self.batches.repeat(
                 body.get("id", ""), bool(body.get("start_now")))}
         if path == "/api/batch/from-plan":
+            if body.get("start_now") and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите физический запуск партий из плана")
             return 200, {"ok": True, "batches": self.batches.create_from_plan(
                 body.get("rows") or [], body.get("warehouse_id", ""),
                 bool(body.get("start_now")))}
@@ -1972,6 +2066,8 @@ class Api:
             self.db.delete("ams_profiles", body.get("id", ""))
             return 200, {"ok": True}
         if path == "/api/ams-profile/apply":
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите отправку профиля в AMS")
             profile = self.db.one("SELECT * FROM ams_profiles WHERE id=?", (body.get("id", ""),))
             if not profile:
                 raise ValueError("Профиль не найден")
@@ -1994,8 +2090,14 @@ class Api:
                               printer.id, {"profile_id": profile["id"], "sent": sent})
             return 200, {"ok": True, "sent": sent}
         if path == "/api/schedule/command":
-            if not body.get("command") or not body.get("at"):
+            command = str(body.get("command") or "").strip()
+            if not command or not body.get("at"):
                 raise ValueError("Нужны команда и время")
+            if (command in DANGEROUS_AUTOMATION_COMMANDS
+                    and not self.db.setting("unattended_dangerous_actions", False)):
+                raise ValueError(
+                    "Команда заблокирована safety-gate: включите явное разрешение опасных автоматических действий"
+                )
             self.db.upsert("scheduled_commands", {
                 "id": uid("sch"), "at": body["at"], "printer_id": body.get("printer_id") or "",
                 "command": body["command"], "value": json.dumps(body.get("value"), ensure_ascii=False),
@@ -2051,6 +2153,8 @@ class Api:
             pushed, push_error = False, ""
             manager = getattr(self, "manager", None)
             printer = manager.get(printer_id) if manager and printer_id else None
+            if push_ams and printer and body.get("confirmed") is not True:
+                raise ValueError("Подтвердите отправку материала в AMS")
             if push_ams and printer:
                 try:
                     printer.command("ams_filament", {
@@ -2603,6 +2707,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/api/printer/upload":
                 return self.handle_upload(query)
+            if path == "/api/jobs/upload":
+                return self.handle_job_upload()
             if path == "/api/estimate/upload":
                 return self.handle_estimate_upload()
             length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
@@ -2642,6 +2748,66 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._send_bytes(target.read_bytes(), ctype, download=target.name)
 
+    def _multipart_upload(self) -> tuple[dict[str, str], tuple[str, bytes] | None]:
+        """Прочитать один multipart-файл с общей проверкой размера и boundary."""
+        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
+        if too_large:
+            raise ValueError("Файл слишком большой")
+        content_type = self.headers.get("Content-Type", "")
+        boundary = ""
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part[9:].strip('"')
+        if not boundary:
+            raise ValueError("Ожидается multipart/form-data")
+        return parse_multipart(self.rfile.read(length), boundary)
+
+    def handle_job_upload(self):
+        """Сохранить локальный файл и сразу поставить его в очередь.
+
+        Очередь не должна требовать, чтобы модель сначала лежала на SD-карте:
+        при ручном старте менеджер сам загрузит локальную копию на выбранный
+        принтер (или передаст её Bambu Cloud)."""
+        fields, upload = self._multipart_upload()
+        if not upload:
+            return self.send_json(400, {"error": "Файл не передан"})
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
+            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
+        name, local, created = save_upload(requested_name, upload[1])
+        payload = {
+            "name": str(fields.get("name") or Path(name).stem).strip() or Path(name).stem,
+            "file": name,
+            "printer_id": str(fields.get("printer_id") or "").strip(),
+            "order_id": str(fields.get("order_id") or "").strip(),
+            "plate": max(1, int(num(fields.get("plate"), 1) or 1)),
+            "priority": int(num(fields.get("priority"), 0)),
+            "use_ams": _form_bool(fields.get("use_ams"), True),
+            "bed_level": _form_bool(fields.get("bed_level"), True),
+            "flow_cali": _form_bool(fields.get("flow_cali"), False),
+            "timelapse": _form_bool(fields.get("timelapse"), False),
+            "source": "local-upload",
+            "allow_auto_start": _form_bool(fields.get("allow_auto_start"), True),
+        }
+        try:
+            job = self.api.manager.enqueue(payload)
+        except Exception:
+            # Если именно эта загрузка не стала заданием, не оставляем мусор.
+            if created:
+                try:
+                    local.unlink()
+                except OSError:
+                    pass
+            raise
+        return self.send_json(200, {"ok": True, "file": name, "saved": name,
+                                    "job": job, "source": "upload"})
+
     def handle_estimate_upload(self):
         """Сохранить выбранный 3MF/G-code в uploads и вернуть вес плиты."""
         length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
@@ -2658,12 +2824,15 @@ class Handler(BaseHTTPRequestHandler):
         fields, upload = parse_multipart(self.rfile.read(length), boundary)
         if not upload:
             return self.send_json(400, {"error": "Файл не передан"})
-        name = Path(upload[0]).name
-        if not name.lower().endswith((".3mf", ".gcode")):
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        ensure_dirs()
-        local = UPLOAD_DIR / name
-        local.write_bytes(upload[1])
+        name, local, _created = save_upload(requested_name, upload[1])
         estimate = {}
         try:
             from .estimate import estimate_file
@@ -2710,12 +2879,15 @@ class Handler(BaseHTTPRequestHandler):
         fields, upload = parse_multipart(self.rfile.read(length), boundary)
         if not upload:
             return self.send_json(400, {"error": "Файл не передан"})
-        name = Path(upload[0]).name
-        if not name.lower().endswith((".3mf", ".gcode")):
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".3mf", ".gcode")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        ensure_dirs()
-        local = UPLOAD_DIR / name
-        local.write_bytes(upload[1])
+        name, local, _created = save_upload(requested_name, upload[1])
         printer_id = fields.get("printer_id", "") or (query.get("printer_id") or [""])[0]
         printer = self.api.manager.get(printer_id)
         if not printer:

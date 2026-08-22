@@ -16,7 +16,8 @@ from pathlib import Path
 
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
-from .config import BACKUP_DIR, UPLOAD_DIR, now_iso, rotate_backups
+from .config import (BACKUP_DIR, DANGEROUS_AUTOMATION_COMMANDS, UPLOAD_DIR,
+                     now_iso, rotate_backups)
 from .db import Database
 from .repo import Repo
 from .telegram_bot import TelegramBot
@@ -56,8 +57,13 @@ class PrinterManager:
         # Авто-продолжение при сбое питания (Крым): трекинг пауз и попыток
         self._user_paused: dict[str, float] = {}
         self._auto_resume_attempts: dict[str, dict] = {}
+        self._auto_resume_blocked_at: dict[str, float] = {}
         self._startup_ts = time.time()
         self.reload()
+        # Если коннектор перезапустился во время печати, сохраняем кандидата
+        # на power-loss recovery. Ручная пауза хранится отдельно и не будет
+        # возобновлена автоматически.
+        self._mark_restart_recovery_candidates()
         # 8.0: Watch Folder
         try:
             from .watch_folder import WatchFolder
@@ -175,6 +181,12 @@ class PrinterManager:
             self._on_print_end(printer_id, kind, detail, data)
         elif kind == "pause":
             self._on_print_pause(printer_id, detail, data)
+        elif kind == "power_loss_confirmed":
+            self._confirm_power_loss_candidate(printer_id, data)
+        elif kind == "offline":
+            # Offline — только кандидат на power loss. Команду resume здесь
+            # не отправляем: сеть может восстановиться без отключения света.
+            self._mark_power_loss_candidate(printer_id, "connection_lost", data)
         if kind in ("start", "complete", "error", "pause"):
             self._auto_photo(printer_id, kind, detail)
         # Конструктор правил: событие принтера может запустить правила.
@@ -258,15 +270,19 @@ class PrinterManager:
         if job:
             self.db.execute(
                 "UPDATE print_jobs SET state='running', started_at=COALESCE(started_at, ?),"
-                " name=?, remote_task_id=?, finished_at=NULL, result=NULL, accounted_at=NULL"
-                " WHERE id=?",
-                (now_iso(), name or job.get("name", ""), remote_task_id, job["id"]))
+                " name=?, remote_task_id=?, file_version=COALESCE(NULLIF(file_version,''), ?),"
+                " finished_at=NULL, result=NULL, accounted_at=NULL,"
+                " resume_eligible=1, manual_paused=0, power_loss_at='',"
+                " resume_attempts=0, resume_reason='' WHERE id=?",
+                (now_iso(), name or job.get("name", ""), remote_task_id, remote_task_id, job["id"]))
         else:
             self.db.upsert("print_jobs", {
                 "id": uid("job"), "printer_id": printer_id, "order_id": order_id,
                 "name": name, "file": name, "state": "running", "source": "printer",
-                "remote_task_id": remote_task_id,
-                "started_at": now_iso(), "created_at": now_iso()})
+                "remote_task_id": remote_task_id, "file_version": remote_task_id,
+                "started_at": now_iso(), "resume_eligible": 1, "manual_paused": 0,
+                "power_loss_at": "", "resume_attempts": 0, "resume_reason": "",
+                "created_at": now_iso()})
         if order_id:
             printing = self.db.one("SELECT id FROM statuses WHERE id='printing'")
             if printing:
@@ -668,8 +684,9 @@ class PrinterManager:
     # ----------------------------------------------------------------- очередь
     def queue(self) -> list[dict]:
         rows = self.db.query(
-            "SELECT * FROM print_jobs WHERE state IN ('queued','starting','running')"
-            " ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'starting' THEN 1 ELSE 2 END,"
+            "SELECT * FROM print_jobs WHERE state IN ('queued','uploading','starting','running')"
+            " ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'starting' THEN 1"
+            " WHEN 'uploading' THEN 2 ELSE 3 END,"
             " priority DESC, datetime(created_at)")
         for row in rows:
             if row.get("order_id"):
@@ -684,12 +701,13 @@ class PrinterManager:
             " ORDER BY datetime(finished_at) DESC LIMIT ?", (int(limit),))
 
     def enqueue(self, data: dict) -> dict:
+        file_value = str(data.get("file") or "").strip()
         job = {
             "id": uid("job"),
             "printer_id": data.get("printer_id") or None,
             "order_id": data.get("order_id") or None,
-            "name": data.get("name") or (data.get("file") or "").rsplit("/", 1)[-1],
-            "file": data.get("file", ""),
+            "name": data.get("name") or file_value.rsplit("/", 1)[-1],
+            "file": file_value,
             "state": "queued",
             "source": data.get("source", "queue"),
             "plate": int(num(data.get("plate"), 1) or 1),
@@ -731,6 +749,11 @@ class PrinterManager:
                     "material": estimate.get("material") or "",
                     "color": estimate.get("color") or "",
                 }
+                # Если файл привязали к заказу из окна очереди, карточка
+                # заказа тоже должна знать о нём — иначе планировщик продолжит
+                # показывать ложный блокер «нет файла».
+                if not str(order.get("file") or "").strip() and file_value:
+                    fill["file"] = file_value
                 sets, params = [], []
                 for field, value in fill.items():
                     if value and not str(order.get(field) or "").strip():
@@ -740,59 +763,134 @@ class PrinterManager:
                     self.db.execute(
                         f"UPDATE orders SET {', '.join(sets)}, updated_at=? WHERE id=?",
                         (*params, now_iso(), job["order_id"]))
+        # Связь файла не должна зависеть от того, удалось ли разобрать смету.
+        # Даже «пустой» G-code остаётся файлом заказа, а не осиротевшей печатью.
+        if job.get("order_id") and file_value:
+            self.db.execute(
+                "UPDATE orders SET file=?, updated_at=? WHERE id=?"
+                " AND COALESCE(file,'')=''",
+                (file_value, now_iso(), job["order_id"]))
         row = self.db.upsert("print_jobs", job)
         self.db.add_event("queue", "Задание добавлено в очередь", job["name"],
                           job["printer_id"] or "", {"job_id": job["id"]})
-        if self.db.setting("auto_queue", False) and data.get("allow_auto_start", True):
+        if (self.db.setting("auto_queue", False)
+                and self.db.setting("unattended_dangerous_actions", False)
+                and data.get("allow_auto_start", True)):
             self._maybe_start_next(job["printer_id"] or "")
-        return row
+        # Автозапуск может синхронно перевести это задание в starting/running.
+        # Не возвращаем устаревшую копию «queued» — UI должен показывать факт.
+        return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or row
 
     def cancel_job(self, job_id: str) -> dict:
         job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
         if not job:
             raise ValueError("Задание не найдено")
-        if job["state"] == "running":
+        if job.get("state") in ("done", "failed", "cancelled"):
+            return job  # повторный клик не меняет историю и не освобождает её повторно
+        if job.get("state") == "running":
             printer = self.get(job["printer_id"] or "")
             if printer:
                 printer.command("stop")
-        self.db.execute("UPDATE print_jobs SET state='cancelled', finished_at=? WHERE id=?",
-                        (now_iso(), job_id))
+            # Событие STOP может прийти синхронно или из другого потока.
+            # Не затираем его результат отменой после успешной финализации.
+            current = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if current and current.get("state") not in ("running", "starting"):
+                return current
+        self.db.execute(
+            "UPDATE print_jobs SET state='cancelled', finished_at=?, accounted_at=?"
+            " WHERE id=? AND state IN ('queued','uploading','starting','running')",
+            (now_iso(), now_iso(), job_id),
+        )
         # Заказ не должен остаться «в печати» после отмены задания вручную.
         self._release_order(job.get("order_id") or "", "задание отменено")
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
+
+    def _local_job_file(self, filename: str) -> Path | None:
+        """Локальная копия задания, если она загружена в uploads."""
+        name = Path(str(filename or "").replace("\\", "/")).name
+        if not name:
+            return None
+        candidate = (UPLOAD_DIR / name).resolve()
+        try:
+            candidate.relative_to(UPLOAD_DIR.resolve())
+        except ValueError:
+            return None
+        return candidate if candidate.is_file() else None
 
     def start_job(self, job_id: str, printer_id: str = "") -> dict:
         job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
         if not job:
             raise ValueError("Задание не найдено")
+        if job.get("state") != "queued":
+            raise ValueError("Запустить можно только задание из очереди")
         printer = self.get(printer_id or job.get("printer_id") or "")
         if not printer:
             raise ValueError("Нет доступного принтера")
         if not job.get("file"):
-            raise ValueError("В задании не указан файл на принтере")
+            raise ValueError("В задании не указан файл")
         try:
             mapping = json.loads(job.get("ams_mapping") or "[]")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             mapping = []
-        if printer.mode == "cloud":
-            # Облачный принтер: заливка + диспетчеризация /my/task.
-            self.start_print_cloud(printer, job["file"],
-                                   plate=int(num(job.get("plate"), 1) or 1),
-                                   use_ams=bool(job.get("use_ams", 1)),
-                                   ams_mapping=mapping,
-                                   bed_level=bool(job.get("bed_level", 1)),
-                                   flow_cali=bool(job.get("flow_cali")),
-                                   timelapse=bool(job.get("timelapse")))
-        else:
-            printer.start_print(job["file"], plate=int(num(job.get("plate"), 1) or 1),
-                                use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
-                                bed_level=bool(job.get("bed_level", 1)),
-                                flow_cali=bool(job.get("flow_cali")),
-                                timelapse=bool(job.get("timelapse")),
-                                subtask_name=job.get("name", ""))
-        self.db.execute(
-            "UPDATE print_jobs SET state='starting', printer_id=?, started_at=? WHERE id=?",
-            (printer.id, now_iso(), job_id))
+
+        local = self._local_job_file(job["file"])
+        remote_name = Path(str(job["file"]).replace("\\", "/")).name or job["file"]
+        # Большой файл может грузиться дольше трёх минут. Отдельное состояние
+        # uploading не даёт reconcile принять принтер за свободный и отменить
+        # реальное задание, пока SD ещё получает модель.
+        claim_state = "uploading" if local is not None else "starting"
+        claimed = self.db.execute(
+            f"UPDATE print_jobs SET state=?, printer_id=?, started_at=?,"
+            " resume_eligible=1, manual_paused=0, power_loss_at='',"
+            " resume_attempts=0, resume_reason='' WHERE id=?"
+            " AND state='queued'", (claim_state, printer.id, now_iso(), job_id))
+        if claimed.rowcount != 1:
+            raise ValueError("Задание уже запускается или не стоит в очереди")
+        try:
+            if printer.mode == "cloud" and local is not None:
+                # Облачный запуск сам использует uploads и не требует FTPS.
+                self.start_print_cloud(printer, local.name,
+                                       plate=int(num(job.get("plate"), 1) or 1),
+                                       use_ams=bool(job.get("use_ams", 1)),
+                                       ams_mapping=mapping,
+                                       bed_level=bool(job.get("bed_level", 1)),
+                                       flow_cali=bool(job.get("flow_cali")),
+                                       timelapse=bool(job.get("timelapse")))
+                transitioned = self.db.execute(
+                    "UPDATE print_jobs SET state='starting' WHERE id=?"
+                    " AND state='uploading'", (job_id,))
+                if transitioned.rowcount != 1:
+                    raise ValueError("Задание отменено во время облачной загрузки")
+            else:
+                if local is not None:
+                    # Файл с компьютера становится доступным принтеру только
+                    # после явной загрузки на его SD-карту.
+                    printer.files.upload(local, remote_name)
+                elif printer.mode == "cloud" and not printer.record.get("host"):
+                    raise FileNotFoundError(
+                        "Облачному принтеру нужна локальная копия файла. "
+                        "Загрузите файл с компьютера в очередь заново.")
+                if local is not None:
+                    # MQTT START должен видеть уже starting, а не uploading:
+                    # иначе обработчик не найдёт задание для восстановления.
+                    transitioned = self.db.execute(
+                        "UPDATE print_jobs SET state='starting' WHERE id=?"
+                        " AND state='uploading'", (job_id,))
+                    if transitioned.rowcount != 1:
+                        raise ValueError("Задание отменено во время загрузки файла")
+                printer.start_print(remote_name, plate=int(num(job.get("plate"), 1) or 1),
+                                    use_ams=bool(job.get("use_ams", 1)), ams_mapping=mapping,
+                                    bed_level=bool(job.get("bed_level", 1)),
+                                    flow_cali=bool(job.get("flow_cali")),
+                                    timelapse=bool(job.get("timelapse")),
+                                    subtask_name=job.get("name", ""))
+        except Exception:
+            # Ошибка загрузки/старта не должна оставлять задание в процессе.
+            self.db.execute(
+                "UPDATE print_jobs SET state='queued', started_at=NULL, resume_eligible=0,"
+                "manual_paused=0, power_loss_at='', resume_attempts=0, resume_reason='' WHERE id=?"
+                " AND state IN ('uploading','starting')", (job_id,))
+            raise
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
 
     # ----------------------------------------------------- облачный запуск
@@ -1053,29 +1151,31 @@ class PrinterManager:
                 return str(order["material"]).upper()
         return ""
 
-    def _material_matches(self, job: dict, snap: dict) -> tuple[bool, str]:
+    def _material_matches(self, job: dict, snap: dict, force: bool = False) -> tuple[bool, str]:
         """Совпадает ли материал задания с материалом в активном слоте AMS.
 
         Печать PETG, когда в слоте PLA, даст брак (температуры не подходят) —
         лучше не начинать вовсе.
         """
-        if not self.db.setting("queue_check_material", True):
+        if not force and not self.db.setting("queue_check_material", True):
             return True, ""
         need = self._job_material(job)
         if not need:
-            return True, ""
+            return (False, "Материал задания не сохранён") if force else (True, "")
         active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
         if not active:
-            return True, ""
+            return (False, "Активный слот AMS не подтверждён") if force else (True, "")
         loaded = str(active.get("type") or "").upper()
+        if not loaded and force:
+            return False, "Материал активного слота AMS неизвестен"
         if loaded and loaded != need:
             return False, (f"Задание требует {need}, а в активном слоте {loaded}. "
                            f"Поставьте {need} в слот {active.get('label', '')}.")
         return True, ""
 
-    def _enough_filament(self, job: dict, snap: dict) -> tuple[bool, str]:
+    def _enough_filament(self, job: dict, snap: dict, force: bool = False) -> tuple[bool, str]:
         """Хватит ли пластика в активном слоте на это задание."""
-        if not self.db.setting("queue_check_filament", True):
+        if not force and not self.db.setting("queue_check_filament", True):
             return True, ""
         need = num(job.get("est_grams"))  # оценка слайсера — самый точный план
         if not need and job.get("order_id"):
@@ -1088,14 +1188,16 @@ class PrinterManager:
                 need = num(order.get("grams")) * (1 if has_items
                                                   else max(1.0, num(order.get("qty"), 1)))
         if not need:
-            return True, ""
+            return (False, "Расход пластика задания не сохранён") if force else (True, "")
         active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
         if not active:
-            return True, ""
+            return (False, "Активный слот AMS не подтверждён") if force else (True, "")
         spool = self.acc.pick_spool(job.get("printer_id") or "", str(active.get("slot")),
                                     active.get("type"), active.get("uuid"))
         if not spool:
-            return True, ""
+            return (False, "Катушка AMS не найдена в проверенном складе") if force else (True, "")
+        if not int(num(spool.get("verified"), 1)):
+            return False, "Катушка из AMS не подтверждена оператором в карточке склада"
         left = num(spool.get("remaining_grams"))
         if left and left < need:
             return False, (f"Нужно {need:.0f} г, в катушке «{spool.get('name', '')}» "
@@ -1106,8 +1208,8 @@ class PrinterManager:
         """Выбрать следующее задание с учётом материала в AMS.
 
         Ночная смена (9.3.1): при включённом ``night_shift_enabled`` в тихие
-        часы вперёд идут самые длинные задания — принтер работает до утра;
-        днём — по сроку и приоритету, чтобы срочное не ждало ночи.
+        часы вперёд идут самые длинные задания внутри ручного приоритета —
+        принтер работает до утра; днём сначала учитывается приоритет, затем срок.
         """
         jobs = self.db.query(
             "SELECT j.*, o.hours AS order_hours, o.due AS due"
@@ -1119,14 +1221,18 @@ class PrinterManager:
             return None
         night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()
         if night:
-            # длинное — на ночь: сортировка по оценке часов из заказа
-            jobs.sort(key=lambda j: (-num(j.get("order_hours")),
-                                     -int(num(j.get("priority"))),
+            # Ручной приоритет — первый ключ: кнопки «выше/ниже» и экран
+            # очереди должны менять именно фактический порядок запуска. Внутри
+            # одного приоритета ночью выгоднее закрывать длинные задания.
+            jobs.sort(key=lambda j: (-int(num(j.get("priority"))),
+                                     -num(j.get("order_hours")),
                                      str(j.get("created_at") or "")))
         else:
-            # срочное — днём: по сроку, затем по приоритету
-            jobs.sort(key=lambda j: (str(j.get("due") or "9999-12-31"),
-                                     -int(num(j.get("priority"))),
+            # Дедлайн уточняет порядок только внутри одного приоритета. Раньше
+            # экран показывал priority DESC, а диспетчер запускал сначала
+            # более ранний due — пользователь видел противоречивый порядок.
+            jobs.sort(key=lambda j: (-int(num(j.get("priority"))),
+                                     str(j.get("due") or "9999-12-31"),
                                      str(j.get("created_at") or "")))
         if not self.db.setting("queue_group_material", True) or not snap:
             return jobs[0]
@@ -1141,7 +1247,8 @@ class PrinterManager:
         return same[0] if same else jobs[0]
 
     def _maybe_start_next(self, printer_id: str) -> None:
-        if not self.db.setting("auto_queue", False):
+        if (not self.db.setting("auto_queue", False)
+                or not self.db.setting("unattended_dangerous_actions", False)):
             return
         printer = self.get(printer_id)
         if not printer or not printer.connected:
@@ -1698,70 +1805,304 @@ class PrinterManager:
         return {"ok": True, "order": order, "job": job, "created": True}
 
     # ------------------------------------------------------------- авто-продолжение (Крым / сбои питания)
+    def _mark_restart_recovery_candidates(self) -> None:
+        """Пометить незавершённые печати как кандидатов после рестарта.
+
+        Это единственный безопасный способ восстановить печать, если свет
+        отключился вместе с компьютером и память процесса была потеряна.
+        ``manual_paused`` сохраняется в SQLite и исключает намеренную паузу.
+        """
+        stamp = now_iso()
+        self.db.execute(
+            "UPDATE print_jobs SET power_loss_at=?, resume_reason='connector_restart',"
+            " power_loss_state=COALESCE(NULLIF(power_loss_state,''),'RUNNING'),"
+            " power_loss_progress=COALESCE(progress,0), power_loss_layer=COALESCE(layers,0)"
+            " WHERE state IN ('running','starting','uploading')"
+            " AND COALESCE(resume_eligible,1)=1 AND COALESCE(manual_paused,0)=0"
+            " AND COALESCE(power_loss_at,'')=''",
+            (stamp,))
+
+    def _mark_power_loss_candidate(self, printer_id: str, reason: str = "connection_lost",
+                                   context: dict | None = None) -> None:
+        """Записать потерю связи у активной печати, не отправляя команду."""
+        stamp = now_iso()
+        context = context or {}
+        changed = self.db.execute(
+            "UPDATE print_jobs SET power_loss_at=?, resume_reason=?,"
+            " power_loss_state=?, power_loss_progress=?, power_loss_layer=?,"
+            " power_loss_total_layers=?, power_loss_task=?"
+            " WHERE printer_id=? AND state IN ('running','starting','uploading')"
+            " AND COALESCE(resume_eligible,1)=1 AND COALESCE(manual_paused,0)=0",
+            (stamp, reason, str(context.get("last_state") or "RUNNING").upper(),
+             num(context.get("progress")), int(num(context.get("layer"))),
+             int(num(context.get("total_layers"))), str(context.get("task") or ""),
+             printer_id))
+        if changed.rowcount:
+            self.db.add_event(
+                "security", "Печать помечена для восстановления питания",
+                "Связь с принтером потеряна; это лишь кандидат, не подтверждение "
+                "power loss. Нужен явный marker firmware/bridge и safety-gate",
+                printer_id, {"reason": reason, "at": stamp, "last_snapshot": context})
+
+    def _confirm_power_loss_candidate(self, printer_id: str, evidence: dict | None = None) -> None:
+        """Перевести кандидат в подтверждённый recovery по сигналу принтера."""
+        evidence = evidence or {}
+        self.db.execute(
+            "UPDATE print_jobs SET resume_reason='power_loss_confirmed'"
+            " WHERE printer_id=? AND state IN ('running','starting','uploading')"
+            " AND COALESCE(resume_eligible,1)=1 AND COALESCE(manual_paused,0)=0"
+            " AND resume_reason IN ('connection_lost','connector_restart')",
+            (printer_id,))
+        self.db.add_event(
+            "security", "Подтверждено восстановление питания",
+            "Авто-resume разрешён только для этой прерванной печати после preflight",
+            printer_id, evidence)
+
+    def mark_non_resumable_pause(self, printer_id: str, reason: str) -> None:
+        """Пометить автоматическую защитную паузу как не-resumable."""
+        self.db.execute(
+            "UPDATE print_jobs SET manual_paused=1, resume_eligible=0,"
+            "power_loss_at='', resume_reason=?"
+            " WHERE printer_id=? AND state IN ('running','starting','uploading')",
+            (reason or "protective_pause", printer_id))
+
     def mark_user_paused(self, printer_id: str) -> None:
-        """Пользователь вручную нажал «Пауза» в интерфейсе."""
+        """Сохранить ручную паузу, чтобы она пережила рестарт коннектора."""
         self._user_paused[printer_id] = time.time()
+        self.db.execute(
+            "UPDATE print_jobs SET manual_paused=1, resume_eligible=0,"
+            "power_loss_at='', resume_reason='manual_pause'"
+            " WHERE printer_id=? AND state IN ('running','starting','uploading')",
+            (printer_id,))
+
+    def _clear_recovery_when_running(self, printer_id: str, snap: dict) -> None:
+        """Печать уже RUNNING: закрыть старую recovery-сессию."""
+        state = str(snap.get("printer", {}).get("state") or "").upper()
+        if state not in ("RUNNING", "PREPARE", "SLICING"):
+            return
+        self.db.execute(
+            "UPDATE print_jobs SET power_loss_at='', resume_attempts=0, resume_reason=''"
+            " WHERE printer_id=? AND state='running' AND COALESCE(power_loss_at,'')<>''",
+            (printer_id,))
 
     def clear_user_paused(self, printer_id: str) -> None:
-        """Пользователь вручную нажал «Продолжить» или печать завершена."""
+        """Снять ручную паузу после явной команды resume или завершения печати."""
         self._user_paused.pop(printer_id, None)
+        self.db.execute(
+            "UPDATE print_jobs SET manual_paused=0, resume_eligible=1,"
+            "power_loss_at='', resume_attempts=0, resume_reason=''"
+            " WHERE printer_id=? AND state IN ('running','starting','uploading')",
+            (printer_id,))
 
     def is_user_paused(self, printer_id: str) -> bool:
-        """Была ли ручная пауза за последние 5 минут."""
+        """Была ли пауза явно нажата в текущем процессе."""
         last = self._user_paused.get(printer_id, 0.0)
         return (time.time() - last) < 300.0
 
+    def _recovery_block(self, printer_id: str, job: dict, code: str,
+                        title: str, detail: str) -> None:
+        """Журналировать блокировку recovery, но не спамить на каждом snapshot."""
+        key = f"{printer_id}:{job.get('id') or ''}:{code}"
+        now = time.time()
+        if now - self._auto_resume_blocked_at.get(key, 0.0) < 60:
+            return
+        self._auto_resume_blocked_at[key] = now
+        self.db.add_event("security", title, detail, printer_id,
+                          {"job_id": job.get("id"), "block": code})
+
     def check_auto_resume(self, printer_id: str, snap: dict | None = None) -> bool:
-        """Автоматическое возобновление печати при паузе/сбое питания без ручных команд."""
-        if not self.db.setting("auto_resume_paused", True):
+        """Resume только для доказанного power-loss recovery.
+
+        Статус PAUSE сам по себе ничего не доказывает: это также ручная пауза,
+        filament runout, HMS/fatal и другие ошибки. Доказательством здесь
+        является устойчивый marker потери связи плюс явный marker firmware/
+        bridge о восстановлении питания; один offline/online не подтверждает
+        причину. Marker для ручной паузы сбрасывается в SQLite.
+        """
+        # Power-loss recovery — отдельный safety-policy gate. Общий
+        # unattended_dangerous_actions сюда не протекает: обычные физические
+        # команды по-прежнему требуют его и/или confirmed=true.
+        if not self.db.setting("auto_resume_paused", False):
             return False
         printer = self.get(printer_id)
         if not printer or not printer.connected:
             return False
         if snap is None:
             snap = printer.snapshot()
-        state = snap["printer"].get("state", "")
+        state = str(snap.get("printer", {}).get("state", "")).upper()
         if state not in ("PAUSE", "PAUSED"):
             return False
-        # Если паузу нажал сам пользователь — не вмешиваемся
         if self.is_user_paused(printer_id):
             return False
-        # Проверяем, нет ли критической блокировки: закончившейся катушки
-        from .watchdog import FILAMENT_RUNOUT_CODES
-        problems = snap["printer"].get("problems") or []
-        for prob in problems:
+
+        job = self.db.one(
+            "SELECT * FROM print_jobs WHERE printer_id=?"
+            " AND state IN ('running','starting','uploading')"
+            " ORDER BY datetime(created_at) DESC LIMIT 1", (printer_id,))
+        # Нет устойчивого job/marker — причина паузы неизвестна, оставляем
+        # оператору. COALESCE нужен для legacy-строк до миграции.
+        marker = job.get("power_loss_at") if job else ""
+        if (not job or not marker or int(job.get("manual_paused") or 0)
+                or not int(job.get("resume_eligible", 1))):
+            return False
+
+        printer_data = snap.get("printer", {})
+        explicit_power_signal = bool(printer_data.get("power_loss_recovery"))
+        reason = str(job.get("resume_reason") or "")
+        if explicit_power_signal and reason in ("connection_lost", "connector_restart"):
+            self._confirm_power_loss_candidate(printer_id, {
+                "source": "printer_snapshot", "power_loss_recovery": True,
+                "job_id": job.get("id")})
+            job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or job
+            reason = str(job.get("resume_reason") or "")
+        # A connection cycle is only a candidate. Без явного marker firmware/
+        # bridge (или уже сохранённого подтверждения) причина остаётся
+        # неизвестной, поэтому даже при PAUSE resume не отправляем.
+        if reason != "power_loss_confirmed":
+            return False
+        task = str(printer_data.get("task") or "").strip()
+        current_remote_id = str(printer_data.get("remote_task_id") or "").strip()
+        expected_names = [str(job.get("name") or "").strip(),
+                          str(job.get("file") or "").strip()]
+        expected_names = [x for x in expected_names if x]
+        def same_file(current: str, expected: str) -> bool:
+            current, expected = current.lower(), expected.lower()
+            return (current == expected
+                    or current.rsplit("/", 1)[-1] == expected.rsplit("/", 1)[-1])
+        if (not task or (expected_names and not any(same_file(task, x) for x in expected_names))):
+            self.db.add_event(
+                "security", "Авто-resume заблокирован: изменено задание",
+                f"На принтере «{task or 'неизвестно'}», в очереди «{expected_names[0] if expected_names else 'неизвестно'}»",
+                printer_id, {"job_id": job.get("id"), "marker": marker,
+                             "current_remote_task_id": current_remote_id,
+                             "expected_remote_task_id": job.get("remote_task_id") or ""})
+            return False
+        expected_remote_id = str(job.get("remote_task_id") or "").strip()
+        if expected_remote_id and expected_remote_id != current_remote_id:
+            self.db.add_event(
+                "security", "Авто-resume заблокирован: версия задания изменена",
+                "Идентификатор задачи на принтере не совпадает с сохранённым",
+                printer_id, {"job_id": job.get("id"), "marker": marker,
+                             "current_remote_task_id": current_remote_id,
+                             "expected_remote_task_id": expected_remote_id})
+            return False
+        current_version = str(printer_data.get("file_version") or "").strip()
+        expected_version = str(job.get("file_version") or "").strip()
+        if expected_version and expected_version != current_version:
+            self.db.add_event(
+                "security", "Авто-resume заблокирован: версия файла изменена",
+                "Хэш/версия файла на принтере не совпадает с сохранённым",
+                printer_id, {"job_id": job.get("id"), "marker": marker})
+            return False
+
+        # Старый marker не является достаточным доказательством того, что
+        # принтер всё ещё удерживает resumable-задачу.
+        try:
+            marker_ts = datetime.fromisoformat(str(marker).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError, OverflowError):
+            return False
+        max_delay = max(0, int(num(self.db.setting("auto_resume_max_delay_minutes", 1440), 1440)))
+        if max_delay and time.time() - marker_ts > max_delay * 60:
+            self.db.execute(
+                "UPDATE print_jobs SET resume_reason='auto_resume_expired' WHERE id=?", (job["id"],))
+            self.db.add_event(
+                "security", "Авто-resume истёк",
+                "Печать оставлена оператору: окно power-loss recovery завершилось",
+                printer_id, {"job_id": job["id"], "marker": marker})
+            return False
+
+        # Recovery — не обычный запуск: повторяем preflight для материала,
+        # активной катушки и состояния принтера, но не считаем PAUSE «готовым».
+        if not isinstance(snap.get("ams"), dict):
+            snap["ams"] = {}
+        ok, reason_text = self._material_matches(job, snap, force=True)
+        if not ok:
+            self._recovery_block(printer_id, job, "material",
+                                 "Авто-resume заблокирован: материал", reason_text)
+            return False
+        ok, reason_text = self._enough_filament(job, snap, force=True)
+        if not ok:
+            self._recovery_block(printer_id, job, "filament",
+                                 "Авто-resume заблокирован: пластик", reason_text)
+            return False
+
+        # Проверяем, нет ли runout, HMS/fatal или неизвестной ошибки. Любой
+        # blocking/error HMS оставляем оператору — нельзя угадывать причину
+        # паузы и отправлять физический resume вслепую.
+        printer_status = snap.get("printer", {})
+        problems = printer_status.get("problems") or []
+        if printer_status.get("hms"):
+            self._recovery_block(printer_id, job, "hms",
+                                 "Авто-resume заблокирован: HMS", "На принтере есть HMS-сообщение")
+            return False
+        if problems:
+            prob = problems[0] if isinstance(problems[0], dict) else {}
             code = str(prob.get("code") or "")
-            if code in FILAMENT_RUNOUT_CODES:
-                return False
-            if prob.get("severity") == "fatal":
-                return False
-        # Ограничиваем частоту попыток (не чаще раза в 4 секунды, до 5 раз на инцидент)
+            self._recovery_block(printer_id, job, "printer_error",
+                                 "Авто-resume заблокирован: ошибка принтера",
+                                 str(prob.get("title") or code or "Неизвестная ошибка"))
+            return False
+        raw_error = printer_status.get("print_error")
+        if raw_error and str(raw_error) not in ("0", "0000-0000"):
+            self._recovery_block(printer_id, job, "print_error",
+                                 "Авто-resume заблокирован: print_error", str(raw_error))
+            return False
+
         now = time.time()
-        task = snap["printer"].get("task") or "Печать"
-        attempt_info = self._auto_resume_attempts.setdefault(printer_id, {"count": 0, "last_ts": 0.0, "task": task})
-        if attempt_info.get("task") != task:
-            attempt_info["count"] = 0
-            attempt_info["task"] = task
+        stored_attempts = int(job.get("resume_attempts") or 0)
+        attempt_info = self._auto_resume_attempts.setdefault(
+            printer_id, {"count": stored_attempts, "last_ts": 0.0, "task": task, "job_id": job["id"]})
+        if attempt_info.get("job_id") != job["id"] or attempt_info.get("task") != task:
+            attempt_info.update({"count": 0, "last_ts": 0.0, "task": task, "job_id": job["id"]})
         if now - attempt_info.get("last_ts", 0.0) < 4.0:
             return False
         if attempt_info.get("count", 0) >= 5:
+            self.db.execute(
+                "UPDATE print_jobs SET resume_reason='auto_resume_exhausted' WHERE id=?", (job["id"],))
             return False
         attempt_info["count"] += 1
         attempt_info["last_ts"] = now
+        self.db.execute(
+            "UPDATE print_jobs SET resume_attempts=?, resume_reason='auto_resume_attempt' WHERE id=?",
+            (attempt_info["count"], job["id"]))
         try:
             printer.command("resume")
+            # Команда принята брокером — recovery-сессия исчерпана. Сразу
+            # убираем marker, чтобы последующая ручная PAUSE не была принята
+            # за ту же аварию; retry остаются только для исключения до ACK.
+            self.db.execute(
+                "UPDATE print_jobs SET power_loss_at='', resume_reason='auto_resume_sent' WHERE id=?",
+                (job["id"],))
             self.db.add_event(
-                "printer", "⚡ Авто-продолжение печати",
-                f"Принтер «{printer.record.get('name', 'Принтер')}»: печать «{task}» продолжена автоматически (восстановление питания / Крым)",
-                printer_id, {"task": task, "progress": snap["printer"].get("progress", 0), "attempt": attempt_info["count"]})
+                "printer", "⚡ Авто-resume после power loss",
+                f"Принтер «{printer.record.get('name', 'Принтер')}»: «{task}» продолжена автоматически",
+                printer_id, {"task": task, "job_id": job["id"],
+                            "progress": snap["printer"].get("progress", 0),
+                            "attempt": attempt_info["count"], "marker": marker})
             self.notify_async(
                 f"⚡ PrintFlow · {printer.record.get('name', 'Принтер')}\n"
-                f"Восстановление питания (Крым / авто-продолжение)\n"
-                f"Печать «{task}» ({round(num(snap['printer'].get('progress')))}%) автоматически продолжена!",
+                f"Восстановление после отключения питания\n"
+                f"Печать «{task}» автоматически продолжена (попытка {attempt_info['count']}).",
                 None)
             return True
         except Exception as exc:
-            self.db.add_event("error", "Сбой авто-продолжения печати", str(exc), printer_id)
+            if attempt_info["count"] >= 5:
+                self.db.execute(
+                    "UPDATE print_jobs SET resume_reason='auto_resume_exhausted' WHERE id=?",
+                    (job["id"],))
+                self.db.add_event(
+                    "security", "Авто-resume остановлен после лимита",
+                    "Не удалось безопасно продолжить печать; требуется оператор",
+                    printer_id, {"job_id": job["id"], "attempts": attempt_info["count"]})
+            else:
+                self.db.execute(
+                    "UPDATE print_jobs SET resume_reason='power_loss_confirmed' WHERE id=?",
+                    (job["id"],))
+            self.db.add_event("error", "Сбой авто-resume после power loss", str(exc), printer_id,
+                              {"job_id": job["id"], "attempt": attempt_info["count"]})
+            self.notify_async(
+                f"⚠ PrintFlow · не удалось продолжить печать после power loss\n"
+                f"Задание «{task}», попытка {attempt_info['count']}/5: {exc}", None)
             return False
 
     def _startup_auto_resume_loop(self) -> None:
@@ -1796,6 +2137,7 @@ class PrinterManager:
                     self.check_auto_resume(printer.id, snap)
                     idle_seen.pop(printer.id, None)
                 elif state in ("RUNNING", "PREPARE", "SLICING"):
+                    self._clear_recovery_when_running(printer.id, snap)
                     idle_seen.pop(printer.id, None)
                 elif printer.id not in reconciled_ids:
                     # Свободное состояние подтверждаем несколькими подряд
@@ -1839,6 +2181,7 @@ class PrinterManager:
         if len(self._cost_limit_reported) > 200:
             self._cost_limit_reported.clear()
         try:
+            self.mark_non_resumable_pause(printer.id, "cost_limit_pause")
             printer.command("pause")
             acted = "печать поставлена на паузу"
         except Exception as exc:
@@ -2429,6 +2772,20 @@ class PrinterManager:
             " ORDER BY datetime(at)",
             (now_iso(),))
         for cmd in due:
+            command_name = str(cmd.get("command") or "").strip()
+            if (command_name in DANGEROUS_AUTOMATION_COMMANDS
+                    and not self.db.setting("unattended_dangerous_actions", False)):
+                ok, err = False, "Заблокировано safety-gate: опасные действия без оператора запрещены"
+                self.db.execute(
+                    "UPDATE scheduled_commands SET done=1, result=? WHERE id=?",
+                    (err, cmd["id"]))
+                self.db.add_event(
+                    "security", "Отложенная команда заблокирована",
+                    f"{command_name} · {cmd.get('note') or ''}",
+                    cmd.get("printer_id") or "", {"ok": False, "blocked": True, "command": command_name})
+                if self.db.setting("notify_guard", True):
+                    self.notify_async(f"PrintFlow: опасная отложенная команда заблокирована\n{command_name}", None)
+                continue
             printer = self.get(cmd.get("printer_id") or "")
             ok, err = False, "Принтер не найден"
             if printer:
@@ -2492,7 +2849,9 @@ class PrinterManager:
                         self._check_cost_limit(printer, snap)
                     except Exception as exc:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
-                    if snap["printer"]["state"] in ("IDLE", "FINISH"):
+                    if snap["printer"]["state"] in ("RUNNING", "PREPARE", "SLICING"):
+                        self._clear_recovery_when_running(printer.id, snap)
+                    elif snap["printer"]["state"] in ("IDLE", "FINISH"):
                         self._maybe_start_next(printer.id)
                     elif snap["printer"]["state"] in ("PAUSE", "PAUSED"):
                         self.check_auto_resume(printer.id, snap)
