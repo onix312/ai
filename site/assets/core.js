@@ -354,7 +354,16 @@ function showView(name, sub) {
     v.classList.toggle('on', active);
     v.hidden = !active;
   });
-  $$('.nav-link').forEach((a) => a.classList.toggle('on', a.dataset.view === name));
+  $$('.nav-link').forEach((a) => {
+    const group = (a.dataset.views || '').split(/\s+/).filter(Boolean);
+    const on = a.dataset.view === name || group.includes(name);
+    a.classList.toggle('on', on);
+    if (on) {
+      const more = a.closest('details.nav-more');
+      if (more) more.open = true;
+    }
+  });
+  syncStockTabs(name);
   $('top_title').textContent = VIEWS[name].title;
   $('top_sub').textContent = VIEWS[name].sub;
   document.title = `${VIEWS[name].title} · NOZZA`;
@@ -393,6 +402,24 @@ if (window.matchMedia) {
     if ((PF.state.settings.theme || 'system') === 'system') applyTheme();
   });
 }
+function applyDensity() {
+  const on = store.get('pf_density', '') === 'shop';
+  document.documentElement.dataset.density = on ? 'shop' : 'desk';
+  const btn = $('density_btn');
+  if (btn) {
+    btn.classList.toggle('on', on);
+    btn.title = on ? 'Обычный вид (сейчас режим цеха)' : 'Режим цеха: крупные кнопки, меньше воздуха';
+  }
+}
+applyDensity();
+const densBtn = $('density_btn');
+if (densBtn) densBtn.addEventListener('click', () => {
+  const next = store.get('pf_density', '') === 'shop' ? '' : 'shop';
+  store.set('pf_density', next);
+  applyDensity();
+  toast(next === 'shop' ? 'Режим цеха' : 'Обычный вид', next === 'shop' ? 'Крупные кнопки у станка' : 'Больше данных на экране');
+});
+
 $('theme_btn').addEventListener('click', async () => {
   const order = ['system', 'light', 'dark'];
   const next = order[(order.indexOf(PF.state.settings.theme || 'system') + 1) % order.length];
@@ -422,6 +449,7 @@ function baseCommands() {
     { group: 'Принтер', icon: '■', title: 'Остановить печать', sub: 'Требует подтверждения', run: () => PF.modules.printer && PF.modules.printer.command('stop') },
     { group: 'Система', icon: '↓', title: 'Скачать резервную копию', sub: 'JSON со всеми данными', run: () => PF.modules.settings && PF.modules.settings.downloadBackup() },
     { group: 'Система', icon: '◐', title: 'Переключить тему', sub: 'Светлая / тёмная', run: () => $('theme_btn').click() },
+    { group: 'Система', icon: '▣', title: 'Режим цеха', sub: 'Крупные кнопки у станка', run: () => $('density_btn') && $('density_btn').click() },
   ]);
 }
 
@@ -545,6 +573,62 @@ $('burger').addEventListener('click', () => {
     document.body.appendChild(scrim);
   } else { const s = $('scrim'); if (s) s.remove(); }
 });
+const STOCK_TABS = [
+  { id: 'products', label: 'Товары' },
+  { id: 'batches', label: 'Партии' },
+  { id: 'documents', label: 'Документы' },
+  { id: 'warehouses', label: 'Склады' },
+  { id: 'shelf', label: 'Стеллаж' },
+  { id: 'inventory', label: 'Пластик' },
+];
+const STOCK_IDS = new Set(STOCK_TABS.map((t) => t.id));
+
+function syncStockTabs(name) {
+  $$('.stock-tabs').forEach((el) => el.remove());
+  if (!STOCK_IDS.has(name)) return;
+  const view = $('view-' + name);
+  if (!view) return;
+  const bar = document.createElement('div');
+  bar.className = 'seg tabs stock-tabs';
+  bar.innerHTML = STOCK_TABS.map((t) =>
+    `<button type="button" data-view="${t.id}" class="${t.id === name ? 'on' : ''}">${t.label}</button>`).join('');
+  bar.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-view]');
+    if (btn) PF.go(btn.dataset.view);
+  });
+  const head = view.querySelector('.view-head');
+  if (head && head.nextSibling) view.insertBefore(bar, head.nextSibling);
+  else view.prepend(bar);
+}
+
+function filterNav(q) {
+  const s = String(q || '').trim().toLowerCase();
+  const empty = $('nav_empty');
+  let shown = 0;
+  $$('#side .nav-group').forEach((g) => {
+    let hit = 0;
+    $$('.nav-link', g).forEach((a) => {
+      const blob = (a.textContent + ' ' + (a.dataset.find || '') + ' ' + (a.dataset.view || '') + ' ' + (a.dataset.views || '')).toLowerCase();
+      const ok = !s || blob.includes(s);
+      a.hidden = !ok;
+      if (ok) { hit++; shown++; }
+    });
+    g.hidden = !!s && !hit;
+    const more = g.querySelector('details.nav-more');
+    if (more && s && hit) more.open = true;
+  });
+  if (empty) empty.hidden = !s || shown > 0;
+}
+const navFind = $('nav_find');
+if (navFind) {
+  navFind.addEventListener('input', () => filterNav(navFind.value));
+  navFind.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const first = $$('#side .nav-link').find((a) => !a.hidden);
+    if (first) { e.preventDefault(); PF.go(first.dataset.view); navFind.value = ''; filterNav(''); }
+  });
+}
+
 $('conn_chip').addEventListener('click', () => PF.go('settings'));
 $('quick_order').addEventListener('click', () => PF.modules.ops && PF.modules.ops.openOrder());
 

@@ -160,12 +160,36 @@ img.brand-logo { background: none; box-shadow: none; }
 .brand b { display: block; font-size: 15px; letter-spacing: .02em; }
 .brand small { display: block; font-size: 11.5px; color: var(--muted); }
 
+.nav-find {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 4px 8px; padding: 0 10px;
+  height: 36px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--panel-2);
+}
+.nav-find span { color: var(--muted); font-size: 14px; }
+.nav-find input {
+  border: 0; background: transparent; min-height: 0; padding: 0;
+  font-size: 13px; box-shadow: none;
+}
+.nav-find input:focus { box-shadow: none; background: transparent; }
+.nav-empty { font-size: 12px; color: var(--muted); padding: 10px 12px; margin: 0; }
+.nav-group { margin-bottom: 4px; }
+
 .side-scroll { flex: 1; overflow-y: auto; padding: 2px 2px 8px; margin-right: -4px; }
 
 .nav-group-title {
   font-size: 10.5px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase;
   color: var(--muted); padding: 15px 12px 6px;
 }
+details.nav-more { border: 0; }
+details.nav-more > summary.nav-group-title {
+  list-style: none; cursor: pointer; user-select: none;
+}
+details.nav-more > summary.nav-group-title::-webkit-details-marker { display: none; }
+details.nav-more > summary.nav-group-title::after {
+  content: "▾"; float: right; font-size: 10px; opacity: .6;
+}
+details.nav-more:not([open]) > summary.nav-group-title::after { content: "▸"; }
 .nav-link {
   display: flex; align-items: center; gap: 10px;
   min-height: 38px; padding: 8px 12px; margin-bottom: 2px;
@@ -277,6 +301,7 @@ img.brand-logo { background: none; box-shadow: none; }
 .icon-btn:active { transform: scale(.93); }
 .icon-btn.sm { width: 30px; height: 30px; font-size: 13px; border-radius: 8px; }
 .icon-btn.danger:hover { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
+.icon-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
 
 .live-pill {
   display: flex; align-items: center; gap: 8px;
@@ -689,6 +714,30 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
   .view { display: block !important; }
   .toolbar { position: static; }
 }
+
+/* Режим цеха: крупные цели, меньше воздуха, удобно в перчатках / с телефона у станка */
+html[data-density="shop"] {
+  --top-h: 56px;
+  --side-w: 228px;
+}
+html[data-density="shop"] body { font-size: 15.5px; }
+html[data-density="shop"] #views { padding: 14px 16px 48px; }
+html[data-density="shop"] .card { padding: 14px; }
+html[data-density="shop"] .grid { gap: 12px; }
+html[data-density="shop"] .view-head { margin-bottom: 12px; }
+html[data-density="shop"] .view-head h1 { font-size: 21px; }
+html[data-density="shop"] .btn { height: 44px; padding: 0 16px; font-size: 14.2px; }
+html[data-density="shop"] .btn.sm { height: 36px; }
+html[data-density="shop"] .cmd-btn { min-height: 72px; padding: 12px 8px; font-size: 13px; }
+html[data-density="shop"] .cmd-btn .ic { font-size: 20px; }
+html[data-density="shop"] .jog button { height: 48px; width: 48px; font-size: 16px; }
+html[data-density="shop"] .orbit { width: 118px; height: 118px; }
+html[data-density="shop"] .orbit svg { width: 118px; height: 118px; }
+html[data-density="shop"] .orbit .cap b { font-size: 24px; }
+html[data-density="shop"] .focus-row, html[data-density="shop"] .focus-empty { min-height: 68px; }
+html[data-density="shop"] .ocard { padding: 14px; }
+html[data-density="shop"] .queue-item { min-height: 64px; }
+html[data-density="shop"] .kpi .value { font-size: 28px; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }

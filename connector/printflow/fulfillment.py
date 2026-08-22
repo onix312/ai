@@ -52,8 +52,12 @@ class OrderFulfillment:
         economics = self.acc.order_economics(order)
         due = round(num(economics.get("debt")), 2)
 
-        jobs = self.db.query("SELECT state FROM print_jobs WHERE order_id=?", (order_id,))
-        active_jobs = sum(job.get("state") in ("queued", "starting", "running") for job in jobs)
+        jobs = self.db.query(
+            "SELECT id,name,file,state FROM print_jobs WHERE order_id=?", (order_id,)
+        )
+        printing = [job for job in jobs if job.get("state") in ("starting", "running")]
+        queued_jobs = sum(job.get("state") == "queued" for job in jobs)
+        active_jobs = len(printing)
         successful_jobs = sum(job.get("state") == "done" for job in jobs)
 
         stock_info: dict[str, Any] = {
@@ -83,10 +87,13 @@ class OrderFulfillment:
                 "code": "status",
                 "text": "Сначала примите результат и переведите заказ в статус «Готов»",
             })
-        if not final and active_jobs:
+        if not final and printing:
+            names = ", ".join(
+                str(job.get("name") or job.get("file") or "печать") for job in printing[:3]
+            )
             blocks.append({
                 "code": "active_jobs",
-                "text": f"У заказа есть незавершённые задания: {active_jobs}",
+                "text": f"Печать ещё идёт: {names}",
             })
         if not final and successful_jobs and order.get("quality") != "passed":
             blocks.append({
@@ -126,7 +133,10 @@ class OrderFulfillment:
                 "accounts": accounts,
             },
             "stock": stock_info,
-            "jobs": {"total": len(jobs), "active": active_jobs, "successful": successful_jobs},
+            "jobs": {
+                "total": len(jobs), "active": active_jobs,
+                "queued": queued_jobs, "successful": successful_jobs,
+            },
             "economics": economics,
             "blocks": blocks,
             "warns": warns,
@@ -158,6 +168,11 @@ class OrderFulfillment:
                 raise ValueError("Нельзя выдать заказ: " + "; ".join(
                     item["text"] for item in summary["blocks"]
                 ))
+            self.db.execute(
+                "UPDATE print_jobs SET state='cancelled', finished_at=? "
+                "WHERE order_id=? AND state='queued'",
+                (now_iso(), order_id),
+            )
 
             due = num(summary["payment"]["due"])
             action = str(payment_action or "").strip().lower()

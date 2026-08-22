@@ -56,8 +56,13 @@
     <label>Ширина, мм<input id="swidth" type="number" value="60"></label>
     <label>Глубина, мм<input id="sdepth" type="number" value="40"></label>
    </div>
+   <div id="cardParams" style="display:none">
+    <label>Текст на карточке<input id="cardtext" value="NOZZA"></label>
+    <label>Ширина, мм<input id="cwidth" type="number" value="50"></label>
+    <label>Высота, мм<input id="cheight" type="number" value="30"></label>
+   </div>
    <button class="btn" id="download" type="button">Скачать STL</button>
-   <p class="hint">Текст: цифры, кириллица (строчные станут заглавными), «-», «.», «/», пробел. Латинские буквы не поддерживаются. Шрифт — растровый 5×7, на табличке лучше смотрится 3–6 символов.</p>
+   <p class="hint">Текст: цифры, кириллица и латиница (строчные станут заглавными), «-», «.», «/», пробел. Шрифт — растровый 5×7, на табличке лучше смотрится 3–6 символов. Для бренд-карточки удобно «NOZZA».</p>
   </div>
   <div class="card">
    <h2>Предпросмотр</h2>
@@ -73,6 +78,7 @@
     if(shape==='number_plate'){ p.number=$('#number').value||'1'; p.width=$('#width').value||40; p.height=$('#height').value||24; }
     if(shape==='tag_disc'){ p.diameter=$('#diameter').value||30; }
     if(shape==='qr_stand_base'){ p.width=$('#swidth').value||60; p.depth=$('#sdepth').value||40; }
+    if(shape==='brand_card'){ p.text=$('#cardtext').value||'NOZZA'; p.width=$('#cwidth').value||50; p.height=$('#cheight').value||30; }
     return p;
   }
   function qs(p){ var s=new URLSearchParams(); Object.keys(p).forEach(function(k){s.set(k,p[k]);}); return s.toString(); }
@@ -84,9 +90,10 @@
     $('#plateParams').style.display = s==='number_plate'?'block':'none';
     $('#discParams').style.display = s==='tag_disc'?'block':'none';
     $('#standParams').style.display = s==='qr_stand_base'?'block':'none';
+    $('#cardParams').style.display = s==='brand_card'?'block':'none';
     updatePreview();
   }
-  ['shape','number','width','height','diameter','swidth','sdepth'].forEach(function(id){
+  ['shape','number','width','height','diameter','swidth','sdepth','cardtext','cwidth','cheight'].forEach(function(id){
     $(id).addEventListener('input', function(){ clearTimeout(syncParams._t); syncParams._t=setTimeout(updatePreview,150); });
   });
   $('#shape').addEventListener('change', syncParams);

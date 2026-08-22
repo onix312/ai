@@ -120,6 +120,7 @@ function renderDashboard() {
   }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>';
 
   renderOperatorFocus();
+  renderOwnerCash();
   renderPlan();
   renderHealth();
   renderActivePrint();
@@ -218,6 +219,29 @@ function renderOperatorFocus() {
     : '<div class="focus-empty"><span class="focus-ok">✓</span><div><b>Срочных действий нет</b><small>Можно продолжать плановую печать или открыть любой раздел.</small></div><button class="btn sm" type="button" data-focus-route="queue">Открыть очередь</button></div>';
 }
 
+function renderOwnerCash() {
+  const host = $('owner_cash');
+  if (!host) return;
+  const moneyState = PF.state.money || {};
+  const acc = moneyState.accounts || {};
+  const debts = moneyState.debts || {};
+  const have = moneyState.accounts || moneyState.debts;
+  const cash = have ? num(acc.total) : null;
+  const owe = have ? num(debts.total) : (PF.state.orders || []).reduce((a, o) => {
+    const paid = Math.max(num(o.paid), num(o.prepaid));
+    return a + Math.max(0, num(o.price) - paid);
+  }, 0);
+  const overdue = have ? num(debts.overdue) : 0;
+  const nacc = (acc.accounts || []).length;
+  const ndebt = have ? nfmt(debts.count) : '—';
+  host.hidden = false;
+  host.innerHTML = `<div class="oc ${cash != null && cash < 0 ? 'bad' : 'ok'}"><span>В кассе</span><b>${cash == null ? '…' : money(cash)}</b>`
+    + `<span>${nacc ? nfmt(nacc) + ' касс(ы)' : 'откроется Финансы'}</span></div>`
+    + `<div class="oc ${num(owe) ? 'warn' : 'ok'}"><span>Должны нам</span><b>${money(owe)}</b><span>${have ? ndebt + ' заказ(ов)' : 'по активным заказам'}</span></div>`
+    + `<div class="oc ${num(overdue) ? 'bad' : 'ok'}"><span>Просрочка</span><b>${have ? money(overdue) : '—'}</b>`
+    + `<span>дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дн.</span></div>`;
+}
+
 function renderEvents() {
   const list = PF.state.events || [];
   $('dash_events').innerHTML = list.length ? list.slice(0, 18).map((e) => `<div class="event ${esc(e.kind)}">`
@@ -231,6 +255,7 @@ function renderEvents() {
 const DASH_WIDGETS = [
   ['kpis', 'Показатели (KPI-ряд)'],
   ['operator_focus', 'Сейчас нужно сделать'],
+  ['owner_cash', 'Касса одной строкой'],
   ['plan', 'План на сегодня'],
   ['health', 'Здоровье бизнеса'],
   ['active', 'Активная печать'],
@@ -1839,6 +1864,8 @@ function bind() {
     } catch (e) { fail(e); }
     finally { button.disabled = false; }
   });
+  const cashStrip = $('owner_cash');
+  if (cashStrip) cashStrip.addEventListener('click', () => PF.go('finance'));
   $('operator_focus').addEventListener('click', (e) => {
     const fulfill = e.target.closest('[data-focus-fulfill]');
     if (fulfill) {
@@ -2105,6 +2132,7 @@ PF.on('data', renderCycobar);
 PF.on('live', renderDashboard);
 PF.on('live', renderCycobar);
 PF.on('finance', renderDashboard);
+PF.on('money', renderDashboard);
 PF.on('events', renderEvents);
 PF.on('printers', renderSettings);
 PF.on('printers', renderCycobar);
@@ -2113,7 +2141,10 @@ PF.on('money', () => { if (document.querySelector('#view-settings.on')) renderSe
 PF.on('view', (d) => {
   if (d.view === 'library') showArticle(d.sub || '');
   if (d.view === 'settings') { renderSettings(); loadMaterials(); renderTour(); }
-  if (d.view === 'dashboard') renderDashboard();
+  if (d.view === 'dashboard') {
+    renderDashboard();
+    if (PF.refreshMoney) PF.refreshMoney();
+  }
 });
 window.addEventListener('resize', U.debounce(() => {
   if (document.querySelector('#view-dashboard.on')) renderDashboard();

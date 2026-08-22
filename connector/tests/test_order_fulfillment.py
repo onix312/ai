@@ -43,6 +43,20 @@ class OrderFulfillmentTests(unittest.TestCase):
         data.update(overrides)
         return self.db.upsert("orders", data)
 
+    def test_leftover_queued_job_is_cancelled_on_fulfill(self):
+        self.order()
+        self.db.upsert("print_jobs", {
+            "id": "job-q", "order_id": "order-1", "state": "queued",
+            "created_at": now_iso(),
+        })
+        summary = self.service.summary("order-1")
+        self.assertTrue(summary["can_fulfill"])
+        self.service.fulfill("order-1", handoff_confirmed=True, payment_action="debt")
+        self.assertEqual(
+            self.db.one("SELECT state FROM print_jobs WHERE id='job-q'")["state"],
+            "cancelled",
+        )
+
     def test_summary_requires_ready_status_and_finished_jobs(self):
         self.order(status="post")
         self.db.upsert("print_jobs", {
