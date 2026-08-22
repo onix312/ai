@@ -42,7 +42,7 @@
  <div><b>Наклейки цеха</b><small id="sub">загрузка…</small></div>
  <span class="sp"></span>
  <a href="/labels.html?kind=spool">Катушки</a>
- <a href="/labels.html?kind=shelf">Ценники</a>
+ <a href="/price-tags.html">Ценники</a>
  <a href="/labels.html?kind=all">Всё</a>
  <button class="primary" type="button" id="printBtn">Печать</button>
 </div>
@@ -53,6 +53,8 @@
 (function () {
   'use strict';
   var kind = new URLSearchParams(location.search).get('kind') || 'all';
+  // Старые закладки «labels?kind=shelf» ведём в полноценный конструктор.
+  if (kind === 'shelf') { location.replace('/price-tags.html'); return; }
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, function (c) {
       return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];

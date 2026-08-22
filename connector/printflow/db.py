@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -167,6 +167,23 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("sold", "INTEGER DEFAULT 0"),
         ("nom_id", "TEXT DEFAULT ''"),
         ("updated_at", "TEXT DEFAULT ''"),
+    ],
+    "shelf_items": [
+        # Код и артикул должны совпадать с карточкой номенклатуры в 1С:
+        # кассовый сканер читает Code 128 с ценника без отдельной переклейки.
+        ("nom_id", "TEXT DEFAULT ''"),
+        ("barcode", "TEXT DEFAULT ''"),
+        ("sku", "TEXT DEFAULT ''"),
+        # Индивидуальный вид ценника; пустые подписи берутся из конструктора.
+        ("tag_template", "TEXT DEFAULT 'classic'"),
+        ("tag_badge", "TEXT DEFAULT ''"),
+        ("tag_color", "TEXT DEFAULT '#4f46e5'"),
+        ("tag_note", "TEXT DEFAULT ''"),
+    ],
+    "shelf_moves": [
+        # Внешний ключ строки чека делает повторную отправку из 1С безопасной.
+        ("source", "TEXT DEFAULT ''"),
+        ("external_id", "TEXT DEFAULT ''"),
     ],
 }
 
@@ -683,12 +700,19 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     id TEXT PRIMARY KEY,
     name TEXT DEFAULT '',
     catalog_id TEXT,
-    qty REAL DEFAULT 0,            -- штук на стеллаже
-    price REAL DEFAULT 0,          -- цена ценника, ₽
-    cost_per_unit REAL DEFAULT 0,  -- себестоимость штуки, ₽
-    min_qty REAL DEFAULT 0,        -- минимальный остаток для предупреждения
-    photo TEXT DEFAULT '',         -- имя файла в DATA_DIR/photos/
+    nom_id TEXT DEFAULT '',         -- canonical номенклатура PrintFlow / 1С
+    qty REAL DEFAULT 0,             -- штук на стеллаже
+    price REAL DEFAULT 0,           -- цена ценника, ₽
+    cost_per_unit REAL DEFAULT 0,   -- себестоимость штуки, ₽
+    min_qty REAL DEFAULT 0,         -- минимальный остаток для предупреждения
+    photo TEXT DEFAULT '',          -- имя файла в DATA_DIR/photos/
     note TEXT DEFAULT '',
+    barcode TEXT DEFAULT '',        -- штрихкод ровно как в номенклатуре 1С
+    sku TEXT DEFAULT '',            -- артикул 1С
+    tag_template TEXT DEFAULT 'classic', -- classic|compact|promo|minimal
+    tag_badge TEXT DEFAULT '',      -- своя плашка: «Хит», «Новинка», «−20%»
+    tag_color TEXT DEFAULT '#4f46e5',
+    tag_note TEXT DEFAULT '',       -- короткое описание только для ценника
     active INTEGER DEFAULT 1,
     created_at TEXT,
     updated_at TEXT
@@ -703,6 +727,8 @@ CREATE TABLE IF NOT EXISTS shelf_moves (
     price REAL DEFAULT 0,          -- цена продажи для sale
     job_id TEXT,
     tx_id TEXT,
+    source TEXT DEFAULT '',        -- printflow | 1c | другое внешнее ПО
+    external_id TEXT DEFAULT '',   -- уникальный id строки внешнего чека
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_shelf_moves_item ON shelf_moves(item_id, at);
@@ -1198,6 +1224,15 @@ class Database:
             self.conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_reprint_source"
                 " ON print_jobs(reprint_of_job_id) WHERE reprint_of_job_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_shelf_move_external"
+                " ON shelf_moves(source, external_id)"
+                " WHERE source<>'' AND external_id<>''"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shelf_item_barcode"
+                " ON shelf_items(barcode) WHERE barcode<>''"
             )
             if version < SCHEMA_VERSION:
                 self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

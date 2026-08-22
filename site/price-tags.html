@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Конструктор ценников · PrintFlow</title>
+<link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml">
+<style>
+:root {
+  --ink:#182033; --muted:#6c7890; --line:#dfe4ee; --soft:#f5f7fb; --panel:#fff;
+  --accent:#4f46e5; --accent-soft:#eef0ff; --ok:#138a5b; --warn:#b76a13;
+  --shadow:0 18px 55px -35px rgba(26,35,58,.45);
+}
+* { box-sizing:border-box; }
+html,body { margin:0; min-height:100%; }
+body { font-family:Inter,"Segoe UI",Arial,sans-serif; color:var(--ink); background:#edf1f7;
+  -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+button,input,select { font:inherit; }
+button,a { -webkit-tap-highlight-color:transparent; }
+.topbar { position:sticky; top:0; z-index:20; min-height:68px; display:flex; align-items:center;
+  gap:14px; padding:10px 18px; background:rgba(255,255,255,.96); border-bottom:1px solid var(--line);
+  backdrop-filter:blur(14px); box-shadow:0 8px 30px -26px #172033; }
+.brand { display:flex; gap:10px; align-items:center; min-width:270px; }
+.brand img { width:38px; height:38px; }
+.brand h1 { margin:0; font-size:17px; letter-spacing:-.02em; }
+.brand p { margin:2px 0 0; color:var(--muted); font-size:11.5px; }
+.statuses { display:flex; gap:7px; flex-wrap:wrap; }
+.pill { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:5px 10px; border-radius:999px;
+  background:var(--soft); color:var(--muted); font-size:11.5px; font-weight:650; }
+.pill.ok { color:var(--ok); background:#eaf8f2; }
+.pill.warn { color:var(--warn); background:#fff5e7; }
+.spacer { flex:1; }
+.btn { min-height:38px; border:1px solid var(--line); border-radius:11px; padding:8px 13px; background:#fff;
+  color:var(--ink); font-size:12.5px; font-weight:680; text-decoration:none; cursor:pointer; }
+.btn:hover { border-color:#afb9cc; transform:translateY(-1px); }
+.btn.primary { border-color:transparent; color:#fff; background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.btn.soft { color:#4338ca; background:#f0f1ff; border-color:#d9dcff; }
+.workspace { display:grid; grid-template-columns:340px minmax(0,1fr); min-height:calc(100vh - 68px); }
+.sidebar { position:sticky; top:68px; align-self:start; height:calc(100vh - 68px); overflow:auto; padding:16px;
+  background:#fff; border-right:1px solid var(--line); }
+.section { padding:0 0 17px; margin:0 0 17px; border-bottom:1px solid var(--line); }
+.section:last-child { border:0; }
+.section-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.section-head b { font-size:12px; letter-spacing:.065em; text-transform:uppercase; }
+.section-head small { margin-left:auto; color:var(--muted); }
+.search { width:100%; min-height:39px; padding:8px 11px; border:1px solid var(--line); border-radius:11px;
+  background:var(--soft); color:var(--ink); outline:none; }
+.search:focus, select:focus, input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.list-actions { display:flex; gap:6px; margin:8px 0; }
+.mini { border:0; background:none; color:#4f46e5; font-size:11.5px; font-weight:680; cursor:pointer; padding:3px; }
+.item-list { max-height:238px; overflow:auto; display:flex; flex-direction:column; gap:5px; padding-right:3px; }
+.item-row { display:grid; grid-template-columns:18px 1fr auto; align-items:center; gap:8px; padding:8px; border:1px solid transparent;
+  border-radius:10px; cursor:pointer; background:var(--soft); }
+.item-row:hover { border-color:#cfd6e4; }
+.item-row input { width:16px; height:16px; accent-color:var(--accent); }
+.item-row b { display:block; max-width:196px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.2px; }
+.item-row small { display:block; margin-top:2px; color:var(--muted); font-size:10.5px; }
+.link-dot { width:8px; height:8px; border-radius:50%; background:#d3d9e5; }
+.link-dot.ok { background:#16a36a; box-shadow:0 0 0 3px #dff6ec; }
+.template-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.template-grid label { cursor:pointer; }
+.template-grid input { position:absolute; opacity:0; pointer-events:none; }
+.template-card { display:block; min-height:60px; padding:9px 10px; border:1px solid var(--line); border-radius:11px; background:#fff; }
+.template-card b { display:block; font-size:12px; }
+.template-card small { color:var(--muted); font-size:10.5px; }
+.template-grid input:checked + .template-card { border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 2px #dfe1ff; }
+.template-grid .wide { grid-column:1/-1; }
+.control { display:block; margin-top:11px; }
+.control > span { display:flex; justify-content:space-between; margin-bottom:5px; color:var(--muted); font-size:11.5px; font-weight:600; }
+.control select,.control input[type=text] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff; color:var(--ink); outline:none; }
+.color-row { display:grid; grid-template-columns:1fr 44px; gap:8px; }
+.color-row input[type=color] { width:44px; height:38px; padding:3px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+input[type=range] { width:100%; accent-color:var(--accent); }
+.checks { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; margin-top:12px; }
+.checks label { display:flex; align-items:center; gap:7px; color:#4e5a70; font-size:11.5px; cursor:pointer; }
+.checks input { width:15px; height:15px; accent-color:var(--accent); }
+.one-c-card { padding:12px; border:1px solid #cfe9dd; border-radius:12px; background:#f0faf6; }
+.one-c-card b { display:block; color:#116b49; font-size:12.5px; }
+.one-c-card p { margin:5px 0 10px; color:#547164; font-size:11px; line-height:1.45; }
+.one-c-actions { display:flex; gap:6px; }
+.one-c-actions .btn { flex:1; min-height:34px; padding:6px 8px; font-size:11px; }
+.preview { min-width:0; padding:20px; overflow:auto; }
+.preview-head { max-width:210mm; margin:0 auto 10px; display:flex; align-items:center; color:var(--muted); font-size:12px; }
+.sheets { display:flex; flex-direction:column; gap:20px; align-items:center; }
+.sheet { width:210mm; min-height:297mm; padding:8mm; background:#fff; box-shadow:var(--shadow); page-break-after:always; }
+.sheet:last-child { page-break-after:auto; }
+.sheet-caption { margin:0 0 3mm; color:#929bac; font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
+.tag-grid { display:grid; align-content:start; justify-content:start; }
+.sheet.classic .tag-grid,.sheet.minimal .tag-grid { grid-template-columns:repeat(3,62mm); gap:2mm; }
+.sheet.compact .tag-grid { grid-template-columns:repeat(4,43mm); gap:3mm 5mm; }
+.sheet.promo .tag-grid { grid-template-columns:repeat(2,90mm); gap:4mm; }
+.price-tag { --tag-color:#4f46e5; --font-scale:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
+  width:62mm; height:38mm; padding:3mm 3.2mm 2.4mm 4.3mm; border:.25mm solid #cdd3df; border-radius:2mm;
+  background:#fff; color:#121827; break-inside:avoid; }
+.price-tag::before { content:""; position:absolute; inset:0 auto 0 0; width:1.4mm; background:var(--tag-color); }
+.price-tag.compact { width:43mm; height:25mm; padding:2.1mm 2mm 1.6mm 3mm; border-radius:1.5mm; }
+.price-tag.promo { width:90mm; height:60mm; padding:5mm 5mm 4mm 6mm; border-radius:3mm; border-width:.35mm; }
+.price-tag.minimal { padding-left:3.2mm; border-color:#2f3542; border-radius:0; }
+.price-tag.minimal::before { display:none; }
+.tag-top { display:flex; align-items:center; gap:1.4mm; min-height:4mm; }
+.tag-brand { display:flex; align-items:center; gap:1mm; color:var(--tag-color); font-size:calc(6.7px * var(--font-scale));
+  font-weight:900; letter-spacing:.12em; }
+.tag-brand img { width:3.7mm; height:3.7mm; }
+.badge { margin-left:auto; max-width:27mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:.7mm 2mm;
+  border-radius:10mm; color:#fff; background:var(--tag-color); font-size:calc(6px * var(--font-scale)); font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
+.tag-body { display:flex; flex:1; min-height:0; gap:2mm; padding-top:1.2mm; }
+.tag-main { flex:1; min-width:0; display:flex; flex-direction:column; }
+.tag-name { font-size:calc(11px * var(--font-scale)); line-height:1.1; font-weight:850; letter-spacing:-.015em;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.tag-desc { margin-top:.7mm; color:#5f6a7e; font-size:calc(6.5px * var(--font-scale)); line-height:1.2;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.tag-price { margin-top:auto; font-size:calc(22px * var(--font-scale)); line-height:.92; font-weight:950; letter-spacing:-.045em; white-space:nowrap; }
+.tag-price span { font-size:.48em; letter-spacing:0; }
+.tag-meta { margin-top:.7mm; color:#8791a3; font-size:calc(5.8px * var(--font-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qr { width:14mm; height:14mm; flex:none; align-self:flex-end; }
+.qr svg { width:100%; height:100%; display:block; }
+.tag-bottom { display:flex; align-items:flex-end; gap:2mm; min-height:8mm; margin-top:1mm; }
+.barcode { flex:1; min-width:0; height:8mm; display:flex; align-items:flex-end; }
+.barcode svg { display:block; width:100% !important; height:8mm !important; }
+.barcode-missing { align-self:center; color:#b45309; font-size:5.7px; font-weight:700; border-bottom:.2mm dashed #d89a52; }
+.sku { max-width:19mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:5.5px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.footer-line { position:absolute; right:2.5mm; bottom:1mm; max-width:33mm; color:#9ba3b2; font-size:5px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* compact intentionally keeps the cashier code but removes secondary copy */
+.price-tag.compact .tag-brand img { width:2.8mm; height:2.8mm; }
+.price-tag.compact .tag-brand { font-size:5.2px; }
+.price-tag.compact .badge { max-width:14mm; padding:.5mm 1.2mm; font-size:4.8px; }
+.price-tag.compact .tag-body { padding-top:.7mm; gap:1mm; }
+.price-tag.compact .tag-name { font-size:calc(8px * var(--font-scale)); -webkit-line-clamp:2; }
+.price-tag.compact .tag-desc { display:none; }
+.price-tag.compact .tag-price { font-size:calc(14px * var(--font-scale)); }
+.price-tag.compact .tag-meta { display:none; }
+.price-tag.compact .qr { width:9mm; height:9mm; }
+.price-tag.compact .tag-bottom { min-height:5.8mm; height:5.8mm; margin-top:.5mm; }
+.price-tag.compact .barcode,.price-tag.compact .barcode svg { height:5.8mm !important; }
+.price-tag.compact .sku { max-width:10mm; font-size:4.3px; }
+.price-tag.compact .footer-line { display:none; }
+/* promo has breathing room for a shelf feature card */
+.price-tag.promo::before { width:2.3mm; }
+.price-tag.promo .tag-brand { font-size:10px; }
+.price-tag.promo .tag-brand img { width:6mm; height:6mm; }
+.price-tag.promo .badge { max-width:38mm; padding:1.2mm 3mm; font-size:9px; }
+.price-tag.promo .tag-body { gap:4mm; padding-top:3mm; }
+.price-tag.promo .tag-name { font-size:calc(20px * var(--font-scale)); line-height:1.05; }
+.price-tag.promo .tag-desc { margin-top:2mm; font-size:calc(10px * var(--font-scale)); -webkit-line-clamp:3; }
+.price-tag.promo .tag-price { font-size:calc(38px * var(--font-scale)); }
+.price-tag.promo .tag-meta { font-size:8px; }
+.price-tag.promo .qr { width:24mm; height:24mm; }
+.price-tag.promo .tag-bottom { min-height:12mm; margin-top:2mm; }
+.price-tag.promo .barcode,.price-tag.promo .barcode svg { height:12mm !important; }
+.price-tag.promo .sku { max-width:25mm; font-size:7px; }
+.price-tag.promo .footer-line { right:4mm; bottom:2mm; max-width:46mm; font-size:7px; }
+.price-tag.minimal .tag-brand,.price-tag.minimal .badge { color:#111827; }
+.price-tag.minimal .badge { color:#fff; background:#111827; }
+.empty { max-width:620px; margin:90px auto; padding:34px; border:1px dashed #bcc5d4; border-radius:18px; text-align:center; color:var(--muted); background:#fff; }
+.empty b { display:block; color:var(--ink); font-size:17px; margin-bottom:6px; }
+dialog { width:min(680px,calc(100vw - 28px)); border:0; border-radius:18px; padding:0; color:var(--ink); box-shadow:0 28px 90px -25px #172033; }
+dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
+.dialog-head { display:flex; align-items:center; padding:17px 19px; border-bottom:1px solid var(--line); }
+.dialog-head h2 { margin:0; font-size:16px; }
+.dialog-body { padding:18px 20px 20px; color:#4f5b70; font-size:12.5px; line-height:1.55; }
+.dialog-body ol { padding-left:20px; }
+.code { padding:11px; border-radius:10px; background:#151b2b; color:#dfe5f5; font:11px/1.55 ui-monospace,Consolas,monospace; overflow:auto; white-space:pre-wrap; }
+.lookup { display:flex; gap:8px; margin-top:12px; }
+.lookup input { flex:1; min-width:0; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+.lookup-result { min-height:20px; margin-top:7px; font-size:11.5px; }
+@media (max-width:980px) {
+  .workspace { grid-template-columns:1fr; }
+  .sidebar { position:relative; top:0; height:auto; border-right:0; border-bottom:1px solid var(--line); }
+  .item-list { max-height:180px; }
+  .topbar { position:relative; flex-wrap:wrap; }
+  .brand { min-width:0; }
+  .preview { padding:12px; }
+}
+@page { size:A4 portrait; margin:0; }
+@media print {
+  body { background:#fff; }
+  .topbar,.sidebar,.preview-head,.noprint { display:none !important; }
+  .workspace,.preview,.sheets { display:block; padding:0; margin:0; min-height:0; }
+  .sheet { width:210mm; min-height:297mm; margin:0; padding:8mm; box-shadow:none; }
+  .sheet-caption { display:none; }
+}
+</style>
+</head>
+<body>
+<header class="topbar noprint">
+  <div class="brand">
+    <img src="/assets/brand/nozza-mark-1.svg" alt="NOZZA">
+    <div><h1>Конструктор ценников</h1><p>Стеллаж · печать 1:1 · касса и 1С</p></div>
+  </div>
+  <div class="statuses">
+    <span class="pill" id="selectedPill">0 выбрано</span>
+    <span class="pill" id="sheetsPill">0 листов</span>
+    <span class="pill" id="oneCPill">1С: —</span>
+  </div>
+  <span class="spacer"></span>
+  <a class="btn" href="/index.html#shelf">← Стеллаж</a>
+  <button class="btn soft" id="export1c" type="button">⇩ CSV для 1С</button>
+  <button class="btn" id="help1c" type="button">Как связать с 1С</button>
+  <button class="btn primary" id="print" type="button">Печать</button>
+</header>
+<div class="workspace">
+  <aside class="sidebar noprint">
+    <section class="section">
+      <div class="section-head"><b>1. Товары</b><small id="itemCount">загрузка…</small></div>
+      <input class="search" id="search" type="search" placeholder="Название, артикул или штрихкод">
+      <div class="list-actions">
+        <button class="mini" id="selectAll" type="button">Выбрать все</button>
+        <button class="mini" id="selectNone" type="button">Снять все</button>
+        <button class="mini" id="selectLinked" type="button">Только с кодом 1С</button>
+      </div>
+      <div class="item-list" id="items"></div>
+    </section>
+    <section class="section">
+      <div class="section-head"><b>2. Тип ценника</b></div>
+      <div class="template-grid" id="templates">
+        <label class="wide"><input type="radio" name="template" value="card" checked><span class="template-card"><b>Как в карточке товара</b><small>Можно смешать разные типы — каждый на своём листе</small></span></label>
+        <label><input type="radio" name="template" value="classic"><span class="template-card"><b>Классический</b><small>62 × 38 · до 21</small></span></label>
+        <label><input type="radio" name="template" value="compact"><span class="template-card"><b>Компактный</b><small>43 × 25 · до 40</small></span></label>
+        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промо</b><small>90 × 60 · до 8</small></span></label>
+        <label><input type="radio" name="template" value="minimal"><span class="template-card"><b>Минимал</b><small>ч/б · 62 × 38</small></span></label>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-head"><b>3. Оформление</b></div>
+      <label class="control"><span><i>Цвет</i><i id="colorHint">из карточки</i></span>
+        <div class="color-row"><select id="colorMode"><option value="card">Цвет каждой карточки</option><option value="custom">Один цвет для всех</option></select><input id="accent" type="color" value="#4f46e5" aria-label="Цвет"></div>
+      </label>
+      <label class="control"><span><i>Размер текста</i><i id="fontValue">100%</i></span><input id="fontScale" type="range" min="85" max="115" value="100" step="5"></label>
+      <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
+      <label class="control"><span><i>Нижняя строка</i><i>необязательно</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
+      <div class="checks">
+        <label><input id="showLogo" type="checkbox" checked> Логотип</label>
+        <label><input id="showQr" type="checkbox" checked> QR товара</label>
+        <label><input id="showBarcode" type="checkbox" checked> Штрихкод 1С</label>
+        <label><input id="showSku" type="checkbox" checked> Артикул</label>
+        <label><input id="showDesc" type="checkbox" checked> Описание</label>
+        <label><input id="showStock" type="checkbox"> Остаток</label>
+      </div>
+    </section>
+    <section class="section">
+      <div class="one-c-card">
+        <b id="oneCStatus">Связь с 1С проверяется…</b>
+        <p>На ценник попадёт тот же штрихкод, который хранится в номенклатуре 1С. CSV помогает сверить коды, HTTP — списывать остаток после чека.</p>
+        <div class="one-c-actions"><button class="btn" id="export1cSide" type="button">CSV</button><button class="btn" id="help1cSide" type="button">Настройка</button></div>
+      </div>
+    </section>
+  </aside>
+  <main class="preview">
+    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист»</span></div>
+    <div class="sheets" id="sheets"></div>
+  </main>
+</div>
+<dialog id="oneCDialog">
+  <div class="dialog-head"><h2>Связь ценника с кассой и 1С</h2><span class="spacer"></span><button class="btn" id="closeHelp" type="button">Закрыть</button></div>
+  <div class="dialog-body">
+    <ol>
+      <li>В карточке позиции стеллажа укажите <b>штрихкод ровно как в номенклатуре 1С</b>. Если стеллаж связан с номенклатурой PrintFlow, код подставится оттуда.</li>
+      <li>Скачайте «CSV для 1С» и сверьте или загрузите колонки «Артикул», «Штрихкод», «Наименование», «Цена». Конкретное сопоставление полей выбирается в вашей конфигурации 1С.</li>
+      <li>Распечатайте ценник. Кассовый сканер прочитает Code 128 и найдёт этот же код в 1С.</li>
+      <li>Необязательно: после проведения чека 1С может отправить строку продажи в PrintFlow. Деньги второй раз не записываются — уменьшается только остаток стеллажа.</li>
+    </ol>
+    <div class="code" id="endpointExample">POST /api/shelf/1c/sale
+Content-Type: application/json
+
+{"barcode":"4601234567890","qty":1,"price":590,"external_id":"ККМ-000184:1"}</div>
+    <p><b>external_id</b> — уникальный ID строки чека. Повторная отправка с тем же ID безопасна и не спишет товар дважды.</p>
+    <div class="lookup"><input id="lookupCode" placeholder="Штрихкод или артикул для проверки"><button class="btn soft" id="lookupBtn" type="button">Проверить</button></div>
+    <div class="lookup-result" id="lookupResult"></div>
+  </div>
+</dialog>
+<script src="/assets/qr.js"></script>
+<script>
+(function () {
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const TYPES = ['classic','compact','promo','minimal'];
+const TYPE_NAMES = {classic:'Классический 62 × 38',compact:'Компактный 43 × 25',promo:'Промо 90 × 60',minimal:'Минимал 62 × 38'};
+const PER_PAGE = {classic:21,compact:40,promo:8,minimal:21};
+const STORE = 'printflow:price-tag-designer:v1';
+let items = [];
+let selected = new Set();
+let apiInfo = {base:location.origin, reachable:true, one_c:{linked:0,total:0}};
+let renderTimer = 0;
+
+function money(value) {
+  return Math.round(Number(value) || 0).toLocaleString('ru-RU') + ' ₽';
+}
+function settings() {
+  const chosen = document.querySelector('input[name=template]:checked');
+  return {
+    template: chosen ? chosen.value : 'card', colorMode:$('colorMode').value,
+    accent:$('accent').value, fontScale:Number($('fontScale').value) || 100,
+    badge:$('badge').value.trim(), footer:$('footer').value.trim(),
+    showLogo:$('showLogo').checked, showQr:$('showQr').checked,
+    showBarcode:$('showBarcode').checked, showSku:$('showSku').checked,
+    showDesc:$('showDesc').checked, showStock:$('showStock').checked,
+  };
+}
+function saveSettings() {
+  try { localStorage.setItem(STORE, JSON.stringify(settings())); } catch (_) {}
+}
+function restoreSettings() {
+  let value = {};
+  try { value = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (_) {}
+  const savedTemplate = ['card', ...TYPES].includes(value.template) ? value.template : 'card';
+  const radio = document.querySelector(`input[name=template][value="${savedTemplate}"]`);
+  if (radio) radio.checked = true;
+  ['colorMode','accent','badge','footer'].forEach((id) => { if (value[id] != null) $(id).value = value[id]; });
+  if (value.fontScale) $('fontScale').value = value.fontScale;
+  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock'].forEach((id) => {
+    if (typeof value[id] === 'boolean') $(id).checked = value[id];
+  });
+}
+function typeOf(item, opts) {
+  return opts.template === 'card' && TYPES.includes(item.tag_template) ? item.tag_template : (opts.template === 'card' ? 'classic' : opts.template);
+}
+function colorOf(item, opts, type) {
+  if (type === 'minimal') return '#111827';
+  return opts.colorMode === 'custom' ? opts.accent : (/^#[0-9a-f]{6}$/i.test(item.tag_color || '') ? item.tag_color : '#4f46e5');
+}
+function qrSvg(item, opts) {
+  if (!opts.showQr || !item.url || !window.QR || !window.QR.svg) return '';
+  return `<div class="qr">${window.QR.svg(item.url, {ecl:'M',margin:1})}</div>`;
+}
+function tagHtml(item, type, opts) {
+  const color = colorOf(item, opts, type);
+  const badge = opts.badge || item.tag_badge || '';
+  const note = item.tag_note || item.note || '';
+  const meta = [item.material || '', item.grams ? Math.round(item.grams) + ' г' : '', opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
+  const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>NOZZA</span></span>` : '<span></span>';
+  const barcode = opts.showBarcode ? (item.barcode_svg
+    ? `<div class="barcode">${item.barcode_svg}</div>`
+    : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>') : '';
+  const sku = opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
+  return `<article class="price-tag ${type}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
+    <div class="tag-top">${logo}${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>
+    <div class="tag-body"><div class="tag-main">
+      <div class="tag-name">${esc(item.name || 'Без названия')}</div>
+      ${opts.showDesc && note ? `<div class="tag-desc">${esc(note)}</div>` : ''}
+      <div class="tag-price">${money(item.price).replace(' ₽','')} <span>₽</span></div>
+      ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
+    </div>${qrSvg(item, opts)}</div>
+    ${(barcode || sku) ? `<div class="tag-bottom">${barcode}${sku}</div>` : ''}
+    ${opts.footer ? `<div class="footer-line">${esc(opts.footer)}</div>` : ''}
+  </article>`;
+}
+function chunk(rows, size) {
+  const out = [];
+  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
+  return out;
+}
+function renderSheets() {
+  const opts = settings();
+  saveSettings();
+  $('fontValue').textContent = opts.fontScale + '%';
+  $('colorHint').textContent = opts.colorMode === 'card' ? 'из карточки' : opts.accent;
+  $('accent').disabled = opts.colorMode !== 'custom';
+  const chosen = items.filter((item) => selected.has(item.id));
+  const groups = {};
+  chosen.forEach((item) => { const type = typeOf(item, opts); (groups[type] ||= []).push(item); });
+  let pageNumber = 0;
+  const sheets = [];
+  TYPES.forEach((type) => {
+    chunk(groups[type] || [], PER_PAGE[type]).forEach((page) => {
+      pageNumber += 1;
+      sheets.push(`<section class="sheet ${type}"><div class="sheet-caption">Лист ${pageNumber} · ${esc(TYPE_NAMES[type])} · ${page.length} шт</div><div class="tag-grid">${page.map((item) => tagHtml(item, type, opts)).join('')}</div></section>`);
+    });
+  });
+  $('sheets').innerHTML = sheets.join('') || '<div class="empty"><b>Выберите товары для печати</b><span>Отметьте одну или несколько позиций слева — листы A4 соберутся автоматически.</span></div>';
+  $('selectedPill').textContent = `${chosen.length} выбрано`;
+  $('sheetsPill').textContent = `${pageNumber} ${pageNumber === 1 ? 'лист' : pageNumber > 1 && pageNumber < 5 ? 'листа' : 'листов'}`;
+  $('previewText').textContent = chosen.length ? `Готово: ${chosen.length} ценников на ${pageNumber} листах` : 'Нет выбранных ценников';
+}
+function queueRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(renderSheets, 40);
+}
+function renderList() {
+  const query = $('search').value.trim().toLocaleLowerCase('ru');
+  const visible = items.filter((item) => !query || [item.name,item.sku,item.barcode].join(' ').toLocaleLowerCase('ru').includes(query));
+  $('items').innerHTML = visible.map((item) => `<label class="item-row">
+    <input type="checkbox" data-id="${esc(item.id)}" ${selected.has(item.id) ? 'checked' : ''}>
+    <span><b>${esc(item.name)}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${esc(TYPE_NAMES[item.tag_template] || TYPE_NAMES.classic)}</small></span>
+    <i class="link-dot ${item.barcode ? 'ok' : ''}" title="${item.barcode ? 'Связан с 1С' : 'Нет кода 1С'}"></i>
+  </label>`).join('') || '<div style="padding:16px;color:var(--muted);font-size:12px">Ничего не найдено</div>';
+  $('itemCount').textContent = `${visible.length} из ${items.length}`;
+  $('items').querySelectorAll('input[data-id]').forEach((input) => input.addEventListener('change', () => {
+    if (input.checked) selected.add(input.dataset.id); else selected.delete(input.dataset.id);
+    queueRender();
+  }));
+}
+function setSelection(predicate) {
+  selected = new Set(items.filter(predicate).map((item) => item.id));
+  renderList(); renderSheets();
+}
+async function export1C() {
+  const buttons = [$('export1c'),$('export1cSide')];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const response = await fetch('/api/shelf/1c/export');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Не удалось выгрузить CSV');
+    const blob = new Blob([data.csv], {type:'text/csv;charset=utf-8'});
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = data.filename || 'printflow-1c.csv'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (error) { alert(error.message); }
+  finally { buttons.forEach((button) => { button.disabled = false; }); }
+}
+function openHelp() {
+  $('endpointExample').textContent = `POST ${(apiInfo.base || location.origin).replace(/\/$/,'')}/api/shelf/1c/sale\nContent-Type: application/json\n\n{"barcode":"4601234567890","qty":1,"price":590,"external_id":"ККМ-000184:1"}`;
+  $('oneCDialog').showModal();
+}
+async function lookup() {
+  const code = $('lookupCode').value.trim();
+  if (!code) return;
+  $('lookupResult').textContent = 'Проверяем…';
+  try {
+    const response = await fetch('/api/shelf/1c/lookup?barcode=' + encodeURIComponent(code));
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Не найдено');
+    $('lookupResult').innerHTML = `<span style="color:var(--ok)">✓ ${esc(data.item.name)} · ${money(data.item.price)} · остаток ${esc(data.item.qty)} шт</span>`;
+  } catch (error) { $('lookupResult').innerHTML = `<span style="color:#b42318">${esc(error.message)}</span>`; }
+}
+async function load() {
+  restoreSettings();
+  try {
+    const response = await fetch('/api/labels?kind=shelf');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Ошибка загрузки');
+    apiInfo = data;
+    items = data.shelf || [];
+    const requested = new URLSearchParams(location.search).get('item');
+    selected = requested && items.some((item) => item.id === requested) ? new Set([requested]) : new Set(items.map((item) => item.id));
+    const linked = (data.one_c || {}).linked || 0;
+    const total = (data.one_c || {}).total || items.length;
+    $('oneCPill').textContent = `1С: ${linked}/${total}`;
+    $('oneCPill').className = 'pill ' + (linked === total && total ? 'ok' : 'warn');
+    $('oneCStatus').textContent = linked === total && total ? `Все ${total} позиций связаны с 1С` : `С 1С связано ${linked} из ${total}`;
+    if (data.reachable === false) {
+      $('oneCStatus').textContent += ' · QR недоступен с телефона';
+    }
+    renderList(); renderSheets();
+  } catch (error) {
+    $('items').innerHTML = `<div style="color:#b42318;font-size:12px">${esc(error.message)}. Запустите PrintFlow и обновите страницу.</div>`;
+    $('sheets').innerHTML = '<div class="empty"><b>Нет связи с PrintFlow</b><span>Конструктор получает товары и штрихкоды из локальной базы.</span></div>';
+  }
+}
+$('search').addEventListener('input', renderList);
+$('selectAll').addEventListener('click', () => setSelection(() => true));
+$('selectNone').addEventListener('click', () => setSelection(() => false));
+$('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
+$('templates').addEventListener('change', renderSheets);
+['colorMode','accent','fontScale','badge','footer','showLogo','showQr','showBarcode','showSku','showDesc','showStock'].forEach((id) => {
+  $(id).addEventListener(id === 'badge' || id === 'footer' || id === 'fontScale' ? 'input' : 'change', queueRender);
+});
+$('print').addEventListener('click', () => window.print());
+$('export1c').addEventListener('click', export1C);
+$('export1cSide').addEventListener('click', export1C);
+$('help1c').addEventListener('click', openHelp);
+$('help1cSide').addEventListener('click', openHelp);
+$('closeHelp').addEventListener('click', () => $('oneCDialog').close());
+$('lookupBtn').addEventListener('click', lookup);
+$('lookupCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') lookup(); });
+load();
+})();
+</script>
+</body>
+</html>
