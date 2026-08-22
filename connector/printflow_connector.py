@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sqlite3
 import sys
 import time
@@ -150,12 +151,27 @@ def main() -> int:
         print(f"  http://{lan_ips[0]}:{args.port}/")
         print()
 
+    stop_requested = False
+
+    def request_stop(_signum, _frame) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+
+    # systemd, launchd и Планировщик завершают foreground-сервис через SIGTERM.
+    # Без обработчика процесс обрывался до server.shutdown() и закрытия базы.
     try:
-        while True:
-            time.sleep(1)
+        signal.signal(signal.SIGTERM, request_stop)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+    try:
+        while not stop_requested:
+            time.sleep(0.5)
     except KeyboardInterrupt:
-        print("\n  Останавливаем PrintFlow...")
+        stop_requested = True
     finally:
+        if stop_requested:
+            print("\n  Останавливаем PrintFlow...", flush=True)
         try:
             server.shutdown()
             handler_api = getattr(server.RequestHandlerClass, "api", None)

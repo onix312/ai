@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
 import platform
+import plistlib
 import shutil
 import socket
 import subprocess
@@ -508,6 +510,15 @@ def wait_for_server(port: int, attempts: int = 30) -> bool:
 
 
 def cmd_stop(args: argparse.Namespace) -> int:
+    managed, stopped, detail = stop_autostart_runtime()
+    if managed:
+        if stopped:
+            clear_pid()
+            ok("Системный сервис остановлен до следующего входа в систему")
+            return 0
+        fail(f"Не удалось остановить системный сервис: {detail}")
+        return 1
+
     pid = read_pid()
     if pid is None:
         port = running_port()
@@ -1005,11 +1016,50 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
-# ────────────────────────────────────────────────────── установка в систему
+# ─────────────────────────────────────────── установка и системный автозапуск
+AUTOSTART_CONFIG = STATE_DIR / "autostart.json"
+AUTOSTART_TASK = "PrintFlow Autostart"
+AUTOSTART_LABEL = "ru.nozza.printflow"
+AUTOSTART_UNIT = "printflow.service"
+
+
+def _windows_known_folder(csidl: int, fallback: Path) -> Path:
+    """Путь Known Folder без предположений о языке Windows и OneDrive."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+
+            buffer = ctypes.create_unicode_buffer(32768)
+            result = ctypes.windll.shell32.SHGetFolderPathW(None, csidl, None, 0, buffer)
+            if result == 0 and buffer.value:
+                return Path(buffer.value)
+        except (AttributeError, OSError):
+            pass
+    return fallback
+
+
+def windows_programs_dir() -> Path:
+    fallback = (Path(os.environ.get("APPDATA", Path.home())) /
+                "Microsoft/Windows/Start Menu/Programs")
+    return _windows_known_folder(0x0002, fallback)  # CSIDL_PROGRAMS
+
+
+def windows_startup_dir() -> Path:
+    return _windows_known_folder(0x0007, windows_programs_dir() / "Startup")  # CSIDL_STARTUP
+
+
+def xdg_config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def xdg_data_home() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+
+
 def desktop_dir() -> Path | None:
     """Рабочий стол пользователя или None, если его нет (сервер, WSL, док)."""
     if IS_WINDOWS:
-        candidate = Path(os.path.expanduser("~/Desktop"))
+        candidate = _windows_known_folder(0x0010, Path.home() / "Desktop")
         return candidate if candidate.is_dir() else None
     try:  # у локализованных систем каталог называется по-своему
         result = subprocess.run(["xdg-user-dir", "DESKTOP"], capture_output=True,
@@ -1027,8 +1077,9 @@ def desktop_dir() -> Path | None:
 
 
 def launcher_command(mode: str = "gui", background: bool = False) -> list[str]:
+    """Команда для ярлыка (без строковой склейки и shell)."""
     python = sys.executable
-    if IS_WINDOWS and mode == "gui":
+    if IS_WINDOWS and mode in ("gui", "service"):
         pythonw = Path(python).with_name("pythonw.exe")
         if pythonw.exists():
             python = str(pythonw)
@@ -1038,138 +1089,690 @@ def launcher_command(mode: str = "gui", background: bool = False) -> list[str]:
     return command
 
 
-def cmd_install(args: argparse.Namespace) -> int:
-    header("Установка PrintFlow в систему", "ярлык, меню программ и автозапуск")
-    ensure_venv()
-    created: list[str] = []
-    if IS_WINDOWS:
-        created += install_windows(args)
-    elif IS_MACOS:
-        created += install_macos(args)
+def service_command(args: argparse.Namespace) -> list[str]:
+    """Команда автозапуска. Все важные параметры фиксируются при установке."""
+    command = launcher_command("service")
+    command += ["--port", str(args.port), "--startup-delay", str(args.startup_delay)]
+    if args.local:
+        command.append("--local")
+    if args.system:
+        command.append("--system")
+    if args.verbose:
+        command.append("--verbose")
+    return command
+
+
+def cmd_service(args: argparse.Namespace) -> int:
+    """Внутренний foreground-режим для systemd, launchd и Планировщика.
+
+    После подготовки окружения процесс заменяется коннектором через exec: ОС
+    отслеживает реальный сервер, а не промежуточный launcher и не двойной daemon.
+    """
+    check_python_version()
+    delay = max(0, min(int(args.startup_delay), 300))
+    if delay:
+        time.sleep(delay)
+    if health(args.port):
+        return 0  # уже запущен вручную; следующая сессия попробует снова
+    if port_busy(args.port):
+        fail(f"Автозапуск: порт {args.port} занят другой программой")
+        return 1
+    python = interpreter(args.system, quiet=True)
+    if IS_WINDOWS and Path(sys.executable).name.lower() == "pythonw.exe":
+        pythonw = Path(python).with_name("pythonw.exe")
+        if pythonw.exists():
+            python = pythonw
+    host = "127.0.0.1" if args.local else "0.0.0.0"
+    command = [str(python), str(ENTRYPOINT), "--host", host,
+               "--port", str(args.port), "--no-browser", "--no-banner"]
+    if args.verbose:
+        command.append("--verbose")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    write_pid(os.getpid())
+    os.chdir(ROOT)
+    try:
+        os.execv(str(python), command)
+    except OSError as exc:
+        clear_pid()
+        fail(f"Автозапуск: не удалось запустить сервер: {exc}")
+        return 1
+    return 1  # pragma: no cover — успешный exec не возвращается
+
+
+def _atomic_write(path: Path, content: str | bytes, mode: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    if isinstance(content, bytes):
+        temporary.write_bytes(content)
     else:
-        created += install_linux(args)
-    say()
-    if created:
-        for item in created:
-            ok(item)
+        temporary.write_text(content, encoding="utf-8")
+    os.replace(temporary, path)
+    if mode is not None:
+        path.chmod(mode)
+
+
+def _desktop_quote(value: str | Path) -> str:
+    """Кавычки поля Exec по Desktop Entry Specification."""
+    value = str(value)
+    escaped = (value.replace("\\", "\\\\").replace('"', '\\"')
+               .replace("`", "\\`").replace("$", "\\$").replace("%", "%%"))
+    return f'"{escaped}"'
+
+
+def _desktop_string(value: str | Path) -> str:
+    """Экранирование обычного string-поля .desktop (кавычки там не синтаксис)."""
+    return (str(value).replace("\\", "\\\\").replace("\n", "\\n")
+            .replace("\r", "\\r").replace("\t", "\\t"))
+
+
+def _systemd_quote(value: str | Path) -> str:
+    # В unit-файлах % — specifier даже внутри кавычек, поэтому удваиваем его.
+    value = str(value).replace("%", "%%")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _systemd_path(value: str | Path) -> str:
+    """Экранирование path-directive: WorkingDirectory не снимает кавычки."""
+    output: list[str] = []
+    for char in str(value):
+        if char == "%":
+            output.append("%%")
+        elif char == "\\":
+            output.append("\\\\")
+        elif char.isspace() or char in ('"', "'", ";", "#"):
+            output.extend(f"\\x{byte:02x}" for byte in char.encode("utf-8"))
+        else:
+            output.append(char)
+    return "".join(output)
+
+
+def render_xdg_entry(command: list[str], *, name: str = "PrintFlow") -> str:
+    executable = " ".join(_desktop_quote(part) for part in command)
+    return textwrap.dedent(f"""\
+        [Desktop Entry]
+        Type=Application
+        Version=1.0
+        Name={name}
+        GenericName=Управление 3D-производством
+        Comment=NOZZA · заказы, склад и принтеры Bambu Lab
+        Exec={executable}
+        Path={_desktop_string(ROOT)}
+        Terminal=false
+        Categories=Office;Utility;
+        X-GNOME-Autostart-enabled=true
+        """)
+
+
+def render_systemd_unit(command: list[str]) -> str:
+    executable = " ".join(_systemd_quote(part) for part in command)
+    return textwrap.dedent(f"""\
+        [Unit]
+        Description=PrintFlow — локальный сервер 3D-производства
+        Wants=network-online.target
+        After=network-online.target
+        StartLimitIntervalSec=120
+        StartLimitBurst=5
+
+        [Service]
+        Type=simple
+        WorkingDirectory={_systemd_path(ROOT)}
+        ExecStart={executable}
+        Restart=on-failure
+        RestartSec=10
+        TimeoutStopSec=30
+        Environment=PYTHONUNBUFFERED=1
+
+        [Install]
+        WantedBy=default.target
+        """)
+
+
+def launchd_configuration(command: list[str]) -> dict:
+    return {
+        "Label": AUTOSTART_LABEL,
+        "ProgramArguments": command,
+        "WorkingDirectory": str(ROOT),
+        "RunAtLoad": True,
+        "KeepAlive": {"SuccessfulExit": False},
+        "ThrottleInterval": 10,
+        "ProcessType": "Background",
+        "StandardOutPath": str(RUN_LOG),
+        "StandardErrorPath": str(RUN_LOG),
+    }
+
+
+def _powershell_literal(value: str | Path) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _powershell_executable() -> str | None:
+    return shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
+
+
+def run_powershell(script: str) -> subprocess.CompletedProcess:
+    executable = _powershell_executable()
+    if not executable:
+        return subprocess.CompletedProcess([], 127, "", "PowerShell не найден")
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    return subprocess.run([executable, "-NoProfile", "-NonInteractive",
+                           "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                          capture_output=True, text=True)
+
+
+def create_windows_shortcut(path: Path, command: list[str], description: str) -> tuple[bool, str]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "$shell = New-Object -ComObject WScript.Shell",
+        f"$link = $shell.CreateShortcut({_powershell_literal(path)})",
+        f"$link.TargetPath = {_powershell_literal(command[0])}",
+        f"$link.Arguments = {_powershell_literal(subprocess.list2cmdline(command[1:]))}",
+        f"$link.WorkingDirectory = {_powershell_literal(ROOT)}",
+        f"$link.Description = {_powershell_literal(description)}",
+        "$link.Save()",
+    ])
+    result = run_powershell(script)
+    error = (result.stderr or result.stdout or "неизвестная ошибка").strip()
+    return result.returncode == 0 and path.exists(), error
+
+
+def render_windows_task_script(command: list[str], start_now: bool = True) -> str:
+    arguments = subprocess.list2cmdline(command[1:])
+    lines = [
+        "$ErrorActionPreference = 'Stop'",
+        "$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name",
+        f"$action = New-ScheduledTaskAction -Execute {_powershell_literal(command[0])} "
+        f"-Argument {_powershell_literal(arguments)} -WorkingDirectory {_powershell_literal(ROOT)}",
+        "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user",
+        "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
+        "-DontStopIfGoingOnBatteries -RestartCount 3 "
+        "-RestartInterval (New-TimeSpan -Minutes 1) "
+        "-ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew",
+        "$principal = New-ScheduledTaskPrincipal -UserId $user "
+        "-LogonType Interactive -RunLevel Limited",
+        f"Register-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+        "-Action $action -Trigger $trigger -Settings $settings -Principal $principal "
+        "-Description 'PrintFlow — надёжный запуск локального сервера при входе' "
+        "-Force | Out-Null",
+    ]
+    if start_now:
+        lines.append(f"Start-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)}")
+    return "\n".join(lines)
+
+
+def _autostart_config(args: argparse.Namespace, mechanism: str) -> dict:
+    return {
+        "version": 1,
+        "mechanism": mechanism,
+        "root": str(ROOT),
+        "port": int(args.port),
+        "local": bool(args.local),
+        "system": bool(args.system),
+        "verbose": bool(args.verbose),
+        "startup_delay": int(args.startup_delay),
+        "installed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
+
+
+def load_autostart_config() -> dict:
+    try:
+        config = json.loads(AUTOSTART_CONFIG.read_text(encoding="utf-8"))
+        return config if isinstance(config, dict) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+
+
+def _enable_windows_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
+    command = service_command(args)
+    startup = windows_startup_dir() / f"{APP_NAME}.lnk"
+    # Удаляем ярлык старой реализации, иначе при входе будут два запуска.
+    startup.unlink(missing_ok=True)
+    result = run_powershell(render_windows_task_script(command, start_now=not bool(health(args.port))))
+    if result.returncode == 0:
+        return True, "windows-task", f"Планировщик заданий: {AUTOSTART_TASK}"
+
+    # На урезанных Windows ScheduledTasks может отсутствовать. Перед fallback
+    # обязательно убираем возможную старую задачу, иначе получатся два запуска.
+    cleanup = run_powershell(
+        f"Unregister-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+        "-Confirm:$false -ErrorAction SilentlyContinue")
+    if cleanup.returncode == 0:
+        success, shortcut_error = create_windows_shortcut(
+            startup, command, "PrintFlow — автозапуск при входе")
+        if success:
+            detail = "папка Startup (Планировщик недоступен)"
+            return True, "windows-startup", detail
+    else:
+        shortcut_error = (cleanup.stderr or cleanup.stdout or
+                          "не удалось удалить старую задачу").strip()
+    error = (result.stderr or result.stdout or shortcut_error or "неизвестная ошибка").strip()
+    return False, "windows-task", error
+
+
+def _enable_macos_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    plist = Path.home() / "Library/LaunchAgents" / f"{AUTOSTART_LABEL}.plist"
+    _atomic_write(plist, plistlib.dumps(launchd_configuration(service_command(args)),
+                                       fmt=plistlib.FMT_XML, sort_keys=False))
+    domain = f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", f"{domain}/{AUTOSTART_LABEL}"],
+                   capture_output=True, text=True)
+    subprocess.run(["launchctl", "enable", f"{domain}/{AUTOSTART_LABEL}"],
+                   capture_output=True, text=True)
+    result = subprocess.run(["launchctl", "bootstrap", domain, str(plist)],
+                            capture_output=True, text=True)
+    if result.returncode != 0:  # macOS 10.13 и старые окружения
+        result = subprocess.run(["launchctl", "load", "-w", str(plist)],
+                                capture_output=True, text=True)
+    if result.returncode == 0:
+        return True, "launchd", str(plist)
+    error = (result.stderr or result.stdout or "launchctl отказал").strip()
+    plist.unlink(missing_ok=True)
+    return False, "launchd", error
+
+
+def _systemd_available() -> tuple[bool, str]:
+    if not shutil.which("systemctl"):
+        return False, "systemctl не найден"
+    probe = subprocess.run(["systemctl", "--user", "show-environment"],
+                           capture_output=True, text=True)
+    return probe.returncode == 0, (probe.stderr or probe.stdout).strip()
+
+
+def _enable_linux_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
+    command = service_command(args)
+    unit = xdg_config_home() / "systemd/user" / AUTOSTART_UNIT
+    xdg = xdg_config_home() / "autostart/printflow.desktop"
+    available, reason = _systemd_available()
+    if available:
+        _atomic_write(unit, render_systemd_unit(command))
+        reload_result = subprocess.run(["systemctl", "--user", "daemon-reload"],
+                                       capture_output=True, text=True)
+        enable_result = subprocess.run(
+            ["systemctl", "--user", "enable", "--now", AUTOSTART_UNIT],
+            capture_output=True, text=True)
+        if reload_result.returncode == 0 and enable_result.returncode == 0:
+            xdg.unlink(missing_ok=True)
+            return True, "systemd-user", f"systemd --user: {AUTOSTART_UNIT}"
+        reason = (enable_result.stderr or reload_result.stderr or
+                  enable_result.stdout or reload_result.stdout).strip()
+        subprocess.run(["systemctl", "--user", "disable", "--now", AUTOSTART_UNIT],
+                       capture_output=True, text=True)
+        unit.unlink(missing_ok=True)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+
+    # Графические сессии без user systemd (часть WSL, контейнеров, старых дистрибутивов).
+    try:
+        _atomic_write(xdg, render_xdg_entry(command), mode=0o755)
+    except OSError as exc:
+        return False, "xdg-autostart", f"{reason}; XDG: {exc}"
+    return True, "xdg-autostart", f"XDG Autostart: {xdg} ({reason or 'systemd недоступен'})"
+
+
+def enable_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
+    try:
+        if IS_WINDOWS:
+            success, mechanism, detail = _enable_windows_autostart(args)
+        elif IS_MACOS:
+            success, mechanism, detail = _enable_macos_autostart(args)
+        else:
+            success, mechanism, detail = _enable_linux_autostart(args)
+        if success:
+            try:
+                _atomic_write(AUTOSTART_CONFIG,
+                              json.dumps(_autostart_config(args, mechanism), ensure_ascii=False,
+                                         indent=2) + "\n")
+            except OSError as exc:
+                # Не оставляем включённый сервис без метаданных для status/repair/uninstall.
+                if IS_WINDOWS:
+                    _disable_windows_autostart()
+                elif IS_MACOS:
+                    _disable_macos_autostart()
+                else:
+                    _disable_linux_autostart()
+                return False, mechanism, f"не удалось сохранить настройки: {exc}"
+        return success, mechanism, detail
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, "unknown", str(exc)
+
+
+def stop_autostart_runtime() -> tuple[bool, bool, str]:
+    """Остановить управляемый экземпляр, не выключая запуск при следующем входе."""
+    try:
+        if IS_WINDOWS:
+            query = run_powershell(
+                f"$task = Get-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+                "-ErrorAction SilentlyContinue; if ($task) { $task.State }")
+            if query.returncode != 0 or query.stdout.strip().lower() != "running":
+                return False, True, ""
+            result = run_powershell(
+                f"Stop-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+                "-ErrorAction Stop")
+            return True, result.returncode == 0, (result.stderr or result.stdout).strip()
+        if IS_MACOS:
+            plist = Path.home() / "Library/LaunchAgents" / f"{AUTOSTART_LABEL}.plist"
+            if not plist.exists():
+                return False, True, ""
+            domain = f"gui/{os.getuid()}"
+            loaded = subprocess.run(
+                ["launchctl", "print", f"{domain}/{AUTOSTART_LABEL}"],
+                capture_output=True, text=True).returncode == 0
+            if not loaded:
+                return False, True, ""
+            result = subprocess.run(
+                ["launchctl", "bootout", f"{domain}/{AUTOSTART_LABEL}"],
+                capture_output=True, text=True)
+            return True, result.returncode == 0, (result.stderr or result.stdout).strip()
+
+        unit = xdg_config_home() / "systemd/user" / AUTOSTART_UNIT
+        if not unit.exists() or not shutil.which("systemctl"):
+            return False, True, ""
+        active = subprocess.run(["systemctl", "--user", "is-active", "--quiet",
+                                 AUTOSTART_UNIT], capture_output=True).returncode == 0
+        if not active:
+            return False, True, ""
+        result = subprocess.run(["systemctl", "--user", "stop", AUTOSTART_UNIT],
+                                capture_output=True, text=True)
+        return True, result.returncode == 0, (result.stderr or result.stdout).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return True, False, str(exc)
+
+
+def _disable_windows_autostart() -> tuple[bool, str]:
+    startup = windows_startup_dir() / f"{APP_NAME}.lnk"
+    startup.unlink(missing_ok=True)
+    script = "\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        f"$task = Get-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+        "-ErrorAction SilentlyContinue",
+        "if ($null -ne $task) {",
+        "  if ($task.State -eq 'Running') {",
+        f"    Stop-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)}",
+        "  }",
+        f"  Unregister-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+        "-Confirm:$false",
+        "}",
+    ])
+    result = run_powershell(script)
+    if (result.returncode == 127 and
+            load_autostart_config().get("mechanism") == "windows-startup"):
+        return True, ""
+    return result.returncode == 0, (result.stderr or result.stdout).strip()
+
+
+def _disable_macos_autostart() -> tuple[bool, str]:
+    plist = Path.home() / "Library/LaunchAgents" / f"{AUTOSTART_LABEL}.plist"
+    domain = f"gui/{os.getuid()}"
+    loaded = subprocess.run(["launchctl", "print", f"{domain}/{AUTOSTART_LABEL}"],
+                            capture_output=True, text=True).returncode == 0
+    if loaded:
+        result = subprocess.run(["launchctl", "bootout", f"{domain}/{AUTOSTART_LABEL}"],
+                                capture_output=True, text=True)
+        if result.returncode != 0 and plist.exists():
+            result = subprocess.run(["launchctl", "unload", "-w", str(plist)],
+                                    capture_output=True, text=True)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or "launchctl отказал").strip()
+    plist.unlink(missing_ok=True)
+    return True, ""
+
+
+def _disable_linux_autostart() -> tuple[bool, str]:
+    unit = xdg_config_home() / "systemd/user" / AUTOSTART_UNIT
+    xdg = xdg_config_home() / "autostart/printflow.desktop"
+    if unit.exists():
+        if not shutil.which("systemctl"):
+            return False, "unit найден, но systemctl недоступен; сервис мог остаться запущенным"
+        result = subprocess.run(["systemctl", "--user", "disable", "--now", AUTOSTART_UNIT],
+                                capture_output=True, text=True)
+        if result.returncode != 0:
+            return False, (result.stderr or result.stdout or "systemctl отказал").strip()
+    unit.unlink(missing_ok=True)
+    xdg.unlink(missing_ok=True)
+    if shutil.which("systemctl"):
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "reset-failed", AUTOSTART_UNIT],
+                       capture_output=True)
+    return True, ""
+
+
+def disable_autostart() -> tuple[bool, str]:
+    try:
+        if IS_WINDOWS:
+            success, detail = _disable_windows_autostart()
+        elif IS_MACOS:
+            success, detail = _disable_macos_autostart()
+        else:
+            success, detail = _disable_linux_autostart()
+        if success:
+            AUTOSTART_CONFIG.unlink(missing_ok=True)
+        return success, detail
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+
+
+def autostart_status() -> dict:
+    config = load_autostart_config()
+    config_detail = ""
+    try:
+        port = int(config.get("port", DEFAULT_PORT))
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except (TypeError, ValueError):
+        port = DEFAULT_PORT
+        config_detail = "файл настроек повреждён: использую порт 8080"
+    status = {
+        "installed": False,
+        "enabled": False,
+        "running": bool(health(port)),
+        "mechanism": config.get("mechanism", "—"),
+        "port": port,
+        "root_matches": not config or config.get("root") == str(ROOT),
+        "detail": config_detail,
+    }
+    try:
+        if IS_WINDOWS:
+            script = (f"$task = Get-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
+                      "-ErrorAction SilentlyContinue; if ($task) { $task.State }")
+            result = run_powershell(script)
+            startup = windows_startup_dir() / f"{APP_NAME}.lnk"
+            task_state = result.stdout.strip()
+            task = result.returncode == 0 and bool(task_state)
+            task_enabled = task and task_state.lower() != "disabled"
+            status.update(installed=task or startup.exists(),
+                          enabled=task_enabled or startup.exists(),
+                          mechanism="windows-task" if task else
+                          ("windows-startup" if startup.exists() else "—"),
+                          detail=task_state)
+        elif IS_MACOS:
+            plist = Path.home() / "Library/LaunchAgents" / f"{AUTOSTART_LABEL}.plist"
+            loaded = subprocess.run(
+                ["launchctl", "print", f"gui/{os.getuid()}/{AUTOSTART_LABEL}"],
+                capture_output=True, text=True).returncode == 0
+            status.update(installed=plist.exists(), enabled=plist.exists(),
+                          mechanism="launchd" if plist.exists() else "—",
+                          detail="загружен" if loaded else "будет загружен при следующем входе")
+        else:
+            unit = xdg_config_home() / "systemd/user" / AUTOSTART_UNIT
+            xdg = xdg_config_home() / "autostart/printflow.desktop"
+            if unit.exists() and shutil.which("systemctl"):
+                enabled = subprocess.run(["systemctl", "--user", "is-enabled", "--quiet",
+                                          AUTOSTART_UNIT], capture_output=True).returncode == 0
+                active = subprocess.run(["systemctl", "--user", "is-active", "--quiet",
+                                         AUTOSTART_UNIT], capture_output=True).returncode == 0
+                status.update(installed=True, enabled=enabled, mechanism="systemd-user",
+                              detail="сервис активен" if active else "сервис сейчас не активен")
+            elif unit.exists():
+                status.update(installed=True, enabled=False, mechanism="systemd-user",
+                              detail="unit найден, но systemctl недоступен")
+            elif xdg.exists():
+                status.update(installed=True, enabled=True, mechanism="xdg-autostart",
+                              detail="запускается графической сессией")
+    except (OSError, subprocess.SubprocessError) as exc:
+        status["detail"] = str(exc)
+    if config_detail and config_detail not in status["detail"]:
+        status["detail"] = "; ".join(filter(None, (config_detail, status["detail"])))
+    return status
+
+
+def _print_autostart_status(status: dict) -> None:
+    printer = ok if status["installed"] and status["enabled"] else warn
+    printer("Автозапуск включён" if status["enabled"] else "Автозапуск выключен")
+    say(f"    Механизм: {status['mechanism']}")
+    say(f"    Порт:     {status['port']}")
+    say(f"    Сервер:   {'работает' if status['running'] else 'сейчас не запущен'}")
+    if status["detail"]:
+        say(f"    Система:  {status['detail']}", Style.DIM)
+    if not status["root_matches"]:
+        warn("PrintFlow перенесён в другую папку — выполните autostart repair")
+
+
+def cmd_autostart(args: argparse.Namespace) -> int:
+    action = args.autostart_action
+    if action == "status":
+        header("Системный автозапуск PrintFlow")
+        status = autostart_status()
+        _print_autostart_status(status)
         say()
-        say("  Удалить всё это: python pf.py uninstall", Style.DIM)
-        say("  Данные и база при удалении не трогаются.", Style.DIM)
-    else:
-        warn("Ничего не установлено")
-    say()
+        say("  Изменить: python pf.py autostart enable|disable|repair", Style.DIM)
+        say()
+        return 0 if status["enabled"] and status["root_matches"] else 1
+    if action == "disable":
+        header("Отключение автозапуска")
+        success, detail = disable_autostart()
+        if success:
+            ok("Автозапуск отключён; ярлыки и данные сохранены")
+            if detail:
+                say(f"    {detail}", Style.DIM)
+            return 0
+        fail(f"Не удалось полностью отключить автозапуск: {detail}")
+        return 1
+
+    header("Восстановление автозапуска" if action == "repair" else "Включение автозапуска")
+    if action == "repair":
+        # repair предназначен прежде всего для переноса каталога/обновления launcher:
+        # не сбрасываем ранее выбранные порт и сетевой режим на значения CLI по умолчанию.
+        saved = load_autostart_config()
+        try:
+            saved_port = int(saved.get("port", args.port))
+            saved_delay = int(saved.get("startup_delay", args.startup_delay))
+            if 1 <= saved_port <= 65535:
+                args.port = saved_port
+            if 0 <= saved_delay <= 300:
+                args.startup_delay = saved_delay
+        except (TypeError, ValueError):
+            warn("Сохранённые параметры повреждены — использую безопасные значения")
+        for name in ("local", "system", "verbose"):
+            if isinstance(saved.get(name), bool):
+                setattr(args, name, saved[name])
+    if not args.system:
+        ensure_venv()
+    success, _mechanism, detail = enable_autostart(args)
+    if not success:
+        fail(f"Автозапуск не установлен: {detail}")
+        return 1
+    ok(f"Автозапуск настроен: {detail}")
+    _print_autostart_status(autostart_status())
     return 0
 
 
-def install_windows(args: argparse.Namespace) -> list[str]:
-    done = []
+def cmd_install(args: argparse.Namespace) -> int:
+    header("Установка PrintFlow в систему", "ярлык, меню программ и автозапуск")
+    if not args.system:
+        ensure_venv()
+    created: list[str] = []
+    errors: list[str] = []
+    if IS_WINDOWS:
+        items, failures = install_windows(args)
+    elif IS_MACOS:
+        items, failures = install_macos(args)
+    else:
+        items, failures = install_linux(args)
+    created += items
+    errors += failures
+
+    if args.no_autostart:
+        success, detail = disable_autostart()
+        if success:
+            created.append("Автозапуск отключён (--no-autostart)")
+        else:
+            errors.append(f"автозапуск не отключён: {detail}")
+    else:
+        success, _mechanism, detail = enable_autostart(args)
+        if success:
+            created.append(f"Автозапуск: {detail}")
+        else:
+            errors.append(f"автозапуск: {detail}")
+
+    say()
+    for item in created:
+        ok(item)
+    for item in errors:
+        fail(item)
+    say()
+    say("  Проверить: python pf.py autostart status", Style.DIM)
+    say("  Удалить всё: python pf.py uninstall", Style.DIM)
+    say("  Данные и база при удалении не трогаются.", Style.DIM)
+    say()
+    return 1 if errors else 0
+
+
+def install_windows(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    done: list[str] = []
+    errors: list[str] = []
     command = launcher_command("gui")
+    shortcuts: dict[Path, str] = {}
     desktop = desktop_dir()
-    shortcuts = {}
     if desktop:
         shortcuts[desktop / f"{APP_NAME}.lnk"] = "Ярлык на рабочем столе"
-    start_menu = Path(os.environ.get("APPDATA", Path.home())) / \
-        "Microsoft/Windows/Start Menu/Programs"
+    start_menu = windows_programs_dir()
     shortcuts[start_menu / f"{APP_NAME}.lnk"] = "Пункт в меню «Пуск»"
-    if not args.no_autostart:
-        startup = start_menu / "Startup"
-        shortcuts[startup / f"{APP_NAME}.lnk"] = "Автозапуск при входе в систему"
-
     for path, label in shortcuts.items():
-        autostart = "Startup" in str(path)
-        run = launcher_command("start", background=True) if autostart else command
-        script = (
-            "$shell = New-Object -ComObject WScript.Shell; "
-            f"$link = $shell.CreateShortcut('{path}'); "
-            f"$link.TargetPath = '{run[0]}'; "
-            f"$link.Arguments = '{subprocess.list2cmdline(run[1:])}'; "
-            f"$link.WorkingDirectory = '{ROOT}'; "
-            f"$link.Description = 'PrintFlow — управление 3D-производством'; "
-            "$link.Save()"
-        )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                                capture_output=True, text=True)
-        if result.returncode == 0 and path.exists():
+        success, detail = create_windows_shortcut(
+            path, command, "PrintFlow — управление 3D-производством")
+        if success:
             done.append(f"{label}: {path}")
         else:
-            warn(f"Не удалось создать: {path}")
-    return done
+            errors.append(f"не удалось создать {path}: {detail}")
+    return done, errors
 
 
-def install_macos(args: argparse.Namespace) -> list[str]:
-    done = []
-    apps = Path.home() / "Applications"
-    bundle = apps / f"{APP_NAME}.app"
+def install_macos(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    bundle = Path.home() / "Applications" / f"{APP_NAME}.app"
     macos_dir = bundle / "Contents/MacOS"
-    macos_dir.mkdir(parents=True, exist_ok=True)
-    (bundle / "Contents/Info.plist").write_text(textwrap.dedent(f"""\
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-          "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0"><dict>
-          <key>CFBundleName</key><string>{APP_NAME}</string>
-          <key>CFBundleDisplayName</key><string>NOZZA PrintFlow</string>
-          <key>CFBundleIdentifier</key><string>ru.nozza.printflow</string>
-          <key>CFBundleVersion</key><string>{app_version()}</string>
-          <key>CFBundleExecutable</key><string>{APP_NAME}</string>
-          <key>CFBundlePackageType</key><string>APPL</string>
-          <key>LSMinimumSystemVersion</key><string>10.13</string>
-        </dict></plist>
-        """), encoding="utf-8")
-    runner = macos_dir / APP_NAME
-    runner.write_text("#!/bin/bash\n"
-                      f'cd "{ROOT}"\n'
-                      f'exec "{sys.executable}" "{ROOT / "pf.py"}" gui\n', encoding="utf-8")
-    runner.chmod(0o755)
-    done.append(f"Программа: {bundle}")
-
-    if not args.no_autostart:
-        agents = Path.home() / "Library/LaunchAgents"
-        agents.mkdir(parents=True, exist_ok=True)
-        plist = agents / "ru.nozza.printflow.plist"
-        command = launcher_command("start")
-        arguments = "".join(f"    <string>{part}</string>\n" for part in command)
-        plist.write_text(textwrap.dedent(f"""\
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-              "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0"><dict>
-              <key>Label</key><string>ru.nozza.printflow</string>
-              <key>ProgramArguments</key><array>
-            {arguments}  </array>
-              <key>WorkingDirectory</key><string>{ROOT}</string>
-              <key>RunAtLoad</key><true/>
-              <key>StandardOutPath</key><string>{RUN_LOG}</string>
-              <key>StandardErrorPath</key><string>{RUN_LOG}</string>
-            </dict></plist>
-            """), encoding="utf-8")
-        subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
-        subprocess.run(["launchctl", "load", str(plist)], capture_output=True)
-        done.append(f"Автозапуск при входе: {plist}")
-    return done
+    try:
+        macos_dir.mkdir(parents=True, exist_ok=True)
+        info = {
+            "CFBundleName": APP_NAME,
+            "CFBundleDisplayName": "NOZZA PrintFlow",
+            "CFBundleIdentifier": AUTOSTART_LABEL,
+            "CFBundleVersion": app_version(),
+            "CFBundleExecutable": APP_NAME,
+            "CFBundlePackageType": "APPL",
+            "LSMinimumSystemVersion": "10.13",
+        }
+        _atomic_write(bundle / "Contents/Info.plist",
+                      plistlib.dumps(info, fmt=plistlib.FMT_XML, sort_keys=False))
+        runner = macos_dir / APP_NAME
+        # argv передаётся напрямую через exec; shell-экранирование обрабатывает пробелы/кавычки.
+        import shlex
+        run = " ".join(shlex.quote(part) for part in launcher_command("gui"))
+        _atomic_write(runner, f"#!/bin/sh\ncd {shlex.quote(str(ROOT))}\nexec {run}\n", mode=0o755)
+        return [f"Программа: {bundle}"], []
+    except OSError as exc:
+        return [], [f"не удалось создать {bundle}: {exc}"]
 
 
-def install_linux(args: argparse.Namespace) -> list[str]:
-    done = []
-    apps = Path.home() / ".local/share/applications"
-    apps.mkdir(parents=True, exist_ok=True)
-    entry = apps / "printflow.desktop"
-    command = " ".join(f'"{part}"' for part in launcher_command("gui"))
-    entry.write_text(textwrap.dedent(f"""\
-        [Desktop Entry]
-        Type=Application
-        Name=PrintFlow
-        GenericName=Управление 3D-производством
-        Comment=NOZZA · заказы, склад и принтеры Bambu Lab
-        Exec={command}
-        Path={ROOT}
-        Terminal=false
-        Categories=Office;Utility;
-        """), encoding="utf-8")
-    entry.chmod(0o755)
-    done.append(f"Пункт в меню программ: {entry}")
-
+def install_linux(args: argparse.Namespace) -> tuple[list[str], list[str]]:
+    done: list[str] = []
+    errors: list[str] = []
+    entry = xdg_data_home() / "applications/printflow.desktop"
+    try:
+        _atomic_write(entry, render_xdg_entry(launcher_command("gui")), mode=0o755)
+        done.append(f"Пункт в меню программ: {entry}")
+    except OSError as exc:
+        errors.append(f"не удалось создать {entry}: {exc}")
+        return done, errors
     desktop = desktop_dir()
     if desktop:
         shortcut = desktop / "PrintFlow.desktop"
@@ -1177,83 +1780,54 @@ def install_linux(args: argparse.Namespace) -> list[str]:
             shutil.copy2(entry, shortcut)
             shortcut.chmod(0o755)
             done.append(f"Ярлык на рабочем столе: {shortcut}")
-        except OSError:
-            pass
-
-    if not args.no_autostart and shutil.which("systemctl"):
-        units = Path.home() / ".config/systemd/user"
-        units.mkdir(parents=True, exist_ok=True)
-        unit = units / "printflow.service"
-        exec_start = " ".join(f'"{part}"' for part in launcher_command("start"))
-        unit.write_text(textwrap.dedent(f"""\
-            [Unit]
-            Description=PrintFlow — локальный сервер 3D-производства
-            After=network-online.target
-
-            [Service]
-            Type=simple
-            WorkingDirectory={ROOT}
-            ExecStart={exec_start}
-            Restart=on-failure
-            RestartSec=10
-
-            [Install]
-            WantedBy=default.target
-            """), encoding="utf-8")
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        result = subprocess.run(["systemctl", "--user", "enable", "printflow.service"],
-                                capture_output=True, text=True)
-        if result.returncode == 0:
-            done.append("Автозапуск при входе: systemd --user (printflow.service)")
-            say("    Запустить прямо сейчас: systemctl --user start printflow", Style.DIM)
-        else:
-            warn("systemd отказал в автозапуске — ярлык всё равно работает")
-    return done
+        except OSError as exc:
+            errors.append(f"не удалось создать {shortcut}: {exc}")
+    return done, errors
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
     header("Удаление ярлыков и автозапуска", "база и настройки остаются на месте")
-    removed = []
+    removed: list[str] = []
+    errors: list[str] = []
+    disabled, detail = disable_autostart()
+    if not disabled:
+        errors.append(f"автозапуск: {detail}")
+
     desktop = desktop_dir() or Path.home()
     candidates = [
         desktop / f"{APP_NAME}.lnk",
         desktop / "PrintFlow.desktop",
-        Path.home() / ".local/share/applications/printflow.desktop",
-        Path.home() / "Library/LaunchAgents/ru.nozza.printflow.plist",
-        Path(os.environ.get("APPDATA", Path.home())) /
-        "Microsoft/Windows/Start Menu/Programs" / f"{APP_NAME}.lnk",
-        Path(os.environ.get("APPDATA", Path.home())) /
-        "Microsoft/Windows/Start Menu/Programs/Startup" / f"{APP_NAME}.lnk",
+        xdg_data_home() / "applications/printflow.desktop",
+        windows_programs_dir() / f"{APP_NAME}.lnk",
     ]
-    plist = Path.home() / "Library/LaunchAgents/ru.nozza.printflow.plist"
-    if plist.exists():
-        subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
-    unit = Path.home() / ".config/systemd/user/printflow.service"
-    if unit.exists():
-        subprocess.run(["systemctl", "--user", "disable", "--now", "printflow.service"],
-                       capture_output=True)
-        candidates.append(unit)
     bundle = Path.home() / "Applications" / f"{APP_NAME}.app"
     if bundle.exists():
-        shutil.rmtree(bundle, ignore_errors=True)
-        removed.append(str(bundle))
+        try:
+            shutil.rmtree(bundle)
+            removed.append(str(bundle))
+        except OSError as exc:
+            errors.append(f"не удалось удалить {bundle}: {exc}")
     for path in candidates:
         if path.exists():
             try:
                 path.unlink()
                 removed.append(str(path))
-            except OSError:
-                warn(f"Не удалось удалить: {path}")
+            except OSError as exc:
+                errors.append(f"не удалось удалить {path}: {exc}")
     say()
     for item in removed:
         ok(f"Удалено: {item}")
-    if not removed:
-        warn("Ярлыки не найдены — похоже, установка не выполнялась")
+    if disabled:
+        ok("Автозапуск отключён")
+    for item in errors:
+        fail(item)
+    if not removed and not errors:
+        warn("Ярлыки не найдены — повторное удаление безопасно")
     say()
     say(f"  Данные остались: {DATA_DIR}", Style.DIM)
     say(f"  Окружение осталось: {VENV_DIR}", Style.DIM)
     say()
-    return 0
+    return 1 if errors else 0
 
 
 # ─────────────────────────────────────────────────────────── окно управления
@@ -1355,8 +1929,12 @@ HELP = """
 
   УСТАНОВКА
     python pf.py install            ярлык, меню программ, автозапуск
-    python pf.py install --no-autostart    только ярлык
-    python pf.py uninstall          убрать ярлыки (данные не трогаются)
+    python pf.py install --no-autostart    ярлыки и явное отключение автозапуска
+    python pf.py autostart status   состояние системного автозапуска
+    python pf.py autostart enable   включить системный автозапуск
+    python pf.py autostart disable  отключить, сохранив ярлыки и данные
+    python pf.py autostart repair   пересоздать конфигурацию после переноса папки
+    python pf.py uninstall          убрать ярлыки и автозапуск (данные не трогаются)
     python pf.py build              автономная программа без Python (PyInstaller)
 """
 
@@ -1370,14 +1948,27 @@ def cmd_help(args: argparse.Namespace) -> int:
     return 0
 
 
+def startup_delay_value(value: str) -> int:
+    try:
+        delay = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("задержка должна быть целым числом") from exc
+    if not 0 <= delay <= 300:
+        raise argparse.ArgumentTypeError("задержка должна быть от 0 до 300 секунд")
+    return delay
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pf", add_help=False,
         description="PrintFlow — запуск и обслуживание локальной системы 3D-производства")
     parser.add_argument("command", nargs="?", default="start",
-                        choices=["start", "gui", "app", "menu", "stop", "status", "doctor",
-                                 "backup", "restore", "update", "deps", "build",
-                                 "install", "uninstall", "logs", "help"])
+                        choices=["start", "service", "gui", "app", "menu", "stop", "status",
+                                 "doctor", "backup", "restore", "update", "deps", "build",
+                                 "install", "uninstall", "autostart", "logs", "help"])
+    parser.add_argument("autostart_action", nargs="?", default="status",
+                        choices=["status", "enable", "disable", "repair"],
+                        help="действие для команды autostart")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="порт панели")
     parser.add_argument("--local", action="store_true",
                         help="слушать только 127.0.0.1 (без доступа с телефона)")
@@ -1387,7 +1978,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
     parser.add_argument("--no-qr", action="store_true", help="не рисовать QR-код")
     parser.add_argument("--no-autostart", action="store_true",
-                        help="при install — не добавлять автозапуск")
+                        help="при install — отключить автозапуск, установить только ярлыки")
+    parser.add_argument("--startup-delay", type=startup_delay_value, default=10,
+                        help="задержка автозапуска в секундах (0–300, по умолчанию 10)")
     parser.add_argument("--system", action="store_true",
                         help="запускать текущим Python, без отдельного окружения")
     parser.add_argument("--verbose", action="store_true", help="подробный журнал")
@@ -1399,6 +1992,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "start": cmd_start,
+    "service": cmd_service,
     "gui": cmd_gui,
     "app": cmd_app,
     "menu": cmd_menu,
@@ -1412,6 +2006,7 @@ COMMANDS = {
     "build": cmd_build,
     "install": cmd_install,
     "uninstall": cmd_uninstall,
+    "autostart": cmd_autostart,
     "logs": cmd_logs,
     "help": cmd_help,
 }

@@ -295,10 +295,19 @@ class LauncherWindow:
     def run_task(self, command: str) -> None:
         """Служебная команда лаунчера с выводом в журнал окна."""
         self.write(f"── {command} ──")
+        argv = [sys.executable, str(pf.ROOT / "pf.py"), command]
+        if command == "install":
+            # Автозапуск должен повторять выбранные в окне порт и режим сети,
+            # а не молча возвращаться к 8080/доступу по LAN.
+            argv += ["--port", str(self.current_port())]
+            if not self.lan_var.get():
+                argv.append("--local")
+            if getattr(self.args, "system", False):
+                argv.append("--system")
 
         def worker() -> None:
             process = subprocess.Popen(
-                [sys.executable, str(pf.ROOT / "pf.py"), command],
+                argv,
                 cwd=str(pf.ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
                 errors="replace", bufsize=1)
