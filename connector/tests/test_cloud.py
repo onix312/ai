@@ -285,6 +285,32 @@ class CloudBridgeTests(unittest.TestCase):
         self.assertFalse(state["connected"])
         bridge.shutdown()
 
+    def test_state_all(self):
+        """state_all() не падает на зарегистрированном мосте (KeyError 'error').
+
+        В проде ошибка проявлялась только когда в реестре _shared уже был
+        мост: на пустом реестре списковое включение не выполнялось.
+        """
+        from connector.printflow.cloud_bridge import CloudBridge
+        CloudBridge.shutdown_all()
+        bridge = CloudBridge("global", "1", "tok")
+        key = "global|1"
+        CloudBridge._shared[key] = bridge
+        bridge.last_error = "Токен устарел — войдите заново"
+        try:
+            state = CloudBridge.state_all()
+        finally:
+            CloudBridge._shared.pop(key, None)
+        self.assertEqual(state["bridges"], 1)
+        self.assertFalse(state["connected"])
+        self.assertEqual(state["attached"], 0)
+        self.assertEqual(state["errors"], ["Токен устарел — войдите заново"])
+        bridge.shutdown()
+        # Пустой реестр — тоже без ошибок.
+        empty = CloudBridge.state_all()
+        self.assertEqual(empty["bridges"], 0)
+        self.assertEqual(empty["errors"], [])
+
     def test_connect_without_token(self):
         from connector.printflow import cloud_bridge
         if cloud_bridge.mqtt is None:
