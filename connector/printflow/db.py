@@ -19,7 +19,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso,
                      rotate_backups)
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -118,6 +118,18 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reprint_of_job_id", "TEXT DEFAULT ''"),
         ("reprint_request_id", "TEXT DEFAULT ''"),
         ("defect_id", "TEXT DEFAULT ''"),
+        # Восстановление только после подтверждённой потери связи/питания.
+        ("resume_eligible", "INTEGER DEFAULT 1"),
+        ("manual_paused", "INTEGER DEFAULT 0"),
+        ("power_loss_at", "TEXT DEFAULT ''"),
+        ("resume_attempts", "INTEGER DEFAULT 0"),
+        ("resume_reason", "TEXT DEFAULT ''"),
+        ("file_version", "TEXT DEFAULT ''"),
+        ("power_loss_state", "TEXT DEFAULT ''"),
+        ("power_loss_progress", "REAL DEFAULT 0"),
+        ("power_loss_layer", "INTEGER DEFAULT 0"),
+        ("power_loss_total_layers", "INTEGER DEFAULT 0"),
+        ("power_loss_task", "TEXT DEFAULT ''"),
     ],
     "defects": [
         ("note", "TEXT DEFAULT ''"),
@@ -342,6 +354,17 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     reprint_of_job_id TEXT DEFAULT '',
     reprint_request_id TEXT DEFAULT '',
     defect_id TEXT DEFAULT '',
+    resume_eligible INTEGER DEFAULT 1,
+    manual_paused INTEGER DEFAULT 0,
+    power_loss_at TEXT DEFAULT '',
+    resume_attempts INTEGER DEFAULT 0,
+    resume_reason TEXT DEFAULT '',
+    file_version TEXT DEFAULT '',
+    power_loss_state TEXT DEFAULT '',
+    power_loss_progress REAL DEFAULT 0,
+    power_loss_layer INTEGER DEFAULT 0,
+    power_loss_total_layers INTEGER DEFAULT 0,
+    power_loss_task TEXT DEFAULT '',
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON print_jobs(state);

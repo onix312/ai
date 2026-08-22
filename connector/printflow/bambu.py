@@ -111,6 +111,7 @@ class BambuPrinter:
         self.sequence = 0
         self.previous_state = ""
         self.previous_error = ""
+        self.previous_power_loss_signal = False
         self.session: dict[str, Any] | None = None
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
                                             "access_code": self.record.get("access_code"),
@@ -221,6 +222,18 @@ class BambuPrinter:
             if self.connected and not was:
                 self.connected_since = time.time()
 
+    def _disconnect_context(self) -> dict:
+        """Последний известный snapshot перед разрывом связи."""
+        p = self.raw.get("print", {}) if isinstance(self.raw.get("print"), dict) else {}
+        return {
+            "last_state": str(p.get("gcode_state") or self.previous_state or "").upper(),
+            "task": p.get("subtask_name") or p.get("gcode_file") or "",
+            "remote_task_id": str(p.get("subtask_id") or p.get("task_id") or ""),
+            "progress": as_num(p.get("mc_percent")),
+            "layer": int(as_num(p.get("layer_num"))),
+            "total_layers": int(as_num(p.get("total_layer_num"))),
+        }
+
     def _on_cloud_status(self, connected: bool, error: str) -> None:
         was = self.connected
         self.connected = connected
@@ -241,7 +254,7 @@ class BambuPrinter:
             self.last_error = error or self.last_error or "Облачное соединение потеряно"
             if was:
                 self.on_event("offline", "Связь с принтером потеряна (Bambu Cloud)",
-                              self.record.get("name", ""), {})
+                              self.record.get("name", ""), self._disconnect_context())
 
     def _connect_lan(self) -> None:
         try:
@@ -331,7 +344,8 @@ class BambuPrinter:
         if rc_value(reason_code) != 0:
             self.last_error = f"Соединение потеряно (код {reason_code})"
             if was:
-                self.on_event("offline", "Связь с принтером потеряна", self.record.get("name", ""), {})
+                self.on_event("offline", "Связь с принтером потеряна", self.record.get("name", ""),
+                              self._disconnect_context())
 
     def _on_message(self, client, userdata, message):
         try:
@@ -353,9 +367,46 @@ class BambuPrinter:
             self.last_message = time.time()
             self._detect_events()
 
+    @staticmethod
+    def _has_power_loss_signal(print_report: dict) -> bool:
+        """Распознать только явный firmware/bridge power-loss marker.
+
+        Offline/online и ``PAUSE`` намеренно не входят в этот список: они
+        одинаково возникают при сетевом обрыве, ручном reconnect и обычной
+        паузе. Разные bridge/прошивки используют разные имена поля, поэтому
+        принимаем только явно названные power-loss/recovery значения.
+        """
+        keys = ("power_loss", "power_loss_recovery", "poweroff_recovery",
+                "power_loss_recovery_state", "power_loss_state")
+        for key in keys:
+            value = print_report.get(key)
+            if isinstance(value, bool) and value:
+                return True
+            if isinstance(value, (int, float)) and value == 1:
+                return True
+            if isinstance(value, dict):
+                value = value.get("state") or value.get("status") or value.get("reason") or value.get("active")
+            text = str(value or "").strip().lower().replace("-", "_")
+            if text in ("power_loss", "power_loss_recovery", "poweroff",
+                        "poweroff_recovery", "recovered", "resume"):
+                return True
+        return False
+
     def _detect_events(self) -> None:
         p = self.raw.get("print", {})
         state = str(p.get("gcode_state", "")).upper()
+        signal = self._has_power_loss_signal(p) or any(
+            self._has_power_loss_signal(value)
+            for key, value in self.raw.items()
+            if key != "print" and isinstance(value, dict)
+        )
+        if signal and not self.previous_power_loss_signal:
+            self.on_event(
+                "power_loss_confirmed", "Принтер подтвердил восстановление питания",
+                str(p.get("subtask_name") or p.get("gcode_file") or "Печать"),
+                {"source": "printer_report", "power_loss_recovery": True})
+        self.previous_power_loss_signal = signal
+
         name = p.get("subtask_name") or p.get("gcode_file") or "Задание печати"
         if state and state != self.previous_state:
             previous, self.previous_state = self.previous_state, state
@@ -645,7 +696,12 @@ class BambuPrinter:
             },
             "printer": {
                 "state": state, "state_label": STATE_NAMES.get(state, state),
-                "task": task, "progress": as_num(p.get("mc_percent")),
+                "task": task,
+                "file": p.get("gcode_file") or task,
+                "remote_task_id": str(p.get("subtask_id") or p.get("task_id") or ""),
+                "file_version": str(p.get("gcode_file_hash") or p.get("file_hash") or ""),
+                "power_loss_recovery": self._has_power_loss_signal(p),
+                "progress": as_num(p.get("mc_percent")),
                 "remaining_min": remaining,
                 "eta": time.time() + remaining * 60 if remaining else None,
                 "layer": int(as_num(p.get("layer_num"))),

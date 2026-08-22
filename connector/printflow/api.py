@@ -1352,11 +1352,15 @@ class Api:
             cmd = str(body.get("command") or "").strip()
             if cmd in DANGEROUS_AUTOMATION_COMMANDS and body.get("confirmed") is not True:
                 raise ValueError("Подтвердите физическую команду оператора")
+            # Для pause marker ставится ДО MQTT-команды, чтобы асинхронный
+            # report PAUSE не успел запустить recovery. При ошибке команды
+            # оставляем безопасную ручную блокировку до явного решения оператора.
             if cmd == "pause":
                 self.manager.mark_user_paused(printer.id)
-            elif cmd == "resume":
+            result = printer.command(cmd, body.get("value"))
+            if cmd == "resume":
                 self.manager.clear_user_paused(printer.id)
-            return 200, printer.command(cmd, body.get("value"))
+            return 200, result
         if path == "/api/printer/convert-to-order":
             printer_id = pid or body.get("printer_id", "")
             return 200, self.manager.convert_active_to_order(printer_id, body)

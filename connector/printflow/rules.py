@@ -212,6 +212,7 @@ class RulesEngine:
             printer = self.manager.get(ctx.get("printer_id") or "")
             if printer:
                 try:
+                    self.manager.mark_non_resumable_pause(printer.id, "rule_pause")
                     printer.command("pause")
                 except Exception as exc:
                     self.db.add_event("rule", f"Правило: {rule['name']} не сработало",
