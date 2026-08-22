@@ -392,7 +392,17 @@ def estimate_file(path: str | Path) -> dict:
             return estimate_3mf(path)
         elif path.suffix.lower() == ".gcode":
             text = _read_head(path)
-            return _parse_gcode_head(text) if text else {}
+            est = _parse_gcode_head(text) if text else {}
+            # 8.5: аудит G-code — слои, высота, скорости (идея 28)
+            if est:
+                try:
+                    from .plate_map import audit_gcode
+                    audit = audit_gcode(path)
+                    if audit:
+                        est["gcode_audit"] = audit
+                except Exception:
+                    pass
+            return est
         else:
             return {}
     except Exception:
@@ -466,6 +476,14 @@ def estimate_3mf(path: Path) -> dict:
                 all_fils.append(f)
     if all_fils:
         result["filaments"] = all_fils
+    # 8.5: карта плиты — где что лежит и % заполнения (идеи 54, 55)
+    try:
+        from .plate_map import plate_map_3mf
+        pm = plate_map_3mf(path)
+        if pm:
+            result["plate_map"] = pm
+    except Exception:
+        pass
     return result
 
 

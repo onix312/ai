@@ -837,6 +837,15 @@ const MQTT = [
 const AMS_SETTINGS = [
   ['dry_humidity_threshold', 'Порог влажности AMS, %', 'Выше порога система рекомендует сушку', 'num', 1],
 ];
+/* 8.5: умный цех — камера и виртуальный принтер */
+const PHASE11 = [
+  ['keyframe_interval_min', 'Кейфреймы, мин', 'Каждые N минут — кадр в архив задания (0 = выключено, мин. 0.5)', 'num', 0.5],
+  ['first_layer_watch_min', 'Смотреть первый слой, мин', 'Первые N минут после старта сверяем кадр со столом (0 = выключено)', 'num', 1],
+  ['bed_watch_enabled', 'Проверка «деталь на столе»', 'После финиша кадр сравнивается с эталоном пустого стола', 'bool'],
+  ['bed_watch_threshold', 'Порог пустого стола, %', 'Разница кадров, выше которой «стол не пуст»', 'num', 1],
+  ['demo_printer_enabled', 'Виртуальный принтер P1S', 'Симулятор для тестов и демо: очередь, телеметрия, камера-демо', 'bool'],
+  ['demo_speed', 'Скорость демо, мин/с', 'Насколько быстрее реального времени идёт виртуальная печать', 'num', 1],
+];
 const SYSTEM2 = [
   ['public_url', 'Адрес для QR', 'Пусто — LAN IP компьютера. Пример: http://192.168.1.50:8080', 'text'],
   ['encrypt_access_code', 'Шифровать Access Code', 'Рекомендуется: код хранится отдельно от ключа шифрования', 'bool'],
@@ -1177,6 +1186,7 @@ function renderSettings() {
   if ($('set_ftps')) $('set_ftps').innerHTML = settingGroup(FTPS);
   if ($('set_mqtt')) $('set_mqtt').innerHTML = settingGroup(MQTT);
   if ($('set_ams')) $('set_ams').innerHTML = settingGroup(AMS_SETTINGS);
+  if ($('set_phase11')) $('set_phase11').innerHTML = settingGroup(PHASE11);
   if ($('set_system2')) $('set_system2').innerHTML = settingGroup(SYSTEM2);
   // профили настроек
   if ($('set_profiles')) renderProfiles();
@@ -1968,6 +1978,105 @@ function bind() {
   $('lib_back').addEventListener('click', () => PF.go('library'));
 }
 
+/* ============================================== 8.5: статус-бар цеха (#75) */
+function renderCycobar() {
+  const bar = $('cycobar');
+  if (!bar) return;
+  bar.hidden = false;
+  const live = PF.state.live;
+  const snap = (live && (live.active || (live.printers || [])[0])) || null;
+  const info = (snap && snap.printer) || {};
+  const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(info.state);
+  const print = $('cb_print_text');
+  const dot = $('cb_print').querySelector('.cb-dot');
+  if (running) {
+    dot.className = 'cb-dot' + (info.state === 'PAUSE' ? ' bad' : '');
+    print.textContent = `${info.task || 'печать'} · ${Math.round(num(info.progress))}%`;
+  } else if (snap) {
+    dot.className = 'cb-dot idle';
+    print.textContent = `${snap.name} · ${info.state_label || 'свободен'}`;
+  } else {
+    dot.className = 'cb-dot idle';
+    print.textContent = 'принтеры не подключены';
+  }
+  $('cb_prog').style.width = (running ? clamp(num(info.progress), 0, 100) : 0) + '%';
+  $('cb_queue').textContent = (PF.state.jobs.queue || []).length;
+  const shelfText = (PF.modules.shelf && PF.modules.shelf.shelfSummary) || null;
+  if (shelfText) $('cb_shelf').textContent = shelfText;
+  const h = cycobarHeartbeat;
+  $('cb_dot').className = 'cb-dot' + (h && h.ok === false ? ' bad' : '');
+}
+
+/* ============================================== 8.5: здоровье (#36) */
+let cycobarHeartbeat = null;
+async function refreshHeartbeat() {
+  const el = $('dash_heartbeat');
+  try {
+    const h = await get('/api/system/heartbeat');
+    cycobarHeartbeat = h;
+    if (!el) { renderCycobar(); return; }
+    const rows = [];
+    rows.push(`<div class="mini-row"><span class="dot ${h.telegram.ok ? 'on' : ''}"></span>`
+      + `<div class="mbody"><b>Telegram-бот</b><small>${esc(h.telegram.note || '')}</small></div>`
+      + `<span class="chip ${h.telegram.ok ? 'ok' : 'warn'}">${h.telegram.ok ? 'жив' : 'нет'}</span></div>`);
+    (h.printers || []).forEach((p) => {
+      rows.push(`<div class="mini-row"><span class="dot ${p.connected ? 'on' : 'bad'}"></span>`
+        + `<div class="mbody"><b>${esc(p.name)}${p.virtual ? ' (вирт.)' : ''}</b>`
+        + `<small>${p.connected ? 'на связи' : esc(p.last_error || 'нет связи')}</small></div>`
+        + `<span class="chip ${p.connected ? 'ok' : 'warn'}">${p.connected ? 'ok' : 'нет'}</span></div>`);
+    });
+    rows.push(`<div class="mini-row"><span class="dot ${h.db_exists ? 'on' : 'bad'}"></span>`
+      + `<div class="mbody"><b>База и бэкапы</b>`
+      + `<small>последняя копия ${h.backup_newest_at ? agoText(h.backup_newest_at) : 'нет'}${h.backup_age_h != null ? ` · ${nfmt(h.backup_age_h)} ч назад` : ''}</small></div>`
+      + `<span class="chip ${h.db_exists ? 'ok' : 'warn'}">${h.db_exists ? 'ok' : 'нет'}</span></div>`);
+    if (h.disk) rows.push(`<div class="mini-row"><span class="dot"></span>`
+      + `<div class="mbody"><b>Диск</b><small>${nfmt(h.disk.free_gb, 1)} ГБ свободно</small></div>`
+      + `<span class="chip outline">${nfmt(h.disk.used_pct)}% занято</span></div>`);
+    el.innerHTML = rows.join('');
+    renderCycobar();
+  } catch (e) {
+    if (el) el.innerHTML = `<span class="muted">${esc(e.message)}</span>`;
+  }
+}
+
+/* ============================================== 8.5: достижения (#90) */
+async function refreshAchievements() {
+  const el = $('dash_achievements');
+  try {
+    const d = await get('/api/achievements');
+    const done = (d.badges || []).filter((b) => b.achieved);
+    el.innerHTML = (d.badges || []).map((b) =>
+      `<span class="mk-badge${b.achieved ? ' on' : ''}" title="${esc(b.desc)}">`
+      + `${b.achieved ? '★' : '☆'} ${esc(b.title)}<small class="muted">${nfmt(b.progress)}/${nfmt(b.target)}</small></span>`
+    ).join('');
+    if ($('dash_ach_sub')) $('dash_ach_sub').textContent = `Открыто ${done.length} из ${(d.badges || []).length}`;
+  } catch (e) { el.textContent = '—'; }
+}
+
+/* ============================================== 8.5: NOZZA tour (#27) */
+async function renderTour() {
+  const el = $('set_tour');
+  if (!el) return;
+  let st = {};
+  try { st = await get('/api/tour/state'); } catch (e) { /* старый коннектор */ }
+  if (st.active) {
+    el.innerHTML = `<div class="notice" style="margin-bottom:8px"><span>🎬</span><span>Демо активно: виртуальный принтер и демо-данные работают. Откат вернёт базу из копии ${esc(st.backup || '')}.</span></div>`
+      + `<button class="btn danger wide" type="button" id="tour_stop">■ Завершить tour и вернуть мои данные</button>`;
+    $('tour_stop').addEventListener('click', async () => {
+      if (!confirmDanger('Завершить NOZZA tour? Приложение перезапустится с исходной базой.')) return;
+      try { const r = await post('/api/tour/stop', {}); toast('Tour завершён', r.message || 'Перезапуск…'); }
+      catch (e) { fail(e); }
+    });
+    return;
+  }
+  el.innerHTML = `<p class="muted" style="font-size:12.5px;margin-bottom:8px">Покажите PrintFlow гостю: симулятор P1S печатает, заказы и полка живые, но всё — демо-данные. Завершение одной кнопкой откатывает базу.</p>`
+    + `<button class="btn primary wide" type="button" id="tour_start">▶ Запустить NOZZA tour</button>`;
+  $('tour_start').addEventListener('click', async () => {
+    try { const r = await post('/api/tour/start', {}); toast('Tour запущен', r.job_started ? 'Виртуальная печать стартовала' : 'Демо-данные готовы'); renderSettings(); }
+    catch (e) { fail(e); }
+  });
+}
+
 /* =============================================================== старт */
 PF.on('ready', () => {
   bind();
@@ -1982,20 +2091,28 @@ PF.on('ready', () => {
   loadTemplates();
   initBrowserNotify();
   checkUpdate(false);
+  renderCycobar();
+  refreshHeartbeat();
+  refreshAchievements();
   setInterval(refreshTimeline, 60000);
   setInterval(refreshPlan, 60000);
   setInterval(refreshInsights, 90000);
+  setInterval(refreshHeartbeat, 60000);
+  setInterval(refreshAchievements, 300000);
 });
 PF.on('data', renderDashboard);
+PF.on('data', renderCycobar);
 PF.on('live', renderDashboard);
+PF.on('live', renderCycobar);
 PF.on('finance', renderDashboard);
 PF.on('events', renderEvents);
 PF.on('printers', renderSettings);
+PF.on('printers', renderCycobar);
 PF.on('bootstrap', renderSettings);
 PF.on('money', () => { if (document.querySelector('#view-settings.on')) renderSettings(); });
 PF.on('view', (d) => {
   if (d.view === 'library') showArticle(d.sub || '');
-  if (d.view === 'settings') { renderSettings(); loadMaterials(); }
+  if (d.view === 'settings') { renderSettings(); loadMaterials(); renderTour(); }
   if (d.view === 'dashboard') renderDashboard();
 });
 window.addEventListener('resize', U.debounce(() => {

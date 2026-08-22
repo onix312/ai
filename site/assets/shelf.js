@@ -8,7 +8,7 @@ const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeTe
 const { get, post } = PF.api;
 
 let editingShelf = null;
-let shelfData = { items: [], summary: {}, moves: [] };
+let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null };
 
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
@@ -21,16 +21,30 @@ const STATUS_LABEL = {
 /* ============================================================== загрузка */
 async function refreshShelf() {
   try {
-    const [data, moves] = await Promise.all([
+    const [data, moves, tags, forecast, head] = await Promise.all([
       get('/api/shelf'), get('/api/shelf/moves', { limit: 60 }),
+      get('/api/shelf/tags').catch(() => ({ hit: [], new: [], last: [] })),
+      get('/api/shelf/forecast', { days: 7 }).catch(() => ({ days: 7, items: [] })),
+      get('/api/content/shelf-header', { days: 7 }).catch(() => null),
     ]);
-    shelfData = { items: data.items || [], summary: data.summary || {}, moves: moves.moves || [] };
+    shelfData = {
+      items: data.items || [], summary: data.summary || {}, moves: moves.moves || [],
+      tags: tags || {}, forecast: forecast.items || [], head: head || null,
+    };
     if (document.querySelector('#view-shelf.on')) renderShelf();
     updateNavTag();
     PF.emit('shelf', shelfData);
   } catch (e) { /* офлайн */ }
 }
 PF.refreshShelf = refreshShelf;
+
+/* Короткая сводка для статус-бара цеха: «12 шт · 2 тревоги» */
+function shelfSummaryText() {
+  const s = shelfData.summary || {};
+  if (!s.items) return null;
+  const alerts = (s.low || 0) + (s.dead || 0);
+  return `${nfmt(s.qty)} шт${alerts ? ` · ${alerts} ⚠` : ''}`;
+}
 
 function updateNavTag() {
   const tag = $('nav_shelf_tag');
@@ -49,16 +63,43 @@ function shelfKpi(label, value, sub, kind) {
     + `<b class="value">${value}</b><span class="sub">${esc(sub || '')}</span></div>`;
 }
 
+function liveBadgeFor(id) {
+  const t = shelfData.tags || {};
+  if ((t.last || []).some((x) => x.id === id)) return '<span class="shelf-live last">Последний!</span>';
+  if ((t.new || []).some((x) => x.id === id)) return '<span class="shelf-live new">Новинка</span>';
+  if ((t.hit || []).some((x) => x.id === id)) return '<span class="shelf-live hit">Хит</span>';
+  return '';
+}
+
 function renderShelf() {
   const s = shelfData.summary || {};
-  $('shelf_kpis').innerHTML = [
-    shelfKpi('Штук на стеллаже', nfmt(s.qty), `${nfmt(s.items)} позиций`),
-    shelfKpi('Остаток в рублях', money(s.value), 'по себестоимости (заморожено)'),
-    shelfKpi('Продано за 7 дней', `${nfmt(s.sold_7)} шт`, `${money(s.sold_7_money)}`),
-    shelfKpi('Мёртвый сток', String(s.dead || 0), s.dead_value ? `${money(s.dead_value)} заморожено` : 'нет позиций без продаж',
-      s.dead ? 'bad' : 'ok'),
-    shelfKpi('План пополнения', `${nfmt(s.plan_qty)} шт`, 'напечатать, чтобы хватило на 7 дней'),
-  ].join('');
+  const head = shelfData.head;
+  const headHtml = head && head.text
+    ? `<div class="notice" style="margin-bottom:12px"><span>✦</span><span>${esc(head.text)}${head.new_items && head.new_items.length ? ` Новинки: ${head.new_items.map((n) => '«' + esc(n) + '»').join(', ')}.` : ''}</span></div>`
+    : '';
+  const fc = shelfData.forecast || [];
+  const maxFc = Math.max(1, ...fc.map((f) => num(f.qty) + num(f.gap)));
+  const fcHtml = fc.length ? `
+   <div class="shelf-forecast">
+    <b>Прогноз полки на 7 дней</b> <span class="muted" style="font-size:11.5px">— при текущем темпе продаж</span>
+    ${fc.slice(0, 6).map((f) =>
+      `<div class="row"><span style="width:150px;flex:none">${esc(f.name)}</span>`
+      + `<span class="bar"><i style="width:${Math.round(num(f.qty) / maxFc * 100)}%"></i>`
+      + (f.gap ? `<i class="gap" style="width:${Math.round(num(f.gap) / maxFc * 100)}%"></i>` : '') + `</span>`
+      + `<span style="width:130px;text-align:right;flex:none">${f.empty
+        ? '<span class="gap-warn">закончится</span>'
+        : `останется ${nfmt(f.projected)} шт${f.gap ? ` <span class="gap-warn">(не хватит ${nfmt(f.gap)})</span>` : ''}`}</span></div>`
+    ).join('')}
+   </div>` : '';
+  $('shelf_kpis').innerHTML =
+    headHtml + [
+      shelfKpi('Штук на стеллаже', nfmt(s.qty), `${nfmt(s.items)} позиций`),
+      shelfKpi('Остаток в рублях', money(s.value), 'по себестоимости (заморожено)'),
+      shelfKpi('Продано за 7 дней', `${nfmt(s.sold_7)} шт`, `${money(s.sold_7_money)}`),
+      shelfKpi('Мёртвый сток', String(s.dead || 0), s.dead_value ? `${money(s.dead_value)} заморожено` : 'нет позиций без продаж',
+        s.dead ? 'bad' : 'ok'),
+      shelfKpi('План пополнения', `${nfmt(s.plan_qty)} шт`, 'напечатать, чтобы хватило на 7 дней'),
+    ].join('') + fcHtml;
 
   const items = shelfData.items || [];
   $('shelf_grid').innerHTML = items.length ? items.map((i) => {
@@ -69,7 +110,7 @@ function renderShelf() {
       + `<div class="shead">`
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
-      + `<div class="sinfo"><h3>${esc(i.name)}</h3>`
+      + `<div class="sinfo"><h3>${esc(i.name)}${liveBadgeFor(i.id)}</h3>`
       + `<small class="muted">${i.catalog_id ? 'из каталога' : 'без привязки'}${i.note ? ' · ' + esc(i.note) : ''}</small></div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
@@ -86,6 +127,7 @@ function renderShelf() {
       + `<span class="chip ${warn}">${STATUS_LABEL[st] || st}</span>`
       + `<span class="spacer"></span>`
       + (i.plan_qty ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)} шт</span>` : '')
+      + `<button class="btn sm ghost" type="button" data-shelf-card="${esc(i.id)}">▤ Карточка</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-qr="${esc(i.id)}">◫ Ценник</button>`
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
@@ -284,6 +326,37 @@ async function openQr(itemId) {
   } catch (e) { fail(e); }
 }
 
+/* Карточка товара для полки + штрихкод (идеи 101, 106) */
+async function openShelfCard(itemId) {
+  const item = (shelfData.items || []).find((x) => x.id === itemId);
+  if (!item) return;
+  const out = $('shelf_card_out');
+  out.innerHTML = '<span class="muted">Собираем карточку…</span>';
+  openModal('shelf_card_modal');
+  $('shelf_card_title').textContent = item.name;
+  try {
+    const bc = await get('/api/labels/code128', { text: String(item.id).slice(-8) }).catch(() => null);
+    const url = await get('/api/shelf/qr-link', { id: itemId }).then((r) => r.url || '').catch(() => '');
+    const qr = (window.QR && url) ? window.QR.svg(url, { size: 120 }) : '';
+    out.innerHTML = `
+     <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+       <div style="font-size:17px;font-weight:700">${esc(item.name)}</div>
+       <div style="font-size:26px;font-weight:800;margin:6px 0">${money(item.price)}</div>
+       <div class="muted" style="font-size:12.5px">
+        ${item.catalog_id ? 'Из каталога' : 'Позиция полки'} · остаток ${nfmt(item.qty)} шт${item.min_qty ? ` · минимум ${nfmt(item.min_qty)}` : ''}
+       </div>
+       <div class="muted" style="font-size:12.5px;margin-top:6px">Продано за 7 дней: ${nfmt(item.sold_7)} шт · за 30: ${nfmt(item.sold_30)} шт</div>
+       ${bc ? bc.svg : ''}
+       ${bc ? `<div class="muted" style="font-size:11px">Code 128 · ${esc(bc.text)} — касса сканирует</div>` : ''}
+      </div>
+      <div style="text-align:center">${qr}<small class="muted">QR → страница позиции</small></div>
+     </div>`;
+  } catch (e) {
+    out.innerHTML = `<span style="color:#ef4444">${esc(e.message)}</span>`;
+  }
+}
+
 /* =============================================================== события */
 function bind() {
   $('shelf_add').addEventListener('click', () => openShelf());
@@ -338,6 +411,8 @@ function bind() {
     if (edit) { openShelf(edit.dataset.shelfEdit); return; }
     const qr = e.target.closest('[data-shelf-qr]');
     if (qr) { openQr(qr.dataset.shelfQr); return; }
+    const card = e.target.closest('[data-shelf-card]');
+    if (card) { openShelfCard(card.dataset.shelfCard); return; }
     const sell = e.target.closest('[data-shelf-sell]');
     if (sell) {
       const item = (shelfData.items || []).find((x) => x.id === sell.dataset.shelfSell);
@@ -361,5 +436,6 @@ PF.on('data', () => { if (document.querySelector('#view-shelf.on')) refreshShelf
 PF.on('view', (d) => { if (d.view === 'shelf') refreshShelf(); });
 setInterval(() => { if (document.querySelector('#view-shelf.on')) refreshShelf(); }, 30000);
 
-PF.modules.shelf = { refreshShelf, openShelf, openProduce, openSales, openInventory };
+PF.modules.shelf = { refreshShelf, openShelf, openProduce, openSales, openInventory,
+  get shelfSummary() { return shelfSummaryText(); } };
 })();

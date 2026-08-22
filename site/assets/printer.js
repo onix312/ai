@@ -78,6 +78,7 @@ function renderLive() {
   const p = active();
   const pill = $('live_pill');
   if (!p) { pill.hidden = true; return; }
+  renderBedStatus(p);
 
   pill.hidden = false;
   const st = p.printer.state, kind = STATE_KIND[st] || '';
@@ -149,6 +150,11 @@ function renderLive() {
     : 'Мониторинг и управление по локальной сети. Принтер сейчас недоступен.');
 
   renderAms(p);
+  if (!renderAms._sugLoaded || renderAms._sugPrinter !== p.id) {
+    renderAms._sugLoaded = true;
+    renderAms._sugPrinter = p.id;
+    loadAmsSuggestion(p.id).then(() => { if (active() && active().id === p.id) renderAms(p); });
+  }
   renderHealth(p);
   renderCamera(p);
   renderAlerts(p);
@@ -206,7 +212,26 @@ function renderAms(p) {
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}">Тип</button>`
       + (t.active ? `<span class="chip ok" style="margin-left:6px">активен</span>` : '')
       + '</div></div>';
-  }).join('');
+  }).join('') + renderAmsSuggestion(p);
+}
+
+/* Память AMS (идея 41): «как в прошлый раз» */
+let amsSuggestion = null;
+async function loadAmsSuggestion(printerId) {
+  try {
+    const d = await get('/api/ams/suggestion');
+    amsSuggestion = (d.suggestion || []).find((x) => x.printer_id === printerId) || null;
+  } catch (e) { amsSuggestion = null; }
+}
+function renderAmsSuggestion(p) {
+  const sug = amsSuggestion;
+  if (!sug || !sug.slots || !sug.slots.length) return '';
+  const chips = sug.slots.map((s) =>
+    `<span class="chip outline" style="margin:2px 4px 2px 0">слот ${num(s.slot) + 1}: ${esc(s.material || '?')}${s.color ? ' · ' + esc(s.color) : ''}</span>`
+  ).join('');
+  return `<div class="notice" style="margin-top:10px"><span>⟲</span><span>`
+    + `<b>Как в прошлый раз:</b> ${chips}<br>`
+    + `<small class="muted">Последняя раскладка катушек этого принтера. Сравните со слотами выше — если не совпало, проверьте вручную.</small></span></div>`;
 }
 
 const SEV_LABEL = { info: 'Заметка', warn: 'Внимание', error: 'Ошибка', fatal: 'Критично' };
@@ -1051,6 +1076,92 @@ function openJob() {
   openModal('job_modal');
 }
 
+/* ============================================== 8.5: видео печати (#61) */
+let kfTimer = 0;
+let kfFrames = [];
+let kfIndex = 0;
+function stopKeyframes() {
+  if (kfTimer) { clearInterval(kfTimer); kfTimer = 0; }
+  $('kf_play').hidden = true;
+  $('kf_stop').hidden = true;
+}
+document.addEventListener('close', (e) => {
+  if (e.target && e.target.id === 'keyframes_modal') stopKeyframes();
+});
+async function openKeyframes() {
+  const p = active();
+  if (!p) return;
+  const job = (PF.state.jobs.queue || []).find((j) => j.printer_id === p.id && j.state === 'running')
+    || (p.job && p.job.id ? p.job : null);
+  const jobId = job && (job.id || job.job_id);
+  $('kf_title').textContent = job && job.name ? job.name : (p.printer.task || 'Видео печати');
+  $('kf_img').src = '';
+  $('kf_cap').textContent = 'Загружаем кадры…';
+  openModal('keyframes_modal');
+  if (!jobId) {
+    $('kf_cap').textContent = 'Нет активного задания — кадры появятся, когда включите кейфреймы в Настройках → «8.5 — умный цех».';
+    return;
+  }
+  try {
+    const d = await get('/api/job/keyframes', { id: jobId });
+    kfFrames = d.frames || [];
+    if (!kfFrames.length) {
+      $('kf_cap').textContent = 'Пока нет кадров. Включите кейфреймы (мин. 0,5 мин) — и таймлайн соберётся сам.';
+      return;
+    }
+    kfIndex = 0;
+    showKfFrame();
+    $('kf_seek').max = String(kfFrames.length - 1);
+    $('kf_play').hidden = false;
+  } catch (e) { $('kf_cap').textContent = e.message; }
+}
+function showKfFrame() {
+  const name = kfFrames[kfIndex];
+  if (!name) return;
+  const p = active();
+  $('kf_img').src = `/api/job/keyframe.jpg?id=${encodeURIComponent((p && p.id) || '')}&name=${encodeURIComponent(name)}`;
+  $('kf_cap').textContent = `Кадр ${kfIndex + 1} из ${kfFrames.length}`;
+  $('kf_seek').value = String(kfIndex);
+}
+$('kf_play').addEventListener('click', () => {
+  if (kfTimer) return;
+  kfTimer = setInterval(() => {
+    kfIndex = (kfIndex + 1) % kfFrames.length;
+    showKfFrame();
+  }, 1200);
+  $('kf_play').hidden = true;
+  $('kf_stop').hidden = false;
+});
+$('kf_stop').addEventListener('click', stopKeyframes);
+$('kf_seek').addEventListener('input', (e) => {
+  kfIndex = num(e.target.value);
+  showKfFrame();
+});
+
+/* ============================================== 8.5: стол (#10) */
+let bedRef = null;
+async function loadBedReference() {
+  try { bedRef = await get('/api/bed/reference'); } catch (e) { bedRef = null; }
+  renderBedStatus(active());
+}
+function renderBedStatus(p) {
+  const el = $('pr_bed_status');
+  if (!el) return;
+  if (!bedRef || !bedRef.has) { el.hidden = true; return; }
+  el.hidden = false;
+  $('pr_bed_status_text').textContent = `Эталон пустого стола снят${p ? ` для «${p.name}»` : ''}. После финиша система проверит: не забыли ли деталь.`;
+}
+async function captureBedReference() {
+  const p = active();
+  if (!p) return;
+  if (!confirmDanger(`Снять эталон пустого стола для «${p.name}»? Убедитесь, что деталь снята.`)) return;
+  try {
+    await post('/api/bed/reference', { printer_id: p.id });
+    toast('Эталон стола сохранён', 'Проверка «деталь на столе» включена для этого принтера');
+    await loadBedReference();
+  } catch (e) { fail(e); }
+}
+
 /* ============================================================= события */
 function bind() {
   $('pr_tabs').addEventListener('click', (e) => {
@@ -1065,8 +1176,11 @@ function bind() {
   document.addEventListener('click', async (e) => {
     const cmd = e.target.closest('[data-cmd]');
     if (cmd) {
+      const name = cmd.dataset.cmd;
+      if (name === 'keyframes') { openKeyframes(); return; }
+      if (name === 'bed_ref') { captureBedReference(); return; }
       const value = cmd.dataset.value !== undefined ? num(cmd.dataset.value) : undefined;
-      command(cmd.dataset.cmd, value, { label: cmd.textContent.trim() });
+      command(name, value, { label: cmd.textContent.trim() });
       return;
     }
     const jog = e.target.closest('[data-jog]');
@@ -1595,6 +1709,7 @@ PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   const total = PF.state.printers.length;
   tag.hidden = !total;
   tag.textContent = String(total);
+  loadBedReference();
 });
 PF.on('live', () => { renderLive(); });
 PF.on('data', () => { renderQueue(); });

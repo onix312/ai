@@ -1272,6 +1272,135 @@ class Api:
             return 200, {"profiles": self.db.setting("settings_profiles", [])}
         if path == "/api/slicer/materials":
             return 200, self.acc.material_options()
+        # --- 8.5: Фаза 11 --------------------------------------------------
+        if path == "/api/content/week":
+            from .content import week_post
+            try:
+                days = max(1, min(int(one("days", "7") or 7), 92))
+            except ValueError:
+                days = 7
+            return 200, week_post(self.db, days)
+        if path == "/api/content/social":
+            from .content import social_pack
+            try:
+                days = max(7, min(int(one("days", "30") or 30), 366))
+            except ValueError:
+                days = 30
+            return 200, social_pack(self.db, days)
+        if path == "/api/content/avito":
+            from .content import avito_card
+            try:
+                return 200, avito_card(self.db, one("item_id"))
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+        if path == "/api/content/holiday":
+            from .content import holiday_cards
+            return 200, holiday_cards()
+        if path == "/api/content/season":
+            from .content import seasonality
+            return 200, seasonality(self.db)
+        if path == "/api/content/report":
+            from .content import workshop_report
+            try:
+                days = max(7, min(int(one("days", "30") or 30), 366))
+            except ValueError:
+                days = 30
+            return 200, workshop_report(self.db, days)
+        if path == "/api/shelf/forecast":
+            try:
+                days = max(1, min(int(one("days", "7") or 7), 30))
+            except ValueError:
+                days = 7
+            return 200, {"days": days, "items": self.shelf.forecast(days)}
+        if path == "/api/shelf/tags":
+            return 200, self.shelf.live_tags()
+        if path == "/api/achievements":
+            from .achievements import achievements
+            return 200, {"badges": achievements(self.db)}
+        if path == "/api/system/heartbeat":
+            return 200, self._heartbeat()
+        if path == "/api/ams/suggestion":
+            return 200, {"suggestion": self._ams_suggestion()}
+        if path == "/api/job/keyframes":
+            from .config import PHOTO_DIR
+            job_id = one("id")
+            d = (PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
+            if not d or not d.is_dir():
+                return 200, {"frames": []}
+            return 200, {"frames": [f.name for f in sorted(d.iterdir())
+                                     if f.suffix == ".jpg"]}
+        if path == "/api/order/pack-data":
+            return 200, self._pack_data(one("id"))
+        if path == "/api/photos/similar":
+            from .photos import similar
+            try:
+                return 200, similar(self.db, one("photo_id"), limit=12)
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+        if path == "/api/public/my":
+            return 200, self._my_nozza(one("code"))
+        if path == "/api/wish/list":
+            customer_id = str(one("customer_id") or "")
+            rows = self.db.query(
+                "SELECT * FROM wishes WHERE customer_id=? ORDER BY created_at DESC",
+                (customer_id,)) if customer_id else []
+            return 200, {"wishes": rows}
+        if path == "/api/bed/reference":
+            from .config import PHOTO_DIR
+            return 200, {"has": (PHOTO_DIR / "bed_reference.jpg").is_file()}
+        # ------------------------------------------------- 8.5: генераторы
+        if path == "/api/content/shelf-header":
+            from .content import shelf_header
+            try:
+                days = max(1, min(int(one("days", "7") or 7), 30))
+            except ValueError:
+                days = 7
+            return 200, shelf_header(self.db, days)
+        if path == "/api/content/promo":
+            from .content import promo_pack
+            return 200, promo_pack(self.db)
+        if path == "/api/content/week-video":
+            from .content import week_video
+            try:
+                days = max(1, min(int(one("days", "7") or 7), 30))
+            except ValueError:
+                days = 7
+            return 200, week_video(self.db, days)
+        if path == "/api/content/print-map":
+            from .content import print_map
+            return 200, print_map(self.db)
+        if path == "/api/order/thread":
+            from .content import order_thread
+            try:
+                return 200, order_thread(self.db, one("id"))
+            except ValueError as exc:
+                return 404, {"error": str(exc)}
+        if path == "/api/content/report/print":
+            from .content import workshop_report_html
+            try:
+                days = max(7, min(int(one("days", "30") or 30), 366))
+            except ValueError:
+                days = 30
+            return 200, {"html": workshop_report_html(self.db, days)}
+        if path == "/api/content/stickers":
+            from .content import stickers
+            return 200, {"html": stickers(one("kind", "all"))}
+        if path == "/api/content/business-card":
+            from .content import business_card_html
+            return 200, {"html": business_card_html(self.db, one("customer_id"))}
+        if path == "/api/tour/state":
+            backup = str(self.db.setting("tour_backup_file", "") or "")
+            return 200, {"active": bool(backup), "backup": backup}
+        if path == "/api/labels/code128":
+            from .barcode import svg, validate
+            text = str(one("text") or "").strip()
+            if not text:
+                return 400, {"error": "Нет текста для штрихкода"}
+            try:
+                info = validate(text)
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+            return 200, {"svg": svg(text), **info}
         return 404, {"error": "Неизвестный маршрут"}
 
     # ------------------------------------------------------------------ POST
@@ -2412,8 +2541,259 @@ class Api:
             # {material, brand, price_per_kg}
             self.db.add_event("slicer", "Синхронизация материала", f"{body.get('material')} {body.get('price_per_kg')}", "", body)
             return 200, {"ok": True}
+        # --- 8.5: Фаза 11 --------------------------------------------------
+        if path == "/api/wish/save":
+            from .accounting import uid
+            customer_id = str(body.get("customer_id") or "")
+            text = str(body.get("text") or "").strip()
+            if not customer_id or not text:
+                return 400, {"error": "Нужны customer_id и текст пожелания"}
+            row = self.db.upsert("wishes", {
+                "id": uid("wish"), "customer_id": customer_id,
+                "order_id": str(body.get("order_id") or ""),
+                "text": text[:500], "status": "pending",
+                "created_at": now_iso(), "resolved_at": ""})
+            self.db.add_event("crm", "Wish-list: добавлено", text[:80],
+                              "", {"customer_id": customer_id})
+            return 200, {"ok": True, "wish": row}
+        if path == "/api/wish/resolve":
+            wish = self.db.one("SELECT * FROM wishes WHERE id=?",
+                               (str(body.get("id") or ""),))
+            if not wish:
+                return 404, {"error": "Пожелание не найдено"}
+            status = "done" if body.get("status") == "done" else "declined"
+            self.db.execute("UPDATE wishes SET status=?, resolved_at=? WHERE id=?",
+                            (status, now_iso(), wish["id"]))
+            if status == "done":
+                # «Сделали — взять?» (идея 72): готовый текст в буфер.
+                customer = self.db.one("SELECT * FROM customers WHERE id=?",
+                                       (wish["customer_id"],)) or {}
+                self.db.add_event("crm", "Wish-list: готово",
+                                  f"«{wish['text'][:60]}» — клиенту {customer.get('name') or ''}",
+                                  "", {"text": f"Готово! «{wish['text'][:80]}» — забирайте 🙂"})
+            return 200, {"ok": True}
+        if path == "/api/wish/delete":
+            self.db.delete("wishes", str(body.get("id") or ""))
+            return 200, {"ok": True}
+        if path == "/api/portal/code":
+            import hashlib
+            customer_id = str(body.get("customer_id") or "")
+            customer = self.db.one("SELECT * FROM customers WHERE id=?",
+                                   (customer_id,))
+            if not customer:
+                return 404, {"error": "Клиент не найден"}
+            code = str(customer.get("portal_code") or "")
+            if not code:
+                code = hashlib.sha1(("nozza:" + customer_id).encode()).hexdigest()[:8]
+                self.db.execute("UPDATE customers SET portal_code=? WHERE id=?",
+                                (code, customer_id))
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "code": code,
+                         "customer": customer.get("name")}
+        if path == "/api/tour/start":
+            from . import tour
+            result = tour.start(self.db)
+            self.manager.reload()  # подхватить виртуальный принтер
+            job = self.db.one(
+                "SELECT * FROM print_jobs WHERE state='queued' AND printer_id='virtual'"
+                " ORDER BY created_at DESC LIMIT 1")
+            started = False
+            if job:
+                try:
+                    self.manager.start_job(job["id"], "virtual")
+                    started = True
+                except Exception:
+                    pass
+            self.bus.publish("resync", {})
+            return 200, {**result, "job_started": started}
+        if path == "/api/tour/stop":
+            from . import tour
+            from .db import request_restore
+            try:
+                backup_file = tour.stop_backup_file(self.db)
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+            tour.reset_settings(self.db)
+            result = request_restore(backup_file)
+            self.db.add_event("system", "NOZZA tour: завершён",
+                              f"Откат из копии {backup_file}; приложение перезапустится",
+                              "", result)
+            threading.Timer(1.5, self.restart_process).start()
+            return 200, {**result, "restarting": True}
+        if path == "/api/bed/reference":
+            try:
+                return 200, self.manager.set_bed_reference(str(pid))
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+        if path == "/api/order/brand-card":
+            # Бренд-карточка в заказ (идея 42): design.py -> очередь печати.
+            from .accounting import uid
+            from .config import UPLOAD_DIR
+            order_id = str(body.get("order_id") or "")
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+            if not order:
+                return 404, {"error": "Заказ не найден"}
+            from .design import brand_card as brand_card_stl
+            text = str(self.db.setting("company_name", "NOZZA") or "NOZZA")[:10]
+            name = f"brand-card-{uid('bc')}.stl"
+            try:
+                UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                (UPLOAD_DIR / name).write_bytes(brand_card_stl(text))
+            except OSError as exc:
+                return 500, {"error": f"Не удалось сохранить STL: {exc}"}
+            job = self.manager.enqueue({
+                "file": name, "name": f"Бренд-карточка — заказ №{order.get('number')}",
+                "order_id": None, "source": "brand-card",
+                "est_minutes": 25.0, "est_grams": 12.0,
+                "priority": int(num(body.get("priority"), 0)),
+            })
+            self.db.add_event("queue", "Бренд-карточка в очередь",
+                              f"Заказ №{order.get('number')} → {job['name']}",
+                              "", {"job_id": job.get("id"), "order_id": order_id})
+            return 200, {"ok": True, "job": job, "file": name}
         return 404, {"error": "Неизвестный маршрут"}
 
+
+    def _heartbeat(self) -> dict:
+        """Сердцебиение системы (идея 36): живы ли каналы, от которых зависит
+        удалённый пульт и учёт."""
+        import shutil
+        now = time.time()
+        settings = self.db.settings()
+        tg_enabled = bool(settings.get("telegram_enabled")
+                          and settings.get("telegram_token")
+                          and settings.get("telegram_chat_id"))
+        bot = getattr(self.manager, "bot", None)
+        if not tg_enabled:
+            tg = {"enabled": False, "ok": True, "note": "Бот выключен"}
+        elif bot is None:
+            tg = {"enabled": True, "ok": False, "note": "Бот не запущен"}
+        else:
+            age = now - bot.last_poll if bot.last_poll else None
+            ok = age is not None and age < 90
+            tg = {"enabled": True, "ok": ok,
+                  "age_sec": round(age, 0) if age is not None else None,
+                  "note": "" if ok else "Опрос не был успешным >90 с"}
+        printers = []
+        for p in self.manager.printers.values():
+            snap_conn = {}
+            try:
+                snap_conn = p.snapshot().get("connection") or {}
+            except Exception:
+                pass
+            connected = bool(getattr(p, "connected", False)
+                              or (snap_conn.get("connected")))
+            printers.append({
+                "id": p.id, "name": p.record.get("name") or p.id,
+                "virtual": p.mode == "virtual",
+                "connected": connected,
+                "last_error": snap_conn.get("last_error") or "",
+            })
+        from .db import list_backups
+        from .config import DB_FILE
+        backups = list_backups()
+        newest = None
+        if backups:
+            newest = max(b.get("at") or "" for b in backups)
+        try:
+            from datetime import datetime
+            newest_dt = datetime.fromisoformat(str(newest).replace("Z", ""))
+            backup_age_h = round((datetime.now() - newest_dt).total_seconds() / 3600, 1)
+        except Exception:
+            backup_age_h = None
+        disk = None
+        if DB_FILE.exists():
+            usage = shutil.disk_usage(DB_FILE.parent)
+            disk = {"free_gb": round(usage.free / 1024 ** 3, 1),
+                    "used_pct": round(usage.used / usage.total * 100, 1)}
+        return {
+            "at": now_iso(), "uptime_sec": round(now - self.started_at),
+            "telegram": tg, "printers": printers,
+            "backup_newest_at": newest, "backup_age_h": backup_age_h,
+            "disk": disk,
+            "db_exists": DB_FILE.exists(),
+        }
+
+    def _ams_suggestion(self) -> list[dict]:
+        """Память AMS (идея 41): последняя раскладка катушек по слотам."""
+        out = []
+        for printer in self.manager.printers.values():
+            rows = self.db.query(
+                "SELECT * FROM spools WHERE printer_id=? AND ams_slot IS NOT NULL"
+                " AND ams_slot<>'' AND remaining_grams>0"
+                " ORDER BY updated_at DESC", (printer.id,))
+            seen = {}
+            for row in rows:
+                slot = str(row.get("ams_slot"))
+                if slot in seen:
+                    continue
+                seen[slot] = {
+                    "slot": slot,
+                    "material": row.get("material") or "",
+                    "color": row.get("color_name") or "",
+                    "color_hex": row.get("color_hex") or "",
+                    "spool_id": row["id"],
+                    "since": row.get("updated_at") or "",
+                }
+            if seen:
+                out.append({"printer_id": printer.id,
+                            "name": printer.record.get("name") or printer.id,
+                            "slots": sorted(seen.values(),
+                                            key=lambda x: int(x["slot"] or 0))})
+        return out
+
+    def _my_nozza(self, code: str) -> dict:
+        """«Мой NOZZA» (идея 94): публичная страница клиента по коду."""
+        code = str(code or "").strip().lower()
+        if not code:
+            return {"error": "Нет кода"}
+        customer = self.db.one("SELECT * FROM customers WHERE lower(portal_code)=?",
+                               (code,))
+        if not customer:
+            return {"error": "Код не найден"}
+        finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        orders = []
+        for o in self.db.query(
+                "SELECT * FROM orders WHERE customer_id=? ORDER BY created_at DESC LIMIT 20",
+                (customer["id"],)):
+            photos = [r["file"] for r in self.db.query(
+                "SELECT file FROM order_photos WHERE order_id=? AND file<>'' ORDER BY at DESC LIMIT 3",
+                (o["id"],))]
+            orders.append({
+                "number": o.get("number"), "product": o.get("product"),
+                "status": o.get("status"), "final": o["status"] in finals,
+                "created_at": o.get("created_at") or "",
+                "photos": photos,
+                "qty": o.get("qty") or 1,
+            })
+        debt = 0.0
+        for o in self.db.query("SELECT price, paid, prepaid, status FROM orders"
+                               " WHERE customer_id=?", (customer["id"],)):
+            if o["status"] not in finals:
+                debt += max(0.0, num(o.get("price")) - max(num(o.get("paid")),
+                                                           num(o.get("prepaid"))))
+        return {
+            "name": customer.get("name") or "Клиент NOZZA",
+            "orders": orders,
+            "orders_count": len(orders),
+            "debt": round(debt, 2),
+        }
+
+    def _pack_data(self, order_id: str) -> dict:
+        """Карточка упаковки (идея 98): что положить в заказ."""
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        items = self.db.query("SELECT * FROM order_items WHERE order_id=?", (order_id,))
+        return {
+            "order": {
+                "number": order.get("number"), "product": order.get("product"),
+                "customer_name": order.get("customer_name"),
+                "qty": order.get("qty") or 1, "notes": order.get("notes") or "",
+            },
+            "items": [dict(r) for r in items],
+            "brand_card": bool(self.db.setting("brand_card_enabled", True)),
+        }
 
 class Handler(BaseHTTPRequestHandler):
     server_version = f"PrintFlow/{APP_VERSION}"
@@ -2466,6 +2846,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_nom_photo((query.get("id") or [""])[0])
             if path == "/api/order/photo.jpg":
                 return self.serve_order_photo((query.get("photo_id") or [""])[0])
+            if path == "/api/job/keyframe.jpg":
+                job_id = (query.get("id") or query.get("job_id") or [""])[0]
+                return self.serve_keyframe(job_id, (query.get("name") or [""])[0])
+            if path == "/api/order/pack":
+                return self.serve_pack_sheet((query.get("id") or [""])[0])
             if path == "/api/design/stl":
                 return self.serve_design_stl(query)
             if path == "/api/design/preview":
@@ -2574,7 +2959,8 @@ class Handler(BaseHTTPRequestHandler):
         from .design import generate
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
         shape = one("shape", "number_plate")
-        params = {"number": one("number", "1"), "width": num(one("width", "40")),
+        params = {"number": one("number", "1"), "text": one("text", ""),
+                  "width": num(one("width", "40")),
                   "height": num(one("height", "24")), "thickness": num(one("thickness", "2")),
                   "font_h": num(one("font_h", "1.4")), "diameter": num(one("diameter", "30")),
                   "depth": num(one("depth", "40"))}
@@ -2623,6 +3009,68 @@ class Handler(BaseHTTPRequestHandler):
         """Фото карточки номенклатуры."""
         row = self.api.db.one("SELECT photo FROM nomenclature WHERE id=?", (nom_id,))
         return self.serve_photo_file((row or {}).get("photo") or "")
+
+    # ------------------------------------------------ 8.5: вспомогательные
+    def serve_keyframe(self, job_id: str, name: str):
+        """Кейфрейм видео печати (идея 61)."""
+        from .config import PHOTO_DIR
+        d = (PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
+        if not d or not d.is_dir() or "/" in name or "\\" in name or name.startswith("."):
+            return self.send_json(400, {"error": "Недопустимый файл"})
+        f = d / name
+        if not f.is_file():
+            return self.send_json(404, {"error": "Кейфрейм не найден"})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(f.read_bytes())
+
+    def serve_pack_sheet(self, order_id: str):
+        """Печатная карточка упаковки (A4, 1:1)."""
+        data = self._pack_data(order_id)
+        o = data["order"]
+        rows = ""
+        for it in data["items"]:
+            rows += (f"<tr><td>{it.get('name') or o['product']}</td>"
+                     f"<td>{it.get('qty') or ''}</td></tr>")
+        if not rows:
+            rows = f"<tr><td>{o['product']}</td><td>{o['qty']}</td></tr>"
+        brand = ("<li>Бренд-карточка NOZZA (идея 42)</li>"
+                 if data["brand_card"] else "")
+        html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<title>Карточка упаковки — заказ №{o['number']}</title>
+<style>
+  @page {{ size: A4; margin: 8mm; }}
+  body {{ font-family: Arial, sans-serif; color: #131a2b; }}
+  .sheet {{ width: 194mm; margin: 0 auto; }}
+  h1 {{ font-size: 18pt; margin: 0 0 2mm; }}
+  .meta {{ color: #6b7280; font-size: 10pt; margin-bottom: 4mm; }}
+  table {{ border-collapse: collapse; width: 100%; margin-bottom: 5mm; }}
+  td, th {{ border: 1px solid #d1d5db; padding: 2.5mm 3mm; font-size: 11pt; }}
+  th {{ background: #f3f4f6; text-align: left; }}
+  .check {{ list-style: none; padding: 0; margin: 0; }}
+  .check li {{ font-size: 12pt; margin-bottom: 2.5mm; }}
+  .check li:before {{ content: "☐ "; color: #4f46e5; font-weight: bold; }}
+  .foot {{ margin-top: 6mm; font-size: 9pt; color: #6b7280; }}
+  @media print {{ .noprint {{ display: none; }} }}
+</style></head><body><div class="sheet">
+  <button class="noprint" onclick="window.print()"
+    style="font-size:11pt;padding:4px 14px;margin-bottom:4mm;cursor:pointer">⎙ Печать</button>
+  <h1>Карточка упаковки · заказ №{o['number']}</h1>
+  <div class="meta">Клиент: {o['customer_name'] or '—'} · NOZZA · PrintFlow</div>
+  <table><tr><th>Изделие</th><th>Кол-во</th></tr>{rows}</table>
+  <h3 style="font-size:12pt">Что положить</h3>
+  <ul class="check">
+    <li>Изделие (проверено по чек-листу качества)</li>
+    {brand}
+    <li>Бирка с названием и QR (если есть)</li>
+    <li>Упаковка: плёнка/коробка, вложение — бумага, не воздух</li>
+    <li>Если заказ подарок — без ценника</li>
+  </ul>
+  <div class="foot">Сформировано автоматически · {time.strftime('%d.%m.%Y %H:%M')}</div>
+</div></body></html>"""
+        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_order_photo(self, photo_id: str):
         """Фото заказа по id записи order_photos."""

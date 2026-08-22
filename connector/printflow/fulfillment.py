@@ -34,9 +34,13 @@ class OrderFulfillment:
         number = str(order.get("number") or "").strip()
         ref = f" №{number}" if number else ""
         text = f"{greeting} Заказ{ref} передан. Спасибо, что выбрали нас!"
-        if debt > 0:
+        # Подарочный режим (идея 33): цену и долг в сообщение не пишем —
+        # получателю это не адресовано, платит даритель.
+        if debt > 0 and not order.get("gift"):
             amount = str(int(debt)) if float(debt).is_integer() else str(round(debt, 2))
             text += f" Осталось к оплате: {amount} ₽."
+        if order.get("gift"):
+            text += " Внутри — с пожеланиями. Хорошего дня!"
         return text
 
     def summary(self, order_id: str) -> dict[str, Any]:
