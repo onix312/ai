@@ -3241,7 +3241,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, created = save_upload(requested_name, upload[1])
         payload = {
@@ -3293,7 +3293,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, _created = save_upload(requested_name, upload[1])
         estimate = {}
@@ -3348,7 +3348,7 @@ class Handler(BaseHTTPRequestHandler):
             requested_name = _upload_filename(upload[0])
         except ValueError as exc:
             return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode")):
+        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, _created = save_upload(requested_name, upload[1])
         printer_id = fields.get("printer_id", "") or (query.get("printer_id") or [""])[0]

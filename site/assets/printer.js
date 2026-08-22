@@ -796,7 +796,7 @@ async function loadFiles() {
 async function uploadFile(file) {
   const p = active();
   if (!p) return fail(new Error('Сначала добавьте принтер'));
-  if (!/\.(3mf|gcode)$/i.test(file.name)) return fail(new Error('Поддерживаются только 3MF и G-code'));
+  if (!/\.(3mf|gcode(?:\.3mf)?)$/i.test(file.name)) return fail(new Error('Поддерживаются только 3MF и G-code'));
   const form = new FormData();
   form.append('file', file);
   form.append('printer_id', p.id);
@@ -1487,7 +1487,7 @@ function bind() {
   $('job_save').addEventListener('click', async () => {
     const file = $('jf_file').value.trim();
     if (!file && !queueLocalFile) return fail(new Error('Выберите файл с компьютера или укажите имя файла на SD-карте'));
-    if (queueLocalFile && !/\.(3mf|gcode)$/i.test(queueLocalFile.name)) {
+    if (queueLocalFile && !/\.(3mf|gcode(?:\.3mf)?)$/i.test(queueLocalFile.name)) {
       return fail(new Error('Поддерживаются только 3MF и G-code'));
     }
     const values = {
