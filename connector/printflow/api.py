@@ -9,6 +9,7 @@ import hashlib
 import json
 import mimetypes
 import re
+import sqlite3
 import threading
 import time
 import urllib.parse
@@ -21,7 +22,7 @@ from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
 from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
                      ensure_dirs, now_iso)
-from .db import Database
+from .db import Database, friendly_sqlite_error
 from .manager import PrinterManager
 from .repo import Repo
 
@@ -157,6 +158,18 @@ class Api:
         # вместо того чтобы каждая из них опрашивала его по таймеру.
         self.bus = EventBus()
         self.db.bus = self.bus
+        if self.db.recovery:
+            recovery = self.db.recovery
+            self.db.add_event(
+                "database_recovery", "База данных восстановлена",
+                str(recovery.get("message") or "Выполнено аварийное восстановление."),
+                "", recovery)
+            try:
+                from .logging_setup import log
+                log().warning("%s Карантин: %s",
+                              recovery.get("message"), recovery.get("quarantine"))
+            except Exception:
+                pass
         self.repo = Repo(self.db)
         self.acc = Accounting(self.db)
         self.manager = PrinterManager(self.db, self.repo)
@@ -2881,6 +2894,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         except TimeoutError:
             return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
+        except sqlite3.DatabaseError as exc:
+            try:
+                from .logging_setup import log
+                log().exception("Ошибка SQLite при GET %s", path)
+            except Exception:
+                pass
+            return self.send_json(503, {"error": friendly_sqlite_error(exc)})
         except (OSError, ConnectionError) as exc:
             return self.send_json(503, {"error": str(exc)})
         except ValueError as exc:
@@ -3192,6 +3212,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         except TimeoutError:
             return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
+        except sqlite3.DatabaseError as exc:
+            try:
+                from .logging_setup import log
+                log().exception("Ошибка SQLite при POST %s", path)
+            except Exception:
+                pass
+            return self.send_json(503, {"error": friendly_sqlite_error(exc)})
         except (OSError, ConnectionError) as exc:
             return self.send_json(503, {"error": str(exc)})
         except Exception as exc:

@@ -201,6 +201,8 @@ class MonthClose:
             return {"ok": False, "done": True, "error": "Копия уже сделана"}
         from .db import make_backup
         file_copy = make_backup(f"month-close-{key.replace('-', '')}")
+        if not file_copy.get("ok"):
+            return {"ok": False, "error": file_copy.get("error") or "Копия базы не создана"}
         export_name = ""
         try:
             from .repo import Repo

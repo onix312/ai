@@ -121,6 +121,15 @@ class MonthCloseTests(unittest.TestCase):
         self.assertTrue(backup["ok"])
         self.assertTrue(backup["file"])
 
+    def test_failed_backup_does_not_complete_month_step(self):
+        with mock.patch.object(db_module, "make_backup",
+                               return_value={"ok": False, "error": "База повреждена"}):
+            result = self.mc.run(self.key, "backup")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("повреждена", result["error"])
+        self.assertFalse(self.mc.state(self.key)["done"]["backup"])
+
     def test_state_tracks_progress(self):
         state = self.mc.state(self.key)
         self.assertEqual(state["next"], "fixed")

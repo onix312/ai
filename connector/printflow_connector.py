@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 import time
 import webbrowser
@@ -99,7 +100,8 @@ def main() -> int:
     from printflow.logging_setup import log
     # Отложенное восстановление базы: маркер из панели «Настройки → Данные».
     # Выполняется до открытия базы, чтобы не подменять файл под живым соединением.
-    from printflow.db import apply_pending_restore
+    from printflow.db import (DatabaseRecoveryError, apply_pending_restore,
+                              friendly_sqlite_error)
     restore = apply_pending_restore()
     if restore is not None:
         if restore.get("error"):
@@ -111,6 +113,16 @@ def main() -> int:
     log().info("PrintFlow %s стартует: %s:%s (данные: %s)", APP_VERSION, args.host, args.port, DATA_DIR)
     try:
         server = serve(args.host, args.port, flags)
+    except DatabaseRecoveryError as exc:
+        log().error("Безопасное восстановление базы не удалось: %s", exc)
+        print(f"\n  ❌ {exc}")
+        print("  Запустите диагностику: python pf.py doctor")
+        return 1
+    except sqlite3.DatabaseError as exc:
+        message = friendly_sqlite_error(exc)
+        log().exception("Не удалось открыть базу данных")
+        print(f"\n  ❌ {message}")
+        return 1
     except OSError as exc:
         print(f"\n  ❌ Не удалось занять {args.host}:{args.port}: {exc}")
         print("  Возможно, PrintFlow уже запущен. Закройте старое окно или укажите --port.")

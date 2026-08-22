@@ -359,7 +359,8 @@ class UpdateChecker:
                 # Через SQLite API — копия консистентна даже под нагрузкой.
                 self.db.backup_to(target)
             else:
-                shutil.copy2(DB_FILE, target)
+                from .db import backup_database_file
+                backup_database_file(DB_FILE, target)
             keep = self._setting("backup_keep", 20)
             rotate_backups(BACKUP_DIR, keep)
             return target

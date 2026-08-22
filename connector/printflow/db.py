@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 import threading
@@ -771,37 +772,348 @@ CREATE INDEX IF NOT EXISTS idx_wishes_customer ON wishes(customer_id, status);
 """
 
 
+# ------------------------------------------------ целостность и аварийный запуск
+
+class DatabaseRecoveryError(RuntimeError):
+    """Базу нельзя безопасно открыть или восстановить автоматически."""
+
+
+_CORRUPTION_MARKERS = (
+    "database disk image is malformed",
+    "malformed database",
+    "file is not a database",
+    "not a database",
+    "database corruption",
+    "unsupported file format",
+    "file is encrypted",
+)
+
+
+def _is_corruption_message(message: object) -> bool:
+    text = str(message or "").casefold()
+    return any(marker in text for marker in _CORRUPTION_MARKERS)
+
+
+def friendly_sqlite_error(error: object) -> str:
+    """Не показывать пользователю внутренние англоязычные ошибки SQLite."""
+    text = str(error or "").casefold()
+    if _is_corruption_message(text):
+        return ("База данных повреждена. Перезапустите PrintFlow — при запуске "
+                "он проверит базу и восстановит последнюю исправную копию.")
+    if "database is locked" in text or "database table is locked" in text:
+        return "База данных занята другим процессом. Закройте второй экземпляр PrintFlow и повторите."
+    if "readonly" in text or "read-only" in text:
+        return "Нет прав на запись в базу данных. Проверьте доступ к папке данных PrintFlow."
+    if "database or disk is full" in text or "disk full" in text:
+        return "На диске закончилось место. Освободите место и перезапустите PrintFlow."
+    if "unable to open database file" in text:
+        return "Не удалось открыть базу данных. Проверьте права и доступность папки PrintFlow."
+    if "disk i/o error" in text:
+        return "Ошибка чтения или записи диска. Проверьте накопитель и папку данных PrintFlow."
+    return "Ошибка базы данных. Перезапустите PrintFlow и выполните: python pf.py doctor"
+
+
+def database_integrity(path: str | Path, *, ignore_sidecars: bool = False,
+                       thorough: bool = True) -> dict[str, object]:
+    """Проверить SQLite только для чтения и классифицировать результат.
+
+    ``ignore_sidecars`` включает immutable-режим: он нужен, чтобы отличить
+    повреждение основного файла от битого/чужого WAL-журнала. Функция никогда
+    не создаёт отсутствующий файл и не меняет проверяемую базу.
+    """
+    target = Path(path)
+    if not target.is_file():
+        return {"ok": False, "kind": "missing", "error": "файл базы не найден"}
+    try:
+        if target.stat().st_size == 0:
+            return {"ok": False, "kind": "corrupt", "error": "файл базы пуст"}
+    except OSError as exc:
+        return {"ok": False, "kind": "error", "error": str(exc)}
+
+    uri = target.resolve().as_uri() + "?mode=ro"
+    if ignore_sidecars:
+        uri += "&immutable=1"
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=3)
+        conn.execute("PRAGMA query_only=ON")
+        pragma = "PRAGMA integrity_check(20)" if thorough else "PRAGMA quick_check(20)"
+        rows = conn.execute(pragma).fetchall()
+        messages = [str(row[0]) for row in rows if row and str(row[0]).casefold() != "ok"]
+        if not messages:
+            return {"ok": True, "kind": "ok", "error": ""}
+        return {"ok": False, "kind": "corrupt", "error": "; ".join(messages)[:2000]}
+    except sqlite3.Error as exc:
+        return {"ok": False,
+                "kind": "corrupt" if _is_corruption_message(exc) else "error",
+                "error": str(exc)}
+    except OSError as exc:
+        return {"ok": False, "kind": "error", "error": str(exc)}
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _sidecar_paths(path: str | Path) -> list[Path]:
+    target = Path(path)
+    return [Path(str(target) + suffix) for suffix in ("-wal", "-shm", "-journal")]
+
+
+def _clear_sidecars(path: str | Path) -> None:
+    """Удалить журналы старой базы перед установкой другого основного файла."""
+    for sidecar in _sidecar_paths(path):
+        try:
+            sidecar.unlink(missing_ok=True)
+        except OSError as exc:
+            raise DatabaseRecoveryError(
+                f"Не удалось убрать старый журнал базы {sidecar.name}: {exc}") from exc
+
+
+def _temporary_sibling(target: Path, label: str) -> Path:
+    token = f"{os.getpid()}-{threading.get_ident()}-{time.time_ns()}"
+    return target.with_name(f".{target.name}.{label}-{token}.tmp")
+
+
+def _unique_backup_path(target: Path) -> Path:
+    """Не перезаписывать две копии, созданные в одну и ту же секунду."""
+    if not target.exists():
+        return target
+    for index in range(2, 10_000):
+        candidate = target.with_name(f"{target.stem}-{index}{target.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise OSError("не удалось подобрать свободное имя резервной копии")
+
+
+def _backup_connection(source: sqlite3.Connection, target: str | Path) -> Path:
+    """Атомарно сделать и проверить копию открытого SQLite-соединения."""
+    destination = Path(target)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _temporary_sibling(destination, "backup")
+    dest: sqlite3.Connection | None = None
+    try:
+        dest = sqlite3.connect(str(temporary))
+        source.backup(dest)
+        dest.close()
+        dest = None
+        check = database_integrity(temporary, ignore_sidecars=True, thorough=True)
+        if not check["ok"]:
+            raise sqlite3.DatabaseError(
+                "Созданная резервная копия не прошла проверку целостности")
+        os.replace(temporary, destination)
+        return destination
+    finally:
+        if dest is not None:
+            dest.close()
+        temporary.unlink(missing_ok=True)
+        _clear_sidecars(temporary)
+
+
+def backup_database_file(source: str | Path, target: str | Path) -> Path:
+    """Консистентно скопировать закрытую или работающую SQLite-базу."""
+    source_path = Path(source)
+    uri = source_path.resolve().as_uri() + "?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, timeout=5)
+    try:
+        return _backup_connection(conn, target)
+    finally:
+        conn.close()
+
+
+def install_database_copy(source: str | Path, target: str | Path) -> None:
+    """Проверить копию и атомарно установить её без старых WAL/SHM-файлов."""
+    source_path, target_path = Path(source), Path(target)
+    check = database_integrity(source_path, ignore_sidecars=True, thorough=True)
+    if not check["ok"]:
+        detail = friendly_sqlite_error(check.get("error")) if check["kind"] == "corrupt" \
+            else "Копия не читается: проверьте диск и права доступа."
+        raise ValueError(f"Выбранная копия повреждена. {detail}")
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _temporary_sibling(target_path, "restore")
+    try:
+        shutil.copy2(source_path, temporary)
+        copied = database_integrity(temporary, ignore_sidecars=True, thorough=True)
+        if not copied["ok"]:
+            raise ValueError("Не удалось получить целый файл из выбранной копии")
+        # Старый WAL относится к прежнему основному файлу. Если оставить его,
+        # SQLite может воспроизвести чужие страницы поверх исправной копии.
+        _clear_sidecars(target_path)
+        os.replace(temporary, target_path)
+        _clear_sidecars(target_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+        _clear_sidecars(temporary)
+
+
+def preserve_damaged_database(path: str | Path = None,
+                               backup_dir: str | Path = None) -> Path:
+    """Сохранить повреждённую базу и все журналы отдельно, не выдавая их за бэкап."""
+    source = Path(path if path is not None else DB_FILE)
+    root = Path(backup_dir if backup_dir is not None else BACKUP_DIR) / "damaged"
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = root / f"{stamp}-{time.time_ns() % 1_000_000_000:09d}"
+    folder.mkdir(parents=True, exist_ok=False)
+    copied_main: Path | None = None
+    try:
+        for item in [source, *_sidecar_paths(source)]:
+            if not item.is_file():
+                continue
+            copied = folder / item.name
+            shutil.copy2(item, copied)
+            if item == source:
+                copied_main = copied
+        if copied_main is None:
+            raise OSError("основной файл базы не найден")
+        return copied_main
+    except Exception:
+        # Неполную папку оставляем для диагностики, но исходник не трогаем.
+        raise
+
+
+def recover_database_if_needed(path: str | Path = None,
+                               backup_dir: str | Path = None) -> dict | None:
+    """На старте изолировать повреждение и вернуть PrintFlow в рабочее состояние.
+
+    Приоритет восстановления: целый основной файл без сломанного WAL, затем
+    самая свежая исправная резервная копия, затем новая пустая база. Исходные
+    повреждённые файлы всегда предварительно сохраняются в ``backups/damaged``.
+    """
+    target = Path(path if path is not None else DB_FILE)
+    backups = Path(backup_dir if backup_dir is not None else BACKUP_DIR)
+    if not target.is_file():
+        return None
+
+    current = database_integrity(target, thorough=True)
+    if current["ok"]:
+        return None
+    main_only = database_integrity(target, ignore_sidecars=True, thorough=True)
+
+    definite_corruption = current["kind"] == "corrupt" or main_only["kind"] == "corrupt"
+    if not definite_corruption:
+        # Успешная immutable-проверка ещё не доказывает, что WAL повреждён:
+        # обычной проверке мог помешать второй процесс, блокировка или I/O-сбой.
+        # В таком случае ничего не удаляем и не подменяем автоматически.
+        raise DatabaseRecoveryError(
+            "Не удалось безопасно проверить базу данных. "
+            + friendly_sqlite_error(current.get("error") or main_only.get("error")))
+
+    try:
+        quarantined = preserve_damaged_database(target, backups)
+    except Exception as exc:
+        raise DatabaseRecoveryError(
+            "База повреждена, но сохранить её аварийную копию не удалось. "
+            "Исходный файл не изменён. Проверьте свободное место и права на папку данных."
+        ) from exc
+
+    common = {
+        "quarantine": str(quarantined),
+        "detected": str(current.get("error") or "нарушена целостность"),
+    }
+    if main_only["ok"]:
+        _clear_sidecars(target)
+        recheck = database_integrity(target, thorough=True)
+        if recheck["ok"]:
+            return {
+                **common,
+                "action": "wal",
+                "message": ("Повреждённый журнал SQLite изолирован; основной файл базы "
+                            "исправен, данные из него сохранены."),
+            }
+
+    candidates: list[Path] = []
+    if backups.exists():
+        try:
+            candidates = sorted(
+                backups.glob("*.sqlite3"),
+                key=lambda item: (item.stat().st_mtime_ns, item.name), reverse=True)
+        except OSError:
+            candidates = []
+    skipped: list[str] = []
+    for candidate in candidates:
+        check = database_integrity(candidate, ignore_sidecars=True, thorough=True)
+        if not check["ok"]:
+            skipped.append(candidate.name)
+            continue
+        try:
+            install_database_copy(candidate, target)
+        except (OSError, ValueError, DatabaseRecoveryError):
+            skipped.append(candidate.name)
+            continue
+        return {
+            **common,
+            "action": "backup",
+            "backup": candidate.name,
+            "skipped": skipped,
+            "message": f"База автоматически восстановлена из исправной копии {candidate.name}.",
+        }
+
+    # Ни одной исправной копии нет. Приложение всё равно запускается, но старый
+    # файл не уничтожается: его байт-в-байт снимок уже лежит в damaged.
+    try:
+        target.unlink(missing_ok=True)
+        _clear_sidecars(target)
+    except OSError as exc:
+        raise DatabaseRecoveryError(
+            "Повреждённая база сохранена, но подготовить новую базу не удалось. "
+            "Проверьте права на папку данных PrintFlow."
+        ) from exc
+    return {
+        **common,
+        "action": "new",
+        "skipped": skipped,
+        "message": ("Повреждённая база изолирована. Исправных резервных копий нет, "
+                    "поэтому создана новая база; исходные файлы сохранены для восстановления."),
+    }
+
+
 class Database:
     """Потокобезопасная обёртка над SQLite."""
 
-    def __init__(self, path=DB_FILE):
+    def __init__(self, path=None):
         ensure_dirs()
+        path = DB_FILE if path is None else path
         self.path = path
         self.lock = threading.RLock()
         self._local = threading.local()
+        # Автовосстановление разрешено только для основной пользовательской
+        # базы. Временные/тестовые/страховочные файлы никогда не подменяем.
+        self.recovery: dict | None = None
+        if str(path) != ":memory:":
+            try:
+                is_primary = Path(path).resolve() == Path(DB_FILE).resolve()
+            except (OSError, TypeError, ValueError):
+                is_primary = False
+            if is_primary:
+                self.recovery = recover_database_if_needed(path)
         # Шину подключает сервер (api.py). Пока её нет — события просто
         # пишутся в базу, поэтому база остаётся самостоятельной в тестах.
         self.bus = None
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        # SQLite lower() умеет только ASCII — регистронезависимый поиск по
-        # кириллице делаем средствами Python.
-        self.conn.create_function("pylower", 1, lambda v: v.lower() if isinstance(v, str) else v)
-        self.conn.executescript(SCHEMA)
-        from .schema_v3 import SCHEMA_V3
-        self.conn.executescript(SCHEMA_V3)
-        self._migrate()
-        self._seed()
-        self._seed_v3()
-        self._migrate_v3_data()
-        # Реестр моделей 6.0
         try:
-            from .model_registry import ModelRegistry
-            ModelRegistry(self).ensure_schema()
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            # SQLite lower() умеет только ASCII — регистронезависимый поиск по
+            # кириллице делаем средствами Python.
+            self.conn.create_function(
+                "pylower", 1, lambda v: v.lower() if isinstance(v, str) else v)
+            self.conn.executescript(SCHEMA)
+            from .schema_v3 import SCHEMA_V3
+            self.conn.executescript(SCHEMA_V3)
+            self._migrate()
+            self._seed()
+            self._seed_v3()
+            self._migrate_v3_data()
+            # Реестр моделей 6.0
+            try:
+                from .model_registry import ModelRegistry
+                ModelRegistry(self).ensure_schema()
+            except Exception:
+                pass
         except Exception:
-            pass
+            self.conn.close()
+            raise
 
     # ------------------------------------------------------------------ ядро
     def _migrate(self) -> None:
@@ -1258,14 +1570,9 @@ class Database:
         return rows
 
     def backup_to(self, target) -> None:
-        """Консистентная копия базы через SQLite API (безопасна под нагрузкой)."""
-        import sqlite3
+        """Консистентная, проверенная и атомарная копия базы под нагрузкой."""
         with self.lock:
-            dest = sqlite3.connect(str(target))
-            try:
-                self.conn.backup(dest)
-            finally:
-                dest.close()
+            _backup_connection(self.conn, target)
 
     def close(self) -> None:
         with self.lock:
@@ -1295,17 +1602,18 @@ def list_backups() -> list[dict]:
 
 
 def make_backup(prefix: str = "printflow-manual", keep: object | None = None) -> dict:
-    """Консистентная копия базы с единой ротацией всех снимков."""
+    """Консистентная проверенная копия базы с общей ротацией снимков."""
     ensure_dirs()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    target = BACKUP_DIR / f"{prefix}-{stamp}.sqlite3"
+    target = _unique_backup_path(BACKUP_DIR / f"{prefix}-{stamp}.sqlite3")
     if not DB_FILE.exists():
         return {"ok": False, "error": "База ещё не создана"}
-    source = sqlite3.connect(str(DB_FILE))
-    dest = sqlite3.connect(str(target))
+    uri = Path(DB_FILE).resolve().as_uri() + "?mode=ro"
+    source: sqlite3.Connection | None = None
     try:
-        source.backup(dest)
+        source = sqlite3.connect(uri, uri=True, timeout=5)
+        _backup_connection(source, target)
         if keep is None:
             try:
                 row = source.execute(
@@ -1313,9 +1621,12 @@ def make_backup(prefix: str = "printflow-manual", keep: object | None = None) ->
                 keep = json.loads(row[0]) if row else DEFAULT_SETTINGS["backup_keep"]
             except (sqlite3.Error, json.JSONDecodeError, TypeError):
                 keep = DEFAULT_SETTINGS["backup_keep"]
+    except (sqlite3.Error, OSError, DatabaseRecoveryError) as exc:
+        target.unlink(missing_ok=True)
+        return {"ok": False, "error": friendly_sqlite_error(exc)}
     finally:
-        dest.close()
-        source.close()
+        if source is not None:
+            source.close()
     rotate_backups(BACKUP_DIR, keep)
     return {"ok": True, "file": target.name}
 
@@ -1333,18 +1644,29 @@ def request_restore(filename: str) -> dict:
     source = BACKUP_DIR / filename
     if not source.is_file():
         raise ValueError("Копия не найдена")
+    check = database_integrity(source, ignore_sidecars=True, thorough=True)
+    if not check["ok"]:
+        raise ValueError("Выбранная копия повреждена; откат отменён")
+
     safety = ""
     if DB_FILE.exists():
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        safety_file = BACKUP_DIR / f"before-restore-{stamp}.sqlite3"
-        src = sqlite3.connect(str(DB_FILE))
-        dest = sqlite3.connect(str(safety_file))
+        safety_file = _unique_backup_path(
+            BACKUP_DIR / f"before-restore-{stamp}.sqlite3")
         try:
-            src.backup(dest)
-        finally:
-            dest.close()
-            src.close()
-        safety = safety_file.name
+            backup_database_file(DB_FILE, safety_file)
+            safety = safety_file.name
+        except (sqlite3.Error, OSError, DatabaseRecoveryError):
+            # Даже повреждённую текущую базу нельзя молча потерять. Сохраняем
+            # её байт-в-байт вместе с WAL/SHM в отдельный карантин.
+            try:
+                quarantined = preserve_damaged_database(DB_FILE, BACKUP_DIR)
+            except Exception as exc:
+                raise DatabaseRecoveryError(
+                    "Текущая база не читается, а сохранить её аварийную копию не удалось. "
+                    "Откат отменён; исходный файл не изменён."
+                ) from exc
+            safety = str(quarantined)
     RESTORE_REQUEST.write_text(
         json.dumps({"file": filename, "at": now_iso()}, ensure_ascii=False),
         encoding="utf-8")
@@ -1363,30 +1685,36 @@ def pending_restore() -> dict | None:
 
 
 def apply_pending_restore() -> dict | None:
-    """Выполнить отложенное восстановление базы из копии.
+    """Выполнить отложенное восстановление базы из проверенной копии.
 
     Вызывается при старте, до открытия `Database`. Возвращает итог или None,
     если восстанавливать нечего. Маркер удаляется в любом случае.
     """
+    marker_exists = RESTORE_REQUEST.exists()
     request = pending_restore()
-    if request is None:
+    if request is None and not marker_exists:
         return None
-    filename = str(request.get("file") or "")
     result: dict = {"restored": ""}
-    if filename == Path(filename).name and filename.endswith(".sqlite3"):
-        source = BACKUP_DIR / filename
-        if source.is_file():
-            try:
-                shutil.copyfile(source, DB_FILE)
-                result["restored"] = filename
-            except OSError as exc:
-                result["error"] = str(exc)
-        else:
-            result["error"] = f"копия {filename} не найдена"
-    else:
-        result["error"] = "недопустимое имя копии в маркере"
     try:
-        RESTORE_REQUEST.unlink()
-    except OSError:
-        pass
-    return result
+        if request is None:
+            result["error"] = "маркер восстановления повреждён"
+            return result
+        filename = str(request.get("file") or "")
+        if filename != Path(filename).name or not filename.endswith(".sqlite3"):
+            result["error"] = "недопустимое имя копии в маркере"
+            return result
+        source = BACKUP_DIR / filename
+        if not source.is_file():
+            result["error"] = f"копия {filename} не найдена"
+            return result
+        try:
+            install_database_copy(source, DB_FILE)
+            result["restored"] = filename
+        except (OSError, ValueError, DatabaseRecoveryError) as exc:
+            result["error"] = str(exc)
+        return result
+    finally:
+        try:
+            RESTORE_REQUEST.unlink()
+        except OSError:
+            pass
