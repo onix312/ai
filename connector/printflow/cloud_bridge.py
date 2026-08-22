@@ -65,9 +65,10 @@ class CloudBridge:
         states = [b.state() for b in bridges]
         return {
             "bridges": len(states),
-            "connected": any(s["connected"] for s in states),
-            "attached": sum(s["attached"] for s in states),
-            "errors": [s["error"] for s in states if s["error"]],
+            "connected": any(s.get("connected") for s in states),
+            "attached": sum(s.get("attached") or 0 for s in states),
+            # state() кладёт текст ошибки в last_error, а не в error.
+            "errors": [s["last_error"] for s in states if s.get("last_error")],
         }
 
     def __init__(self, region: str, uid: str, token: str):
