@@ -750,18 +750,22 @@ async function loadFiles() {
   const host = $('pr_files');
   if (!p) return;
   if (p.connection.mode === 'cloud' && !p.connection.host) {
-    // Облачный принтер без локального IP: SD-карта недоступна по FTPS,
-    // показываем облачную историю (что принтер печатал).
+    // Облачный принтер без локального IP: сервер сам попробует найти IP
+    // (SSDP) и Access Code (облачный список устройств) — тогда SD-карта
+    // станет видимой по FTPS. Если не вышло — показываем облачную историю.
     host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
     try {
+      const sd = await get('/api/printer/files', { printer_id: p.id });
+      if (!sd.error) { renderFileList(sd); return; }
       const data = await get('/api/printer/cloud-files', { printer_id: p.id });
       const tasks = data.tasks || [];
-      host.innerHTML = tasks.length ? tasks.map((t) => `<div class="file-row">`
+      const hint = `<div class="notice"><span>ℹ</span><span>${esc(sd.error)}</span></div>`;
+      host.innerHTML = hint + (tasks.length ? tasks.map((t) => `<div class="file-row">`
         + '<span class="fic">☁</span>'
         + `<span class="fname" title="${esc(t.title || '')}">${esc(t.title || 'Без названия')}</span>`
         + `<span class="fsize">${esc((t.mode || 'cloud') === 'lan_file' ? 'SD' : 'облако')}</span>`
         + '<span class="acts"></span></div>').join('')
-        : '<div class="empty compact"><span>В облачной истории пока пусто. Загрузите 3MF перетаскиванием — он уйдёт в облако Bambu.</span></div>';
+        : '<div class="empty compact"><span>В облачной истории пока пусто. Загрузите 3MF перетаскиванием — он уйдёт в облако Bambu.</span></div>');
     } catch (e) {
       host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
     }
@@ -775,22 +779,30 @@ async function loadFiles() {
   host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
   try {
     const data = await get('/api/printer/files', { printer_id: p.id });
-    // Показываем только печатные файлы: папки и прочие объекты в списке
-    // пропускаем, иначе «Печать» предлагается для директорий файловой системы.
-    filesCache = (data.files || []).filter((f) =>
-      !f.dir && /\\.(3mf|gcode(?:\\.3mf)?)$/i.test(String(f.name || '')));
-    host.innerHTML = filesCache.length ? filesCache.map((f) => `<div class="file-row">`
-      + `<span class="fic">${fileIcon(f.name)}</span>`
-      + `<span class="fname" title="${esc(f.path || f.name)}">${esc(f.name)}</span>`
-      + `<span class="fsize">${esc(sizeText(f.size))}</span>`
-      + '<span class="acts">'
-      + `<button class="btn sm primary" type="button" data-print-file="${esc(f.path || f.name)}">Печать</button>`
-      + `<button class="icon-btn sm danger" type="button" data-del-file="${esc(f.path || f.name)}">×</button>`
-      + '</span></div>').join('')
-      : '<div class="empty compact"><span>На SD-карте нет 3MF и G-code файлов.</span></div>';
+    if (data.error) { host.innerHTML = `<div class="notice"><span>ℹ</span><span>${esc(data.error)}</span></div>`; return; }
+    renderFileList(data);
   } catch (e) {
     host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`;
   }
+}
+
+function renderFileList(data) {
+  const host = $('pr_files');
+  // Показываем только печатные файлы: папки и прочие объекты в списке
+  // пропускаем, иначе «Печать» предлагается для директорий файловой системы.
+  // Регэксп без двойного экранирования: раньше /\\./ требовал буквальный
+  // обратный слеш в имени и прятал все файлы — SD-карта выглядела пустой.
+  filesCache = (data.files || []).filter((f) =>
+    !f.dir && /\.(3mf|gcode(?:\.3mf)?)$/i.test(String(f.name || '')));
+  host.innerHTML = filesCache.length ? filesCache.map((f) => `<div class="file-row">`
+    + `<span class="fic">${fileIcon(f.name)}</span>`
+    + `<span class="fname" title="${esc(f.path || f.name)}">${esc(f.name)}</span>`
+    + `<span class="fsize">${esc(sizeText(f.size))}</span>`
+    + '<span class="acts">'
+    + `<button class="btn sm primary" type="button" data-print-file="${esc(f.path || f.name)}">Печать</button>`
+    + `<button class="icon-btn sm danger" type="button" data-del-file="${esc(f.path || f.name)}">×</button>`
+    + '</span></div>').join('')
+    : '<div class="empty compact"><span>На SD-карте нет 3MF и G-code файлов.</span></div>';
 }
 
 async function uploadFile(file) {

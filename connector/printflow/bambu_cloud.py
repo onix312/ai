@@ -130,6 +130,10 @@ def _http_error_text(code: int, body: str) -> str:
             return "Bambu Cloud: вход через сайт требует cookie. Войдите логином и паролем."
         return f"Bambu Cloud отклонил запрос (403). {snippet or 'Проверьте аккаунт и регион.'}"
     if code == 400:
+        if "zip security" in body.lower():
+            return ("Bambu Cloud отклонил архив (Invalid zip security): облако "
+                    "проверяет структуру 3MF. Пересохраните файл в свежей Bambu "
+                    "Studio или отправьте по локальной сети (IP + Access Code).")
         return f"Bambu Cloud: неверный запрос (400). {snippet or ''}".rstrip()
     if code == 429:
         return "Bambu Cloud: слишком много запросов (429). Подождите и повторите."
@@ -265,6 +269,62 @@ def md5_hex_upper(data: bytes) -> str:
     return hashlib.md5(data).hexdigest().upper()  # noqa: S324 — протокол Bambu
 
 
+# Записи, из-за которых облако отвечает «Invalid zip security»: служебный
+# мусор macOS/Windows и любые пути, выходящие за пределы архива.
+_ZIP_JUNK = ("__macosx/", ".ds_store", "thumbs.db", "desktop.ini")
+
+
+def is_3mf_zip(data: bytes) -> bool:
+    """3MF — это ZIP: без сигнатуры PK облако файл не примет."""
+    import io
+    import zipfile
+    try:
+        return zipfile.is_zipfile(io.BytesIO(data))
+    except Exception:
+        return False
+
+
+def zip_issues(data: bytes) -> list[str]:
+    """Проблемные записи 3MF, на которые Bambu Cloud отвечает
+    «Invalid zip security»: мусор ОС, абсолютные пути, выход из архива."""
+    import io
+    import zipfile
+    issues: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                low = name.lower()
+                if (low.startswith(_ZIP_JUNK[0]) or any(low.endswith(j) for j in _ZIP_JUNK[1:])
+                        or name.startswith(("/", "\\")) or ".." in name.split("/")):
+                    issues.append(name)
+    except Exception:
+        return []
+    return issues
+
+
+def sanitize_3mf(data: bytes) -> bytes:
+    """Пересобрать 3MF без записей, которые облако считает небезопасными.
+
+    Содержимое печатных файлов не трогаем — только выбрасываем служебный
+    мусор ОС и записи с опасными путями, из-за которых Bambu Cloud
+    отвечает «Invalid zip security».
+    """
+    import io
+    import zipfile
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            name = info.filename
+            low = name.lower()
+            if (low.startswith(_ZIP_JUNK[0]) or any(low.endswith(j) for j in _ZIP_JUNK[1:])
+                    or name.startswith(("/", "\\")) or ".." in name.split("/")):
+                continue
+            dst.writestr(info, src.read(info))
+    src.close()
+    return out.getvalue()
+
+
 def _s3_put(url: str, data: bytes, timeout: float = 300) -> None:
     """PUT в presigned S3 URL Bambu. Без Content-Type: подпись SigV2
     посчитана для пустого Content-Type, лишний заголовок ломает её."""
@@ -333,13 +393,46 @@ def upload_project(path: str | Path, token: str, uid: str, region: str = "global
 
     Возвращает манифест {project_id, model_id, profile_id, url, md5} —
     его передают в create_task() для запуска печати.
+
+    Перед отправкой архив проверяется: облако отвечает «Invalid zip
+    security» на 3MF с мусором ОС (__MACOSX, .DS_Store) или опасными
+    путями — такие записи вычищаются заранее. Если облако всё равно
+    ответило этой ошибкой, делаем одну повторную попытку с пересобранным
+    архивом.
     """
     local = Path(path)
     if not local.exists():
         raise CloudError(f"Файл не найден: {local.name}")
     data = local.read_bytes()
-    base = api_host(region)
     name = local.name
+    if name.lower().endswith(".3mf"):
+        if not is_3mf_zip(data):
+            raise CloudError(f"Файл {name} повреждён: это не ZIP-архив (3MF). "
+                             "Пересохраните проект в Bambu Studio.")
+        bad = zip_issues(data)
+        if bad:
+            data = sanitize_3mf(data)  # вычищаем до первой попытки
+    try:
+        return _upload_project_once(data, name, token, uid, region, progress)
+    except CloudError as exc:
+        # Одна повторная попытка с пересобранным архивом: облако иногда
+        # 400-ит «Invalid zip security» и на формально чистом ZIP.
+        if "zip security" not in str(exc).lower() or not name.lower().endswith(".3mf"):
+            raise
+        try:
+            cleaned = sanitize_3mf(data)
+        except Exception:
+            raise exc from None
+        if cleaned == data:
+            raise
+        return _upload_project_once(cleaned, name, token, uid, region, progress)
+
+
+def _upload_project_once(data: bytes, name: str, token: str, uid: str,
+                         region: str = "global",
+                         progress: Callable[[int, int], None] | None = None) -> dict:
+    """Один проход облачной заливки: project → PUT → notification → PATCH."""
+    base = api_host(region)
 
     def report(pct: int) -> None:
         if progress:
@@ -373,8 +466,14 @@ def upload_project(path: str | Path, token: str, uid: str, region: str = "global
             "GET", f"{base}/v1/iot-service/api/user/notification"
                    f"?action=upload&ticket={urllib.parse.quote(ticket)}",
             token=token, uid=uid, timeout=30, content_type=False)
-        if str(status.get("message") or "") == "success":
+        message = str(status.get("message") or "")
+        if message == "success":
             break
+        # «failed» / «Invalid zip security» — обработка не пройдёт, ждать
+        # оставшиеся циклы бессмысленно: отдаём реальный ответ сервера.
+        if message and message not in ("running", "processing", "pending", "waiting"):
+            raise CloudError(_http_error_text(400, json.dumps(
+                {"message": message, "error": str(status.get("error") or "")})))
         time.sleep(0.5)
     else:
         raise CloudError("Bambu Cloud не подтвердил загрузку файла (таймаут)")

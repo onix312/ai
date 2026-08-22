@@ -186,7 +186,22 @@ class CloudUploadTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.path = pathlib.Path(self._tmp.name) / "model.3mf"
-        self.path.write_bytes(b"3MF-PRINTFLOW-TEST")
+        # 3MF — это ZIP: пишем настоящий архив, иначе предпроверка
+        # «Invalid zip security» честно отбросит файл до сети.
+        self.path.write_bytes(self._make_3mf())
+        self.data = self.path.read_bytes()
+
+    @staticmethod
+    def _make_3mf(extra: dict[str, bytes] | None = None) -> bytes:
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("3D/3dmodel.model", b"<model/>")
+            zf.writestr("Metadata/plate_1.gcode", b";TIME:100\n")
+            for name, payload in (extra or {}).items():
+                zf.writestr(name, payload)
+        return buf.getvalue()
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -215,7 +230,7 @@ class CloudUploadTests(unittest.TestCase):
              mock.patch.object(bambu_cloud, "_s3_put", return_value=None) as s3:
             manifest = bambu_cloud.upload_project(self.path, "tok", "1", "global")
         self.assertEqual(manifest["project_id"], "P1")
-        self.assertEqual(manifest["md5"], bambu_cloud.md5_hex_upper(b"3MF-PRINTFLOW-TEST"))
+        self.assertEqual(manifest["md5"], bambu_cloud.md5_hex_upper(self.data))
         self.assertEqual(s3.call_count, 2)  # конфиг + основной файл
         self.assertEqual(seq[0], ("POST", "/v1/iot-service/api/user/project"))
         self.assertIn(("PATCH", "/v1/iot-service/api/user/project/P1"), seq)
@@ -226,6 +241,90 @@ class CloudUploadTests(unittest.TestCase):
         with self.assertRaises(bambu_cloud.CloudError):
             bambu_cloud.upload_project(pathlib.Path(self._tmp.name) / "нет.3mf",
                                        "tok", "1")
+
+    def test_upload_rejects_broken_zip(self):
+        """Не-ZIP с расширением .3mf отбрасывается до сети — облако всё
+        равно ответит «Invalid zip security», а так ошибка понятна сразу."""
+        broken = pathlib.Path(self._tmp.name) / "битый.3mf"
+        broken.write_bytes(b"NOT-A-ZIP")
+        with self.assertRaises(bambu_cloud.CloudError) as ctx:
+            bambu_cloud.upload_project(broken, "tok", "1")
+        self.assertIn("не ZIP", str(ctx.exception))
+
+    def test_zip_issues_and_sanitize(self):
+        """Мусор macOS и опасные пути находятся и вычищаются, печатные
+        файлы остаются нетронутыми."""
+        import io
+        import zipfile
+        dirty = self._make_3mf({
+            "__MACOSX/._3dmodel.model": b"junk",
+            "Metadata/.DS_Store": b"junk",
+            "../escape.txt": b"junk",
+        })
+        issues = bambu_cloud.zip_issues(dirty)
+        self.assertEqual(len(issues), 3)
+        clean = bambu_cloud.sanitize_3mf(dirty)
+        self.assertEqual(bambu_cloud.zip_issues(clean), [])
+        with zipfile.ZipFile(io.BytesIO(clean)) as zf:
+            names = zf.namelist()
+            self.assertIn("3D/3dmodel.model", names)
+            self.assertIn("Metadata/plate_1.gcode", names)
+            self.assertEqual(zf.read("Metadata/plate_1.gcode"), b";TIME:100\n")
+
+    def test_upload_sanitizes_dirty_3mf(self):
+        """3MF с __MACOSX уходит в облако уже вычищенным: md5 манифеста —
+        от пересобранного архива, а не от исходника."""
+        dirty_path = pathlib.Path(self._tmp.name) / "с-мусором.3mf"
+        dirty = self._make_3mf({"__MACOSX/._x": b"junk"})
+        dirty_path.write_bytes(dirty)
+        uploaded: list[bytes] = []
+
+        def fake_request(method, url, **kwargs):
+            if method == "POST" and url.endswith("/user/project"):
+                return {"project_id": "P1", "model_id": "M1", "profile_id": "PR1",
+                        "upload_url": "https://s3/up", "upload_ticket": "T"}
+            if "/user/notification" in url:
+                return {"message": "success"}
+            if method == "GET" and "/user/upload" in url:
+                return {"urls": [{"url": "https://s3/main"}]}
+            return {}
+
+        with mock.patch.object(bambu_cloud, "request", side_effect=fake_request), \
+             mock.patch.object(bambu_cloud, "_s3_put",
+                               side_effect=lambda url, data, **k: uploaded.append(data)):
+            manifest = bambu_cloud.upload_project(dirty_path, "tok", "1", "global")
+        self.assertTrue(uploaded)
+        self.assertNotEqual(uploaded[-1], dirty)  # мусор вычищен
+        self.assertEqual(bambu_cloud.zip_issues(uploaded[-1]), [])
+        self.assertEqual(manifest["md5"], bambu_cloud.md5_hex_upper(uploaded[-1]))
+
+    def test_upload_fails_fast_on_failed_notification(self):
+        """Ответ «failed» при поллинге не крутится до таймаута 10 секунд,
+        а сразу превращается в понятную ошибку."""
+        def fake_request(method, url, **kwargs):
+            if method == "POST" and url.endswith("/user/project"):
+                return {"project_id": "P1", "model_id": "M1", "profile_id": "PR1",
+                        "upload_url": "https://s3/up", "upload_ticket": "T"}
+            if method == "GET" and "/user/notification" in url:
+                return {"message": "failed", "error": "Invalid zip security"}
+            if method == "PUT" and url.endswith("/user/notification"):
+                return {"ok": True}
+            return {}
+
+        # чистый архив: авторетрай sanitize не изменит байты и не повторит попытку
+        with mock.patch.object(bambu_cloud, "request", side_effect=fake_request), \
+             mock.patch.object(bambu_cloud, "_s3_put", return_value=None), \
+             mock.patch.object(bambu_cloud.time, "sleep", return_value=None):
+            with self.assertRaises(bambu_cloud.CloudError) as ctx:
+                bambu_cloud.upload_project(self.path, "tok", "1", "global")
+        self.assertIn("zip security", str(ctx.exception).lower())
+
+    def test_error_text_zip_security(self):
+        text = bambu_cloud._http_error_text(
+            400, '{"code":2,"error":"Please check specified resource exist or not.",'
+                 '"message":"Invalid zip security"}')
+        self.assertIn("Invalid zip security", text)
+        self.assertIn("локальной сети", text)
 
     def test_create_task_dispatch(self):
         payload = {"id": 987654}

@@ -1009,8 +1009,12 @@ class PrinterManager:
         except bambu_cloud.CloudError as exc:
             lan_ok = bool(printer.record.get("host") and printer.record.get("access_code"))
             if not lan_ok:
+                lan_ok = self._try_fill_lan_access(printer)
+            if not lan_ok:
                 raise ConnectionError(
-                    f"{exc}. Локальная сеть не настроена — принтер не сможет принять файл.") from None
+                    f"{exc}. Локальная сеть не настроена — принтер не сможет принять файл. "
+                    "Укажите IP (экран принтера → Настройки → WLAN) и Access Code "
+                    "в карточке принтера.") from None
             # Фолбэк 1: FTPS на SD + диспетчеризация через /my/task (lan_file).
             self.db.add_event("cloud", "Облачная заливка не удалась — пробуем по локальной сети",
                               str(exc), printer.id, {"file": name})
@@ -1041,6 +1045,58 @@ class PrinterManager:
                 raise ConnectionError(
                     f"Облачная печать не удалась: {exc}. По локальной сети: {exc2}."
                     f" Можно экспортировать файл как .gcode и повторить.") from None
+
+    def _try_fill_lan_access(self, printer: BambuPrinter) -> bool:
+        """Дозаполнить IP/Access Code облачного принтера для LAN-фолбэков.
+
+        IP берём из облачного списка устройств или SSDP-скана, Access Code —
+        из облака. Найденное сохраняем в таблицу printers, чтобы камера и
+        FTPS работали и дальше. True — если в записи есть и IP, и код.
+        """
+        record = printer.record
+        serial = str(record.get("serial") or "")
+        if not serial:
+            return False
+        host = str(record.get("host") or "")
+        code = str(record.get("access_code") or "")
+        updates: dict = {}
+        creds = self._cloud_creds()
+        if not code and creds["token"] and creds["uid"]:
+            from . import bambu_cloud
+            try:
+                for device in bambu_cloud.get_devices(
+                        creds["token"], creds["region"], include_access_code=True):
+                    if str(device.get("serial")) == serial:
+                        if device.get("access_code"):
+                            code = str(device["access_code"])
+                            updates["access_code"] = code
+                        if not host and device.get("host"):
+                            host = str(device["host"])
+                            updates["host"] = host
+                        break
+            except bambu_cloud.CloudError:
+                pass
+        if not host:
+            try:
+                for found in BambuPrinter.discover(timeout=2.0):
+                    if str(found.get("serial") or "") == serial and found.get("host"):
+                        host = str(found["host"])
+                        updates["host"] = host
+                        break
+            except Exception:
+                pass
+        if updates:
+            printer.record.update(updates)
+            try:
+                if self.repo is not None:
+                    self.repo.save_printer({"id": printer.id, **updates})
+            except Exception:
+                pass
+            self.db.add_event("cloud", "Найден локальный доступ к принтеру",
+                              f"IP {host or '—'}, Access Code "
+                              f"{'заполнен' if code else 'не найден'}",
+                              printer.id, {})
+        return bool(host and code)
 
     def sync_cloud_history(self, printer_id: str) -> dict:
         """Дополнить журнал печатями из облачной истории Bambu.
