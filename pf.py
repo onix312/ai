@@ -631,7 +631,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             if counts:
                 say("      " + ", ".join(f"{k}: {v}" for k, v in counts.items()), Style.DIM)
         except Exception as exc:
-            fail(f"База не читается: {exc}")
+            try:
+                from connector.printflow.db import friendly_sqlite_error
+                message = friendly_sqlite_error(exc)
+            except Exception:
+                message = "База не читается"
+            fail(message)
+            say("      Перезапустите PrintFlow для автоматического восстановления")
             problems += 1
     else:
         warn("Базы ещё нет — создастся при первом запуске")
@@ -764,19 +770,23 @@ def cmd_backup(args: argparse.Namespace) -> int:
     if not DB_FILE.exists():
         warn("Базы ещё нет — копировать нечего")
         return 1
-    import sqlite3
+    from connector.printflow.db import backup_database_file, friendly_sqlite_error
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = BACKUP_DIR / f"printflow-{stamp}.sqlite3"
-    source = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
-    destination = sqlite3.connect(str(target))
+    index = 2
+    while target.exists():
+        target = BACKUP_DIR / f"printflow-{stamp}-{index}.sqlite3"
+        index += 1
     try:
-        source.backup(destination)  # консистентно даже при работающем сервере
-    finally:
-        destination.close()
-        source.close()
-    ok(f"Копия готова: {target}")
+        backup_database_file(DB_FILE, target)
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        fail(f"Копия не создана. {friendly_sqlite_error(exc)}")
+        say("    Перезапустите PrintFlow: он попробует восстановить исправную базу.")
+        return 1
+    ok(f"Копия готова и проверена: {target}")
     say(f"    Размер: {target.stat().st_size / 1048576:.1f} МБ")
 
     keep = configured_backup_keep()
@@ -819,17 +829,46 @@ def cmd_restore(args: argparse.Namespace) -> int:
             return 1
         chosen = backups[index]
 
-    if DB_FILE.exists():
-        safety = BACKUP_DIR / f"before-restore-{time.strftime('%Y%m%d-%H%M%S')}.sqlite3"
-        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(DB_FILE, safety)
-        step(f"Текущая база сохранена: {safety.name}")
+    from connector.printflow.db import (backup_database_file, database_integrity,
+                                        install_database_copy,
+                                        preserve_damaged_database)
+
+    chosen_check = database_integrity(chosen, ignore_sidecars=True, thorough=True)
+    if not chosen_check["ok"]:
+        fail("Выбранная копия повреждена или не читается — база не изменена")
+        return 1
     if not ask(f"Заменить базу файлом {chosen.name}?", default=False):
         say("  Отменено.")
         return 1
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(chosen, DB_FILE)
-    ok("База восстановлена. Запускайте: python pf.py")
+
+    if DB_FILE.exists():
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        safety = BACKUP_DIR / f"before-restore-{stamp}.sqlite3"
+        index = 2
+        while safety.exists():
+            safety = BACKUP_DIR / f"before-restore-{stamp}-{index}.sqlite3"
+            index += 1
+        try:
+            backup_database_file(DB_FILE, safety)
+            step(f"Текущая база сохранена и проверена: {safety.name}")
+        except Exception:
+            # Повреждённый файл нельзя класть рядом с исправными копиями: иначе
+            # следующий откат снова выберет его как самый свежий.
+            try:
+                quarantined = preserve_damaged_database(DB_FILE, BACKUP_DIR)
+                step(f"Повреждённая текущая база изолирована: {quarantined.parent}")
+            except Exception:
+                fail("Не удалось сохранить текущую базу — восстановление отменено")
+                return 1
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        install_database_copy(chosen, DB_FILE)
+    except Exception as exc:
+        fail(f"Не удалось установить копию: {exc}")
+        return 1
+    ok("База восстановлена и проверена. Старые WAL/SHM-журналы удалены.")
+    say("    Запускайте: python pf.py")
     say()
     return 0
 
