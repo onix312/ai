@@ -26,7 +26,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 from connector.printflow.api import Handler  # noqa: E402
 
 PAGES = ["/", "/index.html", "/order.html", "/shelf.html", "/spool.html",
-         "/design.html", "/track.html", "/labels.html", "/m.html",
+         "/design.html", "/track.html", "/labels.html", "/price-tags.html", "/m.html",
          "/manifest.webmanifest", "/sw.js"]
 
 # Файлы, чей id-набор не обязан быть уникальным глобально (вставки/демо).

@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import html
 import struct
 import zlib
 
@@ -85,30 +86,36 @@ def modules(text: str) -> list[int]:
 
 
 def svg(text: str, width_mm: float = 30.0, height_mm: float = 12.0) -> str:
-    """SVG-штрихкод с зоной тишины (~8 модулей) — прямо в лист ценников."""
+    """SVG-штрихкод с настоящей тихой зоной с обеих сторон.
+
+    ``width_mm`` — ширина самих модулей; итоговый SVG чуть шире из-за тихих
+    зон. Текст экранируется: артикул остаётся данными, а не HTML-разметкой.
+    """
     mods = modules(text)
     unit = width_mm / len(mods)  # один модуль в мм
+    quiet = 10
     rects = []
     i = 0
-    x = 0
     while i < len(mods):
         if mods[i]:
             j = i
             while j < len(mods) and mods[j]:
                 j += 1
-            rects.append(f'<rect x="{x * unit:.3f}" y="0" '
+            rects.append(f'<rect x="{(i + quiet) * unit:.3f}" y="0" '
                          f'width="{(j - i) * unit:.3f}" height="{height_mm}"/>')
             i = j
-            x = j
         else:
             i += 1
-    svg_w = (len(mods) + 16) * unit
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" '
+    svg_w = (len(mods) + quiet * 2) * unit
+    safe_text = html.escape(str(text), quote=True)
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" role="img" '
+            f'aria-label="Code 128 {safe_text}" '
             f'viewBox="0 0 {svg_w:.2f} {height_mm + 6:.2f}" '
             f'width="{svg_w:.2f}mm" height="{height_mm + 6:.2f}mm">'
+            f'<rect width="100%" height="100%" fill="#fff"/>'
             f'<g fill="#111">{"".join(rects)}</g>'
             f'<text x="{svg_w / 2:.2f}" y="{height_mm + 5:.2f}" text-anchor="middle" '
-            f'font-size="4" font-family="monospace">{text}</text></svg>')
+            f'font-size="4" font-family="monospace">{safe_text}</text></svg>')
 
 
 def png_bytes(text: str, scale: int = 4, quiet: int = 8) -> bytes:

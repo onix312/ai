@@ -629,7 +629,7 @@
   <div><span class="eyebrow">Магазин · полка NOZZA</span><h1>Стеллаж</h1><p>Готовая продукция: остатки, продажи и план пополнения.</p></div>
   <div class="head-actions">
    <a class="btn" href="/order.html" target="_blank" rel="noopener">🛍 Витрина</a>
-   <a class="btn" href="/labels.html?kind=shelf" target="_blank" rel="noopener">▣ Все ценники</a>
+   <a class="btn" href="/price-tags.html" target="_blank" rel="noopener">▦ Конструктор ценников</a>
    <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
@@ -4262,19 +4262,46 @@
  <div class="modal-head"><div><h3 id="shelf_modal_title">Позиция стеллажа</h3><p>Штуки на полке, цена ценника и себестоимость</p></div>
   <button class="icon-btn" type="button" data-close="shelf_modal">✕</button></div>
  <div class="modal-body">
-  <div class="frm-grid">
-   <label>Название<input id="shf_name" placeholder="Адресник для кота"></label>
-   <label>Позиция каталога
-    <select id="shf_catalog_id"><option value="">Без привязки</option></select></label>
-   <label>Цена ценника, ₽<input id="shf_price" type="number" min="0" step="10" placeholder="450"></label>
-   <label>Себестоимость штуки, ₽<input id="shf_cost" type="number" min="0" step="1" placeholder="60"></label>
-   <label>Начальный остаток, шт<input id="shf_qty" type="number" min="0" step="1" placeholder="10"></label>
-   <label>Мин. остаток для предупреждения, шт<input id="shf_min" type="number" min="0" step="1" placeholder="3"></label>
-  </div>
-  <label style="margin-top:10px">Заметка<input id="shf_note"></label>
-  <div class="shelf-photo-row" style="margin-top:12px">
+  <input id="shf_nom_id" type="hidden">
+  <section class="form-section">
+   <h3>Товар и остаток</h3>
+   <div class="form-grid">
+    <label>Название<input id="shf_name" placeholder="Адресник для кота"></label>
+    <label>Позиция каталога
+     <select id="shf_catalog_id"><option value="">Без привязки</option></select></label>
+    <label>Цена ценника, ₽<input id="shf_price" type="number" min="0" step="10" placeholder="450"></label>
+    <label>Себестоимость штуки, ₽<input id="shf_cost" type="number" min="0" step="1" placeholder="60"></label>
+    <label>Начальный остаток, шт<input id="shf_qty" type="number" min="0" step="1" placeholder="10"></label>
+    <label>Мин. остаток для предупреждения, шт<input id="shf_min" type="number" min="0" step="1" placeholder="3"></label>
+   </div>
+   <label style="margin-top:10px">Внутренняя заметка<input id="shf_note"></label>
+  </section>
+  <section class="form-section">
+   <h3>Ценник</h3>
+   <div class="form-grid">
+    <label>Тип ценника<select id="shf_tag_template">
+     <option value="classic">Классический · 62 × 38</option>
+     <option value="compact">Компактный · 43 × 25</option>
+     <option value="promo">Промо · 90 × 60</option>
+     <option value="minimal">Минимал · 62 × 38</option>
+    </select></label>
+    <label>Акцентный цвет<input id="shf_tag_color" type="color" value="#4f46e5"></label>
+    <label>Плашка<input id="shf_tag_badge" maxlength="40" placeholder="Хит / Новинка / −20%"></label>
+    <label>Короткое описание<input id="shf_tag_note" maxlength="180" placeholder="Цвет на выбор · сделано в Крыму"></label>
+   </div>
+  </section>
+  <section class="form-section">
+   <h3>Касса и 1С</h3>
+   <div class="form-grid">
+    <label>Штрихкод из 1С<input id="shf_barcode" maxlength="80" inputmode="numeric" placeholder="4601234567890"></label>
+    <label>Артикул из 1С<input id="shf_sku" maxlength="80" placeholder="NOZZA-001"></label>
+   </div>
+   <div class="notice" style="margin-top:10px"><span>▥</span><span>Код должен в точности совпадать со штрихкодом номенклатуры в 1С. Он попадёт в Code 128 на ценнике — касса распознает товар обычным сканером. Деньги остаются в 1С, PrintFlow может принимать только списание остатка.</span></div>
+  </section>
+  <div class="shelf-photo-row">
    <img id="shf_photo_preview" alt="" hidden style="width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line)">
    <button class="btn sm" id="shf_photo_btn" type="button">📷 Добавить фото</button>
+   <button class="btn sm ghost" id="shf_tag_open" type="button" hidden>▦ Открыть ценник</button>
    <input type="file" id="shf_photo_file" accept="image/*" hidden>
   </div>
  </div>

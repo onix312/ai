@@ -12,6 +12,9 @@
 """
 from __future__ import annotations
 
+import csv
+import io
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -23,6 +26,10 @@ from .db import Database
 SALE_DAYS = 7        # окно «продано за N дней» для оборачиваемости
 DEAD_DAYS = 14       # после скольких дней без продаж позиция — «мёртвый сток»
 PLAN_DAYS = 7        # на сколько дней вперёд планировать пополнение
+
+TAG_TEMPLATES = {"classic", "compact", "promo", "minimal"}
+DEFAULT_TAG_COLOR = "#4f46e5"
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class Shelf:
@@ -40,7 +47,8 @@ class Shelf:
         since30 = (datetime.now() - timedelta(days=30)).isoformat()
         since_dead = (datetime.now() - timedelta(days=DEAD_DAYS)).isoformat()
         out = []
-        for row in rows:
+        for raw_row in rows:
+            row = self._with_cashier_data(raw_row)
             qty = num(row["qty"])
             sold7 = num(self._sum_sold(row["id"], since7))
             sold30 = num(self._sum_sold(row["id"], since30))
@@ -76,6 +84,60 @@ class Shelf:
             })
         return out
 
+    def _linked_nomenclature(self, row: dict) -> dict | None:
+        """Найти canonical-карточку товара для полочной позиции.
+
+        Старые базы связывали полку с ``catalog``, новые — прямо с
+        ``nomenclature``. Поддерживаем оба варианта, чтобы штрихкод 1С не
+        пришлось переносить руками после обновления.
+        """
+        nom_id = str(row.get("nom_id") or "").strip()
+        if nom_id:
+            found = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+            if found:
+                return found
+        catalog_id = str(row.get("catalog_id") or "").strip()
+        if catalog_id:
+            catalog = self.db.one("SELECT nom_id FROM catalog WHERE id=?", (catalog_id,)) or {}
+            catalog_nom_id = str(catalog.get("nom_id") or "").strip()
+            if catalog_nom_id:
+                found = self.db.one("SELECT * FROM nomenclature WHERE id=?", (catalog_nom_id,))
+                if found:
+                    return found
+            found = self.db.one(
+                "SELECT * FROM nomenclature WHERE legacy_catalog_id=? LIMIT 1",
+                (catalog_id,))
+            if found:
+                return found
+        return self.db.one(
+            "SELECT * FROM nomenclature WHERE legacy_shelf_id=? LIMIT 1",
+            (row.get("id") or "",))
+
+    def _with_cashier_data(self, row: dict) -> dict:
+        """Добавить эффективные артикул/штрихкод и данные печатного ценника."""
+        result = dict(row)
+        nom = self._linked_nomenclature(result)
+        own_barcode = str(result.get("barcode") or "").strip()
+        own_sku = str(result.get("sku") or "").strip()
+        if nom:
+            result["nom_id"] = result.get("nom_id") or nom.get("id") or ""
+            result["barcode"] = own_barcode or str(nom.get("barcode") or "").strip()
+            result["sku"] = own_sku or str(nom.get("sku") or nom.get("code") or "").strip()
+            result["material"] = nom.get("material") or ""
+            result["grams"] = num(nom.get("grams"))
+        else:
+            result["barcode"] = own_barcode
+            result["sku"] = own_sku
+            result.setdefault("material", "")
+            result.setdefault("grams", 0.0)
+        result["barcode_source"] = ("shelf" if own_barcode else
+                                    ("nomenclature" if result.get("barcode") else ""))
+        template = str(result.get("tag_template") or "classic").strip().lower()
+        result["tag_template"] = template if template in TAG_TEMPLATES else "classic"
+        color = str(result.get("tag_color") or DEFAULT_TAG_COLOR).strip()
+        result["tag_color"] = color if _HEX_COLOR.fullmatch(color) else DEFAULT_TAG_COLOR
+        return result
+
     def _sum_sold(self, item_id: str, since: str) -> float:
         row = self.db.one(
             "SELECT COALESCE(SUM(-qty),0) v FROM shelf_moves"
@@ -87,6 +149,7 @@ class Shelf:
         row = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
         if not row:
             return None
+        row = self._with_cashier_data(row)
         row["moves"] = self.moves(item_id, limit=40)
         return row
 
@@ -95,6 +158,45 @@ class Shelf:
         new = not data.get("id")
         if not data.get("id"):
             data["id"] = uid("shf")
+        item_id = str(data["id"])
+        if not str(data.get("name") or "").strip():
+            raise ValueError("Укажите название позиции")
+        data["name"] = str(data["name"]).strip()[:200]
+
+        # Если позиция выбрана из старого каталога, сразу запоминаем canonical id.
+        # Штрихкод при этом остаётся «живым»: пока в полке он пуст, берём его из
+        # номенклатуры, поэтому изменение в карточке товара доходит до ценника.
+        linked = self._linked_nomenclature(data)
+        if linked and not data.get("nom_id"):
+            data["nom_id"] = linked.get("id") or ""
+
+        for key, limit in (("barcode", 80), ("sku", 80), ("tag_badge", 40),
+                           ("tag_note", 180), ("note", 500)):
+            if key in data:
+                data[key] = str(data.get(key) or "").strip()[:limit]
+        barcode = str(data.get("barcode") or "").strip()
+        if barcode:
+            from .barcode import validate
+            validate(barcode)  # понятная ошибка для кириллицы/непечатных символов
+            duplicate = self.db.one(
+                "SELECT id,name FROM shelf_items"
+                " WHERE active=1 AND barcode=? AND id<>? LIMIT 1",
+                (barcode, item_id))
+            if duplicate:
+                raise ValueError(
+                    f"Штрихкод уже привязан к позиции «{duplicate.get('name') or duplicate['id']}»")
+
+        if "tag_template" in data:
+            template = str(data.get("tag_template") or "classic").strip().lower()
+            if template not in TAG_TEMPLATES:
+                raise ValueError("Неизвестный тип ценника")
+            data["tag_template"] = template
+        if "tag_color" in data:
+            color = str(data.get("tag_color") or DEFAULT_TAG_COLOR).strip()
+            if not _HEX_COLOR.fullmatch(color):
+                raise ValueError("Цвет ценника должен быть в формате #4f46e5")
+            data["tag_color"] = color.lower()
+
         if new:
             data.setdefault("created_at", now_iso())
         data["updated_at"] = now_iso()
@@ -104,7 +206,7 @@ class Shelf:
         row = self.db.upsert("shelf_items", data)
         self.db.add_event("shelf", "Позиция стеллажа создана" if new else "Позиция стеллажа изменена",
                           row.get("name") or "", data={"item_id": row["id"]})
-        return row
+        return self._with_cashier_data(row)
 
     def delete_item(self, item_id: str) -> None:
         if not item_id:
@@ -124,11 +226,15 @@ class Shelf:
         return self.db.query(sql, params)
 
     def _move(self, item_id: str, kind: str, qty: float, price: float = 0.0,
-              job_id: str = "", tx_id: str = "", note: str = "") -> dict:
+              job_id: str = "", tx_id: str = "", note: str = "",
+              source: str = "", external_id: str = "") -> dict:
         row = self.db.upsert("shelf_moves", {
             "id": uid("shm"), "at": now_iso(), "item_id": item_id, "kind": kind,
             "qty": round(num(qty), 2), "price": round(num(price), 2),
-            "job_id": job_id or None, "tx_id": tx_id or None, "note": note or ""})
+            "job_id": job_id or None, "tx_id": tx_id or None,
+            "source": str(source or "").strip(),
+            "external_id": str(external_id or "").strip(),
+            "note": note or ""})
         self.db.execute("UPDATE shelf_items SET qty=?, updated_at=? WHERE id=?",
                         (round(num(qty) + self._qty(item_id), 2), now_iso(), item_id))
         return row
@@ -164,12 +270,15 @@ class Shelf:
             "SELECT * FROM shelf_items WHERE id=?", (item_id,))}
 
     def sale(self, item_id: str, qty: float, price: float = 0.0,
-             channel: str = "shelf", note: str = "") -> dict:
+             channel: str = "shelf", note: str = "", *,
+             record_income: bool = True, source: str = "",
+             external_id: str = "") -> dict:
         """Продажа штук со стеллажа.
 
-        price > 0 → создаётся проводка дохода в кассу (с пометкой «стеллаж»);
-        price = 0 → только списание штук (деньги видит 1С магазина).
-        channel: shelf — стеллаж, online — Авито/Telegram (единый остаток).
+        Обычная ручная продажа пишет доход в PrintFlow. Интеграция с 1С передаёт
+        ``record_income=False``: 1С остаётся источником денег, а PrintFlow только
+        уменьшает физический остаток. ``source + external_id`` защищают от
+        повторной отправки одной строки чека.
         """
         item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
         if not item:
@@ -183,7 +292,7 @@ class Shelf:
         price = num(price) if num(price) > 0 else num(item.get("price"))
         tx = None
         kind = "online" if channel == "online" else "sale"
-        if price > 0:
+        if price > 0 and record_income:
             tx = self.acc.add_transaction(
                 "income", "sale", price * qty,
                 f"Стеллаж: {item.get('name') or ''} × {round(qty)}",
@@ -192,13 +301,16 @@ class Shelf:
                 payer="person")
         move = self._move(item_id, kind, -qty, price=price,
                           tx_id=tx.get("id") if tx else "",
-                          note=note or f"Продажа ({channel})")
+                          note=note or f"Продажа ({channel})",
+                          source=source, external_id=external_id)
         self.db.add_event("shelf", "Продажа со стеллажа",
                           f"{item.get('name') or ''} −{round(qty)} шт"
                           + (f" на {round(price * qty)} ₽" if price else ""),
-                          data={"item_id": item_id, "qty": qty, "price": price})
+                          data={"item_id": item_id, "qty": qty, "price": price,
+                                "source": source, "external_id": external_id,
+                                "income_recorded": bool(tx)})
         return {"ok": True, "move": move, "tx": tx,
-                "item": self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))}
+                "item": self.item(item_id)}
 
     def sales_many(self, rows: list[dict], channel: str = "shelf") -> list[dict]:
         """Продажи раз в день: [{item_id, qty, price?}]. Одна операция — несколько позиций."""
@@ -213,6 +325,76 @@ class Shelf:
                                      num(row.get("price")), channel,
                                      row.get("note", "")))
         return results
+
+    # ------------------------------------------------------- касса и 1С
+    def cashier_lookup(self, code: str) -> dict | None:
+        """Найти позицию по коду, который прислал кассовый сканер/1С."""
+        code = str(code or "").strip()
+        if not code:
+            raise ValueError("Передайте штрихкод или артикул")
+        matches = [item for item in self.items()
+                   if code in {str(item.get("barcode") or "").strip(),
+                               str(item.get("sku") or "").strip(),
+                               str(item.get("id") or "").strip()}]
+        if len(matches) > 1:
+            names = ", ".join(str(item.get("name") or item["id"]) for item in matches[:3])
+            raise ValueError(f"Код неоднозначен: найдено несколько позиций ({names})")
+        return matches[0] if matches else None
+
+    def sale_from_1c(self, barcode: str, qty: float, external_id: str,
+                     price: float = 0.0) -> dict:
+        """Принять строку чека из 1С без повторной финансовой проводки.
+
+        ``external_id`` — уникальный ключ *строки* чека, например
+        ``ККМ-000184:2``. При сетевом retry возвращаем прежний результат и не
+        уменьшаем остаток второй раз.
+        """
+        external_id = str(external_id or "").strip()
+        if not external_id:
+            raise ValueError("1С должна передать external_id строки чека")
+        if len(external_id) > 160:
+            raise ValueError("external_id слишком длинный")
+        qty = num(qty)
+        if qty <= 0:
+            raise ValueError("Количество должно быть больше нуля")
+        with self.db.transaction():
+            existing = self.db.one(
+                "SELECT * FROM shelf_moves WHERE source='1c' AND external_id=? LIMIT 1",
+                (external_id,))
+            if existing:
+                return {"ok": True, "duplicate": True, "move": existing,
+                        "item": self.item(existing.get("item_id") or "")}
+            item = self.cashier_lookup(barcode)
+            if not item:
+                raise ValueError("Штрихкод не привязан ни к одной позиции стеллажа")
+            result = self.sale(
+                item["id"], qty, num(price), channel="shelf",
+                note=f"чек 1С · {external_id}", record_income=False,
+                source="1c", external_id=external_id)
+            result["duplicate"] = False
+            result["money_source"] = "1c"
+            return result
+
+    def one_c_export_csv(self) -> str:
+        """CSV-справочник для загрузки/сверки номенклатуры в 1С.
+
+        Разделитель ``;``, UTF-8 с BOM и десятичная запятая нормально
+        открываются в русской 1С и Excel. Конфигурации 1С отличаются, поэтому
+        имена колонок оставлены явными, без притворства «универсальным обменом».
+        """
+        stream = io.StringIO()
+        writer = csv.writer(stream, delimiter=";", lineterminator="\r\n")
+        writer.writerow(("ID PrintFlow", "Код", "Артикул", "Штрихкод",
+                         "Наименование", "Цена", "Остаток", "Единица"))
+        for item in self.items():
+            writer.writerow((
+                item.get("id") or "", item.get("nom_id") or "",
+                item.get("sku") or "", item.get("barcode") or "",
+                item.get("name") or "",
+                f"{num(item.get('price')):.2f}".replace(".", ","),
+                f"{num(item.get('qty')):.2f}".replace(".", ","), "шт",
+            ))
+        return "\ufeff" + stream.getvalue()
 
     def writeoff(self, item_id: str, qty: float, note: str = "Списание") -> dict:
         """Списание штук без продажи: порча, потеря, подарок."""
@@ -418,6 +600,9 @@ class Shelf:
                 price = 0.0
             item = self.save_item({
                 "name": nom.get("name") or "Товар со склада",
+                "nom_id": nom_id,
+                "barcode": nom.get("barcode") or "",
+                "sku": nom.get("sku") or nom.get("code") or "",
                 "price": price, "cost_per_unit": unit_cost,
                 "photo": nom.get("photo") or "",
                 "note": "создано перемещением со склада",

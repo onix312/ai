@@ -111,7 +111,8 @@ function renderShelf() {
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
       + `<div class="sinfo"><h3>${esc(i.name)}${liveBadgeFor(i.id)}</h3>`
-      + `<small class="muted">${i.catalog_id ? 'из каталога' : 'без привязки'}${i.note ? ' · ' + esc(i.note) : ''}</small></div>`
+      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
+      + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
       + `<div class="sqty ${warn}"><b>${nfmt(i.qty)}</b><span>шт</span>`
@@ -128,7 +129,7 @@ function renderShelf() {
       + `<span class="spacer"></span>`
       + (i.plan_qty ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)} шт</span>` : '')
       + `<button class="btn sm ghost" type="button" data-shelf-card="${esc(i.id)}">▤ Карточка</button>`
-      + `<button class="btn sm ghost" type="button" data-shelf-qr="${esc(i.id)}">◫ Ценник</button>`
+      + `<button class="btn sm ghost" type="button" data-shelf-tag="${esc(i.id)}">▦ Ценник</button>`
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
@@ -161,13 +162,24 @@ function fillShelfSelectors(keep) {
 function openShelf(id) {
   editingShelf = id || null;
   const i = id ? (shelfData.items || []).find((x) => x.id === id) : null;
-  const d = i || { name: '', catalog_id: '', price: '', cost_per_unit: '', qty: 0, min_qty: '', note: '' };
+  const d = i || {
+    name: '', catalog_id: '', nom_id: '', price: '', cost_per_unit: '', qty: 0,
+    min_qty: '', note: '', barcode: '', sku: '', tag_template: 'classic',
+    tag_badge: '', tag_color: '#4f46e5', tag_note: '',
+  };
   $('shf_name').value = d.name || '';
+  $('shf_nom_id').value = d.nom_id || '';
   $('shf_price').value = d.price ?? '';
   $('shf_cost').value = d.cost_per_unit ?? '';
   $('shf_qty').value = d.qty ?? '';
   $('shf_min').value = d.min_qty ?? '';
   $('shf_note').value = d.note || '';
+  $('shf_barcode').value = d.barcode || '';
+  $('shf_sku').value = d.sku || '';
+  $('shf_tag_template').value = d.tag_template || 'classic';
+  $('shf_tag_badge').value = d.tag_badge || '';
+  $('shf_tag_color').value = /^#[0-9a-f]{6}$/i.test(d.tag_color || '') ? d.tag_color : '#4f46e5';
+  $('shf_tag_note').value = d.tag_note || '';
   $('shf_catalog_id').innerHTML = '<option value="">Без привязки</option>'
     + (PF.state.catalog || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('shf_catalog_id').value = d.catalog_id || '';
@@ -175,6 +187,8 @@ function openShelf(id) {
   img.hidden = !d.photo;
   if (d.photo) img.src = `/api/shelf/photo.jpg?id=${esc(d.id)}&t=${esc(d.updated_at || '')}`;
   $('shelf_delete').hidden = !id;
+  $('shf_tag_open').hidden = !id;
+  $('shf_tag_open').dataset.item = id || '';
   $('shelf_modal_title').textContent = id ? 'Позиция: ' + d.name : 'Новая позиция стеллажа';
   openModal('shelf_modal');
 }
@@ -184,11 +198,18 @@ async function saveShelf() {
     id: editingShelf || '',
     name: $('shf_name').value.trim(),
     catalog_id: $('shf_catalog_id').value,
+    nom_id: $('shf_nom_id').value,
     price: num($('shf_price').value),
     cost_per_unit: num($('shf_cost').value),
     qty: num($('shf_qty').value),
     min_qty: num($('shf_min').value),
     note: $('shf_note').value.trim(),
+    barcode: $('shf_barcode').value.trim(),
+    sku: $('shf_sku').value.trim(),
+    tag_template: $('shf_tag_template').value,
+    tag_badge: $('shf_tag_badge').value.trim(),
+    tag_color: $('shf_tag_color').value,
+    tag_note: $('shf_tag_note').value.trim(),
   };
   if (!payload.name) return fail(new Error('Укажите название позиции'));
   try {
@@ -385,7 +406,9 @@ async function openShelfCard(itemId) {
   openModal('shelf_card_modal');
   $('shelf_card_title').textContent = item.name;
   try {
-    const bc = await get('/api/labels/code128', { text: String(item.id).slice(-8) }).catch(() => null);
+    const bc = item.barcode
+      ? await get('/api/labels/code128', { text: item.barcode }).catch(() => null)
+      : null;
     const url = await get('/api/shelf/qr-link', { id: itemId }).then((r) => r.url || '').catch(() => '');
     const qr = (window.QR && url) ? window.QR.svg(url, { size: 120 }) : '';
     out.innerHTML = `
@@ -398,7 +421,7 @@ async function openShelfCard(itemId) {
        </div>
        <div class="muted" style="font-size:12.5px;margin-top:6px">Продано за 7 дней: ${nfmt(item.sold_7)} шт · за 30: ${nfmt(item.sold_30)} шт</div>
        ${bc ? bc.svg : ''}
-       ${bc ? `<div class="muted" style="font-size:11px">Code 128 · ${esc(bc.text)} — касса сканирует</div>` : ''}
+       ${bc ? `<div class="muted" style="font-size:11px">Code 128 · ${esc(bc.text)} — тот же код ищется в 1С</div>` : '<div class="notice warn" style="margin-top:8px"><span>!</span><span>Добавьте штрихкод 1С в карточке позиции.</span></div>'}
       </div>
       <div style="text-align:center">${qr}<small class="muted">QR → страница позиции</small></div>
      </div>`;
@@ -421,6 +444,10 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('shf_photo_btn').addEventListener('click', () => $('shf_photo_file').click());
+  $('shf_tag_open').addEventListener('click', () => {
+    const item = $('shf_tag_open').dataset.item;
+    if (item) window.open(`/price-tags.html?item=${encodeURIComponent(item)}`, '_blank', 'noopener');
+  });
   $('shf_photo_file').addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -464,8 +491,11 @@ function bind() {
   $('shelf_grid').addEventListener('click', (e) => {
     const edit = e.target.closest('[data-shelf-edit]');
     if (edit) { openShelf(edit.dataset.shelfEdit); return; }
-    const qr = e.target.closest('[data-shelf-qr]');
-    if (qr) { openQr(qr.dataset.shelfQr); return; }
+    const tag = e.target.closest('[data-shelf-tag]');
+    if (tag) {
+      window.open(`/price-tags.html?item=${encodeURIComponent(tag.dataset.shelfTag)}`, '_blank', 'noopener');
+      return;
+    }
     const card = e.target.closest('[data-shelf-card]');
     if (card) { openShelfCard(card.dataset.shelfCard); return; }
     const sell = e.target.closest('[data-shelf-sell]');

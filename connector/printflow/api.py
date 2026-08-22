@@ -291,19 +291,39 @@ class Api:
                     "ams_slot": s.get("ams_slot"),
                 })
         if kind in ("", "all", "shelf"):
+            from .barcode import svg as barcode_svg
             for item in self.shelf.items():
                 info = self.shelf.qr_link(
                     item["id"], getattr(self, "last_host", ""),
                     str(self.db.setting("public_url", "") or ""),
                     int(getattr(self, "listen_port", 8080) or 8080))
+                barcode = str(item.get("barcode") or "").strip()
+                try:
+                    code_svg = barcode_svg(barcode, width_mm=38, height_mm=7) if barcode else ""
+                except ValueError:
+                    code_svg = ""
                 shelf.append({
                     "id": item["id"], "url": info["url"],
                     "name": item.get("name") or "",
                     "price": item.get("price"),
                     "qty": item.get("qty"),
+                    "sku": item.get("sku") or "",
+                    "barcode": barcode,
+                    "barcode_svg": code_svg,
+                    "barcode_source": item.get("barcode_source") or "",
+                    "material": item.get("material") or "",
+                    "grams": item.get("grams") or 0,
+                    "note": item.get("note") or "",
+                    "tag_note": item.get("tag_note") or "",
+                    "tag_badge": item.get("tag_badge") or "",
+                    "tag_template": item.get("tag_template") or "classic",
+                    "tag_color": item.get("tag_color") or "#4f46e5",
+                    "photo": bool(item.get("photo")),
                 })
         return {"base": base["base"], "reachable": base["reachable"], "source": base["source"],
-                "spools": spools, "shelf": shelf}
+                "spools": spools, "shelf": shelf,
+                "one_c": {"linked": sum(1 for item in shelf if item.get("barcode")),
+                           "total": len(shelf)}}
 
     def ops_today(self) -> dict:
         """Сводка для телефона у станка: печать, выдача, пластик, LAN."""
@@ -1003,6 +1023,21 @@ class Api:
                 str(self.db.setting("public_url", "") or ""),
                 int(getattr(self, "listen_port", 8080) or 8080))
             return 200, info
+        if path == "/api/shelf/1c/lookup":
+            try:
+                item = self.shelf.cashier_lookup(one("barcode") or one("code"))
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+            return (200, {"item": item}) if item else (
+                404, {"error": "Код не привязан к позиции стеллажа"})
+        if path == "/api/shelf/1c/export":
+            items = self.shelf.items()
+            return 200, {
+                "filename": "printflow-1c-nomenclature.csv",
+                "csv": self.shelf.one_c_export_csv(),
+                "items": len(items),
+                "linked": sum(1 for item in items if item.get("barcode")),
+            }
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature":
             return 200, {
@@ -2036,6 +2071,11 @@ class Api:
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),
                                         body.get("note", ""))
+        if path == "/api/shelf/1c/sale":
+            return 200, self.shelf.sale_from_1c(
+                body.get("barcode") or body.get("code") or "",
+                num(body.get("qty")), body.get("external_id", ""),
+                num(body.get("price")))
         if path == "/api/shelf/sales":
             return 200, {"ok": True, "results": self.shelf.sales_many(
                 body.get("rows") or [], body.get("channel", "shelf"))}
