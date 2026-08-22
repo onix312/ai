@@ -151,8 +151,9 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
 .ams-slot:hover { border-color: var(--accent-line); transform: translateY(-1px); }
 .ams-slot.active { border-color: var(--accent); background: var(--accent-soft); }
 .ams-slot .swatch {
-  width: 26px; height: 26px; border-radius: 8px; margin-bottom: 8px;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
+  width: 28px; height: 28px; border-radius: 50%; margin-bottom: 8px;
+  box-shadow: inset 0 0 0 5px var(--panel), inset 0 0 0 7px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.12);
+  background: conic-gradient(from 210deg, var(--filament, #cbd5e1), color-mix(in srgb, var(--filament, #cbd5e1) 55%, #111) 70%, var(--filament, #cbd5e1));
 }
 .ams-slot b { display: block; font-size: 12.6px; font-weight: 640; }
 .ams-slot small { display: block; font-size: 11.2px; color: var(--muted); }
@@ -415,6 +416,22 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .tx-row .amt { font-weight: 680; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ======================================================= центр действий */
+.owner-cash {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px; margin-top: 12px; cursor: pointer;
+}
+.owner-cash[hidden] { display: none !important; }
+.owner-cash .oc {
+  padding: 10px 12px; border-radius: var(--r);
+  border: 1px solid var(--line); background: var(--panel);
+}
+.owner-cash .oc span { display: block; font-size: 11.2px; color: var(--muted); }
+.owner-cash .oc b { display: block; font-size: 18px; font-weight: 680; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.owner-cash .oc.warn b { color: var(--warn); }
+.owner-cash .oc.bad b { color: var(--bad); }
+.owner-cash .oc.ok b { color: var(--ok); }
+@media (max-width: 700px) { .owner-cash { grid-template-columns: 1fr; } }
+
 .operator-focus { border-color: var(--accent-line, var(--line)); }
 .operator-focus .card-head { align-items: center; }
 .focus-row, .focus-empty {
@@ -634,12 +651,27 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 
 /* ==================================== вкладки разделов, учёт и настройки */
 .seg.tabs {
-  display: flex; overflow-x: auto; flex-wrap: nowrap;
-  max-width: 100%; margin-bottom: 14px; padding: 3px;
+  display: flex; overflow-x: auto; flex-wrap: nowrap; gap: 2px;
+  max-width: 100%; margin-bottom: 16px; padding: 0 0 2px;
   scrollbar-width: none;
+  position: sticky; top: calc(var(--top-h) + 36px); z-index: 28;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border: 0; box-shadow: none; border-radius: 0;
+  border-bottom: 1px solid var(--line);
 }
 .seg.tabs::-webkit-scrollbar { display: none; }
-.seg.tabs button { flex: 0 0 auto; white-space: nowrap; }
+.seg.tabs button {
+  flex: 0 0 auto; white-space: nowrap; height: 36px; padding: 0 12px;
+  background: transparent; border: 0; box-shadow: none; border-radius: 0;
+  color: var(--muted); font-weight: 560;
+}
+.seg.tabs button:hover { color: var(--text); background: transparent; }
+.seg.tabs button.on {
+  font-weight: 680; color: var(--accent);
+  background: transparent; box-shadow: none;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .seg.tabs button.dim { opacity: .38; }
 .seg.tabs button .tab-hits {
   display: inline-block; margin-left: 6px; padding: 0 6px;
@@ -671,6 +703,9 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .mini-row .mval.neg { color: var(--bad); }
 .mini-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .mini-row .dot.on { background: var(--ok); }
+.mini-row .dot.bad { background: var(--bad); }
+#thread_body .mini-row { padding: 10px 0; }
+#thread_body .mini-row b { font-weight: 620; }
 
 .inline-checks { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
 .chk { display: inline-flex; align-items: center; gap: 7px; font-size: 12.9px; color: var(--text); cursor: pointer; }
@@ -1298,8 +1333,10 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 
 /* ============ 8.5: Статус-бар цеха (#75) ============ */
 #cycobar {
-  position: sticky; top: 0; z-index: 40; display: flex; gap: 14px; align-items: center;
-  padding: 7px 16px; font-size: 12.5px; background: var(--panel, var(--bg));
+  position: sticky; top: var(--top-h); z-index: 35; display: flex; gap: 14px; align-items: center;
+  padding: 7px 22px; font-size: 12.5px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(10px) saturate(1.2);
   border-bottom: 1px solid var(--line); overflow-x: auto; white-space: nowrap;
 }
 #cycobar .cb-item { display: inline-flex; align-items: center; gap: 6px; }

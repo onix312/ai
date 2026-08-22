@@ -152,6 +152,8 @@ async function loadWeekVideo() {
     const d = await get('/api/content/week-video', { days: 7 });
     videoFrames = d.frames || [];
     if (!videoFrames.length) {
+      empty.hidden = false;
+      box.hidden = true;
       empty.innerHTML = '<span>За неделю кадров нет. Включите кейфреймы в Настройках → «8.5 — умный цех» (мин. 0,5 мин) — и видео соберётся само.</span>';
       return;
     }

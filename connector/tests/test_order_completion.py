@@ -121,13 +121,24 @@ class OrderCompletionTests(unittest.TestCase):
 
     def test_summary_blocks_active_or_missing_successful_jobs(self):
         self.order()
-        self.job(state="queued")
+        self.job(state="running")
         summary = self.completion.summary("order-1")
         self.assertFalse(summary["can_accept"])
         self.assertEqual({item["code"] for item in summary["blocks"]},
                          {"active_jobs", "successful_job"})
         with self.assertRaisesRegex(ValueError, "Нельзя принять"):
             self.completion.accept("order-1", quality_confirmed=True)
+
+    def test_leftover_queue_does_not_block_accept(self):
+        self.order()
+        self.job(state="done", duration_min=30, grams=100, cost=150,
+                 finished_at=now_iso(), accounted_at=now_iso())
+        self.job(job_id="job-queued", state="queued")
+        summary = self.completion.summary("order-1")
+        self.assertTrue(summary["can_accept"])
+        self.completion.accept("order-1", quality_confirmed=True)
+        leftover = self.db.one("SELECT state FROM print_jobs WHERE id='job-queued'")
+        self.assertEqual(leftover["state"], "cancelled")
 
     def test_accept_requires_visual_confirmation_and_is_idempotent(self):
         self.order(qc_done=json.dumps({"0": True, "1": True, "2": True, "3": True}))

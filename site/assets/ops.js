@@ -2,7 +2,7 @@
    клиенты, ниши и настройка статусов. Все данные — с сервера. */
 (() => {
 'use strict';
-const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeText,
+const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, minutesText, dateText, dateTimeText,
   todayISO, initials, debounce, toast, fail, openModal, closeModal, confirmDanger } = U;
 const { get, post, api } = PF.api;
 
@@ -150,6 +150,12 @@ function bindDrag() {
 
 /* ========================================================= карточка заказа */
 function fillSelectors() {
+  const keepSel = (id) => ($(id) || {}).value || '';
+  const keep = {
+    of_status: keepSel('of_status'), of_niche_id: keepSel('of_niche_id'),
+    of_channel: keepSel('of_channel'), of_nom_id: keepSel('of_nom_id'),
+    of_warehouse_id: keepSel('of_warehouse_id'),
+  };
   const statuses = PF.state.statuses.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   $('of_status').innerHTML = statuses;
   $('orders_filter_status').innerHTML = '<option value="">Все статусы</option>' + statuses;
@@ -179,6 +185,18 @@ function fillSelectors() {
     + (PF.state.warehouses || []).map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
   $('orders_filter_status').value = filters.status;
   $('orders_filter_niche').value = filters.niche;
+  Object.keys(keep).forEach((id) => {
+    const el = $(id);
+    if (!el || !keep[id]) return;
+    if ([...el.options].some((o) => o.value === keep[id])) el.value = keep[id];
+  });
+  toggleWarehouseField();
+}
+
+function toggleWarehouseField() {
+  const nom = ($('of_nom_id') || {}).value || '';
+  const wrap = $('of_warehouse_id') && $('of_warehouse_id').closest('label');
+  if (wrap) wrap.hidden = !nom;
 }
 
 const OF = ['product', 'status', 'priority', 'niche_id', 'channel', 'qty', 'due',
@@ -740,6 +758,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
     if (b) b.hidden = !has85;
   });
   updateReadyStockHint();
+  toggleWarehouseField();
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
   // Оплата — только через единый журнал платежей. В карточке показываем
   // справочное значение, но оно не входит в payload сохранения заказа.
@@ -1070,7 +1089,7 @@ function renderOrderPhotos(photos) {
 }
 async function addOrderPhoto(orderId, dataUrl, kind, note) {
   try {
-    await post('/api/order/photo', { order_id: orderId, data, kind, note });
+    await post('/api/order/photo', { order_id: orderId, data: dataUrl, kind, note });
     toast('Фото добавлено');
   } catch (e) { fail(e); }
 }
@@ -1533,23 +1552,32 @@ async function openOrderThread() {
     const row = (icon, title, detail, tone) =>
       `<div class="mini-row"><span class="dot ${tone || ''}"></span>`
       + `<div class="mbody"><b>${esc(title)}</b><small>${detail}</small></div></div>`;
-    let html = row('①', `Заказ №${o.number || ''} · ${o.product || ''}`,
-      `${o.customer_name || 'без клиента'} · ${dateTimeText(o.created_at)} · ${money(o.price)}${o.gift ? ' · подарочный' : ''}`);
-    (d.print || []).forEach((j) => {
-      html += row('②', `Печать: ${j.name || j.id}`,
-        `${esc(j.state)}${j.grams ? ` · ${nfmt(j.grams)} г` : ''}${j.duration_min ? ` · ${minutesText(j.duration_min)}` : ''}`);
-    });
+    let html = row('①', `Заказ №${esc(o.number || '')} · ${esc(o.product || '')}`,
+      `${esc(o.customer_name || 'без клиента')} · ${esc(dateTimeText(o.created_at))} · ${money(o.price)}${o.gift ? ' · подарочный' : ''}`, 'on');
+    if ((d.print || []).length) {
+      (d.print || []).forEach((j) => {
+        html += row('②', `Печать: ${esc(j.name || j.id)}`,
+          `${esc(j.state)}${j.grams ? ` · ${nfmt(j.grams)} г` : ''}${j.duration_min ? ` · ${minutesText(j.duration_min)}` : ''}`,
+          j.state === 'done' ? 'on' : '');
+      });
+    } else {
+      html += row('②', 'Печать ещё не запускалась', 'задание появится после постановки в очередь');
+    }
     if (d.shelf && d.shelf.item_id) {
       const last = (d.shelf.recent_sales || [])[0];
-      html += row('③', `Полка: ${d.shelf.name}`,
-        `остаток ${nfmt(d.shelf.qty)} шт${last ? ` · последняя продажа ${dateTimeText(last.at)}` : ''}`);
+      html += row('③', `Полка: ${esc(d.shelf.name)}`,
+        `остаток ${nfmt(d.shelf.qty)} шт${last ? ` · последняя продажа ${esc(dateTimeText(last.at))}` : ''}`, 'on');
+    } else {
+      html += row('③', 'На полке нет позиции с таким именем', 'связка появится, когда изделие совпадёт с карточкой полки');
     }
     if (d.income && d.income.length) {
       const last = d.income[d.income.length - 1];
-      html += row('④', `Оплата: ${money(last.amount)}`, `${d.income.length} проводок · последняя ${dateTimeText(last.at)}`);
+      html += row('④', `Продажа / оплата: ${money(last.amount)}`, `${d.income.length} проводок · последняя ${esc(dateTimeText(last.at))}`, 'on');
+    } else {
+      html += row('④', 'Оплаты ещё нет', 'проводка появится после платежа или продажи с полки');
     }
     if (d.feedback) {
-      html += row('⑤', `Отзыв: ${nfmt(d.feedback.rating)}/5`, d.feedback.text || 'текст не заполнен',
+      html += row('⑤', `Отзыв: ${nfmt(d.feedback.rating)}/5`, esc(d.feedback.text || 'текст не заполнен'),
         num(d.feedback.rating) >= 4 ? 'on' : 'bad');
     } else {
       html += row('⑤', 'Отзыв ещё не собран', 'после выдачи система подберёт момент для запроса');
@@ -1807,8 +1835,9 @@ function bind() {
   }
   $('of_nom_id').addEventListener('change', () => {
     const item = (PF.state.nomenclature || []).find((i) => i.id === $('of_nom_id').value);
-    if (!item) { $('of_reserved').checked = false; updateReadyStockHint(); return; }
+    if (!item) { $('of_reserved').checked = false; updateReadyStockHint(); toggleWarehouseField(); return; }
     applyProduct(item, true);
+    toggleWarehouseField();
   });
   // Автоподстановка поддерживает и новый справочник товаров, и старую базу изделий.
   $('of_product').addEventListener('change', () => {

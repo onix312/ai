@@ -18,29 +18,36 @@
 
 <div id="shell">
 <nav id="side">
- <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · Bambu Lab</small></div></div>
- <div class="side-scroll">
-  <div class="nav-group-title">Работа</div>
-  <a class="nav-link" href="#dashboard" data-view="dashboard"><span class="ic">◈</span>Обзор</a>
-  <a class="nav-link" href="#printers" data-view="printers"><span class="ic">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
-  <a class="nav-link" href="#queue" data-view="queue"><span class="ic">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
-  <a class="nav-link" href="#orders" data-view="orders"><span class="ic">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
-  <a class="nav-link" href="#customers" data-view="customers"><span class="ic">◎</span>Клиенты</a>
-  <div class="nav-group-title">Склад и товары</div>
-  <a class="nav-link" href="#products" data-view="products"><span class="ic">▩</span>Товары<span class="tag warn" id="nav_products_tag" hidden></span></a>
-  <a class="nav-link" href="#batches" data-view="batches"><span class="ic">⎙</span>Партии<span class="tag" id="nav_batches_tag" hidden></span></a>
-  <a class="nav-link" href="#documents" data-view="documents"><span class="ic">▤</span>Документы<span class="tag" id="nav_docs_tag" hidden></span></a>
-  <a class="nav-link" href="#warehouses" data-view="warehouses"><span class="ic">▥</span>Склады</a>
-  <div class="nav-group-title">Экономика</div>
-  <a class="nav-link" href="#finance" data-view="finance"><span class="ic">₽</span>Финансы</a>
-  <a class="nav-link" href="#shelf" data-view="shelf"><span class="ic">▤</span>Стеллаж<span class="tag warn" id="nav_shelf_tag" hidden></span></a>
-  <a class="nav-link" href="#inventory" data-view="inventory"><span class="ic">◍</span>Склад пластика<span class="tag warn" id="nav_stock_tag" hidden></span></a>
-  <a class="nav-link" href="#niches" data-view="niches"><span class="ic">◫</span>Ниши</a>
-  <a class="nav-link" href="#calc" data-view="calc"><span class="ic">⌁</span>Калькулятор</a>
-  <div class="nav-group-title">Справочник</div>
-  <a class="nav-link" href="#marketing" data-view="marketing"><span class="ic">✎</span>Контент</a>
-  <a class="nav-link" href="#library" data-view="library"><span class="ic">▤</span>Библиотека</a>
-  <a class="nav-link" href="#settings" data-view="settings"><span class="ic">⚙</span>Настройки</a>
+ <div class="brand"><img class="brand-logo" src="assets/brand/nozza-mark.svg" alt="NOZZA" width="38" height="38"><div><b>NOZZA</b><small>PrintFlow · цех</small></div></div>
+ <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
+ <div class="side-scroll" id="nav_scroll">
+  <div class="nav-group">
+  <div class="nav-group-title">У станка</div>
+  <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic">◈</span>Обзор</a>
+  <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
+  <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
+  <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
+  </div>
+  <div class="nav-group">
+  <div class="nav-group-title">Склад</div>
+  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span></a>
+  </div>
+  <div class="nav-group">
+  <div class="nav-group-title">Деньги</div>
+  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы касса налог прибыль долг проводка"><span class="ic">₽</span>Касса</a>
+  <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic">⌁</span>Калькулятор</a>
+  </div>
+  <div class="nav-group">
+  <details class="nav-more" id="nav_more">
+  <summary class="nav-group-title">Ещё</summary>
+  <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон"><span class="ic">◎</span>Клиенты</a>
+  <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос"><span class="ic">◫</span>Ниши</a>
+  <a class="nav-link" href="#marketing" data-view="marketing" data-find="контент пост авито табличка"><span class="ic">✎</span>Контент</a>
+  <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь"><span class="ic">▤</span>Библиотека</a>
+  <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram"><span class="ic">⚙</span>Настройки</a>
+  </details>
+  </div>
+  <p class="nav-empty" id="nav_empty" hidden>Нет такого раздела. Попробуйте «принтер», «касса», «пластик».</p>
  </div>
  <div class="side-foot">
   <button class="conn-chip" id="conn_chip" type="button"><span class="dot" id="conn_dot"></span><span><b id="conn_title">Проверяем связь…</b><small id="conn_sub">Локальный коннектор</small></span></button>
@@ -378,15 +385,13 @@
   </div>
  </div>
  <div class="seg tabs" id="fin_tabs">
-  <button data-pane="overview" class="on">Обзор</button>
-  <button data-pane="pnl">Прибыль по месяцам</button>
-  <button data-pane="tax">Налоги</button>
-  <button data-pane="cash">Кассы и долги</button>
+  <button data-pane="cash" class="on">Касса и долги</button>
+  <button data-pane="profit">Прибыль</button>
   <button data-pane="reports">Отчёты</button>
  </div>
 
  <!-- ---------------------------------------------------------- обзор -->
- <div class="pane on" id="finpane-overview">
+ <div class="pane" id="finpane-profit">
   <div class="kpi-grid" id="fin_kpis"></div>
   <div id="fin_hour_cost" style="margin-top:10px"></div>
   <div class="grid g-2-1">
@@ -404,10 +409,10 @@
    <div class="card-head"><div><h2>Последние проводки</h2><p>Автоматические помечены значком ⚙</p></div></div>
    <div id="fin_tx"></div>
   </div>
- </div>
+ 
 
  <!-- ------------------------------------------------------------ P&L -->
- <div class="pane" id="finpane-pnl">
+ <div class="fin-block" id="finpane-pnl">
   <div class="kpi-grid" id="pnl_kpis"></div>
   <div class="grid g-2-1">
    <div class="card">
@@ -426,27 +431,11 @@
   </div>
  </div>
 
- <!-- -------------------------------------------------------- налоги -->
- <div class="pane" id="finpane-tax">
-  <div class="kpi-grid" id="tax_kpis"></div>
-  <div class="grid g-2-1">
-   <div class="card">
-    <div class="card-head"><div><h2 id="tax_mode_name">Налоговый режим</h2><p>Настраивается в разделе «Настройки → Налоги»</p></div><button class="btn sm" id="tax_go_settings" type="button">Настроить</button></div>
-    <div id="tax_box"></div>
-   </div>
-   <div class="card">
-    <div class="card-head"><div><h2>Резерв под налоги</h2><p>Откладывайте сразу — потом не придётся искать</p></div><button class="btn sm primary" id="tax_pay" type="button">Записать уплату</button></div>
-    <div id="tax_reserve"></div>
-   </div>
   </div>
-  <div class="card" style="margin-top:16px">
-   <div class="card-head"><div><h2>По кварталам</h2><p>База авансовых платежей — до уменьшения на страховые взносы</p></div></div>
-   <div class="table-wrap"><table class="data"><thead><tr><th>Квартал</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">Налог с базы</th></tr></thead><tbody id="tax_tbody"></tbody></table></div>
-  </div>
- </div>
 
- <!-- ------------------------------------------------- кассы и долги -->
- <div class="pane" id="finpane-cash">
+<!-- -------------------------------------------------------- налоги -->
+  <!-- ------------------------------------------------- кассы и долги -->
+ <div class="pane on" id="finpane-cash">
   <div class="kpi-grid" id="cash_kpis"></div>
   <div class="grid g-2-1">
    <div class="card">
@@ -466,6 +455,24 @@
 
  <!-- -------------------------------------------------------- отчёты -->
  <div class="pane" id="finpane-reports">
+<div class="fin-block" id="finpane-tax">
+  <div class="kpi-grid" id="tax_kpis"></div>
+  <div class="grid g-2-1">
+   <div class="card">
+    <div class="card-head"><div><h2 id="tax_mode_name">Налоговый режим</h2><p>Настраивается в разделе «Настройки → Налоги»</p></div><button class="btn sm" id="tax_go_settings" type="button">Настроить</button></div>
+    <div id="tax_box"></div>
+   </div>
+   <div class="card">
+    <div class="card-head"><div><h2>Резерв под налоги</h2><p>Откладывайте сразу — потом не придётся искать</p></div><button class="btn sm primary" id="tax_pay" type="button">Записать уплату</button></div>
+    <div id="tax_reserve"></div>
+   </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+   <div class="card-head"><div><h2>По кварталам</h2><p>База авансовых платежей — до уменьшения на страховые взносы</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Квартал</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">Налог с базы</th></tr></thead><tbody id="tax_tbody"></tbody></table></div>
+  </div>
+ </div>
+
   <div class="card">
    <div class="card-head"><div><h2>Импорт банковской выписки</h2><p>CSV из банка → проводки по статьям автоматически (по ключевым словам в назначении)</p></div>
     <button class="btn sm" id="bank_file_btn" type="button">Выбрать CSV</button>

@@ -31,9 +31,15 @@ class DesignTests(unittest.TestCase):
         from connector.printflow.design import generate
         stl = generate("number_plate", {"number": "БАРСИК"})
         self.assertGreater(len(stl), 84)
-        # латиница по-прежнему честно отклоняется
+
+    def test_latin_and_brand_card(self):
+        from connector.printflow.design import generate
+        stl = generate("number_plate", {"number": "Barsik"})
+        self.assertGreater(len(stl), 84)
+        card = generate("brand_card", {"text": "NOZZA"})
+        self.assertGreater(len(card), 84)
         with self.assertRaises(ValueError):
-            generate("number_plate", {"number": "Barsik"})
+            generate("number_plate", {"number": "☺"})
 
     def test_preview_svg(self):
         from connector.printflow.design import preview_svg

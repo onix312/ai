@@ -14,7 +14,9 @@ from .config import now_iso
 from .db import Database
 from .repo import Repo
 
-ACTIVE_JOB_STATES = ("queued", "starting", "running")
+# Печатается сейчас — приёмку нельзя. «queued» — черновик очереди, снимем сами.
+PRINTING_JOB_STATES = ("starting", "running")
+ACTIVE_JOB_STATES = PRINTING_JOB_STATES
 TERMINAL_JOB_STATES = ("done", "failed", "cancelled")
 
 
@@ -133,7 +135,9 @@ class OrderCompletion:
         actual["hours_difference"] = self._difference(planned["hours"], actual["hours"], 3)
         actual["cost_difference"] = self._difference(planned["cost"], actual["cost"], 2)
 
-        active = [job for job in jobs if job.get("state") in ACTIVE_JOB_STATES]
+        printing = [job for job in jobs if job.get("state") in PRINTING_JOB_STATES]
+        queued = [job for job in jobs if job.get("state") == "queued"]
+        active = printing
         successful = [job for job in jobs if job.get("state") == "done"]
         failed = [job for job in jobs if job.get("state") == "failed"]
         cancelled = [job for job in jobs if job.get("state") == "cancelled"]
@@ -149,10 +153,19 @@ class OrderCompletion:
         warns: list[dict] = []
         if not successful and not accepted:
             blocks.append({"code": "successful_job", "text": "Нет успешно завершённой печати"})
-        if active and not accepted:
+        if printing and not accepted:
+            names = ", ".join(
+                str(job.get("name") or job.get("file") or job.get("id") or "печать")
+                for job in printing[:3]
+            )
             blocks.append({
                 "code": "active_jobs",
-                "text": f"Есть незавершённые задания: {len(active)}",
+                "text": f"Печать ещё идёт: {names}",
+            })
+        if queued and successful and not accepted:
+            warns.append({
+                "code": "queued_jobs",
+                "text": f"В очереди ещё {len(queued)} задан(ий) — снимем при приёмке",
             })
         if unaccounted and not accepted:
             blocks.append({
@@ -224,6 +237,11 @@ class OrderCompletion:
                 raise ValueError("Нельзя принять заказ: " + "; ".join(
                     item["text"] for item in summary["blocks"]
                 ))
+            self.db.execute(
+                "UPDATE print_jobs SET state='cancelled', finished_at=? "
+                "WHERE order_id=? AND state='queued'",
+                (now_iso(), order_id),
+            )
             ready = self.db.one("SELECT id FROM statuses WHERE id='ready' AND is_final=0")
             if not ready:
                 raise ValueError("Не настроен статус «Готов»")

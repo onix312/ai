@@ -2639,6 +2639,8 @@ class Api:
             try:
                 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
                 (UPLOAD_DIR / name).write_bytes(brand_card_stl(text))
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
             except OSError as exc:
                 return 500, {"error": f"Не удалось сохранить STL: {exc}"}
             job = self.manager.enqueue({
@@ -2975,7 +2977,8 @@ class Handler(BaseHTTPRequestHandler):
         from .design import preview_svg
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
         shape = one("shape", "number_plate")
-        params = {"number": one("number", "1"), "width": num(one("width", "40")),
+        params = {"number": one("number", "1"), "text": one("text", ""),
+                  "width": num(one("width", "40")),
                   "height": num(one("height", "24")), "diameter": num(one("diameter", "30")),
                   "depth": num(one("depth", "40"))}
         self._send_bytes(preview_svg(shape, params).encode("utf-8"),
@@ -3028,14 +3031,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def serve_pack_sheet(self, order_id: str):
         """Печатная карточка упаковки (A4, 1:1)."""
-        data = self._pack_data(order_id)
+        import html as _html
+        data = self.api._pack_data(order_id)
         o = data["order"]
+        h = lambda v: _html.escape("" if v is None else str(v))
         rows = ""
         for it in data["items"]:
-            rows += (f"<tr><td>{it.get('name') or o['product']}</td>"
-                     f"<td>{it.get('qty') or ''}</td></tr>")
+            rows += (f"<tr><td>{h(it.get('name') or o['product'])}</td>"
+                     f"<td>{h(it.get('qty') or '')}</td></tr>")
         if not rows:
-            rows = f"<tr><td>{o['product']}</td><td>{o['qty']}</td></tr>"
+            rows = f"<tr><td>{h(o['product'])}</td><td>{h(o['qty'])}</td></tr>"
         brand = ("<li>Бренд-карточка NOZZA (идея 42)</li>"
                  if data["brand_card"] else "")
         html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">

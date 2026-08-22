@@ -214,14 +214,11 @@ function renderCash() {
   if (!data || !$('cash_kpis')) return;
   const acc = data.accounts || {};
   const debts = data.debts || {};
-  const fixedMonthly = (data.fixed_costs || []).filter((f) => num(f.active))
-    .reduce((a, f) => a + num(f.amount) / ({ month: 1, quarter: 3, year: 12 }[f.period] || 1), 0);
   $('cash_kpis').innerHTML = [
-    kpi('Деньги в кассах', money(acc.total), `${(acc.accounts || []).length} счёт(ов)`, num(acc.total) >= 0 ? 'ok' : 'bad'),
-    kpi('Долги клиентов', money(debts.total), `${nfmt(debts.count)} заказ(ов) не оплачены`, num(debts.total) ? 'warn' : 'ok'),
-    kpi('Просрочено', money(debts.overdue), `дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дней`,
+    kpi('В кассе', money(acc.total), `${(acc.accounts || []).length} касс(ы) · наличные, карта, счёт`, num(acc.total) >= 0 ? 'ok' : 'bad'),
+    kpi('Должны нам', money(debts.total), `${nfmt(debts.count)} заказ(ов) не закрыты`, num(debts.total) ? 'warn' : 'ok'),
+    kpi('Просрочка', money(debts.overdue), `дольше ${nfmt(PF.state.settings.debt_alert_days, 0)} дней`,
       num(debts.overdue) ? 'bad' : 'ok'),
-    kpi('Постоянные расходы', money(fixedMonthly), 'в месяц'),
   ].join('');
 
   $('cash_accounts').innerHTML = (acc.accounts || []).length
@@ -242,9 +239,8 @@ function renderCash() {
     + `<td class="right tnum">${money(d.paid)}</td>`
     + `<td class="right tnum neg">${money(d.debt)}</td>`
     + `<td class="right tnum">${nfmt(d.days)}${d.overdue ? ' <span class="pill bad">просрочка</span>' : ''}`
-      + `${d.reminded_at ? `<small class="muted">напомнили ${esc(dateText(d.reminded_at))}</small>` : ''}</td>`
-    + `<td class="right"><button class="btn sm ghost" type="button" data-remind-order="${esc(d.id)}">Напомнить</button> <button class="btn sm" type="button" data-pay-order="${esc(d.id)}">Получить оплату</button></td></tr>`).join('')
-    : '<tr><td colspan="7"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
+      + `${d.reminded_at ? `<small class="muted">напомнили ${esc(dateText(d.reminded_at))}</small>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="6"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
 }
 
 const kindName = (k) => ({ cash: 'наличные', card: 'карта', bank: 'расчётный счёт' }[k] || 'счёт');
