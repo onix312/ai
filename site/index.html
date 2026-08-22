@@ -38,6 +38,7 @@
   <a class="nav-link" href="#niches" data-view="niches"><span class="ic">◫</span>Ниши</a>
   <a class="nav-link" href="#calc" data-view="calc"><span class="ic">⌁</span>Калькулятор</a>
   <div class="nav-group-title">Справочник</div>
+  <a class="nav-link" href="#marketing" data-view="marketing"><span class="ic">✎</span>Контент</a>
   <a class="nav-link" href="#library" data-view="library"><span class="ic">▤</span>Библиотека</a>
   <a class="nav-link" href="#settings" data-view="settings"><span class="ic">⚙</span>Настройки</a>
  </div>
@@ -57,6 +58,14 @@
   <button class="btn primary" id="quick_order" type="button"><span class="ic">+</span>Заказ</button>
  </header>
 
+ <div id="cycobar" hidden>
+  <span class="cb-item" title="Сердцебиение системы"><i class="cb-dot" id="cb_dot"></i><b>Цех</b></span>
+  <span class="cb-item" id="cb_print" title="Активная печать"><i class="cb-dot idle"></i><span id="cb_print_text">печати нет</span></span>
+  <span class="cb-item cb-prog" title="Прогресс активной печати"><i id="cb_prog" style="width:0%"></i></span>
+  <span class="cb-item" title="Заданий в очереди">≡ <b id="cb_queue">0</b></span>
+  <span class="cb-item" title="Стеллаж">▤ <b id="cb_shelf">—</b></span>
+  <span class="cb-item" title="Связь с коннектором"><a href="#settings" data-view="settings">система →</a></span>
+ </div>
  <main id="views">
   <div id="offline-bar"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow командой <code>python pf.py</code> или ярлыком «PrintFlow».</span></div>
 
@@ -130,6 +139,16 @@
   <div class="card-head"><div><h2>Таймлайн печати за день</h2><p id="dash_timeline_sub">—</p></div><a href="#queue" data-view="queue">Журнал →</a></div>
   <div id="dash_timeline"></div>
  </div>
+ <div class="grid2" style="margin-top:16px">
+  <div class="card" data-widget="achievements">
+   <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div><a href="#marketing" data-view="marketing">Контент →</a></div>
+   <div id="dash_achievements" class="muted">Загружаем…</div>
+  </div>
+  <div class="card" data-widget="heartbeat">
+   <div class="card-head"><div><h2>Здоровье системы</h2><p>Бот, принтеры, бэкапы и диск — что живёт</p></div></div>
+   <div id="dash_heartbeat" class="muted">Проверяем…</div>
+  </div>
+ </div>
 </section>
 
 <!-- ================================================== ПРИНТЕРЫ -->
@@ -196,8 +215,11 @@
       <button class="cmd-btn" data-cmd="resume" type="button"><span class="ic">▶</span>Продолжить</button>
       <button class="cmd-btn" data-cmd="light" type="button"><span class="ic">☀</span>Свет</button>
       <button class="cmd-btn" data-cmd="refresh" type="button"><span class="ic">⟳</span>Опросить</button>
+      <button class="cmd-btn" data-cmd="keyframes" type="button" id="pr_keyframes_btn" title="Видео печати: архив кадров задания"><span class="ic">▦</span>Видео</button>
+      <button class="cmd-btn" data-cmd="bed_ref" type="button" id="pr_bed_btn" title="Снять эталон пустого стола для проверки «деталь на столе»"><span class="ic">▭</span>Пустой стол</button>
       <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic">■</span>Стоп</button>
      </div>
+     <div class="notice" id="pr_bed_status" hidden style="margin-top:8px"><span>▭</span><span id="pr_bed_status_text"></span></div>
      <div class="cmd-row">
       <label class="field"><span>Скорость печати</span><select id="pr_speed_sel"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Ludicrous</option></select></label>
       <button class="btn" id="pr_speed_apply" type="button">Применить</button>
@@ -341,7 +363,7 @@
   <div id="aftercare_list"><div class="empty">Проверяем завершённые заказы…</div></div>
  </div>
  <div class="toolbar"><div class="search-box"><input id="customers_search" type="search" placeholder="Имя, телефон, мессенджер…"></div></div>
- <div class="table-wrap"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
+ <div class="table-wrap"><table class="data"><thead><tr><th>Клиент</th><th>Связь</th><th class="right">Заказов</th><th class="right">Выручка</th><th>Последний заказ</th><th>Сегмент</th><th>NOZZA 8.5</th></tr></thead><tbody id="customers_tbody"></tbody></table></div>
 </section>
 
 <!-- ================================================== ФИНАНСЫ -->
@@ -802,6 +824,78 @@
 </section>
 
 <!-- ================================================== БИБЛИОТЕКА -->
+<section class="view" id="view-marketing">
+ <div class="view-head">
+  <div><span class="eyebrow">Генераторы 8.5</span><h1>Контент</h1><p>Посты, карточки, отчёты и таблички — тексты из фактов цеха, печать одним кликом.</p></div>
+ </div>
+ <div class="grid2">
+  <div class="card">
+   <div class="card-head"><div><h2>Дневник цеха</h2><p id="mk_week_sub">Пост за неделю из фактов</p></div><button class="btn sm" type="button" id="mk_week_copy">Копировать</button></div>
+   <pre id="mk_week" class="mk-pre">Загружаем…</pre>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Соцсетевой пакет</h2><p id="mk_social_sub">Шапка, квадрат и сторис с реальными цифрами</p></div><button class="btn sm" type="button" id="mk_social_copy">Копировать всё</button></div>
+   <pre id="mk_social" class="mk-pre">Загружаем…</pre>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Карточка Авито</h2><p>Текст объявления по позиции стеллажа</p></div></div>
+   <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><select id="mk_avito_item" class="field" style="flex:1;min-width:180px"></select><button class="btn sm" type="button" id="mk_avito_gen">Создать</button><button class="btn sm ghost" type="button" id="mk_avito_copy" hidden>Копировать</button></div>
+   <pre id="mk_avito" class="mk-pre">Выберите позицию и нажмите «Создать».</pre>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Праздники и сезонность</h2><p>Ближайший праздник и индекс спроса по месяцам</p></div></div>
+   <div id="mk_holiday" class="muted">Загружаем…</div>
+   <div id="mk_season" style="margin-top:10px"></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Цеховой отчёт</h2><p id="mk_report_sub">Брендированный A4 — печать в PDF</p></div><button class="btn sm" type="button" id="mk_report_open">Открыть отчёт</button></div>
+   <pre id="mk_report" class="mk-pre">Сформируем отчёт за 30 дней: выручка, прибыль, топ изделий.</pre>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Промо-пак сезона</h2><p>Карточки под праздники со стартом продаж</p></div></div>
+   <div id="mk_promo" class="muted">Загружаем…</div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Видео недели</h2><p>Монтаж из кейфреймов камеры</p></div><button class="btn sm ghost" type="button" id="mk_video_play" hidden>▶ Пуск</button><button class="btn sm ghost" type="button" id="mk_video_stop" hidden>■ Стоп</button></div>
+   <div id="mk_video_empty" class="empty compact"><span>Загрузим кадры…</span></div>
+   <div id="mk_video" hidden style="text-align:center">
+    <img id="mk_video_img" alt="Кейфрейм" style="max-width:100%;border-radius:10px;border:1px solid var(--line)">
+    <div id="mk_video_cap" class="muted" style="margin-top:6px"></div>
+   </div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Карта печатей</h2><p id="mk_map_sub">Точка = завершённая печать</p></div></div>
+   <div id="mk_map" class="muted">Загружаем…</div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Шапка полки</h2><p id="mk_shelfhead_sub">«Эта неделя: …» для полки магазина</p></div><button class="btn sm" type="button" id="mk_shelfhead_copy">Копировать</button></div>
+   <pre id="mk_shelfhead" class="mk-pre">Загружаем…</pre>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Штрихкод на ценник</h2><p>Code 128 — касса сканирует</p></div></div>
+   <div style="display:flex;gap:8px;margin-bottom:8px"><input id="mk_bc_text" class="field" placeholder="Артикул или цена, например 199.90" style="flex:1"><button class="btn sm" type="button" id="mk_bc_gen">Построить</button></div>
+   <div id="mk_bc_out" class="muted">Введите текст — построим штрихкод.</div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Печать в один клик</h2><p>Стикеры, визитки, таблички — листы A4</p></div></div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn sm" type="button" id="mk_print_stickers"> Стикеры в упаковку</button>
+    <button class="btn sm" type="button" id="mk_print_business">✉ Визитка 2.0</button>
+    <button class="btn sm" type="button" id="mk_print_labels">▦ Таблички цеха</button>
+   </div>
+   <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <select id="mk_labels_kind" class="field" style="min-width:220px">
+     <option value="danger">Осторожно — 3D-печать рядом</option>
+     <option value="wash">Мойте руки после работы с пластиком</option>
+     <option value="delivery">Заказы печатаем за 1–3 дня</option>
+     <option value="gift">Подарки печатаем к любому празднику</option>
+    </select>
+    <input id="mk_labels_note" class="field" placeholder="Дополнительная строка (необязательно)" style="flex:1;min-width:160px">
+    <button class="btn sm" type="button" id="mk_label_one">Одна табличка</button>
+   </div>
+  </div>
+ </div>
+</section>
 <section class="view" id="view-library">
  <div class="view-head">
   <div><span class="eyebrow">База знаний</span><h1>Библиотека</h1><p>Инструкции, скрипты и материалы для печати на A4.</p></div>
@@ -3304,6 +3398,10 @@
     <div id="set_preflight"></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>8.5 — умный цех</h2><p>Камера: кейфреймы, первый слой, стол. Виртуальный принтер.</p></div></div>
+    <div id="set_phase11"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>FTPS — файлы на принтер</h2><p>Заливка 3MF на SD-карту</p></div></div>
     <div id="set_ftps"></div>
    </div>
@@ -3344,6 +3442,10 @@
     <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
      <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
     <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>NOZZA tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
+    <div id="set_tour" class="muted">Проверяем состояние…</div>
    </div>
    <div class="card" data-set-card>
     <div class="card-head"><div><h2>Обновления</h2><p>Свежая версия PrintFlow с GitHub</p></div></div>
@@ -3417,6 +3519,7 @@
    <label class="field"><span>Канал</span><select id="of_channel"><option value="direct">Напрямую / рекомендация</option><option value="shop">Витрина / полка</option><option value="telegram">Telegram</option><option value="avito">Авито</option><option value="ozon">Маркетплейс</option><option value="b2b">B2B</option></select></label>
    <label class="field"><span>Количество</span><input id="of_qty" type="number" min="1" step="1" value="1"></label>
    <label class="field"><span>Срок</span><input id="of_due" type="date"></label>
+   <label class="check span-2"><input type="checkbox" id="of_gift"> Подарочный режим: цену в сообщениях не показываем, внутри — с пожеланиями</label>
   </div></div>
   <div class="form-section"><h3>Клиент</h3><div class="form-grid">
    <label class="field"><span>Имя или компания</span><input id="of_customer_name" list="customers_datalist"></label>
@@ -3507,7 +3610,7 @@
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
  </div>
- <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><button class="btn" type="button" id="order_brand_card" hidden>✒ Бренд-карточка</button><button class="btn" type="button" id="order_pack_card" hidden>▦ Карточка упаковки</button><button class="btn" type="button" id="order_thread" hidden>〰 Нить изделия</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>
 
 <dialog class="modal" id="fulfillment_modal"><form method="dialog">
@@ -3873,6 +3976,46 @@
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="maint_modal">Отмена</button><button class="btn primary" type="button" id="mf_done">Отметить выполненным</button></div>
 </form></dialog>
 
+<dialog class="modal" id="wish_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Wish-list</span><h2 id="wish_title">Пожелания клиента</h2><p>«Хочу, когда будет» — сделаем и спросим: «Готово, забрать?»</p></div><button class="icon-btn" type="button" data-close="wish_modal">×</button></div>
+ <div class="modal-body">
+  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+   <input id="wish_new_text" class="field" placeholder="Например: красный адресник с именем" style="flex:1;min-width:200px">
+   <button class="btn sm" type="button" id="wish_add">Добавить</button>
+  </div>
+  <div id="wish_list" class="muted">Загружаем…</div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="wish_modal">Закрыть</button></div>
+</form></dialog>
+<dialog class="modal narrow" id="my_nozza_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Мой NOZZA</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
+ <div class="modal-body" style="text-align:center">
+  <div id="my_qr" style="margin:8px auto;width:160px"></div>
+  <div id="my_code" style="font-size:26px;font-weight:800;letter-spacing:4px;font-family:monospace"></div>
+  <div id="my_link" class="muted" style="margin:8px 0;word-break:break-all"></div>
+  <button class="btn sm" type="button" id="my_copy">Копировать ссылку</button>
+  <button class="btn sm ghost" type="button" id="my_open">Открыть страницу</button>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="my_nozza_modal">Закрыть</button></div>
+</form></dialog>
+<dialog class="modal" id="thread_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Цифровая нить</span><h2 id="thread_title">Заказ → печать → полка → продажа → отзыв</h2><p>Полный путь изделия по системе.</p></div><button class="icon-btn" type="button" data-close="thread_modal">×</button></div>
+ <div class="modal-body"><div id="thread_body" class="muted">Загружаем…</div></div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="thread_modal">Закрыть</button></div>
+</form></dialog>
+<dialog class="modal" id="keyframes_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Видео печати</span><h2 id="kf_title">Кейфреймы задания</h2><p>Кадр каждые несколько минут — таймлайн печати.</p></div><button class="icon-btn" type="button" data-close="keyframes_modal">×</button></div>
+ <div class="modal-body" style="text-align:center">
+  <img id="kf_img" alt="Кейфрейм" style="max-width:100%;border-radius:10px;border:1px solid var(--line)">
+  <div id="kf_cap" class="muted" style="margin-top:6px"></div>
+  <div style="display:flex;gap:8px;justify-content:center;margin-top:10px">
+   <button class="btn sm ghost" type="button" id="kf_play" hidden>▶ Пуск</button>
+   <button class="btn sm ghost" type="button" id="kf_stop" hidden>■ Стоп</button>
+   <input type="range" id="kf_seek" min="0" max="0" value="0" style="flex:1;max-width:360px">
+  </div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="keyframes_modal">Закрыть</button></div>
+</form></dialog>
 <dialog id="cam_modal"><button class="icon-btn" type="button" data-close="cam_modal">×</button><img id="cam_full" alt="Камера принтера"></dialog>
 
 <!-- ============================================ КАРТОЧКА НОМЕНКЛАТУРЫ -->
@@ -4164,6 +4307,12 @@
   <button class="btn primary" type="button" id="shelf_inventory_save">Зафиксировать</button></div>
 </dialog>
 
+<dialog id="shelf_card_modal" class="modal">
+ <div class="modal-head"><div><h3 id="shelf_card_title">Карточка товара</h3><p>Для полки: цена, QR и штрихкод</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_card_modal">✕</button></div>
+ <div class="modal-body"><div id="shelf_card_out"></div></div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="shelf_card_modal">Закрыть</button></div>
+</dialog>
 <dialog id="shelf_qr_modal" class="modal">
  <div class="modal-head"><div><h3>QR-ценник</h3><p>Сканируйте телефоном — откроется страница позиции</p></div>
   <button class="icon-btn" type="button" data-close="shelf_qr_modal">✕</button></div>
@@ -4314,16 +4463,17 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=8.2.1"></script>
-<script src="assets/core.js?v=8.2.1"></script>
-<script src="assets/printer.js?v=8.2.1"></script>
-<script src="assets/ops.js?v=8.2.1"></script>
-<script src="assets/money.js?v=8.2.1"></script>
-<script src="assets/finance.js?v=8.2.1"></script>
-<script src="assets/shelf.js?v=8.2.1"></script>
-<script src="assets/products.js?v=8.2.1"></script>
-<script src="assets/bridge.js?v=8.2.1"></script>
-<script src="assets/app.js?v=8.2.1"></script>
+<script src="assets/qr.js?v=8.5.0"></script>
+<script src="assets/core.js?v=8.5.0"></script>
+<script src="assets/printer.js?v=8.5.0"></script>
+<script src="assets/ops.js?v=8.5.0"></script>
+<script src="assets/money.js?v=8.5.0"></script>
+<script src="assets/finance.js?v=8.5.0"></script>
+<script src="assets/shelf.js?v=8.5.0"></script>
+<script src="assets/products.js?v=8.5.0"></script>
+<script src="assets/bridge.js?v=8.5.0"></script>
+<script src="assets/marketing.js?v=8.5.0"></script>
+<script src="assets/app.js?v=8.5.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */

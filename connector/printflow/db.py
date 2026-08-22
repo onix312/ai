@@ -19,7 +19,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, RESTORE_REQUEST, ensure_dirs, now_iso,
                      rotate_backups)
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -101,6 +101,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reminded_at", "TEXT DEFAULT ''"),  # когда напоминали о долге (B4)
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
         ("items_override", "INTEGER DEFAULT 0"),  # явное переопределение состава
+        ("gift", "INTEGER DEFAULT 0"),       # подарочный режим (идея 33): цена скрыта
     ],
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
@@ -148,6 +149,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("credit_limit", "REAL DEFAULT 0"),
         ("address", "TEXT DEFAULT ''"),
         ("email", "TEXT DEFAULT ''"),
+        ("portal_code", "TEXT DEFAULT ''"),  # код «Мой NOZZA» (идея 94)
     ],
     "spools": [
         ("warehouse_id", "TEXT"),            # где физически лежит катушка
@@ -754,6 +756,18 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rules_event ON automation_rules(event);
+
+-- ------------------------------------------- 8.5: wish-list клиентов (идея 72)
+CREATE TABLE IF NOT EXISTS wishes (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT,
+    order_id TEXT DEFAULT '',
+    text TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',   -- pending | done | declined
+    created_at TEXT,
+    resolved_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_wishes_customer ON wishes(customer_id, status);
 """
 
 

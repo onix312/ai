@@ -93,6 +93,18 @@ def job_passport(db, job_id: str) -> dict[str, Any]:
     if job.get("spool_id"):
         out["spool"] = db.one("SELECT * FROM spools WHERE id=?",
                               (job["spool_id"],)) or {}
+    # --- эко-паспорт (идея 62): пластик и энергия этой печати
+    fact_grams = num(job.get("grams")) or num(job.get("est_grams"))
+    energy_kwh = num(job.get("energy_kwh"))
+    # Ориентировочный CO2 для PLA ~0.9 кг на 1 кг пластика (консервативная оценка)
+    co2_kg = round(fact_grams / 1000.0 * 0.9, 2) if fact_grams else 0.0
+    out["eco"] = {
+        "grams": round(fact_grams, 1),
+        "energy_kwh": round(energy_kwh, 2),
+        "co2_kg": co2_kg,
+        "material": str(job.get("material") or (out.get("spool") or {}).get("material")
+                        or (out.get("order") or {}).get("material") or "PLA"),
+    }
     # --- расшифровка ошибки печати
     if job.get("error"):
         try:

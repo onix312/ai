@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOZZA · ТВ-режим</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root { --bg: #0a0e19; --card: #111827; --line: #1f2a44; --text: #e5e7eb; --muted: #8b96ad; --accent: #f97316; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+#wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; height: 100%; padding: 22px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  padding: 24px; display: flex; flex-direction: column; min-width: 0; }
+.panel h1 { font-size: 15px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin: 0 0 14px; }
+#cam img { width: 100%; flex: 1; min-height: 0; object-fit: cover; border-radius: 12px; background: #000; }
+#cam .tag { position: absolute; }
+.live { display: inline-flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; }
+.live i { width: 12px; height: 12px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+.live.idle i { background: #64748b; animation: none; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+#task { font-size: 34px; font-weight: 800; margin: 16px 0 6px; }
+#meta { color: var(--muted); font-size: 17px; }
+.ring-wrap { position: relative; width: min(40vh, 380px); margin: 26px auto; }
+.ring-wrap svg { transform: rotate(-90deg); width: 100%; height: auto; }
+.ring-track { fill: none; stroke: var(--line); stroke-width: 10; }
+.ring-fill { fill: none; stroke: var(--accent); stroke-width: 10; stroke-linecap: round;
+  transition: stroke-dashoffset 1s ease; }
+.ring-cap { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.ring-cap b { font-size: 58px; font-weight: 800; }
+.ring-cap small { color: var(--muted); font-size: 16px; }
+#facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: auto; }
+#facts div { background: rgba(148,163,184,.07); border-radius: 12px; padding: 14px; }
+#facts span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+#facts b { font-size: 24px; }
+#clock { position: fixed; right: 26px; bottom: 18px; font-size: 15px; color: var(--muted); letter-spacing: 1px; }
+#brand { position: fixed; left: 26px; bottom: 18px; font-size: 15px; color: var(--muted); }
+#brand b { color: var(--accent); }
+/* большой монитор: камера во всю ширину, без колец */
+body.monitor #wrap { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; }
+body.monitor .ring-wrap { display: none; }
+body.monitor #task { font-size: 26px; margin: 10px 0 4px; }
+body.monitor #facts { grid-template-columns: repeat(4, 1fr); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="panel" id="cam">
+    <h1>Камера цеха</h1>
+    <img id="cam_img" alt="Камера">
+    <div style="margin-top:12px" id="cam_state" class="muted">Подключаемся…</div>
+  </div>
+  <div class="panel">
+    <h1>Сейчас печатается</h1>
+    <div class="live idle" id="live"><i></i><span id="live_text">ждём данных</span></div>
+    <div id="task">—</div>
+    <div id="meta"></div>
+    <div class="ring-wrap">
+      <svg viewBox="0 0 120 120">
+        <circle class="ring-track" cx="60" cy="60" r="52"></circle>
+        <circle class="ring-fill" id="ring" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+      </svg>
+      <div class="ring-cap"><b id="pct">—</b><small>готово</small></div>
+    </div>
+    <div id="facts">
+      <div><span>Слой</span><b id="f_layer">—</b></div>
+      <div><span>Осталось</span><b id="f_left">—</b></div>
+      <div><span>Финиш</span><b id="f_eta">—</b></div>
+    </div>
+  </div>
+</div>
+<div id="brand"><b>NOZZA</b> · цех</div>
+<div id="clock"></div>
+<script>
+'use strict';
+const qs = new URLSearchParams(location.search);
+const mode = qs.get('mode') === 'monitor' ? 'monitor' : 'tv';
+document.body.classList.add(mode);
+
+function $(id) { return document.getElementById(id); }
+const RING = 2 * Math.PI * 52;
+function minutesText(m) {
+  m = Math.round(m || 0);
+  if (!m) return '—';
+  const h = Math.floor(m / 60), mm = m % 60;
+  return h ? h + ' ч ' + (mm ? mm + ' мин' : '') : mm + ' мин';
+}
+async function tick() {
+  try {
+    const res = await fetch('/api/state');
+    const st = await res.json();
+    const snap = (st.active) || ((st.printers || [])[0]) || null;
+    if (!snap) { $('cam_state').textContent = 'Принтеры не добавлены'; return; }
+    const p = snap.printer || {};
+    const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(p.state);
+    $('live').classList.toggle('idle', !running);
+    $('live_text').textContent = running
+      ? (p.state === 'PAUSE' ? 'на паузе' : 'печать идёт')
+      : (snap.name || 'принтер');
+    $('task').textContent = (running && (p.task || 'Печать')) || 'Свободен';
+    const progress = Math.max(0, Math.min(100, parseFloat(p.progress) || 0));
+    $('pct').textContent = running ? Math.round(progress) + '%' : '—';
+    $('ring').style.strokeDashoffset = String(RING - RING * progress / 100);
+    $('meta').textContent = running
+      ? `${snap.name} · ${p.state_label || ''}`
+      : (p.state_label || 'Готов к печати');
+    $('f_layer').textContent = (p.layer != null && p.layer !== '')
+      ? `${p.layer} / ${p.total_layers || '—'}` : '—';
+    $('f_left').textContent = minutesText(p.remaining_min);
+    $('f_eta').textContent = p.eta
+      ? new Date(p.eta * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+      : '—';
+    // камера: кадр обновляем раз в 4 секунды
+    const t = Date.now();
+    $('cam_img').src = `/api/printer/camera.jpg?printer_id=${encodeURIComponent(snap.id || '')}&t=${t}`;
+    $('cam_state').textContent = snap.connection && snap.connection.mode === 'virtual'
+      ? 'Виртуальный принтер · демо-камера'
+      : `обновлено ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  } catch (e) {
+    $('cam_state').textContent = 'Коннектор недоступен — переподключим';
+  }
+}
+function clock() {
+  $('clock').textContent = new Date().toLocaleTimeString('ru-RU',
+    { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+tick();
+clock();
+setInterval(tick, 5000);
+setInterval(clock, 1000);
+</script>
+</body>
+</html>

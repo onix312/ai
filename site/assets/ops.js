@@ -733,6 +733,12 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   renderItemsEcon(data.items_economics || []);
   updateOrderItemsSummary();
   $('of_reserved').checked = Boolean(num(data.reserved));
+  if ($('of_gift')) $('of_gift').checked = Boolean(num(data.gift));
+  const has85 = Boolean(id);
+  ['order_brand_card', 'order_pack_card', 'order_thread'].forEach((bid) => {
+    const b = $(bid);
+    if (b) b.hidden = !has85;
+  });
   updateReadyStockHint();
   $('of_auto_cost').value = String(num(data.auto_cost, 1) ? 1 : 0);
   // Оплата — только через единый журнал платежей. В карточке показываем
@@ -1004,6 +1010,7 @@ async function saveOrder(prepareAfter) {
   distributeSpoolGrams();
   payload.spools = collectSpoolRows();
   payload.reserved = $('of_reserved').checked ? 1 : 0;
+  if ($('of_gift')) payload.gift = $('of_gift').checked ? 1 : 0;
   payload.items = collectOrderItems();
   payload.items_override = $('of_items_override') && $('of_items_override').checked ? 1 : 0;
   if (!payload.product.trim()) {
@@ -1268,8 +1275,10 @@ function renderCustomers() {
       + `<td class="right tnum">${nfmt(c.orders)}</td>`
       + `<td class="right tnum">${money(c.revenue)}</td>`
       + `<td>${c.last_order ? esc(dateText(c.last_order)) : '—'}</td>`
-      + `<td><span class="chip ${seg[0]}">${seg[1]}</span></td></tr>`;
-  }).join('') : '<tr><td colspan="6"><div class="empty compact"><span>Клиенты появятся после первого заказа.</span></div></td></tr>';
+      + `<td><span class="chip ${seg[0]}">${seg[1]}</span></td>`
+      + `<td><button class="btn xs" type="button" data-cust-my="${esc(c.id)}" title="Страница «Мой NOZZA» по коду">🔑 Мой NOZZA</button> `
+      + `<button class="btn xs" type="button" data-cust-wish="${esc(c.id)}" title="Wish-list: хочу, когда будет">💌 Пожелания</button></td></tr>`;
+  }).join('') : '<tr><td colspan="7"><div class="empty compact"><span>Клиенты появятся после первого заказа.</span></div></td></tr>';
 }
 
 /* =============================================== обратная связь после продажи */
@@ -1498,6 +1507,133 @@ async function previewOrderIntake() {
     button.disabled = false;
     button.textContent = 'Разобрать и заполнить';
   }
+}
+
+/* ============================================== 8.5: действия заказа */
+function openPackCard() {
+  if (!editingOrder) return;
+  window.open('/api/order/pack?id=' + encodeURIComponent(editingOrder), '_blank');
+}
+async function orderBrandCard() {
+  if (!editingOrder) return;
+  try {
+    const r = await post('/api/order/brand-card', { order_id: editingOrder });
+    toast('Бренд-карточка в очереди', r.job && r.job.name ? r.job.name : '');
+    await PF.refreshCore();
+  } catch (e) { fail(e); }
+}
+async function openOrderThread() {
+  if (!editingOrder) return;
+  const body = $('thread_body');
+  body.innerHTML = '<span class="muted">Загружаем…</span>';
+  openModal('thread_modal');
+  try {
+    const d = await get('/api/order/thread', { id: editingOrder });
+    const o = d.order || {};
+    const row = (icon, title, detail, tone) =>
+      `<div class="mini-row"><span class="dot ${tone || ''}"></span>`
+      + `<div class="mbody"><b>${esc(title)}</b><small>${detail}</small></div></div>`;
+    let html = row('①', `Заказ №${o.number || ''} · ${o.product || ''}`,
+      `${o.customer_name || 'без клиента'} · ${dateTimeText(o.created_at)} · ${money(o.price)}${o.gift ? ' · подарочный' : ''}`);
+    (d.print || []).forEach((j) => {
+      html += row('②', `Печать: ${j.name || j.id}`,
+        `${esc(j.state)}${j.grams ? ` · ${nfmt(j.grams)} г` : ''}${j.duration_min ? ` · ${minutesText(j.duration_min)}` : ''}`);
+    });
+    if (d.shelf && d.shelf.item_id) {
+      const last = (d.shelf.recent_sales || [])[0];
+      html += row('③', `Полка: ${d.shelf.name}`,
+        `остаток ${nfmt(d.shelf.qty)} шт${last ? ` · последняя продажа ${dateTimeText(last.at)}` : ''}`);
+    }
+    if (d.income && d.income.length) {
+      const last = d.income[d.income.length - 1];
+      html += row('④', `Оплата: ${money(last.amount)}`, `${d.income.length} проводок · последняя ${dateTimeText(last.at)}`);
+    }
+    if (d.feedback) {
+      html += row('⑤', `Отзыв: ${nfmt(d.feedback.rating)}/5`, d.feedback.text || 'текст не заполнен',
+        num(d.feedback.rating) >= 4 ? 'on' : 'bad');
+    } else {
+      html += row('⑤', 'Отзыв ещё не собран', 'после выдачи система подберёт момент для запроса');
+    }
+    body.innerHTML = html;
+  } catch (e) { body.innerHTML = `<span style="color:#ef4444">${esc(e.message)}</span>`; }
+}
+
+/* ============================================== 8.5: wish-list (#72) */
+let wishCustomerId = '';
+let wishCustomerName = '';
+let wishList = [];
+async function openWishes(id, name) {
+  wishCustomerId = id;
+  wishCustomerName = name || '';
+  $('wish_title').textContent = `Пожелания · ${wishCustomerName || 'клиент'}`;
+  $('wish_list').innerHTML = '<span class="muted">Загружаем…</span>';
+  openModal('wish_modal');
+  try {
+    const d = await get('/api/wish/list', { customer_id: id });
+    wishList = d.wishes || [];
+    renderWishes();
+  } catch (e) {
+    $('wish_list').innerHTML = `<span style="color:#ef4444">${esc(e.message)}</span>`;
+  }
+}
+function renderWishes() {
+  const el = $('wish_list');
+  if (!wishList.length) {
+    el.innerHTML = '<span class="muted">Пожеланий пока нет — записывайте: «хочу, когда будет».</span>';
+    return;
+  }
+  const WISH_STATE = { pending: ['accent', 'ждёт'], done: ['ok', 'сделано'], declined: ['outline', 'отклонено'] };
+  el.innerHTML = wishList.map((w) => {
+    const st = WISH_STATE[w.status] || ['outline', w.status];
+    return `<div class="mini-row"><span class="dot ${w.status === 'done' ? 'on' : ''}"></span>`
+      + `<div class="mbody"><b>${esc(w.text)}</b><small>${dateTimeText(w.created_at)} · ${st[1]}</small></div>`
+      + `<span class="chip ${st[0]}">${st[1]}</span>`
+      + (w.status === 'pending'
+        ? `<button class="btn xs ok" type="button" data-wish-done="${esc(w.id)}">✓ Готово</button>`
+        + `<button class="btn xs ghost" type="button" data-wish-del="${esc(w.id)}">×</button>`
+        : `<button class="btn xs ghost" type="button" data-wish-del="${esc(w.id)}">×</button>`)
+      + '</div>';
+  }).join('');
+}
+async function wishAction(action, id) {
+  try {
+    if (action === 'done') await post('/api/wish/resolve', { id, status: 'done' });
+    if (action === 'del') await post('/api/wish/delete', { id });
+    const d = await get('/api/wish/list', { customer_id: wishCustomerId });
+    wishList = d.wishes || [];
+    renderWishes();
+    if (action === 'done') toast('Отмечено готовым', 'Готовьте сообщение клиенту');
+  } catch (e) { fail(e); }
+}
+
+/* ============================================== 8.5: «Мой NOZZA» (#94) */
+async function openMyNozza(id) {
+  const box = $('my_code');
+  box.textContent = '…';
+  $('my_qr').innerHTML = '';
+  $('my_link').textContent = '';
+  $('my_title').textContent = 'Страница клиента';
+  openModal('my_nozza_modal');
+  try {
+    const r = await post('/api/portal/code', { customer_id: id });
+    const code = String(r.code || '').toUpperCase();
+    box.textContent = code;
+    const base = (PF.state.settings.public_url || '').replace(/\/$/, '') || location.origin;
+    const link = `${base}/my.html?code=${code}`;
+    $('my_link').textContent = link;
+    if (window.QR) $('my_qr').innerHTML = window.QR.svg(link, { size: 160 });
+    $('my_copy').onclick = () => copyTextLocal(link, 'Ссылка «Мой NOZZA»');
+    $('my_open').onclick = () => window.open(link, '_blank');
+  } catch (e) {
+    box.textContent = '';
+    $('my_link').innerHTML = `<span style="color:#ef4444">${esc(e.message)}</span>`;
+  }
+}
+function copyTextLocal(text, label) {
+  const done = () => toast('Скопировано', label || '');
+  const bad = () => fail(new Error('Не удалось скопировать'));
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, bad);
+  else bad();
 }
 
 /* ============================================================= события */
@@ -1773,6 +1909,43 @@ function bind() {
   $('aftercare_list').addEventListener('click', (e) => {
     const button = e.target.closest('[data-aftercare]');
     if (button) openAftercare(button.dataset.aftercare);
+  });
+
+  /* 8.5: бренд-карточка, упаковка, нить изделия */
+  $('order_brand_card').addEventListener('click', orderBrandCard);
+  $('order_pack_card').addEventListener('click', openPackCard);
+  $('order_thread').addEventListener('click', openOrderThread);
+
+  /* 8.5: клиенты — «Мой NOZZA» и wish-list */
+  $('customers_tbody').addEventListener('click', (e) => {
+    const my = e.target.closest('[data-cust-my]');
+    if (my) {
+      openMyNozza(my.dataset.custMy);
+      return;
+    }
+    const wish = e.target.closest('[data-cust-wish]');
+    if (wish) {
+      const c = PF.state.customers.find((x) => x.id === wish.dataset.custWish);
+      openWishes(wish.dataset.custWish, c ? c.name : '');
+    }
+  });
+  $('wish_add').addEventListener('click', async () => {
+    const text = ($('wish_new_text').value || '').trim();
+    if (!text) return fail(new Error('Опишите пожелание'));
+    try {
+      await post('/api/wish/save', { customer_id: wishCustomerId, text });
+      $('wish_new_text').value = '';
+      const d = await get('/api/wish/list', { customer_id: wishCustomerId });
+      wishList = d.wishes || [];
+      renderWishes();
+      toast('Записано', 'Сообщим, когда будет готово');
+    } catch (e) { fail(e); }
+  });
+  $('wish_list').addEventListener('click', (e) => {
+    const done = e.target.closest('[data-wish-done]');
+    if (done) { wishAction('done', done.dataset.wishDone); return; }
+    const del = e.target.closest('[data-wish-del]');
+    if (del && confirmDanger('Удалить пожелание?')) wishAction('del', del.dataset.wishDel);
   });
   $('aftercare_copy_request').addEventListener('click', () =>
     copyAftercare('aftercare_request_text', 'Запрос скопирован'));

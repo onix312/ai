@@ -77,6 +77,41 @@ def spaghetti_decision(ratio: float, strikes: int, sensitivity: float) -> tuple[
     return max(0, strikes - 1), False
 
 
+def first_layer_decision(ref_score: float, score: float, min_ratio: float = 0.4) -> bool:
+    """Первый слой: тревога, если плотность кромок резко упала к эталону.
+
+    ref_score — оценка кадра в начале печати (этап, когда слой ложится),
+    score — текущая. Если деталь отошла от стола, на кадре остаётся почти
+    пустой стол — кромок заметно меньше. Чистая функция — тестируется
+    без камеры.
+    """
+    if ref_score <= 0 or score <= 0:
+        return False
+    return score < ref_score * max(0.1, min_ratio)
+
+
+def frame_diff_ratio(a: bytes, b: bytes) -> float | None:
+    """Доля пикселей, различающихся между двумя JPEG-кадрами (0..100).
+
+    Для «деталь осталась на столе» (идея 10): кадр после финиша против
+    эталона пустого стола. None — если Pillow не установлен или кадр
+    не распознал.
+    """
+    if not HAS_PIL:
+        return None
+    try:
+        img_a = Image.open(io.BytesIO(a)).convert("L").resize((160, 120))
+        img_b = Image.open(io.BytesIO(b)).convert("L").resize((160, 120))
+        data_a = list(img_a.getdata())
+        data_b = list(img_b.getdata())
+    except Exception:
+        return None
+    if not data_a:
+        return None
+    diff = sum(1 for x, y in zip(data_a, data_b) if abs(x - y) > 24)
+    return round(diff / len(data_a) * 100, 1)
+
+
 def grayscale_matrix(image) -> list[list[int]]:
     """PIL-изображение (уже в оттенках серого) → двумерный список 0..255."""
     width, height = image.size

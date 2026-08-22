@@ -196,6 +196,19 @@ def qr_stand_base(width: float = 60.0, depth: float = 40.0,
     return stl_bytes(tris)
 
 
+def brand_card(text: str, width: float = 50.0, height: float = 30.0,
+               thickness: float = 3.0, font_h: float = 6.0) -> bytes:
+    """Бренд-карточка в заказ (идея 42): визитка цеха с выдвинутым логотипом."""
+    tris = box(0.0, 0.0, 0.0, width, height, thickness)
+    cell = font_h * 0.9
+    text_w = len(str(text)) * 5 * cell + max(0, len(str(text)) - 1) * 0.6
+    text_h = 7 * cell
+    x0 = (width - text_w) / 2
+    y0 = (height - text_h) / 2
+    tris += emboss_text_tris(thickness, str(text), font_h, x0, y0, cell)
+    return stl_bytes(tris)
+
+
 # --------------------------------------------------------------- превью
 def preview_svg(shape: str, params: dict) -> str:
     """SVG-превью изделия (для карточки конструктора, до генерации STL)."""
@@ -217,6 +230,15 @@ def preview_svg(shape: str, params: dict) -> str:
         d = float(params.get("depth", 40))
         return (f'<svg viewBox="0 0 {w + 6} {d + 6}" xmlns="http://www.w3.org/2000/svg">'
                 f'<rect x="3" y="3" width="{w}" height="{d}" rx="4" fill="#7c3aed"/></svg>')
+    if shape == "brand_card":
+        w = float(params.get("width", 50))
+        h = float(params.get("height", 30))
+        text = str(params.get("text", "НОZZА"))
+        return (f'<svg viewBox="0 0 {w + 6} {h + 6}" xmlns="http://www.w3.org/2000/svg">'
+                f'<rect x="3" y="3" width="{w}" height="{h}" rx="3" fill="#f97316"/>'
+                f'<text x="{(w + 6) / 2}" y="{(h + 6) / 2 + 3}" text-anchor="middle" '
+                f'font-size="{min(w, h) * 0.34}" fill="#fff" font-family="Arial" '
+                f'font-weight="bold">{text}</text></svg>')
     return '<svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg"><text>?</text></svg>'
 
 
@@ -237,4 +259,12 @@ def generate(shape: str, params: dict) -> bytes:
         return qr_stand_base(width=float(params.get("width", 60)),
                              depth=float(params.get("depth", 40)),
                              height=float(params.get("height", 6.0)))
+    if shape == "brand_card":
+        text = str(params.get("text") or "").strip()
+        return brand_card(
+            text or "НОZZА",
+            width=float(params.get("width", 50)),
+            height=float(params.get("height", 30)),
+            thickness=float(params.get("thickness", 3.0)),
+            font_h=float(params.get("font_h", 6.0)))
     raise ValueError("Неизвестная форма")

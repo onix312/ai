@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мой NOZZA</title>
+<style>
+:root { --bg: #0d1220; --card: #141c30; --line: #24304e; --text: #e5e7eb; --muted: #8b96ad; --accent: #f97316; --ok: #22c55e; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font-family: Arial, Helvetica, sans-serif; min-height: 100vh; }
+.shell { max-width: 640px; margin: 0 auto; padding: 30px 18px 60px; }
+.brand { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.brand b { font-size: 30px; color: var(--accent); letter-spacing: 1px; }
+.brand span { color: var(--muted); font-size: 14px; }
+h1 { font-size: 20px; margin: 18px 0 4px; }
+.sub { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 18px; margin-bottom: 12px; }
+.card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.6px;
+  color: var(--muted); margin: 0 0 10px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row .ic { width: 40px; height: 40px; border-radius: 10px; overflow: hidden; flex: none;
+  background: #0a0e19; display: grid; place-content: center; font-size: 20px; }
+.row .ic img { width: 100%; height: 100%; object-fit: cover; }
+.row b { font-size: 15px; }
+.row small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.chip { margin-left: auto; flex: none; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.chip.ok { background: rgba(34,197,94,.15); color: var(--ok); }
+.chip.mid { background: rgba(249,115,22,.15); color: var(--accent); }
+.chip.new { background: rgba(148,163,184,.15); color: var(--muted); }
+.debt { font-size: 16px; }
+.debt b { color: var(--accent); font-size: 20px; }
+.empty { color: var(--muted); font-size: 14px; }
+.err { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.4); color: #fca5a5;
+  border-radius: 12px; padding: 14px 16px; font-size: 14.5px; }
+.foot { margin-top: 26px; color: var(--muted); font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand"><b>NOZZA</b><span>личный уголок заказчика</span></div>
+  <div id="content"><div class="empty">Проверяем код…</div></div>
+  <div class="foot">Страница открывается по коду из визитки или сообщения. Если заказ не отображается — позвоните в цех.</div>
+</div>
+<script>
+'use strict';
+const code = new URLSearchParams(location.search).get('code') || '';
+const el = document.getElementById('content');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function chipFor(order) {
+  if (order.final) return '<span class="chip ok">готово / выдано</span>';
+  if (['ready', 'printing', 'production'].includes(order.status) || /печат/i.test(order.status || ''))
+    return '<span class="chip mid">в работе</span>';
+  return '<span class="chip new">' + esc(order.status || 'в работе') + '</span>';
+}
+
+async function main() {
+  if (!code) {
+    el.innerHTML = '<div class="err">В ссылке нет кода. Код даёт цех — он есть на визитке и в сообщении после заказа.</div>';
+    return;
+  }
+  try {
+    const res = await fetch('/api/public/my?code=' + encodeURIComponent(code.toUpperCase()));
+    const d = await res.json();
+    if (!res.ok || d.error) {
+      el.innerHTML = `<div class="err">${esc(d.error || 'Код не найден')}</div>`;
+      return;
+    }
+    document.title = `Мой NOZZA · ${d.name || ''}`;
+    el.innerHTML = `<h1>${esc(d.name || 'Здравствуйте!')}</h1>` +
+      `<div class="sub">Ваши заказы в цеху NOZZA обновляются сами.</div>` + ordersHtml(d);
+  } catch (e) {
+    el.innerHTML = '<div class="err">Цех сейчас недоступен. Загляните позже.</div>';
+  }
+}
+function ordersHtml(d) {
+  const orders = d.orders || [];
+  return `<div class="card"><h2>Заказы</h2>` +
+    (orders.length ? orders.map((o) =>
+      `<div class="row">` +
+      `<span class="ic">${o.photos && o.photos.length ? '▣' : '▦'}</span>` +
+      `<div><b>${esc(o.number ? '№' + o.number : 'Заказ')} · ${esc(o.product || '')}</b>` +
+      `<small>${o.qty > 1 ? esc(o.qty) + ' шт · ' : ''}${esc(o.created_at || '')}</small></div>` +
+      chipFor(o) + `</div>`).join('')
+      : '<div class="empty">Заказов пока нет.</div>') + `</div>` +
+    (d.debt > 0
+      ? `<div class="card debt"><h2>К оплате</h2>Осталось ${esc(d.debt)} ₽ — удобно рассчитаться при получении.</div>`
+      : `<div class="card debt"><h2>Оплата</h2>Всё оплачено. Спасибо, что выбрали нас!</div>`);
+}
+main();
+</script>
+</body>
+</html>

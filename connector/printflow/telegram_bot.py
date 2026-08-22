@@ -96,6 +96,7 @@ class TelegramBot:
         self.db = manager.db
         self._stop = threading.Event()
         self._offset = 0
+        self.last_poll = 0.0  # время успешного опроса (сердцебиение, идея 36)
         self._pending_stop: dict[str, float] = {}
         self._live: dict[str, dict] = {}  # chat -> {message_id, text} живого дашборда
         self._printer_choice: dict[str, str] = {}  # chat -> printer_id
@@ -152,6 +153,7 @@ class TelegramBot:
                     "offset": self._offset, "timeout": 25,
                     "allowed_updates": json.dumps(["message", "callback_query"]),
                 })
+                self.last_poll = time.time()
                 for update in (result.get("result") or []):
                     self._offset = max(self._offset, num(update.get("update_id")) + 1)
                     self._handle(update, str(settings.get("telegram_chat_id")))

@@ -272,6 +272,57 @@ class Shelf:
             "plan_qty": plan,
         }
 
+    # ------------------------------------------------- прогноз и таблички
+    def forecast(self, days: int = 7) -> list[dict[str, Any]]:
+        """Симуляция полки: при текущей скорости продаж сколько будет через N дней.
+
+        Идея 13. Скорость берётся за 7 дней (как в `items()`); дефицит —
+        красная полоса. Позиции без продаж показываются с нулевой скоростью:
+        это честно, а не домысел.
+        """
+        days = max(1, min(int(days or 7), 30))
+        out = []
+        for i in self.items():
+            if num(i["qty"]) <= 0 and num(i["sold_7"]) <= 0:
+                continue  # пусто и не продаётся — в прогноз не входит
+            rate = num(i["rate_per_day"])
+            projected = num(i["qty"]) - rate * days
+            gap = max(0.0, rate * days - num(i["qty"]))
+            out.append({
+                "id": i["id"], "name": i["name"], "qty": i["qty"],
+                "rate_per_day": rate,
+                "projected": round(max(0.0, projected), 1),
+                "gap": round(gap, 1),
+                "days_left": i["days_left"],
+                "empty": projected <= 0,
+                "low": 0 < projected <= num(i.get("min_qty") or 0),
+            })
+        out.sort(key=lambda r: (not r["empty"], r["projected"] / (r["rate_per_day"] or 1)))
+        return out
+
+    def live_tags(self, limit: int = 5) -> dict[str, list[dict[str, Any]]]:
+        """Живые таблички полки: хит / новинка / последний. Идея 102.
+
+        • хит — топ продаж за 30 дней;
+        • новинка — позиция создана (или пришла) не более 14 дней назад;
+        • «последний!» — остаток 1 штука.
+        """
+        items = self.items()
+        since_new = (datetime.now() - timedelta(days=DEAD_DAYS)).isoformat()
+        hits = sorted([i for i in items if num(i["sold_30"]) > 0],
+                      key=lambda x: num(x["sold_30"]), reverse=True)[:max(1, limit)]
+        news = [i for i in items
+                if str(i.get("created_at") or "") >= since_new or
+                str(i.get("updated_at") or "") >= since_new]
+        news = news[:max(1, limit)]
+        last = [i for i in items if 0 < num(i["qty"]) <= 1][:max(1, limit)]
+        slim = lambda i: {"id": i["id"], "name": i["name"], "price": num(i["price"]),
+                          "qty": i["qty"],
+                          "sold_30": i["sold_30"], "sold_7": i["sold_7"]}
+        return {"hit": [slim(i) for i in hits],
+                "new": [slim(i) for i in news],
+                "last": [slim(i) for i in last]}
+
     # ------------------------------------------------------------- QR-ценник
     def qr_link(self, item_id: str, host: str = "", public_url: str = "",
                 listen_port: int = 8080) -> dict:

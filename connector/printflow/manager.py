@@ -6,6 +6,7 @@ PrinterManager связывает MQTT-мост, базу данных и бух
 """
 from __future__ import annotations
 
+import io
 import json
 import threading
 import time
@@ -56,6 +57,10 @@ class PrinterManager:
         self._last_backup_attempt = 0.0
         # Авто-продолжение при сбое питания (Крым): трекинг пауз и попыток
         self._user_paused: dict[str, float] = {}
+        # 8.5: видео печати, первый слой
+        self._keyframe_last: dict[str, float] = {}
+        self._first_layer_ref: dict[str, float] = {}
+        self._first_layer_alerted: set[str] = set()
         self._auto_resume_attempts: dict[str, dict] = {}
         self._auto_resume_blocked_at: dict[str, float] = {}
         self._startup_ts = time.time()
@@ -81,6 +86,7 @@ class PrinterManager:
     # ------------------------------------------------------------- управление
     def reload(self) -> None:
         """Синхронизировать список подключений с таблицей printers."""
+        from .virtual import VIRTUAL_ID
         records = {r["id"]: r for r in self.db.query("SELECT * FROM printers")}
         # Access Code может лежать зашифрованным — расшифровываем для подключения.
         try:
@@ -100,7 +106,7 @@ class PrinterManager:
         }
         with self.lock:
             for pid in list(self.printers):
-                if pid not in records:
+                if pid not in records and pid != VIRTUAL_ID:
                     self.printers.pop(pid).shutdown()
             for pid, record in records.items():
                 enriched = dict(record)
@@ -120,6 +126,22 @@ class PrinterManager:
                     self.guard.seed_maintenance(pid)
                 except Exception:
                     continue
+            # Виртуальный принтер (идея 7): демо-P1S не живёт в таблице
+            # printers, его жизненным циклом управляет demo_printer_enabled.
+            from .virtual import VirtualPrinter
+            demo_on = bool(self.db.setting("demo_printer_enabled", False))
+            existing = self.printers.get(VIRTUAL_ID)
+            demo_record = {"id": VIRTUAL_ID, "name": "P1S (виртуальный)",
+                           "model": "P1S", "enabled": 1, "mode": "virtual"}
+            if demo_on and not existing:
+                printer = VirtualPrinter(self.db, demo_record,
+                                         self._make_handler(VIRTUAL_ID))
+                self.printers[VIRTUAL_ID] = printer
+                printer.start()
+            elif demo_on and existing:
+                existing.update_record(demo_record)
+            elif existing:
+                self.printers.pop(VIRTUAL_ID).shutdown()
 
     def _cloud_creds(self) -> dict:
         """Токен/uid/регион аккаунта Bambu из настроек (для облачных принтеров)."""
@@ -348,6 +370,8 @@ class PrinterManager:
             )
             job["remote_task_id"] = remote_task_id
         self._finalize_job(job, state, kind, duration, grams, data)
+        if kind == "complete":
+            self.watch_bed(printer_id)
         self._maybe_start_next(printer_id)
 
     def _finalize_job(self, job: dict, state: str, kind: str,
@@ -2810,6 +2834,144 @@ class PrinterManager:
             if not ok and self.db.setting("notify_guard", True):
                 self.notify_async(f"PrintFlow: отложенная команда не выполнилась\n{err}", None)
 
+    # ------------------------------------------------ 8.5: наблюдение за цехом
+    def capture_keyframes(self, printer, job: dict) -> None:
+        """Видео печати (идеи 61, 87): кадр раз в N минут в архив задания."""
+        interval = num(self.db.setting("keyframe_interval_min", 0.0), 0.0)
+        if interval < 0.5:
+            return
+        frame = getattr(printer.camera, "frame", None)
+        if not frame:
+            return
+        now = time.time()
+        if now - self._keyframe_last.get(job["id"], 0.0) < interval * 60:
+            return
+        self._keyframe_last[job["id"]] = now
+        try:
+            from .config import PHOTO_DIR
+            d = PHOTO_DIR / "keyframes" / str(job["id"])
+            d.mkdir(parents=True, exist_ok=True)
+            (d / time.strftime("%Y%m%d-%H%M%S.jpg")).write_bytes(frame)
+            # Архив живёт 14 дней — дальше можно удалять без сожалений.
+            for old in d.parent.iterdir():
+                if old.is_dir() and time.time() - old.stat().st_mtime > 14 * 86400:
+                    import shutil
+                    shutil.rmtree(old, ignore_errors=True)
+        except Exception:
+            pass
+
+    def watch_first_layer(self, printer, snap: dict, job: dict) -> None:
+        """Первый слой (идея 60): первые N минут следим за столом в кадре."""
+        minutes = num(self.db.setting("first_layer_watch_min", 5.0), 5.0)
+        if not minutes or (snap.get("camera") or {}).get("demo"):
+            return
+        elapsed = num((snap.get("printer") or {}).get("elapsed_min"), 0.0)
+        if elapsed <= 0 or elapsed > minutes or job["id"] in self._first_layer_alerted:
+            return
+        frame = getattr(printer.camera, "frame", None)
+        if not frame:
+            return
+        try:
+            from PIL import Image
+            from .spaghetti import (edge_score, first_layer_decision,
+                                    grayscale_matrix)
+            img = Image.open(io.BytesIO(frame)).convert("L").resize((160, 120))
+            score = edge_score(grayscale_matrix(img))
+        except Exception:
+            return
+        ref = self._first_layer_ref.get(job["id"])
+        if ref is None:
+            self._first_layer_ref[job["id"]] = score
+            return
+        if first_layer_decision(ref, score):
+            self._first_layer_alerted.add(job["id"])
+            self.db.add_event(
+                "guard", "Первый слой: печать могла оторваться от стола",
+                "Плотность кромок в кадре резко упала — проверьте деталь",
+                printer.id, {"job_id": job["id"]})
+            if self.db.setting("notify_guard", True):
+                self.notify_async(
+                    "PrintFlow: первый слой — печать могла оторваться от стола. "
+                    "Пауза и проверка.", frame,
+                    buttons=[("⏸ Пауза", "cmd:pause"), ("📷 Кадр", "cmd:frame")],
+                    critical=True)
+
+    def watch_bed(self, printer_id: str) -> None:
+        """Деталь осталась на столе (идея 10): кадр финиша vs эталон стола."""
+        if not self.db.setting("bed_watch_enabled", False):
+            return
+        printer = self.get(printer_id)
+        if not printer:
+            return
+        frame = getattr(printer.camera, "frame", None)
+        if not frame:
+            return
+        from .config import PHOTO_DIR
+        ref_file = PHOTO_DIR / "bed_reference.jpg"
+        if not ref_file.exists():
+            return
+        from .spaghetti import frame_diff_ratio
+        ratio = frame_diff_ratio(frame, ref_file.read_bytes())
+        if ratio is None:
+            return
+        threshold = num(self.db.setting("bed_watch_threshold", 6.0), 6.0)
+        if ratio > threshold:
+            self.db.add_event(
+                "guard", "Деталь могла остаться на столе",
+                f"Кадр отличается от пустого стола на {ratio}% — снимите деталь",
+                printer_id, {"diff_pct": ratio})
+            if self.db.setting("notify_guard", True):
+                self.notify_async(
+                    f"PrintFlow: печать завершена, стол не пустой (разница {ratio}%). "
+                    "Снимите деталь.", frame,
+                    buttons=[("🤚 Снял", "cmd:removed")], critical=True)
+
+    def set_bed_reference(self, printer_id: str) -> dict:
+        """Калибровка: сохранить текущий кадр как эталон пустого стола."""
+        printer = self.get(printer_id)
+        if not printer:
+            raise ValueError("Принтер не найден")
+        frame = getattr(printer.camera, "frame", None)
+        if not frame:
+            raise ValueError("Кадр камеры ещё не получен")
+        from .config import PHOTO_DIR
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        (PHOTO_DIR / "bed_reference.jpg").write_bytes(frame)
+        self.db.add_event("system", "Эталон пустого стола сохранён",
+                          "Для проверки «деталь на столе»", printer_id)
+        return {"ok": True}
+
+    def night_reset_if_due(self) -> None:
+        """Ночной сброс цеха (идея 85): один раз в день — итоги дня в базу."""
+        if not self.db.setting("night_reset_enabled", True):
+            return
+        today = time.strftime("%Y-%m-%d")
+        if time.strftime("%H:%M") < str(self.db.setting("night_reset_time", "23:00") or "23:00"):
+            return
+        done = self.db.one(
+            "SELECT id FROM events WHERE kind='system' AND title='Ночной сброс цеха'"
+            " AND date(at)=date(?)", (today,))
+        if done:
+            return
+        try:
+            stats = self.db.one(
+                "SELECT COALESCE(SUM(print_minutes),0) m, COALESCE(SUM(grams),0) g,"
+                " COALESCE(SUM(jobs_done),0) d, COALESCE(SUM(jobs_failed),0) f"
+                " FROM printer_stats WHERE date(day)=date(?)", (today,)) or {}
+            income = self.db.one(
+                "SELECT COALESCE(SUM(amount),0) v FROM transactions"
+                " WHERE kind='income' AND date(at)=date(?)", (today,)) or {}
+            text = (f"Сегодня: {int(num(stats.get('d')))} печатей "
+                    f"({num(stats.get('m')) / 60:.1f} ч, {num(stats.get('g')):.0f} г), "
+                    f"сбоев {int(num(stats.get('f')))}, "
+                    f"доход {num(income.get('v')):,.0f} ₽")
+            self.db.add_event("system", "Ночной сброс цеха", text, "",
+                              {"hours": round(num(stats.get("m")) / 60, 1),
+                               "grams": round(num(stats.get("g")), 0),
+                               "income": round(num(income.get("v")), 0)})
+        except Exception as exc:
+            self.db.add_event("error", "Ночной сброс не удался", str(exc), "")
+
     # ------------------------------------------------------------ фоновый цикл
     def _loop(self) -> None:
         """Раз в 30 секунд: прогресс, телеметрия, сторож и очередь."""
@@ -2836,6 +2998,8 @@ class PrinterManager:
                         self.db.execute(
                             "UPDATE print_jobs SET progress=?, layers=? WHERE id=?",
                             (snap["printer"]["progress"], snap["printer"]["total_layers"], job["id"]))
+                        self.capture_keyframes(printer, job)
+                        self.watch_first_layer(printer, snap, job)
                     else:
                         self._reconcile_printer(printer, snap)
                     if job and snap["printer"]["state"] in ("IDLE", "FINISH", "FAILED"):
@@ -2845,7 +3009,10 @@ class PrinterManager:
                     try:
                         self.guard.record_telemetry(printer, snap, job["id"] if job else "")
                         self.guard.check(printer, snap)
-                        self.spaghetti.check(printer, snap)
+                        # Демо-камера (виртуальный принтер) отдаёт заготовленные
+                        # кадры — спагетти-детект по ним был бы ложным.
+                        if not (snap.get("camera") or {}).get("demo"):
+                            self.spaghetti.check(printer, snap)
                         self._check_cost_limit(printer, snap)
                     except Exception as exc:
                         self.db.add_event("error", "Сбой сторожа печати", str(exc), printer.id)
@@ -2857,6 +3024,7 @@ class PrinterManager:
                         self.check_auto_resume(printer.id, snap)
                 try:
                     self.run_scheduled()
+                    self.night_reset_if_due()
                     self.check_filament_stock()
                     self.maybe_sync_cloud_history()
                     self.rules.check_debts()
