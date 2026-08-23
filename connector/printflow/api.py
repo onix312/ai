@@ -218,6 +218,12 @@ class Api:
         from .updater import UpdateChecker
         self.updater = UpdateChecker(APP_VERSION, self.db, self.manager)
         self.updater.start_auto()
+        from .workshop_v9 import WorkshopV9
+        self.workshop = WorkshopV9(self.db, self.repo, self.shopping, self.manager, self.acc)
+        try:
+            self.workshop.ensure_schema()
+        except Exception:
+            pass
         self.live = LiveBroadcaster(self.bus, self.manager)
         self.live.start()
         self.last_host = ""
@@ -814,6 +820,10 @@ class Api:
     # ------------------------------------------------------------------- GET
     def get(self, path: str, query: dict) -> tuple[int, object]:
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
+        from .v9_api import dispatch_get
+        v9 = dispatch_get(self, path, query)
+        if v9 is not None:
+            return v9
 
         if path == "/api/health":
             return 200, {"ok": True, "version": APP_VERSION,
@@ -901,8 +911,8 @@ class Api:
                                            "сети: укажите IP принтера (экран → Настройки → "
                                            "WLAN) и Access Code в карточке принтера.")}
                 printer = self.printer_or_fail(one("printer_id"))
-            return 200, {"path": one("path", "/"),
-                         "files": printer.files.list_files(one("path", "/"))}
+            from .v9_api import _files_payload
+            return 200, _files_payload(printer, one("path", "/"))
         if path == "/api/orders":
             return 200, {"orders": self.repo.orders(one("status"), one("q"), one("niche_id"))}
         if path == "/api/order":
@@ -1524,6 +1534,10 @@ class Api:
     # ------------------------------------------------------------------ POST
     def post(self, path: str, body: dict, query: dict) -> tuple[int, object]:
         pid = body.get("printer_id") or (query.get("printer_id") or [""])[0]
+        from .v9_api import dispatch_post
+        v9 = dispatch_post(self, path, body, query)
+        if v9 is not None:
+            return v9
 
         # --- Bambu Cloud: вход, код, выход
         if path == "/api/cloud/login":
@@ -1664,6 +1678,9 @@ class Api:
             name = str(body.get("name") or body.get("file") or "").strip()
             if not body.get("file"):
                 raise ValueError("Не указан файл для печати")
+            from .sd_browser import can_print
+            if not can_print(str(body.get("file") or "")):
+                raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
             check = self.manager.preflight(
                 printer.id, str(body.get("file") or ""), int(num(body.get("plate"), 1) or 1),
                 body.get("ams_mapping") or body.get("mapping"))
@@ -1719,6 +1736,10 @@ class Api:
 
         # --- очередь
         if path == "/api/jobs/enqueue":
+            from .sd_browser import can_print
+            file_value = str(body.get("file") or "")
+            if file_value and not can_print(file_value):
+                raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
             return 200, {"ok": True, "job": self.manager.enqueue(body)}
         if path == "/api/jobs/start":
             if body.get("confirmed") is not True:
@@ -1726,6 +1747,10 @@ class Api:
             job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (body.get("id", ""),))
             if not job:
                 raise ValueError("Задание не найдено")
+            from .sd_browser import can_print
+            file_value = str(job.get("file") or "")
+            if file_value and not can_print(file_value):
+                raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
             printer_id = pid or job.get("printer_id") or ""
             check = self.manager.preflight(
                 printer_id, str(job.get("file") or job.get("name") or ""),
@@ -1737,7 +1762,10 @@ class Api:
                     str(x.get("title") or x.get("detail") or "") for x in check["blocks"]))
             if check.get("warns") and body.get("preflight_acknowledged") is not True:
                 raise ValueError("Подтвердите предупреждения Preflight перед стартом")
-            return 200, {"ok": True, "job": self.manager.start_job(job["id"], printer_id)}
+            return 200, {"ok": True, "job": self.manager.start_job(
+                job["id"], printer_id,
+                start_request_id=str(body.get("start_request_id") or ""),
+            )}
         if path == "/api/jobs/cancel":
             return 200, {"ok": True, "job": self.manager.cancel_job(body.get("id", ""))}
         if path == "/api/jobs/save":
@@ -1855,6 +1883,26 @@ class Api:
 
         # --- склад, каталог, деньги
         if path == "/api/spool/save":
+            slot = str(body.get("ams_slot") or "").strip()
+            printer_id = str(body.get("printer_id") or "").strip()
+            spool_id = str(body.get("id") or "").strip()
+            if slot and printer_id:
+                other = self.db.one(
+                    "SELECT * FROM spools WHERE id<>? AND printer_id=? AND ams_slot=?"
+                    " AND remaining_grams>0",
+                    (spool_id or "__new__", printer_id, slot),
+                )
+                if other and body.get("force") is not True:
+                    raise ValueError(
+                        f"Слот {slot} уже занят катушкой "
+                        f"{other.get('material') or ''} {other.get('color_name') or other['id']}. "
+                        "Снимите её или подтвердите force."
+                    )
+                if other and body.get("force") is True:
+                    self.db.execute(
+                        "UPDATE spools SET ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
+                        (now_iso(), other["id"]),
+                    )
             return 200, {"ok": True, "spool": self.repo.save_spool(body)}
         if path == "/api/spool/delete":
             self.repo.delete_spool(body.get("id", ""))
@@ -2844,12 +2892,28 @@ class Api:
             usage = shutil.disk_usage(DB_FILE.parent)
             disk = {"free_gb": round(usage.free / 1024 ** 3, 1),
                     "used_pct": round(usage.used / usage.total * 100, 1)}
+        from .workshop_v9 import heartbeat_channels
+        channels = heartbeat_channels(self.manager, self.db)
+        if channels.get("disk"):
+            disk = {
+                "free_gb": channels["disk"].get("free_gb"),
+                "used_pct": channels["disk"].get("used_pct"),
+                "ok": channels["disk"].get("ok", True),
+                "error": channels["disk"].get("error") or "",
+            }
+        mqtt_ok = bool((channels.get("mqtt") or {}).get("ok", True))
+        ftps_ok = bool((channels.get("ftps") or {}).get("ok", True))
+        disk_ok = True if not disk else disk.get("ok", True)
         return {
             "at": now_iso(), "uptime_sec": round(now - self.started_at),
             "telegram": tg, "printers": printers,
             "backup_newest_at": newest, "backup_age_h": backup_age_h,
             "disk": disk,
             "db_exists": DB_FILE.exists(),
+            "mqtt": channels.get("mqtt") or {"ok": True, "printers": []},
+            "ftps": channels.get("ftps") or {"ok": True, "printers": []},
+            "channels": channels,
+            "ok": mqtt_ok and ftps_ok and disk_ok,
         }
 
     def _ams_suggestion(self) -> list[dict]:

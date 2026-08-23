@@ -12,4 +12,4 @@
     api         — HTTP API и раздача сайта.
 """
 
-APP_VERSION = "8.6.0"
+APP_VERSION = "9.0.0"

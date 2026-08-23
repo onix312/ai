@@ -247,6 +247,12 @@ class TestRender(unittest.TestCase):
         expected = (len(qrgen.matrix("http://localhost:8080/")) + 4) * 4
         self.assertEqual(width, expected)
 
+    def test_svg_has_modules(self):
+        mark = qrgen.svg("pf:spool:demo", scale=3)
+        self.assertTrue(mark.startswith("<svg"))
+        self.assertIn('fill="#111111"', mark)
+        self.assertGreater(mark.count("<rect"), 20)
+
 
 if __name__ == "__main__":
     unittest.main()

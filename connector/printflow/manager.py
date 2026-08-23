@@ -764,8 +764,37 @@ class PrinterManager:
             "spool_id": data.get("spool_id") or None,
             "est_minutes": max(0.0, num(data.get("est_minutes"))),
             "est_grams": max(0.0, num(data.get("est_grams"))),
+            "no_auto": 1 if data.get("no_auto") else 0,
+            "mixed_label": str(data.get("mixed_label") or "")[:180],
+            "plate_preset_id": str(data.get("plate_preset_id") or "")[:80],
             "queued_at": now_iso(), "created_at": now_iso(),
         }
+        from .sd_browser import can_print
+        if file_value and not can_print(file_value):
+            raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
+        preset_id = str(data.get("plate_preset_id") or "").strip()
+        if preset_id:
+            preset = self.db.one("SELECT * FROM plate_presets WHERE id=?", (preset_id,))
+            if preset:
+                import json as _json
+                try:
+                    payload = _json.loads(preset.get("payload") or "{}")
+                except (TypeError, _json.JSONDecodeError):
+                    payload = {}
+                if isinstance(payload, dict):
+                    if "use_ams" in payload:
+                        job["use_ams"] = 1 if payload.get("use_ams") else 0
+                    if "bed_level" in payload:
+                        job["bed_level"] = 1 if payload.get("bed_level") else 0
+                    if "flow_cali" in payload:
+                        job["flow_cali"] = 1 if payload.get("flow_cali") else 0
+                    if "timelapse" in payload:
+                        job["timelapse"] = 1 if payload.get("timelapse") else 0
+                    if payload.get("ams_mapping") is not None:
+                        mapping = payload.get("ams_mapping")
+                        job["ams_mapping"] = mapping if isinstance(mapping, str) else _json.dumps(mapping)
+                    if payload.get("plate"):
+                        job["plate"] = int(num(payload.get("plate"), 1) or 1)
         # оценка печати до запуска: время и граммы из файла
         estimate = {}
         try:
@@ -819,7 +848,8 @@ class PrinterManager:
                           job["printer_id"] or "", {"job_id": job["id"]})
         if (self.db.setting("auto_queue", False)
                 and self.db.setting("unattended_dangerous_actions", False)
-                and data.get("allow_auto_start", True)):
+                and data.get("allow_auto_start", True)
+                and not job.get("no_auto")):
             self._maybe_start_next(job["printer_id"] or "")
         # Автозапуск может синхронно перевести это задание в starting/running.
         # Не возвращаем устаревшую копию «queued» — UI должен показывать факт.
@@ -861,7 +891,16 @@ class PrinterManager:
             return None
         return candidate if candidate.is_file() else None
 
-    def start_job(self, job_id: str, printer_id: str = "") -> dict:
+    def start_job(self, job_id: str, printer_id: str = "",
+                  start_request_id: str = "") -> dict:
+        rid = str(start_request_id or "").strip()[:120]
+        if rid:
+            existing = self.db.one(
+                "SELECT * FROM print_jobs WHERE start_request_id=?", (rid,))
+            if existing:
+                existing = dict(existing)
+                existing["already_started"] = True
+                return existing
         job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
         if not job:
             raise ValueError("Задание не найдено")
@@ -872,6 +911,9 @@ class PrinterManager:
             raise ValueError("Нет доступного принтера")
         if not job.get("file"):
             raise ValueError("В задании не указан файл")
+        from .sd_browser import can_print
+        if not can_print(str(job.get("file") or "")):
+            raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
         try:
             mapping = json.loads(job.get("ams_mapping") or "[]")
         except (json.JSONDecodeError, TypeError):
@@ -886,8 +928,11 @@ class PrinterManager:
         claimed = self.db.execute(
             f"UPDATE print_jobs SET state=?, printer_id=?, started_at=?,"
             " resume_eligible=1, manual_paused=0, power_loss_at='',"
-            " resume_attempts=0, resume_reason='' WHERE id=?"
-            " AND state='queued'", (claim_state, printer.id, now_iso(), job_id))
+            " resume_attempts=0, resume_reason='',"
+            " start_request_id=CASE WHEN ?<>'' THEN ? ELSE start_request_id END"
+            " WHERE id=?"
+            " AND state='queued'",
+            (claim_state, printer.id, now_iso(), rid, rid, job_id))
         if claimed.rowcount != 1:
             raise ValueError("Задание уже запускается или не стоит в очереди")
         try:
@@ -1316,7 +1361,8 @@ class PrinterManager:
             " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
             " AND j.file<>'' AND COALESCE(j.source,'')"
-            " NOT IN ('order-prepared','defect-recovery','reprint-confirmed')", (printer_id,))
+            " NOT IN ('order-prepared','defect-recovery','reprint-confirmed')"
+            " AND COALESCE(j.no_auto,0)=0", (printer_id,))
         if not jobs:
             return None
         night = bool(self.db.setting("night_shift_enabled", True)) and self.quiet_now()

@@ -53,6 +53,8 @@ class PrinterFiles:
         self.timeout = max(1, min(120, int(timeout)))
         self.retries = max(1, min(10, int(retries)))
         self.block_size = max(16 * 1024, min(4 * 1024 * 1024, int(block_size)))
+        self.last_ok: bool | None = None
+        self.last_error: str = ""
 
     def _connect(self) -> ImplicitFTPS:
         if not self.host or not self.access_code:
@@ -94,33 +96,27 @@ class PrinterFiles:
                 pass
 
     def list_files(self, path: str = "/") -> list[dict]:
-        ftp = self._connect()
-        entries: list[dict] = []
+        from . import sd_browser
         try:
-            lines: list[str] = []
-            try:
-                ftp.retrlines(f"LIST {path}", lines.append)
-            except (ftplib.error_perm, socket.timeout):
-                lines = []
-            for line in lines:
-                parsed = self._parse_line(line, path)
-                if parsed:
-                    entries.append(parsed)
-            if not entries:  # некоторые прошивки отвечают только на NLST
-                try:
-                    for name in ftp.nlst(path):
-                        clean = name.rsplit("/", 1)[-1]
-                        if clean in (".", ".."):
-                            continue
-                        entries.append({"name": clean, "path": self._join(path, clean),
-                                        "size": 0, "dir": not clean.lower().endswith(PRINT_EXT),
-                                        "modified": ""})
-                except ftplib.error_perm:
-                    pass
+            path = sd_browser.sanitize_remote_path(path)
+        except ValueError as exc:
+            self.last_ok = False
+            self.last_error = str(exc)[:160]
+            raise
+        ftp = None
+        try:
+            ftp = self._connect()
+            entries = sd_browser.list_via_ftp(ftp, path)
+            self.last_ok = True
+            self.last_error = ""
+            return entries
+        except Exception as exc:
+            self.last_ok = False
+            self.last_error = str(exc)[:160]
+            raise
         finally:
-            self._quit(ftp)
-        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
-        return entries
+            if ftp is not None:
+                self._quit(ftp)
 
     @staticmethod
     def _join(base: str, name: str) -> str:

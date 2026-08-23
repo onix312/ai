@@ -645,6 +645,13 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
 }
 #offline-bar.show { display: flex; }
 #offline-bar b { color: var(--warn); }
+#channel-bar {
+  display: none; align-items: center; gap: 12px;
+  margin: 0 0 16px; padding: 10px 16px;
+  border-radius: var(--r); border: 1px solid var(--bad);
+  background: var(--bad-soft); color: var(--text); font-size: 13.2px;
+}
+#channel-bar.show { display: flex; }
 
 /* ------------------------------------------------------------ адаптив */
 @media (max-width: 1280px) {

@@ -15,14 +15,15 @@
 
 Рендер:
     * :func:`terminal` — блоки Unicode для консоли (половинки — вдвое ниже);
-    * :func:`png_bytes` — PNG без Pillow (для окна лаунчера и печати).
+    * :func:`png_bytes` — PNG без Pillow (для окна лаунчера и печати);
+    * :func:`svg` — вектор для наклейки катушки и HTML-мастера QR.
 """
 from __future__ import annotations
 
 import struct
 import zlib
 
-__all__ = ["matrix", "terminal", "png_bytes", "QrError"]
+__all__ = ["matrix", "terminal", "png_bytes", "svg", "QrError"]
 
 
 class QrError(ValueError):
@@ -474,3 +475,25 @@ def png_bytes(text: str, level: str = "M", scale: int = 6, border: int = 2) -> b
             + chunk(b"IHDR", header)
             + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
             + chunk(b"IEND", b""))
+
+
+def svg(text: str, level: str = "M", scale: int = 4, border: int = 2,
+        dark: str = "#111111", light: str = "#ffffff") -> str:
+    """Векторный QR: модули как квадраты, без внешних библиотек."""
+    mod = matrix(text, level)
+    size = len(mod)
+    side = size + border * 2
+    px = max(1, int(scale))
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {side} {side}"'
+        f' width="{side * px}" height="{side * px}" shape-rendering="crispEdges">',
+        f'<rect width="{side}" height="{side}" fill="{light}"/>',
+    ]
+    for y, row in enumerate(mod):
+        for x, cell in enumerate(row):
+            if cell:
+                parts.append(
+                    f'<rect x="{x + border}" y="{y + border}" width="1" height="1" fill="{dark}"/>'
+                )
+    parts.append("</svg>")
+    return "".join(parts)

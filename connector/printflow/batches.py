@@ -311,6 +311,12 @@ class Batches:
                 per_plate_g = round(plan["grams"] / max(1, plan["plates"]), 1)
                 per_plate_m = round(plan["hours"] * 60 / max(1, plan["plates"]), 1)
                 for index in range(plan["plates"]):
+                    from .workshop_v9 import WorkshopV9
+                    mixed = WorkshopV9(self.db).mixed_plate_label(
+                        [{"name": r.get("name"), "qty": r.get("qty_per_plate")}
+                         for r in plan["items"]],
+                        plan["plates"],
+                    )
                     job = self.manager.enqueue({
                         "name": f"{name} · плита {index + 1}/{plan['plates']}",
                         "file": plan["file"],
@@ -319,12 +325,15 @@ class Batches:
                         "spool_id": data.get("spool_id", ""),
                         "priority": int(num(data.get("priority"))),
                         "source": "batch",
+                        "mixed_label": mixed,
                     })
                     self.db.execute(
                         "UPDATE print_jobs SET batch_id=?, batch_qty=?,"
                         " est_grams=COALESCE(NULLIF(est_grams,0),?),"
-                        " est_minutes=COALESCE(NULLIF(est_minutes,0),?) WHERE id=?",
-                        (row["id"], plan["units_per_plate"], per_plate_g, per_plate_m, job["id"]))
+                        " est_minutes=COALESCE(NULLIF(est_minutes,0),?),"
+                        " mixed_label=COALESCE(NULLIF(mixed_label,''),?) WHERE id=?",
+                        (row["id"], plan["units_per_plate"], per_plate_g, per_plate_m,
+                         mixed, job["id"]))
                     jobs.append(job["id"])
         self.db.add_event("batch", "Смешанная партия создана",
                           f"{name} · {plan['plates']} плита(ит)", data={"batch_id": row["id"]})

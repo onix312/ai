@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -73,6 +73,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("receipt_tx_id", "TEXT DEFAULT ''"),
         ("received_qty", "INTEGER DEFAULT 0"),
         ("received_spool_grams", "REAL DEFAULT 0"),
+        ("receipt_doc_id", "TEXT DEFAULT ''"),
+        ("price_per_kg", "REAL DEFAULT 0"),
+        ("supplier_id", "TEXT DEFAULT ''"),
     ],
     "transactions": [
         ("account_id", "TEXT"),
@@ -132,6 +135,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("power_loss_layer", "INTEGER DEFAULT 0"),
         ("power_loss_total_layers", "INTEGER DEFAULT 0"),
         ("power_loss_task", "TEXT DEFAULT ''"),
+        ("start_request_id", "TEXT DEFAULT ''"),
+        ("mixed_label", "TEXT DEFAULT ''"),
+        ("no_auto", "INTEGER DEFAULT 0"),
+        ("plate_preset_id", "TEXT DEFAULT ''"),
     ],
     "defects": [
         ("note", "TEXT DEFAULT ''"),
@@ -160,6 +167,13 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("ams_sync", "INTEGER DEFAULT 1"),   # обновлять остаток/слот из AMS
         ("synced_at", "TEXT"),               # когда AMS последний раз обновлял
         ("verified", "INTEGER DEFAULT 1"),   # импорт AMS требует проверки бренда/цены/веса
+        ("location", "TEXT DEFAULT 'shop'"),  # ярлык места: shop/home/ams/dry/other
+        ("location_note", "TEXT DEFAULT ''"),
+        ("label_note", "TEXT DEFAULT ''"),
+        ("qr_payload", "TEXT DEFAULT ''"),
+        ("price_per_kg", "REAL DEFAULT 0"),
+        ("supplier_id", "TEXT DEFAULT ''"),
+        ("received_doc_id", "TEXT DEFAULT ''"),
     ],
     "catalog": [
         # Старые финансовые поля плюс связь с canonical nomenclature.
@@ -795,6 +809,80 @@ CREATE TABLE IF NOT EXISTS wishes (
     resolved_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_wishes_customer ON wishes(customer_id, status);
+
+-- ------------------------------------------- 9.0: цех, приход пластика, AMS
+CREATE TABLE IF NOT EXISTS workshop_docs (
+    id TEXT PRIMARY KEY,
+    number TEXT DEFAULT '',
+    kind TEXT DEFAULT 'filament_receipt',
+    at TEXT,
+    state TEXT DEFAULT 'posted',
+    title TEXT DEFAULT '',
+    payload TEXT DEFAULT '{}',
+    total_amount REAL DEFAULT 0,
+    grams REAL DEFAULT 0,
+    supplier TEXT DEFAULT '',
+    supplier_id TEXT DEFAULT '',
+    shopping_id TEXT DEFAULT '',
+    request_id TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_docs_request
+    ON workshop_docs(request_id) WHERE request_id<>'';
+CREATE INDEX IF NOT EXISTS idx_workshop_docs_kind ON workshop_docs(kind, at);
+
+CREATE TABLE IF NOT EXISTS ams_slot_history (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    printer_id TEXT DEFAULT '',
+    slot TEXT DEFAULT '',
+    spool_id TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ams_slot_hist ON ams_slot_history(printer_id, at);
+
+CREATE TABLE IF NOT EXISTS filament_scrap (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    spool_id TEXT,
+    grams REAL DEFAULT 0,
+    reason TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    request_id TEXT DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_filament_scrap_request
+    ON filament_scrap(request_id) WHERE request_id<>'';
+CREATE INDEX IF NOT EXISTS idx_filament_scrap_spool ON filament_scrap(spool_id, at);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    price_per_kg REAL DEFAULT 0,
+    archived INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS plate_presets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    payload TEXT DEFAULT '{}',
+    created_at TEXT,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS shift_checks (
+    id TEXT PRIMARY KEY,
+    day TEXT,
+    item_id TEXT,
+    at TEXT,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shift_checks_day ON shift_checks(day, item_id);
 """
 
 
@@ -1233,6 +1321,18 @@ class Database:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_shelf_item_barcode"
                 " ON shelf_items(barcode) WHERE barcode<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_start_request"
+                " ON print_jobs(start_request_id) WHERE start_request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_docs_request"
+                " ON workshop_docs(request_id) WHERE request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_filament_scrap_request"
+                " ON filament_scrap(request_id) WHERE request_id<>''"
             )
             if version < SCHEMA_VERSION:
                 self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
