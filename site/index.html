@@ -4336,6 +4336,15 @@
   <button class="icon-btn" type="button" data-close="shelf_modal">✕</button></div>
  <div class="modal-body">
   <input id="shf_nom_id" type="hidden">
+  <section class="form-section" id="shf_stock_section" hidden>
+   <h3>Готовый товар со склада</h3>
+   <p class="muted" style="margin:2px 0 10px">Сразу перенести готовые штуки с учётного склада в новую позицию — остаток, цена и себестоимость подставятся автоматически.</p>
+   <div class="form-grid">
+    <label>Товар<select id="shf_stock_item"><option value="">Заполню вручную</option></select></label>
+    <label>Перенести, шт<input id="shf_stock_qty" type="number" min="1" step="1" value="1"></label>
+   </div>
+   <div class="notice" id="shf_stock_info" hidden><span>ℹ</span><span id="shf_stock_info_text"></span></div>
+  </section>
   <section class="form-section">
    <h3>Товар и остаток</h3>
    <div class="form-grid">

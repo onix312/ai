@@ -157,6 +157,68 @@ class ShelfTransferTests(unittest.TestCase):
         self.assertEqual(result["qty"], 1.25)
         self.assertAlmostEqual(self.stock.qty("nom5", "home"), 1.25)
 
+    # ----------------------- новая позиция сразу с товаром со склада
+    def test_create_item_from_stock_creates_and_moves(self):
+        """Пустое название подставляется из номенклатуры, штуки приходят переносом."""
+        result = self.shelf.create_item_from_stock({"name": ""}, "nom1", "home", 3)
+        self.assertTrue(result["ok"])
+        item = result["item"]
+        self.assertEqual(item["name"], "Органайзер")
+        self.assertEqual(round(item["qty"], 1), 3.0)
+        self.assertEqual(round(item["cost_per_unit"], 2), 100.0)
+        self.assertEqual(self.stock.qty("nom1", "home"), 2)
+        self.assertEqual(self.stock.qty("nom1", "shelf"), 3)
+
+    def test_create_item_from_stock_keeps_given_name_and_price(self):
+        """Владелец может задать своё название и цену — они сохраняются."""
+        result = self.shelf.create_item_from_stock(
+            {"name": "Мой органайзер", "price": 700, "note": "витрина"},
+            "nom1", "home", 1)
+        item = result["item"]
+        self.assertEqual(item["name"], "Мой органайзер")
+        self.assertEqual(round(item["price"], 2), 700.0)
+        self.assertEqual(round(item["qty"], 1), 1.0)
+
+    def test_create_item_from_stock_rejects_zero_and_unknown(self):
+        with self.assertRaises(ValueError):
+            self.shelf.create_item_from_stock({}, "nom1", "home", 0)
+        with self.assertRaises(ValueError):
+            self.shelf.create_item_from_stock({}, "нет-такого", "home", 1)
+
+    def test_create_item_from_stock_rejects_more_than_available(self):
+        with self.assertRaises(ValueError):
+            self.shelf.create_item_from_stock({}, "nom1", "home", 6)
+
+    def test_create_item_from_stock_is_atomic_on_failure(self):
+        """Ошибка переноса не должна оставить позицию-сироту."""
+        with self.assertRaises(ValueError):
+            self.shelf.create_item_from_stock({}, "nom1", "home", 6)
+        # позиция не создана: на полке только «Органайзер» из setUp не появлялся
+        items = [i for i in self.shelf.items() if i["nom_id"] == "nom1"]
+        self.assertEqual(items, [])
+
+    def test_stock_available_goods_only_excludes_materials(self):
+        """goods_only оставляет готовые товары и прячет материалы."""
+        self.db.upsert("nomenclature", {
+            "id": "mat1", "name": "Пластик PLA", "kind": "material",
+            "unit": "кг", "archived": 0})
+        self.stock.add_move("mat1", "home", 10, 5000, doc_kind="receipt")
+        all_items = self.shelf.stock_available()
+        self.assertIn("mat1", [i["nom_id"] for i in all_items])
+        goods = self.shelf.stock_available(goods_only=True)
+        ids = [i["nom_id"] for i in goods]
+        self.assertIn("nom1", ids)
+        self.assertNotIn("mat1", ids)
+
+    def test_stock_available_has_base_price(self):
+        """Список готовых товаров отдаёт базовую розничную цену для ценника."""
+        self.db.upsert("prices", {"id": "p1", "nom_id": "nom1",
+                                  "price_type_id": "retail", "price": 500,
+                                  "at": "2026-08-24T10:00:00"})
+        row = next(i for i in self.shelf.stock_available(goods_only=True)
+                   if i["nom_id"] == "nom1")
+        self.assertEqual(row["price"], 500.0)
+
 
 if __name__ == "__main__":
     unittest.main()

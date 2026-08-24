@@ -9,6 +9,7 @@ const { get, post } = PF.api;
 
 let editingShelf = null;
 let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null };
+let stockGoods = [];
 
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
@@ -149,6 +150,60 @@ function renderShelf() {
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
+/* ================================== готовые товары для новой позиции */
+async function loadStockGoods() {
+  try {
+    const data = await get('/api/shelf/stock-available', { goods: 1 });
+    stockGoods = data.items || [];
+  } catch (e) { stockGoods = []; }
+  return stockGoods;
+}
+
+function fillStockGoodsSelect() {
+  const sel = $('shf_stock_item');
+  sel.innerHTML = '<option value="">Заполню вручную</option>'
+    + stockGoods.map((i, idx) =>
+      `<option value="${idx}">${esc(i.name)} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} ${esc(i.unit || 'шт')}</option>`).join('');
+  $('shf_stock_info').hidden = true;
+}
+
+function selectedStockGood() {
+  const v = $('shf_stock_item').value;
+  if (v === '' || v == null) return null;
+  return stockGoods[Number(v)] || null;
+}
+
+function onStockGoodChange() {
+  const row = selectedStockGood();
+  const info = $('shf_stock_info');
+  const qtyEl = $('shf_qty');
+  if (!row) {
+    info.hidden = true;
+    qtyEl.disabled = false;
+    return;
+  }
+  // Подставляем данные товара в пустые поля — владелец может поправить.
+  if (!$('shf_name').value.trim()) $('shf_name').value = row.name || '';
+  if (!$('shf_nom_id').value) $('shf_nom_id').value = row.nom_id || '';
+  if (!num($('shf_price').value)) $('shf_price').value = num(row.price);
+  if (!num($('shf_cost').value)) $('shf_cost').value = num(row.avg_cost);
+  // Остаток придёт переносом со склада, а не «начальным остатком».
+  qtyEl.disabled = true;
+  qtyEl.value = '';
+  const unit = row.unit || 'шт';
+  const max = pieceUnit(unit) ? Math.floor(num(row.qty)) : num(row.qty);
+  const q = $('shf_stock_qty');
+  q.min = pieceUnit(unit) ? '1' : '0';
+  q.step = pieceUnit(unit) ? '1' : '0.1';
+  q.max = max;
+  if (num(q.value) > max) q.value = max;
+  $('shf_stock_info_text').textContent =
+    `На «${row.warehouse_name}» доступно ${nfmt(row.qty)} ${unit}`
+    + (num(row.avg_cost) ? ` · себестоимость ~${money(row.avg_cost)}/${pieceUnit(unit) ? 'шт' : unit}` : '')
+    + (num(row.price) ? ` · цена ${money(row.price)}` : '');
+  info.hidden = false;
+}
+
 /* ============================================================== позиция */
 function fillShelfSelectors(keep) {
   const items = shelfData.items || [];
@@ -186,6 +241,18 @@ function openShelf(id) {
   const img = $('shf_photo_preview');
   img.hidden = !d.photo;
   if (d.photo) img.src = `/api/shelf/photo.jpg?id=${esc(d.id)}&t=${esc(d.updated_at || '')}`;
+  // Перенос готовых товаров со склада — только для новой позиции.
+  if (!id) {
+    $('shf_stock_section').hidden = false;
+    $('shf_stock_item').value = '';
+    $('shf_stock_qty').value = 1;
+    $('shf_qty').disabled = false;
+    $('shf_stock_info').hidden = true;
+    loadStockGoods().then(fillStockGoodsSelect);
+  } else {
+    $('shf_stock_section').hidden = true;
+    $('shf_stock_item').value = '';
+  }
   $('shelf_delete').hidden = !id;
   $('shf_tag_open').hidden = !id;
   $('shf_tag_open').dataset.item = id || '';
@@ -212,26 +279,48 @@ async function saveShelf() {
     tag_note: $('shf_tag_note').value.trim(),
   };
   if (!payload.name) return fail(new Error('Укажите название позиции'));
-  try {
-    const res = await post('/api/shelf/save', payload);
-    closeModal('shelf_modal');
-    // фото, если выбрали
-    const file = $('shf_photo_file').files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          await post('/api/shelf/photo', { id: res.item.id, data: reader.result });
-          await refreshShelf();
-          toast('Позиция сохранена', payload.name);
-        } catch (e) { fail(e); }
-      };
-      reader.readAsDataURL(file);
-    } else {
-      await refreshShelf();
-      toast('Позиция сохранена', payload.name);
+
+  const stockRow = editingShelf ? null : selectedStockGood();
+  const stockQty = num($('shf_stock_qty').value);
+  const viaStock = !!(stockRow && stockQty > 0);
+  if (viaStock) {
+    if (pieceUnit(stockRow.unit || 'шт') && stockQty !== Math.round(stockQty)) {
+      return fail(new Error('Штучные товары переносятся целыми штуками'));
     }
-  } catch (e) { fail(e); }
+    if (stockQty > num(stockRow.qty) + 1e-9) {
+      return fail(new Error(`На складе только ${nfmt(stockRow.qty)} ${stockRow.unit || 'шт'}`));
+    }
+  }
+
+  let savedItemId = '';
+  try {
+    const res = viaStock
+      ? await post('/api/shelf/save-from-stock', {
+          ...payload,
+          nom_id: stockRow.nom_id, warehouse_id: stockRow.warehouse_id, qty: stockQty,
+        })
+      : await post('/api/shelf/save', payload);
+    savedItemId = res.item && res.item.id;
+  } catch (e) { return fail(e); }
+
+  closeModal('shelf_modal');
+  // фото, если выбрали
+  const file = $('shf_photo_file').files[0];
+  if (file && savedItemId) {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        await post('/api/shelf/photo', { id: savedItemId, data: reader.result });
+        await refreshShelf();
+        toast('Позиция сохранена', payload.name);
+      } catch (e) { fail(e); }
+    };
+    reader.readAsDataURL(file);
+  } else {
+    await refreshShelf();
+    toast(viaStock ? 'Позиция создана' : 'Позиция сохранена',
+      viaStock ? `«${payload.name}» +${nfmt(stockQty)} шт со склада` : payload.name);
+  }
 }
 
 /* ============================================================== приход */
@@ -451,6 +540,7 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('shf_photo_btn').addEventListener('click', () => $('shf_photo_file').click());
+  $('shf_stock_item').addEventListener('change', onStockGoodChange);
   $('shf_tag_open').addEventListener('click', () => {
     const item = $('shf_tag_open').dataset.item;
     if (item) window.open(`/price-tags.html?item=${encodeURIComponent(item)}`, '_blank', 'noopener');

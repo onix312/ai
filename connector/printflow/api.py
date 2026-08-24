@@ -1020,7 +1020,8 @@ class Api:
         if path == "/api/shelf/stock-available":
             # Товары учётных складов с остатком ≥ 1 шт — их можно
             # переместить на стеллаж (0 и «хвосты» меньше штуки не показываем).
-            return 200, {"items": self.shelf.stock_available()}
+            goods_only = str(one("goods", "")).lower() in ("1", "true", "yes")
+            return 200, {"items": self.shelf.stock_available(goods_only=goods_only)}
         if path == "/api/shelf/moves":
             return 200, {"moves": self.shelf.moves(one("item_id"),
                                                    int(num(one("limit", "100"), 100)))}
@@ -2161,6 +2162,12 @@ class Api:
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
                 num(body.get("qty")), body.get("item_id", ""),
                 body.get("note", ""))
+        if path == "/api/shelf/save-from-stock":
+            # Новая позиция стеллажа сразу с готовым товаром со склада:
+            # создание позиции и перенос штук — одной операцией.
+            return 200, self.shelf.create_item_from_stock(
+                body, body.get("nom_id", ""), body.get("warehouse_id", ""),
+                num(body.get("qty")))
         if path == "/api/shelf/sale":
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),
