@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — объявления для Авито</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  body { background: #eef1f7; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 18px 18px 70px; }
+
+  .intro {
+    display: flex; gap: 14px; align-items: center;
+    background: linear-gradient(135deg, #046866, #0aa8a2); color: #fff;
+    border-radius: 16px; padding: 18px 22px; margin-bottom: 18px;
+  }
+  .intro .big { font-size: 34px; line-height: 1; }
+  .intro h1 { margin: 0; font-size: 21px; font-weight: 900; letter-spacing: -.01em; }
+  .intro p { margin: 4px 0 0; font-size: 12.5px; opacity: .93; line-height: 1.5; }
+
+  .listing {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .listing header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .listing header .ic { font-size: 20px; }
+  .listing header h2 { margin: 0; font-size: 15px; flex: 1; }
+  .listing .fields { display: grid; grid-template-columns: minmax(280px, 1fr) 170px; gap: 10px 14px; }
+  .listing label { font-size: 11.5px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 4px; }
+  .listing label.full { grid-column: 1 / -1; }
+  .listing input, .listing textarea {
+    font: inherit; font-size: 12.5px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+  }
+  .listing textarea { min-height: 230px; line-height: 1.55; resize: vertical; }
+  .counter { font-size: 10.5px; color: var(--ink-soft); }
+  .counter.over { color: #c0392b; font-weight: 700; }
+  .listing .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+  .photos { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+  .photos label { font-size: 12px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+
+  .block {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .block h2 { margin: 0 0 4px; font-size: 14px; }
+  .block p.hint { font-size: 12px; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.5; }
+  .reply {
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+  }
+  .reply h3 { margin: 0 0 6px; font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .05em; }
+  .reply pre {
+    margin: 0 0 8px; font-family: inherit; white-space: pre-wrap; font-size: 12.5px; line-height: 1.6; color: var(--ink);
+  }
+  .check { list-style: none; margin: 0; padding: 0; }
+  .check li { font-size: 12.5px; line-height: 1.55; padding: 3px 0 3px 26px; position: relative; }
+  .check input { position: absolute; left: 0; top: 5px; }
+  .check li.done { color: #98a2b8; text-decoration: line-through; }
+  .warn {
+    background: #fff8e5; border: 1px solid #f0d99a; border-radius: 10px;
+    padding: 10px 14px; font-size: 12px; line-height: 1.55; color: #8a6516; margin-bottom: 14px;
+  }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Объявления для Авито</h1>
+    <div class="panel-row" data-nz-common></div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="intro">
+    <div class="big">🟢</div>
+    <div>
+      <h1>Авито-комплект NOZZA</h1>
+      <p>Четыре готовых объявления под направления производства, быстрые ответы, чек-листы фото и публикации. Все тексты редактируются и сохраняются. Баннер магазина 1200 × 400 — на странице «Шапки Telegram и Авито».</p>
+    </div>
+  </div>
+
+  <div class="warn"><b>Важно:</b> правила, категории и комиссии Авито меняются. Перед публикацией проверьте актуальные условия в своём кабинете. Не публикуйте телефон клиента с адресника, чужие рендеры и логотипы без права использования.</div>
+
+  <div id="listings"></div>
+
+  <div class="two-col">
+    <div class="block">
+      <h2>Быстрые ответы в чате</h2>
+      <p class="hint">Копируйте в переписку Авито: первый ответ решает, останется ли покупатель.</p>
+      <div id="replies"></div>
+    </div>
+
+    <div>
+      <div class="block">
+        <h2>Чек-лист публикации</h2>
+        <p class="hint">Пройдите перед выкладыванием каждого объявления.</p>
+        <ul class="check" id="pubcheck"></ul>
+      </div>
+      <div class="block">
+        <h2>Когда вежливо отказать</h2>
+        <p class="hint">Безопасность и права важнее продажи — так написано и в правилах площадки.</p>
+        <ul class="check" style="list-style:disc;padding-left:18px">
+          <li>копия охраняемого персонажа или логотипа без права использования;</li>
+          <li>несущая деталь без документации (тормоза, давление, газ, электробезопасность);</li>
+          <li>«точно пищевое» изделие без подтверждённой технологии;</li>
+          <li>просьба скрыть дефект или ввести покупателя в заблуждение;</li>
+          <li>детская игрушка без понятной юридической схемы.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS = 'avito';
+
+const PHOTOS = [
+  'изделие в использовании (а не на столе)',
+  'крупный план качества поверхности',
+  'варианты цвета и персонализации',
+  'изделие в руке или с линейкой для масштаба',
+  'процесс печати или рабочее место',
+];
+
+const LISTINGS = [
+  {
+    key: 'pets', ic: '🐾',
+    title: 'Адресник для собаки или кошки с именем',
+    price: 'от 350 ₽',
+    desc: `Изготавливаем персональные аксессуары для питомцев на 3D-принтере: именные адресники, таблички на ошейник и держатели поводков.
+
+Что можно выбрать:
+— имя и телефон на изделии;
+— цвет (несколько вариантов пластика);
+— размер и форму;
+— крепление под ошейник.
+
+Как заказать:
+1. Напишите имя, телефон и цвет.
+2. Мы готовим макет и присылаем на согласование.
+3. После подтверждения печатаем — обычно 1 день.
+
+Материал — PETG: не боится влаги и улицы, надёжнее интерьерного пластика.
+
+Важно: адресник помогает вернуть питомца, но не заменяет чипирование. Несущие детали ошейника и поводка (карабины, стропы) не изготавливаем.
+
+Перед отправкой каждое изделие проверяем. Упаковываем так, чтобы доехало целым. Пишите — ответим быстро.`,
+  },
+  {
+    key: 'home', ic: '🏠',
+    title: 'Органайзер, держатель, крепление по размерам',
+    price: 'от 300 ₽',
+    desc: `Делаем полезные вещи для дома точно по вашим размерам: органайзеры для стола и ящиков, держатели телефона и наушников, настенные крючки и крепления для роутера, пылесоса, инструментов.
+
+Чем это лучше магазинного:
+— изделие встаёт в ваше место точно, без «почти подошло»;
+— нужное количество отсеков, крючков и отверстий;
+— цвет под интерьер;
+— сломанную деталь можно сделать заново по образцу.
+
+Как заказать:
+1. Пришлите фото места и размеры (длина × ширина × высота).
+2. Опишите, что будете хранить и какая нагрузка.
+3. Мы готовим эскиз, расчёт и срок. Обычно изготовление 1–3 дня.
+
+Материал подбираем под задачу: PLA для интерьера, PETG для влаги и нагрузки, TPU, если нужна гибкость.
+
+Не изготавливаем без инженерной документации детали для газа, давления, электробезопасности и тормозных систем.
+
+Пишите — даже если есть только фото проблемы, подскажем решение.`,
+  },
+  {
+    key: 'biz', ic: '🏪',
+    title: 'Таблички, QR-стойки, держатели ценников',
+    price: 'от 250 ₽/шт',
+    desc: `Изготавливаем партии оснастки для кафе, магазинов, салонов и офисов: настольные QR-стойки (меню и оплата), номерки заказов, держатели ценников, таблички на дверь и стол, органайзеры рабочих мест.
+
+Почему это удобно:
+— партии от 10 штук с одинаковой геометрией;
+— ваши цвета, нумерация и размеры;
+— тираж повторяется по запросу — файлы храним у себя;
+— дешевле, чем фрезеровка и литьё на малых партиях.
+
+Как работаем:
+1. Обсуждаем задачу и место установки.
+2. Делаем образец на согласование.
+3. После утверждения — тираж.
+
+Срок партии обычно 2–5 дней в зависимости от количества.
+
+Логотип размещаем после подтверждения права использования.
+
+Пишите — посчитаем вашу партию в течение дня.`,
+  },
+  {
+    key: 'file', ic: '📁',
+    title: '3D-печать по готовому файлу — деталь на заказ',
+    price: 'от 200 ₽',
+    desc: `Напечатаем вашу 3D-модель на профессиональном принтере: PLA, PETG, TPU и технические пластики. Слой от 0,08 мм — деталь получается аккуратной и точной.
+
+Подходит, если:
+— сломалась пластиковая деталь техники или мебели;
+— нужна нестандартная втулка, заглушка, уголок, крепление;
+— есть готовая модель STL/3MF/STEP и нужен качественный отпечаток.
+
+Как заказать:
+1. Пришлите файл модели (STL, 3MF, STEP) и материал.
+2. Назовём цену и срок — обычно 1–2 дня.
+3. Если модели нет, но есть сломанная деталь — можно восстановить по образцу: сначала макет на согласование.
+
+Проверяем габариты, ориентацию слоёв под нагрузку и усадку — деталь должна работать, а не просто выглядеть.
+
+Не берём в печать детали для газовых систем, давления, тормозов и электробезопасности без инженерной документации, а также объекты с нарушением чужих прав.
+
+Пишите — разберём вашу задачу честно: если печать не подходит, скажем прямо.`,
+  },
+];
+
+const REPLIES = [
+  { name: 'Первый ответ', text: 'Здравствуйте! Чтобы точно посчитать, пришлите, пожалуйста: фото места или примера, размеры, количество, желаемый цвет, назначение и нужную дату. После этого назову цену и срок. Если удобнее — можно короткое видео.' },
+  { name: 'Про цену', text: 'Цена зависит от размера, материала и количества. Ориентир: [изделие] — от ___ ₽. Пришлите размеры — посчитаю точно, без сюрпризов. Точную сумму подтверждаю до начала работы.' },
+  { name: 'Про срок', text: 'Стандартный срок — 1–3 дня с момента согласования макета. Если нужно к конкретной дате — напишите её, проверю очередь и отвечу честно: успеваем или нет.' },
+  { name: 'Про доставку', text: 'Можно самовывоз или отправка транспортом. Упаковываю в защитную плёнку и жёсткую коробку — изделия доезжают целыми. Трек-номер отправлю в чат.' },
+];
+
+const PUBCHECK = [
+  'категория и формат объявления актуальны',
+  'цена реальная или честный диапазон',
+  'фотографии свои, не чужие рендеры',
+  'срок изготовления понятен',
+  'ограничения указаны честно',
+  'коммерческая лицензия модели проверена',
+  'доставка реально доступна из вашего адреса',
+  'заказ заведён в PrintFlow после оплаты',
+  'персональные данные клиента не попадают в портфолио',
+];
+
+let state = {};
+
+function defaultState() {
+  const st = { checks: {}, photos: {} };
+  LISTINGS.forEach((L) => { st[L.key] = { title: L.title, price: L.price, desc: L.desc }; });
+  return st;
+}
+
+function load() {
+  state = Object.assign(defaultState(), NZ.pageState({})[LS] || {});
+}
+
+function persist() { NZ.pageStateSave({ [LS]: state }); }
+
+function listingCard(L) {
+  const cur = state[L.key];
+  return `<div class="listing" data-key="${L.key}">
+    <header><span class="ic">${L.ic}</span><h2>${L.title.split(',')[0]}</h2>
+      <button class="btn" data-copy="${L.key}">Копировать всё</button></header>
+    <div class="fields">
+      <label>Заголовок (до 50 знаков)
+        <input type="text" data-f="title" value="${NZ.esc(cur.title)}" maxlength="80">
+        <span class="counter" data-c="title"></span>
+      </label>
+      <label>Цена / «от»
+        <input type="text" data-f="price" value="${NZ.esc(cur.price)}">
+        <span class="counter">как в объявлении</span>
+      </label>
+      <label class="full">Описание
+        <textarea data-f="desc">${NZ.esc(cur.desc)}</textarea>
+        <span class="counter" data-c="desc"></span>
+      </label>
+    </div>
+    <div class="photos">
+      <b style="font-size:12px;color:var(--ink-soft)">Фото:</b>
+      ${PHOTOS.map((p, i) => `<label><input type="checkbox" data-photo="${i}" ${state.photos[L.key + i] ? 'checked' : ''}>${p}</label>`).join('')}
+    </div>
+    <div class="actions">
+      <button class="btn" data-copydesc="${L.key}">Копировать описание</button>
+      <span class="counter" id="hint-${L.key}">правки сохраняются автоматически</span>
+    </div>
+  </div>`;
+}
+
+function render() {
+  $('listings').innerHTML = LISTINGS.map(listingCard).join('');
+
+  $('replies').innerHTML = REPLIES.map((r, i) =>
+    `<div class="reply"><h3>${r.name}</h3><pre>${NZ.esc(r.text)}</pre>
+      <button class="btn" data-reply="${i}">Копировать</button></div>`).join('');
+
+  $('pubcheck').innerHTML = PUBCHECK.map((c, i) =>
+    `<li class="${state.checks['p' + i] ? 'done' : ''}"><input type="checkbox" data-pub="${i}" ${state.checks['p' + i] ? 'checked' : ''}>${c}</li>`).join('');
+
+  // слушатели объявлений
+  document.querySelectorAll('.listing').forEach((card) => {
+    const key = card.dataset.key;
+    const updCounters = () => {
+      const t = card.querySelector('[data-f="title"]');
+      const d = card.querySelector('[data-f="desc"]');
+      const ct = card.querySelector('[data-c="title"]');
+      const cd = card.querySelector('[data-c="desc"]');
+      ct.textContent = t.value.length + ' / 50 знаков';
+      ct.classList.toggle('over', t.value.length > 50);
+      cd.textContent = d.value.length + ' знаков';
+    };
+    card.querySelectorAll('[data-f]').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        state[key][inp.dataset.f] = inp.value;
+        persist(); updCounters();
+      });
+    });
+    card.querySelectorAll('[data-photo]').forEach((ch) => {
+      ch.addEventListener('change', () => {
+        state.photos[key + ch.dataset.photo] = ch.checked;
+        persist();
+      });
+    });
+    updCounters();
+    card.querySelector('[data-copy]').addEventListener('click', (e) => {
+      const c = state[key];
+      NZ.copy(`${c.title}\n${c.price}\n\n${c.desc}`, e.target);
+    });
+    card.querySelector('[data-copydesc]').addEventListener('click', (e) => {
+      NZ.copy(state[key].desc, e.target);
+    });
+  });
+
+  document.querySelectorAll('[data-reply]').forEach((b) => {
+    b.addEventListener('click', (e) => NZ.copy(REPLIES[Number(b.dataset.reply)].text, e.target));
+  });
+  document.querySelectorAll('[data-pub]').forEach((ch) => {
+    ch.addEventListener('change', () => {
+      state.checks['p' + ch.dataset.pub] = ch.checked;
+      persist(); render();
+    });
+  });
+}
+
+load();
+NZ.mount(render);
+</script>
+</body></html>

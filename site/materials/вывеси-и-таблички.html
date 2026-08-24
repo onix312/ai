@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — конструктор вывесей и табличек</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  /* ------------------------------------------------------------ листы */
+  .grid { display: flex; flex-wrap: wrap; gap: 5mm; align-content: flex-start; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+
+  /* ------------------------------------------------------- сама вывеска */
+  .sg {
+    position: relative; overflow: hidden;
+    display: flex; align-items: center; gap: 4mm;
+    border-radius: 3.5mm; padding: 5mm 6mm;
+    cursor: pointer; transition: outline .12s ease, box-shadow .12s ease;
+    page-break-inside: avoid; break-inside: avoid;
+    --sg-soft: rgba(255,255,255,.78);
+  }
+  .sg.t-light { --sg-soft: #5d6b85; }
+  .sg:not(.t-light) .sg-mid, .sg:not(.t-light) .sg-side { color: #fff; }
+  .sg:hover { box-shadow: 0 8px 22px -14px rgba(19,26,43,.7); }
+  .sg.selected { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .sg.t-brand { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+  .sg.t-ink   { background: #131a2b; }
+  .sg.t-light { background: #fff; color: var(--ink); border: 1mm solid var(--brand); }
+  .sg.t-green { background: linear-gradient(135deg, #047857, #10b981); }
+  .sg.t-red   { background: linear-gradient(135deg, #b91c1c, #ef4444); }
+  .sg.t-amber { background: linear-gradient(135deg, #b45309, #f59e0b); }
+
+  .sg-ico { flex: none; line-height: 1; font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+  .sg-mid { flex: 1; min-width: 0; }
+  .sg-title { font-weight: 900; letter-spacing: -.01em; line-height: 1.02; text-transform: uppercase; }
+  .sg-sub { color: var(--sg-soft); font-weight: 600; line-height: 1.25; margin-top: 1.5mm; }
+  .sg-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2mm; max-width: 40%; }
+  .sg-brand { display: flex; align-items: center; gap: 1.5mm; font-weight: 800; letter-spacing: .1em; white-space: nowrap; }
+  .sg-brand img { width: 6mm; height: 6mm; flex: none; }
+  .sg-qrbox { background: #fff; border-radius: 1.6mm; padding: 1.4mm; }
+  .sg-qrbox svg { display: block; }
+
+  /* размеры: 186 × 266 (лист) · 186 × 126 · 186 × 86 · 92 × 52 */
+  .sz-full  { width: 186mm; height: 266mm; flex-direction: column; justify-content: center; text-align: center; gap: 8mm; }
+  .sz-full .sg-ico { font-size: 58mm; }
+  .sz-full .sg-title { font-size: 30mm; }
+  .sz-full .sg-sub { font-size: 11mm; margin-top: 4mm; }
+  .sz-full .sg-side { flex-direction: column; align-items: center; max-width: 100%; gap: 5mm; }
+  .sz-full .sg-brand { font-size: 9mm; } .sz-full .sg-brand img { width: 11mm; height: 11mm; }
+  .sz-full .sg-qrbox svg { width: 44mm; height: 44mm; }
+
+  .sz-big   { width: 186mm; height: 126mm; }
+  .sz-big .sg-ico { font-size: 34mm; }
+  .sz-big .sg-title { font-size: 19mm; }
+  .sz-big .sg-sub { font-size: 8.5mm; }
+  .sz-big .sg-brand { font-size: 5.5mm; } .sz-big .sg-brand img { width: 7mm; height: 7mm; }
+  .sz-big .sg-qrbox svg { width: 30mm; height: 30mm; }
+
+  .sz-door  { width: 186mm; height: 86mm; padding: 4mm 6mm; }
+  .sz-door .sg-ico { font-size: 22mm; }
+  .sz-door .sg-title { font-size: 12.5mm; }
+  .sz-door .sg-sub { font-size: 6mm; }
+  .sz-door .sg-brand { font-size: 4.2mm; } .sz-door .sg-brand img { width: 5.5mm; height: 5.5mm; }
+  .sz-door .sg-qrbox svg { width: 21mm; height: 21mm; }
+
+  .sz-small { width: 92mm; height: 52mm; padding: 3mm 4mm; gap: 3mm; border-radius: 2.5mm; }
+  .sz-small .sg-ico { font-size: 13mm; }
+  .sz-small .sg-title { font-size: 7mm; }
+  .sz-small .sg-sub { font-size: 3.6mm; margin-top: 1mm; }
+  .sz-small .sg-brand { font-size: 3mm; } .sz-small .sg-brand img { width: 4mm; height: 4mm; }
+  .sz-small .sg-qrbox svg { width: 12mm; height: 12mm; }
+
+  .sg.cut { outline: 1px dashed #c8cfdf; outline-offset: 1.8mm; }
+
+  /* ------------------------------------------------------ панель правки */
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input, .editor select { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 240px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
+  .chip b { font-weight: 800; color: var(--brand); }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+
+  .library { margin-top: 10px; }
+  .library h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-soft); margin: 10px 0 6px; }
+  .lib-chip {
+    font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;
+    background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 4px 11px;
+    cursor: pointer; margin: 0 6px 6px 0; color: var(--ink);
+  }
+  .lib-chip:hover { border-color: var(--brand); color: var(--brand); }
+  .lib-chip .ic { font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Вывеси и таблички — конструктор</h1>
+    <label>Размер <select id="size">
+      <option value="door">Дверная 186 × 86 мм — 3 на лист</option>
+      <option value="big">Крупная 186 × 126 мм — 2 на лист</option>
+      <option value="full">Целый лист A4 — 186 × 266 мм</option>
+      <option value="small">Малая 92 × 52 мм — 8 на лист</option>
+    </select></label>
+    <div class="panel-row" data-nz-common></div>
+  </div>
+
+  <div class="editor">
+    <h3>✏️ Правка таблички — кликните по любой табличке на листе</h3>
+    <div class="row">
+      <label>Иконка <input id="e_ico" style="width:56px;text-align:center" placeholder="🐾"></label>
+      <label>Заголовок <input id="e_title" class="wide" placeholder="МЫ ОТКРЫТЫ"></label>
+    </div>
+    <div class="row">
+      <label>Подпись <input id="e_sub" class="wide" style="min-width:330px" placeholder="Ждём вас ежедневно · 10:00–19:00"></label>
+    </div>
+    <div class="row">
+      <label>Низ (бренд) <input id="e_foot" style="min-width:220px" placeholder="NOZZA · Симферополь"></label>
+      <label>Тема <select id="e_theme">
+        <option value="brand">Индиго NOZZA</option>
+        <option value="ink">Тёмная</option>
+        <option value="light">Светлая с рамкой</option>
+        <option value="green">Зелёная (открыто / да)</option>
+        <option value="red">Красная (внимание / запрет)</option>
+        <option value="amber">Янтарная (предупреждение)</option>
+      </select></label>
+      <label><input type="checkbox" id="e_qr"> QR-код</label>
+      <label>QR-ссылка <input id="e_link" style="min-width:210px" placeholder="https://nozza.ru"></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btnAdd">+ Добавить табличку</button>
+      <button class="btn" id="btnDup">Дублировать</button>
+      <button class="btn" id="btnUp">↑ Выше</button>
+      <button class="btn" id="btnDown">↓ Ниже</button>
+      <button class="btn danger" id="btnDel">Удалить</button>
+      <span class="chip" id="selInfo"><b>Выбрано:</b> нет — клик по табличке</span>
+      <span class="chip"><b>Всего:</b> <span id="count">0</span></span>
+      <button class="btn" id="btnExport">Экспорт JSON</button>
+      <label class="btn" style="cursor:pointer">Импорт JSON <input type="file" id="btnImport" accept=".json" style="display:none"></label>
+      <button class="btn danger" id="btnReset">Сбросить набор</button>
+    </div>
+
+    <div class="library">
+      <h3>Библиотека ситуаций — клик добавляет табличку в набор</h3>
+      <div id="lib"></div>
+    </div>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Как пользоваться:</b> кликните табличку на листе — она подсветится, поля выше заполнятся; правки применяются сразу. Текст, иконка, цвет и QR меняются у каждой таблички. Набор сохраняется в браузере. Печать: масштаб 100 %, без «вписать в лист»; бумага 160–250 г/м². Пунктир — линия реза.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS_KEY = 'signs';
+
+const SIZES = {
+  full:  { per: 1, label: 'лист A4' },
+  big:   { per: 2, label: '186 × 126' },
+  door:  { per: 3, label: '186 × 86' },
+  small: { per: 8, label: '92 × 52' },
+};
+
+/* ------------------------------------------------ библиотека ситуаций */
+const GROUPS = [
+  { name: 'Магазин и точка продаж', items: [
+    { ico:'🟢', title:'Мы открыты', sub:'Ждём вас · ежедневно 10:00–19:00', theme:'green' },
+    { ico:'🔴', title:'Закрыто', sub:'Заказы принимаем круглосуточно в Telegram', theme:'red' },
+    { ico:'☕', title:'Перерыв', sub:'13:00–14:00 · скоро вернёмся', theme:'amber' },
+    { ico:'🕒', title:'График работы', sub:'Пн–Пт 10:00–19:00 · Сб–Вс 10:00–17:00', theme:'light' },
+    { ico:'⏰', title:'Сегодня до 20:00', sub:'Успейте забрать заказ', theme:'brand' },
+    { ico:'🎁', title:'Акция недели', sub:'Именной адресник — 350 ₽ вместо 450 ₽', theme:'brand' },
+  ]},
+  { name: 'Заказы и клиенты', items: [
+    { ico:'📦', title:'Приём заказов на 3D-печать', sub:'Изготовим вещь по вашим размерам за 1–3 дня', theme:'brand', qr:true },
+    { ico:'✅', title:'Выдача заказов', sub:'Назовите номер заказа или имя', theme:'light' },
+    { ico:'🔔', title:'Нажмите звонок', sub:'Мы в цеху — обязательно услышим', theme:'amber' },
+    { ico:'💳', title:'Оплата', sub:'Наличные · Карта · Перевод', theme:'light' },
+    { ico:'⭐', title:'Понравилось?', sub:'Оставьте отзыв по QR — это лучшая поддержка', theme:'brand', qr:true },
+    { ico:'🛠', title:'Ремонт и переделка', sub:'Сломалась деталь? Сделаем новую по образцу', theme:'brand' },
+  ]},
+  { name: 'Цех и производство', items: [
+    { ico:'🖨', title:'Идёт 3D-печать', sub:'НЕ ОТКЛЮЧАЙТЕ ПИТАНИЕ И КОМПЬЮТЕР', theme:'amber' },
+    { ico:'🔥', title:'Осторожно: горячее сопло', sub:'До 300 °C · не трогайте руками', theme:'red' },
+    { ico:'⚠️', title:'Рабочая зона', sub:'Посторонним вход запрещён', theme:'red' },
+    { ico:'🧪', title:'Тестовая партия', sub:'Не трогать — идут замеры', theme:'amber' },
+    { ico:'🗂', title:'Готовая продукция', sub:'Отсортировано по заказам', theme:'light' },
+    { ico:'🧵', title:'Склад пластика', sub:'Катушки учитываются в PrintFlow', theme:'light' },
+  ]},
+  { name: 'Офис и помещение', items: [
+    { ico:'🚫', title:'Не беспокоить', sub:'Идёт важная печать · примерно до 15:00', theme:'ink' },
+    { ico:'🚻', title:'Санузел', sub:'Ключ у администратора', theme:'light' },
+    { ico:'👷', title:'Служебный вход', sub:'Только для сотрудников', theme:'ink' },
+    { ico:'📶', title:'Wi-Fi для гостей', sub:'Сеть: NOZZA · пароль: pechat2026', theme:'light', qr:true },
+    { ico:'🚪', title:'Выход', sub:'Спасибо за визит!', theme:'green' },
+    { ico:'🧥', title:'Раздевалка', sub:'Оставьте вещи на полке №', theme:'light' },
+  ]},
+];
+
+const START = [
+  { ico:'🟢', title:'Мы открыты', sub:'Ждём вас · ежедневно 10:00–19:00', theme:'green' },
+  { ico:'📦', title:'Приём заказов на 3D-печать', sub:'Изготовим вещь по вашим размерам за 1–3 дня', theme:'brand', qr:true },
+  { ico:'🖨', title:'Идёт 3D-печать', sub:'НЕ ОТКЛЮЧАЙТЕ ПИТАНИЕ И КОМПЬЮТЕР', theme:'amber' },
+  { ico:'✅', title:'Выдача заказов', sub:'Назовите номер заказа или имя', theme:'light' },
+  { ico:'📶', title:'Wi-Fi для гостей', sub:'Сеть: NOZZA · пароль: pechat2026', theme:'light', qr:true },
+  { ico:'⭐', title:'Понравилось?', sub:'Оставьте отзыв по QR — это лучшая поддержка', theme:'brand', qr:true },
+];
+
+let signs = [];
+let selected = -1;
+
+function load() {
+  const st = NZ.pageState({});
+  signs = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map(s => ({ ...s, id: NZ.uid('sg') }));
+  $('size').value = st.size || 'door';
+}
+function save() { NZ.pageStateSave({ [LS_KEY]: signs, size: $('size').value }); }
+
+function footLine() { return 'NOZZA · ' + (NZ.contact().city || 'Симферополь'); }
+
+function renderSign(s, idx) {
+  const size = $('size').value;
+  const qr = s.qr ? NZ.qr(s.link || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  const foot = (s.foot == null || s.foot === '') ? footLine() : s.foot;
+  return `<div class="sg t-${s.theme || 'brand'} sz-${size}${size !== 'full' ? ' cut' : ''}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править эту табличку">
+    <div class="sg-ico">${NZ.esc(s.ico || '')}</div>
+    <div class="sg-mid">
+      <div class="sg-title">${NZ.esc(s.title || '')}</div>
+      ${s.sub ? `<div class="sg-sub">${NZ.esc(s.sub)}</div>` : ''}
+    </div>
+    <div class="sg-side">
+      ${qr ? `<div class="sg-qrbox">${qr}</div>` : ''}
+      <div class="sg-brand"><img src="${NZ.markSrc(s.theme === 'light' ? false : true)}" alt="">${NZ.esc(foot)}</div>
+    </div>
+  </div>`;
+}
+
+function draw() {
+  const size = $('size').value;
+  save();
+  $('count').textContent = signs.length;
+
+  const per = SIZES[size].per;
+  const pages = [];
+  for (let i = 0; i < signs.length; i += per) pages.push(signs.slice(i, i + per));
+
+  const host = $('sheets');
+  if (!signs.length) {
+    host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Набор пуст.<br>Добавьте табличку кнопкой «+ Добавить» или из библиотеки ситуаций ниже.</div></div>';
+    return;
+  }
+  host.innerHTML = pages.map((page, p) =>
+    `<div class="sheet">
+      <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · ${SIZES[size].label} · ${page.length} шт</div>
+      <div class="grid">${page.map((s, j) => renderSign(s, p * per + j)).join('')}</div>
+    </div>`).join('');
+
+  host.querySelectorAll('.sg[data-idx]').forEach((el) => {
+    el.addEventListener('click', () => select(Number(el.dataset.idx)));
+  });
+}
+
+function select(idx) {
+  selected = idx;
+  const s = signs[idx];
+  if (!s) { selected = -1; draw(); return; }
+  $('e_ico').value = s.ico || '';
+  $('e_title').value = s.title || '';
+  $('e_sub').value = s.sub || '';
+  $('e_foot').value = s.foot != null ? s.foot : '';
+  $('e_theme').value = s.theme || 'brand';
+  $('e_qr').checked = !!s.qr;
+  $('e_link').value = s.link || '';
+  $('selInfo').innerHTML = `<b>Выбрано:</b> #${idx + 1} ${NZ.esc(s.title || '')}`;
+  draw();
+}
+
+function patchSelected(patch) {
+  if (selected < 0 || !signs[selected]) return;
+  Object.assign(signs[selected], patch);
+  save();
+}
+
+['e_ico', 'e_title', 'e_sub', 'e_foot', 'e_link'].forEach((id) => {
+  $(id).addEventListener('input', () => {
+    patchSelected({ ico: $('e_ico').value, title: $('e_title').value, sub: $('e_sub').value, foot: $('e_foot').value, link: $('e_link').value });
+    draw();
+  });
+});
+$('e_theme').addEventListener('change', () => { patchSelected({ theme: $('e_theme').value }); draw(); });
+$('e_qr').addEventListener('change', () => { patchSelected({ qr: $('e_qr').checked }); draw(); });
+
+$('size').addEventListener('change', draw);
+
+$('btnAdd').addEventListener('click', () => {
+  signs.push({ id: NZ.uid('sg'), ico: '🪧', title: 'Новая табличка', sub: 'Подпись — две строки текста', theme: 'brand' });
+  selected = signs.length - 1;
+  $('selInfo').innerHTML = `<b>Выбрано:</b> #${signs.length} новая табличка`;
+  draw(); select(selected);
+});
+$('btnDup').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите табличку');
+  signs.splice(selected + 1, 0, { ...signs[selected], id: NZ.uid('sg') });
+  selected += 1; draw(); select(selected);
+});
+$('btnUp').addEventListener('click', () => {
+  if (selected < 1) return;
+  [signs[selected - 1], signs[selected]] = [signs[selected], signs[selected - 1]];
+  selected -= 1; draw(); select(selected);
+});
+$('btnDown').addEventListener('click', () => {
+  if (selected < 0 || selected >= signs.length - 1) return;
+  [signs[selected + 1], signs[selected]] = [signs[selected], signs[selected + 1]];
+  selected += 1; draw(); select(selected);
+});
+$('btnDel').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите табличку');
+  signs.splice(selected, 1);
+  selected = -1;
+  $('selInfo').innerHTML = '<b>Выбрано:</b> нет — клик по табличке';
+  draw();
+});
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Вернуть стартовый набор из 6 табличек? Текущие правки пропадут.')) return;
+  signs = START.map((s) => ({ ...s, id: NZ.uid('sg') }));
+  selected = -1; draw();
+});
+$('btnExport').addEventListener('click', () => {
+  NZ.download('nozza-vyvesi.json', JSON.stringify(signs, null, 2), 'application/json');
+});
+$('btnImport').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const arr = JSON.parse(r.result);
+      if (!Array.isArray(arr)) throw new Error('не массив');
+      signs = arr.map((s) => ({ ...s, id: s.id || NZ.uid('sg') }));
+      selected = -1; draw();
+    } catch (err) { alert('Файл не похож на набор табличек: ' + err.message); }
+  };
+  r.readAsText(f);
+  e.target.value = '';
+});
+
+function renderLibrary() {
+  $('lib').innerHTML = GROUPS.map((g) =>
+    `<div><h3 style="margin-top:8px">${g.name}</h3>` +
+    g.items.map((it, i) => `<button type="button" class="lib-chip" data-g="${GROUPS.indexOf(g)}" data-i="${i}"><span class="ic">${it.ico}</span>${NZ.esc(it.title)}</button>`).join('') +
+    '</div>').join('');
+  $('lib').querySelectorAll('.lib-chip').forEach((b) => {
+    b.addEventListener('click', () => {
+      const it = GROUPS[Number(b.dataset.g)].items[Number(b.dataset.i)];
+      signs.push({ ...it, id: NZ.uid('sg') });
+      selected = signs.length - 1;
+      select(selected);
+    });
+  });
+}
+
+load();
+renderLibrary();
+NZ.mount(draw);
+</script>
+</body></html>

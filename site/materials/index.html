@@ -1,20 +1,31 @@
 <!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NOZZA — материалы для магазина</title>
+<title>NOZZA — печатные материалы и генераторы</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css">
 <style>
   body { background: #eef1f7; }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 26px 18px 60px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 26px 18px 70px; }
+
   .hero {
-    display: flex; align-items: center; gap: 16px;
+    display: flex; align-items: center; gap: 18px;
     background: linear-gradient(135deg, var(--brand), var(--brand-2));
-    color: #fff; border-radius: 18px; padding: 26px 28px; margin-bottom: 22px;
+    color: #fff; border-radius: 18px; padding: 26px 28px; margin-bottom: 14px;
   }
   .hero img { width: 62px; height: 62px; flex: none; }
   .hero h1 { margin: 0; font-size: 30px; font-weight: 900; letter-spacing: .08em; }
-  .hero p { margin: 5px 0 0; font-size: 13.5px; opacity: .92; letter-spacing: .04em; }
+  .hero p { margin: 6px 0 0; font-size: 13.5px; opacity: .92; letter-spacing: .04em; line-height: 1.5; }
+
+  .how {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 26px;
+  }
+  .how .step {
+    flex: 1 1 200px; background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; font-size: 12px; line-height: 1.55; color: var(--ink-soft);
+  }
+  .how .step b { display: block; color: var(--ink); font-size: 12.5px; margin-bottom: 3px; }
+
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
   a.card {
     display: block; text-decoration: none; color: inherit;
@@ -24,17 +35,21 @@
   a.card:hover { transform: translateY(-2px); box-shadow: 0 14px 30px -22px rgba(19,26,43,.8); border-color: #b9c2d8; }
   a.card h2 { font-size: 15px; margin: 0 0 6px; letter-spacing: -.01em; }
   a.card p { font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; margin: 0; }
-  a.card .badge {
+  a.card .badges { margin-bottom: 9px; }
+  .badge {
     display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--brand); background: #eeecff; border-radius: 20px; padding: 3px 9px; margin-bottom: 9px;
+    color: var(--brand); background: #eeecff; border-radius: 20px; padding: 3px 9px; margin-right: 5px;
   }
-  a.card .badge.live { color: #1e8449; background: #e6f6ec; }
+  .badge.live { color: #1e8449; background: #e6f6ec; }
+  .badge.new { color: #fff; background: linear-gradient(135deg, #f97316, #ef4444); }
+  .badge.edit { color: #8a6516; background: #fff4d6; }
   section h3 {
     font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-soft);
-    margin: 26px 0 12px;
+    margin: 30px 0 12px;
   }
+  section:first-of-type h3 { margin-top: 0; }
   .tips {
-    background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-top: 24px;
+    background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-top: 28px;
     font-size: 13px; line-height: 1.65; color: var(--ink-soft);
   }
   .tips b { color: var(--ink); }
@@ -47,51 +62,78 @@
     <img id="heroMark" src="../assets/brand/nozza-mark-white.svg" alt="">
     <div>
       <h1>NOZZA</h1>
-      <p>ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · материалы для полки и магазина</p>
+      <p>ТАМ, ГДЕ РОЖДАЕТСЯ ФОРМА · печатная мастерская: откройте генератор, поменяйте любой текст, нажмите Ctrl+P</p>
     </div>
   </div>
 
+  <div class="how">
+    <div class="step"><b>1 · Настройте один раз</b>Город, телефон, Telegram, ссылка QR и вариант знака задаются в панели любого генератора и запоминаются для всех остальных.</div>
+    <div class="step"><b>2 · Меняйте любой текст</b>Кликните по ценнику, табличке или воблеру — редактируйте прямо на макете. Все правки сохраняются в браузере.</div>
+    <div class="step"><b>3 · Печатайте</b>Ctrl+P, масштаб 100 %, без «вписать в лист». Ценники и прайс тянут живые данные из каталога PrintFlow.</div>
+  </div>
+
   <section>
-    <h3>Генераторы — данные из каталога PrintFlow</h3>
+    <h3>Вывеси и таблички — конструктор</h3>
     <div class="cards">
-      <a class="card" href="ценники-генератор.html">
-        <span class="badge live">Живые данные</span>
-        <h2>Ценники</h2>
-        <p>Тянет изделия и цены из базы PrintFlow, добавляет QR на страницу товара. Два размера, наценка, округление, пустые бланки.</p>
+      <a class="card" href="вывеси-и-таблички.html">
+        <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Вывеси и таблички — конструктор</h2>
+        <p>21 ситуация: «Мы открыты», «Перерыв», «Идёт 3D-печать — не отключать», «Горячее сопло», Wi-Fi, «Выдача заказов». Четыре размера, шесть цветов, QR. Всё редактируется.</p>
       </a>
-      <a class="card" href="наклейки-и-бирки.html">
-        <span class="badge live">Живые данные</span>
-        <h2>Наклейки и бирки</h2>
-        <p>Круглые Ø40 и Ø30 мм, прямоугольные 50 × 25 мм, бирки 32 × 55 мм с QR и ценой из каталога.</p>
+      <a class="card" href="таблички-зон.html">
+        <div class="badges"><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Таблички зон на полке</h2>
+        <p>Крупные разделители полки: «Питомцы», «Для дома», «Для бизнеса». Иконка, девиз, описание и цвет — редактируются, зоны можно добавлять.</p>
+      </a>
+      <a class="card" href="воблеры.html">
+        <div class="badges"><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Воблеры на полку</h2>
+        <p>Нависающие ярлыки с ценой и оффером. Клик по воблеру — правка названия, цены и подписи; акцентная рамка для главного предложения.</p>
       </a>
     </div>
   </section>
 
   <section>
-    <h3>Витрина магазина</h3>
+    <h3>Авито и интернет-продажи</h3>
     <div class="cards">
-      <a class="card" href="воблеры.html">
-        <span class="badge">6 шт / лист</span>
-        <h2>Воблеры на полку</h2>
-        <p>Нависающие ярлыки с ценой, оффером и QR: «адресник», «органайзер», «QR-стойка». Вырезаются и крепятся к полке.</p>
+      <a class="card" href="авито-объявления.html">
+        <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Объявления для Авито</h2>
+        <p>Четыре готовых объявления под направления: адресники, органайзеры, партии для бизнеса, печать по файлу. Счётчик заголовка, копирование в один клик, быстрые ответы, чек-листы фото и публикации.</p>
       </a>
-      <a class="card" href="прайс-на-подставку.html">
-        <span class="badge live">Живые данные</span>
-        <h2>Прайс на подставку</h2>
-        <p>Лист A4 для рамки на полке: товары и цены тянутся из базы PrintFlow, QR на витрину.</p>
+      <a class="card" href="наклейки-на-коробки.html">
+        <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Наклейки на коробки</h2>
+        <p>Для отправлений Авито и выдачи: «Хрупкое», «Не сгибать», «Верх», «Спасибо за заказ» с QR, «Проверено NOZZA». Самоклейка A4, 8 наклеек на лист.</p>
       </a>
-      <a class="card" href="таблички-зон.html">
-        <span class="badge">3 шт / лист</span>
-        <h2>Таблички зон</h2>
-        <p>«Питомцы», «Для дома», «Для бизнеса» — крупные таблички-разделители на полку с примерами.</p>
+      <a class="card" href="сертификаты-и-купоны.html">
+        <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Сертификаты и купоны</h2>
+        <p>Подарочный сертификат с номиналом и номером + купоны со скидкой и промокодом. Любой текст, сумма и срок меняются в панели.</p>
       </a>
-      <a class="card" href="как-заказать.html">
-        <span class="badge">4 шт / лист</span>
-        <h2>Карточки «как заказать»</h2>
-        <p>Разрезные карточки с шагами: фото → размеры → цвет → расчёт. Кладёте на полку и к кассе.</p>
+      <a class="card" href="шапки-соцсетей.html">
+        <div class="badges"><span class="badge">PNG</span></div>
+        <h2>Шапки Telegram и Авито</h2>
+        <p>Аватар 512 × 512, обложка канала 1280 × 640, баннер магазина Авито 1200 × 400 и готовые тексты описаний профиля.</p>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h3>Telegram и контент</h3>
+    <div class="cards">
+      <a class="card" href="контент-план-тг.html">
+        <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Контент-план недели для Telegram</h2>
+        <p>7 готовых постов: манифест, кейс, ликбез, закулисье, оффер, опрос, итоги. Пять фокусов недели, кнопка «другой вариант», копирование в один клик, экспорт в Markdown.</p>
+      </a>
+      <a class="card" href="постеры.html">
+        <div class="badges"><span class="badge">A4 / A3</span></div>
+        <h2>Постеры</h2>
+        <p>«Печатаем вещи под вас» и «Как заказать своё» с вашим телефоном и QR на сайт. Переключение A4 ↔ A3.</p>
       </a>
       <a class="card" href="qr-витрина.html">
-        <span class="badge">A4</span>
+        <div class="badges"><span class="badge">A4</span></div>
         <h2>Плакат «закажи по QR»</h2>
         <p>Яркий плакат над полкой: «понравилось — сделаем такое для вас» с QR на витрину заказов.</p>
       </a>
@@ -99,49 +141,53 @@
   </section>
 
   <section>
-    <h3>Печатная реклама</h3>
+    <h3>Ценники — с живыми данными PrintFlow</h3>
     <div class="cards">
-      <a class="card" href="постеры.html">
-        <span class="badge">A4 / A3</span>
-        <h2>Постеры</h2>
-        <p>«Печатаем вещи под вас» и «Как заказать своё» — с вашим телефоном и QR на сайт. Переключение A4 ↔ A3.</p>
+      <a class="card" href="ценники-генератор.html">
+        <div class="badges"><span class="badge live">Живые данные</span><span class="badge edit">Весь текст меняем</span></div>
+        <h2>Ценники</h2>
+        <p>Тянет изделия и цены из базы PrintFlow, добавляет QR на страницу товара. Два размера, наценка, округление, ручные ценники и пустые бланки.</p>
       </a>
+      <a class="card" href="наклейки-и-бирки.html">
+        <div class="badges"><span class="badge live">Живые данные</span></div>
+        <h2>Наклейки и бирки</h2>
+        <p>Круглые Ø40 и Ø30 мм, прямоугольные 50 × 25 мм, бирки 32 × 55 мм с QR и ценой из каталога.</p>
+      </a>
+      <a class="card" href="прайс-на-подставку.html">
+        <div class="badges"><span class="badge live">Живые данные</span></div>
+        <h2>Прайс на подставку</h2>
+        <p>Лист A4 для рамки на полке: товары и цены тянутся из базы PrintFlow, QR на витрину.</p>
+      </a>
+      <a class="card" href="как-заказать.html">
+        <div class="badges"><span class="badge">4 шт / лист</span></div>
+        <h2>Карточки «как заказать»</h2>
+        <p>Разрезные карточки с шагами: фото → размеры → цвет → расчёт. Кладёте на полку и к кассе.</p>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h3>Бренд, визитки и персонал</h3>
+    <div class="cards">
       <a class="card" href="визитки-и-таблички.html">
-        <span class="badge">Комплект</span>
+        <div class="badges"><span class="badge">Комплект</span></div>
         <h2>Визитки, таблички, вкладыш</h2>
         <p>Визитки 90 × 50 мм (лицо и оборот), шесть табличек на полку, вкладыш «спасибо за покупку» A6 с уходом за изделием.</p>
       </a>
+      <a class="card" href="логотипы-на-выбор.html">
+        <div class="badges"><span class="badge live">4 варианта</span></div>
+        <h2>Логотипы на выбор</h2>
+        <p>4 варианта знака NOZZA. Выбор сохраняется и подтягивается во все генераторы автоматически.</p>
+      </a>
       <a class="card" href="плакат-над-полкой.html">
-        <span class="badge">A4</span>
+        <div class="badges"><span class="badge">A4</span></div>
         <h2>Плакат над полкой</h2>
         <p>Готовый плакат с описанием ниш и порядка работы. Печатать без изменений.</p>
       </a>
-    </div>
-  </section>
-
-  <section>
-    <h3>Бренд и логотипы</h3>
-    <div class="cards">
-      <a class="card" href="логотипы-на-выбор.html">
-        <span class="badge live">4 варианта</span>
-        <h2>Логотипы на выбор</h2>
-        <p>4 варианта знака NOZZA (слои, сопло, нить, штамп). Выбор сохраняется и подтягивается во все генераторы. Симферополь по умолчанию.</p>
-      </a>
-      <a class="card" href="шапки-соцсетей.html">
-        <span class="badge">PNG</span>
-        <h2>Шапки Telegram и Авито</h2>
-        <p>Аватар 512 × 512, обложка канала 1280 × 640, баннер Авито 1200 × 400 и готовые тексты описаний. Город Симферополь.</p>
-      </a>
-    </div>
-  </section>
-
-  <section>
-    <h3>Персонал</h3>
-    <div class="cards">
       <a class="card" href="памятка-продавцу.html">
-        <span class="badge">A4</span>
+        <div class="badges"><span class="badge">A4</span></div>
         <h2>Памятка продавцу</h2>
-        <p>Что отвечать на частые вопросы, как принять заявку и какие обещания давать нельзя. Симферополь.</p>
+        <p>Что отвечать на частые вопросы, как принять заявку и какие обещания давать нельзя.</p>
       </a>
     </div>
   </section>
@@ -150,16 +196,17 @@
     <b>Перед печатью:</b>
     <ul>
       <li>Масштаб <b>100 %</b>, галочка «вписать в страницу» — снята, иначе размеры уедут.</li>
-      <li>Ценники и таблички — плотная бумага 160–250 г/м², наклейки — самоклеящаяся плёнка A4.</li>
-      <li>Визитки и бирки — картон 250–300 г/м².</li>
-      <li>Генераторы берут цены из PrintFlow: обновите базу изделий перед печатью партии.</li>
-      <li>QR ведёт на адрес, указанный в поле «Ссылка» — проверьте его на телефоне до печати тиража.</li>
+      <li>Ценники и таблички — плотная бумага 160–250 г/м², наклейки — самоклеящаяся плёнка A4, визитки и сертификаты — картон 250–300 г/м².</li>
+      <li>Генераторы цен и прайса берут данные из PrintFlow: обновите базу изделий перед печатью партии.</li>
+      <li>QR ведёт на адрес из поля «Ссылка QR» — проверьте его на телефоне до печати тиража.</li>
+      <li>Общие настройки (город, телефон, Telegram, знак) заполняются один раз в любом генераторе.</li>
+      <li>Тексты объявлений и постов — отправная точка: правила площадок меняются, перечитайте перед публикацией.</li>
     </ul>
   </div>
 
 </div>
 <script>
-// Подставляем выбранный на странице «Логотипы» вариант знака (белая версия для тёмной шапки).
+// Подставляем выбранный на странице «Логотипы» вариант знака.
 (function(){
   var id='1';
   try { id = localStorage.getItem('nozza:logo') || '1'; } catch(e) {}
