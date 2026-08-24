@@ -1519,7 +1519,8 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 
 /* ============================================ печать QR-ценника */
 @media print {
-  #shelf_qr_modal { display: block !important; position: static !important; box-shadow: none !important; border: none !important; }
+  /* Только открытое окно: закрытый dialog не должен всплывать на печати. */
+  #shelf_qr_modal[open] { display: block !important; position: static !important; box-shadow: none !important; border: none !important; }
   #shelf_qr_modal .modal-head, #shelf_qr_modal .modal-foot, #shelf_qr_modal .icon-btn { display: none !important; }
   #shelf_qr_modal .modal-body { padding: 0 !important; }
 }
