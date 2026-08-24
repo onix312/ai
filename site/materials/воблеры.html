@@ -3,76 +3,184 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NOZZA — воблеры на полку</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
 <style>
-  @page { size: A4 portrait; margin: 8mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Segoe UI", Arial, sans-serif; color: #12203c; background: #fff; }
-  .panel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
-    background: #f3f6fd; border: 1px solid #dbe3f2; border-radius: 10px; padding: 10px 14px; margin-bottom: 6mm; }
-  .panel b { font-size: 13px; margin-right: 6px; }
-  .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
-  .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5mm; }
-  .wobbler {
-    border: 2px solid #1f3864; border-radius: 12px; padding: 5mm 5mm 4mm; position: relative;
-    display: flex; flex-direction: column; height: 74mm;
-    background: radial-gradient(circle at 90% 0%, #e8eefc 0 38%, transparent 38%), #fff;
+  .grid { display: grid; grid-template-columns: repeat(2, 92mm); gap: 5mm; justify-content: center; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+
+  .wob {
+    width: 92mm; height: 87mm; box-sizing: border-box; border-radius: 4mm;
+    border: 0.9mm solid var(--ink); background: #fff;
+    background-image: radial-gradient(circle at 100% 0%, #eeecff 0 30mm, transparent 30mm);
+    padding: 3.5mm 4mm 2.5mm; position: relative;
+    display: flex; flex-direction: column; cursor: pointer;
+    transition: outline .12s ease, box-shadow .12s ease;
+    page-break-inside: avoid; break-inside: avoid;
   }
-  .wobbler.promo { border-color: #7c3aed; }
-  .hole { width: 8mm; height: 8mm; border: 2px solid #1f3864; border-radius: 50%; align-self: center; margin-bottom: 3mm; }
-  .name { font-size: 15pt; font-weight: 900; line-height: 1.05; }
-  .price { font-size: 26pt; font-weight: 900; color: #4f46e5; margin: 2mm 0 1mm; }
-  .offer { font-size: 9.5pt; color: #42506e; line-height: 1.3; }
-  .foot { margin-top: auto; display: flex; align-items: center; gap: 4mm; }
-  .qr { width: 26mm; height: 26mm; flex: none; }
-  .qr svg { width: 100%; height: 100%; display: block; }
-  .foot .t { font-size: 8.5pt; color: #5d6b85; line-height: 1.3; }
-  .foot .t b { color: #1f3864; }
-  .cut { border-top: 1.5px dashed #b9c4da; margin: 3mm 0 0; text-align: center; font-size: 7pt; color: #9aa6bd; padding-top: 1mm; }
-  @media print { .panel { display: none; } }
-</style></head>
-<body>
-<div class="panel">
-  <b>Воблеры на полку — 6 штук на листе</b>
-  <label>Оффер <input id="offer" value="Сделаем под вас за 1 день"></label>
-  <label>Ссылка QR <input id="link" value="http://192.168.1.10:8080/order.html"></label>
-  <label>Цена 1 <input id="p1" value="450 ₽"></label>
-  <label>Цена 2 <input id="p2" value="от 150 ₽"></label>
+  .wob:hover { box-shadow: 0 6px 18px -12px rgba(19,26,43,.6); }
+  .wob.selected { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .wob.promo { border-color: var(--brand-2); background-image: radial-gradient(circle at 100% 0%, #f3ecff 0 30mm, transparent 30mm); }
+  .wob .hole {
+    width: 7mm; height: 7mm; border: 0.8mm solid var(--ink); border-radius: 50%;
+    align-self: center; margin-bottom: 2.5mm; flex: none;
+  }
+  .wob .name { font-size: 14.5px; font-weight: 900; line-height: 1.08; letter-spacing: -.01em; }
+  .wob .price { font-size: 24px; font-weight: 900; color: var(--brand); line-height: 1; margin: 1.8mm 0 1mm; }
+  .wob .offer { font-size: 10px; color: #42506e; line-height: 1.35; }
+  .wob .foot { margin-top: auto; display: flex; align-items: center; gap: 3mm; padding-top: 2mm; }
+  .wob .qr svg { width: 20mm; height: 20mm; display: block; }
+  .wob .ft { font-size: 8.5px; color: var(--ink-soft); line-height: 1.35; }
+  .wob .ft b { color: var(--ink); }
+  .wob .cut { border-top: 1px dashed #b9c4da; margin-top: 2mm; text-align: center; font-size: 7.5px; color: #9aa6bd; padding-top: 1mm; }
+
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input, .editor select { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 230px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
+  .chip b { font-weight: 800; color: var(--brand); }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Воблеры на полку</h1>
+    <div class="panel-row" data-nz-common="qr"></div>
+    <label>Общий оффер <input id="tail" data-page="tail" type="text" style="min-width:230px" value="Сделаем под вас за 1–3 дня"></label>
+    <label><input type="checkbox" id="qron" data-page="qron" checked> QR на воблере</label>
+  </div>
+
+  <div class="editor">
+    <h3>✏️ Правка воблера — кликните по воблеру на листе</h3>
+    <div class="row">
+      <label>Название <input id="e_name" class="wide" placeholder="Адресник с именем"></label>
+      <label>Цена <input id="e_price" style="width:100px" placeholder="от 350 ₽"></label>
+    </div>
+    <div class="row">
+      <label>Оффер <input id="e_offer" style="min-width:280px" placeholder="Имя + телефон + цвет"></label>
+      <label><input type="checkbox" id="e_promo"> акцентная рамка</label>
+      <button class="btn primary" id="btnAdd">+ Добавить</button>
+      <button class="btn" id="btnDup">Дублировать</button>
+      <button class="btn danger" id="btnDel">Удалить</button>
+      <span class="chip" id="selInfo"><b>Выбрано:</b> нет — клик по воблеру</span>
+      <button class="btn danger" id="btnReset">Сбросить</button>
+    </div>
+  </div>
 </div>
-<div class="grid" id="grid"></div>
+
+<div class="note noprint">
+  <b>Как пользоваться:</b> клик по воблеру — правка названия, цены и оффера; общий оффер и QR — в панели сверху. Воблер вырезается по контуру, отверстие — под крючок полки. Печать на плотной бумаге 200 г/м², масштаб 100 %.
+</div>
+
+<div id="sheets"></div>
+
 <script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
 <script>
-(function(){
-  var ITEMS = [
-    { name: 'Адресник с именем', offer: 'Имя + телефон + цвет', promo: true },
-    { name: 'Органайзер по размерам', offer: 'Точно под ваше место' },
-    { name: 'Именная табличка', offer: 'Для питомца или дома' },
-    { name: 'QR-стойка для бизнеса', offer: 'Меню и оплата на столе' },
-    { name: 'Номерки и ценники', offer: 'Партия для кафе и точек' },
-    { name: 'Крепление и держатели', offer: 'Ремонт без ожидания доставки' },
-  ];
-  function el(id){ return document.getElementById(id); }
-  function draw(){
-    var offer = el('offer').value || 'Сделаем под вас за 1 день';
-    var link = el('link').value || 'http://127.0.0.1:8080/order.html';
-    var p1 = el('p1').value, p2 = el('p2').value;
-    var qr = '';
-    if (window.QR) qr = QR.svg(link, { ecl: 'M', margin: 0 });
-    else qr = '<span style="font-size:6pt">QR</span>';
-    el('grid').innerHTML = ITEMS.map(function(it, i){
-      var price = i === 0 ? p1 : p2;
-      return '<div class="wobbler' + (it.promo ? ' promo' : '') + '">'
-        + '<div class="hole"></div>'
-        + '<div class="name">' + it.name + '</div>'
-        + '<div class="price">' + price + '</div>'
-        + '<div class="offer">' + it.offer + ' · ' + offer + '</div>'
-        + '<div class="foot"><div class="qr">' + qr + '</div>'
-        + '<div class="t"><b>NOZZA</b><br>Отсканируйте — заказать или спросить</div></div>'
-        + '<div class="cut">вырезать · отверстие — для крючка</div></div>';
-    }).join('');
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS_KEY = 'wobblers';
+const PER_PAGE = 6;
+
+const START = [
+  { name: 'Адресник с именем', price: 'от 350 ₽', offer: 'Имя + телефон + цвет', promo: true },
+  { name: 'Органайзер по размерам', price: 'от 300 ₽', offer: 'Точно под ваше место' },
+  { name: 'Именная табличка', price: 'от 450 ₽', offer: 'Для питомца или дома' },
+  { name: 'QR-стойка для бизнеса', price: 'от 250 ₽', offer: 'Меню и оплата на столе' },
+  { name: 'Номерки и ценники', price: 'от 60 ₽', offer: 'Партия для кафе и точек' },
+  { name: 'Крепления и держатели', price: 'от 200 ₽', offer: 'Ремонт без ожидания доставки' },
+];
+
+let items = [];
+let selected = -1;
+
+function load() {
+  const st = NZ.pageState({});
+  items = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map((s) => ({ ...s }));
+}
+function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
+
+function renderWob(s, idx) {
+  const tail = $('tail').value || '';
+  const qr = $('qron').checked ? NZ.qr(NZ.contact().qrbase || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  return `<div class="wob${s.promo ? ' promo' : ''}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
+    <div class="hole"></div>
+    <div class="name">${NZ.esc(s.name || '')}</div>
+    <div class="price">${NZ.esc(s.price || '')}</div>
+    <div class="offer">${NZ.esc(s.offer || '')}${tail ? ' · ' + NZ.esc(tail) : ''}</div>
+    <div class="foot">
+      ${qr ? `<div class="qr">${qr}</div>` : ''}
+      <div class="ft"><b>NOZZA</b><br>Отсканируйте —<br>заказать или спросить</div>
+    </div>
+    <div class="cut">вырезать · отверстие — для крючка полки</div>
+  </div>`;
+}
+
+function draw() {
+  save();
+  const host = $('sheets');
+  if (!items.length) {
+    host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Воблеров нет — добавьте кнопкой «+ Добавить».</div></div>';
+    return;
   }
-  ['offer','link','p1','p2'].forEach(function(id){ el(id).addEventListener('input', draw); });
+  const pages = [];
+  for (let i = 0; i < items.length; i += PER_PAGE) pages.push(items.slice(i, i + PER_PAGE));
+  host.innerHTML = pages.map((page, p) =>
+    `<div class="sheet">
+      <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · 92 × 87 мм · ${page.length} шт</div>
+      <div class="grid">${page.map((s, j) => renderWob(s, p * PER_PAGE + j)).join('')}</div>
+    </div>`).join('');
+  host.querySelectorAll('.wob[data-idx]').forEach((el) => {
+    el.addEventListener('click', () => select(Number(el.dataset.idx)));
+  });
+}
+
+function select(idx) {
+  selected = idx;
+  const s = items[idx];
+  if (!s) { selected = -1; draw(); return; }
+  $('e_name').value = s.name || '';
+  $('e_price').value = s.price || '';
+  $('e_offer').value = s.offer || '';
+  $('e_promo').checked = !!s.promo;
+  $('selInfo').innerHTML = `<b>Выбрано:</b> #${idx + 1} ${NZ.esc(s.name || '')}`;
   draw();
-})();
+}
+
+function patch(p) { if (selected >= 0 && items[selected]) { Object.assign(items[selected], p); save(); } }
+
+['e_name', 'e_price', 'e_offer'].forEach((id) => {
+  $(id).addEventListener('input', () => { patch({ name: $('e_name').value, price: $('e_price').value, offer: $('e_offer').value }); draw(); });
+});
+$('e_promo').addEventListener('change', () => { patch({ promo: $('e_promo').checked }); draw(); });
+
+$('btnAdd').addEventListener('click', () => {
+  items.push({ name: 'Новый воблер', price: 'от ___ ₽', offer: 'Что входит' });
+  select(items.length - 1);
+});
+$('btnDup').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите воблер');
+  items.splice(selected + 1, 0, { ...items[selected] });
+  select(selected + 1);
+});
+$('btnDel').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите воблер');
+  items.splice(selected, 1);
+  selected = -1;
+  $('selInfo').innerHTML = '<b>Выбрано:</b> нет';
+  draw();
+});
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Вернуть стартовый набор из 6 воблеров?')) return;
+  items = START.map((s) => ({ ...s }));
+  selected = -1; draw();
+});
+
+load();
+NZ.mount(draw);
 </script>
 </body></html>

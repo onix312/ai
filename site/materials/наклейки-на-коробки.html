@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — наклейки на коробки</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  .grid { display: flex; flex-wrap: wrap; gap: 5mm; align-content: flex-start; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+
+  .stk {
+    width: 92mm; height: 52mm; box-sizing: border-box; border-radius: 3mm;
+    display: flex; align-items: center; gap: 3.5mm; padding: 3mm 4mm;
+    position: relative; overflow: hidden; cursor: pointer;
+    outline: 1px dashed #c8cfdf; outline-offset: 1.8mm;
+    transition: box-shadow .12s ease;
+    --stk-soft: rgba(255,255,255,.82);
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  .stk.t-light { --stk-soft: #5d6b85; }
+  .stk:hover { box-shadow: 0 6px 18px -12px rgba(19,26,43,.6); }
+  .stk.selected { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .stk.t-brand { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: #fff; }
+  .stk.t-ink   { background: #131a2b; color: #fff; }
+  .stk.t-light { background: #fff; color: var(--ink); border: 1mm solid var(--brand); }
+  .stk.t-green { background: linear-gradient(135deg, #047857, #10b981); color: #fff; }
+  .stk.t-red   { background: linear-gradient(135deg, #b91c1c, #ef4444); color: #fff; }
+  .stk.t-amber { background: linear-gradient(135deg, #b45309, #f59e0b); color: #fff; }
+
+  .stk .ico { flex: none; font-size: 17mm; line-height: 1; font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+  .stk .mid { flex: 1; min-width: 0; }
+  .stk .t { font-size: 9.5mm; font-weight: 900; line-height: 1; text-transform: uppercase; letter-spacing: -.01em; }
+  .stk .s { font-size: 4.2mm; color: var(--stk-soft); font-weight: 650; line-height: 1.25; margin-top: 1.2mm; }
+  .stk .side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1.6mm; }
+  .stk .brand { display: flex; align-items: center; gap: 1mm; font-size: 3mm; font-weight: 800; letter-spacing: .12em; white-space: nowrap; }
+  .stk .brand img { width: 4mm; height: 4mm; }
+  .stk .qrbox { background: #fff; border-radius: 1.4mm; padding: 1mm; }
+  .stk .qrbox svg { width: 14mm; height: 14mm; display: block; }
+
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input, .editor select { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 230px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
+  .chip b { font-weight: 800; color: var(--brand); }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+
+  .lib-chip {
+    font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 6px;
+    background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 4px 11px;
+    cursor: pointer; margin: 0 6px 6px 0; color: var(--ink);
+  }
+  .lib-chip:hover { border-color: var(--brand); color: var(--brand); }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Наклейки на коробки</h1>
+    <div class="panel-row" data-nz-common="qr"></div>
+  </div>
+
+  <div class="editor">
+    <h3>📦 Правка наклейки — кликните по наклейке на листе</h3>
+    <div class="row">
+      <label>Иконка <input id="e_ico" style="width:56px;text-align:center" placeholder="📦"></label>
+      <label>Текст <input id="e_title" class="wide" placeholder="ХРУПКОЕ"></label>
+      <label>Подпись <input id="e_sub" style="min-width:250px" placeholder="Не бросать!"></label>
+    </div>
+    <div class="row">
+      <label>Тема <select id="e_theme">
+        <option value="red">Красная (хрупкое)</option>
+        <option value="amber">Янтарная (внимание)</option>
+        <option value="brand">Индиго NOZZA</option>
+        <option value="green">Зелёная (спасибо/проверено)</option>
+        <option value="ink">Тёмная</option>
+        <option value="light">Светлая с рамкой</option>
+      </select></label>
+      <label><input type="checkbox" id="e_qr"> QR</label>
+      <label>Низ <input id="e_foot" style="min-width:190px" placeholder="NOZZA · Симферополь"></label>
+      <button class="btn primary" id="btnAdd">+ Добавить</button>
+      <button class="btn" id="btnDup">Дублировать</button>
+      <button class="btn danger" id="btnDel">Удалить</button>
+      <span class="chip" id="selInfo"><b>Выбрано:</b> нет — клик по наклейке</span>
+      <span class="chip"><b>На лист:</b> <span id="count">8</span></span>
+      <button class="btn danger" id="btnReset">Сбросить</button>
+    </div>
+    <div class="row">
+      <b style="font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em">Готовые:</b>
+      <span id="lib"></span>
+    </div>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Печать:</b> самоклеящаяся бумага A4, масштаб 100 %, рез по пунктиру. Стандартный лист вмещает 8 наклеек 92 × 52 мм. Наклейка «Спасибо за заказ» с QR — на видное место коробки: так покупатель попадает на витрину и оставляет отзыв.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS_KEY = 'boxstickers';
+const PER_PAGE = 8;
+
+const PRESETS = [
+  { ico:'⚠️', title:'Хрупкое', sub:'Не бросать! Внутри 3D-изделие', theme:'red' },
+  { ico:'📐', title:'Не сгибать', sub:'Гибкая деталь TPU внутри', theme:'amber' },
+  { ico:'⬆️', title:'Верх', sub:'Не переворачивать · только так', theme:'amber' },
+  { ico:'✂️', title:'Открыть здесь', sub:'Разрез по шву коробки', theme:'light' },
+  { ico:'🙏', title:'Спасибо за заказ!', sub:'NOZZA — там, где рождается форма', theme:'brand', qr:true },
+  { ico:'✅', title:'Проверено NOZZA', sub:'Контроль качества пройден · дата ____', theme:'green' },
+  { ico:'🛡', title:'Бережная доставка', sub:'Упаковано в защитную плёнку', theme:'green' },
+  { ico:'🌡', title:'Изделие из пластика', sub:'Не нагревать выше 60 °C', theme:'light' },
+  { ico:'🚫', title:'Не мочить наклейку', sub:'Адрес отправителя — под плёнкой', theme:'ink' },
+  { ico:'🐢', title:'Осторожно, открыто', sub:'Проверьте содержимое при получении', theme:'amber' },
+];
+
+const START = [0, 1, 2, 4, 5, 6].map((i) => ({ ...PRESETS[i], id: NZ.uid('st') }));
+
+let items = [];
+let selected = -1;
+
+function load() {
+  const st = NZ.pageState({});
+  items = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map((s) => ({ ...s }));
+}
+function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
+
+function renderSticker(s, idx) {
+  const qr = s.qr ? NZ.qr(s.link || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  const foot = (s.foot == null || s.foot === '') ? 'NOZZA · ' + (NZ.contact().city || '') : s.foot;
+  return `<div class="stk t-${s.theme || 'brand'}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
+    ${s.ico ? `<div class="ico">${NZ.esc(s.ico)}</div>` : ''}
+    <div class="mid">
+      <div class="t">${NZ.esc(s.title || '')}</div>
+      ${s.sub ? `<div class="s">${NZ.esc(s.sub)}</div>` : ''}
+    </div>
+    <div class="side">
+      ${qr ? `<div class="qrbox">${qr}</div>` : ''}
+      <div class="brand"><img src="${NZ.markSrc(s.theme !== 'light')}" alt="">${NZ.esc(foot)}</div>
+    </div>
+  </div>`;
+}
+
+function draw() {
+  save();
+  $('count').textContent = items.length;
+  const host = $('sheets');
+  if (!items.length) {
+    host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Наклеек нет — добавьте кнопкой «+ Добавить» или готовую ниже.</div></div>';
+    return;
+  }
+  const pages = [];
+  for (let i = 0; i < items.length; i += PER_PAGE) pages.push(items.slice(i, i + PER_PAGE));
+  host.innerHTML = pages.map((page, p) =>
+    `<div class="sheet">
+      <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · 92 × 52 мм · ${page.length} шт</div>
+      <div class="grid">${page.map((s, j) => renderSticker(s, p * PER_PAGE + j)).join('')}</div>
+    </div>`).join('');
+  host.querySelectorAll('.stk[data-idx]').forEach((el) => {
+    el.addEventListener('click', () => select(Number(el.dataset.idx)));
+  });
+}
+
+function select(idx) {
+  selected = idx;
+  const s = items[idx];
+  if (!s) { selected = -1; draw(); return; }
+  $('e_ico').value = s.ico || '';
+  $('e_title').value = s.title || '';
+  $('e_sub').value = s.sub || '';
+  $('e_foot').value = s.foot != null ? s.foot : '';
+  $('e_theme').value = s.theme || 'brand';
+  $('e_qr').checked = !!s.qr;
+  $('selInfo').innerHTML = `<b>Выбрано:</b> #${idx + 1} ${NZ.esc(s.title || '')}`;
+  draw();
+}
+
+function patch(p) { if (selected >= 0 && items[selected]) { Object.assign(items[selected], p); save(); } }
+
+['e_ico', 'e_title', 'e_sub', 'e_foot'].forEach((id) => {
+  $(id).addEventListener('input', () => { patch({ ico: $('e_ico').value, title: $('e_title').value, sub: $('e_sub').value, foot: $('e_foot').value }); draw(); });
+});
+$('e_theme').addEventListener('change', () => { patch({ theme: $('e_theme').value }); draw(); });
+$('e_qr').addEventListener('change', () => { patch({ qr: $('e_qr').checked }); draw(); });
+
+$('btnAdd').addEventListener('click', () => {
+  items.push({ id: NZ.uid('st'), ico: '📦', title: 'Наклейка', sub: 'Подпись', theme: 'brand' });
+  select(items.length - 1);
+});
+$('btnDup').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите наклейку');
+  items.splice(selected + 1, 0, { ...items[selected], id: NZ.uid('st') });
+  select(selected + 1);
+});
+$('btnDel').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите наклейку');
+  items.splice(selected, 1);
+  selected = -1;
+  $('selInfo').innerHTML = '<b>Выбрано:</b> нет';
+  draw();
+});
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Вернуть стартовый набор наклеек?')) return;
+  items = START.map((s) => ({ ...s }));
+  selected = -1; draw();
+});
+
+$('lib').innerHTML = PRESETS.map((p, i) => `<button type="button" class="lib-chip" data-i="${i}">${p.ico} ${NZ.esc(p.title)}</button>`).join('');
+$('lib').querySelectorAll('.lib-chip').forEach((b) => {
+  b.addEventListener('click', () => {
+    items.push({ ...PRESETS[Number(b.dataset.i)], id: NZ.uid('st') });
+    select(items.length - 1);
+  });
+});
+
+load();
+NZ.mount(draw);
+</script>
+</body></html>

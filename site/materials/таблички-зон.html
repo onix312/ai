@@ -3,65 +3,204 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NOZZA — таблички зон на полке</title>
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
 <style>
-  @page { size: A4 portrait; margin: 8mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Segoe UI", Arial, sans-serif; color: #12203c; background: #fff; }
-  .panel { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
-    background: #f3f6fd; border: 1px solid #dbe3f2; border-radius: 10px; padding: 10px 14px; margin-bottom: 6mm; }
-  .panel b { font-size: 13px; margin-right: 6px; }
-  .panel label { font-size: 12px; color: #5d6b85; display: flex; align-items: center; gap: 6px; }
-  .panel input { font: inherit; font-size: 12.5px; padding: 5px 8px; border: 1px solid #d6dcea; border-radius: 7px; }
-  .sheet { display: flex; flex-direction: column; gap: 6mm; }
-  .zone { display: flex; gap: 5mm; align-items: stretch; border: 2px solid #dbe3f2; border-radius: 14px; overflow: hidden; }
-  .zone .side { width: 34mm; flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2mm; padding: 4mm; color: #fff; }
-  .zone .side .ico { font-size: 26pt; line-height: 1; }
-  .zone .side .n { font-size: 12pt; font-weight: 900; text-align: center; line-height: 1.1; }
-  .zone .body { flex: 1; padding: 4mm 4mm 3mm; }
-  .zone .body .t { font-size: 14pt; font-weight: 900; }
-  .zone .body .d { font-size: 10pt; color: #42506e; margin-top: 1.5mm; line-height: 1.4; }
-  .zone .body .ex { font-size: 9pt; color: #5d6b85; margin-top: 2mm; }
-  .zone .body .ex b { color: #1f3864; }
-  .z-pets .side { background: linear-gradient(160deg, #ec4899, #be185d); }
-  .z-home .side { background: linear-gradient(160deg, #0ea5e9, #0369a1); }
-  .z-biz  .side { background: linear-gradient(160deg, #8b5cf6, #6d28d9); }
-  @media print { .panel { display: none; } }
-</style></head>
-<body>
-<div class="panel">
-  <b>Таблички зон — 3 штуки на листе</b>
-  <label>Подпись зоны питомцев <input id="s1" value="Персонализация за день"></label>
-  <label>Подпись зоны дома <input id="s2" value="Точно под ваше место"></label>
-  <label>Подпись зоны бизнеса <input id="s3" value="Партии и оснастка"></label>
-</div>
-<div class="sheet" id="sheet"></div>
-<script>
-(function(){
-  var ZONES = [
-    { cls: 'z-pets', ico: '🐾', n: 'Питомцы', tag: 'Персонализация за день',
-      d: 'Адресники и именные таблички, которые делаются под имя, телефон и цвет.',
-      ex: '<b>Примеры:</b> адресник, табличка на зону, держатель поводка' },
-    { cls: 'z-home', ico: '🏠', n: 'Для дома', tag: 'Точно под ваше место',
-      d: 'Органайзеры, держатели и крепления, которые не нужно подпиливать и клеить скотчем.',
-      ex: '<b>Примеры:</b> органайзер стола, держатель кабелей, крепление роутера' },
-    { cls: 'z-biz', ico: '🏪', n: 'Для бизнеса', tag: 'Партии и оснастка',
-      d: 'Таблички, QR-стойки и рабочая оснастка в цветах вашей точки, от 10 штук.',
-      ex: '<b>Примеры:</b> QR-стойка, номерки, держатели ценников' },
-  ];
-  function el(id){ return document.getElementById(id); }
-  function draw(){
-    var tags = [el('s1').value, el('s2').value, el('s3').value];
-    el('sheet').innerHTML = ZONES.map(function(z, i){
-      return '<div class="zone ' + z.cls + '">'
-        + '<div class="side"><div class="ico">' + z.ico + '</div><div class="n">' + z.n + '</div></div>'
-        + '<div class="body"><div class="t">' + z.n + '</div>'
-        + '<div class="d">' + z.d + '</div>'
-        + '<div class="d" style="font-weight:800;color:#4f46e5">' + tags[i] + '</div>'
-        + '<div class="ex">' + z.ex + '</div></div></div>';
-    }).join('');
+  .grid { display: flex; flex-direction: column; gap: 6mm; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+
+  .zone {
+    width: 186mm; box-sizing: border-box; min-height: 78mm;
+    border-radius: 4mm; overflow: hidden; display: flex; cursor: pointer;
+    border: 1px solid var(--line);
+    transition: outline .12s ease, box-shadow .12s ease;
+    page-break-inside: avoid; break-inside: avoid;
   }
-  ['s1','s2','s3'].forEach(function(id){ el(id).addEventListener('input', draw); });
+  .zone:hover { box-shadow: 0 8px 22px -14px rgba(19,26,43,.6); }
+  .zone.selected { outline: 3px solid var(--brand); outline-offset: 2px; }
+  .zone .side {
+    width: 46mm; flex: none; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.5mm; padding: 5mm 3mm; color: #fff; text-align: center;
+  }
+  .zone .side .ico { font-size: 34px; line-height: 1; font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+  .zone .side .n { font-size: 15px; font-weight: 900; line-height: 1.1; letter-spacing: -.01em; }
+  .zone .side .mark { width: 12mm; height: 12mm; margin-top: 1mm; }
+  .zone .body { flex: 1; padding: 5mm 5mm 4mm; min-width: 0; }
+  .zone .body .t { font-size: 17px; font-weight: 900; letter-spacing: -.01em; }
+  .zone .body .tag { font-size: 11.5px; font-weight: 800; color: var(--brand); margin-top: 1.2mm; }
+  .zone .body .d { font-size: 11px; color: #42506e; line-height: 1.45; margin-top: 2mm; }
+  .zone .body .ex { font-size: 9.5px; color: var(--ink-soft); margin-top: 2.5mm; line-height: 1.4; }
+  .zone .body .ex b { color: #1f3864; }
+  .z-brand { background: linear-gradient(160deg, #4f46e5, #7c3aed); }
+  .z-pink  { background: linear-gradient(160deg, #ec4899, #be185d); }
+  .z-sky   { background: linear-gradient(160deg, #0ea5e9, #0369a1); }
+  .z-green { background: linear-gradient(160deg, #059669, #047857); }
+  .z-ink   { background: linear-gradient(160deg, #374151, #131a2b); }
+  .z-amber { background: linear-gradient(160deg, #f59e0b, #b45309); }
+
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input, .editor select { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 240px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 3px 10px; }
+  .chip b { font-weight: 800; color: var(--brand); }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Таблички зон на полке</h1>
+    <div class="panel-row" data-nz-common></div>
+  </div>
+
+  <div class="editor">
+    <h3>✏️ Правка зоны — кликните по табличке на листе</h3>
+    <div class="row">
+      <label>Иконка <input id="e_ico" style="width:56px;text-align:center" placeholder="🐾"></label>
+      <label>Название <input id="e_name" placeholder="Питомцы" style="width:150px"></label>
+      <label>Девиз <input id="e_tag" class="wide" placeholder="Персонализация за день"></label>
+    </div>
+    <div class="row">
+      <label>Описание <input id="e_desc" style="min-width:420px" placeholder="Что это за зона и для кого"></label>
+    </div>
+    <div class="row">
+      <label>Примеры <input id="e_ex" style="min-width:330px" placeholder="адресник, табличка, держатель поводка"></label>
+      <label>Цвет <select id="e_theme">
+        <option value="pink">Розовый</option>
+        <option value="sky">Голубой</option>
+        <option value="brand">Индиго</option>
+        <option value="green">Зелёный</option>
+        <option value="amber">Янтарный</option>
+        <option value="ink">Графит</option>
+      </select></label>
+      <button class="btn primary" id="btnAdd">+ Добавить зону</button>
+      <button class="btn" id="btnDup">Дублировать</button>
+      <button class="btn danger" id="btnDel">Удалить</button>
+      <span class="chip" id="selInfo"><b>Выбрано:</b> нет — клик по табличке</span>
+      <button class="btn danger" id="btnReset">Сбросить</button>
+    </div>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Печать:</b> 3–4 таблички на лист A4, плотная бумага 200–250 г/м², масштаб 100 %, рез по контуру. Табличка ставится ребром на полку между зонами товара — загнутый цветной бок виден покупателю из прохода.
+</div>
+
+<div id="sheets"></div>
+
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS_KEY = 'zones';
+const PER_PAGE = 3;
+
+const START = [
+  { ico:'🐾', name:'Питомцы', tag:'Персонализация за день', theme:'pink',
+    desc:'Адресники и именные таблички, которые делаются под имя, телефон и цвет.',
+    ex:'адресник, табличка на зону, держатель поводка' },
+  { ico:'🏠', name:'Для дома', tag:'Точно под ваше место', theme:'sky',
+    desc:'Органайзеры, держатели и крепления, которые не нужно подпиливать и клеить скотчем.',
+    ex:'органайзер стола, держатель кабелей, крепление роутера' },
+  { ico:'🏪', name:'Для бизнеса', tag:'Партии и оснастка', theme:'brand',
+    desc:'Таблички, QR-стойки и рабочая оснастка в цветах вашей точки, от 10 штук.',
+    ex:'QR-стойка, номерки, держатели ценников' },
+];
+
+let items = [];
+let selected = -1;
+
+function load() {
+  const st = NZ.pageState({});
+  items = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map((s) => ({ ...s }));
+}
+function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
+
+function renderZone(s, idx) {
+  return `<div class="zone${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
+    <div class="side z-${s.theme || 'brand'}">
+      <div class="ico">${NZ.esc(s.ico || '')}</div>
+      <div class="n">${NZ.esc(s.name || '')}</div>
+      <img class="mark" src="${NZ.markSrc(true)}" alt="">
+    </div>
+    <div class="body">
+      <div class="t">${NZ.esc(s.name || '')}</div>
+      <div class="tag">${NZ.esc(s.tag || '')}</div>
+      <div class="d">${NZ.esc(s.desc || '')}</div>
+      <div class="ex"><b>Примеры:</b> ${NZ.esc(s.ex || '')}</div>
+    </div>
+  </div>`;
+}
+
+function draw() {
+  save();
+  const host = $('sheets');
+  if (!items.length) {
+    host.innerHTML = '<div class="sheet"><div style="padding:40mm 10mm;text-align:center;color:var(--ink-soft);font-size:13px;line-height:1.7">Зон нет — добавьте кнопкой «+ Добавить зону».</div></div>';
+    return;
+  }
+  const pages = [];
+  for (let i = 0; i < items.length; i += PER_PAGE) pages.push(items.slice(i, i + PER_PAGE));
+  host.innerHTML = pages.map((page, p) =>
+    `<div class="sheet">
+      <div class="sheet-title noprint">Лист ${p + 1} из ${pages.length} · 186 × 78 мм · ${page.length} зон</div>
+      <div class="grid">${page.map((s, j) => renderZone(s, p * PER_PAGE + j)).join('')}</div>
+    </div>`).join('');
+  host.querySelectorAll('.zone[data-idx]').forEach((el) => {
+    el.addEventListener('click', () => select(Number(el.dataset.idx)));
+  });
+}
+
+function select(idx) {
+  selected = idx;
+  const s = items[idx];
+  if (!s) { selected = -1; draw(); return; }
+  $('e_ico').value = s.ico || '';
+  $('e_name').value = s.name || '';
+  $('e_tag').value = s.tag || '';
+  $('e_desc').value = s.desc || '';
+  $('e_ex').value = s.ex || '';
+  $('e_theme').value = s.theme || 'brand';
+  $('selInfo').innerHTML = `<b>Выбрано:</b> #${idx + 1} ${NZ.esc(s.name || '')}`;
   draw();
-})();
+}
+
+function patch(p) { if (selected >= 0 && items[selected]) { Object.assign(items[selected], p); save(); } }
+
+['e_ico', 'e_name', 'e_tag', 'e_desc', 'e_ex'].forEach((id) => {
+  $(id).addEventListener('input', () => {
+    patch({ ico: $('e_ico').value, name: $('e_name').value, tag: $('e_tag').value, desc: $('e_desc').value, ex: $('e_ex').value });
+    draw();
+  });
+});
+$('e_theme').addEventListener('change', () => { patch({ theme: $('e_theme').value }); draw(); });
+
+$('btnAdd').addEventListener('click', () => {
+  items.push({ ico: '🧩', name: 'Новая зона', tag: 'Девиз зоны', desc: 'Что это за зона и для кого.', ex: 'пример, пример, пример', theme: 'green' });
+  select(items.length - 1);
+});
+$('btnDup').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите зону');
+  items.splice(selected + 1, 0, { ...items[selected] });
+  select(selected + 1);
+});
+$('btnDel').addEventListener('click', () => {
+  if (selected < 0) return alert('Сначала выберите зону');
+  items.splice(selected, 1);
+  selected = -1;
+  $('selInfo').innerHTML = '<b>Выбрано:</b> нет';
+  draw();
+});
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Вернуть стартовый набор из 3 зон?')) return;
+  items = START.map((s) => ({ ...s }));
+  selected = -1; draw();
+});
+
+load();
+NZ.mount(draw);
 </script>
 </body></html>

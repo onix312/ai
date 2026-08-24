@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — контент-план на неделю для Telegram</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  body { background: #eef1f7; }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 18px 18px 70px; }
+
+  .intro {
+    display: flex; gap: 16px; align-items: center;
+    background: linear-gradient(135deg, #2b5fed, #37aee2); color: #fff;
+    border-radius: 16px; padding: 18px 22px; margin-bottom: 18px;
+  }
+  .intro .big { font-size: 36px; line-height: 1; }
+  .intro h1 { margin: 0; font-size: 21px; font-weight: 900; }
+  .intro p { margin: 4px 0 0; font-size: 12.5px; opacity: .93; line-height: 1.5; }
+
+  .plan-controls {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 18px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  }
+  .plan-controls label { font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; gap: 7px; }
+  .plan-controls input, .plan-controls select {
+    font: inherit; font-size: 12.5px; padding: 6px 9px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+  }
+
+  .day {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .day header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+  .day .date { font-size: 15px; font-weight: 900; letter-spacing: -.01em; }
+  .day .badge {
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--brand); background: #eeecff; padding: 3px 9px; border-radius: 20px;
+  }
+  .day header .sp { flex: 1; }
+  .day header input.time { font: inherit; font-size: 12.5px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; width: 72px; }
+  .day .hint { font-size: 11.5px; color: var(--ink-soft); margin: 0 0 8px; line-height: 1.5; }
+  .day textarea {
+    width: 100%; box-sizing: border-box; min-height: 170px; resize: vertical;
+    font: inherit; font-size: 12.5px; line-height: 1.65; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: #fcfcff; color: var(--ink);
+  }
+  .day .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .counter { font-size: 11px; color: var(--ink-soft); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+  @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+  .block { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .block h2 { margin: 0 0 8px; font-size: 14px; }
+  .block ul, .block ol { margin: 0; padding-left: 18px; }
+  .block li { font-size: 12.5px; line-height: 1.65; color: var(--ink-soft); }
+  .block li b { color: var(--ink); }
+  .formula {
+    background: #f4f6fc; border: 1px dashed #b9c2d8; border-radius: 10px;
+    padding: 10px 14px; font-size: 12.5px; line-height: 1.7; color: var(--ink);
+  }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Контент-план недели — Telegram</h1>
+    <div class="panel-row" data-nz-common></div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="intro">
+    <div class="big">📣</div>
+    <div>
+      <h1>Неделя постов NOZZA — за 10 минут</h1>
+      <p>Готовый план на 7 дней: манифест, кейс, ликбез, закулисье, оффер, вовлечение, итоги. Любой пост можно править, перемешивать и копировать прямо в Telegram. Всё сохраняется в браузере.</p>
+    </div>
+  </div>
+
+  <div class="plan-controls">
+    <label>Фокус недели <select id="focus">
+      <option value="mix">Микс — все три ниши</option>
+      <option value="intro">Знакомство и доверие</option>
+      <option value="pets">Питомцы</option>
+      <option value="home">Дом и порядок</option>
+      <option value="biz">Бизнес и партии</option>
+    </select></label>
+    <label>Понедельник <input type="date" id="start"></label>
+    <button class="btn" id="btnShuffleAll">↻ Другие варианты постов</button>
+    <button class="btn" id="btnCopyAll">Копировать весь план</button>
+    <button class="btn" id="btnMd">Скачать .md</button>
+    <button class="btn danger" id="btnReset" style="background:#fef2f2;border-color:#f4b4b4;color:#b42318">Сбросить правки</button>
+    <span class="counter">Один пост — одна проблема и одно действие</span>
+  </div>
+
+  <div id="days"></div>
+
+  <div class="two-col">
+    <div class="block">
+      <h2>Формула короткого поста</h2>
+      <div class="formula">
+        Проблема клиента → что сделали → материал / размер / срок → результат → как заказать расчёт.<br>
+        В конце — один призыв и 2–3 хэштега: #NOZZA #3Dпечать #ВашГород
+      </div>
+      <h2 style="margin-top:14px">Пять правил канала</h2>
+      <ol>
+        <li>Показывать <b>пользу и реальный контекст</b>, а не «чудеса технологии».</li>
+        <li>Не публиковать персональные данные клиентов и чужие логотипы без согласия.</li>
+        <li>Не выдавать свойства материала за подтверждённую безопасность.</li>
+        <li>Каждый оффер — отдельный тест ниши: считайте отклики.</li>
+        <li>Лучшее время — вечер будней (19:00–20:00) и полдень выходных.</li>
+      </ol>
+    </div>
+    <div class="block">
+      <h2>Что прикрепить к посту</h2>
+      <ul>
+        <li><b>Кейс:</b> фото «до/после» или изделие в руках — 2–4 кадра.</li>
+        <li><b>Ликбез:</b> крупный план слоёв или катушки пластика.</li>
+        <li><b>Оффер:</b> готовая карточка товара из PrintFlow (ценник, QR).</li>
+        <li><b>Опрос:</b> нативный опрос Telegram — не нужен дизайн.</li>
+        <li><b>Итоги:</b> коллаж из постов недели.</li>
+      </ul>
+      <h2 style="margin-top:14px">Куда ведём читателя</h2>
+      <ul>
+        <li>Личный чат: «напишите в {tg}» — расчёт по фото и размерам.</li>
+        <li>Витрина заказов: QR-ссылка из общих настроек (кнопка «Знак» рядом).</li>
+        <li>Полка магазина: адрес и график из настроек города.</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const LS = 'tgplan';
+
+const DAYS = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+const DAY_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+/* --------------------------------------------------- пул постов по слотам */
+const POOL = {
+  manifesto: [
+    { name:'Знакомство', text:`Мы — локальное 3D-производство NOZZA ({city}). Делаем вещи, которых нет в магазине: точно под ваши размеры, цвет и задачу.
+
+Три направления:
+🐾 аксессуары для питомцев — адресники, таблички, держатели;
+🏠 польза для дома — органайзеры, крепления, ремонтные детали;
+🏪 оснастка для бизнеса — QR-стойки, номерки, партии.
+
+Путь заказа: заявка → расчёт → макет → печать → контроль → выдача. Каждый этап видим в системе, поэтому сроки не «примерно», а честные.
+
+Покажите проблему — скажем, решается ли она печатью. Расчёт бесплатный.
+
+#NOZZA #3Dпечать #{city}` },
+    { name:'Почему не магазин', text:`Знакомая ситуация: полка почти подходит, но «почти» = не подходит. На 3–5 мм мимо, и вся организация сада ломается.
+
+Мы в NOZZA ({city}) делаем органайзеры и крепления по вашим размерам. Не «подгоняем напильником», а печатаем деталь ровно под место: замерили, согласовали макет, напечатали за 1–3 дня.
+
+Это и есть разница между товаром с полки и изделием под задачу.
+
+Какая полка у вас «почти подходит»? Напишите — посчитаем.
+
+#NOZZA #3Dпечать #{city}` },
+    { name:'Путь заказа', text:`Частый вопрос: «а как это работает?» Рассказываем.
+
+1️⃣ Вы присылаете фото места или сломанной детали + размеры.
+2️⃣ Мы отвечаем: можно ли, из чего и за сколько. Расчёт бесплатный.
+3️⃣ Макет на согласование — вы видите вещь до печати.
+4️⃣ Печать 1–3 дня, контроль качества, выдача в {city} или отправка.
+
+Никакой магии: инженерный подход к бытовым задачам. NOZZA — там, где рождается форма.
+
+#NOZZA #3Dпечать #{city}` },
+  ],
+  casePets: [
+    { name:'Адресник', text:`Кейс: адресник для таксы по имени Штрудель 🌭
+
+Задача: имя спереди, телефон сзади, цвет — как ошейник. Материал — PETG: не боится дождя и снега.
+
+Что сделали:
+— согласовали макет в тот же день (владелец увидел шрифт и рамку);
+— напечатали за 4 часа 20 минут;
+— вес — 11 граммов, собаке не мешает.
+
+Адресник помогает вернуть питомца, но не заменяет чипирование — говорим об этом честно.
+
+Хотите такой? Имя, телефон, цвет — и макет уже сегодня. Пишите в {tg}.
+
+#NOZZA #3Dпечать #адресник` },
+    { name:'Держатель поводков', text:`«Поводки вечно у двери» — классика.
+
+Решение: настенный держатель на 3 комплекта, напечатан под конкретную стену и количество крючков. PETG держит пружину поводка, не провисает и не трескается от холода в прихожей.
+
+Замер занял 5 минут, печать — вечер. Теперь у двери порядок, а не «сугроб».
+
+Что у вас вечно лежит не на своём месте? Пришлите фото — скажем, есть ли решение.
+
+#NOZZA #3Dпечать #порядок` },
+    { name:'Зона питомца', text:`Именная табличка для зоны питомца: миски, лежанка, полка с уходом.
+
+Имя — рельефом, в цвет интерьера. Это не «штамповка с рынка»: шрифт и размер подбираем под ваш интерьер, а буквы не сотрутся — они часть детали, а не краска.
+
+Такой табличкой часто поздравляют: подарок питомцу и хозяину одновременно.
+
+Делаем за 1–2 дня, макет — бесплатно. Пишите в {tg} 🐾
+
+#NOZZA #3Dпечать #питомцы` },
+  ],
+  caseHome: [
+    { name:'Органайзер по размерам', text:`Кейс: органайзер под кухонный ящик 46,5 × 33 см.
+
+Почему не магазин: ящик «нестандартный», готовые органайзеры ездят внутри и оставляют 4 см мёртвой зоны.
+
+Что сделали:
+— замерили ящик (попросили фото с линейкой);
+— согласовали количество отсеков: крупные + узкие под столовые приборы;
+— напечатали за 2 дня, встал впритык, не ездит.
+
+Итог: +30% полезного объёма ящика без drilling и клея.
+
+Ваш ящик тоже «нестандартный»? Это наш профиль. Расчёт бесплатный: {tg}
+
+#NOZZA #3Dпечать #порядок` },
+    { name:'Ремонтная деталь', text:`Сломалась пластиковая деталь кресла? Магазин предлагает «кресло целиком». Мы — напечатать деталь.
+
+Кейс: крепление спинки, сломалось в месте защёлки.
+— по сломанному образцу восстановили геометрию;
+— усилили то место, где сломалось (толще на 0,8 мм);
+— PETG — он пружинит, а не лопается.
+
+Кресел спасено: одно. Бюджет: в 20 раз дешевле нового кресла.
+
+Пришлите фото обломка — скажем честно, берёмся или нет.
+
+#NOZZA #3Dпечать #ремонт` },
+    { name:'Кабели и рабочий стол', text:`Кейс: рабочее место с 9 кабелями «архитектурного хаоса».
+
+Решение: кабель-органайзеры под столешницу + держатель наушников + подставка под телефон с местом для зарядки. Всё в одном цвете, всё под конкретный стол.
+
+Печать — день. Результат: стол, на который не стыдно показать в зуме.
+
+Начните с одного держателя — это 300 ₽ и один вечер. Пишите в {tg}.
+
+#NOZZA #3Dпечать #рабочее_место` },
+  ],
+  caseBiz: [
+    { name:'QR-стойка', text:`Кейс для кафе: настольные QR-стойки «меню + оплата».
+
+Было: laminированные карточки, которые вечно теряются и выцветают.
+Стало: 24 стойки в цветах заведения, QR — рельефной плашкой сверху, основание утяжелено — не падают от сквозняка.
+
+— партия от печати до выдачи: 4 дня;
+— цвет точно по брендбуку кафе;
+— файлы храним: докупить 10 штук = один звонок.
+
+Для точек общепита и салонов это самая быстрая партия — считаем за день. {tg}
+
+#NOZZA #3Dпечать #бизнес` },
+    { name:'Держатели ценников', text:`Кейс: магазину нужны были 60 держателей ценников под стандартную вставку — и чтобы не рассыпались от чиха.
+
+Напечатали партию: PETG, усиленное плечо, геометрия под полку магазина. Одинаковые до миллиметра — полка выглядит аккуратно, а не «как попало».
+
+Малые партии оснастки — наш профиль: дешевле фрезеровки, быстрее литья, повторяемо по файлу.
+
+Сколько держателей нужно вам? Посчитаем: {tg}
+
+#NOZZA #3Dпечать #розница` },
+    { name:'Оснастка рабочего места', text:`Кейс: СТО попросило органайзеры под метизы — гайки, шайбы, шпильки разных размеров.
+
+Задача: сотни ячеек, подписи, стойкость к маслу.
+Решение: модульные кассеты из PETG (масло не страшно), ячейки трёх размеров, плашки под подписи. Мастер собирает модули под свой стенд как конструктор.
+
+Партия — неделя. Мастер доволен больше, чем начальство 🙂
+
+Ваша задача на производстве? Расскажите — посчитаем.
+
+#NOZZA #3Dпечать #производство` },
+  ],
+  edu: [
+    { name:'PLA/PETG/TPU', text:`Ликбез: из чего печатаем (простыми словами).
+
+🔷 PLA — жёсткий, аккуратный, для интерьера. Не любит жару (машина летом — плохая идея) и долго мокнуть.
+🔷 PETG — прочный, терпит влагу и улицу. Выбор для функциональных деталей: держатели, крепления, адресники.
+🔷 TPU — гибкий, как плотная резина. Для бамперов, ремешков, ножек.
+
+Нет «лучшего пластика» — есть правильный под задачу. На консультации подбираем под нагрузку, температуру и влажность, а не «что было на катушке».
+
+#NOZZA #3Dпечать #материалы` },
+    { name:'Почему важны слои', text:`Ликбез: почему 3D-деталь может сломаться «не там».
+
+3D-печать кладёт пластик слоями. Слои держат нагрузку вдоль себя отлично, поперёк — хуже. Поэтому одна и та же деталь, напечатанная под другой ориентацией, может быть в разы прочнее.
+
+Что делаем мы: думаем про ориентацию слоёв ДО печати, под задачу и нагрузку. Крючок в стену печатаем не «как удобно», а «как прочно».
+
+В этом разница между «напечатал» и «спроектировал под нагрузку».
+
+#NOZZA #3Dпечать #технология` },
+    { name:'Что мы не печатаем', text:`Честный пост: что мы НЕ напечатаем.
+
+❌ детали тормозной системы, газа и давления — без инженерной документации;
+❌ «точно пищевое» — без подтверждённой технологии контакта с едой;
+❌ копии чужих персонажей и логотипов — без права использования;
+❌ несущие детали, от которых зависит чья-то безопасность, «на глазок».
+
+Почему: 3D-печать — серьёзная технология, а не волшебная кнопка. Мы говорим «нет» заранее, чтобы не подвести вас потом.
+
+Всё остальное — с удовольствием. Спрашивайте: {tg}
+
+#NOZZA #3Dпечать` },
+  ],
+  process: [
+    { name:'Как согласуем макет', text:`Закулисье: что значит «макет на согласование».
+
+Перед печатью вы получаете изображение будущей вещи: форму, пропорции, текст, место креплений. Это не «для красоты» — на этом этапе бесплатно меняется всё: размеры, компоновка, шрифт.
+
+Статистика: 7 из 10 клиентов просят что-то двинуть. Если бы мы печатали сразу — 7 переделок за свой счёт.
+
+Поэтому правило NOZZA: пока макет не понравился вам — принтер не стартует.
+
+#NOZZA #3Dпечать #процесс` },
+    { name:'Контроль качества', text:`Закулисье: что происходит перед выдачей заказа.
+
+1. Габариты — штангенциркулем по контрольным точкам.
+2. Геометрия — деталь должна встать/сесть/закрутиться, а не «выглядеть похоже».
+3. Внешний вид — слои, замятые границы, «волоски» убираем.
+4. Функция — крючок вешаем, крышку закрываем, стойку роняем (шутка… почти).
+
+Не прошла проверку — печатаем заново за наш счёт. Так проще, чем краснеть.
+
+#NOZZA #3Dпечать #качество` },
+    { name:'Ночная смена', text:`Закулисье: почему мы любим ночную печать.
+
+Длинные задания — партии адресников, большие органайзеры — уходят в очередь на вечер. Принтер работает 8 часов без нас, утро встречает готовыми деталями на плите.
+
+Это не «работаем круглосуточно», а честная организация очереди: короткие и срочные — днём, долгие и партийные — ночью. Поэтому наши 1–3 дня — это дни, а не «недели почти».
+
+Ваша деталь может попасть в ночную смену уже сегодня: {tg}
+
+#NOZZA #3Dпечать #цех` },
+  ],
+  offer: [
+    { name:'Бесплатный расчёт', text:`Оффер недели: расчёт вашей задачи — бесплатно.
+
+Как работает:
+📷 фото места или сломанной детали;
+📏 размеры (подскажем, что замерить);
+🎨 цвет и срок, который нужен.
+
+В ответ — цена, материал и срок. Без «примерно от», без обязательств заказать.
+
+Это самый простой способ понять, что 3D-печать — не про игрушки, а про ваши задачи. Пишите: {tg}
+
+#NOZZA #3Dпечать #{city}` },
+    { name:'Адресник со скидкой', text:`Оффер недели: именной адресник — 350 ₽ вместо 450 ₽. 🐾
+
+Имя + телефон + цвет на выбор. Макет согласуем до печати, изготовление — 1 день. PETG: дождь, снег и купание в луже не страшны.
+
+Количество ограничено слотами печати на этой неделе. Заявки — в {tg}, промокод: ПОСТ.
+
+Адресник не заменяет чипирование — он для честных людей, которые вернут питомца.
+
+#NOZZA #3Dпечать #адресник` },
+    { name:'−10% первому', text:`Оффер для новых подписчиков: −10% на первый заказ по промокоду ПЕРВЫЙ.
+
+Действует на всё: органайзеры, держатели, таблички, партии. Считается вместе с бесплатным расчётом — то есть вы ничем не рискуете: сначала цена, потом решение.
+
+До конца недели. Пишите в {tg} со словом ПЕРВЫЙ — забронируем слот печати.
+
+#NOZZA #3Dпечать #{city}` },
+  ],
+  engage: [
+    { name:'Опрос о проблемах', text:`Вопрос дня: какая «мелкая бытовая проблема» раздражает вас больше всего?
+
+— кабели, которые живут своей жизнью;
+— полка/ящик «почти подходит»;
+— сломанная деталь, которую не купить;
+— некуда деть [ваш вариант].
+
+Мы коллекционируем такие проблемы и превращаем их в изделия. Самые частые — уходим в разработку, а автору проблемы — первый экземпляр со скидкой.
+
+Пишите в комментариях 👇
+
+#NOZZA #3Dпечать` },
+    { name:'Для кого печатаем', text:`Субботний вопрос: для кого из питомцев вам не хватает аксессуаров?
+
+🐶 собаке — адресник, держатель поводка;
+🐱 кошке — табличка на домик, когтеточка-насадка;
+🐦 птичке — игрушки-головоломки (безопасные);
+🐠 аквариуму — крепления и организаторы ухода.
+
+Расскажите, у кого живёте — соберём идеи следующей недели. Авторам идей, которые возьмём в работу, — скидка на первый заказ.
+
+#NOZZA #3Dпечать #питомцы` },
+    { name:'Голосование за образец', text:'Воскресное голосование: что показать на следующей неделе?\n\n1️⃣ Настольный органайзер с отделением для телефона\n2️⃣ Крючки-вешалки в прихожую (комплект)\n3️⃣ QR-стойка для меню/оплаты\n4️⃣ Ремонтная деталь «до/после»\n\nГолосуйте цифрой в комментариях. Что наберёт больше — то и распечатаем с полным разбором: от замера до результата.\n\n#NOZZA #3Dпечать' },
+  ],
+  wrap: [
+    { name:'Итоги недели', text:`Итоги недели в NOZZA:
+
+✅ выполнено заказов: [N]
+🐾 адресников: [N]
+🏠 органайзеров и держателей: [N]
+🏪 партий для бизнеса: [N]
+
+Самое интересное — кейс [название], он собрал больше всего откликов. Возьмём в постоянную линейку.
+
+Спасибо, что читаете. Если за неделю появилась задача «нет в магазине, а надо» — вы знаете, куда писать: {tg}
+
+#NOZZA #3Dпечать #{city}` },
+    { name:'Анонс', text:`На следующей неделе в канале:
+
+🐾 день питомцев: разбор адресника до винтика;
+🔧 ликбез: как прислать размеры так, чтобы расчёт был точным с первого раза;
+🏭 история одной партии для кафе — от заявки до выдачи;
+🎁 и один оффер, который вы ждёте.
+
+Подписывайтесь, если ещё нет — дальше только полезнее. NOZZA — там, где рождается форма.
+
+#NOZZA #3Dпечать` },
+    { name:'Как нас найти', text:`Пост-навигация для новых подписчиков.
+
+Мы — NOZZA, 3D-производство в {city}. Печатаем вещи под задачу: для питомцев, дома и бизнеса.
+
+📍 Город: {city}
+✉️ Заявки и вопросы: {tg}
+🧾 Как заказать: фото + размеры + срок → бесплатный расчёт → макет → печать за 1–3 дня.
+🚚 Выдача в {city}, отправка транспортом.
+
+Сохраните пост — пригодится, когда сломается «та самая деталь» 🙂
+
+#NOZZA #3Dпечать #{city}` },
+  ],
+};
+
+/* слоты по дням для каждого фокуса */
+const FOCUS_PLANS = {
+  mix:   ['manifesto', 'casePets', 'edu', 'process', 'offer', 'engage', 'wrap'],
+  intro: ['manifesto', 'process', 'edu', 'caseHome', 'offer', 'engage', 'wrap'],
+  pets:  ['casePets', 'casePets', 'edu', 'process', 'offer', 'engage', 'wrap'],
+  home:  ['caseHome', 'caseHome', 'edu', 'process', 'offer', 'engage', 'wrap'],
+  biz:   ['caseBiz', 'caseBiz', 'edu', 'process', 'offer', 'engage', 'wrap'],
+};
+
+const DAY_META = {
+  manifesto: { badge: 'Знакомство', hint: 'Знакомство и доверие: кто вы, чем полезны. Фото: рабочее место, принтер в деле.' },
+  casePets:  { badge: 'Кейс · питомцы', hint: 'Один кейс = одна проблема. Фото: изделие на питомце или в использовании.' },
+  caseHome:  { badge: 'Кейс · дом', hint: 'Формула: проблема → решение → результат. Фото «до/после» обязательны.' },
+  caseBiz:   { badge: 'Кейс · бизнес', hint: 'Партии и оснастка. Без названий клиентов — только с разрешения.' },
+  edu:       { badge: 'Ликбез', hint: 'Простыми словами про материалы и технологию. Фото: катушки, крупный план слоёв.' },
+  process:   { badge: 'Закулисье', hint: 'Процесс и контроль качества. Фото: согласование макета, проверка деталей.' },
+  offer:     { badge: 'Оффер', hint: 'Одно предложение и один призыв. Прикрепите карточку товара с QR из PrintFlow.' },
+  engage:    { badge: 'Вовлечение', hint: 'Опрос или вопрос — собираете идеи и комментарии. Не нужен дизайн.' },
+  wrap:      { badge: 'Итоги', hint: 'Итоги недели или анонс. Коллаж из постов недели работает лучше всего.' },
+};
+
+let state = {};
+
+function nextMonday() {
+  const d = new Date();
+  const day = (d.getDay() + 6) % 7; // Пн=0
+  d.setDate(d.getDate() + (day === 0 ? 0 : 7 - day));
+  return d.toISOString().slice(0, 10);
+}
+
+function fill(text) {
+  const c = NZ.contact();
+  return String(text)
+    .split('{city}').join(c.city || 'Симферополь')
+    .split('{tg}').join(c.tg || '@nozza_shop')
+    .split('{phone}').join(c.phone || '');
+}
+
+function defaultState() {
+  return { start: nextMonday(), focus: 'mix', variant: {}, times: {}, texts: {} };
+}
+
+function load() {
+  state = Object.assign(defaultState(), NZ.pageState({})[LS] || {});
+}
+
+function persist() { NZ.pageStateSave({ [LS]: state }); }
+
+function pick(slot) {
+  const pool = POOL[slot];
+  const v = ((state.variant[slot] == null ? 0 : state.variant[slot]) % pool.length + pool.length) % pool.length;
+  return pool[v];
+}
+
+function textFor(slot, force) {
+  const key = state.focus + ':' + slot;
+  if (!force && state.texts[key]) return state.texts[key];
+  return fill(pick(slot).text);
+}
+
+function fmtDate(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+}
+
+function dayISO(i) {
+  const d = new Date(state.start + 'T12:00:00');
+  d.setDate(d.getDate() + i);
+  return d.toISOString().slice(0, 10);
+}
+
+function render() {
+  $('start').value = state.start;
+  $('focus').value = state.focus;
+
+  const slots = FOCUS_PLANS[state.focus] || FOCUS_PLANS.mix;
+  $('days').innerHTML = slots.map((slot, i) => {
+    const meta = DAY_META[slot];
+    const post = pick(slot);
+    const time = state.times[i] || (i >= 5 ? '12:00' : '19:00');
+    const text = textFor(slot);
+    return `<div class="day" data-slot="${slot}" data-i="${i}">
+      <header>
+        <span class="date">${DAYS[i]}, ${fmtDate(dayISO(i))}</span>
+        <span class="badge">${meta.badge}${post.name ? ' · ' + post.name : ''}</span>
+        <span class="sp"></span>
+        <label style="font-size:12px;color:var(--ink-soft);display:flex;align-items:center;gap:6px">время <input type="text" class="time" data-time="${i}" value="${NZ.esc(time)}"></label>
+      </header>
+      <p class="hint">${meta.hint}</p>
+      <textarea data-text="${slot}">${NZ.esc(text)}</textarea>
+      <div class="row">
+        <button class="btn primary" data-copy="${i}">Копировать пост</button>
+        <button class="btn" data-shuffle="${i}">↻ Другой вариант</button>
+        <button class="btn danger" data-original="${i}" style="background:#fef2f2;border-color:#f4b4b4;color:#b42318">Вернуть исходный</button>
+        <span class="counter" data-count="${i}"></span>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('days').querySelectorAll('.day').forEach((card) => {
+    const slot = card.dataset.slot, i = Number(card.dataset.i);
+    const ta = card.querySelector('textarea');
+    const counter = card.querySelector(`[data-count="${i}"]`);
+    const upd = () => { counter.textContent = ta.value.length + ' знаков · ~' + Math.max(1, Math.round(ta.value.length / 220)) + ' мин чтения'; };
+    upd();
+
+    ta.addEventListener('input', () => {
+      state.texts[state.focus + ':' + slot] = ta.value;
+      persist(); upd();
+    });
+    card.querySelector(`[data-time="${i}"]`).addEventListener('input', (e) => {
+      state.times[i] = e.target.value; persist();
+    });
+    card.querySelector(`[data-copy="${i}"]`).addEventListener('click', (e) => NZ.copy(ta.value, e.target));
+    card.querySelector(`[data-shuffle="${i}"]`).addEventListener('click', () => {
+      state.variant[slot] = ((state.variant[slot] == null ? 0 : state.variant[slot]) + 1) % POOL[slot].length;
+      ta.value = textFor(slot, true);
+      state.texts[state.focus + ':' + slot] = ta.value;
+      persist(); render();
+    });
+    card.querySelector(`[data-original="${i}"]`).addEventListener('click', () => {
+      delete state.texts[state.focus + ':' + slot];
+      persist(); render();
+    });
+  });
+}
+
+function planMarkdown() {
+  const slots = FOCUS_PLANS[state.focus] || FOCUS_PLANS.mix;
+  const lines = [`# Контент-план NOZZA — неделя с ${fmtDate(state.start)}`, '', `Фокус: ${$('focus').selectedOptions[0].textContent}`, ''];
+  slots.forEach((slot, i) => {
+    const time = state.times[i] || (i >= 5 ? '12:00' : '19:00');
+    lines.push(`## ${DAYS[i]}, ${fmtDate(dayISO(i))} · ${time} · ${DAY_META[slot].badge}`);
+    lines.push('');
+    lines.push(textFor(slot));
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+$('focus').addEventListener('change', (e) => { state.focus = e.target.value; persist(); render(); });
+$('start').addEventListener('change', (e) => { state.start = e.target.value; persist(); render(); });
+$('btnShuffleAll').addEventListener('click', () => {
+  Object.keys(POOL).forEach((slot) => {
+    state.variant[slot] = Math.floor(Math.random() * POOL[slot].length);
+  });
+  state.texts = {};
+  persist(); render();
+});
+$('btnCopyAll').addEventListener('click', (e) => NZ.copy(planMarkdown(), e.target, 'План скопирован ✓'));
+$('btnMd').addEventListener('click', () => NZ.download('nozza-kontent-plan.md', planMarkdown(), 'text/markdown;charset=utf-8'));
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Сбросить все правки и собрать план заново?')) return;
+  state = defaultState(); persist(); render();
+});
+
+load();
+NZ.mount(render);
+</script>
+</body></html>

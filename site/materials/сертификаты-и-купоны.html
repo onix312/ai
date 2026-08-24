@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — подарочные сертификаты и купоны</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  .grid { display: flex; flex-wrap: wrap; gap: 5mm; align-content: flex-start; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+  h3.block { font-size: 11px; color: var(--ink-soft); margin: 0 0 3mm; letter-spacing: .05em; text-transform: uppercase; }
+
+  /* ------------------------------------------------------------ сертификат */
+  .cert {
+    width: 186mm; height: 92mm; box-sizing: border-box;
+    border: 0.8mm solid var(--brand); border-radius: 4mm;
+    background:
+      radial-gradient(circle at 100% 0%, #eeecff 0 52mm, transparent 52mm),
+      radial-gradient(circle at 0% 100%, #f3f0ff 0 46mm, transparent 46mm),
+      #fff;
+    padding: 4mm 5mm 3.5mm; position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+    outline: 1px dashed #c8cfdf; outline-offset: 1.8mm;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  .cert .top { display: flex; align-items: center; gap: 3mm; }
+  .cert .top img { width: 10mm; height: 10mm; }
+  .cert .top .t { font-size: 13px; font-weight: 900; letter-spacing: .22em; color: var(--ink); }
+  .cert .top .n { margin-left: auto; font-size: 9px; color: var(--ink-soft); letter-spacing: .06em; }
+  .cert .mid { flex: 1; display: flex; align-items: center; gap: 6mm; padding: 0 2mm; }
+  .cert .amount { font-size: 54px; font-weight: 900; line-height: .95; letter-spacing: -.02em; color: var(--brand); white-space: nowrap; }
+  .cert .amount span { font-size: 24px; }
+  .cert .mid .about { flex: 1; min-width: 0; }
+  .cert .h { font-size: 10.5px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+  .cert .v { font-size: 13.5px; font-weight: 700; line-height: 1.35; margin-top: .8mm; }
+  .cert .qr { flex: none; background: #fff; }
+  .cert .qr svg { width: 24mm; height: 24mm; display: block; }
+  .cert .fine { display: flex; gap: 4mm; align-items: baseline; font-size: 8.5px; color: var(--ink-soft); line-height: 1.4; }
+  .cert .fine b { color: var(--ink); }
+  .cert .fine .code { font-size: 10px; font-weight: 800; letter-spacing: .12em; color: var(--brand); }
+
+  /* ------------------------------------------------------------------ купон */
+  .coupon {
+    width: 92mm; height: 50mm; box-sizing: border-box;
+    border-radius: 3mm; overflow: hidden; position: relative;
+    background: #fff; border: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    outline: 1px dashed #c8cfdf; outline-offset: 1.8mm;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  .coupon .head {
+    background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: #fff;
+    font-size: 9.5px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase;
+    padding: 2mm 3.5mm; display: flex; align-items: center; gap: 2mm;
+  }
+  .coupon .head img { width: 5mm; height: 5mm; }
+  .coupon .body { flex: 1; padding: 2.5mm 3.5mm 2mm; display: flex; flex-direction: column; min-height: 0; }
+  .coupon .offer { font-size: 13px; font-weight: 900; line-height: 1.1; }
+  .coupon .cond { font-size: 7.5px; color: var(--ink-soft); line-height: 1.35; margin-top: 1mm; }
+  .coupon .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 2mm; margin-top: auto; }
+  .coupon .code {
+    border: 1px dashed var(--brand); border-radius: 2mm; color: var(--brand);
+    font-size: 10px; font-weight: 900; letter-spacing: .18em; padding: 1mm 2.5mm; white-space: nowrap;
+  }
+  .coupon .till { font-size: 7px; color: var(--ink-soft); text-align: right; line-height: 1.3; }
+  .coupon .qr svg { width: 13mm; height: 13mm; display: block; }
+
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 250px; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Сертификаты и купоны</h1>
+    <div class="panel-row" data-nz-common="qr"></div>
+  </div>
+
+  <div class="editor">
+    <h3>🎟 Сертификат — 2 на листе</h3>
+    <div class="row">
+      <label>Номинал <input id="c_amount" data-page="c_amount" style="width:90px" value="3000"></label>
+      <label>Кому <input id="c_to" data-page="c_to" style="width:170px" placeholder="владельцу сертификата"></label>
+      <label>От кого <input id="c_from" data-page="c_from" style="width:150px" value="NOZZA"></label>
+      <label>Серия/№ <input id="c_code" data-page="c_code" style="width:110px" value="NZ 001"></label>
+      <label>Действует <input id="c_till" data-page="c_till" style="width:130px" value="до 24.02.2027"></label>
+    </div>
+    <div class="row">
+      <label>На что <input id="c_for" data-page="c_for" class="wide" value="на любые изделия и печать по вашим размерам"></label>
+      <label><input type="checkbox" id="c_qr" data-page="c_qr" checked> QR на сайт</label>
+    </div>
+
+    <h3 style="margin-top:12px">🏷 Купон — 8 на листе</h3>
+    <div class="row">
+      <label>Оффер <input id="k_offer" data-page="k_offer" class="wide" value="−10% на первый заказ"></label>
+      <label>Код <input id="k_code" data-page="k_code" style="width:100px" value="NOZZA10"></label>
+      <label>Срок <input id="k_till" data-page="k_till" style="width:140px" value="до 30 сентября"></label>
+      <label><input type="checkbox" id="k_qr" data-page="k_qr" checked> QR</label>
+    </div>
+    <div class="row">
+      <label>Условия <input id="k_cond" data-page="k_cond" class="wide" style="min-width:420px" value="по одному купону на заказ · назвать код при заявке · суммируется с бесплатным расчётом"></label>
+      <label>Купонов <input id="k_count" data-page="k_count" type="number" min="1" max="8" style="width:64px" value="8"></label>
+    </div>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Печать:</b> плотная бумага 200–300 г/м², масштаб 100 %. Сертификат — 2 на листе, купон — 8 на листе, рез по пунктиру. Номер сертификата меняйте для каждого экземпляра перед печатью — так проще учитывать проданные.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+function certHtml() {
+  const qr = $('c_qr').checked ? NZ.qr(NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  return `<div class="cert">
+    <div class="top">
+      <img src="${NZ.markSrc(false)}" alt="">
+      <div class="t">ПОДАРОЧНЫЙ СЕРТИФИКАТ</div>
+      <div class="n">№ ${NZ.esc($('c_code').value)} · ${NZ.esc(NZ.contact().city)}</div>
+    </div>
+    <div class="mid">
+      <div class="amount">${NZ.esc($('c_amount').value)} <span>₽</span></div>
+      <div class="about">
+        <div class="h">Кому</div><div class="v">${NZ.esc($('c_to').value || '—')}</div>
+        <div class="h" style="margin-top:1.6mm">От кого</div><div class="v">${NZ.esc($('c_from').value)}</div>
+        <div class="h" style="margin-top:1.6mm">На что</div><div class="v">${NZ.esc($('c_for').value)}</div>
+      </div>
+      ${qr ? `<div class="qr">${qr}</div>` : ''}
+    </div>
+    <div class="fine">
+      <span>Действует <b>${NZ.esc($('c_till').value)}</b>.</span>
+      <span>Не обменивается на деньги, остаток не возвращается, заказ и оплата — как обычно.</span>
+      <span class="code">NOZZA</span>
+    </div>
+  </div>`;
+}
+
+function couponHtml() {
+  const qr = $('k_qr').checked ? NZ.qr(NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  return `<div class="coupon">
+    <div class="head"><img src="${NZ.markSrc(true)}" alt="">КУПОН NOZZA</div>
+    <div class="body">
+      <div class="offer">${NZ.esc($('k_offer').value)}</div>
+      <div class="cond">${NZ.esc($('k_cond').value)}</div>
+      <div class="foot">
+        <span class="code">${NZ.esc($('k_code').value)}</span>
+        ${qr ? `<div class="qr">${qr}</div>` : ''}
+        <span class="till">${NZ.esc($('k_till').value)}<br>NOZZA · ${NZ.esc(NZ.contact().city)}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function draw() {
+  const n = Math.min(8, Math.max(1, Number($('k_count').value) || 8));
+  $('sheets').innerHTML =
+    `<div class="sheet">
+      <div class="sheet-title noprint">Сертификаты — 186 × 92 мм, рез по пунктиру</div>
+      <div class="grid">${certHtml()}${certHtml()}</div>
+    </div>
+    <div class="sheet">
+      <div class="sheet-title noprint">Купоны — 92 × 50 мм, рез по пунктиру</div>
+      <div class="grid">${Array.from({ length: n }, couponHtml).join('')}</div>
+    </div>`;
+}
+
+NZ.mount(draw);
+</script>
+</body></html>
