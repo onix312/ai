@@ -470,12 +470,22 @@ class Documents:
 
     def for_order(self, order_id: str) -> dict[str, Any]:
         """Складские документы заказа и доступные печатные формы."""
+        from .b2b import fold_lines
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
         docs = self.list(order_id=order_id, limit=50)
         lines = [it for it in self._order_lines(order) if it.get("nom_id") and it.get("qty") > 0]
         existing_sale = next((d for d in docs if d.get("kind") == "sale"), None)
+        # Насколько свёртка мелких товаров сократит печатную форму —
+        # подсказка на кнопках печати. Считается так же, как в b2b.document:
+        # все строки состава, включая позиции вне базы товаров.
+        all_lines = self._order_lines(order)
+        groups_map = self._print_groups(
+            [ln.get("nom_id") for ln in all_lines if ln.get("nom_id")])
+        _, fold = fold_lines(
+            [{**ln, "print_group": groups_map.get(ln.get("nom_id") or "", "")}
+             for ln in all_lines], collapse_groups=True)
         return {
             "ok": True,
             "order_id": order_id,
@@ -484,6 +494,9 @@ class Documents:
             "can_create_waybill": bool(lines),
             "has_waybill": bool(existing_sale),
             "waybill_id": (existing_sale or {}).get("id") or "",
+            "fold": {"enabled": fold["after"] < fold["before"],
+                     "before": fold["before"], "after": fold["after"],
+                     "groups": fold["groups"]},
             "print": [
                 {"kind": "invoice", "title": "Счёт на оплату"},
                 {"kind": "cp", "title": "Коммерческое предложение"},
@@ -491,6 +504,16 @@ class Documents:
                 {"kind": "waybill", "title": "Товарная накладная"},
             ],
         }
+
+    def _print_groups(self, nom_ids: list[str]) -> dict[str, str]:
+        """Печатные группы позиций одним запросом: {nom_id: print_group}."""
+        ids = sorted({str(n) for n in nom_ids or [] if n})
+        if not ids:
+            return {}
+        marks = ",".join("?" for _ in ids)
+        return {r["id"]: r["print_group"] for r in self.db.query(
+            f"SELECT id, print_group FROM nomenclature"
+            f" WHERE id IN ({marks}) AND print_group<>''", ids) if r.get("print_group")}
 
     def waybill_from_order(self, order_id: str, warehouse_id: str = "",
                            post: bool = False) -> dict:

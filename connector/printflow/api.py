@@ -1050,12 +1050,20 @@ class Api:
             }
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature":
+            items = self.nom.items(one("group_id"), one("kind"), one("search"),
+                                   one("warehouse_id"),
+                                   one("archived") == "1")
+            # Без фильтров список полный — сводка считается по нему же и не
+            # декорирует номенклатуру второй раз. С фильтрами сводка остаётся
+            # глобальной (по всему складу) и считает свой проход, как раньше.
+            filtered = bool(one("group_id") or one("kind") or one("search")
+                            or one("archived") == "1")
             return 200, {
-                "items": self.nom.items(one("group_id"), one("kind"), one("search"),
-                                        one("warehouse_id"),
-                                        one("archived") == "1"),
-                "summary": self.nom.summary(one("warehouse_id")),
+                "items": items,
+                "summary": self.nom.summary(one("warehouse_id"),
+                                            items=None if filtered else items),
                 "groups": self.nom.groups(),
+                "print_groups": self.nom.print_groups(),
                 "warehouses": self.db.query(
                     "SELECT * FROM warehouses WHERE archived=0 ORDER BY position"),
                 "price_types": self.db.query(
@@ -3209,9 +3217,13 @@ class Handler(BaseHTTPRequestHandler):
                          "image/svg+xml; charset=utf-8")
 
     def serve_b2b_doc(self, query: dict):
-        """Документ B2B (счёт / КП / товарный чек) как печатная HTML-страница."""
+        """Документ B2B (счёт / КП / товарный чек) как печатная HTML-страница.
+
+        group=0 отключает сворачивание мелких товаров в печатные группы —
+        форма печатается построчно, как состав заказа."""
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
-        html = self.api.b2b.document(one("id"), one("kind", "invoice"))
+        html = self.api.b2b.document(one("id"), one("kind", "invoice"),
+                                     group=one("group", "1") != "0")
         self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_photo_file(self, name: str):

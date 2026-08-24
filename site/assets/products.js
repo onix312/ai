@@ -7,7 +7,7 @@ const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeTe
   toast, fail, openModal, closeModal, confirmDanger, debounce } = U;
 const { get, post } = PF.api;
 
-let data = { items: [], summary: {}, groups: [], warehouses: [], priceTypes: [] };
+let data = { items: [], summary: {}, groups: [], warehouses: [], priceTypes: [], printGroups: [] };
 let docsData = [];
 let batchData = [];
 let editingNom = null;
@@ -73,8 +73,13 @@ async function refresh() {
     data = {
       items: res.items || [], summary: res.summary || {}, groups: res.groups || [],
       warehouses: res.warehouses || [], priceTypes: res.price_types || [],
+      printGroups: res.print_groups || [],
     };
     fillSelectors();
+    const pgList = $('print_groups_datalist');
+    if (pgList) {
+      pgList.innerHTML = data.printGroups.map((g) => `<option value="${esc(g)}"></option>`).join('');
+    }
     if (document.querySelector('#view-products.on')) render();
     updateTags();
     PF.emit('nomenclature', data);
@@ -344,7 +349,7 @@ async function openNom(id) {
   const setv = (key, value) => { const el = $('nf_' + key); if (el) el.value = value ?? ''; };
   ['name', 'code', 'sku', 'barcode', 'kind', 'unit', 'min_qty', 'max_qty', 'vat', 'note',
     'material', 'grams', 'hours', 'fit_per_plate', 'post_minutes', 'file',
-    'model_url', 'license'].forEach((k) => setv(k, d[k]));
+    'model_url', 'license', 'print_group'].forEach((k) => setv(k, d[k]));
   fillSelectors();
   $('nf_group_id').value = d.group_id || '';
   $('nf_niche_id').value = d.niche_id || '';
@@ -476,6 +481,7 @@ async function saveNom() {
     post_minutes: num($('nf_post_minutes').value),
     file: $('nf_file').value.trim(), model_url: $('nf_model_url').value.trim(),
     license: $('nf_license').value.trim(),
+    print_group: ($('nf_print_group') || { value: '' }).value.trim(),
     min_qty: num($('nf_min_qty').value), max_qty: num($('nf_max_qty').value),
     vat: num($('nf_vat').value), marked: $('nf_marked').checked ? 1 : 0,
     note: $('nf_note').value.trim(),

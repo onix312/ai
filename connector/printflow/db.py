@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -32,6 +32,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "nomenclature": [
         # фактическая себестоимость штуки из завершённых партий
         ("cost", "REAL DEFAULT 0"),
+        # печатная группа мелких товаров: позиции с одинаковой группой
+        # сворачиваются в одну строку в печатных формах (схема 13)
+        ("print_group", "TEXT DEFAULT ''"),
     ],
     "batches": [
         # смешанная плита: разные товары на одном столе, JSON-состав
@@ -1203,6 +1206,10 @@ class Database:
         # Шину подключает сервер (api.py). Пока её нет — события просто
         # пишутся в базу, поэтому база остаётся самостоятельной в тестах.
         self.bus = None
+        # Кэш settings(): экономика заказов и карточки товаров читают все
+        # настройки по несколько раз на строку списка. Сбрасывается при любой
+        # записи в таблицу settings (см. execute/executemany).
+        self._settings_cache: dict | None = None
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         try:
             self.conn.row_factory = sqlite3.Row
@@ -1575,9 +1582,17 @@ class Database:
                 if depth == 0:
                     self.conn.commit()
 
+    @staticmethod
+    def _writes_settings(sql: str) -> bool:
+        """Пишет ли запрос в таблицу settings (для сброса кэша settings())."""
+        head = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
+        return head in ("INSERT", "UPDATE", "DELETE", "REPLACE") and "settings" in sql
+
     def execute(self, sql: str, params: Iterable = ()) -> sqlite3.Cursor:
         with self.lock:
             cur = self.conn.execute(sql, tuple(params))
+            if self._writes_settings(sql):
+                self._settings_cache = None
             if not getattr(self._local, "transaction_depth", 0):
                 self.conn.commit()
             return cur
@@ -1585,6 +1600,8 @@ class Database:
     def executemany(self, sql: str, seq: Iterable[Iterable]) -> None:
         with self.lock:
             self.conn.executemany(sql, [tuple(x) for x in seq])
+            if self._writes_settings(sql):
+                self._settings_cache = None
             if not getattr(self._local, "transaction_depth", 0):
                 self.conn.commit()
 
@@ -1611,12 +1628,16 @@ class Database:
 
     # -------------------------------------------------------------- настройки
     def settings(self, include_secrets: bool = False) -> dict[str, Any]:
-        data = dict(DEFAULT_SETTINGS)
-        for row in self.query("SELECT key,value FROM settings"):
-            try:
-                data[row["key"]] = json.loads(row["value"])
-            except json.JSONDecodeError:
-                data[row["key"]] = row["value"]
+        cached = self._settings_cache
+        if cached is None:
+            cached = dict(DEFAULT_SETTINGS)
+            for row in self.query("SELECT key,value FROM settings"):
+                try:
+                    cached[row["key"]] = json.loads(row["value"])
+                except json.JSONDecodeError:
+                    cached[row["key"]] = row["value"]
+            self._settings_cache = cached
+        data = dict(cached)  # копия: вызывающий код не должен править кэш
         from .config import SECRET_SETTINGS
         if include_secrets:
             # Расшифровываем секреты только явно запрошенным читателям.

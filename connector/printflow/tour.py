@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from .accounting import num, uid
+from .accounting import uid
 from .config import BACKUP_DIR, now_iso
 from .db import Database
 
