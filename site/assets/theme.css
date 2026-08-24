@@ -573,12 +573,19 @@ dialog.modal {
   border-radius: var(--r-xl); background: var(--panel); color: var(--text);
   box-shadow: var(--shadow-3);
   overflow: hidden;
-  display: flex; flex-direction: column;
+  flex-direction: column;
 }
+/* ВАЖНО: раскладку flex включаем ТОЛЬКО у открытого диалога.
+   Безусловный `display: flex` перебивает браузерное правило
+   `dialog:not([open]) { display: none }` — и тогда все модальные окна
+   (продажа с полки, склад, ценообразование, ценник, брак, правила,
+   отложенные команды, профили AMS…) вываливаются простынёй в самый низ
+   каждой страницы. Закрытый диалог обязан быть скрыт. */
+dialog:not([open]) { display: none !important; }
 dialog.modal.narrow { width: min(520px, calc(100vw - 32px)); }
 dialog.modal.wide { width: min(1040px, calc(100vw - 32px)); }
 dialog.modal::backdrop { background: rgba(9, 13, 26, .55); backdrop-filter: blur(6px); }
-dialog.modal[open] { animation: modalIn .2s var(--ease); }
+dialog.modal[open] { display: flex; animation: modalIn .2s var(--ease); }
 @keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
 .modal form { display: flex; flex-direction: column; max-height: inherit; min-height: 0; }
 /* Длинная карточка заказа получает реальную flex-высоту: тело прокручивается,
