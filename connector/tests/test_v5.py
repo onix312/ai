@@ -102,6 +102,22 @@ class ClientsTests(unittest.TestCase):
         rows = Clients(self.db).rfm()
         self.assertEqual(rows[0]["segment"], "Новый")
 
+    def test_rfm_takes_max_of_legacy_paid_prepaid(self):
+        """RFM видит оплату и в prepaid, а не только в paid.
+
+        У старых заказов деньги могли лежать в поле prepaid; если paid при
+        этом отличалось, раньше RFM брал paid и занижал оборот клиента.
+        """
+        from connector.printflow.clients import Clients
+        self.db.upsert("customers", {"id": "c1", "name": "Мария"})
+        self.db.upsert("orders", {
+            "id": "o1", "customer_id": "c1", "product": "Адресник",
+            "price": 1000, "paid": 200, "prepaid": 500,
+            "status": "done", "created_at": "2026-08-01T00:00:00",
+        })
+        rows = Clients(self.db).rfm(days=30)
+        self.assertEqual(rows[0]["paid"], 500)
+
 
 class InsightsV5Tests(unittest.TestCase):
     def setUp(self):

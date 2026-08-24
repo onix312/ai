@@ -61,10 +61,12 @@ def similar(db: Database, photo_id: str, limit: int = 10) -> dict[str, Any]:
         raise ValueError("Фото не найдено")
     f = _photo_file(str(photo.get("file") or ""))
     if not f:
-        raise ValueError("Файл фото не найден")
+        # Запись есть, а файл удалён/не найден на диске — это не ошибка выборки:
+        # честно возвращаем пустой список, как и обещает модуль.
+        return {"ok": True, "photos": []}
     target = a_hash_of_bytes(f.read_bytes())
     if target is None:
-        raise ValueError("Не удалось разобрать фото")
+        return {"ok": True, "photos": []}
     out = []
     for row in db.query("SELECT * FROM order_photos WHERE id<>? ORDER BY at DESC", (photo_id,)):
         f2 = _photo_file(str(row.get("file") or ""))

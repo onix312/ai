@@ -44,6 +44,11 @@ class Batches:
         item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         if not item:
             raise ValueError("Товар не найден")
+        if str(item.get("kind") or "product") == "showcase":
+            raise ValueError(
+                "Категория «Для магазина» — витрина без производственного учёта: "
+                "её нельзя печатать партией. Создайте отдельный Товар, если "
+                "позиция должна попадать в расчёт себестоимости.")
         qty = max(0.0, num(qty))
         fit = max(1, int(num(item.get("fit_per_plate"), 1) or 1))
         grams_unit = num(item.get("grams"))
@@ -109,6 +114,10 @@ class Batches:
             nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (it.get("nom_id") or "",))
             if not nom:
                 raise ValueError(f"Товар не найден: {it.get('nom_id') or '—'}")
+            if str(nom.get("kind") or "product") == "showcase":
+                raise ValueError(
+                    f"«{nom.get('name') or '—'}» — категория «Для магазина», "
+                    "в смешанную партию печати не добавляется.")
             qty = int(num(it.get("qty")))
             if qty <= 0:
                 continue

@@ -335,6 +335,18 @@ class MixedBatchTests(Base):
             " WHERE d.batch_id=?", (batch["id"],))
         self.assertEqual(len(lines), 2)
 
+    def test_showcase_not_printable_in_batch(self):
+        """Витрину «Для магазина» нельзя отправить в партию печати."""
+        s = self.db.upsert("nomenclature", {
+            "id": uid("nom"), "name": "Демо", "kind": "showcase",
+            "material": "PLA", "grams": 20, "hours": 0.5, "fit_per_plate": 1,
+            "archived": 0})
+        batches = Batches(self.db, None)
+        with self.assertRaises(ValueError):
+            batches.plan(s["id"], 1)
+        with self.assertRaises(ValueError):
+            batches.plan_multi([{"nom_id": s["id"], "qty": 1}])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,12 @@ from .schema_v3 import NOM_KINDS
 from .stock import Stock
 
 
+# Виды, участвующие в производственном учёте (остатки, план пополнения,
+# замороженный капитал). «Для магазина» (showcase) сознательно исключена:
+# это витрина, а не товар для печати.
+GOOD_KINDS = {"product", "kit", "semi"}
+
+
 class Nomenclature:
     """Справочник номенклатуры: карточки, группы, цены, спецификации."""
 
@@ -84,8 +90,13 @@ class Nomenclature:
         item_prices = prices.get(nom_id, {})
         price = num(item_prices.get(base_type or self._base_type()))
         # Остаток со склада → записанная с/с карточки → норматив по граммам/часам.
-        cost = num(bal["cost"]) or num(row.get("cost")) or self._norm_cost(row)
-        margin = price - cost if price else 0.0
+        display_only = str(row.get("kind") or "product") == "showcase"
+        # Витринная позиция не участвует в тревогах запасов и плане пополнения:
+        # это витрина, а не товар на производство.
+        if display_only:
+            status, days_left, plan = "none", None, 0
+        cost = 0.0 if display_only else (num(bal["cost"]) or num(row.get("cost")) or self._norm_cost(row))
+        margin = 0.0 if display_only else (price - cost if price else 0.0)
         hours = num(row.get("hours"))
         profit_per_hour = round(margin / hours, 2) if hours else 0.0
         return {
@@ -99,9 +110,10 @@ class Nomenclature:
             "price": price,
             "prices": item_prices,
             "margin": round(margin, 2),
-            "margin_pct": round(margin / price * 100, 1) if price else 0.0,
+            "margin_pct": round(margin / price * 100, 1) if price and not display_only else 0.0,
             "profit_per_hour": profit_per_hour,
-            "profitable": profit_per_hour >= target if hours else None,
+            "profitable": None if display_only else (profit_per_hour >= target if hours else None),
+            "display_only": display_only,
             "sold_7": stats["sold_7"],
             "sold_30": stats["sold_30"],
             "rate_per_day": stats["rate_per_day"],
@@ -117,7 +129,12 @@ class Nomenclature:
         Нормативы карточки — на штуку. Если заданы вес, время и вместимость
         плиты, считаем полную плиту и берём себестоимость штуки: так материал
         и часы печати делятся на fit, а цена катушки берётся из справочника.
+
+        Категория «Для магазина» (showcase) — витрина без учёта: нормативная
+        себестоимость не считается вообще.
         """
+        if str(row.get("kind") or "product") == "showcase":
+            return 0.0
         grams = num(row.get("grams"))
         hours = num(row.get("hours"))
         if not grams and not hours:
@@ -368,8 +385,10 @@ class Nomenclature:
         item = self.item(nom_id)
         if not item:
             raise ValueError("Позиция номенклатуры не найдена")
-        if item.get("kind") == "service":
-            return {"ok": True, "changed": 0, "prices": {}, "reason": "Услуга не пересчитывается по себестоимости"}
+        if item.get("kind") in ("service", "showcase"):
+            reason = "Услуга не пересчитывается по себестоимости" if item.get("kind") == "service" \
+                else "Витринная позиция «Для магазина» не пересчитывается — цена задаётся вручную"
+            return {"ok": True, "changed": 0, "prices": {}, "reason": reason}
         cost = num(item.get("cost"))
         if cost <= 0:
             return {"ok": True, "changed": 0, "prices": {},
@@ -406,7 +425,7 @@ class Nomenclature:
         base_type = self._base_type()
         changed = 0
         for item in self.items(group_id=group_id):
-            if item.get("kind") in ("service",) or num(item.get("cost")) <= 0:
+            if item.get("kind") in ("service", "showcase") or num(item.get("cost")) <= 0:
                 continue
             price = self._suggest_price(item, ptype, price_type_id, base_type)
             if abs(price - num(item.get("prices", {}).get(price_type_id))) >= 0.01:
@@ -508,7 +527,7 @@ class Nomenclature:
         # а не декорируем всю номенклатуру второй раз на один запрос.
         if items is None:
             items = self.items(warehouse_id=warehouse_id)
-        goods = [i for i in items if i.get("kind") in ("product", "kit", "semi")]
+        goods = [i for i in items if i.get("kind") in GOOD_KINDS]
         qty = sum(num(i["qty"]) for i in goods)
         value = sum(num(i["stock_value"]) for i in goods)
         low = [i for i in goods if i["status"] == "low"]
@@ -538,7 +557,7 @@ class Nomenclature:
         """Что и сколько печатать: позиции с дефицитом, отсортированные по срочности."""
         out = []
         for item in self.items(warehouse_id=warehouse_id):
-            if item.get("kind") not in ("product", "kit", "semi"):
+            if item.get("kind") not in GOOD_KINDS:
                 continue
             if not num(item.get("plan_qty")):
                 continue
@@ -565,7 +584,7 @@ class Nomenclature:
         • «мёртвый» сток (нет продаж 30+ дней).
         """
         items = self.items(warehouse_id=warehouse_id)
-        goods = [i for i in items if i.get("kind") in ("product", "kit", "semi")]
+        goods = [i for i in items if i.get("kind") in GOOD_KINDS]
         groups: dict[str, dict[str, Any]] = {}
         by_item: list[dict[str, Any]] = []
         dead: list[dict[str, Any]] = []
@@ -666,7 +685,13 @@ class Nomenclature:
 
         После приёмки партии фактическая себестоимость штуки записывается
         в карточку товара — это точнее нормативной из граммов и часов.
+
+        Витринная позиция «Для магазина» не обновляется — у неё нет
+        себестоимости по определению.
         """
+        nom = self.db.one("SELECT kind FROM nomenclature WHERE id=?", (nom_id,))
+        if (nom or {}).get("kind") == "showcase":
+            return {"ok": False, "reason": "Витринная позиция не участвует в учёте"}
         batch = self.db.one(
             "SELECT * FROM batches WHERE nom_id=? AND state IN ('done','partial')"
             " ORDER BY datetime(at) DESC LIMIT 1", (nom_id,))

@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS nomenclature (
     barcode TEXT DEFAULT '',
     name TEXT DEFAULT '',
     group_id TEXT,
-    kind TEXT DEFAULT 'product',    -- product|material|service|kit|semi
+    kind TEXT DEFAULT 'product',    -- product|material|service|kit|semi|showcase
     unit TEXT DEFAULT 'шт',
     niche_id TEXT,
     material TEXT DEFAULT '',
@@ -299,12 +299,16 @@ DEFAULT_NOM_GROUPS = [
 ]
 
 # Виды номенклатуры для интерфейса
+# showcase — «для магазина»: витринная позиция без производственного учёта
+# (без себестоимости/маржи/плана пополнения), но с остатком на стеллаже,
+# ценником и QR. В summary/replenishment намеренно не попадает.
 NOM_KINDS = {
     "product": "Товар",
     "semi": "Полуфабрикат",
     "kit": "Комплект",
     "material": "Материал",
     "service": "Услуга",
+    "showcase": "Для магазина",
 }
 
 # Виды документов: код → (название, префикс номера, влияет на склад)

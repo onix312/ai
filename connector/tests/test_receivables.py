@@ -113,6 +113,41 @@ class ReceivablesTests(unittest.TestCase):
         self.assertEqual(row["days"], 0)
         self.assertFalse(row["overdue"])
 
+    def test_report_cash_flow_nets_platform_fees(self):
+        """В денежный поток доход входит за вычетом комиссии эквайринга.
+
+        accounts_state считает amount-fee, а отчёт раньше показывал gross,
+        из-за чего «в кассе» и «денежный поток» расходились на размер комиссии.
+        """
+        self.acc.add_transaction("income", "sale", 1000, "Продажа онлайн",
+                                 fee=50)
+        self.acc.add_transaction("expense", "other", 200, "Материал")
+        rep = self.acc.report("month")
+        self.assertEqual(rep["cash_in"], 950)
+        self.assertEqual(rep["cash_out"], 200)
+        self.assertEqual(rep["cash_flow"], 750)
+
+    def test_payment_after_legacy_prepaid_clears_debt(self):
+        """Старое поле prepaid не должно «замораживать» остаток долга.
+
+        Если в старой базе долг хранился в prepaid, а сейчас клиент доплачивает,
+        новый платёж увеличивает paid, и экономика не должна смотреть только
+        на prepaid: после доплаты долг исчезает полностью.
+        """
+        self.order(paid=0, prepaid=500)
+        self.assertEqual(self.acc.order_economics(
+            self.db.one("SELECT * FROM orders WHERE id='order-1'"))["debt"], 500)
+        recorded = self.acc.add_payment(
+            "order-1", 500, "payment", request_id="legacy-prepay-1")
+        self.assertFalse(recorded["already_recorded"])
+        row = self.db.one("SELECT paid,prepaid FROM orders WHERE id='order-1'")
+        self.assertEqual(row["paid"], 1000)
+        self.assertEqual(row["prepaid"], 0)
+        eco = self.acc.order_economics(
+            self.db.one("SELECT * FROM orders WHERE id='order-1'"))
+        self.assertEqual(eco["debt"], 0)
+        self.assertEqual(self.acc.debts()["rows"], [])
+
 
 class ReceivablesApiRouteTests(unittest.TestCase):
     def setUp(self):

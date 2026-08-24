@@ -21,7 +21,9 @@ class Clients:
             orders = self.db.query(
                 "SELECT * FROM orders WHERE customer_id=? AND datetime(created_at)>=datetime(?)",
                 (c["id"], since))
-            paid = sum(num(o.get("paid")) or num(o.get("prepaid")) for o in orders)
+            # prepaid — старое поле совместимости старого каталога; принять
+            # во внимание максимум, как это делает экономика заказа.
+            paid = sum(max(num(o.get("paid")), num(o.get("prepaid"))) for o in orders)
             last = max((o.get("created_at") or "") for o in orders) if orders else ""
             seg = self._segment(len(orders), paid, last)
             out.append({

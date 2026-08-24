@@ -287,24 +287,31 @@ async function openTransfer() {
   openModal('shelf_transfer_modal');
 }
 
+function pieceUnit(unit) { return ['шт','шт.','piece','pcs'].includes(String(unit || 'шт').toLowerCase()); }
+
 function updateTransferInfo() {
   const row = stockAvail[Number($('stf_item').value)] || null;
   const info = $('stf_info');
   if (!row) { info.hidden = true; return; }
-  const max = Math.floor(num(row.qty));
+  const unit = row.unit || 'шт';
+  const max = pieceUnit(unit) ? Math.floor(num(row.qty)) : num(row.qty);
   $('stf_qty').max = max;
+  $('stf_qty').min = pieceUnit(unit) ? '1' : '0';
+  $('stf_qty').step = pieceUnit(unit) ? '1' : '0.1';
   if (num($('stf_qty').value) > max) $('stf_qty').value = max;
-  $('stf_info_text').textContent = `Доступно на «${row.warehouse_name}»: ${nfmt(row.qty)} шт`
-    + (row.avg_cost ? ` · себестоимость ~${money(row.avg_cost)}/шт` : '');
+  $('stf_info_text').textContent = `Доступно на «${row.warehouse_name}»: ${nfmt(row.qty)} ${unit}`
+    + (row.avg_cost ? ` · себестоимость ~${money(row.avg_cost)}/${pieceUnit(unit) ? 'шт' : unit}` : '');
   info.hidden = false;
 }
 
 async function saveTransfer() {
   const row = stockAvail[Number($('stf_item').value)] || null;
   if (!row) return fail(new Error('Выберите товар'));
+  const unit = row.unit || 'шт';
   const qty = num($('stf_qty').value);
-  if (qty < 1 || qty !== Math.round(qty)) return fail(new Error('Количество — целое число, минимум 1'));
-  if (qty > Math.floor(num(row.qty))) return fail(new Error(`На складе только ${nfmt(row.qty)} шт`));
+  if (qty <= 0) return fail(new Error('Количество должно быть больше нуля'));
+  if (pieceUnit(unit) && qty !== Math.round(qty)) return fail(new Error('Штучные товары перемещаются целыми штуками'));
+  if (qty > num(row.qty) + 1e-9) return fail(new Error(`На складе только ${nfmt(row.qty)} ${unit}`));
   try {
     await post('/api/shelf/transfer', {
       nom_id: row.nom_id, warehouse_id: row.warehouse_id, qty,

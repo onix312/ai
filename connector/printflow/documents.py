@@ -218,7 +218,14 @@ class Documents:
         total = 0.0
         wh = doc.get("warehouse_id") or self._default_warehouse()
         for item in items:
-            cost = num(item.get("cost")) or num(item.get("price"))
+            nom = self.db.one("SELECT kind FROM nomenclature WHERE id=?",
+                              (item.get("nom_id") or "",))
+            # Витрина «Для магазина» без производственного учёта: у неё нет
+            # себестоимости, цена на приход не подставляется в cost.
+            if (nom or {}).get("kind") == "showcase":
+                cost = 0.0
+            else:
+                cost = num(item.get("cost")) or num(item.get("price"))
             amount = cost * num(item["qty"])
             self.stock.add_move(item["nom_id"], wh, num(item["qty"]), amount,
                                 doc["id"], "receipt", item.get("variant_id") or "",
@@ -270,7 +277,10 @@ class Documents:
             if available < qty:
                 name = item.get("nom_name") or "позиция"
                 raise ValueError(f"«{name}»: на складе-источнике {round(available, 1)} шт")
-            unit_cost = self.stock.avg_cost(item["nom_id"], src)
+            nom = self.db.one("SELECT kind FROM nomenclature WHERE id=?",
+                              (item.get("nom_id") or "",))
+            display_only = (nom or {}).get("kind") == "showcase"
+            unit_cost = 0.0 if display_only else self.stock.avg_cost(item["nom_id"], src)
             cost = unit_cost * qty
             self.stock.add_move(item["nom_id"], src, -qty, -cost, doc["id"], "move",
                                 item.get("variant_id") or "", note="перемещение",

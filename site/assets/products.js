@@ -99,7 +99,7 @@ function toggleBatchMode() {
 }
 
 const KIND_LABEL = { product: 'Товар', semi: 'Полуфабрикат', kit: 'Комплект',
-  material: 'Материал', service: 'Услуга' };
+  material: 'Материал', service: 'Услуга', showcase: 'Для магазина' };
 const STATUS_LABEL = { ok: 'В наличии', low: 'Мало', empty: 'Кончился',
   dead: 'Мёртвый сток', none: 'Только модель' };
 const STATUS_CLASS = { ok: 'ok', low: 'warn', empty: 'bad', dead: 'bad', none: '' };
@@ -252,7 +252,7 @@ function fillSelectors() {
   const ptypes = data.priceTypes.map((p) =>
     `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   set('df_price_type', ptypes);
-  const noms = formatNomGroupedOptions(data.items.filter((i) => i.kind !== 'service'), data.groups);
+  const noms = formatNomGroupedOptions(data.items.filter((i) => i.kind !== 'service' && i.kind !== 'showcase'), data.groups);
   set('bf_nom', noms);
   const printers = (PF.state.printers || []).map((p) =>
     `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
@@ -306,19 +306,21 @@ function render() {
 }
 
 function renderCards(list) {
-  const KIND_ICONS = { kit: '◫', material: '◍', semi: '⚙', service: '★', product: '📦' };
+  const KIND_ICONS = { kit: '◫', material: '◍', semi: '⚙', service: '★', product: '📦', showcase: '🛍' };
   const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
   $('prod_grid').innerHTML = list.length ? list.map((i) => {
     const st = i.status || 'ok';
-    const cls = STATUS_CLASS[st] || '';
-    const unprofit = i.profitable === false;
+    const disp = !!i.display_only;
+    const cls = disp ? '' : (STATUS_CLASS[st] || '');
+    const unprofit = !disp && i.profitable === false;
     const minQ = num(i.min_qty) || 5;
     const stockPct = Math.min(100, Math.max(0, Math.round(num(i.qty) / minQ * 50)));
-    const stockHealthCls = st === 'ok' ? 'ok' : (st === 'low' ? 'warn' : 'bad');
+    const stockHealthCls = disp ? 'ok' : (st === 'ok' ? 'ok' : (st === 'low' ? 'warn' : 'bad'));
     const marginPct = num(i.price) ? Math.round(num(i.margin) / num(i.price) * 100) : 0;
     const daysLeftCls = i.days_left == null ? 'muted' : (i.days_left < 3 ? 'neg' : (i.days_left < 7 ? 'warn-text' : 'pos'));
     const kindIc = KIND_ICONS[i.kind] || '📦';
-    const statusIc = STATUS_ICONS[st] || '◻';
+    const statusIc = disp ? '🛍' : (STATUS_ICONS[st] || '◻');
+    const statusLabel = disp ? 'Для магазина' : (STATUS_LABEL[st] || st);
     return `<article class="prod-card ${st}" data-nom="${esc(i.id)}">`
       + '<div class="phead">'
       + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
@@ -331,25 +333,27 @@ function renderCards(list) {
       + '<div class="pbody">'
       + `<div class="pqty ${cls}"><div class="pqty-num"><b>${nfmt(i.qty)}</b><span>${esc(i.unit || 'шт')}</span></div>`
       + `<div class="bar thin prod-stock-bar ${stockHealthCls}"><i style="width:${stockPct}%"></i></div>`
-      + (num(i.reserved) ? `<small class="muted reserve-tag">резерв ${nfmt(i.reserved)} шт</small>` : `<small class="muted free-tag">${nfmt(i.free)} своб.</small>`)
+      + (disp ? '<small class="muted">витрина · без учёта остатков</small>'
+        : (num(i.reserved) ? `<small class="muted reserve-tag">резерв ${nfmt(i.reserved)} шт</small>` : `<small class="muted free-tag">${nfmt(i.free)} своб.</small>`))
       + '</div>'
       + '<div class="pfacts">'
       + `<span>Цена <b>${money(i.price)}</b></span>`
-      + `<span>С/с <b>${money(i.cost)}</b></span>`
-      + `<span>Маржа <b class="${num(i.margin) >= 0 ? 'pos' : 'neg'}">${money(i.margin)} <small class="pct">(${marginPct}%)</small></b></span>`
+      + `<span>С/с <b>${disp ? '—' : money(i.cost)}</b></span>`
+      + `<span>Маржа <b class="${num(i.margin) >= 0 ? 'pos' : 'neg'}">${disp ? '—' : money(i.margin) + ` <small class="pct">(${marginPct}%)</small>`}</b></span>`
       + `<span>₽/час <b class="${unprofit ? 'neg' : 'pos'}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</b></span>`
-      + `<span>7 дн. <b>${nfmt(i.sold_7)} шт</b></span>`
-      + (i.days_left != null ? `<span>Хватит <b class="${daysLeftCls}">${nfmt(i.days_left, 1)} дн.</b></span>`
-        : '<span class="muted">продаж нет</span>')
+      + `<span>7 дн. <b>${disp ? '—' : nfmt(i.sold_7) + ' шт'}</b></span>`
+      + (disp ? '<span class="muted">ценник/QR — со стеллажа</span>'
+        : (i.days_left != null ? `<span>Хватит <b class="${daysLeftCls}">${nfmt(i.days_left, 1)} дн.</b></span>`
+          : '<span class="muted">продаж нет</span>'))
       + '</div></div>'
       + '<div class="pacts">'
-      + `<span class="chip ${cls}">${statusIc} ${esc(STATUS_LABEL[st] || st)}</span>`
+      + `<span class="chip ${cls}">${statusIc} ${esc(statusLabel)}</span>`
       + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">📉 убыточный</span>' : '')
       + '<span class="spacer"></span>'
       + (num(i.plan_qty) ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)}</span>` : '')
-      + `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену только этого товара">↻</button>`
-      + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
-      + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`
+      + (disp ? '<span class="muted">не печатается партией</span>' : `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену только этого товара">↻</button>`
+        + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
+        + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`)
       + '</div></article>';
   }).join('') : emptyBox('▩', 'Номенклатура пуста',
     'Добавьте товар — модель, нормативы печати и цену. Остальное система посчитает сама.');
@@ -359,22 +363,24 @@ function renderTable(list) {
   const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
   $('prod_tbody').innerHTML = list.length ? list.map((i) => {
     const group = data.groups.find((g) => g.id === i.group_id);
-    const unprofit = i.profitable === false;
-    const statusIc = STATUS_ICONS[i.status] || '◻';
+    const disp = !!i.display_only;
+    const unprofit = !disp && i.profitable === false;
+    const statusIc = disp ? '🛍' : (STATUS_ICONS[i.status] || '◻');
+    const statusLabel = disp ? 'Для магазина' : (STATUS_LABEL[i.status] || i.status);
     return `<tr class="clickable" data-nom-edit="${esc(i.id)}">`
       + `<td class="tnum muted">${esc(i.code || '')}</td>`
       + `<td class="strong">${esc(i.name)}${i.sku ? `<small class="muted"> · ${esc(i.sku)}</small>` : ''}</td>`
       + `<td>${esc(group ? group.name : '—')}</td>`
       + `<td class="right tnum">${nfmt(i.qty)}</td>`
-      + `<td class="right tnum ${num(i.reserved) ? 'warn-text' : 'muted'}">${nfmt(i.reserved)}</td>`
-      + `<td class="right tnum">${nfmt(i.free)}</td>`
+      + `<td class="right tnum muted">—</td>`
+      + `<td class="right tnum muted">—</td>`
       + `<td class="right tnum">${money(i.price)}</td>`
-      + `<td class="right tnum">${money(i.cost)}</td>`
-      + `<td class="right tnum ${num(i.margin) >= 0 ? 'pos' : 'neg'}">${money(i.margin)}</td>`
-      + `<td class="right tnum ${unprofit ? 'neg' : ''}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</td>`
-      + `<td class="right tnum">${nfmt(i.sold_7)}</td>`
-      + `<td><span class="chip ${STATUS_CLASS[i.status] || ''}">${statusIc} ${esc(STATUS_LABEL[i.status] || i.status)}</span></td>`
-      + `<td class="right"><button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button></td></tr>`;
+      + `<td class="right tnum muted">${disp ? '—' : money(i.cost)}</td>`
+      + `<td class="right tnum muted">${disp ? '—' : (num(i.margin) >= 0 ? money(i.margin) : money(i.margin))}</td>`
+      + `<td class="right tnum muted">—</td>`
+      + `<td class="right tnum muted">${disp ? '—' : nfmt(i.sold_7)}</td>`
+      + `<td><span class="chip ${disp ? '' : (STATUS_CLASS[i.status] || '')}">${statusIc} ${esc(statusLabel)}</span></td>`
+      + `<td class="right">${disp ? '<span class="muted">не печатается</span>' : `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button>`}</td></tr>`;
   }).join('') : `<tr><td colspan="13">${emptyBox('▩', 'Ничего не найдено', 'Измените фильтры или добавьте товар.')}</td></tr>`;
 }
 
@@ -392,22 +398,26 @@ function renderNomSummary(item) {
     host.innerHTML = '<span>ⓘ</span><span>Заполните и сохраните карточку — сводка появится после расчёта нормативов.</span>';
     return;
   }
-  const low = item.status === 'low' || item.status === 'out';
-  const unprofitable = item.profitable === false;
+  const disp = !!item.display_only;
+  const low = !disp && (item.status === 'low' || item.status === 'out');
+  const unprofitable = !disp && item.profitable === false;
   const price = num(item.price);
   const cost = num(item.cost);
   const margin = price - cost;
-  const statusText = STATUS_LABEL[item.status] || item.status || 'без статуса';
-  host.className = `notice ${low || unprofitable ? 'warn' : 'ok'}`;
-  host.innerHTML = '<span>' + (low || unprofitable ? '⚠' : '✓') + '</span><span>'
-    + `<b>Цена ${money(price)}</b> · с/с ${money(cost)} · маржа ${money(margin)}`
-    + (price ? ` (${nfmt(margin / price * 100, 1)}%)` : '')
-    + ` · прибыль/час ${num(item.hours) ? money(item.profit_per_hour) : '—'}`
-    + ` · запас: ${nfmt(item.free)} ${esc(item.unit || 'шт')}`
-    + (num(item.reserved) ? `, резерв ${nfmt(item.reserved)}` : '')
-    + ` · ${esc(statusText)}`
-    + (item.days_left != null ? ` · хватит на ${nfmt(item.days_left, 1)} дн.` : '')
-    + (unprofitable ? '<br><small>Цена ниже целевой прибыли за час — используйте пересчёт или проверьте нормативы.</small>' : '')
+  const statusText = disp ? 'Для магазина' : (STATUS_LABEL[item.status] || item.status || 'без статуса');
+  host.className = `notice ${disp ? 'ok' : (low || unprofitable ? 'warn' : 'ok')}`;
+  host.innerHTML = '<span>' + (disp ? '🛍' : (low || unprofitable ? '⚠' : '✓')) + '</span><span>'
+    + (disp
+      ? `<b>Цена ${money(price)}</b> · витрина без производственного учёта · на стеллаже: ${nfmt(item.free)} ${esc(item.unit || 'шт')}`
+        + '<br><small>Себестоимость не считается; ценник и QR печатаются со стеллажа.</small>'
+      : `<b>Цена ${money(price)}</b> · с/с ${money(cost)} · маржа ${money(margin)}`
+        + (price ? ` (${nfmt(margin / price * 100, 1)}%)` : '')
+        + ` · прибыль/час ${num(item.hours) ? money(item.profit_per_hour) : '—'}`
+        + ` · запас: ${nfmt(item.free)} ${esc(item.unit || 'шт')}`
+        + (num(item.reserved) ? `, резерв ${nfmt(item.reserved)}` : '')
+        + ` · ${esc(statusText)}`
+        + (item.days_left != null ? ` · хватит на ${nfmt(item.days_left, 1)} дн.` : '')
+        + (unprofitable ? '<br><small>Цена ниже целевой прибыли за час — используйте пересчёт или проверьте нормативы.</small>' : ''))
     + '</span>';
 }
 
@@ -1135,6 +1145,7 @@ function openQuickSale() {
 function renderQuickRows() {
   const q = (($('qs_search') || {}).value || '').toLowerCase().trim();
   const list = data.items.filter((i) => num(i.qty) > 0 && i.kind !== 'service'
+    && i.kind !== 'showcase'
     && (!q || `${i.name} ${i.sku || ''}`.toLowerCase().includes(q)));
   $('qs_rows').innerHTML = list.length ? list.map((i) =>
     `<div class="sale-row"><div class="sinfo"><b>${esc(i.name)}</b>`
