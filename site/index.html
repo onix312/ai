@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
 <link rel="stylesheet" href="assets/theme.css?v=9.1.2">
 <link rel="stylesheet" href="assets/app.css?v=9.1.2">
-<link rel="stylesheet" href="assets/more.css?v=9.2.1">
+<link rel="stylesheet" href="assets/more.css?v=9.2.2">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -1011,14 +1011,30 @@
   </div>
  </div>
 </section>
-<section class="view" id="view-library">
+<section class="view library-workspace" id="view-library">
  <div class="view-head">
-  <div><span class="eyebrow">База знаний · без лишнего поиска</span><h1>Библиотека</h1><p>Практические гайды, скрипты и готовые материалы для цеха и продаж.</p></div>
-  <div class="head-actions"><div class="lib-progress"><span>Чек-листы</span><div class="bar" id="lib_bar_wrap"><i id="lib_bar"></i></div><b id="lib_progress">0 / 0</b></div><button class="btn ghost" id="lib_back" type="button" hidden>← К списку</button></div>
+  <div><span class="eyebrow">База знаний · маршрут вместо папки файлов</span><h1>Библиотека</h1><p>Гайды, готовые скрипты и печатные материалы — от первого товара до витрины и системного порядка.</p></div>
+  <div class="head-actions"><div class="lib-progress"><span>Чек-листы</span><div class="bar" id="lib_bar_wrap"><i id="lib_bar"></i></div><b id="lib_progress">0 / 0</b></div><button class="btn ghost" id="lib_back" type="button" hidden>← Все материалы</button></div>
  </div>
+ <section class="library-home" id="library_home" aria-label="Быстрый маршрут по библиотеке">
+  <div class="library-home-copy">
+   <span class="library-home-kicker">С чего начать</span>
+   <h2>Выберите задачу — не нужно искать по папкам</h2>
+   <p>Соберите первую полку, приведите в порядок цех или подготовьте продажу. Каждый маршрут ведёт к конкретным шагам и готовым материалам.</p>
+   <div class="library-home-actions">
+    <button class="btn primary" type="button" data-library-open="start">🚀 Запустить первую неделю</button>
+    <button class="btn" id="lib_continue" type="button" data-library-open="" hidden>Продолжить чтение</button>
+   </div>
+  </div>
+  <div class="library-home-map" aria-label="Популярные маршруты">
+   <button type="button" class="library-route route-start" data-library-open="start"><span>01</span><b>Начать</b><small>Первая неделя и ассортимент</small><i>→</i></button>
+   <button type="button" class="library-route route-sales" data-library-open="b2b"><span>02</span><b>Продать</b><small>B2B, Авито, Telegram и витрина</small><i>→</i></button>
+   <button type="button" class="library-route route-workshop" data-library-open="tech"><span>03</span><b>Сделать стабильно</b><small>Техника, пластики и смена</small><i>→</i></button>
+  </div>
+ </section>
  <div class="lib-discovery" id="lib_discovery">
   <label class="lib-search-box"><span aria-hidden="true">⌕</span><input type="search" id="lib_search" placeholder="Найти инструкцию, материал или сценарий…" autocomplete="off" aria-label="Найти в библиотеке"></label>
-  <div class="lib-filters" id="lib_filters" role="group" aria-label="Категории библиотеки"><button type="button" class="on" data-lib-filter="all">Все</button><button type="button" data-lib-filter="start">Старт</button><button type="button" data-lib-filter="sales">Продажи</button><button type="button" data-lib-filter="workshop">Цех</button><button type="button" data-lib-filter="system">Система</button></div>
+  <div class="lib-filters" id="lib_filters" role="group" aria-label="Категории библиотеки"><button type="button" class="on" data-lib-filter="all">Все</button><button type="button" data-lib-filter="start">Старт</button><button type="button" data-lib-filter="sales">Продажи</button><button type="button" data-lib-filter="workshop">Цех</button><button type="button" data-lib-filter="system">Система</button><button type="button" data-lib-filter="tools">Инструменты</button></div>
   <span class="lib-result-count" id="lib_count">Все материалы</span>
  </div>
  <div class="lib-grid" id="lib_grid">
@@ -1046,10 +1062,11 @@
   <a class="lib-card" href="#library/settings-guide" data-article="settings-guide"><span class="ic">⚙️</span><b>Гайд по настройкам</b><small>Все вкладки — что и зачем менять</small></a>
   <a class="lib-card" href="#library/faq" data-article="faq"><span class="ic">❓</span><b>FAQ — частые ошибки</b><small>HMS-коды, налипание, паутинки, коробление</small></a>
   <a class="lib-card" href="#library/camera-cloud" data-article="camera-cloud"><span class="ic">📷</span><b>Камера в облаке</b><small>Почему нет картинки и как починить</small></a>
-  <a class="lib-card" href="/design.html" target="_blank" rel="noopener"><span class="ic">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
-  <a class="lib-card" href="/m.html" target="_blank" rel="noopener"><span class="ic">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
-  <a class="lib-card" href="/track.html" target="_blank" rel="noopener"><span class="ic">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
+  <a class="lib-card" data-library-category="tools" href="/design.html" target="_blank" rel="noopener"><span class="ic">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
+  <a class="lib-card" data-library-category="tools" href="/m.html" target="_blank" rel="noopener"><span class="ic">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
+  <a class="lib-card" data-library-category="tools" href="/track.html" target="_blank" rel="noopener"><span class="ic">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
  </div>
+ <div class="lib-empty-state" id="lib_empty" hidden><span>⌕</span><b>Ничего не нашли</b><p>Смените категорию или попробуйте другое слово.</p><button class="btn sm" type="button" id="lib_reset_filters">Показать все материалы</button></div>
  <div id="lib_tpl_wrap" hidden>
   <div class="card">
    <div class="card-head"><div><h2>Шаблоны ответов клиентам</h2><p>Копируйте в Авито или Telegram — ручное время меньше</p></div><button class="btn sm" id="lib_tpl_add" type="button">+ Шаблон</button></div>
@@ -1057,6 +1074,12 @@
   </div>
  </div>
  <div id="library-body">
+ <aside class="lib-article-nav" id="lib_article_nav" hidden aria-label="Навигация по статье">
+  <span class="lib-article-nav-kicker">В этом гайде</span>
+  <b id="lib_article_nav_title">Разделы</b>
+  <div id="lib_article_nav_links"></div>
+  <button class="btn sm ghost" id="lib_article_top" type="button">↑ К началу статьи</button>
+ </aside>
 <article data-article="start" class="library-article"><div class="sechead"><span class="secic">🚀</span><div><h1>Первая неделя</h1><p>Тест трёх ниш и запуск учёта</p></div></div><blockquote>
 <p>Цель недели — не заполнить склад, а получить первые измеримые сигналы спроса.</p>
 </blockquote>
@@ -2844,7 +2867,7 @@
 <li>[ ] Заказ и оплата отражены в учёте.</li>
 <li>[ ] Проведён контроль качества.</li>
 <li>[ ] Сделана свежая резервная копия.</li>
-</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🪧 Вывеси и таблички — конструктор</b><span>21 ситуация: «Мы открыты», «Перерыв», «Идёт 3D-печать», Wi-Fi, «Выдача заказов»; любой текст, цвет и QR</span><a class="printbtn" href="materials/вывеси-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>🟢 Объявления для Авито</b><span>4 готовых объявления, счётчик заголовка, быстрые ответы, чек-листы фото и публикации</span><a class="printbtn" href="materials/авито-объявления.html" target="_blank">Открыть</a></div><div class="mat"><b>📣 Контент-план недели ТГ</b><span>7 постов под пять фокусов недели: правьте, перемешивайте, копируйте в Telegram или выгружайте .md</span><a class="printbtn" href="materials/контент-план-тг.html" target="_blank">Открыть</a></div><div class="mat"><b>📦 Наклейки на коробки</b><span>«Хрупкое», «Не сгибать», «Верх», «Спасибо за заказ» с QR — для отправлений Авито</span><a class="printbtn" href="materials/наклейки-на-коробки.html" target="_blank">Открыть</a></div><div class="mat"><b>🎟 Сертификаты и купоны</b><span>Подарочный сертификат с номиналом и купоны с промокодом; всё редактируется</span><a class="printbtn" href="materials/сертификаты-и-купоны.html" target="_blank">Открыть</a></div><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий; два размера и пустые бланки</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Воблеры и таблички зон</b><span>Воблеры на полку и разделители зон — каждый текст редактируется кликом</span><a class="printbtn" href="materials/воблеры.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Город, телефон, Telegram и вариант знака задаются один раз в любом генераторе и запоминаются. Генераторы цен берут цены из «Базы изделий»; для полки магазина есть <b>воблеры</b>, <b>прайс на подставку</b>, <b>таблички зон</b> и <b>карточки «как заказать»</b>.</p></article>
+</ul></article><article data-article="mats" class="library-article"><div class="sechead"><span class="secic">🖨</span><div><h1>Печать на A4</h1><p>Откройте и нажмите Ctrl+P — фирменные материалы NOZZA</p></div></div><div class="matgrid"><div class="mat"><b>🪧 Вывеси и таблички — конструктор</b><span>21 ситуация: «Мы открыты», «Перерыв», «Идёт 3D-печать», Wi-Fi, «Выдача заказов»; любой текст, цвет и QR</span><a class="printbtn" href="materials/вывеси-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>🟢 Объявления для Авито</b><span>4 готовых объявления, счётчик заголовка, быстрые ответы, чек-листы фото и публикации</span><a class="printbtn" href="materials/авито-объявления.html" target="_blank">Открыть</a></div><div class="mat"><b>📣 Контент-план недели ТГ</b><span>7 постов под пять фокусов недели: правьте, перемешивайте, копируйте в Telegram или выгружайте .md</span><a class="printbtn" href="materials/контент-план-тг.html" target="_blank">Открыть</a></div><div class="mat"><b>📦 Наклейки на коробки</b><span>«Хрупкое», «Не сгибать», «Верх», «Спасибо за заказ» с QR — для отправлений Авито</span><a class="printbtn" href="materials/наклейки-на-коробки.html" target="_blank">Открыть</a></div><div class="mat"><b>🎟 Сертификаты и купоны</b><span>Подарочный сертификат с номиналом и купоны с промокодом; всё редактируется</span><a class="printbtn" href="materials/сертификаты-и-купоны.html" target="_blank">Открыть</a></div><div class="mat"><b>🏷 Ценники — генератор</b><span>Цены и QR прямо из вашей базы изделий: ценник 66×31 мм или промостенд 66×56 мм</span><a class="printbtn" href="materials/ценники-генератор.html" target="_blank">Открыть</a></div><div class="mat"><b>⭕ Наклейки и бирки</b><span>Круглые Ø40/Ø30, прямоугольные 50×25 и бирки с QR и ценой</span><a class="printbtn" href="materials/наклейки-и-бирки.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Воблеры и таблички зон</b><span>Воблеры на полку и разделители зон — каждый текст редактируется кликом</span><a class="printbtn" href="materials/воблеры.html" target="_blank">Открыть</a></div><div class="mat"><b>📢 Постеры A4 и A3</b><span>«Печатаем вещи под вас» и «Как заказать своё» с вашим QR</span><a class="printbtn" href="materials/постеры.html" target="_blank">Открыть</a></div><div class="mat"><b>🪧 Визитки и таблички</b><span>Визитки 90×50, шесть табличек на полку и вкладыш «спасибо»</span><a class="printbtn" href="materials/визитки-и-таблички.html" target="_blank">Открыть</a></div><div class="mat"><b>📱 Шапки Telegram и Авито</b><span>Аватар, обложки в PNG и готовые тексты описаний</span><a class="printbtn" href="materials/шапки-соцсетей.html" target="_blank">Открыть</a></div><div class="mat"><b>📋 Памятка продавцу</b><span>Ответы на частые вопросы и порядок приёма заявки</span><a class="printbtn" href="materials/памятка-продавцу.html" target="_blank">Открыть</a></div></div><p class="hint">Все материалы разом — <a href="materials/index.html" target="_blank">materials/index.html</a>. Печатайте в масштабе 100% без «вписать в лист», режьте по пунктиру. Город, телефон, Telegram и вариант знака задаются один раз в любом генераторе и запоминаются. Генераторы цен берут цены из «Базы изделий»; для полки магазина есть <b>воблеры</b>, <b>прайс на подставку</b>, <b>таблички зон</b> и <b>карточки «как заказать»</b>.</p></article>
 
 <article data-article="night" class="library-article"><div class="sechead"><span class="secic">🌙</span><div><h1>Ночная смена</h1><p>Ноль простоя и автономность P1S</p></div></div><blockquote>
 <p>Один принтер зарабатывает, только когда печатает. Всё остальное время — простой. Задача этого раздела: сделать так, чтобы утром тебя ждала готовая работа, а не пустой стол.</p>
@@ -3093,7 +3116,7 @@
 <thead><tr><th>Изделие</th><th>Размер (ориентир)</th><th>Зачем</th></tr></thead>
 <tbody>
 <tr><td>Подставка-ступенька под образцы</td><td>200×80×40 мм</td><td>Задний ряд выше — все изделия видно</td></tr>
-<tr><td>Держатель ценника</td><td>под лист 62×38 мм</td><td>Ценник стоит, а не лежит</td></tr>
+<tr><td>Держатель ценника</td><td>под ценник 66×31 мм</td><td>Ценник стоит, а не лежит</td></tr>
 <tr><td>Подставка под QR-плакат</td><td>под A6/A5</td><td>Витрина и «закажи по QR» всегда на виду</td></tr>
 <tr><td>Подставка под телефон-витрину</td><td>под ширину телефона</td><td>Планшет/телефон с <code>order.html</code> в режиме киоска</td></tr>
 <tr><td>Крючки-навески</td><td>30–40 мм</td><td>Брелоки и адресники висят, а не лежат кучей</td></tr>
@@ -4447,17 +4470,17 @@
   </section>
   <section class="form-section">
    <h3>Ценник</h3>
+   <p class="muted" style="margin:2px 0 10px">Выберите фактический носитель: обычный ценник или высокий промостенд. Конструктор печатает их в масштабе 1:1.</p>
    <div class="form-grid">
-    <label>Тип ценника<select id="shf_tag_template">
-     <option value="classic">Классический · 62 × 38</option>
-     <option value="compact">Компактный · 43 × 25</option>
-     <option value="promo">Промо · 90 × 60</option>
-     <option value="minimal">Минимал · 62 × 38</option>
+    <label>Формат для печати<select id="shf_tag_template">
+     <option value="standard">Ценник · 66 × 31 мм</option>
+     <option value="promo">Промостенд · 66 × 56 мм</option>
     </select></label>
     <label>Акцентный цвет<input id="shf_tag_color" type="color" value="#4f46e5"></label>
     <label>Плашка<input id="shf_tag_badge" maxlength="40" placeholder="Хит / Новинка / −20%"></label>
     <label>Короткое описание<input id="shf_tag_note" maxlength="180" placeholder="Цвет на выбор · сделано в Крыму"></label>
    </div>
+   <div class="notice" style="margin-top:10px"><span>▦</span><span><b>Ценник — 66 × 31 мм</b> для полки; <b>промостенд — 66 × 56 мм</b> для акций и фокусных товаров. Старые карточки автоматически переходят на обычный ценник.</span></div>
   </section>
   <section class="form-section">
    <h3>Касса и 1С</h3>
@@ -4698,12 +4721,12 @@
 <script src="assets/ops.js?v=9.2.1"></script>
 <script src="assets/money.js?v=9.1.2"></script>
 <script src="assets/finance.js?v=9.1.2"></script>
-<script src="assets/shelf.js?v=9.1.2"></script>
+<script src="assets/shelf.js?v=9.2.2"></script>
 <script src="assets/products.js?v=9.1.2"></script>
 <script src="assets/bridge.js?v=9.1.2"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>
 <script src="assets/workshop.js?v=9.1.2"></script>
-<script src="assets/app.js?v=9.2.1"></script>
+<script src="assets/app.js?v=9.2.2"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */

@@ -191,8 +191,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("nom_id", "TEXT DEFAULT ''"),
         ("barcode", "TEXT DEFAULT ''"),
         ("sku", "TEXT DEFAULT ''"),
-        # Индивидуальный вид ценника; пустые подписи берутся из конструктора.
-        ("tag_template", "TEXT DEFAULT 'classic'"),
+        # Физический формат: standard (66×31) или promo (66×56). Старые
+        # classic/compact/minimal нормализуются в Shelf при чтении/сохранении.
+        ("tag_template", "TEXT DEFAULT 'standard'"),
         ("tag_badge", "TEXT DEFAULT ''"),
         ("tag_color", "TEXT DEFAULT '#4f46e5'"),
         ("tag_note", "TEXT DEFAULT ''"),
@@ -726,7 +727,7 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     note TEXT DEFAULT '',
     barcode TEXT DEFAULT '',        -- штрихкод ровно как в номенклатуре 1С
     sku TEXT DEFAULT '',            -- артикул 1С
-    tag_template TEXT DEFAULT 'classic', -- classic|compact|promo|minimal
+    tag_template TEXT DEFAULT 'standard', -- standard (66×31) | promo (66×56); legacy IDs normalize to standard
     tag_badge TEXT DEFAULT '',      -- своя плашка: «Хит», «Новинка», «−20%»
     tag_color TEXT DEFAULT '#4f46e5',
     tag_note TEXT DEFAULT '',       -- короткое описание только для ценника

@@ -82,75 +82,63 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .preview { min-width:0; padding:20px; overflow:auto; }
 .preview-head { max-width:210mm; margin:0 auto 10px; display:flex; align-items:center; color:var(--muted); font-size:12px; }
 .sheets { display:flex; flex-direction:column; gap:20px; align-items:center; }
-.sheet { width:210mm; min-height:297mm; padding:8mm; background:#fff; box-shadow:var(--shadow); page-break-after:always; }
+/* A4 is used as a real canvas: no visual gaps between labels and no scaling.
+   Standard: 3 × 9 labels (66 × 31); promo: 3 × 5 stands (66 × 56). */
+.sheet { position:relative; width:210mm; min-height:297mm; background:#fff; box-shadow:var(--shadow); page-break-after:always; }
+.sheet.standard { padding:9mm 6mm; }
+.sheet.promo { padding:8.5mm 6mm; }
 .sheet:last-child { page-break-after:auto; }
-.sheet-caption { margin:0 0 3mm; color:#929bac; font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
-.tag-grid { display:grid; align-content:start; justify-content:start; }
-.sheet.classic .tag-grid,.sheet.minimal .tag-grid { grid-template-columns:repeat(3,62mm); gap:2mm; }
-.sheet.compact .tag-grid { grid-template-columns:repeat(4,43mm); gap:3mm 5mm; }
-.sheet.promo .tag-grid { grid-template-columns:repeat(2,90mm); gap:4mm; }
+.sheet-caption { position:absolute; top:2mm; left:6mm; z-index:1; color:#929bac; font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
+.tag-grid { display:grid; align-content:start; justify-content:start; overflow:hidden; }
+.sheet.standard .tag-grid { grid-template-columns:repeat(3,66mm); grid-auto-rows:31mm; gap:0; }
+.sheet.promo .tag-grid { grid-template-columns:repeat(3,66mm); grid-auto-rows:56mm; gap:0; }
 .price-tag { --tag-color:#4f46e5; --font-scale:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
-  width:62mm; height:38mm; padding:3mm 3.2mm 2.4mm 4.3mm; border:.25mm solid #cdd3df; border-radius:2mm;
-  background:#fff; color:#121827; break-inside:avoid; }
-.price-tag::before { content:""; position:absolute; inset:0 auto 0 0; width:1.4mm; background:var(--tag-color); }
-.price-tag.compact { width:43mm; height:25mm; padding:2.1mm 2mm 1.6mm 3mm; border-radius:1.5mm; }
-.price-tag.promo { width:90mm; height:60mm; padding:5mm 5mm 4mm 6mm; border-radius:3mm; border-width:.35mm; }
-.price-tag.minimal { padding-left:3.2mm; border-color:#2f3542; border-radius:0; }
-.price-tag.minimal::before { display:none; }
-.tag-top { display:flex; align-items:center; gap:1.4mm; min-height:4mm; }
-.tag-brand { display:flex; align-items:center; gap:1mm; color:var(--tag-color); font-size:calc(6.7px * var(--font-scale));
-  font-weight:900; letter-spacing:.12em; }
-.tag-brand img { width:3.7mm; height:3.7mm; }
-.badge { margin-left:auto; max-width:27mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:.7mm 2mm;
-  border-radius:10mm; color:#fff; background:var(--tag-color); font-size:calc(6px * var(--font-scale)); font-weight:850; text-transform:uppercase; letter-spacing:.04em; }
-.tag-body { display:flex; flex:1; min-height:0; gap:2mm; padding-top:1.2mm; }
+  width:66mm; height:31mm; padding:1.7mm 2.2mm 1.3mm 3.7mm; border:.25mm solid #cdd3df; border-radius:1.5mm;
+  background:linear-gradient(115deg,#fff 0%,#fff 76%,color-mix(in srgb,var(--tag-color) 5%,#fff) 100%); color:#121827; break-inside:avoid; }
+.price-tag::before { content:""; position:absolute; inset:0 auto 0 0; width:1.35mm; background:var(--tag-color); }
+.tag-top { display:flex; align-items:center; gap:1.1mm; min-height:3.5mm; }
+.tag-brand { display:flex; align-items:center; gap:.7mm; color:var(--tag-color); font-size:calc(5.4px * var(--font-scale));
+  font-weight:900; letter-spacing:.11em; }
+.tag-brand img { width:2.9mm; height:2.9mm; }
+.badge { margin-left:auto; max-width:29mm; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:.45mm 1.45mm;
+  border-radius:10mm; color:#fff; background:var(--tag-color); font-size:calc(5.1px * var(--font-scale)); font-weight:850; text-transform:uppercase; letter-spacing:.035em; }
+.tag-body { display:flex; flex:1; min-height:0; gap:1.5mm; padding-top:.4mm; }
 .tag-main { flex:1; min-width:0; display:flex; flex-direction:column; }
-.tag-name { font-size:calc(11px * var(--font-scale)); line-height:1.1; font-weight:850; letter-spacing:-.015em;
+.tag-name { font-size:calc(10px * var(--font-scale)); line-height:1.08; font-weight:850; letter-spacing:-.015em;
   display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-.tag-desc { margin-top:.7mm; color:#5f6a7e; font-size:calc(6.5px * var(--font-scale)); line-height:1.2;
-  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
-.tag-price { margin-top:auto; font-size:calc(22px * var(--font-scale)); line-height:.92; font-weight:950; letter-spacing:-.045em; white-space:nowrap; }
+.tag-desc { margin-top:.35mm; color:#5f6a7e; font-size:calc(5.4px * var(--font-scale)); line-height:1.16;
+  display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; overflow:hidden; }
+.tag-price { margin-top:auto; font-size:calc(18px * var(--font-scale)); line-height:.92; font-weight:950; letter-spacing:-.045em; white-space:nowrap; }
 .tag-price span { font-size:.48em; letter-spacing:0; }
-.tag-meta { margin-top:.7mm; color:#8791a3; font-size:calc(5.8px * var(--font-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.qr { width:14mm; height:14mm; flex:none; align-self:flex-end; }
+.tag-meta { margin-top:.4mm; color:#8791a3; font-size:calc(4.8px * var(--font-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qr { width:12mm; height:12mm; flex:none; align-self:flex-end; }
 .qr svg { width:100%; height:100%; display:block; }
-.tag-bottom { display:flex; align-items:flex-end; gap:2mm; min-height:8mm; margin-top:1mm; }
-.barcode { flex:1; min-width:0; height:8mm; display:flex; align-items:flex-end; }
-.barcode svg { display:block; width:100% !important; height:8mm !important; }
-.barcode-missing { align-self:center; color:#b45309; font-size:5.7px; font-weight:700; border-bottom:.2mm dashed #d89a52; }
-.sku { max-width:19mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:5.5px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.footer-line { position:absolute; right:2.5mm; bottom:1mm; max-width:33mm; color:#9ba3b2; font-size:5px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-/* compact intentionally keeps the cashier code but removes secondary copy */
-.price-tag.compact .tag-brand img { width:2.8mm; height:2.8mm; }
-.price-tag.compact .tag-brand { font-size:5.2px; }
-.price-tag.compact .badge { max-width:14mm; padding:.5mm 1.2mm; font-size:4.8px; }
-.price-tag.compact .tag-body { padding-top:.7mm; gap:1mm; }
-.price-tag.compact .tag-name { font-size:calc(8px * var(--font-scale)); -webkit-line-clamp:2; }
-.price-tag.compact .tag-desc { display:none; }
-.price-tag.compact .tag-price { font-size:calc(14px * var(--font-scale)); }
-.price-tag.compact .tag-meta { display:none; }
-.price-tag.compact .qr { width:9mm; height:9mm; }
-.price-tag.compact .tag-bottom { min-height:5.8mm; height:5.8mm; margin-top:.5mm; }
-.price-tag.compact .barcode,.price-tag.compact .barcode svg { height:5.8mm !important; }
-.price-tag.compact .sku { max-width:10mm; font-size:4.3px; }
-.price-tag.compact .footer-line { display:none; }
-/* promo has breathing room for a shelf feature card */
-.price-tag.promo::before { width:2.3mm; }
-.price-tag.promo .tag-brand { font-size:10px; }
-.price-tag.promo .tag-brand img { width:6mm; height:6mm; }
-.price-tag.promo .badge { max-width:38mm; padding:1.2mm 3mm; font-size:9px; }
-.price-tag.promo .tag-body { gap:4mm; padding-top:3mm; }
-.price-tag.promo .tag-name { font-size:calc(20px * var(--font-scale)); line-height:1.05; }
-.price-tag.promo .tag-desc { margin-top:2mm; font-size:calc(10px * var(--font-scale)); -webkit-line-clamp:3; }
-.price-tag.promo .tag-price { font-size:calc(38px * var(--font-scale)); }
-.price-tag.promo .tag-meta { font-size:8px; }
-.price-tag.promo .qr { width:24mm; height:24mm; }
-.price-tag.promo .tag-bottom { min-height:12mm; margin-top:2mm; }
-.price-tag.promo .barcode,.price-tag.promo .barcode svg { height:12mm !important; }
-.price-tag.promo .sku { max-width:25mm; font-size:7px; }
-.price-tag.promo .footer-line { right:4mm; bottom:2mm; max-width:46mm; font-size:7px; }
-.price-tag.minimal .tag-brand,.price-tag.minimal .badge { color:#111827; }
-.price-tag.minimal .badge { color:#fff; background:#111827; }
+.tag-bottom { display:flex; align-items:flex-end; gap:1.5mm; min-height:6mm; margin-top:.4mm; }
+.barcode { flex:1; min-width:0; height:6mm; display:flex; align-items:flex-end; }
+.barcode svg { display:block; width:100% !important; height:6mm !important; }
+.barcode-missing { align-self:center; color:#b45309; font-size:4.8px; font-weight:700; border-bottom:.2mm dashed #d89a52; }
+.sku { max-width:18mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:4.7px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.footer-line { display:none; }
+/* The tall promo stand deliberately gives the offer, QR and cashier code room. */
+.price-tag.promo { width:66mm; height:56mm; padding:3.6mm 3.8mm 3mm 5.2mm; border-radius:2.5mm; border-width:.35mm;
+  background:linear-gradient(145deg,#fff 0%,#fff 62%,color-mix(in srgb,var(--tag-color) 10%,#fff) 100%); }
+.price-tag.promo::before { width:2.2mm; }
+.price-tag.promo .tag-top { min-height:6mm; }
+.price-tag.promo .tag-brand { gap:1mm; font-size:9px; }
+.price-tag.promo .tag-brand img { width:5.2mm; height:5.2mm; }
+.price-tag.promo .badge { max-width:34mm; padding:1mm 2.5mm; font-size:8px; }
+.price-tag.promo .tag-body { gap:3mm; padding-top:2mm; }
+.price-tag.promo .tag-name { font-size:calc(16px * var(--font-scale)); line-height:1.05; -webkit-line-clamp:3; }
+.price-tag.promo .tag-desc { margin-top:1.3mm; font-size:calc(8px * var(--font-scale)); line-height:1.25; -webkit-line-clamp:3; }
+.price-tag.promo .tag-price { font-size:calc(31px * var(--font-scale)); }
+.price-tag.promo .tag-meta { margin-top:1.2mm; font-size:7px; }
+.price-tag.promo .qr { width:19mm; height:19mm; }
+.price-tag.promo .tag-bottom { min-height:9mm; margin-top:1.4mm; gap:2mm; }
+.price-tag.promo .barcode,.price-tag.promo .barcode svg { height:9mm !important; }
+.price-tag.promo .sku { max-width:22mm; font-size:6.4px; }
+.price-tag.promo .footer-line { display:block; position:absolute; right:3.8mm; bottom:1.2mm; max-width:42mm; color:#7d8798; font-size:5.8px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.format-note { margin-top:10px; padding:10px 11px; border:1px solid #d9dcff; border-radius:11px; background:#f6f6ff; color:#4b5570; font-size:11px; line-height:1.42; }
+.format-note b { display:block; margin-bottom:2px; color:#3730a3; font-size:11.5px; }
 .empty { max-width:620px; margin:90px auto; padding:34px; border:1px dashed #bcc5d4; border-radius:18px; text-align:center; color:var(--muted); background:#fff; }
 .empty b { display:block; color:var(--ink); font-size:17px; margin-bottom:6px; }
 dialog { width:min(680px,calc(100vw - 28px)); border:0; border-radius:18px; padding:0; color:var(--ink); box-shadow:0 28px 90px -25px #172033; }
@@ -176,7 +164,9 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
   body { background:#fff; }
   .topbar,.sidebar,.preview-head,.noprint { display:none !important; }
   .workspace,.preview,.sheets { display:block; padding:0; margin:0; min-height:0; }
-  .sheet { width:210mm; min-height:297mm; margin:0; padding:8mm; box-shadow:none; }
+  .sheet { width:210mm; min-height:297mm; margin:0; box-shadow:none; }
+  .sheet.standard { padding:9mm 6mm; }
+  .sheet.promo { padding:8.5mm 6mm; }
   .sheet-caption { display:none; }
 }
 </style>
@@ -185,7 +175,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
 <header class="topbar noprint">
   <div class="brand">
     <img src="/assets/brand/nozza-mark-1.svg" alt="NOZZA">
-    <div><h1>Конструктор ценников</h1><p>Стеллаж · печать 1:1 · касса и 1С</p></div>
+    <div><h1>Конструктор ценников</h1><p>Стеллаж · 66 × 31 / 66 × 56 мм · касса и 1С</p></div>
   </div>
   <div class="statuses">
     <span class="pill" id="selectedPill">0 выбрано</span>
@@ -211,14 +201,13 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
       <div class="item-list" id="items"></div>
     </section>
     <section class="section">
-      <div class="section-head"><b>2. Тип ценника</b></div>
+      <div class="section-head"><b>2. Формат печати</b></div>
       <div class="template-grid" id="templates">
-        <label class="wide"><input type="radio" name="template" value="card" checked><span class="template-card"><b>Как в карточке товара</b><small>Можно смешать разные типы — каждый на своём листе</small></span></label>
-        <label><input type="radio" name="template" value="classic"><span class="template-card"><b>Классический</b><small>62 × 38 · до 21</small></span></label>
-        <label><input type="radio" name="template" value="compact"><span class="template-card"><b>Компактный</b><small>43 × 25 · до 40</small></span></label>
-        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промо</b><small>90 × 60 · до 8</small></span></label>
-        <label><input type="radio" name="template" value="minimal"><span class="template-card"><b>Минимал</b><small>ч/б · 62 × 38</small></span></label>
+        <label class="wide"><input type="radio" name="template" value="card" checked><span class="template-card"><b>Как в карточке стеллажа</b><small>Каждая позиция сохранит свой формат и попадёт на отдельный лист</small></span></label>
+        <label><input type="radio" name="template" value="standard"><span class="template-card"><b>Ценник</b><small>66 × 31 мм · 27 на A4</small></span></label>
+        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промостенд</b><small>66 × 56 мм · 15 на A4</small></span></label>
       </div>
+      <div class="format-note"><b>Физические форматы без масштабирования</b><span>Обычный ценник — 66 × 31 мм. Высокий промостенд — 66 × 56 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
     </section>
     <section class="section">
       <div class="section-head"><b>3. Оформление</b></div>
@@ -227,7 +216,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
       </label>
       <label class="control"><span><i>Размер текста</i><i id="fontValue">100%</i></span><input id="fontScale" type="range" min="85" max="115" value="100" step="5"></label>
       <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
-      <label class="control"><span><i>Нижняя строка</i><i>необязательно</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
+      <label class="control"><span><i>Нижняя строка</i><i>для промостенда</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
       <div class="checks">
         <label><input id="showLogo" type="checkbox" checked> Логотип</label>
         <label><input id="showQr" type="checkbox" checked> QR товара</label>
@@ -246,7 +235,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
     </section>
   </aside>
   <main class="preview">
-    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист»</span></div>
+    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист» · 66 × 31 / 66 × 56 мм</span></div>
     <div class="sheets" id="sheets"></div>
   </main>
 </div>
@@ -274,10 +263,14 @@ Content-Type: application/json
 'use strict';
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const TYPES = ['classic','compact','promo','minimal'];
-const TYPE_NAMES = {classic:'Классический 62 × 38',compact:'Компактный 43 × 25',promo:'Промо 90 × 60',minimal:'Минимал 62 × 38'};
-const PER_PAGE = {classic:21,compact:40,promo:8,minimal:21};
-const STORE = 'printflow:price-tag-designer:v1';
+// The designer only creates real shelf formats. Legacy saved values remain
+// usable and deliberately resolve to the normal 66 × 31 mm label.
+const TYPES = ['standard','promo'];
+const TYPE_NAMES = {standard:'Ценник 66 × 31 мм',promo:'Промостенд 66 × 56 мм'};
+const PER_PAGE = {standard:27,promo:15};
+const LEGACY_TYPE_ALIASES = {classic:'standard',compact:'standard',minimal:'standard'};
+const STORE = 'printflow:price-tag-designer:v2';
+const LEGACY_STORE = 'printflow:price-tag-designer:v1';
 let items = [];
 let selected = new Set();
 let apiInfo = {base:location.origin, reachable:true, one_c:{linked:0,total:0}};
@@ -300,10 +293,16 @@ function settings() {
 function saveSettings() {
   try { localStorage.setItem(STORE, JSON.stringify(settings())); } catch (_) {}
 }
+function normalizeType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return LEGACY_TYPE_ALIASES[type] || (TYPES.includes(type) ? type : 'standard');
+}
 function restoreSettings() {
   let value = {};
-  try { value = JSON.parse(localStorage.getItem(STORE) || '{}'); } catch (_) {}
-  const savedTemplate = ['card', ...TYPES].includes(value.template) ? value.template : 'card';
+  try {
+    value = JSON.parse(localStorage.getItem(STORE) || localStorage.getItem(LEGACY_STORE) || '{}');
+  } catch (_) {}
+  const savedTemplate = value.template == null || value.template === 'card' ? 'card' : normalizeType(value.template);
   const radio = document.querySelector(`input[name=template][value="${savedTemplate}"]`);
   if (radio) radio.checked = true;
   ['colorMode','accent','badge','footer'].forEach((id) => { if (value[id] != null) $(id).value = value[id]; });
@@ -313,10 +312,9 @@ function restoreSettings() {
   });
 }
 function typeOf(item, opts) {
-  return opts.template === 'card' && TYPES.includes(item.tag_template) ? item.tag_template : (opts.template === 'card' ? 'classic' : opts.template);
+  return opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
 }
-function colorOf(item, opts, type) {
-  if (type === 'minimal') return '#111827';
+function colorOf(item, opts) {
   return opts.colorMode === 'custom' ? opts.accent : (/^#[0-9a-f]{6}$/i.test(item.tag_color || '') ? item.tag_color : '#4f46e5');
 }
 function qrSvg(item, opts) {
@@ -324,13 +322,15 @@ function qrSvg(item, opts) {
   return `<div class="qr">${window.QR.svg(item.url, {ecl:'M',margin:1})}</div>`;
 }
 function tagHtml(item, type, opts) {
-  const color = colorOf(item, opts, type);
+  const color = colorOf(item, opts);
   const badge = opts.badge || item.tag_badge || '';
   const note = item.tag_note || item.note || '';
   const meta = [item.material || '', item.grams ? Math.round(item.grams) + ' г' : '', opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
   const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>NOZZA</span></span>` : '<span></span>';
+  // Shelf API omits human-readable digits: SKU is already beside the code, so
+  // the full physical height stays available to scanner bars on 66 × 31 mm.
   const barcode = opts.showBarcode ? (item.barcode_svg
-    ? `<div class="barcode">${item.barcode_svg}</div>`
+    ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
     : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>') : '';
   const sku = opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
   return `<article class="price-tag ${type}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
@@ -342,7 +342,7 @@ function tagHtml(item, type, opts) {
       ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
     </div>${qrSvg(item, opts)}</div>
     ${(barcode || sku) ? `<div class="tag-bottom">${barcode}${sku}</div>` : ''}
-    ${opts.footer ? `<div class="footer-line">${esc(opts.footer)}</div>` : ''}
+    ${opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : ''}
   </article>`;
 }
 function chunk(rows, size) {
@@ -381,7 +381,7 @@ function renderList() {
   const visible = items.filter((item) => !query || [item.name,item.sku,item.barcode].join(' ').toLocaleLowerCase('ru').includes(query));
   $('items').innerHTML = visible.map((item) => `<label class="item-row">
     <input type="checkbox" data-id="${esc(item.id)}" ${selected.has(item.id) ? 'checked' : ''}>
-    <span><b>${esc(item.name)}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${esc(TYPE_NAMES[item.tag_template] || TYPE_NAMES.classic)}</small></span>
+    <span><b>${esc(item.name)}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${esc(TYPE_NAMES[normalizeType(item.tag_template)] || TYPE_NAMES.standard)}</small></span>
     <i class="link-dot ${item.barcode ? 'ok' : ''}" title="${item.barcode ? 'Связан с 1С' : 'Нет кода 1С'}"></i>
   </label>`).join('') || '<div style="padding:16px;color:var(--muted);font-size:12px">Ничего не найдено</div>';
   $('itemCount').textContent = `${visible.length} из ${items.length}`;

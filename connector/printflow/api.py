@@ -305,7 +305,7 @@ class Api:
                     int(getattr(self, "listen_port", 8080) or 8080))
                 barcode = str(item.get("barcode") or "").strip()
                 try:
-                    code_svg = barcode_svg(barcode, width_mm=38, height_mm=7) if barcode else ""
+                    code_svg = barcode_svg(barcode, width_mm=38, height_mm=7, show_text=False) if barcode else ""
                 except ValueError:
                     code_svg = ""
                 shelf.append({
@@ -322,7 +322,7 @@ class Api:
                     "note": item.get("note") or "",
                     "tag_note": item.get("tag_note") or "",
                     "tag_badge": item.get("tag_badge") or "",
-                    "tag_template": item.get("tag_template") or "classic",
+                    "tag_template": item.get("tag_template") or "standard",
                     "tag_color": item.get("tag_color") or "#4f46e5",
                     "photo": bool(item.get("photo")),
                 })

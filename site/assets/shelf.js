@@ -18,6 +18,15 @@ const KIND_LABEL = {
 const STATUS_LABEL = {
   ok: 'В наличии', low: 'Мало', dead: 'Мёртвый сток', empty: 'Пусто',
 };
+// Существующие записи с устаревшими classic/compact/minimal остаются печатабельными:
+// API уже нормализует их, а этот fallback покрывает офлайн-кэш старого интерфейса.
+const TAG_TEMPLATE_ALIASES = { classic: 'standard', compact: 'standard', minimal: 'standard' };
+const TAG_FORMAT_LABEL = { standard: 'ценник 66 × 31 мм', promo: 'промостенд 66 × 56 мм' };
+function normalizedTagTemplate(value) {
+  const template = String(value || '').trim().toLowerCase();
+  return TAG_TEMPLATE_ALIASES[template] || (TAG_FORMAT_LABEL[template] ? template : 'standard');
+}
+function tagFormatLabel(value) { return TAG_FORMAT_LABEL[normalizedTagTemplate(value)]; }
 
 /* ============================================================== загрузка */
 async function refreshShelf() {
@@ -112,7 +121,7 @@ function renderShelf() {
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
       + `<div class="sinfo"><h3>${esc(i.name)}${liveBadgeFor(i.id)}</h3>`
-      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
+      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
       + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
@@ -219,7 +228,7 @@ function openShelf(id) {
   const i = id ? (shelfData.items || []).find((x) => x.id === id) : null;
   const d = i || {
     name: '', catalog_id: '', nom_id: '', price: '', cost_per_unit: '', qty: 0,
-    min_qty: '', note: '', barcode: '', sku: '', tag_template: 'classic',
+    min_qty: '', note: '', barcode: '', sku: '', tag_template: 'standard',
     tag_badge: '', tag_color: '#4f46e5', tag_note: '',
   };
   $('shf_name').value = d.name || '';
@@ -231,7 +240,7 @@ function openShelf(id) {
   $('shf_note').value = d.note || '';
   $('shf_barcode').value = d.barcode || '';
   $('shf_sku').value = d.sku || '';
-  $('shf_tag_template').value = d.tag_template || 'classic';
+  $('shf_tag_template').value = normalizedTagTemplate(d.tag_template);
   $('shf_tag_badge').value = d.tag_badge || '';
   $('shf_tag_color').value = /^#[0-9a-f]{6}$/i.test(d.tag_color || '') ? d.tag_color : '#4f46e5';
   $('shf_tag_note').value = d.tag_note || '';

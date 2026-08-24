@@ -85,11 +85,14 @@ def modules(text: str) -> list[int]:
     return out
 
 
-def svg(text: str, width_mm: float = 30.0, height_mm: float = 12.0) -> str:
+def svg(text: str, width_mm: float = 30.0, height_mm: float = 12.0,
+        show_text: bool = True) -> str:
     """SVG-штрихкод с настоящей тихой зоной с обеих сторон.
 
     ``width_mm`` — ширина самих модулей; итоговый SVG чуть шире из-за тихих
-    зон. Текст экранируется: артикул остаётся данными, а не HTML-разметкой.
+    зон. ``show_text=False`` оставляет только штрихи: это важно для маленького
+    ценника, где артикул уже напечатан отдельной строкой и не должен съедать
+    высоту Code 128. Текст экранируется, когда он включён.
     """
     mods = modules(text)
     unit = width_mm / len(mods)  # один модуль в мм
@@ -108,14 +111,15 @@ def svg(text: str, width_mm: float = 30.0, height_mm: float = 12.0) -> str:
             i += 1
     svg_w = (len(mods) + quiet * 2) * unit
     safe_text = html.escape(str(text), quote=True)
+    text_height = 6.0 if show_text else 0.0
+    text_node = (f'<text x="{svg_w / 2:.2f}" y="{height_mm + 5:.2f}" text-anchor="middle" '
+                 f'font-size="4" font-family="monospace">{safe_text}</text>') if show_text else ""
     return (f'<svg xmlns="http://www.w3.org/2000/svg" role="img" '
             f'aria-label="Code 128 {safe_text}" '
-            f'viewBox="0 0 {svg_w:.2f} {height_mm + 6:.2f}" '
-            f'width="{svg_w:.2f}mm" height="{height_mm + 6:.2f}mm">'
+            f'viewBox="0 0 {svg_w:.2f} {height_mm + text_height:.2f}" '
+            f'width="{svg_w:.2f}mm" height="{height_mm + text_height:.2f}mm">'
             f'<rect width="100%" height="100%" fill="#fff"/>'
-            f'<g fill="#111">{"".join(rects)}</g>'
-            f'<text x="{svg_w / 2:.2f}" y="{height_mm + 5:.2f}" text-anchor="middle" '
-            f'font-size="4" font-family="monospace">{safe_text}</text></svg>')
+            f'<g fill="#111">{"".join(rects)}</g>{text_node}</svg>')
 
 
 def png_bytes(text: str, scale: int = 4, quiet: int = 8) -> bytes:
