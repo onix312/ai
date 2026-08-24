@@ -1138,7 +1138,12 @@ class Api:
         if path == "/api/documents":
             return 200, {"documents": self.docs.list(
                 one("kind"), one("state"), one("warehouse_id"), one("search"),
-                int(num(one("limit", "200"), 200)))}
+                int(num(one("limit", "200"), 200)), one("order_id"))}
+        if path == "/api/order/documents":
+            order_id = one("id") or one("order_id")
+            if not order_id:
+                raise ValueError("Не указан заказ")
+            return 200, self.docs.for_order(order_id)
         if path == "/api/document":
             doc = self.docs.get(one("id"))
             return (200, doc) if doc else (404, {"error": "Документ не найден"})
@@ -1822,6 +1827,17 @@ class Api:
                 warehouse_id=str(body.get("warehouse_id") or ""),
                 note=str(body.get("note") or ""),
             )
+        if path == "/api/order/waybill":
+            order_id = str(body.get("id") or body.get("order_id") or "").strip()
+            already = bool(self.db.one(
+                "SELECT id FROM documents WHERE order_id=? AND kind='sale' LIMIT 1",
+                (order_id,)))
+            return 200, {"ok": True, "existing": already,
+                         "document": self.docs.waybill_from_order(
+                             order_id,
+                             warehouse_id=str(body.get("warehouse_id") or ""),
+                             post=body.get("post") is True,
+                         )}
         if path == "/api/aftercare/request/confirm":
             return 200, self.aftercare.confirm_request(
                 str(body.get("id") or ""),
@@ -2153,10 +2169,11 @@ class Api:
                 body.get("nom_id", ""), num(body.get("price")),
                 body.get("price_type_id", ""), body.get("note", ""))}
         if path == "/api/nomenclature/recalc-price":
-            if not body.get("nom_id"):
+            nom_id = str(body.get("nom_id") or body.get("id") or "").strip()
+            if not nom_id or nom_id.startswith("[object "):
                 raise ValueError("Не указана позиция для пересчёта")
             return 200, self.nom.recalc_price(
-                body.get("nom_id", ""), body.get("price_type_id", ""))
+                nom_id, body.get("price_type_id", ""))
         if path == "/api/nomenclature/recalc-prices":
             return 200, self.nom.recalc_prices(body.get("price_type_id", ""),
                                                body.get("group_id", ""))
@@ -3057,7 +3074,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_design_stl(query)
             if path == "/api/design/preview":
                 return self.serve_design_preview(query)
-            if path == "/api/b2b/doc":
+            if path in ("/api/b2b/doc", "/api/b2b"):
                 return self.serve_b2b_doc(query)
             if path == "/api/stream":
                 return self.serve_sse()

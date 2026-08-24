@@ -88,6 +88,21 @@ class SafetyVersionTests(unittest.TestCase):
         self.assertTrue(any(h["note"] == "автопересчёт одной позиции" for h in self.db.query(
             "SELECT * FROM prices WHERE nom_id=?", (first["id"],))))
 
+    def test_recalc_price_resolves_catalog_id_and_rejects_event(self):
+        """Клик кнопки не должен слать Event как nom_id; catalog.id тоже резолвится."""
+        nomenclature = Nomenclature(self.db)
+        catalog = self.repo.save_catalog_item({
+            "name": "Старая карточка", "grams": 18, "hours": 0.4, "price": 200, "material": "PLA",
+        })
+        self.assertTrue(catalog.get("nom_id"))
+        self.assertEqual(nomenclature.resolve_id(catalog["id"]), catalog["nom_id"])
+        self.assertEqual(nomenclature.resolve_id("[object PointerEvent]"), "")
+        result = nomenclature.recalc_price(catalog["id"])
+        self.assertEqual(result["nom_id"], catalog["nom_id"])
+        self.assertGreaterEqual(result["changed"], 1)
+        with self.assertRaises(ValueError):
+            nomenclature.recalc_price("[object PointerEvent]")
+
     def test_versions_protect_nomenclature_and_spools(self):
         nom = Nomenclature(self.db).save({"name": "Изделие", "grams": 10})
         with self.assertRaises(ValueError):

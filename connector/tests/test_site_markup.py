@@ -93,6 +93,24 @@ class SiteMarkupTests(TestCase):
                 self.assertIn("main", parent_ids)
                 self.assertIn("views", parent_ids)
 
+    def test_order_card_has_waybill_documents_block(self):
+        self.assertIn("of_docs_wrap", self.parser.ids)
+        self.assertIn("of_docs_print", self.parser.ids)
+        self.assertIn("of_docs_list", self.parser.ids)
+        self.assertIn("order_create_waybill", self.parser.ids)
+
+    def test_recalc_and_waybill_scripts_are_wired(self):
+        products = (ROOT / "site" / "assets" / "products.js").read_text(encoding="utf-8")
+        ops = (ROOT / "site" / "assets" / "ops.js").read_text(encoding="utf-8")
+        self.assertIn("function nomRecalcId", products)
+        self.assertIn("[object ", products)
+        self.assertIn("recalcNomPrices()", products)
+        self.assertIn("/api/nomenclature/recalc-price", products)
+        self.assertIn("function createOrderWaybill", ops)
+        self.assertIn("/api/order/waybill", ops)
+        self.assertIn("/api/order/documents", ops)
+        self.assertIn("/api/b2b/doc", ops)
+
     def test_finance_report_cards_stay_in_report_grid(self):
         for element_id in ("rep_channels", "rep_expenses"):
             with self.subTest(element=element_id):
