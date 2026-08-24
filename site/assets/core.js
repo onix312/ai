@@ -646,10 +646,20 @@ function filterNav(q) {
       if (ok) { hit++; shown++; }
     });
     g.hidden = !!s && !hit;
+    $$('.nav-more-section', g).forEach((section) => {
+      const sectionHit = $$('.nav-link', section).some((link) => !link.hidden);
+      section.hidden = !!s && !sectionHit;
+    });
     const more = g.querySelector('details.nav-more');
     if (more && s && hit) more.open = true;
   });
   if (empty) empty.hidden = !s || shown > 0;
+}
+const navMore = $('nav_more');
+if (navMore) {
+  const savedMoreState = store.get('pf_nav_more_open', null);
+  if (savedMoreState !== null) navMore.open = savedMoreState === '1';
+  navMore.addEventListener('toggle', () => store.set('pf_nav_more_open', navMore.open ? '1' : '0'));
 }
 const navFind = $('nav_find');
 if (navFind) {

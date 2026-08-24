@@ -11,6 +11,7 @@ let fulfillmentDraft = null;
 let aftercareItems = [], aftercareCurrent = null;
 let filters = { q: '', status: '', niche: '' };
 let orderView = 'kanban';
+let customerSegment = 'all';
 
 const PRIORITY = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
 
@@ -1587,25 +1588,54 @@ function renderQcChecklist(saved) {
 }
 
 /* ============================================================= клиенты */
+function customerHasContact(customer) {
+  return Boolean(String(customer.phone || '').trim() || String(customer.messenger || '').trim());
+}
+function matchesCustomerSegment(customer) {
+  if (customerSegment === 'repeat') return num(customer.orders) > 1;
+  if (customerSegment === 'new') return num(customer.orders) <= 1;
+  if (customerSegment === 'no-contact') return !customerHasContact(customer);
+  return true;
+}
+function renderCustomerInsights(customers, repeat, withoutContact) {
+  const host = $('customers_insight');
+  if (!host) return;
+  const revenue = customers.reduce((sum, customer) => sum + num(customer.revenue), 0);
+  const repeatRevenue = customers.filter((customer) => num(customer.orders) > 1)
+    .reduce((sum, customer) => sum + num(customer.revenue), 0);
+  const shown = customers.filter(matchesCustomerSegment).length;
+  host.innerHTML = `<article class="more-insight"><span>Клиентов в базе</span><b>${nfmt(customers.length)}</b><small>${shown === customers.length ? 'вся база' : `в выбранном сегменте ${nfmt(shown)}`}</small></article>`
+    + `<article class="more-insight ok"><span>Повторных покупателей</span><b>${nfmt(repeat)}</b><small>${customers.length ? `${nfmt(repeat / customers.length * 100)}% от базы` : 'появятся после второго заказа'}</small></article>`
+    + `<article class="more-insight ${withoutContact ? 'warn' : ''}"><span>Выручка по базе</span><b>${money(revenue)}</b><small>${withoutContact ? `без контакта: ${nfmt(withoutContact)} · повторные дали ${money(repeatRevenue)}` : `повторные дали ${money(repeatRevenue)}`}</small></article>`;
+}
 function renderCustomers() {
   const q = ($('customers_search').value || '').trim().toLowerCase();
-  const list = PF.state.customers.filter((c) => !q ||
-    [c.name, c.phone, c.messenger, c.company].some((v) => String(v || '').toLowerCase().includes(q)));
-  const repeat = PF.state.customers.filter((c) => num(c.orders) > 1).length;
-  $('customers_kpi').innerHTML = `<span class="chip">Всего <b>&nbsp;${PF.state.customers.length}</b></span>`
-    + `<span class="chip ok">Постоянных <b>&nbsp;${repeat}</b></span>`;
-  $('customers_tbody').innerHTML = list.length ? list.map((c) => {
-    const seg = num(c.orders) > 2 ? ['ok', 'Постоянный'] : num(c.orders) > 1 ? ['accent', 'Повторный'] : ['outline', 'Новый'];
-    return `<tr><td><div class="cell-user"><span class="avatar">${esc(initials(c.name))}</span>`
-      + `<span><b>${esc(c.name || 'Без имени')}</b>${c.company ? `<small>${esc(c.company)}</small>` : ''}</span></div></td>`
-      + `<td>${esc(c.phone || '—')}${c.messenger ? `<br><small class="muted">${esc(c.messenger)}</small>` : ''}</td>`
-      + `<td class="right tnum">${nfmt(c.orders)}</td>`
-      + `<td class="right tnum">${money(c.revenue)}</td>`
-      + `<td>${c.last_order ? esc(dateText(c.last_order)) : '—'}</td>`
-      + `<td><span class="chip ${seg[0]}">${seg[1]}</span></td>`
-      + `<td><button class="btn xs" type="button" data-cust-my="${esc(c.id)}" title="Страница «Мой NOZZA» по коду">🔑 Мой NOZZA</button> `
-      + `<button class="btn xs" type="button" data-cust-wish="${esc(c.id)}" title="Wish-list: хочу, когда будет">💌 Пожелания</button></td></tr>`;
-  }).join('') : '<tr><td colspan="7"><div class="empty compact"><span>Клиенты появятся после первого заказа.</span></div></td></tr>';
+  const customers = PF.state.customers || [];
+  const list = customers.filter((customer) => matchesCustomerSegment(customer) && (!q ||
+    [customer.name, customer.phone, customer.messenger, customer.company]
+      .some((value) => String(value || '').toLowerCase().includes(q))));
+  const repeat = customers.filter((customer) => num(customer.orders) > 1).length;
+  const withoutContact = customers.filter((customer) => !customerHasContact(customer)).length;
+  const head = $('customers_kpi');
+  if (head) {
+    head.innerHTML = `<span class="chip">База <b>&nbsp;${nfmt(customers.length)}</b></span>`
+      + `<span class="chip ok">Повторных <b>&nbsp;${nfmt(repeat)}</b></span>`;
+  }
+  renderCustomerInsights(customers, repeat, withoutContact);
+  $('customers_tbody').innerHTML = list.length ? list.map((customer) => {
+    const segment = num(customer.orders) > 2 ? ['ok', 'Постоянный']
+      : num(customer.orders) > 1 ? ['accent', 'Повторный'] : ['outline', 'Новый'];
+    const contact = customerHasContact(customer);
+    return `<tr><td><div class="cell-user"><span class="avatar">${esc(initials(customer.name))}</span>`
+      + `<span><b>${esc(customer.name || 'Без имени')}</b>${customer.company ? `<small>${esc(customer.company)}</small>` : ''}</span></div></td>`
+      + `<td>${esc(customer.phone || '—')}${customer.messenger ? `<br><small class="muted">${esc(customer.messenger)}</small>` : ''}${!contact ? '<br><small class="neg">нет контакта</small>' : ''}</td>`
+      + `<td class="right tnum">${nfmt(customer.orders)}</td>`
+      + `<td class="right tnum">${money(customer.revenue)}</td>`
+      + `<td>${customer.last_order ? esc(dateText(customer.last_order)) : '—'}</td>`
+      + `<td><span class="chip ${segment[0]}">${segment[1]}</span></td>`
+      + `<td><button class="btn xs" type="button" data-cust-my="${esc(customer.id)}" title="Страница «Мой NOZZA» по коду">🔑 Мой NOZZA</button> `
+      + `<button class="btn xs" type="button" data-cust-wish="${esc(customer.id)}" title="Wish-list: хочу, когда будет">💌 Пожелания</button></td></tr>`;
+  }).join('') : `<tr><td colspan="7"><div class="empty compact"><span>${customers.length ? 'В этом сегменте никого не найдено.' : 'Клиенты появятся после первого заказа.'}</span></div></td></tr>`;
 }
 
 /* =============================================== обратная связь после продажи */
@@ -1734,25 +1764,46 @@ function nicheVerdict(n) {
   if (pph > 0) return ['warn', `Прибыль есть, но ${money(pph)} за час печати ниже нормы ${money(target)}. Поднимите цену или сократите время печати.`];
   return ['bad', 'Ниша убыточна по факту. Пересчитайте цену или закройте гипотезу.'];
 }
+function renderNicheSummary(niches) {
+  const host = $('niche_summary');
+  if (!host) return;
+  const active = niches.filter((niche) => num(niche.active, 1));
+  const pool = active.length ? active : niches;
+  const orders = pool.reduce((sum, niche) => sum + num(niche.orders), 0);
+  const profit = pool.reduce((sum, niche) => sum + num(niche.profit), 0);
+  const leads = pool.reduce((sum, niche) => sum + num(niche.leads), 0);
+  const views = pool.reduce((sum, niche) => sum + num(niche.views), 0);
+  const leader = pool.slice().sort((left, right) => num(right.profit) - num(left.profit))[0];
+  host.innerHTML = `<article class="niche-overview"><span>Сейчас тестируется</span><b>${nfmt(active.length || niches.length)} ${active.length === 1 ? 'направление' : active.length < 5 ? 'направления' : 'направлений'}</b><small>${leader && num(leader.profit) > 0 ? `Лидер по прибыли: ${esc(leader.name)}. Сравнивайте его с остальными до расширения ассортимента.` : 'Добавьте показы и обращения — после этого система покажет, где предложение теряет людей.'}</small></article>`
+    + `<article class="niche-summary-stat"><span>Заказов</span><b>${nfmt(orders)}</b><small>из ${nfmt(leads)} обращений</small></article>`
+    + `<article class="niche-summary-stat"><span>Конверсия</span><b>${leads ? nfmt(orders / leads * 100) + '%' : '—'}</b><small>${views ? `обращений от показов: ${nfmt(leads / views * 100)}%` : 'нужны показы'}</small></article>`
+    + `<article class="niche-summary-stat"><span>Прибыль</span><b class="${profit >= 0 ? 'pos' : 'neg'}">${money(profit)}</b><small>${pool.length ? `по ${nfmt(pool.length)} гипотезам` : 'пока нет данных'}</small></article>`;
+}
 function renderNiches() {
   const host = $('niche_grid');
-  host.innerHTML = PF.state.niches.length ? PF.state.niches.map((n) => {
-    const [kind, verdict] = nicheVerdict(n);
-    return `<article class="niche-card" data-niche="${esc(n.id)}">`
-      + `<div class="nhead"><span class="nic" style="background:${esc(n.color)}22;color:${esc(n.color)}">${esc(n.icon || '◆')}</span>`
-      + `<div style="flex:1"><h3>${esc(n.name)}</h3><small class="muted">${esc(n.hypothesis || 'Гипотеза не описана')}</small></div>`
-      + `<button class="icon-btn sm" type="button" data-niche-edit="${esc(n.id)}">✎</button></div>`
+  const niches = PF.state.niches || [];
+  renderNicheSummary(niches);
+  host.innerHTML = niches.length ? niches.map((niche) => {
+    const [kind, verdict] = nicheVerdict(niche);
+    const leadRate = num(niche.views) ? num(niche.leads) / num(niche.views) * 100 : 0;
+    const orderRate = num(niche.leads) ? num(niche.orders) / num(niche.leads) * 100 : 0;
+    return `<article class="niche-card" data-niche="${esc(niche.id)}">`
+      + `<div class="nhead"><span class="nic" style="background:${esc(niche.color)}22;color:${esc(niche.color)}">${esc(niche.icon || '◆')}</span>`
+      + `<div style="flex:1"><h3>${esc(niche.name)}</h3><small class="muted">${esc(niche.hypothesis || 'Гипотеза не описана')}</small></div>`
+      + `<button class="icon-btn sm" type="button" data-niche-edit="${esc(niche.id)}" title="Настроить нишу">✎</button></div>`
       + '<div class="funnel">'
-      + `<div><span>Показы</span><b>${nfmt(n.views)}</b></div>`
-      + `<div><span>Обращения</span><b>${nfmt(n.leads)}</b></div>`
-      + `<div><span>Заказы</span><b>${nfmt(n.orders)}</b></div>`
-      + `<div><span>Повторных</span><b>${nfmt(n.repeat_buyers)}</b></div>`
+      + `<div><span>Показы</span><b>${nfmt(niche.views)}</b></div>`
+      + `<div><span>Обращения</span><b>${nfmt(niche.leads)}</b></div>`
+      + `<div><span>Заказы</span><b>${nfmt(niche.orders)}</b></div>`
+      + `<div><span>Повторных</span><b>${nfmt(niche.repeat_buyers)}</b></div>`
       + '</div>'
-      + '<div class="res-row"><span class="lbl">Выручка</span><span class="val">' + money(n.revenue) + '</span></div>'
-      + '<div class="res-row"><span class="lbl">Прибыль</span><span class="val ' + (num(n.profit) >= 0 ? 'pos' : 'neg') + '">' + money(n.profit) + '</span></div>'
-      + '<div class="res-row"><span class="lbl">Часы печати</span><span class="val">' + hoursText(n.hours) + '</span></div>'
-      + '<div class="res-row"><span class="lbl">Прибыль за час</span><span class="val">' + (num(n.hours) ? money(n.profit_per_hour) : '—') + '</span></div>'
+      + `<div class="niche-conversion"><span>в обращение <b>${niche.views ? nfmt(leadRate) + '%' : '—'}</b></span><span>в заказ <b>${niche.leads ? nfmt(orderRate) + '%' : '—'}</b></span></div>`
+      + '<div class="res-row"><span class="lbl">Выручка</span><span class="val">' + money(niche.revenue) + '</span></div>'
+      + '<div class="res-row"><span class="lbl">Прибыль</span><span class="val ' + (num(niche.profit) >= 0 ? 'pos' : 'neg') + '">' + money(niche.profit) + '</span></div>'
+      + '<div class="res-row"><span class="lbl">Часы печати</span><span class="val">' + hoursText(niche.hours) + '</span></div>'
+      + '<div class="res-row"><span class="lbl">Прибыль за час</span><span class="val">' + (num(niche.hours) ? money(niche.profit_per_hour) : '—') + '</span></div>'
       + `<div class="verdict ${kind}" style="margin-top:11px">${esc(verdict)}</div>`
+      + `<div class="niche-card-foot"><span class="niche-state">${num(niche.active, 1) ? 'Гипотеза активна' : 'На паузе'}</span><a href="#marketing" data-view="marketing">Сделать контент →</a></div>`
       + '</article>';
   }).join('') : '<div class="empty"><span class="big">◫</span><b>Ниш пока нет</b><span>Добавьте гипотезу, чтобы сравнивать направления по фактической прибыли.</span></div>';
 }
@@ -2327,6 +2378,13 @@ function bind() {
     editingOrder, $('of_prepare_printer').value, $('of_prepare_spool').value));
 
   $('customers_search').addEventListener('input', debounce(renderCustomers, 180));
+  $('customers_filter').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-customer-segment]');
+    if (!button) return;
+    customerSegment = button.dataset.customerSegment || 'all';
+    $$('#customers_filter [data-customer-segment]').forEach((item) => item.classList.toggle('on', item === button));
+    renderCustomers();
+  });
   $('aftercare_refresh').addEventListener('click', loadAftercare);
   $('aftercare_list').addEventListener('click', (e) => {
     const button = e.target.closest('[data-aftercare]');
