@@ -4476,11 +4476,19 @@
      <option value="standard">Ценник · 66 × 31 мм</option>
      <option value="promo">Промостенд · 66 × 56 мм</option>
     </select></label>
+    <label>Вариант макета<select id="shf_tag_variant">
+     <option value="clean">Чистый · универсальный</option>
+     <option value="accent">Акцент на цене</option>
+     <option value="sale">Акция · контрастный</option>
+     <option value="mono">Монохром · экономия цвета</option>
+     <option value="photo">Фото товара · промостенд</option>
+    </select></label>
     <label>Акцентный цвет<input id="shf_tag_color" type="color" value="#4f46e5"></label>
     <label>Плашка<input id="shf_tag_badge" maxlength="40" placeholder="Хит / Новинка / −20%"></label>
     <label>Короткое описание<input id="shf_tag_note" maxlength="180" placeholder="Цвет на выбор · сделано в Крыму"></label>
+    <label>Цена до акции, ₽<input id="shf_tag_old_price" type="number" min="0" step="1" placeholder="Например: 990"></label>
    </div>
-   <div class="notice" style="margin-top:10px"><span>▦</span><span><b>Ценник — 66 × 31 мм</b> для полки; <b>промостенд — 66 × 56 мм</b> для акций и фокусных товаров. Старые карточки автоматически переходят на обычный ценник.</span></div>
+   <div class="notice" style="margin-top:10px"><span>▦</span><span><b>Ценник — 66 × 31 мм</b> для полки; <b>промостенд — 66 × 56 мм</b> для акций и фокусных товаров. Вариант меняет только визуал, не размер. «Фото товара» использует фото позиции на промостенде; без него конструктор покажет аккуратную плашку.</span></div>
   </section>
   <section class="form-section">
    <h3>Касса и 1С</h3>
@@ -4721,7 +4729,7 @@
 <script src="assets/ops.js?v=9.2.1"></script>
 <script src="assets/money.js?v=9.1.2"></script>
 <script src="assets/finance.js?v=9.1.2"></script>
-<script src="assets/shelf.js?v=9.2.2"></script>
+<script src="assets/shelf.js?v=9.2.3"></script>
 <script src="assets/products.js?v=9.1.2"></script>
 <script src="assets/bridge.js?v=9.1.2"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>

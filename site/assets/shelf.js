@@ -22,11 +22,29 @@ const STATUS_LABEL = {
 // API уже нормализует их, а этот fallback покрывает офлайн-кэш старого интерфейса.
 const TAG_TEMPLATE_ALIASES = { classic: 'standard', compact: 'standard', minimal: 'standard' };
 const TAG_FORMAT_LABEL = { standard: 'ценник 66 × 31 мм', promo: 'промостенд 66 × 56 мм' };
+const TAG_VARIANT_LABEL = {
+  clean: 'чистый', accent: 'акцент на цене', sale: 'акция', mono: 'монохром', photo: 'фото товара',
+};
 function normalizedTagTemplate(value) {
   const template = String(value || '').trim().toLowerCase();
   return TAG_TEMPLATE_ALIASES[template] || (TAG_FORMAT_LABEL[template] ? template : 'standard');
 }
+function normalizedTagVariant(value) {
+  const variant = String(value || '').trim().toLowerCase();
+  return TAG_VARIANT_LABEL[variant] ? variant : 'clean';
+}
 function tagFormatLabel(value) { return TAG_FORMAT_LABEL[normalizedTagTemplate(value)]; }
+function tagVariantLabel(value) { return TAG_VARIANT_LABEL[normalizedTagVariant(value)]; }
+function syncShelfTagVariant() {
+  const format = normalizedTagTemplate($('shf_tag_template').value);
+  const option = $('shf_tag_variant').querySelector('option[value="photo"]');
+  if (option) option.disabled = format !== 'promo';
+  // Keep the compact 66 × 31 label readable: it deliberately has no room for
+  // a product photo and uses the price-focused look instead.
+  if (format !== 'promo' && $('shf_tag_variant').value === 'photo') {
+    $('shf_tag_variant').value = 'accent';
+  }
+}
 
 /* ============================================================== загрузка */
 async function refreshShelf() {
@@ -121,7 +139,7 @@ function renderShelf() {
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
       + `<div class="sinfo"><h3>${esc(i.name)}${liveBadgeFor(i.id)}</h3>`
-      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
+      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
       + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
@@ -228,8 +246,8 @@ function openShelf(id) {
   const i = id ? (shelfData.items || []).find((x) => x.id === id) : null;
   const d = i || {
     name: '', catalog_id: '', nom_id: '', price: '', cost_per_unit: '', qty: 0,
-    min_qty: '', note: '', barcode: '', sku: '', tag_template: 'standard',
-    tag_badge: '', tag_color: '#4f46e5', tag_note: '',
+    min_qty: '', note: '', barcode: '', sku: '', tag_template: 'standard', tag_variant: 'clean',
+    tag_badge: '', tag_color: '#4f46e5', tag_note: '', tag_old_price: 0,
   };
   $('shf_name').value = d.name || '';
   $('shf_nom_id').value = d.nom_id || '';
@@ -241,9 +259,12 @@ function openShelf(id) {
   $('shf_barcode').value = d.barcode || '';
   $('shf_sku').value = d.sku || '';
   $('shf_tag_template').value = normalizedTagTemplate(d.tag_template);
+  $('shf_tag_variant').value = normalizedTagVariant(d.tag_variant);
+  syncShelfTagVariant();
   $('shf_tag_badge').value = d.tag_badge || '';
   $('shf_tag_color').value = /^#[0-9a-f]{6}$/i.test(d.tag_color || '') ? d.tag_color : '#4f46e5';
   $('shf_tag_note').value = d.tag_note || '';
+  $('shf_tag_old_price').value = num(d.tag_old_price) || '';
   $('shf_catalog_id').innerHTML = '<option value="">Без привязки</option>'
     + (PF.state.catalog || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('shf_catalog_id').value = d.catalog_id || '';
@@ -283,9 +304,11 @@ async function saveShelf() {
     barcode: $('shf_barcode').value.trim(),
     sku: $('shf_sku').value.trim(),
     tag_template: $('shf_tag_template').value,
+    tag_variant: $('shf_tag_variant').value,
     tag_badge: $('shf_tag_badge').value.trim(),
     tag_color: $('shf_tag_color').value,
     tag_note: $('shf_tag_note').value.trim(),
+    tag_old_price: num($('shf_tag_old_price').value),
   };
   if (!payload.name) return fail(new Error('Укажите название позиции'));
 
@@ -550,6 +573,7 @@ function bind() {
   });
   $('shf_photo_btn').addEventListener('click', () => $('shf_photo_file').click());
   $('shf_stock_item').addEventListener('change', onStockGoodChange);
+  $('shf_tag_template').addEventListener('change', syncShelfTagVariant);
   $('shf_tag_open').addEventListener('click', () => {
     const item = $('shf_tag_open').dataset.item;
     if (item) window.open(`/price-tags.html?item=${encodeURIComponent(item)}`, '_blank', 'noopener');

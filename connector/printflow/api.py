@@ -323,7 +323,9 @@ class Api:
                     "tag_note": item.get("tag_note") or "",
                     "tag_badge": item.get("tag_badge") or "",
                     "tag_template": item.get("tag_template") or "standard",
+                    "tag_variant": item.get("tag_variant") or "clean",
                     "tag_color": item.get("tag_color") or "#4f46e5",
+                    "tag_old_price": item.get("tag_old_price") or 0,
                     "photo": bool(item.get("photo")),
                 })
         return {"base": base["base"], "reachable": base["reachable"], "source": base["source"],

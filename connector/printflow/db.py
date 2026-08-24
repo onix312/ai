@@ -194,9 +194,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # Физический формат: standard (66×31) или promo (66×56). Старые
         # classic/compact/minimal нормализуются в Shelf при чтении/сохранении.
         ("tag_template", "TEXT DEFAULT 'standard'"),
+        # Вариант — только визуальный: физический формат остаётся 66×31/66×56.
+        ("tag_variant", "TEXT DEFAULT 'clean'"),
         ("tag_badge", "TEXT DEFAULT ''"),
         ("tag_color", "TEXT DEFAULT '#4f46e5'"),
         ("tag_note", "TEXT DEFAULT ''"),
+        ("tag_old_price", "REAL DEFAULT 0"),
     ],
     "shelf_moves": [
         # Внешний ключ строки чека делает повторную отправку из 1С безопасной.
@@ -728,9 +731,11 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     barcode TEXT DEFAULT '',        -- штрихкод ровно как в номенклатуре 1С
     sku TEXT DEFAULT '',            -- артикул 1С
     tag_template TEXT DEFAULT 'standard', -- standard (66×31) | promo (66×56); legacy IDs normalize to standard
+    tag_variant TEXT DEFAULT 'clean', -- clean | accent | sale | mono | photo (только визуал)
     tag_badge TEXT DEFAULT '',      -- своя плашка: «Хит», «Новинка», «−20%»
     tag_color TEXT DEFAULT '#4f46e5',
     tag_note TEXT DEFAULT '',       -- короткое описание только для ценника
+    tag_old_price REAL DEFAULT 0,   -- старая цена для акционного промостенда
     active INTEGER DEFAULT 1,
     created_at TEXT,
     updated_at TEXT

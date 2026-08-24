@@ -65,6 +65,31 @@ button,a { -webkit-tap-highlight-color:transparent; }
 .template-card small { color:var(--muted); font-size:10.5px; }
 .template-grid input:checked + .template-card { border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 2px #dfe1ff; }
 .template-grid .wide { grid-column:1/-1; }
+.style-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.style-grid label { cursor:pointer; }
+.style-grid input { position:absolute; opacity:0; pointer-events:none; }
+.style-grid .wide { grid-column:1/-1; }
+.style-card { position:relative; display:flex; align-items:center; gap:8px; min-height:54px; padding:8px 9px; overflow:hidden;
+  border:1px solid var(--line); border-radius:11px; background:#fff; }
+.style-card b { display:block; font-size:11.5px; }
+.style-card small { display:block; margin-top:1px; color:var(--muted); font-size:9.8px; line-height:1.2; }
+.style-mark { width:24px; height:30px; flex:none; overflow:hidden; border-radius:6px; background:linear-gradient(145deg,#fff 10%,#eef0ff); border:1px solid #dfe4ee; }
+.style-mark.clean { border-left:5px solid #4f46e5; }
+.style-mark.accent { background:linear-gradient(155deg,#fff 0 45%,#4f46e5 46%); }
+.style-mark.sale { border:0; background:linear-gradient(145deg,#3d2485,#d31b5b); }
+.style-mark.mono { background:repeating-linear-gradient(135deg,#172033 0 4px,#fff 4px 8px); }
+.style-mark.photo { background:linear-gradient(135deg,#ede9fe,#7c3aed 48%,#f9a8d4 49%); }
+.style-grid input:checked + .style-card { border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 2px #dfe1ff; }
+.style-help { margin:8px 0 0; color:var(--muted); font-size:10.5px; line-height:1.35; }
+.palette-label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:12px; color:var(--muted); font-size:11.5px; font-weight:600; }
+.palette-row { display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-top:7px; }
+.palette { position:relative; min-height:30px; padding:0; border:1px solid var(--line); border-radius:9px; background:var(--swatch); cursor:pointer; }
+.palette::after { content:""; position:absolute; inset:4px; border:1px solid rgba(255,255,255,.56); border-radius:5px; }
+.palette:hover,.palette.on { border-color:#111827; box-shadow:0 0 0 2px #dfe4ee; }
+.control-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 9px; }
+.control-grid .control { min-width:0; }
+.preset-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.preset-row .mini { padding:5px 7px; border:1px solid #dfe4ee; border-radius:8px; background:#f8f9fc; }
 .control { display:block; margin-top:11px; }
 .control > span { display:flex; justify-content:space-between; margin-bottom:5px; color:var(--muted); font-size:11.5px; font-weight:600; }
 .control select,.control input[type=text] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff; color:var(--ink); outline:none; }
@@ -94,7 +119,8 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .sheet.promo .tag-grid { grid-template-columns:repeat(3,66mm); grid-auto-rows:56mm; gap:0; }
 .price-tag { --tag-color:#4f46e5; --font-scale:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
   width:66mm; height:31mm; padding:1.7mm 2.2mm 1.3mm 3.7mm; border:.25mm solid #cdd3df; border-radius:1.5mm;
-  background:linear-gradient(115deg,#fff 0%,#fff 76%,color-mix(in srgb,var(--tag-color) 5%,#fff) 100%); color:#121827; break-inside:avoid; }
+  background:linear-gradient(115deg,#fff 0%,#fff 76%,color-mix(in srgb,var(--tag-color) 5%,#fff) 100%); color:#121827; break-inside:avoid;
+  font-family:var(--tag-font,Inter,"Segoe UI",Arial,sans-serif); }
 .price-tag::before { content:""; position:absolute; inset:0 auto 0 0; width:1.35mm; background:var(--tag-color); }
 .tag-top { display:flex; align-items:center; gap:1.1mm; min-height:3.5mm; }
 .tag-brand { display:flex; align-items:center; gap:.7mm; color:var(--tag-color); font-size:calc(5.4px * var(--font-scale));
@@ -108,9 +134,14 @@ input[type=range] { width:100%; accent-color:var(--accent); }
   display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
 .tag-desc { margin-top:.35mm; color:#5f6a7e; font-size:calc(5.4px * var(--font-scale)); line-height:1.16;
   display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:1; overflow:hidden; }
-.tag-price { margin-top:auto; font-size:calc(18px * var(--font-scale)); line-height:.92; font-weight:950; letter-spacing:-.045em; white-space:nowrap; }
+.price-line { display:flex; align-items:baseline; gap:.65mm; min-width:0; margin-top:auto; }
+.price-lead { color:#68748a; font-size:calc(5px * var(--font-scale)); font-weight:800; text-transform:uppercase; white-space:nowrap; }
+.tag-price { margin-top:0; font-size:calc(18px * var(--font-scale)); line-height:.92; font-weight:950; letter-spacing:-.045em; white-space:nowrap; }
 .tag-price span { font-size:.48em; letter-spacing:0; }
-.tag-meta { margin-top:.4mm; color:#8791a3; font-size:calc(4.8px * var(--font-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.price-subrow { display:flex; align-items:center; gap:1mm; min-height:1.8mm; margin-top:.3mm; overflow:hidden; }
+.old-price { color:#8b95a7; font-size:calc(5px * var(--font-scale)); font-weight:700; text-decoration:line-through; white-space:nowrap; }
+.price-note { color:#68748a; font-size:calc(4.8px * var(--font-scale)); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tag-meta { margin-top:.25mm; color:#8791a3; font-size:calc(4.8px * var(--font-scale)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .qr { width:12mm; height:12mm; flex:none; align-self:flex-end; }
 .qr svg { width:100%; height:100%; display:block; }
 .tag-bottom { display:flex; align-items:flex-end; gap:1.5mm; min-height:6mm; margin-top:.4mm; }
@@ -119,6 +150,7 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .barcode-missing { align-self:center; color:#b45309; font-size:4.8px; font-weight:700; border-bottom:.2mm dashed #d89a52; }
 .sku { max-width:18mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:4.7px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .footer-line { display:none; }
+.promo-photo { display:none; }
 /* The tall promo stand deliberately gives the offer, QR and cashier code room. */
 .price-tag.promo { width:66mm; height:56mm; padding:3.6mm 3.8mm 3mm 5.2mm; border-radius:2.5mm; border-width:.35mm;
   background:linear-gradient(145deg,#fff 0%,#fff 62%,color-mix(in srgb,var(--tag-color) 10%,#fff) 100%); }
@@ -137,6 +169,39 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .price-tag.promo .barcode,.price-tag.promo .barcode svg { height:9mm !important; }
 .price-tag.promo .sku { max-width:22mm; font-size:6.4px; }
 .price-tag.promo .footer-line { display:block; position:absolute; right:3.8mm; bottom:1.2mm; max-width:42mm; color:#7d8798; font-size:5.8px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Five visual variants reuse the two physical formats instead of inventing a
+   new paper size. Their hierarchy stays readable at 1:1 on the A4 sheet. */
+.price-tag.variant-accent { border-color:color-mix(in srgb,var(--tag-color) 55%,#cdd3df); background:linear-gradient(125deg,#fff 0%,#fff 55%,color-mix(in srgb,var(--tag-color) 13%,#fff) 56%); }
+.price-tag.variant-accent::before { width:1.8mm; }
+.price-tag.standard.variant-accent .price-line { align-self:flex-start; margin-left:-.45mm; padding:.45mm .9mm .35mm; border-radius:1.2mm; color:var(--tag-color); background:color-mix(in srgb,var(--tag-color) 12%,#fff); }
+.price-tag.variant-accent .tag-price { color:var(--tag-color); }
+.price-tag.variant-sale { border-color:color-mix(in srgb,var(--tag-color) 76%,#111827); background:linear-gradient(135deg,color-mix(in srgb,var(--tag-color) 86%,#111827),var(--tag-color)); color:#fff; }
+.price-tag.variant-sale::before { width:100%; opacity:.13; background:repeating-linear-gradient(135deg,#fff 0 1.2mm,transparent 1.2mm 3.1mm); }
+.price-tag.variant-sale .tag-brand,.price-tag.variant-sale .tag-desc,.price-tag.variant-sale .tag-meta,.price-tag.variant-sale .price-lead,.price-tag.variant-sale .price-note,.price-tag.variant-sale .old-price { color:#fff; }
+.price-tag.variant-sale .tag-price { color:#fff; }
+.price-tag.variant-sale .badge { color:#172033; background:#fff; }
+.price-tag.variant-sale .price-subrow { opacity:.88; }
+.price-tag.variant-sale .footer-line { color:#fff; }
+.price-tag.variant-mono { border-color:#172033; background:#fff; }
+.price-tag.variant-mono::before { width:1.35mm; background:#172033; }
+.price-tag.variant-mono .tag-brand,.price-tag.variant-mono .tag-price { color:#172033; }
+.price-tag.variant-mono .badge { background:#172033; }
+.price-tag.variant-mono .tag-desc,.price-tag.variant-mono .tag-meta,.price-tag.variant-mono .price-lead,.price-tag.variant-mono .price-note { color:#596273; }
+.price-tag.border-accent { border-color:var(--tag-color); border-width:.45mm; }
+.price-tag.border-none { border-color:transparent; border-radius:0; }
+.price-tag.font-rounded { --tag-font:"Trebuchet MS","Arial Rounded MT Bold",Arial,sans-serif; }
+.price-tag.font-classic { --tag-font:Georgia,"Times New Roman",serif; }
+.price-tag.font-mono { --tag-font:ui-monospace,SFMono-Regular,Consolas,monospace; }
+.sheet.with-cut-marks .price-tag { outline:.12mm dashed #aeb7c7; outline-offset:-.18mm; }
+.price-tag.promo.variant-photo { background:linear-gradient(145deg,#fff 0%,#fff 57%,color-mix(in srgb,var(--tag-color) 12%,#fff) 100%); }
+.price-tag.promo.variant-photo::before { width:2.2mm; }
+.price-tag.promo.variant-photo .tag-body { padding-left:23mm; }
+.price-tag.promo.variant-photo .tag-body .qr { position:absolute; z-index:2; top:30mm; left:5.2mm; width:11mm; height:11mm; }
+.price-tag.promo.variant-photo .promo-photo { position:absolute; z-index:1; top:10.5mm; left:5.2mm; display:grid; place-items:center; width:19mm; height:18mm; overflow:hidden; border:.3mm solid color-mix(in srgb,var(--tag-color) 35%,#fff); border-radius:2mm; background:linear-gradient(145deg,color-mix(in srgb,var(--tag-color) 25%,#fff),#fff); }
+.promo-photo img { position:relative; z-index:1; width:100%; height:100%; object-fit:cover; }
+.promo-photo .photo-fallback { color:var(--tag-color); font-size:5px; font-weight:900; letter-spacing:.08em; text-align:center; }
+.price-tag.promo.variant-photo .tag-name { -webkit-line-clamp:3; }
+.price-tag.promo.variant-photo .footer-line { max-width:29mm; }
 .format-note { margin-top:10px; padding:10px 11px; border:1px solid #d9dcff; border-radius:11px; background:#f6f6ff; color:#4b5570; font-size:11px; line-height:1.42; }
 .format-note b { display:block; margin-bottom:2px; color:#3730a3; font-size:11.5px; }
 .empty { max-width:620px; margin:90px auto; padding:34px; border:1px dashed #bcc5d4; border-radius:18px; text-align:center; color:var(--muted); background:#fff; }
@@ -210,20 +275,55 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
       <div class="format-note"><b>Физические форматы без масштабирования</b><span>Обычный ценник — 66 × 31 мм. Высокий промостенд — 66 × 56 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
     </section>
     <section class="section">
-      <div class="section-head"><b>3. Оформление</b></div>
+      <div class="section-head"><b>3. Вариант и палитра</b><small>без смены размера</small></div>
+      <div class="style-grid" id="variants" role="radiogroup" aria-label="Вариант оформления">
+        <label class="wide"><input type="radio" name="variant" value="card" checked><span class="style-card"><span class="style-mark clean"></span><span><b>Как в карточке стеллажа</b><small>У каждой позиции свой выбранный вариант, цвет и старая цена</small></span></span></label>
+        <label><input type="radio" name="variant" value="clean"><span class="style-card"><span class="style-mark clean"></span><span><b>Чистый</b><small>Универсальный</small></span></span></label>
+        <label><input type="radio" name="variant" value="accent"><span class="style-card"><span class="style-mark accent"></span><span><b>Цена</b><small>Акцент на сумме</small></span></span></label>
+        <label><input type="radio" name="variant" value="sale"><span class="style-card"><span class="style-mark sale"></span><span><b>Акция</b><small>Контрастный оффер</small></span></span></label>
+        <label><input type="radio" name="variant" value="mono"><span class="style-card"><span class="style-mark mono"></span><span><b>Монохром</b><small>Для ч/б печати</small></span></span></label>
+        <label class="wide"><input type="radio" name="variant" value="photo"><span class="style-card"><span class="style-mark photo"></span><span><b>Фото товара</b><small>Промостенд с фото позиции; обычный ценник сохранит вариант «Цена»</small></span></span></label>
+      </div>
+      <p class="style-help" id="variantHint">Выберите общий вариант или оставьте стили, заданные в карточках стеллажа.</p>
+      <div class="palette-label"><span>Быстрые палитры</span><span>нажмите, чтобы применить ко всем</span></div>
+      <div class="palette-row" aria-label="Быстрые палитры">
+        <button class="palette" type="button" style="--swatch:#4f46e5" data-tag-color="#4f46e5" aria-label="Индиго"></button>
+        <button class="palette" type="button" style="--swatch:#0f766e" data-tag-color="#0f766e" aria-label="Бирюзовый"></button>
+        <button class="palette" type="button" style="--swatch:#c2410c" data-tag-color="#c2410c" aria-label="Терракотовый"></button>
+        <button class="palette" type="button" style="--swatch:#be123c" data-tag-color="#be123c" aria-label="Малиновый"></button>
+        <button class="palette" type="button" style="--swatch:#7c3aed" data-tag-color="#7c3aed" aria-label="Фиолетовый"></button>
+        <button class="palette" type="button" style="--swatch:#172033" data-tag-color="#172033" aria-label="Графит"></button>
+      </div>
       <label class="control"><span><i>Цвет</i><i id="colorHint">из карточки</i></span>
-        <div class="color-row"><select id="colorMode"><option value="card">Цвет каждой карточки</option><option value="custom">Один цвет для всех</option></select><input id="accent" type="color" value="#4f46e5" aria-label="Цвет"></div>
+        <div class="color-row"><select id="colorMode"><option value="card">Цвет каждой карточки</option><option value="custom">Один цвет для всех</option></select><input id="accent" type="color" value="#4f46e5" aria-label="Свой акцентный цвет"></div>
       </label>
+      <div class="control-grid">
+        <label class="control"><span><i>Шрифт</i></span><select id="fontFamily"><option value="modern">Современный</option><option value="rounded">Мягкий</option><option value="classic">Классический</option><option value="mono">Моно</option></select></label>
+        <label class="control"><span><i>Рамка</i></span><select id="borderMode"><option value="soft">Мягкая</option><option value="accent">Акцентная</option><option value="none">Без рамки</option></select></label>
+      </div>
       <label class="control"><span><i>Размер текста</i><i id="fontValue">100%</i></span><input id="fontScale" type="range" min="85" max="115" value="100" step="5"></label>
-      <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
-      <label class="control"><span><i>Нижняя строка</i><i>для промостенда</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
+      <div class="control-grid">
+        <label class="control"><span><i>Название бренда</i><i>вместо NOZZA</i></span><input id="brandName" type="text" maxlength="24" placeholder="NOZZA"></label>
+        <label class="control"><span><i>Надпись над ценой</i><i>необязательно</i></span><input id="priceLead" type="text" maxlength="18" placeholder="Например: от"></label>
+        <label class="control"><span><i>Подпись к цене</i><i>необязательно</i></span><input id="priceNote" type="text" maxlength="32" placeholder="Например: за комплект"></label>
+        <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
+      </div>
+      <label class="control"><span><i>Призыв или нижняя строка</i><i>для промостенда</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
       <div class="checks">
-        <label><input id="showLogo" type="checkbox" checked> Логотип</label>
+        <label><input id="showLogo" type="checkbox" checked> Логотип и бренд</label>
         <label><input id="showQr" type="checkbox" checked> QR товара</label>
         <label><input id="showBarcode" type="checkbox" checked> Штрихкод 1С</label>
         <label><input id="showSku" type="checkbox" checked> Артикул</label>
         <label><input id="showDesc" type="checkbox" checked> Описание</label>
         <label><input id="showStock" type="checkbox"> Остаток</label>
+        <label><input id="showCut" type="checkbox"> Тонкие линии реза</label>
+      </div>
+      <div class="preset-row" aria-label="Быстрые стили">
+        <button class="mini" type="button" data-tag-preset="retail">Витрина</button>
+        <button class="mini" type="button" data-tag-preset="sale">Акция</button>
+        <button class="mini" type="button" data-tag-preset="mono">Моно</button>
+        <button class="mini" type="button" data-tag-preset="photo">Промо с фото</button>
+        <button class="mini" type="button" data-tag-preset="reset">Сбросить оформление</button>
       </div>
     </section>
     <section class="section">
@@ -265,12 +365,30 @@ const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 // The designer only creates real shelf formats. Legacy saved values remain
 // usable and deliberately resolve to the normal 66 × 31 mm label.
+const LEGACY_TYPE_ALIASES = {classic:'standard',compact:'standard',minimal:'standard'};
+const TAG_VARIANTS = ['clean','accent','sale','mono','photo'];
+const VARIANT_NAMES = {
+  clean:'чистый', accent:'акцент на цене', sale:'акция', mono:'монохром', photo:'фото товара',
+};
 const TYPES = ['standard','promo'];
 const TYPE_NAMES = {standard:'Ценник 66 × 31 мм',promo:'Промостенд 66 × 56 мм'};
 const PER_PAGE = {standard:27,promo:15};
-const LEGACY_TYPE_ALIASES = {classic:'standard',compact:'standard',minimal:'standard'};
-const STORE = 'printflow:price-tag-designer:v2';
-const LEGACY_STORE = 'printflow:price-tag-designer:v1';
+// v3 adds visual recipes and text controls. v2/v1 remain readable so an
+// existing workstation keeps its preferred printing setup after the upgrade.
+const STORE = 'printflow:price-tag-designer:v3';
+const LEGACY_STORES = ['printflow:price-tag-designer:v2', 'printflow:price-tag-designer:v1'];
+const DESIGN_DEFAULTS = {
+  template:'card', variant:'card', colorMode:'card', accent:'#4f46e5', fontScale:100,
+  fontFamily:'modern', borderMode:'soft', brandName:'', priceLead:'', priceNote:'',
+  badge:'', footer:'', showLogo:true, showQr:true, showBarcode:true, showSku:true,
+  showDesc:true, showStock:false, showCut:false,
+};
+const DESIGN_PRESETS = {
+  retail: {variant:'accent', colorMode:'custom', accent:'#4f46e5', fontFamily:'modern', borderMode:'accent', fontScale:100, badge:'', footer:''},
+  sale: {variant:'sale', colorMode:'custom', accent:'#be123c', fontFamily:'rounded', borderMode:'none', fontScale:105, badge:'Выгодно', footer:'Предложение ограничено'},
+  mono: {variant:'mono', colorMode:'custom', accent:'#172033', fontFamily:'mono', borderMode:'accent', fontScale:100, badge:'', footer:''},
+  photo: {template:'promo', variant:'photo', colorMode:'custom', accent:'#7c3aed', fontFamily:'modern', borderMode:'accent', fontScale:105, badge:'Новинка', footer:'Сканируйте QR — больше цветов и вариантов'},
+};
 let items = [];
 let selected = new Set();
 let apiInfo = {base:location.origin, reachable:true, one_c:{linked:0,total:0}};
@@ -279,40 +397,71 @@ let renderTimer = 0;
 function money(value) {
   return Math.round(Number(value) || 0).toLocaleString('ru-RU') + ' ₽';
 }
+function normalizeType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return LEGACY_TYPE_ALIASES[type] || (TYPES.includes(type) ? type : 'standard');
+}
+function normalizeVariant(value) {
+  const variant = String(value || '').trim().toLowerCase();
+  return TAG_VARIANTS.includes(variant) ? variant : 'clean';
+}
+function selectedValue(name, fallback) {
+  const input = document.querySelector(`input[name="${name}"]:checked`);
+  return input ? input.value : fallback;
+}
 function settings() {
-  const chosen = document.querySelector('input[name=template]:checked');
   return {
-    template: chosen ? chosen.value : 'card', colorMode:$('colorMode').value,
-    accent:$('accent').value, fontScale:Number($('fontScale').value) || 100,
+    template: selectedValue('template', 'card'), variant: selectedValue('variant', 'card'),
+    colorMode:$('colorMode').value, accent:$('accent').value,
+    fontScale:Number($('fontScale').value) || 100, fontFamily:$('fontFamily').value,
+    borderMode:$('borderMode').value, brandName:$('brandName').value.trim(),
+    priceLead:$('priceLead').value.trim(), priceNote:$('priceNote').value.trim(),
     badge:$('badge').value.trim(), footer:$('footer').value.trim(),
     showLogo:$('showLogo').checked, showQr:$('showQr').checked,
     showBarcode:$('showBarcode').checked, showSku:$('showSku').checked,
     showDesc:$('showDesc').checked, showStock:$('showStock').checked,
+    showCut:$('showCut').checked,
   };
 }
 function saveSettings() {
   try { localStorage.setItem(STORE, JSON.stringify(settings())); } catch (_) {}
 }
-function normalizeType(value) {
-  const type = String(value || '').trim().toLowerCase();
-  return LEGACY_TYPE_ALIASES[type] || (TYPES.includes(type) ? type : 'standard');
+function readSavedSettings() {
+  for (const key of [STORE, ...LEGACY_STORES]) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return JSON.parse(raw) || {};
+    } catch (_) { /* try the previous generation */ }
+  }
+  return {};
+}
+function setRadio(name, value) {
+  const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (radio) radio.checked = true;
 }
 function restoreSettings() {
-  let value = {};
-  try {
-    value = JSON.parse(localStorage.getItem(STORE) || localStorage.getItem(LEGACY_STORE) || '{}');
-  } catch (_) {}
+  const value = readSavedSettings();
   const savedTemplate = value.template == null || value.template === 'card' ? 'card' : normalizeType(value.template);
-  const radio = document.querySelector(`input[name=template][value="${savedTemplate}"]`);
-  if (radio) radio.checked = true;
-  ['colorMode','accent','badge','footer'].forEach((id) => { if (value[id] != null) $(id).value = value[id]; });
+  setRadio('template', savedTemplate);
+  const savedVariant = value.variant == null || value.variant === 'card' ? 'card' : normalizeVariant(value.variant);
+  setRadio('variant', savedVariant);
+  ['colorMode','accent','badge','footer','brandName','priceLead','priceNote','fontFamily','borderMode'].forEach((id) => {
+    if (value[id] != null) $(id).value = value[id];
+  });
   if (value.fontScale) $('fontScale').value = value.fontScale;
-  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock'].forEach((id) => {
+  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
     if (typeof value[id] === 'boolean') $(id).checked = value[id];
   });
 }
 function typeOf(item, opts) {
   return opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
+}
+function variantOf(item, type, opts) {
+  const requested = opts.variant === 'card' ? item.tag_variant : opts.variant;
+  const variant = normalizeVariant(requested);
+  // A small 66 × 31 label cannot fit a useful product image, so the photo
+  // recipe degrades to the price-focused design rather than shrinking content.
+  return type === 'standard' && variant === 'photo' ? 'accent' : variant;
 }
 function colorOf(item, opts) {
   return opts.colorMode === 'custom' ? opts.accent : (/^#[0-9a-f]{6}$/i.test(item.tag_color || '') ? item.tag_color : '#4f46e5');
@@ -321,29 +470,64 @@ function qrSvg(item, opts) {
   if (!opts.showQr || !item.url || !window.QR || !window.QR.svg) return '';
   return `<div class="qr">${window.QR.svg(item.url, {ecl:'M',margin:1})}</div>`;
 }
+function promoPhoto(item, type, variant) {
+  if (type !== 'promo' || variant !== 'photo') return '';
+  const source = item.photo && item.id
+    ? `<img src="/api/shelf/photo.jpg?id=${encodeURIComponent(String(item.id))}" alt="">` : '';
+  return `<div class="promo-photo">${source}<span class="photo-fallback">${source ? '' : 'ВАШ<br>ТОВАР'}</span></div>`;
+}
 function tagHtml(item, type, opts) {
-  const color = colorOf(item, opts);
+  const variant = variantOf(item, type, opts);
+  const itemColor = colorOf(item, opts);
+  const color = variant === 'mono' ? '#172033' : itemColor;
   const badge = opts.badge || item.tag_badge || '';
   const note = item.tag_note || item.note || '';
   const meta = [item.material || '', item.grams ? Math.round(item.grams) + ' г' : '', opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
-  const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>NOZZA</span></span>` : '<span></span>';
+  const brandName = opts.brandName || 'NOZZA';
+  const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(brandName)}</span></span>` : '<span></span>';
   // Shelf API omits human-readable digits: SKU is already beside the code, so
   // the full physical height stays available to scanner bars on 66 × 31 mm.
   const barcode = opts.showBarcode ? (item.barcode_svg
     ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
     : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>') : '';
   const sku = opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
-  return `<article class="price-tag ${type}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
+  const currentPrice = Number(item.price) || 0;
+  const oldPrice = Number(item.tag_old_price) || 0;
+  const oldPriceHtml = oldPrice > currentPrice && currentPrice > 0 ? `<span class="old-price">было ${esc(money(oldPrice))}</span>` : '';
+  const lead = opts.priceLead ? `<span class="price-lead">${esc(opts.priceLead)}</span>` : '';
+  const priceNote = opts.priceNote ? `<span class="price-note">${esc(opts.priceNote)}</span>` : '';
+  const footer = opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : '';
+  return `<article class="price-tag ${type} variant-${variant} font-${esc(opts.fontFamily)} border-${esc(opts.borderMode)}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
     <div class="tag-top">${logo}${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>
     <div class="tag-body"><div class="tag-main">
       <div class="tag-name">${esc(item.name || 'Без названия')}</div>
       ${opts.showDesc && note ? `<div class="tag-desc">${esc(note)}</div>` : ''}
-      <div class="tag-price">${money(item.price).replace(' ₽','')} <span>₽</span></div>
+      <div class="price-line">${lead}<div class="tag-price">${money(item.price).replace(' ₽','')} <span>₽</span></div></div>
+      ${(oldPriceHtml || priceNote) ? `<div class="price-subrow">${oldPriceHtml}${priceNote}</div>` : ''}
       ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
     </div>${qrSvg(item, opts)}</div>
+    ${promoPhoto(item, type, variant)}
     ${(barcode || sku) ? `<div class="tag-bottom">${barcode}${sku}</div>` : ''}
-    ${opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : ''}
+    ${footer}
   </article>`;
+}
+
+function updateDesignUi(opts) {
+  $('fontValue').textContent = opts.fontScale + '%';
+  $('colorHint').textContent = opts.colorMode === 'card' ? 'из карточки' : opts.accent;
+  $('accent').disabled = opts.colorMode !== 'custom';
+  const normalizedAccent = String(opts.accent || '').toLowerCase();
+  document.querySelectorAll('[data-tag-color]').forEach((button) => {
+    button.classList.toggle('on', opts.colorMode === 'custom'
+      && button.dataset.tagColor.toLowerCase() === normalizedAccent);
+  });
+  if (opts.variant === 'card') {
+    $('variantHint').textContent = 'Сохраняйте чистый, акционный, монохромный или фото-вариант у каждой позиции стеллажа — здесь они останутся разными.';
+  } else if (opts.variant === 'photo') {
+    $('variantHint').textContent = 'Фото используется только на промостенде 66 × 56 мм. На обычном ценнике этот вариант автоматически превращается в акцент на цене.';
+  } else {
+    $('variantHint').textContent = `Общий вариант «${VARIANT_NAMES[opts.variant] || 'чистый'}» применён ко всем выбранным товарам; физические размеры не меняются.`;
+  }
 }
 function chunk(rows, size) {
   const out = [];
@@ -353,9 +537,7 @@ function chunk(rows, size) {
 function renderSheets() {
   const opts = settings();
   saveSettings();
-  $('fontValue').textContent = opts.fontScale + '%';
-  $('colorHint').textContent = opts.colorMode === 'card' ? 'из карточки' : opts.accent;
-  $('accent').disabled = opts.colorMode !== 'custom';
+  updateDesignUi(opts);
   const chosen = items.filter((item) => selected.has(item.id));
   const groups = {};
   chosen.forEach((item) => { const type = typeOf(item, opts); (groups[type] ||= []).push(item); });
@@ -364,7 +546,7 @@ function renderSheets() {
   TYPES.forEach((type) => {
     chunk(groups[type] || [], PER_PAGE[type]).forEach((page) => {
       pageNumber += 1;
-      sheets.push(`<section class="sheet ${type}"><div class="sheet-caption">Лист ${pageNumber} · ${esc(TYPE_NAMES[type])} · ${page.length} шт</div><div class="tag-grid">${page.map((item) => tagHtml(item, type, opts)).join('')}</div></section>`);
+      sheets.push(`<section class="sheet ${type}${opts.showCut ? ' with-cut-marks' : ''}"><div class="sheet-caption">Лист ${pageNumber} · ${esc(TYPE_NAMES[type])} · ${page.length} шт</div><div class="tag-grid">${page.map((item) => tagHtml(item, type, opts)).join('')}</div></section>`);
     });
   });
   $('sheets').innerHTML = sheets.join('') || '<div class="empty"><b>Выберите товары для печати</b><span>Отметьте одну или несколько позиций слева — листы A4 соберутся автоматически.</span></div>';
@@ -393,6 +575,21 @@ function renderList() {
 function setSelection(predicate) {
   selected = new Set(items.filter(predicate).map((item) => item.id));
   renderList(); renderSheets();
+}
+function applyDesignValues(values) {
+  if (values.template) setRadio('template', values.template === 'card' ? 'card' : normalizeType(values.template));
+  if (values.variant) setRadio('variant', values.variant === 'card' ? 'card' : normalizeVariant(values.variant));
+  ['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer'].forEach((id) => {
+    if (values[id] != null) $(id).value = values[id];
+  });
+  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
+    if (typeof values[id] === 'boolean') $(id).checked = values[id];
+  });
+}
+function applyDesignPreset(name) {
+  if (name === 'reset') applyDesignValues(DESIGN_DEFAULTS);
+  else if (DESIGN_PRESETS[name]) applyDesignValues(DESIGN_PRESETS[name]);
+  queueRender();
 }
 async function export1C() {
   const buttons = [$('export1c'),$('export1cSide')];
@@ -451,10 +648,21 @@ $('search').addEventListener('input', renderList);
 $('selectAll').addEventListener('click', () => setSelection(() => true));
 $('selectNone').addEventListener('click', () => setSelection(() => false));
 $('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
-$('templates').addEventListener('change', renderSheets);
-['colorMode','accent','fontScale','badge','footer','showLogo','showQr','showBarcode','showSku','showDesc','showStock'].forEach((id) => {
-  $(id).addEventListener(id === 'badge' || id === 'footer' || id === 'fontScale' ? 'input' : 'change', queueRender);
+$('templates').addEventListener('change', queueRender);
+$('variants').addEventListener('change', queueRender);
+const LIVE_DESIGN_FIELDS = new Set(['accent','fontScale','brandName','priceLead','priceNote','badge','footer']);
+['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer',
+ 'showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
+  $(id).addEventListener(LIVE_DESIGN_FIELDS.has(id) ? 'input' : 'change', queueRender);
 });
+document.querySelectorAll('[data-tag-color]').forEach((button) => button.addEventListener('click', () => {
+  $('colorMode').value = 'custom';
+  $('accent').value = button.dataset.tagColor;
+  queueRender();
+}));
+document.querySelectorAll('[data-tag-preset]').forEach((button) => button.addEventListener('click', () => {
+  applyDesignPreset(button.dataset.tagPreset);
+}));
 $('print').addEventListener('click', () => window.print());
 $('export1c').addEventListener('click', export1C);
 $('export1cSide').addEventListener('click', export1C);
