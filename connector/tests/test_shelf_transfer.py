@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.db import Database  # noqa: E402
+from connector.printflow.documents import Documents  # noqa: E402
 from connector.printflow.shelf import Shelf  # noqa: E402
 from connector.printflow.stock import Stock  # noqa: E402
 
@@ -116,6 +117,45 @@ class ShelfTransferTests(unittest.TestCase):
     def test_transfer_requires_warehouse(self):
         with self.assertRaises(ValueError):
             self.shelf.transfer_from_stock("nom1", "", 1)
+
+    def test_transfer_showcase_display_item(self):
+        """«Для магазина» — витринная позиция: переносится на стеллаж и создаёт ценник."""
+        self.db.upsert("nomenclature", {
+            "id": "nom4", "name": "Демо-фигурка", "kind": "showcase",
+            "unit": "шт", "archived": 0})
+        self.stock.add_move("nom4", "home", 2, 0, doc_kind="receipt")
+        result = self.shelf.transfer_from_stock("nom4", "home", 1)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["item"]["nom_id"], "nom4")
+        self.assertEqual(result["item"]["name"], "Демо-фигурка")
+
+    def test_showcase_receipt_ignores_price_as_cost(self):
+        """Приход витрины не подставляет цену в себестоимость."""
+        self.db.upsert("nomenclature", {
+            "id": "nom6", "name": "Знак на витрину", "kind": "showcase",
+            "unit": "шт", "archived": 0})
+        self.db.upsert("warehouses", {"id": "home", "name": "Склад",
+                                      "kind": "home", "archived": 0})
+        docs = Documents(self.db)
+        doc = docs.save({"kind": "receipt", "warehouse_id": "home",
+                         "items": [{"nom_id": "nom6", "qty": 2,
+                                    "price": 900, "cost": 0}]})
+        docs.post(doc["id"])
+        self.assertEqual(self.stock.qty("nom6", "home"), 2)
+        # Себестоимость осталась нулевой — цена витрины не стала «с/с».
+        self.assertEqual(self.stock.avg_cost("nom6", "home"), 0.0)
+
+    def test_transfer_allows_fractional_non_piece_units(self):
+        """Метраж/вес можно вынести на стеллаж дробно; штучные — только целыми."""
+        self.db.upsert("nomenclature", {
+            "id": "nom5", "name": "Лента 10 см", "kind": "product",
+            "unit": "м", "archived": 0})
+        self.stock.add_move("nom5", "home", 2.5, 125, doc_kind="receipt")
+        items = self.shelf.stock_available()
+        self.assertIn("nom5", [i["nom_id"] for i in items])
+        result = self.shelf.transfer_from_stock("nom5", "home", 1.25)
+        self.assertEqual(result["qty"], 1.25)
+        self.assertAlmostEqual(self.stock.qty("nom5", "home"), 1.25)
 
 
 if __name__ == "__main__":

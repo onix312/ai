@@ -516,23 +516,29 @@ class Shelf:
         """
         rows = self.db.query(
             "SELECT m.nom_id, m.warehouse_id, COALESCE(w.name,'Склад') warehouse_name,"
-            " n.name, n.photo, n.unit,"
+            " n.name, n.photo, n.unit, n.kind,"
             " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
             " FROM stock_moves m"
             " JOIN nomenclature n ON n.id=m.nom_id AND n.archived=0"
             " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
             " WHERE COALESCE(w.kind,'') != 'shelf'"
-            " GROUP BY m.nom_id, m.warehouse_id HAVING q >= 1"
+            " GROUP BY m.nom_id, m.warehouse_id HAVING q > 0"
             " ORDER BY n.name")
         out = []
         for row in rows:
             qty = num(row["q"])
+            unit = str(row.get("unit") or "шт")
+            # Штучные товары показываем только когда есть целая штука; весовые
+            # и метражные (кг/м/л) можно вынести хоть грамм — это не «дробная штука».
+            if unit in ("шт", "шт.", "piece", "pcs") and qty < 1:
+                continue
             out.append({
                 "nom_id": row["nom_id"], "name": row["name"] or "Без названия",
-                "photo": row.get("photo") or "", "unit": row.get("unit") or "шт",
+                "photo": row.get("photo") or "", "unit": unit,
+                "kind": str(row.get("kind") or "product"),
                 "warehouse_id": row["warehouse_id"] or "",
                 "warehouse_name": row["warehouse_name"],
-                "qty": round(qty, 2),
+                "qty": round(qty, 3),
                 "avg_cost": round(max(0.0, num(row["c"])) / qty, 2) if qty > 0 else 0.0,
             })
         return out
@@ -557,19 +563,27 @@ class Shelf:
             raise ValueError("Товар не найден в номенклатуре")
         if not warehouse_id:
             raise ValueError("Укажите склад-источник")
+        unit = str(nom.get("unit") or "шт")
+        piece_unit = unit in ("шт", "шт.", "piece", "pcs")
         qty = num(qty)
-        if qty < 1 or abs(qty - round(qty)) > 1e-9:
-            raise ValueError("Перемещать можно целыми штуками: минимум 1")
-        qty = float(round(qty))
+        if qty <= 0:
+            raise ValueError("Перемещать нужно больше нуля")
+        if piece_unit and (abs(qty - round(qty)) > 1e-9):
+            raise ValueError("Штучные товары перемещаются целыми штуками")
+        qty = float(round(qty)) if piece_unit else round(qty, 3)
         from .stock import Stock
         stock = Stock(self.db)
         available = stock.qty(nom_id, warehouse_id)
-        if available < 1:
-            raise ValueError("На складе меньше 1 шт — перемещать нечего")
-        if qty > available:
-            raise ValueError(f"На складе только {round(available, 1)} шт, "
-                             f"а переместить просят {round(qty)}")
-        unit_cost = stock.avg_cost(nom_id, warehouse_id)
+        if available < qty:
+            raise ValueError(f"На складе только {round(available, 3)} {unit}, "
+                             f"а переместить просят {round(qty, 3)} {unit}")
+        if piece_unit and available < 1:
+            raise ValueError(f"На складе только {round(available, 1)} {unit}, "
+                             f"а переместить просят {round(qty)} {unit}")
+        display_only = str(nom.get("kind") or "product") == "showcase"
+        # Витрина без производственного учёта: даже если при оприходовании
+        # указали цену, себестоимость на стеллаже остаётся нулевой.
+        unit_cost = 0.0 if display_only else stock.avg_cost(nom_id, warehouse_id)
         cost = round(unit_cost * qty, 2)
         # 1) регистр остатков: расход со склада + приход на полку магазина
         shelf_wh = (self.db.one(

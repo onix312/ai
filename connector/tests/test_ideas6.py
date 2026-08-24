@@ -99,6 +99,31 @@ class HourCostTests(unittest.TestCase):
         self.assertIn("defects_cost", summary)
         self.assertGreater(summary["defects_cost"], 0)
 
+    def test_summary_profit_matches_pnl(self):
+        """Сводка цеха и P&L считают прибыль одинаково.
+
+        Раньше summary брал все списания подряд: комиссии, налоги и «вывод
+        себе» искажали прибыль маркетингового отчёта относительно вкладки
+        «Финансы».
+        """
+        stamp = datetime.now().isoformat(timespec="seconds")
+        self.acc.add_transaction("income", "sale", 1000, "выручка", fee=50,
+                                 at=stamp)
+        self.acc.add_transaction("expense", "filament", 300, "пластик",
+                                 at=stamp)
+        self.acc.add_transaction("expense", "tax", 60, "налог", at=stamp)
+        self.acc.add_transaction("expense", "withdrawal", 200, "вывод себе",
+                                 at=stamp)
+        summary = self.acc.summary(30)
+        pnl = self.acc.pnl_month(stamp[:7])
+        self.assertEqual(summary["income"], 1000.0)
+        self.assertEqual(summary["fees"], 50.0)
+        self.assertEqual(summary["expense"], 300.0)
+        self.assertEqual(summary["taxes"], 60.0)
+        self.assertEqual(summary["owner_draw"], 200.0)
+        self.assertEqual(summary["profit"], 590.0)
+        self.assertEqual(pnl["profit"], summary["profit"])
+
 
 if __name__ == "__main__":
     unittest.main()

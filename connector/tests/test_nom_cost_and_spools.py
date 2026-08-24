@@ -88,6 +88,32 @@ class NomCostTests(Base):
         self.assertAlmostEqual(num(again["cost"]), 99.0, places=2)
 
 
+class ShowcaseKindTests(Base):
+    """Категория «Для магазина»: витрина без производственного учёта."""
+
+    def test_showcase_has_no_cost_and_is_not_goods(self):
+        item = self.nom.save({
+            "name": "Демо на полке", "kind": "showcase",
+            "grams": 30, "hours": 1.5, "material": "PLA",
+        })
+        self.assertEqual(num(item["cost"]), 0.0)
+        self.assertEqual(num(item["margin"]), 0.0)
+        self.assertIsNone(item.get("profitable"))
+        self.assertNotIn("showcase", {"x": 1})  # просто проверка не попадает в goods
+
+        items = self.nom.items()
+        self.assertIn(item["id"], [i["id"] for i in items])
+        summary = self.nom.summary(items=items)
+        self.assertEqual(summary["goods"], 0)
+        plan = self.nom.replenishment()
+        self.assertNotIn(item["id"], [p["nom_id"] for p in plan])
+
+    def test_showcase_listed_with_kind_label(self):
+        item = self.nom.save({"name": "Сувенир", "kind": "showcase"})
+        self.assertEqual(item["kind_label"], "Для магазина")
+        self.assertTrue(item["display_only"])
+
+
 class OrderSpoolSaveTests(Base):
     """Катушка заказа сохраняется даже без предзаполненных граммов."""
 

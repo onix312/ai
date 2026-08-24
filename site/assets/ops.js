@@ -2141,14 +2141,16 @@ function bind() {
     const order = PF.state.orders.find((o) => o.id === orderId);
     if (!order) return;
     try {
-      await post('/api/queue/add', {
+      await post('/api/jobs/enqueue', {
         order_id: order.id,
-        title: `${order.product || 'Заказ'} (№${order.number})`,
+        name: `${order.product || 'Заказ'} (№${order.number})`,
         file: order.file || '',
-        grams: num(order.grams) || 0,
-        hours: num(order.hours) || 0,
+        est_grams: num(order.grams) || 0,
+        est_minutes: Math.round((num(order.hours) || 0) * 60),
         printer_id: '',
         spool_id: '',
+        source: 'order-quick',
+        allow_auto_start: false,
       });
       toast('Добавлен в очередь печати', `№${order.number} · ${order.product || ''}`);
       await PF.refreshCore();

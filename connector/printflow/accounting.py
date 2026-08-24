@@ -1374,12 +1374,21 @@ class Accounting:
 
     def summary(self, days: int = 30) -> dict[str, Any]:
         since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
-        income = num(self.db.one(
-            "SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE kind='income' AND at>=?",
-            (since,))["v"])
-        expense = num(self.db.one(
-            "SELECT COALESCE(SUM(amount),0) v FROM transactions WHERE kind='expense' AND at>=?",
-            (since,))["v"])
+        income_rows = self.db.query(
+            "SELECT amount, fee FROM transactions WHERE kind='income' AND at>=?", (since,))
+        income = sum(num(r["amount"]) for r in income_rows)
+        fees = sum(num(r["fee"]) for r in income_rows)
+        expense_rows = self.db.query(
+            "SELECT amount, category FROM transactions WHERE kind='expense' AND at>=?",
+            (since,))
+        # P&L считает прибыль без «вывода себе» и с отдельной строкой налогов;
+        # сводка цеха должна давать ту же цифру, иначе два отчёта расходятся.
+        expense = sum(num(r["amount"]) for r in expense_rows
+                      if r["category"] not in ("tax", "insurance", "withdrawal"))
+        taxes = sum(num(r["amount"]) for r in expense_rows
+                    if r["category"] in ("tax", "insurance"))
+        owner_draw = sum(num(r["amount"]) for r in expense_rows
+                         if r["category"] == "withdrawal")
         jobs = self.db.one(
             "SELECT COUNT(*) n, COALESCE(SUM(duration_min),0) m, COALESCE(SUM(grams),0) g,"
             " COALESCE(SUM(cost),0) c, COALESCE(SUM(energy_kwh),0) e"
@@ -1395,11 +1404,14 @@ class Accounting:
                        for o in active)
         total_minutes = num(jobs.get("m"))
         done_jobs = int(num(jobs.get("n")))
-        profit = income - expense
+        profit = income - fees - expense - taxes
         return {
             "period_days": days,
             "income": round(income, 2),
+            "fees": round(fees, 2),
             "expense": round(expense, 2),
+            "taxes": round(taxes, 2),
+            "owner_draw": round(owner_draw, 2),
             "profit": round(profit, 2),
             "margin": round(profit / income * 100, 1) if income else 0.0,
             "print_hours": round(total_minutes / 60, 1),
@@ -1621,7 +1633,9 @@ class Accounting:
 
         # страховые взносы ИП «за себя»
         fixed_due = num(s.get("insurance_fixed")) if mode in ("usn6", "usn15", "patent") else 0.0
-        base = income if mode != "usn15" else max(0.0, income - expense)
+        # Дополнительный взнос 1% считается с дохода (выручки) свыше порога,
+        # а не с прибыли — даже на УСН «доходы минус расходы».
+        base = income
         extra_due = 0.0
         if fixed_due:
             over = max(0.0, base - num(s.get("insurance_extra_base"), 300000))
@@ -1830,6 +1844,17 @@ class Accounting:
         expected_updated_at = str(expected_updated_at or "").strip()
         if expected_updated_at and expected_updated_at != str(order.get("updated_at") or ""):
             raise ValueError("Заказ уже изменён — обновите карточку перед записью платежа")
+        # Старое поле prepaid — только совместимость старых заказов. Если оплата
+        # приходит по новому сценарию, основной счётчик paid должен стать суммой
+        # «уже собранной» суммы, иначе заказ с prepaid>paid навсегда сохранит
+        # остаток долга: max(paid,prepaid) увидит только старое значение.
+        legacy_prepaid = num(order.get("prepaid"))
+        if legacy_prepaid > num(order.get("paid")):
+            stamp = now_iso()
+            self.db.execute(
+                "UPDATE orders SET paid=?, prepaid=0, updated_at=? WHERE id=?",
+                (legacy_prepaid, stamp, order_id))
+            order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if kind not in ("prepay", "payment", "refund"):
             raise ValueError("Тип платежа: предоплата, оплата или возврат")
         amount = round(num(amount), 2)
@@ -2025,7 +2050,12 @@ class Accounting:
                 label_cat = cats.get(t["category"], t["category"] or "Прочее")
                 by_cat[label_cat] = round(by_cat.get(label_cat, 0.0) + num(t["amount"]), 2)
 
-        income_tx = sum(num(t["amount"]) for t in txs if t["kind"] == "income")
+        # Денежный поток считаем по факту на кассе: комиссия эквайринга
+        # уходит до зачисления, поэтому с дохода берём amount−fee (так же
+        # считает accounts_state), иначе отчёт показывал бы больше денег,
+        # чем есть на счетах.
+        income_tx = sum(num(t["amount"]) - num(t["fee"]) for t in txs
+                        if t["kind"] == "income")
         expense_tx = sum(num(t["amount"]) for t in txs if t["kind"] == "expense")
         top = lambda d, field: sorted(d.values(), key=lambda r: -r[field])[:10]  # noqa: E731
         return {

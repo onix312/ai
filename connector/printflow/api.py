@@ -1754,6 +1754,28 @@ class Api:
             if file_value and not can_print(file_value):
                 raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
             return 200, {"ok": True, "job": self.manager.enqueue(body)}
+        # Совместимый маршрут «добавить в очередь» из карточки заказа.
+        # Раньше фронтенд вызывал /api/queue/add, которого не было на сервере.
+        if path == "/api/queue/add":
+            from .sd_browser import can_print
+            file_value = str(body.get("file") or "")
+            if file_value and not can_print(file_value):
+                raise ValueError("Нельзя печатать логи, таймлапс и ipcam")
+            payload = dict(body)
+            # Кнопка «В очередь» из карточки заказа использует человеческие
+            # единицы (grams/hours), а очередь хранит минуты/граммы как смету.
+            if payload.get("title") and not payload.get("name"):
+                payload["name"] = payload.get("title")
+            if not num(payload.get("est_grams")) and num(payload.get("grams")):
+                payload["est_grams"] = num(payload.get("grams"))
+            if not num(payload.get("est_minutes")) and num(payload.get("hours")):
+                payload["est_minutes"] = round(num(payload.get("hours")) * 60.0, 2)
+            payload.pop("title", None)
+            payload.pop("grams", None)
+            payload.pop("hours", None)
+            payload.setdefault("source", "order-quick")
+            payload.setdefault("allow_auto_start", False)
+            return 200, {"ok": True, "job": self.manager.enqueue(payload)}
         if path == "/api/jobs/start":
             if body.get("confirmed") is not True:
                 raise ValueError("Подтвердите физический запуск печати")

@@ -395,6 +395,28 @@ class ApiPhase11Tests(unittest.TestCase):
             code, _ = self.api.get(path, {})
             self.assertEqual(code, 200, path)
 
+    def test_queue_add_route_maps_order_fast_add(self):
+        """«В очередь» с карточки заказа не должно уходить в несуществующий URL.
+
+        Раньше фронтенд вызывал /api/queue/add, которого не было на сервере, и
+        кнопка всегда заканчивалась ошибкой. Маршрут теперь стандартизирует
+        поля, которые очередь читает (est_grams/est_minutes).
+        """
+        calls: dict = {}
+        self.api.manager = types.SimpleNamespace(enqueue=lambda p: (calls.update(p), {"id": "jq"})[-1])
+        code, payload = self.api.post("/api/queue/add", {
+            "order_id": "o1", "title": "Адресник (№1)", "file": "/model/a.3mf",
+            "grams": 30, "hours": 1.5,
+        }, {})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["ok"], True)
+        self.assertEqual(calls["name"], "Адресник (№1)")
+        self.assertEqual(calls["est_grams"], 30.0)
+        self.assertEqual(calls["est_minutes"], 90.0)
+        self.assertNotIn("grams", calls)
+        self.assertNotIn("hours", calls)
+        self.assertNotIn("title", calls)
+
     def test_shelf_and_achieve_routes(self):
         code, payload = self.api.get("/api/shelf/forecast", {"days": ["7"]})
         self.assertEqual(code, 200)
