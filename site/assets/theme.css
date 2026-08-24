@@ -560,6 +560,12 @@ table.data .strong { font-weight: 620; }
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
 /* ------------------------------------------------------------ диалоги */
+/* Диалог — flex-колонка сама по себе: тело (.modal-body) прокручивается,
+   а шапка и нижняя панель действий всегда остаются на экране.
+   Раньше flex-контейнером был только <form> внутри карточки, поэтому
+   длинные окна без формы (новая позиция стеллажа, брак, правила,
+   отложенные команды и др.) обрезались снизу: нижние секции и кнопки
+   уходили за край — «карточка не целиком отображается». */
 dialog.modal {
   width: min(760px, calc(100vw - 32px));
   max-height: min(88vh, 900px);
@@ -567,6 +573,7 @@ dialog.modal {
   border-radius: var(--r-xl); background: var(--panel); color: var(--text);
   box-shadow: var(--shadow-3);
   overflow: hidden;
+  display: flex; flex-direction: column;
 }
 dialog.modal.narrow { width: min(520px, calc(100vw - 32px)); }
 dialog.modal.wide { width: min(1040px, calc(100vw - 32px)); }
