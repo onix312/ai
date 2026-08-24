@@ -916,6 +916,26 @@ def _norm_key(key: str) -> str:
     return (key or "").strip().upper().replace(" ", "_")
 
 
+# Ключи, которые сушат обязательно, даже если в weaknesses нет слова «гигроскоп».
+_HYGRO_KEYS = {
+    "PC", "PA", "PA_GF", "PAHT_CF", "PVA", "BVOH", "PETG", "TPU", "TPE",
+    "PET", "PETG_CF", "PETG_ESD", "PC_ABS", "PPA_CF", "PPS", "PPS_CF",
+}
+
+
+def is_hygroscopic(key: str, material: dict | None = None) -> bool:
+    """Гигроскопичный пластик: влажность AMS — предупреждение, PLA — нет."""
+    norm = _norm_key(key)
+    if norm in ("PLA", "PLA+", "PLA_SILK", "PLA_MATTE", "PLA_CF", "PLA_WOOD",
+                "PLA_MARBLE", "PLA_GLOW", "PLA_METAL"):
+        return False
+    if norm in _HYGRO_KEYS or norm.startswith("PA") or norm.startswith("PC"):
+        return True
+    src = material if isinstance(material, dict) else MATERIALS.get(norm, {})
+    blob = " ".join(str(src.get(k) or "") for k in ("weaknesses", "name", "full_name", "key"))
+    return "гигроскоп" in blob.casefold()
+
+
 def material_from_row(row: dict) -> dict:
     """Строка таблицы materials → справочник материала.
 

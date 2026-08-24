@@ -92,11 +92,44 @@ function renderStock() {
     kpi('Материалов', String(materials), 'разных типов'),
   ].join('');
 
-  const tag = $('nav_stock_tag');
-  tag.hidden = !low.length;
-  tag.textContent = String(low.length);
+  const tag = $('nav_products_tag');
+  if (tag) {
+    tag.hidden = !low.length;
+    tag.textContent = String(low.length);
+  }
 
-  $('spool_grid').innerHTML = spools.length ? spools.map((s) => {
+  const locLabel = { shop: 'магазин', home: 'дом', ams: 'AMS', dry: 'сушка', other: 'другое' };
+  const q = String(($('spool_search') || {}).value || '').trim().toLowerCase();
+  const matF = String(($('spool_filter_mat') || {}).value || '');
+  const locF = String(($('spool_filter_loc') || {}).value || '');
+  const lowOnly = !!( $('spool_filter_low') && $('spool_filter_low').checked );
+  const mats = [...new Set(spools.map((s) => s.material).filter(Boolean))].sort();
+  const matSel = $('spool_filter_mat');
+  if (matSel && matSel.dataset.built !== mats.join('|')) {
+    const keep = matSel.value;
+    matSel.innerHTML = '<option value="">Все материалы</option>' + mats.map((m) =>
+      `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    matSel.dataset.built = mats.join('|');
+    if (keep && [...matSel.options].some((o) => o.value === keep)) matSel.value = keep;
+  }
+  const filtered = spools.filter((s) => {
+    if (matF && String(s.material || '') !== matF) return false;
+    if (locF && String(s.location || 'shop') !== locF) return false;
+    if (lowOnly && num(s.percent) >= num(PF.state.settings.filament_low_threshold, 15)) return false;
+    if (!q) return true;
+    const blob = [s.material, s.color_name, s.brand, s.location, s.ams_slot, s.supplier, s.label_note]
+      .join(' ').toLowerCase();
+    return blob.includes(q);
+  });
+  if (!spools.length) {
+    $('spool_grid').innerHTML = '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Добавьте катушки, чтобы расход списывался автоматически.</span></div>';
+    return;
+  }
+  if (!filtered.length) {
+    $('spool_grid').innerHTML = '<div class="empty"><span class="big">⌕</span><b>Ничего не найдено</b><span>Сбросьте поиск или фильтры — катушки на складе есть.</span></div>';
+    return;
+  }
+  $('spool_grid').innerHTML = filtered.map((s) => {
     const p = clamp(num(s.percent), 0, 100);
     const cls = p <= 0 ? 'empty-spool' : p < num(PF.state.settings.filament_low_threshold, 15) ? 'low' : '';
     const dryInfo = s.last_dry
@@ -104,11 +137,14 @@ function renderStock() {
         + (num(s.last_dry_temp) ? ` ${nfmt(s.last_dry_temp)}°` : '')
         + (num(s.last_dry_min) ? ` ${nfmt(s.last_dry_min)} мин` : '')
       : '';
-    return `<article class="spool ${cls}" data-spool="${esc(s.id)}">`
+    const loc = locLabel[s.location || 'shop'] || s.location || 'магазин';
+    return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить">`
       + `<div class="spool-top">`
       + `<div class="reel" style="--filament:${esc(s.color_hex || '#4b5563')};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
       + `<div class="body"><b>${esc(s.material)} ${esc(s.color_name)}</b>`
       + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}`
+      + ` · ${esc(loc)}`
+      + `${num(s.price_per_kg) ? ` · ${money(s.price_per_kg)}/кг` : ''}`
       + `${num(s.ams_sync, 1) !== 0 && s.synced_at ? ' · <span title="Остаток обновляется автоматически из AMS. Отключается в карточке катушки.">⟳ из AMS</span>' : ''}`
       + `${!num(s.verified, 1) ? ' · <b class="warn">нужно проверить</b>' : ''}</small>`
       + `<div class="nums"><em>${nfmt(s.remaining_grams)}</em><span class="muted">/ ${nfmt(s.total_grams)} г · ${money(s.value)}</span></div>`
@@ -120,13 +156,14 @@ function renderStock() {
       + '<div class="acts">'
       + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">Пополнить</button>`
       + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">Списать</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-scrap="${esc(s.id)}">Обрезки</button>`
       + '</div>'
       + '<div class="acts tools">'
       + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">☀ Сушка</button>`
       + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR-код для наклейки на катушку">◫ QR</button>`
       + `<button class="btn sm ghost" type="button" data-spool-edit="${esc(s.id)}" title="Карточка катушки">✎ Изменить</button>`
       + '</div></article>';
-  }).join('') : '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Добавьте катушки, чтобы расход списывался автоматически.</span></div>';
+  }).join('');
 }
 
 /* ============================================== статистика расхода */
@@ -253,26 +290,38 @@ async function submitShoppingReceive() {
 }
 
 /* ================================================== QR катушки и сушка */
+let lastSpoolQrId = '';
 async function openSpoolQr(spoolId) {
   const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
   if (!spool) return;
+  lastSpoolQrId = spoolId;
   let url = '';
   let reachable = true;
   let source = '';
+  let wizard = null;
   try {
-    const res = await get('/api/spool/qr-link', { id: spoolId });
-    url = res.url || '';
-    reachable = res.reachable !== false;
-    source = res.source || '';
+    wizard = await get('/api/workshop/qr', { spool_id: spoolId, kind: 'spool' });
+    url = wizard.url || '';
+    reachable = wizard.reachable !== false;
+    source = wizard.source || '';
   } catch (e) {
-    // офлайн: не подставляем localhost — телефон его не откроет
-    url = '';
+    try {
+      const res = await get('/api/spool/qr-link', { id: spoolId });
+      url = res.url || '';
+      reachable = res.reachable !== false;
+      source = res.source || '';
+    } catch (err) {
+      url = '';
+    }
   }
   const code = $('spool_qr_code');
-  code.innerHTML = (url && window.QR && window.QR.svg)
-    ? window.QR.svg(url, { size: 240, dark: '#111827', light: '#ffffff' })
-    : '<div class="empty compact"><span>QR недоступен</span></div>';
-  const warn = !reachable || !url
+  code.innerHTML = (wizard && wizard.svg)
+    ? wizard.svg
+    : ((url && window.QR && window.QR.svg)
+      ? window.QR.svg(url, { size: 240, dark: '#111827', light: '#ffffff' })
+      : '<div class="empty compact"><span>QR недоступен</span></div>');
+  const lines = (wizard && wizard.lines) ? wizard.lines : [];
+  const warn = !reachable || !(url || (wizard && wizard.payload))
     ? '<div class="notice warn" style="margin-top:10px"><span>⚠</span><span>'
       + 'Ссылка для телефона не собралась: нет LAN-адреса. '
       + 'Запустите PrintFlow с доступом по сети (python pf.py) и укажите IP в '
@@ -280,7 +329,8 @@ async function openSpoolQr(spoolId) {
     : (source === 'lan'
       ? '<small class="muted" style="display:block;margin-top:6px">Телефон должен быть в той же Wi-Fi сети.</small>'
       : '');
-  $('spool_qr_info').innerHTML = `<b>${esc(spool.material)} ${esc(spool.color_name)}</b>`
+  $('spool_qr_info').innerHTML = `<b>${esc((wizard && wizard.title) || (spool.material + ' ' + spool.color_name))}</b>`
+    + (lines.length ? `<small class="muted" style="display:block">${lines.map(esc).join(' · ')}</small>` : '')
     + (url ? `<small class="muted" style="display:block">${esc(url)}</small>` : '')
     + `<small class="muted">Наклейте на катушку. При установке в AMS отсканируйте — слот привяжется сам.</small>`
     + warn;
@@ -809,6 +859,9 @@ function openSpool(id) {
   editingSpoolUpdatedAt = id ? String(d.updated_at || '') : '';
   ['material', 'brand', 'color_name', 'color_hex', 'total_grams', 'remaining_grams', 'price', 'ams_slot']
     .forEach((k) => { $('sf_' + k).value = d[k] ?? ''; });
+  if ($('sf_location')) $('sf_location').value = d.location || 'shop';
+  if ($('sf_location_note')) $('sf_location_note').value = d.location_note || '';
+  if ($('sf_price_per_kg')) $('sf_price_per_kg').value = d.price_per_kg || '';
   const syncBox = $('sf_ams_sync');
   if (syncBox) syncBox.checked = num(d.ams_sync, 1) !== 0;
   const verifiedBox = $('sf_verified');
@@ -1054,6 +1107,9 @@ function bind() {
       printer_id: $('sf_printer_id').value,
       ams_sync: $('sf_ams_sync') && $('sf_ams_sync').checked ? 1 : 0,
       verified: $('sf_verified') && $('sf_verified').checked ? 1 : 0,
+      location: ($('sf_location') && $('sf_location').value) || 'shop',
+      location_note: ($('sf_location_note') && $('sf_location_note').value) || '',
+      price_per_kg: $('sf_price_per_kg') ? num($('sf_price_per_kg').value) : 0,
     };
     try {
       const result = await post('/api/spool/save', payload);
@@ -1123,7 +1179,24 @@ function bind() {
   });
 
   const spoolQrPrint = $('spool_qr_print');
-  if (spoolQrPrint) spoolQrPrint.addEventListener('click', () => window.print());
+  if (spoolQrPrint) spoolQrPrint.addEventListener('click', async () => {
+    if (!lastSpoolQrId) { window.print(); return; }
+    try {
+      const res = await get('/api/workshop/label', { spool_id: lastSpoolQrId });
+      if (res && res.html) {
+        const w = window.open('', '_blank', 'noopener,width=480,height=360');
+        if (w) { w.document.write(res.html); w.document.close(); w.focus(); }
+        return;
+      }
+    } catch (e) { /* печать страницы как запас */ }
+    window.print();
+  });
+
+  ['spool_search', 'spool_filter_mat', 'spool_filter_loc', 'spool_filter_low'].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener(id === 'spool_search' ? 'input' : 'change', () => renderStock());
+  });
 
   document.addEventListener('click', async (e) => {
     const dry = e.target.closest('[data-spool-dry]');
@@ -1132,6 +1205,28 @@ function bind() {
     if (qr) { openSpoolQr(qr.dataset.spoolQr); return; }
     const edit = e.target.closest('[data-spool-edit]');
     if (edit) return openSpool(edit.dataset.spoolEdit);
+    const scrap = e.target.closest('[data-spool-scrap]');
+    if (scrap) {
+      const grams = window.prompt('Сколько граммов обрезков AMS списать?', '8');
+      if (grams == null) return;
+      if (!window.confirm('Подтвердите списание обрезков с катушки.')) return;
+      try {
+        await post('/api/workshop/scrap', {
+          spool_id: scrap.dataset.spoolScrap, grams: num(grams),
+          confirmed: true, reason: 'обрезки AMS',
+          request_id: (window.crypto && window.crypto.randomUUID)
+            ? window.crypto.randomUUID() : `scrap-${Date.now()}`,
+        });
+        toast('Обрезки списаны', nfmt(grams) + ' г');
+        PF.refreshCore();
+      } catch (err) { fail(err); }
+      return;
+    }
+    const card = e.target.closest('#spool_grid [data-spool]');
+    if (card && !e.target.closest('button')) {
+      openSpool(card.dataset.spool);
+      return;
+    }
     const restock = e.target.closest('[data-spool-restock]');
     if (restock) {
       const grams = window.prompt('Сколько граммов добавить на катушку?', '1000');

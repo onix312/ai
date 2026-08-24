@@ -31,7 +31,7 @@ const DANGER = {
   bed_temp: 'Задать температуру стола? Принтер начнёт нагрев.',
 };
 
-let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null;
+let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null, filesPath = '/';
 let queueFilter = 'all';
 let camStream = '', camSession = Date.now();     // ключ живого MJPEG-соединения
 let shotsKey = '';                              // чтобы не перезапрашивать архив зря
@@ -262,6 +262,23 @@ function plural(n, one, few, many) {
 }
 
 /* ------------------------------------------------- тревоги сторожа печати */
+async function refreshEnough() {
+  const host = $('pr_enough');
+  const textEl = $('pr_enough_text');
+  if (!host || !textEl) return;
+  const p = active();
+  if (!p) { host.hidden = true; return; }
+  try {
+    const info = await get('/api/workshop/enough', { printer_id: p.id });
+    if (!info.job) { host.hidden = true; return; }
+    host.hidden = false;
+    host.className = 'notice' + (info.enough ? '' : ' warn');
+    textEl.textContent = info.enough
+      ? `На «${info.job.name || 'задание'}» хватит (${nfmt(info.have)} г)`
+      : (info.message || 'Мало пластика на следующее задание');
+  } catch (e) { host.hidden = true; }
+}
+
 function renderAlerts(p) {
   const host = $('pr_alerts');
   if (!host) return;
@@ -755,7 +772,7 @@ async function loadFiles() {
     // станет видимой по FTPS. Если не вышло — показываем облачную историю.
     host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
     try {
-      const sd = await get('/api/printer/files', { printer_id: p.id });
+      const sd = await get('/api/printer/files', { printer_id: p.id, path: filesPath || '/' });
       if (!sd.error) { renderFileList(sd); return; }
       const data = await get('/api/printer/cloud-files', { printer_id: p.id });
       const tasks = data.tasks || [];
@@ -778,7 +795,7 @@ async function loadFiles() {
   }
   host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
   try {
-    const data = await get('/api/printer/files', { printer_id: p.id });
+    const data = await get('/api/printer/files', { printer_id: p.id, path: filesPath || '/' });
     if (data.error) { host.innerHTML = `<div class="notice"><span>ℹ</span><span>${esc(data.error)}</span></div>`; return; }
     renderFileList(data);
   } catch (e) {
@@ -788,21 +805,30 @@ async function loadFiles() {
 
 function renderFileList(data) {
   const host = $('pr_files');
-  // Показываем только печатные файлы: папки и прочие объекты в списке
-  // пропускаем, иначе «Печать» предлагается для директорий файловой системы.
-  // Регэксп без двойного экранирования: раньше /\\./ требовал буквальный
-  // обратный слеш в имени и прятал все файлы — SD-карта выглядела пустой.
-  filesCache = (data.files || []).filter((f) =>
-    !f.dir && /\.(3mf|gcode(?:\.3mf)?)$/i.test(String(f.name || '')));
-  host.innerHTML = filesCache.length ? filesCache.map((f) => `<div class="file-row">`
-    + `<span class="fic">${fileIcon(f.name)}</span>`
-    + `<span class="fname" title="${esc(f.path || f.name)}">${esc(f.name)}</span>`
-    + `<span class="fsize">${esc(sizeText(f.size))}</span>`
-    + '<span class="acts">'
-    + `<button class="btn sm primary" type="button" data-print-file="${esc(f.path || f.name)}">Печать</button>`
-    + `<button class="icon-btn sm danger" type="button" data-del-file="${esc(f.path || f.name)}">×</button>`
-    + '</span></div>').join('')
-    : '<div class="empty compact"><span>На SD-карте нет 3MF и G-code файлов.</span></div>';
+  filesPath = data.path || filesPath || '/';
+  const crumbs = data.crumbs || [{ name: 'SD', path: '/' }];
+  const items = data.files || [];
+  filesCache = items;
+  const crumbHtml = '<div class="file-crumbs" id="pr_file_crumbs">'
+    + crumbs.map((c) => `<button type="button" class="btn sm ghost" data-sd-path="${esc(c.path)}">${esc(c.name)}</button>`).join('<span class="muted"> / </span>')
+    + '</div>';
+  const rows = items.map((f) => {
+    const printable = f.printable || (!f.dir && /\.(3mf|gcode(?:\.3mf)?)$/i.test(String(f.name || '')) && f.kind !== 'media');
+    const icon = f.dir ? '📁' : (f.kind === 'media' ? '🎞' : fileIcon(f.name));
+    return `<div class="file-row${f.dir ? ' dir' : ''}">`
+      + `<span class="fic">${icon}</span>`
+      + (f.dir
+        ? `<button type="button" class="fname link" data-sd-path="${esc(f.path)}">${esc(f.name)}</button>`
+        : `<span class="fname" title="${esc(f.path || f.name)}">${esc(f.name)}</span>`)
+      + `<span class="fsize">${f.dir ? 'папка' : esc(sizeText(f.size))}</span>`
+      + '<span class="acts">'
+      + (printable ? `<button class="btn sm ghost" type="button" data-preview-file="${esc(f.path || f.name)}">Превью</button>` : '')
+      + (printable ? `<button class="btn sm primary" type="button" data-print-file="${esc(f.path || f.name)}">Печать</button>` : '')
+      + (!f.dir ? `<button class="icon-btn sm danger" type="button" data-del-file="${esc(f.path || f.name)}">×</button>` : '')
+      + '</span></div>';
+  }).join('');
+  host.innerHTML = crumbHtml + (items.length ? rows
+    : '<div class="empty compact"><span>В этой папке пусто.</span></div>');
 }
 
 async function uploadFile(file) {
@@ -842,6 +868,9 @@ function fillPrintModal(path) {
     .map((s) => `<option value="${esc(s.id)}">${esc(s.material)} ${esc(s.color_name)} · ${Math.round(num(s.remaining_grams))} г</option>`).join('');
   const guess = open.find((o) => o.file && path.toLowerCase().includes(String(o.file).toLowerCase()));
   if (guess) $('pj_order').value = guess.id;
+  if (PF.modules.workshop && PF.modules.workshop.loadPresets) {
+    PF.modules.workshop.loadPresets();
+  }
   openModal('print_modal');
 }
 function printPayload() {
@@ -858,6 +887,8 @@ function printPayload() {
     flow_cali: $('pj_flow_cali').checked,
     timelapse: $('pj_timelapse').checked,
     ams_mapping: mapping,
+    plate_preset_id: ($('pj_preset') && $('pj_preset').value) || '',
+    no_auto: !!($('pj_no_auto') && $('pj_no_auto').checked),
   };
 }
 
@@ -894,6 +925,8 @@ function renderQueue() {
       + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
       + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
       + (order ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">заказ №${esc(order.number)}</a>` : '')
+      + (j.mixed_label ? ` · <span class="chip outline" title="Смешанная плита">${esc(j.mixed_label)}</span>` : '')
+      + (num(j.no_auto) ? ' · без автостарта' : '')
       + (num(j.est_minutes) ? ` · оценка ${minutesText(j.est_minutes)}${num(j.est_grams) ? ' · ~' + nfmt(j.est_grams) + ' г' : ''}` : '')
       + '</small>'
       + (j.state === 'running' ? `<div class="bar thin" style="margin-top:6px"><i style="width:${clamp(num(j.progress), 0, 100)}%"></i></div>` : '')
@@ -901,6 +934,8 @@ function renderQueue() {
       + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу">🔗 К заказу</button>` : '')
       + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания">✨ Новый</button>` : '')
       + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
+      + `<button class="btn sm ghost" type="button" data-job-clone="${esc(j.id)}" title="Копия в очередь">⧉</button>`
+      + (j.state === 'queued' ? `<button class="btn sm ghost" type="button" data-job-noauto="${esc(j.id)}" title="Автостарт">${num(j.no_auto) ? 'авто вкл' : 'без авто'}</button>` : '')
       + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
       + '</div></div>';
   }).join('') : (queue.length
@@ -943,8 +978,10 @@ async function startNextJob() {
   if (!printerId) return fail(new Error('Сначала выберите или добавьте принтер'));
   try {
     if (!await preflightAndConfirmJob(next, printerId)) return;
-    await post('/api/jobs/start', { id: next.id, printer_id: printerId,
-      confirmed: true, preflight_acknowledged: true });
+        await post('/api/jobs/start', { id: next.id, printer_id: printerId,
+      confirmed: true, preflight_acknowledged: true,
+      start_request_id: (window.crypto && window.crypto.randomUUID)
+        ? window.crypto.randomUUID() : `start-${Date.now()}` });
     toast('Следующее задание запущено', next.name || next.file || 'Печать');
     await PF.refreshCore();
     setTimeout(PF.poll, 1200);
@@ -1222,6 +1259,28 @@ function bind() {
         { confirm: `Записать материал ${type.toUpperCase()} в слот AMS?`, label: 'AMS ' + type });
       return;
     }
+    const sd = e.target.closest('[data-sd-path]');
+    if (sd) {
+      filesPath = sd.dataset.sdPath || '/';
+      loadFiles();
+      return;
+    }
+    const prev = e.target.closest('[data-preview-file]');
+    if (prev) {
+      const p = active();
+      if (!p) return;
+      get('/api/printer/preview', { printer_id: p.id, path: prev.dataset.previewFile })
+        .then((info) => {
+          const bits = [];
+          if (num(info.minutes)) bits.push(minutesText(info.minutes));
+          if (num(info.grams)) bits.push('~' + nfmt(info.grams) + ' г');
+          if (info.material) bits.push(info.material);
+          if (info.color) bits.push(info.color);
+          toast('Превью ' + (info.name || ''), bits.join(' · ') || 'оценка из файла', 'info');
+        })
+        .catch(fail);
+      return;
+    }
     const pf = e.target.closest('[data-print-file]');
     if (pf) { fillPrintModal(pf.dataset.printFile); return; }
     const df = e.target.closest('[data-del-file]');
@@ -1242,6 +1301,19 @@ function bind() {
           confirmed: true, preflight_acknowledged: true });
         toast('Задание запущено'); PF.refreshCore();
       } catch (err) { fail(err); }
+      return;
+    }
+    const clone = e.target.closest('[data-job-clone]');
+    if (clone) {
+      post('/api/workshop/clone', { id: clone.dataset.jobClone })
+        .then(() => { toast('Копия в очереди'); PF.refreshCore(); }).catch(fail);
+      return;
+    }
+    const noauto = e.target.closest('[data-job-noauto]');
+    if (noauto) {
+      const job = (PF.state.jobs.queue || []).find((x) => x.id === noauto.dataset.jobNoauto);
+      post('/api/workshop/no-auto', { id: noauto.dataset.jobNoauto, no_auto: !num(job && job.no_auto) })
+        .then(() => PF.refreshCore()).catch(fail);
       return;
     }
     const jc = e.target.closest('[data-job-cancel]');

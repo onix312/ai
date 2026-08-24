@@ -903,7 +903,9 @@ class Repo:
         tables = ["settings", "statuses", "niches", "customers", "orders", "order_items",
                   "spools", "print_jobs", "transactions", "filament_usage", "catalog",
                   "printer_stats", "accounts", "channels", "expense_categories",
-                  "fixed_costs", "payments", "tax_periods"]
+                  "fixed_costs", "payments", "tax_periods",
+                  "workshop_docs", "ams_slot_history", "filament_scrap",
+                  "suppliers", "plate_presets", "shift_checks"]
         data: dict[str, Any] = {"format": "printflow-backup", "version": 2, "exported_at": now_iso()}
         for table in tables:
             data[table] = self.db.query(f"SELECT * FROM {table}")
@@ -930,7 +932,9 @@ class Repo:
         for table in ("statuses", "niches", "customers", "orders", "order_items",
                       "spools", "catalog", "accounts", "channels",
                       "expense_categories", "fixed_costs", "transactions",
-                      "payments", "print_jobs", "tax_periods"):
+                      "payments", "print_jobs", "tax_periods",
+                      "workshop_docs", "ams_slot_history", "filament_scrap",
+                      "suppliers", "plate_presets", "shift_checks"):
             rows = payload.get(table)
             if not isinstance(rows, list):
                 continue

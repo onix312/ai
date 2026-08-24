@@ -74,7 +74,8 @@
   <span class="cb-item" title="Связь с коннектором"><a href="#settings" data-view="settings">система →</a></span>
  </div>
  <main id="views">
-  <div id="offline-bar"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow командой <code>python pf.py</code> или ярлыком «PrintFlow».</span></div>
+   <div id="offline-bar"><span>⚠</span><span><b>Коннектор недоступен.</b> Данные не сохраняются. Запустите PrintFlow командой <code>python pf.py</code> или ярлыком «PrintFlow».</span></div>
+   <div id="channel-bar"><span>📡</span><span id="channel_bar_text">MQTT · FTPS · диск</span></div>
 
 <!-- ================================================== ОБЗОР -->
 <section class="view" id="view-dashboard">
@@ -172,7 +173,8 @@
  <div class="printer-tabs" id="pr_tabs"></div>
  <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «+ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
  <div id="pr_workspace" hidden>
-  <div id="pr_alerts" class="alert-strip"></div>
+   <div id="pr_alerts" class="alert-strip"></div>
+   <div id="pr_enough" class="notice" hidden><span>◍</span><span id="pr_enough_text">Проверяем пластик на следующее задание…</span></div>
   <div class="printer-grid">
    <div class="grid" style="gap:16px">
     <article class="job-card" id="pr_job">
@@ -645,7 +647,7 @@
  </div>
 </section>
 
-<section class="view" id="view-inventory">
+<section class="view" id="view-inventory" data-alias="inventory">
  <div class="view-head">
   <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
   <div class="head-actions">
@@ -653,8 +655,37 @@
    <button class="btn primary" id="spool_add" type="button">+ Катушка</button>
   </div>
  </div>
- <div class="kpi-grid" id="stock_kpis"></div>
- <div class="spool-grid" id="spool_grid"></div>
+  <div class="kpi-grid" id="stock_kpis"></div>
+  <div class="toolbar spool-toolbar" id="spool_toolbar" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;align-items:center">
+   <input id="spool_search" type="search" placeholder="Поиск: цвет, бренд, место…" style="flex:1;min-width:180px">
+   <select id="spool_filter_mat"><option value="">Все материалы</option></select>
+   <select id="spool_filter_loc">
+    <option value="">Все места</option>
+    <option value="shop">Магазин</option>
+    <option value="home">Дом</option>
+    <option value="ams">AMS</option>
+    <option value="dry">Сушка</option>
+    <option value="other">Другое</option>
+   </select>
+   <label class="check"><span class="switch"><input type="checkbox" id="spool_filter_low"><i></i></span>Только низкий остаток</label>
+  </div>
+  <div class="spool-grid" id="spool_grid"></div>
+  <div class="grid g2" style="margin-top:16px">
+   <div class="card" id="workshop_shift_card">
+    <div class="card-head"><div><h2>Чек-лист смены</h2><p>Перед стартом дня</p></div><button class="btn sm" type="button" id="shift_refresh">↻</button></div>
+    <div id="shift_list"></div>
+   </div>
+   <div class="card" id="workshop_suppliers_card">
+    <div class="card-head"><div><h2>Поставщики ₽/кг</h2><p>Ярлык цены, не второй склад</p></div>
+     <button class="btn sm" type="button" id="supplier_add">+ Поставщик</button></div>
+    <div id="supplier_list"></div>
+   </div>
+  </div>
+  <div class="card" style="margin-top:16px" id="workshop_presets_card">
+   <div class="card-head"><div><h2>Пресеты плиты</h2><p>AMS, калибровка, таймлапс — одним кликом на задание</p></div>
+    <button class="btn sm" type="button" id="preset_add">+ Пресет</button></div>
+   <div id="preset_list"></div>
+  </div>
  <div class="card" style="margin-top:16px">
   <div class="card-head"><div><h2>Список закупок</h2><p>Что докупить — авто и вручную</p></div><button class="btn sm" id="shopping_auto" type="button">Автозаполнить</button></div>
   <div id="shopping_list"></div>
@@ -3742,11 +3773,13 @@
    <label class="field"><span>Плита (plate)</span><input id="pj_plate" type="number" min="1" value="1"></label>
    <label class="field"><span>Связать с заказом</span><select id="pj_order"><option value="">Без заказа</option></select></label>
    <label class="field"><span>Катушка со склада</span><select id="pj_spool"><option value="">Определить автоматически</option></select></label>
-   <label class="field span-2"><span>Слоты AMS (через запятую, напр. 0,1)</span><input id="pj_ams_mapping" placeholder="0"></label>
-   <label class="check"><input type="checkbox" id="pj_use_ams" checked> Использовать AMS</label>
+    <label class="field span-2"><span>Слоты AMS (через запятую, напр. 0,1)</span><input id="pj_ams_mapping" placeholder="0"></label>
+    <label class="field span-2"><span>Пресет плиты</span><select id="pj_preset"><option value="">Без пресета</option></select></label>
+    <label class="check"><input type="checkbox" id="pj_use_ams" checked> Использовать AMS</label>
    <label class="check"><input type="checkbox" id="pj_bed_level" checked> Калибровка стола</label>
    <label class="check"><input type="checkbox" id="pj_flow_cali"> Калибровка потока</label>
-   <label class="check"><input type="checkbox" id="pj_timelapse"> Таймлапс</label>
+    <label class="check"><input type="checkbox" id="pj_timelapse"> Таймлапс</label>
+    <label class="check"><input type="checkbox" id="pj_no_auto"> Не стартовать автоматически</label>
   </div>
  </div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" id="pj_queue">В очередь</button><button class="btn" type="button" data-close="print_modal">Отмена</button><button class="btn primary" type="button" id="pj_start">Печатать сейчас</button></div>
@@ -3772,8 +3805,14 @@
   <label class="field"><span>Вес катушки, г</span><input id="sf_total_grams" type="number" min="1" step="any" value="1000"></label>
   <label class="field"><span>Осталось, г</span><input id="sf_remaining_grams" type="number" min="0" step="any" value="1000"></label>
   <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>
-  <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
-  <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
+   <label class="field"><span>Слот AMS</span><input id="sf_ams_slot" placeholder="0"></label>
+   <label class="field"><span>Место (ярлык)</span><select id="sf_location">
+    <option value="shop">Магазин</option><option value="home">Дом</option>
+    <option value="ams">AMS</option><option value="dry">Сушка</option><option value="other">Другое</option>
+   </select></label>
+   <label class="field"><span>Цена ₽/кг</span><input id="sf_price_per_kg" type="number" min="0" step="any" placeholder="из поставщика"></label>
+   <label class="field span-2"><span>Заметка о месте</span><input id="sf_location_note" placeholder="полка / дом / сушилка"></label>
+   <label class="field span-2"><span>Закреплена за принтером</span><select id="sf_printer_id"><option value="">Не закреплена</option></select></label>
   <label class="check span-2"><span class="switch"><input type="checkbox" id="sf_ams_sync" checked><i></i></span>Обновлять остаток и слот из AMS <i class="hint-i" title="Принтер сам обновляет остаток и привязку к слоту. Выключите, если ведёте эту катушку вручную — тогда автосбор её не тронет.">?</i></label>
   <label class="check span-2"><span class="switch"><input type="checkbox" id="sf_verified" checked><i></i></span>Проверена оператором <small class="hint">Непроверенная катушка из AMS не используется для автоматического списания.</small></label>
   <small class="muted span-2" id="sf_synced_at" hidden></small>
@@ -4523,17 +4562,18 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=8.5.0"></script>
-<script src="assets/core.js?v=8.5.0"></script>
-<script src="assets/printer.js?v=8.5.0"></script>
-<script src="assets/ops.js?v=8.5.0"></script>
-<script src="assets/money.js?v=8.5.0"></script>
-<script src="assets/finance.js?v=8.5.0"></script>
-<script src="assets/shelf.js?v=8.5.0"></script>
-<script src="assets/products.js?v=8.5.0"></script>
-<script src="assets/bridge.js?v=8.5.0"></script>
-<script src="assets/marketing.js?v=8.5.0"></script>
-<script src="assets/app.js?v=8.5.0"></script>
+<script src="assets/qr.js?v=9.0.0"></script>
+<script src="assets/core.js?v=9.0.0"></script>
+<script src="assets/printer.js?v=9.0.0"></script>
+<script src="assets/ops.js?v=9.0.0"></script>
+<script src="assets/money.js?v=9.0.0"></script>
+<script src="assets/finance.js?v=9.0.0"></script>
+<script src="assets/shelf.js?v=9.0.0"></script>
+<script src="assets/products.js?v=9.0.0"></script>
+<script src="assets/bridge.js?v=9.0.0"></script>
+<script src="assets/marketing.js?v=9.0.0"></script>
+<script src="assets/workshop.js?v=9.0.0"></script>
+<script src="assets/app.js?v=9.0.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */

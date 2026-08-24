@@ -168,14 +168,31 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
             # если есть информация о занятости — пока info
             pass
 
-    # влажность AMS
+    # влажность AMS — только гигроскопичные (PC/PA/PVA/TPU/PETG…), PLA не критичен
     if db.setting("preflight_warn_humidity", True):
         hum = snap["ams"].get("humidity")
         if hum is not None:
             try:
                 if float(hum) > float(db.setting("dry_humidity_threshold", 55)):
-                    # только для гигроскопичных — но пока для всех
-                    warns.append({"code": "humidity", "title": "Высокая влажность в AMS", "detail": f"{hum}% при пороге {db.setting('dry_humidity_threshold',55)}% — просушите пластик"})
+                    from .materials import is_hygroscopic
+                    trays = snap["ams"].get("trays", []) or []
+                    hygro = []
+                    for tray in trays:
+                        key = str(tray.get("type") or tray.get("material") or "")
+                        if key and is_hygroscopic(key):
+                            hygro.append(key)
+                    job_mat = str((est or {}).get("material") or "")
+                    if job_mat and is_hygroscopic(job_mat):
+                        hygro.append(job_mat)
+                    if hygro:
+                        warns.append({
+                            "code": "humidity",
+                            "title": "Высокая влажность в AMS",
+                            "detail": (
+                                f"{hum}% при пороге {db.setting('dry_humidity_threshold', 55)}%"
+                                f" — просушите {', '.join(dict.fromkeys(hygro))}"
+                            ),
+                        })
             except Exception:
                 pass
 

@@ -74,13 +74,36 @@ const store = {
 /* ============================================================== HTTP */
 let offline = false;
 function setOffline(flag, reason) {
-  if (offline === flag) return;
   offline = flag;
-  $('offline-bar').classList.toggle('show', flag);
+  const bar = $('offline-bar');
+  if (bar) bar.classList.toggle('show', flag);
   const dot = $('conn_dot');
-  dot.className = 'dot' + (flag ? ' bad' : ' ok');
-  $('conn_title').textContent = flag ? 'Коннектор недоступен' : 'Коннектор работает';
-  $('conn_sub').textContent = flag ? (reason || 'Данные не сохраняются') : `Локально · v${PF.state.version || '2.0'}`;
+  if (dot) dot.className = 'dot' + (flag ? ' bad' : ' ok');
+  const title = $('conn_title');
+  if (title) title.textContent = flag ? 'Коннектор недоступен' : 'Коннектор работает';
+  const sub = $('conn_sub');
+  if (sub) sub.textContent = flag ? (reason || 'Данные не сохраняются') : `Локально · v${PF.state.version || '2.0'}`;
+}
+
+function setChannelBar(channels) {
+  const bar = $('channel-bar');
+  const text = $('channel_bar_text');
+  if (!bar || !text) return;
+  const ch = channels || {};
+  const mqtt = ch.mqtt || { ok: true };
+  const ftps = ch.ftps || { ok: true };
+  const disk = ch.disk || { ok: true };
+  const bad = [];
+  if (mqtt.ok === false) bad.push('MQTT');
+  if (ftps.ok === false) bad.push('FTPS / SD');
+  if (disk.ok === false) bad.push(disk.error || 'диск');
+  if (!bad.length) {
+    bar.classList.remove('show');
+    text.textContent = 'MQTT · FTPS · диск — ок';
+    return;
+  }
+  bar.classList.add('show');
+  text.textContent = 'Нет связи: ' + bad.join(' · ');
 }
 
 async function api(path, options) {
@@ -166,6 +189,7 @@ const PF = {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
     dateText, dateTimeText, agoText, todayISO, initials, debounce,
     toast, fail, openModal, closeModal, confirmDanger, CUR, store, catName,
+    setChannelBar,
   },
   modules: {},
   bus: new EventTarget(),
@@ -371,12 +395,19 @@ function showView(name, sub) {
   $('side').classList.remove('show');
   const scrim = $('scrim'); if (scrim) scrim.remove();
   PF.emit('view', { view: name, sub });
+  store.set('pf_last_view', name);
+  if (STOCK_IDS.has(name)) store.set('pf_last_stock', name);
   // После перерисовки и обработки hash браузером повторно фиксируем начало.
   requestAnimationFrame(resetViewScroll);
   setTimeout(resetViewScroll, 0);
 }
 function routeFromHash() {
-  const raw = (location.hash || '#dashboard').slice(1);
+  const raw = (location.hash || '').slice(1);
+  if (!raw) {
+    const last = store.get('pf_last_view', 'dashboard') || 'dashboard';
+    showView(last);
+    return;
+  }
   const [name, sub] = raw.split('/');
   showView(name, sub);
 }

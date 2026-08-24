@@ -2056,10 +2056,19 @@ async function refreshHeartbeat() {
       + `<div class="mbody"><b>База и бэкапы</b>`
       + `<small>последняя копия ${h.backup_newest_at ? agoText(h.backup_newest_at) : 'нет'}${h.backup_age_h != null ? ` · ${nfmt(h.backup_age_h)} ч назад` : ''}</small></div>`
       + `<span class="chip ${h.db_exists ? 'ok' : 'warn'}">${h.db_exists ? 'ok' : 'нет'}</span></div>`);
-    if (h.disk) rows.push(`<div class="mini-row"><span class="dot"></span>`
-      + `<div class="mbody"><b>Диск</b><small>${nfmt(h.disk.free_gb, 1)} ГБ свободно</small></div>`
-      + `<span class="chip outline">${nfmt(h.disk.used_pct)}% занято</span></div>`);
+    if (h.disk) rows.push(`<div class="mini-row"><span class="dot ${h.disk.ok === false ? 'bad' : 'on'}"></span>`
+      + `<div class="mbody"><b>Диск</b><small>${nfmt(h.disk.free_gb, 1)} ГБ свободно${h.disk.error ? ' · ' + esc(h.disk.error) : ''}</small></div>`
+      + `<span class="chip ${h.disk.ok === false ? 'warn' : 'outline'}">${nfmt(h.disk.used_pct)}% занято</span></div>`);
+    const mqtt = h.mqtt || (h.channels && h.channels.mqtt) || { ok: true, printers: [] };
+    const ftps = h.ftps || (h.channels && h.channels.ftps) || { ok: true, printers: [] };
+    rows.push(`<div class="mini-row"><span class="dot ${mqtt.ok ? 'on' : 'bad'}"></span>`
+      + `<div class="mbody"><b>MQTT</b><small>${mqtt.ok ? 'принтеры на связи' : esc((mqtt.printers || []).filter((x) => !x.ok).map((x) => x.error || x.name).join(', ') || 'молчит')}</small></div>`
+      + `<span class="chip ${mqtt.ok ? 'ok' : 'warn'}">${mqtt.ok ? 'ok' : 'нет'}</span></div>`);
+    rows.push(`<div class="mini-row"><span class="dot ${ftps.ok ? 'on' : 'bad'}"></span>`
+      + `<div class="mbody"><b>FTPS / SD</b><small>${ftps.ok ? 'карта доступна' : esc((ftps.printers || []).filter((x) => !x.ok).map((x) => x.error || x.name).join(', ') || 'нет ответа')}</small></div>`
+      + `<span class="chip ${ftps.ok ? 'ok' : 'warn'}">${ftps.ok ? 'ok' : 'нет'}</span></div>`);
     el.innerHTML = rows.join('');
+    if (PF.ui.setChannelBar) PF.ui.setChannelBar(h.channels || { mqtt, ftps, disk: h.disk });
     renderCycobar();
   } catch (e) {
     if (el) el.innerHTML = `<span class="muted">${esc(e.message)}</span>`;

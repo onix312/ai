@@ -195,6 +195,8 @@ class ShoppingList:
                 raise ValueError("Ключ операции уже использован для другой закупки")
 
             price_each = round(amount / count, 2) if amount else 0.0
+            kg_all = (count * grams) / 1000.0
+            price_per_kg = round(amount / kg_all, 2) if amount and kg_all else 0.0
             for index in range(count):
                 spool_id = uid("sp")
                 spool_ids.append(spool_id)
@@ -214,6 +216,8 @@ class ShoppingList:
                     "warehouse_id": warehouse_id or None,
                     "supplier": supplier,
                     "ams_sync": 1,
+                    "location": "shop",
+                    "price_per_kg": price_per_kg,
                     "created_at": stamp,
                     "updated_at": stamp,
                 })
@@ -244,6 +248,58 @@ class ShoppingList:
                 "", {"shopping_id": item_id, "spool_ids": spool_ids,
                      "transaction_id": (tx or {}).get("id") or ""},
             )
+            # 9.0: документ прихода без новых публичных kwargs
+            if "workshop_docs" in {
+                r["name"] for r in self.db.query(
+                    "SELECT name FROM sqlite_master WHERE type='table'")
+            }:
+                n = int(num((self.db.one("SELECT COUNT(*) n FROM workshop_docs") or {}).get("n")))
+                doc_id = uid("wd")
+                self.db.upsert("workshop_docs", {
+                    "id": doc_id,
+                    "number": f"Ф-{n + 1:04d}",
+                    "kind": "filament_receipt",
+                    "at": stamp,
+                    "state": "posted",
+                    "title": f"Приход пластика {material} {color_name}".strip(),
+                    "payload": json.dumps({
+                        "items": [{
+                            "material": material, "color_name": color_name,
+                            "color_hex": color_hex, "brand": brand,
+                            "spool_count": count, "spool_grams": grams,
+                            "total_amount": amount, "price_per_kg": price_per_kg,
+                        }],
+                        "supplier": supplier, "shopping_id": item_id,
+                        "account_id": account_id, "spool_ids": spool_ids,
+                    }, ensure_ascii=False),
+                    "total_amount": amount,
+                    "grams": round(count * grams, 1),
+                    "supplier": supplier,
+                    "shopping_id": item_id,
+                    "request_id": request_id,
+                    "note": f"{count} × {grams:g} г",
+                    "created_at": stamp,
+                })
+                if spool_ids:
+                    marks = ",".join("?" * len(spool_ids))
+                    self.db.execute(
+                        f"UPDATE spools SET received_doc_id=? WHERE id IN ({marks})",
+                        [doc_id, *spool_ids],
+                    )
+                shop_cols = self.db.columns("shopping_items")
+                sets, params = [], []
+                if "receipt_doc_id" in shop_cols:
+                    sets.append("receipt_doc_id=?")
+                    params.append(doc_id)
+                if "price_per_kg" in shop_cols:
+                    sets.append("price_per_kg=?")
+                    params.append(price_per_kg)
+                if sets:
+                    params.append(item_id)
+                    self.db.execute(
+                        f"UPDATE shopping_items SET {', '.join(sets)} WHERE id=?",
+                        params,
+                    )
 
         received = self.db.one("SELECT * FROM shopping_items WHERE id=?", (item_id,)) or {}
         return self._receipt_result(received, already_received=False)
