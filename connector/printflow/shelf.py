@@ -506,24 +506,31 @@ class Shelf:
                 "last": [slim(i) for i in last]}
 
     # ------------------------------------------------- перемещение со склада
-    def stock_available(self) -> list[dict]:
+    def stock_available(self, goods_only: bool = False) -> list[dict]:
         """Товары учётных складов с остатком ≥ 1 шт — кандидаты на стеллаж.
 
         Позиции с нулевым или дробным «хвостом» меньше единицы не показываем:
         переместить на полку можно только целую штуку, которая реально есть.
         Полка магазина (склад kind='shelf') исключается — оттуда не «перемещают
-        на стеллаж», это и есть стеллаж.
+        на стеллаж», это и есть стеллаж. ``goods_only`` оставляет только готовые
+        товары (product/kit/semi) — их переносят в новые позиции стеллажа.
         """
-        rows = self.db.query(
-            "SELECT m.nom_id, m.warehouse_id, COALESCE(w.name,'Склад') warehouse_name,"
-            " n.name, n.photo, n.unit, n.kind,"
-            " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
-            " FROM stock_moves m"
-            " JOIN nomenclature n ON n.id=m.nom_id AND n.archived=0"
-            " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
-            " WHERE COALESCE(w.kind,'') != 'shelf'"
-            " GROUP BY m.nom_id, m.warehouse_id HAVING q > 0"
-            " ORDER BY n.name")
+        sql = ("SELECT m.nom_id, m.warehouse_id, COALESCE(w.name,'Склад') warehouse_name,"
+               " n.name, n.photo, n.unit, n.kind,"
+               " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
+               " FROM stock_moves m"
+               " JOIN nomenclature n ON n.id=m.nom_id AND n.archived=0"
+               " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
+               " WHERE COALESCE(w.kind,'') != 'shelf'")
+        if goods_only:
+            sql += " AND n.kind IN ('product','kit','semi')"
+        sql += " GROUP BY m.nom_id, m.warehouse_id HAVING q > 0 ORDER BY n.name"
+        rows = self.db.query(sql)
+        # Базовая цена готовых товаров — для подстановки в новый ценник.
+        from .nomenclature import Nomenclature
+        nom = Nomenclature(self.db)
+        prices = nom._all_prices()
+        base_type = nom._base_type()
         out = []
         for row in rows:
             qty = num(row["q"])
@@ -540,6 +547,7 @@ class Shelf:
                 "warehouse_name": row["warehouse_name"],
                 "qty": round(qty, 3),
                 "avg_cost": round(max(0.0, num(row["c"])) / qty, 2) if qty > 0 else 0.0,
+                "price": round(num((prices.get(row["nom_id"]) or {}).get(base_type, 0)), 2),
             })
         return out
 
@@ -634,6 +642,56 @@ class Shelf:
         return {"ok": True, "move": move, "qty": qty, "cost": cost,
                 "item": self.db.one("SELECT * FROM shelf_items WHERE id=?",
                                     (item["id"],))}
+
+    def create_item_from_stock(self, data: dict, nom_id: str, warehouse_id: str,
+                               qty: float) -> dict:
+        """Новая позиция стеллажа сразу с готовым товаром со склада.
+
+        Создаёт позицию по полям формы (название, цена ценника, ценник,
+        заметка…) и в одной транзакции переносит готовые штуки с учётного
+        склада на полку: остаток и себестоимость приходят движением, а не
+        «начальным остатком» без проводки. Пустые название, цена,
+        себестоимость и штрихкод берутся из номенклатуры.
+        """
+        from .nomenclature import Nomenclature
+        from .stock import Stock
+        nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        if not nom:
+            raise ValueError("Товар не найден в номенклатуре")
+        if not warehouse_id:
+            raise ValueError("Укажите склад-источник")
+        qty = num(qty)
+        if qty <= 0:
+            raise ValueError("Переносить нужно больше нуля")
+        data = dict(data)
+        data["id"] = ""  # всегда новая позиция
+        if not str(data.get("name") or "").strip():
+            data["name"] = str(nom.get("name") or "Товар со склада").strip()
+        if not data.get("nom_id"):
+            data["nom_id"] = nom_id
+        if not str(data.get("barcode") or "").strip():
+            data["barcode"] = str(nom.get("barcode") or "").strip()
+        if not str(data.get("sku") or "").strip():
+            data["sku"] = str(nom.get("sku") or nom.get("code") or "").strip()
+        if not num(data.get("price")):
+            try:
+                prices = Nomenclature(self.db)._prices_of(nom_id)
+                data["price"] = num(prices.get(Nomenclature(self.db)._base_type()))
+            except Exception:
+                data["price"] = 0.0
+        display_only = str(nom.get("kind") or "product") == "showcase"
+        unit_cost = 0.0 if display_only else Stock(self.db).avg_cost(nom_id, warehouse_id)
+        if not num(data.get("cost_per_unit")):
+            data["cost_per_unit"] = round(unit_cost, 2)
+        data["qty"] = 0  # остаток придёт переносом
+        with self.db.transaction():
+            item = self.save_item(data)
+            moved = self.transfer_from_stock(nom_id, warehouse_id, qty,
+                                             item_id=item["id"],
+                                             note="перенос готового товара при создании позиции")
+            return {"ok": True, "item": self.item(item["id"]),
+                    "move": moved.get("move"), "qty": moved.get("qty"),
+                    "cost": moved.get("cost")}
 
     # ------------------------------------------------------------- QR-ценник
     def qr_link(self, item_id: str, host: str = "", public_url: str = "",
