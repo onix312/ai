@@ -3648,6 +3648,21 @@
    </div>
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
+  <div class="form-section" id="of_docs_wrap" hidden>
+   <h3>Документы</h3>
+   <p class="muted" style="margin:0 0 8px">Печатные формы и расходная накладная по этому заказу.</p>
+   <div id="of_docs_print" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+    <button class="btn sm" type="button" data-b2b-kind="invoice">Счёт</button>
+    <button class="btn sm" type="button" data-b2b-kind="cp">КП</button>
+    <button class="btn sm" type="button" data-b2b-kind="receipt">Товарный чек</button>
+    <button class="btn sm primary" type="button" data-b2b-kind="waybill">Накладная</button>
+   </div>
+   <div id="of_docs_list"></div>
+   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <button class="btn sm" type="button" id="order_create_waybill">+ Расходная накладная</button>
+    <small class="muted">Создаёт складской документ «Продажа» (РН) черновиком. Остатки не меняются, пока его не проведёте.</small>
+   </div>
+  </div>
  </div>
  <div class="modal-foot"><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><button class="btn" type="button" id="order_brand_card" hidden>✒ Бренд-карточка</button><button class="btn" type="button" id="order_pack_card" hidden>▦ Карточка упаковки</button><button class="btn" type="button" id="order_thread" hidden>〰 Нить изделия</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn" type="button" id="order_to_warehouse" hidden>▦ На склад</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>

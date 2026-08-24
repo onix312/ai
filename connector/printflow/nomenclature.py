@@ -154,27 +154,47 @@ class Nomenclature:
         return result
 
     # -------------------------------------------------------------- карточка
+    def resolve_id(self, nom_id: str) -> str:
+        """Канонический id карточки: сам id, legacy_catalog_id или catalog.id."""
+        key = str(nom_id or "").strip()
+        if not key or key.startswith("[object "):
+            return ""
+        row = self.db.one("SELECT id FROM nomenclature WHERE id=?", (key,))
+        if row:
+            return row["id"]
+        row = self.db.one(
+            "SELECT id FROM nomenclature WHERE legacy_catalog_id=?", (key,))
+        if row:
+            return row["id"]
+        row = self.db.one("SELECT nom_id FROM catalog WHERE id=?", (key,))
+        if row and row.get("nom_id"):
+            return str(row["nom_id"])
+        return ""
+
     def item(self, nom_id: str) -> dict | None:
-        row = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        resolved = self.resolve_id(nom_id)
+        if not resolved:
+            return None
+        row = self.db.one("SELECT * FROM nomenclature WHERE id=?", (resolved,))
         if not row:
             return None
         balances = self.stock.balances()
         item = self._decorate(row, balances, self._all_prices(),
                               num(self.db.setting("target_profit_per_hour", 250), 250))
-        item["warehouses"] = self.stock.by_warehouse(nom_id)
-        item["moves"] = self.stock.moves(nom_id, limit=50)
+        item["warehouses"] = self.stock.by_warehouse(resolved)
+        item["moves"] = self.stock.moves(resolved, limit=50)
         item["variants"] = self.db.query(
             "SELECT * FROM nom_variants WHERE nom_id=? AND archived=0 ORDER BY position, name",
-            (nom_id,))
+            (resolved,))
         item["price_history"] = self.db.query(
             "SELECT p.*, t.name type_name FROM prices p"
             " LEFT JOIN price_types t ON t.id=p.price_type_id"
-            " WHERE p.nom_id=? ORDER BY datetime(p.at) DESC LIMIT 30", (nom_id,))
-        item["spec"] = self.spec_of(nom_id)
+            " WHERE p.nom_id=? ORDER BY datetime(p.at) DESC LIMIT 30", (resolved,))
+        item["spec"] = self.spec_of(resolved)
         item["batches"] = self.db.query(
             "SELECT * FROM batches WHERE nom_id=? ORDER BY datetime(at) DESC LIMIT 20",
-            (nom_id,))
-        item["fact"] = self._fact_stats(nom_id)
+            (resolved,))
+        item["fact"] = self._fact_stats(resolved)
         return item
 
     def _fact_stats(self, nom_id: str) -> dict:
@@ -313,7 +333,7 @@ class Nomenclature:
         Это отдельная операция от массового пересчёта: карточка товара не может
         случайно изменить остальные товары.
         """
-        item = self.item(str(nom_id or ""))
+        item = self.item(nom_id)
         if not item:
             raise ValueError("Позиция номенклатуры не найдена")
         if item.get("kind") == "service":

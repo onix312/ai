@@ -204,6 +204,57 @@ class B2BTests(unittest.TestCase):
         from connector.printflow.b2b import B2B
         self.assertIn("Товарный чек", B2B(self.db).document(self.order["id"], "receipt"))
 
+    def test_waybill_html(self):
+        from connector.printflow.b2b import B2B
+        html = B2B(self.db).document(self.order["id"], "накладная")
+        self.assertIn("Товарная накладная", html)
+        self.assertIn("Отпустил", html)
+        self.assertIn("Получил", html)
+        self.assertIn("QR-стойка", html)
+
+
+class OrderWaybillTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        from connector.printflow.documents import Documents
+        from connector.printflow.nomenclature import Nomenclature
+        from connector.printflow.repo import Repo
+        self.docs = Documents(self.db)
+        self.nom = Nomenclature(self.db)
+        self.repo = Repo(self.db)
+        self.item = self.nom.save({
+            "name": "Адресник", "grams": 12, "hours": 0.3, "material": "PLA",
+        })
+        self.nom.set_price(self.item["id"], 450)
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_waybill_from_order_and_list_by_order_id(self):
+        order = self.repo.save_order({
+            "product": "Адресник", "price": 450, "qty": 2,
+            "nom_id": self.item["id"], "status": "queue",
+        })
+        payload = self.docs.for_order(order["id"])
+        self.assertTrue(payload["can_create_waybill"])
+        self.assertFalse(payload["has_waybill"])
+        first = self.docs.waybill_from_order(order["id"])
+        self.assertEqual(first["kind"], "sale")
+        self.assertEqual(first["state"], "draft")
+        self.assertEqual(first["order_id"], order["id"])
+        self.assertEqual(len(first["items"]), 1)
+        self.assertEqual(first["items"][0]["nom_id"], self.item["id"])
+        second = self.docs.waybill_from_order(order["id"])
+        self.assertEqual(second["id"], first["id"])
+        listed = self.docs.list(order_id=order["id"])
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["id"], first["id"])
+        again = self.docs.for_order(order["id"])
+        self.assertTrue(again["has_waybill"])
+        self.assertEqual(again["waybill_id"], first["id"])
+
 
 class TelegramParserTests(unittest.TestCase):
     def test_new_order_parse(self):

@@ -51,7 +51,7 @@ class Documents:
 
     # --------------------------------------------------------------- чтение
     def list(self, kind: str = "", state: str = "", warehouse_id: str = "",
-             search: str = "", limit: int = 200) -> list[dict]:
+             search: str = "", limit: int = 200, order_id: str = "") -> list[dict]:
         sql = ("SELECT d.*, w.name warehouse_name, w2.name warehouse_to_name,"
                " c.name counterparty_name FROM documents d"
                " LEFT JOIN warehouses w ON w.id=d.warehouse_id"
@@ -67,6 +67,9 @@ class Documents:
         if warehouse_id:
             sql += " AND (d.warehouse_id=? OR d.warehouse_to_id=?)"
             params += [warehouse_id, warehouse_id]
+        if order_id:
+            sql += " AND d.order_id=?"
+            params.append(order_id)
         if search:
             sql += " AND (pylower(d.number) LIKE ? OR pylower(d.note) LIKE ?)"
             like = f"%{search.lower()}%"
@@ -438,6 +441,104 @@ class Documents:
                          "items": [{"nom_id": nom_id, "qty": num(qty),
                                     "cost": num(cost), "price": num(cost)}]})
         return self.post(doc["id"])
+
+    def _order_lines(self, order: dict) -> list[dict]:
+        """Строки накладной: состав мультизаказа или одиночное изделие."""
+        rows = self.db.query(
+            "SELECT * FROM order_items WHERE order_id=? ORDER BY position",
+            (order.get("id"),))
+        if rows:
+            return [{
+                "nom_id": r.get("nom_id") or "",
+                "name": r.get("name") or "",
+                "qty": max(0.0, num(r.get("qty"))),
+                "price": num(r.get("price")),
+            } for r in rows]
+        nom_id = str(order.get("nom_id") or "").strip()
+        if not nom_id:
+            return []
+        nom = self.db.one("SELECT name FROM nomenclature WHERE id=?", (nom_id,)) or {}
+        qty = max(0.0, num(order.get("qty"), 1))
+        total = num(order.get("price"))
+        unit = round(total / qty, 2) if qty else total
+        return [{
+            "nom_id": nom_id,
+            "name": nom.get("name") or str(order.get("product") or ""),
+            "qty": qty,
+            "price": unit,
+        }]
+
+    def for_order(self, order_id: str) -> dict[str, Any]:
+        """Складские документы заказа и доступные печатные формы."""
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        docs = self.list(order_id=order_id, limit=50)
+        lines = [it for it in self._order_lines(order) if it.get("nom_id") and it.get("qty") > 0]
+        existing_sale = next((d for d in docs if d.get("kind") == "sale"), None)
+        return {
+            "ok": True,
+            "order_id": order_id,
+            "number": order.get("number") or "",
+            "documents": docs,
+            "can_create_waybill": bool(lines),
+            "has_waybill": bool(existing_sale),
+            "waybill_id": (existing_sale or {}).get("id") or "",
+            "print": [
+                {"kind": "invoice", "title": "Счёт на оплату"},
+                {"kind": "cp", "title": "Коммерческое предложение"},
+                {"kind": "receipt", "title": "Товарный чек"},
+                {"kind": "waybill", "title": "Товарная накладная"},
+            ],
+        }
+
+    def waybill_from_order(self, order_id: str, warehouse_id: str = "",
+                           post: bool = False) -> dict:
+        """Создать расходную накладную (продажу) по составу заказа.
+
+        Повторный вызов возвращает уже существующую накладную заказа.
+        Проведение не выполняется само: на складе может не быть остатка.
+        """
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        existing = self.db.one(
+            "SELECT id FROM documents WHERE order_id=? AND kind='sale' "
+            "ORDER BY datetime(at) DESC, rowid DESC LIMIT 1",
+            (order_id,))
+        if existing:
+            doc = self.get(existing["id"]) or {}
+            if post and doc.get("state") != "posted":
+                return self.post(doc["id"])
+            return doc
+
+        lines = [it for it in self._order_lines(order)
+                 if it.get("nom_id") and it.get("qty") > 0]
+        if not lines:
+            raise ValueError(
+                "В заказе нет позиций из базы товаров — накладную не из чего собрать")
+
+        wh = str(warehouse_id or order.get("warehouse_id") or "").strip()
+        items = []
+        for line in lines:
+            items.append({
+                "nom_id": line["nom_id"],
+                "qty": num(line["qty"]),
+                "price": num(line["price"]) or self.price_of(line["nom_id"]),
+            })
+        note = f"Накладная по заказу №{order.get('number') or ''}".strip()
+        doc = self.save({
+            "kind": "sale",
+            "warehouse_id": wh,
+            "order_id": order_id,
+            "counterparty_id": order.get("customer_id") or "",
+            "channel": order.get("channel") or "",
+            "note": note,
+            "items": items,
+        })
+        if post:
+            return self.post(doc["id"])
+        return doc
 
     def price_of(self, nom_id: str, price_type_id: str = "") -> float:
         """Текущая цена позиции по типу цен (последняя установленная)."""

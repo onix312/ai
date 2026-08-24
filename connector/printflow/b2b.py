@@ -1,4 +1,4 @@
-"""Документы B2B PrintFlow 5.0: счёт, КП и товарный чек из заказа.
+"""Документы B2B PrintFlow 5.0: счёт, КП, товарный чек и накладная из заказа.
 
 Генерирует готовый к печати HTML с реквизитами из настроек (legal_name, inn).
 Формируется на сервере и открывается как отдельная страница — в один клик
@@ -98,6 +98,10 @@ class B2B:
                     f"<td class=\"r\">{_fmt(price)}</td>"
                     f"<td class=\"r\">{_fmt(total)}</td></tr>")
 
+        kind = str(kind or "invoice").strip().lower()
+        if kind in ("накладная", "tn", "torg12", "rn"):
+            kind = "waybill"
+
         if kind == "receipt":
             title = "Товарный чек"
             head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
@@ -105,6 +109,8 @@ class B2B:
                     f"<div class=\"meta\">Дата: {date}<br>№ {number}</div></div>")
             body = (f"<div class=\"meta\">Покупатель: {_esc(customer or 'частное лицо')}<br>"
                     f"Изделие изготовлено по индивидуальному заказу.</div>")
+            left, right = "Исполнитель", "Заказчик"
+            foot = "не является публичной офертой без подписи."
         elif kind == "cp":
             title = "Коммерческое предложение"
             head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
@@ -114,6 +120,20 @@ class B2B:
                     f"Предлагаем изготовить «{_esc(product)}» — {int(qty)} шт. "
                     f"Срок готовности — по согласованию (ориентир: {due or 'уточняется'}). "
                     f"Цена действует после утверждения образца.</div>")
+            left, right = "Исполнитель", "Заказчик"
+            foot = "не является публичной офертой без подписи."
+        elif kind == "waybill":
+            title = "Товарная накладная"
+            inn = req["inn"]
+            head = (f"<div class=\"head\"><div><div class=\"brand\">{_esc(req['legal_name'])}</div>"
+                    f"<div class=\"doc\">{title} № {_esc(number)}</div></div>"
+                    f"<div class=\"meta\">ИНН: {_esc(inn)}<br>Дата: {date}</div></div>")
+            body = (f"<div class=\"meta\">Грузоотправитель: {_esc(req['legal_name'])}"
+                    f"{(' · ИНН ' + _esc(inn)) if inn else ''}<br>"
+                    f"Грузополучатель: {_esc(customer or '—')}<br>"
+                    f"Основание: заказ № {_esc(number)}</div>")
+            left, right = "Отпустил", "Получил"
+            foot = "подтверждает передачу товара. Не является счётом-фактурой."
         else:
             title = "Счёт на оплату"
             inn = req["inn"]
@@ -121,6 +141,8 @@ class B2B:
                     f"<div class=\"doc\">{title} № {_esc(number)}</div></div>"
                     f"<div class=\"meta\">ИНН: {_esc(inn)}<br>Дата: {date}</div></div>")
             body = f"<div class=\"meta\">Покупатель: {_esc(customer or '—')}</div>"
+            left, right = "Исполнитель", "Заказчик"
+            foot = "не является публичной офертой без подписи."
 
         return _doc_shell(f"{title} №{number}", (
             f"{head}{body}"
@@ -128,7 +150,7 @@ class B2B:
             "<th class=\"r\">Цена</th><th class=\"r\">Сумма</th></tr></thead><tbody>"
             f"{rows}</tbody></table>"
             f"<div class=\"total\">Итого: <b>{_fmt(total)} {cur}</b></div>"
-            "<div class=\"sign\"><div>Исполнитель</div><div>Заказчик</div></div>"
+            f"<div class=\"sign\"><div>{left}</div><div>{right}</div></div>"
             f"<div class=\"foot\">{_esc(req['legal_name'])} · изготовлено локально · "
-            "не является публичной офертой без подписи.</div>"
+            f"{foot}</div>"
         ))

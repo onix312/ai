@@ -309,8 +309,14 @@ function renderNomSummary(item) {
     + '</span>';
 }
 
+function nomRecalcId(nomId) {
+  // addEventListener передаёт PointerEvent первым аргументом — его нельзя
+  // отправлять как nom_id, иначе сервер ищет «[object PointerEvent]».
+  return typeof nomId === 'string' && nomId.trim() ? nomId.trim() : '';
+}
+
 async function recalcNomPrices(nomId) {
-  const targetId = nomId || editingNom;
+  const targetId = nomRecalcId(nomId) || editingNom;
   if (!targetId) return fail(new Error('Сначала сохраните товар'));
   if (!confirmDanger('Пересчитать цены только для этого товара? Старые значения останутся в истории.')) return;
   try {
@@ -1125,7 +1131,7 @@ function bind() {
     if (btn) switchPane('nom_tabs', 'nompane', btn.dataset.pane);
   });
   $('nom_save').addEventListener('click', saveNom);
-  $('nf_recalc_prices').addEventListener('click', recalcNomPrices);
+  $('nf_recalc_prices').addEventListener('click', () => recalcNomPrices());
   $('nom_batch').addEventListener('click', () => {
     closeModal('nom_modal');
     openBatch(editingNom);

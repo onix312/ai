@@ -816,11 +816,13 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   renderOrderPhotos((order && order.photos) || []);
   renderOrderDefects((order && order.defects) || []);
   renderQcChecklist((order && order.qc_done) || '');
+  renderOrderDocuments(null);
   updateEcon();
   openModal('order_modal');
   if (id) {
     loadOrderReadiness(id);
     loadOrderCompletion(id);
+    loadOrderDocuments(id);
   }
   // Автоподстановка граммов: если поле пустое, попробуем взять вес плиты
   // с принтера / файла / базы товаров. Ручной ввод не перезаписываем.
@@ -1185,6 +1187,80 @@ async function refreshOrderDetail() {
     renderOrderPhotos(order.photos || []);
     renderOrderDefects(order.defects || []);
   } catch (e) { /* не критично */ }
+}
+
+/* ====================================================== документы заказа */
+function openOrderPrint(kind) {
+  if (!editingOrder) return fail(new Error('Сначала сохраните заказ'));
+  const k = String(kind || 'waybill').trim() || 'waybill';
+  window.open('/api/b2b/doc?id=' + encodeURIComponent(editingOrder) + '&kind=' + encodeURIComponent(k), '_blank');
+}
+
+function renderOrderDocuments(payload) {
+  const wrap = $('of_docs_wrap');
+  const host = $('of_docs_list');
+  if (!wrap || !host) return;
+  wrap.hidden = !editingOrder;
+  if (!editingOrder) {
+    host.innerHTML = '';
+    return;
+  }
+  if (!payload) {
+    host.innerHTML = '<div class="empty compact"><span>Загружаем документы…</span></div>';
+    return;
+  }
+  const docs = payload.documents || [];
+  if (!docs.length) {
+    host.innerHTML = payload.can_create_waybill
+      ? '<div class="empty compact"><span>Складских документов ещё нет. Можно создать расходную накладную черновиком.</span></div>'
+      : '<div class="empty compact"><span>Накладную со склада можно собрать, когда в заказе есть товар из базы.</span></div>';
+    return;
+  }
+  host.innerHTML = docs.map((d) => {
+    const posted = d.state === 'posted';
+    return `<div class="tx-row">`
+      + `<span class="tx-ic ${posted ? 'income' : 'expense'}">${posted ? '✓' : '•'}</span>`
+      + `<div class="tx-body"><b>${esc(d.kind_label || d.kind || 'Документ')} ${esc(d.number || '')}</b>`
+      + `<small>${esc(dateTimeText(d.at))}${d.warehouse_name ? ' · ' + esc(d.warehouse_name) : ''}`
+      + `${d.note ? ' · ' + esc(d.note) : ''}</small></div>`
+      + `<span class="chip ${posted ? 'ok' : 'warn'}">${posted ? 'Проведён' : 'Черновик'}</span>`
+      + `<button class="btn sm" type="button" data-order-doc="${esc(d.id)}">Открыть</button></div>`;
+  }).join('');
+}
+
+async function loadOrderDocuments(orderId) {
+  if (!orderId) return null;
+  const wrap = $('of_docs_wrap');
+  if (wrap) wrap.hidden = false;
+  try {
+    const res = await get('/api/order/documents', { id: orderId });
+    if (editingOrder !== orderId) return res;
+    renderOrderDocuments(res);
+    return res;
+  } catch (e) {
+    const host = $('of_docs_list');
+    if (host && editingOrder === orderId) {
+      host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message || String(e))}</span></div>`;
+    }
+    return null;
+  }
+}
+
+async function createOrderWaybill() {
+  if (!editingOrder) return fail(new Error('Сначала сохраните заказ'));
+  try {
+    const res = await post('/api/order/waybill', {
+      id: editingOrder,
+      warehouse_id: ($('of_warehouse_id') || {}).value || '',
+    });
+    const doc = res.document || {};
+    toast(res.existing ? 'Накладная уже есть' : 'Накладная создана',
+      `${doc.number || ''} · черновик, остатки не менялись`.trim());
+    await loadOrderDocuments(editingOrder);
+    if (PF.modules.products && PF.modules.products.openDoc && doc.id) {
+      PF.modules.products.openDoc(doc.id);
+    }
+  } catch (e) { fail(e); }
 }
 
 /* ====================================================== журнал брака */
@@ -1920,9 +1996,26 @@ function bind() {
   });
   $('order_b2b').addEventListener('click', () => {
     if (!editingOrder) return;
-    const kind = window.prompt('Документ: счёт (invoice), КП (cp) или товарный чек (receipt)?', 'invoice');
-    if (!kind) return;
-    window.open(`/api/b2b/doc?id=${encodeURIComponent(editingOrder)}&kind=${encodeURIComponent(kind)}`, '_blank');
+    const wrap = $('of_docs_wrap');
+    if (wrap) {
+      wrap.hidden = false;
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    openOrderPrint('waybill');
+  });
+  const docsPrint = $('of_docs_print');
+  if (docsPrint) docsPrint.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-b2b-kind]');
+    if (!btn) return;
+    openOrderPrint(btn.dataset.b2bKind);
+  });
+  const createWaybill = $('order_create_waybill');
+  if (createWaybill) createWaybill.addEventListener('click', createOrderWaybill);
+  const docsList = $('of_docs_list');
+  if (docsList) docsList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-order-doc]');
+    if (!btn) return;
+    if (PF.modules.products && PF.modules.products.openDoc) PF.modules.products.openDoc(btn.dataset.orderDoc);
   });
   $('order_accept_result').addEventListener('click', async () => {
     if (!editingOrder) return;
