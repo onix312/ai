@@ -926,7 +926,7 @@ class PrinterManager:
         # реальное задание, пока SD ещё получает модель.
         claim_state = "uploading" if local is not None else "starting"
         claimed = self.db.execute(
-            f"UPDATE print_jobs SET state=?, printer_id=?, started_at=?,"
+            "UPDATE print_jobs SET state=?, printer_id=?, started_at=?,"
             " resume_eligible=1, manual_paused=0, power_loss_at='',"
             " resume_attempts=0, resume_reason='',"
             " start_request_id=CASE WHEN ?<>'' THEN ? ELSE start_request_id END"

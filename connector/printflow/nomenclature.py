@@ -54,22 +54,35 @@ class Nomenclature:
         balances = self.stock.balances(warehouse_id)
         prices = self._all_prices()
         target = num(self.db.setting("target_profit_per_hour", 250), 250)
+        # Один проход по регистру вместо запросов на каждую строку списка:
+        # статистика продаж, резервы и базовый тип цен — массово.
+        stats_map = self.stock.sales_stats_all()
+        reserved_map = self.stock.reserved_all(warehouse_id)
+        base_type = self._base_type()
         out = []
         for row in rows:
-            out.append(self._decorate(row, balances, prices, target, warehouse_id))
+            out.append(self._decorate(row, balances, prices, target, warehouse_id,
+                                      stats_map=stats_map, reserved_map=reserved_map,
+                                      base_type=base_type))
         return out
 
     def _decorate(self, row: dict, balances: dict, prices: dict,
-                  target: float, warehouse_id: str = "") -> dict:
+                  target: float, warehouse_id: str = "",
+                  stats_map: dict | None = None,
+                  reserved_map: dict | None = None,
+                  base_type: str = "") -> dict:
         nom_id = row["id"]
         bal = balances.get(nom_id) or {"qty": 0.0, "value": 0.0, "cost": 0.0}
         qty = num(bal["qty"])
-        stats = self.stock.sales_stats(nom_id)
+        stats = ((stats_map or {}).get(nom_id)
+                 or {"sold_7": 0.0, "sold_30": 0.0, "rate_per_day": 0.0, "last_sale": ""})
         status, days_left, plan = self.stock.status_of(
             qty, num(row.get("min_qty")), stats, num(row.get("max_qty")))
-        reserved = self.stock.reserved(nom_id, warehouse_id)
+        reserved = (num((reserved_map or {}).get(nom_id))
+                    if reserved_map is not None
+                    else self.stock.reserved(nom_id, warehouse_id))
         item_prices = prices.get(nom_id, {})
-        price = num(item_prices.get(self._base_type()))
+        price = num(item_prices.get(base_type or self._base_type()))
         # Остаток со склада → записанная с/с карточки → норматив по граммам/часам.
         cost = num(bal["cost"]) or num(row.get("cost")) or self._norm_cost(row)
         margin = price - cost if price else 0.0
@@ -128,14 +141,29 @@ class Nomenclature:
         row = self.db.one("SELECT id FROM price_types WHERE is_base=1 LIMIT 1")
         return (row or {}).get("id") or "retail"
 
+    def _prices_of(self, nom_id: str) -> dict[str, float]:
+        """Последние цены одной позиции по всем типам цен (точечный запрос)."""
+        out: dict[str, float] = {}
+        for row in self.db.query(
+                "SELECT price_type_id, price FROM prices"
+                " WHERE nom_id=? ORDER BY datetime(at) DESC, rowid DESC", (nom_id,)):
+            if row["price_type_id"] not in out:
+                out[row["price_type_id"]] = round(num(row["price"]), 2)
+        return out
+
     def _all_prices(self) -> dict[str, dict[str, float]]:
-        """Последние цены всех позиций по всем типам цен."""
+        """Последние цены всех позиций по всем типам цен.
+
+        Правило «последней цены» совпадает с Documents.price_of: сначала
+        свежесть datetime(at), при равенстве — максимальный rowid. Раньше
+        выбирался просто max(rowid), и запись, внесённая задним числом,
+        перебивала актуальную цену."""
         rows = self.db.query(
-            "SELECT p.nom_id, p.price_type_id, p.price FROM prices p"
-            " JOIN (SELECT nom_id, price_type_id, MAX(datetime(at)) mx, MAX(rowid) mr"
-            "       FROM prices GROUP BY nom_id, price_type_id) t"
-            " ON t.nom_id=p.nom_id AND t.price_type_id=p.price_type_id"
-            "    AND p.rowid=t.mr")
+            "SELECT nom_id, price_type_id, price FROM prices p"
+            " WHERE p.rowid=("
+            "   SELECT p2.rowid FROM prices p2"
+            "   WHERE p2.nom_id=p.nom_id AND p2.price_type_id=p.price_type_id"
+            "   ORDER BY datetime(p2.at) DESC, p2.rowid DESC LIMIT 1)")
         out: dict[str, dict[str, float]] = {}
         for row in rows:
             out.setdefault(row["nom_id"], {})[row["price_type_id"]] = round(num(row["price"]), 2)
@@ -178,9 +206,13 @@ class Nomenclature:
         row = self.db.one("SELECT * FROM nomenclature WHERE id=?", (resolved,))
         if not row:
             return None
-        balances = self.stock.balances()
-        item = self._decorate(row, balances, self._all_prices(),
-                              num(self.db.setting("target_profit_per_hour", 250), 250))
+        # Точечные запросы одной карточки: не сворачиваем регистр и цены
+        # по всему справочнику, чтобы открыть одну позицию.
+        balances = self.stock.balances(nom_id=resolved)
+        stats = {resolved: self.stock.sales_stats(resolved)}
+        item = self._decorate(row, balances, {resolved: self._prices_of(resolved)},
+                              num(self.db.setting("target_profit_per_hour", 250), 250),
+                              stats_map=stats, base_type=self._base_type())
         item["warehouses"] = self.stock.by_warehouse(resolved)
         item["moves"] = self.stock.moves(resolved, limit=50)
         item["variants"] = self.db.query(
@@ -393,6 +425,12 @@ class Nomenclature:
             row["items"] = counts.get(row["id"], 0)
         return rows
 
+    def print_groups(self) -> list[str]:
+        """Существующие печатные группы мелких товаров — для подсказок ввода."""
+        return [r["print_group"] for r in self.db.query(
+            "SELECT DISTINCT print_group FROM nomenclature"
+            " WHERE print_group<>'' ORDER BY print_group") if r["print_group"]]
+
     def save_group(self, data: dict) -> dict:
         data = dict(data)
         if not data.get("id"):
@@ -465,8 +503,11 @@ class Nomenclature:
         self.db.delete("nom_variants", variant_id)
 
     # ----------------------------------------------------------- сводка
-    def summary(self, warehouse_id: str = "") -> dict[str, Any]:
-        items = self.items(warehouse_id=warehouse_id)
+    def summary(self, warehouse_id: str = "", items: list[dict] | None = None) -> dict[str, Any]:
+        # В ответе /api/nomenclature список уже вычислен — используем его,
+        # а не декорируем всю номенклатуру второй раз на один запрос.
+        if items is None:
+            items = self.items(warehouse_id=warehouse_id)
         goods = [i for i in items if i.get("kind") in ("product", "kit", "semi")]
         qty = sum(num(i["qty"]) for i in goods)
         value = sum(num(i["stock_value"]) for i in goods)

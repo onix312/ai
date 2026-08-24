@@ -157,7 +157,7 @@ class OrderStockTests(unittest.TestCase):
 
         summary = self.service.summary("order-1")
         self.assertEqual(summary["quantity"], 5)
-        result = self.service.stock_to_warehouse(
+        self.service.stock_to_warehouse(
             "order-1", warehouse_id=warehouse["id"])
         self.assertEqual(self.stock.qty(item["id"], warehouse["id"]), 2)
         self.assertEqual(self.stock.qty(item2["id"], warehouse["id"]), 3)

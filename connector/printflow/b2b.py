@@ -20,6 +20,77 @@ def _fmt(value) -> str:
     return f"{int(round(num(value))):,}".replace(",", " ")
 
 
+def _qty_text(value) -> str:
+    """Количество без лишних нулей: 3, 2.5. Дроби больше не усекаются до целых."""
+    qty = num(value)
+    if abs(qty - round(qty)) < 0.0005:
+        return str(int(round(qty)))
+    return f"{qty:.3f}".rstrip("0").rstrip(".")
+
+
+def fold_lines(lines: list[dict], collapse_groups: bool = True) -> tuple[list[dict], dict]:
+    """Свёртка строк печатной формы без изменения итоговой суммы.
+
+    Два правила уменьшают число позиций в накладной:
+
+    * повторы одной позиции номенклатуры (или одного названия с той же
+      ценой) сливаются в одну строку с суммарным количеством;
+    * мелкие товары с одинаковой печатной группой (`nomenclature.print_group`)
+      показываются одной строкой под именем группы — складские движения при
+      этом по-прежнему идут построчно по конкретным товарам.
+
+    Возвращает (rows, info): rows — список {name, qty, price, amount, averaged},
+    info — {folded, before, after, groups}.
+    """
+    rows: list[dict] = []
+    index: dict[tuple, int] = {}
+    groups: list[str] = []
+    before = 0
+    for line in lines or []:
+        qty = num(line.get("qty"))
+        price = num(line.get("price"))
+        if qty <= 0:
+            continue  # нулевые строки в печатной форме — мусор
+        before += 1
+        name = str(line.get("name") or "Позиция")
+        group = str(line.get("print_group") or "").strip()
+        nom_id = str(line.get("nom_id") or "").strip()
+        if collapse_groups and group:
+            key: tuple = ("group", group.casefold())
+        elif nom_id:
+            key = ("nom", nom_id)
+        else:
+            key = ("custom", name.casefold(), round(price, 2))
+        if key in index:
+            row = rows[index[key]]
+            row["qty"] = round(row["qty"] + qty, 3)
+            row["amount"] = round(row["amount"] + price * qty, 2)
+            if abs(row["price"] - price) > 0.004:
+                row["averaged"] = True
+            # Цена объединённой строки — средняя по сумме и количеству;
+            # итог при этом всегда равен точной сумме по позициям.
+            if row["qty"]:
+                row["price"] = round(row["amount"] / row["qty"], 2)
+            continue
+        display = group if (collapse_groups and group) else name
+        if collapse_groups and group and group not in groups:
+            groups.append(group)
+        index[key] = len(rows)
+        rows.append({
+            "name": display,
+            "qty": round(qty, 3),
+            "price": round(price, 2),
+            "amount": round(price * qty, 2),
+            "averaged": False,
+        })
+    return rows, {
+        "folded": before > len(rows),
+        "before": before,
+        "after": len(rows),
+        "groups": groups,
+    }
+
+
 def _doc_shell(title: str, body: str) -> str:
     return (
         "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
@@ -38,6 +109,7 @@ def _doc_shell(title: str, body: str) -> str:
         "td.r{text-align:right;white-space:nowrap}"
         ".total{font-size:13pt;font-weight:800;text-align:right;margin-top:4mm}"
         ".total b{color:#4f46e5}"
+        ".foldnote{margin-top:2mm;font-size:9pt;color:#5d6b85}"
         ".sign{margin-top:14mm;display:flex;gap:20mm}"
         ".sign div{flex:1;border-top:1px solid #12203c;padding-top:2mm;font-size:9.5pt;color:#5d6b85}"
         ".foot{margin-top:8mm;font-size:9pt;color:#5d6b85;border-top:1px dashed #c9d3e8;padding-top:3mm}"
@@ -63,7 +135,8 @@ class B2B:
     def __init__(self, db: Database):
         self.db = db
 
-    def document(self, order_id: str, kind: str = "invoice") -> str:
+    def document(self, order_id: str, kind: str = "invoice",
+                 group: bool = True) -> str:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             return _doc_shell("Не найдено", "<p>Заказ не найден.</p>")
@@ -79,23 +152,34 @@ class B2B:
 
         # Мультизаказ: строки документа — состав заказа, а не одна строка.
         # Цена заказа уже итоговая, умножать её на количество нельзя.
+        # Печатная группа мелких товаров и повторы позиций сворачиваются
+        # в одну строку (group=1), сумма документа не меняется.
         items = self.db.query(
-            "SELECT name, qty, price FROM order_items WHERE order_id=? ORDER BY position",
+            "SELECT oi.name, oi.qty, oi.price, oi.nom_id,"
+            " COALESCE(n.print_group,'') print_group"
+            " FROM order_items oi"
+            " LEFT JOIN nomenclature n ON n.id=oi.nom_id"
+            " WHERE oi.order_id=? ORDER BY oi.position",
             (order_id,))
+        fold: dict = {"folded": False, "before": 0, "after": 0, "groups": []}
         if items:
+            lines, fold = fold_lines(items, collapse_groups=group)
             rows = "".join(
-                f"<tr><td>{_esc(it.get('name') or 'Позиция')}</td>"
-                f"<td class=\"r\">{int(max(1.0, num(it.get('qty'), 1)))}</td>"
-                f"<td class=\"r\">{_fmt(num(it.get('price')))}</td>"
-                f"<td class=\"r\">{_fmt(round(num(it.get('price')) * num(it.get('qty'), 1), 2))}</td></tr>"
-                for it in items)
-            total = round(sum(num(it.get("price")) * num(it.get("qty"), 1)
-                              for it in items), 2)
+                f"<tr><td>{_esc(ln['name'])}</td>"
+                f"<td class=\"r\">{_qty_text(ln['qty'])}</td>"
+                f"<td class=\"r\">{'ср. ' if ln['averaged'] else ''}{_fmt(ln['price'])}</td>"
+                f"<td class=\"r\">{_fmt(ln['amount'])}</td></tr>"
+                for ln in lines)
+            total = round(sum(num(ln["amount"]) for ln in lines), 2)
         else:
-            total = round(price * qty, 2)
+            # Цена заказа — итоговая сумма заказа, а не цена штуки (как в
+            # экономике и в _order_lines складской накладной): делим на
+            # количество, умножать нельзя — иначе итог документа завышался.
+            total = round(price, 2)
+            unit = round(price / qty, 2) if qty else price
             rows = (f"<tr><td>{_esc(product)}</td>"
-                    f"<td class=\"r\">{int(qty)}</td>"
-                    f"<td class=\"r\">{_fmt(price)}</td>"
+                    f"<td class=\"r\">{_qty_text(qty)}</td>"
+                    f"<td class=\"r\">{_fmt(unit)}</td>"
                     f"<td class=\"r\">{_fmt(total)}</td></tr>")
 
         kind = str(kind or "invoice").strip().lower()
@@ -144,12 +228,24 @@ class B2B:
             left, right = "Исполнитель", "Заказчик"
             foot = "не является публичной офертой без подписи."
 
+        # Сноска о свёртке: клиент видит, что часть строк показана группой,
+        # а полный состав остаётся в заказе и складской накладной.
+        fold_note = ""
+        if fold.get("folded"):
+            parts = [f"Показано позиций {_fmt(fold['after'])} из {_fmt(fold['before'])}"]
+            if fold.get("groups"):
+                parts.append("мелкие товары — группами: "
+                             + ", ".join(_esc(g) for g in fold["groups"]))
+            parts.append(f"полный состав — в заказе № {_esc(number)}")
+            fold_note = f"<div class=\"foldnote\">{'; '.join(parts)}.</div>"
+
         return _doc_shell(f"{title} №{number}", (
             f"{head}{body}"
             "<table><thead><tr><th>Наименование</th><th class=\"r\">Кол-во</th>"
             "<th class=\"r\">Цена</th><th class=\"r\">Сумма</th></tr></thead><tbody>"
             f"{rows}</tbody></table>"
             f"<div class=\"total\">Итого: <b>{_fmt(total)} {cur}</b></div>"
+            f"{fold_note}"
             f"<div class=\"sign\"><div>{left}</div><div>{right}</div></div>"
             f"<div class=\"foot\">{_esc(req['legal_name'])} · изготовлено локально · "
             f"{foot}</div>"

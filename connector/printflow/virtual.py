@@ -22,7 +22,6 @@ from typing import Any, Callable
 
 from .accounting import num
 from .bambu import STATE_NAMES, CameraWorker
-from .config import now_iso
 from .db import Database
 
 VIRTUAL_ID = "virtual"

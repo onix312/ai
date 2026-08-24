@@ -48,8 +48,8 @@ class Repo:
             params += [like, like, like, like]
         sql += " ORDER BY datetime(created_at) DESC"
         rows = self.db.query(sql, params)
-        for row in rows:
-            row["economics"] = self.acc.order_economics(row)
+        # Сначала счётчики позиций: экономика заказа использует items_count
+        # и не делает пробный запрос в order_items для каждой строки списка.
         if rows:
             marks = ",".join("?" for _ in rows)
             counts = {r["order_id"]: int(num(r["n"])) for r in self.db.query(
@@ -58,6 +58,8 @@ class Repo:
                 [r["id"] for r in rows])}
             for row in rows:
                 row["items_count"] = counts.get(row["id"], 0)
+        for row in rows:
+            row["economics"] = self.acc.order_economics(row)
         return rows
 
     def order(self, order_id: str) -> dict | None:

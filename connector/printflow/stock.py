@@ -83,14 +83,20 @@ class Stock:
             return 0.0
         return round(self.value(nom_id, warehouse_id) / q, 2)
 
-    def balances(self, warehouse_id: str = "") -> dict[str, dict]:
-        """Остатки всей номенклатуры: {nom_id: {qty, value}}."""
+    def balances(self, warehouse_id: str = "", nom_id: str = "") -> dict[str, dict]:
+        """Остатки всей номенклатуры: {nom_id: {qty, value}}.
+
+        С `nom_id` считает только одну позицию — точечный запрос для карточки
+        товара, без свертки движений по всему справочнику."""
         sql = ("SELECT nom_id, COALESCE(SUM(qty),0) q, COALESCE(SUM(cost),0) c"
                " FROM stock_moves WHERE 1=1")
         params: list[Any] = []
         if warehouse_id:
             sql += " AND warehouse_id=?"
             params.append(warehouse_id)
+        if nom_id:
+            sql += " AND nom_id=?"
+            params.append(nom_id)
         sql += " GROUP BY nom_id"
         out: dict[str, dict] = {}
         for row in self.db.query(sql, params):
@@ -148,6 +154,17 @@ class Stock:
         return self.db.query(sql, params)
 
     # -------------------------------------------------------------- резервы
+    def reserved_all(self, warehouse_id: str = "") -> dict[str, float]:
+        """Активные резервы всех позиций одним запросом (списки товаров)."""
+        sql = ("SELECT nom_id, COALESCE(SUM(qty),0) v FROM reserves"
+               " WHERE state='active'")
+        params: list[Any] = []
+        if warehouse_id:
+            sql += " AND warehouse_id=?"
+            params.append(warehouse_id)
+        sql += " GROUP BY nom_id"
+        return {r["nom_id"]: round(num(r["v"]), 3) for r in self.db.query(sql, params)}
+
     def reserved(self, nom_id: str, warehouse_id: str = "") -> float:
         sql = ("SELECT COALESCE(SUM(qty),0) v FROM reserves"
                " WHERE nom_id=? AND state='active'")
@@ -192,6 +209,31 @@ class Stock:
         return self.db.query(sql)
 
     # ------------------------------------------------------------ аналитика
+    def sales_stats_all(self) -> dict[str, dict[str, Any]]:
+        """Статистика продаж для всех позиций одним запросом.
+
+        Результат совпадает с sales_stats(nom_id) по каждой позиции, но
+        вместо трёх запросов на товар в списке товаров выполняется один."""
+        since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()
+        since30 = (datetime.now() - timedelta(days=30)).isoformat()
+        rows = self.db.query(
+            "SELECT nom_id,"
+            " COALESCE(SUM(CASE WHEN at>=? THEN -qty ELSE 0 END),0) s7,"
+            " COALESCE(SUM(CASE WHEN at>=? THEN -qty ELSE 0 END),0) s30,"
+            " MAX(at) last_sale"
+            " FROM stock_moves WHERE doc_kind='sale' AND qty<0"
+            " GROUP BY nom_id", (since7, since30))
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            sold7 = num(row["s7"])
+            out[row["nom_id"]] = {
+                "sold_7": round(sold7, 1),
+                "sold_30": round(num(row["s30"]), 1),
+                "rate_per_day": round(sold7 / SALE_DAYS, 2) if sold7 else 0.0,
+                "last_sale": row.get("last_sale") or "",
+            }
+        return out
+
     def sales_stats(self, nom_id: str) -> dict[str, Any]:
         """Продажи за 7 и 30 дней, скорость, дата последней продажи."""
         since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()

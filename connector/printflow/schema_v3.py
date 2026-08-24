@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS nomenclature (
     marked INTEGER DEFAULT 0,       -- подлежит обязательной маркировке
     min_qty REAL DEFAULT 0,         -- минимальный запас
     max_qty REAL DEFAULT 0,         -- максимальный запас
+    print_group TEXT DEFAULT '',    -- печатная группа мелких товаров (схема 13):
+                                    -- строки с одинаковой группой сворачиваются
+                                    -- в одну позицию в счёте/чеке/накладной
     shelf_life_days REAL DEFAULT 0,
     photo TEXT DEFAULT '',
     note TEXT DEFAULT '',

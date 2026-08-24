@@ -721,10 +721,13 @@ class Accounting:
         grams = num(order.get("actual_grams")) or num(order.get("grams"))
         # У мультизаказа grams — уже вся плита, а qty — сумма единиц по всем
         # позициям; умножать вес плиты на количество нельзя.
+        # Если вызывающий код уже посчитал items_count (список заказов),
+        # лишний пробный запрос не нужен — доверяем счётчику.
         has_items = (num(order.get("items_count")) > 0
                      or bool(order.get("items"))
-                     or self.db.one("SELECT id FROM order_items WHERE order_id=?"
-                                    " LIMIT 1", (order.get("id") or "",)) is not None)
+                     or ("items_count" not in order
+                         and self.db.one("SELECT id FROM order_items WHERE order_id=?"
+                                         " LIMIT 1", (order.get("id") or "",)) is not None))
         qty = 1.0 if has_items else num(order.get("qty"), 1)
         cost = num(order.get("actual_cost")) or num(order.get("cost"))
         if not cost:

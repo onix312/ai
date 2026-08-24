@@ -1190,10 +1190,16 @@ async function refreshOrderDetail() {
 }
 
 /* ====================================================== документы заказа */
+function docFoldEnabled() {
+  const box = $('order_doc_fold');
+  return box ? box.checked : true; // по умолчанию мелкие товары сворачиваем
+}
+
 function openOrderPrint(kind) {
   if (!editingOrder) return fail(new Error('Сначала сохраните заказ'));
   const k = String(kind || 'waybill').trim() || 'waybill';
-  window.open('/api/b2b/doc?id=' + encodeURIComponent(editingOrder) + '&kind=' + encodeURIComponent(k), '_blank');
+  window.open('/api/b2b/doc?id=' + encodeURIComponent(editingOrder) + '&kind=' + encodeURIComponent(k)
+    + '&group=' + (docFoldEnabled() ? '1' : '0'), '_blank');
 }
 
 function renderOrderDocuments(payload) {
@@ -1208,6 +1214,17 @@ function renderOrderDocuments(payload) {
   if (!payload) {
     host.innerHTML = '<div class="empty compact"><span>Загружаем документы…</span></div>';
     return;
+  }
+  const foldInfo = payload.fold || {};
+  const foldHint = $('of_docs_fold_hint');
+  if (foldHint) {
+    const before = Number(foldInfo.before) || 0;
+    const after = Number(foldInfo.after) || 0;
+    foldHint.hidden = !foldInfo.enabled;
+    if (foldInfo.enabled) {
+      foldHint.textContent = `В документе ${before} поз. → ${after} после свёртки`
+        + (foldInfo.groups && foldInfo.groups.length ? ` (группы: ${foldInfo.groups.join(', ')})` : '');
+    }
   }
   const docs = payload.documents || [];
   if (!docs.length) {
@@ -2011,6 +2028,17 @@ function bind() {
   });
   const createWaybill = $('order_create_waybill');
   if (createWaybill) createWaybill.addEventListener('click', createOrderWaybill);
+  // Свёртка мелких товаров в печатных формах: выбор запоминается в браузере.
+  const docFold = $('order_doc_fold');
+  if (docFold) {
+    try {
+      const saved = localStorage.getItem('pf.docs.fold');
+      if (saved !== null) docFold.checked = saved !== '0';
+    } catch (e) { /* приватный режим */ }
+    docFold.addEventListener('change', () => {
+      try { localStorage.setItem('pf.docs.fold', docFold.checked ? '1' : '0'); } catch (e) { /* ок */ }
+    });
+  }
   const docsList = $('of_docs_list');
   if (docsList) docsList.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-order-doc]');

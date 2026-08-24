@@ -93,7 +93,6 @@ class ContentTests(unittest.TestCase):
         self.assertEqual(out["nearest"]["date"], "2027-01-01")
 
     def test_avito_card(self):
-        from connector.printflow.accounting import uid
         from connector.printflow.content import avito_card
         from connector.printflow.config import now_iso
         db = self.db
@@ -177,7 +176,7 @@ class ShelfForecastTests(unittest.TestCase):
     def test_live_tags(self):
         from connector.printflow.config import now_iso
         self._item("hit", 3.0, 6)
-        new_id = self.shelf.save_item({"id": "new", "name": "new",
+        self.shelf.save_item({"id": "new", "name": "new",
                                        "qty": 4.0, "price": 50.0,
                                        "created_at": now_iso()})
         self._item("last", 1.0, 0)
@@ -266,7 +265,6 @@ class PlateMapTests(unittest.TestCase):
 class VirtualPrinterTests(unittest.TestCase):
     def setUp(self):
         self.db = make_db()
-        from connector.printflow.accounting import uid
         self.db.upsert("spools", {"id": "sp1", "material": "PLA",
                                   "color_name": "Красный", "color_hex": "#dc2626",
                                   "remaining_grams": 400.0,
