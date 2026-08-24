@@ -21,6 +21,45 @@ let viewMode = 'cards';
 let batchPlan = null;
 let mixedRows = [{ nom_id: '', qty: 1 }];
 
+function formatNomGroupedOptions(items, groups, selected = '', formatFn) {
+  const grps = groups || [];
+  const byGroup = new Map();
+  grps.forEach((g) => byGroup.set(g.id, []));
+  byGroup.set('', []);
+
+  (items || []).forEach((i) => {
+    const gid = i.group_id && byGroup.has(i.group_id) ? i.group_id : '';
+    byGroup.get(gid).push(i);
+  });
+
+  const defaultFmt = (i) => `${esc(i.name)}`;
+  const fmt = formatFn || defaultFmt;
+  let html = '';
+
+  grps.forEach((g) => {
+    const gItems = byGroup.get(g.id) || [];
+    if (gItems.length) {
+      html += `<optgroup label="📂 ${esc(g.name)}">`;
+      gItems.forEach((i) => {
+        const sel = String(i.id) === String(selected) ? ' selected' : '';
+        html += `<option value="${esc(i.id)}"${sel}>${fmt(i)}</option>`;
+      });
+      html += `</optgroup>`;
+    }
+  });
+
+  const noGroup = byGroup.get('') || [];
+  if (noGroup.length) {
+    if (grps.length > 0) html += `<optgroup label="📁 Без категории">`;
+    noGroup.forEach((i) => {
+      const sel = String(i.id) === String(selected) ? ' selected' : '';
+      html += `<option value="${esc(i.id)}"${sel}>${fmt(i)}</option>`;
+    });
+    if (grps.length > 0) html += `</optgroup>`;
+  }
+  return html;
+}
+
 /* ===================== смешанная плита: разные товары на одном столе ==== */
 function renderMixedRows() {
   const host = $('bf_item_rows');
@@ -30,9 +69,12 @@ function renderMixedRows() {
     host.innerHTML = '<small class="muted">Сначала добавьте товары в номенклатуру.</small>';
     return;
   }
-  const options = (selected) => noms.map((n) =>
-    `<option value="${esc(n.id)}"${n.id === selected ? ' selected' : ''}>`
-    + `${esc(n.name)}${num(n.grams) ? ` · ${nfmt(n.grams)} г` : ''}</option>`).join('');
+  const options = (selected) => formatNomGroupedOptions(
+    noms,
+    data.groups,
+    selected,
+    (n) => `${esc(n.name)}${num(n.grams) ? ` · ${nfmt(n.grams)} г` : ''}`
+  );
   host.innerHTML = mixedRows.map((r, i) => `<div class="of-spool-row">`
     + `<select data-mixed-nom><option value="">— товар —</option>${options(r.nom_id)}</select>`
     + `<input type="number" min="1" step="1" data-mixed-qty value="${num(r.qty) || 1}" title="Сколько штук этого товара на одной плите" placeholder="шт">`
@@ -133,7 +175,49 @@ function updateTags() {
     dt.textContent = String(drafts);
     dt.className = 'tag warn';
   }
+  updateStockTabBadges();
 }
+
+function updateStockTabBadges() {
+  const s = data.summary || {};
+  const prodAlerts = (s.low || 0) + (s.empty || 0) + (s.dead || 0);
+  $$('[data-tab-badge="products"]').forEach((el) => {
+    el.hidden = !prodAlerts;
+    el.textContent = String(prodAlerts);
+    el.className = 'tab-hits' + (s.empty || s.dead ? ' bad' : ' warn');
+  });
+
+  const activeBatches = batchData.filter((b) => b.state === 'printing' || b.state === 'planned').length;
+  const isPrinting = batchData.some((b) => b.state === 'printing');
+  $$('[data-tab-badge="batches"]').forEach((el) => {
+    el.hidden = !activeBatches;
+    el.textContent = String(activeBatches);
+    el.className = 'tab-hits' + (isPrinting ? ' live' : '');
+  });
+
+  const drafts = docsData.filter((d) => d.state === 'draft').length;
+  $$('[data-tab-badge="documents"]').forEach((el) => {
+    el.hidden = !drafts;
+    el.textContent = String(drafts);
+    el.className = 'tab-hits warn';
+  });
+
+  const spools = (PF.state && PF.state.spools) || [];
+  const lowSpools = spools.filter((sp) => num(sp.percent) < num((PF.state && PF.state.settings && PF.state.settings.filament_low_threshold) || 15, 15)).length;
+  $$('[data-tab-badge="inventory"]').forEach((el) => {
+    el.hidden = !lowSpools;
+    el.textContent = String(lowSpools);
+    el.className = 'tab-hits warn';
+  });
+
+  const whCount = (data.warehouses || []).length;
+  $$('[data-tab-badge="warehouses"]').forEach((el) => {
+    el.hidden = !whCount;
+    el.textContent = String(whCount);
+    el.className = 'tab-hits dim';
+  });
+}
+PF.updateStockTabBadges = updateStockTabBadges;
 
 function fillSelectors() {
   const whOpts = data.warehouses.map((w) =>
@@ -168,8 +252,7 @@ function fillSelectors() {
   const ptypes = data.priceTypes.map((p) =>
     `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   set('df_price_type', ptypes);
-  const noms = data.items.filter((i) => i.kind !== 'service').map((i) =>
-    `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  const noms = formatNomGroupedOptions(data.items.filter((i) => i.kind !== 'service'), data.groups);
   set('bf_nom', noms);
   const printers = (PF.state.printers || []).map((p) =>
     `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
@@ -223,33 +306,45 @@ function render() {
 }
 
 function renderCards(list) {
+  const KIND_ICONS = { kit: '◫', material: '◍', semi: '⚙', service: '★', product: '📦' };
+  const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
   $('prod_grid').innerHTML = list.length ? list.map((i) => {
     const st = i.status || 'ok';
     const cls = STATUS_CLASS[st] || '';
     const unprofit = i.profitable === false;
+    const minQ = num(i.min_qty) || 5;
+    const stockPct = Math.min(100, Math.max(0, Math.round(num(i.qty) / minQ * 50)));
+    const stockHealthCls = st === 'ok' ? 'ok' : (st === 'low' ? 'warn' : 'bad');
+    const marginPct = num(i.price) ? Math.round(num(i.margin) / num(i.price) * 100) : 0;
+    const daysLeftCls = i.days_left == null ? 'muted' : (i.days_left < 3 ? 'neg' : (i.days_left < 7 ? 'warn-text' : 'pos'));
+    const kindIc = KIND_ICONS[i.kind] || '📦';
+    const statusIc = STATUS_ICONS[st] || '◻';
     return `<article class="prod-card ${st}" data-nom="${esc(i.id)}">`
       + '<div class="phead">'
       + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
-        : `<span class="pphoto ph">${i.kind === 'kit' ? '◫' : i.kind === 'material' ? '◍' : '◻'}</span>`)
-      + `<div class="pinfo"><h3>${esc(i.name)}</h3>`
-      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''} · ${esc(KIND_LABEL[i.kind] || 'Товар')}</small></div>`
+        : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
+      + `<div class="pinfo">`
+      + `<div class="pinfo-top"><h3>${esc(i.name)}</h3><span class="prod-kind-tag ${esc(i.kind || 'product')}">${esc(KIND_LABEL[i.kind] || 'Товар')}</span></div>`
+      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''}</small>`
+      + `</div>`
       + `<button class="icon-btn sm" type="button" data-nom-edit="${esc(i.id)}" title="Открыть карточку">✎</button></div>`
       + '<div class="pbody">'
-      + `<div class="pqty ${cls}"><b>${nfmt(i.qty)}</b><span>${esc(i.unit || 'шт')}</span>`
-      + (num(i.reserved) ? `<small class="muted">резерв ${nfmt(i.reserved)}</small>` : '')
+      + `<div class="pqty ${cls}"><div class="pqty-num"><b>${nfmt(i.qty)}</b><span>${esc(i.unit || 'шт')}</span></div>`
+      + `<div class="bar thin prod-stock-bar ${stockHealthCls}"><i style="width:${stockPct}%"></i></div>`
+      + (num(i.reserved) ? `<small class="muted reserve-tag">резерв ${nfmt(i.reserved)} шт</small>` : `<small class="muted free-tag">${nfmt(i.free)} своб.</small>`)
       + '</div>'
       + '<div class="pfacts">'
       + `<span>Цена <b>${money(i.price)}</b></span>`
       + `<span>С/с <b>${money(i.cost)}</b></span>`
-      + `<span>Маржа <b class="${num(i.margin) >= 0 ? 'pos' : 'neg'}">${money(i.margin)}</b></span>`
+      + `<span>Маржа <b class="${num(i.margin) >= 0 ? 'pos' : 'neg'}">${money(i.margin)} <small class="pct">(${marginPct}%)</small></b></span>`
       + `<span>₽/час <b class="${unprofit ? 'neg' : 'pos'}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</b></span>`
       + `<span>7 дн. <b>${nfmt(i.sold_7)} шт</b></span>`
-      + (i.days_left != null ? `<span>Хватит <b>${nfmt(i.days_left, 1)} дн.</b></span>`
+      + (i.days_left != null ? `<span>Хватит <b class="${daysLeftCls}">${nfmt(i.days_left, 1)} дн.</b></span>`
         : '<span class="muted">продаж нет</span>')
       + '</div></div>'
       + '<div class="pacts">'
-      + `<span class="chip ${cls}">${esc(STATUS_LABEL[st] || st)}</span>`
-      + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">убыточный</span>' : '')
+      + `<span class="chip ${cls}">${statusIc} ${esc(STATUS_LABEL[st] || st)}</span>`
+      + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">📉 убыточный</span>' : '')
       + '<span class="spacer"></span>'
       + (num(i.plan_qty) ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)}</span>` : '')
       + `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену только этого товара">↻</button>`
@@ -261,9 +356,11 @@ function renderCards(list) {
 }
 
 function renderTable(list) {
+  const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
   $('prod_tbody').innerHTML = list.length ? list.map((i) => {
     const group = data.groups.find((g) => g.id === i.group_id);
     const unprofit = i.profitable === false;
+    const statusIc = STATUS_ICONS[i.status] || '◻';
     return `<tr class="clickable" data-nom-edit="${esc(i.id)}">`
       + `<td class="tnum muted">${esc(i.code || '')}</td>`
       + `<td class="strong">${esc(i.name)}${i.sku ? `<small class="muted"> · ${esc(i.sku)}</small>` : ''}</td>`
@@ -276,7 +373,7 @@ function renderTable(list) {
       + `<td class="right tnum ${num(i.margin) >= 0 ? 'pos' : 'neg'}">${money(i.margin)}</td>`
       + `<td class="right tnum ${unprofit ? 'neg' : ''}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</td>`
       + `<td class="right tnum">${nfmt(i.sold_7)}</td>`
-      + `<td><span class="chip ${STATUS_CLASS[i.status] || ''}">${esc(STATUS_LABEL[i.status] || i.status)}</span></td>`
+      + `<td><span class="chip ${STATUS_CLASS[i.status] || ''}">${statusIc} ${esc(STATUS_LABEL[i.status] || i.status)}</span></td>`
       + `<td class="right"><button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button></td></tr>`;
   }).join('') : `<tr><td colspan="13">${emptyBox('▩', 'Ничего не найдено', 'Измените фильтры или добавьте товар.')}</td></tr>`;
 }
@@ -535,24 +632,27 @@ function renderBatches() {
     const cls = { planned: '', printing: 'accent', partial: 'warn', done: 'ok', cancelled: '' }[b.state] || '';
     const label = { planned: 'План', printing: 'Печатает', partial: 'Частично',
       done: 'Готова', cancelled: 'Отменена' }[b.state] || b.state;
+    const isPrinting = b.state === 'printing';
     const rest = Math.max(0, num(b.qty_planned) - num(b.qty_done));
     const mixedList = (b.items_list || []);
     const mixedChips = mixedList.length
-      ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin:6px 0">` + mixedList.map((r) =>
+      ? `<div class="batch-mixed-list">` + mixedList.map((r) =>
           `<span class="chip outline">${esc(r.name || '')} ×${nfmt(r.qty_per_plate)}/плита</span>`).join('') + `</div>`
       : '';
+    const prog = Math.min(100, Math.max(0, Math.round(num(b.progress))));
     return `<div class="batch-item ${b.state}">`
       + `<div class="bhead"><b>${esc(b.nom_name || b.name)}</b>`
-      + `<span class="chip ${cls}">${esc(label)}</span>`
+      + `<span class="chip ${cls}">${isPrinting ? '<span class="live-dot"></span>' : ''}${esc(label)}</span>`
+      + `<span class="spacer"></span>`
       + `<small class="muted">${esc(b.number || '')} · ${esc(dateTimeText(b.at))}</small></div>`
       + mixedChips
-      + `<div class="bbar"><i style="width:${Math.min(100, num(b.progress))}%"></i></div>`
+      + `<div class="bbar"><i style="width:${prog}%"></i></div>`
       + '<div class="bfacts">'
-      + `<span>Готово <b>${nfmt(b.qty_done)} / ${nfmt(b.qty_planned)} шт</b></span>`
-      + `<span>Запусков <b>${nfmt(b.plates)}</b></span>`
-      + (num(b.qty_scrap) ? `<span>Брак <b class="neg">${nfmt(b.qty_scrap)} шт</b></span>` : '')
-      + (num(b.cost) ? `<span>С/с <b>${money(b.cost)}</b></span>` : '')
-      + `<span>Склад <b>${esc(b.warehouse_name || '—')}</b></span>`
+      + `<span class="bfact">Готово <b>${nfmt(b.qty_done)} / ${nfmt(b.qty_planned)} шт</b> (${prog}%)</span>`
+      + `<span class="bfact">Запусков <b>${nfmt(b.plates)}</b></span>`
+      + (num(b.qty_scrap) ? `<span class="bfact">Брак <b class="neg">${nfmt(b.qty_scrap)} шт</b></span>` : '')
+      + (num(b.cost) ? `<span class="bfact">С/с <b>${money(b.cost)}</b></span>` : '')
+      + `<span class="bfact">Склад <b>${esc(b.warehouse_name || '—')}</b></span>`
       + '</div>'
       + '<div class="bacts">'
       + (rest > 0 && b.state !== 'cancelled'
@@ -773,18 +873,30 @@ async function createFromPlan() {
 }
 
 /* ============================================================ документы */
+const DOC_ICONS = {
+  receipt: '📥',
+  sale: '📤',
+  move: '🔄',
+  writeoff: '🗑',
+  inventory: '📋',
+  production: '⚙',
+  return: '↩',
+  pricing: '🏷',
+};
+
 function renderDocs() {
   $('doc_tbody').innerHTML = docsData.length ? docsData.map((d) => {
     const posted = d.state === 'posted';
+    const ic = DOC_ICONS[d.kind] || '📋';
     return `<tr class="clickable" data-doc="${esc(d.id)}">`
       + `<td class="strong tnum">${esc(d.number || '')}</td>`
-      + `<td>${esc(DOC_KIND[d.kind] || d.kind)}</td>`
-      + `<td>${esc(dateTimeText(d.at))}</td>`
+      + `<td><span class="doc-kind-chip ${esc(d.kind)}">${ic} ${esc(DOC_KIND[d.kind] || d.kind)}</span></td>`
+      + `<td class="muted">${esc(dateTimeText(d.at))}</td>`
       + `<td>${esc(d.warehouse_name || '—')}${d.warehouse_to_name ? ' → ' + esc(d.warehouse_to_name) : ''}</td>`
       + `<td class="right tnum">${nfmt(d.lines)}</td>`
       + `<td class="right tnum">${nfmt(d.qty_total)}</td>`
       + `<td class="right tnum">${num(d.amount) ? money(d.amount) : '—'}</td>`
-      + `<td><span class="chip ${posted ? 'ok' : 'warn'}">${posted ? 'Проведён' : 'Черновик'}</span></td>`
+      + `<td><span class="chip ${posted ? 'ok' : 'warn'}">${posted ? '✓ Проведён' : '✎ Черновик'}</span></td>`
       + `<td class="right"><button class="icon-btn sm" type="button" data-doc-open="${esc(d.id)}">→</button></td></tr>`;
   }).join('') : `<tr><td colspan="9">${emptyBox('▤', 'Документов нет', 'Создайте приход, продажу или инвентаризацию.')}</td></tr>`;
 }
@@ -863,8 +975,12 @@ async function openDoc(id, kind) {
 
 function renderDocRows() {
   const kind = $('doc_modal').dataset.kind || 'receipt';
-  const opts = data.items.map((i) =>
-    `<option value="${esc(i.id)}">${esc(i.name)}${i.code ? ' · ' + esc(i.code) : ''}</option>`).join('');
+  const opts = formatNomGroupedOptions(
+    data.items,
+    data.groups,
+    '',
+    (i) => `${esc(i.name)}${i.code ? ' · ' + esc(i.code) : ''}`
+  );
   $('df_tbody').innerHTML = docRows.map((r, index) =>
     `<tr><td><select data-row-nom="${index}"><option value="">— выберите —</option>${opts}</select></td>`
     + `<td class="right"><input type="number" min="0" step="any" data-row-qty="${index}" value="${esc(r.qty)}"></td>`
@@ -929,6 +1045,7 @@ async function saveDoc(thenPost) {
 /* ============================================================== склады */
 const WH_KIND = { shelf: 'Полка магазина', home: 'Домашний склад', window: 'Витрина',
   defect: 'Брак', transit: 'В пути', material: 'Материалы' };
+const WH_ICONS = { shelf: '🏬', home: '🏠', window: '🪟', defect: '⚠', transit: '🚚', material: '🧶', other: '📦' };
 
 async function renderWarehouses() {
   let res = { warehouses: [], reserves: [], reserved: 0 };
@@ -943,15 +1060,19 @@ async function renderWarehouses() {
     kpi('В резерве', `${nfmt(res.reserved)} шт`, `${(res.reserves || []).length} резерв(ов) под заказы`),
   ].join('');
 
-  $('wh_grid').innerHTML = list.length ? list.map((w) =>
-    `<article class="wh-card" data-wh="${esc(w.id)}">`
-    + `<div class="whead"><h3>${esc(w.name)}</h3>`
-    + (num(w.retail) ? '<span class="chip ok">розница</span>' : '')
-    + `<button class="icon-btn sm" type="button" data-wh-edit="${esc(w.id)}" title="Изменить">✎</button></div>`
-    + `<div class="wbody"><div class="wnum"><b>${nfmt(w.qty)}</b><span>шт</span></div>`
-    + `<div class="wval">${money(w.value)}</div></div>`
-    + `<small class="muted">${esc(w.address || WH_KIND[w.kind] || '')} · ${nfmt(w.positions)} позиц.</small>`
-    + '</article>').join('')
+  $('wh_grid').innerHTML = list.length ? list.map((w) => {
+    const ic = WH_ICONS[w.kind] || '📦';
+    return `<article class="wh-card" data-wh="${esc(w.id)}">`
+      + `<div class="whead"><span class="wh-ic ${esc(w.kind || 'shelf')}">${ic}</span>`
+      + `<div class="wh-info"><h3>${esc(w.name)}</h3><small class="muted">${esc(w.address || WH_KIND[w.kind] || 'Место хранения')}</small></div>`
+      + (num(w.retail) ? '<span class="chip ok">розница</span>' : '')
+      + `<button class="icon-btn sm" type="button" data-wh-edit="${esc(w.id)}" title="Изменить">✎</button></div>`
+      + `<div class="wbody"><div class="wnum"><b>${nfmt(w.qty)}</b><span>шт</span></div>`
+      + `<div class="wval">${money(w.value)}</div></div>`
+      + `<div class="wfoot"><span class="chip outline">${nfmt(w.positions)} позиций</span>`
+      + (w.note ? `<small class="muted wh-note" title="${esc(w.note)}">${esc(w.note)}</small>` : '')
+      + `</div></article>`;
+  }).join('')
     : emptyBox('▦', 'Складов нет', 'Добавьте место хранения — полку магазина или домашний склад.');
 
   const reserves = res.reserves || [];

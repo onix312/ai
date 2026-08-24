@@ -99,6 +99,7 @@ function renderStock() {
   }
 
   const locLabel = { shop: 'магазин', home: 'дом', ams: 'AMS', dry: 'сушка', other: 'другое' };
+  const locIcon = { shop: '🏬', home: '🏠', ams: '🖨', dry: '♨', other: '📦' };
   const q = String(($('spool_search') || {}).value || '').trim().toLowerCase();
   const matF = String(($('spool_filter_mat') || {}).value || '');
   const locF = String(($('spool_filter_loc') || {}).value || '');
@@ -138,28 +139,36 @@ function renderStock() {
         + (num(s.last_dry_min) ? ` ${nfmt(s.last_dry_min)} мин` : '')
       : '';
     const loc = locLabel[s.location || 'shop'] || s.location || 'магазин';
-    return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить">`
+    const locIc = locIcon[s.location || 'shop'] || '📦';
+    const colorHex = s.color_hex || '#4b5563';
+    return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить" style="--filament:${esc(colorHex)}">`
       + `<div class="spool-top">`
-      + `<div class="reel" style="--filament:${esc(s.color_hex || '#4b5563')};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
-      + `<div class="body"><b>${esc(s.material)} ${esc(s.color_name)}</b>`
-      + `<small>${esc(s.brand || 'без бренда')}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS слот ${esc(String(s.ams_slot))}` : ''}`
-      + ` · ${esc(loc)}`
-      + `${num(s.price_per_kg) ? ` · ${money(s.price_per_kg)}/кг` : ''}`
-      + `${num(s.ams_sync, 1) !== 0 && s.synced_at ? ' · <span title="Остаток обновляется автоматически из AMS. Отключается в карточке катушки.">⟳ из AMS</span>' : ''}`
-      + `${!num(s.verified, 1) ? ' · <b class="warn">нужно проверить</b>' : ''}</small>`
-      + `<div class="nums"><em>${nfmt(s.remaining_grams)}</em><span class="muted">/ ${nfmt(s.total_grams)} г · ${money(s.value)}</span></div>`
-      + `<div class="bar ${p < 15 ? 'warn' : 'ok'}"><i style="width:${p}%"></i></div>`
-      + `<small class="muted used">израсходовано ${nfmt(s.used_grams)} г`
-      + (s.last_dry ? ` · сушка ${esc(dateText(s.last_dry))}` : '')
-      + '</small>'
+      + `<div class="reel" style="--filament:${esc(colorHex)};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
+      + `<div class="body">`
+      + `<div class="spool-title-row">`
+      + `<span class="mat-chip" data-mat="${esc(s.material || 'PLA')}">${esc(s.material || 'PLA')}</span>`
+      + `<b class="spool-name"><span class="color-swatch-dot" style="background:${esc(colorHex)}"></span>${esc(s.color_name || 'Без названия')}</b>`
+      + `</div>`
+      + `<div class="spool-meta-row">`
+      + `<span class="spool-brand">${esc(s.brand || 'без бренда')}</span>`
+      + `<span class="spool-loc-badge" title="Место хранения">${locIc} ${esc(loc)}${s.ams_slot !== '' && s.ams_slot != null ? ` · AMS ${esc(String(s.ams_slot))}` : ''}</span>`
+      + (num(s.price_per_kg) ? `<span class="spool-price-badge">${money(s.price_per_kg)}/кг</span>` : '')
+      + (num(s.ams_sync, 1) !== 0 && s.synced_at ? '<span class="spool-ams-badge" title="Остаток обновляется автоматически из AMS">⟳ AMS</span>' : '')
+      + (!num(s.verified, 1) ? '<span class="chip xs warn" title="Требуется подтвердить остаток">⚠ проверить</span>' : '')
+      + `</div>`
+      + `<div class="nums"><em>${nfmt(s.remaining_grams)} г</em><span class="muted">/ ${nfmt(s.total_grams)} г</span><span class="spacer"></span><b class="spool-cost">${money(s.value)}</b></div>`
+      + `<div class="bar ${p < 15 ? (p <= 0 ? 'bad' : 'warn') : 'ok'}"><i style="width:${p}%"></i></div>`
+      + `<div class="spool-sub-row"><small class="muted used">израсходовано ${nfmt(s.used_grams)} г</small>`
+      + (s.last_dry ? `<small class="spool-dry-tag" title="Сушка">♨ ${esc(dateText(s.last_dry))}</small>` : '')
+      + `</div>`
       + '</div></div>'
       + '<div class="acts">'
-      + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">Пополнить</button>`
-      + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">Списать</button>`
+      + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">+ Пополнить</button>`
+      + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">− Списать</button>`
       + `<button class="btn sm ghost" type="button" data-spool-scrap="${esc(s.id)}">Обрезки</button>`
       + '</div>'
       + '<div class="acts tools">'
-      + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">☀ Сушка</button>`
+      + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">♨ Сушка</button>`
       + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR-код для наклейки на катушку">◫ QR</button>`
       + `<button class="btn sm ghost" type="button" data-spool-edit="${esc(s.id)}" title="Карточка катушки">✎ Изменить</button>`
       + '</div></article>';
@@ -170,18 +179,37 @@ function renderStock() {
 async function loadFilamentStats() {
   try {
     const data = await get('/api/filament-stats', { days: 30 });
-    const row = (d) => `<div class="tx-row"><div class="tx-body"><b>${esc(d.material || '—')}</b>`
-      + `<small>${nfmt(d.uses)} списаний · ${money(d.cost)}</small></div>`
-      + `<span class="amt">${nfmt(d.grams)} г</span></div>`;
+    const maxMatG = Math.max(1, ...(data.by_material || []).map((d) => num(d.grams)));
+    const maxColG = Math.max(1, ...(data.by_color || []).map((d) => num(d.grams)));
+
+    const matRow = (d) => {
+      const pct = Math.round(num(d.grams) / maxMatG * 100);
+      return `<div class="tx-row stat-row">`
+        + `<div class="tx-body">`
+        + `<div class="stat-head"><b>${esc(d.material || '—')}</b><span class="amt">${nfmt(d.grams)} г</span></div>`
+        + `<div class="bar thin stat-bar"><i style="width:${pct}%"></i></div>`
+        + `<small>${nfmt(d.uses)} списаний · ${money(d.cost)}</small>`
+        + `</div></div>`;
+    };
+
+    const colRow = (d) => {
+      const pct = Math.round(num(d.grams) / maxColG * 100);
+      const colHex = d.color_hex || '#64748b';
+      return `<div class="tx-row stat-row">`
+        + `<div class="tx-body">`
+        + `<div class="stat-head"><b class="color-head"><span class="color-swatch-dot" style="background:${esc(colHex)}"></span>${esc(d.color || 'Без названия')}</b><span class="amt">${nfmt(d.grams)} г</span></div>`
+        + `<div class="bar thin stat-bar"><i style="width:${pct}%;background:${esc(colHex)}"></i></div>`
+        + `<small>${esc(d.material || '—')} · ${nfmt(d.uses)} списаний · ${money(d.cost)}</small>`
+        + `</div></div>`;
+    };
+
     const mat = $('filament_by_mat');
     if (mat) mat.innerHTML = (data.by_material || []).length
-      ? (data.by_material || []).slice(0, 8).map(row).join('')
+      ? (data.by_material || []).slice(0, 8).map(matRow).join('')
       : '<div class="empty compact"><span>Расхода ещё не было.</span></div>';
     const col = $('filament_by_color');
     if (col) col.innerHTML = (data.by_color || []).length
-      ? (data.by_color || []).slice(0, 8).map((d) => `<div class="tx-row"><div class="tx-body"><b>${esc(d.color)}</b>`
-        + `<small>${esc(d.material || '—')} · ${nfmt(d.uses)} списаний · ${money(d.cost)}</small></div>`
-        + `<span class="amt">${nfmt(d.grams)} г</span></div>`).join('')
+      ? (data.by_color || []).slice(0, 8).map(colRow).join('')
       : '<div class="empty compact"><span>Расхода ещё не было.</span></div>';
   } catch (e) { /* офлайн */ }
 }

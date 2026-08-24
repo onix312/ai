@@ -3549,7 +3549,19 @@
   <div class="verdict" id="of_intake_hint" hidden></div>
   <div class="form-section"><h3>Заказ</h3><div class="form-grid">
    <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" list="products_datalist" required></label>
-   <label class="field span-2"><span>Готовый товар из базы</span><select id="of_nom_id"><option value="">Не выбран — заказ на печать / услугу</option></select><small class="hint" id="of_stock_hint">Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.</small></label>
+   <div class="field span-2">
+     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+       <span>Готовый товар из базы</span>
+       <div style="display:flex;align-items:center;gap:6px">
+         <span style="font-size:11.2px;color:var(--muted)">Категория:</span>
+         <select id="of_category_filter" style="width:auto;min-width:130px;height:26px;padding:0 8px;font-size:11.5px;border-radius:6px;background:var(--panel-2);border:1px solid var(--line-soft)">
+           <option value="">Все категории</option>
+         </select>
+       </div>
+     </div>
+     <select id="of_nom_id"><option value="">Не выбран — заказ на печать / услугу</option></select>
+     <small class="hint" id="of_stock_hint">Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.</small>
+   </div>
    <label class="field"><span>Склад готового товара</span><select id="of_warehouse_id"><option value="">Автоматически</option></select></label>
    <label class="check"><input type="checkbox" id="of_reserved"> Взять готовое со склада и зарезервировать</label>
    <label class="field"><span>Статус</span><select id="of_status"></select></label>
