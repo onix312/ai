@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — «О нас» и промпт для ИИ</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+body{background:#eef1f7}.wrap{max-width:1080px;margin:0 auto;padding:20px 18px 70px}.hero{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-radius:18px;padding:22px 24px;margin-bottom:16px}.hero h1{margin:0;font-size:25px}.hero p{max-width:780px;line-height:1.55;margin:7px 0 0;font-size:13px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:17px}.card h2{font-size:15px;margin:0 0 5px}.hint{font-size:12px;color:var(--ink-soft);line-height:1.5;margin:0 0 12px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fields .wide{grid-column:1/-1}.field{display:block;font-size:12px;color:var(--ink-soft)}.field input,.field textarea{display:block;width:100%;margin-top:5px;padding:8px 9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;color:var(--ink);background:#fcfcff}.field textarea{min-height:76px;resize:vertical;line-height:1.45}.result{margin-top:14px}.result textarea{width:100%;min-height:450px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fff;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--ink);resize:vertical}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.check{font-size:12px;line-height:1.55;color:var(--ink-soft);background:#f4f6fc;border-radius:10px;padding:11px 13px;margin-top:12px}.check b{color:var(--ink)}@media(max-width:720px){.grid,.fields{grid-template-columns:1fr}.fields .wide{grid-column:auto}.panel{position:static}}
+</style></head><body>
+<div class="panel noprint"><div class="panel-row"><h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">О нас · промпт для ИИ</h1><div class="panel-row" data-nz-common="qr"></div></div></div>
+<div class="wrap">
+ <section class="hero"><h1>Один честный контекст — для сайта, постов и ИИ</h1><p>Заполните только то, что действительно готовы обещать. Генератор соберёт подробный текст «О нас» и готовый промпт: его можно вставить в ChatGPT, Claude или другую модель перед созданием постов, карточек, ответов клиентам и сценариев.</p></section>
+ <div class="grid">
+  <section class="card"><h2>Позиционирование</h2><p class="hint">Факты о мастерской. Общие контакты сверху подставляются автоматически.</p><div class="fields">
+   <label class="field">Название мастерской<input data-page="brand" value="NOZZA"></label>
+   <label class="field">Слоган<input data-page="tagline" value="Там, где рождается форма"></label>
+   <label class="field wide">Чем занимаетесь<textarea data-page="what">Локальная мастерская 3D-печати: делаем функциональные изделия на заказ и небольшие партии по задаче клиента.</textarea></label>
+   <label class="field wide">Кому помогаем<textarea data-page="audience">Людям, которым нужна вещь точного размера; владельцам питомцев; небольшим локальным бизнесам, которым нужны таблички, QR-стойки, номерки и рабочая оснастка.</textarea></label>
+  </div></section>
+  <section class="card"><h2>Что можем предложить</h2><p class="hint">Пишите конкретно: это защищает от выдуманных обещаний в ответах ИИ.</p><div class="fields">
+   <label class="field wide">Основные направления<textarea data-page="offers">• Питомцы: адресники, именные таблички, держатели поводков и органайзеры.
+• Дом: органайзеры, крепления, держатели и некритичные детали по размерам.
+• Бизнес: QR-стойки, ценникодержатели, таблички, номерки и малые партии.</textarea></label>
+   <label class="field">Материалы<input data-page="materials" value="PLA и PETG; выбор зависит от задачи"></label>
+   <label class="field">Обычный срок<input data-page="leadtime" value="1–3 дня после согласования"></label>
+   <label class="field wide">Что не обещаем<textarea data-page="limits">Не берём на себя ответственность за несущие, медицинские, детские и критичные по безопасности изделия без отдельной оценки. Не обещаем точный срок или цену до расчёта и согласования.</textarea></label>
+  </div></section>
+  <section class="card"><h2>Как проходит заказ</h2><p class="hint">Это превратится в понятный блок для клиента и правило для ИИ.</p><div class="fields">
+   <label class="field wide">Шаги заказа<textarea data-page="process">Клиент присылает фото, задачу и размеры → мы уточняем применимость, материал, цену и срок → при необходимости согласуем макет → печатаем → проверяем качество → выдаём или отправляем.</textarea></label>
+   <label class="field wide">Тон общения<textarea data-page="tone">Дружелюбно, по делу и без техножаргона. Сначала выяснить задачу и размеры, затем предложить следующий шаг. Не давить на покупку.</textarea></label>
+  </div></section>
+  <section class="card"><h2>Правила для ИИ</h2><p class="hint">Они включаются в промпт и помогают не публиковать рискованные или недостоверные формулировки.</p><div class="fields">
+   <label class="field wide">Обязательные правила<textarea data-page="rules">Не выдумывай цены, сроки, наличие, свойства материалов, сертификаты, отзывы и адрес. Если данных не хватает — задай один короткий уточняющий вопрос или используй нейтральную формулировку. Не называй 3D-печать безопасной для еды, детей или нагрузок без подтверждения. Не публикуй личные данные клиентов.</textarea></label>
+  </div></section>
+ </div>
+ <section class="card result"><h2>Готовый промпт и текст «О нас»</h2><p class="hint">Скопируйте полностью для ИИ. Внутри уже есть контекст, стиль, ограничения и подробный блок, который можно использовать как «О нас».</p><div class="actions"><button class="btn primary" id="copy">Копировать промпт</button><button class="btn" id="download">Скачать .md</button><button class="btn" id="copyAbout">Копировать только «О нас»</button></div><textarea id="output" readonly aria-label="Сгенерированный промпт"></textarea><div class="check"><b>Перед публикацией:</b> проверьте телефон, ссылку QR, фактический срок и цену. ИИ получает контекст, но не заменяет расчёт, проверку макета и юридическую оценку товара.</div></section>
+</div>
+<script src="nz.js"></script><script>
+'use strict';
+const fields=[...document.querySelectorAll('[data-page]')];
+const val=k=>{const e=document.querySelector('[data-page="'+k+'"]');return e?e.value.trim():''};
+function about(){const c=NZ.contact(),brand=val('brand')||'NOZZA';return `${brand} — ${val('tagline')}\n\n${val('what')}\n\nРаботаем в городе: ${c.city||'уточняйте'}.\n\nКому помогаем\n${val('audience')}\n\nЧто делаем\n${val('offers')}\n\nМатериалы: ${val('materials')}.\nОбычный срок: ${val('leadtime')}.\n\nКак заказать\n${val('process')}\n\nСвязь: ${c.phone||'телефон уточняется'} · Telegram ${c.tg||'уточняется'} · ${c.site||''}`.trim()}
+function build(){const c=NZ.contact(),brand=val('brand')||'NOZZA',a=about();document.getElementById('output').value=`Ты — помощник мастерской ${brand}. Используй только контекст ниже, когда создаёшь тексты для сайта, Telegram, Авито, карточек товаров и ответы клиентам. Отвечай по-русски.\n\nЦЕЛЬ\nОбъяснять пользу 3D-печати простыми словами, помогать клиенту сформулировать задачу и вести к расчёту без давления.\n\nТОН\n${val('tone')}\n\nПРАВИЛА\n${val('rules')}\n\nКОНТАКТЫ\nГород: ${c.city||'уточнить'}\nТелефон: ${c.phone||'уточнить'}\nTelegram: ${c.tg||'уточнить'}\nСайт: ${c.site||'уточнить'}\nСсылка для QR: ${c.qrbase||'уточнить'}\n\nПОДРОБНО О НАС\n${a}\n\nОГРАНИЧЕНИЯ\n${val('limits')}\n\nПеред готовым текстом проверь: есть ли уместный следующий шаг (фото, размеры, задача); нет ли неподтверждённых цены, срока или свойства; нет ли лишних обещаний.`}
+NZ.mount(build);fields.forEach(e=>e.addEventListener('input',build));
+document.getElementById('copy').onclick=e=>NZ.copy(document.getElementById('output').value,e.currentTarget,'Промпт скопирован ✓');
+document.getElementById('copyAbout').onclick=e=>NZ.copy(about(),e.currentTarget,'«О нас» скопировано ✓');
+document.getElementById('download').onclick=()=>NZ.download('nozza-prompt-o-nas.md',document.getElementById('output').value,'text/markdown;charset=utf-8');
+</script></body></html>
