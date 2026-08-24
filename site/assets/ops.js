@@ -33,25 +33,122 @@ function orderCard(o) {
   const n = PF.niche(o.niche_id);
   const st = PF.status(o.status);
   const econ = o.economics || {};
-  const left = Math.max(0, num(o.price) - Math.max(num(o.paid), num(o.prepaid)));
+  const paid = Math.max(num(o.paid), num(o.prepaid));
+  const price = num(o.price);
+  const left = Math.max(0, price - paid);
   const cls = ['ocard'];
   if (o.priority === 'urgent') cls.push('urgent');
   if (overdue(o)) cls.push('late');
+
+  // Приоритет
+  let prioBadge = '';
+  if (o.priority === 'urgent') {
+    prioBadge = '<span class="prio-tag urgent" title="Срочный заказ">⚡ Срочно</span>';
+  } else if (o.priority === 'high') {
+    prioBadge = '<span class="prio-tag high" title="Высокий приоритет">🔥 Высокий</span>';
+  } else if (o.priority === 'low') {
+    prioBadge = '<span class="prio-tag low" title="Низкий приоритет">💤 Низкий</span>';
+  }
+
+  // Канал продаж
+  const channelAliases = {
+    direct: 'Прямой', shop: 'Витрина', telegram: 'Telegram',
+    avito: 'Авито', ozon: 'Ozon', b2b: 'B2B',
+  };
+  const ch = (PF.state.channels || []).find((c) => c.id === o.channel);
+  const channelName = ch ? ch.name : (channelAliases[o.channel] || (o.channel && o.channel !== 'direct' ? o.channel : ''));
+  const channelChip = channelName ? `<span class="channel-chip">${esc(channelName)}</span>` : '';
+
+  // Срок сдачи
+  let dueBadge = '';
+  if (o.due) {
+    if (overdue(o)) {
+      dueBadge = `<span class="due-badge bad" title="Срок сдачи просрочен">⚠️ ${esc(dateText(o.due))}</span>`;
+    } else {
+      const today = new Date().toISOString().slice(0, 10);
+      if (o.due === today) {
+        dueBadge = '<span class="due-badge warn" title="Срок сегодня">⏳ Сегодня</span>';
+      } else {
+        dueBadge = `<span class="due-badge" title="Срок сдачи">📅 ${esc(dateText(o.due))}</span>`;
+      }
+    }
+  }
+
+  // Оплата
+  let payChip = '';
+  if (price > 0) {
+    if (paid >= price) {
+      payChip = '<span class="pay-chip ok" title="Заказ полностью оплачен">✓ Оплачен</span>';
+    } else if (paid > 0) {
+      payChip = `<span class="pay-chip warn" title="Оплачено ${money(paid)}, остаток ${money(left)}">Оплата ${money(paid)} · ост. ${money(left)}</span>`;
+    } else {
+      payChip = '<span class="pay-chip dim" title="Не оплачен">Не оплачен</span>';
+    }
+  }
+
+  // Файл печати
+  const fileChip = o.file ? `<div class="file-chip" title="Файл: ${esc(o.file)}">🧊 ${esc(String(o.file).split('/').pop())}</div>` : '';
+
+  // Параметры производства
+  const specs = [];
+  if (o.material) {
+    specs.push(`<span class="spec-pill mat" title="Материал и цвет">🧵 ${esc(o.material)}${o.color ? ' · ' + esc(o.color) : ''}</span>`);
+  }
+  if (num(o.grams)) {
+    specs.push(`<span class="spec-pill" title="Вес пластика">⚖️ ${nfmt(o.grams)} г</span>`);
+  }
+  if (num(o.hours)) {
+    specs.push(`<span class="spec-pill" title="Время печати">⏱ ${hoursText(o.hours)}</span>`);
+  }
+  if (n) {
+    specs.push(`<span class="chip" style="background:${esc(n.color)}22;color:${esc(n.color)}">${esc(n.icon || '◆')} ${esc(n.name)}</span>`);
+  }
+  if (dueBadge) {
+    specs.push(dueBadge);
+  }
+
+  // Прибыль
+  let profitChip = '';
+  if (econ.profit != null && price > 0) {
+    const profitNum = num(econ.profit);
+    const pos = profitNum >= 0;
+    const marginStr = econ.margin != null ? ` (${nfmt(econ.margin, 0)}%)` : '';
+    profitChip = `<span class="profit-chip ${pos ? 'pos' : 'neg'}" title="Расчётная прибыль">${pos ? '+' : ''}${money(profitNum)}${marginStr}</span>`;
+  }
+
+  // Количество / состав
+  let qtyBadge = '';
+  if (o.items_count > 1) {
+    qtyBadge = `<span class="cnt-badge">${nfmt(o.items_count)} поз. · ${nfmt(o.qty)} шт</span>`;
+  } else if (o.qty > 1) {
+    qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
+  }
+
   return `<article class="${cls.join(' ')}" draggable="true" data-order="${esc(o.id)}">`
     + `<div class="strip" style="background:${esc(st.color)}"></div>`
-    + `<div class="num">№${esc(o.number)}${o.qty > 1 ? ` · ${nfmt(o.qty)} шт` : ''}${o.items_count ? ` · ${nfmt(o.items_count)} поз.` : ''}</div>`
+    + `<div class="ocard-head">`
+    + `<span class="num">№${esc(o.number)}</span>`
+    + qtyBadge
+    + prioBadge
+    + channelChip
+    + `</div>`
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
-    + `<div class="who">${esc(o.customer_name || 'Без клиента')}</div>`
-    + '<div class="meta">'
-    + `<span class="prio ${esc(o.priority || 'normal')}" title="${esc(PRIORITY[o.priority] || '')}"></span>`
-    + (n ? `<span class="chip" style="background:${esc(n.color)}22;color:${esc(n.color)}">${esc(n.icon || '◆')} ${esc(n.name)}</span>` : '')
-    + (o.hours ? `<span class="muted">${hoursText(o.hours)}</span>` : '')
-    + (o.due ? `<span class="due muted">${esc(dateText(o.due))}</span>` : '')
+    + fileChip
+    + `<div class="who-row">`
+    + `<span class="who" title="${esc(o.customer_name || '')}"><span class="who-ic">👤</span>${esc(o.customer_name || 'Без клиента')}</span>`
+    + (o.phone ? `<span class="phone-chip" title="Телефон">${esc(o.phone)}</span>` : '')
+    + `</div>`
+    + (specs.length ? `<div class="ocard-specs">${specs.join('')}</div>` : '')
+    + `<div class="ocard-foot">`
     + `<span class="price">${money(o.price)}</span>`
-    + '</div>'
-    + (left > 0 && Math.max(num(o.paid), num(o.prepaid)) > 0 ? `<div class="muted" style="font-size:11.4px;margin-top:5px">осталось получить ${money(left)}</div>` : '')
-    + (econ.profit != null && num(o.price) ? `<div class="muted" style="font-size:11.4px;margin-top:3px">прибыль ${money(econ.profit)}${econ.profit_per_hour ? ` · ${money(econ.profit_per_hour)}/ч` : ''}</div>` : '')
-    + '</article>';
+    + payChip
+    + profitChip
+    + `</div>`
+    + `<div class="ocard-actions">`
+    + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа">✎ Открыть</button>`
+    + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати">⎙ В очередь</button>` : '')
+    + `</div>`
+    + `</article>`;
 }
 
 function renderKanban(list) {
@@ -148,12 +245,64 @@ function bindDrag() {
   });
 }
 
+function buildNomenclatureGroupedOptions(items, selectedId = '', filterGroupId = '', formatOption) {
+  const groups = PF.state.groups || [];
+  let list = items || [];
+  if (filterGroupId) {
+    list = list.filter((i) => String(i.group_id || '') === String(filterGroupId));
+  }
+
+  const defaultFmt = (i) => `${esc(i.name)} · готово ${nfmt(i.free)} шт${num(i.price) ? ' · ' + money(i.price) : ''}`;
+  const fmt = formatOption || defaultFmt;
+
+  if (filterGroupId || groups.length === 0) {
+    return list.map((i) => {
+      const sel = String(i.id) === String(selectedId) ? ' selected' : '';
+      return `<option value="${esc(i.id)}"${sel}>${fmt(i)}</option>`;
+    }).join('');
+  }
+
+  const byGroup = new Map();
+  groups.forEach((g) => byGroup.set(g.id, []));
+  byGroup.set('', []);
+
+  list.forEach((item) => {
+    const gid = item.group_id && byGroup.has(item.group_id) ? item.group_id : '';
+    byGroup.get(gid).push(item);
+  });
+
+  let html = '';
+  groups.forEach((g) => {
+    const gItems = byGroup.get(g.id) || [];
+    if (gItems.length) {
+      html += `<optgroup label="📂 ${esc(g.name)}">`;
+      gItems.forEach((i) => {
+        const sel = String(i.id) === String(selectedId) ? ' selected' : '';
+        html += `<option value="${esc(i.id)}"${sel}>${fmt(i)}</option>`;
+      });
+      html += `</optgroup>`;
+    }
+  });
+
+  const noGroup = byGroup.get('') || [];
+  if (noGroup.length) {
+    if (groups.length > 0) html += `<optgroup label="📁 Без категории">`;
+    noGroup.forEach((i) => {
+      const sel = String(i.id) === String(selectedId) ? ' selected' : '';
+      html += `<option value="${esc(i.id)}"${sel}>${fmt(i)}</option>`;
+    });
+    if (groups.length > 0) html += `</optgroup>`;
+  }
+  return html;
+}
+
 /* ========================================================= карточка заказа */
 function fillSelectors() {
   const keepSel = (id) => ($(id) || {}).value || '';
   const keep = {
     of_status: keepSel('of_status'), of_niche_id: keepSel('of_niche_id'),
     of_channel: keepSel('of_channel'), of_nom_id: keepSel('of_nom_id'),
+    of_category_filter: keepSel('of_category_filter'),
     of_warehouse_id: keepSel('of_warehouse_id'),
   };
   const statuses = PF.state.statuses.map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
@@ -176,10 +325,26 @@ function fillSelectors() {
   const pd = $('products_datalist');
   if (pd) pd.innerHTML = [...(PF.state.nomenclature || []), ...(PF.state.catalog || [])]
     .map((c) => `<option value="${esc(c.name)}">`).join('');
+
+  const catFilter = $('of_category_filter');
+  if (catFilter) {
+    catFilter.innerHTML = '<option value="">Все категории</option>'
+      + (PF.state.groups || []).map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+    if (keep.of_category_filter && (PF.state.groups || []).some((g) => g.id === keep.of_category_filter)) {
+      catFilter.value = keep.of_category_filter;
+    }
+  }
+
   const nom = $('of_nom_id');
-  if (nom) nom.innerHTML = '<option value="">Не выбран — заказ на печать / услугу</option>'
-    + (PF.state.nomenclature || []).map((i) => `<option value="${esc(i.id)}">`
-      + `${esc(i.name)} · готово ${nfmt(i.free)} шт${num(i.price) ? ' · ' + money(i.price) : ''}</option>`).join('');
+  if (nom) {
+    const catVal = (catFilter && catFilter.value) || '';
+    nom.innerHTML = '<option value="">Не выбран — заказ на печать / услугу</option>'
+      + buildNomenclatureGroupedOptions(PF.state.nomenclature || [], keep.of_nom_id, catVal);
+    if (keep.of_nom_id && [...nom.options].some((o) => o.value === keep.of_nom_id)) {
+      nom.value = keep.of_nom_id;
+    }
+  }
+
   const wh = $('of_warehouse_id');
   if (wh) wh.innerHTML = '<option value="">Автоматически</option>'
     + (PF.state.warehouses || []).map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
@@ -326,9 +491,9 @@ function updateReadyStockHint() {
    Цена заказа = сумма позиций (цены из базы товаров, можно править).
    Вес/время плиты — поля заказа (с принтера/слайсера), вес позиции — из базы. */
 function itemNomOptions(selected) {
+  const fmt = (i) => `${esc(i.name)}${num(i.price) ? ' · ' + money(i.price) : ''}${num(i.grams) ? ' · ' + nfmt(i.grams) + ' г/шт' : ''}`;
   return '<option value="">— из базы товаров —</option>'
-    + (PF.state.nomenclature || []).map((i) => `<option value="${esc(i.id)}"${i.id === selected ? ' selected' : ''}>`
-      + `${esc(i.name)}${num(i.price) ? ' · ' + money(i.price) : ''}${num(i.grams) ? ' · ' + nfmt(i.grams) + ' г/шт' : ''}</option>`).join('');
+    + buildNomenclatureGroupedOptions(PF.state.nomenclature || [], selected, '', fmt);
 }
 function renderOrderItems(items) {
   const host = $('of_items');
@@ -1848,8 +2013,21 @@ function bind() {
     renderOrders();
   });
   document.addEventListener('click', (e) => {
+    const actionBtn = e.target.closest('[data-order-action]');
+    if (actionBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const act = actionBtn.dataset.orderAction;
+      const orderId = actionBtn.dataset.order;
+      if (act === 'open') openOrder(orderId);
+      else if (act === 'queue') quickQueueOrder(orderId);
+      return;
+    }
     const card = e.target.closest('[data-order]');
-    if (card && !e.target.closest('button')) { openOrder(card.dataset.order); return; }
+    if (card && !e.target.closest('button') && !e.target.closest('.w-check') && !e.target.closest('input') && !e.target.closest('select')) {
+      openOrder(card.dataset.order);
+      return;
+    }
     const ne = e.target.closest('[data-niche-edit]');
     if (ne) { openNiche(ne.dataset.nicheEdit); }
   });
@@ -1959,6 +2137,27 @@ function bind() {
     }));
   $('of_file').addEventListener('change', fillFromFileEstimate);
 
+  async function quickQueueOrder(orderId) {
+    const order = PF.state.orders.find((o) => o.id === orderId);
+    if (!order) return;
+    try {
+      await post('/api/queue/add', {
+        order_id: order.id,
+        title: `${order.product || 'Заказ'} (№${order.number})`,
+        file: order.file || '',
+        grams: num(order.grams) || 0,
+        hours: num(order.hours) || 0,
+        printer_id: '',
+        spool_id: '',
+      });
+      toast('Добавлен в очередь печати', `№${order.number} · ${order.product || ''}`);
+      await PF.refreshCore();
+    } catch (e) {
+      openOrder(orderId);
+      toast('Проверьте заказ перед отправкой в очередь', e.message, 'warn');
+    }
+  }
+
   function applyProduct(item, ready) {
     if (!item) return;
     $('of_product').value = item.name || $('of_product').value;
@@ -1975,6 +2174,24 @@ function bind() {
     updateReadyStockHint();
     updateEconDebounced();
     toast(ready ? 'Готовый товар добавлен' : 'Подставлено из базы', item.name);
+  }
+  const catFilter = $('of_category_filter');
+  if (catFilter) {
+    catFilter.addEventListener('change', () => {
+      const nom = $('of_nom_id');
+      const currentNom = nom ? nom.value : '';
+      if (nom) {
+        nom.innerHTML = '<option value="">Не выбран — заказ на печать / услугу</option>'
+          + buildNomenclatureGroupedOptions(PF.state.nomenclature || [], currentNom, catFilter.value);
+        if (currentNom && [...nom.options].some((o) => o.value === currentNom)) {
+          nom.value = currentNom;
+        } else {
+          nom.value = '';
+          toggleWarehouseField();
+          updateReadyStockHint();
+        }
+      }
+    });
   }
   $('of_nom_id').addEventListener('change', () => {
     const item = (PF.state.nomenclature || []).find((i) => i.id === $('of_nom_id').value);

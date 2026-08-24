@@ -605,12 +605,12 @@ $('burger').addEventListener('click', () => {
   } else { const s = $('scrim'); if (s) s.remove(); }
 });
 const STOCK_TABS = [
-  { id: 'products', label: 'Товары' },
-  { id: 'batches', label: 'Партии' },
-  { id: 'documents', label: 'Документы' },
-  { id: 'warehouses', label: 'Склады' },
-  { id: 'shelf', label: 'Стеллаж' },
-  { id: 'inventory', label: 'Пластик' },
+  { id: 'products', label: 'Товары', icon: '📦' },
+  { id: 'batches', label: 'Партии', icon: '🖨' },
+  { id: 'documents', label: 'Документы', icon: '📋' },
+  { id: 'warehouses', label: 'Склады', icon: '🏬' },
+  { id: 'shelf', label: 'Стеллаж', icon: '🏷' },
+  { id: 'inventory', label: 'Пластик', icon: '🧶' },
 ];
 const STOCK_IDS = new Set(STOCK_TABS.map((t) => t.id));
 
@@ -622,7 +622,7 @@ function syncStockTabs(name) {
   const bar = document.createElement('div');
   bar.className = 'seg tabs stock-tabs';
   bar.innerHTML = STOCK_TABS.map((t) =>
-    `<button type="button" data-view="${t.id}" class="${t.id === name ? 'on' : ''}">${t.label}</button>`).join('');
+    `<button type="button" data-view="${t.id}" class="${t.id === name ? 'on' : ''}"><span class="tab-ic">${t.icon}</span><span>${t.label}</span><span class="tab-hits" data-tab-badge="${t.id}" hidden></span></button>`).join('');
   bar.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-view]');
     if (btn) PF.go(btn.dataset.view);
@@ -630,6 +630,7 @@ function syncStockTabs(name) {
   const head = view.querySelector('.view-head');
   if (head && head.nextSibling) view.insertBefore(bar, head.nextSibling);
   else view.prepend(bar);
+  if (window.PF && PF.updateStockTabBadges) PF.updateStockTabBadges();
 }
 
 function filterNav(q) {
@@ -683,7 +684,7 @@ async function refreshCore() {
   const [orders, customers, spools, catalog, jobs, nomenclature] = await Promise.all([
     get('/api/orders'), get('/api/customers'), get('/api/spools'),
     get('/api/catalog'), get('/api/jobs', { limit: 60 }),
-    get('/api/nomenclature', { kind: 'product' }),
+    get('/api/nomenclature'),
   ]);
   PF.state.orders = orders.orders || [];
   PF.state.customers = customers.customers || [];
@@ -691,6 +692,7 @@ async function refreshCore() {
   PF.state.catalog = catalog.catalog || [];
   PF.state.jobs = jobs || { queue: [], history: [] };
   PF.state.nomenclature = nomenclature.items || [];
+  PF.state.groups = nomenclature.groups || [];
   PF.state.warehouses = nomenclature.warehouses || [];
   PF.emit('data');
 }
