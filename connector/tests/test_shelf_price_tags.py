@@ -32,18 +32,37 @@ class ShelfPriceTagTests(unittest.TestCase):
         item = self.shelf.save_item({
             "name": "Органайзер", "qty": 3, "price": 590,
             "barcode": "4601234567890", "sku": "NOZZA-001",
-            "tag_template": "promo", "tag_badge": "Хит",
-            "tag_color": "#ff5500", "tag_note": "Цвет на выбор",
+            "tag_template": "promo", "tag_variant": "sale", "tag_badge": "Хит",
+            "tag_color": "#ff5500", "tag_note": "Цвет на выбор", "tag_old_price": 790,
         })
         self.assertEqual(item["barcode"], "4601234567890")
         self.assertEqual(item["tag_template"], "promo")
+        self.assertEqual(item["tag_variant"], "sale")
         self.assertEqual(item["tag_color"], "#ff5500")
+        self.assertEqual(item["tag_old_price"], 790)
         with self.assertRaisesRegex(ValueError, "тип ценника"):
             self.shelf.save_item({"name": "Плохой", "tag_template": "unknown"})
+        with self.assertRaisesRegex(ValueError, "вариант оформления"):
+            self.shelf.save_item({"name": "Плохой", "tag_variant": "unknown"})
         with self.assertRaisesRegex(ValueError, "формате"):
             self.shelf.save_item({"name": "Плохой", "tag_color": "red"})
         with self.assertRaises(ValueError):
             self.shelf.save_item({"name": "Кириллица", "barcode": "КОД-1"})
+
+    def test_legacy_tag_templates_are_kept_printable_as_standard_format(self):
+        """Old rows have no obsolete physical layout after the format upgrade."""
+        saved = self.shelf.save_item({"name": "Старый компактный", "tag_template": "compact"})
+        self.assertEqual(saved["tag_template"], "standard")
+        raw = self.db.upsert("shelf_items", {
+            "id": "legacy-tag", "name": "Старый минимал", "tag_template": "minimal",
+        })
+        self.assertEqual(raw["tag_template"], "minimal")
+        self.assertEqual(self.shelf.item("legacy-tag")["tag_template"], "standard")
+        self.db.upsert("shelf_items", {"id": "legacy-style", "name": "Старый стиль", "tag_variant": "minimal"})
+        self.assertEqual(self.shelf.item("legacy-style")["tag_variant"], "mono")
+        fresh = self.shelf.save_item({"name": "Обычный"})
+        self.assertEqual(fresh["tag_template"], "standard")
+        self.assertEqual(fresh["tag_variant"], "clean")
 
     def test_barcode_inherits_from_canonical_nomenclature(self):
         self.db.upsert("nomenclature", {
@@ -105,7 +124,7 @@ class ShelfPriceTagApiTests(unittest.TestCase):
         self.api.manager = types.SimpleNamespace(printers={}, bot=None)
         self.api.shelf.save_item({
             "name": "Органайзер", "barcode": "4601234567890",
-            "sku": "ORG-1", "qty": 2, "price": 590, "tag_template": "compact",
+            "sku": "ORG-1", "qty": 2, "price": 590, "tag_template": "standard",
         })
 
     def tearDown(self):
@@ -115,7 +134,12 @@ class ShelfPriceTagApiTests(unittest.TestCase):
         payload = self.api.labels("shelf")
         self.assertEqual(payload["one_c"], {"linked": 1, "total": 1})
         self.assertIn("<svg", payload["shelf"][0]["barcode_svg"])
-        self.assertEqual(payload["shelf"][0]["tag_template"], "compact")
+        # The compact physical label reserves barcode height for bars, while
+        # its SKU is rendered separately by the designer.
+        self.assertNotIn("<text", payload["shelf"][0]["barcode_svg"])
+        self.assertEqual(payload["shelf"][0]["tag_template"], "standard")
+        self.assertEqual(payload["shelf"][0]["tag_variant"], "clean")
+        self.assertEqual(payload["shelf"][0]["tag_old_price"], 0)
 
     def test_lookup_export_and_sale_routes(self):
         code, found = self.api.get("/api/shelf/1c/lookup", {"barcode": ["4601234567890"]})
@@ -136,11 +160,25 @@ class ShelfPriceTagFrontendTests(unittest.TestCase):
     def test_designer_is_linked_from_shelf(self):
         index = (ROOT / "site/index.html").read_text(encoding="utf-8")
         page = (ROOT / "site/price-tags.html").read_text(encoding="utf-8")
+        legacy_page = (ROOT / "site/materials/ценники-генератор.html").read_text(encoding="utf-8")
         script = (ROOT / "site/assets/shelf.js").read_text(encoding="utf-8")
         self.assertIn('/price-tags.html', index)
         self.assertIn('/api/shelf/1c/export', page)
         self.assertIn('/api/shelf/1c/sale', page)
         self.assertIn('/price-tags.html?item=', script)
+        self.assertIn('Ценник · 66 × 31 мм', index)
+        self.assertIn('Промостенд · 66 × 56 мм', index)
+        # Both user-facing generators use the real physical formats and A4 counts.
+        self.assertIn('width:66mm; height:31mm', page)
+        self.assertIn('width:66mm; height:56mm', page)
+        self.assertIn('PER_PAGE = {standard:27,promo:15}', page)
+        self.assertIn("TAG_VARIANTS = ['clean','accent','sale','mono','photo']", page)
+        self.assertIn('data-tag-preset="photo"', page)
+        self.assertIn('id="shf_tag_variant"', index)
+        self.assertIn('id="shf_tag_old_price"', index)
+        self.assertIn('width: 66mm; height: 31mm', legacy_page)
+        self.assertIn('width: 66mm; height: 56mm', legacy_page)
+        self.assertIn('PER_PAGE={standard:27,promo:15}', legacy_page)
 
 
 if __name__ == "__main__":

@@ -5,62 +5,77 @@
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css">
 <style>
-  .grid { display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start; }
+  /* Exact shelf formats on A4: 27 standard labels or 15 promo stands. */
+  .sheet { position: relative; box-sizing: border-box; }
+  .sheet.standard { padding: 9mm 6mm; }
+  .sheet.promo { padding: 8.5mm 6mm; }
+  .grid { display: grid; align-content: flex-start; justify-content: flex-start; overflow: hidden; }
+  .sheet.standard .grid { grid-template-columns: repeat(3, 66mm); grid-auto-rows: 31mm; gap: 0; }
+  .sheet.promo .grid { grid-template-columns: repeat(3, 66mm); grid-auto-rows: 56mm; gap: 0; }
   .tag {
-    width: 62mm; height: 38mm;
-    border: 1px solid var(--line); border-radius: 2mm;
-    padding: 4mm 4mm 3.5mm 5.5mm;
-    display: flex; gap: 3mm;
+    width: 66mm; height: 31mm;
+    border: .25mm solid var(--line); border-radius: 1.5mm;
+    padding: 1.7mm 2.1mm 1.3mm 3.7mm;
+    display: flex; gap: 1.4mm;
     position: relative; overflow: hidden;
     page-break-inside: avoid; break-inside: avoid;
     cursor: pointer; transition: outline .12s ease, box-shadow .12s ease, transform .12s ease;
+    background: linear-gradient(115deg, #fff 0%, #fff 76%, #f5f4ff 100%);
   }
   .tag:hover { box-shadow: 0 6px 18px -12px rgba(19,26,43,.6); transform: translateY(-0.5mm); }
   .tag.selected { outline: 2.5px solid var(--brand); outline-offset: 2px; box-shadow: 0 10px 24px -14px rgba(79,70,229,.7); }
   .tag::before {
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.6mm;
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 1.35mm;
     background: linear-gradient(180deg, var(--brand), var(--brand-2));
   }
   .tag-main { flex: 1; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; }
   .tag .name {
-    font-size: 12.5px; font-weight: 800; line-height: 1.15; letter-spacing: -.01em;
+    font-size: 10px; font-weight: 800; line-height: 1.08; letter-spacing: -.01em;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
   .tag .desc {
-    font-size: 8.5px; color: var(--ink-soft); line-height: 1.3; margin-top: 1mm;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    font-size: 5.4px; color: var(--ink-soft); line-height: 1.2; margin-top: .35mm;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .tag .price { font-size: 25px; font-weight: 900; line-height: 1; letter-spacing: -.02em; }
-  .tag .price span { font-size: 13px; font-weight: 700; }
-  .tag .meta { font-size: 7.5px; color: #98a2b8; letter-spacing: .02em; margin-top: .8mm; }
-  .tag-side { width: 17mm; display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
-  .tag-side svg { width: 16mm; height: 16mm; display: block; }
+  .tag .price { font-size: 18px; font-weight: 900; line-height: .92; letter-spacing: -.02em; }
+  .tag .price span { font-size: 9px; font-weight: 700; }
+  .tag .meta { font-size: 4.8px; color: #98a2b8; letter-spacing: .02em; margin-top: .4mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag-side { width: 12mm; display: flex; flex-direction: column; align-items: center; justify-content: space-between; }
+  .tag-side svg { width: 11.5mm; height: 11.5mm; display: block; }
   .tag .badge {
-    font-size: 6.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
-    background: var(--ink); color: #fff; padding: 1mm 2mm; border-radius: 10mm;
-    max-width: 17mm; text-align: center; line-height: 1.2;
+    font-size: 5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+    background: var(--ink); color: #fff; padding: .45mm 1.2mm; border-radius: 10mm;
+    max-width: 12mm; text-align: center; line-height: 1.12; overflow: hidden;
   }
   .tag .brandline {
-    font-size: 7px; font-weight: 800; letter-spacing: .08em; color: var(--brand);
-    text-align: center; line-height: 1.2; max-width: 100%; white-space: nowrap;
-    display: flex; align-items: center; justify-content: center; gap: 1mm;
+    font-size: 4.8px; font-weight: 800; letter-spacing: .06em; color: var(--brand);
+    text-align: center; line-height: 1.1; max-width: 100%; white-space: nowrap;
+    display: flex; align-items: center; justify-content: center; gap: .6mm;
   }
-  .tag .brandline img { width: 3.6mm; height: 3.6mm; flex: none; }
-  .grid.small .tag .brandline { font-size: 5.5px; letter-spacing: .04em; }
-  .grid.small .tag .brandline img { width: 3mm; height: 3mm; }
-  .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 4mm; }
+  .tag .brandline img { width: 2.6mm; height: 2.6mm; flex: none; }
+  .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 3.5mm; }
   .tag.blank .price { color: #cbd2e0; }
-  .grid.small .tag { width: 43mm; height: 25mm; padding: 3mm 3mm 2.5mm 4.5mm; gap: 2mm; }
-  .grid.small .tag .name { font-size: 9.5px; -webkit-line-clamp: 2; }
-  .grid.small .tag .desc { display: none; }
-  .grid.small .tag .price { font-size: 17px; }
-  .grid.small .tag .price span { font-size: 9px; }
-  .grid.small .tag-side { width: 12mm; }
-  .grid.small .tag-side svg { width: 11mm; height: 11mm; }
-  .grid.small .tag .badge { font-size: 5.5px; max-width: 12mm; }
-  .grid.small .tag .meta { font-size: 6px; }
-  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+  /* The 66 × 56 mm promo stand has deliberate breathing room for an offer and QR. */
+  .sheet.promo .tag { width: 66mm; height: 56mm; padding: 3.6mm 3.8mm 3mm 5.2mm; gap: 3mm; border-radius: 2.5mm; background: linear-gradient(145deg, #fff 0%, #fff 62%, #f0efff 100%); }
+  .sheet.promo .tag::before { width: 2.2mm; }
+  .sheet.promo .tag .name { font-size: 16px; line-height: 1.05; -webkit-line-clamp: 3; }
+  .sheet.promo .tag .desc { font-size: 8px; line-height: 1.25; margin-top: 1.3mm; -webkit-line-clamp: 3; }
+  .sheet.promo .tag .price { font-size: 31px; }
+  .sheet.promo .tag .price span { font-size: 16px; }
+  .sheet.promo .tag .meta { font-size: 7px; margin-top: 1.2mm; }
+  .sheet.promo .tag-side { width: 19mm; }
+  .sheet.promo .tag-side svg { width: 18mm; height: 18mm; }
+  .sheet.promo .tag .badge { font-size: 8px; max-width: 19mm; padding: 1mm 2mm; line-height: 1.2; }
+  .sheet.promo .tag .brandline { font-size: 8px; letter-spacing: .08em; gap: 1mm; }
+  .sheet.promo .tag .brandline img { width: 4.5mm; height: 4.5mm; }
+  .sheet-title { position: absolute; z-index: 1; top: 2mm; left: 6mm; font-size: 9px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; }
   .empty { padding: 30mm 10mm; text-align: center; color: var(--ink-soft); font-size: 13px; line-height: 1.6; }
+  @page { size: A4 portrait; margin: 0; }
+  @media print {
+    .sheet { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; }
+    .sheet.standard { padding: 9mm 6mm; }
+    .sheet.promo { padding: 8.5mm 6mm; }
+  }
 
   /* Manual editor */
   .editor {
@@ -87,7 +102,7 @@
   <div class="panel-row">
     <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Генератор ценников</h1>
     <label>Источник <select id="src"><option value="api">Каталог PrintFlow</option><option value="custom">Только ручные</option><option value="demo">Демо-набор</option></select></label>
-    <label>Размер <select id="size"><option value="big">62 × 38 мм (12 на лист)</option><option value="small">43 × 25 мм (24 на лист)</option></select></label>
+    <label>Формат <select id="size"><option value="standard">Ценник · 66 × 31 мм (27 на лист)</option><option value="promo">Промостенд · 66 × 56 мм (15 на лист)</option></select></label>
     <label>Наценка, % <input type="number" id="markup" value="0" step="5" style="width:60px"></label>
     <label>Округлять до <select id="round"><option value="0">не округлять</option><option value="10" selected>10 ₽</option><option value="50">50 ₽</option><option value="100">100 ₽</option></select></label>
     <label>Город <input type="text" id="city" value="Симферополь" style="width:120px"></label>
@@ -133,7 +148,7 @@
 </div>
 
 <div class="note noprint">
-  <b>Как печатать:</b> масштаб 100 %, без «вписать в лист», бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указывать информацию самостоятельно в полях выше — цена, материал, бейдж, QR. Если каталог PrintFlow не открыт, покажется демо-набор. Город по умолчанию — Симферополь.
+  <b>Как печатать:</b> обычный ценник — 66 × 31 мм, промостенд — 66 × 56 мм. Выберите A4, масштаб 100 % и отключите «вписать в лист». Бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указать цену, материал, бейдж и QR; если каталог PrintFlow не открыт, покажется демо-набор.
 </div>
 
 <div id="sheets"></div>
@@ -145,7 +160,7 @@ const $=id=>document.getElementById(id);
 const LS_CONTACT='nozza:contact';
 const LS_LOGO='nozza:logo';
 const LS_CUSTOM='nozza:priceCustom';
-const PER_PAGE={big:12,small:24};
+const PER_PAGE={standard:27,promo:15};
 
 const DEMO=[
   {id:'d1',name:'Органайзер для стола',notes:'Три отсека, цвет на выбор',price:890,material:'PLA',grams:120,niche:'Для дома'},
@@ -256,21 +271,21 @@ function render(){
   const per=PER_PAGE[opts.size];
   const host=$('sheets');
   if(!display.length){
-    host.innerHTML=`<div class="sheet"><div class="empty">Каталог пуст и ручных нет.<br>Добавьте ручной ценник в редакторе выше или выберите другой источник.</div></div>`;
+    host.innerHTML=`<div class="sheet standard"><div class="empty">Каталог пуст и ручных нет.<br>Добавьте ручной ценник в редакторе выше или выберите другой источник.</div></div>`;
     return;
   }
   const pages=[];
   for(let i=0;i<display.length;i+=per) pages.push(display.slice(i,i+per));
 
   let html=pages.map((page,idx)=>`
-    <div class="sheet">
-      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} ценников ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
-      <div class="grid ${opts.size==='small'?'small':''}">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
+    <div class="sheet ${opts.size}">
+      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} · ${opts.size==='promo' ? 'промостенд 66 × 56 мм' : 'ценник 66 × 31 мм'} ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
+      <div class="grid">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
     </div>`).join('');
 
   if($('blanks').checked){
-    const count=opts.size==='small'?24:12;
-    html+=`<div class="sheet"><div class="sheet-title">Пустые бланки — вписать от руки · ${esc(city)}</div><div class="grid ${opts.size==='small'?'small':''}">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
+    const count=PER_PAGE[opts.size];
+    html+=`<div class="sheet ${opts.size}"><div class="sheet-title noprint">Пустые бланки — ${opts.size==='promo' ? 'промостенд 66 × 56 мм' : 'ценник 66 × 31 мм'} · ${esc(city)}</div><div class="grid">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
   }
   host.innerHTML=html;
 

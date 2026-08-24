@@ -27,9 +27,48 @@ SALE_DAYS = 7        # окно «продано за N дней» для обо
 DEAD_DAYS = 14       # после скольких дней без продаж позиция — «мёртвый сток»
 PLAN_DAYS = 7        # на сколько дней вперёд планировать пополнение
 
-TAG_TEMPLATES = {"classic", "compact", "promo", "minimal"}
+# Физические форматы витрины.  Старые идентификаторы не выбрасываем: они уже
+# лежат в пользовательских shelf_items и безопасно приводятся к обычному ценнику.
+# Это позволяет обновить раскладку старых записей без «пустых»
+# ценников у существующих позиций.
+TAG_TEMPLATES = {"standard", "promo"}
+LEGACY_TAG_TEMPLATE_ALIASES = {
+    "classic": "standard",
+    "compact": "standard",
+    "minimal": "standard",
+}
+SUPPORTED_TAG_TEMPLATES = TAG_TEMPLATES | set(LEGACY_TAG_TEMPLATE_ALIASES)
+DEFAULT_TAG_TEMPLATE = "standard"
+# Visual variants never change the physical sheet geometry.  This lets a shop
+# switch between retail, sale and photo-led looks without creating a wrong-size
+# label on A4.
+TAG_VARIANTS = {"clean", "accent", "sale", "mono", "photo"}
+DEFAULT_TAG_VARIANT = "clean"
+LEGACY_TAG_VARIANT_ALIASES = {"classic": "clean", "minimal": "mono"}
 DEFAULT_TAG_COLOR = "#4f46e5"
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def normalize_tag_template(value: Any, fallback: str = DEFAULT_TAG_TEMPLATE) -> str:
+    """Return a current physical tag format, accepting records from older builds.
+
+    ``standard`` prints as 66 × 31 mm, ``promo`` as 66 × 56 mm.  ``classic``,
+    ``compact`` and ``minimal`` were historical visual IDs with obsolete paper
+    dimensions; treating all of them as ``standard`` keeps old shelf records
+    printable and upgrades them when their card is next saved.
+    """
+    template = str(value or "").strip().lower()
+    if template in TAG_TEMPLATES:
+        return template
+    return LEGACY_TAG_TEMPLATE_ALIASES.get(template, fallback)
+
+
+def normalize_tag_variant(value: Any, fallback: str = DEFAULT_TAG_VARIANT) -> str:
+    """Return a supported visual tag style without affecting paper dimensions."""
+    variant = str(value or "").strip().lower()
+    if variant in TAG_VARIANTS:
+        return variant
+    return LEGACY_TAG_VARIANT_ALIASES.get(variant, fallback)
 
 
 class Shelf:
@@ -132,10 +171,13 @@ class Shelf:
             result.setdefault("grams", 0.0)
         result["barcode_source"] = ("shelf" if own_barcode else
                                     ("nomenclature" if result.get("barcode") else ""))
-        template = str(result.get("tag_template") or "classic").strip().lower()
-        result["tag_template"] = template if template in TAG_TEMPLATES else "classic"
+        # API always returns a current physical format.  Raw legacy values remain
+        # readable in old databases and become ``standard`` after the next save.
+        result["tag_template"] = normalize_tag_template(result.get("tag_template"))
+        result["tag_variant"] = normalize_tag_variant(result.get("tag_variant"))
         color = str(result.get("tag_color") or DEFAULT_TAG_COLOR).strip()
         result["tag_color"] = color if _HEX_COLOR.fullmatch(color) else DEFAULT_TAG_COLOR
+        result["tag_old_price"] = max(0.0, round(num(result.get("tag_old_price")), 2))
         return result
 
     def _sum_sold(self, item_id: str, since: str) -> float:
@@ -187,10 +229,17 @@ class Shelf:
                     f"Штрихкод уже привязан к позиции «{duplicate.get('name') or duplicate['id']}»")
 
         if "tag_template" in data:
-            template = str(data.get("tag_template") or "classic").strip().lower()
-            if template not in TAG_TEMPLATES:
+            template = str(data.get("tag_template") or "").strip().lower()
+            if template not in SUPPORTED_TAG_TEMPLATES:
                 raise ValueError("Неизвестный тип ценника")
-            data["tag_template"] = template
+            # Persist only current formats for newly edited/new positions while
+            # accepting legacy clients and data exports during the transition.
+            data["tag_template"] = normalize_tag_template(template)
+        if "tag_variant" in data:
+            variant = str(data.get("tag_variant") or "").strip().lower()
+            if variant not in TAG_VARIANTS and variant not in LEGACY_TAG_VARIANT_ALIASES:
+                raise ValueError("Неизвестный вариант оформления ценника")
+            data["tag_variant"] = normalize_tag_variant(variant)
         if "tag_color" in data:
             color = str(data.get("tag_color") or DEFAULT_TAG_COLOR).strip()
             if not _HEX_COLOR.fullmatch(color):
@@ -200,9 +249,11 @@ class Shelf:
         if new:
             data.setdefault("created_at", now_iso())
         data["updated_at"] = now_iso()
-        for key in ("qty", "price", "cost_per_unit", "min_qty"):
+        for key in ("qty", "price", "cost_per_unit", "min_qty", "tag_old_price"):
             if key in data:
                 data[key] = round(num(data[key]), 2)
+        if "tag_old_price" in data:
+            data["tag_old_price"] = max(0.0, data["tag_old_price"])
         row = self.db.upsert("shelf_items", data)
         self.db.add_event("shelf", "Позиция стеллажа создана" if new else "Позиция стеллажа изменена",
                           row.get("name") or "", data={"item_id": row["id"]})

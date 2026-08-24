@@ -1247,6 +1247,9 @@ function renderSettings() {
 
   $('set_data_dir').textContent = navigator.platform.toLowerCase().includes('win')
     ? '%APPDATA%\\PrintFlow' : '~/.config/printflow';
+  $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
+    button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
+  });
   renderUpdateInfo();
 }
 
@@ -1385,6 +1388,18 @@ function renderUpdateInfo() {
 /** Поиск по настройкам: ищет сразу по всем вкладкам и прячет лишнее. */
 let settingsPane = 'business';
 
+function selectSettingsPane(name) {
+  const known = ['business', 'tax', 'pricing', 'money', 'production', 'system'];
+  if (!known.includes(name)) return;
+  settingsPane = name;
+  const search = $('set_search');
+  if (search) search.value = '';
+  $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
+    button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
+  });
+  filterSettings('');
+}
+
 function filterSettings(query) {
   const q = String(query || '').trim().toLowerCase();
   const panes = $$('[id^="setpane-"]');
@@ -1401,6 +1416,9 @@ function filterSettings(query) {
       b.classList.remove('dim');
       const badge = b.querySelector('.tab-hits');
       if (badge) badge.remove();
+    });
+    $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
+      button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
     });
     $('set_no_results').hidden = true;
     return;
@@ -1816,19 +1834,129 @@ async function runDataCheck() {
   } catch (e) { host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc(e.message)}</span></div>`; }
 }
 
+const LIBRARY_CATEGORIES = {
+  start: 'start', plan: 'start', models: 'start', stock: 'start',
+  b2b: 'sales', avito: 'sales', tg: 'sales', posts: 'sales', content: 'sales', storefront: 'sales', vitrina: 'sales', tpl: 'sales',
+  tech: 'workshop', night: 'workshop', auto: 'workshop', plastics: 'workshop', 'plastics-step': 'workshop',
+  ip: 'system', legal: 'system', network: 'system', bot: 'system', 'settings-guide': 'system', faq: 'system', 'camera-cloud': 'system',
+  mats: 'tools',
+};
+const LIBRARY_CATEGORY_LABELS = {
+  start: 'Старт', sales: 'Продажи', workshop: 'Цех', system: 'Система', tools: 'Инструменты',
+};
+const LIBRARY_RECENT_KEY = 'printflow:library:last-article';
+let libraryFilter = 'all';
+
+function libraryArticleById(name) {
+  return $$('#library-body .library-article').find((article) => article.dataset.article === name) || null;
+}
+function libraryArticleTitle(article) {
+  const heading = article && article.querySelector('.sechead h1');
+  return heading ? heading.textContent.trim() : '';
+}
+function renderLibraryHome() {
+  const button = $('lib_continue');
+  if (!button) return;
+  const name = store.get(LIBRARY_RECENT_KEY, '');
+  const article = libraryArticleById(name);
+  const title = libraryArticleTitle(article);
+  button.hidden = !title;
+  button.dataset.libraryOpen = title ? name : '';
+  button.textContent = title ? `Продолжить: ${title}` : 'Продолжить чтение';
+}
+function rememberLibraryArticle(name, article) {
+  if (!name || !article) return;
+  store.set(LIBRARY_RECENT_KEY, name);
+  renderLibraryHome();
+}
+function renderArticleNavigation(article) {
+  const nav = $('lib_article_nav');
+  const title = $('lib_article_nav_title');
+  const links = $('lib_article_nav_links');
+  if (!nav || !title || !links) return;
+  if (!article) {
+    nav.hidden = true;
+    links.innerHTML = '';
+    return;
+  }
+  const name = article.dataset.article || 'guide';
+  const headings = Array.from(article.querySelectorAll('h2'));
+  title.textContent = libraryArticleTitle(article) || 'Разделы';
+  links.innerHTML = headings.map((heading, index) => {
+    const text = heading.textContent.replace(/\s+/g, ' ').trim();
+    const id = heading.id || `library-${name}-${index + 1}`;
+    heading.id = id;
+    return `<button type="button" data-library-heading="${esc(id)}" title="${esc(text)}">${esc(text)}</button>`;
+  }).join('');
+  nav.hidden = !headings.length;
+}
+function filterLibrary() {
+  const input = $('lib_search');
+  const count = $('lib_count');
+  const empty = $('lib_empty');
+  const cards = $$('#lib_grid .lib-card');
+  const query = String((input || {}).value || '').trim().toLowerCase();
+  let visible = 0;
+  cards.forEach((card) => {
+    const category = card.dataset.libraryCategory || 'tools';
+    const text = `${card.textContent || ''} ${card.dataset.article || ''} ${card.dataset.libraryLabel || ''}`.toLowerCase();
+    const on = (libraryFilter === 'all' || category === libraryFilter) && (!query || text.includes(query));
+    card.hidden = !on;
+    if (on) visible += 1;
+  });
+  if (count) count.textContent = query || libraryFilter !== 'all'
+    ? `Найдено ${visible} из ${cards.length}`
+    : `Все материалы · ${cards.length}`;
+  if (empty) empty.hidden = visible > 0;
+}
+
+function initLibraryDiscovery() {
+  const input = $('lib_search');
+  const filters = $('lib_filters');
+  if (!input || !filters || filters.dataset.bound) return;
+  filters.dataset.bound = '1';
+  $$('#lib_grid .lib-card').forEach((card) => {
+    const article = card.dataset.article || '';
+    const category = card.dataset.libraryCategory || LIBRARY_CATEGORIES[article] || (article ? 'system' : 'tools');
+    card.dataset.libraryCategory = category;
+    card.dataset.libraryLabel = LIBRARY_CATEGORY_LABELS[category] || LIBRARY_CATEGORY_LABELS.tools;
+  });
+  input.addEventListener('input', U.debounce(filterLibrary, 130));
+  filters.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-lib-filter]');
+    if (!button) return;
+    libraryFilter = button.dataset.libFilter || 'all';
+    $$('#lib_filters [data-lib-filter]').forEach((item) => item.classList.toggle('on', item === button));
+    filterLibrary();
+  });
+  renderLibraryHome();
+  filterLibrary();
+}
+
 function showArticle(name) {
   const articles = $$('#library-body .library-article');
-  let shown = false;
-  articles.forEach((a) => {
-    const on = a.dataset.article === name;
-    a.classList.toggle('on', on);
-    if (on) shown = true;
+  let activeArticle = null;
+  articles.forEach((article) => {
+    const on = article.dataset.article === name;
+    article.classList.toggle('on', on);
+    if (on) activeArticle = article;
   });
+  const shown = Boolean(activeArticle);
   $('lib_grid').hidden = shown;
+  const discovery = $('lib_discovery');
+  if (discovery) discovery.hidden = shown;
+  const home = $('library_home');
+  if (home) home.hidden = shown;
   $('lib_back').hidden = !shown;
   const tpl = $('lib_tpl_wrap');
   if (tpl) tpl.hidden = name !== 'tpl';
   if (name === 'tpl') loadTemplates();
+  renderArticleNavigation(activeArticle);
+  if (shown) rememberLibraryArticle(name, activeArticle);
+  else {
+    renderLibraryHome();
+    filterLibrary();
+  }
 }
 
 /* ============================================================= события */
@@ -1924,10 +2052,15 @@ function bind() {
   $('mat_base').addEventListener('change', (e) => fillMaterialFromBase(e.target.value));
   $('set_tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-pane]');
+    if (btn) selectSettingsPane(btn.dataset.pane);
+  });
+  const settingShortcuts = $('set_shortcuts');
+  if (settingShortcuts) settingShortcuts.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-set-shortcut]');
     if (!btn) return;
-    settingsPane = btn.dataset.pane;
-    $('set_search').value = '';
-    filterSettings('');
+    selectSettingsPane(btn.dataset.setShortcut);
+    const tabs = $('set_tabs');
+    if (tabs) tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   $('set_search').addEventListener('input', U.debounce((e) => filterSettings(e.target.value), 150));
   $('set_tax_mode').addEventListener('change', (e) => {
@@ -1996,6 +2129,11 @@ function bind() {
     }
   });
 
+  initLibraryDiscovery();
+  $('library_home').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-library-open]');
+    if (button && button.dataset.libraryOpen) PF.go('library', button.dataset.libraryOpen);
+  });
   $('lib_grid').addEventListener('click', (e) => {
     const card = e.target.closest('[data-article]');
     if (!card) return;
@@ -2003,6 +2141,21 @@ function bind() {
     PF.go('library', card.dataset.article);
   });
   $('lib_back').addEventListener('click', () => PF.go('library'));
+  $('lib_reset_filters').addEventListener('click', () => {
+    libraryFilter = 'all';
+    $('lib_search').value = '';
+    $$('#lib_filters [data-lib-filter]').forEach((button) => button.classList.toggle('on', button.dataset.libFilter === 'all'));
+    filterLibrary();
+  });
+  $('lib_article_nav_links').addEventListener('click', (e) => {
+    const button = e.target.closest('[data-library-heading]');
+    const heading = button && document.getElementById(button.dataset.libraryHeading);
+    if (heading) heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('lib_article_top').addEventListener('click', () => {
+    const article = document.querySelector('#library-body .library-article.on');
+    if (article) article.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 }
 
 /* ============================================== 8.5: статус-бар цеха (#75) */
