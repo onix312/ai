@@ -37,8 +37,11 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • итоги недели · итоги месяца — отчёты по запросу
 • долги · брак · рейтинг — должники, потери на браке, ABC изделий
 • сколько осталось / что печатает / когда закончит / сколько заработал
-• стеллаж / полка — остаток, дефицит и план пополнения с кнопками
+• стеллаж / полка — остаток, дефицит, приход, продажи и движения с кнопками
 • продажа — продать со стеллажа (−1 шт)
+• приход — меню прихода; «приход Адресник 5» — приход на позицию
+• движения стеллажа — последние приходы/продажи/списания
+• продажи стеллажа — что ушло за 7 дней, по позициям
 • план — что печатать сегодня
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
 • оплата 1500 по 1001 — принять оплату
@@ -247,9 +250,13 @@ class TelegramBot:
         command = data.replace("cmd:", "", 1)
         # Меню стеллажа и продаж отправляют новое сообщение с актуальными
         # остатками и кнопками; исходное не превращаем в неактуальный чек.
-        if command in ("shelf", "sell-menu"):
+        if command in ("shelf", "sell-menu", "shelf-prod-menu"):
             self._call("answerCallbackQuery", {"callback_query_id": callback_id})
-            return self.shelf_keyboard(chat) if command == "shelf" else self.sell_keyboard(chat)
+            if command == "shelf":
+                return self.shelf_keyboard(chat)
+            if command == "sell-menu":
+                return self.sell_keyboard(chat)
+            return self.shelf_produce_keyboard(chat)
         text = self._run_command(command, chat)
         self._call("answerCallbackQuery", {"callback_query_id": callback_id})
         # Управление печатью обновляем в том же сообщении; продажа и панель — новым.
@@ -305,6 +312,16 @@ class TelegramBot:
             return self.text_shelf(only_needs=True)
         if command.startswith("sell:"):
             return self.do_sell(command.split(":", 1)[1])
+        if command.startswith("shelf-sell:"):
+            return self.do_shelf_sell(command.split(":", 1)[1])
+        if command.startswith("shelf-prod:"):
+            return self.do_shelf_produce(command.split(":", 1)[1])
+        if command == "shelf-moves":
+            return self.text_shelf_moves()
+        if command == "shelf-sales7":
+            return self.text_shelf_sales(7)
+        if command == "shelf-sales30":
+            return self.text_shelf_sales(30)
         return "Не понял команду."
 
     def _start_next(self, chat: str) -> str:
@@ -471,8 +488,17 @@ class TelegramBot:
             return self._reply(chat, self.text_plan())
         if word in ("стеллаж", "полка", "витрина", "shelf"):
             return self.shelf_keyboard(chat)
+        # Отчёты стеллажа ловим до общей команды «продажа»:
+        # «продажи стеллажа» — это сводка, а не меню быстрой продажи.
+        if text.startswith("движения стеллаж") or text in ("движения", "стеллаж движения"):
+            return self._reply(chat, self.text_shelf_moves(15))
+        if text.startswith("продажи стеллаж") or text in ("продажи за неделю", "продажи полки"):
+            return self._reply(chat, self.text_shelf_sales(7))
         if word in ("продажа", "продать", "продажи", "sell"):
             return self.sell_keyboard(chat)
+        if word in ("приход", "положить", "пополнить"):
+            # «приход» — меню быстрого прихода; «приход Адресник 5» — конкретной позиции.
+            return self._shelf_produce_text(chat, text)
         if word in ("оплата", "оплатить", "payment"):
             return self._reply(chat, self._pay(text))
         if word in ("статус", "status", "принтер", "принтеры"):
@@ -1209,35 +1235,38 @@ class TelegramBot:
         return "\n".join(lines)
 
     def shelf_keyboard(self, chat: str) -> None:
-        """Панель стеллажа: обзор, дефицит, план и быстрый переход к продаже."""
+        """Панель стеллажа: обзор, дефицит, продажи, приход, движения, план."""
         text = self.text_shelf()
         buttons = [
             [{"text": "⚠ Нужны на полку", "callback_data": "cmd:shelf:needs"},
-             {"text": "🛒 Продать −1", "callback_data": "cmd:sell-menu"}],
-            [{"text": "⚑ План печати", "callback_data": "cmd:plan"},
+             {"text": "🛒 Продать", "callback_data": "cmd:sell-menu"}],
+            [{"text": "📥 Приход +1", "callback_data": "cmd:shelf-prod-menu"},
+             {"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"}],
+            [{"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"},
              {"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
         ]
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
 
     def _sell_rows(self) -> list[dict]:
-        """Позиции номенклатуры с остатком для продажи со стеллажа."""
-        from .nomenclature import Nomenclature
-        items = Nomenclature(self.db).items()
-        rows = [i for i in items if num(i.get("qty")) > 0 and num(i.get("price")) > 0]
+        """Позиции стеллажа с остатком для быстрой продажи."""
+        from .shelf import Shelf
+        items = Shelf(self.db).items()
+        rows = [i for i in items if num(i.get("qty")) > 0]
         rows.sort(key=lambda i: -num(i["qty"]))
         return rows[:8]
 
     def sell_keyboard(self, chat: str) -> None:
         rows = self._sell_rows()
         if not rows:
-            self._reply(chat, "Нет позиций с остатком для продажи. Добавьте приход на склад.")
+            self._reply(chat, "На стеллаже нет товара. Сделайте приход или перенесите со склада.")
             return
-        lines = ["🛍 Продажа со стеллажа — нажмите «−1»:"]
+        lines = ["🛍 Продажа со стеллажа — нажмите «−1» (деньги по цене ценника):"]
         buttons = []
         for i in rows:
-            lines.append(f"• {i['name']} — {int(num(i['qty']))} шт · {_money(i['price'])}")
-            buttons.append([{"text": f"−1 · {i['name'][:24]}", "callback_data": f"cmd:sell:{i['id']}"}])
+            lines.append(f"• {i['name']} — {round(num(i['qty']),1)} шт · {_money(i.get('price'))}")
+            label = f"−1 · {i['name'][:22]} · {_money(i.get('price'))}"
+            buttons.append([{"text": label[:60], "callback_data": f"cmd:shelf-sell:{i['id']}"}])
         self._call("sendMessage", {"chat_id": chat, "text": "\n".join(lines)[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
 
@@ -1259,6 +1288,124 @@ class TelegramBot:
             return f"Продано 1 шт «{name}» — проведено и учтено в кассе."
         except Exception as exc:
             return f"Не получилось продать: {exc}"
+
+    # ----------------------------------------------------- стеллаж из ТГ
+    def do_shelf_sell(self, item_id: str, qty: float = 1) -> str:
+        """Списать штуки с физической позиции стеллажа и записать доход."""
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1", (item_id,))
+        if not item:
+            return "Позиция стеллажа не найдена."
+        qty = num(qty) or 1
+        try:
+            shelf.sale(item_id, qty, 0, channel="shelf", note="продажа из Telegram")
+            left = num(item.get("qty")) - qty
+            price = num(item.get("price"))
+            money = f" · {_money(price * qty)}" if price else " (без цены)"
+            return (f"✅ Продано {round(qty)} шт «{item.get('name')}»{money}. "
+                    f"Осталось {round(max(0, left),1)} шт.")
+        except Exception as exc:
+            return f"Не получилось продать: {exc}"
+
+    def shelf_produce_keyboard(self, chat: str) -> None:
+        """Быстрый приход +1 на позиции с планом пополнения или низким остатком."""
+        from .shelf import Shelf
+        items = Shelf(self.db).items()
+        candidates = [i for i in items if num(i.get("plan_qty")) > 0 or i.get("low") or i.get("status") == "empty"]
+        candidates = candidates or items
+        if not candidates:
+            self._reply(chat, "Стеллаж пуст — сначала добавьте позицию.")
+            return
+        lines = ["📥 Приход на стеллаж (+1 шт). Для другого количества — «приход Адресник 5»."]
+        buttons = []
+        for i in candidates[:8]:
+            name = i.get("name") or "позиция"
+            lines.append(f"• {name} — {round(num(i.get('qty')),1)} шт"
+                         + (f" · нужно +{int(num(i.get('plan_qty')))}" if num(i.get("plan_qty")) else ""))
+            buttons.append([{"text": f"+1 · {name[:24]}", "callback_data": f"cmd:shelf-prod:{i['id']}"}])
+        self._call("sendMessage", {"chat_id": chat, "text": "\n".join(lines)[:3800],
+                                   "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
+
+    def do_shelf_produce(self, item_id: str, qty: float = 1) -> str:
+        from .shelf import Shelf
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1", (item_id,))
+        if not item:
+            return "Позиция стеллажа не найдена."
+        qty = num(qty) or 1
+        try:
+            Shelf(self.db).produce(item_id, qty, note="приход из Telegram")
+            return f"📥 Приход +{round(qty)} шт «{item.get('name')}» записан."
+        except Exception as exc:
+            return f"Не получилось оприходовать: {exc}"
+
+    def _shelf_produce_text(self, chat: str, text: str) -> None:
+        """«приход Адресник 5» — найти позицию по подстроке и сделать приход."""
+        from .shelf import Shelf
+        parts = text.split()
+        # Последнее слово может быть количеством.
+        qty = 1.0
+        name_words = parts[1:]
+        if name_words:
+            try:
+                qty = float(name_words[-1].replace(",", "."))
+                name_words = name_words[:-1]
+            except ValueError:
+                qty = 1.0
+        query = " ".join(name_words).strip().lower()
+        if not query:
+            return self.shelf_produce_keyboard(chat)
+        items = Shelf(self.db).items()
+        matches = [i for i in items if query in (i.get("name") or "").lower()]
+        if not matches:
+            self._reply(chat, f"Позиция, содержащая «{query}», не найдена на стеллаже.")
+            return
+        if len(matches) > 1:
+            names = "; ".join((i.get("name") or "")[:30] for i in matches[:5])
+            self._reply(chat, f"Уточните позицию: совпало несколько — {names}.")
+            return
+        self._reply(chat, self.do_shelf_produce(matches[0]["id"], qty))
+
+    def text_shelf_moves(self, limit: int = 12) -> str:
+        """Последние движения стеллажа одной лентой."""
+        from .shelf import Shelf
+        moves = Shelf(self.db).moves(limit=limit)
+        if not moves:
+            return "Движений стеллажа пока нет."
+        labels = {"produce": "приход", "sale": "продажа", "online": "онлайн",
+                  "writeoff": "списание", "inventory": "инв."}
+        lines = ["🧾 Последние движения стеллажа:"]
+        for m in moves:
+            q = num(m.get("qty"))
+            sign = "+" if q > 0 else ""
+            name = m.get("item_name") or "позиция"
+            day = str(m.get("at") or "")[:16].replace("T", " ")
+            price = num(m.get("price"))
+            tail = f" · {_money(price * abs(q))}" if price and q < 0 else ""
+            lines.append(f"{day} · {labels.get(m.get('kind'), m.get('kind'))} · "
+                         f"{name} {sign}{round(q,1)} шт{tail}")
+        return "\n".join(lines)
+
+    def text_shelf_sales(self, days: int = 7) -> str:
+        """Что реально продалось со стеллажа за период, по позициям."""
+        from .shelf import Shelf
+        from datetime import datetime, timedelta
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = self.db.query(
+            "SELECT m.item_id, i.name, SUM(-m.qty) qty, SUM(-m.qty*m.price) money"
+            " FROM shelf_moves m LEFT JOIN shelf_items i ON i.id=m.item_id"
+            " WHERE m.kind IN ('sale','online') AND m.qty<0 AND m.at>=?"
+            " GROUP BY m.item_id ORDER BY money DESC", (since,))
+        if not rows:
+            return f"За {days} дн продаж со стеллажа не было."
+        total_qty = sum(num(r.get("qty")) for r in rows)
+        total_money = sum(num(r.get("money")) for r in rows)
+        lines = [f"📊 Продажи стеллажа за {days} дн: {round(total_qty,1)} шт · {_money(total_money)}"]
+        for r in rows[:15]:
+            lines.append(f"• {r.get('name') or 'позиция'} — {round(num(r.get('qty')),1)} шт · {_money(r.get('money'))}")
+        if len(rows) > 15:
+            lines.append(f"… ещё {len(rows) - 15} поз.")
+        return "\n".join(lines)
 
     def _final_status_id(self) -> str | None:
         row = self.db.one("SELECT id FROM statuses WHERE is_final=1 ORDER BY position LIMIT 1")

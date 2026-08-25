@@ -15,8 +15,10 @@ PF.state.channels = [];
 PF.state.expenseCategories = [];
 PF.state.fixedCosts = [];
 PF.state.report = null;
+PF.state.reportSales = null;
 
 let repPeriod = 'month', repOffset = 0;
+let salesFilter = { q: '', source: '' };
 let editingAccount = null, editingChannel = null, editingFixed = null,
   editingCat = null, payingOrder = null, payingDebt = 0, payingPaid = 0,
   payingOrderUpdatedAt = '', paymentRequestId = '',
@@ -66,8 +68,14 @@ PF.refreshMoney = refreshMoney;
 
 async function refreshReport() {
   try {
-    PF.state.report = await get('/api/report', { period: repPeriod, offset: repOffset });
+    const [rep, sales] = await Promise.all([
+      get('/api/report', { period: repPeriod, offset: repOffset }),
+      get('/api/report/sales', { period: repPeriod, offset: repOffset, limit: 1000 }),
+    ]);
+    PF.state.report = rep;
+    PF.state.reportSales = sales;
     renderReport();
+    renderSalesLedger();
   } catch (e) { fail(e); }
 }
 
@@ -298,6 +306,42 @@ function renderReport() {
     : '<div class="empty compact"><span>Расходов за период не было.</span></div>';
 }
 
+function renderSalesLedger() {
+  const r = PF.state.reportSales;
+  const tbody = $('rep_sales_rows');
+  if (!r || !tbody) return;
+  $('rep_sales_sub').textContent =
+    `Документы продаж, заказы и стеллаж · ${nfmt(r.count)} строк · ${nfmt(r.total_qty)} шт · ${money(r.total_amount)} · прибыль ${money(r.total_profit)}`;
+  const q = salesFilter.q.trim().toLocaleLowerCase('ru-RU');
+  const src = salesFilter.source;
+  const rows = (r.rows || []).filter((row) => {
+    if (src && row.source !== src) return false;
+    if (!q) return true;
+    return [row.name, row.doc_number, row.customer, row.channel, row.note]
+      .filter(Boolean).join(' ').toLocaleLowerCase('ru-RU').includes(q);
+  });
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty compact"><span>${(r.rows || []).length ? 'Ничего не найдено по фильтру.' : 'За период продаж не было.'}</span></div></td></tr>`;
+    return;
+  }
+  const sourceMark = { document: '📄 документ', order: '🧾 заказ', shelf: '🛍 стеллаж' };
+  tbody.innerHTML = rows.map((row) => {
+    const profitCls = num(row.profit) >= 0 ? 'pos' : 'neg';
+    return `<tr>`
+      + `<td class="muted">${(row.at || '').slice(0, 16).replace('T', ' ')}</td>`
+      + `<td><span class="chip">${esc(sourceMark[row.source] || row.source_label || row.source)}</span></td>`
+      + `<td class="muted">${esc(row.doc_number || '—')}</td>`
+      + `<td class="strong">${esc(row.name)}</td>`
+      + `<td class="muted">${esc(row.customer || '—')}</td>`
+      + `<td class="muted">${esc(row.channel || '—')}</td>`
+      + `<td class="right tnum">${nfmt(row.qty)}</td>`
+      + `<td class="right tnum">${num(row.price) ? money(row.price) : '—'}</td>`
+      + `<td class="right tnum">${money(row.amount)}</td>`
+      + `<td class="right tnum ${profitCls}">${money(row.profit)}</td>`
+      + `</tr>`;
+  }).join('');
+}
+
 /* ============================================== справочники в настройках */
 function renderDirectories() {
   if ($('set_accounts')) {
@@ -495,6 +539,22 @@ function bind() {
       downloadCsv(r.filename, r.csv);
     } catch (e) { fail(e); }
   });
+  btn('rep_sales_export', async () => {
+    try {
+      const r = await get('/api/export/sales', { period: repPeriod, offset: repOffset });
+      downloadCsv(r.filename, r.csv);
+    } catch (e) { fail(e); }
+  });
+  if ($('rep_sales_search')) {
+    $('rep_sales_search').addEventListener('input', () => {
+      salesFilter.q = $('rep_sales_search').value;
+      renderSalesLedger();
+    });
+    $('rep_sales_source').addEventListener('change', () => {
+      salesFilter.source = $('rep_sales_source').value;
+      renderSalesLedger();
+    });
+  }
   btn('rep_prev', () => { repOffset += 1; refreshReport(); });
   btn('rep_next', () => { repOffset = Math.max(0, repOffset - 1); refreshReport(); });
   const repSeg = $('rep_period');

@@ -106,6 +106,26 @@ class TelegramTextTests(unittest.TestCase):
         self.assertNotIn("печать +", text)
         self.assertIn("Внимание к стеллажу", self.bot.text_shelf(only_needs=True))
 
+    def test_shelf_sell_and_sales_report_from_telegram(self):
+        self.db.upsert("shelf_items", {
+            "id": "s1", "name": "Адресник", "qty": 3, "price": 500,
+            "cost_per_unit": 120, "active": 1,
+        })
+        reply = self.bot.do_shelf_sell("s1", 1)
+        self.assertIn("Продано", reply)
+        self.assertIn("Осталось 2", reply)
+        sales = self.bot.text_shelf_sales(7)
+        self.assertIn("Продажи стеллажа за 7", sales)
+        self.assertIn("Адресник", sales)
+        moves = self.bot.text_shelf_moves(5)
+        self.assertIn("Последние движения", moves)
+        # Продажа без цены тоже проходит как списание.
+        self.db.upsert("shelf_items", {
+            "id": "s2", "name": "Визитка", "qty": 2, "price": 0,
+            "cost_per_unit": 0, "active": 1,
+        })
+        self.assertIn("Продано", self.bot.do_shelf_sell("s2", 1))
+
     def test_ask_without_printer(self):
         self.assertEqual(self.bot.text_ask("сколько осталось"),
                          "Сейчас ничего не печатается.")

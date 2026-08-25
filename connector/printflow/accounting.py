@@ -2102,6 +2102,218 @@ class Accounting:
             lines.append(f"{e['name']};{e['amount']}")
         return "\r\n".join(lines)
 
+    def sales_details(self, period: str = "month", offset: int = 0,
+                      limit: int = 500) -> dict[str, Any]:
+        """Построчный реестр проданных товаров за период.
+
+        Владелец просил «буквально посмотреть каждый товар, который продался,
+        даже если продавалось документом». Поэтому в один список попадают:
+        • позиции проведённых документов продаж (1С-стиль: несколько строк в
+          одном документе, себестоимость по складу);
+        • позиции закрытых заказов (с одиночным товаром и мультизаказы);
+        • продажи со стеллажа (по QR, из ТГ, ручные, 1С-чек).
+
+        Это рабочий реестр фактов, а не сведённый P&L: один и тот же товар
+        показывается столько раз, сколько реально ушёл, с документом-источником.
+        """
+        start, end, label = self.period_bounds(period, offset)
+        channels = {c["id"]: c.get("name") or c["id"]
+                    for c in self.db.query("SELECT id,name FROM channels")}
+        final_ids = [r["id"] for r in self.db.query(
+            "SELECT id FROM statuses WHERE is_final=1")]
+        final_marks = ",".join("?" * len(final_ids)) if final_ids else "''"
+
+        rows: list[dict[str, Any]] = []
+
+        # 1) Проведённые документы «Продажа» — основной «продавалось документом».
+        doc_rows = self.db.query(
+            "SELECT d.id doc_id, d.number doc_number, d.at at, d.channel channel,"
+            " d.note note, d.counterparty_id cp, ctp.name cp_name,"
+            " ctp.name counterparty_name,"
+            " i.line line, i.nom_id nom_id, n.name nom_name, i.qty qty,"
+            " i.price price, i.cost cost, i.amount amount"
+            " FROM documents d LEFT JOIN doc_items i ON i.doc_id=d.id"
+            " LEFT JOIN nomenclature n ON n.id=i.nom_id"
+            " LEFT JOIN customers ctp ON ctp.id=d.counterparty_id"
+            " WHERE d.kind='sale' AND d.state='posted'"
+            " AND d.at>=? AND d.at<? AND i.id IS NOT NULL"
+            " ORDER BY datetime(d.at) DESC, d.number, i.line", (start, end))
+        # Себестоимость строки документа при проведении пишется не всегда
+        # (quick_sale отдаёт только цену). Распределяем cost_total документа
+        # пропорционально суммам строк, чтобы прибыль в реестре не была
+        # завышена до выручки.
+        doc_cost_totals = {
+            d["id"]: num(d.get("cost_total")) for d in self.db.query(
+                "SELECT id,cost_total FROM documents WHERE kind='sale' AND state='posted'"
+                " AND at>=? AND at<?", (start, end))
+        }
+        doc_amount_totals: dict[str, float] = {}
+        for r in doc_rows:
+            doc_amount_totals[r["doc_id"]] = doc_amount_totals.get(r["doc_id"], 0.0) \
+                + num(r.get("amount"))
+        for r in doc_rows:
+            qty = num(r.get("qty"))
+            price = num(r.get("price"))
+            amount = num(r.get("amount")) or qty * price
+            line_cost = num(r.get("cost")) * qty
+            if not line_cost:
+                doc_total_cost = doc_cost_totals.get(r.get("doc_id"), 0.0)
+                doc_total_amount = doc_amount_totals.get(r.get("doc_id"), 0.0)
+                if doc_total_cost and doc_total_amount:
+                    line_cost = doc_total_cost * amount / doc_total_amount
+            rows.append({
+                "at": r.get("at") or "",
+                "source": "document",
+                "source_label": "Документ",
+                "doc_id": r.get("doc_id") or "",
+                "doc_number": r.get("doc_number") or r.get("doc_id") or "",
+                "nom_id": r.get("nom_id") or "",
+                "name": r.get("nom_name") or "Без названия",
+                "qty": round(qty, 3),
+                "price": round(price, 2),
+                "amount": round(amount, 2),
+                "cost": round(line_cost, 2),
+                "profit": round(amount - line_cost, 2),
+                "customer": (r.get("cp_name") or r.get("counterparty_name") or ""),
+                "channel": channels.get(r.get("channel") or "", r.get("channel") or "Магазин"),
+                "note": r.get("note") or "",
+            })
+
+        # 2) Закрытые заказы: одиночные и строки мультизаказов.
+        if final_ids:
+            orders = self.db.query(
+                f"SELECT * FROM orders WHERE created_at>=? AND created_at<?"
+                f" AND status IN ({final_marks})", (start, end, *final_ids))
+        else:
+            orders = []
+        doc_order_ids = {r.get("order_id") for r in self.db.query(
+            "SELECT order_id FROM documents WHERE kind='sale' AND state='posted'"
+            " AND order_id IS NOT NULL AND order_id<>''")}
+        for o in orders:
+            if o.get("id") in doc_order_ids:
+                continue  # учтён через документ продажи
+            at = o.get("closed_at") or o.get("updated_at") or o.get("created_at") or ""
+            if not (start <= at < end):
+                # заказ создан в периоде, но закрылся позже — всё равно покажем
+                at = o.get("created_at") or at
+            eco = self.order_economics(o)
+            lines = self.order_items_economics(o)
+            if lines:
+                for li in lines:
+                    rows.append({
+                        "at": at, "source": "order", "source_label": "Заказ",
+                        "doc_id": o.get("id") or "",
+                        "doc_number": o.get("number") or "",
+                        "nom_id": li.get("nom_id") or "",
+                        "name": li.get("name") or o.get("product") or "Без названия",
+                        "qty": round(num(li.get("qty")), 3),
+                        "price": round(num(li.get("unit_price")), 2),
+                        "amount": round(num(li.get("price")), 2),
+                        "cost": round(num(li.get("cost")), 2),
+                        "profit": round(num(li.get("profit")), 2),
+                        "customer": o.get("customer_name") or "",
+                        "channel": channels.get(o.get("channel") or "",
+                                                o.get("channel") or "Напрямую"),
+                        "note": o.get("notes") or "",
+                    })
+            else:
+                qty = num(o.get("qty"), 1) or 1
+                rows.append({
+                    "at": at, "source": "order", "source_label": "Заказ",
+                    "doc_id": o.get("id") or "",
+                    "doc_number": o.get("number") or "",
+                    "nom_id": o.get("nom_id") or "",
+                    "name": o.get("product") or "Без названия",
+                    "qty": round(qty, 3),
+                    "price": round(eco["price"] / qty, 2) if qty else 0.0,
+                    "amount": round(eco["price"], 2),
+                    "cost": round(eco["cost"], 2),
+                    "profit": round(eco["profit"], 2),
+                    "customer": o.get("customer_name") or "",
+                    "channel": channels.get(o.get("channel") or "",
+                                            o.get("channel") or "Напрямую"),
+                    "note": o.get("notes") or "",
+                })
+
+        # 3) Продажи со стеллажа (по QR, из ТГ, ручные, 1С).
+        shelf_rows = self.db.query(
+            "SELECT m.*, i.name item_name, i.cost_per_unit cost_unit"
+            " FROM shelf_moves m LEFT JOIN shelf_items i ON i.id=m.item_id"
+            " WHERE m.kind IN ('sale','online') AND m.qty<0"
+            " AND m.at>=? AND m.at<? ORDER BY datetime(m.at) DESC", (start, end))
+        for m in shelf_rows:
+            qty = abs(num(m.get("qty")))
+            price = num(m.get("price"))
+            unit_cost = num(m.get("cost_unit"))
+            amount = price * qty
+            rows.append({
+                "at": m.get("at") or "",
+                "source": "shelf", "source_label": "Стеллаж",
+                "doc_id": m.get("id") or "",
+                "doc_number": m.get("external_id") or m.get("id") or "",
+                "nom_id": m.get("item_id") or "",
+                "name": m.get("item_name") or "Позиция стеллажа",
+                "qty": round(qty, 3),
+                "price": round(price, 2),
+                "amount": round(amount, 2),
+                "cost": round(unit_cost * qty, 2),
+                "profit": round(amount - unit_cost * qty, 2),
+                "customer": "",
+                "channel": "Стеллаж" if m.get("kind") == "sale" else "Онлайн",
+                "note": (m.get("note") or "").strip(),
+            })
+
+        rows.sort(key=lambda r: r.get("at") or "", reverse=True)
+        total_qty = sum(num(r["qty"]) for r in rows)
+        total_amount = sum(num(r["amount"]) for r in rows)
+        total_cost = sum(num(r["cost"]) for r in rows)
+        total_profit = sum(num(r["profit"]) for r in rows)
+        # Сводка по товарам — для быстрого поиска «что именно и сколько».
+        products: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            p = products.setdefault(r["name"], {"name": r["name"], "qty": 0.0,
+                                                "amount": 0.0, "profit": 0.0})
+            p["qty"] += num(r["qty"])
+            p["amount"] += num(r["amount"])
+            p["profit"] += num(r["profit"])
+        product_list = sorted(products.values(), key=lambda x: -x["amount"])
+        for p in product_list:
+            p["qty"] = round(p["qty"], 2)
+            p["amount"] = round(p["amount"], 2)
+            p["profit"] = round(p["profit"], 2)
+
+        return {
+            "period": period, "label": label, "start": start, "end": end,
+            "rows": rows[: max(1, int(limit or 500))],
+            "count": len(rows),
+            "total_qty": round(total_qty, 2),
+            "total_amount": round(total_amount, 2),
+            "total_cost": round(total_cost, 2),
+            "total_profit": round(total_profit, 2),
+            "products": product_list,
+        }
+
+    def sales_details_csv(self, period: str = "month", offset: int = 0) -> str:
+        """CSV реестра продаж — каждая строка товара отдельной записью."""
+        rep = self.sales_details(period, offset, limit=10000)
+        lines = [f"PrintFlow · реестр проданных товаров за {rep['label']}", "",
+                 "Дата;Источник;Документ/заказ;Товар;Клиент;Канал;Штук;Цена;Сумма;Себест.;Прибыль;Заметка"]
+        for r in rep["rows"]:
+            lines.append(";".join(str(x).replace(";", ",") for x in (
+                (r["at"] or "")[:16].replace("T", " "),
+                r.get("source_label", ""),
+                r.get("doc_number", ""),
+                r.get("name", ""),
+                r.get("customer", ""),
+                r.get("channel", ""),
+                r.get("qty", 0),
+                r.get("price", 0),
+                r.get("amount", 0),
+                r.get("cost", 0),
+                r.get("profit", 0),
+                (r.get("note") or "").replace("\n", " "))))
+        return "\r\n".join(lines)
+
     def transactions_csv(self, days: int = 365) -> str:
         since = (datetime.now() - timedelta(days=max(1, days))).isoformat()
         rows = self.db.query(
