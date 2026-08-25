@@ -191,10 +191,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("nom_id", "TEXT DEFAULT ''"),
         ("barcode", "TEXT DEFAULT ''"),
         ("sku", "TEXT DEFAULT ''"),
-        # Физический формат: standard (66×31) или promo (66×56). Старые
+        # Физический формат: standard (67×32) или promo (67×57). Старые
         # classic/compact/minimal нормализуются в Shelf при чтении/сохранении.
         ("tag_template", "TEXT DEFAULT 'standard'"),
-        # Вариант — только визуальный: физический формат остаётся 66×31/66×56.
+        # Вариант — только визуальный: физический формат остаётся 67×32/67×57.
         ("tag_variant", "TEXT DEFAULT 'clean'"),
         ("tag_badge", "TEXT DEFAULT ''"),
         ("tag_color", "TEXT DEFAULT '#4f46e5'"),
@@ -730,7 +730,7 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     note TEXT DEFAULT '',
     barcode TEXT DEFAULT '',        -- штрихкод ровно как в номенклатуре 1С
     sku TEXT DEFAULT '',            -- артикул 1С
-    tag_template TEXT DEFAULT 'standard', -- standard (66×31) | promo (66×56); legacy IDs normalize to standard
+    tag_template TEXT DEFAULT 'standard', -- standard (67×32) | promo (67×57); legacy IDs normalize to standard
     tag_variant TEXT DEFAULT 'clean', -- clean | accent | sale | mono | photo (только визуал)
     tag_badge TEXT DEFAULT '',      -- своя плашка: «Хит», «Новинка», «−20%»
     tag_color TEXT DEFAULT '#4f46e5',

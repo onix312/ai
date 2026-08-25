@@ -98,7 +98,7 @@
     <div class="row">
       <label>Оффер <input id="k_offer" data-page="k_offer" class="wide" value="−10% на первый заказ"></label>
       <label>Код <input id="k_code" data-page="k_code" style="width:100px" value="NOZZA10"></label>
-      <label>Срок <input id="k_till" data-page="k_till" style="width:140px" value="до 30 сентября"></label>
+      <label>Срок <input id="k_till" data-page="k_till" style="width:140px" value=""></label>
       <label><input type="checkbox" id="k_qr" data-page="k_qr" checked> QR</label>
     </div>
     <div class="row">
@@ -119,6 +119,16 @@
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
+
+function dateAfter(days) {
+  const d = new Date(); d.setDate(d.getDate() + days);
+  return 'до ' + d.toLocaleDateString('ru-RU');
+}
+// Новая партия всегда получает понятную дату с годом. Сохранённые вручную
+// сроки NZ.mount вернёт из браузера и не перезапишет.
+const initialState = NZ.pageState({});
+if (initialState.c_till === undefined) $('c_till').value = dateAfter(365);
+if (initialState.k_till === undefined) $('k_till').value = dateAfter(45);
 
 function certHtml() {
   const qr = $('c_qr').checked ? NZ.qr(NZ.contact().site, { ecl: 'M', margin: 0 }) : '';

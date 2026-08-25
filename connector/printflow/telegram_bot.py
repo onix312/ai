@@ -37,8 +37,9 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • итоги недели · итоги месяца — отчёты по запросу
 • долги · брак · рейтинг — должники, потери на браке, ABC изделий
 • сколько осталось / что печатает / когда закончит / сколько заработал
-• план — что печатать сегодня
+• стеллаж / полка — остаток, дефицит и план пополнения с кнопками
 • продажа — продать со стеллажа (−1 шт)
+• план — что печатать сегодня
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
 • оплата 1500 по 1001 — принять оплату
 • статус 1001 печать — сменить статус заказа
@@ -130,11 +131,14 @@ class TelegramBot:
 
     def _reply_keyboard(self, chat: str, text: str) -> None:
         """Сообщение с постоянной клавиатурой-меню внизу."""
+        # Постоянное меню — только безопасные обзоры и переходы. Продажа
+        # открывает отдельный список с явными кнопками «−1», а не списывает
+        # товар случайным нажатием на клавиатуре.
         keyboard = [
-            [{"text": "🖨 Панель"}, {"text": "📷 Кадр"}],
-            [{"text": "≡ Очередь"}, {"text": "₽ Деньги"}],
-            [{"text": "⚑ План"}, {"text": "🛍 Продажа"}],
-            [{"text": "📊 Итоги"}],
+            [{"text": "🖨 Панель"}, {"text": "📷 Кадр"}, {"text": "≡ Очередь"}],
+            [{"text": "🛍 Стеллаж"}, {"text": "🛒 Продажа"}, {"text": "⚑ План"}],
+            [{"text": "📦 Пластик"}, {"text": "₽ Деньги"}, {"text": "⚠ Хвосты"}],
+            [{"text": "📊 Итоги"}, {"text": "❔ Помощь"}],
         ]
         self._call("sendMessage", {
             "chat_id": chat, "text": text[:3800], "disable_web_page_preview": "true",
@@ -241,6 +245,11 @@ class TelegramBot:
                                                 "text": "Этот бот приватный."})
             return
         command = data.replace("cmd:", "", 1)
+        # Меню стеллажа и продаж отправляют новое сообщение с актуальными
+        # остатками и кнопками; исходное не превращаем в неактуальный чек.
+        if command in ("shelf", "sell-menu"):
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            return self.shelf_keyboard(chat) if command == "shelf" else self.sell_keyboard(chat)
         text = self._run_command(command, chat)
         self._call("answerCallbackQuery", {"callback_query_id": callback_id})
         # Управление печатью обновляем в том же сообщении; продажа и панель — новым.
@@ -292,6 +301,8 @@ class TelegramBot:
             return self.text_panel()
         if command == "plan":
             return self.text_plan()
+        if command == "shelf:needs":
+            return self.text_shelf(only_needs=True)
         if command.startswith("sell:"):
             return self.do_sell(command.split(":", 1)[1])
         return "Не понял команду."
@@ -445,7 +456,7 @@ class TelegramBot:
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е")
-        for emoji in "🖨📷≡₽⚑🛍📊▦▤·":
+        for emoji in "🖨📷≡₽⚑🛍🛒📦📊⚠❔▦▤·":
             text = text.replace(emoji, " ")
         text = text.strip()
         word = text.split()[0] if text else ""
@@ -458,6 +469,8 @@ class TelegramBot:
             return self._reply_keyboard(chat, self.text_panel())
         if word in ("план", "plan", "печатать"):
             return self._reply(chat, self.text_plan())
+        if word in ("стеллаж", "полка", "витрина", "shelf"):
+            return self.shelf_keyboard(chat)
         if word in ("продажа", "продать", "продажи", "sell"):
             return self.sell_keyboard(chat)
         if word in ("оплата", "оплатить", "payment"):
@@ -1151,6 +1164,61 @@ class TelegramBot:
         if not plan.get("sequence"):
             lines.append("Печатать нечего — полка и очередь в порядке.")
         return "\n".join(lines)
+
+    def text_shelf(self, only_needs: bool = False) -> str:
+        """Короткий честный срез стеллажа для телефона.
+
+        Не подменяет инвентаризацию: показывает учётный остаток и помечает
+        позиции, которые надо проверить или пополнить физически.
+        """
+        from .shelf import Shelf
+        items = Shelf(self.db).items()
+        if not items:
+            return "🛍 Стеллаж пуст: активных позиций пока нет."
+        needs = [i for i in items if i.get("status") in ("empty", "low", "dead") or num(i.get("plan_qty")) > 0]
+        total_qty = sum(num(i.get("qty")) for i in items)
+        total_value = sum(num(i.get("stock_value")) for i in items)
+        if only_needs:
+            if not needs:
+                return "✅ Стеллаж в порядке: пустых, низких и залежавшихся позиций нет."
+            title = f"⚠ Внимание к стеллажу: {len(needs)}"
+            rows = needs
+        else:
+            title = (f"🛍 Стеллаж: {len(items)} поз. · {round(total_qty, 1)} шт · "
+                     f"учётная стоимость {_money(total_value)}")
+            rows = sorted(needs, key=lambda i: (i.get("status") == "empty", num(i.get("plan_qty"))), reverse=True) or items
+        lines = [title]
+        for item in rows[:8]:
+            # В базовой аналитике «нет продаж» приоритетнее low. Для человека
+            # на полке это две разные причины действия, поэтому не прячем
+            # низкий остаток за статусом залежавшегося товара.
+            marks = []
+            if num(item.get("qty")) <= 0:
+                marks.append("нет")
+            elif item.get("low"):
+                marks.append("мало")
+            elif not item.get("dead"):
+                marks.append("в норме")
+            if item.get("dead"):
+                marks.append("нет продаж")
+            status = " · ".join(marks) or "проверить"
+            extra = f" · печать +{int(num(item.get('plan_qty')))}" if num(item.get("plan_qty")) > 0 else ""
+            lines.append(f"• {item.get('name') or 'Без названия'} — {round(num(item.get('qty')), 1)} шт · {status}{extra}")
+        if len(rows) > 8:
+            lines.append(f"… ещё {len(rows) - 8} поз. в полной панели.")
+        return "\n".join(lines)
+
+    def shelf_keyboard(self, chat: str) -> None:
+        """Панель стеллажа: обзор, дефицит, план и быстрый переход к продаже."""
+        text = self.text_shelf()
+        buttons = [
+            [{"text": "⚠ Нужны на полку", "callback_data": "cmd:shelf:needs"},
+             {"text": "🛒 Продать −1", "callback_data": "cmd:sell-menu"}],
+            [{"text": "⚑ План печати", "callback_data": "cmd:plan"},
+             {"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
+        ]
+        self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
+                                   "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
 
     def _sell_rows(self) -> list[dict]:
         """Позиции номенклатуры с остатком для продажи со стеллажа."""

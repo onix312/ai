@@ -92,6 +92,20 @@ class TelegramTextTests(unittest.TestCase):
         text = self.bot.text_rating()
         self.assertIn("номерок", text)
 
+    def test_shelf_summary_marks_shortage_and_print_plan(self):
+        self.db.upsert("shelf_items", {
+            "id": "s1", "name": "Адресник", "qty": 1, "price": 500,
+            "cost_per_unit": 120, "min_qty": 3, "active": 1,
+        })
+        text = self.bot.text_shelf()
+        self.assertIn("Стеллаж: 1 поз.", text)
+        self.assertIn("Адресник — 1", text)
+        self.assertIn("мало", text)
+        # Без факта продаж бот не выдумывает план печати: показывает дефицит,
+        # а количество для пополнения строится только из реального спроса.
+        self.assertNotIn("печать +", text)
+        self.assertIn("Внимание к стеллажу", self.bot.text_shelf(only_needs=True))
+
     def test_ask_without_printer(self):
         self.assertEqual(self.bot.text_ask("сколько осталось"),
                          "Сейчас ничего не печатается.")

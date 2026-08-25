@@ -134,7 +134,7 @@ function load() {
 function save() { NZ.pageStateSave({ [LS_KEY]: items }); }
 
 function renderSticker(s, idx) {
-  const qr = s.qr ? NZ.qr(s.link || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  const qr = s.qr ? NZ.qr(s.link || NZ.contact().qrbase || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
   const foot = (s.foot == null || s.foot === '') ? 'NOZZA · ' + (NZ.contact().city || '') : s.foot;
   return `<div class="stk t-${s.theme || 'brand'}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править">
     ${s.ico ? `<div class="ico">${NZ.esc(s.ico)}</div>` : ''}

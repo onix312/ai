@@ -99,6 +99,60 @@ function download(name, text, mime) {
 
 function uid(prefix) { return (prefix || 'id') + '-' + Math.random().toString(36).slice(2, 8); }
 
+/* Шаблон — переносит правки конкретного генератора между браузерами.
+   Контакты включаем намеренно: на новом компьютере макет сразу остаётся
+   пригодным к печати. Импорт ограничен тем же путём страницы. */
+function exportTemplate() {
+  return {
+    format: 'nozza-generator-template', version: 1, path: location.pathname,
+    savedAt: new Date().toISOString(), contact: contact(), logo: logo(),
+    page: readLS(pageKey()) || {}
+  };
+}
+function importTemplate(data) {
+  if (!data || data.format !== 'nozza-generator-template' || data.version !== 1) {
+    throw new Error('Это не шаблон генератора NOZZA.');
+  }
+  if (data.path !== location.pathname) {
+    throw new Error('Шаблон создан для другого генератора.');
+  }
+  if (!data.page || typeof data.page !== 'object') throw new Error('В шаблоне нет данных макета.');
+  if (data.contact && typeof data.contact === 'object') contactSave(data.contact);
+  if (/^[1-4]$/.test(String(data.logo))) logoSave(data.logo);
+  writeLS(pageKey(), data.page);
+}
+
+function addTemplateTools() {
+  const panel = document.querySelector('.panel');
+  if (!panel || panel.querySelector('[data-nz-template-tools]')) return;
+  const tools = document.createElement('div');
+  tools.className = 'panel-row nz-template-tools';
+  tools.setAttribute('data-nz-template-tools', '');
+  tools.innerHTML = '<button class="btn" type="button" data-nz-export title="Сохранить текущие поля и контакты в файл">⇩ Сохранить шаблон</button>' +
+    '<label class="btn nz-import" title="Загрузить ранее сохранённый шаблон">⇧ Загрузить<input type="file" accept="application/json,.json" data-nz-import></label>' +
+    '<button class="btn" type="button" data-nz-clear title="Удалить правки только этого генератора">↺ Очистить макет</button>';
+  panel.appendChild(tools);
+  tools.querySelector('[data-nz-export]').addEventListener('click', () => {
+    const date = new Date().toISOString().slice(0, 10);
+    download('nozza-шаблон-' + date + '.json', JSON.stringify(exportTemplate(), null, 2), 'application/json;charset=utf-8');
+  });
+  tools.querySelector('[data-nz-import]').addEventListener('change', (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { importTemplate(JSON.parse(String(reader.result || ''))); location.reload(); }
+      catch (e) { window.alert(e.message || 'Не удалось загрузить шаблон.'); }
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+  tools.querySelector('[data-nz-clear]').addEventListener('click', () => {
+    if (!window.confirm('Очистить все сохранённые правки этого макета? Общие контакты останутся.')) return;
+    try { localStorage.removeItem(pageKey()); } catch (e) { /* noop */ }
+    location.reload();
+  });
+}
+
 /* ------------------------------------------------------------------- панель */
 
 let drawFn = null, timer = null;
@@ -127,6 +181,7 @@ function mount(draw) {
   drawFn = draw;
 
   document.querySelectorAll('[data-nz-common]').forEach(commonFields);
+  addTemplateTools();
 
   const c = contact();
   document.querySelectorAll('[data-nz]').forEach((inp) => {
