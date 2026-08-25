@@ -7,13 +7,13 @@
 <style>
   /* Exact shelf formats on A4: 27 standard labels or 15 promo stands. */
   .sheet { position: relative; box-sizing: border-box; }
-  .sheet.standard { padding: 9mm 6mm; }
-  .sheet.promo { padding: 8.5mm 6mm; }
+  .sheet.standard { padding: 4.5mm; }
+  .sheet.promo { padding: 6mm 4.5mm; }
   .grid { display: grid; align-content: flex-start; justify-content: flex-start; overflow: hidden; }
-  .sheet.standard .grid { grid-template-columns: repeat(3, 66mm); grid-auto-rows: 31mm; gap: 0; }
-  .sheet.promo .grid { grid-template-columns: repeat(3, 66mm); grid-auto-rows: 56mm; gap: 0; }
+  .sheet.standard .grid { grid-template-columns: repeat(3, 67mm); grid-auto-rows: 32mm; gap: 0; }
+  .sheet.promo .grid { grid-template-columns: repeat(3, 67mm); grid-auto-rows: 57mm; gap: 0; }
   .tag {
-    width: 66mm; height: 31mm;
+    width: 67mm; height: 32mm;
     border: .25mm solid var(--line); border-radius: 1.5mm;
     padding: 1.7mm 2.1mm 1.3mm 3.7mm;
     display: flex; gap: 1.4mm;
@@ -55,8 +55,8 @@
   .tag .brandline img { width: 2.6mm; height: 2.6mm; flex: none; }
   .tag.blank .name, .tag.blank .desc { border-bottom: 1px solid #dfe4ef; min-height: 3.5mm; }
   .tag.blank .price { color: #cbd2e0; }
-  /* The 66 × 56 mm promo stand has deliberate breathing room for an offer and QR. */
-  .sheet.promo .tag { width: 66mm; height: 56mm; padding: 3.6mm 3.8mm 3mm 5.2mm; gap: 3mm; border-radius: 2.5mm; background: linear-gradient(145deg, #fff 0%, #fff 62%, #f0efff 100%); }
+  /* The 67 × 57 mm promo stand has deliberate breathing room for an offer and QR. */
+  .sheet.promo .tag { width: 67mm; height: 57mm; padding: 3.6mm 3.8mm 3mm 5.2mm; gap: 3mm; border-radius: 2.5mm; background: linear-gradient(145deg, #fff 0%, #fff 62%, #f0efff 100%); }
   .sheet.promo .tag::before { width: 2.2mm; }
   .sheet.promo .tag .name { font-size: 16px; line-height: 1.05; -webkit-line-clamp: 3; }
   .sheet.promo .tag .desc { font-size: 8px; line-height: 1.25; margin-top: 1.3mm; -webkit-line-clamp: 3; }
@@ -73,8 +73,8 @@
   @page { size: A4 portrait; margin: 0; }
   @media print {
     .sheet { width: 210mm; min-height: 297mm; margin: 0; box-shadow: none; }
-    .sheet.standard { padding: 9mm 6mm; }
-    .sheet.promo { padding: 8.5mm 6mm; }
+    .sheet.standard { padding: 4.5mm; }
+    .sheet.promo { padding: 6mm 4.5mm; }
   }
 
   /* Manual editor */
@@ -102,7 +102,7 @@
   <div class="panel-row">
     <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Генератор ценников</h1>
     <label>Источник <select id="src"><option value="api">Каталог PrintFlow</option><option value="custom">Только ручные</option><option value="demo">Демо-набор</option></select></label>
-    <label>Формат <select id="size"><option value="standard">Ценник · 66 × 31 мм (27 на лист)</option><option value="promo">Промостенд · 66 × 56 мм (15 на лист)</option></select></label>
+    <label>Формат <select id="size"><option value="standard">Ценник · 67 × 32 мм (27 на лист)</option><option value="promo">Промостенд · 67 × 57 мм (15 на лист)</option></select></label>
     <label>Наценка, % <input type="number" id="markup" value="0" step="5" style="width:60px"></label>
     <label>Округлять до <select id="round"><option value="0">не округлять</option><option value="10" selected>10 ₽</option><option value="50">50 ₽</option><option value="100">100 ₽</option></select></label>
     <label>Город <input type="text" id="city" value="Симферополь" style="width:120px"></label>
@@ -148,7 +148,7 @@
 </div>
 
 <div class="note noprint">
-  <b>Как печатать:</b> обычный ценник — 66 × 31 мм, промостенд — 66 × 56 мм. Выберите A4, масштаб 100 % и отключите «вписать в лист». Бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указать цену, материал, бейдж и QR; если каталог PrintFlow не открыт, покажется демо-набор.
+  <b>Как печатать:</b> обычный ценник — 67 × 32 мм, промостенд — 67 × 57 мм. Выберите A4, масштаб 100 % и отключите «вписать в лист». Бумага 160–250 г/м² или самоклеящаяся плёнка A4. Клик по ценнику выделяет его (синяя рамка) и переносит в редактор. Можно указать цену, материал, бейдж и QR; если каталог PrintFlow не открыт, покажется демо-набор.
 </div>
 
 <div id="sheets"></div>
@@ -279,13 +279,13 @@ function render(){
 
   let html=pages.map((page,idx)=>`
     <div class="sheet ${opts.size}">
-      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} · ${opts.size==='promo' ? 'промостенд 66 × 56 мм' : 'ценник 66 × 31 мм'} ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
+      <div class="sheet-title noprint">Лист ${idx+1} из ${pages.length} · ${page.length} · ${opts.size==='promo' ? 'промостенд 67 × 57 мм' : 'ценник 67 × 32 мм'} ${page.some(x=>x._custom)?'— ручные выделены, клик редактирует':''}</div>
       <div class="grid">${page.map(it=>buildTagInner(it, opts, it._globalIdx)).join('')}</div>
     </div>`).join('');
 
   if($('blanks').checked){
     const count=PER_PAGE[opts.size];
-    html+=`<div class="sheet ${opts.size}"><div class="sheet-title noprint">Пустые бланки — ${opts.size==='promo' ? 'промостенд 66 × 56 мм' : 'ценник 66 × 31 мм'} · ${esc(city)}</div><div class="grid">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
+    html+=`<div class="sheet ${opts.size}"><div class="sheet-title noprint">Пустые бланки — ${opts.size==='promo' ? 'промостенд 67 × 57 мм' : 'ценник 67 × 32 мм'} · ${esc(city)}</div><div class="grid">${Array.from({length:count}, blankHtml).join('')}</div></div>`;
   }
   host.innerHTML=html;
 

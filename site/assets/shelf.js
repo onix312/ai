@@ -21,7 +21,7 @@ const STATUS_LABEL = {
 // Существующие записи с устаревшими classic/compact/minimal остаются печатабельными:
 // API уже нормализует их, а этот fallback покрывает офлайн-кэш старого интерфейса.
 const TAG_TEMPLATE_ALIASES = { classic: 'standard', compact: 'standard', minimal: 'standard' };
-const TAG_FORMAT_LABEL = { standard: 'ценник 66 × 31 мм', promo: 'промостенд 66 × 56 мм' };
+const TAG_FORMAT_LABEL = { standard: 'ценник 67 × 32 мм', promo: 'промостенд 67 × 57 мм' };
 const TAG_VARIANT_LABEL = {
   clean: 'чистый', accent: 'акцент на цене', sale: 'акция', mono: 'монохром', photo: 'фото товара',
 };
@@ -39,7 +39,7 @@ function syncShelfTagVariant() {
   const format = normalizedTagTemplate($('shf_tag_template').value);
   const option = $('shf_tag_variant').querySelector('option[value="photo"]');
   if (option) option.disabled = format !== 'promo';
-  // Keep the compact 66 × 31 label readable: it deliberately has no room for
+  // Keep the compact 67 × 32 label readable: it deliberately has no room for
   // a product photo and uses the price-focused look instead.
   if (format !== 'promo' && $('shf_tag_variant').value === 'photo') {
     $('shf_tag_variant').value = 'accent';

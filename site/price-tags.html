@@ -92,7 +92,7 @@ button,a { -webkit-tap-highlight-color:transparent; }
 .preset-row .mini { padding:5px 7px; border:1px solid #dfe4ee; border-radius:8px; background:#f8f9fc; }
 .control { display:block; margin-top:11px; }
 .control > span { display:flex; justify-content:space-between; margin-bottom:5px; color:var(--muted); font-size:11.5px; font-weight:600; }
-.control select,.control input[type=text] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff; color:var(--ink); outline:none; }
+.control select,.control input[type=text],.control input[type=number] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff; color:var(--ink); outline:none; }
 .color-row { display:grid; grid-template-columns:1fr 44px; gap:8px; }
 .color-row input[type=color] { width:44px; height:38px; padding:3px; border:1px solid var(--line); border-radius:10px; background:#fff; }
 input[type=range] { width:100%; accent-color:var(--accent); }
@@ -108,17 +108,17 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .preview-head { max-width:210mm; margin:0 auto 10px; display:flex; align-items:center; color:var(--muted); font-size:12px; }
 .sheets { display:flex; flex-direction:column; gap:20px; align-items:center; }
 /* A4 is used as a real canvas: no visual gaps between labels and no scaling.
-   Standard: 3 × 9 labels (66 × 31); promo: 3 × 5 stands (66 × 56). */
+   Standard: 3 × 9 labels (67 × 32); promo: 3 × 5 stands (67 × 57). */
 .sheet { position:relative; width:210mm; min-height:297mm; background:#fff; box-shadow:var(--shadow); page-break-after:always; }
-.sheet.standard { padding:9mm 6mm; }
-.sheet.promo { padding:8.5mm 6mm; }
+.sheet.standard { padding:4.5mm; }
+.sheet.promo { padding:6mm 4.5mm; }
 .sheet:last-child { page-break-after:auto; }
 .sheet-caption { position:absolute; top:2mm; left:6mm; z-index:1; color:#929bac; font-size:9px; text-transform:uppercase; letter-spacing:.08em; }
 .tag-grid { display:grid; align-content:start; justify-content:start; overflow:hidden; }
-.sheet.standard .tag-grid { grid-template-columns:repeat(3,66mm); grid-auto-rows:31mm; gap:0; }
-.sheet.promo .tag-grid { grid-template-columns:repeat(3,66mm); grid-auto-rows:56mm; gap:0; }
+.sheet.standard .tag-grid { grid-template-columns:repeat(3,67mm); grid-auto-rows:32mm; gap:0; }
+.sheet.promo .tag-grid { grid-template-columns:repeat(3,67mm); grid-auto-rows:57mm; gap:0; }
 .price-tag { --tag-color:#4f46e5; --font-scale:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
-  width:66mm; height:31mm; padding:1.7mm 2.2mm 1.3mm 3.7mm; border:.25mm solid #cdd3df; border-radius:1.5mm;
+  width:67mm; height:32mm; padding:1.7mm 2.2mm 1.3mm 3.7mm; border:.25mm solid #cdd3df; border-radius:1.5mm;
   background:linear-gradient(115deg,#fff 0%,#fff 76%,color-mix(in srgb,var(--tag-color) 5%,#fff) 100%); color:#121827; break-inside:avoid;
   font-family:var(--tag-font,Inter,"Segoe UI",Arial,sans-serif); }
 .price-tag::before { content:""; position:absolute; inset:0 auto 0 0; width:1.35mm; background:var(--tag-color); }
@@ -152,7 +152,7 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .footer-line { display:none; }
 .promo-photo { display:none; }
 /* The tall promo stand deliberately gives the offer, QR and cashier code room. */
-.price-tag.promo { width:66mm; height:56mm; padding:3.6mm 3.8mm 3mm 5.2mm; border-radius:2.5mm; border-width:.35mm;
+.price-tag.promo { width:67mm; height:57mm; padding:3.6mm 3.8mm 3mm 5.2mm; border-radius:2.5mm; border-width:.35mm;
   background:linear-gradient(145deg,#fff 0%,#fff 62%,color-mix(in srgb,var(--tag-color) 10%,#fff) 100%); }
 .price-tag.promo::before { width:2.2mm; }
 .price-tag.promo .tag-top { min-height:6mm; }
@@ -230,8 +230,8 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
   .topbar,.sidebar,.preview-head,.noprint { display:none !important; }
   .workspace,.preview,.sheets { display:block; padding:0; margin:0; min-height:0; }
   .sheet { width:210mm; min-height:297mm; margin:0; box-shadow:none; }
-  .sheet.standard { padding:9mm 6mm; }
-  .sheet.promo { padding:8.5mm 6mm; }
+  .sheet.standard { padding:4.5mm; }
+  .sheet.promo { padding:6mm 4.5mm; }
   .sheet-caption { display:none; }
 }
 </style>
@@ -240,7 +240,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
 <header class="topbar noprint">
   <div class="brand">
     <img src="/assets/brand/nozza-mark-1.svg" alt="NOZZA">
-    <div><h1>Конструктор ценников</h1><p>Стеллаж · 66 × 31 / 66 × 56 мм · касса и 1С</p></div>
+    <div><h1>Конструктор ценников</h1><p>Стеллаж · 67 × 32 / 67 × 57 мм · касса и 1С</p></div>
   </div>
   <div class="statuses">
     <span class="pill" id="selectedPill">0 выбрано</span>
@@ -262,6 +262,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
         <button class="mini" id="selectAll" type="button">Выбрать все</button>
         <button class="mini" id="selectNone" type="button">Снять все</button>
         <button class="mini" id="selectLinked" type="button">Только с кодом 1С</button>
+        <button class="mini" id="selectNeeds" type="button">Нужны на полку</button>
       </div>
       <div class="item-list" id="items"></div>
     </section>
@@ -269,10 +270,11 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
       <div class="section-head"><b>2. Формат печати</b></div>
       <div class="template-grid" id="templates">
         <label class="wide"><input type="radio" name="template" value="card" checked><span class="template-card"><b>Как в карточке стеллажа</b><small>Каждая позиция сохранит свой формат и попадёт на отдельный лист</small></span></label>
-        <label><input type="radio" name="template" value="standard"><span class="template-card"><b>Ценник</b><small>66 × 31 мм · 27 на A4</small></span></label>
-        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промостенд</b><small>66 × 56 мм · 15 на A4</small></span></label>
+        <label><input type="radio" name="template" value="standard"><span class="template-card"><b>Ценник</b><small>67 × 32 мм · 27 на A4</small></span></label>
+        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промостенд</b><small>67 × 57 мм · 15 на A4</small></span></label>
       </div>
-      <div class="format-note"><b>Физические форматы без масштабирования</b><span>Обычный ценник — 66 × 31 мм. Высокий промостенд — 66 × 56 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
+      <div class="format-note"><b>Физические форматы без масштабирования</b><span>Обычный ценник — 67 × 32 мм. Высокий промостенд — 67 × 57 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
+      <label class="control"><span><i>Копий каждого товара</i><i>для повтора на полке</i></span><input id="copies" type="number" min="1" max="50" value="1"></label>
     </section>
     <section class="section">
       <div class="section-head"><b>3. Вариант и палитра</b><small>без смены размера</small></div>
@@ -305,7 +307,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
       <div class="control-grid">
         <label class="control"><span><i>Название бренда</i><i>вместо NOZZA</i></span><input id="brandName" type="text" maxlength="24" placeholder="NOZZA"></label>
         <label class="control"><span><i>Надпись над ценой</i><i>необязательно</i></span><input id="priceLead" type="text" maxlength="18" placeholder="Например: от"></label>
-        <label class="control"><span><i>Подпись к цене</i><i>необязательно</i></span><input id="priceNote" type="text" maxlength="32" placeholder="Например: за комплект"></label>
+  fontFamily:'modern', borderMode:'soft', brandName:'', priceLead:'', priceNote:'',
         <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
       </div>
       <label class="control"><span><i>Призыв или нижняя строка</i><i>для промостенда</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
@@ -335,7 +337,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
     </section>
   </aside>
   <main class="preview">
-    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист» · 66 × 31 / 66 × 56 мм</span></div>
+    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист» · 67 × 32 / 67 × 57 мм</span></div>
     <div class="sheets" id="sheets"></div>
   </main>
 </div>
@@ -364,21 +366,21 @@ Content-Type: application/json
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 // The designer only creates real shelf formats. Legacy saved values remain
-// usable and deliberately resolve to the normal 66 × 31 mm label.
+// usable and deliberately resolve to the normal 67 × 32 mm label.
 const LEGACY_TYPE_ALIASES = {classic:'standard',compact:'standard',minimal:'standard'};
 const TAG_VARIANTS = ['clean','accent','sale','mono','photo'];
 const VARIANT_NAMES = {
   clean:'чистый', accent:'акцент на цене', sale:'акция', mono:'монохром', photo:'фото товара',
 };
 const TYPES = ['standard','promo'];
-const TYPE_NAMES = {standard:'Ценник 66 × 31 мм',promo:'Промостенд 66 × 56 мм'};
+const TYPE_NAMES = {standard:'Ценник 67 × 32 мм',promo:'Промостенд 67 × 57 мм'};
 const PER_PAGE = {standard:27,promo:15};
 // v3 adds visual recipes and text controls. v2/v1 remain readable so an
 // existing workstation keeps its preferred printing setup after the upgrade.
 const STORE = 'printflow:price-tag-designer:v3';
 const LEGACY_STORES = ['printflow:price-tag-designer:v2', 'printflow:price-tag-designer:v1'];
 const DESIGN_DEFAULTS = {
-  template:'card', variant:'card', colorMode:'card', accent:'#4f46e5', fontScale:100,
+  template:'card', variant:'card', colorMode:'card', accent:'#4f46e5', fontScale:100, copies:1,
   fontFamily:'modern', borderMode:'soft', brandName:'', priceLead:'', priceNote:'',
   badge:'', footer:'', showLogo:true, showQr:true, showBarcode:true, showSku:true,
   showDesc:true, showStock:false, showCut:false,
@@ -413,7 +415,8 @@ function settings() {
   return {
     template: selectedValue('template', 'card'), variant: selectedValue('variant', 'card'),
     colorMode:$('colorMode').value, accent:$('accent').value,
-    fontScale:Number($('fontScale').value) || 100, fontFamily:$('fontFamily').value,
+    fontScale:Number($('fontScale').value) || 100,
+    copies:Math.max(1, Math.min(50, Number($('copies').value) || 1)), fontFamily:$('fontFamily').value,
     borderMode:$('borderMode').value, brandName:$('brandName').value.trim(),
     priceLead:$('priceLead').value.trim(), priceNote:$('priceNote').value.trim(),
     badge:$('badge').value.trim(), footer:$('footer').value.trim(),
@@ -445,7 +448,7 @@ function restoreSettings() {
   setRadio('template', savedTemplate);
   const savedVariant = value.variant == null || value.variant === 'card' ? 'card' : normalizeVariant(value.variant);
   setRadio('variant', savedVariant);
-  ['colorMode','accent','badge','footer','brandName','priceLead','priceNote','fontFamily','borderMode'].forEach((id) => {
+  ['colorMode','accent','badge','footer','brandName','priceLead','priceNote','fontFamily','borderMode','copies'].forEach((id) => {
     if (value[id] != null) $(id).value = value[id];
   });
   if (value.fontScale) $('fontScale').value = value.fontScale;
@@ -459,7 +462,7 @@ function typeOf(item, opts) {
 function variantOf(item, type, opts) {
   const requested = opts.variant === 'card' ? item.tag_variant : opts.variant;
   const variant = normalizeVariant(requested);
-  // A small 66 × 31 label cannot fit a useful product image, so the photo
+  // A small 67 × 32 label cannot fit a useful product image, so the photo
   // recipe degrades to the price-focused design rather than shrinking content.
   return type === 'standard' && variant === 'photo' ? 'accent' : variant;
 }
@@ -486,7 +489,7 @@ function tagHtml(item, type, opts) {
   const brandName = opts.brandName || 'NOZZA';
   const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(brandName)}</span></span>` : '<span></span>';
   // Shelf API omits human-readable digits: SKU is already beside the code, so
-  // the full physical height stays available to scanner bars on 66 × 31 mm.
+  // the full physical height stays available to scanner bars on 67 × 32 mm.
   const barcode = opts.showBarcode ? (item.barcode_svg
     ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
     : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>') : '';
@@ -524,7 +527,7 @@ function updateDesignUi(opts) {
   if (opts.variant === 'card') {
     $('variantHint').textContent = 'Сохраняйте чистый, акционный, монохромный или фото-вариант у каждой позиции стеллажа — здесь они останутся разными.';
   } else if (opts.variant === 'photo') {
-    $('variantHint').textContent = 'Фото используется только на промостенде 66 × 56 мм. На обычном ценнике этот вариант автоматически превращается в акцент на цене.';
+    $('variantHint').textContent = 'Фото используется только на промостенде 67 × 57 мм. На обычном ценнике этот вариант автоматически превращается в акцент на цене.';
   } else {
     $('variantHint').textContent = `Общий вариант «${VARIANT_NAMES[opts.variant] || 'чистый'}» применён ко всем выбранным товарам; физические размеры не меняются.`;
   }
@@ -538,7 +541,10 @@ function renderSheets() {
   const opts = settings();
   saveSettings();
   updateDesignUi(opts);
-  const chosen = items.filter((item) => selected.has(item.id));
+  const chosenItems = items.filter((item) => selected.has(item.id));
+  // Одна позиция может стоять в нескольких местах полки. Повторяем именно
+  // печатный макет, не создавая дубликаты товара или движения в учёте.
+  const chosen = chosenItems.flatMap((item) => Array.from({ length: opts.copies }, () => item));
   const groups = {};
   chosen.forEach((item) => { const type = typeOf(item, opts); (groups[type] ||= []).push(item); });
   let pageNumber = 0;
@@ -550,9 +556,9 @@ function renderSheets() {
     });
   });
   $('sheets').innerHTML = sheets.join('') || '<div class="empty"><b>Выберите товары для печати</b><span>Отметьте одну или несколько позиций слева — листы A4 соберутся автоматически.</span></div>';
-  $('selectedPill').textContent = `${chosen.length} выбрано`;
+  $('selectedPill').textContent = chosen.length ? `${chosenItems.length} товаров · ${chosen.length} ценников` : '0 выбрано';
   $('sheetsPill').textContent = `${pageNumber} ${pageNumber === 1 ? 'лист' : pageNumber > 1 && pageNumber < 5 ? 'листа' : 'листов'}`;
-  $('previewText').textContent = chosen.length ? `Готово: ${chosen.length} ценников на ${pageNumber} листах` : 'Нет выбранных ценников';
+  $('previewText').textContent = chosen.length ? `Готово: ${chosen.length} ценников (${opts.copies} коп. каждого) на ${pageNumber} листах` : 'Нет выбранных ценников';
 }
 function queueRender() {
   clearTimeout(renderTimer);
@@ -579,7 +585,7 @@ function setSelection(predicate) {
 function applyDesignValues(values) {
   if (values.template) setRadio('template', values.template === 'card' ? 'card' : normalizeType(values.template));
   if (values.variant) setRadio('variant', values.variant === 'card' ? 'card' : normalizeVariant(values.variant));
-  ['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer'].forEach((id) => {
+  ['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer','copies'].forEach((id) => {
     if (values[id] != null) $(id).value = values[id];
   });
   ['showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
@@ -648,6 +654,8 @@ $('search').addEventListener('input', renderList);
 $('selectAll').addEventListener('click', () => setSelection(() => true));
 $('selectNone').addEventListener('click', () => setSelection(() => false));
 $('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
+$('selectNeeds').addEventListener('click', () => setSelection((item) =>
+  Boolean(item.low) || item.status === 'empty' || item.status === 'dead' || Number(item.plan_qty) > 0));
 $('templates').addEventListener('change', queueRender);
 $('variants').addEventListener('change', queueRender);
 const LIVE_DESIGN_FIELDS = new Set(['accent','fontScale','brandName','priceLead','priceNote','badge','footer']);
