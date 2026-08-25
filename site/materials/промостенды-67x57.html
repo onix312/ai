@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — генератор промостендов 67 × 57 мм</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="generator.css">
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  body { background: #eef1f7; }
+  .panel h1 { min-width: 270px; }
+  .panel textarea {
+    font: inherit; font-size: 12.5px; padding: 6px 8px;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink);
+    min-width: 240px; min-height: 36px; resize: vertical;
+  }
+  .panel .edit-row { margin-top: 10px; padding-top: 10px; border-top: 1px solid #edf0f7; }
+  .panel .edit-row label { align-items: flex-start; }
+  .panel .edit-row input[type="text"] { min-width: 190px; }
+  .hint { font-size: 11.5px; color: var(--ink-soft); line-height: 1.45; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px;
+    border: 1px solid var(--line); border-radius: 999px; background: #fff;
+    font-size: 11.5px; color: var(--ink-soft);
+  }
+  .pill b { color: var(--brand); }
+
+  .sheet {
+    width: 210mm; min-height: 297mm; padding: 6mm 4.5mm;
+    display: grid; grid-template-columns: repeat(3, 67mm); grid-auto-rows: 57mm;
+    gap: 0; align-content: start; justify-content: start;
+  }
+  .stand {
+    width: 67mm; height: 57mm; position: relative; overflow: hidden;
+    border: .25mm dashed #c6cede; background: #fff; color: var(--ink);
+    padding: 4.2mm 4.1mm 3.6mm; display: flex; flex-direction: column;
+    break-inside: avoid; cursor: pointer;
+  }
+  .stand.selected { outline: .8mm solid #4f46e5; outline-offset: -1mm; z-index: 2; }
+  .stand::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(circle at 100% 0, rgba(124,58,237,.12) 0 16mm, transparent 16.5mm),
+                linear-gradient(135deg, rgba(79,70,229,.06), rgba(255,255,255,0) 42%);
+  }
+  .stand.theme-dark { background: linear-gradient(145deg, #111827, #312e81); color: #fff; border-color: #6d74a7; }
+  .stand.theme-dark::before { background: radial-gradient(circle at 100% 0, rgba(255,255,255,.16) 0 17mm, transparent 17.5mm); }
+  .stand.theme-warm { background: #fff8ec; border-color: #f1cc8b; }
+  .stand.theme-warm::before { background: radial-gradient(circle at 100% 0, rgba(249,115,22,.14) 0 17mm, transparent 17.5mm); }
+  .stand.theme-mono { background: #fff; border-color: #aeb7c8; }
+  .stand.theme-mono::before { display: none; }
+
+  .topline { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 2mm; min-height: 8mm; }
+  .brand { display: flex; align-items: center; gap: 1.7mm; min-width: 0; }
+  .brand img { width: 6.2mm; height: 6.2mm; flex: none; }
+  .brand b { font-size: 8.2pt; letter-spacing: .13em; font-weight: 900; white-space: nowrap; }
+  .kicker {
+    max-width: 29mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 5.8pt; line-height: 1.1; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--brand); font-weight: 850; text-align: right;
+  }
+  .theme-dark .kicker { color: #c7d2fe; }
+  .theme-warm .kicker { color: #c2410c; }
+  .theme-mono .kicker { color: #334155; }
+  .headline {
+    position: relative; margin-top: 2.2mm;
+    font-size: 15.6pt; line-height: .96; letter-spacing: -.055em; font-weight: 950;
+  }
+  .headline.small { font-size: 13.2pt; line-height: 1; }
+  .headline .accent { color: var(--brand); font-style: italic; }
+  .theme-dark .headline .accent { color: #fbbf24; }
+  .theme-warm .headline .accent { color: #ea580c; }
+  .theme-mono .headline .accent { color: #111827; text-decoration: underline; }
+  .body {
+    position: relative; margin-top: 2mm; font-size: 7.35pt; line-height: 1.24; color: #4b5874;
+  }
+  .theme-dark .body { color: #dbe4ff; }
+  .points { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 1.3mm; margin-top: 2.3mm; }
+  .point {
+    min-height: 8mm; border-radius: 2mm; padding: 1.25mm 1.5mm;
+    background: rgba(79,70,229,.075); font-size: 6.35pt; line-height: 1.12; font-weight: 760; color: #27334f;
+  }
+  .theme-dark .point { background: rgba(255,255,255,.12); color: #fff; }
+  .theme-warm .point { background: rgba(249,115,22,.09); }
+  .theme-mono .point { background: #f4f6fb; }
+  .foot { position: relative; margin-top: auto; padding-top: 2mm; display: flex; align-items: end; justify-content: space-between; gap: 2mm; }
+  .cta { font-size: 6.55pt; line-height: 1.18; color: var(--ink-soft); }
+  .cta b { display: block; color: var(--ink); font-size: 7.1pt; }
+  .theme-dark .cta, .theme-dark .cta b { color: #fff; }
+  .qrbox { width: 12.2mm; height: 12.2mm; flex: none; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 1.2mm; padding: .7mm; }
+  .qrbox svg { display: block; width: 100%; height: 100%; }
+  .noqr .qrbox { display: none; }
+  .noqr .cta { font-size: 7.15pt; }
+
+  .ideas { max-width: 210mm; margin: 0 auto 26px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .ideas h2 { margin: 0 0 8px; font-size: 15px; }
+  .ideas ol { columns: 2; column-gap: 28px; margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); }
+  .ideas li { break-inside: avoid; margin: 0 0 5px; }
+
+  @media print {
+    .sheet { width: 210mm; height: 297mm; min-height: 297mm; margin: 0; padding: 6mm 4.5mm; box-shadow: none; }
+    .stand { cursor: default; }
+    .stand.selected { outline: none; }
+    .ideas { display: none; }
+  }
+</style>
+</head><body>
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Промостенды 67 × 57 мм</h1>
+    <div class="panel-row" data-nz-common="qr"></div>
+    <label>Тема
+      <select id="theme">
+        <option value="auto">разные</option>
+        <option value="light">светлая</option>
+        <option value="dark">тёмная</option>
+        <option value="warm">тёплая</option>
+        <option value="mono">моно</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="qrOn" checked> QR</label>
+    <button class="btn" type="button" id="shuffle">Собрать другие 15</button>
+    <button class="btn" type="button" id="copyIdeas">Копировать идеи</button>
+    <button class="btn primary" type="button" data-nz-print>Печать</button>
+    <span class="pill"><b>Выбрано:</b> <span id="selectedName">1</span></span>
+  </div>
+  <div class="panel-row edit-row">
+    <label>Верх <input id="e_kicker" type="text" placeholder="3D-ПЕЧАТЬ НА ЗАКАЗ"></label>
+    <label>Заголовок <input id="e_title" type="text" placeholder="Печатаем вещи под вас"></label>
+    <label>Текст <textarea id="e_text" placeholder="Короткое описание на 1–2 строки"></textarea></label>
+    <label>Плашки <textarea id="e_points" placeholder="Через ||: Готовое на полке || Под заказ 1–3 дня"></textarea></label>
+    <label>CTA <input id="e_cta" type="text" placeholder="Напишите в Telegram"></label>
+    <button class="btn" type="button" id="applyAll">Размножить выбранный на лист</button>
+    <button class="btn" type="button" id="reset">Вернуть 15 идей</button>
+    <span class="hint">Клик по карточке — правка. Заголовок до звёздочки выделяется акцентом: <b>Печатаем* вещи под вас</b>.</span>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Печать:</b> 15 промостендов на A4, каждый 67 × 57 мм. Масштаб 100 %, без «вписать в лист». После печати режьте по пунктирной рамке и вставляйте в держатели.
+</div>
+
+<div class="sheet" id="sheet"></div>
+
+<div class="ideas noprint">
+  <h2>15 идей для промостендов 67 × 57 мм</h2>
+  <ol id="ideaList"></ol>
+</div>
+
+<script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
+<script>
+'use strict';
+const STORE = 'nozza:promo67:cards:v1';
+const $ = (id) => document.getElementById(id);
+const THEMES = ['light', 'dark', 'warm', 'mono'];
+const IDEAS = [
+  {kicker:'3D-ПЕЧАТЬ НА ЗАКАЗ', title:'Печатаем* вещи под вас', text:'От держателя кабеля до партии фирменных табличек. Идея, фото или чертёж — посчитаем при вас.', points:['по размерам', '1–3 дня', 'цвет на выбор', 'от 1 штуки'], cta:'Telegram @nozza3d'},
+  {kicker:'СЛОМАЛАСЬ ДЕТАЛЬ?', title:'Не ищите замену* — напечатаем', text:'Принесите обломок или фото. Снимем размеры, подберём материал и восстановим форму.', points:['ручки и крышки', 'крепления', 'заглушки', 'переходники'], cta:'Покажите деталь мастеру'},
+  {kicker:'ГОТОВО НА ПОЛКЕ', title:'Заберите* сегодня', text:'Полезные мелочи для дома, рабочего места и питомцев уже напечатаны и ждут вас.', points:['адресники', 'органайзеры', 'крючки', 'подставки'], cta:'Спросите наличие'},
+  {kicker:'ДЛЯ БИЗНЕСА', title:'Малые партии* без пресс-форм', text:'Таблички, держатели, оснастка и мерч — быстро проверим идею и напечатаем тираж.', points:['логотип', 'нумерация', 'повтор партии', 'счёт/чек'], cta:'Рассчитать партию'},
+  {kicker:'НЕТ В МАГАЗИНЕ?', title:'Сделаем* под задачу', text:'Если стандартное не подходит по размеру, цвету или форме — это как раз работа для 3D-печати.', points:['замер', 'макет', 'печать', 'подгонка'], cta:'Принесите пример'},
+  {kicker:'ПОДАРОК С ИМЕНЕМ', title:'Персонально* за 1–3 дня', text:'Адресники, брелоки, таблички и сувениры с именем, датой, номером или логотипом.', points:['имя', 'телефон', 'цвет', 'упаковка'], cta:'Выберите цвет'},
+  {kicker:'ПОРЯДОК НА СТОЛЕ', title:'Органайзер* ровно под вас', text:'Под ваши кабели, инструменты, косметику, канцелярию или витрину. Размеры не ограничены полкой магазина.', points:['отсеки', 'подписи', 'модули', 'цвета'], cta:'Замерьте место'},
+  {kicker:'ПИТОМЦЫ', title:'Адресник* с телефоном', text:'Лёгкий, яркий, не боится прогулок. Имя питомца и номер владельца — прямо на изделии.', points:['кошки', 'собаки', 'цвет', 'форма'], cta:'Сделаем за день'},
+  {kicker:'МАСТЕРСКИМ', title:'Оснастка* без ожидания', text:'Шаблоны, проставки, фиксаторы, держатели инструмента — печатаем под ваш процесс.', points:['PETG/ABS', 'серия', 'прототип', 'доработка'], cta:'Обсудить чертёж'},
+  {kicker:'БЫСТРЫЙ ПРОТОТИП', title:'Сначала* проверить', text:'Напечатаем пробный образец, померим в руках, поправим — и только потом делаем партию.', points:['черновик', 'примерка', 'правки', 'тираж'], cta:'Прислать эскиз'},
+  {kicker:'ДОМ И РЕМОНТ', title:'Крючок, клипса,* заглушка', text:'Мелкая деталь часто решает большую бытовую проблему. Подберём форму и материал.', points:['ванная', 'кухня', 'балкон', 'гараж'], cta:'Покажите место'},
+  {kicker:'ЦВЕТ И ФАКТУРА', title:'Не только* пластик', text:'Матовые, яркие, прозрачные, «под металл» и инженерные материалы — подберём под задачу.', points:['PLA', 'PETG', 'ABS', 'TPU'], cta:'Посмотреть палитру'},
+  {kicker:'ДЛЯ ВИТРИНЫ', title:'Таблички* и держатели', text:'Ценники, разделители, мини-стойки и брендированные элементы для аккуратной полки.', points:['67×57 мм', 'логотип', 'серия', 'QR'], cta:'Заказать комплект'},
+  {kicker:'ПО ВАШЕМУ ФАЙЛУ', title:'STL, STEP,* фото или эскиз', text:'Есть модель — печатаем. Нет модели — поможем подготовить простую деталь к печати.', points:['проверка', 'слайсинг', 'материал', 'срок'], cta:'Отправьте файл'},
+  {kicker:'NOZZA · СИМФЕРОПОЛЬ', title:'Локальная* 3D-печать', text:'Мы рядом: можно принести деталь, выбрать цвет на месте и получить понятный расчёт.', points:['самовывоз', 'связь', 'совет', 'подгонка'], cta:'nozza.ru · @nozza3d'},
+  {kicker:'АКЦИЯ НА ПОЛКЕ', title:'Спросите* комплектом', text:'Кабель-органайзеры, крючки, бирки и подставки выгоднее брать набором под одно место.', points:['набор', 'цвет', 'размер', 'скидка'], cta:'Собрать комплект'},
+  {kicker:'НЕ ПОДОШЛО?', title:'Подгоним* размер', text:'3D-печать хороша тем, что форму можно быстро поправить под вашу реальную задачу.', points:['замер', 'правка', 'примерка', 'готово'], cta:'Вернитесь с деталью'},
+  {kicker:'МИНИ-СЕРИЯ', title:'10–100 штук* без склада', text:'Печатайте столько, сколько нужно сейчас: для события, смены ценников или теста продаж.', points:['без формы', 'быстрый старт', 'повтор', 'учёт'], cta:'Узнать срок'},
+  {kicker:'ДЕТАЛИ ДЛЯ АВТО', title:'Заглушки,* клипсы, крепёж', text:'Для салона, багажника и гаража: когда оригинал дорогой или больше не продаётся.', points:['по образцу', 'PETG/ABS', 'примерка', 'цвет'], cta:'Принесите образец'},
+  {kicker:'КОМПЬЮТЕР И КАБЕЛИ', title:'Убрать* хаос проводов', text:'Клипсы, каналы, держатели блоков питания и стойки под гаджеты — под ваш стол.', points:['кабели', 'роутер', 'зарядки', 'монтаж'], cta:'Сфотографируйте стол'}
+];
+let cards = loadCards();
+let selected = 0;
+
+function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function loadCards(){
+  try {
+    const st = NZ.pageState({});
+    if (Array.isArray(st.cards) && st.cards.length) return st.cards.slice(0, 15);
+    const legacy = JSON.parse(localStorage.getItem(STORE) || 'null');
+    if (Array.isArray(legacy) && legacy.length) return legacy.slice(0, 15);
+  } catch(e) {}
+  return IDEAS.slice(0, 15).map(x => ({...x, points:[...x.points]}));
+}
+function saveCards(){
+  NZ.pageStateSave({ cards });
+  try { localStorage.setItem(STORE, JSON.stringify(cards)); } catch(e) {}
+}
+function splitAccent(title){
+  const parts = String(title || '').split('*');
+  if (parts.length < 2) return esc(title || '');
+  return esc(parts[0]) + '<span class="accent">' + esc(parts.slice(1).join('')) + '</span>';
+}
+function themeFor(i){ const t = $('theme').value; return t === 'auto' ? THEMES[i % THEMES.length] : t; }
+function qrLink(i){
+  const c = NZ.contact();
+  const base = c.qrbase || c.site || 'https://nozza.ru';
+  return base.includes('{n}') ? base.replace('{n}', String(i + 1)) : base;
+}
+function renderCard(card, i){
+  const c = NZ.contact();
+  const phone = c.phone ? '<br>' + esc(c.phone) : '';
+  const showQr = $('qrOn').checked;
+  const qr = showQr ? NZ.qr(qrLink(i), { margin: 1 }) : '';
+  const pts = (card.points || []).slice(0, 4);
+  while (pts.length < 4) pts.push('');
+  const titleCls = String(card.title || '').replace(/\*/g, '').length > 24 ? ' small' : '';
+  return '<article class="stand theme-' + themeFor(i) + (showQr ? '' : ' noqr') + (i === selected ? ' selected' : '') + '" data-idx="' + i + '">'
+    + '<div class="topline"><div class="brand"><img data-nz-mark="' + (themeFor(i) === 'dark' ? 'white' : '') + '" src="' + NZ.markSrc(themeFor(i) === 'dark') + '" alt=""><b>NOZZA</b></div><div class="kicker">' + esc(card.kicker || '') + '</div></div>'
+    + '<div class="headline' + titleCls + '">' + splitAccent(card.title || '') + '</div>'
+    + '<div class="body">' + esc(card.text || '') + '</div>'
+    + '<div class="points">' + pts.map(p => '<div class="point">' + esc(p) + '</div>').join('') + '</div>'
+    + '<div class="foot"><div class="cta"><b>' + esc(card.cta || c.tg || '@nozza3d') + '</b>' + esc(c.city || 'Симферополь') + phone + '</div><div class="qrbox">' + qr + '</div></div>'
+    + '</article>';
+}
+function draw(){
+  cards = cards.slice(0, 15);
+  while (cards.length < 15) cards.push({...IDEAS[cards.length % IDEAS.length], points:[...IDEAS[cards.length % IDEAS.length].points]});
+  $('sheet').innerHTML = cards.map(renderCard).join('');
+  $('ideaList').innerHTML = IDEAS.slice(0, 15).map((x) => '<li><b>' + esc(x.title.replace(/\*/g, '')) + '</b> — ' + esc(x.text) + '</li>').join('');
+  fillEditor();
+}
+function fillEditor(){
+  const card = cards[selected] || cards[0];
+  $('selectedName').textContent = String(selected + 1);
+  $('e_kicker').value = card.kicker || '';
+  $('e_title').value = card.title || '';
+  $('e_text').value = card.text || '';
+  $('e_points').value = (card.points || []).join(' || ');
+  $('e_cta').value = card.cta || '';
+}
+function applyEditor(){
+  if (!cards[selected]) return;
+  cards[selected] = {
+    kicker: $('e_kicker').value,
+    title: $('e_title').value,
+    text: $('e_text').value,
+    points: $('e_points').value.split('||').map(s => s.trim()).filter(Boolean).slice(0, 4),
+    cta: $('e_cta').value
+  };
+  saveCards();
+  $('sheet').innerHTML = cards.map(renderCard).join('');
+}
+function pickSet(offset){
+  const pool = IDEAS.map(x => ({...x, points:[...x.points]}));
+  const start = offset % pool.length;
+  cards = pool.slice(start).concat(pool.slice(0, start)).slice(0, 15);
+  selected = 0; saveCards(); draw();
+}
+
+['e_kicker','e_title','e_text','e_points','e_cta'].forEach(id => $(id).addEventListener('input', applyEditor));
+['theme','qrOn'].forEach(id => $(id).addEventListener('change', draw));
+$('sheet').addEventListener('click', (ev) => {
+  const el = ev.target.closest('.stand'); if (!el) return;
+  selected = Number(el.getAttribute('data-idx')) || 0;
+  draw();
+});
+$('applyAll').addEventListener('click', () => {
+  const base = {...cards[selected], points:[...(cards[selected].points || [])]};
+  cards = Array.from({length:15}, () => ({...base, points:[...base.points]}));
+  selected = 0; saveCards(); draw();
+});
+$('reset').addEventListener('click', () => { pickSet(0); });
+$('shuffle').addEventListener('click', () => { pickSet(Math.floor(Math.random() * IDEAS.length)); });
+$('copyIdeas').addEventListener('click', (ev) => {
+  const text = IDEAS.slice(0, 15).map((x, i) => (i + 1) + '. ' + x.title.replace(/\*/g, '') + ' — ' + x.text).join('\n');
+  NZ.copy(text, ev.currentTarget, 'Идеи скопированы ✓');
+});
+NZ.mount(draw);
+</script>
+</body></html>
