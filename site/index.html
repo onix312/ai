@@ -515,6 +515,27 @@
     </div>
    </div>
    <div class="kpi-grid" id="rep_kpis"></div>
+   <div class="card" style="margin-top:16px">
+    <div class="card-head">
+     <div><h2>Реестр проданных товаров</h2><p id="rep_sales_sub">Каждая строка — реально ушедший товар: документы продаж, заказы и стеллаж</p></div>
+     <div class="head-actions">
+      <input id="rep_sales_search" type="search" placeholder="Поиск: товар, документ, клиент" style="min-width:220px">
+      <select id="rep_sales_source">
+       <option value="">Все источники</option>
+       <option value="document">Документы</option>
+       <option value="order">Заказы</option>
+       <option value="shelf">Стеллаж</option>
+      </select>
+      <button class="btn sm" id="rep_sales_export" type="button">↓ CSV реестр</button>
+     </div>
+    </div>
+    <div class="table-wrap">
+     <table class="data">
+      <thead><tr><th>Дата</th><th>Источник</th><th>Документ</th><th>Товар</th><th>Клиент</th><th>Канал</th><th class="right">Шт</th><th class="right">Цена</th><th class="right">Сумма</th><th class="right">Прибыль</th></tr></thead>
+      <tbody id="rep_sales_rows"><tr><td colspan="10" class="muted">Загрузка…</td></tr></tbody>
+     </table>
+    </div>
+   </div>
   </div>
   <div class="grid g2" style="margin-top:16px">
    <div class="card">
@@ -661,6 +682,18 @@
    <button class="btn" id="shelf_transfer_btn" type="button">📦 Со склада</button>
    <button class="btn primary" id="shelf_add" type="button">+ Позиция</button>
   </div>
+ </div>
+ <div class="toolbar shelf-toolbar" id="shelf_toolbar" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;align-items:center">
+  <input id="shelf_search" type="search" placeholder="Поиск по названию, артикулу или штрихкоду" style="flex:1;min-width:200px">
+  <select id="shelf_filter_status">
+   <option value="">Все позиции</option>
+   <option value="ok">В наличии</option>
+   <option value="low">Мало</option>
+   <option value="empty">Нет</option>
+   <option value="dead">Мёртвый сток</option>
+   <option value="needs">Нужны на полку</option>
+  </select>
+  <label class="check"><span class="switch"><input type="checkbox" id="shelf_filter_linked"><i></i></span>Только с кодом 1С</label>
  </div>
  <div class="kpi-grid" id="shelf_kpis"></div>
  <div class="shelf-grid" id="shelf_grid"></div>

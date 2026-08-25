@@ -987,6 +987,10 @@ class Api:
         if path == "/api/report":
             return 200, self.acc.report(one("period", "month"),
                                         int(num(one("offset", "0"), 0)))
+        if path == "/api/report/sales":
+            return 200, self.acc.sales_details(
+                one("period", "month"), int(num(one("offset", "0"), 0)),
+                int(num(one("limit", "500"), 500)))
         if path == "/api/debts":
             return 200, self.acc.debts()
         if path == "/api/accounts":
@@ -1005,6 +1009,10 @@ class Api:
             return 200, {"filename": f"printflow-{one('period', 'month')}.csv",
                          "csv": self.acc.report_csv(one("period", "month"),
                                                     int(num(one("offset", "0"), 0)))}
+        if path == "/api/export/sales":
+            return 200, {"filename": f"printflow-продажи-{one('period', 'month')}.csv",
+                         "csv": self.acc.sales_details_csv(one("period", "month"),
+                                                           int(num(one("offset", "0"), 0)))}
         if path == "/api/export/transactions":
             return 200, {"filename": "printflow-проводки.csv",
                          "csv": self.acc.transactions_csv(int(num(one("days", "365"), 365)))}

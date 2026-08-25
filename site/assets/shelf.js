@@ -10,6 +10,7 @@ const { get, post } = PF.api;
 let editingShelf = null;
 let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null };
 let stockGoods = [];
+let shelfFilter = { q: '', status: '', linkedOnly: false };
 
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
@@ -129,7 +130,10 @@ function renderShelf() {
       shelfKpi('План пополнения', `${nfmt(s.plan_qty)} шт`, 'напечатать, чтобы хватило на 7 дней'),
     ].join('') + fcHtml;
 
-  const items = shelfData.items || [];
+  const items = filteredShelfItems();
+  const emptyText = (shelfData.items || []).length
+    ? 'Ничего не найдено по фильтру.'
+    : 'Добавьте позицию и положите на неё первую партию печати.';
   $('shelf_grid').innerHTML = items.length ? items.map((i) => {
     const st = i.status || 'ok';
     const days = i.days_left;
@@ -161,7 +165,7 @@ function renderShelf() {
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
-  }).join('') : '<div class="empty" style="grid-column:1/-1"><span class="big">▤</span><b>На стеллаже пока пусто</b><span>Добавьте позицию и положите на неё первую партию печати.</span></div>';
+  }).join('') : `<div class="empty" style="grid-column:1/-1"><span class="big">▤</span><b>${(shelfData.items || []).length ? 'Ничего не найдено' : 'На стеллаже пока пусто'}</b><span>${emptyText}</span></div>`;
 
   const moves = shelfData.moves || [];
   $('shelf_moves').innerHTML = moves.length ? moves.slice(0, 40).map((m) => {
@@ -176,6 +180,32 @@ function renderShelf() {
 }
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+/* ============================================================ фильтры */
+function filteredShelfItems() {
+  const all = shelfData.items || [];
+  const q = shelfFilter.q.trim().toLocaleLowerCase('ru-RU');
+  return all.filter((i) => {
+    if (shelfFilter.linkedOnly && !i.barcode) return false;
+    const st = shelfFilter.status;
+    if (st === 'needs') {
+      if (!(i.status === 'empty' || i.low || i.dead || num(i.plan_qty) > 0)) return false;
+    } else if (st && i.status !== st) {
+      return false;
+    }
+    if (!q) return true;
+    return [i.name, i.sku, i.barcode, i.note, i.tag_badge]
+      .filter(Boolean).join(' ').toLocaleLowerCase('ru-RU').includes(q);
+  });
+}
+
+function applyShelfFilter() {
+  shelfFilter.q = $('shelf_search') ? $('shelf_search').value : '';
+  shelfFilter.status = $('shelf_filter_status') ? $('shelf_filter_status').value : '';
+  shelfFilter.linkedOnly = $('shelf_filter_linked') ? $('shelf_filter_linked').checked : false;
+  renderShelf();
+}
+
 
 /* ================================== готовые товары для новой позиции */
 async function loadStockGoods() {
@@ -561,6 +591,11 @@ async function openShelfCard(itemId) {
 /* =============================================================== события */
 function bind() {
   $('shelf_add').addEventListener('click', () => openShelf());
+  if ($('shelf_search')) {
+    $('shelf_search').addEventListener('input', applyShelfFilter);
+    $('shelf_filter_status').addEventListener('change', applyShelfFilter);
+    $('shelf_filter_linked').addEventListener('change', applyShelfFilter);
+  }
   $('shelf_save').addEventListener('click', saveShelf);
   $('shelf_delete').addEventListener('click', async () => {
     if (!editingShelf || !confirmDanger('Удалить позицию стеллажа? История движений останется.')) return;
@@ -617,7 +652,14 @@ function bind() {
     if (item) { $('sif_expected').textContent = nfmt(item.qty); $('sif_actual').value = item.qty; }
   });
 
-  $('shelf_qr_print').addEventListener('click', () => window.print());
+  $('shelf_qr_print').addEventListener('click', () => {
+    const title = $('shelf_qr_modal').querySelector('h3');
+    const info = $('shelf_qr_info').querySelector('b');
+    const itemId = info ? (shelfData.items || []).find((x) => x.name === info.textContent) : null;
+    const id = itemId ? itemId.id : '';
+    if (id) window.open(`/price-tags.html?item=${encodeURIComponent(id)}`, '_blank', 'noopener');
+    else window.print();
+  });
   $('shelf_grid').addEventListener('click', (e) => {
     const edit = e.target.closest('[data-shelf-edit]');
     if (edit) { openShelf(edit.dataset.shelfEdit); return; }
