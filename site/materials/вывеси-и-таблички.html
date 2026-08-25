@@ -228,7 +228,7 @@ function footLine() { return 'NOZZA · ' + (NZ.contact().city || 'Симферо
 
 function renderSign(s, idx) {
   const size = $('size').value;
-  const qr = s.qr ? NZ.qr(s.link || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
+  const qr = s.qr ? NZ.qr(s.link || NZ.contact().qrbase || NZ.contact().site, { ecl: 'M', margin: 0 }) : '';
   const foot = (s.foot == null || s.foot === '') ? footLine() : s.foot;
   return `<div class="sg t-${s.theme || 'brand'} sz-${size}${size !== 'full' ? ' cut' : ''}${idx === selected ? ' selected' : ''}" data-idx="${idx}" title="Клик — править эту табличку">
     <div class="sg-ico">${NZ.esc(s.ico || '')}</div>
