@@ -630,6 +630,35 @@ class Repo:
             economics = self.acc.order_economics({
                 "price": row["price"], "grams": row["grams"], "hours": row["hours"], "qty": 1})
             row["economics"] = economics
+
+        # 9.3.2: товары, созданные сразу во вкладке «Товары» (номенклатура),
+        # не имели legacy-строки и потому не попадали в «Изделия», генераторы
+        # ценников и наклеек — хотя это тот же канонический каталог.
+        # Дополняем представление, ничего не дублируя.
+        from .nomenclature import Nomenclature
+        covered = {str(r.get("canonical_id") or r.get("nom_id") or "") for r in rows}
+        for nom in Nomenclature(self.db).items(kind="product"):
+            nom_id = str(nom.get("id") or "")
+            if not nom_id or nom_id in covered:
+                continue
+            row = {
+                "id": nom_id, "name": nom.get("name") or "",
+                "niche_id": nom.get("niche_id") or "",
+                "grams": num(nom.get("grams")), "hours": num(nom.get("hours")),
+                "fit_per_plate": max(1, int(num(nom.get("fit_per_plate"), 1))),
+                "price": num(nom.get("price")),
+                "material": nom.get("material") or "",
+                "file": nom.get("file") or "",
+                "notes": nom.get("note") or "",
+                "archived": 0, "nom_id": nom_id,
+                "created_at": nom.get("created_at"),
+                "updated_at": nom.get("updated_at"),
+            }
+            row["economics"] = self.acc.order_economics({
+                "price": row["price"], "grams": row["grams"],
+                "hours": row["hours"], "qty": 1})
+            rows.append(row)
+        rows.sort(key=lambda r: str(r.get("name") or "").lower())
         return rows
 
     def save_catalog_item(self, data: dict) -> dict:
@@ -648,9 +677,12 @@ class Repo:
         legacy = self.db.one("SELECT * FROM catalog WHERE id=?", (item_id,))
         if legacy and expected_updated_at and expected_updated_at != str(legacy.get("updated_at") or ""):
             raise ValueError("База изделий уже изменена — обновите карточку перед сохранением")
+        # 9.3.2: позиция могла прийти из представления номенклатуры (вкладка
+        # «Товары») — её id и есть id канонической карточки, иначе правка
+        # из «Изделий» плодила бы дубликат вместо обновления.
         nom = self.db.one(
             "SELECT * FROM nomenclature WHERE id=? OR legacy_catalog_id=? LIMIT 1",
-            (legacy.get("nom_id") if legacy else "", item_id),
+            ((legacy or {}).get("nom_id") or item_id, item_id),
         )
         nom_id = (legacy or {}).get("nom_id") or (nom or {}).get("id") or uid("nom")
         now = now_iso()
@@ -699,7 +731,16 @@ class Repo:
             raise ValueError("Не указана позиция")
         row = self.db.one("SELECT * FROM catalog WHERE id=?", (item_id,))
         if not row:
-            raise ValueError("Позиция не найдена")
+            # 9.3.2: позиция может существовать только в номенклатуре
+            # (создана во вкладке «Товары») — архивируем каноническую
+            # карточку, история цен и партий сохраняется.
+            nom = self.db.one("SELECT id FROM nomenclature WHERE id=?", (item_id,))
+            if not nom:
+                raise ValueError("Позиция не найдена")
+            self.db.execute(
+                "UPDATE nomenclature SET archived=1, updated_at=? WHERE id=?",
+                (now_iso(), item_id))
+            return
         now = now_iso()
         # Не удаляем canonical-источник: архивирование сохраняет историю и
         # не оставляет двойную запись при следующем импорте.
