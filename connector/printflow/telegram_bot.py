@@ -194,20 +194,21 @@ class TelegramBot:
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "disable_web_page_preview": "true"}, timeout=15)
 
+    def _inline_menu(self) -> dict:
+        """Главное inline-меню сотрудника, общее для всех карточек."""
+        return _keyboard(
+            [("🖨 Принтеры", "cmd:printers"), ("≡ Очередь", "cmd:queue")],
+            [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
+            [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
+            [("📊 Итоги", "cmd:today"), ("❔ Помощь", "cmd:help")],
+        )
+
     def _reply_keyboard(self, chat: str, text: str) -> None:
-        """Сообщение с постоянной клавиатурой-меню внизу."""
-        # Постоянное меню — только безопасные обзоры и переходы. Продажа
-        # открывает отдельный список с явными кнопками «−1», а не списывает
-        # товар случайным нажатием на клавиатуре.
-        keyboard = [
-            [{"text": "🖨 Панель"}, {"text": "📷 Кадр"}, {"text": "≡ Очередь"}],
-            [{"text": "🛍 Стеллаж"}, {"text": "🛒 Продажа"}, {"text": "⚑ План"}],
-            [{"text": "📦 Пластик"}, {"text": "₽ Деньги"}, {"text": "⚠ Хвосты"}],
-            [{"text": "📊 Итоги"}, {"text": "❔ Помощь"}],
-        ]
+        """Сообщение с постоянной inline-клавиатурой."""
+        keyboard = self._inline_menu()
         self._call("sendMessage", {
             "chat_id": chat, "text": text[:3800], "disable_web_page_preview": "true",
-            "reply_markup": json.dumps({"keyboard": keyboard, "resize_keyboard": True}),
+            "reply_markup": json.dumps(keyboard, ensure_ascii=False),
         }, timeout=15)
 
     def _loop(self) -> None:
@@ -397,7 +398,7 @@ class TelegramBot:
                 return
             except Exception:
                 pass
-        self._edit_or_reply(chat, message, text)
+        self._edit_or_reply(chat, message, text, self._inline_menu())
 
     def _edit_or_reply(self, chat: str, message: dict, text: str,
                        buttons: dict | None = None) -> None:
@@ -418,6 +419,16 @@ class TelegramBot:
 
     def _run_command(self, command: str, chat: str = "") -> str:
         """Выполнить команду (текстовую или inline-кнопки) и вернуть ответ."""
+        if command in ("panel", "printers"):
+            return self.text_panel() if command == "panel" else self._list_printers(chat)
+        if command == "queue":
+            return self.text_queue()
+        if command == "inbox":
+            return self._client_inbox()
+        if command in ("plan", "filament", "money", "today", "help"):
+            return {"plan": self.text_plan, "filament": self.text_filament,
+                    "money": self.text_money, "today": self.text_today,
+                    "help": lambda: HELP}[command]()
         if command == "pause":
             return self.do_command("pause", "Печать поставлена на паузу", chat=chat)
         if command == "resume":
