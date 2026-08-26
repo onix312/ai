@@ -54,6 +54,19 @@ class PrintFlow10Tests(unittest.TestCase):
         self.assertFalse(result[0]["matched"])
         self.assertEqual(result[0]["preview"], "№7")
 
+    def test_queue_simulation_never_changes_queue(self):
+        from connector.tests.test_phase11 import make_api
+        api = make_api(self.db)
+        api.manager.queue = lambda: [
+            {"id": "a", "name": "Первое", "est_minutes": 20, "state": "queued"},
+            {"id": "b", "name": "Второе", "est_minutes": 10, "state": "queued"},
+        ]
+        code, payload = api.post("/api/ops10/queue/simulate", {"job_ids": ["b"]}, {})
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual([x["id"] for x in payload["items"]], ["b", "a"])
+        self.assertEqual(payload["total_minutes"], 30)
+
 
 if __name__ == "__main__":
     unittest.main()

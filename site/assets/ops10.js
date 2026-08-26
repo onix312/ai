@@ -40,6 +40,13 @@
       return `<article class="ops10-printer"><div class="ops10-item-head"><b>${esc10(p.name || info.name || 'Принтер')}</b><span class="tag ${conn.connected ? 'ok' : 'bad'}">${conn.connected ? 'онлайн' : 'офлайн'}</span></div><small>${esc10(info.state_label || info.state || 'Ожидание')} · ${esc10(info.task || 'нет активной печати')}</small><div class="bar"><i style="width:${progress}%"></i></div><small>Печать: ${progress}% · AMS: ${active.length ? active.length + ' слотов' : 'нет данных'}${low ? ' · мало пластика: ' + low : ''}</small><div class="chips">${active.map((t) => `<span class="tag">${esc10(t.material || '—')} ${esc10(t.color || '')} · ${t.remain == null ? '—' : Math.round(Number(t.remain)) + '%'}</span>`).join('') || '<span class="muted">Слоты AMS пока не переданы</span>'}</div></article>`;
     }).join('');
   }
+  function renderProduction(data) {
+    const stats = data?.planfact || {}, fact = $('ops10_planfact'), list = $('ops10_production_list');
+    if (!fact || !list) return;
+    fact.innerHTML = `<span class="tag">Завершено: ${Number(stats.total || 0)}</span><span class="tag">Факт: ${Math.round(Number(stats.fact_minutes || 0))} мин</span><span class="tag">Пластик: ${Math.round(Number(stats.fact_grams || 0))} г</span><span class="tag ${Number(stats.failed || 0) ? 'warn' : ''}">Брак/сбой: ${Number(stats.failed || 0)}</span>`;
+    const jobs = (data?.queue || []).slice(0, 8);
+    list.innerHTML = jobs.length ? jobs.map((j) => `<div class="ops10-production-row"><span><b>${esc10(j.name || 'Задание')}</b><small class="muted"> · ${esc10(j.state || 'queued')} · ${esc10(j.printer_id || 'парк')}</small></span><span>${Number(j.est_minutes || 0) ? Math.round(Number(j.est_minutes)) + ' мин' : 'оценка —'}</span></div>`).join('') : '<div class="empty compact"><span>Очередь свободна.</span></div>';
+  }
   function renderRules(rules, runs) {
     const host = $('ops10_rules'), log = $('ops10_runs'); if (!host || !log) return;
     host.innerHTML = rules.length ? rules.map((r) => `<div class="ops10-rule"><div><b>${esc10(r.name)}</b><small>${esc10(r.event)} → ${esc10(r.action)} · ${r.enabled ? 'включено' : 'выключено'}</small></div><div class="ops10-actions"><button class="btn sm" data-rule-dry="${esc10(r.id)}" type="button">Проверить</button><label class="switch"><input type="checkbox" data-rule-enabled="${esc10(r.id)}"${Number(r.enabled) ? ' checked' : ''}><i></i></label></div></div>`).join('') : '<div class="empty compact"><span>Правил нет. Добавьте их в Настройках → Автоматизация.</span></div>';
@@ -51,12 +58,15 @@
     log.innerHTML = runs.length ? runs.slice(0, 12).map((r) => `<div class="ops10-run"><b>${esc10(r.mode === 'dry_run' ? 'Dry-run' : 'Факт')}</b> · ${esc10(r.action)} · ${r.matched ? 'условие совпало' : 'не совпало'}<br><span class="muted">${fmtAt(r.at)} · ${esc10(r.preview || 'без текста')}</span></div>`).join('') : '<div class="empty compact"><span>Проверок пока нет.</span></div>';
   }
   async function load() {
-    try { const data = await get('/api/ops10/overview'); renderPipeline(data.pipeline); renderPrinters(data.printers || []); renderInbox(data.inbox || []); renderRules(data.rules || [], data.rule_runs || []); }
+    try { const data = await get('/api/ops10/overview'); renderPipeline(data.pipeline); renderPrinters(data.printers || []); renderInbox(data.inbox || []); renderRules(data.rules || [], data.rule_runs || []); renderProduction(await get('/api/ops10/production')); }
     catch (e) { const host = $('ops10_inbox'); if (host) host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc10(e.message)}</span></div>`; }
   }
   function init() {
     if (!$('view-ops10')) return;
     $('ops10_refresh')?.addEventListener('click', load);
+    $('ops10_simulate_queue')?.addEventListener('click', async () => {
+      try { const data = await post('/api/ops10/queue/simulate', {job_ids: []}); const minutes = Number(data.total_minutes || 0); toast('Симуляция очереди', minutes ? `Суммарная оценка: ${Math.round(minutes)} мин. Запуск не выполнен.` : 'Очередь пуста', 'info'); } catch (e) { fail(e); }
+    });
     PF.on?.('ready', load);
     if (location.hash === '#ops10') load();
   }
