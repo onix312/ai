@@ -61,6 +61,9 @@
   }
   $('#check').addEventListener('click', check);
   $('#number').addEventListener('keydown', function(e){ if(e.key==='Enter') check(); });
+  // Ссылка из клиентского бота: /track?number=1001 — сразу показываем статус.
+  var pre = new URLSearchParams(location.search).get('number');
+  if (pre) { $('#number').value = pre; check(); }
 })();
 </script>
 </body>

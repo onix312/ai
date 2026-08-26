@@ -36,6 +36,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # сворачиваются в одну строку в печатных формах (схема 13)
         ("print_group", "TEXT DEFAULT ''"),
     ],
+    "client_orders": [
+        # отметка о напоминании «заказ ждёт на полке» (9.3.2): пусто — не писали
+        ("reminded_at", "TEXT DEFAULT ''"),
+    ],
     "batches": [
         # смешанная плита: разные товары на одном столе, JSON-состав
         # [{"nom_id": "...", "qty_per_plate": 3, "grams": 40, "hours": 1.2}]
@@ -267,7 +271,19 @@ CREATE TABLE IF NOT EXISTS client_bot_log (
     name TEXT DEFAULT '',
     text TEXT DEFAULT '',
     answer TEXT DEFAULT '',
-    kind TEXT DEFAULT 'message'      -- message | order | status | push | join
+    kind TEXT DEFAULT 'message'      -- message | order | status | push | join | answer | paid
+);
+
+-- Отзывы покупателей после выдачи (9.3.2): спрашиваем один раз, рейтинг —
+-- кнопкой, комментарий — следующим сообщением.
+CREATE TABLE IF NOT EXISTS client_reviews (
+    order_id TEXT,
+    chat_id TEXT DEFAULT '',
+    asked_at TEXT,
+    rating TEXT DEFAULT '',          -- good | bad | ''
+    comment TEXT DEFAULT '',
+    created_at TEXT,
+    PRIMARY KEY (order_id, chat_id)
 );
 
 CREATE TABLE IF NOT EXISTS printers (

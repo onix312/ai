@@ -66,6 +66,7 @@ WORD_GROUPS: dict[str, str] = {
     "закрыть": "orders", "готов": "orders", "ready": "orders",
     "новый": "orders", "заказ": "orders", "создать": "orders",
     "оплата": "orders", "оплатить": "orders", "payment": "orders",
+    "кответ": "orders", "ответить": "orders", "creply": "orders",
     # принтер
     "пауза": "printers", "pause": "printers", "продолжить": "printers",
     "resume": "printers", "старт-печати": "printers", "свет": "printers",
