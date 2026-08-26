@@ -108,6 +108,7 @@ class TelegramBot:
         self._live: dict[str, dict] = {}  # chat -> {message_id, text} живого дашборда
         self._printer_choice: dict[str, str] = {}  # chat -> printer_id
         self._watched: dict[str, dict] = {}  # chat -> {number, last_milestone}
+        self._client_sessions: dict[str, dict] = {}  # client chat -> intake draft
         self._thread = threading.Thread(target=self._loop, name="pf-bot", daemon=True)
         self._thread.start()
 
@@ -245,11 +246,23 @@ class TelegramBot:
         """Безопасный публичный сценарий: только собирает заявку, без команд цеха."""
         text = (message.get("text") or message.get("caption") or "").strip()
         if text.lower() in ("/start", "start", "начать", "помощь"):
-            self._reply(chat, self._settings().get("client_bot_welcome") or "Опишите изделие, размеры, количество и срок. Прикрепите фото — сотрудник подготовит расчёт.")
+            self._client_sessions[chat] = {"step": "product", "chat_id": chat}
+            self._reply(chat, self._settings().get("client_bot_welcome") or "Опишите изделие и прикрепите фото, если оно есть.")
             return
-        if not text and not message.get("photo"):
+        session = self._client_sessions.setdefault(chat, {"step": "product", "chat_id": chat})
+        photo = message.get("photo") or []
+        if not text and not photo:
             return self._reply(chat, "Пришлите описание задачи или фото изделия.")
-        summary = text or "Фото от клиента"
+        fields = {"product": "Что нужно изготовить?", "dimensions": "Какие размеры или фото образца?", "quantity": "Какое количество нужно?", "deadline": "К какому сроку?", "contact": "Как с вами связаться?"}
+        step = session.get("step", "product")
+        session[step] = text or "Фото приложено"
+        if photo: session["photo_file_id"] = str(photo[-1].get("file_id", ""))
+        order = list(fields)
+        idx = order.index(step)
+        if idx < len(order) - 1:
+            session["step"] = order[idx + 1]
+            return self._reply(chat, fields[order[idx + 1]])
+        summary = "\n".join(f"{k}: {session.get(k, '—')}" for k in fields)
         photo = message.get("photo") or []
         file_id = str(photo[-1].get("file_id")) if photo and isinstance(photo[-1], dict) else ""
         self.db.add_event("client_bot", "Новая заявка клиента", summary[:500], "", {"chat_id": chat, "has_photo": bool(file_id)})
