@@ -82,6 +82,7 @@ class PrinterManager:
         self._startup_thread = threading.Thread(target=self._startup_auto_resume_loop, name="pf-auto-resume", daemon=True)
         self._startup_thread.start()
         self.bot = TelegramBot(self)
+        self.client_bot = TelegramBot(self, client_mode=True)
 
     # ------------------------------------------------------------- управление
     def reload(self) -> None:

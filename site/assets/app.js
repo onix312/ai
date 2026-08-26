@@ -2315,3 +2315,14 @@ window.addEventListener('resize', U.debounce(() => {
 
 PF.modules.settings = { downloadBackup, renderSettings, saveSettings, resetSettings, filterSettings };
 })();
+
+/* Клиентский бот и команда: настройки не смешиваются с ботом принтера. */
+(function initClientBot(){
+  const token=$('client_bot_token'), chat=$('client_bot_chat'), enabled=$('client_bot_enabled'), welcome=$('client_bot_welcome'), list=$('staff_list');
+  if(!token) return;
+  let staff=[];
+  const render=()=>{ list.innerHTML=staff.length?staff.map((x,i)=>`<div class="set-row"><span><b>${esc(x.name)}</b><small>${esc(x.role)} · ${esc(x.telegram||'без Telegram')}</small></span><button class="btn sm ghost" data-staff-del="${i}">Удалить</button></div>`).join(''):'<div class="empty compact">Сотрудники ещё не добавлены.</div>'; list.querySelectorAll('[data-staff-del]').forEach(b=>b.onclick=()=>{staff.splice(+b.dataset.staffDel,1);render()}); };
+  (async()=>{try{const d=await get('/api/settings');const s=d.settings||{}; enabled.checked=!!s.client_bot_enabled; chat.value=s.client_bot_chat||''; welcome.value=s.client_bot_welcome||welcome.value; staff=JSON.parse(s.staff||'[]');render()}catch(e){}})();
+  $('staff_add').onclick=()=>{const name=prompt('Имя сотрудника или руководителя');if(!name)return;const role=prompt('Роль: сотрудник или руководитель','сотрудник');if(!role)return;const telegram=prompt('Telegram username или Chat ID','');staff.push({name,role,telegram});render()};
+  $('client_bot_save').onclick=async()=>{try{await post('/api/settings',{client_bot_enabled:enabled.checked,client_bot_token:token.value,client_bot_chat:chat.value,client_bot_welcome:welcome.value,staff:JSON.stringify(staff)});toast('Клиентский бот сохранён','Токен добавьте в настройках Telegram отдельным безопасным полем');}catch(e){fail(e)}};
+})();

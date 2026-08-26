@@ -151,6 +151,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "telegram_chat_id": "",
     "telegram_quiet_from": "23:00",  # тихие часы бота: не шлём некритичное
     "telegram_quiet_to": "07:00",
+    # Отдельный контур входящих заявок клиентов (не смешивать с ботом цеха).
+    "client_bot_enabled": False,
+    "client_bot_token": "",
+    "client_bot_chat": "",
+    "client_bot_welcome": "Здравствуйте! Поможем изготовить изделие по вашим размерам.",
+    "staff": "[]",
     # Bambu Cloud: управление принтером без LAN Only Mode / Developer Mode.
     # Токен и uid — секреты (маскируются, как telegram_token); email хранится
     # для повторного входа, пароль не хранится — при истечении токена Bambu
@@ -264,7 +270,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "backup_auto_export": False,
 }
 
-SECRET_SETTINGS = {"telegram_token", "cloud_token", "cloud_uid"}
+SECRET_SETTINGS = {"telegram_token", "client_bot_token", "cloud_token", "cloud_uid"}
 
 # Кассы и счета: где физически лежат деньги.
 # (id, название, тип, комиссия при поступлении %, стартовый остаток)
