@@ -9,8 +9,11 @@ polling, как и внутренний: ни белого IP, ни пробро
 • «заказ 3» или кнопка — заказ по номеру позиции, заказ попадает в панель
   как новая заявка (канал Telegram) и получает номер;
 • «индивидуальный …» — заявка на печать по задаче: текст уходит в панель;
-• «мои заказы» / «статус 1001» — статусы своих заказов;
-• «телефон +7…» — привязать телефон, чтобы видеть заказы с полки и Авито;
+• «мои заказы» / «статус 1001» — статусы своих заказов (тоже кнопкой);
+• «телефон +7…» или кнопка «Отправить номер» — привязать телефон, чтобы
+  видеть заказы с полки и Авито;
+• фото, файл или голосовое — мастерская получает подсказку, как оформить
+  заявку, подпись к фото работает как текст команды;
 • уведомления: статус заказа изменился — бот сам напишет (если включено).
 
 Диалоги пишутся в client_bot_log и видны на вкладке «Клиент-бот» в панели.
@@ -44,7 +47,8 @@ HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 • помощь — это сообщение
 
 Как считается индивидуальный заказ: пришлите задачу, размеры или фото —
-мастер посчитает цену и срок, и вы получите ответ здесь же."""
+мастер посчитает цену и срок, и вы получите ответ здесь же. Кнопки под
+сообщениями работают так же, как команды."""
 
 WELCOME = ("Здравствуйте! Это бот мастерской NOZZA — «Там, где рождается форма».\n\n"
            "Здесь можно посмотреть готовые вещи на полке, заказать печать по своей "
@@ -171,16 +175,47 @@ class ClientBot:
         if not chat:
             return
         row = self._touch_chat(chat, message)
-        text = (message.get("text") or "").strip()
-        if not text:
-            return
+        # Подпись к фото работает как текст: покупатель шлёт снимок эскиза
+        # с подписью «индивидуальный …» — это уже готовая заявка.
+        text = (message.get("text") or message.get("caption") or "").strip()
         try:
-            answer = self._dispatch(chat, row, text)
-            self._log(chat, row.get("name") or "", text, answer)
+            if text:
+                answer, buttons = self._dispatch(chat, row, text)
+            else:
+                answer, buttons = self._no_text_reply(chat, row, message)
+            self._reply(chat, answer, buttons)
+            self._log(chat, row.get("name") or "",
+                      text or self._media_label(message), answer)
         except Exception as exc:
             answer = f"Не получилось: {exc}"
             self._reply(chat, answer)
             self._log(chat, row.get("name") or "", text, answer)
+
+    def _no_text_reply(self, chat: str, row: dict,
+                       message: dict) -> tuple[str, dict | None]:
+        """Ответ на сообщение без текста: контакт привязываем, медиа — подсказка.
+
+        Раньше фото и голосовые молча игнорировались, хотя помощь просит
+        «пришлите фото» — покупатель решал, что бот сломался.
+        """
+        contact = message.get("contact") or {}
+        phone = str(contact.get("phone_number") or "")
+        if phone:
+            return self._save_phone(chat, row, f"телефон {phone}"), self._menu()
+        label = self._media_label(message)
+        return (f"{label.capitalize()} получил ✓ Опишите задачу текстом — "
+                "«индивидуальный держатель 120 мм» — и мастер посчитает "
+                "цену и срок.", self._menu())
+
+    def _media_label(self, message: dict) -> str:
+        """Короткое имя вложения для ответа и журнала диалогов."""
+        for key, label in (("photo", "фото"), ("document", "файл"),
+                           ("video", "видео"), ("video_note", "видео"),
+                           ("voice", "голосовое"), ("sticker", "стикер"),
+                           ("location", "локацию"), ("contact", "контакт")):
+            if message.get(key):
+                return label
+        return "сообщение"
 
     def _handle_callback(self, callback: dict) -> None:
         message = callback.get("message") or {}
@@ -195,22 +230,31 @@ class ClientBot:
             # Профиль берём из callback (у сообщения от бота поля from нет).
             row = self._touch_chat(chat, {"from": callback.get("from") or {}})
         try:
-            answer = self._run_callback(chat, row, data)
+            answer, buttons = self._run_callback(chat, row, data)
+            # Кнопка обязана ответить: раньше текст только писался в журнал,
+            # и покупатель не видел реакции — «кнопки не работают».
+            self._reply(chat, answer, buttons)
             self._log(chat, row.get("name") or "", data, answer, kind="status")
         except Exception as exc:
             answer = f"Не получилось: {exc}"
             self._reply(chat, answer)
+            self._log(chat, row.get("name") or "", data, answer, kind="status")
 
-    def _run_callback(self, chat: str, row: dict, data: str) -> str:
+    def _run_callback(self, chat: str, row: dict,
+                      data: str) -> tuple[str, dict | None]:
         if data.startswith("buy:"):
-            return self._order_item(chat, row, data.split(":", 1)[1])
+            return self._order_item(chat, row, data.split(":", 1)[1]), \
+                self._menu()
+        if data.startswith("status:"):
+            return self.text_order_status(chat, row, data.split(":", 1)[1]), \
+                self._menu()
         if data == "catalog":
-            return self.text_catalog()
+            return self.text_catalog(), self._catalog_keyboard()
         if data == "mine":
-            return self.text_my_orders(chat, row)
+            return self.text_my_orders(chat, row), self._orders_keyboard(chat, row)
         if data == "help":
-            return HELP
-        return "Не понял кнопку — напишите «помощь»."
+            return HELP, self._menu()
+        return "Не понял кнопку — напишите «помощь».", self._menu()
 
     def _menu(self) -> dict:
         return _keyboard(
@@ -218,38 +262,52 @@ class ClientBot:
             [("❔ Помощь", "help")],
         )
 
-    def _dispatch(self, chat: str, row: dict, raw: str) -> str:
+    def _contact_keyboard(self) -> dict:
+        """Обычная (не inline) клавиатура с кнопкой отправки контакта:
+        Telegram сам предлагает номер телефона одним касанием."""
+        return {"keyboard": [[{"text": "📱 Отправить номер",
+                               "request_contact": True}]],
+                "resize_keyboard": True, "one_time_keyboard": True}
+
+    def _dispatch(self, chat: str, row: dict, raw: str) -> tuple[str, dict | None]:
+        """Разбор текстовой команды. Возвращает текст и кнопки; отправляет
+        только вызывающий (_handle) — одна точка отправки вместо пяти."""
         text = raw.lower().lstrip("/").replace("ё", "е")
         text = _re.sub(r"^nozza\S*\s+", "", text).strip()
         word = text.split()[0] if text else ""
 
         if word in ("start", "старт", "начать"):
             welcome = str(self._settings().get("client_bot_welcome") or "").strip()
-            self._reply(chat, welcome or WELCOME, self._menu())
-            return welcome or WELCOME
+            return welcome or WELCOME, self._menu()
         if word in ("help", "помощь", "?", "меню"):
-            self._reply(chat, HELP, self._menu())
-            return HELP
+            return HELP, self._menu()
         if word in ("каталог", "товары", "витрина", "полка", "catalog"):
-            answer = self.text_catalog()
-            self._reply(chat, answer, self._catalog_keyboard())
-            return answer
+            return self.text_catalog(), self._catalog_keyboard()
         if word in ("мои", "мои заказы", "заказы") or text == "мои заказы":
-            return self.text_my_orders(chat, row)
+            answer = self.text_my_orders(chat, row)
+            # заказов нет и телефон не привязан — вместо пустого списка даём
+            # кнопку отправки контакта, чтобы связать заказы с полки
+            if not self._linked_orders(chat, row) \
+                    and not str(row.get("phone") or "").strip():
+                return answer, self._contact_keyboard()
+            return answer, self._orders_keyboard(chat, row)
         if word in ("статус", "status", "заказ", "order"):
             number = next((w for w in text.split() if w.isdigit()), "")
             if word in ("заказ", "order") and number:
-                return self._order_item(chat, row, number)
-            return self.text_order_status(chat, row, number)
+                return self._order_item(chat, row, number), self._menu()
+            return self.text_order_status(chat, row, number), self._menu()
         if text.startswith("индивидуальн") or word in ("печать", "задача"):
-            return self._custom_order(chat, row, raw)
+            return self._custom_order(chat, row, raw), self._menu()
         if word in ("телефон", "phone", "номер") or text.startswith("+7") or text.startswith("8 9"):
-            return self._save_phone(chat, row, text)
+            answer = self._save_phone(chat, row, text)
+            # пока телефон не привязан — предлагаем отправить контакт кнопкой,
+            # это одно касание вместо набора номера
+            buttons = self._menu() if row.get("phone") else self._contact_keyboard()
+            return answer, buttons
         contact = str(self._settings().get("company_name", "NOZZA") or "NOZZA")
         answer = ("Не понял сообщение. Напишите «помощь» — покажу, что я умею. "
                   f"Мастерская {contact} ответит и без команд.")
-        self._reply(chat, answer, self._menu())
-        return answer
+        return answer, self._menu()
 
     # -------------------------------------------------------------- тексты
     def _catalog_rows(self) -> list[dict]:
@@ -278,6 +336,10 @@ class ClientBot:
         return "\n".join(lines)
 
     def _catalog_keyboard(self) -> dict:
+        # Витрину могли выключить настройкой — тогда кнопок заказа не даём,
+        # иначе каталог «закрыт», а кнопки под ним всё ещё продают.
+        if not bool(self._settings().get("client_bot_catalog", True)):
+            return self._menu()
         rows = self._catalog_rows()
         buttons = []
         for i, item in enumerate(rows[:18], 1):
@@ -285,6 +347,18 @@ class ClientBot:
         keys = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
         keys.append([("📦 Мои заказы", "mine")])
         return _keyboard(*keys) if keys else self._menu()
+
+    def _orders_keyboard(self, chat: str, row: dict,
+                         orders: list[dict] | None = None) -> dict:
+        """К каждому заказу — кнопка-карточка: покупатель касается номера и
+        видит статус со сроком, без набора «статус 1001»."""
+        if orders is None:
+            orders = self._linked_orders(chat, row)
+        keys = [[(f"№{o.get('number')} · {self._status_label(o)}"[:60],
+                 f"status:{o['number']}")]
+                for o in orders[:6] if o.get("number")]
+        keys.append([("🛍 Каталог", "catalog"), ("❔ Помощь", "help")])
+        return _keyboard(*keys)
 
     def _order_item(self, chat: str, row: dict, nom_id: str) -> str:
         """Заказ позиции каталога: создаём заявку в панели и связываем чат."""
@@ -371,8 +445,9 @@ class ClientBot:
     def _save_phone(self, chat: str, row: dict, text: str) -> str:
         match = _re.search(r"(\+?\d[\d\s()\-]{8,17}\d)", text)
         if not match:
-            return ("Формат: «телефон +7 978 000-00-00». По номеру найдутся "
-                    "заказы, оформленные на полке и в переписке.")
+            return ("Формат: «телефон +7 978 000-00-00» — или нажмите "
+                    "«Отправить номер». По номеру найдутся заказы, "
+                    "оформленные на полке и в переписке.")
         phone = _re.sub(r"[^\d+]", "", match.group(1))
         self.db.execute("UPDATE client_chats SET phone=? WHERE chat_id=?",
                         (phone, chat))
@@ -463,7 +538,8 @@ class ClientBot:
                 continue  # о создании заказа уже сказали при приёме
             self._reply(chat, f"Заказ №{order.get('number')}"
                               f" «{order.get('product')}» — "
-                              f"{self._status_label(order)}")
+                              f"{self._status_label(order)}",
+                        self._menu())
             self._log(chat, "", "→ push", f"№{order.get('number')}: {status}",
                       kind="push")
 
