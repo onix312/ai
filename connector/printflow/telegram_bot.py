@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 from .accounting import num, uid
 from .config import now_iso
+from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
@@ -58,7 +59,15 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • фото — прикрепить фото к заказу (или «фото 1001»)
 • стоп — прервать печать (подтверждение: стоп да)
 
-Можно писать без слэша и в любом регистре."""
+Команда:
+• код — узнать свой chat_id (для добавления в команду)
+• команда — список участников и ролей
+• сотрудник Имя 123456 / руководитель Имя 123456 — добавить
+• пригласить сотрудник Имя — одноразовый код: «старт PF-XXXX»
+• убрать 123456 — отключить участника
+
+Роли: сотрудник — обзоры, полка и фото; руководитель — плюс деньги,
+заказы и принтеры; владелец — всё. Можно писать без слэша и в любом регистре."""
 
 STATE_RU = {
     "RUNNING": "печатает", "IDLE": "свободен", "PAUSE": "на паузе",
@@ -212,10 +221,41 @@ class TelegramBot:
         chat = str((message.get("chat") or {}).get("id", ""))
         if not chat:
             return
-        if chat != owner:
-            # Чужой чат: вежливо отказываем и пишем в журнал.
-            text = (message.get("text") or "").strip()
-            self._reply(chat, "Этот бот приватный и отвечает только владельцу.")
+        text = (message.get("text") or "").strip()
+        who = gate(self.db, chat)
+        if not who["role"]:
+            # Посторонний чат: единственное, что можно — показать свой chat_id
+            # (чтобы владелец добавил в команду) или войти по коду приглашения.
+            lowered = text.lower().lstrip("/").replace("ё", "е").strip()
+            invite = _re.match(r"(?:старт|start|код|code)?\s*(pf-[a-z0-9]{4,12})$",
+                               lowered)
+            if invite:
+                profile = message.get("from") or {}
+                try:
+                    member = Staff(self.db).use_invite(
+                        invite.group(1), chat,
+                        str(profile.get("first_name") or ""),
+                        str(profile.get("id") or ""))
+                    role = member.get("role_name") or "сотрудник"
+                    self._reply(chat,
+                                f"Добро пожаловать, {member.get('name')}! "
+                                f"Вы в команде NOZZA как {role}.\n"
+                                "Права: " + Staff(self.db).rights_text(member.get("role"))
+                                + "\n\nНапишите «помощь» — покажу команды.")
+                    self.db.add_event("bot", "Новый участник по приглашению",
+                                      f"{member.get('name')} — {role}", "", {})
+                    return
+                except ValueError as exc:
+                    return self._reply(chat, str(exc))
+            if lowered in ("код", "code", "мой код", "id"):
+                return self._reply(
+                    chat, f"Ваш chat_id: {chat}\nПередайте его владельцу — "
+                          "он добавит вас в команду в настройках панели или "
+                          "пришлёт код приглашения.")
+            self._reply(chat,
+                        "Этот бот — рабочий инструмент команды NOZZA.\n"
+                        f"Ваш chat_id: {chat} — попросите владельца добавить вас.\n"
+                        "Если у вас есть код приглашения, напишите: старт КОД")
             self.db.add_event("bot", "Посторонний в Telegram-боте",
                               f"chat_id {chat}: {text[:80]}", "", {})
             return
@@ -236,18 +276,25 @@ class TelegramBot:
             self._reply(chat, f"Не получилось: {exc}")
 
     def _handle_callback(self, callback: dict, owner: str) -> None:
-        """Нажатие inline-кнопки. Отвечаем владельцу, чужому — отказ."""
+        """Нажатие inline-кнопки. Отвечаем команде, чужому — отказ."""
         message = callback.get("message") or {}
         chat = str((message.get("chat") or {}).get("id", ""))
         data = str(callback.get("data") or "")
         callback_id = str(callback.get("id") or "")
         if not chat or not data:
             return
-        if chat != owner:
+        who = gate(self.db, chat)
+        if not who["role"]:
             self._call("answerCallbackQuery", {"callback_query_id": callback_id,
-                                                "text": "Этот бот приватный."})
+                                               "text": "Этот бот приватный."})
             return
         command = data.replace("cmd:", "", 1)
+        group = group_for_word("", command=command)
+        if group not in who["allowed"]:
+            self._call("answerCallbackQuery", {
+                "callback_query_id": callback_id,
+                "text": f"Недоступно для роли «{ROLE_NAMES.get(who['role'])}»"})
+            return
         # Меню стеллажа и продаж отправляют новое сообщение с актуальными
         # остатками и кнопками; исходное не превращаем в неактуальный чек.
         if command in ("shelf", "sell-menu", "shelf-prod-menu"):
@@ -323,6 +370,75 @@ class TelegramBot:
         if command == "shelf-sales30":
             return self.text_shelf_sales(30)
         return "Не понял команду."
+
+    # -------------------------------------------------------------- команда
+    def _staff_command(self, chat: str, action: str, text: str,
+                       role: str = "") -> str:
+        """Управление командой из чата: список, добавить, пригласить, убрать.
+
+        Владелец делает всё; руководитель может смотреть список и приглашать
+        сотрудников (но не руководителей и не убирать людей).
+        """
+        who = gate(self.db, chat)
+        staff = Staff(self.db)
+        if not who["role"]:
+            return "Недоступно."
+        is_owner = who["role"] == "owner"
+        if action == "list":
+            if not is_owner and who["role"] != "manager":
+                return "Список команды — для владельца и руководителя."
+            return staff.text_list()
+        words = str(text).split()
+        if action == "invite":
+            if not (is_owner or who["role"] == "manager"):
+                return "Приглашать может владелец или руководитель."
+            role = "employee"
+            name = ""
+            for w in words[1:]:
+                lowered = w.lower().replace("ё", "е")
+                if lowered in ("сотрудник", "руководитель", "менеджер"):
+                    role = "manager" if lowered == "руководитель" else "employee"
+                else:
+                    name += (" " if name else "") + w
+            if role == "manager" and not is_owner:
+                return "Руководителя может пригласить только владелец."
+            code = staff.invite(role, name, created_by=str(chat))
+            return (f"Код приглашения: {code.get('code')}\n"
+                    f"Роль: {code.get('role_name')}"
+                    + (f", имя: {name}" if name else "") +
+                    "\nОтправьте код человеку — он пишет боту «старт "
+                    f"{code.get('code')}» и попадает в команду. Код одноразовый.")
+        if action == "add":
+            if not is_owner:
+                return "Добавлять участников может только владелец."
+            digits = next((w for w in words if w.lstrip("-").isdigit()), "")
+            name_words = [w for w in words[1:]
+                          if not w.lstrip("-").isdigit()
+                          and w.lower() != role]
+            if not digits or not name_words:
+                return ("Формат: «сотрудник Имя 123456» или "
+                        "«руководитель Имя 123456».\n"
+                        "chat_id человек узнает у бота командой «код».")
+            try:
+                member = staff.add(" ".join(name_words), role, digits)
+            except ValueError as exc:
+                return str(exc)
+            return (f"✅ {member.get('name')} — {member.get('role_name')} "
+                    f"(chat_id {member.get('chat_id')}).\n"
+                    "Права: " + staff.rights_text(member.get("role")))
+        if action == "remove":
+            if not is_owner:
+                return "Убирать участников может только владелец."
+            ident = next((w for w in words[1:] if w), "")
+            if not ident:
+                return "Формат: «убрать 123456» (chat_id или имя)."
+            try:
+                row = staff.remove(ident)
+            except ValueError as exc:
+                return str(exc)
+            return (f"✅ {row.get('name')} отключён от бота "
+                    "(в панели можно вернуть).")
+        return "Не понял команду команды 🙂 Напишите «команда»."
 
     def _start_next(self, chat: str) -> str:
         """Запустить следующее задание очереди на свободном принтере."""
@@ -477,6 +593,28 @@ class TelegramBot:
             text = text.replace(emoji, " ")
         text = text.strip()
         word = text.split()[0] if text else ""
+
+        # Команда: управление участниками (владелец; руководитель — наполовину).
+        if word in ("команда", "сотрудники", "team"):
+            return self._reply(chat, self._staff_command(chat, "list", text))
+        if word in ("пригласить", "приглашение"):
+            return self._reply(chat, self._staff_command(chat, "invite", raw))
+        if word in ("сотрудник", "руководитель"):
+            return self._reply(chat, self._staff_command(chat, "add", raw, role=word))
+        if word in ("убрать", "уволить"):
+            return self._reply(chat, self._staff_command(chat, "remove", raw))
+
+        # Роль решает, что доступно: обзоры и полка — всем, деньги, заказы
+        # и принтеры — руководителю и владельцу.
+        who = gate(self.db, chat)
+        effective = "стоп-живой" if (word == "стоп" and "живой" in text) else word
+        group = group_for_word(
+            effective, text_has_digits=any(w.isdigit() for w in text.split()[1:]))
+        if who["role"] and group and group not in who["allowed"]:
+            return self._reply(
+                chat, f"🚫 «{word}» недоступен для роли "
+                      f"«{ROLE_NAMES.get(who['role'])}».\n"
+                      "Доступно сейчас: " + Staff(self.db).rights_text(who["role"]))
 
         if word in ("start", "help", "старт", "помощь", "меню", "?"):
             return self._reply_keyboard(chat, HELP)

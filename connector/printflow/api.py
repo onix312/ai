@@ -1186,6 +1186,42 @@ class Api:
                                                   one("printer_id"), one("kind"))}
         if path == "/api/settings":
             return 200, {"settings": self.db.settings()}
+        if path == "/api/staff":
+            from .staff import ROLE_RIGHTS, ROLE_NAMES, Staff
+            staff = Staff(self.db)
+            return 200, {"staff": staff.all(), "invites": staff.invites(),
+                         "roles": {r: {"name": ROLE_NAMES[r],
+                                       "rights": sorted(rights)}
+                                  for r, rights in ROLE_RIGHTS.items()},
+                         "owner_chat": str(self.db.setting("telegram_chat_id",
+                                                           "") or "")}
+        if path == "/api/client-bot":
+            bot = getattr(self.manager, "client_bot", None)
+            settings = self.db.settings()
+            data = {
+                "enabled": bool(settings.get("client_bot_enabled")),
+                "has_token": bool(settings.get("client_bot_token")),
+                "welcome": str(settings.get("client_bot_welcome") or ""),
+                "notify": bool(settings.get("client_bot_notify", True)),
+                "catalog": bool(settings.get("client_bot_catalog", True)),
+                "stats": bot.stats() if bot else {},
+                "alive": bool(bot and bot.last_poll
+                              and time.time() - bot.last_poll < 120),
+                "chats": self.db.query(
+                    "SELECT c.*, COUNT(l.order_id) orders FROM client_chats c"
+                    " LEFT JOIN client_orders l ON l.chat_id=c.chat_id"
+                    " GROUP BY c.chat_id ORDER BY datetime(c.last_seen) DESC"
+                    " LIMIT 50"),
+                "log": self.db.query(
+                    "SELECT * FROM client_bot_log ORDER BY id DESC LIMIT 60"),
+                "orders": self.db.query(
+                    "SELECT l.number, l.created_at linked_at, o.product, o.status,"
+                    " o.price, c.name FROM client_orders l"
+                    " JOIN orders o ON o.id=l.order_id"
+                    " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+                    " ORDER BY datetime(l.created_at) DESC LIMIT 50"),
+            }
+            return 200, data
         if path == "/api/rules":
             from .rules import ACTIONS, TRIGGERS
             return 200, {"rules": self.manager.rules.rules(),
@@ -2705,6 +2741,52 @@ class Api:
         if path == "/api/telegram/test":
             self.db.set_settings({k: v for k, v in body.items() if k.startswith("telegram")})
             return 200, self.manager.send_telegram("PrintFlow: проверка уведомлений прошла успешно.")
+        if path == "/api/staff/save":
+            from .staff import Staff
+            staff = Staff(self.db)
+            member = staff.add(str(body.get("name") or ""),
+                               str(body.get("role") or "employee"),
+                               str(body.get("chat_id") or ""),
+                               str(body.get("note") or ""))
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "member": member}
+        if path == "/api/staff/delete":
+            from .staff import Staff
+            Staff(self.db).remove(str(body.get("id") or ""))
+            self.bus.publish("resync", {})
+            return 200, {"ok": True}
+        if path == "/api/staff/restore":
+            from .staff import Staff
+            member = Staff(self.db).restore(str(body.get("id") or ""))
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "member": member}
+        if path == "/api/staff/invite":
+            from .staff import Staff
+            invite = Staff(self.db).invite(str(body.get("role") or "employee"),
+                                           str(body.get("name") or ""),
+                                           "panel")
+            return 200, {"ok": True, "invite": invite}
+        if path == "/api/staff/invite/delete":
+            from .staff import Staff
+            Staff(self.db).invite_delete(str(body.get("code") or ""))
+            return 200, {"ok": True}
+        if path == "/api/client-bot/save":
+            patch = {k: v for k, v in body.items()
+                     if k in ("client_bot_enabled", "client_bot_token",
+                              "client_bot_welcome", "client_bot_notify",
+                              "client_bot_catalog")}
+            settings = self.db.set_settings(patch)
+            return 200, {"ok": True, "settings": {
+                k: v for k, v in settings.items() if k.startswith("client_bot")}}
+        if path == "/api/client-bot/test":
+            # Проверка токена без отправки сообщения: getMe показывает имя бота.
+            self.db.set_settings({k: v for k, v in body.items()
+                                  if k.startswith("client_bot")})
+            bot = getattr(self.manager, "client_bot", None)
+            if not bot:
+                return 200, {"ok": False,
+                             "error": "Клиентский бот не запущен (перезапустите панель)"}
+            return 200, bot.me()
         if path == "/api/import":
             return 200, {"ok": True, "imported": self.repo.import_backup(body)}
         if path == "/api/import/localstorage":

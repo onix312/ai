@@ -82,6 +82,12 @@ class PrinterManager:
         self._startup_thread = threading.Thread(target=self._startup_auto_resume_loop, name="pf-auto-resume", daemon=True)
         self._startup_thread.start()
         self.bot = TelegramBot(self)
+        # Клиентский бот (9.3): отдельный токен, покупатели заказывают сами.
+        try:
+            from .client_bot import ClientBot
+            self.client_bot = ClientBot(self)
+        except Exception:
+            self.client_bot = None
 
     # ------------------------------------------------------------- управление
     def reload(self) -> None:
@@ -178,6 +184,9 @@ class PrinterManager:
         bot = getattr(self, "bot", None)
         if bot:
             bot.shutdown()
+        client_bot = getattr(self, "client_bot", None)
+        if client_bot:
+            client_bot.shutdown()
         with self.lock:
             for printer in self.printers.values():
                 printer.shutdown()

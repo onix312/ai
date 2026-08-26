@@ -47,6 +47,7 @@
      <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic">◎</span><span>Клиенты</span><small>CRM</small></a>
      <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic">◫</span><span>Ниши</span><small>Тесты</small></a>
      <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic">✎</span><span>Контент</span><small>Студия</small></a>
+     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
     </div>
     <div class="nav-more-section">
      <span class="nav-more-caption">Знания и система</span>
@@ -1044,6 +1045,60 @@
   </div>
  </div>
 </section>
+
+<!-- ============================================== КЛИЕНТСКИЙ БОТ -->
+<section class="view" id="view-clientbot">
+ <div class="view-head">
+  <div><span class="eyebrow">Рост и продажи · покупатель сам</span><h1>Клиент-бот Telegram</h1><p>Витрина, заказ по кнопке и статусы заказов — покупателю, без доступа к панели.</p></div>
+  <div class="head-actions">
+   <button class="btn" id="cb_refresh" type="button">↻ Обновить</button>
+  </div>
+ </div>
+ <div class="kpi-grid" id="cb_kpis"></div>
+ <div class="grid g-2-1">
+  <div class="card">
+   <div class="card-head"><div><h2>Подключение</h2><p>Отдельный бот для покупателей — токен внутреннего бота не подходит</p></div><span class="tag" id="cb_state_tag" hidden></span></div>
+   <div class="set-grid">
+    <div class="set-row"><div class="sinfo"><b>Клиентский бот</b><small>Каталог, заказы и статусы для покупателей</small></div>
+     <label class="switch"><input type="checkbox" id="cb_enabled"><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Bot Token</b><small id="cb_token_hint">Создайте второго бота у @BotFather и вставьте токен</small></div>
+     <input type="password" autocomplete="new-password" id="cb_token" placeholder="токен покупательского бота" style="max-width:260px"></div>
+    <div class="set-row"><div class="sinfo"><b>Каталог с ценами</b><small>Бот показывает витрину — товары номенклатуры с ценой</small></div>
+     <label class="switch"><input type="checkbox" id="cb_catalog" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Уведомлять о статусе</b><small>«Печатается», «Готов» — покупателю, без запросов</small></div>
+     <label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
+    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Приветствие /start</b><small>Пусто — стандартный текст NOZZA</small></div>
+     <textarea id="cb_welcome" rows="3" placeholder="Здравствуйте! Это бот мастерской…" style="max-width:320px"></textarea></div>
+   </div>
+   <div class="btn-grid" style="margin-top:10px">
+    <button class="btn primary" id="cb_save" type="button">Сохранить</button>
+    <button class="btn" id="cb_test" type="button">Проверить токен</button>
+    <a class="btn ghost" href="https://t.me/BotFather" target="_blank" rel="noopener">Открыть @BotFather</a>
+   </div>
+   <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Токен хранится только на этом компьютере и шифруется в базе. Бот не показывает чужие заказы: клиент видит лишь свои — по чату или привязанному телефону.</span></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Команды покупателя</h2><p>Работают без слэша и в любом регистре</p></div></div>
+   <div class="table-wrap"><table class="data"><tbody id="cb_commands"></tbody></table></div>
+   <div class="notice" style="margin-top:10px"><span>💡</span><span>Ускоритель продаж: QR на полке и в упаковке ведёт на бота — покупатель дозаказывает без звонка.</span></div>
+  </div>
+ </div>
+ <div class="grid g-2-1" style="margin-top:16px">
+  <div class="card">
+   <div class="card-head"><div><h2>Заказы из бота</h2><p>Попадают в панель как заявки канала Telegram</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Когда</th></tr></thead><tbody id="cb_orders"></tbody></table></div>
+  </div>
+  <div class="card">
+   <div class="card-head"><div><h2>Покупатели</h2><p>Чаты, которые писали боту</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Имя</th><th>Telegram</th><th>Телефон</th><th class="right">Заказов</th><th>Был</th></tr></thead><tbody id="cb_chats"></tbody></table></div>
+  </div>
+ </div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Диалоги</h2><p>Последние сообщения — видно, что бот отвечал</p></div></div>
+  <div class="table-wrap"><table class="data"><thead><tr><th>Время</th><th>Клиент</th><th>Сообщение</th><th>Ответ бота</th></tr></thead><tbody id="cb_log"></tbody></table></div>
+ </div>
+</section>
+
 <section class="view library-workspace" id="view-library">
  <div class="view-head">
   <div><span class="eyebrow">База знаний · маршрут вместо папки файлов</span><h1>Библиотека</h1><p>Гайды, готовые скрипты и печатные материалы — от первого товара до витрины и системного порядка.</p></div>
@@ -1098,6 +1153,8 @@
   <a class="lib-card" data-library-category="tools" href="/design.html" target="_blank" rel="noopener"><span class="ic">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
   <a class="lib-card" data-library-category="tools" href="/m.html" target="_blank" rel="noopener"><span class="ic">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
   <a class="lib-card" data-library-category="tools" href="/track.html" target="_blank" rel="noopener"><span class="ic">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
+  <a class="lib-card" data-library-category="tools" href="/materials/промостенды-67x57.html" target="_blank" rel="noopener"><span class="ic">🪧</span><b>Промостенды 67×57</b><small>Генератор: 100 идей, свой текст, QR и печать на A4</small></a>
+  <a class="lib-card" data-library-category="tools" href="/materials/index.html" target="_blank" rel="noopener"><span class="ic">🖨</span><b>Все материалы A4</b><small>Вывеси, ценники, сертификаты, купоны</small></a>
  </div>
  <div class="lib-empty-state" id="lib_empty" hidden><span>⌕</span><b>Ничего не нашли</b><p>Смените категорию или попробуйте другое слово.</p><button class="btn sm" type="button" id="lib_reset_filters">Показать все материалы</button></div>
  <div id="lib_tpl_wrap" hidden>
@@ -3622,6 +3679,10 @@
     <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Команда Telegram</h2><p>Сотрудник и руководитель — со своими правами в боте</p></div></div>
+    <div id="set_staff"></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Оформление</h2><p>Тема и акцент интерфейса</p></div></div>
     <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
      <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
@@ -4768,6 +4829,7 @@
 <script src="assets/products.js?v=9.1.2"></script>
 <script src="assets/bridge.js?v=9.1.2"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>
+<script src="assets/clientbot.js?v=9.3.0"></script>
 <script src="assets/workshop.js?v=9.1.2"></script>
 <script src="assets/app.js?v=9.2.2"></script>
 <script>
