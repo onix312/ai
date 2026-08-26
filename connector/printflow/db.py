@@ -214,6 +214,62 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+-- Команда: сотрудник и руководитель в Telegram-боте. Владелец остаётся
+-- в настройке telegram_chat_id; staff — дополнительные чаты с ролями.
+CREATE TABLE IF NOT EXISTS staff (
+    id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    role TEXT DEFAULT 'employee',     -- employee | manager
+    chat_id TEXT DEFAULT '',
+    tg_user_id TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_staff_chat ON staff(chat_id);
+
+-- Одноразовые коды приглашения: «старт PF-XXXX» в чат бота — и человек
+-- автоматически становится сотрудником/руководителем без ручного ввода chat_id.
+CREATE TABLE IF NOT EXISTS staff_invites (
+    code TEXT PRIMARY KEY,
+    role TEXT DEFAULT 'employee',
+    name TEXT DEFAULT '',
+    created_by TEXT DEFAULT '',
+    used INTEGER DEFAULT 0,
+    used_by TEXT DEFAULT '',
+    created_at TEXT
+);
+
+-- Клиентский бот: чаты покупателей (9.3).
+CREATE TABLE IF NOT EXISTS client_chats (
+    chat_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    username TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    created_at TEXT,
+    last_seen TEXT
+);
+
+-- Связь «чат ↔ заказ» для отслеживания и уведомлений о статусе.
+CREATE TABLE IF NOT EXISTS client_orders (
+    chat_id TEXT DEFAULT '',
+    order_id TEXT DEFAULT '',
+    number TEXT DEFAULT '',
+    created_at TEXT,
+    PRIMARY KEY (chat_id, order_id)
+);
+
+-- Журнал диалогов клиентского бота (для вкладки панели, без засорения events).
+CREATE TABLE IF NOT EXISTS client_bot_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    chat_id TEXT DEFAULT '',
+    name TEXT DEFAULT '',
+    text TEXT DEFAULT '',
+    answer TEXT DEFAULT '',
+    kind TEXT DEFAULT 'message'      -- message | order | status | push | join
+);
+
 CREATE TABLE IF NOT EXISTS printers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

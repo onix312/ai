@@ -340,6 +340,7 @@ const VIEWS = {
   niches: { title: 'Ниши', sub: 'Проверка гипотез по фактическим заказам' },
   calc: { title: 'Калькулятор', sub: 'Себестоимость, цена и прибыль за час' },
   marketing: { title: 'Контент', sub: 'Посты, карточки, отчёты и таблички — генераторы 8.5' },
+  clientbot: { title: 'Клиент-бот', sub: 'Telegram-бот для покупателей: витрина, заказы, статусы' },
   library: { title: 'Библиотека', sub: 'Инструкции, скрипты и материалы' },
   settings: { title: 'Настройки', sub: 'Тарифы, автоматизация и данные' },
 };
@@ -356,6 +357,8 @@ const VIEW_ALIASES = {
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
   jobs: 'queue', print: 'queue', clients: 'customers',
   calculator: 'calc', docs: 'library', settings2: 'settings',
+  client: 'clientbot', clientsbot: 'clientbot', buyer: 'clientbot',
+  покупатель: 'clientbot',
 };
 let currentView = '';
 

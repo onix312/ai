@@ -68,6 +68,7 @@
       python pf.py install                 ярлыки + включить автозапуск
       python pf.py install --no-autostart  ярлыки + отключить автозапуск
       python pf.py autostart status        проверить состояние и порт
+      python pf.py autostart verify        глубокая проверка: механизм, путь, порт
       python pf.py autostart disable       отключить, не удаляя ярлыки
       python pf.py autostart enable        снова включить
       python pf.py autostart repair        восстановить после переноса папки

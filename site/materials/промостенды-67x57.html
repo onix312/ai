@@ -120,6 +120,9 @@
   .ideas h2 { margin: 0 0 8px; font-size: 15px; }
   .ideas ol { columns: 2; column-gap: 28px; margin: 0; padding-left: 20px; font-size: 12.5px; line-height: 1.5; color: var(--ink-soft); }
   .ideas li { break-inside: avoid; margin: 0 0 5px; }
+  .ideas #ideaList li { cursor: pointer; padding: 2px 4px; margin-left: -4px; border-radius: 6px; }
+  .ideas #ideaList li:hover { background: color-mix(in srgb, var(--brand) 8%, transparent); color: var(--ink); }
+  .ideas #ideaList li:hover b { color: var(--brand); }
 
   @media print {
     .sheet { width: 210mm; height: 297mm; min-height: 297mm; margin: 0; padding: 6mm 4.5mm; box-shadow: none; }
@@ -143,6 +146,7 @@
       </select>
     </label>
     <label><input type="checkbox" id="qrOn" checked> QR</label>
+    <label>Поиск идей <input type="search" id="ideaSearch" placeholder="адресник, кафе, авто…" style="width:170px"></label>
     <button class="btn" type="button" id="shuffle">Собрать другие 15</button>
     <button class="btn" type="button" id="addAbout">+ Карточка «О нас»</button>
     <button class="btn" type="button" id="copyIdeas">Копировать идеи</button>
@@ -155,6 +159,7 @@
     <label>Текст <textarea id="e_text" placeholder="Короткое описание на 1–2 строки"></textarea></label>
     <label>Плашки <textarea id="e_points" placeholder="Через ||: Готовое на полке || Под заказ 1–3 дня"></textarea></label>
     <label>CTA <input id="e_cta" type="text" placeholder="Напишите в Telegram"></label>
+    <label>Свой QR <input id="e_qr" type="text" placeholder="ссылка только этой карточки" style="min-width:170px"></label>
     <button class="btn" type="button" id="applyAll">Размножить выбранный на лист</button>
     <button class="btn" type="button" id="reset">Вернуть 15 идей</button>
     <span class="hint">Клик по карточке — правка. Заголовок до звёздочки выделяется акцентом: <b>Печатаем* вещи под вас</b>.</span>
@@ -171,6 +176,7 @@
     </label>
     <label>Свой цвет акцента <input id="e_color" type="color" value="#4f46e5"></label>
     <button class="btn sm" type="button" id="e_color_clear" title="Вернуть цвет темы">✕ цвет</button>
+    <button class="btn sm" type="button" id="e_qr_clear" title="Убрать персональный QR карточки">✕ QR</button>
     <label>Шрифт
       <select id="e_font">
         <option value="">по умолчанию</option>
@@ -189,9 +195,12 @@
     </label>
     <label>Размер текста <input id="e_scale" type="range" min="85" max="120" step="5" value="100"><span id="e_scale_val">100%</span></label>
     <label><input type="checkbox" id="e_logo" checked> Логотип NOZZA</label>
+    <button class="btn sm" type="button" id="dupCard" title="Вставить копию выбранной карточки следующей">⧉ Дублировать</button>
+    <button class="btn sm" type="button" id="upCard" title="Передвинуть выбранную карточку выше">↑</button>
+    <button class="btn sm" type="button" id="downCard" title="Передвинуть выбранную карточку ниже">↓</button>
     <button class="btn" type="button" id="applyDesignAll">Применить оформление ко всем</button>
     <button class="btn" type="button" id="resetDesign">Сбросить оформление карточки</button>
-    <span class="hint">Настройки оформления сохраняются отдельно для каждой карточки — цвет, шрифт, рамка, размер текста и логотип.</span>
+    <span class="hint">Настройки оформления сохраняются отдельно для каждой карточки — цвет, шрифт, рамка, размер текста, логотип и QR.</span>
   </div>
 </div>
 
@@ -202,8 +211,25 @@
 <div class="sheet" id="sheet"></div>
 
 <div class="ideas noprint">
-  <h2>100 идей для промостендов 67 × 57 мм</h2>
+  <h2>Библиотека идей: <span id="ideaCount">100</span> промостендов 67 × 57 мм
+    <span class="hint" style="margin-left:10px">Клик по идее — вставить её в выбранную карточку листа. Поиск — в панели сверху.</span></h2>
   <ol id="ideaList"></ol>
+</div>
+
+<div class="ideas noprint">
+  <h2>Куда развивать генератор — 10 следующих шагов</h2>
+  <ol>
+    <li><b>Тираж со счётчиком:</b> «размножить выбранный на лист» сегодня заменяет все 15 — сделать выбор количества (5, 10, 15) с нумерацией серий.</li>
+    <li><b>Обратная сторона:</b> вторая страница A4 с инструкцией ухода и QR на гарантию — печать с двух сторон на плотной бумаге.</li>
+    <li><b>Свои фото:</b> загрузка картинки товара в карточку (сегодня только логотип и QR).</li>
+    <li><b>Навигация по идеям:</b> фильтры-вкладки «дом · питомцы · бизнес · авто · офис» поверх поиска.</li>
+    <li><b>Импорт идей из панели:</b> генератор читает названия товаров из PrintFlow и предлагает стенды под реальную номенклатуру.</li>
+    <li><b>Сезонные подборки:</b> кнопки «Новый год», «8 марта», «1 сентября» — готовые 15 из библиотеки по празднику.</li>
+    <li><b>A/B маркировка:</b> у каждой карточки маленький код (A1, B2), чтобы по спрашиванию клиента узнать, какой стенд сработал.</li>
+    <li><b>Пакетная печать:</b> кнопка «скачать PDF» листа без диалога браузера — одинаковые отступы на любом принтере.</li>
+    <li><b>Партнёрские стенды:</b> шаблон с чужим логотипом (грумер, кафе) — кросс-промо на чужой полке.</li>
+    <li><b>Статистика с полки:</b> отметка «продано после стенда» в панели — счётчик окупаемости печати стендов.</li>
+  </ol>
 </div>
 
 <script src="../assets/qr.js"></script>
@@ -358,11 +384,12 @@ function renderCard(card, i){
   const c = NZ.contact();
   const phone = c.phone ? '<br>' + esc(c.phone) : '';
   const showQr = $('qrOn').checked;
-  const qr = showQr ? NZ.qr(qrLink(i), { margin: 1 }) : '';
+  const d = card.design || {};
+  // QR: персональная ссылка карточки (для отслеживания канала) или общий QR.
+  const qr = showQr ? NZ.qr(d.qr || qrLink(i), { margin: 1 }) : '';
   const pts = (card.points || []).slice(0, 4);
   while (pts.length < 4) pts.push('');
   const titleCls = String(card.title || '').replace(/\*/g, '').length > 24 ? ' small' : '';
-  const d = card.design || {};
   const theme = themeFor(i);
   const cls = ['stand', 'theme-' + theme];
   if (!showQr) cls.push('noqr');
@@ -406,9 +433,21 @@ function draw(){
   cards = cards.slice(0, 15);
   while (cards.length < 15) cards.push({...IDEAS[cards.length % IDEAS.length], points:[...IDEAS[cards.length % IDEAS.length].points]});
   $('sheet').innerHTML = cards.map(renderCard).join('');
-  $('ideaList').innerHTML = IDEAS.map((x) => '<li><b>' + esc(x.title.replace(/\*/g, '')) + '</b> — ' + esc(x.text) + '</li>').join('');
+  drawIdeas();
   fillEditor();
   requestAnimationFrame(fitAllCards);
+}
+function drawIdeas(){
+  const q = ($('ideaSearch').value || '').trim().toLowerCase().replace(/ё/g, 'е');
+  const hay = (x) => [x.kicker, x.title, x.text, (x.points || []).join(' '), x.cta]
+    .join(' ').toLowerCase().replace(/ё/g, 'е');
+  const rows = IDEAS.map((x, i) => ({x, i})).filter((o) => !q || hay(o.x).includes(q));
+  $('ideaList').innerHTML = rows.length
+    ? rows.map(({x, i}) => '<li data-idea="' + i + '" title="Вставить в выбранную карточку №'
+        + (selected + 1) + '"><b>' + esc(x.title.replace(/\*/g, '')) + '</b> — ' + esc(x.text) + '</li>').join('')
+    : '<li>Ничего не нашлось — попробуйте другое слово.</li>';
+  $('ideaCount').textContent = rows.length === IDEAS.length
+    ? String(IDEAS.length) : (rows.length + ' из ' + IDEAS.length);
 }
 function fillEditor(){
   const card = cards[selected] || cards[0];
@@ -419,6 +458,7 @@ function fillEditor(){
   $('e_text').value = card.text || '';
   $('e_points').value = (card.points || []).join(' || ');
   $('e_cta').value = card.cta || '';
+  $('e_qr').value = d.qr || '';
   $('e_theme').value = d.theme || '';
   $('e_color').value = d.color || '#4f46e5';
   $('e_color').dataset.custom = d.color ? '1' : '0';
@@ -446,6 +486,7 @@ function readDesignFromEditor(){
   const design = {};
   if ($('e_theme').value) design.theme = $('e_theme').value;
   if ($('e_color').dataset.custom === '1') design.color = $('e_color').value;
+  if ($('e_qr').value.trim()) design.qr = $('e_qr').value.trim();
   if ($('e_font').value) design.font = $('e_font').value;
   if ($('e_border').value) design.border = $('e_border').value;
   if (Number($('e_scale').value) !== 100) design.scale = Number($('e_scale').value);
@@ -472,6 +513,36 @@ $('e_color').addEventListener('input', () => { $('e_color').dataset.custom = '1'
 $('e_color_clear').addEventListener('click', () => { $('e_color').dataset.custom = '0'; applyDesign(); });
 $('e_scale').addEventListener('input', () => { $('e_scale_val').textContent = $('e_scale').value + '%'; applyDesign(); });
 ['e_theme','e_font','e_border','e_logo'].forEach(id => $(id).addEventListener('change', applyDesign));
+$('e_qr').addEventListener('input', applyDesign);
+$('e_qr_clear').addEventListener('click', () => { $('e_qr').value = ''; applyDesign(); });
+$('ideaSearch').addEventListener('input', drawIdeas);
+$('ideaList').addEventListener('click', (ev) => {
+  const li = ev.target.closest('li[data-idea]');
+  if (!li) return;
+  const idea = IDEAS[Number(li.getAttribute('data-idea'))];
+  if (!idea) return;
+  cards[selected] = {...idea, points:[...idea.points]};
+  saveCards(); draw();
+});
+$('dupCard').addEventListener('click', () => {
+  const base = cards[selected];
+  if (!base) return;
+  const copy = {...base, points:[...(base.points || [])], design:{...(base.design || {})}};
+  cards.splice(Math.min(selected + 1, cards.length), 0, copy);
+  cards = cards.slice(0, 15);  // лист A4 вмещает 15 держателей
+  saveCards(); draw();
+});
+function moveCard(delta){
+  const target = selected + delta;
+  if (target < 0 || target >= cards.length) return;
+  const tmp = cards[selected];
+  cards[selected] = cards[target];
+  cards[target] = tmp;
+  selected = target;
+  saveCards(); draw();
+}
+$('upCard').addEventListener('click', () => moveCard(-1));
+$('downCard').addEventListener('click', () => moveCard(1));
 $('sheet').addEventListener('click', (ev) => {
   const el = ev.target.closest('.stand'); if (!el) return;
   selected = Number(el.getAttribute('data-idx')) || 0;

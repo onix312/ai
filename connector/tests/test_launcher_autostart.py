@@ -329,6 +329,63 @@ class AutostartOperationsTests(unittest.TestCase):
         disable.assert_called_once_with()
         enable.assert_not_called()
 
+    # ------------------------------------------------ 9.3: verify, watchdog
+    def test_parser_supports_verify_json_and_watchdog(self) -> None:
+        parsed = pf.build_parser().parse_args(
+            ["autostart", "verify", "--json"])
+        self.assertEqual(parsed.autostart_action, "verify")
+        self.assertTrue(parsed.json)
+        parsed = pf.build_parser().parse_args(["service", "--watchdog"])
+        self.assertTrue(parsed.watchdog)
+
+    def test_verify_flags_missing_install_and_moved_root(self) -> None:
+        status = {"installed": False, "enabled": False, "running": False,
+                  "mechanism": "—", "port": 8080, "root_matches": False,
+                  "detail": ""}
+        with mock.patch.object(pf, "autostart_status", return_value=status), \
+             mock.patch.object(pf, "port_busy", return_value=False), \
+             mock.patch.object(pf, "health", return_value=None):
+            problems = pf.autostart_verify()
+        self.assertTrue(any("не установлен" in p for p in problems))
+
+        moved = dict(status, installed=True, enabled=True, root_matches=False)
+        with mock.patch.object(pf, "autostart_status", return_value=moved), \
+             mock.patch.object(pf, "port_busy", return_value=False), \
+             mock.patch.object(pf, "health", return_value=None):
+            problems = pf.autostart_verify()
+        self.assertEqual(problems, ["PrintFlow перенесён в другую папку — "
+                                    "python pf.py autostart repair"])
+
+    def test_verify_ok_when_installed_and_healthy_port(self) -> None:
+        status = {"installed": True, "enabled": True, "running": True,
+                  "mechanism": "systemd-user", "port": 8080,
+                  "root_matches": True, "detail": ""}
+        with mock.patch.object(pf, "autostart_status", return_value=status), \
+             mock.patch.object(pf, "port_busy", return_value=False), \
+             mock.patch.object(pf, "health", return_value={"version": "9.3"}):
+            self.assertEqual(pf.autostart_verify(), [])
+
+    def test_xdg_fallback_uses_watchdog(self) -> None:
+        written: dict[str, str] = {}
+
+        def fake_write(path, content, mode=None):
+            written[str(path)] = content
+
+        with mock.patch.object(pf, "_systemd_available", return_value=(False, "нет")), \
+             mock.patch.object(pf, "_atomic_write", side_effect=fake_write), \
+             mock.patch.object(pf, "xdg_config_home", return_value=Path("/tmp/xdg-test")):
+            success, mechanism, detail = pf._enable_linux_autostart(self.args())
+        self.assertTrue(success)
+        self.assertEqual(mechanism, "xdg-autostart")
+        self.assertIn("watchdog", detail)
+        entry = next(v for k, v in written.items() if k.endswith("printflow.desktop"))
+        self.assertIn("--watchdog", entry)
+
+    def test_windows_task_script_starts_when_available(self) -> None:
+        script = pf.render_windows_task_script(
+            ["/usr/bin/python", str(pf.ROOT / "pf.py"), "service"])
+        self.assertIn("-StartWhenAvailable", script)
+
 
 if __name__ == "__main__":
     unittest.main()

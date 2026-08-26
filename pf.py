@@ -709,6 +709,24 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 say("      Принтер выключен, в другой сети или включён облачный режим",
                     Style.DIM)
 
+    # Автозапуск — предупреждения, не ошибки: работать можно и без него.
+    say()
+    say("  Автозапуск", Style.BOLD)
+    try:
+        autostart_problems = autostart_verify()
+        status = autostart_status()
+        if status["installed"] and status["enabled"]:
+            ok(f"Механизм: {status['mechanism']} · порт {status['port']}"
+               + (" · сервер работает" if status["running"] else " · ждёт входа/старта"))
+        if not autostart_problems:
+            if not status["installed"]:
+                say("      Не установлен — включить: python pf.py install", Style.DIM)
+        else:
+            for problem in autostart_problems:
+                warn(problem)
+    except Exception as exc:  # диагностика не должна падать на экзотических ОС
+        warn(f"Не удалось проверить автозапуск: {exc}")
+
     say()
     if problems:
         fail(f"Найдено проблем: {problems}")
@@ -1102,16 +1120,36 @@ def service_command(args: argparse.Namespace) -> list[str]:
     return command
 
 
+def _connector_command(args: argparse.Namespace) -> list[str]:
+    """Команда запуска коннектора для автозапуска (без exec-специфики)."""
+    python = interpreter(args.system, quiet=True)
+    if IS_WINDOWS and Path(sys.executable).name.lower() == "pythonw.exe":
+        pythonw = Path(python).with_name("pythonw.exe")
+        if pythonw.exists():
+            python = pythonw
+    host = "127.0.0.1" if args.local else "0.0.0.0"
+    command = [str(python), str(ENTRYPOINT), "--host", host,
+               "--port", str(args.port), "--no-browser", "--no-banner"]
+    if args.verbose:
+        command.append("--verbose")
+    return command
+
+
 def cmd_service(args: argparse.Namespace) -> int:
     """Внутренний foreground-режим для systemd, launchd и Планировщика.
 
     После подготовки окружения процесс заменяется коннектором через exec: ОС
     отслеживает реальный сервер, а не промежуточный launcher и не двойной daemon.
+    Режим ``--watchdog`` — супервизор для механизмов без собственного контроля
+    (XDG Autostart, папка Startup): коннектор запускается дочерним процессом
+    и поднимается обратно при падении, с нарастающей паузой между попытками.
     """
     check_python_version()
     delay = max(0, min(int(args.startup_delay), 300))
     if delay:
         time.sleep(delay)
+    if getattr(args, "watchdog", False):
+        return _service_watchdog(args)
     if health(args.port):
         return 0  # уже запущен вручную; следующая сессия попробует снова
     if port_busy(args.port):
@@ -1137,6 +1175,77 @@ def cmd_service(args: argparse.Namespace) -> int:
         fail(f"Автозапуск: не удалось запустить сервер: {exc}")
         return 1
     return 1  # pragma: no cover — успешный exec не возвращается
+
+
+def _service_watchdog(args: argparse.Namespace) -> int:
+    """Супервизор для XDG Autostart и папки Startup: перезапуск при падении.
+
+    systemd, launchd и Планировщик заданий Windows сами перезапускают службу.
+    Графическая автозагрузка таких гарантий не даёт — поэтому здесь коннектор
+    работает дочерним процессом: упал → пауза (растёт до 10 минут) → снова
+    старт. Панель, поднятая вручную, не трогается: если порт уже отвечает,
+    watchdog молчит и ждёт.
+    """
+    import signal
+
+    state = {"stop": False}
+    child: subprocess.Popen | None = None
+
+    def _terminate(_signum, _frame) -> None:
+        state["stop"] = True
+        if child is not None and child.poll() is None:
+            child.terminate()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _terminate)
+        except (ValueError, OSError):
+            pass
+
+    command = _connector_command(args)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    os.chdir(ROOT)
+    write_pid(os.getpid())
+    backoff = 15
+    try:
+        while not state["stop"]:
+            if health(args.port):
+                time.sleep(30)  # панель уже работает (вручную или копией)
+                continue
+            if port_busy(args.port):
+                fail(f"Автозапуск: порт {args.port} занят другой программой — жду")
+                time.sleep(60)
+                continue
+            log = open(RUN_LOG, "ab", buffering=0)
+            log.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} watchdog:"
+                      f" {' '.join(command)}\n".encode("utf-8"))
+            popen_kwargs: dict = {}
+            if IS_WINDOWS:
+                popen_kwargs["creationflags"] = 0x00000008 | 0x08000000
+            else:
+                popen_kwargs["start_new_session"] = True
+            try:
+                child = subprocess.Popen(command, cwd=str(ROOT), stdout=log,
+                                         stderr=log, stdin=subprocess.DEVNULL,
+                                         **popen_kwargs)
+            except OSError as exc:
+                fail(f"Автозапуск: не удалось запустить сервер: {exc}")
+                time.sleep(60)
+                continue
+            code = child.wait()
+            if state["stop"]:
+                break
+            if health(args.port):
+                backoff = 15  # кто-то поднял панель заново — не мешаем
+                continue
+            minutes = round(backoff / 60, 1)
+            warn(f"Автозапуск: сервер остановился (код {code})."
+                 f" Перезапуск через {minutes} мин")
+            time.sleep(backoff)
+            backoff = min(int(backoff * 1.5) + 5, 600)
+    finally:
+        clear_pid()
+    return 0
 
 
 def _atomic_write(path: Path, content: str | bytes, mode: int | None = None) -> None:
@@ -1287,6 +1396,7 @@ def render_windows_task_script(command: list[str], start_now: bool = True) -> st
         "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries "
         "-DontStopIfGoingOnBatteries -RestartCount 3 "
         "-RestartInterval (New-TimeSpan -Minutes 1) "
+        "-StartWhenAvailable "  # проспали триггер (сон/занятость) — стартуем позже
         "-ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew",
         "$principal = New-ScheduledTaskPrincipal -UserId $user "
         "-LogonType Interactive -RunLevel Limited",
@@ -1337,10 +1447,11 @@ def _enable_windows_autostart(args: argparse.Namespace) -> tuple[bool, str, str]
         f"Unregister-ScheduledTask -TaskName {_powershell_literal(AUTOSTART_TASK)} "
         "-Confirm:$false -ErrorAction SilentlyContinue")
     if cleanup.returncode == 0:
+        # Startup сам не перезапускает сервер — добавляем встроенный watchdog.
         success, shortcut_error = create_windows_shortcut(
-            startup, command, "PrintFlow — автозапуск при входе")
+            startup, command + ["--watchdog"], "PrintFlow — автозапуск при входе")
         if success:
-            detail = "папка Startup (Планировщик недоступен)"
+            detail = "папка Startup + watchdog (Планировщик недоступен)"
             return True, "windows-startup", detail
     else:
         shortcut_error = (cleanup.stderr or cleanup.stdout or
@@ -1403,10 +1514,11 @@ def _enable_linux_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
 
     # Графические сессии без user systemd (часть WSL, контейнеров, старых дистрибутивов).
     try:
-        _atomic_write(xdg, render_xdg_entry(command), mode=0o755)
+        # XDG ничего не перезапускает при падении — включаем встроенный watchdog.
+        _atomic_write(xdg, render_xdg_entry(command + ["--watchdog"]), mode=0o755)
     except OSError as exc:
         return False, "xdg-autostart", f"{reason}; XDG: {exc}"
-    return True, "xdg-autostart", f"XDG Autostart: {xdg} ({reason or 'systemd недоступен'})"
+    return True, "xdg-autostart", f"XDG Autostart: {xdg} + watchdog ({reason or 'systemd недоступен'})"
 
 
 def enable_autostart(args: argparse.Namespace) -> tuple[bool, str, str]:
@@ -1627,16 +1739,48 @@ def _print_autostart_status(status: dict) -> None:
         warn("PrintFlow перенесён в другую папку — выполните autostart repair")
 
 
+def autostart_verify() -> list[str]:
+    """Проверить автозапуск и вернуть список проблем (пустой — всё хорошо).
+
+    Требовать работающий сервер не будем: после перезагрузки задача может
+    стартовать с задержкой. Проверяем установку, включённость, путь и порт.
+    """
+    problems: list[str] = []
+    status = autostart_status()
+    if not status["installed"]:
+        problems.append("автозапуск не установлен — python pf.py install")
+    elif not status["enabled"]:
+        problems.append("автозапуск установлен, но выключен — python pf.py autostart enable")
+    if status["installed"] and not status["root_matches"]:
+        problems.append("PrintFlow перенесён в другую папку — python pf.py autostart repair")
+    port = status["port"]
+    if port_busy(port) and not health(port):
+        problems.append(f"порт {port} занят другой программой — проверьте: python pf.py doctor")
+    return problems
+
+
 def cmd_autostart(args: argparse.Namespace) -> int:
     action = args.autostart_action
     if action == "status":
-        header("Системный автозапуск PrintFlow")
         status = autostart_status()
+        if getattr(args, "json", False):
+            print(json.dumps(status, ensure_ascii=False, indent=2))
+            return 0 if status["enabled"] and status["root_matches"] else 1
+        header("Системный автозапуск PrintFlow")
         _print_autostart_status(status)
         say()
-        say("  Изменить: python pf.py autostart enable|disable|repair", Style.DIM)
+        say("  Изменить: python pf.py autostart enable|disable|repair|verify", Style.DIM)
         say()
         return 0 if status["enabled"] and status["root_matches"] else 1
+    if action == "verify":
+        header("Проверка автозапуска", "механизм, путь, порт и состояние")
+        problems = autostart_verify()
+        if not problems:
+            ok("Автозапуск в порядке")
+        else:
+            for problem in problems:
+                warn(problem)
+        return 0 if not problems else 1
     if action == "disable":
         header("Отключение автозапуска")
         success, detail = disable_autostart()
@@ -1967,12 +2111,17 @@ def build_parser() -> argparse.ArgumentParser:
                                  "doctor", "backup", "restore", "update", "deps", "build",
                                  "install", "uninstall", "autostart", "logs", "help"])
     parser.add_argument("autostart_action", nargs="?", default="status",
-                        choices=["status", "enable", "disable", "repair"],
+                        choices=["status", "enable", "disable", "repair", "verify"],
                         help="действие для команды autostart")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="порт панели")
     parser.add_argument("--local", action="store_true",
                         help="слушать только 127.0.0.1 (без доступа с телефона)")
     parser.add_argument("--background", action="store_true", help="запуск в фоне")
+    parser.add_argument("--watchdog", action="store_true",
+                        help="сервисный режим: перезапускать коннектор при падении "
+                             "(для XDG Autostart и папки Startup)")
+    parser.add_argument("--json", action="store_true",
+                        help="статус автозапуска в JSON (для скриптов)")
     parser.add_argument("--auto-port", action="store_true",
                         help="занять следующий свободный порт, если основной занят")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
