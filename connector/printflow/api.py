@@ -1411,6 +1411,35 @@ class Api:
                 " LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
                 " ORDER BY datetime(p.created_at) DESC LIMIT ?",
                 (max(1, min(200, int(num(one("limit", "60"), 60)))),))}
+        if path == "/api/ops10/production":
+            queue = self.manager.queue()
+            history = self.manager.history(200)
+            planfact = self.db.query(
+                "SELECT COUNT(*) total, COALESCE(SUM(duration_min),0) fact_minutes,"
+                " COALESCE(SUM(grams),0) fact_grams, COALESCE(SUM(cost),0) cost,"
+                " COALESCE(SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END),0) failed"
+                " FROM print_jobs WHERE state IN ('done','failed','cancelled')")[0]
+            for job in history:
+                job['variance_minutes'] = round(float(job.get('duration_min') or 0) - float(job.get('est_minutes') or 0), 1)
+                job['variance_grams'] = round(float(job.get('grams') or 0) - float(job.get('est_grams') or 0), 1)
+            return 200, {"queue": queue, "history": history, "planfact": planfact}
+        if path == "/api/ops10/overview":
+            chats = self.db.query(
+                "SELECT c.*, l.text, l.answer, l.at, l.unread, l.direction "
+                "FROM client_chats c LEFT JOIN client_bot_log l ON l.id=("
+                "SELECT MAX(x.id) FROM client_bot_log x WHERE x.chat_id=c.chat_id) "
+                "ORDER BY c.last_seen DESC LIMIT 200")
+            counts = self.db.query(
+                "SELECT COALESCE(pipeline_stage,'new') stage, COUNT(*) count "
+                "FROM client_chats GROUP BY COALESCE(pipeline_stage,'new')")
+            return 200, {"inbox": chats, "pipeline": counts,
+                         "rules": self.manager.rules.rules(),
+                         "rule_runs": self.manager.rules.recent_runs(30),
+                         # Только телеметрия и AMS, секреты принтеров сюда не попадают.
+                         "printers": self.manager.snapshot().get("printers", [])}
+        if path == "/api/rules/runs":
+            return 200, {"runs": self.manager.rules.recent_runs(
+                max(1, min(200, int(num(one("limit", "50"), 50)))))}
         if path == "/api/rules":
             from .rules import ACTIONS, TRIGGERS
             return 200, {"rules": self.manager.rules.rules(),
@@ -2840,6 +2869,48 @@ class Api:
             return 200, self.shopping.auto_fill(bool(body.get("dry_run")))
         if path == "/api/shopping/clear-done":
             return 200, {"ok": True, "removed": self.shopping.clear_done()}
+        if path == "/api/ops10/queue/simulate":
+            requested = body.get("job_ids") if isinstance(body.get("job_ids"), list) else []
+            requested = [str(x) for x in requested if str(x)]
+            queue = self.manager.queue()
+            by_id = {str(j.get("id")): j for j in queue}
+            chosen = [by_id[x] for x in requested if x in by_id]
+            rest = [j for j in queue if str(j.get("id")) not in requested]
+            ordered = chosen + rest
+            offset = 0.0
+            result = []
+            for job in ordered:
+                estimate = float(job.get("est_minutes") or job.get("duration_min") or 0)
+                result.append({"id": job.get("id"), "name": job.get("name"),
+                               "printer_id": job.get("printer_id"),
+                               "estimated_minutes": round(max(0, estimate), 1),
+                               "starts_after_minutes": round(offset, 1)})
+                offset += max(0, estimate)
+            return 200, {"dry_run": True, "total_minutes": round(offset, 1), "items": result}
+        if path == "/api/ops10/inbox/stage":
+            chat_id = str(body.get("chat_id") or "").strip()
+            stage = str(body.get("stage") or "new").strip().lower()
+            stages = {"new", "qualifying", "quoted", "awaiting", "order", "won", "lost"}
+            if not chat_id or stage not in stages:
+                raise ValueError("Укажите чат и корректную стадию воронки")
+            if not self.db.one("SELECT chat_id FROM client_chats WHERE chat_id=?", (chat_id,)):
+                raise ValueError("Чат покупателя не найден")
+            self.db.execute("UPDATE client_chats SET pipeline_stage=?,last_contact_at=? WHERE chat_id=?",
+                            (stage, now_iso(), chat_id))
+            self._audit("client_chat", chat_id, "pipeline", "Стадия обращения изменена", stage,
+                        actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "chat_id": chat_id, "stage": stage}
+        if path == "/api/rules/simulate":
+            event = str(body.get("event") or "").strip()
+            rule_id = str(body.get("rule_id") or "").strip()
+            if not event and rule_id:
+                row = self.db.one("SELECT event FROM automation_rules WHERE id=?", (rule_id,))
+                event = str((row or {}).get("event") or "")
+            if not event:
+                raise ValueError("Укажите событие для симуляции")
+            context = body.get("context") if isinstance(body.get("context"), dict) else {}
+            return 200, {"ok": True, "dry_run": True, "items": self.manager.rules.simulate(
+                event, context, rule_id, str(body.get("actor") or "panel"))}
         if path == "/api/rules/save":
             return 200, {"ok": True, "rule": self.manager.rules.save_rule(body)}
         if path == "/api/rules/delete":

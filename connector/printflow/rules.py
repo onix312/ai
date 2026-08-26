@@ -168,11 +168,62 @@ class RulesEngine:
             if not self._match(rule, ctx):
                 continue
             self._execute(rule, ctx)
+            config = rule.get("config") or {}
+            self.db.execute(
+                "INSERT INTO automation_rule_runs(rule_id,mode,event,matched,action,preview,at,actor)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (rule["id"], "live", event, 1, str(rule.get("action") or "notify"),
+                 _render(str(config.get("template") or ""), ctx)[:2000], now_iso(), "system"))
             self.db.execute(
                 "UPDATE automation_rules SET fires=COALESCE(fires,0)+1, last_fired=? WHERE id=?",
                 (now_iso(), rule["id"]))
             fired.append(rule)
         return fired
+
+    def simulate(self, event: str, ctx: dict[str, Any] | None = None,
+                 rule_id: str = "", actor: str = "panel") -> list[dict]:
+        """Показать последствия правил без выполнения действий.
+
+        Это безопасный dry-run: не отправляет Telegram, не меняет статусы,
+        очередь или принтер. Результат сохраняется только как технический
+        журнал симуляции, чтобы оператор мог проверить его перед включением.
+        """
+        context = dict(ctx or {})
+        context.setdefault("name", context.get("detail", ""))
+        result = []
+        for rule in self.rules():
+            if rule_id and rule.get("id") != rule_id:
+                continue
+            if rule.get("event") != event:
+                continue
+            matched = bool(self._match(rule, context))
+            config = rule.get("config") or {}
+            preview = _render(str(config.get("template") or ""), context)
+            action = str(rule.get("action") or "notify")
+            if action == "reprint":
+                preview = (preview + "\n" if preview else "") + "Будет создан запрос на подтверждение повтора"
+            elif action == "pause":
+                preview = (preview + "\n" if preview else "") + "Будет запрошена пауза принтера"
+            elif action == "event":
+                preview = preview or "Будет записано событие"
+            elif action == "notify":
+                preview = preview or "Будет подготовлено уведомление"
+            item = {"id": rule["id"], "name": rule["name"], "matched": matched,
+                    "enabled": bool(num(rule.get("enabled"), 0)), "action": action,
+                    "preview": preview}
+            self.db.execute(
+                "INSERT INTO automation_rule_runs(rule_id,mode,event,matched,action,preview,at,actor)"
+                " VALUES(?,?,?,?,?,?,?,?)",
+                (rule["id"], "dry_run", event, 1 if matched else 0, action,
+                 preview[:2000], now_iso(), str(actor or "panel")[:120]))
+            result.append(item)
+        return result
+
+    def recent_runs(self, limit: int = 50) -> list[dict]:
+        """Последние dry-run/live записи без содержимого секретных настроек."""
+        return self.db.query(
+            "SELECT * FROM automation_rule_runs ORDER BY id DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),))
 
     def _match(self, rule: dict, ctx: dict) -> bool:
         """Дополнительные условия из config (порог дней, статус заказа)."""
