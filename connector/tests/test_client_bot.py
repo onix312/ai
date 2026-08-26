@@ -142,7 +142,7 @@ class ClientBotTests(unittest.TestCase):
         return sent
 
     def _sends(self, sent):
-        return [p for m, p in sent if m == "sendMessage"]
+        return [p for m, p in sent if m in ("sendMessage", "editMessageText")]
 
     @staticmethod
     def _msg(text=None, **extra):
@@ -160,9 +160,15 @@ class ClientBotTests(unittest.TestCase):
             "message": {"chat": {"id": 555, "type": "private"}, "message_id": 9},
             "from": {"id": 777, "first_name": "Иван", "username": "ivan"}}}
 
+    def test_inline_callback_edits_card_without_new_message(self):
+        """Inline-навигация обновляет карточку и не засоряет чат."""
+        sent = self._wire()
+        self.bot._edit_or_reply("555", {"message_id": 9}, "обновлено", {"inline_keyboard": []})
+        self.assertEqual([method for method, _ in sent], ["editMessageText"])
+
     def test_callback_buttons_reply(self):
         """Баг 9.3: кнопка отвечала только записью в журнал — покупатель
-        не видел реакции. Теперь каждая кнопка шлёт сообщение."""
+        не видел реакции. Теперь каждая кнопка шлёт ответ."""
         sent = self._wire()
         for data in ("catalog", "mine", "help"):
             sent.clear()

@@ -61,6 +61,13 @@ class StaffRoleTests(unittest.TestCase):
     def test_unknown_chat_has_no_rights(self):
         self.assertIsNone(gate(self.db, "999")["role"])
 
+    def test_inline_callback_edits_card_without_new_message(self):
+        """Inline-карточки сотрудника не плодят сообщения в чате."""
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
+        self.bot._edit_or_reply("111", {"message_id": 7}, "обновлено")
+        self.assertEqual([method for method, _ in calls], ["editMessageText"])
+
     def test_bot_denies_finance_for_employee(self):
         self.staff.add("Ваня", "employee", "222")
         replies: list[str] = []

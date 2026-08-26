@@ -953,16 +953,33 @@ class ClientBot:
                 answer, buttons = self._run_callback(chat, row, data)
                 # Кнопка обязана ответить: раньше текст только писался в журнал,
                 # и покупатель не видел реакции — «кнопки не работают».
-                self._reply(chat, answer, buttons)
+                self._edit_or_reply(chat, message, answer, buttons)
             # Нажатие inline-кнопки — уже обработанное действие, а не новое
             # непрочитанное сообщение для inbox.
             self._log(chat, row.get("name") or "", data, answer,
                       kind="status", unread=0)
         except Exception as exc:
             answer = f"Не получилось: {exc}"
-            self._reply(chat, answer)
+            self._edit_or_reply(chat, message, answer)
             self._log(chat, row.get("name") or "", data, answer,
                       kind="status", unread=0)
+
+    def _edit_or_reply(self, chat: str, message: dict, text: str,
+                       buttons: dict | None = None) -> None:
+        """Обновить карточку по inline-клику, не плодя сообщения в чате.
+
+        Если старое сообщение нельзя изменить (истёкшее/удалённое),
+        безопасно отправляем новую карточку как fallback.
+        """
+        message_id = str(message.get("message_id") or "")
+        if not message_id:
+            return self._reply(chat, text, buttons)
+        params = {"chat_id": chat, "message_id": message_id, "text": text[:3800]}
+        if buttons:
+            params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
+        result = self._call("editMessageText", params)
+        if not result.get("ok"):
+            self._reply(chat, text, buttons)
 
     def _run_callback(self, chat: str, row: dict,
                       data: str) -> tuple[str, dict | None]:

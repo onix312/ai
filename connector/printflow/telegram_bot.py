@@ -397,7 +397,24 @@ class TelegramBot:
                 return
             except Exception:
                 pass
-        self._reply(chat, text)
+        self._edit_or_reply(chat, message, text)
+
+    def _edit_or_reply(self, chat: str, message: dict, text: str,
+                       buttons: dict | None = None) -> None:
+        """Редактировать inline-карточку вместо нового сообщения.
+
+        Новое сообщение используется только если Telegram уже не позволяет
+        изменить старое или callback пришёл без message_id.
+        """
+        message_id = str(message.get("message_id") or "")
+        if not message_id:
+            return self._reply(chat, text, buttons)
+        params = {"chat_id": chat, "message_id": message_id, "text": text[:3800]}
+        if buttons:
+            params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
+        result = self._call("editMessageText", params)
+        if not result.get("ok"):
+            self._reply(chat, text, buttons)
 
     def _run_command(self, command: str, chat: str = "") -> str:
         """Выполнить команду (текстовую или inline-кнопки) и вернуть ответ."""
