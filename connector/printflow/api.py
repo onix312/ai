@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import mimetypes
 import re
@@ -562,6 +563,18 @@ class Api:
             pass
         return []
 
+    def _audit(self, entity: str, entity_id: str, action: str, title: str,
+               detail: str = "", data: dict | None = None, actor: str = "panel") -> None:
+        """Единый журнал операторских действий панели/бота."""
+        try:
+            self.db.execute(
+                "INSERT INTO audit_log(at,entity,entity_id,action,title,detail,data)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (now_iso(), entity, str(entity_id or ""), action, title,
+                 detail, json.dumps({"actor": actor or "panel", **(data or {})}, ensure_ascii=False)))
+        except Exception:
+            pass
+
     def order_save_photo(self, order_id: str, data_url: str, note: str = "", kind: str = "upload") -> dict:
         """Сохранить фото заказа (загрузка или кадр камеры)."""
         import base64
@@ -598,18 +611,33 @@ class Api:
                   for r in self.db.query("SELECT id, name, icon, color FROM niches")}
         goods = []
         for item in self.nom.items(kind="product"):
-            if num(item.get("price")) <= 0:
+            if num(item.get("archived")) or not bool(num(item.get("client_bot_published"), 1)):
+                continue
+            variants = self.db.query(
+                "SELECT v.id,v.name,v.color_name,v.color_hex,v.size,v.sku,"
+                " COALESCE((SELECT p.price FROM prices p JOIN price_types t ON t.id=p.price_type_id"
+                " WHERE p.variant_id=v.id AND t.is_base=1 ORDER BY datetime(p.at) DESC,p.rowid DESC LIMIT 1),0) price,"
+                " COALESCE((SELECT SUM(m.qty) FROM stock_moves m WHERE m.variant_id=v.id),0) qty"
+                " FROM nom_variants v WHERE v.nom_id=? AND v.archived=0"
+                " ORDER BY v.position,v.name", (item["id"],))
+            base_price = num(item.get("price"))
+            variant_prices = [num(v.get("price")) for v in variants if num(v.get("price")) > 0]
+            display_price = base_price or (min(variant_prices) if variant_prices else 0)
+            if display_price <= 0:
                 continue
             goods.append({
                 "id": item["id"],
                 "name": item["name"],
-                "price": item["price"],
+                "price": display_price,
                 "qty": item["qty"],
                 "status": item["status"],
                 "photo": item.get("photo") or "",
                 "group": groups.get(item.get("group_id") or "", ""),
                 "niche_id": item.get("niche_id") or "",
                 "material": item.get("material") or "",
+                # Внутренняя заметка не попадает во внешнюю витрину.
+                "description": item.get("client_bot_description") or "",
+                "variants": variants,
             })
         return {
             "company": str(self.db.setting("company_name", "NOZZA") or "NOZZA"),
@@ -619,6 +647,56 @@ class Api:
         }
 
     def public_order(self, body: dict) -> dict:
+        """Атомарно принять заявку с витрины.
+
+        Проверка идемпотентности, уникальный ключ заказа, связанные записи и
+        ответ выполняются под BEGIN IMMEDIATE. Поэтому два параллельных retry
+        не могут пройти одинаковую проверку «ключ ещё не встречался».
+        """
+        with self.db.transaction():
+            return self._public_order_impl(body)
+
+    def _reserve_public_order(self, order: dict) -> None:
+        """Зарезервировать доступный готовый вариант заявки с витрины.
+
+        Отсутствие остатка не блокирует заявку: позиция остаётся «под заказ».
+        Сам вызов находится внутри транзакции public_order, поэтому проверка
+        свободного остатка и вставка резерва сериализованы с соседним retry.
+        """
+        nom_id = str(order.get("nom_id") or "")
+        if not nom_id:
+            return
+        existing = self.db.one(
+            "SELECT id FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
+            (order.get("id") or "",))
+        if existing:
+            return
+        variant_id = str(order.get("client_variant_id") or "")
+        qty = max(1.0, num(order.get("qty"), 1))
+        try:
+            from .stock import Stock
+            stock = Stock(self.db)
+            warehouse_sql = ("SELECT warehouse_id, SUM(qty) balance FROM stock_moves"
+                             " WHERE nom_id=?"
+                             + (" AND variant_id=?" if variant_id else "")
+                             + " GROUP BY warehouse_id HAVING balance>=?"
+                             " ORDER BY balance DESC LIMIT 1")
+            params = ((nom_id, variant_id, qty) if variant_id else (nom_id, qty))
+            warehouse = self.db.one(warehouse_sql, params) or {}
+            warehouse_id = str(warehouse.get("warehouse_id") or "")
+            if (stock.qty(nom_id, warehouse_id, variant_id)
+                    - stock.reserved(nom_id, warehouse_id, variant_id) < qty):
+                return
+            stock.reserve(nom_id, qty, order.get("id") or "", warehouse_id,
+                          "резерв с публичной витрины", variant_id)
+            self.db.execute(
+                "UPDATE orders SET reserved=1,warehouse_id=?,updated_at=? WHERE id=?",
+                (warehouse_id, now_iso(), order.get("id")))
+        except Exception:
+            # Заказ не должен теряться из-за временно неполного учёта склада.
+            return
+
+    def _public_order_impl(self, body: dict) -> dict:
         """Заявка с витрины (QR-заказ): создаёт заказ в статусе «Новая заявка».
 
         Вход строго валидируется: минимум полей, никаких внутренних ссылок.
@@ -627,6 +705,18 @@ class Api:
         на каждую позицию, все привязываются к одному клиенту. Старый
         формат с одним ``nom_id`` сохранён.
         """
+        request_id = str(body.get("request_id") or body.get("idempotency_key") or "").strip()[:160]
+        if request_id:
+            cached = self.db.one("SELECT response FROM idempotency_keys WHERE request_id=? AND kind='public_order'",
+                                 (request_id,))
+            if cached:
+                try:
+                    response = json.loads(cached.get("response") or "{}")
+                except (TypeError, ValueError):
+                    response = {}
+                response["already_recorded"] = True
+                return response
+        source = str(body.get("source") or body.get("utm_source") or body.get("ref") or "storefront").strip()[:120]
         name = str(body.get("name") or "").strip()
         contact = str(body.get("phone") or body.get("messenger") or "").strip()
         if not name:
@@ -651,14 +741,19 @@ class Api:
             order = self.repo.save_order({
                 "product": text, "customer_name": name, "phone": phone,
                 "messenger": messenger, "channel": channel, "status": "new",
+                "client_source": source, "client_request_id": request_id,
                 "qty": max(1, int(num(body.get("qty"), 1))),
                 "notes": note or "Заявка с витрины",
             })
             self.db.add_event("lead", "Заявка с витрины",
                               f"{text} · {name}", data={"order_id": order.get("id"),
-                                                        "source": "storefront"})
-            return {"ok": True, "order_number": order.get("number"),
-                    "order_id": order.get("id"), "count": 1}
+                                                        "source": source})
+            response = {"ok": True, "order_number": order.get("number"),
+                        "order_id": order.get("id"), "count": 1}
+            if request_id:
+                self.db.execute("INSERT OR IGNORE INTO idempotency_keys(request_id,kind,entity_id,response,created_at) VALUES(?,?,?,?,?)",
+                                (request_id, "public_order", order.get("id") or "", json.dumps(response, ensure_ascii=False), now_iso()))
+            return response
         if not isinstance(items, list) or not items:
             raise ValueError("Добавьте хотя бы одну позицию")
         rows = []
@@ -669,43 +764,78 @@ class Api:
             if not nom_id:
                 continue
             item = self.nom.item(nom_id)
-            if not item:
-                raise ValueError("Товар из заявки не найден")
-            qty = max(1, int(num(raw.get("qty"), 1)))
+            if (not item or num(item.get("archived"))
+                    or not bool(num(item.get("client_bot_published"), 1))):
+                raise ValueError("Товар из заявки не опубликован или недоступен")
+            qty = max(1, min(100, int(num(raw.get("qty"), 1))))
             color = str(raw.get("color") or "").strip()
-            rows.append({"item": item, "qty": qty, "color": color, "nom_id": nom_id})
+            variant_id = str(raw.get("variant_id") or "").strip()
+            variant = None
+            if variant_id:
+                variant = self.db.one(
+                    "SELECT * FROM nom_variants WHERE id=? AND nom_id=? AND archived=0",
+                    (variant_id, nom_id))
+                if not variant:
+                    raise ValueError("Вариант товара не найден")
+                color = color or str(variant.get("name") or variant.get("color_name") or "").strip()
+            variant_price = self.db.one(
+                "SELECT p.price FROM prices p JOIN price_types t ON t.id=p.price_type_id"
+                " WHERE p.variant_id=? AND t.is_base=1 ORDER BY datetime(p.at) DESC LIMIT 1",
+                (variant_id,)) if variant_id else None
+            unit_price = num((variant_price or {}).get("price")) or num(item.get("price"))
+            if unit_price <= 0:
+                raise ValueError("У товара нет опубликованной цены")
+            rows.append({"item": item, "qty": qty, "color": color,
+                         "variant": variant or {}, "unit_price": unit_price,
+                         "variant_id": variant_id, "nom_id": nom_id})
         if not rows:
             raise ValueError("Добавьте хотя бы одну позицию")
 
         order_ids, numbers = [], []
         for row in rows:
-            item, qty, color, nom_id = row["item"], row["qty"], row["color"], row["nom_id"]
+            item, qty, color = row["item"], row["qty"], row["color"]
+            nom_id, variant_id = row["nom_id"], row.get("variant_id") or ""
+            variant = row.get("variant") or {}
+            display_name = item.get("name") or ""
+            if variant:
+                display_name += " · " + str(variant.get("name") or variant.get("color_name") or variant.get("size") or "вариант")
+            grams = num(variant.get("grams")) or num(item.get("grams"))
+            hours = num(variant.get("hours")) or num(item.get("hours"))
             order = self.repo.save_order({
-                "product": item.get("name") or "",
+                "product": display_name,
                 "customer_name": name,
                 "phone": phone, "messenger": messenger, "channel": channel,
+                "client_source": source,
+                "client_request_id": request_id if not order_ids else "",
+                "client_variant_id": variant_id,
                 "niche_id": item.get("niche_id") or None,
                 "status": "new",
                 "qty": qty,
                 "material": item.get("material") or "",
                 "color": color,
-                "grams": num(item.get("grams")),
-                "hours": num(item.get("hours")),
+                "grams": grams,
+                "hours": hours,
                 "manual_minutes": num(item.get("post_minutes")),
                 "file": item.get("file") or "",
-                "price": round(num(item.get("price")) * qty, 2),
+                "price": round(row.get("unit_price", num(item.get("price"))) * qty, 2),
                 "notes": note or "Заявка с витрины",
                 "nom_id": nom_id or None,
             })
+            self._reserve_public_order(order)
             order_ids.append(order.get("id"))
             numbers.append(order.get("number"))
         first = numbers[0] if numbers else ""
         title = f"{first} (+{len(numbers) - 1})" if len(numbers) > 1 else first
         self.db.add_event("lead", "Заявка с витрины",
                           f"{len(numbers)} поз. · {name}" + (f" · {phone}" if phone else ""),
-                          data={"order_ids": order_ids, "source": "storefront"})
-        return {"ok": True, "order_number": title, "order_id": order_ids[0] if order_ids else None,
-                "order_ids": order_ids, "order_numbers": numbers, "count": len(numbers)}
+                          data={"order_ids": order_ids, "source": source})
+        response = {"ok": True, "order_number": title, "order_id": order_ids[0] if order_ids else None,
+                    "order_ids": order_ids, "order_numbers": numbers, "count": len(numbers)}
+        if request_id:
+            self.db.execute("INSERT OR IGNORE INTO idempotency_keys(request_id,kind,entity_id,response,created_at) VALUES(?,?,?,?,?)",
+                            (request_id, "public_order", order_ids[0] if order_ids else "",
+                             json.dumps(response, ensure_ascii=False), now_iso()))
+        return response
 
     def save_order(self, body: dict) -> dict:
         """Сохранить заказ и синхронизировать резерв готового товара.
@@ -726,17 +856,23 @@ class Api:
             if num(order.get("reserved")) and order.get("nom_id"):
                 warehouse_id = order.get("warehouse_id") or ""
                 if not warehouse_id:
-                    candidate = self.db.one(
-                        "SELECT warehouse_id, SUM(qty) balance FROM stock_moves"
-                        " WHERE nom_id=? GROUP BY warehouse_id HAVING balance>=?"
-                        " ORDER BY balance DESC LIMIT 1",
-                        (order["nom_id"], max(1.0, num(order.get("qty"), 1))))
+                    variant_id = str(order.get("client_variant_id") or "")
+                    candidate_sql = ("SELECT warehouse_id, SUM(qty) balance FROM stock_moves"
+                                     " WHERE nom_id=?"
+                                     + (" AND variant_id=?" if variant_id else "")
+                                     + " GROUP BY warehouse_id HAVING balance>=?"
+                                     " ORDER BY balance DESC LIMIT 1")
+                    candidate_params = ((order["nom_id"], variant_id, max(1.0, num(order.get("qty"), 1)))
+                                        if variant_id else
+                                        (order["nom_id"], max(1.0, num(order.get("qty"), 1))))
+                    candidate = self.db.one(candidate_sql, candidate_params)
                     warehouse_id = (candidate or {}).get("warehouse_id") or ""
                     if warehouse_id:
                         self.db.execute("UPDATE orders SET warehouse_id=? WHERE id=?",
                                         (warehouse_id, order["id"]))
                 self.stock.reserve(order["nom_id"], max(1.0, num(order.get("qty"), 1)),
-                                   order["id"], warehouse_id, "готовый товар заказа")
+                                   order["id"], warehouse_id, "готовый товар заказа",
+                                   str(order.get("client_variant_id") or ""))
             order = self.repo.order(order["id"]) or order
         return {"ok": True, "order": order}
 
@@ -772,17 +908,24 @@ class Api:
             return {"error": "Укажите IP принтера", "host": ""}
         return network.diagnose(host)
 
-    def track_order(self, number: str, phone: str) -> dict:
-        """Статус заказа для клиента по номеру и контактному телефону."""
+    def track_order(self, number: str, phone: str = "", token: str = "") -> dict:
+        """Приватный статус по одноразовой ссылке из клиентского бота.
+
+        Номер и телефон сами по себе больше не являются ключом доступа: старый
+        публичный перебор заказов закрыт. В базе хранится только SHA-256 токена.
+        """
         number = (number or "").strip()
-        phone = (phone or "").strip()
+        token = (token or "").strip()
         if not number:
             return {"found": False, "error": "Укажите номер заказа"}
         order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
-        if not order:
-            return {"found": False, "error": "Заказ не найден"}
-        if phone and phone not in (order.get("phone") or ""):
-            return {"found": False, "error": "Телефон не совпадает"}
+        # Единый ответ не раскрывает, существует ли номер без корректного ключа.
+        if not order or not token:
+            return {"found": False, "error": "Откройте статус по ссылке из Telegram-бота"}
+        expected = str(order.get("client_track_token_hash") or "")
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        if not expected or not hmac.compare_digest(expected, digest):
+            return {"found": False, "error": "Ссылка статуса недействительна или устарела"}
         status = self.db.one("SELECT * FROM statuses WHERE id=?", (order.get("status", ""),))
         photos = self.db.query(
             "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC LIMIT 4",
@@ -1137,7 +1280,7 @@ class Api:
         if path == "/api/order/history":
             return 200, {"history": self.repo.order_history(one("id"))}
         if path == "/api/track/order":
-            return 200, self.track_order(one("number"), one("phone"))
+            return 200, self.track_order(one("number"), one("phone"), one("token"))
         # ------------------------------------------------------------- склады
         if path == "/api/warehouses":
             return 200, {"warehouses": self.stock.warehouse_totals(),
@@ -1208,6 +1351,12 @@ class Api:
                 "review": bool(settings.get("client_bot_review", True)),
                 "pickup_days": int(num(settings.get("client_bot_pickup_days"), 3)),
                 "pay_info": str(settings.get("client_bot_pay_info") or ""),
+                "pay_qr": str(settings.get("client_bot_pay_qr") or ""),
+                "payment_purpose": str(settings.get("client_bot_payment_purpose") or ""),
+                "quiet_hours_enabled": bool(settings.get("client_bot_quiet_hours_enabled", False)),
+                "quiet_from": str(settings.get("client_bot_quiet_from") or "22:00"),
+                "quiet_to": str(settings.get("client_bot_quiet_to") or "08:00"),
+                "marketing_enabled": bool(settings.get("client_bot_marketing_enabled", False)),
                 "track_url": str(settings.get("client_bot_track_url") or ""),
                 "stats": bot.stats() if bot else {},
                 "alive": bool(bot and bot.last_poll
@@ -1218,16 +1367,28 @@ class Api:
                     " GROUP BY c.chat_id ORDER BY datetime(c.last_seen) DESC"
                     " LIMIT 50"),
                 "log": self.db.query(
-                    "SELECT * FROM client_bot_log ORDER BY id DESC LIMIT 60"),
+                    "SELECT * FROM client_bot_log ORDER BY id DESC LIMIT 100"),
+                "inbox": self.db.query(
+                    "SELECT l.*, c.username, c.inbox_status, c.assigned_to"
+                    " FROM client_bot_log l LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+                    " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT 60"),
+                "payments": self.db.query(
+                    "SELECT p.*,o.number,o.product,c.name FROM client_payment_intents p"
+                    " LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
+                    " ORDER BY datetime(p.created_at) DESC LIMIT 60"),
+                "analytics": (bot.analytics(30) if bot else {}),
+                "templates": (bot.templates() if bot else []),
                 "reviews": self.db.query(
-                    "SELECT r.order_id, r.chat_id, r.rating, r.comment,"
-                    " r.asked_at, r.created_at, o.number, o.product"
+                    "SELECT r.order_id, r.chat_id, r.rating, r.comment, r.state,"
+                    " r.asked_at, r.created_at, r.resolved_at, r.operator_note,"
+                    " o.number, o.product"
                     " FROM client_reviews r"
                     " LEFT JOIN orders o ON o.id=r.order_id"
-                    " ORDER BY datetime(r.asked_at) DESC LIMIT 30"),
+                    " ORDER BY datetime(COALESCE(r.created_at,r.asked_at)) DESC LIMIT 30"),
                 "orders": self.db.query(
-                    "SELECT l.number, l.created_at linked_at, o.product, o.status,"
-                    " o.price, c.name, (SELECT COUNT(*) FROM order_photos p"
+                    "SELECT l.number, l.order_id, l.created_at linked_at,"
+                    " l.source, o.product, o.status, o.price, c.name,"
+                    " (SELECT COUNT(*) FROM order_photos p"
                     " WHERE p.order_id=l.order_id) photos"
                     " FROM client_orders l"
                     " JOIN orders o ON o.id=l.order_id"
@@ -1235,6 +1396,21 @@ class Api:
                     " ORDER BY datetime(l.created_at) DESC LIMIT 50"),
             }
             return 200, data
+        if path == "/api/client-bot/inbox":
+            return 200, {"items": self.db.query(
+                "SELECT l.*,c.username,c.inbox_status,c.assigned_to FROM client_bot_log l"
+                " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+                " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT ?",
+                (max(1, min(200, int(num(one("limit", "60"), 60)))),))}
+        if path == "/api/client-bot/analytics":
+            bot = getattr(self.manager, "client_bot", None)
+            return 200, bot.analytics(int(num(one("days", "30"), 30))) if bot else {}
+        if path == "/api/client-bot/payments":
+            return 200, {"payments": self.db.query(
+                "SELECT p.*,o.number,o.product,c.name FROM client_payment_intents p"
+                " LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
+                " ORDER BY datetime(p.created_at) DESC LIMIT ?",
+                (max(1, min(200, int(num(one("limit", "60"), 60)))),))}
         if path == "/api/rules":
             from .rules import ACTIONS, TRIGGERS
             return 200, {"rules": self.manager.rules.rules(),
@@ -1895,8 +2071,16 @@ class Api:
         if path == "/api/order/save":
             return 200, self.save_order(body)
         if path == "/api/order/status":
-            return 200, {"ok": True, "order": self.repo.set_order_status(
-                body.get("id", ""), body.get("status", ""))}
+            order = self.repo.set_order_status(body.get("id", ""), body.get("status", ""))
+            client = getattr(self.manager, "client_bot", None)
+            if client:
+                try:
+                    client._maybe_push_statuses()
+                except Exception:
+                    pass
+            self._audit("order", body.get("id", ""), "status", "Статус заказа изменён",
+                        str(body.get("status") or ""), actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "order": order}
         if path == "/api/order/delete":
             self.stock.release(order_id=body.get("id", ""))
             self.repo.delete_order(body.get("id", ""))
@@ -2347,7 +2531,8 @@ class Api:
         if path == "/api/reserve":
             return 200, {"ok": True, "reserve": self.stock.reserve(
                 body.get("nom_id", ""), num(body.get("qty")), body.get("order_id", ""),
-                body.get("warehouse_id", ""), body.get("note", ""))}
+                body.get("warehouse_id", ""), body.get("note", ""),
+                body.get("variant_id", ""))}
         if path == "/api/reserve/release":
             return 200, {"ok": True, "released": self.stock.release(
                 body.get("id", ""), body.get("order_id", ""))}
@@ -2783,13 +2968,206 @@ class Api:
             from .staff import Staff
             Staff(self.db).invite_delete(str(body.get("code") or ""))
             return 200, {"ok": True}
+        if path == "/api/client-bot/template/save":
+            client = getattr(self.manager, "client_bot", None)
+            if not client:
+                raise ValueError("Клиентский бот не запущен")
+            template = client.save_template(
+                str(body.get("id") or ""), str(body.get("name") or ""),
+                str(body.get("text") or ""))
+            self._audit("client_template", template["id"], "save",
+                        "Сохранён шаблон ответа", template["name"], actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "template": template, "templates": client.templates()}
+        if path == "/api/client-bot/template/delete":
+            client = getattr(self.manager, "client_bot", None)
+            if not client:
+                raise ValueError("Клиентский бот не запущен")
+            ident = str(body.get("id") or "")
+            client.delete_template(ident)
+            self._audit("client_template", ident, "delete", "Удалён шаблон ответа", actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "templates": client.templates()}
+        if path == "/api/client-bot/reply":
+            client = getattr(self.manager, "client_bot", None)
+            target = str(body.get("chat_id") or "").strip()
+            message = str(body.get("text") or body.get("message") or "").strip()
+            actor = str(body.get("actor") or body.get("operator") or "panel")[:120]
+            if not client:
+                raise ValueError("Клиентский бот не запущен")
+            if not target or not target.lstrip("-").isdigit():
+                raise ValueError("Укажите chat_id покупателя")
+            if not message:
+                raise ValueError("Введите текст ответа")
+            if len(message) > 3800:
+                raise ValueError("Ответ длиннее 3800 символов")
+            if not self.db.one("SELECT chat_id FROM client_chats WHERE chat_id=?", (target,)):
+                raise ValueError("Чат покупателя не найден")
+            request_id = str(body.get("request_id") or uid("panel-reply"))[:160]
+            cached = self.db.one("SELECT entity_id FROM idempotency_keys WHERE request_id=? AND kind='client_reply'",
+                                 (request_id,))
+            if cached:
+                return 200, {"ok": True, "already_recorded": True, "chat_id": target}
+            client._reply_keyed(target, message, client._menu(),
+                                dedupe_key=f"panel-reply:{request_id}")
+            client._log(target, (self.db.one("SELECT name FROM client_chats WHERE chat_id=?", (target,)) or {}).get("name") or "",
+                        "← мастер", message, kind="answer", direction="out", unread=0,
+                        operator=actor)
+            self.db.execute("INSERT OR IGNORE INTO idempotency_keys(request_id,kind,entity_id,response,created_at) VALUES(?,?,?,?,?)",
+                            (request_id, "client_reply", target, "{}", now_iso()))
+            self._audit("client_chat", target, "reply", "Ответ покупателю",
+                        message[:400], {"request_id": request_id}, actor)
+            self.db.add_event("bot", "Ответ покупателю из панели", message[:200], "",
+                              {"chat_id": target, "actor": actor})
+            return 200, {"ok": True, "queued": True, "chat_id": target}
+        if path in ("/api/client-bot/read", "/api/client-bot/chat/read"):
+            target = str(body.get("chat_id") or "").strip()
+            if not target:
+                raise ValueError("Укажите chat_id")
+            self.db.execute("UPDATE client_bot_log SET unread=0 WHERE chat_id=? AND direction='in'",
+                            (target,))
+            self.db.execute("UPDATE client_chats SET inbox_status='open' WHERE chat_id=?", (target,))
+            self._audit("client_chat", target, "read", "Диалог отмечен прочитанным", actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "chat_id": target}
+        if path == "/api/client-bot/chat/status":
+            target = str(body.get("chat_id") or "").strip()
+            status = str(body.get("status") or "open").strip().lower()
+            if status not in {"open", "pending", "closed"}:
+                raise ValueError("Статус диалога: open, pending или closed")
+            if not target:
+                raise ValueError("Укажите chat_id")
+            self.db.execute("UPDATE client_chats SET inbox_status=?,assigned_to=? WHERE chat_id=?",
+                            (status, str(body.get("assigned_to") or "")[:120], target))
+            self._audit("client_chat", target, "status", "Статус диалога изменён", status,
+                        actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "chat_id": target, "status": status}
+        if path == "/api/client-bot/payment":
+            intent_id = str(body.get("intent_id") or body.get("id") or "").strip()
+            action = str(body.get("action") or body.get("status") or "confirm").strip().lower()
+            actor = str(body.get("actor") or body.get("operator") or "panel")[:120]
+            intent = self.db.one("SELECT * FROM client_payment_intents WHERE id=?", (intent_id,))
+            if not intent:
+                raise ValueError("Заявка оплаты не найдена")
+            if action not in {"confirm", "confirmed", "reject", "rejected"}:
+                raise ValueError("Действие: confirm или reject")
+            if intent.get("status") in {"confirmed", "rejected"}:
+                return 200, {"ok": True, "already_recorded": True, "intent": intent}
+            client = getattr(self.manager, "client_bot", None)
+            if action in {"reject", "rejected"}:
+                reason = str(body.get("reason") or "Оплата не подтверждена").strip()[:500]
+                self.db.execute("UPDATE client_payment_intents SET status='rejected',reject_reason=?,confirmed_at=?,confirmed_by=?,updated_at=? WHERE id=?",
+                                (reason, now_iso(), actor, now_iso(), intent_id))
+                if client:
+                    client._reply_keyed(intent["chat_id"],
+                                        f"По заказу №{(self.db.one('SELECT number FROM orders WHERE id=?',(intent['order_id'],)) or {}).get('number') or ''} оплату пока не удалось подтвердить. {reason}",
+                                        client._menu(), dedupe_key=f"payment:{intent_id}:rejected")
+                self._audit("payment_intent", intent_id, "reject", "Отклонено подтверждение оплаты", reason, actor=actor)
+                return 200, {"ok": True, "intent": self.db.one("SELECT * FROM client_payment_intents WHERE id=?", (intent_id,))}
+            payment = self.acc.add_payment(
+                intent["order_id"], num(intent.get("amount")), "payment",
+                str(body.get("account_id") or ""),
+                str(body.get("method") or "СБП (ручная сверка)"),
+                f"Подтверждено по заявке клиента {intent_id}",
+                request_id=f"client-intent:{intent_id}")
+            self.db.execute("UPDATE client_payment_intents SET status='confirmed',confirmed_at=?,confirmed_by=?,payment_id=?,updated_at=? WHERE id=?",
+                            (now_iso(), actor, payment.get("id") or "", now_iso(), intent_id))
+            if client:
+                order = self.db.one("SELECT * FROM orders WHERE id=?", (intent["order_id"],)) or {}
+                client._reply_keyed(intent["chat_id"],
+                                    f"Оплата по заказу №{order.get('number') or ''} подтверждена мастером ✓",
+                                    client._menu(), dedupe_key=f"payment:{intent_id}:confirmed")
+                client._funnel(intent["chat_id"], "payment_confirmed", source="telegram",
+                               order_id=intent["order_id"], data={"intent_id": intent_id})
+            self._audit("payment_intent", intent_id, "confirm", "Оплата подтверждена вручную",
+                        f"{num(intent.get('amount')):g} RUB", {"payment_id": payment.get("id") or ""}, actor)
+            self.db.add_event("finance", "Оплата клиента подтверждена",
+                              f"заявка {intent_id}", "", {"order_id": intent["order_id"], "actor": actor})
+            return 200, {"ok": True, "intent": self.db.one("SELECT * FROM client_payment_intents WHERE id=?", (intent_id,)),
+                         "payment": payment, "order": self.repo.order(intent["order_id"])}
+        if path == "/api/client-bot/review/resolve":
+            order_id = str(body.get("order_id") or "").strip()
+            chat_id = str(body.get("chat_id") or "").strip()
+            if not order_id or not chat_id:
+                raise ValueError("Укажите order_id и chat_id")
+            note = str(body.get("note") or "").strip()[:1000]
+            self.db.execute("UPDATE client_reviews SET state='resolved',resolved_at=?,operator_note=? WHERE order_id=? AND chat_id=?",
+                            (now_iso(), note, order_id, chat_id))
+            self._audit("client_review", f"{order_id}:{chat_id}", "resolve", "Отзыв отмечен обработанным", note,
+                        actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True}
+        if path == "/api/client-bot/broadcast":
+            if not bool(self.db.setting("client_bot_marketing_enabled", False)):
+                raise ValueError("Рассылки выключены в настройках")
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите отправку рассылки")
+            text = str(body.get("text") or "").strip()
+            if not text:
+                raise ValueError("Введите текст рассылки")
+            request_id = str(body.get("request_id") or uid("broadcast"))[:160]
+            client = getattr(self.manager, "client_bot", None)
+            if not client:
+                raise ValueError("Клиентский бот не запущен")
+            with self.db.transaction():
+                cached = self.db.one(
+                    "SELECT response FROM client_broadcasts WHERE request_id=?",
+                    (request_id,))
+                if cached:
+                    try:
+                        response = json.loads(cached.get("response") or "{}")
+                    except (TypeError, ValueError):
+                        response = {"ok": True, "request_id": request_id}
+                    response["already_recorded"] = True
+                    return 200, response
+                stamp = now_iso()
+                self.db.execute(
+                    "INSERT INTO client_broadcasts(request_id,text,audience,created_at,updated_at)"
+                    " VALUES(?,?,?,?,?)",
+                    (request_id, text[:3800], "marketing_opt_in", stamp, stamp))
+                sent = skipped = 0
+                for chat in self.db.query("SELECT * FROM client_chats WHERE marketing_opt_in=1"):
+                    if client._in_quiet_hours(chat):
+                        skipped += 1
+                        continue
+                    client._reply_keyed(chat["chat_id"], text, client._menu(),
+                                        dedupe_key=f"broadcast:{request_id}:{chat['chat_id']}")
+                    sent += 1
+                response = {"ok": True, "sent": sent, "skipped": skipped,
+                            "request_id": request_id}
+                self.db.execute(
+                    "UPDATE client_broadcasts SET response=?,updated_at=? WHERE request_id=?",
+                    (json.dumps(response, ensure_ascii=False), now_iso(), request_id))
+            self._audit("client_broadcast", request_id, "send", "Рассылка клиентам",
+                        text[:300], {"sent": sent, "skipped": skipped}, str(body.get("actor") or "panel"))
+            return 200, response
+        if path == "/api/client-bot/fulfill":
+            order_id = str(body.get("order_id") or body.get("id") or "").strip()
+            actor = str(body.get("actor") or "panel")[:120]
+            result = self.fulfill_order(
+                order_id, str(body.get("account_id") or ""),
+                handoff_confirmed=body.get("handoff_confirmed") is True,
+                payment_action=str(body.get("payment_action") or ""),
+                payment_method=str(body.get("payment_method") or ""))
+            client = getattr(self.manager, "client_bot", None)
+            if client and not result.get("already_fulfilled"):
+                link = self.db.one("SELECT * FROM client_orders WHERE order_id=? ORDER BY datetime(created_at) LIMIT 1", (order_id,))
+                if link:
+                    order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,)) or {}
+                    self.db.execute("UPDATE orders SET client_delivered_at=? WHERE id=? AND COALESCE(client_delivered_at,'')=''",
+                                    (now_iso(), order_id))
+                    client._reply_keyed(link["chat_id"],
+                                        f"Заказ №{order.get('number') or ''} выдан ✓ Спасибо, что выбрали NOZZA!",
+                                        client._menu(), dedupe_key=f"delivered:{order_id}")
+                    client._funnel(link["chat_id"], "delivered", source=link.get("source") or "telegram", order_id=order_id)
+            self._audit("order", order_id, "fulfill", "Подтверждена выдача клиентского заказа", actor=actor)
+            return 200, result
         if path == "/api/client-bot/save":
             patch = {k: v for k, v in body.items()
                      if k in ("client_bot_enabled", "client_bot_token",
                               "client_bot_welcome", "client_bot_notify",
                               "client_bot_catalog", "client_bot_faq",
                               "client_bot_review", "client_bot_pickup_days",
-                              "client_bot_pay_info", "client_bot_track_url")}
+                              "client_bot_pay_info", "client_bot_pay_qr",
+                              "client_bot_payment_purpose", "client_bot_quiet_hours_enabled",
+                              "client_bot_quiet_from", "client_bot_quiet_to",
+                              "client_bot_marketing_enabled", "client_bot_track_url")}
             settings = self.db.set_settings(patch)
             return 200, {"ok": True, "settings": {
                 k: v for k, v in settings.items() if k.startswith("client_bot")}}

@@ -60,28 +60,32 @@ class Stock:
         row = self.db.one(sql, params) or {}
         return round(num(row.get("v")), 3)
 
-    def value(self, nom_id: str, warehouse_id: str = "") -> float:
+    def value(self, nom_id: str, warehouse_id: str = "", variant_id: str = "") -> float:
         """Стоимость остатка по накопленной себестоимости."""
         sql = "SELECT COALESCE(SUM(cost),0) v FROM stock_moves WHERE nom_id=?"
         params: list[Any] = [nom_id]
         if warehouse_id:
             sql += " AND warehouse_id=?"
             params.append(warehouse_id)
+        if variant_id:
+            sql += " AND variant_id=?"
+            params.append(variant_id)
         row = self.db.one(sql, params) or {}
         return round(max(0.0, num(row.get("v"))), 2)
 
-    def avg_cost(self, nom_id: str, warehouse_id: str = "") -> float:
+    def avg_cost(self, nom_id: str, warehouse_id: str = "", variant_id: str = "") -> float:
         """Средняя себестоимость единицы на складе."""
-        q = self.qty(nom_id, warehouse_id)
+        q = self.qty(nom_id, warehouse_id, variant_id)
         if q <= 0:
             # склад пуст — берём последнюю цену прихода
-            row = self.db.one(
-                "SELECT cost, qty FROM stock_moves WHERE nom_id=? AND qty>0"
-                " ORDER BY datetime(at) DESC LIMIT 1", (nom_id,)) or {}
+            sql = ("SELECT cost, qty FROM stock_moves WHERE nom_id=? AND qty>0"
+                   + (" AND variant_id=?" if variant_id else "")
+                   + " ORDER BY datetime(at) DESC LIMIT 1")
+            row = self.db.one(sql, (nom_id, variant_id) if variant_id else (nom_id,)) or {}
             if num(row.get("qty")) > 0:
                 return round(num(row.get("cost")) / num(row.get("qty")), 2)
             return 0.0
-        return round(self.value(nom_id, warehouse_id) / q, 2)
+        return round(self.value(nom_id, warehouse_id, variant_id) / q, 2)
 
     def balances(self, warehouse_id: str = "", nom_id: str = "") -> dict[str, dict]:
         """Остатки всей номенклатуры: {nom_id: {qty, value}}.
@@ -165,28 +169,33 @@ class Stock:
         sql += " GROUP BY nom_id"
         return {r["nom_id"]: round(num(r["v"]), 3) for r in self.db.query(sql, params)}
 
-    def reserved(self, nom_id: str, warehouse_id: str = "") -> float:
+    def reserved(self, nom_id: str, warehouse_id: str = "", variant_id: str = "") -> float:
         sql = ("SELECT COALESCE(SUM(qty),0) v FROM reserves"
                " WHERE nom_id=? AND state='active'")
         params: list[Any] = [nom_id]
         if warehouse_id:
             sql += " AND warehouse_id=?"
             params.append(warehouse_id)
+        if variant_id:
+            sql += " AND variant_id=?"
+            params.append(variant_id)
         row = self.db.one(sql, params) or {}
         return round(num(row.get("v")), 3)
 
     def reserve(self, nom_id: str, qty: float, order_id: str = "",
-                warehouse_id: str = "", note: str = "") -> dict:
+                warehouse_id: str = "", note: str = "", variant_id: str = "") -> dict:
         qty = num(qty)
         if qty <= 0:
             raise ValueError("Количество резерва должно быть больше нуля")
-        free = self.qty(nom_id, warehouse_id) - self.reserved(nom_id, warehouse_id)
+        free = (self.qty(nom_id, warehouse_id, variant_id)
+                - self.reserved(nom_id, warehouse_id, variant_id))
         if free < qty:
             raise ValueError(f"Свободно только {round(free, 1)} шт — зарезервировать {round(qty, 1)} нельзя")
         return self.db.upsert("reserves", {
             "id": uid("rsv"), "at": now_iso(), "nom_id": nom_id,
-            "warehouse_id": warehouse_id or None, "qty": round(qty, 3),
-            "order_id": order_id or None, "state": "active", "note": note})
+            "variant_id": variant_id or None, "warehouse_id": warehouse_id or None,
+            "qty": round(qty, 3), "order_id": order_id or None,
+            "state": "active", "note": note})
 
     def release(self, reserve_id: str = "", order_id: str = "") -> int:
         if reserve_id:

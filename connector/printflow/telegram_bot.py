@@ -46,7 +46,9 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • план — что печатать сегодня
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
 • оплата 1500 по 1001 — принять оплату
+• чаты / диалоги — непрочитанные вопросы покупателей
 • кответ 555 текст — ответить покупателю клиентского бота
+• оплата подтвердить 1001 — вручную подтвердить заявку «Я оплатил»
 • статус 1001 печать — сменить статус заказа
 • новый адресник 2шт 900р Мария — заказ из текста
 • принтер — список парка · принтер 2 — выбрать принтер
@@ -109,7 +111,11 @@ class TelegramBot:
         self.manager = manager
         self.db = manager.db
         self._stop = threading.Event()
-        self._offset = 0
+        try:
+            self._offset = max(0, int(num(self.db.setting("telegram_bot_update_offset", 0))))
+        except (TypeError, ValueError):
+            self._offset = 0
+        self._current_update_id = ""
         self.last_poll = 0.0  # время успешного опроса (сердцебиение, идея 36)
         self._pending_stop: dict[str, float] = {}
         self._live: dict[str, dict] = {}  # chat -> {message_id, text} живого дашборда
@@ -137,6 +143,52 @@ class TelegramBot:
                 return json.loads(response.read().decode("utf-8", "ignore"))
         except Exception:
             return {}
+
+    def _claim_update(self, update: dict) -> bool | None:
+        """Занять update рабочего бота; живую обработку не перехватываем."""
+        update_id = str(update.get("update_id") or "").strip()
+        if not update_id:
+            return True
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO telegram_bot_updates(update_id,state,received_at)"
+            " VALUES(?,'processing',?)", (update_id, now_iso()))
+        if cur.rowcount:
+            return True
+        existing = self.db.one(
+            "SELECT state,received_at FROM telegram_bot_updates WHERE update_id=?",
+            (update_id,)) or {}
+        state = str(existing.get("state") or "")
+        if state == "done":
+            return None
+        stale = state == "failed"
+        if state == "processing":
+            try:
+                received = datetime.fromisoformat(str(existing.get("received_at") or ""))
+                if received.tzinfo is None:
+                    received = received.astimezone()
+                stale = (datetime.now().astimezone() - received).total_seconds() >= 300
+            except (TypeError, ValueError, OverflowError):
+                stale = False
+        if not stale:
+            return False
+        stamp = now_iso()
+        if state == "processing":
+            cur = self.db.execute(
+                "UPDATE telegram_bot_updates SET state='processing',received_at=?,error=''"
+                " WHERE update_id=? AND state='processing' AND received_at=?",
+                (stamp, update_id, existing.get("received_at")))
+        else:
+            cur = self.db.execute(
+                "UPDATE telegram_bot_updates SET state='processing',received_at=?,error=''"
+                " WHERE update_id=? AND state='failed'", (stamp, update_id))
+        return True if cur.rowcount else False
+
+    def _finish_update(self, update_id: str, ok: bool = True, error: str = "") -> None:
+        if not update_id:
+            return
+        self.db.execute(
+            "UPDATE telegram_bot_updates SET state=?,processed_at=?,error=? WHERE update_id=?",
+            ("done" if ok else "failed", now_iso(), str(error or "")[:500], update_id))
 
     def _reply(self, chat: str, text: str) -> None:
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
@@ -170,10 +222,34 @@ class TelegramBot:
                     "offset": self._offset, "timeout": 25,
                     "allowed_updates": json.dumps(["message", "callback_query"]),
                 })
-                self.last_poll = time.time()
+                if result.get("ok"):
+                    self.last_poll = time.time()
                 for update in (result.get("result") or []):
-                    self._offset = max(self._offset, num(update.get("update_id")) + 1)
-                    self._handle(update, str(settings.get("telegram_chat_id")))
+                    update_id = str(update.get("update_id") or "")
+                    claim = self._claim_update(update)
+                    if claim is False:
+                        # Не подтверждаем более новые update поверх живой
+                        # обработки: порядок Telegram должен сохраниться.
+                        break
+                    try:
+                        previous = self._current_update_id
+                        self._current_update_id = update_id
+                        if claim is not None:
+                            self._handle(update, str(settings.get("telegram_chat_id")))
+                            self._finish_update(update_id, True)
+                        self._current_update_id = previous
+                        try:
+                            next_offset = int(num(update_id)) + 1
+                        except (TypeError, ValueError):
+                            next_offset = self._offset
+                        self._offset = max(self._offset, next_offset)
+                        self.db.set_settings({"telegram_bot_update_offset": self._offset})
+                    except Exception as exc:
+                        self._current_update_id = ""
+                        self._finish_update(update_id, False, str(exc))
+                        # Не подтверждаем offset: следующий polling повторит
+                        # failed update после безопасного reclaim.
+                        continue
                 self._maybe_digest(settings)
                 self._maybe_weekly(settings)
                 self._maybe_live()
@@ -638,6 +714,12 @@ class TelegramBot:
         if word in ("приход", "положить", "пополнить"):
             # «приход» — меню быстрого прихода; «приход Адресник 5» — конкретной позиции.
             return self._shelf_produce_text(chat, text)
+        if word in ("чаты", "диалоги", "inbox", "клиенты"):
+            return self._reply(chat, self._client_inbox())
+        if text.startswith("оплата подтвердить") or text.startswith("подтвердить оплату"):
+            return self._reply(chat, self._client_payment_action(text, "confirm", chat))
+        if text.startswith("оплата отклонить") or text.startswith("отклонить оплату"):
+            return self._reply(chat, self._client_payment_action(text, "reject", chat))
         if word in ("оплата", "оплатить", "payment"):
             return self._reply(chat, self._pay(text))
         if word in ("кответ", "ответить", "creply"):
@@ -1589,6 +1671,19 @@ class TelegramBot:
             )
         except ValueError as exc:
             return f"Не получилось выдать заказ №{number}: {exc}"
+        if not result.get("already_fulfilled"):
+            client = getattr(self.manager, "client_bot", None)
+            link = self.db.one("SELECT * FROM client_orders WHERE order_id=? ORDER BY datetime(created_at) LIMIT 1",
+                               (order["id"],))
+            if client and link:
+                try:
+                    client._reply_keyed(link["chat_id"],
+                                        f"Заказ №{number} выдан ✓ Спасибо, что выбрали NOZZA!",
+                                        client._menu(), dedupe_key=f"delivered:{order['id']}")
+                    client._funnel(link["chat_id"], "delivered", source=link.get("source") or "telegram",
+                                   order_id=order["id"])
+                except Exception:
+                    pass
         repeated = " (уже был выдан)" if result.get("already_fulfilled") else ""
         money = (f"получено {_money(result.get('collected'))}"
                  if num(result.get("collected")) > 0 else
@@ -1596,6 +1691,68 @@ class TelegramBot:
                  if num(result.get("debt")) > 0 else "оплачен ранее")
         return (f"✅ Заказ №{number} выдан{repeated} · {money}.\n\n"
                 f"Текст клиенту (не отправлен):\n{result.get('message') or ''}")
+
+    def _client_inbox(self, limit: int = 12) -> str:
+        """Короткий inbox для рабочего Telegram-бота."""
+        rows = self.db.query(
+            "SELECT l.chat_id,l.name,l.text,l.at,c.inbox_status FROM client_bot_log l"
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+            " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT ?", (limit,))
+        if not rows:
+            return "💬 Непрочитанных диалогов нет."
+        lines = [f"💬 Непрочитанные диалоги: {len(rows)}", ""]
+        for row in rows:
+            when = str(row.get("at") or "")[5:16].replace("T", " ")
+            status = f" · {row.get('inbox_status')}" if row.get("inbox_status") else ""
+            lines.append(f"• чат {row.get('chat_id')} · {row.get('name') or 'клиент'}{status} · {when}")
+            lines.append(f"  «{str(row.get('text') or '')[:180]}»")
+        lines.append("\nОтвет: «кответ <chat_id> <текст>». После ответа диалог отметьте прочитанным в панели.")
+        return "\n".join(lines)
+
+    def _client_payment_action(self, text: str, action: str, actor: str) -> str:
+        parts = text.split()
+        ident = next((w for w in parts[2:] if w), "")
+        if not ident:
+            return "Формат: «оплата подтвердить 1001» или укажите id заявки из панели."
+        intent = self.db.one(
+            "SELECT p.*,o.number FROM client_payment_intents p LEFT JOIN orders o ON o.id=p.order_id"
+            " WHERE p.status='pending' AND (p.id=? OR o.number=?) ORDER BY datetime(p.created_at) DESC LIMIT 1",
+            (ident, ident))
+        if not intent:
+            return f"Ожидающая заявка оплаты «{ident}» не найдена."
+        if action == "reject":
+            self.db.execute("UPDATE client_payment_intents SET status='rejected',reject_reason=?,confirmed_at=?,confirmed_by=?,updated_at=? WHERE id=?",
+                            ("Отклонено сотрудником Telegram", now_iso(), actor, now_iso(), intent["id"]))
+            client = getattr(self.manager, "client_bot", None)
+            if client:
+                client._reply_keyed(intent["chat_id"],
+                                    f"По заказу №{intent.get('number') or ''} оплату пока не подтвердили. Напишите мастеру, если это ошибка.",
+                                    client._menu(), dedupe_key=f"payment:{intent['id']}:rejected")
+            result = "Заявка оплаты отклонена."
+        else:
+            try:
+                payment = self.manager.acc.add_payment(
+                    intent["order_id"], num(intent.get("amount")), "payment", "",
+                    "СБП (ручная сверка)", f"Подтверждено из рабочего Telegram: {intent['id']}",
+                    request_id=f"client-intent:{intent['id']}")
+            except ValueError as exc:
+                return f"Не получилось подтвердить: {exc}"
+            self.db.execute("UPDATE client_payment_intents SET status='confirmed',confirmed_at=?,confirmed_by=?,payment_id=?,updated_at=? WHERE id=?",
+                            (now_iso(), actor, payment.get("id") or "", now_iso(), intent["id"]))
+            client = getattr(self.manager, "client_bot", None)
+            if client:
+                client._reply_keyed(intent["chat_id"],
+                                    f"Оплата по заказу №{intent.get('number') or ''} подтверждена мастером ✓",
+                                    client._menu(), dedupe_key=f"payment:{intent['id']}:confirmed")
+            result = f"Оплата по заказу №{intent.get('number') or ''} подтверждена и проведена."
+        try:
+            self.db.execute("INSERT INTO audit_log(at,entity,entity_id,action,title,detail,data) VALUES(?,?,?,?,?,?,?)",
+                            (now_iso(), "payment_intent", intent["id"], action,
+                             "Заявка оплаты обработана из Telegram", result,
+                             json.dumps({"actor": actor}, ensure_ascii=False)))
+        except Exception:
+            pass
+        return result
 
     def _client_answer(self, raw: str) -> str:
         """«кответ <chat_id> <текст>» — ответить покупателю клиентского бота.
@@ -1614,9 +1771,18 @@ class TelegramBot:
         row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (target,))
         if not row:
             return f"Чат {target} не найден среди покупателей."
-        client._reply(target, message, client._menu())
+        dedupe_key = (f"staff-reply:{self._current_update_id}:{target}"
+                      if self._current_update_id else "")
+        client._reply_keyed(target, message, client._menu(), dedupe_key=dedupe_key)
         client._log(target, row.get("name") or "", "← мастер", message,
-                    kind="answer")
+                    kind="answer", direction="out", unread=0, operator=str(self.db.setting("telegram_chat_id", "") or ""))
+        self.db.execute("UPDATE client_bot_log SET unread=0 WHERE chat_id=? AND direction='in'", (target,))
+        try:
+            self.db.execute("INSERT INTO audit_log(at,entity,entity_id,action,title,detail,data) VALUES(?,?,?,?,?,?,?)",
+                            (now_iso(), "client_chat", target, "reply", "Ответ покупателю из рабочего Telegram",
+                             message[:400], json.dumps({"actor": str(self.db.setting("telegram_chat_id", "") or "")}, ensure_ascii=False)))
+        except Exception:
+            pass
         self.db.add_event("bot", "Ответ покупателю из бота",
                           f"{row.get('name') or target}", "",
                           {"chat_id": target})
@@ -1640,6 +1806,8 @@ class TelegramBot:
             self.manager.acc.add_payment(
                 order["id"], amount, "payment",
                 order.get("account_id") or "", "other", "оплата из Telegram",
+                request_id=(f"staff-tg-payment:{self._current_update_id}"
+                            if self._current_update_id else ""),
             )
         except ValueError as exc:
             return f"Не получилось записать оплату: {exc}"
@@ -1683,6 +1851,8 @@ class TelegramBot:
         draft = preview["draft"]
         if not draft["product"]:
             return "Формат: «новый адресник 2шт 900р Мария»."
+        if self._current_update_id:
+            draft["client_request_id"] = f"staff-tg:{self._current_update_id}"
         order = self.manager.repo.save_order(draft)
         return (f"📝 Создан заказ №{order.get('number')} «{draft['product']}»"
                 + (f" · {int(parsed['qty'])} шт" if parsed["qty"] > 1 else "")

@@ -24,11 +24,15 @@ polling, как и внутренний: ни белого IP, ни пробро
 из внутреннего бота командой «кответ <chat_id> <текст>».
 
 Диалоги пишутся в client_bot_log и видны на вкладке «Клиент-бот» в панели.
+Локальные шаблоны ответов мастер редактирует там же; выбранный шаблон
+подставляется в composer inbox перед отправкой.
 Бот никогда не показывает цены чужих заказов, себестоимость и внутренние
 данные — только имя изделия, статус и срок.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re as _re
 import threading
@@ -37,6 +41,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 
 from .accounting import num, uid
 from .config import now_iso
@@ -47,6 +52,7 @@ HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 
 • каталог — что есть на полке, с ценами и кнопками
 • заказ 3 — заказать позицию №3 из каталога
+• корзина — проверить выбранные позиции и оформить заявку
 • индивидуальный <задача> — печать по вашему заданию (можно фото)
 • мои заказы — статусы ваших заказов
 • статус 1001 — статус заказа по номеру
@@ -101,8 +107,15 @@ class ClientBot:
         self.manager = manager
         self.db = manager.db
         self._stop = threading.Event()
-        self._offset = 0
+        # Offset хранится в SQLite, а не только в RAM: после перезапуска уже
+        # подтверждённые Telegram updates не повторяются, необработанные остаются
+        # в очереди Telegram.
+        try:
+            self._offset = max(0, int(num(self.db.setting("client_bot_update_offset", 0))))
+        except (TypeError, ValueError):
+            self._offset = 0
         self.last_poll = 0.0
+        self._current_update_id = ""
         # заказы, о которых уже сообщили в этом чате: {(chat, order_id): status}
         self._notified: dict[tuple[str, str], str] = {}
         # анти-спам уведомлений мастеру: {chat: время последней}
@@ -122,6 +135,65 @@ class ClientBot:
     def _settings(self) -> dict:
         return self.db.settings(include_secrets=True)
 
+    def templates(self) -> list[dict]:
+        """Шаблоны ответов оператора из локальной настройки.
+
+        Текст хранится в SQLite вместе с остальными настройками, но токены и
+        другие секреты туда не попадают. Поля нормализуются перед выдачей в
+        панель, чтобы старый/ручной JSON не ломал интерфейс.
+        """
+        raw = self._settings().get("client_bot_templates", [])
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (TypeError, ValueError):
+                raw = []
+        if not isinstance(raw, list):
+            return []
+        result = []
+        for item in raw[:30]:
+            if not isinstance(item, dict):
+                continue
+            ident = str(item.get("id") or "").strip()[:80]
+            name = str(item.get("name") or "").strip()[:100]
+            message = str(item.get("text") or "").strip()[:1500]
+            if ident and name and message:
+                result.append({"id": ident, "name": name, "text": message,
+                               "enabled": bool(item.get("enabled", True))})
+        return result
+
+    def save_template(self, template_id: str = "", name: str = "", text: str = "") -> dict:
+        """Создать/изменить шаблон ответа; возвращает нормализованную запись."""
+        name = str(name or "").strip()[:100]
+        text = str(text or "").strip()[:1500]
+        if not name:
+            raise ValueError("Укажите название шаблона")
+        if not text:
+            raise ValueError("Введите текст шаблона")
+        with self.db.transaction():
+            templates = self.templates()
+            ident = str(template_id or "").strip()[:80]
+            if ident:
+                found = next((item for item in templates if item["id"] == ident), None)
+                if not found:
+                    raise ValueError("Шаблон не найден")
+                found.update({"name": name, "text": text, "enabled": True})
+                saved = found
+            else:
+                ident = uid("tpl")
+                saved = {"id": ident, "name": name, "text": text, "enabled": True}
+                templates.append(saved)
+            self.db.set_settings({"client_bot_templates": templates[:30]})
+        return saved
+
+    def delete_template(self, template_id: str) -> None:
+        ident = str(template_id or "").strip()
+        if not ident:
+            raise ValueError("Укажите шаблон")
+        with self.db.transaction():
+            templates = [item for item in self.templates() if item["id"] != ident]
+            self.db.set_settings({"client_bot_templates": templates})
+
     def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
         token = self._settings().get("client_bot_token", "")
         if not token:
@@ -135,33 +207,144 @@ class ClientBot:
         except Exception:
             return {}
 
-    def _reply(self, chat: str, text: str, buttons: dict | None = None) -> None:
+    def _outbox_add(self, chat: str, method: str, payload: dict,
+                    dedupe_key: str = "", file_path: str = "") -> dict | None:
+        """Поставить исходящее сообщение в постоянную очередь.
+
+        Важное свойство: сначала создаётся запись в SQLite, затем выполняется
+        HTTP-вызов Telegram. При падении процесса между этими шагами worker на
+        следующем запуске повторит доставку, а уникальный dedupe_key не даст
+        отправить одно и то же уведомление дважды.
+        """
+        key = str(dedupe_key or "").strip()[:240]
+        if key:
+            existing = self.db.one(
+                "SELECT * FROM client_bot_outbox WHERE dedupe_key=?", (key,))
+            if existing:
+                return existing
+        stamp = now_iso()
+        ident = uid("cbout")
+        # Пустой ключ должен быть NULL: UNIQUE допускает много NULL, но не
+        # допускает несколько пустых строк. Обычные сообщения без dedupe_key
+        # иначе начали бы теряться после первой отправки.
+        db_key = key or None
+        self.db.execute(
+            "INSERT OR IGNORE INTO client_bot_outbox"
+            "(id,dedupe_key,chat_id,method,payload,file_path,state,attempts,available_at,created_at)"
+            " VALUES(?,?,?,?,? ,?, 'pending',0,?,?)",
+            (ident, db_key, str(chat), method,
+             json.dumps(payload, ensure_ascii=False), str(file_path or ""), stamp, stamp),
+        )
+        return self.db.one("SELECT * FROM client_bot_outbox WHERE id=?", (ident,)) \
+            or (self.db.one("SELECT * FROM client_bot_outbox WHERE dedupe_key=?", (key,)) if key else None)
+
+    def _outbox_send(self, row: dict) -> bool:
+        """Синхронно попробовать доставить одну запись очереди."""
+        try:
+            payload = json.loads(row.get("payload") or "{}")
+        except (TypeError, ValueError):
+            payload = {}
+        claim = self.db.execute(
+            "UPDATE client_bot_outbox SET state='sending',available_at=? WHERE id=? AND state='pending'",
+            (now_iso(), row.get("id")))
+        if not claim.rowcount:
+            current = self.db.one("SELECT state FROM client_bot_outbox WHERE id=?",
+                                  (row.get("id"),)) or {}
+            return current.get("state") == "sent"
+        row["state"] = "sending"
+        result: dict = {}
+        if row.get("method") == "sendPhoto":
+            raw = b""
+            path = str(row.get("file_path") or "")
+            if path:
+                try:
+                    raw = Path(path).read_bytes()
+                except OSError:
+                    raw = b""
+            if raw:
+                result = self._send_photo_now(payload, raw)
+        else:
+            result = self._call(str(row.get("method") or "sendMessage"),
+                                payload, timeout=15)
+        if result.get("ok"):
+            self.db.execute(
+                "UPDATE client_bot_outbox SET state='sent',sent_at=?,last_error='' WHERE id=?",
+                (now_iso(), row["id"]),
+            )
+            path = str(row.get("file_path") or "")
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            return True
+        attempts = int(num(row.get("attempts"))) + 1
+        # Экспоненциальная пауза ограничена пятью минутами; запись не удаляем.
+        delay = min(300, 2 ** min(attempts, 8))
+        available = datetime.fromtimestamp(time.time() + delay).astimezone().isoformat()
+        self.db.execute(
+            "UPDATE client_bot_outbox SET state='pending',attempts=?,available_at=?,last_error=? WHERE id=?",
+            (attempts, available, "Telegram не подтвердил доставку", row["id"]),
+        )
+        return False
+
+    def _drain_outbox(self, limit: int = 30) -> int:
+        """Доставить due-сообщения; вызывается после polling и тестируется отдельно."""
+        self.db.execute(
+            "UPDATE client_bot_outbox SET state='pending'"
+            " WHERE state='sending' AND datetime(replace(available_at,'T',' '))"
+            " <= datetime('now','-300 seconds')")
+        rows = self.db.query(
+            "SELECT * FROM client_bot_outbox WHERE state='pending'"
+            " AND (available_at IS NULL OR available_at='' OR"
+            " datetime(replace(available_at,'T',' '))<=datetime('now'))"
+            " ORDER BY datetime(replace(created_at,'T',' ')), id LIMIT ?",
+            (max(1, int(limit)),))
+        sent = 0
+        for row in rows:
+            if self._outbox_send(row):
+                sent += 1
+        return sent
+
+    def _reply(self, chat: str, text: str, buttons: dict | None = None,
+               dedupe_key: str = "") -> None:
         params: dict = {"chat_id": chat, "text": text[:3800],
                         "disable_web_page_preview": "true"}
         if buttons:
-            params["reply_markup"] = json.dumps(buttons)
-        self._call("sendMessage", params, timeout=15)
+            params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
+        if not dedupe_key and self._current_update_id:
+            digest = hashlib.sha256(
+                (str(chat) + "\0" + str(text) + "\0" + json.dumps(buttons or {}, sort_keys=True)).encode()
+            ).hexdigest()[:24]
+            dedupe_key = f"update:{self._current_update_id}:message:{digest}"
+        row = self._outbox_add(str(chat), "sendMessage", params, dedupe_key)
+        if row and row.get("state") != "sent":
+            self._outbox_send(row)
 
-    def _send_photo(self, chat: str, caption: str, raw: bytes,
-                    buttons: dict | None = None) -> None:
-        """Карточка товара картинкой: sendPhoto с подписью и кнопками.
+    def _reply_keyed(self, chat: str, text: str, buttons: dict | None = None,
+                     dedupe_key: str = "") -> None:
+        """Совместимый вызов для старых интеграций, подменяющих _reply."""
+        try:
+            self._reply(chat, text, buttons, dedupe_key=dedupe_key)
+        except TypeError as exc:
+            if "dedupe_key" not in str(exc):
+                raise
+            self._reply(chat, text, buttons)
 
-        Без фото (или без токена) молча превращаемся в обычный текст —
-        карточка остаётся рабочей даже без картинки."""
+    def _send_photo_now(self, params: dict, raw: bytes) -> dict:
+        """Непосредственная multipart-отправка без изменения outbox."""
         token = self._settings().get("client_bot_token", "")
-        if not raw or not token:
-            return self._reply(chat, caption, buttons)
+        if not token or not raw:
+            return {}
         boundary = f"pfcb{int(time.time() * 1000)}"
         parts: list[bytes] = []
-
         def field(name: str, value: str) -> None:
             parts.append(f"--{boundary}\r\nContent-Disposition: form-data;"
                          f' name="{name}"\r\n\r\n{value}\r\n'.encode())
-
-        field("chat_id", chat)
-        field("caption", caption[:1000])
-        if buttons:
-            field("reply_markup", json.dumps(buttons))
+        for key, value in params.items():
+            if key != "chat_id":
+                field(key, str(value))
+        field("chat_id", str(params.get("chat_id") or ""))
         parts.append(f"--{boundary}\r\nContent-Disposition: form-data;"
                      f' name="photo"; filename="item.jpg"\r\n'
                      f"Content-Type: image/jpeg\r\n\r\n".encode())
@@ -172,10 +355,31 @@ class ClientBot:
             request = urllib.request.Request(
                 url, data=b"".join(parts),
                 headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-            with urllib.request.urlopen(request, timeout=20):
-                pass
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.loads(response.read().decode("utf-8", "ignore"))
         except Exception:
-            self._reply(chat, caption, buttons)  # сеть подвела — текст лучше тишины
+            return {}
+
+    def _send_photo(self, chat: str, caption: str, raw: bytes,
+                    buttons: dict | None = None, dedupe_key: str = "") -> None:
+        """Положить карточку с фото в ту же durable outbox, что и текст."""
+        if not raw:
+            return self._reply_keyed(chat, caption, buttons, dedupe_key=dedupe_key)
+        from .config import PHOTO_DIR
+        try:
+            PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+            path = PHOTO_DIR / f"client_outbox_{uid('photo')}.jpg"
+            path.write_bytes(raw)
+        except OSError:
+            return self._reply_keyed(chat, caption, buttons, dedupe_key=dedupe_key)
+        params: dict = {"chat_id": chat, "caption": caption[:1000]}
+        if buttons:
+            params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
+        if not dedupe_key and self._current_update_id:
+            dedupe_key = f"update:{self._current_update_id}:photo:{hashlib.sha256((chat + caption).encode()).hexdigest()[:24]}"
+        row = self._outbox_add(chat, "sendPhoto", params, dedupe_key, str(path))
+        if row and row.get("state") != "sent":
+            self._outbox_send(row)
 
     def _download_file(self, file_id: str) -> bytes | None:
         """Скачать файл покупателя (getFile → скачивание), как во внутреннем боте."""
@@ -202,42 +406,201 @@ class ClientBot:
         return self._bot_username
 
     def _log(self, chat: str, name: str, text: str, answer: str,
-             kind: str = "message") -> None:
+             kind: str = "message", *, direction: str = "in",
+             update_id: str = "", event: str = "", order_id: str = "",
+             source: str = "", unread: int | None = None,
+             operator: str = "") -> None:
+        """Записать сообщение и одновременно сформировать inbox-признак."""
         try:
+            if unread is None:
+                unread = 1 if direction == "in" else 0
             self.db.execute(
-                "INSERT INTO client_bot_log(at,chat_id,name,text,answer,kind)"
-                " VALUES(?,?,?,?,?,?)",
+                "INSERT INTO client_bot_log(at,chat_id,name,text,answer,kind,update_id,"
+                "direction,event,order_id,source,unread,operator)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (now_iso(), chat, name or "", (text or "")[:500],
-                 (answer or "")[:1000], kind))
+                 (answer or "")[:1000], kind, str(update_id or self._current_update_id or ""),
+                 direction, event, order_id, source, int(unread), operator))
         except Exception:
             pass  # журнал не должен ломать ответы клиенту
 
     def _touch_chat(self, chat: str, message: dict) -> dict:
-        """Обновить/создать запись чата и вернуть её.
+        """Обновить профиль приватного Telegram-чата без затирания данных.
 
-        Профиль может прийти пустым (например, у callback-сообщения от бота) —
-        в этом случае сохранённые имя и username не затираем.
+        Telegram user id хранится отдельно от chat_id: это позволяет проверить,
+        что переданный контакт принадлежит именно отправителю, а не чужому
+        профилю, пересланному в чат.
         """
         profile = message.get("from") or {}
         row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (chat,))
-        patch = {
-            "chat_id": chat,
-            "last_seen": now_iso(),
-        }
+        patch = {"chat_id": chat, "last_seen": now_iso()}
+        if profile.get("id") is not None:
+            patch["tg_user_id"] = str(profile.get("id"))
         if str(profile.get("first_name") or profile.get("title") or ""):
             patch["name"] = str(profile.get("first_name") or profile.get("title"))
         if str(profile.get("username") or ""):
             patch["username"] = str(profile.get("username"))
         if row:
-            patch.setdefault("name", row.get("name") or "")
-            patch.setdefault("username", row.get("username") or "")
-            patch["phone"] = row.get("phone") or ""
+            for field in ("name", "username", "tg_user_id", "phone", "phone_verified",
+                          "customer_id", "source", "status_notify", "marketing_opt_in",
+                          "quiet_from", "quiet_to", "inbox_status", "assigned_to", "last_error"):
+                patch.setdefault(field, row.get(field) or (0 if field in ("phone_verified", "status_notify", "marketing_opt_in") else ""))
             patch["created_at"] = row.get("created_at") or now_iso()
         else:
             patch.setdefault("name", "")
             patch.setdefault("username", "")
+            patch.setdefault("tg_user_id", "")
+            patch.setdefault("phone", "")
+            patch.setdefault("phone_verified", 0)
+            patch.setdefault("customer_id", "")
+            patch.setdefault("source", "")
+            patch.setdefault("status_notify", 1)
+            patch.setdefault("marketing_opt_in", 0)
+            patch.setdefault("quiet_from", "")
+            patch.setdefault("quiet_to", "")
+            patch.setdefault("inbox_status", "open")
+            patch.setdefault("assigned_to", "")
+            patch.setdefault("last_error", "")
             patch["created_at"] = now_iso()
         return self.db.upsert("client_chats", patch, key="chat_id")
+
+    def _claim_update(self, update: dict) -> bool | None:
+        """Атомарно занять update_id; повторная доставка не исполняется.
+
+        ``True`` означает «обработать», ``False`` — «временно не трогать»,
+        ``None`` — update уже успешно завершён (polling может подтвердить
+        offset, но побочный эффект повторять нельзя). Упавший update переводим
+        обратно в processing, чтобы ошибка сети/процесса не оставила очередь
+        навсегда заблокированной.
+        """
+        update_id = str(update.get("update_id") or "").strip()
+        if not update_id:
+            return True
+        callback = update.get("callback_query") or {}
+        message = update.get("message") or callback.get("message") or {}
+        chat = str((message.get("chat") or {}).get("id") or "")
+        kind = "callback" if callback else "message"
+        cur = self.db.execute(
+            "INSERT OR IGNORE INTO client_bot_updates"
+            "(update_id,chat_id,kind,state,received_at) VALUES(?,?,?,?,?)",
+            (update_id, chat, kind, "processing", now_iso()))
+        if cur.rowcount:
+            return True
+        existing = self.db.one(
+            "SELECT state,received_at FROM client_bot_updates WHERE update_id=?", (update_id,)) or {}
+        state = str(existing.get("state") or "")
+        if state == "done":
+            return None
+        # Не перехватываем живую обработку: второй поток/экземпляр бота
+        # должен дождаться её завершения. Повторяем только failed или запись,
+        # которая действительно зависла дольше пяти минут.
+        stale = state == "failed"
+        if state == "processing":
+            try:
+                received = datetime.fromisoformat(str(existing.get("received_at") or ""))
+                if received.tzinfo is None:
+                    received = received.astimezone()
+                stale = (datetime.now().astimezone() - received).total_seconds() >= 300
+            except (TypeError, ValueError, OverflowError):
+                stale = False
+        if not stale:
+            return False
+        now = now_iso()
+        if state == "processing":
+            cur = self.db.execute(
+                "UPDATE client_bot_updates SET state='processing',received_at=?,error=''"
+                " WHERE update_id=? AND state='processing' AND received_at=?",
+                (now, update_id, existing.get("received_at")),
+            )
+        else:
+            cur = self.db.execute(
+                "UPDATE client_bot_updates SET state='processing',received_at=?,error=''"
+                " WHERE update_id=? AND state='failed'",
+                (now, update_id),
+            )
+        if cur.rowcount:
+            return True
+        latest = self.db.one("SELECT state FROM client_bot_updates WHERE update_id=?",
+                             (update_id,)) or {}
+        return None if latest.get("state") == "done" else False
+
+    def _finish_update(self, update_id: str, ok: bool = True, error: str = "") -> None:
+        if not update_id:
+            return
+        self.db.execute(
+            "UPDATE client_bot_updates SET state=?,processed_at=?,error=? WHERE update_id=?",
+            ("done" if ok else "failed", now_iso(), str(error or "")[:500], update_id))
+
+    def _funnel(self, chat: str, event: str, row: dict | None = None,
+                *, order_id: str = "", nom_id: str = "", source: str = "",
+                data: dict | None = None) -> None:
+        try:
+            self.db.execute(
+                "INSERT INTO client_bot_funnel(at,chat_id,event,source,order_id,nom_id,data)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (now_iso(), str(chat), str(event),
+                 str(source or (row or {}).get("source") or "telegram"),
+                 str(order_id or ""), str(nom_id or ""),
+                 json.dumps(data or {}, ensure_ascii=False)))
+        except Exception:
+            pass
+
+    def _link_order(self, chat: str, row: dict, order: dict,
+                    *, source: str = "telegram", update_id: str = "") -> dict:
+        """Связать заказ с чатом, клиентом и источником идемпотентно."""
+        update_id = str(update_id or self._current_update_id or "")
+        self.db.execute(
+            "INSERT OR IGNORE INTO client_orders(chat_id,order_id,number,update_id,source,created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (chat, order.get("id") or "", order.get("number") or "", update_id,
+             source, now_iso()))
+        customer_id = str(order.get("customer_id") or "")
+        if customer_id:
+            try:
+                self.db.execute(
+                    "UPDATE customers SET tg_user_id=? WHERE id=? AND (tg_user_id IS NULL OR tg_user_id='')",
+                    (str(row.get("tg_user_id") or chat), customer_id))
+                self.db.execute("UPDATE client_chats SET customer_id=? WHERE chat_id=?",
+                                (customer_id, chat))
+            except Exception:
+                pass
+        self._track_token(order.get("id") or "")
+        return self.db.one("SELECT * FROM client_orders WHERE chat_id=? AND order_id=?",
+                           (chat, order.get("id") or "")) or {}
+
+    def _track_token(self, order_id: str) -> str:
+        """Детерминированный секретный токен ссылки, без хранения plaintext."""
+        order_id = str(order_id or "")
+        token = str(self._settings().get("client_bot_token") or "")
+        if not order_id or not token:
+            return ""
+        raw = hmac.new(token.encode(), order_id.encode(), hashlib.sha256).hexdigest()
+        digest = hashlib.sha256(raw.encode()).hexdigest()
+        current = self.db.one("SELECT client_track_token_hash FROM orders WHERE id=?", (order_id,)) or {}
+        if current.get("client_track_token_hash") != digest:
+            self.db.execute(
+                "UPDATE orders SET client_track_token_hash=?,client_track_token_at=? WHERE id=?",
+                (digest, now_iso(), order_id))
+        return raw
+
+    def _in_quiet_hours(self, row: dict | None = None) -> bool:
+        settings = self._settings()
+        source = row or {}
+        has_personal = bool(source.get("quiet_from") and source.get("quiet_to"))
+        if not has_personal and not bool(settings.get("client_bot_quiet_hours_enabled", False)):
+            return False
+        start = str(source.get("quiet_from") or settings.get("client_bot_quiet_from") or "")
+        end = str(source.get("quiet_to") or settings.get("client_bot_quiet_to") or "")
+        if not start or not end:
+            return False
+        try:
+            now = datetime.now().hour * 60 + datetime.now().minute
+            sh, sm = (int(x) for x in start.split(":", 1))
+            eh, em = (int(x) for x in end.split(":", 1))
+            a, b = sh * 60 + sm, eh * 60 + em
+            return now >= a or now < b if a >= b else a <= now < b
+        except (TypeError, ValueError):
+            return False
 
     # ---------------------------------------------------------------- цикл
     def _loop(self) -> None:
@@ -252,45 +615,160 @@ class ClientBot:
                     "offset": self._offset, "timeout": 25,
                     "allowed_updates": json.dumps(["message", "callback_query"]),
                 })
-                self.last_poll = time.time()
+                if result.get("ok"):
+                    self.last_poll = time.time()
                 for update in (result.get("result") or []):
-                    self._offset = max(self._offset, num(update.get("update_id")) + 1)
-                    self._handle(update)
+                    update_id = str(update.get("update_id") or "")
+                    if not self._handle(update, dedupe=True):
+                        # Не подтверждаем более новые update поверх живой или
+                        # временно упавшей обработки: сохраняем порядок.
+                        break
+                    try:
+                        next_offset = int(num(update_id)) + 1
+                    except (TypeError, ValueError):
+                        next_offset = self._offset
+                    self._offset = max(self._offset, next_offset)
+                    # Telegram подтверждает update только когда offset ушёл
+                    # в сеть; храним тот же watermark для восстановления.
+                    self.db.set_settings({"client_bot_update_offset": self._offset})
+                self._drain_outbox()
                 self._maybe_push_statuses()
                 self._maybe_ask_reviews()
                 self._maybe_remind_pickup()
+                self._drain_outbox()
             except Exception:
                 self._stop.wait(10)
 
     # ------------------------------------------------------------ обработка
-    def _handle(self, update: dict) -> None:
-        callback = update.get("callback_query") or {}
-        if callback:
-            return self._handle_callback(callback)
-        message = update.get("message") or {}
-        chat = str((message.get("chat") or {}).get("id", ""))
-        if not chat:
-            return
-        row = self._touch_chat(chat, message)
-        # Подпись к фото работает как текст: покупатель шлёт снимок эскиза
-        # с подписью «индивидуальный …» — это уже готовая заявка.
-        caption = (message.get("caption") or "").strip()
-        text = (message.get("text") or "").strip()
+    def _handle(self, update: dict, *, dedupe: bool = False) -> bool:
+        """Обработать одно обновление.
+
+        ``dedupe`` включён только polling-циклом; прямые вызовы этого метода
+        остаются удобными для offline-тестов и внутренних интеграций.
+        """
+        update_id = str(update.get("update_id") or "")
+        claimed = False
+        if dedupe:
+            claim = self._claim_update(update)
+            if claim is None:
+                return True  # уже выполнен: Telegram можно подтвердить offset
+            if not claim:
+                return False
+            claimed = True
+        previous = self._current_update_id
+        self._current_update_id = update_id
         try:
-            if message.get("photo"):
-                answer, buttons = self._photo_reply(chat, row, message, caption)
-            elif text:
-                answer, buttons = self._dispatch(chat, row, text)
-            else:
-                answer, buttons = self._no_text_reply(chat, row, message)
-            self._reply(chat, answer, buttons)
-            self._log(chat, row.get("name") or "",
-                      text or (f"📷 {caption}" if caption else
-                               self._media_label(message)), answer)
-        except Exception as exc:
-            answer = f"Не получилось: {exc}"
-            self._reply(chat, answer)
-            self._log(chat, row.get("name") or "", text or caption, answer)
+            callback = update.get("callback_query") or {}
+            if callback:
+                self._handle_callback(callback)
+                if claimed:
+                    self._finish_update(update_id, True)
+                return True
+            message = update.get("message") or {}
+            telegram_chat = message.get("chat") or {}
+            chat_type = str(telegram_chat.get("type") or "")
+            # Клиентский бот никогда не отвечает в группах/каналах: это
+            # предотвращает случайную публикацию заказов и персональных данных.
+            if chat_type != "private":
+                if claimed:
+                    self._finish_update(update_id, True, "non_private_chat")
+                return True
+            chat = str(telegram_chat.get("id", ""))
+            if not chat:
+                if claimed:
+                    self._finish_update(update_id, True, "no_chat")
+                return True
+            row = self._touch_chat(chat, message)
+            # Подпись к фото работает как текст: покупатель шлёт снимок эскиза
+            # с подписью «индивидуальный …» — это уже готовая заявка.
+            caption = (message.get("caption") or "").strip()
+            text = (message.get("text") or "").strip()
+            try:
+                if message.get("photo"):
+                    answer, buttons = self._photo_reply(chat, row, message, caption)
+                elif message.get("document"):
+                    answer, buttons = self._document_reply(chat, row, message, caption)
+                elif text:
+                    answer, buttons = self._dispatch(chat, row, text)
+                else:
+                    answer, buttons = self._no_text_reply(chat, row, message)
+                self._reply(chat, answer, buttons)
+                self._log(chat, row.get("name") or "",
+                          text or (f"📷 {caption}" if caption else
+                                   self._media_label(message)), answer,
+                          update_id=update_id, source=row.get("source") or "")
+            except Exception as exc:
+                answer = f"Не получилось: {exc}"
+                self._reply(chat, answer)
+                self._log(chat, row.get("name") or "", text or caption, answer,
+                          update_id=update_id, source=row.get("source") or "")
+                if claimed:
+                    self._finish_update(update_id, False, str(exc))
+                return False
+            if claimed:
+                self._finish_update(update_id, True)
+            return True
+        finally:
+            self._current_update_id = previous
+
+    def _document_reply(self, chat: str, row: dict, message: dict,
+                        caption: str) -> tuple[str, dict | None]:
+        """Принять PDF/чертёж/архив как файл заявки и сохранить его в заказе."""
+        document = message.get("document") or {}
+        file_id = str(document.get("file_id") or "")
+        raw = self._download_file(file_id) if file_id else None
+        if not raw:
+            return ("Файл получил, но скачать его не удалось. Попробуйте отправить ещё раз "
+                    "или пришлите ссылку/фото."), self._menu()
+        active = [o for o in self._linked_orders(chat, row) if not self._is_final(o)]
+        if active:
+            self._attach_file(active[0]["id"], raw, document.get("file_name") or "file", chat)
+            return (f"Файл получил ✓ Прикрепил к заказу №{active[0].get('number')}. "
+                    "Мастер увидит его в карточке."), self._menu()
+        task = caption or "Заявка с файлом — описание уточняется"
+        order = self.manager.repo.save_order({
+            "product": task[:120], "customer_name": row.get("name") or "Покупатель",
+            "phone": row.get("phone") or "",
+            "messenger": (f"tg:@{row.get('username')}" if row.get("username") else f"tg:{chat}"),
+            "channel": "telegram", "status": "new", "qty": 1,
+            "client_source": row.get("source") or "telegram",
+            "client_quote_status": "requested",
+            "notes": "Файл из клиентского бота; описание уточняется",
+        })
+        self._link_order(chat, row, order, source="telegram")
+        self._attach_file(order.get("id") or "", raw,
+                          document.get("file_name") or "file", chat, lead=True)
+        self._funnel(chat, "file_order", row, order_id=order.get("id") or "")
+        return (f"Файл получил ✓ Заявка №{order.get('number')} создана. "
+                "Напишите размеры, материал и назначение — мастер посчитает цену и срок."), self._menu()
+
+    def _attach_file(self, order_id: str, raw: bytes | None, filename: str,
+                     chat: str, lead: bool = False) -> None:
+        """Сохранить файл клиента как order_photo с безопасным именем."""
+        from .config import PHOTO_DIR
+        if not raw:
+            self._alert_master(chat, self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (chat,)) or {},
+                               f"Файл {filename} не удалось скачать")
+            return
+        if len(raw) > 20 * 1024 * 1024:
+            raise ValueError("Файл больше 20 МБ")
+        safe_name = _re.sub(r"[^a-zA-Z0-9а-яА-Я._-]+", "_", str(filename or "file"))[:80]
+        try:
+            PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+            path = PHOTO_DIR / f"client_{order_id}_{int(time.time() * 1000)}_{safe_name}"
+            path.write_bytes(raw)
+        except OSError as exc:
+            raise ValueError(f"Не удалось сохранить файл: {exc}") from exc
+        self.db.upsert("order_photos", {
+            "id": uid("file"), "order_id": order_id, "at": now_iso(),
+            "file": path.name, "note": "файл из клиентского бота", "kind": "client_file"})
+        number = (self.db.one("SELECT number FROM orders WHERE id=?", (order_id,)) or {}).get("number") or ""
+        try:
+            self.manager.notify_async(
+                f"📎 Файл от покупателя — заказ №{number}\nЧат {chat} · {safe_name}",
+                critical=bool(lead))
+        except Exception:
+            pass
 
     def _photo_reply(self, chat: str, row: dict, message: dict,
                      caption: str) -> tuple[str, dict | None]:
@@ -303,9 +781,12 @@ class ClientBot:
         raw = self._download_file(file_id) if file_id else None
         low = caption.lower().replace("ё", "е").strip()
         if low.startswith("индивидуальн"):
+            previous = self._latest_linked(chat)
             answer = self._custom_order(chat, row, caption)
             order = self._latest_linked(chat)
-            if order:
+            # Если команда только открыла черновик, не прикрепляем фото к
+            # предыдущему заказу. После описания фото можно прислать повторно.
+            if order and (not previous or order.get("id") != previous.get("id")):
                 self._attach_photo(order["id"], raw, chat)
             return answer, self._menu()
         # «фото 1001» — приложить снимок к своему заказу
@@ -335,13 +816,14 @@ class ClientBot:
             "messenger": (f"tg:@{row.get('username')}" if row.get("username")
                           else f"tg:{chat}"),
             "channel": "telegram", "status": "new", "qty": 1,
+            "client_source": row.get("source") or "telegram",
+            "client_quote_status": "requested",
             "notes": "Фотозаявка из клиентского бота (фото без описания)",
         })
         number = order.get("number") or ""
-        self.db.execute(
-            "INSERT OR IGNORE INTO client_orders(chat_id,order_id,number,created_at)"
-            " VALUES(?,?,?,?)", (chat, order.get("id"), number, now_iso()))
+        self._link_order(chat, row, order, source="telegram")
         self._notified[(chat, order.get("id", ""))] = "new"
+        self._funnel(chat, "photo_order", row, order_id=order.get("id") or "")
         self._attach_photo(order.get("id"), raw, chat, lead=True)
         return ("Фото получил ✓ Мастерская уже видит снимок. Опишите задачу — "
                 "что напечатать, размеры и назначение — и мастер посчитает "
@@ -397,7 +879,12 @@ class ClientBot:
         contact = message.get("contact") or {}
         phone = str(contact.get("phone_number") or "")
         if phone:
-            return self._save_phone(chat, row, f"телефон {phone}"), self._menu()
+            sender_id = str((message.get("from") or {}).get("id") or "")
+            contact_owner = str(contact.get("user_id") or "")
+            if not sender_id or contact_owner != sender_id:
+                return ("Нужно отправить именно свой контакт Telegram — чужой номер "
+                        "нельзя использовать для привязки заказов.", self._contact_keyboard())
+            return self._save_phone(chat, row, f"телефон {phone}", verified=True), self._menu()
         label = self._media_label(message)
         return (f"{label.capitalize()} получил ✓ Опишите задачу текстом — "
                 "«индивидуальный держатель 120 мм» — и мастер посчитает "
@@ -417,6 +904,9 @@ class ClientBot:
         message = callback.get("message") or {}
         chat = str((message.get("chat") or {}).get("id", ""))
         data = str(callback.get("data") or "")
+        chat_type = str(((message.get("chat") or {}).get("type") or ""))
+        if chat_type != "private":
+            return
         if not chat or not data:
             return
         self._call("answerCallbackQuery", {"callback_query_id":
@@ -435,17 +925,47 @@ class ClientBot:
                 # Кнопка обязана ответить: раньше текст только писался в журнал,
                 # и покупатель не видел реакции — «кнопки не работают».
                 self._reply(chat, answer, buttons)
-            self._log(chat, row.get("name") or "", data, answer, kind="status")
+            # Нажатие inline-кнопки — уже обработанное действие, а не новое
+            # непрочитанное сообщение для inbox.
+            self._log(chat, row.get("name") or "", data, answer,
+                      kind="status", unread=0)
         except Exception as exc:
             answer = f"Не получилось: {exc}"
             self._reply(chat, answer)
-            self._log(chat, row.get("name") or "", data, answer, kind="status")
+            self._log(chat, row.get("name") or "", data, answer,
+                      kind="status", unread=0)
 
     def _run_callback(self, chat: str, row: dict,
                       data: str) -> tuple[str, dict | None]:
         if data.startswith("buy:"):
             return self._order_item(chat, row, data.split(":", 1)[1]), \
                 self._menu()
+        if data.startswith("cart:"):
+            parts = data.split(":", 2)
+            return self._add_to_cart(chat, parts[1] if len(parts) > 1 else "",
+                                     parts[2] if len(parts) > 2 else ""), self._cart_keyboard(chat)
+        if data.startswith("cartv:"):
+            parts = data.split(":", 2)
+            return self._add_to_cart(chat, parts[1] if len(parts) > 1 else "",
+                                     parts[2] if len(parts) > 2 else ""), self._cart_keyboard(chat)
+        if data.startswith("cartremove:"):
+            parts = data.split(":", 2)
+            return self._remove_from_cart(chat, parts[1] if len(parts) > 1 else "",
+                                          parts[2] if len(parts) > 2 else ""), self._cart_keyboard(chat)
+        if data == "cart":
+            return self._cart_text(chat), self._cart_keyboard(chat)
+        if data == "checkout":
+            return self._checkout_cart(chat, row), self._menu()
+        if data.startswith("wish:"):
+            return self._toggle_wishlist(chat, data.split(":", 1)[1]), self._menu()
+        if data == "wishlist":
+            return self._wishlist_text(chat), self._wishlist_keyboard(chat)
+        if data.startswith("repeat:"):
+            return self._repeat_order(chat, row, data.split(":", 1)[1]), self._menu()
+        if data == "notify":
+            return self._toggle_notifications(chat, row), self._menu()
+        if data == "marketing":
+            return self._toggle_marketing(chat, row), self._menu()
         if data.startswith("status:"):
             number = data.split(":", 1)[1]
             return self._order_card(chat, row, number)
@@ -453,6 +973,10 @@ class ClientBot:
             return self._pay_card(chat, row, data.split(":", 1)[1])
         if data.startswith("paid:"):
             return self._paid_notice(chat, row, data.split(":", 1)[1])
+        if data.startswith("quote_yes:"):
+            return self._quote_action(chat, row, data.split(":", 1)[1], True)
+        if data.startswith("quote_no:"):
+            return self._quote_action(chat, row, data.split(":", 1)[1], False)
         if data.startswith("review:"):
             _, order_id, rating = data.split(":", 2)
             return self._review_rating(chat, row, order_id, rating)
@@ -472,6 +996,8 @@ class ClientBot:
     def _menu(self) -> dict:
         return _keyboard(
             [("🛍 Каталог", "catalog"), ("📦 Мои заказы", "mine")],
+            [("🛒 Корзина", "cart"), ("💛 Избранное", "wishlist")],
+            [("🔔 Статусы", "notify"), ("📣 Рассылка", "marketing")],
             [("❓ Вопрос-ответ", "faq"), ("❔ Помощь", "help")],
         )
 
@@ -490,21 +1016,63 @@ class ClientBot:
         word = text.split()[0] if text else ""
 
         if word in ("start", "старт", "начать"):
+            raw_parts = raw.strip().split(None, 1)
+            payload = raw_parts[1].strip()[:120] if len(raw_parts) > 1 else ""
+            if payload:
+                source = payload
+                if payload.startswith(("utm_", "src_")):
+                    source = payload.split("_", 1)[1]
+                self.db.execute("UPDATE client_chats SET source=? WHERE chat_id=?",
+                                (source, chat))
+                row["source"] = source
+                self._funnel(chat, "start", row, source=source, data={"payload": payload})
+            else:
+                self._funnel(chat, "start", row)
             welcome = str(self._settings().get("client_bot_welcome") or "").strip()
             return welcome or WELCOME, self._menu()
+        quote_answer = self._quote_response(chat, row, raw)
+        if quote_answer:
+            return quote_answer, self._menu()
+        # Если есть незавершённый мастер заявки, любое обычное сообщение —
+        # следующий шаг; явные команды меню по-прежнему имеют приоритет.
+        if word not in ("help", "помощь", "?", "меню", "каталог", "товары", "витрина",
+                        "полка", "catalog", "мои", "заказы", "статус", "status", "заказ",
+                        "order", "телефон", "phone", "номер", "faq", "вопрос", "вопросы",
+                        "вопрос-ответ", "избранное", "wishlist", "любимое", "уведомления",
+                        "уведомление", "рассылка", "отписаться", "корзина", "cart",
+                        "оформить", "checkout"):
+            draft_answer, draft_buttons = self._draft_reply(chat, row, raw)
+            if draft_answer:
+                return draft_answer, draft_buttons
         if word in ("help", "помощь", "?", "меню"):
             return HELP, self._menu()
         if word in ("faq", "вопрос", "вопросы", "вопрос-ответ"):
+            self._funnel(chat, "faq", row)
             return self.text_faq(), self._menu()
+        if word in ("избранное", "wishlist", "любимое"):
+            return self._wishlist_text(chat), self._wishlist_keyboard(chat)
+        if word in ("уведомления", "уведомление"):
+            return self._toggle_notifications(chat, row), self._menu()
+        if word in ("рассылка", "marketing"):
+            return self._toggle_marketing(chat, row), self._menu()
+        if word in ("отписаться", "стоп рассылка"):
+            self.db.execute("UPDATE client_chats SET marketing_opt_in=0 WHERE chat_id=?", (chat,))
+            return "Рассылки отключены. Сервисные статусы заказа остаются включены.", self._menu()
         if word in ("каталог", "товары", "витрина", "полка", "catalog"):
+            self._funnel(chat, "catalog", row)
             return self.text_catalog(), self._catalog_keyboard()
+        if word in ("корзина", "cart"):
+            return self._cart_text(chat), self._cart_keyboard(chat)
+        if word in ("оформить", "checkout"):
+            return self._checkout_cart(chat, row), self._menu()
         if word in ("мои", "мои заказы", "заказы") or text == "мои заказы":
             answer = self.text_my_orders(chat, row)
             # заказов нет и телефон не привязан — вместо пустого списка даём
             # кнопку отправки контакта, чтобы связать заказы с полки
             if not self._linked_orders(chat, row) \
-                    and not str(row.get("phone") or "").strip():
-                return answer, self._contact_keyboard()
+                    and (not str(row.get("phone") or "").strip()
+                         or not bool(num(row.get("phone_verified")))):
+                return (answer + "\nДля безопасной привязки нажмите «Отправить номер»."), self._contact_keyboard()
             return answer, self._orders_keyboard(chat, row)
         if word in ("статус", "status", "заказ", "order"):
             number = next((w for w in text.split() if w.isdigit()), "")
@@ -514,7 +1082,9 @@ class ClientBot:
         if text.startswith("индивидуальн") or word in ("печать", "задача"):
             return self._custom_order(chat, row, raw), self._menu()
         if word in ("телефон", "phone", "номер") or text.startswith("+7") or text.startswith("8 9"):
-            answer = self._save_phone(chat, row, text)
+            # Набранный номер не является доказательством владения им. Сохраняем
+            # его только как неподтверждённый; заказы по нему не раскрываются.
+            answer = self._save_phone(chat, row, text, verified=False)
             # пока телефон не привязан — предлагаем отправить контакт кнопкой,
             # это одно касание вместо набора номера
             buttons = self._menu() if row.get("phone") else self._contact_keyboard()
@@ -551,6 +1121,302 @@ class ClientBot:
             pass
 
     # -------------------------------------------------------------- тексты
+    def _toggle_wishlist(self, chat: str, nom_id: str) -> str:
+        item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        if not item or not bool(num(item.get("client_bot_published"), 1)) or num(item.get("archived")):
+            return "Эта позиция больше не опубликована."
+        existing = self.db.one("SELECT 1 FROM client_wishlist WHERE chat_id=? AND nom_id=?",
+                               (chat, nom_id))
+        if existing:
+            self.db.execute("DELETE FROM client_wishlist WHERE chat_id=? AND nom_id=?", (chat, nom_id))
+            self._funnel(chat, "wishlist_remove", source="telegram", nom_id=nom_id)
+            return f"«{item.get('name') or 'Позиция'}» убрана из избранного."
+        self.db.execute("INSERT OR IGNORE INTO client_wishlist(chat_id,nom_id,created_at) VALUES(?,?,?)",
+                        (chat, nom_id, now_iso()))
+        self._funnel(chat, "wishlist_add", source="telegram", nom_id=nom_id)
+        return f"«{item.get('name') or 'Позиция'}» сохранена в избранном 💛"
+
+    def _wishlist_rows(self, chat: str) -> list[dict]:
+        return self.db.query(
+            "SELECT n.*, p.price FROM client_wishlist w JOIN nomenclature n ON n.id=w.nom_id"
+            " LEFT JOIN (SELECT p.nom_id, p.price FROM prices p JOIN price_types t"
+            " ON t.id=p.price_type_id WHERE t.is_base=1"
+            " AND (p.variant_id IS NULL OR p.variant_id='')"
+            " AND p.rowid=(SELECT p2.rowid FROM prices p2"
+            " JOIN price_types t2 ON t2.id=p2.price_type_id"
+            " WHERE p2.nom_id=p.nom_id AND t2.is_base=1"
+            " AND (p2.variant_id IS NULL OR p2.variant_id='')"
+            " ORDER BY datetime(p2.at) DESC,p2.rowid DESC LIMIT 1)) p"
+            " ON p.nom_id=n.id WHERE w.chat_id=? AND n.archived=0"
+            " ORDER BY datetime(w.created_at) DESC", (chat,))
+
+    def _wishlist_text(self, chat: str) -> str:
+        rows = [r for r in self._wishlist_rows(chat) if num(r.get("price")) > 0]
+        if not rows:
+            return "Избранное пусто. Откройте «каталог» и нажмите 💛 на карточке товара."
+        lines = ["💛 Избранное:", ""]
+        for i, item in enumerate(rows[:20], 1):
+            lines.append(f"{i}. {item.get('name')} — {_money(item.get('price'))}")
+        return "\n".join(lines)
+
+    def _wishlist_keyboard(self, chat: str) -> dict:
+        rows = self._wishlist_rows(chat)
+        keys = [[(f"🛒 {r.get('name')} · {_money(r.get('price'))}"[:60], f"buy:{r['id']}")]
+                for r in rows[:8] if num(r.get("price")) > 0]
+        keys.append([("🛍 Каталог", "catalog"), ("📦 Мои заказы", "mine")])
+        return _keyboard(*keys)
+
+    def _cart_rows(self, chat: str) -> list[dict]:
+        """Вернуть живой состав корзины, убирая архивированные карточки."""
+        catalog = {str(item.get("id")): item for item in self._catalog_rows()}
+        rows = self.db.query(
+            "SELECT w.nom_id,w.variant_id,w.qty,w.created_at,w.updated_at,"
+            " n.name,n.material,n.grams,n.hours,v.name variant_name,v.color_name"
+            " FROM client_bot_cart w JOIN nomenclature n ON n.id=w.nom_id"
+            " LEFT JOIN nom_variants v ON v.id=w.variant_id"
+            " WHERE w.chat_id=? ORDER BY datetime(w.updated_at) DESC", (chat,))
+        result = []
+        for row in rows:
+            item = catalog.get(str(row.get("nom_id") or ""))
+            if not item:
+                continue
+            variant_id = str(row.get("variant_id") or "")
+            price = num(item.get("price"))
+            if variant_id:
+                variant_price = self.db.one(
+                    "SELECT p.price FROM prices p JOIN price_types t ON t.id=p.price_type_id"
+                    " WHERE p.variant_id=? AND t.is_base=1 ORDER BY datetime(p.at) DESC,p.rowid DESC LIMIT 1",
+                    (variant_id,))
+                price = num((variant_price or {}).get("price")) or price
+            result.append({**row, "price": price, "item": item,
+                           "variant_name": row.get("variant_name") or row.get("color_name") or ""})
+        return result
+
+    def _cart_text(self, chat: str) -> str:
+        rows = self._cart_rows(chat)
+        if not rows:
+            return "🛒 Корзина пуста. Откройте «каталог» и добавьте позицию кнопкой «В корзину»."
+        total = sum(num(row.get("price")) * num(row.get("qty"), 1) for row in rows)
+        lines = ["🛒 Корзина:", ""]
+        for index, row in enumerate(rows, 1):
+            label = row["item"].get("name") or "Позиция"
+            if row.get("variant_name"):
+                label += f" · {row['variant_name']}"
+            lines.append(f"{index}. {label} ×{num(row.get('qty'), 1):g} — {_money(num(row.get('price')) * num(row.get('qty'), 1))}")
+        lines.append(f"\nИтого: {_money(total)}")
+        lines.append("Проверьте состав и нажмите «Оформить заявку» — резерв проверим в момент оформления.")
+        return "\n".join(lines)
+
+    def _cart_keyboard(self, chat: str) -> dict:
+        rows = self._cart_rows(chat)
+        keys: list[list[tuple[str, str]]] = []
+        for row in rows[:8]:
+            label = f"Убрать · {row['item'].get('name') or 'позиция'}"
+            if row.get("variant_name"):
+                label += f" · {row['variant_name']}"
+            keys.append([(label[:58], f"cartremove:{row['nom_id']}:{row.get('variant_id') or '-'}")])
+        if rows:
+            keys.append([("✅ Оформить заявку", "checkout")])
+        keys.append([("🛍 Каталог", "catalog"), ("📦 Мои заказы", "mine")])
+        return _keyboard(*keys)
+
+    def _add_to_cart(self, chat: str, nom_id: str, variant_id: str = "") -> str:
+        item = next((row for row in self._catalog_rows() if row.get("id") == nom_id), None)
+        if not item:
+            return "Эта позиция больше не опубликована."
+        variant_id = str(variant_id or "").strip()
+        if variant_id:
+            variant = self.db.one(
+                "SELECT id FROM nom_variants WHERE id=? AND nom_id=? AND archived=0",
+                (variant_id, nom_id))
+            if not variant:
+                return "Этот вариант больше недоступен — откройте каталог заново."
+        current = self.db.one(
+            "SELECT qty FROM client_bot_cart WHERE chat_id=? AND nom_id=? AND variant_id=?",
+            (chat, nom_id, variant_id))
+        qty = min(100, num((current or {}).get("qty"), 0) + 1)
+        stock_qty = num(item.get("qty"))
+        if stock_qty > 0:
+            try:
+                from .stock import Stock
+                free = Stock(self.db).qty(nom_id, variant_id=variant_id) - Stock(self.db).reserved(nom_id, variant_id=variant_id)
+                if free > 0 and qty > free:
+                    return f"В свободном остатке только {free:g} шт. Можно оформить под заказ позже."
+            except Exception:
+                pass
+        stamp = now_iso()
+        self.db.execute(
+            "INSERT INTO client_bot_cart(chat_id,nom_id,variant_id,qty,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,nom_id,variant_id)"
+            " DO UPDATE SET qty=excluded.qty,updated_at=excluded.updated_at",
+            (chat, nom_id, variant_id, qty,
+             (current or {}).get("created_at") or stamp, stamp))
+        self._funnel(chat, "cart_add", source="telegram", nom_id=nom_id,
+                     data={"variant_id": variant_id, "qty": qty})
+        label = item.get("name") or "Позиция"
+        return f"«{label}» добавлена в корзину ✓ Количество: {qty:g}."
+
+    def _remove_from_cart(self, chat: str, nom_id: str, variant_id: str = "") -> str:
+        self.db.execute("DELETE FROM client_bot_cart WHERE chat_id=? AND nom_id=? AND variant_id=?",
+                        (chat, nom_id, "" if variant_id in ("", "-") else variant_id))
+        self._funnel(chat, "cart_remove", source="telegram", nom_id=nom_id)
+        return "Позиция убрана из корзины."
+
+    def _checkout_cart(self, chat: str, row: dict) -> str:
+        # Сохранение заказа, резервов и очистка корзины должны быть одной
+        # критической секцией: параллельный retry не может зарезервировать
+        # один и тот же остаток дважды.
+        with self.db.transaction():
+            return self._checkout_cart_impl(chat, row)
+
+    def _checkout_cart_impl(self, chat: str, row: dict) -> str:
+        rows = self._cart_rows(chat)
+        if not rows:
+            return "Корзина пуста — сначала добавьте позицию из каталога."
+        request = f"tg:{self._current_update_id}" if self._current_update_id else ""
+        if request:
+            existing = self.db.one("SELECT * FROM orders WHERE client_request_id=?", (request,))
+            if existing:
+                self.db.execute("DELETE FROM client_bot_cart WHERE chat_id=?", (chat,))
+                return f"Заявка уже принята ✓ Номер — №{existing.get('number')}."
+        items = []
+        for item in rows:
+            label = item["item"].get("name") or "Позиция"
+            if item.get("variant_name"):
+                label += f" · {item['variant_name']}"
+            items.append({
+                "nom_id": item["nom_id"], "variant_id": item.get("variant_id") or "",
+                "name": label, "qty": num(item.get("qty"), 1),
+                "price": num(item.get("price")), "grams": num(item["item"].get("grams")),
+                "hours": num(item["item"].get("hours")),
+                "note": "из корзины",
+            })
+        order = self.manager.repo.save_order({
+            "product": ", ".join(str(item["name"]) for item in items)[:240],
+            "customer_name": row.get("name") or "Покупатель", "phone": row.get("phone") or "",
+            "messenger": f"tg:@{row.get('username')}" if row.get("username") else f"tg:{chat}",
+            "channel": "telegram", "client_source": row.get("source") or "telegram",
+            "client_request_id": request, "status": "new", "qty": sum(num(item["qty"]) for item in items),
+            "nom_id": items[0]["nom_id"] if len(items) == 1 else "",
+            "client_variant_id": items[0].get("variant_id") if len(items) == 1 else "",
+            "items": items, "notes": "Заказ из корзины клиентского бота",
+        })
+        self._link_order(chat, row, order, source="telegram", update_id=self._current_update_id)
+        # Резервируем готовые варианты после проверки свободного остатка. Если
+        # склад не заведён, заказ остаётся «под заказ» и не теряется.
+        reserved_any = False
+        try:
+            from .stock import Stock
+            stock = Stock(self.db)
+            for item in items:
+                try:
+                    variant_id = str(item.get("variant_id") or "")
+                    stock_qty = stock.qty(item["nom_id"], variant_id=variant_id)
+                    free = stock_qty - stock.reserved(item["nom_id"], variant_id=variant_id)
+                    if free >= num(item["qty"], 1) and free > 0:
+                        warehouse_sql = ("SELECT warehouse_id FROM stock_moves WHERE nom_id=?"
+                                         + (" AND variant_id=?" if variant_id else "")
+                                         + " GROUP BY warehouse_id ORDER BY SUM(qty) DESC LIMIT 1")
+                        warehouse_params = ((item["nom_id"], variant_id)
+                                            if variant_id else (item["nom_id"],))
+                        warehouse = self.db.one(warehouse_sql, warehouse_params) or {}
+                        stock.reserve(item["nom_id"], num(item["qty"], 1), order["id"],
+                                      warehouse.get("warehouse_id") or "", "резерв из корзины", variant_id)
+                        reserved_any = True
+                except Exception:
+                    # Отдельная позиция может быть «под заказ», остальные не
+                    # должны из-за этого исчезать из корзины/заказа.
+                    continue
+        except Exception:
+            pass
+        if reserved_any:
+            self.db.execute("UPDATE orders SET reserved=1 WHERE id=?", (order["id"],))
+        self.db.execute("DELETE FROM client_bot_cart WHERE chat_id=?", (chat,))
+        self._funnel(chat, "cart_checkout", row, order_id=order.get("id") or "",
+                     data={"count": len(items)})
+        try:
+            self.manager.notify_async(
+                f"🛒 Заказ из корзины клиентского бота\n№{order.get('number')} · {order.get('product')}",
+                critical=True)
+        except Exception:
+            pass
+        return f"Заявка из корзины принята ✓\nНомер заказа — №{order.get('number')}.\nМастер подтвердит цену и срок."
+
+    def _toggle_marketing(self, chat: str, row: dict) -> str:
+        if not bool(self._settings().get("client_bot_marketing_enabled", False)):
+            return "Рассылки пока отключены владельцем мастерской. Сервисные статусы заказа доступны всегда."
+        current = bool(num(row.get("marketing_opt_in")))
+        value = 0 if current else 1
+        self.db.execute("UPDATE client_chats SET marketing_opt_in=? WHERE chat_id=?", (value, chat))
+        row["marketing_opt_in"] = value
+        self._funnel(chat, "marketing_opt_in" if value else "marketing_opt_out", row)
+        return ("Добровольные рассылки включены 📣 Их можно отключить командой «отписаться»."
+                if value else "Добровольные рассылки отключены. Сервисные статусы заказа остаются включены.")
+
+    def _quote_response(self, chat: str, row: dict, raw: str) -> str:
+        answer = str(raw or "").strip().lower().replace("ё", "е")
+        if answer not in {"да", "ок", "окей", "согласен", "согласна", "подтверждаю" ,
+                          "нет", "не согласен", "не согласна"}:
+            return ""
+        order = next((item for item in self._linked_orders(chat, row)
+                      if str(item.get("client_quote_status") or "") in {"sent", "requested"}
+                      and num(item.get("price")) > 0), None)
+        if not order:
+            return ""
+        accepted = answer not in {"нет", "не согласен", "не согласна"}
+        status = "accepted" if accepted else "declined"
+        self.db.execute(
+            "UPDATE orders SET client_quote_status=?,client_quote_accepted_at=? WHERE id=?",
+            (status, now_iso(), order["id"]))
+        self._funnel(chat, "quote_accepted" if accepted else "quote_declined",
+                     source=row.get("source") or "telegram", order_id=order["id"],
+                     data={"amount": num(order.get("price"))})
+        try:
+            self.manager.notify_async(
+                f"{'✅' if accepted else '↩️'} Покупатель {'согласовал' if accepted else 'не согласовал'} цену"
+                f" по заказу №{order.get('number')} · чат {chat}", critical=True)
+        except Exception:
+            pass
+        return (f"Цена и срок по заказу №{order.get('number')} отмечены как согласованные ✓"
+                if accepted else
+                f"Передал мастеру: цена по заказу №{order.get('number')} требует обсуждения.")
+
+    def _quote_action(self, chat: str, row: dict, order_id: str,
+                      accepted: bool) -> tuple[str, dict | None]:
+        order = self._own_order(chat, row, order_id)
+        if not order or str(order.get("client_quote_status") or "") not in {"sent", "requested"}:
+            return "Эта заявка больше не ждёт согласования.", self._menu()
+        answer = self._quote_response(chat, row, "да" if accepted else "нет")
+        return answer, self._menu()
+
+    def _toggle_notifications(self, chat: str, row: dict) -> str:
+        current = bool(num(row.get("status_notify"), 1))
+        value = 0 if current else 1
+        self.db.execute("UPDATE client_chats SET status_notify=? WHERE chat_id=?", (value, chat))
+        row["status_notify"] = value
+        self._funnel(chat, "status_notifications_on" if value else "status_notifications_off", row)
+        return ("Уведомления о статусе включены 🔔" if value else
+                "Уведомления о статусе выключены. Проверить заказ можно в «мои заказы»." )
+
+    def _repeat_order(self, chat: str, row: dict, order_id: str) -> str:
+        order = self._own_order(chat, row, order_id)
+        if not order:
+            return "Это не ваш заказ."
+        request = self._current_update_id
+        if request:
+            key = f"repeat:{chat}:{request}"
+            existing = self.db.one("SELECT entity_id FROM idempotency_keys WHERE request_id=?", (key,))
+            if existing:
+                repeat = self.db.one("SELECT * FROM orders WHERE id=?", (existing.get("entity_id"),)) or {}
+                return f"Повтор уже создан — №{repeat.get('number') or '—'}."
+        repeat = self.manager.repo.duplicate_order(order_id)
+        self._link_order(chat, row, repeat, source="telegram", update_id=request)
+        if request:
+            self.db.execute("INSERT OR IGNORE INTO idempotency_keys(request_id,kind,entity_id,response,created_at) VALUES(?,?,?,?,?)",
+                            (f"repeat:{chat}:{request}", "client_repeat", repeat.get("id") or "", "{}", now_iso()))
+        self._funnel(chat, "repeat_order", row, order_id=repeat.get("id") or "")
+        return f"Повтор заказа создан ✓ Новый номер — №{repeat.get('number')}. Мастер подтвердит срок."
+
     def _catalog_rows(self) -> list[dict]:
         """Позиции витрины: товары номенклатуры с ценой, по порядку."""
         try:
@@ -558,7 +1424,10 @@ class ClientBot:
             items = Nomenclature(self.db).items(kind="product")
         except Exception:
             items = []
-        return [item for item in items if num(item.get("price")) > 0]
+        return [item for item in items
+                if num(item.get("price")) > 0
+                and not bool(num(item.get("archived")))
+                and bool(num(item.get("client_bot_published"), 1))]
 
     def text_catalog(self, page: int = 1) -> str:
         if not bool(self._settings().get("client_bot_catalog", True)):
@@ -629,22 +1498,44 @@ class ClientBot:
         """Текст, фото и кнопки карточки товара каталога."""
         item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         rows = self._catalog_rows()
+        catalog_item = next((r for r in rows if r.get("id") == nom_id), None)
+        if not item or not catalog_item:
+            return "Эта карточка больше не опубликована.", b"", {"inline_keyboard": [[{"text": "🛍 Каталог", "callback_data": "catalog"}]]}
         index = next((i for i, r in enumerate(rows, 1) if r["id"] == nom_id), 0)
-        price = num((item or {}).get("price"))
-        if price <= 0:
-            price = num(next((r.get("price") for r in rows if r["id"] == nom_id), 0))
-        qty = num((item or {}).get("qty"))
+        price = num(catalog_item.get("price"))
+        qty = num(catalog_item.get("qty"))
         caption = [f"🛍 {item.get('name') if item else 'Товар'}"]
         caption.append(f"Цена: {_money(price)}")
         caption.append("Есть на полке" if qty > 0 else "Под заказ")
         if (item or {}).get("material"):
             caption.append(f"Материал: {item.get('material')}")
+        if (item or {}).get("client_bot_description"):
+            caption.append(str(item.get("client_bot_description"))[:500])
         if index:
             caption.append(f"Заказ: кнопкой ниже или «заказ {index}»")
+        variants = self.db.query(
+            "SELECT v.id,v.name,v.color_name,v.size,"
+            " COALESCE((SELECT p.price FROM prices p JOIN price_types t ON t.id=p.price_type_id"
+            " WHERE p.variant_id=v.id AND t.is_base=1 ORDER BY datetime(p.at) DESC LIMIT 1),0) price,"
+            " COALESCE((SELECT SUM(m.qty) FROM stock_moves m WHERE m.variant_id=v.id),0) qty"
+            " FROM nom_variants v WHERE v.nom_id=? AND v.archived=0"
+            " ORDER BY v.position,v.name LIMIT 8", (nom_id,))
+        if variants:
+            caption.append("Варианты:")
+            for variant in variants:
+                label = str(variant.get("name") or variant.get("color_name") or variant.get("size") or "вариант")
+                variant_text = f"{label} — {_money(num(variant.get('price')) or price)}"
+                caption.append(variant_text + (" · есть" if num(variant.get("qty")) > 0 else " · под заказ"))
         keys = [
-            [{"text": "🛒 Заказать", "callback_data": f"buy:{nom_id}"}],
-            [{"text": "⬅️ Каталог", "callback_data": f"catalog:{page}"}],
+            [{"text": "🛒 Заказать", "callback_data": f"buy:{nom_id}"},
+             {"text": "🛒 В корзину", "callback_data": f"cart:{nom_id}"}],
+            [{"text": "💛 В избранное", "callback_data": f"wish:{nom_id}"}],
         ]
+        for variant in variants:
+            label = str(variant.get("name") or variant.get("color_name") or variant.get("size") or "вариант")
+            keys.append([{"text": f"В корзину · {label}"[:60],
+                          "callback_data": f"cartv:{nom_id}:{variant['id']}"}])
+        keys.append([{"text": "⬅️ Каталог", "callback_data": f"catalog:{page}"}])
         raw = b""
         if (item or {}).get("photo"):
             from .config import PHOTO_DIR
@@ -684,77 +1575,159 @@ class ClientBot:
         return _keyboard(*keys)
 
     def _order_item(self, chat: str, row: dict, nom_id: str) -> str:
-        """Заказ позиции каталога: создаём заявку в панели и связываем чат."""
+        """Заказать товар с id/номером и безопасно пережить повтор callback."""
+        parts = str(nom_id or "").split(":")
+        nom_key = parts[0]
+        variant_id = ""
+        qty = 1
+        if len(parts) > 2 and parts[1] == "variant":
+            variant_id = parts[2]
+        elif len(parts) > 1:
+            qty = max(1, min(100, int(num(parts[1], 1))))
+        if self._current_update_id:
+            existing = self.db.one(
+                "SELECT o.* FROM client_orders l JOIN orders o ON o.id=l.order_id"
+                " WHERE l.chat_id=? AND l.update_id=? LIMIT 1",
+                (chat, self._current_update_id))
+            if existing:
+                return f"Этот заказ уже принят ✓ Номер — №{existing.get('number')}."
         rows = self._catalog_rows()
-        item = next((r for r in rows if r["id"] == nom_id), None)
-        if item is None and nom_id.isdigit():
-            index = int(nom_id)
+        item = next((r for r in rows if r["id"] == nom_key), None)
+        if item is None and nom_key.isdigit():
+            index = int(nom_key)
             if 1 <= index <= len(rows):
                 item = rows[index - 1]
         if not item:
             return ("Такой позиции в каталоге нет. Напишите «каталог» и "
                     "закажите по номеру из списка (например, «заказ 2»). "
                     "Если вы про номер заказа — «статус <номер>».")
-        qty = 1
+        variant = None
+        if variant_id:
+            variant = self.db.one(
+                "SELECT * FROM nom_variants WHERE id=? AND nom_id=? AND archived=0",
+                (variant_id, item.get("id")))
+            if not variant:
+                return "Этот вариант больше недоступен — откройте карточку товара заново."
+        display_name = item.get("name") or ""
+        if variant:
+            display_name += " · " + str(variant.get("name") or variant.get("color_name") or variant.get("size") or "вариант")
+        variant_price = self.db.one(
+            "SELECT p.price FROM prices p JOIN price_types t ON t.id=p.price_type_id"
+            " WHERE p.variant_id=? AND t.is_base=1 ORDER BY datetime(p.at) DESC LIMIT 1",
+            (variant_id,)) if variant_id else None
+        unit_price = num((variant_price or {}).get("price")) or num(item.get("price"))
         order = self.manager.repo.save_order({
-            "product": item.get("name") or "",
+            "product": display_name,
             "customer_name": row.get("name") or "Покупатель",
             "phone": row.get("phone") or "",
             "messenger": (f"tg:@{row.get('username')}" if row.get("username")
                           else f"tg:{chat}"),
-            "channel": "telegram",
-            "status": "new",
-            "qty": qty,
+            "channel": "telegram", "client_source": row.get("source") or "telegram",
+            "client_request_id": f"tg:{self._current_update_id}" if self._current_update_id else "",
+            "status": "new", "qty": qty,
             "material": item.get("material") or "",
-            "grams": num(item.get("grams")),
-            "hours": num(item.get("hours")),
-            "price": round(num(item.get("price")) * qty, 2),
+            "color": str((variant or {}).get("color_name") or ""),
+            "client_variant_id": variant_id,
+            "grams": num((variant or {}).get("grams")) or num(item.get("grams")),
+            "hours": num((variant or {}).get("hours")) or num(item.get("hours")),
+            "price": round(unit_price * qty, 2),
             "notes": "Заказ из клиентского бота",
             "nom_id": item.get("id"),
         })
         number = order.get("number") or ""
-        self.db.execute(
-            "INSERT OR IGNORE INTO client_orders(chat_id,order_id,number,created_at)"
-            " VALUES(?,?,?,?)", (chat, order.get("id"), number, now_iso()))
+        self._link_order(chat, row, order, source="telegram")
+        self._maybe_reserve(order, item, qty)
         self._notified[(chat, order.get("id", ""))] = "new"
         self.db.add_event("lead", "Заказ из клиентского бота",
-                          f"№{number} · {item.get('name')}",
-                          data={"order_id": order.get("id"), "chat_id": chat})
-        # Мастеру — уведомление, покупателю — подтверждение с номером.
+                          f"№{number} · {display_name}",
+                          data={"order_id": order.get("id"), "chat_id": chat,
+                                "source": row.get("source") or "telegram",
+                                "variant_id": variant_id})
+        self._funnel(chat, "order_created", row, order_id=order.get("id") or "",
+                     nom_id=item.get("id") or "")
         try:
             self.manager.notify_async(
                 f"🛎 Новый заказ из клиентского бота\n№{number} · "
-                f"{item.get('name')} · {_money(num(item.get('price')))}",
+                f"{display_name} · {_money(unit_price * qty)}",
                 critical=True)
         except Exception:
             pass
         return (f"Заказ принят ✓\nНомер заказа — №{number}.\n"
                 "Мастер подтвердит цену и срок. Статус: «мои заказы».")
 
+    def _maybe_reserve(self, order: dict, item: dict, qty: int) -> None:
+        """Зарезервировать готовый товар, если реальный склад это позволяет."""
+        if num(item.get("qty")) < qty or not order.get("nom_id"):
+            return
+        try:
+            from .stock import Stock
+            stock = Stock(self.db)
+            variant_id = str(order.get("client_variant_id") or "")
+            warehouse_sql = ("SELECT warehouse_id, SUM(qty) balance FROM stock_moves WHERE nom_id=?"
+                             + (" AND variant_id=?" if variant_id else "")
+                             + " GROUP BY warehouse_id HAVING balance>=? ORDER BY balance DESC LIMIT 1")
+            warehouse_params = ((order["nom_id"], variant_id, qty)
+                                if variant_id else (order["nom_id"], qty))
+            warehouse = self.db.one(warehouse_sql, warehouse_params) or {}
+            warehouse_id = warehouse.get("warehouse_id") or ""
+            variant_id = str(order.get("client_variant_id") or "")
+            if (stock.qty(order["nom_id"], warehouse_id, variant_id)
+                    - stock.reserved(order["nom_id"], warehouse_id, variant_id) < qty):
+                return
+            stock.reserve(order["nom_id"], qty, order["id"], warehouse_id,
+                          "резерв из клиентского Telegram-бота", variant_id)
+            self.db.execute("UPDATE orders SET reserved=1,warehouse_id=?,updated_at=? WHERE id=?",
+                            (warehouse_id, now_iso(), order["id"]))
+        except Exception:
+            # Каталог остаётся доступен «под заказ», даже если склад не настроен.
+            return
+
     def _custom_order(self, chat: str, row: dict, raw: str) -> str:
-        """«индивидуальный держатель для …» — заявка на печать по задаче."""
+        """«индивидуальный …» — сохранить заявку с ценой/сроком мастера."""
         task = _re.sub(r"^\s*индивидуальн\w*\s*[:\-]?\s*", "", raw.strip(),
-                       flags=_re.IGNORECASE)
-        task = task.strip() or "печать по заданию покупателя"
+                       flags=_re.IGNORECASE).strip()
+        if not task:
+            self.db.upsert("client_bot_drafts", {
+                "chat_id": chat, "step": "description", "data": "{}",
+                "created_at": now_iso(), "updated_at": now_iso()}, key="chat_id")
+            self._funnel(chat, "custom_started", row)
+            return ("Индивидуальная заявка — шаг 1 из 3. Опишите, что напечатать. "
+                    "Черновик сохранён; можно вернуться после перезапуска бота.")
+        return self._create_custom_order(chat, row, task)
+
+    def _create_custom_order(self, chat: str, row: dict, task: str,
+                             *, dimensions: str = "", purpose: str = "") -> str:
+        if self._current_update_id:
+            existing = self.db.one(
+                "SELECT o.* FROM client_orders l JOIN orders o ON o.id=l.order_id"
+                " WHERE l.chat_id=? AND l.update_id=? LIMIT 1",
+                (chat, self._current_update_id))
+            if existing:
+                return f"Эта заявка уже принята ✓ Номер — №{existing.get('number')}."
+        notes = "Заявка из клиентского бота (индивидуальная)"
+        if dimensions:
+            notes += f"\nРазмеры: {dimensions[:300]}"
+        if purpose:
+            notes += f"\nНазначение: {purpose[:300]}"
         order = self.manager.repo.save_order({
             "product": task[:120],
             "customer_name": row.get("name") or "Покупатель",
             "phone": row.get("phone") or "",
             "messenger": (f"tg:@{row.get('username')}" if row.get("username")
                           else f"tg:{chat}"),
-            "channel": "telegram",
-            "status": "new",
-            "qty": 1,
-            "notes": "Заявка из клиентского бота (индивидуальная)",
+            "channel": "telegram", "client_source": row.get("source") or "telegram",
+            "client_request_id": f"tg:{self._current_update_id}" if self._current_update_id else "",
+            "client_quote_status": "requested", "status": "new", "qty": 1,
+            "notes": notes,
         })
         number = order.get("number") or ""
-        self.db.execute(
-            "INSERT OR IGNORE INTO client_orders(chat_id,order_id,number,created_at)"
-            " VALUES(?,?,?,?)", (chat, order.get("id"), number, now_iso()))
+        self._link_order(chat, row, order, source="telegram")
         self._notified[(chat, order.get("id", ""))] = "new"
         self.db.add_event("lead", "Заявка из клиентского бота",
                           f"№{number} · {task[:80]}",
-                          data={"order_id": order.get("id"), "chat_id": chat})
+                          data={"order_id": order.get("id"), "chat_id": chat,
+                                "source": row.get("source") or "telegram"})
+        self._funnel(chat, "custom_order_created", row, order_id=order.get("id") or "")
         try:
             self.manager.notify_async(
                 f"🛎 Индивидуальная заявка из бота\n№{number} · {task[:200]}",
@@ -765,17 +1738,54 @@ class ClientBot:
                 f"{number}.\nДля расчёта пришлите сюда размеры (Д×Ш×В), "
                 "назначение и фото/эскиз. Мастер ответит с ценой и сроком.")
 
-    def _save_phone(self, chat: str, row: dict, text: str) -> str:
+    def _draft_reply(self, chat: str, row: dict, raw: str) -> tuple[str, dict | None]:
+        draft = self.db.one("SELECT * FROM client_bot_drafts WHERE chat_id=?", (chat,))
+        if not draft:
+            return "", None
+        try:
+            data = json.loads(draft.get("data") or "{}")
+        except (TypeError, ValueError):
+            data = {}
+        step = draft.get("step") or "description"
+        text = raw.strip()
+        if step == "description":
+            data["description"] = text[:500]
+            next_step = "dimensions"
+            answer = "Шаг 2 из 3. Укажите размеры или напишите «нет»."
+        elif step == "dimensions":
+            data["dimensions"] = text[:300]
+            next_step = "purpose"
+            answer = "Шаг 3 из 3. Для чего нужна деталь и какой материал предпочтительнее?"
+        else:
+            data["purpose"] = text[:300]
+            answer = self._create_custom_order(chat, row, data.get("description") or text,
+                                                dimensions=data.get("dimensions") or "",
+                                                purpose=data.get("purpose") or "")
+            self.db.execute("DELETE FROM client_bot_drafts WHERE chat_id=?", (chat,))
+            return answer, self._menu()
+        self.db.execute("UPDATE client_bot_drafts SET step=?,data=?,updated_at=? WHERE chat_id=?",
+                        (next_step, json.dumps(data, ensure_ascii=False), now_iso(), chat))
+        return answer, self._menu()
+
+    def _save_phone(self, chat: str, row: dict, text: str,
+                    *, verified: bool = False) -> str:
         match = _re.search(r"(\+?\d[\d\s()\-]{8,17}\d)", text)
         if not match:
             return ("Формат: «телефон +7 978 000-00-00» — или нажмите "
                     "«Отправить номер». По номеру найдутся заказы, "
                     "оформленные на полке и в переписке.")
         phone = _re.sub(r"[^\d+]", "", match.group(1))
-        self.db.execute("UPDATE client_chats SET phone=? WHERE chat_id=?",
-                        (phone, chat))
-        row["phone"] = phone  # та же сессия диалога уже видит заказы по телефону
-        return f"Телефон {phone} привязан. Напишите «мои заказы» — покажу всё."
+        self.db.execute("UPDATE client_chats SET phone=?,phone_verified=? WHERE chat_id=?",
+                        (phone, 1 if verified else 0, chat))
+        row["phone"] = phone
+        row["phone_verified"] = 1 if verified else 0
+        if verified:
+            self._funnel(chat, "phone_verified", row)
+            return f"Телефон {phone} привязан. Напишите «мои заказы» — покажу всё."
+        self._funnel(chat, "phone_submitted", row)
+        return (f"Номер {phone} сохранён, но заказы пока не привязаны: "
+                "для безопасной проверки нажмите «Отправить номер».\n"
+                "После этого напишите «мои заказы».")
 
     def _linked_orders(self, chat: str, row: dict) -> list[dict]:
         """Заказы чата: прямые ссылки + совпадение по телефону."""
@@ -787,7 +1797,7 @@ class ClientBot:
             if order:
                 orders[order["id"]] = order
         phone = str(row.get("phone") or "").strip()
-        if phone:
+        if phone and bool(num(row.get("phone_verified"))):
             # Телефоны в заказах пишут по-разному (+7…, 8…, с дефисами),
             # поэтому сравниваем последние 10 цифр в Python, а не через LIKE.
             digits = _re.sub(r"\D", "", phone)[-10:]
@@ -853,19 +1863,29 @@ class ClientBot:
         settings = self._settings()
         keys: list[list[dict]] = []
         extra: list[dict] = []
-        due = num(order.get("price")) - max(num(order.get("paid")),
-                                            num(order.get("prepaid")))
+        due = max(0.0, num(order.get("price")) - num(order.get("discount")) -
+                   max(num(order.get("paid")), num(order.get("prepaid"))))
         pay_info = str(settings.get("client_bot_pay_info") or "").strip()
-        if due > 0 and pay_info and not self._is_final(order):
+        pay_qr = str(settings.get("client_bot_pay_qr") or "").strip()
+        can_open_qr = pay_qr.startswith(("http://", "https://", "tg://"))
+        if due > 0 and (pay_info or can_open_qr) and not self._is_final(order):
             extra.append({"text": "💳 Оплатить", "callback_data":
                           f"pay:{order['id']}"})
         track = str(settings.get("client_bot_track_url") or "").strip()
         if track and order.get("number"):
+            token = self._track_token(order.get("id") or "")
             url = (track.rstrip("/") + "/track?number="
                    + urllib.parse.quote(str(order["number"]), safe=""))
+            if token:
+                url += "&token=" + urllib.parse.quote(token, safe="")
             extra.append({"text": "🔗 Статус онлайн", "url": url})
         if extra:
             keys.append(extra)
+        if str(order.get("client_quote_status") or "") in {"sent", "requested"} and num(order.get("price")) > 0:
+            keys.append([
+                {"text": "✅ Согласен", "callback_data": f"quote_yes:{order['id']}"},
+                {"text": "↩️ Обсудить", "callback_data": f"quote_no:{order['id']}"},
+            ])
         keys.append([{"text": "🛍 Каталог", "callback_data": "catalog"},
                      {"text": "📦 Мои заказы", "callback_data": "mine"}])
         return {"inline_keyboard": keys}
@@ -876,6 +1896,12 @@ class ClientBot:
                          for o in self._linked_orders(chat, row)):
             return order
         return None
+
+    def _payment_purpose(self, number: str) -> str:
+        purpose = str(self._settings().get("client_bot_payment_purpose") or "").strip()
+        purpose = purpose.replace("{номер заказа}", str(number or ""))
+        purpose = purpose.replace("{number}", str(number or ""))
+        return purpose or f"NOZZA {number}"
 
     def _pay_card(self, chat: str, row: dict,
                   order_id: str) -> tuple[str, dict | None]:
@@ -888,78 +1914,154 @@ class ClientBot:
         if not order:
             return ("Это не ваш заказ — оплата доступна в его карточке.",
                     self._menu())
-        pay_info = str(self._settings().get("client_bot_pay_info") or "").strip()
+        settings = self._settings()
+        pay_info = str(settings.get("client_bot_pay_info") or "").strip()
+        qr = str(settings.get("client_bot_pay_qr") or "").strip()
         if self._is_final(order):
             return (f"Заказ №{order.get('number')} уже закрыт — оплата не нужна.",
                     self._menu())
-        if not pay_info:
-            return ("Оплату принимаем при получении — мастер согласует "
-                    "способ при выдаче.", self._menu())
-        due = num(order.get("price")) - max(num(order.get("paid")),
-                                            num(order.get("prepaid")))
+        if not pay_info and not qr.startswith(("http://", "https://", "tg://")):
+            return ("Реквизиты оплаты ещё не настроены. Мастер согласует "
+                    "способ оплаты при выдаче.", self._menu())
+        due = max(0.0, num(order.get("price")) - num(order.get("discount")) -
+                   max(num(order.get("paid")), num(order.get("prepaid"))))
         number = order.get("number")
+        if due <= 0:
+            return "По этому заказу задолженности уже нет — повторная оплата не нужна.", self._menu()
+        purpose = self._payment_purpose(number)
+        pay_details = pay_info or "Откройте QR СБП кнопкой ниже."
         text = (f"💳 Заказ №{number} — к оплате {_money(due)}\n\n"
-                f"{pay_info}\n\nВ комментарии к переводу напишите: "
-                f"NOZZA {number}\nПосле перевода нажмите «✅ Я оплатил» — "
-                "мастер подтвердит получение.")
+                f"{pay_details}\n\nВ назначении перевода напишите: {purpose}\n"
+                "После перевода нажмите «✅ Я оплатил» — мастер сверит поступление "
+                "и подтвердит оплату вручную.")
         keys = {"inline_keyboard": [
             [{"text": "✅ Я оплатил", "callback_data": f"paid:{order['id']}"}],
-            [{"text": "⬅️ К заказу", "callback_data": f"status:{number}"}],
         ]}
+        qr = str(self._settings().get("client_bot_pay_qr") or "").strip()
+        if qr.startswith(("http://", "https://", "tg://")):
+            keys["inline_keyboard"].append([{"text": "▣ Открыть QR СБП", "url": qr}])
+        keys["inline_keyboard"].append(
+            [{"text": "⬅️ К заказу", "callback_data": f"status:{number}"}])
         return text, keys
 
     def _paid_notice(self, chat: str, row: dict,
                      order_id: str) -> tuple[str, dict | None]:
-        """Покупатель нажал «Я оплатил»: сверяет мастер, деньги пишет он же —
-        бот ничего не проводит по кассе, чтобы не выдумывать платежи."""
+        """Создать ручную заявку на сверку платежа, не проводя деньги автоматически."""
         order = self._own_order(chat, row, order_id)
         if not order:
             return "Это не ваш заказ.", self._menu()
         number = order.get("number")
-        due = num(order.get("price")) - max(num(order.get("paid")),
-                                            num(order.get("prepaid")))
+        due = max(0.0, num(order.get("price")) - num(order.get("discount")) -
+                   max(num(order.get("paid")), num(order.get("prepaid"))))
+        if due <= 0:
+            return "По этому заказу задолженности уже нет — повторное подтверждение не нужно.", self._menu()
+        request_id = f"tg:{self._current_update_id}" if self._current_update_id else uid("pay-intent")
+        existing = self.db.one(
+            "SELECT * FROM client_payment_intents WHERE order_id=? AND chat_id=?"
+            " AND status IN ('pending','confirmed') ORDER BY created_at DESC LIMIT 1",
+            (order_id, chat))
+        if existing:
+            if existing.get("status") == "confirmed":
+                return "Оплата уже подтверждена мастером ✓", self._menu()
+            return ("Сообщение уже передано мастеру ✓ Заявка на сверку ожидает "
+                    "ручного подтверждения."), self._menu()
+        intent_id = uid("payint")
+        purpose = self._payment_purpose(number)
+        try:
+            self.db.execute(
+                "INSERT INTO client_payment_intents"
+                "(id,order_id,chat_id,request_id,amount,currency,purpose,status,created_at,updated_at)"
+                " VALUES(?,?,?,?,?,'RUB',?,'pending',?,?)",
+                (intent_id, order_id, chat, request_id, round(due, 2), purpose,
+                 now_iso(), now_iso()))
+        except Exception:
+            # Гонка двух callback-активаций: уникальный pending intent победил.
+            existing = self.db.one(
+                "SELECT * FROM client_payment_intents WHERE order_id=? AND chat_id=?"
+                " AND status='pending' LIMIT 1", (order_id, chat))
+            if existing:
+                return "Сообщение уже передано мастеру ✓ Заявка на сверку ожидает ручного подтверждения.", self._menu()
+            raise
         try:
             self.manager.notify_async(
-                f"💳 Покупатель сообщил об оплате\n№{number} · "
-                f"{_money(max(0.0, due))}\nЧат {chat}\n"
-                f"Сверьте поступление: «оплата {round(max(0.0, due))} по {number}»",
-                critical=True)
+                f"💳 Покупатель сообщил об оплате\n№{number} · {_money(due)}\n"
+                f"Чат {chat} · заявка {intent_id}\n"
+                "Сверьте поступление и подтвердите в панели или командой «оплата подтвердить "
+                f"{number}»", critical=True)
         except Exception:
             pass
         self.db.add_event("lead", "Покупатель сообщил об оплате",
                           f"№{number}", data={"order_id": order["id"],
-                                              "chat_id": chat})
-        return ("Передал мастеру ✓ Подтвердим получение оплаты здесь же. "
-                "Статус: «мои заказы»."), self._menu()
+                                              "chat_id": chat, "intent_id": intent_id,
+                                              "amount": round(due, 2)})
+        self._funnel(chat, "payment_submitted", row, order_id=order_id,
+                     data={"intent_id": intent_id, "amount": round(due, 2)})
+        return ("Передал мастеру ✓ Заявка на сверку оплаты создана. "
+                "Подтвердим получение здесь же. Статус: «мои заказы»."), self._menu()
 
     # ------------------------------------------------------------ уведомления
     def _maybe_push_statuses(self) -> None:
-        """Сообщить покупателям об изменении статуса их заказов."""
+        """Сообщить покупателям об изменении статуса и согласованной цене."""
         if not bool(self._settings().get("client_bot_notify", True)):
             return
         links = self.db.query(
-            "SELECT l.chat_id, l.order_id FROM client_orders l"
-            " JOIN orders o ON o.id=l.order_id"
-            " WHERE o.status NOT IN (SELECT id FROM statuses WHERE is_final=1)"
-            "    OR o.updated_at >= datetime('now', '-2 days')")
+            "SELECT l.chat_id,l.order_id,l.last_notified_status,l.source,"
+            " c.status_notify,c.quiet_from,c.quiet_to,c.name chat_name"
+            " FROM client_orders l JOIN orders o ON o.id=l.order_id"
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+            " WHERE COALESCE(c.status_notify,1)=1"
+            " ORDER BY datetime(l.created_at) DESC LIMIT 500")
         for link in links:
             chat, order_id = link["chat_id"], link["order_id"]
             order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
             if not order:
                 continue
             status = str(order.get("status") or "")
-            if self._notified.get((chat, order_id)) == status:
-                continue
-            first_push = (chat, order_id) not in self._notified
-            self._notified[(chat, order_id)] = status
-            if first_push:
-                continue  # о создании заказа уже сказали при приёме
-            self._reply(chat, f"Заказ №{order.get('number')}"
-                              f" «{order.get('product')}» — "
-                              f"{self._status_label(order)}",
-                        self._menu())
-            self._log(chat, "", "→ push", f"№{order.get('number')}: {status}",
-                      kind="push")
+            last = str(link.get("last_notified_status") or "")
+            # Backfill памяти после обновления 9.3: первый проход только
+            # фиксирует текущий статус, чтобы не спамить старыми заказами.
+            if not last:
+                self.db.execute("UPDATE client_orders SET last_notified_status=? WHERE chat_id=? AND order_id=?",
+                                (status, chat, order_id))
+                self._notified[(chat, order_id)] = status
+            elif last != status:
+                if self._in_quiet_hours(link):
+                    continue
+                self._reply_keyed(chat, f"Заказ №{order.get('number')} «{order.get('product')}» — "
+                                      f"{self._status_label(order)}"
+                                      + (f"\nОжидаем к: {order.get('due')}" if order.get("due") else ""),
+                                  self._order_card_keyboard(order),
+                                  dedupe_key=f"status:{chat}:{order_id}:{status}")
+                self.db.execute("UPDATE client_orders SET last_notified_status=? WHERE chat_id=? AND order_id=?",
+                                (status, chat, order_id))
+                self._notified[(chat, order_id)] = status
+                self._log(chat, link.get("chat_name") or "", "",
+                          f"№{order.get('number')}: {status}", kind="push", direction="out",
+                          unread=0, order_id=order_id, source=link.get("source") or "")
+            if status == "ready" and not order.get("client_ready_at"):
+                self.db.execute("UPDATE orders SET client_ready_at=? WHERE id=?", (now_iso(), order_id))
+            # Для индивидуальной заявки цена появляется позже: уведомить один
+            # раз, не смешивая это с обычной сменой статуса.
+            if (str(order.get("client_quote_status") or "") == "requested"
+                    and num(order.get("price")) > 0
+                    and not str(order.get("client_quote_sent_at") or "")):
+                if self._in_quiet_hours(link):
+                    continue
+                quote = (f"По заявке №{order.get('number')} мастер согласовал цену: "
+                         f"{_money(num(order.get('price')))}"
+                         + (f"\nСрок: {order.get('due')}" if order.get("due") else "")
+                         + "\nЕсли всё подходит, ответьте «да» мастеру в чате.")
+                quote_buttons = self._order_card_keyboard(order)
+                quote_buttons.setdefault("inline_keyboard", []).insert(0, [
+                    {"text": "✅ Согласен", "callback_data": f"quote_yes:{order_id}"},
+                    {"text": "↩️ Обсудить", "callback_data": f"quote_no:{order_id}"},
+                ])
+                self._reply_keyed(chat, quote, quote_buttons,
+                                  dedupe_key=f"quote:{chat}:{order_id}:{order.get('client_quote_version') or 0}")
+                self.db.execute("UPDATE orders SET client_quote_sent_at=?,client_quote_status='sent' WHERE id=?",
+                                (now_iso(), order_id))
+                self._funnel(chat, "quote_sent", source=link.get("source") or "telegram",
+                             order_id=order_id, data={"amount": num(order.get("price"))})
 
     def _maybe_ask_reviews(self) -> None:
         """Через 2 дня после выдачи — спросить отзыв (один раз на заказ).
@@ -970,12 +2072,15 @@ class ClientBot:
         if not bool(self._settings().get("client_bot_review", True)):
             return
         links = self.db.query(
-            "SELECT l.chat_id, l.order_id FROM client_orders l"
+            "SELECT l.chat_id, l.order_id, c.quiet_from, c.quiet_to FROM client_orders l"
             " JOIN orders o ON o.id=l.order_id"
-            " WHERE o.status IN (SELECT id FROM statuses WHERE is_final=1)"
-            "   AND o.updated_at <= datetime('now', '-2 days')")
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+            " WHERE COALESCE(o.client_delivered_at,'')!=''"
+            "   AND datetime(replace(o.client_delivered_at,'T',' ')) <= datetime('now', '-2 days')")
         for link in links:
             chat, order_id = link["chat_id"], link["order_id"]
+            if self._in_quiet_hours(link):
+                continue
             if self.db.one("SELECT 1 FROM client_reviews"
                            " WHERE order_id=? AND chat_id=?", (order_id, chat)):
                 continue
@@ -983,21 +2088,22 @@ class ClientBot:
             if not order:
                 continue
             self.db.execute(
-                "INSERT OR IGNORE INTO client_reviews(order_id,chat_id,asked_at)"
-                " VALUES(?,?,?)", (order_id, chat, now_iso()))
-            self._reply(chat,
-                        f"Заказ №{order.get('number')} выдан. Всё ли хорошо?",
-                        _keyboard([("👍 Всё хорошо", f"review:{order_id}:good"),
-                                   ("👎 Есть проблема", f"review:{order_id}:bad")]))
+                "INSERT OR IGNORE INTO client_reviews(order_id,chat_id,asked_at,state,sent_at)"
+                " VALUES(?,?,?,'asked',?)", (order_id, chat, now_iso(), now_iso()))
+            self._reply_keyed(
+                chat, f"Заказ №{order.get('number')} выдан. Всё ли хорошо?",
+                _keyboard([("👍 Всё хорошо", f"review:{order_id}:good"),
+                           ("👎 Есть проблема", f"review:{order_id}:bad")]),
+                dedupe_key=f"review:{chat}:{order_id}")
             self._log(chat, "", "→ review", f"№{order.get('number')}: вопрос",
-                      kind="push")
+                      kind="push", direction="out", unread=0, order_id=order_id)
 
     def _review_rating(self, chat: str, row: dict, order_id: str,
                        rating: str) -> tuple[str, dict | None]:
         self.db.execute(
-            "UPDATE client_reviews SET rating=?, created_at=?"
+            "UPDATE client_reviews SET rating=?, state=?, created_at=?"
             " WHERE order_id=? AND chat_id=?",
-            (rating, now_iso(), order_id, chat))
+            (rating, "needs_attention" if rating == "bad" else "rated", now_iso(), order_id, chat))
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         number = (order or {}).get("number") or ""
         if rating == "good":
@@ -1018,7 +2124,7 @@ class ClientBot:
                         text: str) -> str:
         self._await_problem.pop(chat, None)
         self.db.execute(
-            "UPDATE client_reviews SET comment=? WHERE order_id=? AND chat_id=?",
+            "UPDATE client_reviews SET comment=?,state='needs_attention' WHERE order_id=? AND chat_id=?",
             (text[:1000], order_id, chat))
         order = self.db.one("SELECT number FROM orders WHERE id=?", (order_id,))
         number = (order or {}).get("number") or ""
@@ -1039,24 +2145,29 @@ class ClientBot:
         if days <= 0:
             return
         links = self.db.query(
-            "SELECT l.chat_id, l.order_id FROM client_orders l"
+            "SELECT l.chat_id, l.order_id, c.quiet_from, c.quiet_to FROM client_orders l"
             " JOIN orders o ON o.id=l.order_id"
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
             " WHERE o.status='ready' AND COALESCE(l.reminded_at,'')=''"
-            f"   AND o.updated_at <= datetime('now', '-{days} days')")
+            "   AND COALESCE(c.status_notify,1)=1"
+            f"   AND datetime(replace(o.updated_at,'T',' ')) <= datetime('now', '-{days} days')")
         for link in links:
             chat, order_id = link["chat_id"], link["order_id"]
             order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
             if not order:
                 continue
+            if self._in_quiet_hours(link):
+                continue
             self.db.execute("UPDATE client_orders SET reminded_at=?"
                             " WHERE chat_id=? AND order_id=?",
                             (now_iso(), chat, order_id))
-            self._reply(chat, f"Заказ №{order.get('number')} "
-                              f"«{order.get('product')}» готов и ждёт вас. "
-                              "Если забрали — извините за беспокойство 🙂",
-                        self._menu())
+            self._reply_keyed(chat, f"Заказ №{order.get('number')} "
+                                  f"«{order.get('product')}» готов и ждёт вас. "
+                                  "Если забрали — извините за беспокойство 🙂",
+                                  self._menu(),
+                                  dedupe_key=f"pickup:{chat}:{order_id}")
             self._log(chat, "", "→ pickup", f"№{order.get('number')}: ждёт",
-                      kind="push")
+                      kind="push", direction="out", unread=0, order_id=order_id)
 
     # ------------------------------------------------------------- для панели
     def stats(self) -> dict:
@@ -1076,8 +2187,36 @@ class ClientBot:
                 "SELECT COUNT(*) n FROM client_reviews WHERE rating='good'"),
             "reviews_bad": count(
                 "SELECT COUNT(*) n FROM client_reviews WHERE rating='bad'"),
+            "unread": count("SELECT COUNT(*) n FROM client_bot_log WHERE direction='in' AND unread=1"),
+            "pending_payments": count("SELECT COUNT(*) n FROM client_payment_intents WHERE status='pending'"),
+            "funnel_events": count("SELECT COUNT(*) n FROM client_bot_funnel"),
+            "outbox_pending": count("SELECT COUNT(*) n FROM client_bot_outbox WHERE state='pending'"),
             "last_poll": self.last_poll,
         }
+
+    def analytics(self, days: int = 30) -> dict:
+        """Локальная воронка Telegram: источники, события и конверсия."""
+        days = max(1, min(int(days or 30), 3650))
+        # ISO-время в SQLite сравнивается лексикографически; Python timestamp
+        # нужен только как безопасный fallback для старых записей без timezone.
+        from datetime import timedelta
+        at = (datetime.now() - timedelta(days=days)).isoformat()
+        events = self.db.query(
+            "SELECT event,COUNT(*) count FROM client_bot_funnel WHERE at>=?"
+            " GROUP BY event ORDER BY count DESC", (at,))
+        sources = self.db.query(
+            "SELECT COALESCE(NULLIF(source,''),'direct') source,COUNT(DISTINCT chat_id) chats,"
+            " SUM(CASE WHEN event IN ('order_created','custom_order_created','photo_order','file_order') THEN 1 ELSE 0 END) orders"
+            " FROM client_bot_funnel WHERE at>=? GROUP BY source ORDER BY chats DESC", (at,))
+        chats = count = 0
+        try:
+            chats = int(num((self.db.one("SELECT COUNT(DISTINCT chat_id) n FROM client_bot_funnel WHERE at>=?", (at,)) or {}).get("n")))
+            count = int(num((self.db.one("SELECT COUNT(DISTINCT order_id) n FROM client_bot_funnel WHERE at>=? AND order_id<>''", (at,)) or {}).get("n")))
+        except Exception:
+            pass
+        return {"days": days, "events": events, "sources": sources,
+                "unique_chats": chats, "orders": count,
+                "conversion": round(count / chats * 100, 1) if chats else 0.0}
 
     def me(self) -> dict:
         """Проверка токена: getMe — панель показывает имя бота."""

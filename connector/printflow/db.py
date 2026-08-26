@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -35,15 +35,52 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # печатная группа мелких товаров: позиции с одинаковой группой
         # сворачиваются в одну строку в печатных формах (схема 13)
         ("print_group", "TEXT DEFAULT ''"),
+        # публикация во внешней витрине/клиентском Telegram-боте
+        ("client_bot_published", "INTEGER DEFAULT 1"),
+        ("client_bot_description", "TEXT DEFAULT ''"),
     ],
     "client_orders": [
         # отметка о напоминании «заказ ждёт на полке» (9.3.2): пусто — не писали
         ("reminded_at", "TEXT DEFAULT ''"),
+        ("update_id", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT ''"),
+        ("last_notified_status", "TEXT DEFAULT ''"),
     ],
     "batches": [
         # смешанная плита: разные товары на одном столе, JSON-состав
         # [{"nom_id": "...", "qty_per_plate": 3, "grams": 40, "hours": 1.2}]
         ("items", "TEXT DEFAULT ''"),
+    ],
+    "client_chats": [
+        ("tg_user_id", "TEXT DEFAULT ''"),
+        ("customer_id", "TEXT DEFAULT ''"),
+        ("phone_verified", "INTEGER DEFAULT 0"),
+        ("source", "TEXT DEFAULT ''"),
+        ("status_notify", "INTEGER DEFAULT 1"),
+        ("marketing_opt_in", "INTEGER DEFAULT 0"),
+        ("quiet_from", "TEXT DEFAULT ''"),
+        ("quiet_to", "TEXT DEFAULT ''"),
+        ("inbox_status", "TEXT DEFAULT 'open'"),
+        ("assigned_to", "TEXT DEFAULT ''"),
+        ("last_error", "TEXT DEFAULT ''"),
+    ],
+    "client_bot_log": [
+        ("update_id", "TEXT DEFAULT ''"),
+        ("direction", "TEXT DEFAULT 'in'"),
+        ("event", "TEXT DEFAULT ''"),
+        ("order_id", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT ''"),
+        ("unread", "INTEGER DEFAULT 0"),
+        ("operator", "TEXT DEFAULT ''"),
+    ],
+    "client_reviews": [
+        ("state", "TEXT DEFAULT 'new'"),
+        ("sent_at", "TEXT DEFAULT ''"),
+        ("resolved_at", "TEXT DEFAULT ''"),
+        ("operator_note", "TEXT DEFAULT ''"),
+    ],
+    "order_items": [
+        ("variant_id", "TEXT DEFAULT ''"),
     ],
     "printers": [
         ("camera_demo", "INTEGER DEFAULT 0"),      # показывать демо-поток без принтера
@@ -113,6 +150,17 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
         ("items_override", "INTEGER DEFAULT 0"),  # явное переопределение состава
         ("gift", "INTEGER DEFAULT 0"),       # подарочный режим (идея 33): цена скрыта
+        ("client_source", "TEXT DEFAULT ''"),
+        ("client_request_id", "TEXT DEFAULT ''"),
+        ("client_track_token_hash", "TEXT DEFAULT ''"),
+        ("client_track_token_at", "TEXT DEFAULT ''"),
+        ("client_quote_status", "TEXT DEFAULT ''"),
+        ("client_quote_version", "INTEGER DEFAULT 0"),
+        ("client_quote_sent_at", "TEXT DEFAULT ''"),
+        ("client_quote_accepted_at", "TEXT DEFAULT ''"),
+        ("client_variant_id", "TEXT DEFAULT ''"),
+        ("client_ready_at", "TEXT DEFAULT ''"),
+        ("client_delivered_at", "TEXT DEFAULT ''"),
     ],
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
@@ -156,6 +204,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("reprint_job_id", "TEXT DEFAULT ''"),
     ],
     "customers": [
+        ("tg_user_id", "TEXT DEFAULT ''"),
         ("kind", "TEXT DEFAULT 'person'"),   # person | company
         ("inn", "TEXT DEFAULT ''"),
         ("segment", "TEXT DEFAULT ''"),
@@ -244,21 +293,35 @@ CREATE TABLE IF NOT EXISTS staff_invites (
     created_at TEXT
 );
 
--- Клиентский бот: чаты покупателей (9.3).
+-- Клиентский бот: чаты покупателей (9.4).
 CREATE TABLE IF NOT EXISTS client_chats (
     chat_id TEXT PRIMARY KEY,
     name TEXT DEFAULT '',
     username TEXT DEFAULT '',
+    tg_user_id TEXT DEFAULT '',
     phone TEXT DEFAULT '',
+    phone_verified INTEGER DEFAULT 0,
+    customer_id TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    status_notify INTEGER DEFAULT 1,
+    marketing_opt_in INTEGER DEFAULT 0,
+    quiet_from TEXT DEFAULT '',
+    quiet_to TEXT DEFAULT '',
+    inbox_status TEXT DEFAULT 'open',
+    assigned_to TEXT DEFAULT '',
+    last_error TEXT DEFAULT '',
     created_at TEXT,
     last_seen TEXT
 );
-
 -- Связь «чат ↔ заказ» для отслеживания и уведомлений о статусе.
 CREATE TABLE IF NOT EXISTS client_orders (
     chat_id TEXT DEFAULT '',
     order_id TEXT DEFAULT '',
     number TEXT DEFAULT '',
+    update_id TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    reminded_at TEXT DEFAULT '',
+    last_notified_status TEXT DEFAULT '',
     created_at TEXT,
     PRIMARY KEY (chat_id, order_id)
 );
@@ -271,19 +334,160 @@ CREATE TABLE IF NOT EXISTS client_bot_log (
     name TEXT DEFAULT '',
     text TEXT DEFAULT '',
     answer TEXT DEFAULT '',
-    kind TEXT DEFAULT 'message'      -- message | order | status | push | join | answer | paid
+    kind TEXT DEFAULT 'message',      -- message | order | status | push | join | answer | paid
+    update_id TEXT DEFAULT '',
+    direction TEXT DEFAULT 'in',      -- in | out | system
+    event TEXT DEFAULT '',
+    order_id TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    unread INTEGER DEFAULT 0,
+    operator TEXT DEFAULT ''
 );
 
--- Отзывы покупателей после выдачи (9.3.2): спрашиваем один раз, рейтинг —
--- кнопкой, комментарий — следующим сообщением.
+-- Отзывы покупателей после выдачи: рейтинг — кнопкой, комментарий — следующим
+-- сообщением. Отдельная таблица остаётся совместимой с ручным customer_feedback.
 CREATE TABLE IF NOT EXISTS client_reviews (
     order_id TEXT,
     chat_id TEXT DEFAULT '',
     asked_at TEXT,
     rating TEXT DEFAULT '',          -- good | bad | ''
     comment TEXT DEFAULT '',
+    state TEXT DEFAULT 'new',
+    sent_at TEXT DEFAULT '',
+    resolved_at TEXT DEFAULT '',
+    operator_note TEXT DEFAULT '',
     created_at TEXT,
     PRIMARY KEY (order_id, chat_id)
+);
+
+-- Реестр обработанных Telegram update_id. Удаляет повторную доставку после
+-- retry сети и позволяет продолжить polling после перезапуска.
+CREATE TABLE IF NOT EXISTS client_bot_updates (
+    update_id TEXT PRIMARY KEY,
+    chat_id TEXT DEFAULT '',
+    kind TEXT DEFAULT '',
+    state TEXT DEFAULT 'processing', -- processing | done | failed
+    received_at TEXT,
+    processed_at TEXT DEFAULT '',
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_client_updates_state ON client_bot_updates(state, update_id);
+
+-- Дедупликация обновлений рабочего Telegram-бота. Отдельная таблица не
+-- смешивает внутренние команды и клиентские сообщения.
+CREATE TABLE IF NOT EXISTS telegram_bot_updates (
+    update_id TEXT PRIMARY KEY,
+    state TEXT DEFAULT 'processing', -- processing | done | failed
+    received_at TEXT,
+    processed_at TEXT DEFAULT '',
+    error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_updates_state ON telegram_bot_updates(state, update_id);
+
+-- Избранное покупателя — отдельная от заказа сущность, не раскрывает каталог
+-- другим чатам.
+CREATE TABLE IF NOT EXISTS client_wishlist (
+    chat_id TEXT,
+    nom_id TEXT,
+    created_at TEXT,
+    PRIMARY KEY (chat_id, nom_id)
+);
+
+-- Корзина покупателя: черновик переживает перезапуск и не создаёт заказ до
+-- явного подтверждения «Оформить заявку».
+CREATE TABLE IF NOT EXISTS client_bot_cart (
+    chat_id TEXT,
+    nom_id TEXT,
+    variant_id TEXT DEFAULT '',
+    qty REAL DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (chat_id, nom_id, variant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_client_cart_chat ON client_bot_cart(chat_id, updated_at);
+
+-- Черновик мастера индивидуальной заявки: переживает перезапуск бота.
+CREATE TABLE IF NOT EXISTS client_bot_drafts (
+    chat_id TEXT PRIMARY KEY,
+    step TEXT DEFAULT '',
+    data TEXT DEFAULT '{}',
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- Durable outbox: Telegram может быть недоступен, но сообщение не теряется.
+CREATE TABLE IF NOT EXISTS client_bot_outbox (
+    id TEXT PRIMARY KEY,
+    dedupe_key TEXT UNIQUE,
+    chat_id TEXT DEFAULT '',
+    method TEXT DEFAULT 'sendMessage',
+    payload TEXT DEFAULT '{}',
+    file_path TEXT DEFAULT '',
+    state TEXT DEFAULT 'pending',   -- pending | sending | sent | failed
+    attempts INTEGER DEFAULT 0,
+    available_at TEXT,
+    last_error TEXT DEFAULT '',
+    created_at TEXT,
+    sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_client_outbox_due
+    ON client_bot_outbox(state, available_at, id);
+
+-- Подтверждение ручной оплаты: заявка клиента отдельно от кассового платежа.
+CREATE TABLE IF NOT EXISTS client_payment_intents (
+    id TEXT PRIMARY KEY,
+    order_id TEXT DEFAULT '',
+    chat_id TEXT DEFAULT '',
+    request_id TEXT UNIQUE,
+    amount REAL DEFAULT 0,
+    currency TEXT DEFAULT 'RUB',
+    purpose TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending', -- pending | confirmed | rejected
+    client_note TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT,
+    confirmed_at TEXT DEFAULT '',
+    confirmed_by TEXT DEFAULT '',
+    payment_id TEXT DEFAULT '',
+    reject_reason TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_client_payment_order
+    ON client_payment_intents(order_id, status, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_client_payment_pending
+    ON client_payment_intents(order_id, chat_id) WHERE status='pending';
+
+-- UTM/deep-link и продуктовая воронка без внешних сервисов.
+CREATE TABLE IF NOT EXISTS client_bot_funnel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT,
+    chat_id TEXT DEFAULT '',
+    event TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    order_id TEXT DEFAULT '',
+    nom_id TEXT DEFAULT '',
+    data TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_client_funnel_at ON client_bot_funnel(at, event, source);
+
+-- Durable-идемпотентность рассылок: повтор запроса панели возвращает тот же
+-- результат и не создаёт вторую пачку сообщений.
+CREATE TABLE IF NOT EXISTS client_broadcasts (
+    request_id TEXT PRIMARY KEY,
+    text TEXT DEFAULT '',
+    audience TEXT DEFAULT 'opt_in',
+    response TEXT DEFAULT '{}',
+    created_at TEXT,
+    updated_at TEXT
+);
+
+-- Универсальная идемпотентность публичных заявок.
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    request_id TEXT PRIMARY KEY,
+    kind TEXT DEFAULT '',
+    entity_id TEXT DEFAULT '',
+    response TEXT DEFAULT '{}',
+    created_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS printers (
@@ -327,6 +531,7 @@ CREATE TABLE IF NOT EXISTS customers (
     name TEXT DEFAULT '',
     phone TEXT DEFAULT '',
     messenger TEXT DEFAULT '',
+    tg_user_id TEXT DEFAULT '',
     company TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     created_at TEXT
@@ -365,7 +570,18 @@ CREATE TABLE IF NOT EXISTS orders (
     actual_hours REAL DEFAULT 0,
     actual_cost REAL DEFAULT 0,
     auto_cost INTEGER DEFAULT 1,
-    items_override INTEGER DEFAULT 0
+    items_override INTEGER DEFAULT 0,
+    client_variant_id TEXT DEFAULT '',
+    client_source TEXT DEFAULT '',
+    client_request_id TEXT DEFAULT '',
+    client_track_token_hash TEXT DEFAULT '',
+    client_track_token_at TEXT DEFAULT '',
+    client_quote_status TEXT DEFAULT '',
+    client_quote_version INTEGER DEFAULT 0,
+    client_quote_sent_at TEXT DEFAULT '',
+    client_quote_accepted_at TEXT DEFAULT '',
+    client_ready_at TEXT DEFAULT '',
+    client_delivered_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(number);
@@ -380,6 +596,7 @@ CREATE TABLE IF NOT EXISTS order_items (
     price REAL DEFAULT 0,        -- цена за штуку
     grams REAL DEFAULT 0,        -- норматив пластика на штуку (из базы)
     hours REAL DEFAULT 0,        -- норматив печати на штуку (из базы)
+    variant_id TEXT DEFAULT '',
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
@@ -1374,6 +1591,52 @@ class Database:
                 )
             # Индексы создаём после догоняющего ALTER: у старой базы ключевых
             # колонок ещё не было во время первоначального executescript.
+            # Новые индексы создаём только после ALTER TABLE: старые базы
+            # приходят сюда без колонок 9.4, а executescript(SCHEMA) уже завершён.
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_chats_tg_user"
+                " ON client_chats(tg_user_id)"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_orders_update"
+                " ON client_orders(chat_id, update_id) WHERE update_id<>''"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_log_chat"
+                " ON client_bot_log(chat_id, id DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_client_log_inbox"
+                " ON client_bot_log(unread, direction, id DESC)"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_order_request"
+                " ON orders(client_request_id) WHERE client_request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_payment_request"
+                " ON client_payment_intents(request_id) WHERE request_id<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_payment_pending"
+                " ON client_payment_intents(order_id, chat_id) WHERE status='pending'"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_idempotency_request"
+                " ON idempotency_keys(request_id)"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_bot_update"
+                " ON client_bot_updates(update_id)"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_outbox_dedupe"
+                " ON client_bot_outbox(dedupe_key) WHERE dedupe_key<>''"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_client_wishlist"
+                " ON client_wishlist(chat_id, nom_id)"
+            )
             self.conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_pay_request"
                 " ON payments(request_id) WHERE request_id<>''"
