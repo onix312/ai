@@ -17,11 +17,14 @@ polling, как и внутренний: ни белого IP, ни пробро
 • «телефон +7…» или кнопка «Отправить номер» — привязать телефон, чтобы
   видеть заказы с полки и Авито;
 • «вопрос-ответ» — материалы, сроки и как заказать;
+• «оператор» / кнопка «Связаться с оператором» — покупатель зовёт человека;
 • уведомления: статус изменился — бот напишет сам; после выдачи спросит
   отзыв, а «готовый» заказ мягко напомнит о себе, если его не забрали.
 
 Вопросы мимо команд не теряются: мастер получает уведомление и отвечает
-из внутреннего бота командой «кответ <chat_id> <текст>».
+из внутреннего бота командой «кответ <chat_id> <текст>». Ответ покупателя
+на сообщение оператора не считается «не понял»: он уходит в inbox мастеру
+как продолжение диалога, а не как новая команда.
 
 Диалоги пишутся в client_bot_log и видны на вкладке «Клиент-бот» в панели.
 Локальные шаблоны ответов мастер редактирует там же; выбранный шаблон
@@ -57,6 +60,7 @@ HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 • мои заказы — статусы ваших заказов
 • статус 1001 — статус заказа по номеру
 • телефон +7… — привязать телефон к заказам с полки
+• оператор — связаться с мастерской, ответит человек
 • вопрос-ответ — материалы, сроки, как заказать
 • помощь — это сообщение
 
@@ -124,6 +128,7 @@ class ClientBot:
         # {chat: (order_id, до какого времени)}
         self._await_problem: dict[str, tuple[str, float]] = {}
         self._bot_username = ""      # @username бота, для кнопки «Поделиться»
+        self._bot_user_id_cache = ""  # числовой id бота (getMe), для проверки ответов
         self._thread = threading.Thread(target=self._loop, name="pf-client-bot",
                                         daemon=True)
         self._thread.start()
@@ -689,7 +694,9 @@ class ClientBot:
                 elif message.get("document"):
                     answer, buttons = self._document_reply(chat, row, message, caption)
                 elif text:
-                    answer, buttons = self._dispatch(chat, row, text)
+                    answer, buttons = self._dispatch(
+                        chat, row, text,
+                        reply=self._is_reply_to_operator(message))
                 else:
                     answer, buttons = self._no_text_reply(chat, row, message)
                 self._reply(chat, answer, buttons)
@@ -900,6 +907,28 @@ class ClientBot:
                 return label
         return "сообщение"
 
+    def _bot_user_id(self) -> str:
+        """Числовой id клиентского бота (getMe), кэшируется на процесс."""
+        if not self._bot_user_id_cache:
+            me = self._call("getMe", {}, timeout=10)
+            self._bot_user_id_cache = str((me.get("result") or {}).get("id") or "")
+        return self._bot_user_id_cache
+
+    def _is_reply_to_operator(self, message: dict) -> bool:
+        """Покупатель отвечает на сообщение бота (т.е. на ответ оператора).
+
+        У Telegram сообщения бота помечены ``from.is_bot``; числовой id бота —
+        запасной способ, когда поле is_bot недоступно (редкие клиенты).
+        """
+        replied = message.get("reply_to_message") or {}
+        if not replied:
+            return False
+        sender = replied.get("from") or {}
+        if sender.get("is_bot"):
+            return True
+        bot_id = self._bot_user_id()
+        return bool(bot_id) and str(sender.get("id") or "") == bot_id
+
     def _handle_callback(self, callback: dict) -> None:
         message = callback.get("message") or {}
         chat = str((message.get("chat") or {}).get("id", ""))
@@ -991,6 +1020,8 @@ class ClientBot:
             return self.text_faq(), self._menu()
         if data == "help":
             return HELP, self._menu()
+        if data == "operator":
+            return self._contact_operator(chat, row), self._menu()
         return "Не понял кнопку — напишите «помощь».", self._menu()
 
     def _menu(self) -> dict:
@@ -999,6 +1030,7 @@ class ClientBot:
             [("🛒 Корзина", "cart"), ("💛 Избранное", "wishlist")],
             [("🔔 Статусы", "notify"), ("📣 Рассылка", "marketing")],
             [("❓ Вопрос-ответ", "faq"), ("❔ Помощь", "help")],
+            [("👤 Связаться с оператором", "operator")],
         )
 
     def _contact_keyboard(self) -> dict:
@@ -1008,9 +1040,14 @@ class ClientBot:
                                "request_contact": True}]],
                 "resize_keyboard": True, "one_time_keyboard": True}
 
-    def _dispatch(self, chat: str, row: dict, raw: str) -> tuple[str, dict | None]:
+    def _dispatch(self, chat: str, row: dict, raw: str,
+                  *, reply: bool = False) -> tuple[str, dict | None]:
         """Разбор текстовой команды. Возвращает текст и кнопки; отправляет
-        только вызывающий (_handle) — одна точка отправки вместо пяти."""
+        только вызывающий (_handle) — одна точка отправки вместо пяти.
+
+        ``reply=True`` — покупатель отвечает на сообщение оператора: такое
+        сообщение не считается «не понял», а уходит мастеру как диалог.
+        """
         text = raw.lower().lstrip("/").replace("ё", "е")
         text = _re.sub(r"^nozza\S*\s+", "", text).strip()
         word = text.split()[0] if text else ""
@@ -1040,7 +1077,8 @@ class ClientBot:
                         "order", "телефон", "phone", "номер", "faq", "вопрос", "вопросы",
                         "вопрос-ответ", "избранное", "wishlist", "любимое", "уведомления",
                         "уведомление", "рассылка", "отписаться", "корзина", "cart",
-                        "оформить", "checkout"):
+                        "оформить", "checkout", "оператор", "оператора", "человек",
+                        "связаться", "связь", "контакт", "поддержка"):
             draft_answer, draft_buttons = self._draft_reply(chat, row, raw)
             if draft_answer:
                 return draft_answer, draft_buttons
@@ -1089,6 +1127,9 @@ class ClientBot:
             # это одно касание вместо набора номера
             buttons = self._menu() if row.get("phone") else self._contact_keyboard()
             return answer, buttons
+        if word in ("оператор", "оператора", "человек", "связаться", "связь",
+                    "контакт", "поддержка"):
+            return self._contact_operator(chat, row), self._menu()
         contact = str(self._settings().get("company_name", "NOZZA") or "NOZZA")
         # Ждём описание проблемы после оценки «не очень»? Это не «не понял»,
         # а продолжение отзыва — сохраняем комментарий и передаём мастеру.
@@ -1097,6 +1138,10 @@ class ClientBot:
             return self._review_comment(chat, row, pending[0], raw), self._menu()
         if pending:
             self._await_problem.pop(chat, None)
+        # Ответ на сообщение оператора — это диалог, а не «не понял»: не пугаем
+        # покупателя шаблоном и сразу передаём реплику мастеру в inbox.
+        if reply:
+            return self._operator_reply(chat, row, raw), self._menu()
         answer = ("Не понял сообщение. Напишите «помощь» — покажу, что я умею. "
                   f"Мастерская {contact} ответит и без команд.")
         self._alert_master(chat, row, raw)
@@ -1119,6 +1164,38 @@ class ClientBot:
                 f"«{text[:300]}»\nОтветить: кответ {chat} <текст>")
         except Exception:
             pass
+
+    def _contact_operator(self, chat: str, row: dict) -> str:
+        """«Оператор» / кнопка связи: явный запрос человека — будим команду.
+
+        В отличие от случайной болтовни (_alert_master), явная просьба связаться
+        не троттлится: покупатель сам нажал кнопку и ждёт ответа.
+        """
+        name = row.get("name") or "Без имени"
+        self._funnel(chat, "contact_operator", row)
+        try:
+            self.manager.notify_async(
+                f"👤 Покупатель просит связаться с оператором\n"
+                f"{name} · чат {chat}\nОтветить: кответ {chat} <текст>",
+                critical=True)
+        except Exception:
+            pass
+        return ("Передал мастерской ✓ Оператор ответит в этом чате. Пока можете "
+                "посмотреть «каталог», задать «вопрос-ответ» или просто написать "
+                "вопрос текстом — он не потеряется.")
+
+    def _operator_reply(self, chat: str, row: dict, text: str) -> str:
+        """Ответ покупателя на сообщение оператора: сразу мастеру, без шаблона."""
+        name = row.get("name") or "Без имени"
+        self._funnel(chat, "operator_reply", row)
+        try:
+            self.manager.notify_async(
+                f"💬 Ответ покупателя оператору\n{name} · чат {chat}\n"
+                f"«{str(text)[:300]}»\nОтветить: кответ {chat} <текст>")
+        except Exception:
+            pass
+        return ("Передал ваш ответ оператору ✓ Ответит в этом чате. "
+                "Пока могу показать «каталог» или «вопрос-ответ».")
 
     # -------------------------------------------------------------- тексты
     def _toggle_wishlist(self, chat: str, nom_id: str) -> str:
@@ -1868,9 +1945,15 @@ class ClientBot:
         pay_info = str(settings.get("client_bot_pay_info") or "").strip()
         pay_qr = str(settings.get("client_bot_pay_qr") or "").strip()
         can_open_qr = pay_qr.startswith(("http://", "https://", "tg://"))
-        if due > 0 and (pay_info or can_open_qr) and not self._is_final(order):
-            extra.append({"text": "💳 Оплатить", "callback_data":
-                          f"pay:{order['id']}"})
+        if not self._is_final(order):
+            # В статусе «Ждём предоплату» кнопка показывается всегда — покупатель
+            # должен видеть способы оплаты, даже если реквизиты ещё настраивают.
+            if str(order.get("status") or "") == "prepay":
+                extra.append({"text": "💳 Способы оплаты", "callback_data":
+                              f"pay:{order['id']}"})
+            elif due > 0 and (pay_info or can_open_qr):
+                extra.append({"text": "💳 Оплатить", "callback_data":
+                              f"pay:{order['id']}"})
         track = str(settings.get("client_bot_track_url") or "").strip()
         if track and order.get("number"):
             token = self._track_token(order.get("id") or "")
@@ -1920,17 +2003,27 @@ class ClientBot:
         if self._is_final(order):
             return (f"Заказ №{order.get('number')} уже закрыт — оплата не нужна.",
                     self._menu())
+        number = order.get("number")
+        is_prepay = str(order.get("status") or "") == "prepay"
         if not pay_info and not qr.startswith(("http://", "https://", "tg://")):
+            if is_prepay:
+                return (f"Реквизиты предоплаты по заказу №{number} ещё не "
+                        "настроены. Мастер напишет способ оплаты в этом чате.",
+                        self._menu())
             return ("Реквизиты оплаты ещё не настроены. Мастер согласует "
                     "способ оплаты при выдаче.", self._menu())
         due = max(0.0, num(order.get("price")) - num(order.get("discount")) -
                    max(num(order.get("paid")), num(order.get("prepaid"))))
-        number = order.get("number")
         if due <= 0:
+            if is_prepay:
+                return (f"Сумма предоплаты по заказу №{number} уточняется — "
+                        "мастер напишет реквизиты в этом чате.", self._menu())
             return "По этому заказу задолженности уже нет — повторная оплата не нужна.", self._menu()
         purpose = self._payment_purpose(number)
         pay_details = pay_info or "Откройте QR СБП кнопкой ниже."
-        text = (f"💳 Заказ №{number} — к оплате {_money(due)}\n\n"
+        title = (f"💳 Предоплата по заказу №{number}"
+                 if is_prepay else f"💳 Заказ №{number}")
+        text = (f"{title} — к оплате {_money(due)}\n\n"
                 f"{pay_details}\n\nВ назначении перевода напишите: {purpose}\n"
                 "После перевода нажмите «✅ Я оплатил» — мастер сверит поступление "
                 "и подтвердит оплату вручную.")

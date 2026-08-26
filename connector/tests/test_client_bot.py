@@ -588,6 +588,71 @@ class ClientBotTests(unittest.TestCase):
         self.bot.delete_template(saved["id"])
         self.assertNotIn(saved["id"], {item["id"] for item in self.bot.templates()})
 
+    # ----------------------------------- оператор (связь) и статус предоплаты
+    def test_operator_button_in_menu_and_callback(self):
+        keys = self.bot._menu()
+        datas = [b["callback_data"]
+                 for r in keys["inline_keyboard"] for b in r]
+        self.assertIn("operator", datas)
+        notified = self._notify()
+        text, _ = self.bot._dispatch("555", self._chat_row(), "оператор")
+        self.assertIn("Передал мастерской", text)
+        self.assertTrue(notified and "оператор" in notified[0][0].lower())
+        notified.clear()
+        sent = self._wire()
+        self.bot._handle(self._cb("operator"))
+        self.assertTrue(any("Передал мастерской" in p["text"]
+                            for p in self._sends(sent)))
+        self.assertTrue(notified and "оператор" in notified[0][0].lower())
+
+    def test_reply_to_operator_skips_fallback(self):
+        row = self._chat_row()
+        notified = self._notify()
+        message = self._msg("спасибо, всё получилось!")
+        message["message"]["reply_to_message"] = {
+            "message_id": 5, "chat": {"id": 555, "type": "private"},
+            "from": {"id": 999, "is_bot": True, "first_name": "NOZZA"},
+        }
+        sent = self._wire()
+        self.bot._handle(message)
+        replies = self._sends(sent)
+        self.assertTrue(replies)
+        self.assertFalse(any("Не понял" in p["text"] for p in replies))
+        self.assertTrue(any("Передал ваш ответ оператору" in p["text"]
+                            for p in replies))
+        self.assertTrue(notified
+                        and "Ответ покупателя оператору" in notified[0][0])
+        # текст без reply по-прежнему попадает в «не понял»
+        text, _ = self.bot._dispatch("555", row, "совсем другой вопрос")
+        self.assertIn("Не понял", text)
+
+    def test_dispatch_reply_flag_skips_fallback(self):
+        row = self._chat_row()
+        notified = self._notify()
+        text, _ = self.bot._dispatch("555", row, "да, подойдёт", reply=True)
+        self.assertNotIn("Не понял", text)
+        self.assertIn("Передал ваш ответ оператору", text)
+        self.assertTrue(notified
+                        and "Ответ покупателя оператору" in notified[0][0])
+
+    def test_prepay_order_card_offers_payment_methods(self):
+        self._own_order("1001", status="prepay", price=1500.0)
+        order = self.db.one("SELECT * FROM orders WHERE number='1001'")
+        keys = self.bot._order_card_keyboard(order)
+        buttons = [b for r in keys["inline_keyboard"] for b in r]
+        self.assertIn("pay:o1001", [b["callback_data"] for b in buttons])
+        self.assertTrue(any("Способы оплаты" in b["text"] for b in buttons))
+        self.assertFalse(any(b["text"] == "💳 Оплатить" for b in buttons))
+
+    def test_pay_card_prepay_wording(self):
+        self._own_order("1001", status="prepay", price=1500.0)
+        self.db.set_settings({"client_bot_pay_info": "СБП +7 900 000-00-00"})
+        sent = self._wire()
+        self.bot._handle(self._cb("pay:o1001"))
+        card = [p for p in self._sends(sent) if "Предоплата по заказу" in p["text"]]
+        self.assertTrue(card)
+        self.assertIn("1 500", card[0]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()
