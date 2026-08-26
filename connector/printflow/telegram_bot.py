@@ -95,8 +95,11 @@ def _keyboard(*rows: list[tuple[str, str]]) -> dict:
 class TelegramBot:
     """Фоновый слушатель команд. Запускается только когда включён в настройках."""
 
-    def __init__(self, manager):
+    def __init__(self, manager, client_mode=False):
         self.manager = manager
+        self.client_mode = client_mode
+        self.token_key = "client_bot_token" if client_mode else "telegram_token"
+        self.chat_key = "client_bot_chat" if client_mode else "telegram_chat_id"
         self.db = manager.db
         self._stop = threading.Event()
         self._offset = 0
@@ -116,7 +119,7 @@ class TelegramBot:
         return self.db.settings(include_secrets=True)
 
     def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
-        token = self._settings().get("telegram_token", "")
+        token = self._settings().get(self.token_key, "")
         if not token:
             return {}
         url = API.format(token=token, method=method)
@@ -151,8 +154,9 @@ class TelegramBot:
     def _loop(self) -> None:
         while not self._stop.is_set():
             settings = self._settings()
-            if not (settings.get("telegram_enabled") and settings.get("telegram_bot")
-                    and settings.get("telegram_token") and settings.get("telegram_chat_id")):
+            if not ((settings.get("client_bot_enabled") if self.client_mode else settings.get("telegram_enabled"))
+                    and (True if self.client_mode else settings.get("telegram_bot"))
+                    and settings.get(self.token_key) and (self.client_mode or settings.get(self.chat_key))):
                 self._stop.wait(20)          # бот выключен — просто ждём
                 continue
             try:
@@ -163,7 +167,7 @@ class TelegramBot:
                 self.last_poll = time.time()
                 for update in (result.get("result") or []):
                     self._offset = max(self._offset, num(update.get("update_id")) + 1)
-                    self._handle(update, str(settings.get("telegram_chat_id")))
+                    self._handle(update, str(settings.get(self.chat_key)))
                 self._maybe_digest(settings)
                 self._maybe_weekly(settings)
                 self._maybe_live()
@@ -183,7 +187,7 @@ class TelegramBot:
         if last == today:
             return
         self.db.set_settings({"digest_last": today})
-        chat = str(settings.get("telegram_chat_id") or "")
+        chat = str(settings.get(self.chat_key) or "")
         if chat:
             self.manager.notify_async(self.text_digest())
 
@@ -198,7 +202,7 @@ class TelegramBot:
         if str(settings.get("weekly_last") or "") == key:
             return
         self.db.set_settings({"weekly_last": key})
-        chat = str(settings.get("telegram_chat_id") or "")
+        chat = str(settings.get(self.chat_key) or "")
         if chat:
             self.manager.notify_async(self.text_weekly())
 
@@ -212,6 +216,8 @@ class TelegramBot:
         chat = str((message.get("chat") or {}).get("id", ""))
         if not chat:
             return
+        if self.client_mode:
+            return self._handle_client(message, chat)
         if chat != owner:
             # Чужой чат: вежливо отказываем и пишем в журнал.
             text = (message.get("text") or "").strip()
@@ -234,6 +240,27 @@ class TelegramBot:
             self._dispatch(chat, text)
         except Exception as exc:
             self._reply(chat, f"Не получилось: {exc}")
+
+    def _handle_client(self, message: dict, chat: str) -> None:
+        """Безопасный публичный сценарий: только собирает заявку, без команд цеха."""
+        text = (message.get("text") or message.get("caption") or "").strip()
+        if text.lower() in ("/start", "start", "начать", "помощь"):
+            self._reply(chat, self._settings().get("client_bot_welcome") or "Опишите изделие, размеры, количество и срок. Прикрепите фото — сотрудник подготовит расчёт.")
+            return
+        if not text and not message.get("photo"):
+            return self._reply(chat, "Пришлите описание задачи или фото изделия.")
+        summary = text or "Фото от клиента"
+        photo = message.get("photo") or []
+        file_id = str(photo[-1].get("file_id")) if photo and isinstance(photo[-1], dict) else ""
+        self.db.add_event("client_bot", "Новая заявка клиента", summary[:500], "", {"chat_id": chat, "has_photo": bool(file_id)})
+        target = str(self._settings().get("client_bot_chat") or "")
+        if target:
+            if file_id:
+                self._call("sendPhoto", {"chat_id": target, "photo": file_id,
+                                          "caption": "💬 Новая заявка клиента\\n\\n" + summary[:900]})
+            else:
+                self._call("sendMessage", {"chat_id": target, "text": "💬 Новая заявка клиента\\n\\n" + summary[:3500]})
+        self._reply(chat, "Заявка принята ✅ Сотрудник свяжется с вами для уточнения цены и срока.")
 
     def _handle_callback(self, callback: dict, owner: str) -> None:
         """Нажатие inline-кнопки. Отвечаем владельцу, чужому — отказ."""
@@ -457,7 +484,7 @@ class TelegramBot:
 
     def _download_file(self, file_id: str) -> bytes | None:
         """Скачать файл из Telegram (getFile → скачивание)."""
-        token = self._settings().get("telegram_token", "")
+        token = self._settings().get(self.token_key, "")
         if not token:
             return None
         try:
@@ -1028,7 +1055,7 @@ class TelegramBot:
                 caption += f", осталось {_hm(info['remaining_min'])}"
         if snap.get("camera", {}).get("demo"):
             caption += " (демо-кадр: принтер не подключён)"
-        token = self._settings().get("telegram_token", "")
+        token = self._settings().get(self.token_key, "")
         try:
             self.manager._send_photo(token, chat, caption, frame)
             printer.camera.snapshot(note="Запрос из Telegram")
@@ -1053,7 +1080,7 @@ class TelegramBot:
                 photos.append(frame)
         if not photos:
             return self._reply(chat, "Не удалось прочитать сохранённые кадры.")
-        token = self._settings().get("telegram_token", "")
+        token = self._settings().get(self.token_key, "")
         if len(photos) == 1:
             self.manager._send_photo(token, chat, "Последний кадр печати", photos[0])
             return None

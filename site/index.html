@@ -51,6 +51,7 @@
     <div class="nav-more-section">
      <span class="nav-more-caption">Знания и система</span>
      <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic">▤</span><span>Библиотека</span><small>Гайды</small></a>
+     <a class="nav-link" href="#client-bot" data-view="client-bot" data-find="клиентский бот бот заявки telegram клиенты"><span class="ic">💬</span><span>Клиентский бот</span><small>Заявки</small></a>
      <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные"><span class="ic">⚙</span><span>Настройки</span><small>Цех</small></a>
     </div>
    </div>
@@ -1090,6 +1091,7 @@
   <a class="lib-card" href="#library/stock" data-article="stock"><span class="ic">🧵</span><b>Стартовый закуп</b><small>PLA: 8 катушек и приоритеты</small></a>
   <a class="lib-card" href="#library/storefront" data-article="storefront"><span class="ic">🛍</span><b>Витрина и QR-заказ</b><small>Заявки с полки без продавца</small></a>
   <a class="lib-card" href="#library/bot" data-article="bot"><span class="ic">🤖</span><b>Telegram-панель</b><small>Управление и продажи с телефона</small></a>
+  <a class="lib-card" href="/materials/промостенды-67x57.html" target="_blank" rel="noopener" data-library-category="tools"><span class="ic">🪧</span><b>Промостенд 67×57</b><small>Отдельный генератор для полки и QR</small></a>
   <a class="lib-card" href="#library/vitrina" data-article="vitrina"><span class="ic">🪧</span><b>3D-витрина</b><small>Что напечатать для самой полки</small></a>
   <a class="lib-card" href="#library/plastics-step" data-article="plastics-step"><span class="ic">🧪</span><b>Пластики пошагово</b><small>PLA/PETG/TPU/ABS/ASA и др. — сушка, стол, профиль</small></a>
   <a class="lib-card" href="#library/settings-guide" data-article="settings-guide"><span class="ic">⚙️</span><b>Гайд по настройкам</b><small>Все вкладки — что и зачем менять</small></a>
@@ -3420,6 +3422,23 @@
 <div class="notice ok"><span>✓</span><span>Совет: оставляй режим «Облако» по умолчанию (удобнее Handy + Handy остаётся), но всегда указывай IP — получишь и облако и камеру/файлы одновременно.</span></div>
 </article>
 
+ </div>
+</section>
+
+<!-- ========================================== КЛИЕНТСКИЙ БОТ -->
+<section class="view" id="view-client-bot">
+ <div class="view-head"><div><span class="eyebrow">Продажи · Telegram</span><h1>Клиентский бот</h1><p>Принимает заявку, собирает размеры и передаёт её в очередь на расчёт. Сотрудники не видят секрет клиента.</p></div><div class="head-actions"><button class="btn primary" id="client_bot_save">Сохранить</button></div></div>
+ <div class="set-grid">
+  <div class="card"><div class="card-head"><div><h2>Подключение</h2><p>Создайте отдельного бота через @BotFather. Не используйте токен рабочего бота.</p></div></div>
+   <label class="field"><span>Bot Token клиентского бота</span><input id="client_bot_token" type="password" autocomplete="new-password" placeholder="токен сохраняется локально"></label>
+   <label class="field"><span>Чат сотрудников для новых заявок</span><input id="client_bot_chat" type="text" placeholder="Chat ID руководителя или группы"></label>
+   <label class="set-row"><span><b>Включить приём заявок</b><small>Бот задаёт вопросы: изделие, размеры, количество, срок и контакты</small></span><input id="client_bot_enabled" type="checkbox"></label>
+  </div>
+  <div class="card"><div class="card-head"><div><h2>Сценарий заявки</h2><p>Что увидит клиент после /start</p></div></div>
+   <textarea id="client_bot_welcome" rows="6">Здравствуйте! Поможем изготовить изделие по вашим размерам. Пришлите фото или опишите задачу, количество и нужную дату — мы подготовим расчёт.</textarea>
+   <div class="notice"><span>✓</span><span>Заявка попадёт в «Заказы» с каналом Telegram. Цена и срок подтверждаются сотрудником до запуска.</span></div>
+  </div>
+  <div class="card"><div class="card-head"><div><h2>Команда и доступы</h2><p>Добавьте сотрудника или руководителя — роли сохраняются в локальной базе.</p></div><button class="btn sm" id="staff_add" type="button">+ Добавить</button></div><div id="staff_list"><div class="empty compact">Сотрудники ещё не добавлены.</div></div></div>
  </div>
 </section>
 
