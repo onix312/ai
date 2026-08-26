@@ -1204,6 +1204,11 @@ class Api:
                 "welcome": str(settings.get("client_bot_welcome") or ""),
                 "notify": bool(settings.get("client_bot_notify", True)),
                 "catalog": bool(settings.get("client_bot_catalog", True)),
+                "faq": str(settings.get("client_bot_faq") or ""),
+                "review": bool(settings.get("client_bot_review", True)),
+                "pickup_days": int(num(settings.get("client_bot_pickup_days"), 3)),
+                "pay_info": str(settings.get("client_bot_pay_info") or ""),
+                "track_url": str(settings.get("client_bot_track_url") or ""),
                 "stats": bot.stats() if bot else {},
                 "alive": bool(bot and bot.last_poll
                               and time.time() - bot.last_poll < 120),
@@ -1214,9 +1219,17 @@ class Api:
                     " LIMIT 50"),
                 "log": self.db.query(
                     "SELECT * FROM client_bot_log ORDER BY id DESC LIMIT 60"),
+                "reviews": self.db.query(
+                    "SELECT r.order_id, r.chat_id, r.rating, r.comment,"
+                    " r.asked_at, r.created_at, o.number, o.product"
+                    " FROM client_reviews r"
+                    " LEFT JOIN orders o ON o.id=r.order_id"
+                    " ORDER BY datetime(r.asked_at) DESC LIMIT 30"),
                 "orders": self.db.query(
                     "SELECT l.number, l.created_at linked_at, o.product, o.status,"
-                    " o.price, c.name FROM client_orders l"
+                    " o.price, c.name, (SELECT COUNT(*) FROM order_photos p"
+                    " WHERE p.order_id=l.order_id) photos"
+                    " FROM client_orders l"
                     " JOIN orders o ON o.id=l.order_id"
                     " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
                     " ORDER BY datetime(l.created_at) DESC LIMIT 50"),
@@ -2774,7 +2787,9 @@ class Api:
             patch = {k: v for k, v in body.items()
                      if k in ("client_bot_enabled", "client_bot_token",
                               "client_bot_welcome", "client_bot_notify",
-                              "client_bot_catalog")}
+                              "client_bot_catalog", "client_bot_faq",
+                              "client_bot_review", "client_bot_pickup_days",
+                              "client_bot_pay_info", "client_bot_track_url")}
             settings = self.db.set_settings(patch)
             return 200, {"ok": True, "settings": {
                 k: v for k, v in settings.items() if k.startswith("client_bot")}}

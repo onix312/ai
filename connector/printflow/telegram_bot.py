@@ -46,6 +46,7 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • план — что печатать сегодня
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
 • оплата 1500 по 1001 — принять оплату
+• кответ 555 текст — ответить покупателю клиентского бота
 • статус 1001 печать — сменить статус заказа
 • новый адресник 2шт 900р Мария — заказ из текста
 • принтер — список парка · принтер 2 — выбрать принтер
@@ -639,6 +640,8 @@ class TelegramBot:
             return self._shelf_produce_text(chat, text)
         if word in ("оплата", "оплатить", "payment"):
             return self._reply(chat, self._pay(text))
+        if word in ("кответ", "ответить", "creply"):
+            return self._reply(chat, self._client_answer(raw))
         if word in ("статус", "status", "принтер", "принтеры"):
             # «принтер 2» — выбрать принтер для команд; «статус 1001 печать» —
             # смена статуса заказа; иначе состояние принтеров.
@@ -1593,6 +1596,31 @@ class TelegramBot:
                  if num(result.get("debt")) > 0 else "оплачен ранее")
         return (f"✅ Заказ №{number} выдан{repeated} · {money}.\n\n"
                 f"Текст клиенту (не отправлен):\n{result.get('message') or ''}")
+
+    def _client_answer(self, raw: str) -> str:
+        """«кответ <chat_id> <текст>» — ответить покупателю клиентского бота.
+
+        Уведомления о вопросах приходят с chat_id; ответ уходит от имени
+        клиентского бота и попадает в журнал диалогов вкладки «Клиент-бот».
+        """
+        parts = raw.strip().split(None, 2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            return ("Формат: «кответ <chat_id> <текст>» — chat_id виден "
+                    "в уведомлении о вопросе покупателя.")
+        target, message = parts[1], parts[2].strip()
+        client = getattr(self.manager, "client_bot", None)
+        if not client:
+            return "Клиентский бот не запущен — проверьте вкладку «Клиент-бот»."
+        row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (target,))
+        if not row:
+            return f"Чат {target} не найден среди покупателей."
+        client._reply(target, message, client._menu())
+        client._log(target, row.get("name") or "", "← мастер", message,
+                    kind="answer")
+        self.db.add_event("bot", "Ответ покупателю из бота",
+                          f"{row.get('name') or target}", "",
+                          {"chat_id": target})
+        return f"Отправлено ✓ {row.get('name') or target} · «{message[:60]}»"
 
     def _pay(self, text: str) -> str:
         import re as _re

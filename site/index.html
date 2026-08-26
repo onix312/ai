@@ -1067,6 +1067,16 @@
      <label class="switch"><input type="checkbox" id="cb_catalog" checked><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Уведомлять о статусе</b><small>«Печатается», «Готов» — покупателю, без запросов</small></div>
      <label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Отзыв после выдачи</b><small>Через 2 дня бот спросит «всё ли хорошо?»</small></div>
+     <label class="switch"><input type="checkbox" id="cb_review" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Напомнить о выдаче</b><small>«Готов» висит дольше N дней — бот напомнит (0 — выключить)</small></div>
+     <input type="number" id="cb_pickup_days" min="0" max="30" style="max-width:90px" value="3"></div>
+    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Вопрос-ответ</b><small>Текст кнопки «❓ Вопрос-ответ»; пусто — стандартный FAQ NOZZA</small></div>
+     <textarea id="cb_faq" rows="3" placeholder="Материалы. Базовые — PLA и PETG…" style="max-width:320px"></textarea></div>
+    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Реквизиты оплаты</b><small>Публичные: покупатель увидит их по кнопке «💳 Оплатить»; пусто — кнопки нет</small></div>
+     <textarea id="cb_pay_info" rows="3" placeholder="СБП по номеру +7 900 000-00-00, получатель NOZZA" style="max-width:320px"></textarea></div>
+    <div class="set-row"><div class="sinfo"><b>Ссылка статуса</b><small>Базовый адрес панели (например http://192.168.1.5:8080) — кнопка «Статус онлайн»; только для своей сети/VPN</small></div>
+     <input type="text" id="cb_track_url" placeholder="http://192.168.1.5:8080" style="max-width:260px"></div>
     <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Приветствие /start</b><small>Пусто — стандартный текст NOZZA</small></div>
      <textarea id="cb_welcome" rows="3" placeholder="Здравствуйте! Это бот мастерской…" style="max-width:320px"></textarea></div>
    </div>
@@ -1089,6 +1099,10 @@
    <div class="table-wrap"><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Когда</th></tr></thead><tbody id="cb_orders"></tbody></table></div>
   </div>
   <div class="card">
+   <div class="card-head"><div><h2>Отзывы после выдачи</h2><p>Кнопка 👍/👎 в чате; проблема — с деталями мастеру</p></div></div>
+   <div class="table-wrap"><table class="data"><thead><tr><th>Заказ</th><th>Оценка</th><th>Комментарий</th><th>Когда</th></tr></thead><tbody id="cb_reviews"></tbody></table></div>
+  </div>
+  <div class="card">
    <div class="card-head"><div><h2>Покупатели</h2><p>Чаты, которые писали боту</p></div></div>
    <div class="table-wrap"><table class="data"><thead><tr><th>Имя</th><th>Telegram</th><th>Телефон</th><th class="right">Заказов</th><th>Был</th></tr></thead><tbody id="cb_chats"></tbody></table></div>
   </div>
@@ -1096,6 +1110,7 @@
  <div class="card" style="margin-top:16px">
   <div class="card-head"><div><h2>Диалоги</h2><p>Последние сообщения — видно, что бот отвечал</p></div></div>
   <div class="table-wrap"><table class="data"><thead><tr><th>Время</th><th>Клиент</th><th>Сообщение</th><th>Ответ бота</th></tr></thead><tbody id="cb_log"></tbody></table></div>
+  <div class="notice" style="margin-top:10px"><span>💬</span><span>Вопрос мимо команд будит мастера уведомлением. Ответить покупателю можно из внутреннего бота: <b>кответ &lt;chat_id&gt; &lt;текст&gt;</b> — сообщение уйдёт от клиентского бота и появится здесь.</span></div>
  </div>
 </section>
 
@@ -4829,7 +4844,7 @@
 <script src="assets/products.js?v=9.1.2"></script>
 <script src="assets/bridge.js?v=9.1.2"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>
-<script src="assets/clientbot.js?v=9.3.0"></script>
+<script src="assets/clientbot.js?v=9.3.2"></script>
 <script src="assets/workshop.js?v=9.1.2"></script>
 <script src="assets/app.js?v=9.2.2"></script>
 <script>

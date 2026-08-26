@@ -10,12 +10,14 @@ const { get, post } = PF.api;
 
 const COMMANDS = [
   ['старт', 'приветствие и меню бота'],
-  ['каталог', 'витрина с ценами и кнопками заказа'],
+  ['каталог', 'витрина страницами, карточки с фото и остатком'],
   ['заказ 3', 'заказать позицию №3 из каталога'],
   ['индивидуальный …', 'заявка на печать по своей задаче'],
-  ['мои заказы', 'статусы заказов покупателя'],
-  ['статус 1001', 'статус по номеру заказа'],
+  ['фото [1001]', 'заявка-референс: снимок уходит мастеру и в заказ'],
+  ['мои заказы', 'статусы заказов + кнопка на каждый заказ'],
+  ['статус 1001', 'статус по номеру + кнопки «Оплатить» и «Статус онлайн»'],
   ['телефон +7…', 'привязать номер: подтянутся заказы с полки'],
+  ['вопрос-ответ', 'материалы, сроки и как заказать'],
   ['помощь', 'список команд'],
 ];
 
@@ -42,6 +44,11 @@ async function renderBot() {
   $('cb_enabled').checked = !!data.enabled;
   $('cb_catalog').checked = data.catalog !== false;
   $('cb_notify').checked = data.notify !== false;
+  $('cb_review').checked = data.review !== false;
+  $('cb_pickup_days').value = data.pickup_days ?? 3;
+  $('cb_faq').value = data.faq || '';
+  $('cb_pay_info').value = data.pay_info || '';
+  $('cb_track_url').value = data.track_url || '';
   $('cb_welcome').value = data.welcome || '';
   $('cb_token').value = '';
   $('cb_token_hint').textContent = data.has_token
@@ -71,11 +78,19 @@ async function renderBot() {
   const statusName = (id) => (st.find((x) => x.id === id) || {}).name || id || '—';
   $('cb_orders').innerHTML = (data.orders || []).length
     ? data.orders.map((o) => `<tr><td><b>№${esc(o.number)}</b></td>`
-      + `<td>${esc(o.product || '')}</td><td>${esc(o.name || '')}</td>`
+      + `<td>${esc(o.product || '')}${o.photos ? ' 📷' : ''}</td><td>${esc(o.name || '')}</td>`
       + `<td>${esc(statusName(o.status))}</td>`
       + `<td class="right">${num(o.price) ? money(o.price) : '—'}</td>`
       + `<td class="muted">${esc(String(o.linked_at || '').slice(0, 16).replace('T', ' '))}</td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">Заказов из бота пока нет — включите бота и дайте QR с полки.</td></tr>';
+
+  $('cb_reviews').innerHTML = (data.reviews || []).length
+    ? data.reviews.map((r) => `<tr><td><b>№${esc(r.number || '')}</b><br>`
+      + `<span class="muted">${esc((r.product || '').slice(0, 30))}</span></td>`
+      + `<td>${r.rating === 'good' ? '👍' : r.rating === 'bad' ? '👎' : '—'}</td>`
+      + `<td>${esc(r.comment || '')}</td>`
+      + `<td class="muted">${esc(String(r.asked_at || '').slice(0, 16).replace('T', ' '))}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">Отзывов ещё нет: бот спросит через 2 дня после выдачи.</td></tr>';
 
   $('cb_chats').innerHTML = (data.chats || []).length
     ? data.chats.map((c) => `<tr><td><b>${esc(c.name || 'Без имени')}</b></td>`
@@ -101,6 +116,11 @@ async function saveBot() {
     client_bot_enabled: $('cb_enabled').checked,
     client_bot_catalog: $('cb_catalog').checked,
     client_bot_notify: $('cb_notify').checked,
+    client_bot_review: $('cb_review').checked,
+    client_bot_pickup_days: Math.max(0, Math.round(num($('cb_pickup_days').value, 3))),
+    client_bot_faq: $('cb_faq').value.trim(),
+    client_bot_pay_info: $('cb_pay_info').value.trim(),
+    client_bot_track_url: $('cb_track_url').value.trim(),
     client_bot_welcome: $('cb_welcome').value.trim(),
   };
   if ($('cb_token').value.trim()) body.client_bot_token = $('cb_token').value.trim();

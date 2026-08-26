@@ -158,6 +158,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "client_bot_welcome": "",         # свой текст /start (пусто — стандартный)
     "client_bot_notify": True,        # сообщать об изменении статуса заказа
     "client_bot_catalog": True,       # показывать витрину с ценами
+    # 9.3.2: сервис клиентского бота
+    "client_bot_faq": "",             # свой текст «Вопрос-ответ» (пусто — стандартный)
+    "client_bot_review": True,        # спрашивать отзыв через 2 дня после выдачи
+    "client_bot_pickup_days": 3,      # напомнить о невыкупленном «готовом» заказе
+    "client_bot_pay_info": "",        # публичные реквизиты оплаты для кнопки «Оплатить»
+    "client_bot_track_url": "",       # базовый URL панели для кнопки «Статус онлайн»
     # Bambu Cloud: управление принтером без LAN Only Mode / Developer Mode.
     # Токен и uid — секреты (маскируются, как telegram_token); email хранится
     # для повторного входа, пароль не хранится — при истечении токена Bambu

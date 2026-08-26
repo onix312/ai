@@ -1344,9 +1344,14 @@ class Accounting:
         Сначала — предпросмотр (apply=False): для каждой позиции считается
         новая себестоимость по текущим тарифам и рекомендованная цена.
         apply=True пишет новые цены в базу изделий.
+
+        9.3.2: идём по представлению каталога (repo.catalog), а не только по
+        legacy-таблице: товары из вкладки «Товары» пересчитываются наравне,
+        а новая цена пишется и в канонический журнал prices.
         """
+        from .repo import Repo
         items: list[dict] = []
-        for row in self.db.query("SELECT * FROM catalog WHERE archived=0"):
+        for row in Repo(self.db).catalog():
             grams = num(row.get("grams"))
             hours = num(row.get("hours"))
             if grams <= 0 and hours <= 0:
@@ -1358,6 +1363,7 @@ class Accounting:
             new_price = num(suggestion.get("price"))
             items.append({
                 "id": row["id"], "name": row.get("name"),
+                "nom_id": row.get("nom_id") or "",
                 "old_price": round(num(row.get("price")), 2),
                 "new_price": round(new_price, 2),
                 "cost": round(cost, 2),
@@ -1367,6 +1373,12 @@ class Accounting:
             for item in items:
                 self.db.execute("UPDATE catalog SET price=? WHERE id=?",
                                 (item["new_price"], item["id"]))
+                if item.get("nom_id"):
+                    self.db.upsert("prices", {
+                        "id": uid("prc"), "at": now_iso(),
+                        "nom_id": item["nom_id"], "price_type_id": "retail",
+                        "price": item["new_price"],
+                        "note": "массовый пересчёт цен"})
             self.db.add_event("catalog", "Пересчитаны цены базы изделий",
                               f"{len(items)} позиций по новым тарифам", "", {})
         return {"items": items, "count": len(items),
