@@ -43,6 +43,7 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • приход — меню прихода; «приход Адресник 5» — приход на позицию
 • движения стеллажа — последние приходы/продажи/списания
 • продажи стеллажа — что ушло за 7 дней, по позициям
+• касса — сколько от стеллажа лежит в магазине; «забрали 5000» — выемка
 • план — что печатать сегодня
 • выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
 • оплата 1500 по 1001 — принять оплату
@@ -121,6 +122,8 @@ class TelegramBot:
         self._live: dict[str, dict] = {}  # chat -> {message_id, text} живого дашборда
         self._printer_choice: dict[str, str] = {}  # chat -> printer_id
         self._watched: dict[str, dict] = {}  # chat -> {number, last_milestone}
+        self._sell_page: dict[str, int] = {}  # chat -> страница меню продаж
+        self._prod_page: dict[str, int] = {}  # chat -> страница меню прихода
         self._thread = threading.Thread(target=self._loop, name="pf-bot", daemon=True)
         self._thread.start()
 
@@ -375,13 +378,19 @@ class TelegramBot:
             return
         # Меню стеллажа и продаж отправляют новое сообщение с актуальными
         # остатками и кнопками; исходное не превращаем в неактуальный чек.
-        if command in ("shelf", "sell-menu", "shelf-prod-menu"):
+        # Листание страниц («sell-menu:next» и т.п.) правит то же сообщение.
+        if command == "shelf" or command.startswith("sell-menu") \
+                or command.startswith("shelf-prod-menu"):
             self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
             if command == "shelf":
                 return self.shelf_keyboard(chat)
-            if command == "sell-menu":
-                return self.sell_keyboard(chat)
-            return self.shelf_produce_keyboard(chat)
+            if command.startswith("shelf-prod-menu"):
+                page = self._page_from_command(
+                    command, "shelf-prod-menu", self._prod_page, chat)
+                return self.shelf_produce_keyboard(chat, page, message_id=message_id)
+            page = self._page_from_command(command, "sell-menu", self._sell_page, chat)
+            return self.sell_keyboard(chat, page, message_id=message_id)
         text = self._run_command(command, chat)
         self._call("answerCallbackQuery", {"callback_query_id": callback_id})
         # Управление печатью обновляем в том же сообщении; продажа и панель — новым.
@@ -782,6 +791,10 @@ class TelegramBot:
             return self._reply(chat, self._reorder_queue(text, word))
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
+        if word == "касса":
+            return self._reply(chat, self.text_shop_cash())
+        if word in ("забрали", "выемка"):
+            return self._reply(chat, self.do_collect_from_shop(text))
         if word in ("день", "сегодня", "итоги"):
             if "недел" in text:
                 return self._reply(chat, self.text_weekly())
@@ -953,6 +966,43 @@ class TelegramBot:
             if num(debts.get("overdue")) > 0:
                 lines.append(f"Из них просрочено: {_money(debts['overdue'])}")
         return "\n".join(lines)
+
+    def text_shop_cash(self) -> str:
+        """Касса стеллажа (магазин): сколько продано, забрано и лежит в магазине."""
+        from .shelf import Shelf
+        c = Shelf(self.db).shop_cash()
+        lines = [
+            "🛍 Касса стеллажа (магазин):",
+            f"Продано со стеллажа: {_money(c.get('shelf_income'))}",
+            f"Забрали из магазина: {_money(c.get('collected_total'))}",
+            f"Лежит в магазине: {_money(c.get('in_shop'))}",
+        ]
+        rows = c.get("collections") or []
+        if rows:
+            lines.append("\nПоследние выемки:")
+            for r in rows[:5]:
+                when = str(r.get("at") or "")[:16].replace("T", " ")
+                note = str(r.get("note") or "").strip()
+                lines.append(f"· {_money(r.get('amount'))} — {when}"
+                             + (f" ({note[:40]})" if note else ""))
+        lines.append("\nЗаписать выемку: «забрали 5000» · «забрали 5000 картой».")
+        return "\n".join(lines)
+
+    def do_collect_from_shop(self, text: str) -> str:
+        """«забрали 5000» — отметить выемку наличных из кассы магазина."""
+        from .shelf import Shelf
+        m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)?", text)
+        if not m:
+            return self.text_shop_cash()
+        amount = num(m.group(1).replace(" ", "").replace(",", "."))
+        note = text[m.end():].strip()[:120]
+        try:
+            Shelf(self.db).add_collection(amount, note)
+        except ValueError as exc:
+            return f"Не получилось: {exc}"
+        c = Shelf(self.db).shop_cash()
+        return (f"✅ Забрали из магазина {_money(amount)}.\n"
+                f"Осталось в магазине: {_money(c.get('in_shop'))}.")
 
     def text_today(self) -> str:
         today = now_iso()[:10]
@@ -1499,27 +1549,67 @@ class TelegramBot:
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
 
+    def _page_from_command(self, command: str, prefix: str, state: dict,
+                           chat: str) -> int:
+        """Страница пагинации из callback «prefix:next/prev/число»."""
+        part = command[len(prefix):].lstrip(":")
+        if part in ("next", "вперёд"):
+            return state.get(chat, 0) + 1
+        if part in ("prev", "назад"):
+            return state.get(chat, 0) - 1
+        try:
+            return max(0, int(num(part)))
+        except (TypeError, ValueError):
+            return 0
+
     def _sell_rows(self) -> list[dict]:
-        """Позиции стеллажа с остатком для быстрой продажи."""
+        """Позиции стеллажа с остатком для быстрой продажи — все, без лимита."""
         from .shelf import Shelf
         items = Shelf(self.db).items()
         rows = [i for i in items if num(i.get("qty")) > 0]
         rows.sort(key=lambda i: -num(i["qty"]))
-        return rows[:8]
+        return rows
 
-    def sell_keyboard(self, chat: str) -> None:
+    def _paginate(self, rows: list, page: int, per_page: int = 8) -> tuple:
+        """Нарезать список на страницы; вернуть (срез, page, total_pages)."""
+        per_page = max(1, int(per_page))
+        total = len(rows)
+        total_pages = max(1, -(-total // per_page))  # округление вверх
+        page = max(0, min(int(page), total_pages - 1))
+        start = page * per_page
+        return rows[start:start + per_page], page, total_pages
+
+    def _send_menu(self, chat: str, text: str, buttons: list, message_id: str = "") -> None:
+        """Отправить inline-меню; если есть message_id — правим старое сообщение."""
+        markup = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
+        if message_id:
+            self._call("editMessageText", {
+                "chat_id": chat, "message_id": message_id,
+                "text": text[:3800], "reply_markup": markup}, timeout=15)
+            return
+        self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
+                                   "reply_markup": markup}, timeout=15)
+
+    def sell_keyboard(self, chat: str, page: int = 0, message_id: str = "") -> None:
         rows = self._sell_rows()
         if not rows:
             self._reply(chat, "На стеллаже нет товара. Сделайте приход или перенесите со склада.")
             return
+        page_rows, page, total_pages = self._paginate(rows, page)
+        self._sell_page[chat] = page
         lines = ["🛍 Продажа со стеллажа — нажмите «−1» (деньги по цене ценника):"]
         buttons = []
-        for i in rows:
-            lines.append(f"• {i['name']} — {round(num(i['qty']),1)} шт · {_money(i.get('price'))}")
-            label = f"−1 · {i['name'][:22]} · {_money(i.get('price'))}"
+        for i in page_rows:
+            name = str(i.get('name') or 'позиция')
+            lines.append(f"• {name} — {round(num(i['qty']),1)} шт · {_money(i.get('price'))}")
+            label = f"−1 · {name[:22]} · {_money(i.get('price'))}"
             buttons.append([{"text": label[:60], "callback_data": f"cmd:shelf-sell:{i['id']}"}])
-        self._call("sendMessage", {"chat_id": chat, "text": "\n".join(lines)[:3800],
-                                   "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
+        if total_pages > 1:
+            nav = [{"text": "◀", "callback_data": "cmd:sell-menu:prev"},
+                   {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:sell-menu"},
+                   {"text": "▶", "callback_data": "cmd:sell-menu:next"}]
+            buttons.append(nav)
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_sell(self, nom_id: str) -> str:
         from .documents import Documents
@@ -1559,7 +1649,7 @@ class TelegramBot:
         except Exception as exc:
             return f"Не получилось продать: {exc}"
 
-    def shelf_produce_keyboard(self, chat: str) -> None:
+    def shelf_produce_keyboard(self, chat: str, page: int = 0, message_id: str = "") -> None:
         """Быстрый приход +1 на позиции с планом пополнения или низким остатком."""
         from .shelf import Shelf
         items = Shelf(self.db).items()
@@ -1568,15 +1658,21 @@ class TelegramBot:
         if not candidates:
             self._reply(chat, "Стеллаж пуст — сначала добавьте позицию.")
             return
+        page_rows, page, total_pages = self._paginate(candidates, page)
+        self._prod_page[chat] = page
         lines = ["📥 Приход на стеллаж (+1 шт). Для другого количества — «приход Адресник 5»."]
         buttons = []
-        for i in candidates[:8]:
+        for i in page_rows:
             name = i.get("name") or "позиция"
             lines.append(f"• {name} — {round(num(i.get('qty')),1)} шт"
                          + (f" · нужно +{int(num(i.get('plan_qty')))}" if num(i.get("plan_qty")) else ""))
             buttons.append([{"text": f"+1 · {name[:24]}", "callback_data": f"cmd:shelf-prod:{i['id']}"}])
-        self._call("sendMessage", {"chat_id": chat, "text": "\n".join(lines)[:3800],
-                                   "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
+        if total_pages > 1:
+            nav = [{"text": "◀", "callback_data": "cmd:shelf-prod-menu:prev"},
+                   {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:shelf-prod-menu"},
+                   {"text": "▶", "callback_data": "cmd:shelf-prod-menu:next"}]
+            buttons.append(nav)
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_shelf_produce(self, item_id: str, qty: float = 1) -> str:
         from .shelf import Shelf

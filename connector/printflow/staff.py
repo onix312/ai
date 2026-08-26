@@ -57,7 +57,7 @@ WORD_GROUPS: dict[str, str] = {
     "прибыль": "finance", "день": "finance", "сегодня": "finance",
     "итоги": "finance", "долги": "finance", "должники": "finance",
     "debt": "finance", "долг": "finance", "заработал": "finance",
-    "заработано": "finance",
+    "заработано": "finance", "касса": "finance", "забрали": "finance",
     # полка: продажи и приход
     "продажа": "shelf", "продать": "shelf", "продажи": "shelf", "sell": "shelf",
     "приход": "shelf", "положить": "shelf", "пополнить": "shelf",

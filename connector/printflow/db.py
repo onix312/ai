@@ -1048,6 +1048,17 @@ CREATE TABLE IF NOT EXISTS shelf_moves (
 );
 CREATE INDEX IF NOT EXISTS idx_shelf_moves_item ON shelf_moves(item_id, at);
 
+-- ------------------------------------------------- касса магазина (стеллаж)
+-- Деньги от продаж со стеллажа физически лежат в кассе магазина. Каждая
+-- строка — выемка «забрали из магазина», чтобы видеть, сколько накопилось
+-- и сколько ещё лежит в магазине (сверка с инвентаризацией кассы).
+CREATE TABLE IF NOT EXISTS shelf_collections (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    amount REAL DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+
 -- ------------------------------------------------- 5.0: конверты-накопления
 CREATE TABLE IF NOT EXISTS envelopes (
     id TEXT PRIMARY KEY,

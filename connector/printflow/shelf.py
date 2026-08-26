@@ -505,6 +505,69 @@ class Shelf:
             "plan_qty": plan,
         }
 
+    # -------------------------------------------------- касса магазина (выемка)
+    def _shelf_income(self) -> float:
+        """Доход от продаж со стеллажа (channel='shelf') по всей истории.
+
+        Онлайн-продажи со стеллажа уходят каналом 'online' и в кассу магазина
+        не попадают — деньги там лежат на счёте, а не в магазине.
+        """
+        row = self.db.one(
+            "SELECT COALESCE(SUM(amount),0) v FROM transactions"
+            " WHERE kind='income' AND channel='shelf'") or {}
+        return num(row.get("v"))
+
+    def collections(self, limit: int = 50) -> list[dict]:
+        """Последние выемки из кассы магазина, свежие сверху."""
+        return self.db.query(
+            "SELECT * FROM shelf_collections"
+            " ORDER BY datetime(at) DESC, id DESC LIMIT ?", (max(1, int(limit)),))
+
+    def shop_cash(self) -> dict[str, Any]:
+        """Сколько денег от стеллажа лежит в магазине и сколько уже забрали.
+
+        Деньги от продаж со стеллажа учитываются доходом в PrintFlow, но
+        физически остаются в кассе магазина. Разница между накопленным доходом
+        и выемками — это остаток, который должен быть в кассе (для сверки).
+        """
+        income = self._shelf_income()
+        collected = sum(num(c.get("amount")) for c in self.collections())
+        return {
+            "shelf_income": round(income, 2),
+            "collected_total": round(collected, 2),
+            "in_shop": round(income - collected, 2),
+            "collections": self.collections(),
+        }
+
+    def add_collection(self, amount: float, note: str = "") -> dict:
+        """Выемка «забрали из магазина»: уменьшает остаток, не трогая доход.
+
+        Проводки не создаём — это перемещение физических денег, а не новая
+        операция. Нельзя забрать больше, чем накоплено от стеллажа: суммарный
+        остаток магазина не должен уходить в минус по невнимательности.
+        """
+        amount = num(amount)
+        if amount <= 0:
+            raise ValueError("Сумма выемки должна быть больше нуля")
+        state = self.shop_cash()
+        if amount > num(state["in_shop"]) + 0.005:
+            raise ValueError(
+                f"В магазине от стеллажа лежит {round(num(state['in_shop']), 2)} ₽ — "
+                f"забрать {round(amount, 2)} ₽ нельзя")
+        row = self.db.upsert("shelf_collections", {
+            "id": uid("shc"), "at": now_iso(), "amount": round(amount, 2),
+            "note": str(note or "").strip()})
+        self.db.add_event("money", "Забрали из кассы магазина",
+                          f"{round(amount, 2)} ₽", "",
+                          data={"collection_id": row["id"], "amount": amount})
+        return row
+
+    def delete_collection(self, collection_id: str) -> None:
+        """Отменить выемку (ошиблись суммой) — вернуть деньги в остаток магазина."""
+        if not collection_id:
+            raise ValueError("Не указана выемка")
+        self.db.delete("shelf_collections", collection_id)
+
     # ------------------------------------------------- прогноз и таблички
     def forecast(self, days: int = 7) -> list[dict[str, Any]]:
         """Симуляция полки: при текущей скорости продаж сколько будет через N дней.

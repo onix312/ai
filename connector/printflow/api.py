@@ -1170,6 +1170,9 @@ class Api:
         if path == "/api/shelf/item":
             item = self.shelf.item(one("id"))
             return (200, item) if item else (404, {"error": "Позиция не найдена"})
+        if path == "/api/shelf/cash":
+            # Касса магазина: сколько от стеллажа лежит в магазине и сколько забрали.
+            return 200, self.shelf.shop_cash()
         if path == "/api/shelf/stock-available":
             # Товары учётных складов с остатком ≥ 1 шт — их можно
             # переместить на стеллаж (0 и «хвосты» меньше штуки не показываем).
@@ -2462,6 +2465,14 @@ class Api:
             if not body.get("id") or not body.get("data"):
                 raise ValueError("Нужны id позиции и фото (data URL)")
             return 200, self.shelf_save_photo(body["id"], str(body["data"]))
+        if path == "/api/shelf/cash/collect":
+            # Выемка «забрали из магазина»: не больше, чем накоплено от стеллажа.
+            return 200, self.shelf.add_collection(num(body.get("amount")),
+                                                  body.get("note", ""))
+        if path == "/api/shelf/cash/collect/delete":
+            # Отменить выемку (ошиблись суммой) — деньги возвращаются в остаток.
+            self.shelf.delete_collection(body.get("id", ""))
+            return 200, {"ok": True}
 
         # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
         # ------------------------------------------------ учёт 3.0: номенклатура

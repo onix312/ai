@@ -17,6 +17,7 @@ PF.state.fixedCosts = [];
 PF.state.report = null;
 PF.state.reportSales = null;
 
+let shelfCash = null;
 let repPeriod = 'month', repOffset = 0;
 let salesFilter = { q: '', source: '' };
 let editingAccount = null, editingChannel = null, editingFixed = null,
@@ -249,6 +250,47 @@ function renderCash() {
     + `<td class="right tnum">${nfmt(d.days)}${d.overdue ? ' <span class="pill bad">просрочка</span>' : ''}`
       + `${d.reminded_at ? `<small class="muted">напомнили ${esc(dateText(d.reminded_at))}</small>` : ''}</td></tr>`).join('')
     : '<tr><td colspan="6"><div class="empty compact"><span>Все заказы оплачены полностью.</span></div></td></tr>';
+}
+
+/* ============================================ касса стеллажа (магазин) */
+async function refreshShelfCash() {
+  try {
+    const data = await get('/api/shelf/cash');
+    shelfCash = data;
+  } catch (e) {
+    shelfCash = null;
+  }
+  renderShelfCash();
+}
+
+function renderShelfCash() {
+  const host = $('shelf_cash_kpis');
+  if (!host) return;
+  const c = shelfCash || { shelf_income: 0, collected_total: 0, in_shop: 0, collections: [] };
+  host.innerHTML = [
+    kpi('Продано со стеллажа', money(c.shelf_income), 'доход за всю историю', num(c.shelf_income) ? 'ok' : ''),
+    kpi('Забрали из магазина', money(c.collected_total), 'выемки наличных', num(c.collected_total) ? '' : ''),
+    kpi('Лежит в магазине', money(c.in_shop),
+      num(c.in_shop) ? 'должно быть в кассе магазина' : 'касса сведена',
+      num(c.in_shop) ? 'warn' : 'ok'),
+  ].join('');
+  const list = $('shelf_cash_list');
+  if (!list) return;
+  const rows = c.collections || [];
+  list.innerHTML = rows.length
+    ? rows.map((r) => `<div class="mini-row">`
+      + `<div class="mbody"><b>${money(r.amount)}</b><small>${esc(dateText(r.at))}${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
+      + `<button class="icon-btn sm" type="button" data-shelf-cash-del="${esc(r.id)}" title="Отменить выемку">✕</button></div>`).join('')
+    : '<div class="empty compact"><span>Выемок ещё не было. Забрали деньги из кассы магазина — нажмите «Забрали из магазина».</span></div>';
+}
+
+async function deleteShelfCash(id) {
+  if (!id || !confirmDanger('Отменить выемку? Деньги вернутся в остаток магазина.')) return;
+  try {
+    await post('/api/shelf/cash/collect/delete', { id });
+    toast('Выемка отменена');
+    await refreshShelfCash();
+  } catch (e) { fail(e); }
 }
 
 const kindName = (k) => ({ cash: 'наличные', card: 'карта', bank: 'расчётный счёт' }[k] || 'счёт');
@@ -595,6 +637,21 @@ function bind() {
   btn('fix_add2', () => openFixed());
   btn('cat_expense_add', () => openExpCat());
 
+  btn('shelf_cash_collect', async () => {
+    const suggested = Math.max(0, Math.round(num(shelfCash && shelfCash.in_shop)));
+    const value = window.prompt('Сколько забрали из кассы магазина, ₽:',
+      suggested ? String(suggested) : '');
+    if (value == null) return;
+    const amount = num(value);
+    if (amount <= 0) return fail(new Error('Сумма должна быть больше нуля'));
+    try {
+      await post('/api/shelf/cash/collect', { amount });
+      toast('Забрали из магазина', money(amount));
+      await refreshShelfCash();
+      PF.refreshFinance();
+    } catch (e) { fail(e); }
+  });
+
   btn('account_save', async () => {
     const payload = {
       id: editingAccount || '', name: $('af_name').value.trim(), kind: $('af_kind').value,
@@ -772,6 +829,8 @@ function bind() {
     if (pay) return openPayment(pay.dataset.payOrder);
     const remind = e.target.closest('[data-remind-order]');
     if (remind) return remindDebt(remind.dataset.remindOrder);
+    const cashDel = e.target.closest('[data-shelf-cash-del]');
+    if (cashDel) return deleteShelfCash(cashDel.dataset.shelfCashDel);
     return undefined;
   });
 
@@ -830,6 +889,7 @@ async function loadAbc() {
 PF.on('ready', () => {
   bind();
   refreshMoney().then(() => { renderAll(); refreshReport(); });
+  refreshShelfCash();
   loadAbc();
   const days = $('abc_days');
   if (days) days.addEventListener('click', (e) => {
@@ -843,7 +903,7 @@ PF.on('ready', () => {
 PF.on('money', renderAll);
 PF.on('finance', () => { if (PF.state.money) renderAll(); });
 PF.on('view', (d) => {
-  if (d.view === 'finance' || d.view === 'settings') refreshMoney();
+  if (d.view === 'finance' || d.view === 'settings') { refreshMoney(); refreshShelfCash(); }
 });
 
 PF.modules.finance = {
