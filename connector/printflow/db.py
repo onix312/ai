@@ -52,6 +52,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("items", "TEXT DEFAULT ''"),
     ],
     "client_chats": [
+        # Воронка 10.0: обращение проходит путь от нового лида до заказа.
+        ("pipeline_stage", "TEXT DEFAULT 'new'"),
+        ("last_contact_at", "TEXT DEFAULT ''"),
         ("tg_user_id", "TEXT DEFAULT ''"),
         ("customer_id", "TEXT DEFAULT ''"),
         ("phone_verified", "INTEGER DEFAULT 0"),
@@ -1095,6 +1098,21 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     updated_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rules_event ON automation_rules(event);
+
+-- 10.0: журнал симуляций и фактических срабатываний правил. Симуляция
+-- никогда не выполняет действие и нужна для проверки правила на данных.
+CREATE TABLE IF NOT EXISTS automation_rule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id TEXT DEFAULT '',
+    mode TEXT DEFAULT 'live',             -- dry_run | live
+    event TEXT DEFAULT '',
+    matched INTEGER DEFAULT 0,
+    action TEXT DEFAULT '',
+    preview TEXT DEFAULT '',
+    at TEXT,
+    actor TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_rule_runs_rule ON automation_rule_runs(rule_id, id DESC);
 
 -- ------------------------------------------- 8.5: wish-list клиентов (идея 72)
 CREATE TABLE IF NOT EXISTS wishes (

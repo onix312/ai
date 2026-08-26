@@ -47,6 +47,7 @@
      <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic">◎</span><span>Клиенты</span><small>CRM</small></a>
      <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic">◫</span><span>Ниши</span><small>Тесты</small></a>
      <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic">✎</span><span>Контент</span><small>Студия</small></a>
+     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic">◆</span><span>Центр 10.0</span><small>Смена</small></a>
      <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
     </div>
     <div class="nav-more-section">
@@ -1043,6 +1044,17 @@
     </select><label class="sr-only" for="mk_labels_note">Дополнительная строка</label><input id="mk_labels_note" class="field" placeholder="Дополнительная строка (необязательно)"><button class="btn primary" type="button" id="mk_label_one">Печать</button></div>
    </section>
   </div>
+ </div>
+</section>
+
+<!-- ============================================== ЦЕНТР 10.0 -->
+<section class="view" id="view-ops10">
+ <div class="view-head"><div><span class="eyebrow">PrintFlow 10.0 · единый рабочий контур</span><h1>Центр смены</h1><p>Inbox, воронка обращений и безопасная проверка автоматизаций.</p></div><div class="head-actions"><button class="btn" id="ops10_refresh" type="button">↻ Обновить</button></div></div>
+ <div class="kpi-grid" id="ops10_pipeline" aria-live="polite"></div>
+ <section class="card ops10-printer-card"><div class="card-head"><div><span class="card-kicker">Bambu Lab · MQTT / AMS</span><h2>Состояние оборудования</h2><p>Телеметрия, материал и блокировки видны до запуска. Команды выполняются только в разделе «Принтеры» с safety-gate.</p></div><a class="btn sm ghost" href="#printers" data-view="printers">Открыть управление →</a></div><div id="ops10_printers" class="ops10-printers"></div></section>
+ <div class="ops10-grid">
+  <section class="card"><div class="card-head"><div><span class="card-kicker">Inbox · CRM</span><h2>Обращения</h2><p>Переводите лид от нового сообщения к заказу. Изменение стадии не отправляет сообщений.</p></div></div><div id="ops10_inbox" class="ops10-inbox"></div></section>
+  <section class="card"><div class="card-head"><div><span class="card-kicker">Automation sandbox</span><h2>Правила</h2><p>Dry-run показывает последствия и ничего не меняет в цехе.</p></div></div><div id="ops10_rules"></div><div class="card-head" style="margin-top:18px"><div><h3>Последние проверки</h3></div></div><div id="ops10_runs"></div></section>
  </div>
 </section>
 
@@ -4838,7 +4850,8 @@
 <script src="assets/marketing.js?v=9.2.1"></script>
 <script src="assets/clientbot.js?v=9.3.4"></script>
 <script src="assets/workshop.js?v=9.1.2"></script>
-<script src="assets/app.js?v=9.2.2"></script>
+<script src="assets/app.js?v=10.0.0"></script>
+<script src="assets/ops10.js?v=10.0.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
