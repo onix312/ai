@@ -327,7 +327,7 @@ function renderCards(list) {
         : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
       + `<div class="pinfo">`
       + `<div class="pinfo-top"><h3>${esc(i.name)}</h3><span class="prod-kind-tag ${esc(i.kind || 'product')}">${esc(KIND_LABEL[i.kind] || 'Товар')}</span></div>`
-      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''}</small>`
+      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''}${i.kind === 'product' && !num(i.client_bot_published, 1) ? ' · 🙈 скрыт в боте' : ''}</small>`
       + `</div>`
       + `<button class="icon-btn sm" type="button" data-nom-edit="${esc(i.id)}" title="Открыть карточку">✎</button></div>`
       + '<div class="pbody">'
@@ -367,9 +367,13 @@ function renderTable(list) {
     const unprofit = !disp && i.profitable === false;
     const statusIc = disp ? '🛍' : (STATUS_ICONS[i.status] || '◻');
     const statusLabel = disp ? 'Для магазина' : (STATUS_LABEL[i.status] || i.status);
+    // Витрина клиентского бота: помечаем только товары без флага —
+    // материалы и услуги в витрину не попадают вовсе.
+    const hidden = i.kind === 'product' && !num(i.client_bot_published, 1);
+    const vitrine = hidden ? '<span title="Скрыт в клиентском боте"> 🙈</span>' : '';
     return `<tr class="clickable" data-nom-edit="${esc(i.id)}">`
       + `<td class="tnum muted">${esc(i.code || '')}</td>`
-      + `<td class="strong">${esc(i.name)}${i.sku ? `<small class="muted"> · ${esc(i.sku)}</small>` : ''}</td>`
+      + `<td class="strong">${esc(i.name)}${vitrine}${i.sku ? `<small class="muted"> · ${esc(i.sku)}</small>` : ''}</td>`
       + `<td>${esc(group ? group.name : '—')}</td>`
       + `<td class="right tnum">${nfmt(i.qty)}</td>`
       + `<td class="right tnum muted">—</td>`
@@ -461,6 +465,10 @@ async function openNom(id) {
   $('nf_group_id').value = d.group_id || '';
   $('nf_niche_id').value = d.niche_id || '';
   $('nf_marked').checked = !!num(d.marked);
+  // Витрина клиентского бота: у новой позиции флаг включён — совпадает
+  // с умолчанием колонки client_bot_published в базе.
+  $('nf_client_published').checked = d.id ? !!num(d.client_bot_published, 1) : true;
+  $('nf_client_desc').value = d.client_bot_description || '';
   const img = $('nf_photo_preview');
   img.hidden = !d.photo;
   if (d.photo) img.src = `/api/nomenclature/photo.jpg?id=${esc(d.id)}&t=${esc(d.updated_at || '')}`;
@@ -591,6 +599,8 @@ async function saveNom() {
     print_group: ($('nf_print_group') || { value: '' }).value.trim(),
     min_qty: num($('nf_min_qty').value), max_qty: num($('nf_max_qty').value),
     vat: num($('nf_vat').value), marked: $('nf_marked').checked ? 1 : 0,
+    client_bot_published: $('nf_client_published').checked ? 1 : 0,
+    client_bot_description: $('nf_client_desc').value.trim(),
     note: $('nf_note').value.trim(),
     prices: {},
   };

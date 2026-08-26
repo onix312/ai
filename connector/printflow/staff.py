@@ -5,9 +5,9 @@
 Роли не меняют панель (она локальная), они разграничивают команды бота:
 
 • сотрудник — обзоры (панель, статус, очередь, кадр), полка: продажа и приход,
-  inbox клиентского бота, фото к заказу, слежка за заказом;
+  каталог (просмотр), inbox клиентского бота, фото к заказу, слежка за заказом;
 • руководитель — всё перечисленное плюс деньги, заказы (новый, статус, выдать,
-  оплата) и управление принтерами;
+  оплата), управление принтерами и правки каталога (цены, витрина);
 • владелец — всё, плюс управление командой.
 
 Пригласительные коды: «пригласить» в боте или кнопка в панели создаёт код
@@ -28,9 +28,11 @@ ROLE_NAMES = {"owner": "владелец", "manager": "руководитель"
 
 # Группы команд бота и права ролей. Группа — не «красивое имя», а способ
 # запретить деньгам и управлению принтером утекать в чаты без полномочий.
+# «catalog» — правки каталога (цены, публикация витрины, карточки позиций):
+# это деньги и наружу видимый контент, поэтому сотруднику не выдаётся.
 ROLE_RIGHTS: dict[str, set[str]] = {
-    "owner": {"view", "shelf", "orders", "finance", "printers", "staff", "inbox"},
-    "manager": {"view", "shelf", "orders", "finance", "printers", "inbox"},
+    "owner": {"view", "shelf", "catalog", "orders", "finance", "printers", "staff", "inbox"},
+    "manager": {"view", "shelf", "catalog", "orders", "finance", "printers", "inbox"},
     "employee": {"view", "shelf", "inbox"},
 }
 
@@ -61,6 +63,13 @@ WORD_GROUPS: dict[str, str] = {
     # полка: продажи и приход
     "продажа": "shelf", "продать": "shelf", "продажи": "shelf", "sell": "shelf",
     "приход": "shelf", "положить": "shelf", "пополнить": "shelf",
+    # каталог: просмотр — всем, правки — отдельная группа «catalog»
+    "каталог": "view", "catalog": "view", "номенклатура": "view",
+    "цена": "catalog", "скрыть": "catalog", "показать": "catalog",
+    "описание": "catalog", "товар": "catalog", "норматив": "catalog",
+    "минималка": "catalog", "архив": "catalog", "вернуть": "catalog",
+    "удалить": "catalog", "пересчёт": "catalog", "пересчет": "catalog",
+    "группы": "catalog",
     # заказы и клиенты
     "выдать": "orders", "выдал": "orders", "выдан": "orders",
     "закрыть": "orders", "готов": "orders", "ready": "orders",
@@ -92,6 +101,12 @@ CALLBACK_GROUPS: dict[str, str] = {
     "frame": "view", "panel": "view", "plan": "view", "shelf:needs": "view",
     "shelf": "shelf", "sell-menu": "shelf", "shelf-prod-menu": "shelf",
     "shelf-moves": "shelf", "shelf-sales7": "shelf", "shelf-sales30": "shelf",
+    # каталог: список и карточка — просмотр, действия — правки
+    "cat": "view", "cati": "view",
+    "cat-hide": "catalog", "cat-show": "catalog", "cat-archive": "catalog",
+    "cat-restore": "catalog", "cat-recalc": "catalog", "cat-del": "catalog",
+    "cat-delyes": "catalog", "cat-grps": "catalog", "cat-grp": "catalog",
+    "cat-vitrine": "catalog",
 }
 
 
@@ -225,10 +240,12 @@ class Staff:
     def rights_text(self, role: str) -> str:
         rights = ROLE_RIGHTS.get(normalize_role(role), set())
         names = {"view": "обзоры и камера", "shelf": "полка: продажа и приход",
+                 "catalog": "каталог: цены и витрина",
                  "orders": "заказы и оплата", "finance": "деньги и отчёты",
                  "printers": "управление принтерами", "staff": "управление командой"}
-        return " · ".join(names[g] for g in ("view", "shelf", "orders", "finance",
-                                             "printers", "staff") if g in rights)
+        return " · ".join(names[g] for g in ("view", "shelf", "catalog", "orders",
+                                             "finance", "printers", "staff")
+                          if g in rights)
 
 
 def gate(db, chat_id: str) -> dict[str, Any]:
