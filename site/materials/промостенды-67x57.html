@@ -32,63 +32,89 @@
   .stand {
     width: 67mm; height: 57mm; position: relative; overflow: hidden;
     border: .25mm dashed #c6cede; background: #fff; color: var(--ink);
-    padding: 4.2mm 4.1mm 3.6mm; display: flex; flex-direction: column;
-    break-inside: avoid; cursor: pointer;
+    padding: 3.4mm 3.6mm 2.8mm; display: flex; flex-direction: column;
+    break-inside: avoid; cursor: pointer; font-family: var(--stand-font, inherit);
+    --accent: var(--brand);
   }
   .stand.selected { outline: .8mm solid #4f46e5; outline-offset: -1mm; z-index: 2; }
   .stand::before {
     content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: radial-gradient(circle at 100% 0, rgba(124,58,237,.12) 0 16mm, transparent 16.5mm),
-                linear-gradient(135deg, rgba(79,70,229,.06), rgba(255,255,255,0) 42%);
+    background: radial-gradient(circle at 100% 0, color-mix(in srgb, var(--accent) 12%, transparent) 0 16mm, transparent 16.5mm),
+                linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, transparent), rgba(255,255,255,0) 42%);
   }
-  .stand.theme-dark { background: linear-gradient(145deg, #111827, #312e81); color: #fff; border-color: #6d74a7; }
+  .stand.theme-dark { background: linear-gradient(145deg, #111827, #312e81); color: #fff; border-color: #6d74a7; --accent: #fbbf24; }
   .stand.theme-dark::before { background: radial-gradient(circle at 100% 0, rgba(255,255,255,.16) 0 17mm, transparent 17.5mm); }
-  .stand.theme-warm { background: #fff8ec; border-color: #f1cc8b; }
-  .stand.theme-warm::before { background: radial-gradient(circle at 100% 0, rgba(249,115,22,.14) 0 17mm, transparent 17.5mm); }
-  .stand.theme-mono { background: #fff; border-color: #aeb7c8; }
+  .stand.theme-warm { background: #fff8ec; border-color: #f1cc8b; --accent: #ea580c; }
+  .stand.theme-mono { background: #fff; border-color: #aeb7c8; --accent: #111827; }
   .stand.theme-mono::before { display: none; }
+  .stand.border-solid { border-style: solid; border-width: .4mm; }
+  .stand.border-accent { border-style: solid; border-width: .5mm; border-color: var(--accent); }
+  .stand.border-none { border-color: transparent; }
+  .stand.font-rounded { --stand-font: "Trebuchet MS", "Arial Rounded MT Bold", Arial, sans-serif; }
+  .stand.font-classic { --stand-font: Georgia, "Times New Roman", serif; }
+  .stand.font-mono { --stand-font: ui-monospace, SFMono-Regular, Consolas, monospace; }
 
-  .topline { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 2mm; min-height: 8mm; }
+  /* Card body is a fixed-height flex column: the scrollable/clampable content
+     (topline + headline + body + points) always shares one shrinkable block,
+     so the footer (CTA + QR) never gets pushed off the physical 57mm card —
+     long text is clamped instead of overlapping or disappearing under it. */
+  .content { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .topline { position: relative; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 2mm; min-height: 7mm; }
   .brand { display: flex; align-items: center; gap: 1.7mm; min-width: 0; }
   .brand img { width: 6.2mm; height: 6.2mm; flex: none; }
   .brand b { font-size: 8.2pt; letter-spacing: .13em; font-weight: 900; white-space: nowrap; }
   .kicker {
     max-width: 29mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 5.8pt; line-height: 1.1; letter-spacing: .07em; text-transform: uppercase;
-    color: var(--brand); font-weight: 850; text-align: right;
+    color: var(--accent); font-weight: 850; text-align: right;
   }
   .theme-dark .kicker { color: #c7d2fe; }
   .theme-warm .kicker { color: #c2410c; }
   .theme-mono .kicker { color: #334155; }
   .headline {
-    position: relative; margin-top: 2.2mm;
-    font-size: 15.6pt; line-height: .96; letter-spacing: -.055em; font-weight: 950;
+    position: relative; flex: none; margin-top: calc(1.8mm * var(--fit, 1));
+    font-size: calc(15.6pt * var(--fit, 1) * var(--text-scale, 1)); line-height: 1.02; letter-spacing: -.05em; font-weight: 950;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
   }
-  .headline.small { font-size: 13.2pt; line-height: 1; }
-  .headline .accent { color: var(--brand); font-style: italic; }
-  .theme-dark .headline .accent { color: #fbbf24; }
-  .theme-warm .headline .accent { color: #ea580c; }
-  .theme-mono .headline .accent { color: #111827; text-decoration: underline; }
+  .headline.small { font-size: calc(12.6pt * var(--fit, 1) * var(--text-scale, 1)); line-height: 1.05; -webkit-line-clamp: 2; }
+  .headline .accent { color: var(--accent); font-style: italic; }
+  .theme-mono .headline .accent { text-decoration: underline; }
   .body {
-    position: relative; margin-top: 2mm; font-size: 7.35pt; line-height: 1.24; color: #4b5874;
+    position: relative; flex: none; margin-top: calc(1.7mm * var(--fit, 1));
+    font-size: calc(7.1pt * var(--fit, 1) * var(--text-scale, 1)); line-height: 1.22; color: #4b5874;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
   }
   .theme-dark .body { color: #dbe4ff; }
-  .points { position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 1.3mm; margin-top: 2.3mm; }
+  .points {
+    position: relative; flex: none; display: grid; grid-template-columns: 1fr 1fr;
+    gap: calc(1.1mm * var(--fit, 1)); margin-top: calc(1.8mm * var(--fit, 1));
+  }
   .point {
-    min-height: 8mm; border-radius: 2mm; padding: 1.25mm 1.5mm;
-    background: rgba(79,70,229,.075); font-size: 6.35pt; line-height: 1.12; font-weight: 760; color: #27334f;
+    min-height: calc(7.2mm * var(--fit, 1)); border-radius: 2mm; padding: calc(1.1mm * var(--fit, 1)) calc(1.4mm * var(--fit, 1));
+    background: color-mix(in srgb, var(--accent) 8%, transparent); font-size: calc(6.1pt * var(--fit, 1) * var(--text-scale, 1)); line-height: 1.1; font-weight: 760; color: #27334f;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
   }
   .theme-dark .point { background: rgba(255,255,255,.12); color: #fff; }
   .theme-warm .point { background: rgba(249,115,22,.09); }
   .theme-mono .point { background: #f4f6fb; }
-  .foot { position: relative; margin-top: auto; padding-top: 2mm; display: flex; align-items: end; justify-content: space-between; gap: 2mm; }
-  .cta { font-size: 6.55pt; line-height: 1.18; color: var(--ink-soft); }
-  .cta b { display: block; color: var(--ink); font-size: 7.1pt; }
+  .stand.no-logo .brand img { display: none; }
+  .foot {
+    position: relative; flex: none; margin-top: 1.8mm; padding-top: 1.8mm;
+    display: flex; align-items: end; justify-content: space-between; gap: 2mm;
+  }
+  .cta {
+    font-size: calc(6.4pt * var(--text-scale, 1)); line-height: 1.16; color: var(--ink-soft); min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  }
+  .cta b {
+    display: block; color: var(--ink); font-size: calc(6.95pt * var(--text-scale, 1));
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .theme-dark .cta, .theme-dark .cta b { color: #fff; }
-  .qrbox { width: 12.2mm; height: 12.2mm; flex: none; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 1.2mm; padding: .7mm; }
+  .qrbox { width: 11.4mm; height: 11.4mm; flex: none; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 1.2mm; padding: .7mm; }
   .qrbox svg { display: block; width: 100%; height: 100%; }
   .noqr .qrbox { display: none; }
-  .noqr .cta { font-size: 7.15pt; }
+  .noqr .cta { font-size: calc(6.95pt * var(--text-scale, 1)); }
 
   .ideas { max-width: 210mm; margin: 0 auto 26px; background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
   .ideas h2 { margin: 0 0 8px; font-size: 15px; }
@@ -118,6 +144,7 @@
     </label>
     <label><input type="checkbox" id="qrOn" checked> QR</label>
     <button class="btn" type="button" id="shuffle">Собрать другие 15</button>
+    <button class="btn" type="button" id="addAbout">+ Карточка «О нас»</button>
     <button class="btn" type="button" id="copyIdeas">Копировать идеи</button>
     <button class="btn primary" type="button" data-nz-print>Печать</button>
     <span class="pill"><b>Выбрано:</b> <span id="selectedName">1</span></span>
@@ -132,6 +159,40 @@
     <button class="btn" type="button" id="reset">Вернуть 15 идей</button>
     <span class="hint">Клик по карточке — правка. Заголовок до звёздочки выделяется акцентом: <b>Печатаем* вещи под вас</b>.</span>
   </div>
+  <div class="panel-row edit-row">
+    <label>Оформление
+      <select id="e_theme">
+        <option value="">как в общей теме</option>
+        <option value="light">светлая</option>
+        <option value="dark">тёмная</option>
+        <option value="warm">тёплая</option>
+        <option value="mono">моно</option>
+      </select>
+    </label>
+    <label>Свой цвет акцента <input id="e_color" type="color" value="#4f46e5"></label>
+    <button class="btn sm" type="button" id="e_color_clear" title="Вернуть цвет темы">✕ цвет</button>
+    <label>Шрифт
+      <select id="e_font">
+        <option value="">по умолчанию</option>
+        <option value="rounded">мягкий</option>
+        <option value="classic">классический</option>
+        <option value="mono">моно</option>
+      </select>
+    </label>
+    <label>Рамка
+      <select id="e_border">
+        <option value="">пунктир (по умолчанию)</option>
+        <option value="solid">сплошная</option>
+        <option value="accent">акцентная</option>
+        <option value="none">без рамки</option>
+      </select>
+    </label>
+    <label>Размер текста <input id="e_scale" type="range" min="85" max="120" step="5" value="100"><span id="e_scale_val">100%</span></label>
+    <label><input type="checkbox" id="e_logo" checked> Логотип NOZZA</label>
+    <button class="btn" type="button" id="applyDesignAll">Применить оформление ко всем</button>
+    <button class="btn" type="button" id="resetDesign">Сбросить оформление карточки</button>
+    <span class="hint">Настройки оформления сохраняются отдельно для каждой карточки — цвет, шрифт, рамка, размер текста и логотип.</span>
+  </div>
 </div>
 
 <div class="note noprint">
@@ -141,7 +202,7 @@
 <div class="sheet" id="sheet"></div>
 
 <div class="ideas noprint">
-  <h2>15 идей для промостендов 67 × 57 мм</h2>
+  <h2>100 идей для промостендов 67 × 57 мм</h2>
   <ol id="ideaList"></ol>
 </div>
 
@@ -172,8 +233,94 @@ const IDEAS = [
   {kicker:'НЕ ПОДОШЛО?', title:'Подгоним* размер', text:'3D-печать хороша тем, что форму можно быстро поправить под вашу реальную задачу.', points:['замер', 'правка', 'примерка', 'готово'], cta:'Вернитесь с деталью'},
   {kicker:'МИНИ-СЕРИЯ', title:'10–100 штук* без склада', text:'Печатайте столько, сколько нужно сейчас: для события, смены ценников или теста продаж.', points:['без формы', 'быстрый старт', 'повтор', 'учёт'], cta:'Узнать срок'},
   {kicker:'ДЕТАЛИ ДЛЯ АВТО', title:'Заглушки,* клипсы, крепёж', text:'Для салона, багажника и гаража: когда оригинал дорогой или больше не продаётся.', points:['по образцу', 'PETG/ABS', 'примерка', 'цвет'], cta:'Принесите образец'},
-  {kicker:'КОМПЬЮТЕР И КАБЕЛИ', title:'Убрать* хаос проводов', text:'Клипсы, каналы, держатели блоков питания и стойки под гаджеты — под ваш стол.', points:['кабели', 'роутер', 'зарядки', 'монтаж'], cta:'Сфотографируйте стол'}
+  {kicker:'КОМПЬЮТЕР И КАБЕЛИ', title:'Убрать* хаос проводов', text:'Клипсы, каналы, держатели блоков питания и стойки под гаджеты — под ваш стол.', points:['кабели', 'роутер', 'зарядки', 'монтаж'], cta:'Сфотографируйте стол'},
+  {kicker:'ДЛЯ КАФЕ И МАГАЗИНОВ', title:'Таблички* на витрину', text:'Ценники, номерки столов, таблички «занято/свободно» — прочные и в цвет интерьера.', points:['номерки', 'ценники', 'меню-стенд', 'логотип'], cta:'Обсудить размер'},
+  {kicker:'ХОББИ И МОДЕЛИЗМ', title:'Детали* для моделей', text:'Мелкие элементы кораблей, самолётов и роботов — печатаем по чертежу или фото референса.', points:['масштаб 1:1', 'мелкий шаг', 'под покраску', 'сборка'], cta:'Пришлите референс'},
+  {kicker:'НАСТОЛЬНЫЕ ИГРЫ', title:'Фишки* и миниатюры', text:'Токены, подставки для персонажей, органайзеры для карт и кубиков под вашу игру.', points:['токены', 'подставки', 'органайзер', 'миниатюры'], cta:'Покажите игру'},
+  {kicker:'ДЛЯ САДА', title:'Маркеры* для грядок', text:'Подписанные таблички для рассады и клумб — не выцветают и легко переставляются.', points:['таблички', 'колышки', 'шрифт', 'цвет'], cta:'Список растений'},
+  {kicker:'ХРАНЕНИЕ НА КУХНЕ', title:'Держатели* для специй', text:'Компактные полки и подставки под баночки — точно под размер вашей кухни.', points:['под баночки', 'настенный', 'угловой', 'модульный'], cta:'Замерьте полку'},
+  {kicker:'В ВАННОЙ', title:'Мыльница* без хлопот', text:'Держатели для щёток, мыла и флаконов — быстросохнущий дизайн под вашу раковину.', points:['мыльница', 'держатель щёток', 'на присосках', 'цвет'], cta:'Выбрать форму'},
+  {kicker:'РАБОЧИЙ СТОЛ', title:'Подставка* под ноутбук', text:'Эргономичная высота, вентиляция и держатель для кабеля — под ваш ноутбук и стол.', points:['высота', 'вентиляция', 'кабель-канал', 'складная'], cta:'Модель ноутбука'},
+  {kicker:'ДЛЯ ГЕЙМЕРОВ', title:'Держатель* для геймпада', text:'Настольная или настенная подставка под контроллер, наушники и мелкую периферию.', points:['геймпад', 'наушники', 'кабель', 'подсветка'], cta:'Ваша платформа'},
+  {kicker:'ФОТО И ВИДЕО', title:'Крепления* для камеры', text:'Адаптеры под штатив, держатели микрофона и накамерного света — свой стандарт креплений.', points:['штатив', 'холодный башмак', 'микрофон', 'свет'], cta:'Модель камеры'},
+  {kicker:'МУЗЫКАНТАМ', title:'Держатели* для медиаторов', text:'Подставки для медиатора, каподастра и мелкой фурнитуры — на стену или на стол.', points:['медиаторы', 'каподастр', 'провода', 'настенный'], cta:'Ваш инструмент'},
+  {kicker:'ДЛЯ ШКОЛЫ', title:'Наглядные* модели', text:'Геометрические тела, модели молекул и механизмов для уроков — прочные и яркие.', points:['геометрия', 'молекулы', 'механизмы', 'набор класса'], cta:'Тема урока'},
+  {kicker:'ОФИСНЫЙ ПОРЯДОК', title:'Таблички* на дверь', text:'Именные таблички, номера кабинетов и указатели — в едином корпоративном стиле.', points:['имя', 'должность', 'номер', 'логотип'], cta:'Список кабинетов'},
+  {kicker:'ДЛЯ ФИТНЕСА', title:'Держатели* для инвентаря', text:'Настенные крепления для гантелей, эспандеров и ковриков — под ваш зал или дом.', points:['гантели', 'коврики', 'эспандеры', 'настенный'], cta:'Замерьте стену'},
+  {kicker:'ВЕЛО И САМОКАТ', title:'Держатель* для бутылки', text:'Крепление под флягу, телефон и мелкий инвентарь на раму велосипеда или самоката.', points:['фляга', 'телефон', 'крепёж', 'вес'], cta:'Диаметр рамы'},
+  {kicker:'РЫБАЛКА И ОХОТА', title:'Держатели* снастей', text:'Катушки для лески, подставки для удочек и органайзеры мелкой оснастки под лодку и берег.', points:['удочки', 'катушки', 'блёсны', 'кейс'], cta:'Ваш набор снастей'},
+  {kicker:'ДЛЯ ПУТЕШЕСТВИЙ', title:'Бирки* на багаж', text:'Прочные именные бирки с QR-контактом — не потеряются и легко узнаются на ленте.', points:['имя', 'QR-контакт', 'цвет', 'крепление'], cta:'Ваши данные'},
+  {kicker:'МОДА И АКСЕССУАРЫ', title:'Держатели* для украшений', text:'Настольные и настенные подставки под кольца, серьги и часы — компактно и красиво.', points:['кольца', 'серьги', 'часы', 'подставка'], cta:'Форма и цвет'},
+  {kicker:'ДЛЯ САЛОНОВ КРАСОТЫ', title:'Органайзер* инструмента', text:'Подставки для расчёсок, фена и мелкого инструмента мастера — под рабочее место.', points:['расчёски', 'фен', 'ножницы', 'настенный'], cta:'Планировка стола'},
+  {kicker:'ДЛЯ КОФЕЕН', title:'Держатель* стаканов', text:'Настенные и настольные подставки под стаканчики, крышки и трубочки на кассе.', points:['стаканы', 'крышки', 'трубочки', 'логотип'], cta:'Размер прилавка'},
+  {kicker:'ПРАЗДНИКИ', title:'Топперы* для торта', text:'Именные и цифровые топперы, украшения на капкейки — под любой праздник и цвет.', points:['имя', 'цифра', 'цвет', 'тема'], cta:'Дата праздника'},
+  {kicker:'СВАДЬБЫ', title:'Декор* для свадьбы', text:'Таблички рассадки, номера столов, топперы для торта — в стиле вашей свадьбы.', points:['рассадка', 'номера столов', 'топпер', 'стиль'], cta:'Цвет и стиль'},
+  {kicker:'НОВЫЙ ГОД', title:'Ёлочные* игрушки на заказ', text:'Персональные игрушки с именами и датами — прочный пластик, яркие цвета.', points:['имя', 'дата', 'цвет', 'набор'], cta:'Количество игрушек'},
+  {kicker:'ДЛЯ ДЕТЕЙ', title:'Игрушки* и запчасти', text:'Допечатаем утерянную деталь конструктора или сделаем фигурку любимого персонажа.', points:['по фото', 'совместимо', 'цвет', 'безопасный пластик'], cta:'Пришлите фото'},
+  {kicker:'КОСПЛЕЙ И РЕКВИЗИТ', title:'Реквизит* и броня', text:'Детали костюма, оружие и элементы брони — по референсу, под покраску.', points:['по референсу', 'под покраску', 'лёгкий', 'сборный'], cta:'Пришлите арт'},
+  {kicker:'ДРОНЫ И RC', title:'Запчасти* для дронов', text:'Рамы, крепления камеры и защита пропеллеров — печатаем по STL или по образцу.', points:['рама', 'крепление камеры', 'защита винтов', 'лёгкий пластик'], cta:'Модель дрона'},
+  {kicker:'RC-МОДЕЛИ', title:'Кузов* и детали шасси', text:'Ремонт и доработка радиоуправляемых моделей — гибкие и жёсткие материалы.', points:['кузов', 'шасси', 'крепления', 'ремонт'], cta:'Модель машинки'},
+  {kicker:'БЫТОВАЯ ТЕХНИКА', title:'Запчасти* для техники', text:'Ручки, крепления и мелкие детали для пылесоса, кофемашины и стиральной машины.', points:['по образцу', 'по фото', 'подбор материала', 'срок 1–3 дня'], cta:'Принесите деталь'},
+  {kicker:'МЕБЕЛЬНАЯ ФУРНИТУРА', title:'Ручки* и заглушки', text:'Мебельные ручки, ножки и заглушки под ваш стиль и цвет — на замену утерянным.', points:['ручки', 'ножки', 'заглушки', 'подбор цвета'], cta:'Замерьте отверстие'},
+  {kicker:'ДЛЯ АКВАРИУМОВ', title:'Декор* и держатели', text:'Подставки для оборудования, декор для аквариума и террариума — безопасный пластик.', points:['декор', 'крепления', 'фильтр', 'безопасно'], cta:'Объём аквариума'},
+  {kicker:'ДЛЯ ФЕРМЕРОВ', title:'Маркировка* тары', text:'Бирки на ящики, таблички на теплицы и держатели этикеток — устойчивы к влаге.', points:['бирки', 'таблички', 'влагостойко', 'партия'], cta:'Количество бирок'},
+  {kicker:'СКЛАД И ЛОГИСТИКА', title:'Держатели* этикеток', text:'Кармашки и рамки для стеллажных этикеток — быстро переставляются и не мнутся.', points:['на стеллаж', 'формат А6/А7', 'прозрачные', 'партия'], cta:'Размер стеллажа'},
+  {kicker:'ТОРГОВОЕ ОБОРУДОВАНИЕ', title:'Держатели* ценников', text:'Клипсы, подставки и рамки под ценники и рекламные материалы на полке.', points:['клипсы', 'подставки', 'рамки', 'цвет бренда'], cta:'Формат ценника'},
+  {kicker:'ВЫСТАВКИ И СТЕНДЫ', title:'Элементы* стенда', text:'Держатели баннеров, подставки под буклеты и мелкий крепёж для выставочного стенда.', points:['баннер', 'буклеты', 'крепёж', 'сборно-разборный'], cta:'Размер стенда'},
+  {kicker:'НАРУЖНАЯ РЕКЛАМА', title:'Буквы* и логотипы', text:'Объёмные буквы и логотипы на стену или витрину — подбираем шрифт и подсветку.', points:['объёмные буквы', 'логотип', 'подсветка', 'крепёж'], cta:'Пришлите логотип'},
+  {kicker:'НОМЕРА ДОМОВ', title:'Таблички* с номером', text:'Уличные таблички с номером дома и названием улицы — устойчивы к погоде.', points:['номер дома', 'улица', 'подсветка', 'крепёж'], cta:'Ваш адрес'},
+  {kicker:'ПОЧТОВЫЕ ЯЩИКИ', title:'Детали* почтового ящика', text:'Замена сломанных крышек, флажков и креплений почтового ящика без покупки нового.', points:['крышка', 'флажок', 'крепление', 'по образцу'], cta:'Пришлите фото'},
+  {kicker:'ГАРАЖ И МАСТЕРСКАЯ', title:'Держатели* инструмента', text:'Настенная система хранения под гаечные ключи, отвёртки и мелкий инструмент.', points:['ключи', 'отвёртки', 'подписи', 'модульно'], cta:'Список инструмента'},
+  {kicker:'СТОЛЯРНАЯ МАСТЕРСКАЯ', title:'Шаблоны* и кондукторы', text:'Направляющие и кондукторы для точных отверстий и пазов — под ваш инструмент.', points:['под фрезер', 'под дрель', 'многоразовые', 'точность'], cta:'Опишите задачу'},
+  {kicker:'ЭЛЕКТРИКА', title:'Держатели* для проводки', text:'Клипсы, короба и хомуты для аккуратной прокладки кабеля дома и в офисе.', points:['клипсы', 'короба', 'хомуты', 'цвет под стену'], cta:'Метраж проводки'},
+  {kicker:'СВЕТ И ЛАМПЫ', title:'Плафоны* и крепления', text:'Замена сломанных плафонов и переходников для светильников — подбор под цоколь.', points:['плафон', 'переходник', 'цоколь', 'термостойкий'], cta:'Модель светильника'},
+  {kicker:'ОКНА И ШТОРЫ', title:'Держатели* карнизов', text:'Кронштейны и заглушки для карнизов — на замену сломанным родным деталям.', points:['кронштейн', 'заглушка', 'диаметр трубы', 'цвет'], cta:'Диаметр карниза'},
+  {kicker:'БАЛКОН И ЛОДЖИЯ', title:'Держатели* для цветов', text:'Кашпо-подставки и крепления для балконных ящиков с цветами — надёжно и легко.', points:['кашпо', 'крепление', 'дренаж', 'цвет'], cta:'Размер ящика'},
+  {kicker:'ДЛЯ ДАЧИ', title:'Мелочи* для дачи', text:'Держатели шлангов, крючки для инвентаря и таблички на калитку — прочный пластик.', points:['держатель шланга', 'крючки', 'таблички', 'погодостойкий'], cta:'Список нужного'},
+  {kicker:'ДЛЯ БАССЕЙНА', title:'Держатели* инвентаря', text:'Крепления для сачков, щёток и шлангов у бассейна — устойчивы к воде и солнцу.', points:['держатель сачка', 'щётка', 'шланг', 'UV-стойкий'], cta:'Опишите инвентарь'},
+  {kicker:'ТУРИЗМ И ПОХОДЫ', title:'Держатели* снаряжения', text:'Крепления для фонаря, котелка и мелкого снаряжения на рюкзак или палатку.', points:['фонарь', 'котелок', 'крепёж', 'лёгкий'], cta:'Ваше снаряжение'},
+  {kicker:'ОХОТНИЧЬИ АКСЕССУАРЫ', title:'Держатели* оптики', text:'Крепления для прицелов, фонарей и мелких аксессуаров — по образцу или чертежу.', points:['крепление прицела', 'фонарь', 'по образцу', 'прочный пластик'], cta:'Модель оружия'},
+  {kicker:'ДЛЯ АВТОСЕРВИСА', title:'Приспособления* для СТО', text:'Оснастка, направляющие и держатели инструмента под конкретные операции сервиса.', points:['оснастка', 'направляющие', 'держатели', 'под задачу'], cta:'Опишите операцию'},
+  {kicker:'ДЛЯ ШИНОМОНТАЖА', title:'Колпачки* и заглушки', text:'Колпачки на ниппели, заглушки дисков и мелкий крепёж — партиями под сеть точек.', points:['колпачки', 'заглушки', 'партия', 'цвет'], cta:'Количество'},
+  {kicker:'КЕМПИНГ И ПИКНИК', title:'Держатели* посуды', text:'Подставки под стаканы, крепления для складных стульев и мелкая туристическая утварь.', points:['подставка под стакан', 'крепление стула', 'лёгкий', 'компакт'], cta:'Опишите набор'},
+  {kicker:'НАСТОЛЬНЫЙ ТЕННИС', title:'Держатели* инвентаря', text:'Подставки для ракеток и мячей, крепления сетки — под клубный или домашний стол.', points:['ракетки', 'мячи', 'сетка', 'подставка'], cta:'Тип стола'},
+  {kicker:'ФУТБОЛ И СПОРТЗАЛ', title:'Держатели* формы', text:'Крючки для формы, подставки под мячи и таблички номеров шкафчиков раздевалки.', points:['крючки', 'подставка под мяч', 'номер шкафчика', 'партия'], cta:'Количество шкафчиков'},
+  {kicker:'ДЛЯ ШКОЛЫ ИСКУССТВ', title:'Подставки* для кистей', text:'Органайзеры для кистей, красок и мелкого инвентаря художественной студии.', points:['кисти', 'краски', 'палитра', 'настольный'], cta:'Размер стола'},
+  {kicker:'МУЗЫКАЛЬНАЯ ШКОЛА', title:'Пюпитры* и держатели', text:'Мини-пюпитры, держатели нот и крепления для инструментов в классе.', points:['пюпитр', 'держатель нот', 'крепление', 'компакт'], cta:'Тип инструмента'},
+  {kicker:'ДЛЯ БИБЛИОТЕК', title:'Держатели* для книг', text:'Разделители полок, подставки для книг и таблички разделов — прочно и аккуратно.', points:['разделители', 'подставки', 'таблички', 'партия'], cta:'Количество полок'},
+  {kicker:'ДЛЯ ОФИСА ПРОДАЖ', title:'Подставки* для буклетов', text:'Настольные и настенные держатели рекламных материалов и визиток на ресепшене.', points:['буклеты', 'визитки', 'настольный', 'логотип'], cta:'Формат буклета'},
+  {kicker:'ДЛЯ СТОМАТОЛОГИИ', title:'Держатели* инструмента', text:'Подставки и лотки для инструментов кабинета — по вашим размерам и требованиям.', points:['лотки', 'подставки', 'стерилизуемый пластик', 'под задачу'], cta:'Опишите кабинет'},
+  {kicker:'ВЕТЕРИНАРНАЯ КЛИНИКА', title:'Держатели* и лотки', text:'Лотки для инструмента, держатели капельниц и таблички кабинетов клиники.', points:['лотки', 'держатель капельницы', 'таблички', 'партия'], cta:'Список нужного'},
+  {kicker:'ДЛЯ САЛОНА ТАТУИРОВКИ', title:'Держатели* расходников', text:'Подставки для машинок, держатели красок и лотки под расходные материалы мастера.', points:['машинка', 'краски', 'лоток', 'настольный'], cta:'Планировка стола'},
+  {kicker:'ФОТОСТУДИЯ', title:'Крепления* для фона', text:'Держатели фонов, зажимы и стойки для реквизита фотостудии — под вашу студию.', points:['держатель фона', 'зажимы', 'стойка', 'реквизит'], cta:'Размер студии'},
+  {kicker:'ДЛЯ БЛОГЕРОВ', title:'Крепления* для света', text:'Держатели кольцевого света, телефона и микрофона для съёмки видео и подкастов.', points:['кольцевой свет', 'телефон', 'микрофон', 'настольный'], cta:'Ваш сетап'},
+  {kicker:'ДЛЯ КАЛЬЯННЫХ', title:'Подставки* и держатели', text:'Подставки под кальян, держатели шлангов и мундштуков — устойчивый жаростойкий пластик.', points:['подставка', 'держатель шланга', 'жаростойкий', 'цвет'], cta:'Тип кальяна'},
+  {kicker:'ДЛЯ БАРОВ', title:'Держатели* барного инвентаря', text:'Подставки под джиггеры, ситечки и мелкий барный инвентарь на стойке.', points:['джиггеры', 'ситечки', 'подставка', 'настенный'], cta:'Опишите стойку'},
+  {kicker:'ДЛЯ ПЕКАРЕН', title:'Держатели* этикеток', text:'Ценникодержатели и таблички для витрины выпечки — легко протираются, гигиеничны.', points:['ценникодержатель', 'таблички', 'гигиенично', 'партия'], cta:'Размер витрины'},
+  {kicker:'ДЛЯ ЦВЕТОЧНЫХ', title:'Подставки* для букетов', text:'Держатели ваз, подставки под горшки и ценники на цветы — под интерьер магазина.', points:['держатель вазы', 'подставка горшка', 'ценники', 'цвет'], cta:'Размер витрины'},
+  {kicker:'ДЛЯ ЗООМАГАЗИНОВ', title:'Держатели* корма', text:'Диспенсеры и подставки для образцов корма, ценникодержатели на полки.', points:['диспенсер', 'образцы', 'ценникодержатель', 'партия'], cta:'Количество полок'},
+  {kicker:'ДЛЯ АПТЕК', title:'Держатели* витрины', text:'Подставки и разделители для витрины, ценникодержатели — аккуратно и по правилам оформления.', points:['разделители', 'подставки', 'ценникодержатель', 'партия'], cta:'Размер витрины'},
+  {kicker:'ДЛЯ ШВЕЙНЫХ МАСТЕРСКИХ', title:'Держатели* катушек', text:'Органайзеры для катушек ниток, игл и мелкой фурнитуры швейного стола.', points:['катушки', 'иглы', 'фурнитура', 'настольный'], cta:'Размер стола'},
+  {kicker:'ДЛЯ ВЯЗАНИЯ', title:'Держатели* спиц и пряжи', text:'Подставки для клубков пряжи, органайзеры спиц и крючков — компактно и удобно.', points:['клубки', 'спицы', 'крючки', 'настольный'], cta:'Ваш набор'},
+  {kicker:'ДЛЯ КЕРАМИКИ', title:'Подставки* для изделий', text:'Сушильные стеллажи и подставки для сырых изделий и готовой керамики мастерской.', points:['сушка', 'стеллаж', 'подставка', 'партия'], cta:'Размер мастерской'},
+  {kicker:'ДЛЯ СВЕЧНОГО ПРОИЗВОДСТВА', title:'Формы* и держатели фитиля', text:'Держатели фитиля, формы для заливки и подставки для готовых свечей.', points:['держатель фитиля', 'форма', 'подставка', 'партия'], cta:'Диаметр свечи'},
+  {kicker:'ДЛЯ МЫЛОВАРЕНИЯ', title:'Формы* для мыла', text:'Формы под мыло ручной работы любой формы и размера, многоразовые.', points:['форма', 'многоразовая', 'антипригарная', 'партия'], cta:'Форма и размер'},
+  {kicker:'ДЛЯ КОНДИТЕРОВ', title:'Трафареты* и формы', text:'Трафареты для декора тортов, формы для шоколада и мастики под ваш дизайн.', points:['трафарет', 'форма для шоколада', 'мастика', 'своя форма'], cta:'Пришлите эскиз'},
+  {kicker:'ДЛЯ ПИВОВАРОВ', title:'Держатели* кранов', text:'Ручки для кранов, держатели этикеток на бочки и таблички сортов пива.', points:['ручка крана', 'этикетка бочки', 'таблички сортов', 'логотип'], cta:'Количество кранов'},
+  {kicker:'ДЛЯ ВИНОДЕЛОВ', title:'Держатели* и бирки', text:'Бирки на бутылки, держатели пробок и подставки для дегустации — под вашу винодельню.', points:['бирки', 'держатель пробки', 'подставка', 'логотип'], cta:'Тираж бирок'},
+  {kicker:'ЭКО-ПРОЕКТЫ', title:'Урны* и держатели', text:'Держатели для раздельного сбора мусора и таблички категорий — прочный пластик.', points:['держатель пакета', 'таблички категорий', 'крепёж', 'партия'], cta:'Количество точек'},
+  {kicker:'ДЛЯ ФЕСТИВАЛЕЙ', title:'Бейджи* и держатели', text:'Держатели бейджей, номерки участников и таблички зон — быстро и партией.', points:['бейджи', 'номерки', 'таблички зон', 'партия'], cta:'Количество участников'},
+  {kicker:'ДЛЯ КОНФЕРЕНЦИЙ', title:'Таблички* спикеров', text:'Именные таблички на стол президиума, номера залов и указатели навигации.', points:['именные таблички', 'номера залов', 'указатели', 'партия'], cta:'Программа мероприятия'},
+  {kicker:'ДЛЯ АРТ-МАСТЕРСКИХ', title:'Подставки* для работ', text:'Мольберты-подставки, держатели кистей и мелкий инвентарь художественной студии.', points:['мольберт', 'держатель кистей', 'инвентарь', 'настольный'], cta:'Размер работ'},
+  {kicker:'ДЛЯ ЙОГА-СТУДИЙ', title:'Держатели* ковриков', text:'Настенные держатели ковриков и блоков для йоги — компактное хранение зала.', points:['держатель коврика', 'блок для йоги', 'настенный', 'модульно'], cta:'Количество мест'},
+  {kicker:'ДЛЯ ДЕТСКИХ САДОВ', title:'Именные* шкафчики', text:'Таблички с именами и картинками на шкафчики и кроватки — яркие и долговечные.', points:['имя', 'картинка', 'цвет', 'партия на группу'], cta:'Список детей'}
 ];
+const ABOUT_CARD = {
+  kicker: 'О НАС', title: 'NOZZA* — 3D-печать в Крыму',
+  text: 'Молодая мастерская 3D-печати в Симферополе: берёмся за штучные заказы и небольшие партии, вникаем в каждую деталь.',
+  points: ['с 2026 года', 'свои принтеры', 'первые заказы', 'срок 1–3 дня'],
+  cta: 'nozza.ru · @nozza3d'
+};
 let cards = loadCards();
 let selected = 0;
 
@@ -196,7 +343,12 @@ function splitAccent(title){
   if (parts.length < 2) return esc(title || '');
   return esc(parts[0]) + '<span class="accent">' + esc(parts.slice(1).join('')) + '</span>';
 }
-function themeFor(i){ const t = $('theme').value; return t === 'auto' ? THEMES[i % THEMES.length] : t; }
+function themeFor(i){
+  const custom = (cards[i] && cards[i].design && cards[i].design.theme) || '';
+  if (custom) return custom;
+  const t = $('theme').value;
+  return t === 'auto' ? THEMES[i % THEMES.length] : t;
+}
 function qrLink(i){
   const c = NZ.contact();
   const base = c.qrbase || c.site || 'https://nozza.ru';
@@ -210,33 +362,76 @@ function renderCard(card, i){
   const pts = (card.points || []).slice(0, 4);
   while (pts.length < 4) pts.push('');
   const titleCls = String(card.title || '').replace(/\*/g, '').length > 24 ? ' small' : '';
-  return '<article class="stand theme-' + themeFor(i) + (showQr ? '' : ' noqr') + (i === selected ? ' selected' : '') + '" data-idx="' + i + '">'
-    + '<div class="topline"><div class="brand"><img data-nz-mark="' + (themeFor(i) === 'dark' ? 'white' : '') + '" src="' + NZ.markSrc(themeFor(i) === 'dark') + '" alt=""><b>NOZZA</b></div><div class="kicker">' + esc(card.kicker || '') + '</div></div>'
+  const d = card.design || {};
+  const theme = themeFor(i);
+  const cls = ['stand', 'theme-' + theme];
+  if (!showQr) cls.push('noqr');
+  if (i === selected) cls.push('selected');
+  if (d.font) cls.push('font-' + d.font);
+  if (d.border) cls.push('border-' + d.border);
+  if (d.logo === false) cls.push('no-logo');
+  const style = [];
+  if (d.color) style.push('--accent:' + esc(d.color));
+  if (d.scale && d.scale !== 100) style.push('--text-scale:' + (d.scale / 100));
+  const styleAttr = style.length ? ' style="' + style.join(';') + '"' : '';
+  return '<article class="' + cls.join(' ') + '"' + styleAttr + ' data-idx="' + i + '">'
+    + '<div class="content">'
+    + '<div class="topline"><div class="brand"><img data-nz-mark="' + (theme === 'dark' ? 'white' : '') + '" src="' + NZ.markSrc(theme === 'dark') + '" alt=""><b>NOZZA</b></div><div class="kicker">' + esc(card.kicker || '') + '</div></div>'
     + '<div class="headline' + titleCls + '">' + splitAccent(card.title || '') + '</div>'
     + '<div class="body">' + esc(card.text || '') + '</div>'
     + '<div class="points">' + pts.map(p => '<div class="point">' + esc(p) + '</div>').join('') + '</div>'
+    + '</div>'
     + '<div class="foot"><div class="cta"><b>' + esc(card.cta || c.tg || '@nozza3d') + '</b>' + esc(c.city || 'Симферополь') + phone + '</div><div class="qrbox">' + qr + '</div></div>'
     + '</article>';
+}
+// Shrinks the clampable content block (headline/body/points) of a card just
+// enough that it never pushes past the card's own bottom edge, so the
+// footer (CTA + QR) always stays fully visible and cards never overlap.
+function fitCard(stand){
+  const content = stand.querySelector('.content');
+  if (!content) return;
+  stand.style.setProperty('--fit', 1);
+  let fit = 1;
+  for (let i = 0; i < 14; i++){
+    if (content.scrollHeight <= content.clientHeight + 0.5) break;
+    fit -= 0.05;
+    if (fit < 0.55) { fit = 0.55; stand.style.setProperty('--fit', fit); break; }
+    stand.style.setProperty('--fit', fit);
+  }
+}
+function fitAllCards(){
+  document.querySelectorAll('.stand').forEach(fitCard);
 }
 function draw(){
   cards = cards.slice(0, 15);
   while (cards.length < 15) cards.push({...IDEAS[cards.length % IDEAS.length], points:[...IDEAS[cards.length % IDEAS.length].points]});
   $('sheet').innerHTML = cards.map(renderCard).join('');
-  $('ideaList').innerHTML = IDEAS.slice(0, 15).map((x) => '<li><b>' + esc(x.title.replace(/\*/g, '')) + '</b> — ' + esc(x.text) + '</li>').join('');
+  $('ideaList').innerHTML = IDEAS.map((x) => '<li><b>' + esc(x.title.replace(/\*/g, '')) + '</b> — ' + esc(x.text) + '</li>').join('');
   fillEditor();
+  requestAnimationFrame(fitAllCards);
 }
 function fillEditor(){
   const card = cards[selected] || cards[0];
+  const d = card.design || {};
   $('selectedName').textContent = String(selected + 1);
   $('e_kicker').value = card.kicker || '';
   $('e_title').value = card.title || '';
   $('e_text').value = card.text || '';
   $('e_points').value = (card.points || []).join(' || ');
   $('e_cta').value = card.cta || '';
+  $('e_theme').value = d.theme || '';
+  $('e_color').value = d.color || '#4f46e5';
+  $('e_color').dataset.custom = d.color ? '1' : '0';
+  $('e_font').value = d.font || '';
+  $('e_border').value = d.border || '';
+  $('e_scale').value = d.scale || 100;
+  $('e_scale_val').textContent = (d.scale || 100) + '%';
+  $('e_logo').checked = d.logo !== false;
 }
 function applyEditor(){
   if (!cards[selected]) return;
   cards[selected] = {
+    ...cards[selected],
     kicker: $('e_kicker').value,
     title: $('e_title').value,
     text: $('e_text').value,
@@ -245,6 +440,24 @@ function applyEditor(){
   };
   saveCards();
   $('sheet').innerHTML = cards.map(renderCard).join('');
+  requestAnimationFrame(fitAllCards);
+}
+function readDesignFromEditor(){
+  const design = {};
+  if ($('e_theme').value) design.theme = $('e_theme').value;
+  if ($('e_color').dataset.custom === '1') design.color = $('e_color').value;
+  if ($('e_font').value) design.font = $('e_font').value;
+  if ($('e_border').value) design.border = $('e_border').value;
+  if (Number($('e_scale').value) !== 100) design.scale = Number($('e_scale').value);
+  if (!$('e_logo').checked) design.logo = false;
+  return design;
+}
+function applyDesign(){
+  if (!cards[selected]) return;
+  cards[selected] = {...cards[selected], design: readDesignFromEditor()};
+  saveCards();
+  $('sheet').innerHTML = cards.map(renderCard).join('');
+  requestAnimationFrame(fitAllCards);
 }
 function pickSet(offset){
   const pool = IDEAS.map(x => ({...x, points:[...x.points]}));
@@ -255,21 +468,41 @@ function pickSet(offset){
 
 ['e_kicker','e_title','e_text','e_points','e_cta'].forEach(id => $(id).addEventListener('input', applyEditor));
 ['theme','qrOn'].forEach(id => $(id).addEventListener('change', draw));
+$('e_color').addEventListener('input', () => { $('e_color').dataset.custom = '1'; applyDesign(); });
+$('e_color_clear').addEventListener('click', () => { $('e_color').dataset.custom = '0'; applyDesign(); });
+$('e_scale').addEventListener('input', () => { $('e_scale_val').textContent = $('e_scale').value + '%'; applyDesign(); });
+['e_theme','e_font','e_border','e_logo'].forEach(id => $(id).addEventListener('change', applyDesign));
 $('sheet').addEventListener('click', (ev) => {
   const el = ev.target.closest('.stand'); if (!el) return;
   selected = Number(el.getAttribute('data-idx')) || 0;
   draw();
 });
 $('applyAll').addEventListener('click', () => {
-  const base = {...cards[selected], points:[...(cards[selected].points || [])]};
-  cards = Array.from({length:15}, () => ({...base, points:[...base.points]}));
+  const base = {...cards[selected], points:[...(cards[selected].points || [])], design: {...(cards[selected].design || {})}};
+  cards = Array.from({length:15}, () => ({...base, points:[...base.points], design: {...base.design}}));
   selected = 0; saveCards(); draw();
+});
+$('applyDesignAll').addEventListener('click', () => {
+  const design = {...(cards[selected].design || {})};
+  cards = cards.map((c) => ({...c, design: {...design}}));
+  saveCards(); draw();
+});
+$('resetDesign').addEventListener('click', () => {
+  if (!cards[selected]) return;
+  cards[selected] = {...cards[selected], design: {}};
+  $('e_color').dataset.custom = '0';
+  saveCards(); draw();
 });
 $('reset').addEventListener('click', () => { pickSet(0); });
 $('shuffle').addEventListener('click', () => { pickSet(Math.floor(Math.random() * IDEAS.length)); });
 $('copyIdeas').addEventListener('click', (ev) => {
-  const text = IDEAS.slice(0, 15).map((x, i) => (i + 1) + '. ' + x.title.replace(/\*/g, '') + ' — ' + x.text).join('\n');
+  const text = IDEAS.map((x, i) => (i + 1) + '. ' + x.title.replace(/\*/g, '') + ' — ' + x.text).join('\n');
   NZ.copy(text, ev.currentTarget, 'Идеи скопированы ✓');
+});
+$('addAbout').addEventListener('click', () => {
+  cards[selected] = {...ABOUT_CARD, points:[...ABOUT_CARD.points]};
+  saveCards();
+  draw();
 });
 NZ.mount(draw);
 </script>

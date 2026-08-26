@@ -162,6 +162,7 @@ function renderShelf() {
       + (i.plan_qty ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)} шт</span>` : '')
       + `<button class="btn sm ghost" type="button" data-shelf-card="${esc(i.id)}">▤ Карточка</button>`
       + `<button class="btn sm ghost" type="button" data-shelf-tag="${esc(i.id)}">▦ Ценник</button>`
+      + `<button class="btn sm ghost" type="button" data-shelf-promo="${esc(i.id)}">◆ Промостенд</button>`
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
@@ -670,6 +671,11 @@ function bind() {
     }
     const card = e.target.closest('[data-shelf-card]');
     if (card) { openShelfCard(card.dataset.shelfCard); return; }
+    const promo = e.target.closest('[data-shelf-promo]');
+    if (promo) {
+      window.open(`/materials/промостенды-67x57.html?item=${encodeURIComponent(promo.dataset.shelfPromo)}`, '_blank', 'noopener');
+      return;
+    }
     const sell = e.target.closest('[data-shelf-sell]');
     if (sell) {
       const item = (shelfData.items || []).find((x) => x.id === sell.dataset.shelfSell);
