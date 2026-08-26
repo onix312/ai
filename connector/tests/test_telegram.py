@@ -126,6 +126,51 @@ class TelegramTextTests(unittest.TestCase):
         })
         self.assertIn("Продано", self.bot.do_shelf_sell("s2", 1))
 
+    def test_sell_rows_return_all_available_items(self):
+        """Меню продаж показывает все позиции с остатком, а не первые 8."""
+        for i in range(1, 13):
+            self.db.upsert("shelf_items", {
+                "id": f"s{i}", "name": f"Позиция {i}", "qty": 2, "price": 100,
+                "cost_per_unit": 10, "active": 1})
+        self.db.upsert("shelf_items", {
+            "id": "empty", "name": "Пустая", "qty": 0, "price": 100,
+            "cost_per_unit": 10, "active": 1})
+        rows = self.bot._sell_rows()
+        # все 12 с остатком, пустая — не кандидат
+        self.assertEqual(len(rows), 12)
+        # страницы нарезаются корректно: 12 / 8 = 2 страницы
+        page_rows, page, total = self.bot._paginate(rows, 0)
+        self.assertEqual(len(page_rows), 8)
+        self.assertEqual(page, 0)
+        self.assertEqual(total, 2)
+        page_rows2, page2, _ = self.bot._paginate(rows, 1)
+        self.assertEqual(page2, 1)
+        self.assertEqual(len(page_rows2), 4)
+        # за пределами — отдаём последнюю страницу, не падаем
+        _, page3, _ = self.bot._paginate(rows, 99)
+        self.assertEqual(page3, 1)
+
+    def test_shop_cash_text_and_collect(self):
+        """Касса магазина: сводка и запись выемки."""
+        from connector.printflow.shelf import Shelf
+        shelf = Shelf(self.db)
+        self.db.upsert("shelf_items", {
+            "id": "s1", "name": "Адресник", "qty": 5, "price": 500,
+            "cost_per_unit": 120, "active": 1})
+        # две продажи по 500 ₽ = 1000 ₽ в кассе магазина
+        shelf.sale("s1", 1, 0, channel="shelf", note="продажа из Telegram")
+        shelf.sale("s1", 1, 0, channel="shelf", note="продажа из Telegram")
+        text = self.bot.text_shop_cash()
+        self.assertIn("Касса стеллажа", text)
+        self.assertIn("1 000", text)  # продано со стеллажа
+        # запись выемки
+        reply = self.bot.do_collect_from_shop("забрали 400 наличными")
+        self.assertIn("Забрали из магазина 400", reply)
+        self.assertIn("600", reply)  # осталось 1000-400
+        # больше накопленного забрать нельзя
+        over = self.bot.do_collect_from_shop("забрали 999999")
+        self.assertIn("Не получилось", over)
+
     def test_ask_without_printer(self):
         self.assertEqual(self.bot.text_ask("сколько осталось"),
                          "Сейчас ничего не печатается.")
