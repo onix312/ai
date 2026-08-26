@@ -1048,69 +1048,61 @@
 
 <!-- ============================================== КЛИЕНТСКИЙ БОТ -->
 <section class="view" id="view-clientbot">
- <div class="view-head">
-  <div><span class="eyebrow">Рост и продажи · покупатель сам</span><h1>Клиент-бот Telegram</h1><p>Витрина, заказ по кнопке и статусы заказов — покупателю, без доступа к панели.</p></div>
-  <div class="head-actions">
-   <button class="btn" id="cb_refresh" type="button">↻ Обновить</button>
-  </div>
+ <div class="view-head clientbot-head">
+  <div><span class="eyebrow">Рост и продажи · покупатель сам</span><h1>Клиент-бот Telegram</h1><p>Каталог, заявки, статусы, ручная оплата и единый inbox — без доступа покупателя к панели.</p></div>
+  <div class="head-actions"><span id="cb_state_tag" class="tag" hidden></span><button class="btn" id="cb_refresh" type="button">↻ Обновить</button></div>
  </div>
- <div class="kpi-grid" id="cb_kpis"></div>
- <div class="grid g-2-1">
-  <div class="card">
-   <div class="card-head"><div><h2>Подключение</h2><p>Отдельный бот для покупателей — токен внутреннего бота не подходит</p></div><span class="tag" id="cb_state_tag" hidden></span></div>
-   <div class="set-grid">
-    <div class="set-row"><div class="sinfo"><b>Клиентский бот</b><small>Каталог, заказы и статусы для покупателей</small></div>
-     <label class="switch"><input type="checkbox" id="cb_enabled"><i></i></label></div>
-    <div class="set-row"><div class="sinfo"><b>Bot Token</b><small id="cb_token_hint">Создайте второго бота у @BotFather и вставьте токен</small></div>
-     <input type="password" autocomplete="new-password" id="cb_token" placeholder="токен покупательского бота" style="max-width:260px"></div>
-    <div class="set-row"><div class="sinfo"><b>Каталог с ценами</b><small>Бот показывает витрину — товары номенклатуры с ценой</small></div>
-     <label class="switch"><input type="checkbox" id="cb_catalog" checked><i></i></label></div>
-    <div class="set-row"><div class="sinfo"><b>Уведомлять о статусе</b><small>«Печатается», «Готов» — покупателю, без запросов</small></div>
-     <label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
-    <div class="set-row"><div class="sinfo"><b>Отзыв после выдачи</b><small>Через 2 дня бот спросит «всё ли хорошо?»</small></div>
-     <label class="switch"><input type="checkbox" id="cb_review" checked><i></i></label></div>
-    <div class="set-row"><div class="sinfo"><b>Напомнить о выдаче</b><small>«Готов» висит дольше N дней — бот напомнит (0 — выключить)</small></div>
-     <input type="number" id="cb_pickup_days" min="0" max="30" style="max-width:90px" value="3"></div>
-    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Вопрос-ответ</b><small>Текст кнопки «❓ Вопрос-ответ»; пусто — стандартный FAQ NOZZA</small></div>
-     <textarea id="cb_faq" rows="3" placeholder="Материалы. Базовые — PLA и PETG…" style="max-width:320px"></textarea></div>
-    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Реквизиты оплаты</b><small>Публичные: покупатель увидит их по кнопке «💳 Оплатить»; пусто — кнопки нет</small></div>
-     <textarea id="cb_pay_info" rows="3" placeholder="СБП по номеру +7 900 000-00-00, получатель NOZZA" style="max-width:320px"></textarea></div>
-    <div class="set-row"><div class="sinfo"><b>Ссылка статуса</b><small>Базовый адрес панели (например http://192.168.1.5:8080) — кнопка «Статус онлайн»; только для своей сети/VPN</small></div>
-     <input type="text" id="cb_track_url" placeholder="http://192.168.1.5:8080" style="max-width:260px"></div>
-    <div class="set-row" style="align-items:flex-start"><div class="sinfo"><b>Приветствие /start</b><small>Пусто — стандартный текст NOZZA</small></div>
-     <textarea id="cb_welcome" rows="3" placeholder="Здравствуйте! Это бот мастерской…" style="max-width:320px"></textarea></div>
+ <div id="cb_error" class="notice error clientbot-error" role="alert" hidden><span>!</span><span id="cb_error_text">Не удалось загрузить данные.</span><button class="btn sm" id="cb_error_retry" type="button">Повторить</button></div>
+ <div id="cb_loading" class="clientbot-loading" role="status"><span class="spinner" aria-hidden="true"></span> Загружаем состояние клиентского бота…</div>
+ <div class="kpi-grid clientbot-kpis" id="cb_kpis" aria-live="polite"></div>
+ <div class="clientbot-layout">
+  <section class="card clientbot-card clientbot-settings-card">
+   <div class="card-head"><div><span class="card-kicker">Подключение и политика</span><h2>Настройки клиентского бота</h2><p>Отдельный Bot Token хранится локально и не выводится в API.</p></div></div>
+   <div class="set-grid clientbot-form">
+    <div class="set-row"><div class="sinfo"><b>Клиентский бот</b><small>Каталог, заказы, статусы и inbox</small></div><label class="switch"><input type="checkbox" id="cb_enabled"><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Bot Token</b><small id="cb_token_hint">Создайте отдельного бота у @BotFather</small></div><input type="password" autocomplete="new-password" id="cb_token" placeholder="токен покупательского бота"></div>
+    <div class="set-row"><div class="sinfo"><b>Каталог</b><small>Показывать только опубликованные позиции с ценой</small></div><label class="switch"><input type="checkbox" id="cb_catalog" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Уведомления о статусе</b><small>Печать, готовность и изменения срока</small></div><label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Отзывы после выдачи</b><small>Только после фактического «Выдан», не после «На складе»</small></div><label class="switch"><input type="checkbox" id="cb_review" checked><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Напоминание о выдаче</b><small>Дней в статусе «Готов», 0 — выключить</small></div><input type="number" id="cb_pickup_days" min="0" max="30" value="3"></div>
+    <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Реквизиты оплаты</b><small>Ручная сверка: реквизиты/QR СБП → «Я оплатил» → подтверждение сотрудником</small></div><textarea id="cb_pay_info" rows="3" placeholder="СБП по номеру +7…, получатель…"></textarea></div>
+    <div class="set-row"><div class="sinfo"><b>QR СБП</b><small>Ссылка на изображение или QR-переход, без обязательного эквайринга</small></div><input type="url" id="cb_pay_qr" placeholder="https://…/qr"></div>
+    <div class="set-row"><div class="sinfo"><b>Назначение перевода</b><small>По умолчанию: NOZZA + номер заказа</small></div><input type="text" id="cb_payment_purpose" placeholder="NOZZA {номер заказа}"></div>
+    <div class="set-row"><div class="sinfo"><b>Тихие часы</b><small>Некритичные статусы и рассылки не тревожат ночью</small></div><div class="clientbot-inline-fields"><label class="switch"><input type="checkbox" id="cb_quiet_enabled"><i></i></label><input type="time" id="cb_quiet_from" value="22:00" aria-label="Начало тихих часов"><span>—</span><input type="time" id="cb_quiet_to" value="08:00" aria-label="Конец тихих часов"></div></div>
+    <div class="set-row"><div class="sinfo"><b>Рассылки по согласию</b><small>Отправка только клиентам, которые сами включили «рассылку»</small></div><label class="switch"><input type="checkbox" id="cb_marketing_enabled"><i></i></label></div>
+    <div class="set-row"><div class="sinfo"><b>Вопрос-ответ</b><small>Пусто — стандартный FAQ NOZZA</small></div><textarea id="cb_faq" rows="3" placeholder="Материалы. Базовые — PLA и PETG…"></textarea></div>
+    <div class="set-row"><div class="sinfo"><b>Статус онлайн</b><small>Ссылка из бота получает подписанный токен; номер/телефон сами по себе не открывают заказ</small></div><input type="url" id="cb_track_url" placeholder="https://ваш-домен"></div>
+    <div class="set-row"><div class="sinfo"><b>Приветствие /start</b><small>Пусто — стандартный текст NOZZA</small></div><textarea id="cb_welcome" rows="3" placeholder="Здравствуйте! Это бот мастерской…"></textarea></div>
    </div>
-   <div class="btn-grid" style="margin-top:10px">
-    <button class="btn primary" id="cb_save" type="button">Сохранить</button>
-    <button class="btn" id="cb_test" type="button">Проверить токен</button>
-    <a class="btn ghost" href="https://t.me/BotFather" target="_blank" rel="noopener">Открыть @BotFather</a>
-   </div>
-   <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Токен хранится только на этом компьютере и шифруется в базе. Бот не показывает чужие заказы: клиент видит лишь свои — по чату или привязанному телефону.</span></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Команды покупателя</h2><p>Работают без слэша и в любом регистре</p></div></div>
-   <div class="table-wrap"><table class="data"><tbody id="cb_commands"></tbody></table></div>
-   <div class="notice" style="margin-top:10px"><span>💡</span><span>Ускоритель продаж: QR на полке и в упаковке ведёт на бота — покупатель дозаказывает без звонка.</span></div>
-  </div>
+   <div class="btn-grid clientbot-actions"><button class="btn primary" id="cb_save" type="button">Сохранить</button><button class="btn" id="cb_test" type="button">Проверить токен</button><a class="btn ghost" href="https://t.me/BotFather" target="_blank" rel="noopener">Открыть @BotFather</a></div>
+   <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Клиентские чаты принимаются только в приватном Telegram-чате. Контакт привязывается только через отправку собственного контакта, а не через произвольный текст.</span></div>
+  </section>
+  <section class="card clientbot-card clientbot-commands-card">
+   <div class="card-head"><div><span class="card-kicker">Сценарии покупателя</span><h2>Команды и состояния</h2><p>Работают без слэша и в любом регистре.</p></div></div>
+   <div class="table-wrap clientbot-table"><table class="data"><tbody id="cb_commands"></tbody></table></div>
+   <div class="clientbot-state-list"><span>черновик заявки</span><b>3 шага</b><span>ручная оплата</span><b>ожидает сверки</b><span>статус</span><b>подписанная ссылка</b></div>
+   <div class="notice" style="margin-top:12px"><span>💡</span><span>Deep-link <b>/start src_…</b> сохраняется в локальной воронке. Данные аналитики не уходят во внешние сервисы.</span></div>
+   <div class="clientbot-templates"><div class="card-head"><div><span class="card-kicker">Inbox</span><h3>Шаблоны ответов</h3><p>Выберите шаблон в диалоге или отредактируйте его здесь.</p></div></div><div id="cb_templates"></div></div>
+  </section>
  </div>
- <div class="grid g-2-1" style="margin-top:16px">
-  <div class="card">
-   <div class="card-head"><div><h2>Заказы из бота</h2><p>Попадают в панель как заявки канала Telegram</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
-   <div class="table-wrap"><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Когда</th></tr></thead><tbody id="cb_orders"></tbody></table></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Отзывы после выдачи</h2><p>Кнопка 👍/👎 в чате; проблема — с деталями мастеру</p></div></div>
-   <div class="table-wrap"><table class="data"><thead><tr><th>Заказ</th><th>Оценка</th><th>Комментарий</th><th>Когда</th></tr></thead><tbody id="cb_reviews"></tbody></table></div>
-  </div>
-  <div class="card">
-   <div class="card-head"><div><h2>Покупатели</h2><p>Чаты, которые писали боту</p></div></div>
-   <div class="table-wrap"><table class="data"><thead><tr><th>Имя</th><th>Telegram</th><th>Телефон</th><th class="right">Заказов</th><th>Был</th></tr></thead><tbody id="cb_chats"></tbody></table></div>
-  </div>
+ <div class="clientbot-grid clientbot-grid-top">
+  <section class="card clientbot-card clientbot-inbox-card">
+   <div class="card-head"><div><span class="card-kicker">Рабочий inbox</span><h2>Непрочитанные диалоги <span id="cb_unread_badge" class="tag warn" hidden>0</span></h2><p>Ответить из панели можно без переключения в Telegram.</p></div></div>
+   <div id="cb_inbox" class="clientbot-inbox" aria-live="polite"></div>
+  </section>
+  <section class="card clientbot-card">
+   <div class="card-head"><div><span class="card-kicker">Ручная сверка</span><h2>Заявки «Я оплатил»</h2><p>Подтверждение создаёт обычный платёж в кассовом журнале.</p></div></div>
+   <div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Заказ</th><th>Клиент</th><th class="right">Сумма</th><th>Состояние</th><th>Когда</th><th></th></tr></thead><tbody id="cb_payments"></tbody></table></div>
+  </section>
  </div>
- <div class="card" style="margin-top:16px">
-  <div class="card-head"><div><h2>Диалоги</h2><p>Последние сообщения — видно, что бот отвечал</p></div></div>
-  <div class="table-wrap"><table class="data"><thead><tr><th>Время</th><th>Клиент</th><th>Сообщение</th><th>Ответ бота</th></tr></thead><tbody id="cb_log"></tbody></table></div>
-  <div class="notice" style="margin-top:10px"><span>💬</span><span>Вопрос мимо команд будит мастера уведомлением. Ответить покупателю можно из внутреннего бота: <b>кответ &lt;chat_id&gt; &lt;текст&gt;</b> — сообщение уйдёт от клиентского бота и появится здесь.</span></div>
+ <div class="clientbot-grid clientbot-grid-main">
+  <section class="card clientbot-card"><div class="card-head"><div><h2>Заказы из бота</h2><p>Каталог, индивидуальные заявки, файлы и источники.</p></div><a href="#orders" data-view="orders">Все заказы →</a></div><div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Источник</th><th>Когда</th></tr></thead><tbody id="cb_orders"></tbody></table></div></section>
+  <section class="card clientbot-card"><div class="card-head"><div><h2>Отзывы</h2><p>Проблемные отзывы остаются в работе до ответа.</p></div></div><div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Заказ</th><th>Оценка</th><th>Комментарий</th><th>Состояние</th><th>Когда</th><th></th></tr></thead><tbody id="cb_reviews"></tbody></table></div></section>
+  <section class="card clientbot-card"><div class="card-head"><div><h2>Покупатели</h2><p>Telegram user ID, согласия и статус диалога.</p></div></div><div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Имя</th><th>Telegram ID</th><th>Телефон</th><th class="right">Заказов</th><th>Согласия</th><th>Был</th></tr></thead><tbody id="cb_chats"></tbody></table></div></section>
+ </div>
+ <div class="clientbot-grid clientbot-grid-bottom">
+  <section class="card clientbot-card"><div class="card-head"><div><span class="card-kicker">UTM/deep-link</span><h2>Воронка</h2><p>События за последние 30 дней.</p></div></div><div id="cb_analytics" class="clientbot-analytics"></div><div class="clientbot-broadcast"><input id="cb_broadcast_text" type="text" placeholder="Текст opt-in рассылки"><button class="btn sm" id="cb_broadcast" type="button">Отправить по согласию</button></div></section>
+  <section class="card clientbot-card"><div class="card-head"><div><h2>Диалоги</h2><p>Последние входящие и ответы бота/оператора.</p></div></div><div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Время</th><th>Клиент</th><th>Направление</th><th>Сообщение</th><th>Ответ</th></tr></thead><tbody id="cb_log"></tbody></table></div></section>
  </div>
 </section>
 
@@ -4844,7 +4836,7 @@
 <script src="assets/products.js?v=9.1.2"></script>
 <script src="assets/bridge.js?v=9.1.2"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>
-<script src="assets/clientbot.js?v=9.3.2"></script>
+<script src="assets/clientbot.js?v=9.3.4"></script>
 <script src="assets/workshop.js?v=9.1.2"></script>
 <script src="assets/app.js?v=9.2.2"></script>
 <script>

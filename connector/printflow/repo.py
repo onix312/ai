@@ -23,7 +23,12 @@ ORDER_FIELDS = (
     # катушки со склада, привязанные к заказу: [{spool_id, grams, note}]
     "spools "
     # связь с номенклатурой и складом (3.0+)
-    "nom_id warehouse_id reserved items_override"
+    "nom_id warehouse_id reserved items_override "
+    # публичный Telegram-контур: источник, идемпотентность, токен ссылки,
+    # согласование цены/срока и отметки выдачи
+    "client_source client_request_id client_track_token_hash client_track_token_at "
+    "client_quote_status client_quote_version client_quote_sent_at "
+    "client_quote_accepted_at client_variant_id client_ready_at client_delivered_at"
 ).split()
 
 
@@ -104,6 +109,7 @@ class Repo:
                 continue
             name = str(raw.get("name") or "").strip()
             nom_id = str(raw.get("nom_id") or "").strip()
+            variant_id = str(raw.get("variant_id") or "").strip()
             qty = num(raw.get("qty"), 1)
             if qty <= 0:
                 continue
@@ -111,6 +117,13 @@ class Repo:
             grams = num(raw.get("grams"))
             hours = num(raw.get("hours"))
             if nom_id and (not name or not grams or not hours):
+                if variant_id:
+                    variant = self.db.one(
+                        "SELECT name, grams, hours FROM nom_variants WHERE id=? AND nom_id=? AND archived=0",
+                        (variant_id, nom_id)) or {}
+                    name = name or str(variant.get("name") or "")
+                    grams = grams or num(variant.get("grams"))
+                    hours = hours or num(variant.get("hours"))
                 nom = self.db.one(
                     "SELECT name, grams, hours FROM nomenclature WHERE id=?",
                     (nom_id,))
@@ -119,11 +132,19 @@ class Repo:
                     grams = grams or num(nom.get("grams"))
                     hours = hours or num(nom.get("hours"))
             if nom_id and not price:
-                row = self.db.one(
-                    "SELECT p.price FROM prices p"
-                    " JOIN price_types t ON t.id=p.price_type_id"
-                    " WHERE p.nom_id=? AND t.is_base=1"
-                    " ORDER BY datetime(p.at) DESC LIMIT 1", (nom_id,))
+                row = None
+                if variant_id:
+                    row = self.db.one(
+                        "SELECT p.price FROM prices p"
+                        " JOIN price_types t ON t.id=p.price_type_id"
+                        " WHERE p.variant_id=? AND t.is_base=1"
+                        " ORDER BY datetime(p.at) DESC LIMIT 1", (variant_id,))
+                if not row:
+                    row = self.db.one(
+                        "SELECT p.price FROM prices p"
+                        " JOIN price_types t ON t.id=p.price_type_id"
+                        " WHERE p.nom_id=? AND t.is_base=1"
+                        " ORDER BY datetime(p.at) DESC LIMIT 1", (nom_id,))
                 price = num(row.get("price")) if row else 0.0
             if not name:
                 continue
@@ -131,6 +152,7 @@ class Repo:
                 "id": uid("oit"), "order_id": order_id, "position": index,
                 "nom_id": nom_id, "name": name, "qty": qty, "price": price,
                 "grams": grams, "hours": hours,
+                "variant_id": str(raw.get("variant_id") or ""),
                 "note": str(raw.get("note") or "")})
             summary["total_price"] += round(price * qty, 2)
             summary["total_qty"] += qty
@@ -147,6 +169,14 @@ class Repo:
         allow_final_status = bool(data.pop("_allow_final_status", False))
         skip_auto_income = bool(data.pop("_skip_auto_income", False))
         expected_updated_at = str(data.pop("expected_updated_at", "") or "").strip()
+        request_key = str(data.get("client_request_id") or "").strip()
+        if request_key and not data.get("id"):
+            # Telegram/public clients may retry after a timeout. The unique
+            # request key turns a retry into a read, not a second order.
+            existing_request = self.db.one(
+                "SELECT id FROM orders WHERE client_request_id=? LIMIT 1", (request_key,))
+            if existing_request:
+                return self.order(existing_request["id"]) or existing_request
         # Поле «Оплачено» в карточке — удобный ввод, но источник правды здесь
         # журнал payments. Прямую запись orders.paid больше не допускаем.
         payment_requested = "paid" in data or "prepaid" in data
@@ -293,7 +323,7 @@ class Repo:
         data["author"] = "duplicate"
         # Мультизаказ: состав копируется вместе с карточкой.
         items = self.db.query(
-            "SELECT nom_id, name, qty, price, grams, hours, note"
+            "SELECT nom_id, name, qty, price, grams, hours, variant_id, note"
             " FROM order_items WHERE order_id=? ORDER BY position", (order_id,))
         if items:
             data["items"] = items

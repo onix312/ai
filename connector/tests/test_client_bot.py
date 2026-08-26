@@ -98,7 +98,7 @@ class ClientBotTests(unittest.TestCase):
             "phone": "+7 978 111-22-33", "product": "брелок", "price": 250,
             "status": "new", "created_at": "2026-08-24T10:00:00",
             "updated_at": "2026-08-24T10:00:00"})
-        answer = self.bot._save_phone("555", row, "телефон +7 978 111-22-33")
+        answer = self.bot._save_phone("555", row, "телефон +7 978 111-22-33", verified=True)
         self.assertIn("привязан", answer)
         mine = self.bot.text_my_orders("555", row)
         self.assertIn("1002", mine)
@@ -146,8 +146,8 @@ class ClientBotTests(unittest.TestCase):
 
     @staticmethod
     def _msg(text=None, **extra):
-        message = {"chat": {"id": 555}, "message_id": 1,
-                   "from": {"first_name": "Иван", "username": "ivan"}}
+        message = {"chat": {"id": 555, "type": "private"}, "message_id": 1,
+                   "from": {"id": 777, "first_name": "Иван", "username": "ivan"}}
         if text is not None:
             message["text"] = text
         message.update(extra)
@@ -157,8 +157,8 @@ class ClientBotTests(unittest.TestCase):
     def _cb(data):
         return {"update_id": 2, "callback_query": {
             "id": "cq1", "data": data,
-            "message": {"chat": {"id": 555}, "message_id": 9},
-            "from": {"first_name": "Иван", "username": "ivan"}}}
+            "message": {"chat": {"id": 555, "type": "private"}, "message_id": 9},
+            "from": {"id": 777, "first_name": "Иван", "username": "ivan"}}}
 
     def test_callback_buttons_reply(self):
         """Баг 9.3: кнопка отвечала только записью в журнал — покупатель
@@ -242,7 +242,7 @@ class ClientBotTests(unittest.TestCase):
         sent = self._wire()
         self.bot._handle(self._msg(
             contact={"phone_number": "+7 978 111-22-33",
-                     "first_name": "Иван"}))
+                     "user_id": 777, "first_name": "Иван"}))
         row = self.db.one("SELECT * FROM client_chats WHERE chat_id='555'")
         self.assertEqual(row["phone"], "+79781112233")
         self.assertTrue(any("привязан" in p["text"] for p in self._sends(sent)))
@@ -445,6 +445,7 @@ class ClientBotTests(unittest.TestCase):
     def test_review_asked_once_and_rating_flow(self):
         row = self._chat_row()
         self._own_order("1001", status="done", age="2026-08-20T10:00:00")
+        self.db.execute("UPDATE orders SET client_delivered_at='2026-08-20T10:00:00' WHERE id='o1001'")
         sent = self._wire()
         self.bot._maybe_ask_reviews()
         self.assertTrue(any("всё ли хорошо" in p["text"].lower()
@@ -510,6 +511,82 @@ class ClientBotTests(unittest.TestCase):
                 for r in (json.loads(p["reply_markup"])["inline_keyboard"] if
                           p.get("reply_markup") else []) for b in r if b.get("url")]
         self.assertTrue(urls and urls[0].endswith("/track?number=1001"))
+
+    def test_non_private_update_is_ignored_and_update_is_idempotent(self):
+        """Группы не получают ответы, а Telegram retry не создаёт второй заказ."""
+        sent = self._wire()
+        group = self._msg("помощь")
+        group["message"]["chat"] = {"id": -555, "type": "group"}
+        self.assertTrue(self.bot._handle(group, dedupe=True))
+        self.assertIsNone(self.db.one("SELECT * FROM client_chats WHERE chat_id='-555'"))
+        self.assertFalse(self._sends(sent))
+
+        self._product("a", "Адресник", 350)
+        update = self._cb("buy:a")
+        self.assertTrue(self.bot._handle(update, dedupe=True))
+        self.assertTrue(self.bot._handle(update, dedupe=True))
+        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM orders")["n"], 1)
+        self.assertEqual(self.db.one("SELECT state FROM client_bot_updates WHERE update_id='2'")["state"], "done")
+
+    def test_variant_cart_and_price_are_preserved(self):
+        self._product("a", "Адресник", 350)
+        self.db.upsert("nom_variants", {
+            "id": "v-red", "nom_id": "a", "name": "Красный",
+            "color_name": "Красный", "archived": 0})
+        from connector.printflow.nomenclature import Nomenclature
+        Nomenclature(self.db).set_price("a", 490, variant_id="v-red")
+        self.assertEqual(self.bot._catalog_rows()[0]["price"], 350)
+        sent = self._wire()
+        self.bot._handle(self._cb("cartv:a:v-red"))
+        cart = self.db.one("SELECT * FROM client_bot_cart WHERE chat_id='555'")
+        self.assertEqual(cart["variant_id"], "v-red")
+        self.bot._handle(self._cb("checkout"))
+        order = self.db.one("SELECT * FROM orders ORDER BY created_at DESC")
+        self.assertEqual(order["client_variant_id"], "v-red")
+        self.assertEqual(order["price"], 490)
+        item = self.db.one("SELECT * FROM order_items WHERE order_id=?", (order["id"],))
+        self.assertEqual(item["variant_id"], "v-red")
+        self.assertIsNone(self.db.one("SELECT * FROM client_bot_cart WHERE chat_id='555'"))
+        self.assertTrue(self._sends(sent))
+
+    def test_quote_action_is_owner_only_and_idempotent(self):
+        row = self._chat_row()
+        self._own_order("1001", price=620)
+        self.db.execute("UPDATE orders SET client_quote_status='requested' WHERE id='o1001'")
+        other = self.db.upsert("client_chats", {
+            "chat_id": "556", "name": "Мария", "created_at": "2026-08-24T10:00:00"}, key="chat_id")
+        sent = self._wire()
+        answer, _ = self.bot._run_callback("556", other, "quote_yes:o1001")
+        self.assertIn("не ждёт", answer)
+        self.assertEqual(self.db.one("SELECT client_quote_status FROM orders WHERE id='o1001'")["client_quote_status"], "requested")
+        answer, _ = self.bot._run_callback("555", row, "quote_yes:o1001")
+        self.assertIn("согласованные", answer)
+        self.assertEqual(self.db.one("SELECT client_quote_status FROM orders WHERE id='o1001'")["client_quote_status"], "accepted")
+        again, _ = self.bot._run_callback("555", row, "quote_yes:o1001")
+        self.assertIn("не ждёт", again)
+
+    def test_review_requires_actual_handoff(self):
+        row = self._chat_row()
+        self._own_order("1001", status="done", age="2026-08-20T10:00:00")
+        sent = self._wire()
+        self.bot._maybe_ask_reviews()
+        self.assertFalse(self._sends(sent))
+        self.db.execute("UPDATE orders SET client_delivered_at='2026-08-20T10:00:00' WHERE id='o1001'")
+        self.bot._maybe_ask_reviews()
+        self.assertTrue(self._sends(sent))
+        sent.clear()
+        self.bot._handle(self._cb("review:o1001:good"))
+        self.assertEqual(self.db.one("SELECT rating FROM client_reviews WHERE order_id='o1001'")["rating"], "good")
+
+    def test_response_templates_are_editable_in_local_db(self):
+        defaults = self.bot.templates()
+        self.assertTrue(defaults)
+        saved = self.bot.save_template(name="Мой ответ", text="Цена — {цена}, срок — {срок}.")
+        self.assertEqual(self.bot.templates()[-1]["id"], saved["id"])
+        updated = self.bot.save_template(saved["id"], "Обновлённый ответ", "Готово ✓")
+        self.assertEqual(updated["text"], "Готово ✓")
+        self.bot.delete_template(saved["id"])
+        self.assertNotIn(saved["id"], {item["id"] for item in self.bot.templates()})
 
 
 if __name__ == "__main__":

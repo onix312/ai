@@ -5,7 +5,7 @@
 Роли не меняют панель (она локальная), они разграничивают команды бота:
 
 • сотрудник — обзоры (панель, статус, очередь, кадр), полка: продажа и приход,
-  фото к заказу, слежка за заказом;
+  inbox клиентского бота, фото к заказу, слежка за заказом;
 • руководитель — всё перечисленное плюс деньги, заказы (новый, статус, выдать,
   оплата) и управление принтерами;
 • владелец — всё, плюс управление командой.
@@ -29,9 +29,9 @@ ROLE_NAMES = {"owner": "владелец", "manager": "руководитель"
 # Группы команд бота и права ролей. Группа — не «красивое имя», а способ
 # запретить деньгам и управлению принтером утекать в чаты без полномочий.
 ROLE_RIGHTS: dict[str, set[str]] = {
-    "owner": {"view", "shelf", "orders", "finance", "printers", "staff"},
-    "manager": {"view", "shelf", "orders", "finance", "printers"},
-    "employee": {"view", "shelf"},
+    "owner": {"view", "shelf", "orders", "finance", "printers", "staff", "inbox"},
+    "manager": {"view", "shelf", "orders", "finance", "printers", "inbox"},
+    "employee": {"view", "shelf", "inbox"},
 }
 
 # Слово команды → группа прав (первое слово сообщения или имя callback-команды).
@@ -66,7 +66,9 @@ WORD_GROUPS: dict[str, str] = {
     "закрыть": "orders", "готов": "orders", "ready": "orders",
     "новый": "orders", "заказ": "orders", "создать": "orders",
     "оплата": "orders", "оплатить": "orders", "payment": "orders",
-    "кответ": "orders", "ответить": "orders", "creply": "orders",
+    "чаты": "inbox", "диалоги": "inbox", "inbox": "inbox", "клиенты": "inbox",
+    "кответ": "inbox", "ответить": "inbox", "creply": "inbox",
+    "подтвердить": "orders", "отклонить": "orders",
     # принтер
     "пауза": "printers", "pause": "printers", "продолжить": "printers",
     "resume": "printers", "старт-печати": "printers", "свет": "printers",

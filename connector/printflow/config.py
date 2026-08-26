@@ -156,6 +156,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "client_bot_enabled": False,
     "client_bot_token": "",           # секрет: токен бота для покупателей
     "client_bot_welcome": "",         # свой текст /start (пусто — стандартный)
+    "client_bot_templates": [
+        {"id": "tpl_quote", "name": "Расчёт готов",
+         "text": "Здравствуйте! Расчёт готов: {цена}. Срок — {срок}. Напишите, подходит ли вам цена и срок."},
+        {"id": "tpl_status", "name": "Статус заказа",
+         "text": "Здравствуйте! Заказ {номер} сейчас на этапе «{статус}». Если срок изменится, сообщим отдельно."},
+    ],
     "client_bot_notify": True,        # сообщать об изменении статуса заказа
     "client_bot_catalog": True,       # показывать витрину с ценами
     # 9.3.2: сервис клиентского бота
@@ -163,7 +169,17 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "client_bot_review": True,        # спрашивать отзыв через 2 дня после выдачи
     "client_bot_pickup_days": 3,      # напомнить о невыкупленном «готовом» заказе
     "client_bot_pay_info": "",        # публичные реквизиты оплаты для кнопки «Оплатить»
+    "client_bot_pay_qr": "",          # URL/ссылка на QR СБП, без обязательного эквайринга
+    "client_bot_payment_purpose": "", # назначение перевода, если отличается от номера заказа
+    "client_bot_quiet_hours_enabled": False,
+    "client_bot_quiet_from": "22:00", # тихие часы клиентских уведомлений
+    "client_bot_quiet_to": "08:00",
     "client_bot_track_url": "",       # базовый URL панели для кнопки «Статус онлайн»
+    "client_bot_marketing_enabled": False,
+    # последний подтверждённый Telegram update_id + 1; техническое состояние,
+    # не показывается клиентам и не содержит секретов
+    "client_bot_update_offset": 0,
+    "telegram_bot_update_offset": 0,
     # Bambu Cloud: управление принтером без LAN Only Mode / Developer Mode.
     # Токен и uid — секреты (маскируются, как telegram_token); email хранится
     # для повторного входа, пароль не хранится — при истечении токена Bambu

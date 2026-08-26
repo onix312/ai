@@ -57,6 +57,8 @@
  .card .row2 .btn { margin-top:0; flex:1; }
  .card .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
  .card .in-cart { font-size:12px; color:var(--ok); font-weight:600; margin-top:6px; }
+ .variant-select { margin:8px 0 0; padding:8px 9px; font-size:12.5px; }
+ .description { color:var(--muted); font-size:12px; line-height:1.4; margin-top:6px; }
  #cartBar { position:fixed; left:0; right:0; bottom:0; z-index:9;
    background:var(--panel); border-top:1px solid var(--line);
    box-shadow:0 -4px 14px rgba(16,24,40,.08); padding:10px 14px; }
@@ -108,6 +110,8 @@
     <div><label>Телефон<input id="f_phone" placeholder="+7…"></label></div>
     <div><label>Количество<input id="f_qty" type="number" min="1" step="1" value="1"></label></div>
    </div>
+   <label id="f_variant_wrap" hidden>Вариант товара
+    <select id="f_variant"></select></label>
    <label>Цвет (если нужен)
     <select id="f_color">
      <option value="">Любой</option>
@@ -166,13 +170,21 @@
     catch (e) { return []; }
   }
   function saveCart(items) { localStorage.setItem(CART_KEY, JSON.stringify(items || [])); }
-  function cartHas(id) { return loadCart().some(function (x) { return x.id === id; }); }
-  function cartIndex(id) { return loadCart().findIndex(function (x) { return x.id === id; }); }
-  function addToCart(item) {
+  function cartKey(item, variant) { return String(item.id) + '::' + String((variant && variant.id) || ''); }
+  function cartIndex(id) { return loadCart().findIndex(function (x) { return x.key === id || (!x.key && x.id === id); }); }
+  function variantLabel(variant) {
+    return String((variant && (variant.name || variant.color_name || variant.size)) || 'Базовый вариант');
+  }
+  function variantPrice(item, variant) {
+    return num(variant && variant.price) || num(item && item.price);
+  }
+  function addToCart(item, variant) {
+    var key = cartKey(item, variant);
     var cart = loadCart();
-    var i = cart.findIndex(function (x) { return x.id === item.id; });
+    var i = cart.findIndex(function (x) { return x.key === key || (!x.key && x.id === item.id && !((variant && variant.id) || x.variant_id)); });
     if (i >= 0) cart[i].qty = Math.min(99, (cart[i].qty || 1) + 1);
-    else cart.push({ id: item.id, name: item.name, price: item.price, qty: 1, color: '' });
+    else cart.push({ key: key, id: item.id, name: item.name, price: variantPrice(item, variant), qty: 1,
+      color: '', variant_id: (variant && variant.id) || '', variant_name: variantLabel(variant) });
     saveCart(cart); renderCartBar();
   }
   function setCartQty(id, qty) {
@@ -183,7 +195,7 @@
     cart[i].qty = qty; saveCart(cart); renderCartBar();
   }
   function removeFromCart(id) {
-    var cart = loadCart().filter(function (x) { return x.id !== id; });
+    var cart = loadCart().filter(function (x) { return x.key !== id && (x.key || x.id !== id); });
     saveCart(cart); renderCartBar(); renderCartSheet();
   }
   function cartTotals() {
@@ -223,8 +235,10 @@
       return;
     }
     host.innerHTML = cart.map(function (x) {
-      return '<div class="cart-item" data-id="' + esc(x.id) + '">'
+      var key = x.key || x.id;
+      return '<div class="cart-item" data-id="' + esc(key) + '">'
         + '<div class="ci-name">' + esc(x.name)
+        + (x.variant_name && x.variant_id ? '<div class="ci-meta">' + esc(x.variant_name) + '</div>' : '')
         + (x.color ? '<div class="ci-meta">' + esc(x.color) + '</div>' : '')
         + '</div>'
         + '<div class="ci-qty">'
@@ -247,6 +261,14 @@
   function money(v) { return Math.round(num(v)).toLocaleString('ru-RU') + ' ' + currency; }
   function esc(s) { return String(s ?? '').replace(/[&<>"']/g, function (c) {
     return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]); }); }
+  function requestId(prefix) {
+    var random = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2);
+    return prefix + ':' + random;
+  }
+  function sourceFromUrl() {
+    var p = new URLSearchParams(location.search);
+    return p.get('utm_source') || p.get('ref') || p.get('src') || p.get('startapp') || 'storefront';
+  }
   function showMsg(text, ok) {
     var m = $('#msg'); m.className = 'msg ' + (ok ? 'ok' : 'err'); m.textContent = text;
     clearTimeout(showMsg._t); showMsg._t = setTimeout(function () { m.className = 'msg'; }, 4000);
@@ -260,6 +282,17 @@
     $('#msg').className = 'msg';
     $('#f_name').value = ''; $('#f_phone').value = ''; $('#f_messenger').value = '';
     $('#f_note').value = ''; $('#f_qty').value = '1'; $('#f_color').value = '';
+    var variantWrap = $('#f_variant_wrap');
+    var variantSelect = $('#f_variant');
+    if (item && !item.custom && item.variants && item.variants.length) {
+      variantSelect.innerHTML = '<option value="">Базовый вариант · ' + esc(money(item.price)) + '</option>'
+        + item.variants.map(function (v) { return '<option value="' + esc(v.id) + '">' + esc(variantLabel(v))
+          + ' · ' + esc(money(variantPrice(item, v))) + (num(v.qty) > 0 ? ' · ' + num(v.qty) + ' шт' : ' · под заказ') + '</option>'; }).join('');
+      variantWrap.hidden = false;
+      variantSelect.value = item.selected_variant ? item.selected_variant.id : '';
+    } else {
+      variantSelect.innerHTML = ''; variantWrap.hidden = true;
+    }
     if (item && item.custom) {
       $('#m_title').textContent = 'Свой заказ по размерам';
       $('#m_sub').textContent = 'Опишите, что нужно, — пришлём расчёт и срок.';
@@ -300,8 +333,14 @@
         var photo = it.photo
           ? '<img src="/api/nomenclature/photo.jpg?id=' + encodeURIComponent(it.id) + '" alt="" loading="lazy">'
           : '<div style="height:150px;display:grid;place-items:center;color:var(--muted);font-size:30px">◫</div>';
+        var variantSelect = it.variants && it.variants.length
+          ? '<select class="variant-select" data-variant-for="' + esc(it.id) + '" aria-label="Вариант">'
+            + '<option value="">Базовый вариант · ' + esc(money(it.price)) + '</option>'
+            + it.variants.map(function (v) { return '<option value="' + esc(v.id) + '">' + esc(variantLabel(v))
+              + ' · ' + esc(money(variantPrice(it, v))) + (num(v.qty) > 0 ? ' · ' + num(v.qty) + ' шт' : ' · под заказ') + '</option>'; }).join('')
+            + '</select>' : '';
         var buttons = canCart
-          ? '<div class="row2">'
+          ? variantSelect + '<div class="row2">'
             + '<button class="btn" type="button" data-add="' + esc(it.id) + '">В корзину</button>'
             + '<button class="btn ghost" type="button" data-order="' + esc(it.id) + '">Быстро</button>'
             + '</div>'
@@ -309,6 +348,7 @@
         return '<article class="card" data-item="' + esc(it.id) + '">' + photo
           + '<div class="body"><p class="name">' + esc(it.name) + '</p>'
           + '<p class="grp">' + esc(it.group || it.material || '') + '</p>'
+          + (it.description ? '<p class="description">' + esc(it.description) + '</p>' : '')
           + '<span class="price">' + money(it.price) + '</span>'
           + '<span class="stock ' + stCls + '">' + esc(labels[st] || labels.ok) + '</span>'
           + buttons + '</div></article>';
@@ -324,7 +364,10 @@
     if (add) {
       var it = catalog.find(function (x) { return x.id === add.dataset.add; });
       if (!it) return;
-      addToCart(it);
+      var select = add.closest('.card') && add.closest('.card').querySelector('[data-variant-for]');
+      var variant = select && select.value
+        ? (it.variants || []).find(function (v) { return v.id === select.value; }) : null;
+      addToCart(it, variant);
       add.textContent = '✓ Добавлено';
       setTimeout(function () { add.textContent = 'В корзину'; }, 1200);
       return;
@@ -332,7 +375,12 @@
     var btn = e.target.closest('[data-order]');
     if (btn && !btn.disabled) {
       var it2 = catalog.find(function (x) { return x.id === btn.dataset.order; });
-      if (it2) openSheet(it2);
+      if (it2) {
+        var select2 = btn.closest('.card') && btn.closest('.card').querySelector('[data-variant-for]');
+        var selected = select2 && select2.value
+          ? (it2.variants || []).find(function (v) { return v.id === select2.value; }) : null;
+        openSheet(Object.assign({}, it2, { selected_variant: selected || null }));
+      }
       return;
     }
     if (e.target.id === 'customBtn') openSheet({ custom: true });
@@ -375,8 +423,10 @@
       qty: Math.max(1, parseInt($('#f_qty').value, 10) || 1),
       color: $('#f_color').value,
       note: $('#f_note').value.trim(),
-      channel: 'shop',
+      channel: 'shop', source: sourceFromUrl(),
+      request_id: current && current._requestId ? current._requestId : requestId('web-order'),
     };
+    if (current) current._requestId = payload.request_id;
     if (!current) return;
     if (current.custom) {
       payload.product = $('#f_note').value.trim() || 'Индивидуальный заказ';
@@ -384,6 +434,12 @@
     } else {
       payload.product = current.name;
       payload.nom_id = current.id;
+      var selectedVariant = $('#f_variant').value
+        ? (current.variants || []).find(function (v) { return v.id === $('#f_variant').value; }) : null;
+      if (selectedVariant) {
+        payload.variant_id = selectedVariant.id;
+        payload.color = selectedVariant.color_name || selectedVariant.name || payload.color;
+      }
     }
     if (!payload.name) return showMsg('Укажите имя', false);
     if (!payload.phone && !payload.messenger) return showMsg('Оставьте телефон или Telegram', false);
@@ -412,9 +468,12 @@
     if (!phone && !messenger) return showCartMsg('Оставьте телефон или Telegram', false);
     var payload = {
       name: name, phone: phone, messenger: messenger, channel: 'shop',
+      source: sourceFromUrl(), request_id: $('#cartForm').dataset.requestId || requestId('web-cart'),
       note: $('#cf_note').value.trim(),
-      items: cart.map(function (x) { return { nom_id: x.id, qty: x.qty, color: x.color || '' }; }),
+      items: cart.map(function (x) { return { nom_id: x.id, qty: x.qty,
+        variant_id: x.variant_id || '', color: x.color || '' }; }),
     };
+    $('#cartForm').dataset.requestId = payload.request_id;
     var btn = $('#cartSubmit');
     btn.disabled = true; btn.textContent = 'Отправляем…';
     fetch('/api/public/order', {
@@ -425,6 +484,7 @@
       if (d.ok) {
         showCartMsg('Заявка №' + d.order_number + ' (' + (d.count || 1) + ' поз.) принята! Мы свяжемся.', true);
         saveCart([]); renderCartBar(); renderCartSheet();
+        $('#cartForm').dataset.requestId = '';
         setTimeout(closeCart, 2000);
       } else showCartMsg(d.error || 'Не получилось отправить', false);
     }).catch(function () {

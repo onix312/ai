@@ -63,22 +63,37 @@ class OrderFulfillment:
         stock_info: dict[str, Any] = {
             "required": False, "ok": True, "available": 0.0, "qty": 0.0,
             "warehouse_id": order.get("warehouse_id") or "",
+            "items": [],
         }
-        if num(order.get("reserved")) and order.get("nom_id"):
-            reserve = self.db.one(
-                "SELECT * FROM reserves WHERE order_id=? AND state='active' LIMIT 1",
+        if num(order.get("reserved")):
+            reserves = self.db.query(
+                "SELECT * FROM reserves WHERE order_id=? AND state='active' ORDER BY id",
                 (order_id,),
             )
-            warehouse_id = (reserve or {}).get("warehouse_id") or order.get("warehouse_id") or ""
-            qty = max(1.0, num((reserve or {}).get("qty"), num(order.get("qty"), 1)))
-            available = self.stock.qty(order["nom_id"], warehouse_id)
-            stock_info = {
-                "required": True,
-                "ok": available >= qty,
-                "available": round(available, 3),
-                "qty": round(qty, 3),
-                "warehouse_id": warehouse_id,
-            }
+            stock_items = []
+            for reserve in reserves:
+                reserve_nom_id = str(reserve.get("nom_id") or order.get("nom_id") or "")
+                if not reserve_nom_id:
+                    continue
+                warehouse_id = reserve.get("warehouse_id") or order.get("warehouse_id") or ""
+                variant_id = str(reserve.get("variant_id") or order.get("client_variant_id") or "")
+                qty = max(1.0, num(reserve.get("qty"), num(order.get("qty"), 1)))
+                available = self.stock.qty(reserve_nom_id, warehouse_id, variant_id)
+                stock_items.append({
+                    "available": round(available, 3), "qty": round(qty, 3),
+                    "warehouse_id": warehouse_id, "variant_id": variant_id,
+                    "nom_id": reserve_nom_id, "ok": available >= qty,
+                })
+            if stock_items:
+                first = stock_items[0]
+                stock_info = {
+                    "required": True,
+                    "ok": all(item["ok"] for item in stock_items),
+                    "available": first["available"], "qty": first["qty"],
+                    "warehouse_id": first["warehouse_id"],
+                    "variant_id": first["variant_id"], "nom_id": first["nom_id"],
+                    "items": stock_items,
+                }
 
         blocks: list[dict] = []
         warns: list[dict] = []
@@ -210,22 +225,29 @@ class OrderFulfillment:
                 collected = due
 
             order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,)) or {}
-            if num(order.get("reserved")) and order.get("nom_id"):
+            active_reserves = self.db.query(
+                "SELECT * FROM reserves WHERE order_id=? AND state='active' ORDER BY id",
+                (order_id,),
+            )
+            if num(order.get("reserved")) and active_reserves:
                 already = self.db.one(
                     "SELECT id FROM stock_moves WHERE doc_id=? AND doc_kind='sale' LIMIT 1",
                     (order_id,),
                 )
                 if not already:
-                    stock_info = summary["stock"]
-                    unit_cost = self.stock.avg_cost(
-                        order["nom_id"], stock_info["warehouse_id"]
-                    )
-                    self.stock.add_move(
-                        order["nom_id"], stock_info["warehouse_id"],
-                        -num(stock_info["qty"]), -unit_cost * num(stock_info["qty"]),
-                        doc_id=order_id, doc_kind="sale",
-                        note=f"выдача заказа №{order.get('number') or ''}",
-                    )
+                    for reserve in active_reserves:
+                        nom_id = str(reserve.get("nom_id") or order.get("nom_id") or "")
+                        if not nom_id:
+                            continue
+                        variant_id = str(reserve.get("variant_id") or order.get("client_variant_id") or "")
+                        warehouse_id = reserve.get("warehouse_id") or order.get("warehouse_id") or ""
+                        qty = max(1.0, num(reserve.get("qty"), num(order.get("qty"), 1)))
+                        unit_cost = self.stock.avg_cost(nom_id, warehouse_id, variant_id)
+                        self.stock.add_move(
+                            nom_id, warehouse_id, -qty, -unit_cost * qty,
+                            doc_id=order_id, doc_kind="sale", variant_id=variant_id,
+                            note=f"выдача заказа №{order.get('number') or ''}",
+                        )
                 self.stock.release(order_id=order_id)
 
             final = self.db.one(
@@ -239,6 +261,7 @@ class OrderFulfillment:
                 "id": order_id,
                 "status": final["id"],
                 "reserved": 0,
+                "client_delivered_at": now_iso(),
                 "_allow_final_status": True,
                 "_skip_auto_income": True,
                 "author": "order-fulfillment",

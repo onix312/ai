@@ -580,5 +580,6 @@ class Documents:
             price_type_id = (base or {}).get("id") or "retail"
         row = self.db.one(
             "SELECT price FROM prices WHERE nom_id=? AND price_type_id=?"
+            " AND (variant_id IS NULL OR variant_id='')"
             " ORDER BY datetime(at) DESC, rowid DESC LIMIT 1", (nom_id, price_type_id))
         return round(num((row or {}).get("price")), 2)

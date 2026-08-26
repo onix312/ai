@@ -24,8 +24,8 @@ from connector.tests.test_phase11 import make_api, make_db  # noqa: E402
 
 class VersionTests(unittest.TestCase):
     def test_app_and_schema(self):
-        self.assertEqual(APP_VERSION, "9.3.0")
-        self.assertEqual(SCHEMA_VERSION, 13)
+        self.assertEqual(APP_VERSION, "9.3.4")
+        self.assertEqual(SCHEMA_VERSION, 14)
 
 
 class Schema12Tests(unittest.TestCase):
@@ -54,7 +54,7 @@ class Schema12Tests(unittest.TestCase):
             conn.close()
             db = Database(path)
             self.addCleanup(db.close)
-            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 14)
             cols = {r["name"] for r in db.query("PRAGMA table_info(spools)")}
             self.assertIn("location", cols)
             job_cols = {r["name"] for r in db.query("PRAGMA table_info(print_jobs)")}
@@ -72,7 +72,7 @@ class Schema12Tests(unittest.TestCase):
             conn.close()
             db = Database(path)
             self.addCleanup(db.close)
-            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 13)
+            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 14)
             nom_cols = {r["name"] for r in db.query("PRAGMA table_info(nomenclature)")}
             self.assertIn("print_group", nom_cols)
 
@@ -235,7 +235,7 @@ class ApiDispatchTests(unittest.TestCase):
         api.workshop = WorkshopV9(api.db, Repo(api.db))
         code, payload = api.get("/api/workshop/about", {})
         self.assertEqual(code, 200)
-        self.assertEqual(payload["version"], "9.3.0")
+        self.assertEqual(payload["version"], "9.3.4")
 
         class Files:
             def list_files(self, path="/"):

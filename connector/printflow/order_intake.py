@@ -283,8 +283,8 @@ class OrderIntake:
         rows = self.db.query(
             "SELECT n.*, COALESCE((SELECT p.price FROM prices p"
             " LEFT JOIN price_types t ON t.id=p.price_type_id"
-            " WHERE p.nom_id=n.id ORDER BY t.is_base DESC, datetime(p.at) DESC,"
-            " p.rowid DESC LIMIT 1),0) price"
+            " WHERE p.nom_id=n.id AND (p.variant_id IS NULL OR p.variant_id='')"
+            " ORDER BY t.is_base DESC, datetime(p.at) DESC, p.rowid DESC LIMIT 1),0) price"
             " FROM nomenclature n WHERE n.archived=0")
         for row in rows:
             row["source"] = "nomenclature"

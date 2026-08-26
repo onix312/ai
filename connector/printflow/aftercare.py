@@ -254,6 +254,25 @@ class CustomerAftercare:
                 (rating_int, text, stamp, request_id, publish_permission,
                  repeat_interest, stamp, feedback["id"]),
             )
+            # Единый слой отзывов: ручной ответ из aftercare также виден во
+            # вкладке клиентского бота и не будет запрошен повторно.
+            for link in self.db.query("SELECT chat_id FROM client_orders WHERE order_id=?", (order_id,)):
+                chat_id = link.get("chat_id") or ""
+                if not chat_id:
+                    continue
+                bot_rating = "good" if rating_int >= 4 else "bad"
+                self.db.execute(
+                    "INSERT OR IGNORE INTO client_reviews(order_id,chat_id,asked_at,rating,comment,state,created_at)"
+                    " VALUES(?,?,?, ?,?,'rated',?)",
+                    (order_id, chat_id, feedback.get("request_sent_at") or stamp,
+                     bot_rating, text, stamp),
+                )
+                self.db.execute(
+                    "UPDATE client_reviews SET rating=?,comment=?,state=?,created_at=?"
+                    " WHERE order_id=? AND chat_id=?",
+                    (bot_rating, text, "rated" if rating_int >= 4 else "needs_attention",
+                     stamp, order_id, chat_id),
+                )
             self.db.add_event(
                 "customer", "Получена обратная связь",
                 f"Заказ №{feedback.get('order_number') or ''} · оценка {rating_int}/5",

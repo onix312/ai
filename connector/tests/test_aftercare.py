@@ -181,7 +181,7 @@ class AftercareTests(unittest.TestCase):
         self.assertEqual(row["paid"], 1000)
 
     def test_schema_version_and_feedback_indexes(self):
-        self.assertEqual(SCHEMA_VERSION, 13)
+        self.assertEqual(SCHEMA_VERSION, 14)
         indexes = {row["name"] for row in self.db.query("PRAGMA index_list(customer_feedback)")}
         self.assertIn("idx_feedback_order", indexes)
         self.assertIn("idx_feedback_request", indexes)

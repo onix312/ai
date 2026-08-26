@@ -163,7 +163,8 @@ class Nomenclature:
         out: dict[str, float] = {}
         for row in self.db.query(
                 "SELECT price_type_id, price FROM prices"
-                " WHERE nom_id=? ORDER BY datetime(at) DESC, rowid DESC", (nom_id,)):
+                " WHERE nom_id=? AND (variant_id IS NULL OR variant_id='')"
+                " ORDER BY datetime(at) DESC, rowid DESC", (nom_id,)):
             if row["price_type_id"] not in out:
                 out[row["price_type_id"]] = round(num(row["price"]), 2)
         return out
@@ -177,9 +178,10 @@ class Nomenclature:
         перебивала актуальную цену."""
         rows = self.db.query(
             "SELECT nom_id, price_type_id, price FROM prices p"
-            " WHERE p.rowid=("
+            " WHERE (p.variant_id IS NULL OR p.variant_id='') AND p.rowid=("
             "   SELECT p2.rowid FROM prices p2"
-            "   WHERE p2.nom_id=p.nom_id AND p2.price_type_id=p.price_type_id"
+            "   WHERE p2.nom_id=p.nom_id AND (p2.variant_id IS NULL OR p2.variant_id='')"
+            "     AND p2.price_type_id=p.price_type_id"
             "   ORDER BY datetime(p2.at) DESC, p2.rowid DESC LIMIT 1)")
         out: dict[str, dict[str, float]] = {}
         for row in rows:
@@ -348,9 +350,16 @@ class Nomenclature:
     def set_price(self, nom_id: str, price: float, price_type_id: str = "",
                   note: str = "", variant_id: str = "") -> dict:
         price_type_id = price_type_id or self._base_type()
-        current = self.db.one(
-            "SELECT price FROM prices WHERE nom_id=? AND price_type_id=?"
-            " ORDER BY datetime(at) DESC, rowid DESC LIMIT 1", (nom_id, price_type_id))
+        if variant_id:
+            current = self.db.one(
+                "SELECT price FROM prices WHERE nom_id=? AND variant_id=? AND price_type_id=?"
+                " ORDER BY datetime(at) DESC, rowid DESC LIMIT 1",
+                (nom_id, variant_id, price_type_id))
+        else:
+            current = self.db.one(
+                "SELECT price FROM prices WHERE nom_id=? AND (variant_id IS NULL OR variant_id='')"
+                " AND price_type_id=? ORDER BY datetime(at) DESC, rowid DESC LIMIT 1",
+                (nom_id, price_type_id))
         if current and abs(num(current["price"]) - num(price)) < 0.005:
             return dict(current)
         return self.db.upsert("prices", {

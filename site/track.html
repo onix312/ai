@@ -35,7 +35,8 @@
  <p class="sub">Проверьте статус вашего заказа</p>
  <div class="card">
   <label>Номер заказа<input id="number" inputmode="numeric" placeholder="Например: 1001"></label>
-  <label>Телефон (если оставляли)<input id="phone" placeholder="+7…"></label>
+  <label>Ключ ссылки из Telegram<input id="token" type="password" autocomplete="off" placeholder="Заполняется автоматически"></label>
+  <p style="margin-top:9px;color:var(--muted);font-size:11.5px;line-height:1.4">Для защиты заказов номер и телефон не являются кодом доступа. Откройте эту страницу кнопкой «Статус онлайн» в клиентском боте.</p>
   <button class="btn" id="check" type="button">Проверить статус</button>
   <div class="result" id="result"></div>
  </div>
@@ -45,9 +46,9 @@
   function $(s){ return document.querySelector(s); }
   function esc(s){ return String(s??'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function check(){
-    var number=$('#number').value.trim(), phone=$('#phone').value.trim();
+    var number=$('#number').value.trim(), token=$('#token').value.trim();
     if(!number){ $('#result').innerHTML='<div class="err">Введите номер заказа</div>'; return; }
-    var q='/api/track/order?number='+encodeURIComponent(number)+(phone?'&phone='+encodeURIComponent(phone):'');
+    var q='/api/track/order?number='+encodeURIComponent(number)+(token?'&token='+encodeURIComponent(token):'');
     fetch(q).then(function(r){return r.json();}).then(function(d){
       if(!d.found){ $('#result').innerHTML='<div class="err">'+esc(d.error||'Заказ не найден')+'</div>'; return; }
       var col=d.status_color||'#64748b';
@@ -61,9 +62,12 @@
   }
   $('#check').addEventListener('click', check);
   $('#number').addEventListener('keydown', function(e){ if(e.key==='Enter') check(); });
-  // Ссылка из клиентского бота: /track?number=1001 — сразу показываем статус.
-  var pre = new URLSearchParams(location.search).get('number');
-  if (pre) { $('#number').value = pre; check(); }
+  // Ссылка из клиентского бота: /track?number=1001&token=… — сразу показываем статус.
+  var params = new URLSearchParams(location.search);
+  var pre = params.get('number'), key = params.get('token');
+  if (pre) { $('#number').value = pre; }
+  if (key) { $('#token').value = key; }
+  if (pre && key) { check(); }
 })();
 </script>
 </body>

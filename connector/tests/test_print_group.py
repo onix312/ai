@@ -61,8 +61,8 @@ class PrintGroupBase(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
     def test_version_and_schema(self):
-        self.assertEqual(APP_VERSION, "9.3.0")
-        self.assertEqual(SCHEMA_VERSION, 13)
+        self.assertEqual(APP_VERSION, "9.3.4")
+        self.assertEqual(SCHEMA_VERSION, 14)
 
 
 class FoldLinesTests(unittest.TestCase):
@@ -354,6 +354,16 @@ class PricesConsistencyTests(PrintGroupBase):
         all_prices = self.nom._all_prices()
         self.assertEqual(docs_price, 250.0)
         self.assertEqual(all_prices[row["id"]]["retail"], 250.0)
+
+    def test_variant_price_does_not_replace_base_price(self):
+        row = self._nom("A", 250)
+        self.db.upsert("nom_variants", {
+            "id": "variant-a", "nom_id": row["id"], "name": "Красный", "archived": 0,
+        })
+        self.nom.set_price(row["id"], 490, variant_id="variant-a")
+        self.assertEqual(Documents(self.db).price_of(row["id"]), 250.0)
+        self.assertEqual(self.nom._prices_of(row["id"])["retail"], 250.0)
+        self.assertEqual(self.nom._all_prices()[row["id"]]["retail"], 250.0)
 
 
 class SettingsCacheTests(PrintGroupBase):
