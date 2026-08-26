@@ -146,6 +146,7 @@
     <button class="btn" type="button" id="shuffle">Собрать другие 15</button>
     <button class="btn" type="button" id="addAbout">+ Карточка «О нас»</button>
     <button class="btn" type="button" id="copyIdeas">Копировать идеи</button>
+    <button class="btn" type="button" id="checkCards">Проверить текст</button>
     <button class="btn primary" type="button" data-nz-print>Печать</button>
     <span class="pill"><b>Выбрано:</b> <span id="selectedName">1</span></span>
   </div>
@@ -498,6 +499,13 @@ $('shuffle').addEventListener('click', () => { pickSet(Math.floor(Math.random() 
 $('copyIdeas').addEventListener('click', (ev) => {
   const text = IDEAS.map((x, i) => (i + 1) + '. ' + x.title.replace(/\*/g, '') + ' — ' + x.text).join('\n');
   NZ.copy(text, ev.currentTarget, 'Идеи скопированы ✓');
+});
+$('checkCards').addEventListener('click', () => {
+  const warnings = cards.map((c, i) => {
+    const text = [c.kicker, c.title, c.text, c.cta, ...(c.points || [])].join(' ');
+    return text.length > 230 ? `№${i + 1}: много текста (${text.length} символов)` : null;
+  }).filter(Boolean);
+  alert(warnings.length ? 'Проверьте перед печатью:\n' + warnings.join('\\n') : 'Все 15 карточек помещаются в рекомендованный объём.');
 });
 $('addAbout').addEventListener('click', () => {
   cards[selected] = {...ABOUT_CARD, points:[...ABOUT_CARD.points]};

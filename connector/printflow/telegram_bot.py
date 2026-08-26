@@ -250,10 +250,16 @@ class TelegramBot:
         if not text and not message.get("photo"):
             return self._reply(chat, "Пришлите описание задачи или фото изделия.")
         summary = text or "Фото от клиента"
-        self.db.add_event("client_bot", "Новая заявка клиента", summary[:500], "", {"chat_id": chat})
+        photo = message.get("photo") or []
+        file_id = str(photo[-1].get("file_id")) if photo and isinstance(photo[-1], dict) else ""
+        self.db.add_event("client_bot", "Новая заявка клиента", summary[:500], "", {"chat_id": chat, "has_photo": bool(file_id)})
         target = str(self._settings().get("client_bot_chat") or "")
         if target:
-            self._call("sendMessage", {"chat_id": target, "text": "💬 Новая заявка клиента\n\n" + summary[:3500]})
+            if file_id:
+                self._call("sendPhoto", {"chat_id": target, "photo": file_id,
+                                          "caption": "💬 Новая заявка клиента\\n\\n" + summary[:900]})
+            else:
+                self._call("sendMessage", {"chat_id": target, "text": "💬 Новая заявка клиента\\n\\n" + summary[:3500]})
         self._reply(chat, "Заявка принята ✅ Сотрудник свяжется с вами для уточнения цены и срока.")
 
     def _handle_callback(self, callback: dict, owner: str) -> None:
