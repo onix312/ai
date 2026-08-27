@@ -6,9 +6,16 @@
 <title>Конструктор ценников · PrintFlow</title>
 <link rel="icon" href="/assets/brand/favicon.svg" type="image/svg+xml">
 <style>
+/* ================================================================
+   Конструктор ценников — печатный центр стеллажа.
+   Данные: GET /api/labels?kind=shelf (товары, цены, штрихкоды 1С).
+   Печать: A4, масштаб 100% — ценник 67 × 32 мм (27 на листе),
+   промостенд 67 × 57 мм (15 на листе). Форматы физические:
+   масштабирование и «вписать в страницу» ломают реальный размер.
+   ================================================================ */
 :root {
   --ink:#182033; --muted:#6c7890; --line:#dfe4ee; --soft:#f5f7fb; --panel:#fff;
-  --accent:#4f46e5; --accent-soft:#eef0ff; --ok:#138a5b; --warn:#b76a13;
+  --accent:#4f46e5; --accent-soft:#eef0ff; --ok:#138a5b; --warn:#b76a13; --bad:#b42318;
   --shadow:0 18px 55px -35px rgba(26,35,58,.45);
 }
 * { box-sizing:border-box; }
@@ -17,6 +24,8 @@ body { font-family:Inter,"Segoe UI",Arial,sans-serif; color:var(--ink); backgrou
   -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 button,input,select { font:inherit; }
 button,a { -webkit-tap-highlight-color:transparent; }
+
+/* ------------------------------------------------------------- шапка */
 .topbar { position:sticky; top:0; z-index:20; min-height:68px; display:flex; align-items:center;
   gap:14px; padding:10px 18px; background:rgba(255,255,255,.96); border-bottom:1px solid var(--line);
   backdrop-filter:blur(14px); box-shadow:0 8px 30px -26px #172033; }
@@ -26,37 +35,47 @@ button,a { -webkit-tap-highlight-color:transparent; }
 .brand p { margin:2px 0 0; color:var(--muted); font-size:11.5px; }
 .statuses { display:flex; gap:7px; flex-wrap:wrap; }
 .pill { display:inline-flex; align-items:center; gap:6px; min-height:30px; padding:5px 10px; border-radius:999px;
-  background:var(--soft); color:var(--muted); font-size:11.5px; font-weight:650; }
+  background:var(--soft); color:var(--muted); font-size:11.5px; font-weight:650; white-space:nowrap; }
 .pill.ok { color:var(--ok); background:#eaf8f2; }
 .pill.warn { color:var(--warn); background:#fff5e7; }
 .spacer { flex:1; }
 .btn { min-height:38px; border:1px solid var(--line); border-radius:11px; padding:8px 13px; background:#fff;
-  color:var(--ink); font-size:12.5px; font-weight:680; text-decoration:none; cursor:pointer; }
+  color:var(--ink); font-size:12.5px; font-weight:680; text-decoration:none; cursor:pointer; display:inline-block; }
 .btn:hover { border-color:#afb9cc; transform:translateY(-1px); }
+.btn:disabled { opacity:.55; cursor:default; transform:none; }
 .btn.primary { border-color:transparent; color:#fff; background:linear-gradient(135deg,#4f46e5,#7c3aed); }
+.btn.primary:hover { filter:brightness(1.06); }
 .btn.soft { color:#4338ca; background:#f0f1ff; border-color:#d9dcff; }
+
+/* ------------------------------------------------------------- каркас */
 .workspace { display:grid; grid-template-columns:340px minmax(0,1fr); min-height:calc(100vh - 68px); }
 .sidebar { position:sticky; top:68px; align-self:start; height:calc(100vh - 68px); overflow:auto; padding:16px;
   background:#fff; border-right:1px solid var(--line); }
 .section { padding:0 0 17px; margin:0 0 17px; border-bottom:1px solid var(--line); }
-.section:last-child { border:0; }
+.section:last-child { border:0; margin:0; }
 .section-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
 .section-head b { font-size:12px; letter-spacing:.065em; text-transform:uppercase; }
 .section-head small { margin-left:auto; color:var(--muted); }
 .search { width:100%; min-height:39px; padding:8px 11px; border:1px solid var(--line); border-radius:11px;
   background:var(--soft); color:var(--ink); outline:none; }
 .search:focus, select:focus, input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
-.list-actions { display:flex; gap:6px; margin:8px 0; }
+.list-actions { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
 .mini { border:0; background:none; color:#4f46e5; font-size:11.5px; font-weight:680; cursor:pointer; padding:3px; }
+.mini:hover { text-decoration:underline; }
+.mini:disabled { opacity:.5; cursor:default; text-decoration:none; }
 .item-list { max-height:238px; overflow:auto; display:flex; flex-direction:column; gap:5px; padding-right:3px; }
-.item-row { display:grid; grid-template-columns:18px 1fr auto; align-items:center; gap:8px; padding:8px; border:1px solid transparent;
-  border-radius:10px; cursor:pointer; background:var(--soft); }
+.item-row { display:grid; grid-template-columns:18px 1fr auto; align-items:center; gap:8px; padding:8px;
+  border:1px solid transparent; border-radius:10px; cursor:pointer; background:var(--soft); }
 .item-row:hover { border-color:#cfd6e4; }
 .item-row input { width:16px; height:16px; accent-color:var(--accent); }
-.item-row b { display:block; max-width:196px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.2px; }
-.item-row small { display:block; margin-top:2px; color:var(--muted); font-size:10.5px; }
+.item-row .item-text b { display:block; max-width:196px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.2px; }
+.item-row .item-text small { display:block; margin-top:2px; color:var(--muted); font-size:10.5px; }
 .link-dot { width:8px; height:8px; border-radius:50%; background:#d3d9e5; }
 .link-dot.ok { background:#16a36a; box-shadow:0 0 0 3px #dff6ec; }
+.list-empty { padding:14px 10px; color:var(--muted); font-size:12px; line-height:1.5; text-align:center; }
+.list-empty.error { color:var(--bad); }
+
+/* ------------------------------------------------------------- форматы */
 .template-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
 .template-grid label { cursor:pointer; }
 .template-grid input { position:absolute; opacity:0; pointer-events:none; }
@@ -65,6 +84,23 @@ button,a { -webkit-tap-highlight-color:transparent; }
 .template-card small { color:var(--muted); font-size:10.5px; }
 .template-grid input:checked + .template-card { border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 2px #dfe1ff; }
 .template-grid .wide { grid-column:1/-1; }
+.format-note { margin-top:10px; padding:10px 11px; border:1px solid #d9dcff; border-radius:11px; background:#f6f6ff;
+  color:#4b5570; font-size:11px; line-height:1.42; }
+.format-note b { display:block; margin-bottom:2px; color:#3730a3; font-size:11.5px; }
+.control-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 9px; }
+.control-grid .control { min-width:0; }
+.control { display:block; margin-top:11px; }
+.control > span { display:flex; justify-content:space-between; gap:8px; margin-bottom:5px; color:var(--muted); font-size:11.5px; font-weight:600; }
+.control > span i { font-style:normal; opacity:.8; }
+.control select,.control input[type=text],.control input[type=search],.control input[type=number] {
+  width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff;
+  color:var(--ink); outline:none; }
+.color-row { display:grid; grid-template-columns:1fr 44px; gap:8px; }
+.color-row input[type=color] { width:44px; height:38px; padding:3px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.color-row input[type=color]:disabled { opacity:.45; }
+input[type=range] { width:100%; accent-color:var(--accent); }
+
+/* ------------------------------------------------------------- варианты */
 .style-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
 .style-grid label { cursor:pointer; }
 .style-grid input { position:absolute; opacity:0; pointer-events:none; }
@@ -86,29 +122,28 @@ button,a { -webkit-tap-highlight-color:transparent; }
 .palette { position:relative; min-height:30px; padding:0; border:1px solid var(--line); border-radius:9px; background:var(--swatch); cursor:pointer; }
 .palette::after { content:""; position:absolute; inset:4px; border:1px solid rgba(255,255,255,.56); border-radius:5px; }
 .palette:hover,.palette.on { border-color:#111827; box-shadow:0 0 0 2px #dfe4ee; }
-.control-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 9px; }
-.control-grid .control { min-width:0; }
-.preset-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
-.preset-row .mini { padding:5px 7px; border:1px solid #dfe4ee; border-radius:8px; background:#f8f9fc; }
-.control { display:block; margin-top:11px; }
-.control > span { display:flex; justify-content:space-between; margin-bottom:5px; color:var(--muted); font-size:11.5px; font-weight:600; }
-.control select,.control input[type=text],.control input[type=number] { width:100%; min-height:38px; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#fff; color:var(--ink); outline:none; }
-.color-row { display:grid; grid-template-columns:1fr 44px; gap:8px; }
-.color-row input[type=color] { width:44px; height:38px; padding:3px; border:1px solid var(--line); border-radius:10px; background:#fff; }
-input[type=range] { width:100%; accent-color:var(--accent); }
 .checks { display:grid; grid-template-columns:1fr 1fr; gap:8px 10px; margin-top:12px; }
 .checks label { display:flex; align-items:center; gap:7px; color:#4e5a70; font-size:11.5px; cursor:pointer; }
 .checks input { width:15px; height:15px; accent-color:var(--accent); }
+.preset-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+.preset-row .mini { padding:5px 7px; border:1px solid #dfe4ee; border-radius:8px; background:#f8f9fc; }
+.preset-row .mini:hover { text-decoration:none; border-color:var(--accent); color:var(--accent); }
+
+/* ------------------------------------------------------------- блок 1С */
 .one-c-card { padding:12px; border:1px solid #cfe9dd; border-radius:12px; background:#f0faf6; }
 .one-c-card b { display:block; color:#116b49; font-size:12.5px; }
 .one-c-card p { margin:5px 0 10px; color:#547164; font-size:11px; line-height:1.45; }
 .one-c-actions { display:flex; gap:6px; }
 .one-c-actions .btn { flex:1; min-height:34px; padding:6px 8px; font-size:11px; }
+
+/* ------------------------------------------------------------- превью */
 .preview { min-width:0; padding:20px; overflow:auto; }
-.preview-head { max-width:210mm; margin:0 auto 10px; display:flex; align-items:center; color:var(--muted); font-size:12px; }
+.preview-head { max-width:210mm; margin:0 auto 10px; display:flex; align-items:center; gap:10px; color:var(--muted); font-size:12px; }
+.preview-head .print-hint { white-space:nowrap; }
 .sheets { display:flex; flex-direction:column; gap:20px; align-items:center; }
-/* A4 is used as a real canvas: no visual gaps between labels and no scaling.
-   Standard: 3 × 9 labels (67 × 32); promo: 3 × 5 stands (67 × 57). */
+
+/* A4 — настоящий канвас: без зрительных зазоров и масштабирования.
+   Стандарт: 3 × 9 ценников (67 × 32); промо: 3 × 5 стендов (67 × 57). */
 .sheet { position:relative; width:210mm; min-height:297mm; background:#fff; box-shadow:var(--shadow); page-break-after:always; }
 .sheet.standard { padding:4.5mm; }
 .sheet.promo { padding:6mm 4.5mm; }
@@ -117,6 +152,8 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .tag-grid { display:grid; align-content:start; justify-content:start; overflow:hidden; }
 .sheet.standard .tag-grid { grid-template-columns:repeat(3,67mm); grid-auto-rows:32mm; gap:0; }
 .sheet.promo .tag-grid { grid-template-columns:repeat(3,67mm); grid-auto-rows:57mm; gap:0; }
+
+/* ------------------------------------------------------------- ценник */
 .price-tag { --tag-color:#4f46e5; --font-scale:1; position:relative; overflow:hidden; display:flex; flex-direction:column;
   width:67mm; height:32mm; padding:1.7mm 2.2mm 1.3mm 3.7mm; border:.25mm solid #cdd3df; border-radius:1.5mm;
   background:linear-gradient(115deg,#fff 0%,#fff 76%,color-mix(in srgb,var(--tag-color) 5%,#fff) 100%); color:#121827; break-inside:avoid;
@@ -148,10 +185,12 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .barcode { flex:1; min-width:0; height:6mm; display:flex; align-items:flex-end; }
 .barcode svg { display:block; width:100% !important; height:6mm !important; }
 .barcode-missing { align-self:center; color:#b45309; font-size:4.8px; font-weight:700; border-bottom:.2mm dashed #d89a52; }
-.sku { max-width:18mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:4.7px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sku { max-width:18mm; color:#6c7586; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:4.7px; text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .footer-line { display:none; }
 .promo-photo { display:none; }
-/* The tall promo stand deliberately gives the offer, QR and cashier code room. */
+
+/* Высокий промостенд сознательно даёт место офферу, QR и кассовому коду. */
 .price-tag.promo { width:67mm; height:57mm; padding:3.6mm 3.8mm 3mm 5.2mm; border-radius:2.5mm; border-width:.35mm;
   background:linear-gradient(145deg,#fff 0%,#fff 62%,color-mix(in srgb,var(--tag-color) 10%,#fff) 100%); }
 .price-tag.promo::before { width:2.2mm; }
@@ -168,16 +207,22 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .price-tag.promo .tag-bottom { min-height:9mm; margin-top:1.4mm; gap:2mm; }
 .price-tag.promo .barcode,.price-tag.promo .barcode svg { height:9mm !important; }
 .price-tag.promo .sku { max-width:22mm; font-size:6.4px; }
-.price-tag.promo .footer-line { display:block; position:absolute; right:3.8mm; bottom:1.2mm; max-width:42mm; color:#7d8798; font-size:5.8px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-/* Five visual variants reuse the two physical formats instead of inventing a
-   new paper size. Their hierarchy stays readable at 1:1 on the A4 sheet. */
-.price-tag.variant-accent { border-color:color-mix(in srgb,var(--tag-color) 55%,#cdd3df); background:linear-gradient(125deg,#fff 0%,#fff 55%,color-mix(in srgb,var(--tag-color) 13%,#fff) 56%); }
+.price-tag.promo .footer-line { display:block; position:absolute; right:3.8mm; bottom:1.2mm; max-width:42mm; color:#7d8798;
+  font-size:5.8px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* Пять визуальных вариантов переиспользуют два физических формата и не
+   изобретают новый размер бумаги. Иерархия читается 1:1 на листе A4. */
+.price-tag.variant-accent { border-color:color-mix(in srgb,var(--tag-color) 55%,#cdd3df);
+  background:linear-gradient(125deg,#fff 0%,#fff 55%,color-mix(in srgb,var(--tag-color) 13%,#fff) 56%); }
 .price-tag.variant-accent::before { width:1.8mm; }
-.price-tag.standard.variant-accent .price-line { align-self:flex-start; margin-left:-.45mm; padding:.45mm .9mm .35mm; border-radius:1.2mm; color:var(--tag-color); background:color-mix(in srgb,var(--tag-color) 12%,#fff); }
+.price-tag.standard.variant-accent .price-line { align-self:flex-start; margin-left:-.45mm; padding:.45mm .9mm .35mm;
+  border-radius:1.2mm; color:var(--tag-color); background:color-mix(in srgb,var(--tag-color) 12%,#fff); }
 .price-tag.variant-accent .tag-price { color:var(--tag-color); }
-.price-tag.variant-sale { border-color:color-mix(in srgb,var(--tag-color) 76%,#111827); background:linear-gradient(135deg,color-mix(in srgb,var(--tag-color) 86%,#111827),var(--tag-color)); color:#fff; }
+.price-tag.variant-sale { border-color:color-mix(in srgb,var(--tag-color) 76%,#111827);
+  background:linear-gradient(135deg,color-mix(in srgb,var(--tag-color) 86%,#111827),var(--tag-color)); color:#fff; }
 .price-tag.variant-sale::before { width:100%; opacity:.13; background:repeating-linear-gradient(135deg,#fff 0 1.2mm,transparent 1.2mm 3.1mm); }
-.price-tag.variant-sale .tag-brand,.price-tag.variant-sale .tag-desc,.price-tag.variant-sale .tag-meta,.price-tag.variant-sale .price-lead,.price-tag.variant-sale .price-note,.price-tag.variant-sale .old-price { color:#fff; }
+.price-tag.variant-sale .tag-brand,.price-tag.variant-sale .tag-desc,.price-tag.variant-sale .tag-meta,
+.price-tag.variant-sale .price-lead,.price-tag.variant-sale .price-note,.price-tag.variant-sale .old-price { color:#fff; }
 .price-tag.variant-sale .tag-price { color:#fff; }
 .price-tag.variant-sale .badge { color:#172033; background:#fff; }
 .price-tag.variant-sale .price-subrow { opacity:.88; }
@@ -197,25 +242,45 @@ input[type=range] { width:100%; accent-color:var(--accent); }
 .price-tag.promo.variant-photo::before { width:2.2mm; }
 .price-tag.promo.variant-photo .tag-body { padding-left:23mm; }
 .price-tag.promo.variant-photo .tag-body .qr { position:absolute; z-index:2; top:30mm; left:5.2mm; width:11mm; height:11mm; }
-.price-tag.promo.variant-photo .promo-photo { position:absolute; z-index:1; top:10.5mm; left:5.2mm; display:grid; place-items:center; width:19mm; height:18mm; overflow:hidden; border:.3mm solid color-mix(in srgb,var(--tag-color) 35%,#fff); border-radius:2mm; background:linear-gradient(145deg,color-mix(in srgb,var(--tag-color) 25%,#fff),#fff); }
+.price-tag.promo.variant-photo .promo-photo { position:absolute; z-index:1; top:10.5mm; left:5.2mm; display:grid; place-items:center;
+  width:19mm; height:18mm; overflow:hidden; border:.3mm solid color-mix(in srgb,var(--tag-color) 35%,#fff); border-radius:2mm;
+  background:linear-gradient(145deg,color-mix(in srgb,var(--tag-color) 25%,#fff),#fff); }
 .promo-photo img { position:relative; z-index:1; width:100%; height:100%; object-fit:cover; }
 .promo-photo .photo-fallback { color:var(--tag-color); font-size:5px; font-weight:900; letter-spacing:.08em; text-align:center; }
 .price-tag.promo.variant-photo .tag-name { -webkit-line-clamp:3; }
 .price-tag.promo.variant-photo .footer-line { max-width:29mm; }
-.format-note { margin-top:10px; padding:10px 11px; border:1px solid #d9dcff; border-radius:11px; background:#f6f6ff; color:#4b5570; font-size:11px; line-height:1.42; }
-.format-note b { display:block; margin-bottom:2px; color:#3730a3; font-size:11.5px; }
-.empty { max-width:620px; margin:90px auto; padding:34px; border:1px dashed #bcc5d4; border-radius:18px; text-align:center; color:var(--muted); background:#fff; }
+
+/* ----------------------------------------------------------- служебное */
+.empty { max-width:620px; width:100%; margin:70px auto; padding:34px; border:1px dashed #bcc5d4; border-radius:18px;
+  text-align:center; color:var(--muted); background:#fff; line-height:1.55; font-size:13px; }
 .empty b { display:block; color:var(--ink); font-size:17px; margin-bottom:6px; }
-dialog { width:min(680px,calc(100vw - 28px)); border:0; border-radius:18px; padding:0; color:var(--ink); box-shadow:0 28px 90px -25px #172033; }
+.empty .btn { margin-top:14px; }
+.empty.error-box { border:1px solid #f3c1bc; background:#fff8f7; }
+.empty.error-box b { color:var(--bad); }
+.empty .hint { display:block; margin-top:10px; color:var(--muted); font-size:12px; line-height:1.5; }
+.spinner { display:inline-block; width:18px; height:18px; vertical-align:-4px; border-radius:50%;
+  border:2px solid var(--line); border-top-color:var(--accent); animation:spin .9s linear infinite; }
+.spinner.big { display:block; width:34px; height:34px; margin:0 auto 14px; border-width:3px; vertical-align:0; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ------------------------------------------------------------- диалог */
+dialog { width:min(680px,calc(100vw - 28px)); border:0; border-radius:18px; padding:0; color:var(--ink);
+  box-shadow:0 28px 90px -25px #172033; }
 dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
-.dialog-head { display:flex; align-items:center; padding:17px 19px; border-bottom:1px solid var(--line); }
+.dialog-head { display:flex; align-items:center; gap:12px; padding:17px 19px; border-bottom:1px solid var(--line); }
 .dialog-head h2 { margin:0; font-size:16px; }
 .dialog-body { padding:18px 20px 20px; color:#4f5b70; font-size:12.5px; line-height:1.55; }
 .dialog-body ol { padding-left:20px; }
-.code { padding:11px; border-radius:10px; background:#151b2b; color:#dfe5f5; font:11px/1.55 ui-monospace,Consolas,monospace; overflow:auto; white-space:pre-wrap; }
+.dialog-body p { margin:10px 0; }
+.code { padding:11px; border-radius:10px; background:#151b2b; color:#dfe5f5; font:11px/1.55 ui-monospace,Consolas,monospace;
+  overflow:auto; white-space:pre-wrap; }
 .lookup { display:flex; gap:8px; margin-top:12px; }
 .lookup input { flex:1; min-width:0; border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
 .lookup-result { min-height:20px; margin-top:7px; font-size:11.5px; }
+.lookup-result .ok { color:var(--ok); }
+.lookup-result .bad { color:var(--bad); }
+
+/* -------------------------------------------------------- адаптив/печать */
 @media (max-width:980px) {
   .workspace { grid-template-columns:1fr; }
   .sidebar { position:relative; top:0; height:auto; border-right:0; border-bottom:1px solid var(--line); }
@@ -243,48 +308,68 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
     <div><h1>Конструктор ценников</h1><p>Стеллаж · 67 × 32 / 67 × 57 мм · касса и 1С</p></div>
   </div>
   <div class="statuses">
-    <span class="pill" id="selectedPill">0 выбрано</span>
+    <span class="pill" id="selPill">0 выбрано</span>
     <span class="pill" id="sheetsPill">0 листов</span>
     <span class="pill" id="oneCPill">1С: —</span>
   </div>
   <span class="spacer"></span>
   <a class="btn" href="/index.html#shelf">← Стеллаж</a>
-  <button class="btn soft" id="export1c" type="button">⇩ CSV для 1С</button>
-  <button class="btn" id="help1c" type="button">Как связать с 1С</button>
-  <button class="btn primary" id="print" type="button">Печать</button>
+  <button class="btn" type="button" id="btnExport">⇩ CSV для 1С</button>
+  <button class="btn" type="button" id="btnHelp">Как связать с 1С</button>
+  <button class="btn primary" type="button" id="btnPrint">Печать</button>
 </header>
+
 <div class="workspace">
   <aside class="sidebar noprint">
     <section class="section">
-      <div class="section-head"><b>1. Товары</b><small id="itemCount">загрузка…</small></div>
+      <div class="section-head">
+        <b>1. Товары</b>
+        <small id="itemCount">загрузка…</small>
+        <button class="mini" type="button" id="btnRefresh" title="Обновить список из PrintFlow">↻</button>
+      </div>
       <input class="search" id="search" type="search" placeholder="Название, артикул или штрихкод">
       <div class="list-actions">
-        <button class="mini" id="selectAll" type="button">Выбрать все</button>
-        <button class="mini" id="selectNone" type="button">Снять все</button>
-        <button class="mini" id="selectLinked" type="button">Только с кодом 1С</button>
-        <button class="mini" id="selectNeeds" type="button">Нужны на полку</button>
+        <button class="mini" type="button" id="selectAll">Выбрать все</button>
+        <button class="mini" type="button" id="selectNone">Снять все</button>
+        <button class="mini" type="button" id="selectLinked">Только с кодом 1С</button>
+        <button class="mini" type="button" id="selectNeeds">Нужны на полку</button>
       </div>
-      <div class="item-list" id="items"></div>
+      <div class="item-list" id="itemBox">
+        <div class="list-empty"><span class="spinner"></span> Загружаем товары из PrintFlow…</div>
+      </div>
     </section>
+
     <section class="section">
       <div class="section-head"><b>2. Формат печати</b></div>
       <div class="template-grid" id="templates">
-        <label class="wide"><input type="radio" name="template" value="card" checked><span class="template-card"><b>Как в карточке стеллажа</b><small>Каждая позиция сохранит свой формат и попадёт на отдельный лист</small></span></label>
-        <label><input type="radio" name="template" value="standard"><span class="template-card"><b>Ценник</b><small>67 × 32 мм · 27 на A4</small></span></label>
-        <label><input type="radio" name="template" value="promo"><span class="template-card"><b>Промостенд</b><small>67 × 57 мм · 15 на A4</small></span></label>
+        <label class="wide"><input type="radio" name="template" value="card" checked>
+          <span class="template-card"><b>Как в карточке стеллажа</b><small>Каждая позиция сохранит свой формат и попадёт на отдельный лист</small></span></label>
+        <label><input type="radio" name="template" value="standard">
+          <span class="template-card"><b>Ценник</b><small>67 × 32 мм · 27 на A4</small></span></label>
+        <label><input type="radio" name="template" value="promo">
+          <span class="template-card"><b>Промостенд</b><small>67 × 57 мм · 15 на A4</small></span></label>
       </div>
-      <div class="format-note"><b>Физические форматы без масштабирования</b><span>Обычный ценник — 67 × 32 мм. Высокий промостенд — 67 × 57 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
-      <label class="control"><span><i>Копий каждого товара</i><i>для повтора на полке</i></span><input id="copies" type="number" min="1" max="50" value="1"></label>
+      <div class="format-note"><b>Физические форматы без масштабирования</b>
+        <span>Обычный ценник — 67 × 32 мм. Высокий промостенд — 67 × 57 мм. В окне печати оставьте A4 и масштаб 100%; не включайте «вписать в страницу».</span></div>
+      <label class="control"><span><i>Копий каждого товара</i><i>для повтора на полке</i></span>
+        <input id="copies" type="number" min="1" max="50" value="1"></label>
     </section>
+
     <section class="section">
       <div class="section-head"><b>3. Вариант и палитра</b><small>без смены размера</small></div>
       <div class="style-grid" id="variants" role="radiogroup" aria-label="Вариант оформления">
-        <label class="wide"><input type="radio" name="variant" value="card" checked><span class="style-card"><span class="style-mark clean"></span><span><b>Как в карточке стеллажа</b><small>У каждой позиции свой выбранный вариант, цвет и старая цена</small></span></span></label>
-        <label><input type="radio" name="variant" value="clean"><span class="style-card"><span class="style-mark clean"></span><span><b>Чистый</b><small>Универсальный</small></span></span></label>
-        <label><input type="radio" name="variant" value="accent"><span class="style-card"><span class="style-mark accent"></span><span><b>Цена</b><small>Акцент на сумме</small></span></span></label>
-        <label><input type="radio" name="variant" value="sale"><span class="style-card"><span class="style-mark sale"></span><span><b>Акция</b><small>Контрастный оффер</small></span></span></label>
-        <label><input type="radio" name="variant" value="mono"><span class="style-card"><span class="style-mark mono"></span><span><b>Монохром</b><small>Для ч/б печати</small></span></span></label>
-        <label class="wide"><input type="radio" name="variant" value="photo"><span class="style-card"><span class="style-mark photo"></span><span><b>Фото товара</b><small>Промостенд с фото позиции; обычный ценник сохранит вариант «Цена»</small></span></span></label>
+        <label class="wide"><input type="radio" name="variant" value="card" checked>
+          <span class="style-card"><span class="style-mark clean"></span><span><b>Как в карточке стеллажа</b><small>У каждой позиции свой выбранный вариант, цвет и старая цена</small></span></span></label>
+        <label><input type="radio" name="variant" value="clean">
+          <span class="style-card"><span class="style-mark clean"></span><span><b>Чистый</b><small>Универсальный</small></span></span></label>
+        <label><input type="radio" name="variant" value="accent">
+          <span class="style-card"><span class="style-mark accent"></span><span><b>Цена</b><small>Акцент на сумме</small></span></span></label>
+        <label><input type="radio" name="variant" value="sale">
+          <span class="style-card"><span class="style-mark sale"></span><span><b>Акция</b><small>Контрастный оффер</small></span></span></label>
+        <label><input type="radio" name="variant" value="mono">
+          <span class="style-card"><span class="style-mark mono"></span><span><b>Монохром</b><small>Для ч/б печати</small></span></span></label>
+        <label class="wide"><input type="radio" name="variant" value="photo">
+          <span class="style-card"><span class="style-mark photo"></span><span><b>Фото товара</b><small>Промостенд с фото позиции; обычный ценник сохранит вариант «Цена»</small></span></span></label>
       </div>
       <p class="style-help" id="variantHint">Выберите общий вариант или оставьте стили, заданные в карточках стеллажа.</p>
       <div class="palette-label"><span>Быстрые палитры</span><span>нажмите, чтобы применить ко всем</span></div>
@@ -297,19 +382,43 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
         <button class="palette" type="button" style="--swatch:#172033" data-tag-color="#172033" aria-label="Графит"></button>
       </div>
       <label class="control"><span><i>Цвет</i><i id="colorHint">из карточки</i></span>
-        <div class="color-row"><select id="colorMode"><option value="card">Цвет каждой карточки</option><option value="custom">Один цвет для всех</option></select><input id="accent" type="color" value="#4f46e5" aria-label="Свой акцентный цвет"></div>
+        <div class="color-row">
+          <select id="colorMode">
+            <option value="card">Цвет каждой карточки</option>
+            <option value="custom">Один цвет для всех</option>
+          </select>
+          <input id="accent" type="color" value="#4f46e5" aria-label="Свой акцентный цвет">
+        </div>
       </label>
       <div class="control-grid">
-        <label class="control"><span><i>Шрифт</i></span><select id="fontFamily"><option value="modern">Современный</option><option value="rounded">Мягкий</option><option value="classic">Классический</option><option value="mono">Моно</option></select></label>
-        <label class="control"><span><i>Рамка</i></span><select id="borderMode"><option value="soft">Мягкая</option><option value="accent">Акцентная</option><option value="none">Без рамки</option></select></label>
+        <label class="control"><span><i>Шрифт</i></span>
+          <select id="fontFamily">
+            <option value="modern">Современный</option>
+            <option value="rounded">Мягкий</option>
+            <option value="classic">Классический</option>
+            <option value="mono">Моно</option>
+          </select></label>
+        <label class="control"><span><i>Рамка</i></span>
+          <select id="borderMode">
+            <option value="soft">Мягкая</option>
+            <option value="accent">Акцентная</option>
+            <option value="none">Без рамки</option>
+          </select></label>
       </div>
-      <label class="control"><span><i>Размер текста</i><i id="fontValue">100%</i></span><input id="fontScale" type="range" min="85" max="115" value="100" step="5"></label>
+      <label class="control"><span><i>Размер текста</i><i id="fontValue">100%</i></span>
+        <input id="fontScale" type="range" min="85" max="115" value="100" step="5"></label>
       <div class="control-grid">
-        <label class="control"><span><i>Название бренда</i><i>вместо NOZZA</i></span><input id="brandName" type="text" maxlength="24" placeholder="NOZZA"></label>
-        <label class="control"><span><i>Надпись над ценой</i><i>необязательно</i></span><input id="priceLead" type="text" maxlength="18" placeholder="Например: от"></label>
-        <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span><input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
+        <label class="control"><span><i>Название бренда</i><i>вместо NOZZA</i></span>
+          <input id="brandName" type="text" maxlength="24" placeholder="NOZZA"></label>
+        <label class="control"><span><i>Надпись над ценой</i><i>необязательно</i></span>
+          <input id="priceLead" type="text" maxlength="18" placeholder="Например: от"></label>
+        <label class="control"><span><i>Надпись под ценой</i><i>необязательно</i></span>
+          <input id="priceNote" type="text" maxlength="18" placeholder="Например: за комплект"></label>
       </div>
-      <label class="control"><span><i>Призыв или нижняя строка</i><i>для промостенда</i></span><input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
+      <label class="control"><span><i>Плашка для всех</i><i>необязательно</i></span>
+        <input id="badge" type="text" maxlength="40" placeholder="Например: −20% только сегодня"></label>
+      <label class="control"><span><i>Призыв или нижняя строка</i><i>для промостенда</i></span>
+        <input id="footer" type="text" maxlength="60" placeholder="Сделано в мастерской NOZZA"></label>
       <div class="checks">
         <label><input id="showLogo" type="checkbox" checked> Логотип и бренд</label>
         <label><input id="showQr" type="checkbox" checked> QR товара</label>
@@ -327,21 +436,41 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
         <button class="mini" type="button" data-tag-preset="reset">Сбросить оформление</button>
       </div>
     </section>
+
     <section class="section">
       <div class="one-c-card">
         <b id="oneCStatus">Связь с 1С проверяется…</b>
         <p>На ценник попадёт тот же штрихкод, который хранится в номенклатуре 1С. CSV помогает сверить коды, HTTP — списывать остаток после чека.</p>
-        <div class="one-c-actions"><button class="btn" id="export1cSide" type="button">CSV</button><button class="btn" id="help1cSide" type="button">Настройка</button></div>
+        <div class="one-c-actions">
+          <button class="btn" type="button" id="btnExportSide">CSV</button>
+          <button class="btn" type="button" id="btnHelpSide">Настройка</button>
+        </div>
       </div>
     </section>
   </aside>
+
   <main class="preview">
-    <div class="preview-head noprint"><span id="previewText">Подготовка листов…</span><span class="spacer"></span><span>Печать: A4 · масштаб 100% · без «вписать в лист» · 67 × 32 / 67 × 57 мм</span></div>
-    <div class="sheets" id="sheets"></div>
+    <div class="preview-head noprint">
+      <span id="previewText">Подготовка листов…</span>
+      <span class="spacer"></span>
+      <span class="print-hint">Печать: A4 · масштаб 100% · без «вписать в лист» · 67 × 32 / 67 × 57 мм</span>
+    </div>
+    <div class="sheets" id="sheets">
+      <div class="empty">
+        <span class="spinner big"></span>
+        <b>Подготовка листов</b>
+        <span>Читаем товары, цены и штрихкоды из локальной базы…</span>
+      </div>
+    </div>
   </main>
 </div>
+
 <dialog id="oneCDialog">
-  <div class="dialog-head"><h2>Связь ценника с кассой и 1С</h2><span class="spacer"></span><button class="btn" id="closeHelp" type="button">Закрыть</button></div>
+  <div class="dialog-head">
+    <h2>Связь ценника с кассой и 1С</h2>
+    <span class="spacer"></span>
+    <button class="btn" type="button" id="btnCloseHelp">Закрыть</button>
+  </div>
   <div class="dialog-body">
     <ol>
       <li>В карточке позиции стеллажа укажите <b>штрихкод ровно как в номенклатуре 1С</b>. Если стеллаж связан с номенклатурой PrintFlow, код подставится оттуда.</li>
@@ -354,50 +483,168 @@ Content-Type: application/json
 
 {"barcode":"4601234567890","qty":1,"price":590,"external_id":"ККМ-000184:1"}</div>
     <p><b>external_id</b> — уникальный ID строки чека. Повторная отправка с тем же ID безопасна и не спишет товар дважды.</p>
-    <div class="lookup"><input id="lookupCode" placeholder="Штрихкод или артикул для проверки"><button class="btn soft" id="lookupBtn" type="button">Проверить</button></div>
+    <div class="lookup">
+      <input id="lookupCode" placeholder="Штрихкод или артикул для проверки">
+      <button class="btn soft" type="button" id="btnLookup">Проверить</button>
+    </div>
     <div class="lookup-result" id="lookupResult"></div>
   </div>
 </dialog>
+
 <script src="/assets/qr.js"></script>
 <script>
 (function () {
 'use strict';
+
+/* ============================== утилиты ============================== */
 const $ = (id) => document.getElementById(id);
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-// The designer only creates real shelf formats. Legacy saved values remain
-// usable and deliberately resolve to the normal 67 × 32 mm label.
-const LEGACY_TYPE_ALIASES = {classic:'standard',compact:'standard',minimal:'standard'};
-const TAG_VARIANTS = ['clean','accent','sale','mono','photo'];
-const VARIANT_NAMES = {
-  clean:'чистый', accent:'акцент на цене', sale:'акция', mono:'монохром', photo:'фото товара',
-};
-const TYPES = ['standard','promo'];
-const TYPE_NAMES = {standard:'Ценник 67 × 32 мм',promo:'Промостенд 67 × 57 мм'};
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
+  (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const money = (value) => Math.round(Number(value) || 0).toLocaleString('ru-RU') + ' ₽';
+const priceDigits = (value) => Math.round(Number(value) || 0).toLocaleString('ru-RU');
+function plural(n, one, few, many) {
+  const abs = Math.abs(n) % 100, d = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (d === 1) return one;
+  if (d >= 2 && d <= 4) return few;
+  return many;
+}
+
+/* ============================== константы ============================== */
+// Страница создаёт только реальные форматы полки. Устаревшие значения из
+// старых баз остаются печатаемыми и честно превращаются в 67 × 32 мм.
+const TYPES = ['standard', 'promo'];
+const TYPE_NAMES = { standard: 'Ценник 67 × 32 мм', promo: 'Промостенд 67 × 57 мм' };
 const PER_PAGE = {standard:27,promo:15};
-// v3 adds visual recipes and text controls. v2/v1 remain readable so an
-// existing workstation keeps its preferred printing setup after the upgrade.
-const STORE = 'printflow:price-tag-designer:v3';
-const LEGACY_STORES = ['printflow:price-tag-designer:v2', 'printflow:price-tag-designer:v1'];
-const DESIGN_DEFAULTS = {
-  template:'card', variant:'card', colorMode:'card', accent:'#4f46e5', fontScale:100, copies:1,
-  fontFamily:'modern', borderMode:'soft', brandName:'', priceLead:'', priceNote:'',
-  badge:'', footer:'', showLogo:true, showQr:true, showBarcode:true, showSku:true,
-  showDesc:true, showStock:false, showCut:false,
+const LEGACY_TYPE_ALIASES = { classic: 'standard', compact: 'standard', minimal: 'standard' };
+const TAG_VARIANTS = ['clean','accent','sale','mono','photo'];
+const VARIANT_NAMES = { clean: 'чистый', accent: 'акцент на цене', sale: 'акция', mono: 'монохром', photo: 'фото товара' };
+const TEMPLATE_VALUES = ['card', 'standard', 'promo'];
+const VARIANT_VALUES = ['card'].concat(TAG_VARIANTS);
+// v3 добавил визуальные рецепты и текстовые поля. v2/v1 остаются читаемыми,
+// чтобы рабочая станция сохранила свой вариант печати после обновления.
+const STORE_KEY = 'printflow:price-tag-designer:v3';
+const LEGACY_STORE_KEYS = ['printflow:price-tag-designer:v2', 'printflow:price-tag-designer:v1'];
+const DEFAULTS = {
+  template: 'card', variant: 'card', colorMode: 'card', accent: '#4f46e5', fontScale: 100, copies: 1,
+  fontFamily: 'modern', borderMode: 'soft', brandName: '', priceLead: '', priceNote: '',
+  badge: '', footer: '', showLogo: true, showQr: true, showBarcode: true, showSku: true,
+  showDesc: true, showStock: false, showCut: false,
 };
-const DESIGN_PRESETS = {
-  retail: {variant:'accent', colorMode:'custom', accent:'#4f46e5', fontFamily:'modern', borderMode:'accent', fontScale:100, badge:'', footer:''},
-  sale: {variant:'sale', colorMode:'custom', accent:'#be123c', fontFamily:'rounded', borderMode:'none', fontScale:105, badge:'Выгодно', footer:'Предложение ограничено'},
-  mono: {variant:'mono', colorMode:'custom', accent:'#172033', fontFamily:'mono', borderMode:'accent', fontScale:100, badge:'', footer:''},
-  photo: {template:'promo', variant:'photo', colorMode:'custom', accent:'#7c3aed', fontFamily:'modern', borderMode:'accent', fontScale:105, badge:'Новинка', footer:'Сканируйте QR — больше цветов и вариантов'},
+const PRESETS = {
+  retail: { variant: 'accent', colorMode: 'custom', accent: '#4f46e5', fontFamily: 'modern', borderMode: 'accent', fontScale: 100, badge: '', footer: '' },
+  sale: { variant: 'sale', colorMode: 'custom', accent: '#be123c', fontFamily: 'rounded', borderMode: 'none', fontScale: 105, badge: 'Выгодно', footer: 'Предложение ограничено' },
+  mono: { variant: 'mono', colorMode: 'custom', accent: '#172033', fontFamily: 'mono', borderMode: 'accent', fontScale: 100, badge: '', footer: '' },
+  photo: { template: 'promo', variant: 'photo', colorMode: 'custom', accent: '#7c3aed', fontFamily: 'modern', borderMode: 'accent', fontScale: 105, badge: 'Новинка', footer: 'Сканируйте QR — больше цветов и вариантов' },
 };
+
+/* ============================== состояние ============================== */
 let items = [];
 let selected = new Set();
-let apiInfo = {base:location.origin, reachable:true, one_c:{linked:0,total:0}};
+let apiInfo = { base: '', reachable: true, source: '' };
+let loadState = 'loading';
 let renderTimer = 0;
+let fatalShown = false;
 
-function money(value) {
-  return Math.round(Number(value) || 0).toLocaleString('ru-RU') + ' ₽';
+/* ============================== настройки ==============================
+   Единственный источник правды о полях: каждое поле знает свой элемент,
+   тип и значение по умолчанию. Поле трогаем, только если элемент на
+   странице существует — конструктор больше не умеет зависнуть из-за
+   «забытого» поля. */
+const FIELDS = [
+  { key: 'template',    kind: 'radio',  name: 'template',  default: 'card', values: TEMPLATE_VALUES },
+  { key: 'variant',     kind: 'radio',  name: 'variant',   default: 'card', values: VARIANT_VALUES },
+  { key: 'colorMode',   kind: 'select', id: 'colorMode',   default: 'card' },
+  { key: 'accent',      kind: 'color',  id: 'accent',      default: '#4f46e5' },
+  { key: 'fontScale',   kind: 'range',  id: 'fontScale',   default: 100 },
+  { key: 'copies',      kind: 'number', id: 'copies',      default: 1 },
+  { key: 'fontFamily',  kind: 'select', id: 'fontFamily',  default: 'modern' },
+  { key: 'borderMode',  kind: 'select', id: 'borderMode',  default: 'soft' },
+  { key: 'brandName',   kind: 'text',   id: 'brandName',   default: '' },
+  { key: 'priceLead',   kind: 'text',   id: 'priceLead',   default: '' },
+  { key: 'priceNote',   kind: 'text',   id: 'priceNote',   default: '' },
+  { key: 'badge',       kind: 'text',   id: 'badge',       default: '' },
+  { key: 'footer',      kind: 'text',   id: 'footer',      default: '' },
+  { key: 'showLogo',    kind: 'check',  id: 'showLogo',    default: true },
+  { key: 'showQr',      kind: 'check',  id: 'showQr',      default: true },
+  { key: 'showBarcode', kind: 'check',  id: 'showBarcode', default: true },
+  { key: 'showSku',     kind: 'check',  id: 'showSku',     default: true },
+  { key: 'showDesc',    kind: 'check',  id: 'showDesc',    default: true },
+  { key: 'showStock',   kind: 'check',  id: 'showStock',   default: false },
+  { key: 'showCut',     kind: 'check',  id: 'showCut',     default: false },
+];
+const nodeOf = (field) => (field.id ? $(field.id) : null);
+
+function readSettings() {
+  const out = {};
+  for (const f of FIELDS) {
+    if (f.kind === 'radio') {
+      const checked = document.querySelector(`input[name="${f.name}"]:checked`);
+      out[f.key] = checked && f.values.includes(checked.value) ? checked.value : f.default;
+      continue;
+    }
+    const node = nodeOf(f);
+    if (!node) { out[f.key] = f.default; continue; }
+    if (f.kind === 'check') out[f.key] = Boolean(node.checked);
+    else if (f.kind === 'range' || f.kind === 'number') {
+      const n = Number(node.value);
+      out[f.key] = Number.isFinite(n) ? n : Number(f.default);
+    } else out[f.key] = String(node.value == null ? '' : node.value);
+  }
+  out.copies = Math.max(1, Math.min(50, Math.round(out.copies)));
+  out.fontScale = Math.max(85, Math.min(115, Math.round(out.fontScale)));
+  return out;
 }
+
+function setField(f, value) {
+  if (f.kind === 'radio') {
+    if (typeof value !== 'string' || !f.values.includes(value)) return;
+    const node = document.querySelector(`input[name="${f.name}"][value="${value}"]`);
+    if (node) node.checked = true;
+    return;
+  }
+  const node = nodeOf(f);
+  if (!node || value == null) return;
+  if (f.kind === 'check') { if (typeof value === 'boolean') node.checked = value; return; }
+  if (f.kind === 'number' || f.kind === 'range') {
+    const n = Number(value);
+    if (Number.isFinite(n)) node.value = String(n);
+    return;
+  }
+  if (typeof value !== 'string') return;
+  node.value = value;
+}
+
+function saveSettings() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(readSettings())); } catch (err) { /* нет доступа — не критично */ }
+}
+
+function loadSavedSettings() {
+  for (const key of [STORE_KEY].concat(LEGACY_STORE_KEYS)) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      return (data && typeof data === 'object') ? data : {};
+    } catch (err) { /* повреждённое значение — пробуем предыдущее поколение */ }
+  }
+  return {};
+}
+
+function applySavedSettings() {
+  const saved = loadSavedSettings();
+  for (const f of FIELDS) if (saved[f.key] != null) setField(f, saved[f.key]);
+}
+
+function applyPreset(name) {
+  const values = name === 'reset' ? DEFAULTS : (PRESETS[name] || null);
+  if (!values) return;
+  for (const f of FIELDS) if (values[f.key] != null) setField(f, values[f.key]);
+  saveSettings();
+  queueRender();
+}
+
+/* ============================== домен ============================== */
 function normalizeType(value) {
   const type = String(value || '').trim().toLowerCase();
   return LEGACY_TYPE_ALIASES[type] || (TYPES.includes(type) ? type : 'standard');
@@ -406,106 +653,63 @@ function normalizeVariant(value) {
   const variant = String(value || '').trim().toLowerCase();
   return TAG_VARIANTS.includes(variant) ? variant : 'clean';
 }
-function selectedValue(name, fallback) {
-  const input = document.querySelector(`input[name="${name}"]:checked`);
-  return input ? input.value : fallback;
-}
-function settings() {
-  return {
-    template: selectedValue('template', 'card'), variant: selectedValue('variant', 'card'),
-    colorMode:$('colorMode').value, accent:$('accent').value,
-    fontScale:Number($('fontScale').value) || 100,
-    copies:Math.max(1, Math.min(50, Number($('copies').value) || 1)), fontFamily:$('fontFamily').value,
-    borderMode:$('borderMode').value, brandName:$('brandName').value.trim(),
-    priceLead:$('priceLead').value.trim(), priceNote:$('priceNote').value.trim(),
-    badge:$('badge').value.trim(), footer:$('footer').value.trim(),
-    showLogo:$('showLogo').checked, showQr:$('showQr').checked,
-    showBarcode:$('showBarcode').checked, showSku:$('showSku').checked,
-    showDesc:$('showDesc').checked, showStock:$('showStock').checked,
-    showCut:$('showCut').checked,
-  };
-}
-function saveSettings() {
-  try { localStorage.setItem(STORE, JSON.stringify(settings())); } catch (_) {}
-}
-function readSavedSettings() {
-  for (const key of [STORE, ...LEGACY_STORES]) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw) return JSON.parse(raw) || {};
-    } catch (_) { /* try the previous generation */ }
-  }
-  return {};
-}
-function setRadio(name, value) {
-  const radio = document.querySelector(`input[name="${name}"][value="${value}"]`);
-  if (radio) radio.checked = true;
-}
-function restoreSettings() {
-  const value = readSavedSettings();
-  const savedTemplate = value.template == null || value.template === 'card' ? 'card' : normalizeType(value.template);
-  setRadio('template', savedTemplate);
-  const savedVariant = value.variant == null || value.variant === 'card' ? 'card' : normalizeVariant(value.variant);
-  setRadio('variant', savedVariant);
-  ['colorMode','accent','badge','footer','brandName','priceLead','priceNote','fontFamily','borderMode','copies'].forEach((id) => {
-    if (value[id] != null) $(id).value = value[id];
-  });
-  if (value.fontScale) $('fontScale').value = value.fontScale;
-  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
-    if (typeof value[id] === 'boolean') $(id).checked = value[id];
-  });
-}
 function typeOf(item, opts) {
   return opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
 }
 function variantOf(item, type, opts) {
-  const requested = opts.variant === 'card' ? item.tag_variant : opts.variant;
-  const variant = normalizeVariant(requested);
-  // A small 67 × 32 label cannot fit a useful product image, so the photo
-  // recipe degrades to the price-focused design rather than shrinking content.
+  const variant = normalizeVariant(opts.variant === 'card' ? item.tag_variant : opts.variant);
+  // Маленький ценник 67 × 32 не вмещает полезное фото, поэтому фото-рецепт
+  // честно деградирует в акцент на цене, а не ужимает контент.
   return type === 'standard' && variant === 'photo' ? 'accent' : variant;
 }
 function colorOf(item, opts) {
-  return opts.colorMode === 'custom' ? opts.accent : (/^#[0-9a-f]{6}$/i.test(item.tag_color || '') ? item.tag_color : '#4f46e5');
+  if (opts.colorMode === 'custom') return /^#[0-9a-fA-F]{6}$/.test(opts.accent || '') ? opts.accent : '#4f46e5';
+  return /^#[0-9a-fA-F]{6}$/.test(item.tag_color || '') ? item.tag_color : '#4f46e5';
 }
+
+/* ============================== ценник ============================== */
 function qrSvg(item, opts) {
   if (!opts.showQr || !item.url || !window.QR || !window.QR.svg) return '';
-  return `<div class="qr">${window.QR.svg(item.url, {ecl:'M',margin:1})}</div>`;
+  return `<div class="qr">${window.QR.svg(item.url, { ecl: 'M', margin: 1 })}</div>`;
 }
 function promoPhoto(item, type, variant) {
   if (type !== 'promo' || variant !== 'photo') return '';
-  const source = item.photo && item.id
+  const img = item.photo && item.id
     ? `<img src="/api/shelf/photo.jpg?id=${encodeURIComponent(String(item.id))}" alt="">` : '';
-  return `<div class="promo-photo">${source}<span class="photo-fallback">${source ? '' : 'ВАШ<br>ТОВАР'}</span></div>`;
+  return `<div class="promo-photo">${img}<span class="photo-fallback">${img ? '' : 'ВАШ<br>ТОВАР'}</span></div>`;
 }
 function tagHtml(item, type, opts) {
   const variant = variantOf(item, type, opts);
-  const itemColor = colorOf(item, opts);
-  const color = variant === 'mono' ? '#172033' : itemColor;
+  const color = variant === 'mono' ? '#172033' : colorOf(item, opts);
   const badge = opts.badge || item.tag_badge || '';
   const note = item.tag_note || item.note || '';
-  const meta = [item.material || '', item.grams ? Math.round(item.grams) + ' г' : '', opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
-  const brandName = opts.brandName || 'NOZZA';
-  const logo = opts.showLogo ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(brandName)}</span></span>` : '<span></span>';
-  // Shelf API omits human-readable digits: SKU is already beside the code, so
-  // the full physical height stays available to scanner bars on 67 × 32 mm.
-  const barcode = opts.showBarcode ? (item.barcode_svg
-    ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
-    : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>') : '';
+  const meta = [item.material || '',
+    item.grams ? Math.round(item.grams) + ' г' : '',
+    opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
+  const logo = opts.showLogo
+    ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(opts.brandName || 'NOZZA')}</span></span>`
+    : '<span></span>';
+  // API стеллажа не дублирует цифры рядом с кодом: артикул уже рядом, а
+  // всю физическую высоту на 67 × 32 мм отдают полоскам сканера.
+  const barcode = opts.showBarcode
+    ? (item.barcode_svg
+      ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
+      : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>')
+    : '';
   const sku = opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
   const currentPrice = Number(item.price) || 0;
   const oldPrice = Number(item.tag_old_price) || 0;
   const oldPriceHtml = oldPrice > currentPrice && currentPrice > 0 ? `<span class="old-price">было ${esc(money(oldPrice))}</span>` : '';
   const lead = opts.priceLead ? `<span class="price-lead">${esc(opts.priceLead)}</span>` : '';
-  const priceNote = opts.priceNote ? `<span class="price-note">${esc(opts.priceNote)}</span>` : '';
+  const priceNoteHtml = opts.priceNote ? `<span class="price-note">${esc(opts.priceNote)}</span>` : '';
   const footer = opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : '';
   return `<article class="price-tag ${type} variant-${variant} font-${esc(opts.fontFamily)} border-${esc(opts.borderMode)}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
     <div class="tag-top">${logo}${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>
     <div class="tag-body"><div class="tag-main">
       <div class="tag-name">${esc(item.name || 'Без названия')}</div>
       ${opts.showDesc && note ? `<div class="tag-desc">${esc(note)}</div>` : ''}
-      <div class="price-line">${lead}<div class="tag-price">${money(item.price).replace(' ₽','')} <span>₽</span></div></div>
-      ${(oldPriceHtml || priceNote) ? `<div class="price-subrow">${oldPriceHtml}${priceNote}</div>` : ''}
+      <div class="price-line">${lead}<div class="tag-price">${esc(priceDigits(item.price))} <span>₽</span></div></div>
+      ${(oldPriceHtml || priceNoteHtml) ? `<div class="price-subrow">${oldPriceHtml}${priceNoteHtml}</div>` : ''}
       ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
     </div>${qrSvg(item, opts)}</div>
     ${promoPhoto(item, type, variant)}
@@ -514,180 +718,300 @@ function tagHtml(item, type, opts) {
   </article>`;
 }
 
-function updateDesignUi(opts) {
+/* ============================== рендер ============================== */
+function updateChrome(opts) {
   $('fontValue').textContent = opts.fontScale + '%';
-  $('colorHint').textContent = opts.colorMode === 'card' ? 'из карточки' : opts.accent;
-  $('accent').disabled = opts.colorMode !== 'custom';
-  const normalizedAccent = String(opts.accent || '').toLowerCase();
+  $('colorHint').textContent = opts.colorMode === 'custom' ? opts.accent : 'из карточки';
+  const accent = $('accent');
+  if (accent) accent.disabled = opts.colorMode !== 'custom';
+  const normalized = String(opts.accent || '').toLowerCase();
   document.querySelectorAll('[data-tag-color]').forEach((button) => {
     button.classList.toggle('on', opts.colorMode === 'custom'
-      && button.dataset.tagColor.toLowerCase() === normalizedAccent);
+      && String(button.dataset.tagColor || '').toLowerCase() === normalized);
   });
+  const hint = $('variantHint');
   if (opts.variant === 'card') {
-    $('variantHint').textContent = 'Сохраняйте чистый, акционный, монохромный или фото-вариант у каждой позиции стеллажа — здесь они останутся разными.';
+    hint.textContent = 'Сохраняйте чистый, акционный, монохромный или фото-вариант у каждой позиции стеллажа — здесь они останутся разными.';
   } else if (opts.variant === 'photo') {
-    $('variantHint').textContent = 'Фото используется только на промостенде 67 × 57 мм. На обычном ценнике этот вариант автоматически превращается в акцент на цене.';
+    hint.textContent = 'Фото используется только на промостенде 67 × 57 мм. На обычном ценнике этот вариант автоматически превращается в акцент на цене.';
   } else {
-    $('variantHint').textContent = `Общий вариант «${VARIANT_NAMES[opts.variant] || 'чистый'}» применён ко всем выбранным товарам; физические размеры не меняются.`;
+    hint.textContent = `Общий вариант «${VARIANT_NAMES[opts.variant] || 'чистый'}» применён ко всем выбранным товарам; физические размеры не меняются.`;
   }
 }
-function chunk(rows, size) {
-  const out = [];
-  for (let i = 0; i < rows.length; i += size) out.push(rows.slice(i, i + size));
-  return out;
-}
-function renderSheets() {
-  const opts = settings();
-  saveSettings();
-  updateDesignUi(opts);
-  const chosenItems = items.filter((item) => selected.has(item.id));
-  // Одна позиция может стоять в нескольких местах полки. Повторяем именно
-  // печатный макет, не создавая дубликаты товара или движения в учёте.
-  const chosen = chosenItems.flatMap((item) => Array.from({ length: opts.copies }, () => item));
-  const groups = {};
-  chosen.forEach((item) => { const type = typeOf(item, opts); (groups[type] ||= []).push(item); });
-  let pageNumber = 0;
-  const sheets = [];
-  TYPES.forEach((type) => {
-    chunk(groups[type] || [], PER_PAGE[type]).forEach((page) => {
-      pageNumber += 1;
-      sheets.push(`<section class="sheet ${type}${opts.showCut ? ' with-cut-marks' : ''}"><div class="sheet-caption">Лист ${pageNumber} · ${esc(TYPE_NAMES[type])} · ${page.length} шт</div><div class="tag-grid">${page.map((item) => tagHtml(item, type, opts)).join('')}</div></section>`);
+
+function renderList() {
+  const query = String($('search').value || '').trim().toLocaleLowerCase('ru');
+  const visible = items.filter((item) =>
+    !query || [item.name, item.sku, item.barcode].join(' ').toLocaleLowerCase('ru').includes(query));
+  $('itemBox').innerHTML = visible.map((item) => {
+    const type = normalizeType(item.tag_template);
+    return `<label class="item-row">
+      <input type="checkbox" data-id="${esc(item.id)}" ${selected.has(item.id) ? 'checked' : ''}>
+      <span class="item-text"><b>${esc(item.name || 'Без названия')}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${TYPE_NAMES[type] || TYPE_NAMES.standard}</small></span>
+      <i class="link-dot ${item.barcode ? 'ok' : ''}" title="${item.barcode ? 'Связан с 1С' : 'Нет кода 1С'}"></i>
+    </label>`;
+  }).join('') || '<div class="list-empty">Ничего не найдено</div>';
+  $('itemCount').textContent = `${visible.length} из ${items.length}`;
+  $('itemBox').querySelectorAll('input[data-id]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.checked) selected.add(input.dataset.id); else selected.delete(input.dataset.id);
+      queueRender();
     });
   });
-  $('sheets').innerHTML = sheets.join('') || '<div class="empty"><b>Выберите товары для печати</b><span>Отметьте одну или несколько позиций слева — листы A4 соберутся автоматически.</span></div>';
-  $('selectedPill').textContent = chosen.length ? `${chosenItems.length} товаров · ${chosen.length} ценников` : '0 выбрано';
-  $('sheetsPill').textContent = `${pageNumber} ${pageNumber === 1 ? 'лист' : pageNumber > 1 && pageNumber < 5 ? 'листа' : 'листов'}`;
-  $('previewText').textContent = chosen.length ? `Готово: ${chosen.length} ценников (${opts.copies} коп. каждого) на ${pageNumber} листах` : 'Нет выбранных ценников';
+}
+
+function renderSheets() {
+  const opts = readSettings();
+  saveSettings();
+  updateChrome(opts);
+  const chosenItems = items.filter((item) => selected.has(item.id));
+  // Одна позиция может стоять в нескольких местах полки. Повторяем печатный
+  // макет, а не создаём дубликаты товара или движения в учёте.
+  const chosen = chosenItems.flatMap((item) => Array.from({ length: opts.copies }, () => item));
+  const groups = { standard: [], promo: [] };
+  chosen.forEach((item) => groups[typeOf(item, opts)].push(item));
+  const sheetHtml = [];
+  let pageNumber = 0;
+  for (const type of TYPES) {
+    for (let i = 0; i < groups[type].length; i += PER_PAGE[type]) {
+      const page = groups[type].slice(i, i + PER_PAGE[type]);
+      pageNumber += 1;
+      sheetHtml.push(`<section class="sheet ${type}${opts.showCut ? ' with-cut-marks' : ''}">
+        <div class="sheet-caption">Лист ${pageNumber} · ${esc(TYPE_NAMES[type])} · ${page.length} шт</div>
+        <div class="tag-grid">${page.map((item) => tagHtml(item, type, opts)).join('')}</div>
+      </section>`);
+    }
+  }
+  $('sheets').innerHTML = sheetHtml.join('') ||
+    '<div class="empty"><b>Выберите товары для печати</b><span>Отметьте одну или несколько позиций слева — листы A4 соберутся автоматически.</span></div>';
+  const distinct = new Set(chosen.map((item) => item.id)).size;
+  $('selPill').textContent = chosen.length
+    ? `${distinct} ${plural(distinct, 'товар', 'товара', 'товаров')} · ${chosen.length} ${plural(chosen.length, 'ценник', 'ценника', 'ценников')}`
+    : '0 выбрано';
+  $('sheetsPill').textContent = `${pageNumber} ${plural(pageNumber, 'лист', 'листа', 'листов')}`;
+  $('previewText').textContent = chosen.length
+    ? `Готово: ${chosen.length} ${plural(chosen.length, 'ценник', 'ценника', 'ценников')} (${opts.copies} ${plural(opts.copies, 'копия', 'копии', 'копий')} каждого) · ${pageNumber} ${plural(pageNumber, 'лист', 'листа', 'листов')}`
+    : 'Нет выбранных ценников';
+}
+
+function safeRender() {
+  try {
+    renderSheets();
+  } catch (error) {
+    // Ошибка отрисовки не должна оставлять страницу «в подвешенном» виде.
+    console.error('price-tags: render failed', error);
+    $('previewText').textContent = 'Ошибка при построении листов';
+    $('sheets').innerHTML = `<div class="empty error-box"><b>Не получилось собрать листы</b>
+      <span>${esc(error && error.message || String(error))}</span>
+      <button class="btn primary" type="button" id="btnRenderRetry">Повторить</button></div>`;
+    const retry = $('btnRenderRetry');
+    if (retry) retry.addEventListener('click', safeRender);
+  }
 }
 function queueRender() {
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(renderSheets, 40);
-}
-function renderList() {
-  const query = $('search').value.trim().toLocaleLowerCase('ru');
-  const visible = items.filter((item) => !query || [item.name,item.sku,item.barcode].join(' ').toLocaleLowerCase('ru').includes(query));
-  $('items').innerHTML = visible.map((item) => `<label class="item-row">
-    <input type="checkbox" data-id="${esc(item.id)}" ${selected.has(item.id) ? 'checked' : ''}>
-    <span><b>${esc(item.name)}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${esc(TYPE_NAMES[normalizeType(item.tag_template)] || TYPE_NAMES.standard)}</small></span>
-    <i class="link-dot ${item.barcode ? 'ok' : ''}" title="${item.barcode ? 'Связан с 1С' : 'Нет кода 1С'}"></i>
-  </label>`).join('') || '<div style="padding:16px;color:var(--muted);font-size:12px">Ничего не найдено</div>';
-  $('itemCount').textContent = `${visible.length} из ${items.length}`;
-  $('items').querySelectorAll('input[data-id]').forEach((input) => input.addEventListener('change', () => {
-    if (input.checked) selected.add(input.dataset.id); else selected.delete(input.dataset.id);
-    queueRender();
-  }));
+  renderTimer = setTimeout(safeRender, 40);
 }
 function setSelection(predicate) {
   selected = new Set(items.filter(predicate).map((item) => item.id));
-  renderList(); renderSheets();
-}
-function applyDesignValues(values) {
-  if (values.template) setRadio('template', values.template === 'card' ? 'card' : normalizeType(values.template));
-  if (values.variant) setRadio('variant', values.variant === 'card' ? 'card' : normalizeVariant(values.variant));
-  ['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer','copies'].forEach((id) => {
-    if (values[id] != null) $(id).value = values[id];
-  });
-  ['showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
-    if (typeof values[id] === 'boolean') $(id).checked = values[id];
-  });
-}
-function applyDesignPreset(name) {
-  if (name === 'reset') applyDesignValues(DESIGN_DEFAULTS);
-  else if (DESIGN_PRESETS[name]) applyDesignValues(DESIGN_PRESETS[name]);
+  renderList();
   queueRender();
 }
+
+/* ============================== состояния загрузки ============================== */
+function setLoadState(state, message) {
+  loadState = state;
+  const itemBox = $('itemBox'), sheets = $('sheets'), previewText = $('previewText');
+  if (state === 'loading') {
+    $('itemCount').textContent = '…';
+    itemBox.innerHTML = '<div class="list-empty"><span class="spinner"></span> Загружаем товары из PrintFlow…</div>';
+    previewText.textContent = 'Подготовка листов…';
+    sheets.innerHTML = '<div class="empty"><span class="spinner big"></span><b>Подготовка листов</b><span>Читаем товары, цены и штрихкоды из локальной базы…</span></div>';
+    return;
+  }
+  if (state === 'error') {
+    $('itemCount').textContent = '—';
+    itemBox.innerHTML = `<div class="list-empty error">${esc(message || 'Ошибка загрузки')}</div>`;
+    previewText.textContent = 'Загрузка не удалась';
+    sheets.innerHTML = `<div class="empty error-box"><b>Не удалось загрузить ценники</b>
+      <span>${esc(message || 'Неизвестная ошибка')}</span>
+      <span class="hint">Проверьте, что PrintFlow запущен (python pf.py) и доступен на этом порту, затем попробуйте ещё раз.</span>
+      <button class="btn primary" type="button" id="btnRetry">↻ Повторить</button></div>`;
+    const retry = $('btnRetry');
+    if (retry) retry.addEventListener('click', loadData);
+    $('oneCPill').textContent = '1С: —';
+    $('oneCPill').className = 'pill';
+    return;
+  }
+  if (state === 'empty') {
+    $('itemCount').textContent = '0';
+    itemBox.innerHTML = '<div class="list-empty">На стеллаже пока нет позиций</div>';
+    previewText.textContent = 'Полка пуста';
+    sheets.innerHTML = '<div class="empty"><b>На стеллаже пока нет позиций</b>'
+      + '<span>Добавьте товары в разделе «Стеллаж» — и ценники появятся здесь.</span>'
+      + '<a class="btn soft" href="/index.html#shelf">Открыть стеллаж</a></div>';
+  }
+}
+
+/* ============================== данные ============================== */
+async function loadData() {
+  setLoadState('loading');
+  const refresh = $('btnRefresh');
+  if (refresh) refresh.disabled = true;
+  const controller = new AbortController();
+  // Не оставляем панель в бесконечном «Подготовка листов…», если локальный
+  // коннектор занят или база временно заблокирована.
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    let response;
+    try {
+      response = await fetch('/api/labels?kind=shelf', { signal: controller.signal, cache: 'no-store' });
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error('PrintFlow не отвечает (прошло 20 секунд). Сервер может быть занят или запущен на другом порту.');
+      }
+      throw new Error('Нет соединения с сервером PrintFlow');
+    }
+    let data = null;
+    try { data = await response.json(); }
+    catch (err) { throw new Error('Панель вернула пустой или повреждённый ответ'); }
+    if (!response.ok) throw new Error((data && data.error) || `Ошибка сервера (код ${response.status})`);
+    apiInfo = data || {};
+    items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));
+    // Глубокая ссылка ?item=… — из карточки стеллажа «печать ценника».
+    const requested = new URLSearchParams(location.search).get('item');
+    selected = (requested && items.some((item) => item.id === requested))
+      ? new Set([requested]) : new Set(items.map((item) => item.id));
+    const oneC = apiInfo.one_c || {};
+    const linked = Number(oneC.linked) || 0;
+    const total = oneC.total != null ? Number(oneC.total) : items.length;
+    const allLinked = total > 0 && linked === total;
+    $('oneCPill').textContent = `1С: ${linked}/${total}`;
+    $('oneCPill').className = 'pill ' + (allLinked ? 'ok' : 'warn');
+    let status = allLinked ? `Все ${total} позиций связаны с 1С` : `С 1С связано ${linked} из ${total}`;
+    if (apiInfo.reachable === false) status += ' · QR недоступен с телефона';
+    $('oneCStatus').textContent = status;
+    if (items.length === 0) {
+      setLoadState('empty');
+    } else {
+      setLoadState('ready');
+      renderList();
+      safeRender();
+    }
+  } catch (error) {
+    console.error('price-tags: load failed', error);
+    setLoadState('error', (error && error.message) || 'Неизвестная ошибка');
+  } finally {
+    clearTimeout(timer);
+    if (refresh) refresh.disabled = false;
+  }
+}
+
+/* ============================== 1С ============================== */
 async function export1C() {
-  const buttons = [$('export1c'),$('export1cSide')];
-  buttons.forEach((button) => { button.disabled = true; });
+  const buttons = [$('btnExport'), $('btnExportSide')];
+  buttons.forEach((button) => { if (button) button.disabled = true; });
   try {
     const response = await fetch('/api/shelf/1c/export');
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Не удалось выгрузить CSV');
-    const blob = new Blob([data.csv], {type:'text/csv;charset=utf-8'});
+    if (!response.ok) throw new Error((data && data.error) || 'Не удалось выгрузить CSV');
+    const blob = new Blob([data.csv], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob); link.download = data.filename || 'printflow-1c.csv'; link.click();
+    link.href = URL.createObjectURL(blob);
+    link.download = data.filename || 'printflow-1c.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  } catch (error) { alert(error.message); }
-  finally { buttons.forEach((button) => { button.disabled = false; }); }
+  } catch (error) {
+    alert((error && error.message) || 'Не удалось выгрузить CSV');
+  } finally {
+    buttons.forEach((button) => { if (button) button.disabled = false; });
+  }
 }
 function openHelp() {
-  $('endpointExample').textContent = `POST ${(apiInfo.base || location.origin).replace(/\/$/,'')}/api/shelf/1c/sale\nContent-Type: application/json\n\n{"barcode":"4601234567890","qty":1,"price":590,"external_id":"ККМ-000184:1"}`;
+  const base = String(apiInfo.base || location.origin).replace(/\/+$/, '');
+  $('endpointExample').textContent =
+    `POST ${base}/api/shelf/1c/sale\nContent-Type: application/json\n\n`
+    + '{"barcode":"4601234567890","qty":1,"price":590,"external_id":"ККМ-000184:1"}';
   $('oneCDialog').showModal();
 }
 async function lookup() {
-  const code = $('lookupCode').value.trim();
+  const code = String($('lookupCode').value || '').trim();
   if (!code) return;
   $('lookupResult').textContent = 'Проверяем…';
   try {
     const response = await fetch('/api/shelf/1c/lookup?barcode=' + encodeURIComponent(code));
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Не найдено');
-    $('lookupResult').innerHTML = `<span style="color:var(--ok)">✓ ${esc(data.item.name)} · ${money(data.item.price)} · остаток ${esc(data.item.qty)} шт</span>`;
-  } catch (error) { $('lookupResult').innerHTML = `<span style="color:#b42318">${esc(error.message)}</span>`; }
-}
-async function load() {
-  restoreSettings();
-  try {
-    // Не оставляем панель в бесконечном «Подготовка листов…», если локальный
-    // коннектор занят или база временно заблокирована.
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    let response;
-    try {
-      response = await fetch('/api/labels?kind=shelf', { signal: controller.signal });
-    } finally {
-      clearTimeout(timeout);
-    }
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Ошибка загрузки');
-    apiInfo = data;
-    items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));
-    const requested = new URLSearchParams(location.search).get('item');
-    selected = requested && items.some((item) => item.id === requested) ? new Set([requested]) : new Set(items.map((item) => item.id));
-    const linked = (data.one_c || {}).linked || 0;
-    const total = (data.one_c || {}).total || items.length;
-    $('oneCPill').textContent = `1С: ${linked}/${total}`;
-    $('oneCPill').className = 'pill ' + (linked === total && total ? 'ok' : 'warn');
-    $('oneCStatus').textContent = linked === total && total ? `Все ${total} позиций связаны с 1С` : `С 1С связано ${linked} из ${total}`;
-    if (data.reachable === false) {
-      $('oneCStatus').textContent += ' · QR недоступен с телефона';
-    }
-    renderList(); renderSheets();
+    if (!response.ok) throw new Error((data && data.error) || 'Не найдено');
+    $('lookupResult').innerHTML =
+      `<span class="ok">✓ ${esc(data.item.name)} · ${money(data.item.price)} · остаток ${esc(data.item.qty)} шт</span>`;
   } catch (error) {
-    $('items').innerHTML = `<div style="color:#b42318;font-size:12px">${esc(error.message)}. Запустите PrintFlow и обновите страницу.</div>`;
-    $('sheets').innerHTML = '<div class="empty"><b>Нет связи с PrintFlow</b><span>Конструктор получает товары и штрихкоды из локальной базы.</span></div>';
+    $('lookupResult').innerHTML = `<span class="bad">${esc((error && error.message) || 'Ошибка')}</span>`;
   }
 }
-$('search').addEventListener('input', renderList);
-$('selectAll').addEventListener('click', () => setSelection(() => true));
-$('selectNone').addEventListener('click', () => setSelection(() => false));
-$('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
-$('selectNeeds').addEventListener('click', () => setSelection((item) =>
-  Boolean(item.low) || item.status === 'empty' || item.status === 'dead' || Number(item.plan_qty) > 0));
-$('templates').addEventListener('change', queueRender);
-$('variants').addEventListener('change', queueRender);
-const LIVE_DESIGN_FIELDS = new Set(['accent','fontScale','brandName','priceLead','priceNote','badge','footer']);
-['colorMode','accent','fontScale','fontFamily','borderMode','brandName','priceLead','priceNote','badge','footer',
- 'showLogo','showQr','showBarcode','showSku','showDesc','showStock','showCut'].forEach((id) => {
-  $(id).addEventListener(LIVE_DESIGN_FIELDS.has(id) ? 'input' : 'change', queueRender);
-});
-document.querySelectorAll('[data-tag-color]').forEach((button) => button.addEventListener('click', () => {
-  $('colorMode').value = 'custom';
-  $('accent').value = button.dataset.tagColor;
-  queueRender();
-}));
-document.querySelectorAll('[data-tag-preset]').forEach((button) => button.addEventListener('click', () => {
-  applyDesignPreset(button.dataset.tagPreset);
-}));
-$('print').addEventListener('click', () => window.print());
-$('export1c').addEventListener('click', export1C);
-$('export1cSide').addEventListener('click', export1C);
-$('help1c').addEventListener('click', openHelp);
-$('help1cSide').addEventListener('click', openHelp);
-$('closeHelp').addEventListener('click', () => $('oneCDialog').close());
-$('lookupBtn').addEventListener('click', lookup);
-$('lookupCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') lookup(); });
-load();
+
+/* ============================== события ============================== */
+function bindEvents() {
+  $('search').addEventListener('input', renderList);
+  $('btnRefresh').addEventListener('click', loadData);
+  $('selectAll').addEventListener('click', () => setSelection(() => true));
+  $('selectNone').addEventListener('click', () => setSelection(() => false));
+  $('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
+  $('selectNeeds').addEventListener('click', () => setSelection((item) =>
+    Boolean(item.low) || item.status === 'empty' || item.status === 'dead' || Number(item.plan_qty) > 0));
+  $('templates').addEventListener('change', queueRender);
+  $('variants').addEventListener('change', queueRender);
+  // Текстовые поля, ползунок и цвет перерисовываются на лету; остальное —
+  // по завершении ввода.
+  const LIVE = new Set(['accent', 'fontScale', 'brandName', 'priceLead', 'priceNote', 'badge', 'footer']);
+  for (const f of FIELDS) {
+    if (f.kind === 'radio') continue;
+    const node = nodeOf(f);
+    if (!node) continue;
+    const live = LIVE.has(f.key) && (f.kind === 'text' || f.kind === 'range' || f.kind === 'color');
+    node.addEventListener(live ? 'input' : 'change', queueRender);
+  }
+  document.querySelectorAll('[data-tag-color]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const colorMode = $('colorMode'), accent = $('accent');
+      if (colorMode) colorMode.value = 'custom';
+      if (accent) accent.value = button.dataset.tagColor;
+      queueRender();
+    });
+  });
+  document.querySelectorAll('[data-tag-preset]').forEach((button) => {
+    button.addEventListener('click', () => applyPreset(button.dataset.tagPreset));
+  });
+  $('btnPrint').addEventListener('click', () => window.print());
+  $('btnExport').addEventListener('click', export1C);
+  $('btnExportSide').addEventListener('click', export1C);
+  $('btnHelp').addEventListener('click', openHelp);
+  $('btnHelpSide').addEventListener('click', openHelp);
+  $('btnCloseHelp').addEventListener('click', () => $('oneCDialog').close());
+  $('btnLookup').addEventListener('click', lookup);
+  $('lookupCode').addEventListener('keydown', (event) => { if (event.key === 'Enter') lookup(); });
+  // Страховка: любая несобранная ошибка показывает карточку, а не заморозку.
+  window.addEventListener('error', (event) => { if (event.error) showFatal(event.error); });
+  window.addEventListener('unhandledrejection', (event) => showFatal(event.reason));
+}
+function showFatal(reason) {
+  if (fatalShown) return;
+  fatalShown = true;
+  const message = (reason && (reason.message || String(reason))) || 'См. консоль браузера (F12)';
+  $('previewText').textContent = 'Ошибка страницы';
+  $('sheets').innerHTML = `<div class="empty error-box"><b>Что-то пошло не так на странице</b>
+    <span>${esc(message)}</span>
+    <button class="btn primary" type="button" id="btnFatalReload">Обновить страницу</button></div>`;
+  const reload = $('btnFatalReload');
+  if (reload) reload.addEventListener('click', () => location.reload());
+  if (reason && reason.stack) console.error('price-tags: fatal', reason);
+}
+
+/* ============================== запуск ============================== */
+applySavedSettings();
+bindEvents();
+loadData();
 })();
 </script>
 </body>

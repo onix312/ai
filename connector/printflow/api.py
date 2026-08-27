@@ -284,12 +284,17 @@ class Api:
         from urllib.parse import quote
         kind = (kind or "all").strip().lower()
         base = self.qr_target("/")
+        # Публичный базис (LAN-IP/порт) считаем один раз на запрос, а не на
+        # каждую позицию: иначе детект сети повторяется N раз и лист ценников
+        # может загружаться очень долго на большой полке.
+        spool_base = self.qr_target("/spool.html")
+        shelf_base = self.qr_target("/shelf.html")
         spools, shelf = [], []
         if kind in ("", "all", "spool", "spools"):
             for s in self.repo.spools():
-                info = self.qr_target("/spool.html", f"id={quote(str(s['id']), safe='')}")
                 spools.append({
-                    "id": s["id"], "url": info["url"],
+                    "id": s["id"],
+                    "url": spool_base["url"] + "?id=" + quote(str(s["id"]), safe=""),
                     "material": s.get("material") or "",
                     "color_name": s.get("color_name") or "",
                     "brand": s.get("brand") or "",
@@ -300,17 +305,14 @@ class Api:
         if kind in ("", "all", "shelf"):
             from .barcode import svg as barcode_svg
             for item in self.shelf.items():
-                info = self.shelf.qr_link(
-                    item["id"], getattr(self, "last_host", ""),
-                    str(self.db.setting("public_url", "") or ""),
-                    int(getattr(self, "listen_port", 8080) or 8080))
                 barcode = str(item.get("barcode") or "").strip()
                 try:
                     code_svg = barcode_svg(barcode, width_mm=38, height_mm=7, show_text=False) if barcode else ""
                 except ValueError:
                     code_svg = ""
                 shelf.append({
-                    "id": item["id"], "url": info["url"],
+                    "id": item["id"],
+                    "url": shelf_base["url"] + "?id=" + quote(str(item["id"]), safe=""),
                     "name": item.get("name") or "",
                     "price": item.get("price"),
                     "qty": item.get("qty"),
