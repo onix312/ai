@@ -628,11 +628,20 @@ async function lookup() {
 async function load() {
   restoreSettings();
   try {
-    const response = await fetch('/api/labels?kind=shelf');
+    // Не оставляем панель в бесконечном «Подготовка листов…», если локальный
+    // коннектор занят или база временно заблокирована.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch('/api/labels?kind=shelf', { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Ошибка загрузки');
     apiInfo = data;
-    items = data.shelf || [];
+    items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));
     const requested = new URLSearchParams(location.search).get('item');
     selected = requested && items.some((item) => item.id === requested) ? new Set([requested]) : new Set(items.map((item) => item.id));
     const linked = (data.one_c || {}).linked || 0;

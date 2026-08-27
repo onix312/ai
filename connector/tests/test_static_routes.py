@@ -72,6 +72,12 @@ class TestShortUrls(unittest.TestCase):
     def test_short_and_long_url_are_the_same_page(self):
         self.assertEqual(serve("/m")[2], serve("/m.html")[2])
 
+    def test_legacy_htm_price_tags_url_is_supported(self):
+        code, _, body = serve("/price-tags.htm")
+        self.assertEqual(code, 200)
+        self.assertIn("Конструктор ценников".encode("utf-8"), body)
+        self.assertEqual(body, serve("/price-tags.html")[2])
+
     def test_unknown_path_is_404(self):
         code, _, _ = serve("/такой-страницы-нет")
         self.assertEqual(code, 404)

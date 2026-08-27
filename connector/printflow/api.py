@@ -3967,6 +3967,12 @@ class Handler(BaseHTTPRequestHandler):
             alias = safe_file(SITE, rel + ".html")
             if alias is not None and alias.exists():
                 target = alias
+        if not target.exists() and target.suffix == ".htm":
+            # Внешняя ссылка на старое расширение не должна превращаться в
+            # 404: браузер затем сможет загрузить API и собрать макет.
+            alias = safe_file(SITE, rel[:-4] + ".html")
+            if alias is not None and alias.exists():
+                target = alias
         if not target.exists():
             return self.send_error(404, "Not Found")
         ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
