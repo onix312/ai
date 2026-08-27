@@ -172,6 +172,7 @@ class ShelfPriceTagFrontendTests(unittest.TestCase):
         self.assertIn('width:67mm; height:32mm', page)
         self.assertIn('width:67mm; height:57mm', page)
         self.assertIn('PER_PAGE = {standard:27,promo:15}', page)
+        self.assertIn("items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));", page)
         self.assertIn("TAG_VARIANTS = ['clean','accent','sale','mono','photo']", page)
         self.assertIn('data-tag-preset="photo"', page)
         self.assertIn('id="selectNeeds"', page)
