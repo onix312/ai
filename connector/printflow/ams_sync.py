@@ -15,6 +15,12 @@
     с включённой галочкой «Обновлять из AMS» (поле ams_sync = 1);
   * автосоздание и синхронизацию остатка можно выключить целиком
     в настройках (ams_auto_spools, ams_sync_remaining, printer_info_sync).
+
+Сверка остатка (идея 21): принтер считает остаток в процентах, база — в
+граммах, и проценты считаются от нашей же массы катушки. Пока они согласованы,
+остаток обновляется сам. Разошлись сильнее `ams_remain_tolerance` — база не
+перетирается: факт принтера сохраняется и ждёт явного подтверждения оператора
+(функции `ams_remain_check` / `accept_ams_remaining`, кнопка «⚖ Принять AMS»).
 """
 from __future__ import annotations
 
@@ -62,6 +68,122 @@ def _clean_uuid(value: Any) -> str:
     return "" if not text or set(text) == {"0"} else text
 
 
+def ams_remain_check(db, printer_id: str, snap: dict,
+                     tolerance: float | None = None) -> list[dict]:
+    """Сверить остаток AMS с остатком в базе.
+
+    Принтер знает остаток в процентах, мы — в граммах, и проценты считаются
+    от нашей же массы катушки (``total_grams``). Если расхождение больше
+    порога, значит одно из двух врёт: либо катушка не та (масса указана
+    неверно), либо остаток в базе давно не обновлялся. Молча перетирать
+    граммы процентами в этом случае нельзя — это ломает учёт расхода,
+    поэтому расхождение отдаётся наружу и ждёт явного подтверждения.
+    """
+    if tolerance is None:
+        tolerance = num(db.setting("ams_remain_tolerance", 25.0), 25.0)
+    trays = (snap.get("ams") or {}).get("trays") or []
+    out: list[dict] = []
+    for tray in trays:
+        tray_uuid = _clean_uuid(tray.get("uuid"))
+        material = str(tray.get("type") or "").strip()
+        if not material and not tray_uuid:
+            continue
+        remain = tray.get("remain")
+        if remain is None or num(remain, -1) < 0:
+            continue
+        slot = "" if tray.get("slot") is None else str(tray.get("slot"))
+        spool = None
+        if tray_uuid:
+            spool = db.one("SELECT * FROM spools WHERE tray_uuid=? AND archived=0",
+                           (tray_uuid,))
+        if not spool and slot != "":
+            spool = db.one(
+                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
+                (printer_id, slot))
+        if not spool or not int(num(spool.get("ams_sync"), 1)):
+            continue
+        total = max(1.0, num(spool.get("total_grams"), 1000))
+        ours_pct = round(min(100.0, max(0.0,
+                                        num(spool.get("remaining_grams")) / total * 100.0)), 1)
+        ams_pct = round(min(100.0, max(0.0, num(remain))), 1)
+        delta = round(ams_pct - ours_pct, 1)
+        if abs(delta) <= tolerance:
+            continue
+        out.append({
+            "spool_id": spool["id"],
+            "material": str(spool.get("material") or material),
+            "color_name": str(spool.get("color_name") or ""),
+            "brand": str(spool.get("brand") or ""),
+            "slot": slot,
+            "total_grams": round(total, 1),
+            "grams_ours": round(num(spool.get("remaining_grams")), 1),
+            "grams_ams": round(ams_pct / 100.0 * total, 1),
+            "pct_ours": ours_pct,
+            "pct_ams": ams_pct,
+            "delta_pct": delta,
+            "verified": int(num(spool.get("verified"), 1)),
+            "at": now_iso(),
+        })
+    return out
+
+
+def mismatch_warning(spool: dict) -> dict | None:
+    """Предупреждение для preflight: остаток катушки расходится с AMS.
+
+    Выносим отдельной функцией, чтобы проверка была тестируемой без принтера:
+    списание пойдёт по нашим граммам, поэтому оператор должен решить сам.
+    """
+    if not spool or spool.get("ams_remain_pct") is None:
+        return None
+    return {
+        "code": "ams_remain_mismatch",
+        "title": "Остаток расходится с AMS",
+        "detail": (f"В базе {num(spool.get('remaining_grams')):.0f} г, принтер показывает "
+                   f"{num(spool.get('ams_remain_pct')):.0f}% — подтвердите остаток в складе"),
+    }
+
+
+def accept_ams_remaining(db, spool_id: str, pct: float | None = None,
+                         printer_id: str = "") -> dict:
+    """Принять факт AMS: записать остаток по данным принтера.
+
+    Явное действие оператора — автоматика так не делает. Если процент не
+    передан, берётся последний факт AMS, сохранённый при сверке.
+    """
+    spool = db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+    if not spool:
+        raise ValueError("Катушка не найдена")
+    if not int(num(spool.get("ams_sync"), 1)):
+        raise ValueError("У катушки выключен автообмен с AMS — включите его в карточке")
+    value = pct
+    if value is None:
+        stored = num(spool.get("ams_remain_pct"), -1)
+        if stored < 0:
+            raise ValueError("Данных AMS по этой катушке нет — выполните синхронизацию")
+        value = stored
+    value = max(0.0, min(100.0, num(value)))
+    total = max(1.0, num(spool.get("total_grams"), 1000))
+    was = num(spool.get("remaining_grams"))
+    fresh = round(value / 100.0 * total, 1)
+    db.execute(
+        "UPDATE spools SET remaining_grams=?, ams_remain_pct=NULL, ams_remain_at='',"
+        " synced_at=?, updated_at=? WHERE id=?",
+        (fresh, now_iso(), now_iso(), spool_id))
+    db.add_event(
+        "spool", "Остаток принят по AMS",
+        f"{spool.get('material') or ''} {spool.get('color_name') or ''}: "
+        f"{round(was)} г → {fresh} г ({round(value)}% от {round(total)} г)",
+        printer_id or str(spool.get("printer_id") or ""),
+        {"spool_id": spool_id, "was": was, "now": fresh, "pct_ams": round(value, 1)})
+    return {
+        "ok": True,
+        "spool": db.one("SELECT * FROM spools WHERE id=?", (spool_id,)) or {},
+        "was_grams": round(was, 1),
+        "now_grams": fresh,
+        "pct_ams": round(value, 1),
+    }
+
+
 def sync_printer_info(db, printer_id: str, snap: dict) -> bool:
     """Записать в карточку принтера данные, которые он сообщил сам."""
     if not db.setting("printer_info_sync", True):
@@ -83,12 +205,17 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
 
     Возвращает счётчики: created / updated / unbound.
     """
-    result = {"created": 0, "updated": 0, "unbound": 0}
+    result = {"created": 0, "updated": 0, "unbound": 0, "mismatch": 0}
     trays = (snap.get("ams") or {}).get("trays") or []
     if not trays:
         return result
     auto_create = bool(db.setting("ams_auto_spools", True))
     sync_remaining = bool(db.setting("ams_sync_remaining", True))
+    tolerance = num(db.setting("ams_remain_tolerance", 25.0), 25.0)
+    need_confirm = bool(db.setting("ams_remain_confirm", True))
+    # Расхождения, требующие подтверждения оператора: по ним остаток не пишем.
+    pending = {str(m.get("spool_id")): m for m in ams_remain_check(db, printer_id, snap, tolerance)} \
+        if (sync_remaining and need_confirm) else {}
     for tray in trays:
         tray_uuid = _clean_uuid(tray.get("uuid"))
         material = str(tray.get("type") or "").strip()
@@ -142,9 +269,31 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
             if sync_remaining and remain is not None and num(remain, -1) >= 0:
                 total = max(1.0, num(spool.get("total_grams"), 1000))
                 fresh = round(min(100.0, num(remain)) / 100.0 * total, 1)
-                if abs(fresh - num(spool.get("remaining_grams"))) > 1.0:
+                conflict = pending.get(str(spool.get("id")))
+                if conflict:
+                    # Проценты AMS и наши граммы разошлись сильно — записываем
+                    # сам факт расхождения и ждём человека: перетирать остаток
+                    # вслепую нельзя, это исказит списание и себестоимость.
+                    updates.append("ams_remain_pct=?")
+                    params.append(conflict["pct_ams"])
+                    updates.append("ams_remain_at=?")
+                    params.append(now_iso())
+                    result["mismatch"] += 1
+                    db.add_event(
+                        "spool", "Остаток AMS разошёлся с базой",
+                        f"{conflict['material']} {conflict['color_name']}: в базе "
+                        f"{conflict['grams_ours']} г, принтер показывает "
+                        f"{conflict['grams_ams']} г — подтвердите остаток в складе",
+                        printer_id, {"spool_id": spool["id"], "slot": slot,
+                                     "pct_ours": conflict["pct_ours"],
+                                     "pct_ams": conflict["pct_ams"]})
+                elif abs(fresh - num(spool.get("remaining_grams"))) > 1.0:
                     updates.append("remaining_grams=?")
                     params.append(fresh)
+                    updates.append("ams_remain_pct=?")
+                    params.append(None)
+                    updates.append("ams_remain_at=?")
+                    params.append("")
             # цвет из AMS: заполняем только если у катушки пустое имя/hex-дефолт
             if color:
                 cur_hex = _normalize_hex(str(spool.get("color_hex") or ""))

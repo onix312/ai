@@ -233,6 +233,11 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("price_per_kg", "REAL DEFAULT 0"),
         ("supplier_id", "TEXT DEFAULT ''"),
         ("received_doc_id", "TEXT DEFAULT ''"),
+        # Сверка остатка с AMS (идея 21): что показал принтер и когда.
+        # Заполняется, когда расхождение выше порога и требует подтверждения;
+        # пусто — остаток совпадает с данными принтера.
+        ("ams_remain_pct", "REAL"),
+        ("ams_remain_at", "TEXT DEFAULT ''"),
     ],
     "catalog": [
         # Старые финансовые поля плюс связь с canonical nomenclature.

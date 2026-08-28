@@ -936,6 +936,28 @@ def is_hygroscopic(key: str, material: dict | None = None) -> bool:
     return "гигроскоп" in blob.casefold()
 
 
+def density_of(key: str, db=None) -> float:
+    """Плотность пластика, г/см³ — из справочника, а не константой в коде.
+
+    Метры и миллиметры длины филамента пересчитываются в граммы именно через
+    плотность: PLA и TPU при одинаковой длине весят по-разному. Неизвестный
+    материал → плотность PLA (1.24), чтобы оценка оставалась консервативной
+    и не падала.
+    """
+    norm = _norm_key(key)
+    if not norm:
+        return float(MATERIALS["PLA"]["density"])
+    try:
+        value = num(get_material(norm, db).get("density"))
+    except Exception:
+        value = 0.0
+    if value <= 0:
+        value = num(MATERIALS.get(norm, {}).get("density"))
+    if value <= 0:
+        value = float(MATERIALS["PLA"]["density"])
+    return float(value)
+
+
 def material_from_row(row: dict) -> dict:
     """Строка таблицы materials → справочник материала.
 

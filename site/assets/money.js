@@ -155,6 +155,7 @@ function renderStock() {
       + (num(s.price_per_kg) ? `<span class="spool-price-badge">${money(s.price_per_kg)}/кг</span>` : '')
       + (num(s.ams_sync, 1) !== 0 && s.synced_at ? '<span class="spool-ams-badge" title="Остаток обновляется автоматически из AMS">⟳ AMS</span>' : '')
       + (!num(s.verified, 1) ? '<span class="chip xs warn" title="Требуется подтвердить остаток">⚠ проверить</span>' : '')
+      + (s.ams_remain_pct != null ? `<span class="chip xs warn" title="Принтер показывает ${nfmt(s.ams_remain_pct)}% — в базе ${nfmt(s.percent)}%. Подтвердите остаток.">⚖ AMS ${nfmt(s.ams_remain_pct)}%</span>` : '')
       + `</div>`
       + `<div class="nums"><em>${nfmt(s.remaining_grams)} г</em><span class="muted">/ ${nfmt(s.total_grams)} г</span><span class="spacer"></span><b class="spool-cost">${money(s.value)}</b></div>`
       + `<div class="bar ${p < 15 ? (p <= 0 ? 'bad' : 'warn') : 'ok'}"><i style="width:${p}%"></i></div>`
@@ -166,6 +167,9 @@ function renderStock() {
       + `<button class="btn sm" type="button" data-spool-restock="${esc(s.id)}">+ Пополнить</button>`
       + `<button class="btn sm" type="button" data-spool-consume="${esc(s.id)}">− Списать</button>`
       + `<button class="btn sm ghost" type="button" data-spool-scrap="${esc(s.id)}">Обрезки</button>`
+      + (s.ams_remain_pct != null
+        ? `<button class="btn sm" type="button" data-spool-ams-accept="${esc(s.id)}" title="Записать остаток по данным принтера: ${nfmt(s.ams_remain_pct)}% — ${nfmt(num(s.ams_remain_pct) / 100 * num(s.total_grams))} г">⚖ Принять AMS</button>`
+        : '')
       + '</div>'
       + '<div class="acts tools">'
       + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">♨ Сушка</button>`
@@ -1233,6 +1237,22 @@ function bind() {
     if (qr) { openSpoolQr(qr.dataset.spoolQr); return; }
     const edit = e.target.closest('[data-spool-edit]');
     if (edit) return openSpool(edit.dataset.spoolEdit);
+    const amsAccept = e.target.closest('[data-spool-ams-accept]');
+    if (amsAccept) {
+      const sp = (PF.state.spools || []).find((x) => x.id === amsAccept.dataset.spoolAmsAccept);
+      const pct = num((sp || {}).ams_remain_pct);
+      const grams = Math.round(pct / 100 * num((sp || {}).total_grams));
+      if (!window.confirm(`Записать остаток по данным принтера: ${nfmt(pct)}% — ${nfmt(grams)} г?`)) return;
+      try {
+        await post('/api/spool/ams-accept', {
+          spool_id: amsAccept.dataset.spoolAmsAccept, confirmed: true,
+          printer_id: PF.state.activePrinter || '',
+        });
+        toast('Остаток принят по AMS', nfmt(grams) + ' г');
+        PF.refreshCore();
+      } catch (err) { fail(err); }
+      return;
+    }
     const scrap = e.target.closest('[data-spool-scrap]');
     if (scrap) {
       const grams = window.prompt('Сколько граммов обрезков AMS списать?', '8');
@@ -1263,8 +1283,15 @@ function bind() {
         String(num(PF.state.settings.default_spool_price, 1600)));
       if (price == null) return;
       try {
-        await post('/api/spool/restock', { id: restock.dataset.spoolRestock, grams: num(grams), price: num(price) });
-        toast('Катушка пополнена', nfmt(grams) + ' г');
+        const res = await post('/api/spool/restock', { id: restock.dataset.spoolRestock, grams: num(grams), price: num(price) });
+        const rev = (res && res.revaluation) || null;
+        if (rev && rev.applied) {
+          const sign = num(rev.delta) > 0 ? '+' : '';
+          toast('Катушка пополнена и переоценена',
+            `${nfmt(grams)} г · цена ${money(rev.price_before)} → ${money(rev.price_after)} (${sign}${money(rev.delta)})`);
+        } else {
+          toast('Катушка пополнена', nfmt(grams) + ' г');
+        }
         await PF.refreshCore();
         PF.refreshFinance();
       } catch (err) { fail(err); }

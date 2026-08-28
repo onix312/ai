@@ -44,9 +44,42 @@ class EstimateTests(unittest.TestCase):
         self.assertEqual(_hex_to_name("808080"), "Серый")
 
     def test_meters_fallback(self):
+        """Метры → граммы: метр прутка 1.75 мм — это ≈2.98 г PLA, не 1.24 г.
+
+        Константа 1.24 г/м была плотностью PLA (г/см³), а не массой метра:
+        смета занижалась в 2.4 раза.
+        """
         path = self._gcode(";Filament used: 10.0\n")
         est = estimate_file(path)
-        self.assertAlmostEqual(est["grams"], 12.4, places=1)
+        self.assertAlmostEqual(est["grams"], 29.8, places=1)
+
+    # --------------------------------------------- идея 26: плотность материала
+    def test_meters_use_material_density(self):
+        """Один и тот же метраж у разных пластиков даёт разную массу."""
+        from connector.printflow.estimate import meters_to_grams
+        self.assertAlmostEqual(meters_to_grams(100, "PLA"), 298.3, places=1)
+        petg = meters_to_grams(100, "PETG")
+        tpu = meters_to_grams(100, "TPU")
+        self.assertGreater(petg, meters_to_grams(100, "PLA"))
+        self.assertLess(tpu, meters_to_grams(100, "PLA"))
+
+    def test_meters_from_gcode_use_filament_type(self):
+        path = self._gcode("; filament_type = PETG\n;Filament used: 10.0\n")
+        est = estimate_file(path)
+        self.assertEqual(est["material"], "PETG")
+        # PETG плотнее PLA: 10 м — 30.5 г против 29.8 г у PLA
+        self.assertAlmostEqual(est["grams"], 30.5, places=1)
+
+    def test_mm_path_unchanged_and_material_aware(self):
+        from connector.printflow.estimate import mm_to_grams
+        self.assertAlmostEqual(mm_to_grams(1000, "PLA"), 3.0, places=1)
+        self.assertGreater(mm_to_grams(1000, "PETG"), mm_to_grams(1000, "PLA"))
+
+    def test_filament_diameter_respected(self):
+        """2.85-мм пруток тяжелее метра 1.75-мм при той же длине."""
+        from connector.printflow.estimate import meters_to_grams
+        self.assertGreater(meters_to_grams(100, "PLA", 2.85),
+                           meters_to_grams(100, "PLA", 1.75))
 
 
 if __name__ == "__main__":

@@ -461,6 +461,14 @@ class Repo:
         row["last_dry"] = (dry or {}).get("at") or ""
         row["last_dry_min"] = num((dry or {}).get("minutes"))
         row["last_dry_temp"] = num((dry or {}).get("temp"))
+        # Сверка с AMS (идея 21): принтер показал другой остаток — ждём человека
+        stored = row.get("ams_remain_pct")
+        if stored is None or stored == "":
+            row["ams_remain_pct"] = None
+            row["ams_mismatch"] = 0.0
+        else:
+            row["ams_remain_pct"] = round(num(stored), 1)
+            row["ams_mismatch"] = round(num(stored) - row["percent"], 1)
         return row
 
     # ------------------------------------------------------------- материалы

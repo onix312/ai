@@ -808,10 +808,10 @@ class PrinterManager:
         estimate = {}
         try:
             from .config import UPLOAD_DIR
-            from .estimate import estimate_file
+            from .estimate import diameter_from, estimate_file
             local = UPLOAD_DIR / (job.get("file") or "").rsplit("/", 1)[-1]
             if local.exists():
-                estimate = estimate_file(local)
+                estimate = estimate_file(local, diameter_from(self.db))
                 # Многоплитные проекты: сумма по всем плитам, а не первая плита.
                 job["est_minutes"] = (num(estimate.get("total_minutes"))
                                       or num(estimate.get("minutes")))
@@ -1573,7 +1573,7 @@ class PrinterManager:
         Вернуть: {"grams": float, "minutes": float, "material": str, "color": str, "source": str}
         """
         from .config import UPLOAD_DIR
-        from .estimate import estimate_file, _parse_gcode_head
+        from .estimate import diameter_from, estimate_file, _parse_gcode_head
 
         name = (task or "").rsplit("/", 1)[-1].strip()
         if not name:
@@ -1601,7 +1601,7 @@ class PrinterManager:
         for local in candidates + extra_candidates:
             try:
                 if local.exists():
-                    est = estimate_file(local)
+                    est = estimate_file(local, diameter_from(self.db))
                     total_g = num(est.get("total_grams")) or num(est.get("grams"))
                     total_m = num(est.get("total_minutes")) or num(est.get("minutes"))
                     if total_g or total_m:
@@ -1641,7 +1641,7 @@ class PrinterManager:
                             tf.write(data)
                             tmp_path = Path(tf.name)
                         try:
-                            est = estimate_file(tmp_path)
+                            est = estimate_file(tmp_path, diameter_from(self.db))
                             total_g = num(est.get("total_grams")) or num(est.get("grams"))
                             total_m = num(est.get("total_minutes")) or num(est.get("minutes"))
                             if total_g or total_m:
@@ -1732,7 +1732,7 @@ class PrinterManager:
         у G-code достаточно шапки. Повторный вызов использует уже скачанную копию.
         """
         from .config import UPLOAD_DIR, ensure_dirs
-        from .estimate import estimate_file
+        from .estimate import diameter_from, estimate_file
 
         printer = self.get(printer_id)
         if not printer:
@@ -1764,7 +1764,7 @@ class PrinterManager:
                 raise ValueError(f"Файл {name} не найден на SD-карте принтера")
             local.write_bytes(data)
             source = "printer"
-        est = estimate_file(local) or {}
+        est = estimate_file(local, diameter_from(self.db)) or {}
         grams = num(est.get("total_grams")) or num(est.get("grams"))
         minutes = num(est.get("total_minutes")) or num(est.get("minutes"))
         if grams and not est.get("total_grams"):

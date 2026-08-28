@@ -81,7 +81,8 @@ class AmsSyncTests(unittest.TestCase):
     def test_empty_slot_ignored(self):
         empty = {"slot": 1, "uuid": "0" * 32, "type": "", "remain": None, "color": ""}
         result = sync_ams_spools(self.db, "prn1", snap([empty]))
-        self.assertEqual(result, {"created": 0, "updated": 0, "unbound": 0})
+        self.assertEqual(result, {"created": 0, "updated": 0, "unbound": 0,
+                                 "mismatch": 0})
 
     # ------------------------------------------------- обновление известных
     def test_known_spool_updates_remaining_only(self):

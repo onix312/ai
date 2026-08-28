@@ -1587,7 +1587,7 @@ class Api:
             if not fname:
                 return 400, {"error": "Не указано имя файла"}
             from .config import UPLOAD_DIR
-            from .estimate import estimate_file, parse_3mf_complete
+            from .estimate import diameter_from, estimate_file, parse_3mf_complete
             safe_name = Path(fname).name
             local = safe_file(UPLOAD_DIR, safe_name) or (UPLOAD_DIR / safe_name)
             if not local.exists():
@@ -1621,7 +1621,7 @@ class Api:
                 is_3mf = local.name.lower().endswith(".3mf")
                 if is_3mf:
                     try:
-                        est = estimate_file(local)
+                        est = estimate_file(local, diameter_from(self.db))
                         try:
                             detail = parse_3mf_complete(local)
                         except Exception:
@@ -1637,9 +1637,9 @@ class Api:
                                 est["plate_count"] = len(detail["plates"])
                         return 200, {"estimate": est, "detail": detail if 'detail' in locals() else {}}
                     except Exception:
-                        return 200, {"estimate": estimate_file(local)}
+                        return 200, {"estimate": estimate_file(local, diameter_from(self.db))}
                 else:
-                    return 200, {"estimate": estimate_file(local)}
+                    return 200, {"estimate": estimate_file(local, diameter_from(self.db))}
             base = Path(fname).name.lower()
             base_variants = {base}
             if base.endswith(".gcode.3mf"):
@@ -1949,11 +1949,41 @@ class Api:
             # Ручной запуск автосбора: катушки AMS и данные принтера → база
             printer = self.printer_or_fail(pid)
             snap = printer.snapshot()
-            from .ams_sync import sync_ams_spools, sync_printer_info
+            from .ams_sync import (ams_remain_check, sync_ams_spools,
+                                   sync_printer_info)
             info_ok = sync_printer_info(self.db, printer.id, snap)
             counts = sync_ams_spools(self.db, printer.id, snap)
             return 200, {"ok": True, "printer_info": info_ok, **counts,
+                         "mismatches": ams_remain_check(self.db, printer.id, snap),
                          "spools": self.repo.spools()}
+        if path == "/api/printer/ams/diff":
+            # Сверка остатка AMS с базой без записи: «принтер показывает 20%,
+            # у нас 50%» — список расхождений для подтверждения оператором.
+            printer = self.printer_or_fail(pid)
+            snap = printer.snapshot()
+            tolerance = body.get("tolerance")
+            return 200, {
+                "ok": True,
+                "printer_id": printer.id,
+                "tolerance": num(self.db.setting("ams_remain_tolerance", 25.0), 25.0),
+                "mismatches": ams_remain_check(
+                    self.db, printer.id, snap,
+                    None if tolerance is None else num(tolerance)),
+            }
+        if path == "/api/spool/ams-accept":
+            # Явное подтверждение: записать остаток по данным принтера.
+            if body.get("confirmed") is not True:
+                raise ValueError("Подтвердите запись остатка по данным AMS")
+            spool_id = str(body.get("spool_id") or body.get("id") or "").strip()
+            if not spool_id:
+                raise ValueError("Не указана катушка")
+            pct = body.get("pct")
+            from .ams_sync import accept_ams_remaining
+            result = accept_ams_remaining(
+                self.db, spool_id,
+                None if pct is None else num(pct),
+                str(body.get("printer_id") or "").strip())
+            return 200, {"ok": True, **result}
         if path == "/api/printer/print":
             if body.get("confirmed") is not True:
                 raise ValueError("Подтвердите физический запуск печати")
@@ -2238,8 +2268,9 @@ class Api:
                 note=body.get("note", ""), order_id=body.get("order_id", ""),
                 material=body.get("material", ""), auto=False)
         if path == "/api/spool/restock":
-            return 200, {"ok": True, "spool": self.acc.restock_spool(
-                body.get("id", ""), num(body.get("grams")), num(body.get("price")))}
+            result = self.acc.restock_spool(
+                body.get("id", ""), num(body.get("grams")), num(body.get("price")))
+            return 200, {"ok": True, **result}
         if path == "/api/catalog/save":
             return 200, {"ok": True, "item": self.repo.save_catalog_item(body)}
         if path == "/api/catalog/delete":
@@ -3320,7 +3351,9 @@ class Api:
             trays = snap["ams"].get("trays", [])
             req = body.get("required") or body.get("filaments") or []
             from .estimate import auto_ams_map
-            mapping = auto_ams_map(req, trays)
+            # Свои катушки важнее похожего оттенка: слот ищется по RFID-метке
+            # катушки (tray_uuid), иначе расход списался бы «ни на что».
+            mapping = auto_ams_map(req, trays, self.db, printer.id)
             return 200, {"mapping": mapping, "trays": trays, "required": req}
         if path == "/api/settings/profile/save":
             name = (body.get("name") or "").strip() or f"Снапшот {now_iso()[:16]}"
@@ -4135,8 +4168,8 @@ class Handler(BaseHTTPRequestHandler):
         name, local, _created = save_upload(requested_name, upload[1])
         estimate = {}
         try:
-            from .estimate import estimate_file
-            estimate = estimate_file(local) or {}
+            from .estimate import diameter_from, estimate_file
+            estimate = estimate_file(local, diameter_from(self.db)) or {}
         except Exception:
             estimate = {}
         grams = num(estimate.get("total_grams")) or num(estimate.get("grams"))
@@ -4264,8 +4297,8 @@ class Handler(BaseHTTPRequestHandler):
         # оценка печати до запуска: время и граммы из 3MF/G-code
         estimate = {}
         try:
-            from .estimate import estimate_file
-            estimate = estimate_file(local)
+            from .estimate import diameter_from, estimate_file
+            estimate = estimate_file(local, diameter_from(self.db))
         except Exception:
             estimate = {}
         order_id = fields.get("order_id", "")

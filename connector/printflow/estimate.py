@@ -3,7 +3,8 @@
 BambuStudio кладёт в начало G-code служебные строки:
     ;TIME:8082            — секунды печати
     ;Filament used [g]: 5.1   — граммы (новый формат)
-    ;Filament used: 12.3      — метры (старый формат, пересчитываем ~1.24 г/м для PLA)
+    ;Filament used: 12.3      — метры (старый формат; пересчитываем в граммы
+                               по плотности материала: метр 1.75-мм PLA ≈ 2.98 г)
 3MF — это zip, внутри Metadata/plate_1.gcode с тем же форматом.
 
 Оценка нужна до старта: показать «≈ 2 ч 10 мин · ≈ 38 г», зарезервировать
@@ -22,9 +23,16 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import re
 import zipfile
 from pathlib import Path
+
+from .materials import density_of
+
+# Пластик по умолчанию — 1.75 мм; диаметр можно переопределить настройкой
+# filament_diameter_mm, если цех печатает 2.85 мм или калибровал фактический.
+DEFAULT_FILAMENT_DIAMETER = 1.75
 
 # --- базовые старые паттерны (совместимость) ---
 _TIME_RE = re.compile(r";\s*TIME\s*:\s*(\d+)", re.IGNORECASE)
@@ -303,40 +311,52 @@ def _extract_grams_from_text(text: str) -> float:
     return 0.0
 
 
-def _extract_meters_as_grams(text: str) -> float:
-    """Фолбэк: метры/мм -> граммы."""
+def _extract_meters_as_grams(text: str, material: str = "",
+                             diameter: float = DEFAULT_FILAMENT_DIAMETER) -> float:
+    """Фолбэк: метры/мм -> граммы по плотности материала.
+
+    ``material`` берётся из ``; filament_type`` того же файла: метр PETG
+    тяжелее метра PLA, и это влияет и на смету, и на списание катушки.
+    Значение больше 1000 в «метровом» паттерне — это миллиметры.
+    """
     if not text:
         return 0.0
+    mat = str(material or "").strip().upper()
     # Сначала ищем mm
     for pat in _METERS_PATTERNS:
         m = pat.search(text)
         if m:
             try:
                 val = float(m.group(1))
-                # если паттерн был mm — конвертим mm->g (PLA ~0.002976 g/mm)
-                if "mm" in pat.pattern.lower():
-                    return round(val * 0.002976, 1)
-                else:
-                    # метры -> граммы (старая эвристика 1.24 г/м)
-                    # но если значение большое (>1000) — это мм, а не метры
-                    if val > 1000:
-                        return round(val * 0.002976, 1)
-                    return round(val * 1.24, 1)
             except ValueError:
                 continue
+            # если паттерн был mm — переводим мм -> г; иначе метры -> г,
+            # но слишком большое значение в «метрах» на самом деле миллиметры.
+            if "mm" in pat.pattern.lower() or val > 1000:
+                return mm_to_grams(val, mat, diameter)
+            return meters_to_grams(val, mat, diameter)
     # старый паттерн
     m = _METERS_RE.search(text)
     if m:
         try:
-            return round(float(m.group(1)) * 1.24, 1)
+            val = float(m.group(1))
         except ValueError:
-            pass
+            return 0.0
+        if val > 1000:
+            return mm_to_grams(val, mat, diameter)
+        return meters_to_grams(val, mat, diameter)
     return 0.0
 
 
-def _parse_gcode_head(text: str) -> dict:
+def _parse_gcode_head(text: str, diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict:
     minutes = 0.0
     grams = 0.0
+
+    # --- материал нужен раньше граммов: метры пересчитываем по его плотности ---
+    material = ""
+    m = _TYPE_RE.search(text)
+    if m:
+        material = m.group(1).strip().upper()
 
     # --- время ---
     m = _TIME_RE.search(text)
@@ -360,12 +380,11 @@ def _parse_gcode_head(text: str) -> dict:
     # --- граммы ---
     grams = _extract_grams_from_text(text)
     if not grams:
-        grams = _extract_meters_as_grams(text)
+        grams = _extract_meters_as_grams(text, material, diameter)
 
     result = {"minutes": minutes, "grams": grams}
-    m = _TYPE_RE.search(text)
-    if m:
-        result["material"] = m.group(1).strip().upper()
+    if material:
+        result["material"] = material
     m = _COLOR_HEX_RE.search(text)
     if m:
         name = _hex_to_name(m.group(1))
@@ -392,7 +411,7 @@ def _parse_gcode_head(text: str) -> dict:
     return result
 
 
-def estimate_file(path: str | Path) -> dict:
+def estimate_file(path: str | Path, diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict:
     """Оценка файла .gcode или .3mf: {minutes, grams, material, color} или {}.
 
     8.0: для 3MF возвращает также plates, plate_count, thumbnails.
@@ -402,10 +421,10 @@ def estimate_file(path: str | Path) -> dict:
         return {}
     try:
         if path.suffix.lower() == ".3mf":
-            return estimate_3mf(path)
+            return estimate_3mf(path, diameter)
         elif path.suffix.lower() == ".gcode":
             text = _read_head(path)
-            est = _parse_gcode_head(text) if text else {}
+            est = _parse_gcode_head(text, diameter) if text else {}
             # 8.5: аудит G-code — слои, высота, скорости (идея 28)
             if est:
                 try:
@@ -422,16 +441,16 @@ def estimate_file(path: str | Path) -> dict:
         return {}
 
 
-def estimate_3mf(path: Path) -> dict:
+def estimate_3mf(path: Path, diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict:
     """Полный парсер 3MF: все плиты, slice_info, thumbnails."""
     try:
-        detail = parse_3mf_complete(path)
+        detail = parse_3mf_complete(path, diameter)
     except Exception:
         return {}
     plates = detail.get("plates", [])
     # Если gcode-плиты пустые, но есть данные из slice_info — используем их
     if not plates:
-        slice_info = normalize_slice_info(detail.get("slice_info", {}))
+        slice_info = normalize_slice_info(detail.get("slice_info", {}), diameter)
         si_plates = slice_info.get("plates") if isinstance(slice_info, dict) else None
         if si_plates:
             for i, sp in enumerate(si_plates, start=1):
@@ -500,9 +519,67 @@ def estimate_3mf(path: Path) -> dict:
     return result
 
 
+def diameter_from(db) -> float:
+    """Диаметр прутка из настроек цеха (по умолчанию 1.75 мм).
+
+    Метры и миллиметры переводятся в граммы через площадь сечения, поэтому
+    диаметр влияет на смету так же, как плотность материала.
+    """
+    try:
+        value = float(db.setting("filament_diameter_mm", DEFAULT_FILAMENT_DIAMETER))
+    except Exception:
+        return DEFAULT_FILAMENT_DIAMETER
+    return value if 0 < value < 10 else DEFAULT_FILAMENT_DIAMETER
+
+
+def _cm3_per_meter(diameter: float = DEFAULT_FILAMENT_DIAMETER) -> float:
+    """Объём одного метра прутка, см³.
+
+    Площадь сечения πr² в мм² численно равна объёму метра прутка в см³:
+    1 м = 1000 мм, а 1000 мм³ = 1 см³. Для 1.75 мм это 2.405 см³/м.
+    """
+    try:
+        d = float(diameter)
+    except (TypeError, ValueError):
+        d = DEFAULT_FILAMENT_DIAMETER
+    if d <= 0:
+        d = DEFAULT_FILAMENT_DIAMETER
+    return math.pi * (d / 2.0) ** 2
+
+
+def meters_to_grams(meters: float, material: str = "PLA",
+                    diameter: float = DEFAULT_FILAMENT_DIAMETER) -> float:
+    """Метры прутка → граммы с учётом плотности материала.
+
+    Раньше метры пересчитывались константой 1.24 г/м — это плотность PLA,
+    а не масса метра: масса метра 1.75-мм PLA равна ≈2.98 г. Оценка
+    занижалась в 2.4 раза и не различала материалы.
+    """
+    try:
+        length = float(meters)
+    except (TypeError, ValueError):
+        return 0.0
+    if length <= 0:
+        return 0.0
+    return round(length * _cm3_per_meter(diameter) * density_of(material), 1)
+
+
+def mm_to_grams(mm: float, material: str = "PLA",
+                diameter: float = DEFAULT_FILAMENT_DIAMETER) -> float:
+    """Миллиметры прутка → граммы (тот же пересчёт, длина в мм)."""
+    try:
+        length = float(mm)
+    except (TypeError, ValueError):
+        return 0.0
+    if length <= 0:
+        return 0.0
+    return round(length * _cm3_per_meter(diameter) / 1000.0 * density_of(material), 1)
+
+
 # Плотность пластика по умолчанию для пересчёта метров -> граммы, когда в
 # slice_info.config нет used_g, а есть только used_m (PLA ~1.24 г/см³,
-# 1.75 мм → ~2.98 мг/мм ≈ 2.98 г/м). Совпадает с константой для фолбэка.
+# 1.75 мм → ~2.98 мг/мм ≈ 2.98 г/м). Оставлена для совместимости старых
+# вызовов; новый код считает через meters_to_grams/mm_to_grams.
 _MM_TO_GRAMS_PLA = 0.002976
 
 
@@ -516,13 +593,15 @@ def _float(value, default: float = 0.0) -> float:
         return default
 
 
-def _normalize_slice_plate(raw: dict) -> dict | None:
+def _normalize_slice_plate(raw: dict,
+                           diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict | None:
     """Привести одну запись плиты к единому виду.
 
     Унифицирует разнобой форматов Bambu/Orca/старых сборок:
       - ключ списка филаментов: ``filaments`` или ``filament``;
       - вес плиты: ``weight`` (иногда строка), иначе сумма ``used_g``;
-      - если ``used_g`` пуст/0, но есть ``used_m`` — оценить граммы по PLA;
+      - если ``used_g`` пуст/0, но есть ``used_m`` — оценить граммы по плотности
+        этого пластика (диаметр прутка учитывается);
       - время: ``prediction`` в секундах;
       - индекс плиты: ``index``/``plate_index``/``plate`` (1-based).
     """
@@ -547,10 +626,11 @@ def _normalize_slice_plate(raw: dict) -> dict | None:
             continue
         used_g = _float(f.get("used_g"))
         used_m = _float(f.get("used_m"))
+        ftype = str(f.get("type") or f.get("filament_type") or "").strip().upper()
         # Bambu иногда отдаёт used_g=0, а used_m заполнен — пересчитываем
-        # по плотности PLA (лучше честная оценка, чем 0 и «граммы не найдены»).
+        # по плотности именно этого пластика (метр PETG тяжелее метра PLA).
         if used_g <= 0 and used_m > 0:
-            used_g = round(used_m * 1000.0 * _MM_TO_GRAMS_PLA, 2)
+            used_g = meters_to_grams(used_m, ftype, diameter)
         if used_g > 0:
             total_g += used_g
         filaments.append({
@@ -581,7 +661,8 @@ def _normalize_slice_plate(raw: dict) -> dict | None:
     return plate
 
 
-def normalize_slice_info(slice_info: object) -> dict:
+def normalize_slice_info(slice_info: object,
+                         diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict:
     """Привести содержимое ``Metadata/slice_info.config`` к виду ``{"plates": [...]}``.
 
     Поддерживает:
@@ -601,7 +682,7 @@ def normalize_slice_info(slice_info: object) -> dict:
         # Все равно нормализуем каждую запись, чтобы добить единообразие
         plates = []
         for p in slice_info["plates"]:
-            np = _normalize_slice_plate(p)
+            np = _normalize_slice_plate(p, diameter)
             if np:
                 plates.append(np)
         out = dict(slice_info)
@@ -636,7 +717,7 @@ def normalize_slice_info(slice_info: object) -> dict:
             plate_source = [plate_source]
     if isinstance(plate_source, list):
         for i, p in enumerate(plate_source, start=1):
-            np = _normalize_slice_plate(p)
+            np = _normalize_slice_plate(p, diameter)
             if not np:
                 continue
             if not np.get("index"):
@@ -711,7 +792,8 @@ def _parse_slice_info_xml(raw: str) -> dict:
     return out
 
 
-def parse_3mf_complete(path: str | Path) -> dict:
+def parse_3mf_complete(path: str | Path,
+                       diameter: float = DEFAULT_FILAMENT_DIAMETER) -> dict:
     """Достать всё полезное из 3MF-архива.
 
     Возвращает {plates: [{minutes, grams, material, ...}], thumbnails: {name: base64}, slice_info: {}, project_settings: {}, bounding_box: {}}
@@ -911,31 +993,81 @@ def color_distance(a_hex: str, b_hex: str) -> float:
         return 999.0
 
 
-def auto_ams_map(required: list[dict], trays: list[dict]) -> list[int]:
-    """Автоподбор слотов AMS по material+цвет.
+def auto_ams_map(required: list[dict], trays: list[dict], db=None,
+                 printer_id: str = "") -> list[int]:
+    """Автоподбор слотов AMS: сначала свои катушки, затем по material+цвет.
 
-    required: [{type: "PLA", color: "#FF0000"}, ...]
-    trays: [{slot:0, type:"PLA", color:"#FF0000"}, ...]
+    required: [{type: "PLA", color: "#FF0000", grams: 40}, ...]
+    trays: [{slot:0, type:"PLA", color:"#FF0000", uuid:"..."} , ...]
+
+    Раньше слот выбирался только по типу и оттенку: два одинаковых чёрных
+    PLA в соседних слотах были неразличимы, и печать могла уйти на катушку,
+    которой в базе нет или которой не хватит. Теперь слот, в котором стоит
+    известная нам катушка (совпадение по RFID-метке ``tray_uuid``), получает
+    приоритет над «просто похожим цветом»: учёт расхода и остатка остаётся
+    честным. Один и тот же слот не предлагается дважды.
+
     Возвращает [slot_index, ...] или -1 если нет подходящего материала.
     """
     mapping: list[int] = []
+
+    known: dict[str, dict] = {}
+    prefer_known = True
+    if db is not None:
+        try:
+            prefer_known = bool(db.setting("ams_map_prefer_known", True))
+            if prefer_known:
+                rows = db.query(
+                    "SELECT * FROM spools WHERE archived=0"
+                    " AND COALESCE(tray_uuid,'')<>''")
+                for row in rows:
+                    key = str(row.get("tray_uuid") or "").strip()
+                    if key and set(key) != {"0"}:
+                        known[key] = row
+        except Exception:
+            known = {}
+
     for req in required:
         req_type = str(req.get("type") or req.get("material") or "").upper()
         req_color = str(req.get("color") or "#CCCCCC")
+        req_grams = 0.0
+        try:
+            req_grams = float(req.get("grams") or 0.0) or 0.0
+        except (TypeError, ValueError):
+            req_grams = 0.0
         best = None
-        best_score = 9999
+        best_score = None
         for t in trays:
             t_type = str(t.get("type") or "").upper()
             t_color = str(t.get("color") or "#CCCCCC")
             if t_type != req_type:
                 continue
+            slot = int(t.get("slot", 0))
             score = color_distance(req_color, t_color)
-            if score < best_score:
+            if known:
+                spool = known.get(str(t.get("uuid") or "").strip())
+                if spool is not None:
+                    # Своя катушка: приоритет важнее оттенка. Непроверенную и
+                    # пустую почти не рассматриваем — по ней нельзя списать расход.
+                    score -= 10000.0
+                    if int(float(spool.get("verified") or 0)):
+                        score -= 500.0
+                    left = float(spool.get("remaining_grams") or 0)
+                    if req_grams and left < req_grams:
+                        score += 5000.0
+                    elif left > 0:
+                        score -= 100.0
+                else:
+                    # В слоте катушка, которой нет в базе: расход будет «ничей».
+                    score += 2000.0
+            if slot in mapping:
+                # Слот уже отдан предыдущему филаменту — только если больше нечего.
+                score += 50000.0
+            if best_score is None or score < best_score:
                 best_score = score
                 best = t
         if best is not None:
             mapping.append(int(best.get("slot", 0)))
         else:
-            # нет материала — пробуем любой слот с тем же типом, иначе -1
             mapping.append(-1)
     return mapping

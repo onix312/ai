@@ -897,17 +897,79 @@ class Accounting:
         return {"ok": True, "spool_id": spool_id, "grams": round(grams, 1), "cost": round(cost, 2)}
 
     def restock_spool(self, spool_id: str, grams: float, price: float = 0.0) -> dict:
-        """Приход катушки: пополнение остатка и расход в кассе."""
+        """Приход катушки: пополнение остатка, переоценка и расход в кассе.
+
+        Цена катушки — это цена полной катушки, а себестоимость грамма
+        считается как ``price / total_grams``. Если новую партию купили
+        дороже или дешевле, старая цена перестаёт соответствовать факту и
+        маржа заказа скачет без причин. Поэтому при приёме считается
+        средневзвешенная цена грамма:
+
+            (остаток × старая цена грамма + приход × цена грамма прихода)
+            ─────────────────────────────────────────────────────────────
+                            остаток + приход
+
+        Разница возвращается отдельным полем ``revaluation`` и показывается
+        оператору: деньги в кассу идут по фактической цене прихода, а
+        переоценка сама по себе проводкой не является — это уточнение
+        стоимости запаса, а не расход.
+        """
         spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
         if not spool:
             raise ValueError("Катушка не найдена")
-        remaining = num(spool["remaining_grams"]) + num(grams)
-        self.db.execute("UPDATE spools SET remaining_grams=?, updated_at=? WHERE id=?",
-                        (round(remaining, 1), now_iso(), spool_id))
-        if price:
-            self.add_transaction("expense", "filament", price,
+        add_grams = num(grams)
+        if add_grams <= 0:
+            raise ValueError("Укажите, сколько граммов добавить на катушку")
+        total = max(1.0, num(spool["total_grams"], 1000))
+        was_remaining = num(spool["remaining_grams"])
+        price_before = num(spool["price"])
+        remaining = was_remaining + add_grams
+
+        old_per_gram = price_before / total if price_before > 0 else 0.0
+        paid = num(price)
+        new_per_gram = paid / add_grams if paid > 0 else 0.0
+        revalue = bool(self.db.setting("spool_revalue_on_restock", True))
+        price_after = price_before
+        if revalue and paid > 0:
+            if was_remaining > 0 and old_per_gram > 0:
+                avg_per_gram = ((was_remaining * old_per_gram + add_grams * new_per_gram)
+                                / remaining)
+            else:
+                # Старой цены нет (катушка из AMS или обнулена) — берём факт.
+                avg_per_gram = new_per_gram
+            price_after = round(avg_per_gram * total, 2)
+
+        self.db.execute(
+            "UPDATE spools SET remaining_grams=?, price=?, updated_at=? WHERE id=?",
+            (round(remaining, 1), round(price_after, 2), now_iso(), spool_id))
+        if paid:
+            self.add_transaction("expense", "filament", paid,
                                  f"Катушка {spool['material']} {spool['color_name']}", auto=False)
-        return self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,)) or {}
+        delta = round(price_after - price_before, 2)
+        if revalue and paid > 0 and abs(delta) >= 0.01:
+            self.db.add_event(
+                "spool", "Катушка переоценена при приёме",
+                f"{spool['material']} {spool.get('color_name') or ''}: цена катушки "
+                f"{price_before:.0f} → {price_after:.0f} ₽ "
+                f"({(price_after / total):.2f} ₽/г по средневзвешенной)",
+                str(spool.get("printer_id") or ""),
+                {"spool_id": spool_id, "grams": round(add_grams, 1),
+                 "price_before": price_before, "price_after": price_after,
+                 "delta": delta})
+        row = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,)) or {}
+        return {
+            "spool": row,
+            "revaluation": {
+                "applied": bool(revalue and paid > 0 and abs(delta) >= 0.01),
+                "price_before": round(price_before, 2),
+                "price_after": round(price_after, 2),
+                "delta": delta,
+                "per_gram_before": round(old_per_gram, 4),
+                "per_gram_after": round(price_after / total, 4),
+                "grams_added": round(add_grams, 1),
+                "paid": round(paid, 2),
+            },
+        }
 
     # --------------------------------------------------- многоцветная печать
     def consume_order_spools(self, job: dict) -> list[dict]:

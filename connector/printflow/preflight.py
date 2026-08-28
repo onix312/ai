@@ -49,7 +49,7 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     detail = {}
     try:
         from .config import UPLOAD_DIR
-        from .estimate import estimate_file
+        from .estimate import diameter_from, estimate_file
         cand = UPLOAD_DIR / Path(filename).name
         if cand.exists():
             upload_path = cand
@@ -68,7 +68,7 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
                     est = plates[0]
                 # если grams 0 но есть estimate_file с slice_info — взять оттуда
                 if not est.get("grams"):
-                    ef = estimate_file(upload_path)
+                    ef = estimate_file(upload_path, diameter_from(db))
                     if ef.get("grams") or ef.get("total_grams"):
                         # сохранить total для проверки остатка
                         est["grams"] = ef.get("total_grams") or ef.get("grams")
@@ -150,6 +150,12 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
                         blocks.append({"code": "filament", "title": "Мало пластика", "detail": f"Нужно ~{need_g:.0f}г (+15% запас), в катушке {remain_g:.0f}г — замените"})
                     elif remain_g and remain_g < need_g * 2:
                         warns.append({"code": "filament_low", "title": "Пластика впритык", "detail": f"Нужно {need_g:.0f}г, осталось {remain_g:.0f}г"})
+                    # Остаток спорный: AMS показывает другое (идея 21). Списание
+                    # пойдёт по нашим граммам, поэтому человек должен решить сам.
+                    from .ams_sync import mismatch_warning
+                    mismatch = mismatch_warning(spool)
+                    if mismatch:
+                        warns.append(mismatch)
             except Exception:
                 pass
         # также по AMS remain%
