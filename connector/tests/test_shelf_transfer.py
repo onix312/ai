@@ -72,9 +72,10 @@ class ShelfTransferTests(unittest.TestCase):
         result = self.shelf.transfer_from_stock("nom1", "home", 2)
         self.assertTrue(result["ok"])
         self.assertEqual(result["qty"], 2)
-        # регистр: со склада ушло, на полку пришло
+        # со склада ушло; на складе-полке штук нет — они на стеллаже
         self.assertEqual(self.stock.qty("nom1", "home"), 3)
-        self.assertEqual(self.stock.qty("nom1", "shelf"), 2)
+        self.assertEqual(self.stock.qty("nom1", "shelf"), 0)
+        self.assertEqual(self.stock.qty("nom1"), 3)
         # позиция стеллажа создана и штуки пришли
         item = result["item"]
         self.assertEqual(item["name"], "Органайзер")
@@ -167,7 +168,8 @@ class ShelfTransferTests(unittest.TestCase):
         self.assertEqual(round(item["qty"], 1), 3.0)
         self.assertEqual(round(item["cost_per_unit"], 2), 100.0)
         self.assertEqual(self.stock.qty("nom1", "home"), 2)
-        self.assertEqual(self.stock.qty("nom1", "shelf"), 3)
+        self.assertEqual(self.stock.qty("nom1", "shelf"), 0)
+        self.assertEqual(self.stock.qty("nom1"), 2)
 
     def test_create_item_from_stock_keeps_given_name_and_price(self):
         """Владелец может задать своё название и цену — они сохраняются."""

@@ -3,7 +3,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, dateText,
-  dateTimeText, debounce, toast, fail, openModal, closeModal, confirmDanger,
+  dateTimeText, debounce, toast, fail, openModal, closeModal, confirmDanger, ask,
   drawChart, legend, store, catName } = U;
 const { get, post } = PF.api;
 
@@ -123,7 +123,8 @@ function renderStock() {
     return blob.includes(q);
   });
   if (!spools.length) {
-    $('spool_grid').innerHTML = '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Добавьте катушки, чтобы расход списывался автоматически.</span></div>';
+    $('spool_grid').innerHTML = '<div class="empty"><span class="big">◍</span><b>Склад пуст</b><span>Нет катушек — принять приход, чтобы расход списывался сам.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="spool_add">+ Катушка</button></div>';
     return;
   }
   if (!filtered.length) {
@@ -146,7 +147,7 @@ function renderStock() {
       + `<div class="reel" style="--filament:${esc(colorHex)};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
       + `<div class="body">`
       + `<div class="spool-title-row">`
-      + `<span class="mat-chip" data-mat="${esc(s.material || 'PLA')}">${esc(s.material || 'PLA')}</span>`
+      + `<span class="mat-chip" data-mat="${esc(s.material || '')}">${esc(s.material || 'Тип не задан')}</span>`
       + `<b class="spool-name"><span class="color-swatch-dot" style="background:${esc(colorHex)}"></span>${esc(s.color_name || 'Без названия')}</b>`
       + `</div>`
       + `<div class="spool-meta-row">`
@@ -367,12 +368,19 @@ async function openSpoolQr(spoolId) {
 async function spoolDry(spoolId) {
   const spool = (PF.state.spools || []).find((x) => x.id === spoolId);
   if (!spool) return;
-  const minutes = window.prompt('Сколько минут сушить?', '240');
-  if (minutes == null) return;
-  const temp = window.prompt('Температура сушки, °C (PLA 50, PETG 65, TPU 55)', '55');
+  const ans = await ask({
+    title: 'Сушка катушки',
+    sub: `${spool.material} ${spool.color_name || ''}`.trim(),
+    fields: [
+      { name: 'minutes', label: 'Минуты', type: 'number', value: '240', min: 1, hint: 'Обычно 4 часа = 240 мин' },
+      { name: 'temp', label: 'Температура, °C', type: 'number', value: '55', hint: 'PLA 50, PETG 65, TPU 55' },
+    ],
+    ok: 'Записать',
+  });
+  if (!ans) return;
   try {
-    await post('/api/spool/dry', { id: spoolId, minutes: num(minutes), temp: num(temp || 0) });
-    toast('Сушка записана', `${spool.material} ${spool.color_name} · ${minutes} мин`);
+    await post('/api/spool/dry', { id: spoolId, minutes: num(ans.minutes), temp: num(ans.temp || 0) });
+    toast('Сушка записана', `${spool.material} ${spool.color_name} · ${ans.minutes} мин`);
   } catch (e) { fail(e); }
 }
 
@@ -1235,7 +1243,11 @@ function bind() {
     if (edit) return openSpool(edit.dataset.spoolEdit);
     const scrap = e.target.closest('[data-spool-scrap]');
     if (scrap) {
-      const grams = window.prompt('Сколько граммов обрезков AMS списать?', '8');
+      const grams = await ask({
+        title: 'Списать обрезки AMS',
+        fields: [{ name: 'grams', label: 'Граммы', type: 'number', value: '8', min: 0, step: 'any' }],
+        ok: 'Списать',
+      });
       if (grams == null) return;
       if (!window.confirm('Подтвердите списание обрезков с катушки.')) return;
       try {
@@ -1257,14 +1269,18 @@ function bind() {
     }
     const restock = e.target.closest('[data-spool-restock]');
     if (restock) {
-      const grams = window.prompt('Сколько граммов добавить на катушку?', '1000');
-      if (grams == null) return;
-      const price = window.prompt('Цена закупки, ₽ (0 — не записывать расход):',
-        String(num(PF.state.settings.default_spool_price, 1600)));
-      if (price == null) return;
+      const ans = await ask({
+        title: 'Пополнить катушку',
+        fields: [
+          { name: 'grams', label: 'Граммы', type: 'number', value: '1000', min: 1, step: 'any' },
+          { name: 'price', label: 'Цена закупки, ₽', type: 'number', value: String(num(PF.state.settings.default_spool_price, 1600)), min: 0, hint: '0 — не записывать расход' },
+        ],
+        ok: 'Пополнить',
+      });
+      if (!ans) return;
       try {
-        await post('/api/spool/restock', { id: restock.dataset.spoolRestock, grams: num(grams), price: num(price) });
-        toast('Катушка пополнена', nfmt(grams) + ' г');
+        await post('/api/spool/restock', { id: restock.dataset.spoolRestock, grams: num(ans.grams), price: num(ans.price) });
+        toast('Катушка пополнена', nfmt(ans.grams) + ' г');
         await PF.refreshCore();
         PF.refreshFinance();
       } catch (err) { fail(err); }
@@ -1272,7 +1288,11 @@ function bind() {
     }
     const consume = e.target.closest('[data-spool-consume]');
     if (consume) {
-      const grams = window.prompt('Сколько граммов списать вручную?', '50');
+      const grams = await ask({
+        title: 'Списать с катушки',
+        fields: [{ name: 'grams', label: 'Граммы', type: 'number', value: '50', min: 0, step: 'any' }],
+        ok: 'Списать',
+      });
       if (grams == null) return;
       try {
         await post('/api/spool/consume', { id: consume.dataset.spoolConsume, grams: num(grams), note: 'ручное списание' });

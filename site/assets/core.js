@@ -152,10 +152,125 @@ function closeModal(id) { const d = $(id); if (d && d.open) d.close(); }
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-close]');
   if (btn) { e.preventDefault(); closeModal(btn.dataset.close); }
+  const emptyBtn = e.target.closest('[data-empty-click]');
+  if (emptyBtn && emptyBtn.dataset.emptyClick) {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = $(emptyBtn.dataset.emptyClick);
+    if (target) target.click();
+  }
 });
 
 /** Подтверждение опасного действия. */
 function confirmDanger(text) { return window.confirm(text); }
+
+/** Пустой экран с одной кнопкой (П23). cta: {label, click: id кнопки в шапке}. */
+function emptyHtml(icon, title, text, cta) {
+  const btn = (cta && cta.label)
+    ? `<button class="btn sm primary" type="button" data-empty-click="${esc(cta.click || '')}">${esc(cta.label)}</button>`
+    : '';
+  return `<div class="empty"><span class="big">${icon || '·'}</span>`
+    + `<b>${esc(title || '')}</b>`
+    + `<span>${esc(text || '')}</span>${btn}</div>`;
+}
+
+/** Модалка вместо window.prompt (П22).
+    ask({title, sub, fields, ok}) → Promise<object|string|null>.
+    Один field без name — строка, как prompt; несколько — объект по name.
+    Отмена / Esc / крестик → null. */
+let askResolve = null;
+function finishAsk(ok) {
+  const resolve = askResolve;
+  askResolve = null;
+  const dlg = $('ask_modal');
+  const box = $('ask_fields');
+  let result = null;
+  if (ok && box) {
+    const inputs = $$('input, select, textarea', box);
+    const out = {};
+    inputs.forEach((el) => { out[el.name || 'value'] = el.value; });
+    const keys = Object.keys(out);
+    result = keys.length === 1 ? out[keys[0]] : out;
+  }
+  if (dlg && dlg.open) dlg.close();
+  if (resolve) resolve(ok ? result : null);
+}
+function ask(opts) {
+  if (typeof opts === 'string') opts = { title: opts };
+  opts = opts || {};
+  if (askResolve) {
+    const prev = askResolve;
+    askResolve = null;
+    prev(null);
+  }
+  const fields = opts.fields && opts.fields.length ? opts.fields : [{
+    name: 'value',
+    label: opts.label || '',
+    type: opts.type || 'text',
+    value: opts.value != null ? opts.value : '',
+    placeholder: opts.placeholder || '',
+    hint: opts.hint || '',
+    min: opts.min, max: opts.max, step: opts.step,
+    options: opts.options,
+    required: opts.required !== false,
+  }];
+  const eye = $('ask_eyebrow');
+  const title = $('ask_title');
+  const sub = $('ask_sub');
+  const okBtn = $('ask_ok');
+  const cancelBtn = $('ask_cancel');
+  const box = $('ask_fields');
+  if (!box || !title) return Promise.resolve(null);
+  if (eye) eye.textContent = opts.eyebrow || 'Ввод';
+  title.textContent = opts.title || 'Введите значение';
+  if (sub) {
+    sub.textContent = opts.sub || '';
+    sub.hidden = !opts.sub;
+  }
+  if (okBtn) okBtn.textContent = opts.ok || 'OK';
+  if (cancelBtn) cancelBtn.textContent = opts.cancel || 'Отмена';
+  box.innerHTML = fields.map((f, i) => {
+    const name = f.name || (fields.length === 1 ? 'value' : ('f' + i));
+    const id = 'ask_f_' + name;
+    const req = f.required === false ? '' : ' required';
+    const hint = f.hint ? `<small>${esc(f.hint)}</small>` : '';
+    const label = f.label || '';
+    if (f.type === 'select' && f.options) {
+      const optsHtml = f.options.map((o) => {
+        const val = (o && typeof o === 'object') ? o.value : o;
+        const lab = (o && typeof o === 'object') ? (o.label || o.value) : o;
+        const sel = String(val) === String(f.value ?? '') ? ' selected' : '';
+        return `<option value="${esc(val)}"${sel}>${esc(lab)}</option>`;
+      }).join('');
+      return `<label class="field"><span>${esc(label)}</span><select id="${esc(id)}" name="${esc(name)}"${req}>${optsHtml}</select>${hint}</label>`;
+    }
+    if (f.type === 'textarea') {
+      return `<label class="field"><span>${esc(label)}</span><textarea id="${esc(id)}" name="${esc(name)}" rows="${f.rows || 4}" placeholder="${esc(f.placeholder || '')}"${req}>${esc(f.value ?? '')}</textarea>${hint}</label>`;
+    }
+    const type = f.type || 'text';
+    const extra = [
+      f.min != null ? ` min="${esc(f.min)}"` : '',
+      f.max != null ? ` max="${esc(f.max)}"` : '',
+      f.step != null ? ` step="${esc(f.step)}"` : '',
+      f.placeholder ? ` placeholder="${esc(f.placeholder)}"` : '',
+    ].join('');
+    return `<label class="field"><span>${esc(label)}</span><input id="${esc(id)}" name="${esc(name)}" type="${esc(type)}" value="${esc(f.value ?? '')}" autocomplete="off"${extra}${req}>${hint}</label>`;
+  }).join('');
+  return new Promise((resolve) => {
+    askResolve = resolve;
+    openModal('ask_modal');
+    setTimeout(() => {
+      const first = box.querySelector('input, select, textarea');
+      if (first) { first.focus(); if (first.select) first.select(); }
+    }, 40);
+  });
+}
+const askForm = $('ask_form');
+if (askForm) askForm.addEventListener('submit', (e) => { e.preventDefault(); finishAsk(true); });
+const askCancel = $('ask_cancel');
+if (askCancel) askCancel.addEventListener('click', (e) => { e.preventDefault(); finishAsk(false); });
+const askDlg = $('ask_modal');
+if (askDlg) askDlg.addEventListener('close', () => { if (askResolve) finishAsk(false); });
 
 /* Запасные названия статей: показываем человеческий текст, даже пока
    справочник расходов ещё не загрузился с коннектора. */
@@ -188,7 +303,7 @@ const PF = {
   ui: {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
     dateText, dateTimeText, agoText, todayISO, initials, debounce,
-    toast, fail, openModal, closeModal, confirmDanger, CUR, store, catName,
+    toast, fail, openModal, closeModal, confirmDanger, ask, emptyHtml, CUR, store, catName,
     setChannelBar,
   },
   modules: {},

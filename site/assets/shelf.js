@@ -133,7 +133,10 @@ function renderShelf() {
   const items = filteredShelfItems();
   const emptyText = (shelfData.items || []).length
     ? 'Ничего не найдено по фильтру.'
-    : 'Добавьте позицию и положите на неё первую партию печати.';
+    : 'Нет позиций — добавьте товар на полку.';
+  const emptyCta = (shelfData.items || []).length
+    ? ''
+    : '<button class="btn sm primary" type="button" data-empty-click="shelf_add">+ Позиция</button>';
   $('shelf_grid').innerHTML = items.length ? items.map((i) => {
     const st = i.status || 'ok';
     const days = i.days_left;
@@ -166,7 +169,7 @@ function renderShelf() {
       + `<button class="btn sm" type="button" data-shelf-sell="${esc(i.id)}">−1</button>`
       + `<button class="btn sm" type="button" data-shelf-prod="${esc(i.id)}">+</button>`
       + `</div></article>`;
-  }).join('') : `<div class="empty" style="grid-column:1/-1"><span class="big">▤</span><b>${(shelfData.items || []).length ? 'Ничего не найдено' : 'На стеллаже пока пусто'}</b><span>${emptyText}</span></div>`;
+  }).join('') : `<div class="empty" style="grid-column:1/-1"><span class="big">▤</span><b>${(shelfData.items || []).length ? 'Ничего не найдено' : 'На стеллаже пока пусто'}</b><span>${emptyText}</span>${emptyCta}</div>`;
 
   const moves = shelfData.moves || [];
   $('shelf_moves').innerHTML = moves.length ? moves.slice(0, 40).map((m) => {
@@ -375,14 +378,16 @@ async function saveShelf() {
       try {
         await post('/api/shelf/photo', { id: savedItemId, data: reader.result });
         await refreshShelf();
+        if (viaStock && PF.refreshCore) await PF.refreshCore();
         toast('Позиция сохранена', payload.name);
       } catch (e) { fail(e); }
     };
     reader.readAsDataURL(file);
   } else {
     await refreshShelf();
+    if (viaStock && PF.refreshCore) await PF.refreshCore();
     toast(viaStock ? 'Позиция создана' : 'Позиция сохранена',
-      viaStock ? `«${payload.name}» +${nfmt(stockQty)} шт со склада` : payload.name);
+      viaStock ? `«${payload.name}» −${nfmt(stockQty)} шт со склада` : payload.name);
   }
 }
 
@@ -471,7 +476,11 @@ async function saveTransfer() {
     });
     closeModal('shelf_transfer_modal');
     await refreshShelf();
-    toast('Перемещено на стеллаж', `${esc(row.name)} +${nfmt(qty)} шт`);
+    if (PF.refreshCore) await PF.refreshCore();
+    if (PF.modules.products && PF.modules.products.refresh) {
+      try { await PF.modules.products.refresh(); } catch (err) { /* список товаров обновится при заходе */ }
+    }
+    toast('Перемещено на стеллаж', `${esc(row.name)} −${nfmt(qty)} шт со склада`);
   } catch (e) { fail(e); }
 }
 

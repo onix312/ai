@@ -189,6 +189,8 @@ dialog#cam_modal .icon-btn { position: absolute; top: 12px; right: 12px; }
 }
 .ams-slot:hover { border-color: var(--accent-line); transform: translateY(-1px); }
 .ams-slot.active { border-color: var(--accent); background: var(--accent-soft); }
+.ams-slot.empty { opacity: .62; }
+.ams-slot.generic { border-style: dashed; }
 .ams-slot .swatch {
   width: 28px; height: 28px; border-radius: 50%; margin-bottom: 8px;
   box-shadow: inset 0 0 0 5px var(--panel), inset 0 0 0 7px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.12);
@@ -1000,10 +1002,7 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .mat {
   display: flex; align-items: center; gap: 11px;
   padding: 12px; border-radius: var(--r);
-  border: 1px solid var(--line); background: var(--panel-2);
-}
-.mat b { font-size: 13.8px; }
-.mat span { font-size: 12.1px; color: var(--muted); flex: 1; }
+  border: 1px solid var(--line);size: 12.1px; color: var(--muted); flex: 1; }
 .printbtn {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 14px; border-radius: var(--r-sm);
@@ -1429,6 +1428,7 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .ams-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
 .ams-row:last-child { border-bottom: 0; }
 .ams-row.active { background: var(--accent-soft); margin: 0 -10px; padding: 8px 10px; border-radius: var(--r); border-bottom: 0; }
+.ams-row.empty { opacity: .55; }
 .ams-row .swatch { width: 15px; height: 15px; border-radius: 50%; flex: none; background: var(--filament, #cbd5e1); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
 .ams-row .ams-info { flex: 1; min-width: 0; }
 .ams-row .ams-info b { display: block; font-size: 12.6px; }
@@ -1926,3 +1926,4 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .shelf-forecast .row .bar i { display: block; height: 100%; background: #22c55e; }
 .shelf-forecast .row .bar i.gap { background: #ef4444; }
 .shelf-forecast .gap-warn { color: #ef4444; font-weight: 600; }
+p-warn { color: #ef4444; font-weight: 600; }

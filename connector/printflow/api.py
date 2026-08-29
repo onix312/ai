@@ -1544,6 +1544,25 @@ class Api:
         if path == "/api/watch/status":
             watch = getattr(self.manager, "watch", None)
             return 200, {"enabled": bool(self.db.setting("watch_folder_enabled", False)), "path": str(self.db.setting("watch_folder_path","")), "pending": len(watch._pending) if watch else 0}
+        if path == "/api/studio/status":
+            studio = getattr(self.manager, "studio", None) if self.manager else None
+            if studio:
+                payload = studio.status()
+                payload.pop("access_code", None)
+                return 200, payload
+            return 200, {
+                "enabled": bool(self.db.setting("studio_gateway_enabled", False)),
+                "running": False,
+                "has_access_code": bool(self.db.setting("studio_gateway_access_code", "")),
+            }
+        if path == "/api/library":
+            from .library import FileLibrary
+            limit = int(num(one("limit", "80"), 80) or 80)
+            return 200, {"files": FileLibrary(self.db).list(
+                kind=one("kind"), q=one("q"), limit=max(1, min(limit, 500)))}
+        if path == "/api/slicer/status":
+            from .slicer import status as slicer_status
+            return 200, slicer_status(str(self.db.setting("slicer_bin", "") or ""))
         if path == "/api/slicer/thumbnail":
             fid = one("fid")
             name = one("name")
@@ -2852,6 +2871,18 @@ class Api:
             if set(patch) & {"ftps_timeout", "ftps_retries", "ftps_block_kb",
                              "mqtt_keepalive", "mqtt_backoff"}:
                 self.manager.reload()
+            studio_keys = {
+                "studio_gateway_enabled", "studio_gateway_name", "studio_gateway_mode",
+                "studio_gateway_autostart", "studio_gateway_serial",
+                "studio_gateway_access_code", "studio_gateway_printer_id",
+            }
+            if set(patch) & studio_keys:
+                studio = getattr(self.manager, "studio", None)
+                if studio:
+                    try:
+                        studio.reload()
+                    except Exception:
+                        pass
             return 200, {"ok": True, "settings": settings}
         if path == "/api/shopping/add":
             return 200, {"ok": True, "item": self.shopping.add(body)}
@@ -3269,6 +3300,45 @@ class Api:
         if path == "/api/import/localstorage":
             return 200, {"ok": True, "imported": self.repo.import_local_storage(body)}
         # 8.0: Watch / slicer
+        if path == "/api/slicer/run":
+            from .config import UPLOAD_DIR as upload_dir
+            from .library import FileLibrary
+            from .slicer import SlicerError, slice_file
+            name = str(body.get("file") or body.get("name") or "").strip()
+            fid = str(body.get("id") or "").strip()
+            explicit = str(self.db.setting("slicer_bin", "") or "")
+            try:
+                if fid:
+                    src = FileLibrary(self.db).resolve(fid)
+                elif name:
+                    src = upload_dir / Path(name).name
+                else:
+                    raise ValueError("Укажите файл для нарезки")
+                result = slice_file(src, explicit_bin=explicit)
+            except (SlicerError, FileNotFoundError, KeyError, ValueError) as exc:
+                return 400, {"error": str(exc)}
+            data = Path(result["path"]).read_bytes()
+            rec = FileLibrary(self.db).put(result["output"], data, source="slicer")
+            job = None
+            if body.get("enqueue") and self.manager:
+                job = self.manager.enqueue({
+                    "file": rec["upload_name"],
+                    "name": Path(rec["name"]).stem,
+                    "source": "slicer",
+                    "no_auto": 1,
+                    "allow_auto_start": False,
+                })
+            return 200, {"ok": True, **result, "library": rec, "job": job}
+        if path == "/api/library/delete":
+            from .library import FileLibrary
+            fid = str(body.get("id") or "").strip()
+            if not fid:
+                raise ValueError("Укажите id файла")
+            try:
+                FileLibrary(self.db).delete(fid, purge=bool(body.get("purge")))
+            except KeyError:
+                raise ValueError("Файл не найден")
+            return 200, {"ok": True}
         if path == "/api/slicer/push":
             # from Bambu Studio post-processing: {file, plates, estimate}
             watch = getattr(self.manager, "watch", None)

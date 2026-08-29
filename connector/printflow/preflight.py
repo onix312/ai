@@ -160,6 +160,29 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
             except Exception:
                 pass
 
+    # Я40: стол чист до старта (тот же эталон, что #10 после финиша).
+    # Нет эталона/кадра — честно пропускаем, не блокируем (как слепая ячейка).
+    if db.setting("preflight_block_bed", True):
+        try:
+            from .config import PHOTO_DIR
+            from .spaghetti import inspect_bed_clear
+            frame = getattr(getattr(printer, "camera", None), "frame", None)
+            ref_path = PHOTO_DIR / "bed_reference.jpg"
+            ref = ref_path.read_bytes() if ref_path.is_file() else None
+            threshold = float(db.setting("bed_watch_threshold", 6.0) or 6.0)
+            verdict = inspect_bed_clear(frame, ref, threshold)
+            item = {
+                "code": verdict["code"],
+                "title": verdict["title"],
+                "detail": verdict["detail"],
+            }
+            if not verdict.get("ok"):
+                blocks.append(item)
+            elif verdict.get("code") == "bed_no_ref":
+                infos.append(item)
+        except Exception:
+            pass
+
     # SD карта
     if db.setting("preflight_warn_sd", True):
         if not snap["printer"].get("sdcard"):

@@ -154,6 +154,12 @@ function orderCard(o) {
 
 function renderKanban(list) {
   const host = $('orders_kanban');
+  if (!PF.state.orders.length) {
+    host.innerHTML = '<div class="empty"><span class="big">▦</span><b>Заказов нет</b>'
+      + '<span>Нет заказов — создайте из сообщения или с нуля.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>';
+    return;
+  }
   host.innerHTML = PF.state.statuses.map((st) => {
     const items = list.filter((o) => o.status === st.id);
     const sum = items.reduce((a, o) => a + num(o.price), 0);
@@ -189,7 +195,10 @@ function renderTable(list) {
       + `<td class="right tnum">${money(o.price)}</td>`
       + `<td class="right tnum ${num(econ.profit) >= 0 ? 'pos' : 'neg'}">${money(econ.profit)}</td>`
       + `<td class="${overdue(o) ? 'neg' : ''}">${o.due ? esc(dateText(o.due)) : '—'}</td></tr>`;
-  }).join('') : '<tr><td colspan="10"><div class="empty compact"><span>Заказов не найдено.</span></div></td></tr>';
+  }).join('') : `<tr><td colspan="10">${!PF.state.orders.length
+    ? '<div class="empty"><span class="big">▦</span><b>Заказов нет</b><span>Нет заказов — создайте из сообщения или с нуля.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'
+    : '<div class="empty compact"><span>Заказов не найдено.</span></div>'}</td></tr>`;
 }
 
 function renderOrders() {
@@ -507,6 +516,7 @@ function renderOrderItems(items) {
     + `<input type="number" min="0" step="any" data-item-price value="${num(r.price) ? esc(String(r.price)) : ''}" placeholder="цена, ₽">`
     + `<input type="number" min="0" step="any" data-item-grams value="${num(r.grams) ? esc(String(r.grams)) : ''}" placeholder="г/шт из базы" title="Вес штуки — подставляется из базы товаров">`
     + `<input type="number" min="0" step="any" data-item-hours value="${num(r.hours) ? esc(String(r.hours)) : ''}" placeholder="ч/шт из базы" title="Время печати штуки — подставляется из базы товаров">`
+    + `<button class="btn sm ghost" type="button" data-item-create title="Создать товар в базе">+ товар</button>`
     + '<button class="icon-btn sm danger" type="button" data-item-del title="Убрать позицию">×</button></div>').join('');
 }
 function collectOrderItems() {
@@ -524,6 +534,86 @@ function collectOrderItems() {
     });
   });
   return out;
+}
+
+/** Создать карточку товара из полей заказа / строки состава. */
+async function saveNomFromPrint(fields) {
+  const name = String(fields.name || '').trim();
+  if (!name) throw new Error('Укажите название изделия');
+  const payload = {
+    name,
+    kind: 'product',
+    grams: num(fields.grams),
+    hours: num(fields.hours),
+    material: String(fields.material || '').trim(),
+    file: String(fields.file || '').trim(),
+    niche_id: String(fields.niche_id || '').trim(),
+    note: String(fields.note || '').trim(),
+  };
+  const price = num(fields.price);
+  if (price > 0) payload.prices = { retail: price };
+  const res = await post('/api/nomenclature/save', payload);
+  const item = res.item || res;
+  if (!item || !item.id) throw new Error('Товар не записался');
+  try {
+    const nom = await get('/api/nomenclature');
+    PF.state.nomenclature = nom.items || [];
+    if (nom.groups) PF.state.groups = nom.groups;
+    if (nom.warehouses) PF.state.warehouses = nom.warehouses;
+  } catch (e) {
+    PF.state.nomenclature = (PF.state.nomenclature || []).concat([item]);
+  }
+  fillSelectors();
+  return item;
+}
+
+async function createProductFromOrder() {
+  const existing = ($('of_nom_id') || {}).value || '';
+  if (existing) return toast('Товар уже выбран из базы', '', 'info');
+  const qty = Math.max(1, num(($('of_qty') || {}).value, 1));
+  const sum = num(($('of_price') || {}).value);
+  try {
+    const item = await saveNomFromPrint({
+      name: ($('of_product') || {}).value,
+      grams: ($('of_grams') || {}).value,
+      hours: ($('of_hours') || {}).value,
+      material: ($('of_material') || {}).value,
+      file: ($('of_file') || {}).value,
+      niche_id: ($('of_niche_id') || {}).value,
+      price: qty ? sum / qty : sum,
+      note: 'создано из заказа / печати',
+    });
+    if ($('of_nom_id')) $('of_nom_id').value = item.id;
+    toggleWarehouseField();
+    toast('Товар создан', item.name || '');
+  } catch (e) { fail(e); }
+}
+
+async function createProductFromItemRow(row) {
+  if (!row) return;
+  const sel = row.querySelector('[data-item-nom]');
+  if (sel && sel.value) return toast('В строке уже товар из базы', '', 'info');
+  const qty = Math.max(1, num((row.querySelector('[data-item-qty]') || {}).value, 1));
+  const sum = num((row.querySelector('[data-item-price]') || {}).value);
+  try {
+    const name = String((row.querySelector('[data-item-name]') || {}).value || '').trim();
+    const item = await saveNomFromPrint({
+      name,
+      grams: (row.querySelector('[data-item-grams]') || {}).value,
+      hours: (row.querySelector('[data-item-hours]') || {}).value,
+      material: ($('of_material') || {}).value,
+      file: ($('of_file') || {}).value,
+      niche_id: ($('of_niche_id') || {}).value,
+      price: qty ? sum / qty : sum,
+      note: 'создано из состава заказа',
+    });
+    const current = collectOrderItems();
+    const hit = current.find((r) => r.name === name && !r.nom_id) || current.find((r) => r.name === name);
+    if (hit) hit.nom_id = item.id;
+    renderOrderItems(current.length ? current : [{ nom_id: item.id, name: item.name, qty, price: sum }]);
+    updateOrderItemsSummary();
+    toast('Товар создан', item.name || '');
+  } catch (e) { fail(e); }
 }
 function orderIsMulti() { return collectOrderItems().length > 0; }
 function renderItemsEcon(list) {
@@ -1635,7 +1725,10 @@ function renderCustomers() {
       + `<td><span class="chip ${segment[0]}">${segment[1]}</span></td>`
       + `<td><button class="btn xs" type="button" data-cust-my="${esc(customer.id)}" title="Страница «Мой NOZZA» по коду">🔑 Мой NOZZA</button> `
       + `<button class="btn xs" type="button" data-cust-wish="${esc(customer.id)}" title="Wish-list: хочу, когда будет">💌 Пожелания</button></td></tr>`;
-  }).join('') : `<tr><td colspan="7"><div class="empty compact"><span>${customers.length ? 'В этом сегменте никого не найдено.' : 'Клиенты появятся после первого заказа.'}</span></div></td></tr>`;
+  }).join('') : `<tr><td colspan="7">${customers.length
+    ? '<div class="empty compact"><span>В этом сегменте никого не найдено.</span></div>'
+    : '<div class="empty"><span class="big">◎</span><b>Клиентов нет</b><span>Появятся после первого заказа.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'}</td></tr>`;
 }
 
 /* =============================================== обратная связь после продажи */
@@ -1805,7 +1898,8 @@ function renderNiches() {
       + `<div class="verdict ${kind}" style="margin-top:11px">${esc(verdict)}</div>`
       + `<div class="niche-card-foot"><span class="niche-state">${num(niche.active, 1) ? 'Гипотеза активна' : 'На паузе'}</span><a href="#marketing" data-view="marketing">Сделать контент →</a></div>`
       + '</article>';
-  }).join('') : '<div class="empty"><span class="big">◫</span><b>Ниш пока нет</b><span>Добавьте гипотезу, чтобы сравнивать направления по фактической прибыли.</span></div>';
+  }).join('') : '<div class="empty"><span class="big">◫</span><b>Ниш пока нет</b><span>Добавьте гипотезу, чтобы сравнивать направления по фактической прибыли.</span>'
+    + '<button class="btn sm primary" type="button" data-empty-click="niche_add">+ Ниша</button></div>';
 }
 
 function openNiche(id) {
@@ -2120,6 +2214,11 @@ function bind() {
   const itemsHost = $('of_items');
   if (itemsHost) {
     itemsHost.addEventListener('click', (e) => {
+      const create = e.target.closest('[data-item-create]');
+      if (create) {
+        createProductFromItemRow(create.closest('.of-item-row'));
+        return;
+      }
       const del = e.target.closest('[data-item-del]');
       if (!del) return;
       del.closest('.of-item-row').remove();

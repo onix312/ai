@@ -242,6 +242,15 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "watch_auto_action": "notify",  # notify | queue | print
     "watch_link_order": True,
     "watch_create_order": False,
+    # --- 11.0: шлюз Bambu Studio + библиотека + CLI-слайсер ---------------
+    "studio_gateway_enabled": False,
+    "studio_gateway_name": "NOZZA-PrintFlow",
+    "studio_gateway_mode": "queue",  # queue | autostart
+    "studio_gateway_autostart": False,
+    "studio_gateway_serial": "",
+    "studio_gateway_access_code": "",
+    "studio_gateway_printer_id": "",
+    "slicer_bin": "",
     # --- 8.0: 3MF парсер --------------------------------------------------
     "slicer_auto_create_order": False,
     "slicer_filename_template": "{product}_№{number}_{material}",
@@ -251,6 +260,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "preflight_block_hms": True,
     "preflight_block_material": True,
     "preflight_block_filament": True,
+    "preflight_block_bed": True,  # Я40: не стартовать, если кадр ≠ пустой стол
     "preflight_warn_sd": True,
     "preflight_warn_nozzle": True,
     "preflight_warn_humidity": True,
@@ -293,7 +303,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "backup_auto_export": False,
 }
 
-SECRET_SETTINGS = {"telegram_token", "cloud_token", "cloud_uid", "client_bot_token"}
+SECRET_SETTINGS = {"telegram_token", "cloud_token", "cloud_uid", "client_bot_token",
+                   "studio_gateway_access_code"}
 
 # Кассы и счета: где физически лежат деньги.
 # (id, название, тип, комиссия при поступлении %, стартовый остаток)
