@@ -10,8 +10,24 @@ let dashMode = 'money';
 
 /* ============================================================ дашборд */
 function kpi(label, value, sub, kind, extra) {
-  return `<div class="kpi ${kind || ''}"><span class="label">${esc(label)}</span>`
+  return `<div class="kpi ${kind || ''}" data-kpi="${esc(label)}"><span class="label">${esc(label)}</span>`
     + `<b class="value">${value}</b><span class="sub">${sub || ''}</span>${extra || ''}</div>`;
+}
+
+/* Н3: прошлые значения KPI — чтобы живое обновление «докручивало» цифру
+   от прежнего значения к новому, а не подменяло её рывком. Ключ — подпись
+   плитки: она уникальна внутри Обзора и стабильна между рендерами. */
+const kpiPrev = new Map();
+function animateKpis() {
+  $$('#dash_kpis .kpi').forEach((tile) => {
+    const valEl = tile.querySelector('.value');
+    const key = tile.dataset.kpi || '';
+    if (!key || !valEl) return;
+    const text = valEl.textContent;
+    const prev = kpiPrev.get(key);
+    if (prev && prev !== text) U.countUp(valEl, prev, text);
+    kpiPrev.set(key, text);
+  });
 }
 
 function renderDashboard() {
@@ -64,6 +80,7 @@ function renderDashboard() {
     kpi('Нужно пластика', `${nfmt(needGrams)} г`, `на складе ${nfmt(stock)} г`,
       needGrams > stock ? 'warn' : 'ok'),
   ].join('');
+  animateKpis();
 
   const series = (PF.state.finance && PF.state.finance.series) || [];
   const cut = series.slice(-PF.state.dashDays);

@@ -60,6 +60,34 @@ function initials(name) {
 }
 const debounce = (fn, ms = 260) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
+/* ================================================== Н3: плавный «докрут» числа
+   KPI обновляются по живым данным; резкая смена цифры читается как скачок.
+   Крутим только строки вида «число + подпись без цифр» («12 400 ₽», «96 %»);
+   составные («3 ч 20 мин») и отключенная анимация — значение ставится сразу. */
+const MOTION_OFF = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+const NUM_WITH_TAIL = /^([\d\u00a0\u202f\s.,\-]+)(\D*)$/;
+function countUp(el, prevText, nextText, duration = 480) {
+  if (!el) return;
+  const a = NUM_WITH_TAIL.exec(String(prevText || '').trim());
+  const b = NUM_WITH_TAIL.exec(String(nextText || '').trim());
+  if (!a || !b) return;
+  const parse = (t) => parseFloat(t.replace(/[\u00a0\u202f\s]/g, '').replace(',', '.'));
+  const from = parse(a[1]), to = parse(b[1]);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to) return;
+  if ((MOTION_OFF && MOTION_OFF.matches) || document.hidden) return;
+  const t0 = performance.now();
+  const fmt = (v) => (Math.round(v * 100) / 100)
+    .toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + b[2];
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / duration);
+    const eased = 1 - Math.pow(1 - k, 3);           // easeOutCubic: старт живой, финиш спокойный
+    el.textContent = fmt(from + (to - from) * eased);
+    if (k < 1) requestAnimationFrame(step);
+    else el.textContent = nextText;                 // финал — ровно серверное значение
+  };
+  requestAnimationFrame(step);
+};
+
 /** Безопасный доступ к localStorage: файл:// и приватный режим его блокируют. */
 const store = {
   get(key, fallback = null) {
@@ -304,7 +332,7 @@ const PF = {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
     dateText, dateTimeText, agoText, todayISO, initials, debounce,
     toast, fail, openModal, closeModal, confirmDanger, ask, emptyHtml, CUR, store, catName,
-    setChannelBar,
+    setChannelBar, countUp,
   },
   modules: {},
   bus: new EventTarget(),
