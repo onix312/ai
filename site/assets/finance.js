@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, dateText,
-  toast, fail, openModal, closeModal, confirmDanger, drawChart, legend } = U;
+  toast, fail, openModal, closeModal, confirmDanger, ask, drawChart, legend } = U;
 const { get, post } = PF.api;
 
 /* Справочники и агрегаты держим в общем состоянии: их читают и «Финансы»,
@@ -618,7 +618,11 @@ function bind() {
   btn('tax_pay', async () => {
     const t = (PF.state.money && PF.state.money.tax) || {};
     const suggested = Math.max(0, num(t.total_due));
-    const value = window.prompt('Сумма уплаченного налога, ₽:', String(Math.round(suggested)));
+    const value = await ask({
+      title: 'Уплата налога',
+      fields: [{ name: 'amount', label: 'Сумма, ₽', type: 'number', value: String(Math.round(suggested)), min: 0, step: 'any' }],
+      ok: 'Записать',
+    });
     if (value == null) return;
     const amount = num(value);
     if (amount <= 0) return fail(new Error('Сумма должна быть больше нуля'));
@@ -639,8 +643,11 @@ function bind() {
 
   btn('shelf_cash_collect', async () => {
     const suggested = Math.max(0, Math.round(num(shelfCash && shelfCash.in_shop)));
-    const value = window.prompt('Сколько забрали из кассы магазина, ₽:',
-      suggested ? String(suggested) : '');
+    const value = await ask({
+      title: 'Забрали из кассы магазина',
+      fields: [{ name: 'amount', label: 'Сумма, ₽', type: 'number', value: suggested ? String(suggested) : '', min: 0, step: 'any' }],
+      ok: 'Записать',
+    });
     if (value == null) return;
     const amount = num(value);
     if (amount <= 0) return fail(new Error('Сумма должна быть больше нуля'));

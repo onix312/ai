@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
-  dateText, dateTimeText, agoText, toast, fail, confirmDanger, drawChart, legend, store,
+  dateText, dateTimeText, agoText, toast, fail, confirmDanger, ask, drawChart, legend, store,
   openModal, closeModal } = U;
 const { get, post } = PF.api;
 
@@ -390,10 +390,14 @@ function renderAmsPanel() {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
     const warn = remain != null && remain < threshold;
     const cname = amsHexToName(t.color) || '';
-    return `<div class="ams-row${t.active ? ' active' : ''}">`
+    const present = t.present !== false && (t.present || t.generic || t.type || t.uuid);
+    const generic = !!(t.generic || (present && !t.bambulab && !t.uuid));
+    const empty = !present;
+    const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
+    return `<div class="ams-row${t.active ? ' active' : ''}${empty ? ' empty' : ''}">`
       + `<span class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></span>`
-      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}${cname ? ' · ' + esc(cname) : ''}</b>`
-      + `<small>${esc(t.type || 'Не задан')}${cname ? ' · ' + esc(cname) : ''}${t.active ? ' · активен' : ''}</small></div>`
+      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}${cname && !empty ? ' · ' + esc(cname) : ''}</b>`
+      + `<small>${esc(typeLabel)}${cname && !empty ? ' · ' + esc(cname) : ''}${generic ? ' · сторонний' : ''}${t.active ? ' · активен' : ''}</small></div>`
       + (remain != null
         ? `<div class="ams-remain${warn ? ' warn' : ''}"><div class="bar thin"><i style="width:${clamp(remain, 0, 100)}%"></i></div><small>${Math.round(remain)}%</small></div>`
         : '<span class="muted">—</span>')
@@ -842,11 +846,21 @@ const WATCH = [
   ['watch_link_order', 'Связывать с заказом по №', 'Искать № заказа в имени файла', 'bool'],
   ['watch_create_order', 'Создавать черновик заказа', 'Если не нашли заказ — сделать новый', 'bool'],
 ];
+const STUDIO = [
+  ['studio_gateway_enabled', 'Шлюз Bambu Studio', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
+  ['studio_gateway_name', 'Имя в Studio', 'Как принтер называется в списке устройств', 'text'],
+  ['studio_gateway_mode', 'Режим', 'queue — только очередь. autostart — печать сразу, если включены автостарт шлюза и safety-gate.', 'text'],
+  ['studio_gateway_autostart', 'Автостарт с шлюза', 'Печатать сразу после Slice/Print. Нужны режим autostart и «действия без присмотра».', 'bool'],
+  ['studio_gateway_serial', 'Серийный номер', 'Пусто — сгенерируется. Studio идентифицирует устройство по нему.', 'text'],
+  ['studio_gateway_printer_id', 'Принтер (id)', 'На какой физический принтер уходит очередь. Пусто — первый доступный.', 'text'],
+  ['slicer_bin', 'Путь к CLI слайсера', 'OrcaSlicer / Bambu Studio / PrusaSlicer. Пусто — поиск в PATH. Свой движок PrintFlow не пишет.', 'text'],
+];
 const PREFLIGHT = [
   ['preflight_enabled', 'Preflight — проверка перед стартом', 'Блокировать старт при проблемах', 'bool'],
   ['preflight_block_material', 'Блок: не тот материал в AMS', 'PLA вместо PETG — брак', 'bool'],
   ['preflight_block_filament', 'Блок: мало пластика', 'Сверять граммы с остатком катушки', 'bool'],
   ['preflight_block_hms', 'Блок: HMS ошибки', 'Не давать старт при ошибке принтера', 'bool'],
+  ['preflight_block_bed', 'Блок: стол не пуст', 'До старта сравнить кадр с эталоном пустого стола. Нет эталона — проверка выключена.', 'bool'],
   ['preflight_warn_nozzle', 'Предупр.: сопло', 'Диаметр сопла в файле vs принтер', 'bool'],
   ['preflight_warn_humidity', 'Предупр.: влажность AMS', 'Выше порога — сушить', 'bool'],
 ];
@@ -966,7 +980,12 @@ async function renderCloudSettings(s) {
         $('cloud_code').focus();
         toast('Код отправлен', 'Введите код из письма/SMS');
       } else if (res.status === 'need_tfa') {
-        const code = window.prompt('Код из приложения-аутентификатора:', '');
+        const code = await ask({
+          title: 'Двухфакторный вход',
+          sub: 'Код из приложения-аутентификатора',
+          fields: [{ name: 'code', label: 'Код', type: 'text', placeholder: '123456' }],
+          ok: 'Войти',
+        });
         if (!code) return;
         const res2 = await post('/api/cloud/login', { email, region, tfa_code: code });
         if (res2.status !== 'ok') return fail(new Error(res2.message || 'Не удалось войти'));
@@ -1207,6 +1226,31 @@ function renderSettings() {
   $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
   $('set_upkeep').innerHTML = settingGroup(UPKEEP);
   if ($('set_watch')) $('set_watch').innerHTML = settingGroup(WATCH);
+  if ($('set_studio')) {
+    $('set_studio').innerHTML = settingGroup(STUDIO)
+      + settingRow('studio_gateway_access_code', 'Access Code для Studio',
+        s.has_studio_gateway_access_code
+          ? 'Сохранён — оставьте пустым, чтобы не менять. Studio спросит этот код при подключении.'
+          : 'Задайте сами: Studio спросит его при подключении. Пусто при включении — сгенерируется и повторно не покажется.',
+        '<input type="password" autocomplete="new-password" data-setting="studio_gateway_access_code" placeholder="'
+          + (s.has_studio_gateway_access_code ? '••••••••' : 'задайте код') + '">');
+    get('/api/studio/status').then((data) => {
+      const el = $('studio_status');
+      if (!el) return;
+      const on = data.enabled ? 'вкл' : 'выкл';
+      const run = data.running ? 'слушает LAN' : 'без сокетов';
+      const model = esc(data.dev_model || data.model || '');
+      el.innerHTML = `<span>ℹ</span><span>Шлюз ${on} · ${run} · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model} · MQTT :${data.mqtt_port || 8883} · FTPS :${data.ftp_port || 990}${data.last_error ? ' · ' + esc(data.last_error) : ''}</span>`;
+    }).catch(() => {});
+    get('/api/slicer/status').then((data) => {
+      const el = $('studio_status');
+      if (!el || !data) return;
+      const extra = data.available
+        ? ` · слайсер ${esc(data.name || data.bin || '')}`
+        : ' · CLI-слайсер не найден';
+      if (el.lastElementChild) el.lastElementChild.textContent += extra;
+    }).catch(() => {});
+  }
   if ($('set_preflight')) $('set_preflight').innerHTML = settingGroup(PREFLIGHT);
   if ($('set_ftps')) $('set_ftps').innerHTML = settingGroup(FTPS);
   if ($('set_mqtt')) $('set_mqtt').innerHTML = settingGroup(MQTT);
@@ -1684,18 +1728,22 @@ function initTemplatesEditor() {
     }
   });
   const add = $('lib_tpl_add');
-  if (add) add.addEventListener('click', () => {
+  if (add) add.addEventListener('click', async () => {
     replyTemplates.push({ id: 't' + Date.now().toString(36), title: 'Новый шаблон', text: '' });
     renderTemplates();
-    // простейшее редактирование: prompt'ом
     const row = host.querySelector('[data-tpl-row="' + (replyTemplates.length - 1) + '"]');
     if (row) {
-      const title = window.prompt('Название шаблона', 'Новый шаблон');
-      if (title == null) { replyTemplates.pop(); renderTemplates(); return; }
-      const text = window.prompt('Текст шаблона', 'Здравствуйте! Ваш заказ готов, можно забрать.');
-      if (text == null) { replyTemplates.pop(); renderTemplates(); return; }
-      replyTemplates[replyTemplates.length - 1].title = title;
-      replyTemplates[replyTemplates.length - 1].text = text;
+      const ans = await ask({
+        title: 'Шаблон ответа',
+        fields: [
+          { name: 'title', label: 'Название', type: 'text', value: 'Новый шаблон' },
+          { name: 'text', label: 'Текст', type: 'textarea', value: 'Здравствуйте! Ваш заказ готов, можно забрать.' },
+        ],
+        ok: 'Сохранить',
+      });
+      if (!ans) { replyTemplates.pop(); renderTemplates(); return; }
+      replyTemplates[replyTemplates.length - 1].title = ans.title;
+      replyTemplates[replyTemplates.length - 1].text = ans.text;
       renderTemplates();
       saveTemplates();
     }
@@ -1722,26 +1770,36 @@ function renderEnvelopes() {
     + `<button class="btn sm" type="button" data-env-edit="${esc(e.id)}">✎</button>`
     + `<button class="btn sm" type="button" data-env-out="${esc(e.id)}">Забрать</button>`
     + `<button class="icon-btn sm danger" type="button" data-env-del="${esc(e.id)}">×</button></div>`).join('')
-    : '<div class="empty compact"><span>Конвертов нет. Добавьте «Налог 6%» или «Второй принтер».</span></div>';
+    : '<div class="empty compact"><span>Конвертов нет. Добавьте «Налог 6%» или «Второй принтер».</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="env_add">+ Конверт</button></div>';
 }
 async function envSave(id) {
   const cur = (PF.state.envelopes || []).find((e) => e.id === id) || {};
-  const name = window.prompt('Название конверта', cur.name || '');
-  if (name == null) return;
-  const pct = window.prompt('Процент с дохода (0–100)', String(cur.pct ?? 0));
-  if (pct == null) return;
-  const goal = window.prompt('Цель накопления, ₽ (0 — без цели)', String(cur.goal || 0));
-  if (goal == null) return;
+  const ans = await ask({
+    title: id ? 'Конверт' : 'Новый конверт',
+    fields: [
+      { name: 'name', label: 'Название', type: 'text', value: cur.name || '' },
+      { name: 'pct', label: 'Процент с дохода', type: 'number', value: String(cur.pct ?? 0), min: 0, max: 100, hint: '0–100' },
+      { name: 'goal', label: 'Цель, ₽', type: 'number', value: String(cur.goal || 0), min: 0, hint: '0 — без цели' },
+    ],
+    ok: 'Сохранить',
+  });
+  if (!ans) return;
   try {
-    await post('/api/envelope/save', { id: id || '', name, pct: num(pct), goal: num(goal) });
-    toast('Конверт сохранён', name);
+    await post('/api/envelope/save', { id: id || '', name: ans.name, pct: num(ans.pct), goal: num(ans.goal) });
+    toast('Конверт сохранён', ans.name);
     loadEnvelopes();
   } catch (e) { fail(e); }
 }
 async function envWithdraw(id) {
   const cur = (PF.state.envelopes || []).find((e) => e.id === id);
   if (!cur) return;
-  const amount = window.prompt(`Сколько забрать из «${cur.name}» (остаток ${money(cur.balance)})?`, '');
+  const amount = await ask({
+    title: 'Забрать из конверта',
+    sub: `«${cur.name}» · остаток ${money(cur.balance)}`,
+    fields: [{ name: 'amount', label: 'Сумма, ₽', type: 'number', value: '', min: 0, step: 'any' }],
+    ok: 'Забрать',
+  });
   if (amount == null) return;
   try {
     await post('/api/envelope/withdraw', { id, amount: num(amount), note: 'изъятие' });
@@ -2114,7 +2172,7 @@ function bind() {
   });
   loadDbBackups();
   const profSave=$('prof_save');
-  if (profSave) profSave.addEventListener('click', async()=>{ const name=window.prompt('Название снапшота','Снапшот '+new Date().toLocaleString('ru-RU')); if(name==null) return; try{ await post('/api/settings/profile/save',{name}); renderProfiles(); toast('Снапшот сохранён', name);}catch(e){fail(e);} });
+  if (profSave) profSave.addEventListener('click', async()=>{ const name=await ask({title:'Снапшот настроек',fields:[{name:'name',label:'Название',type:'text',value:'Снапшот '+new Date().toLocaleString('ru-RU')}],ok:'Сохранить'}); if(name==null) return; try{ await post('/api/settings/profile/save',{name}); renderProfiles(); toast('Снапшот сохранён', name);}catch(e){fail(e);} });
   $('data_check_btn').addEventListener('click', runDataCheck);
 
   $('env_add').addEventListener('click', () => envSave(''));

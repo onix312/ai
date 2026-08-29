@@ -298,6 +298,11 @@ PF.on('view', (d)=>{
       const el=$('watch_status');
       if (el) el.innerHTML=`<span>ℹ</span><span>Watch Folder ${data.enabled?'вкл':'выкл'} · путь <code>${esc(data.path||'')}</code> · ожидают ${data.pending||0}</span>`;
     }).catch(()=>{});
+    get('/api/studio/status').then(data=>{
+      const el=$('studio_status');
+      if (!el) return;
+      el.innerHTML=`<span>ℹ</span><span>Шлюз ${data.enabled?'вкл':'выкл'} · ${data.running?'слушает LAN':'без сокетов'} · ${esc(data.name||'')} · ${esc(data.serial||'нет SN')} · MQTT :${data.mqtt_port||8883}</span>`;
+    }).catch(()=>{});
   }
 });
 

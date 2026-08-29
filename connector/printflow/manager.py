@@ -76,6 +76,12 @@ class PrinterManager:
             self.watch.start()
         except Exception:
             self.watch = None
+        try:
+            from .studio_gateway import StudioGateway
+            self.studio = StudioGateway(self.db, self, getattr(self.db, "bus", None), bind=True)
+            self.studio.start()
+        except Exception:
+            self.studio = None
         self._poller = threading.Thread(target=self._loop, name="pf-manager", daemon=True)
         self._poller.start()
         # Мгновенная проверка при запуске скрипта для авто-продолжения печати
@@ -179,6 +185,11 @@ class PrinterManager:
         if getattr(self, "watch", None):
             try:
                 self.watch.stop()
+            except Exception:
+                pass
+        if getattr(self, "studio", None):
+            try:
+                self.studio.stop()
             except Exception:
                 pass
         bot = getattr(self, "bot", None)

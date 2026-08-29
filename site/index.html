@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/theme.css?v=9.2.3">
+<link rel="stylesheet" href="assets/theme.css?v=11.0.1">
 <link rel="stylesheet" href="assets/app.css?v=9.1.2">
 <link rel="stylesheet" href="assets/more.css?v=9.2.2">
 </head><body>
@@ -182,7 +182,7 @@
   </div>
  </div>
  <div class="printer-tabs" id="pr_tabs"></div>
- <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Нажмите «+ Принтер», чтобы подключить Bambu Lab по локальной сети.</span></div>
+ <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Подключите Bambu Lab по локальной сети.</span><button class="btn sm primary" type="button" data-empty-click="pr_add">+ Принтер</button></div>
  <div id="pr_workspace" hidden>
    <div id="pr_alerts" class="alert-strip"></div>
    <div id="pr_enough" class="notice" hidden><span>◍</span><span id="pr_enough_text">Проверяем пластик на следующее задание…</span></div>
@@ -623,13 +623,7 @@
  <div class="view-head">
   <div><span class="eyebrow">Складской учёт</span><h1>Документы</h1><p>Приход, продажа, перемещение, списание, инвентаризация. Проведение и отмена.</p></div>
   <div class="head-actions">
-   <select id="doc_new_kind">
-    <option value="receipt">Приход</option><option value="sale">Продажа</option>
-    <option value="move">Перемещение</option><option value="writeoff">Списание</option>
-    <option value="inventory">Инвентаризация</option><option value="production">Производство</option>
-    <option value="return">Возврат</option><option value="pricing">Установка цен</option>
-   </select>
-   <button class="btn primary" id="doc_add" type="button">+ Создать</button>
+   <button class="btn primary" id="doc_add" type="button">+ Что произошло</button>
   </div>
  </div>
  <div class="toolbar">
@@ -2937,7 +2931,7 @@
 <li>права на персонажа, логотип или товарный знак;</li>
 <li>право клиента передать объект в производство.</li>
 </ol>
-<p><code>NC</code> и <code>Personal use only</code> запрещают коммерческое использование. Фраза «в стиле известного героя» не гарантирует юридическую чистоту, если сохраняются узнаваемые охраняемые элементы.</p>
+<p><code>NC</code> и <code>Personal use only</code> запрещают коммерческое использование. Фраза «в стиле известного героя» не гарантирует юридическую чистоту, �сли сохраняются узнаваемые охраняемые элементы.</p>
 <p>Для логотипа B2B-клиента получить письменное подтверждение: «заказчик обладает правом использования и поручает изготовление».</p>
 <h2>9. Персональные данные</h2>
 <p>Телефон, Telegram, имя и история заказов — персональные данные. PrintFlow хранит их локально, но это не отменяет обязанностей владельца бизнеса:</p>
@@ -3663,6 +3657,11 @@
     <div class="notice" style="margin-top:10px" id="watch_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Шлюз Bambu Studio</h2><p>Studio видит PrintFlow как принтер: Slice/Print идёт в очередь, не напрямую на P1S</p></div></div>
+    <div id="set_studio"></div>
+    <div class="notice" style="margin-top:10px" id="studio_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>Preflight — проверка перед стартом</h2><p>Что блокирует или предупреждает</p></div></div>
     <div id="set_preflight"></div>
    </div>
@@ -3793,8 +3792,11 @@
          </select>
        </div>
      </div>
-     <select id="of_nom_id"><option value="">Не выбран — заказ на печать / услугу</option></select>
-     <small class="hint" id="of_stock_hint">Выберите готовое изделие: название, цена, вес и файл подставятся автоматически.</small>
+     <div style="display:flex;gap:8px;align-items:center">
+      <select id="of_nom_id" style="flex:1"><option value="">Не выбран — заказ на печать / услугу</option></select>
+      <button class="btn sm" type="button" id="of_nom_create" title="Сохранить изделие в базу товаров">+ Товар</button>
+     </div>
+     <small class="hint" id="of_stock_hint">Выберите из базы или нажмите «+ Товар»: название, вес, время и файл из этой карточки станут карточкой товара.</small>
    </div>
    <label class="field"><span>Склад готового товара</span><select id="of_warehouse_id"><option value="">Автоматически</option></select></label>
    <label class="check"><input type="checkbox" id="of_reserved"> Взять готовое со склада и зарезервировать</label>
@@ -4481,6 +4483,29 @@
   <button class="btn primary" type="button" id="plan_create">Создать партии</button></div>
 </form></dialog>
 
+<!-- ============================================ МАСТЕР ДОКУМЕНТА -->
+<dialog class="modal" id="doc_wizard"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Склад</span><h2 id="dw_title">Что произошло?</h2><p id="dw_sub">Сначала событие, потом откуда-куда, затем что сдвинулось.</p></div>
+  <button class="icon-btn" type="button" data-close="doc_wizard">×</button></div>
+ <div class="modal-body">
+  <div id="dw_step1" class="dw-grid"></div>
+  <div id="dw_step2" hidden>
+   <div class="form-grid">
+    <label class="field" id="dw_wh_wrap"><span id="dw_wh_label">Откуда</span><select id="dw_warehouse"></select></label>
+    <label class="field" id="dw_wh2_wrap" hidden><span>Куда</span><select id="dw_warehouse_to"></select></label>
+    <label class="field" id="dw_channel_wrap" hidden><span>Куда продали</span><select id="dw_channel"></select></label>
+    <p class="muted span-2" id="dw_step2_hint">Дальше укажите, что сдвинулось — позиции документа.</p>
+   </div>
+  </div>
+ </div>
+ <div class="modal-foot">
+  <button class="btn" type="button" id="dw_back" hidden>← Назад</button>
+  <span class="spacer"></span>
+  <button class="btn" type="button" data-close="doc_wizard">Отмена</button>
+  <button class="btn primary" type="button" id="dw_next" hidden>Дальше: что сдвинулось</button>
+ </div>
+</form></dialog>
+
 <!-- ============================================ ДОКУМЕНТ -->
 <dialog class="modal wide" id="doc_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow" id="doc_modal_kind">Документ</span><h2 id="doc_modal_title">Новый документ</h2><p id="doc_modal_sub">Черновик не меняет остатки — движения появятся при проведении</p></div>
@@ -4653,7 +4678,7 @@
 </dialog>
 
 <dialog id="shelf_transfer_modal" class="modal">
- <div class="modal-head"><div><h3>Со склада на стеллаж</h3><p>Только товары с остатком от 1 шт — перемещаются целыми штуками</p></div>
+ <div class="modal-head"><div><h3>Со склада на стеллаж</h3><p>Штуки уйдут со склада и появятся на полке. В «Товарах» остаток склада уменьшится.</p></div>
   <button class="icon-btn" type="button" data-close="shelf_transfer_modal">✕</button></div>
  <div class="modal-body">
   <label>Товар на складе<select id="stf_item"></select></label>
@@ -4829,6 +4854,17 @@
  <div class="modal-foot"><button class="btn" type="button" data-close="price_modal">Закрыть</button></div>
 </dialog>
 
+<dialog class="modal narrow" id="ask_modal">
+ <form method="dialog" id="ask_form">
+  <div class="modal-head"><div><span class="eyebrow" id="ask_eyebrow">Ввод</span><h2 id="ask_title">Введите значение</h2><p id="ask_sub"></p></div>
+   <button class="icon-btn" type="button" data-close="ask_modal">×</button></div>
+  <div class="modal-body"><div class="form-grid" id="ask_fields" style="grid-template-columns:minmax(0,1fr)"></div></div>
+  <div class="modal-foot"><span class="spacer"></span>
+   <button class="btn" type="button" id="ask_cancel">Отмена</button>
+   <button class="btn primary" type="submit" id="ask_ok">OK</button></div>
+ </form>
+</dialog>
+
 <dialog id="palette">
  <div class="palette-input"><span>⌕</span><input id="palette_input" placeholder="Команда, раздел, заказ или клиент…" autocomplete="off"></div>
  <div class="palette-list" id="palette_list"></div>
@@ -4850,18 +4886,18 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=9.1.2"></script>
-<script src="assets/core.js?v=9.2.1"></script>
-<script src="assets/printer.js?v=9.1.2"></script>
-<script src="assets/ops.js?v=9.2.1"></script>
-<script src="assets/money.js?v=9.1.2"></script>
-<script src="assets/finance.js?v=9.1.2"></script>
-<script src="assets/shelf.js?v=9.2.3"></script>
-<script src="assets/products.js?v=9.1.2"></script>
-<script src="assets/bridge.js?v=9.1.2"></script>
+<script src="assets/core.js?v=11.0.1"></script>
+<script src="assets/printer.js?v=11.0.1"></script>
+<script src="assets/ops.js?v=11.0.1"></script>
+<script src="assets/money.js?v=11.0.1"></script>
+<script src="assets/finance.js?v=11.0.1"></script>
+<script src="assets/shelf.js?v=11.0.1"></script>
+<script src="assets/products.js?v=11.0.1"></script>
+<script src="assets/bridge.js?v=11.0.0"></script>
 <script src="assets/marketing.js?v=9.2.1"></script>
-<script src="assets/clientbot.js?v=9.3.4"></script>
-<script src="assets/workshop.js?v=9.1.2"></script>
-<script src="assets/app.js?v=10.0.0"></script>
+<script src="assets/clientbot.js?v=11.0.1"></script>
+<script src="assets/workshop.js?v=11.0.1"></script>
+<script src="assets/app.js?v=11.0.1"></script>
 <script src="assets/ops10.js?v=10.0.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

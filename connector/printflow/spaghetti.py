@@ -112,6 +112,54 @@ def frame_diff_ratio(a: bytes, b: bytes) -> float | None:
     return round(diff / len(data_a) * 100, 1)
 
 
+def inspect_bed_clear(frame: bytes | None, reference: bytes | None,
+                      threshold: float = 6.0) -> dict:
+    """Я40: стол чист до старта. Не #10 (после финиша).
+
+    ``ok=True`` — старт не блокировать. Без эталона или кадра проверка
+    честно выключена, печать не стопорим.
+    """
+    if not reference:
+        return {
+            "ok": True, "level": "info", "code": "bed_no_ref",
+            "title": "Нет эталона пустого стола",
+            "detail": "Снимите эталон кнопкой «Пустой стол» — иначе проверка до старта выключена",
+            "diff_pct": None,
+        }
+    if not frame:
+        return {
+            "ok": True, "level": "info", "code": "bed_no_camera",
+            "title": "Камера не видит стол",
+            "detail": "Нет кадра — проверка «стол чист» пропущена, печать не блокируется",
+            "diff_pct": None,
+        }
+    ratio = frame_diff_ratio(frame, reference)
+    if ratio is None:
+        return {
+            "ok": True, "level": "info", "code": "bed_no_compare",
+            "title": "Не сравнить кадр со столом",
+            "detail": "Нет Pillow или кадр не JPEG — проверка пропущена",
+            "diff_pct": None,
+        }
+    limit = float(threshold if threshold is not None else 6.0)
+    if ratio > limit:
+        return {
+            "ok": False, "level": "block", "code": "bed_dirty",
+            "title": "На столе что-то лежит",
+            "detail": (
+                f"Кадр отличается от пустого стола на {ratio}% "
+                f"(порог {limit}%) — уберите деталь, скребок или плёнку"
+            ),
+            "diff_pct": ratio,
+        }
+    return {
+        "ok": True, "level": "ok", "code": "bed_clear",
+        "title": "Стол чист",
+        "detail": f"Разница с эталоном {ratio}%",
+        "diff_pct": ratio,
+    }
+
+
 def grayscale_matrix(image) -> list[list[int]]:
     """PIL-изображение (уже в оттенках серого) → двумерный список 0..255."""
     width, height = image.size

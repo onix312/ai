@@ -3,7 +3,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, hoursText, minutesText,
-  dateText, dateTimeText, agoText, toast, fail, openModal, closeModal, confirmDanger } = U;
+  dateText, dateTimeText, agoText, toast, fail, openModal, closeModal, confirmDanger, ask } = U;
 const { get, post, api } = PF.api;
 
 const STATE_LABEL = {
@@ -183,7 +183,10 @@ function amsColorName(hex) {
 function renderAms(p) {
   const ams = p.ams || { trays: [] };
   const trays = ams.trays || [];
-  text('pr_ams_count', trays.length ? `${trays.length} слот(ов)` : 'нет данных');
+  const occupied = trays.filter((t) => t.present !== false && (t.present || t.generic || t.type || t.uuid));
+  text('pr_ams_count', trays.length
+    ? `${occupied.length} из ${trays.length} занято`
+    : 'нет данных');
   text('pr_ams_env', ams.temperature != null || ams.humidity != null
     ? `Температура ${ams.temperature ?? '—'} °C · влажность ${ams.humidity ?? '—'}`
     : 'Температура и влажность —');
@@ -197,19 +200,24 @@ function renderAms(p) {
   host.innerHTML = trays.map((t) => {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
     const human = amsColorName(t.color) || '';
+    const present = t.present !== false && (t.present || t.generic || t.type || t.uuid);
+    const generic = !!(t.generic || (present && !t.bambulab && !t.uuid));
+    const empty = !present;
     let spoolHint = '';
     try {
       const sp = (PF.state.spools || []).find((s) => String(s.ams_slot) === String(t.slot) && String(s.printer_id) === String(p.id));
       if (sp && sp.color_name) spoolHint = ' · ' + sp.color_name;
     } catch(e) {}
-    return `<div class="ams-slot${t.active ? ' active' : ''}">`
+    const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
+    return `<div class="ams-slot${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}">`
       + `<div class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></div>`
-      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}${human ? ' · ' + esc(human) : ''}</b>`
-      + `<small>${esc(t.type || 'Не задан')}${human ? ' · ' + esc(human) : ''}${spoolHint}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
+      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}${human && !empty ? ' · ' + esc(human) : ''}</b>`
+      + `<small>${esc(typeLabel)}${human && !empty ? ' · ' + esc(human) : ''}${spoolHint}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
       + (remain != null ? `<div class="bar thin${remain < 15 ? ' warn' : ''}"><i style="width:${clamp(remain, 0, 100)}%"></i></div>` : '')
       + '<div class="acts">'
-      + `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`
+      + (empty ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`)
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}">Тип</button>`
+      + (generic ? `<span class="chip outline" style="margin-left:6px" title="Пластик без RFID Bambu Lab">сторонний</span>` : '')
       + (t.active ? `<span class="chip ok" style="margin-left:6px">активен</span>` : '')
       + '</div></div>';
   }).join('') + renderAmsSuggestion(p);
@@ -940,7 +948,8 @@ function renderQueue() {
       + '</div></div>';
   }).join('') : (queue.length
     ? '<div class="empty compact"><span>В этом фильтре заданий нет.</span></div>'
-    : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Добавьте задание или запустите файл с принтера.</span></div>');
+    : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Нет заданий — добавьте файл в очередь.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="queue_add">+ Задание</button></div>');
 
   const hq = ($('history_search') || {}).value || '';
   const hfiltered = hq ? history.filter((j) => String(j.name || j.file || '').toLowerCase().includes(hq.toLowerCase())) : history;
@@ -1253,7 +1262,18 @@ function bind() {
     const amsEdit = e.target.closest('[data-ams-edit]');
     if (amsEdit) {
       const [unit, tray] = amsEdit.dataset.amsEdit.split(':');
-      const type = window.prompt('Тип пластика в слоте (PLA, PETG, ABS, TPU…):', amsEdit.dataset.type || 'PLA');
+      const typed = await ask({
+        title: 'Пластик в слоте AMS',
+        sub: `Слот ${unit}:${tray}`,
+        fields: [{
+          name: 'type', label: 'Тип', type: 'text',
+          value: amsEdit.dataset.type || '',
+          placeholder: 'PLA, PETG, ABS, TPU…',
+          hint: 'Как на катушке. Только метка слота, не температуры.',
+        }],
+        ok: 'Записать',
+      });
+      const type = String(typed || '').trim();
       if (!type) return;
       command('ams_filament', { ams_id: num(unit), tray_id: num(tray), type: type.toUpperCase(), color: amsEdit.dataset.color },
         { confirm: `Записать материал ${type.toUpperCase()} в слот AMS?`, label: 'AMS ' + type });

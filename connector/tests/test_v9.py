@@ -24,7 +24,7 @@ from connector.tests.test_phase11 import make_api, make_db  # noqa: E402
 
 class VersionTests(unittest.TestCase):
     def test_app_and_schema(self):
-        self.assertEqual(APP_VERSION, "10.0.0")
+        self.assertEqual(APP_VERSION, "11.0.0")
         self.assertEqual(SCHEMA_VERSION, 14)
 
 
@@ -228,6 +228,80 @@ class PreflightHumidityTests(unittest.TestCase):
         self.assertTrue(any(w["code"] == "humidity" for w in out2["warns"]))
 
 
+class PreflightBedClearTests(unittest.TestCase):
+    """Я40: стол чист до старта. Без сети, без живой камеры."""
+
+    def setUp(self):
+        self.db = make_db()
+        self.addCleanup(self.db.close)
+        self.db.set_settings({
+            "preflight_enabled": True,
+            "preflight_block_bed": True,
+            "preflight_warn_humidity": False,
+            "bed_watch_threshold": 6.0,
+        })
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.photo = pathlib.Path(self.tmp.name)
+
+    def _printer(self, frame=None):
+        class P:
+            id = "p1"
+            record = {"nozzle_size": 0.4}
+            camera = types.SimpleNamespace(frame=frame)
+
+            def snapshot(self):
+                return {
+                    "printer": {"state": "IDLE", "state_label": "свободен",
+                                "problems": [], "sdcard": True, "nozzle_size": 0.4},
+                    "ams": {"humidity": 20, "trays": []},
+                    "maintenance": {},
+                }
+        return P()
+
+    def test_no_reference_does_not_block(self):
+        from connector.printflow.preflight import check_preflight
+        with mock.patch("connector.printflow.config.PHOTO_DIR", self.photo):
+            out = check_preflight(self.db, types.SimpleNamespace(get=lambda pid: self._printer()),
+                                  "p1", "missing.3mf")
+        self.assertFalse(any(b["code"] == "bed_dirty" for b in out["blocks"]))
+        self.assertTrue(any(i["code"] == "bed_no_ref" for i in out["infos"]))
+
+    def test_dirty_bed_blocks(self):
+        from connector.printflow.preflight import check_preflight
+        (self.photo / "bed_reference.jpg").write_bytes(b"ref-bytes")
+        printer = self._printer(frame=b"live-frame")
+        with mock.patch("connector.printflow.config.PHOTO_DIR", self.photo), \
+             mock.patch("connector.printflow.spaghetti.frame_diff_ratio", return_value=42.0):
+            out = check_preflight(
+                self.db, types.SimpleNamespace(get=lambda pid: printer),
+                "p1", "missing.3mf")
+        self.assertTrue(any(b["code"] == "bed_dirty" for b in out["blocks"]))
+        self.assertFalse(out["ok"])
+
+    def test_clear_bed_allows_start(self):
+        from connector.printflow.preflight import check_preflight
+        (self.photo / "bed_reference.jpg").write_bytes(b"ref-bytes")
+        printer = self._printer(frame=b"live-frame")
+        with mock.patch("connector.printflow.config.PHOTO_DIR", self.photo), \
+             mock.patch("connector.printflow.spaghetti.frame_diff_ratio", return_value=1.2):
+            out = check_preflight(
+                self.db, types.SimpleNamespace(get=lambda pid: printer),
+                "p1", "missing.3mf")
+        self.assertFalse(any(b["code"] == "bed_dirty" for b in out["blocks"]))
+        self.assertTrue(out["ok"])
+
+    def test_setting_off_skips(self):
+        from connector.printflow.preflight import check_preflight
+        self.db.set_settings({"preflight_block_bed": False})
+        (self.photo / "bed_reference.jpg").write_bytes(b"not-a-jpeg")
+        with mock.patch("connector.printflow.config.PHOTO_DIR", self.photo):
+            out = check_preflight(
+                self.db, types.SimpleNamespace(get=lambda pid: self._printer(b"x")),
+                "p1", "missing.3mf")
+        self.assertFalse(any(b["code"] == "bed_dirty" for b in out["blocks"]))
+
+
 class ApiDispatchTests(unittest.TestCase):
     def test_workshop_about_and_files_crumbs(self):
         api = make_api(make_db())
@@ -235,7 +309,7 @@ class ApiDispatchTests(unittest.TestCase):
         api.workshop = WorkshopV9(api.db, Repo(api.db))
         code, payload = api.get("/api/workshop/about", {})
         self.assertEqual(code, 200)
-        self.assertEqual(payload["version"], "10.0.0")
+        self.assertEqual(payload["version"], "11.0.0")
 
         class Files:
             def list_files(self, path="/"):

@@ -77,6 +77,171 @@ def fan_percent(raw: Any) -> int:
     return round(value / 255 * 100)
 
 
+def _bit_mask(value: Any) -> int | None:
+    """Hex-маска слотов AMS (tray_exist_bits / tray_is_bbl_bits).
+
+    Принтер шлёт строку вроде ``\"0f\"`` или целое. Пустое значение — None:
+    битов в отчёте нет, нельзя делать вид, что слоты пустые.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.lower().startswith("0x"):
+        text = text[2:]
+    try:
+        return int(text, 16)
+    except ValueError:
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            return None
+
+
+def _clean_tray_uuid(value: Any) -> str:
+    """RFID-метка слота; одни нули — метки нет."""
+    text = str(value or "").strip()
+    return "" if not text or set(text) <= {"0"} else text
+
+
+def _tray_color(raw: Any) -> str:
+    """Цвет катушки #RRGGBB. ``00000000`` у пустого/не заданного слота — серый."""
+    text = str(raw or "").strip().lstrip("#")
+    if len(text) >= 8 and text[:8].upper() == "00000000":
+        return "#CBD5E1"
+    if len(text) >= 6:
+        return "#" + text[:6].upper()
+    return "#CBD5E1"
+
+
+def _tray_remain(raw: Any) -> float | None:
+    """Остаток 0–100 %. ``None``/отрицательное — датчик не знает, не выдумываем."""
+    if raw is None:
+        return None
+    value = as_num(raw, -1)
+    if value < 0:
+        return None
+    if value > 100:
+        value = value / 10.0
+    return round(max(0.0, min(100.0, value)), 1)
+
+
+def _tray_color_raw(tray_raw: dict) -> Any:
+    color = tray_raw.get("tray_color")
+    if color:
+        return color
+    cols = tray_raw.get("cols")
+    if isinstance(cols, list) and cols:
+        return cols[0]
+    return ""
+
+
+def _ams_tray_dict(unit_id: int, slot: int, tray_raw: dict | None,
+                   present: bool, bambulab: bool, tray_now: str) -> dict:
+    tray_raw = tray_raw or {}
+    uuid = _clean_tray_uuid(tray_raw.get("tray_uuid") or tray_raw.get("tag_uid"))
+    material = str(tray_raw.get("tray_type") or tray_raw.get("tray_sub_brands") or "").strip()
+    global_id = f"{unit_id}{slot}"
+    return {
+        "id": global_id,
+        "unit": unit_id,
+        "slot": slot,
+        "label": f"AMS {unit_id + 1} · слот {slot + 1}",
+        "type": material,
+        "color": _tray_color(_tray_color_raw(tray_raw)),
+        "remain": _tray_remain(tray_raw.get("remain")),
+        "uuid": uuid,
+        "nozzle_min": tray_raw.get("nozzle_temp_min"),
+        "nozzle_max": tray_raw.get("nozzle_temp_max"),
+        "active": str(tray_now) in (global_id, str(slot), str(unit_id * 4 + slot)),
+        "present": bool(present),
+        "bambulab": bool(bambulab),
+        "generic": bool(present) and not bool(bambulab),
+    }
+
+
+def parse_ams_trays(ams_raw: Any, vt_tray: Any = None) -> list[dict]:
+    """Нормализовать слоты AMS из MQTT-отчёта принтера.
+
+    Занятость берётся из ``tray_exist_bits``, RFID Bambu — из
+    ``tray_is_bbl_bits``. Сторонний пластик без RFID занимает слот, но
+    ``tray_type``/``tray_uuid`` часто пустые, а объект слота может
+    отсутствовать в ``tray[]`` — такие слоты всё равно попадают в снимок
+    как ``present=True, generic=True`` без подстановки PLA.
+
+    Без битов (старые отчёты, симулятор) слоты читаются только из
+    ``tray[]``: занят, если есть тип или RFID.
+    """
+    ams_raw = ams_raw if isinstance(ams_raw, dict) else {}
+    units = ams_raw.get("ams") if isinstance(ams_raw.get("ams"), list) else []
+    tray_now = str(ams_raw.get("tray_now", "") or "")
+    trays: list[dict] = []
+    for unit in units:
+        if not isinstance(unit, dict):
+            continue
+        unit_id = int(as_num(unit.get("id")))
+        raw_list = unit.get("tray") if isinstance(unit.get("tray"), list) else []
+        by_slot: dict[int, dict] = {}
+        for item in raw_list:
+            if not isinstance(item, dict):
+                continue
+            by_slot[int(as_num(item.get("id")))] = item
+        exist = _bit_mask(unit.get("tray_exist_bits")
+                          if unit.get("tray_exist_bits") not in (None, "")
+                          else ams_raw.get("tray_exist_bits"))
+        is_bbl = _bit_mask(unit.get("tray_is_bbl_bits")
+                           if unit.get("tray_is_bbl_bits") not in (None, "")
+                           else ams_raw.get("tray_is_bbl_bits"))
+        if exist is not None:
+            slot_ids = list(range(4))
+            extra = [sid for sid in by_slot if sid not in slot_ids]
+            slot_ids.extend(sorted(extra))
+        else:
+            slot_ids = sorted(by_slot)
+        for slot in slot_ids:
+            raw = by_slot.get(slot) or {}
+            uuid = _clean_tray_uuid(raw.get("tray_uuid") or raw.get("tag_uid"))
+            material = str(raw.get("tray_type") or raw.get("tray_sub_brands") or "").strip()
+            if exist is not None:
+                present = bool(exist & (1 << slot))
+            else:
+                present = bool(material or uuid)
+            if is_bbl is not None:
+                bambulab = bool(is_bbl & (1 << slot))
+            else:
+                bambulab = bool(uuid)
+            if exist is None and not raw:
+                continue
+            trays.append(_ams_tray_dict(unit_id, slot, raw, present, bambulab, tray_now))
+    if isinstance(vt_tray, dict):
+        uuid = _clean_tray_uuid(vt_tray.get("tray_uuid") or vt_tray.get("tag_uid"))
+        material = str(vt_tray.get("tray_type") or vt_tray.get("tray_sub_brands") or "").strip()
+        remain = _tray_remain(vt_tray.get("remain"))
+        if material or uuid or remain is not None:
+            trays.append({
+                "id": "254",
+                "unit": 255,
+                "slot": 254,
+                "label": "Внешний слот",
+                "type": material,
+                "color": _tray_color(_tray_color_raw(vt_tray)),
+                "remain": remain,
+                "uuid": uuid,
+                "nozzle_min": vt_tray.get("nozzle_temp_min"),
+                "nozzle_max": vt_tray.get("nozzle_temp_max"),
+                "active": str(tray_now) in ("254", "255"),
+                "present": True,
+                "bambulab": bool(uuid),
+                "generic": not bool(uuid),
+            })
+    return trays
+
+
 class BambuPrinter:
     """Подключение и телеметрия одного принтера.
 
@@ -554,14 +719,25 @@ class BambuPrinter:
                                     "target": slot, "curr_temp": 220, "tar_temp": 220}})
         elif name == "ams_filament":
             data = value or {}
+            tray_type = str(data.get("type") or "").strip().upper()
+            if not tray_type:
+                raise ValueError("Укажите тип пластика")
+            from .materials import MATERIALS, get_material
+            mat = MATERIALS.get(tray_type.replace(" ", "_").replace("-", "_"))
+            if mat is None:
+                looked = get_material(tray_type)
+                looked_name = str(looked.get("name") or "").upper().replace(" ", "_")
+                if looked_name in (tray_type, tray_type.replace(" ", "_"), tray_type.replace("-", "_")):
+                    mat = looked
+            nozzle = tuple((mat or {}).get("temp_nozzle") or (190, 240))
             self.publish({"print": {
                 "sequence_id": seq, "command": "ams_filament_setting",
                 "ams_id": int(as_num(data.get("ams_id"))), "tray_id": int(as_num(data.get("tray_id"))),
-                "tray_color": str(data.get("color", "FFFFFFFF")).lstrip("#").upper().ljust(8, "F")[:8],
-                "tray_type": str(data.get("type", "PLA")).upper(),
+                "tray_color": str(data.get("color") or "FFFFFFFF").lstrip("#").upper().ljust(8, "F")[:8],
+                "tray_type": tray_type,
                 "tray_info_idx": str(data.get("idx", "")),
-                "nozzle_temp_min": int(as_num(data.get("temp_min"), 190)),
-                "nozzle_temp_max": int(as_num(data.get("temp_max"), 240)),
+                "nozzle_temp_min": int(as_num(data.get("temp_min"), nozzle[0])),
+                "nozzle_temp_max": int(as_num(data.get("temp_max"), nozzle[1])),
                 "setting_id": str(data.get("setting_id", "")),
             }})
         elif name == "timelapse":

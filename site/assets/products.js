@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeText,
-  toast, fail, openModal, closeModal, confirmDanger, debounce } = U;
+  toast, fail, openModal, closeModal, confirmDanger, ask, debounce } = U;
 const { get, post } = PF.api;
 
 let data = { items: [], summary: {}, groups: [], warehouses: [], priceTypes: [], printGroups: [] };
@@ -355,8 +355,11 @@ function renderCards(list) {
         + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
         + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`)
       + '</div></article>';
-  }).join('') : emptyBox('▩', 'Номенклатура пуста',
-    'Добавьте товар — модель, нормативы печати и цену. Остальное система посчитает сама.');
+  }).join('') : (data.items.length
+    ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
+    : emptyBox('▩', 'Номенклатура пуста',
+      'Добавьте товар — модель, нормативы печати и цену. Остальное система посчитает сама.',
+      { label: '+ Товар', click: 'prod_add' }));
 }
 
 function renderTable(list) {
@@ -385,12 +388,17 @@ function renderTable(list) {
       + `<td class="right tnum muted">${disp ? '—' : nfmt(i.sold_7)}</td>`
       + `<td><span class="chip ${disp ? '' : (STATUS_CLASS[i.status] || '')}">${statusIc} ${esc(statusLabel)}</span></td>`
       + `<td class="right">${disp ? '<span class="muted">не печатается</span>' : `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button>`}</td></tr>`;
-  }).join('') : `<tr><td colspan="13">${emptyBox('▩', 'Ничего не найдено', 'Измените фильтры или добавьте товар.')}</td></tr>`;
+  }).join('') : `<tr><td colspan="13">${data.items.length
+    ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
+    : emptyBox('▩', 'Номенклатура пуста', 'Добавьте товар — модель и цену.', { label: '+ Товар', click: 'prod_add' })}</td></tr>`;
 }
 
-function emptyBox(icon, title, text) {
+function emptyBox(icon, title, text, cta) {
+  const btn = (cta && cta.label)
+    ? `<button class="btn sm primary" type="button" data-empty-click="${esc(cta.click)}">${esc(cta.label)}</button>`
+    : '';
   return `<div class="empty" style="grid-column:1/-1"><span class="big">${icon}</span>`
-    + `<b>${esc(title)}</b><span>${esc(text)}</span></div>`;
+    + `<b>${esc(title)}</b><span>${esc(text)}</span>${btn}</div>`;
 }
 
 /* ======================================================= карточка товара */
@@ -683,7 +691,8 @@ function renderBatches() {
         ? `<button class="btn sm danger" type="button" data-batch-cancel="${esc(b.id)}">Отменить</button>` : '')
       + '</div></div>';
   }).join('') : emptyBox('⎙', 'Партий пока нет',
-    'Нажмите «Напечатать партию» — система разложит нужное количество на запуски принтера.');
+    'Система разложит нужное количество на запуски принтера — без старта на станке.',
+    { label: '⎙ Напечатать партию', click: 'batch_add' });
 }
 
 async function openBatch(nomId) {
@@ -903,6 +912,80 @@ const DOC_ICONS = {
   return: '↩',
   pricing: '🏷',
 };
+const DOC_EVENT = {
+  receipt: { title: 'Получил товар', sub: 'Пришло от поставщика или с печати' },
+  sale: { title: 'Продал', sub: 'Ушло клиенту или с полки' },
+  move: { title: 'Переложил', sub: 'С одного места на другое' },
+  writeoff: { title: 'Списал', sub: 'Брак, порча, свои нужды' },
+  inventory: { title: 'Пересчитал остатки', sub: 'Факт не совпал с учётом' },
+  production: { title: 'Произвёл', sub: 'Готовое с принтера на склад' },
+  return: { title: 'Вернули', sub: 'Клиент принёс товар обратно' },
+  pricing: { title: 'Поменял цены', sub: 'Новый прайс без движения штук' },
+};
+
+let wizardKind = 'receipt';
+
+function openDocWizard() {
+  wizardKind = '';
+  const title = $('dw_title');
+  const sub = $('dw_sub');
+  if (title) title.textContent = 'Что произошло?';
+  if (sub) sub.textContent = 'Сначала событие, потом откуда-куда, затем что сдвинулось.';
+  $('dw_step1').hidden = false;
+  $('dw_step2').hidden = true;
+  $('dw_back').hidden = true;
+  $('dw_next').hidden = true;
+  $('dw_step1').innerHTML = Object.entries(DOC_EVENT).map(([k, e]) =>
+    `<button type="button" class="dw-card" data-dw-kind="${esc(k)}">`
+    + `<span class="dw-ic">${DOC_ICONS[k] || '📋'}</span>`
+    + `<b>${esc(e.title)}</b><small>${esc(e.sub)}</small></button>`).join('');
+  openModal('doc_wizard');
+}
+
+function wizardStep2(kind) {
+  wizardKind = kind;
+  const ev = DOC_EVENT[kind] || { title: DOC_KIND[kind] || 'Документ' };
+  $('dw_title').textContent = ev.title;
+  $('dw_sub').textContent = kind === 'pricing'
+    ? 'Цены поменяются без движения штук.'
+    : 'Откуда и куда. Что сдвинулось — на следующем экране.';
+  $('dw_step1').hidden = true;
+  $('dw_step2').hidden = false;
+  $('dw_back').hidden = false;
+  $('dw_next').hidden = false;
+  fillSelectors();
+  const copy = (from, to) => {
+    const a = $(from), b = $(to);
+    if (a && b) b.innerHTML = a.innerHTML;
+  };
+  copy('df_warehouse', 'dw_warehouse');
+  copy('df_warehouse_to', 'dw_warehouse_to');
+  copy('df_channel', 'dw_channel');
+  const retail = data.warehouses.find((w) => num(w.retail));
+  if (retail && $('dw_warehouse')) $('dw_warehouse').value = retail.id;
+  $('dw_wh2_wrap').hidden = kind !== 'move';
+  $('dw_channel_wrap').hidden = kind !== 'sale';
+  $('dw_wh_wrap').hidden = kind === 'pricing';
+  const labels = {
+    receipt: 'Куда положить', production: 'Куда положить', return: 'Куда вернуть',
+    move: 'Откуда', sale: 'Откуда ушло', writeoff: 'Откуда списать', inventory: 'Какой склад',
+  };
+  $('dw_wh_label').textContent = labels[kind] || 'Склад';
+  $('dw_step2_hint').textContent = kind === 'pricing'
+    ? 'Дальше выберите тип цен и позиции.'
+    : 'Дальше укажите, что сдвинулось — позиции документа.';
+}
+
+async function wizardFinish() {
+  const kind = wizardKind || 'receipt';
+  const preset = {
+    warehouse_id: ($('dw_warehouse') || {}).value || '',
+    warehouse_to_id: ($('dw_warehouse_to') || {}).value || '',
+    channel: ($('dw_channel') || {}).value || '',
+  };
+  closeModal('doc_wizard');
+  await openDoc(null, kind, preset);
+}
 
 function renderDocs() {
   $('doc_tbody').innerHTML = docsData.length ? docsData.map((d) => {
@@ -918,7 +1001,9 @@ function renderDocs() {
       + `<td class="right tnum">${num(d.amount) ? money(d.amount) : '—'}</td>`
       + `<td><span class="chip ${posted ? 'ok' : 'warn'}">${posted ? '✓ Проведён' : '✎ Черновик'}</span></td>`
       + `<td class="right"><button class="icon-btn sm" type="button" data-doc-open="${esc(d.id)}">→</button></td></tr>`;
-  }).join('') : `<tr><td colspan="9">${emptyBox('▤', 'Документов нет', 'Создайте приход, продажу или инвентаризацию.')}</td></tr>`;
+  }).join('') : `<tr><td colspan="9">${emptyBox('▤', 'Документов нет',
+    'Скажите, что произошло — приход, продажа или пересчёт.',
+    { label: '+ Что произошло', click: 'doc_add' })}</td></tr>`;
 }
 
 function docKindSetup(kind) {
@@ -938,7 +1023,7 @@ function docKindSetup(kind) {
     : 'Позиции документа';
 }
 
-async function openDoc(id, kind) {
+async function openDoc(id, kind, preset) {
   editingDoc = id || null;
   fillSelectors();
   let doc = null;
@@ -962,7 +1047,10 @@ async function openDoc(id, kind) {
     $('df_note').value = doc.note || '';
   } else {
     const retail = data.warehouses.find((w) => num(w.retail));
-    if (retail) $('df_warehouse').value = retail.id;
+    const from = (preset && preset.warehouse_id) || (retail && retail.id) || '';
+    if (from) $('df_warehouse').value = from;
+    if (preset && preset.warehouse_to_id) $('df_warehouse_to').value = preset.warehouse_to_id;
+    if (preset && preset.channel) $('df_channel').value = preset.channel;
     $('df_reason').value = '';
     $('df_note').value = '';
   }
@@ -973,11 +1061,16 @@ async function openDoc(id, kind) {
   renderDocRows();
 
   const posted = doc && doc.state === 'posted';
+  const human = DOC_EVENT[k];
+  $('doc_modal_kind').textContent = (human && human.title) || DOC_KIND[k] || 'Документ';
   $('doc_modal_title').textContent = doc
-    ? `${DOC_KIND[k]} ${doc.number}` : `Новый документ: ${DOC_KIND[k]}`;
+    ? `${DOC_KIND[k]} ${doc.number}`
+    : (human ? human.title : `Новый документ: ${DOC_KIND[k]}`);
   $('doc_modal_sub').textContent = posted
     ? 'Документ проведён — движения выполнены. Для правки отмените проведение.'
-    : 'Черновик не меняет остатки — движения появятся при проведении';
+    : (doc
+      ? 'Черновик не меняет остатки — движения появятся при проведении'
+      : 'Что сдвинулось — укажите позиции. Проведение подтверждается отдельно.');
   $('doc_post').hidden = !!posted;
   $('doc_save').hidden = !!posted;
   $('doc_unpost').hidden = !posted;
@@ -1093,7 +1186,8 @@ async function renderWarehouses() {
       + (w.note ? `<small class="muted wh-note" title="${esc(w.note)}">${esc(w.note)}</small>` : '')
       + `</div></article>`;
   }).join('')
-    : emptyBox('▦', 'Складов нет', 'Добавьте место хранения — полку магазина или домашний склад.');
+    : emptyBox('▦', 'Складов нет', 'Добавьте место хранения — полку магазина или домашний склад.',
+      { label: '+ Склад', click: 'wh_add' });
 
   const reserves = res.reserves || [];
   $('wh_reserves').innerHTML = reserves.length ? reserves.map((r) =>
@@ -1361,7 +1455,12 @@ function bind() {
         // Смешанная партия: принимаем целыми плитами — каждый товар своим количеством.
         const perPlate = mixedList.reduce((s, r) => s + num(r.qty_per_plate), 0);
         const maxPlates = Math.max(1, Math.ceil(Math.max(0, num(b.qty_planned) - num(b.qty_done)) / Math.max(1, perPlate)));
-        const answer = window.prompt(`Сколько ПЛИТ оприходовать? (на плите ${perPlate} шт, осталось ~${maxPlates})`, '1');
+        const answer = await ask({
+          title: 'Принять плиты',
+          sub: `На плите ${perPlate} шт · осталось ~${maxPlates}`,
+          fields: [{ name: 'plates', label: 'Сколько плит', type: 'number', value: '1', min: 1, step: 1 }],
+          ok: 'Оприходовать',
+        });
         if (answer == null) return;
         const plates = Math.min(maxPlates, Math.max(0, Math.round(num(answer))));
         if (!plates) return;
@@ -1377,8 +1476,12 @@ function bind() {
         return;
       }
       const rest = Math.max(0, num(b.qty_planned) - num(b.qty_done));
-      const answer = window.prompt(
-        `Сколько годных штук принять на склад?\nОсталось по плану: ${rest} шт`, String(rest));
+      const answer = await ask({
+        title: 'Принять на склад',
+        sub: `Осталось по плану: ${rest} шт`,
+        fields: [{ name: 'qty', label: 'Годных штук', type: 'number', value: String(rest), min: 0, step: 'any' }],
+        ok: 'Принять',
+      });
       if (answer === null) return;
       const qty = num(answer);
       if (qty <= 0) return;
@@ -1417,7 +1520,13 @@ function bind() {
   $('plan_create').addEventListener('click', createFromPlan);
 
   // --- документы
-  $('doc_add').addEventListener('click', () => openDoc(null, $('doc_new_kind').value));
+  $('doc_add').addEventListener('click', openDocWizard);
+  $('dw_step1').addEventListener('click', (e) => {
+    const card = e.target.closest('[data-dw-kind]');
+    if (card) wizardStep2(card.dataset.dwKind);
+  });
+  $('dw_back').addEventListener('click', () => openDocWizard());
+  $('dw_next').addEventListener('click', wizardFinish);
   $('doc_search').addEventListener('input', debounce(refreshDocs, 250));
   ['doc_filter_kind', 'doc_filter_state'].forEach((id) =>
     $(id).addEventListener('change', refreshDocs));
@@ -1541,7 +1650,11 @@ function bind() {
 
   // --- типы цен
   $('ptype_add').addEventListener('click', async () => {
-    const name = window.prompt('Название типа цен:', 'Новый тип');
+    const name = await ask({
+      title: 'Тип цен',
+      fields: [{ name: 'name', label: 'Название', type: 'text', value: 'Новый тип' }],
+      ok: 'Создать',
+    });
     if (!name) return;
     try {
       await post('/api/price-type/save', { name, markup: 100 });
@@ -1587,5 +1700,5 @@ setInterval(() => {
   if (document.querySelector('#view-batches.on')) refreshBatches();
 }, 30000);
 
-PF.modules.products = { refresh, openNom, openBatch, openDoc, openQuickSale, openPlan };
+PF.modules.products = { refresh, openNom, openBatch, openDoc, openDocWizard, openQuickSale, openPlan };
 })();

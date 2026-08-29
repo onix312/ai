@@ -466,6 +466,30 @@ details.nav-more:not([open]) > summary.nav-group-title::after { content: "▸"; 
   margin: 0 auto 2px; font-size: 20px;
 }
 .empty.compact { padding: 16px; font-size: 12.5px; }
+.empty .btn { margin-top: 8px; }
+
+/* Мастер документа: что произошло (П21) */
+.dw-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.dw-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  text-align: left; padding: 14px 14px 12px;
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--panel-2); color: var(--text);
+  min-height: 88px; cursor: pointer;
+  transition: border-color .16s var(--ease), background .16s var(--ease), transform .12s var(--ease);
+}
+.dw-card:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+.dw-card:active { transform: scale(.98); }
+.dw-card .dw-ic { font-size: 20px; line-height: 1; }
+.dw-card b { font-size: 14px; font-weight: 640; }
+.dw-card small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+@media (max-width: 700px) {
+  .dw-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* ------------------------------------------------------------ формы */
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }

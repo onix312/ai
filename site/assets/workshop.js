@@ -1,7 +1,7 @@
 /* PrintFlow 9.0 — цех: смена, поставщики, пресеты плиты. */
 (() => {
 'use strict';
-const U = PF.ui, { $, esc, num, money, nfmt, toast, fail } = U;
+const U = PF.ui, { $, esc, num, money, nfmt, toast, fail, ask } = U;
 const { get, post } = PF.api;
 
 async function loadShift() {
@@ -37,7 +37,8 @@ async function loadSuppliers() {
       + `<small>${num(s.price_per_kg) ? money(s.price_per_kg) + '/кг' : 'нет цены'} ${esc(s.url || '')}</small></div>`
       + `<button class="btn sm" type="button" data-sup-apply="${esc(s.id)}">На катушки</button>`
       + `<button class="icon-btn sm" type="button" data-sup-del="${esc(s.id)}">×</button></div>`
-    ).join('') : '<div class="empty compact"><span>Поставщиков пока нет.</span></div>';
+    ).join('') : '<div class="empty compact"><span>Поставщиков пока нет.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="supplier_add">+ Поставщик</button></div>';
     host.querySelectorAll('[data-sup-apply]').forEach((b) => b.addEventListener('click', async () => {
       try {
         const res = await post('/api/workshop/supplier/apply-price', { id: b.dataset.supApply });
@@ -77,7 +78,8 @@ async function loadPresets() {
       ].filter(Boolean).join(' · ');
       return `<div class="tx-row"><div class="tx-body"><b>${esc(p.name)}</b><small>${esc(bits)}</small></div>`
         + `<button class="icon-btn sm" type="button" data-pp-del="${esc(p.id)}">×</button></div>`;
-    }).join('') : '<div class="empty compact"><span>Пресетов нет — сохраните настройки плиты.</span></div>';
+    }).join('') : '<div class="empty compact"><span>Пресетов нет — сохраните настройки плиты.</span>'
+      + '<button class="btn sm primary" type="button" data-empty-click="preset_add">+ Пресет</button></div>';
     host.querySelectorAll('[data-pp-del]').forEach((b) => b.addEventListener('click', async () => {
       try { await post('/api/workshop/preset/delete', { id: b.dataset.ppDel }); loadPresets(); }
       catch (e) { fail(e); }
@@ -92,19 +94,28 @@ function bind() {
   if (shiftBtn) shiftBtn.addEventListener('click', loadShift);
   const addSup = $('supplier_add');
   if (addSup) addSup.addEventListener('click', async () => {
-    const name = window.prompt('Название поставщика');
-    if (!name) return;
-    const price = window.prompt('Цена ₽/кг', '1600');
-    if (price == null) return;
+    const ans = await ask({
+      title: 'Поставщик пластика',
+      fields: [
+        { name: 'name', label: 'Название', type: 'text', placeholder: 'Поставщик' },
+        { name: 'price', label: 'Цена, ₽/кг', type: 'number', value: '1600', min: 0 },
+      ],
+      ok: 'Сохранить',
+    });
+    if (!ans || !ans.name) return;
     try {
-      await post('/api/workshop/supplier/save', { name, price_per_kg: num(price) });
-      toast('Поставщик сохранён', name);
+      await post('/api/workshop/supplier/save', { name: ans.name, price_per_kg: num(ans.price) });
+      toast('Поставщик сохранён', ans.name);
       loadSuppliers();
     } catch (e) { fail(e); }
   });
   const addPp = $('preset_add');
   if (addPp) addPp.addEventListener('click', async () => {
-    const name = window.prompt('Название пресета плиты', 'Обычная плита');
+    const name = await ask({
+      title: 'Пресет плиты',
+      fields: [{ name: 'name', label: 'Название', type: 'text', value: 'Обычная плита' }],
+      ok: 'Сохранить',
+    });
     if (!name) return;
     try {
       await post('/api/workshop/preset/save', {

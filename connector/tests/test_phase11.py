@@ -357,6 +357,23 @@ class SpaghettiExtTests(unittest.TestCase):
         self.assertGreater(ratio, 50)
         self.assertEqual(frame_diff_ratio(b"junk", bb.getvalue()), None)
 
+    def test_inspect_bed_clear(self):
+        from connector.printflow.spaghetti import inspect_bed_clear
+        empty = inspect_bed_clear(None, None)
+        self.assertTrue(empty["ok"])
+        self.assertEqual(empty["code"], "bed_no_ref")
+        no_cam = inspect_bed_clear(None, b"ref")
+        self.assertTrue(no_cam["ok"])
+        self.assertEqual(no_cam["code"], "bed_no_camera")
+        with mock.patch("connector.printflow.spaghetti.frame_diff_ratio", return_value=40.0):
+            dirty = inspect_bed_clear(b"frame", b"ref", threshold=6.0)
+        self.assertFalse(dirty["ok"])
+        self.assertEqual(dirty["code"], "bed_dirty")
+        with mock.patch("connector.printflow.spaghetti.frame_diff_ratio", return_value=2.0):
+            clean = inspect_bed_clear(b"frame", b"ref", threshold=6.0)
+        self.assertTrue(clean["ok"])
+        self.assertEqual(clean["code"], "bed_clear")
+
 
 class PhotosSearchTests(unittest.TestCase):
     def setUp(self):

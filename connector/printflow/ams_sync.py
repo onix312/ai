@@ -59,7 +59,31 @@ def _normalize_hex(value: str) -> str:
 
 def _clean_uuid(value: Any) -> str:
     text = str(value or "").strip()
-    return "" if not text or set(text) == {"0"} else text
+    return "" if not text or set(text) <= {"0"} else text
+
+
+def _tray_occupied(tray: dict) -> bool:
+    """Слот занят катушкой — в том числе сторонней без RFID и без типа."""
+    if tray.get("present") is False:
+        return False
+    if tray.get("present") is True or tray.get("generic") is True:
+        return True
+    if str(tray.get("type") or "").strip():
+        return True
+    if _clean_uuid(tray.get("uuid")):
+        return True
+    return False
+
+
+def _tray_generic(tray: dict) -> bool:
+    """Сторонний пластик: нет RFID Bambu, слот при этом занят."""
+    if tray.get("generic") is True:
+        return True
+    if tray.get("bambulab") is True:
+        return False
+    if tray.get("present") is True and not _clean_uuid(tray.get("uuid")):
+        return True
+    return False
 
 
 def sync_printer_info(db, printer_id: str, snap: dict) -> bool:
@@ -92,12 +116,13 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
     for tray in trays:
         tray_uuid = _clean_uuid(tray.get("uuid"))
         material = str(tray.get("type") or "").strip()
-        if not material and not tray_uuid:
+        if not _tray_occupied(tray):
             continue  # пустой слот
         slot = "" if tray.get("slot") is None else str(tray.get("slot"))
         label = tray.get("label") or (f"Слот {slot}" if slot else "AMS")
         remain = tray.get("remain")
         color = _normalize_hex(str(tray.get("color") or ""))
+        generic = _tray_generic(tray)
 
         # 1) ищем катушку по RFID-метке, затем по привязке принтер+слот
         spool = None
@@ -110,7 +135,11 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 (printer_id, slot))
             if by_slot:
                 old_uuid = _clean_uuid(by_slot.get("tray_uuid"))
-                if tray_uuid and old_uuid and old_uuid != tray_uuid:
+                swapped = bool(tray_uuid and old_uuid and old_uuid != tray_uuid)
+                # RFID-катушку сняли, вставили стороннюю без метки — это другая
+                # физическая катушка, старую не обновляем под generic.
+                replaced_by_generic = bool(old_uuid and not tray_uuid and generic)
+                if swapped or replaced_by_generic:
                     # В слоте теперь другая катушка: старую отвязываем,
                     # ниже заведём новую. Остаток старой не трогаем.
                     db.execute(
@@ -133,6 +162,11 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
             if tray_uuid and tray_uuid != _clean_uuid(spool.get("tray_uuid")):
                 updates.append("tray_uuid=?")
                 params.append(tray_uuid)
+            # Тип из AMS заполняем только если у катушки его ещё нет:
+            # автосозданный generic без RFID ждёт кнопку «Тип», ручной выбор не затираем.
+            if material and not str(spool.get("material") or "").strip():
+                updates.append("material=?")
+                params.append(material)
             if str(spool.get("printer_id") or "") != printer_id:
                 updates.append("printer_id=?")
                 params.append(printer_id)

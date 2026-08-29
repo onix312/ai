@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const { $, esc, num, money, nfmt, toast, fail, agoText } = PF.ui;
+const { $, esc, num, money, nfmt, toast, fail, agoText, ask } = PF.ui;
 const { get, post } = PF.api;
 
 const COMMANDS = [
@@ -407,7 +407,16 @@ async function paymentAction(button) {
   if (action === 'confirm' && !window.confirm('Подтвердить оплату и записать платёж в кассу?')) return;
   let reason = '';
   if (action === 'reject') {
-    reason = window.prompt('Причина отклонения (необязательно):', 'Оплата не подтверждена') || 'Оплата не подтверждена';
+    const typed = await ask({
+      title: 'Отклонить оплату',
+      fields: [{
+        name: 'reason', label: 'Причина', type: 'text',
+        value: 'Оплата не подтверждена', required: false,
+      }],
+      ok: 'Отклонить',
+    });
+    if (typed == null) return;
+    reason = String(typed).trim() || 'Оплата не подтверждена';
   }
   try {
     button.disabled = true;

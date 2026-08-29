@@ -1556,6 +1556,11 @@ class Database:
                 ModelRegistry(self).ensure_schema()
             except Exception:
                 pass
+            try:
+                from .library import FileLibrary
+                FileLibrary(self).ensure_schema()
+            except Exception:
+                pass
         except Exception:
             self.conn.close()
             raise
