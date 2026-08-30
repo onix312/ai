@@ -27,7 +27,7 @@ from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = """PrintFlow 8.2 — панель в кармане.
+HELP = f"""PrintFlow {APP_VERSION} — панель в кармане.
 
 Кнопки внизу или команды (без слэша, в любом регистре):
 • панель — всё сразу: печать, деньги, план, долги
