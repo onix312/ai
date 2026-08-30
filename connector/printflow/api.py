@@ -1398,7 +1398,8 @@ class Api:
                     " ORDER BY datetime(COALESCE(r.created_at,r.asked_at)) DESC LIMIT 30"),
                 "orders": self.db.query(
                     "SELECT l.number, l.order_id, l.created_at linked_at,"
-                    " l.source, o.product, o.status, o.price, c.name,"
+                    " l.source, o.product, o.status, o.price,"
+                    " o.cancel_requested_at, c.name,"
                     " (SELECT COUNT(*) FROM order_photos p"
                     " WHERE p.order_id=l.order_id) photos"
                     " FROM client_orders l"
@@ -3214,6 +3215,37 @@ class Api:
             self._audit("client_review", f"{order_id}:{chat_id}", "resolve", "Отзыв отмечен обработанным", note,
                         actor=str(body.get("actor") or "panel"))
             return 200, {"ok": True}
+        if path == "/api/client-bot/review/reply":
+            # 12.1 (КБ4): ответ покупателю на отзыв — текст уходит в чат,
+            # отзыв помечается отвеченным.
+            chat_id = str(body.get("chat_id") or "").strip()
+            order_id = str(body.get("order_id") or "").strip()
+            text = str(body.get("text") or "").strip()
+            actor = str(body.get("actor") or "panel")[:120]
+            if not chat_id or not order_id:
+                raise ValueError("Укажите order_id и chat_id")
+            if not text:
+                raise ValueError("Введите текст ответа")
+            review = self.db.one(
+                "SELECT * FROM client_reviews WHERE order_id=? AND chat_id=?",
+                (order_id, chat_id))
+            if not review:
+                raise ValueError("Отзыв не найден")
+            client = getattr(self.manager, "client_bot", None)
+            if not client:
+                raise ValueError("Клиентский бот не запущен")
+            client._reply_keyed(chat_id, text[:1500], client._menu(),
+                                dedupe_key=f"reviewreply:{order_id}:{chat_id}")
+            client._log(chat_id, "", "← ответ на отзыв", text[:1500],
+                        kind="answer", direction="out", unread=0,
+                        order_id=order_id, operator=actor)
+            self.db.execute(
+                "UPDATE client_reviews SET state='answered',operator_note=?,"
+                "resolved_at=? WHERE order_id=? AND chat_id=?",
+                (text[:500], now_iso(), order_id, chat_id))
+            self._audit("client_review", f"{order_id}:{chat_id}", "reply",
+                        "Ответ на отзыв отправлен покупателю", text[:400], actor=actor)
+            return 200, {"ok": True}
         if path == "/api/client-bot/broadcast":
             if not bool(self.db.setting("client_bot_marketing_enabled", False)):
                 raise ValueError("Рассылки выключены в настройках")
@@ -3243,7 +3275,10 @@ class Api:
                     " VALUES(?,?,?,?,?)",
                     (request_id, text[:3800], "marketing_opt_in", stamp, stamp))
                 sent = skipped = 0
-                for chat in self.db.query("SELECT * FROM client_chats WHERE marketing_opt_in=1"):
+                # 12.1: заблокированные чаты из рассылки исключаются (КБ6)
+                for chat in self.db.query(
+                        "SELECT * FROM client_chats WHERE marketing_opt_in=1"
+                        " AND COALESCE(banned,0)=0"):
                     if client._in_quiet_hours(chat):
                         skipped += 1
                         continue

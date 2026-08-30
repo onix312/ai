@@ -228,7 +228,7 @@ function renderOrders(items) {
   if (!host) return;
   const rows = Array.isArray(items) ? items : [];
   host.innerHTML = rows.length ? rows.map((item) => `<tr><td><b>№${esc(item.number || '')}</b></td>`
-    + `<td>${esc(item.product || 'Индивидуальная заявка')}${num(item.photos) ? ' 📎' : ''}</td>`
+    + `<td>${esc(item.product || 'Индивидуальная заявка')}${num(item.photos) ? ' 📎' : ''}${item.cancel_requested_at ? ' ✖️ просит отмену' : ''}</td>`
     + `<td>${esc(text(item.name))}</td><td><span class="status-dot">${esc(statusName(item.status))}</span></td>`
     + `<td class="right">${num(item.price) ? money(item.price) : '—'}</td>`
     + `<td class="muted">${esc(item.source || 'direct')}</td><td class="muted">${esc(dt(item.linked_at))}</td></tr>`).join('')
@@ -241,11 +241,19 @@ function renderReviews(items) {
   const rows = Array.isArray(items) ? items : [];
   host.innerHTML = rows.length ? rows.map((item) => {
     const rating = item.rating === 'good' ? '👍 Хорошо' : item.rating === 'bad' ? '👎 Проблема' : '—';
-    const action = item.state === 'resolved' ? '<span class="tag ok">обработан</span>'
+    const stateTag = item.state === 'resolved'
+      ? '<span class="tag ok">обработан</span>'
+      : item.state === 'answered' ? '<span class="tag ok">отвечен</span>'
+        : '<span class="tag warn">в работе</span>';
+    // КБ4: быстрый ответ покупателю прямо из строки отзыва
+    const replyBox = (item.state === 'resolved' || item.state === 'answered') ? ''
+      : `<div class="clientbot-review-reply"><input type="text" maxlength="3800" data-review-reply-text placeholder="Ответ покупателю…" data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">`
+        + `<button class="btn sm primary" type="button" data-review-reply data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">Ответить</button></div>`;
+    const action = item.state === 'resolved' ? '<span class="tag ok">закрыт</span>'
       : `<button class="btn sm" type="button" data-review-resolve data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">Закрыть</button>`;
     return `<tr><td><b>№${esc(item.number || item.order_id || '')}</b><br><small class="muted">${esc(item.product || '')}</small></td>`
-      + `<td>${esc(rating)}</td><td>${esc(item.comment || '—')}</td>`
-      + `<td><span class="tag ${item.state === 'resolved' ? 'ok' : 'warn'}">${esc(item.state === 'resolved' ? 'обработан' : 'в работе')}</span></td>`
+      + `<td>${esc(rating)}</td><td>${esc(item.comment || '—')}${replyBox}</td>`
+      + `<td>${stateTag}</td>`
       + `<td class="muted">${esc(dt(item.created_at || item.asked_at))}</td><td>${action}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">Отзывов ещё нет: вопрос отправляется после фактической выдачи.</td></tr>';
 }
@@ -258,7 +266,7 @@ function renderChats(items) {
     + `<br><small class="muted">${item.username ? '@' + esc(item.username) : 'без username'}</small></td>`
     + `<td>${esc(item.tg_user_id || item.chat_id || '—')}</td><td>${esc(item.phone || '—')}</td>`
     + `<td class="right">${nfmt(item.orders)}</td>`
-    + `<td class="muted">${Number(item.marketing_opt_in) ? 'рассылка' : 'только сервис'} · ${Number(item.status_notify) ? 'статусы' : 'без статусов'}</td>`
+    + `<td class="muted">${Number(item.banned) ? '⛔️ заблокирован · ' : ''}${Number(item.marketing_opt_in) ? 'рассылка' : 'только сервис'} · ${Number(item.status_notify) ? 'статусы' : 'без статусов'}</td>`
     + `<td class="muted">${esc(dt(item.last_seen))}</td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">Покупатели ещё не писали.</td></tr>';
 }
@@ -499,6 +507,25 @@ async function resolveReview(button) {
   finally { button.disabled = false; }
 }
 
+async function reviewReply(button) {
+  // КБ4: ответ на отзыв уходит покупателю в чат клиентского бота
+  const input = document.querySelector(
+    `[data-review-reply-text][data-chat-id="${button.dataset.chatId}"][data-order-id="${button.dataset.orderId}"]`);
+  const text = input ? input.value.trim() : '';
+  if (!text) { toast('Сначала введите текст ответа'); return; }
+  try {
+    button.disabled = true;
+    await post('/api/client-bot/review/reply', {
+      order_id: button.dataset.orderId,
+      chat_id: button.dataset.chatId,
+      text, actor: 'panel',
+    });
+    toast('Ответ отправлен покупателю');
+    await renderBot();
+  } catch (error) { fail(error); }
+  finally { button.disabled = false; }
+}
+
 async function broadcast() {
   const input = $('cb_broadcast_text');
   const value = input && input.value.trim();
@@ -600,8 +627,16 @@ function bind() {
     if (button) paymentAction(button);
   });
   $('cb_reviews')?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-review-resolve]');
-    if (button) resolveReview(button);
+    const button = event.target.closest('button');
+    if (button && button.matches('[data-review-resolve]')) resolveReview(button);
+    if (button && button.matches('[data-review-reply]')) reviewReply(button);
+  });
+  $('cb_reviews')?.addEventListener('keyup', (event) => {
+    if (event.key !== 'Enter' || !event.target.matches('[data-review-reply-text]')) return;
+    const chatId = event.target.dataset.chatId;
+    const orderId = event.target.dataset.orderId;
+    const button = document.querySelector(`[data-review-reply][data-chat-id="${chatId}"][data-order-id="${orderId}"]`);
+    if (button) reviewReply(button);
   });
   bindStaff();
 }

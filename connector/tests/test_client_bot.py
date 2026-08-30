@@ -990,3 +990,163 @@ class ClientBot12Tests(unittest.TestCase):
 
     def test_stats_has_sla(self):
         self.assertIn("sla_minutes", self.bot.stats())
+
+
+class ClientBot121Tests(unittest.TestCase):
+    """12.1 — управление заказом из чата, блокировки, кнопки мастеру."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.manager = PrinterManager(self.db, Repo(self.db))
+        self.bot = self.manager.client_bot
+        self.row = self.db.upsert("client_chats", {
+            "chat_id": "555", "name": "Иван", "username": "ivan",
+            "created_at": "2026-08-24T10:00:00",
+            "last_seen": "2026-08-24T12:00:00"}, key="chat_id")
+
+    def tearDown(self):
+        self.manager.shutdown()
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _notify(self):
+        out: list[tuple[str, bytes | None, list, bool]] = []
+        self.manager.notify_async = (
+            lambda text, photo=None, buttons=None, critical=False:
+            out.append((text, photo, buttons or [], critical)))
+        return out
+
+    def _own_order(self, number="1001", status="new"):
+        self.db.execute(
+            "INSERT INTO orders(id,number,product,status,price,created_at,"
+            "updated_at) VALUES(?,?, 'крючок', ?, 500, '2026-08-24T10:00:00',"
+            "'2026-08-24T10:00:00')", (f"o{number}", number, status))
+        self.db.execute(
+            "INSERT INTO client_orders(chat_id,order_id,number,created_at)"
+            " VALUES('555',?,?,'2026-08-24T10:00:00')", (f"o{number}", number))
+        return self.db.one("SELECT * FROM orders WHERE id=?", (f"o{number}",))
+
+    def _wire(self):
+        sent: list[str] = []
+        self.bot._reply = lambda chat, text, buttons=None: sent.append(text)
+        self.bot._reply_keyed = (
+            lambda chat, text, buttons=None, dedupe_key="": sent.append(text))
+        return sent
+
+    # --------------------------------------------------------- КБ7: дополнить
+    def test_supplement_flow(self):
+        notified = self._notify()
+        order = self._own_order("1001", status="estimate")
+        keys = self.bot._order_card_keyboard(order)["inline_keyboard"]
+        flat = [b["callback_data"] for row in keys for b in row]
+        self.assertIn("supplement:o1001", flat)
+        text, _ = self.bot._run_callback("555", self.row, "supplement:o1001")
+        self.assertIn("что добавить", text)
+        answer, _ = self.bot._dispatch("555", self.row, "материал PETG, чёрный")
+        self.assertIn("Передал мастеру", answer)
+        order = self.db.one("SELECT * FROM orders WHERE id='o1001'")
+        self.assertIn("Дополнение покупателя: материал PETG", order["notes"])
+        self.assertTrue(any("Дополнение" in n[0] for n in notified))
+        # ожидание снято: следующее сообщение — обычный разбор
+        answer, _ = self.bot._dispatch("555", self.row, "спасибо большое")
+        self.assertIn("Не понял", answer)
+
+    def test_supplement_final_order_refused(self):
+        self._own_order("1001", status="done")
+        text, _ = self.bot._run_callback("555", self.row, "supplement:o1001")
+        self.assertIn("не дополнить", text)
+
+    # ---------------------------------------------------------- КБ8: отмена
+    def test_cancel_request_flow(self):
+        notified = self._notify()
+        self._own_order("1001", status="new")
+        keys = self.bot._order_card_keyboard(
+            self.db.one("SELECT * FROM orders WHERE id='o1001'"))["inline_keyboard"]
+        flat = [b["callback_data"] for row in keys for b in row]
+        self.assertIn("cancelreq:o1001", flat)
+        text, _ = self.bot._run_callback("555", self.row, "cancelreq:o1001")
+        self.assertIn("Передал мастеру", text)
+        order = self.db.one("SELECT * FROM orders WHERE id='o1001'")
+        self.assertTrue(order["cancel_requested_at"])
+        self.assertIn("запросил отмену", order["notes"])
+        self.assertTrue(any("просит отменить" in n[0] for n in notified))
+        self.assertTrue(any(n[3] for n in notified))  # critical=True
+        # повтор — идемпотентно
+        text, _ = self.bot._run_callback("555", self.row, "cancelreq:o1001")
+        self.assertIn("уже передан", text)
+
+    def test_cancel_refused_when_printing(self):
+        self._own_order("1001", status="printing")
+        text, _ = self.bot._run_callback("555", self.row, "cancelreq:o1001")
+        self.assertIn("уже в работе", text)
+        order = self.db.one("SELECT * FROM orders WHERE id='o1001'")
+        self.assertFalse(order["cancel_requested_at"])
+
+    # ------------------------------------------------------ КБ11: перенос
+    def test_pickup_later_flow(self):
+        notified = self._notify()
+        self._own_order("1001", status="ready")
+        keys = self.bot._order_card_keyboard(
+            self.db.one("SELECT * FROM orders WHERE id='o1001'"))["inline_keyboard"]
+        flat = [b["callback_data"] for row in keys for b in row]
+        self.assertIn("pickuplater:o1001", flat)
+        text, _ = self.bot._run_callback("555", self.row, "pickuplater:o1001")
+        self.assertIn("когда удобно", text)
+        answer, _ = self.bot._dispatch("555", self.row, "смогу в пятницу после 18")
+        self.assertIn("Передал мастеру", answer)
+        order = self.db.one("SELECT * FROM orders WHERE id='o1001'")
+        self.assertIn("Перенос выдачи: смогу в пятницу", order["notes"])
+        self.assertTrue(any("переносит выдачу" in n[0] for n in notified))
+
+    def test_pickup_later_only_when_ready(self):
+        self._own_order("1001", status="printing")
+        text, _ = self.bot._run_callback("555", self.row, "pickuplater:o1001")
+        self.assertIn("статусе «Готов»", text)
+
+    # ------------------------------------------------------- КБ6: блокировка
+    def test_banned_chat_is_silently_ignored(self):
+        self._own_order("1001", status="new")
+        self.db.execute("UPDATE client_chats SET banned=1 WHERE chat_id='555'")
+        sent = self._wire()
+        update = {"update_id": 9, "message": {
+            "chat": {"id": 555, "type": "private"}, "message_id": 1,
+            "from": {"id": 777, "first_name": "Иван"},
+            "text": "каталог"}}
+        handled = self.bot._handle(update, dedupe=False)
+        self.assertTrue(handled)
+        self.assertEqual(sent, [])
+        # статусы заблокированному тоже не уходят
+        self.db.execute(
+            "UPDATE client_orders SET last_notified_status='printing'"
+            " WHERE order_id='o1001'")
+        self.db.execute("UPDATE orders SET status='ready' WHERE id='o1001'")
+        self.bot._maybe_push_statuses()
+        self.assertEqual(sent, [])
+
+    # -------------------------------------------------------- КБ2: кнопки
+    def test_master_reply_buttons_from_own_templates(self):
+        # в настройках уже есть стартовые шаблоны — кнопки берутся из них
+        buttons = self.bot.master_reply_buttons("555")
+        self.assertEqual(len(buttons), 2)
+        for label, data in buttons:
+            self.assertTrue(data.startswith("cbot_tpl:555:"))
+        self.assertTrue(any(d.endswith(":tpl_quote") for _l, d in buttons))
+
+    def test_master_reply_buttons_fall_back_to_library(self):
+        # свои шаблоны удалены — кнопки из встроенной библиотеки (КБ2/К18)
+        self.db.set_settings({"client_bot_templates": []})
+        buttons = self.bot.master_reply_buttons("555")
+        self.assertEqual(len(buttons), 3)
+        self.assertTrue(any(d.endswith(":tpl_price_ready") for _l, d in buttons))
+
+    def test_master_reply_buttons_prefer_own_templates(self):
+        self.bot.save_template(name="Свой ответ", text="Готово")
+        labels = [label for label, _d in self.bot.master_reply_buttons("555")]
+        self.assertIn("Свой ответ", labels)
+
+    def test_alert_master_carries_buttons(self):
+        captured = self._notify()
+        self.bot._alert_master("555", self.row, "сколько стоит доставка?")
+        self.assertEqual(len(captured), 1)
+        self.assertTrue(captured[0][2])  # buttons не пустые

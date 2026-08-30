@@ -61,6 +61,9 @@ HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 • мои заказы — статусы ваших заказов и счётчик до скидки
 • статус 1001 — статус заказа по номеру
 • как получить — адрес, часы и сколько храним готовый заказ
+• дополнить заявку — кнопка в карточке: размеры и детали после отправки
+• отменить заказ — запрос отмены до старта печати (решает мастер)
+• не могу забрать сегодня — перенос выдачи готового заказа
 • отзывы — что говорят покупатели
 • телефон +7… — привязать телефон к заказам с полки
 • оператор — связаться с мастерской, ответит человек
@@ -189,6 +192,10 @@ class ClientBot:
         # чаты, где ждём описание проблемы после оценки «не очень»:
         # {chat: (order_id, до какого времени)}
         self._await_problem: dict[str, tuple[str, float]] = {}
+        # 12.1: чаты, где ждём текст после кнопок «Дополнить заявку» (КБ7)
+        # и «Не могу забрать сегодня» (КБ11)
+        self._await_supplement: dict[str, tuple[str, float]] = {}
+        self._await_pickup: dict[str, tuple[str, float]] = {}
         self._bot_username = ""      # @username бота, для кнопки «Поделиться»
         self._bot_user_id_cache = ""  # числовой id бота (getMe), для проверки ответов
         self._thread = threading.Thread(target=self._loop, name="pf-client-bot",
@@ -746,6 +753,12 @@ class ClientBot:
                     self._finish_update(update_id, True, "no_chat")
                 return True
             row = self._touch_chat(chat, message)
+            # КБ6: заблокированный за спам чат молча игнорируется —
+            # ни ответов, ни уведомлений мастеру.
+            if bool(num(row.get("banned"))):
+                if claimed:
+                    self._finish_update(update_id, True, "banned")
+                return True
             # Подпись к фото работает как текст: покупатель шлёт снимок эскиза
             # с подписью «индивидуальный …» — это уже готовая заявка.
             caption = (message.get("caption") or "").strip()
@@ -1117,6 +1130,12 @@ class ClientBot:
             return self.text_pickup(), self._menu()
         if data.startswith("problem:"):
             return self._problem_report(chat, row, data.split(":", 1)[1])
+        if data.startswith("supplement:"):
+            return self._supplement_start(chat, row, data.split(":", 1)[1])
+        if data.startswith("cancelreq:"):
+            return self._cancel_request(chat, row, data.split(":", 1)[1])
+        if data.startswith("pickuplater:"):
+            return self._pickup_later_start(chat, row, data.split(":", 1)[1])
         if data == "help":
             return HELP, self._menu()
         if data == "operator":
@@ -1256,6 +1275,18 @@ class ClientBot:
             return self._review_comment(chat, row, pending[0], raw), self._menu()
         if pending:
             self._await_problem.pop(chat, None)
+        # КБ7: ждём дополнение к заявке — текст уходит в заказ, не в «не понял».
+        supplement = self._await_supplement.get(chat)
+        if supplement and time.time() < supplement[1]:
+            return self._supplement_reply(chat, row, supplement[0], raw), self._menu()
+        if supplement:
+            self._await_supplement.pop(chat, None)
+        # КБ11: ждём новый срок выдачи готового заказа.
+        pickup = self._await_pickup.get(chat)
+        if pickup and time.time() < pickup[1]:
+            return self._pickup_later_reply(chat, row, pickup[0], raw), self._menu()
+        if pickup:
+            self._await_pickup.pop(chat, None)
         # Ответ на сообщение оператора — это диалог, а не «не понял»: не пугаем
         # покупателя шаблоном и сразу передаём реплику мастеру в inbox.
         if reply:
@@ -1277,9 +1308,11 @@ class ClientBot:
         self._master_alerts[chat] = time.time()
         name = row.get("name") or "Без имени"
         try:
+            # КБ2: кнопки-шаблоны прямо в уведомлении — ответ одним нажатием.
             self.manager.notify_async(
                 f"💬 Покупатель ждёт ответа\n{name} · чат {chat}\n"
-                f"«{text[:300]}»\nОтветить: кответ {chat} <текст>")
+                f"«{text[:300]}»\nОтветить: кответ {chat} <текст>",
+                buttons=self.master_reply_buttons(chat))
         except Exception:
             pass
 
@@ -1301,7 +1334,7 @@ class ClientBot:
             self.manager.notify_async(
                 f"👤 Покупатель просит связаться с оператором\n"
                 f"{name} · чат {chat}\nОтветить: кответ {chat} <текст>",
-                critical=True)
+                buttons=self.master_reply_buttons(chat), critical=True)
         except Exception:
             pass
         return ("Передал мастерской ✓ Оператор ответит в этом чате."
@@ -1316,7 +1349,8 @@ class ClientBot:
         try:
             self.manager.notify_async(
                 f"💬 Ответ покупателя оператору\n{name} · чат {chat}\n"
-                f"«{str(text)[:300]}»\nОтветить: кответ {chat} <текст>")
+                f"«{str(text)[:300]}»\nОтветить: кответ {chat} <текст>",
+                buttons=self.master_reply_buttons(chat))
         except Exception:
             pass
         return ("Передал ваш ответ оператору ✓ Ответит в этом чате. "
@@ -1790,11 +1824,128 @@ class ClientBot:
             self.manager.notify_async(
                 f"⚠️ Покупатель сообщает проблему\nЗаказ №{order.get('number')} · "
                 f"чат {chat}\nЖдём описания — ответить: кответ {chat} <текст>",
-                critical=True)
+                buttons=self.master_reply_buttons(chat), critical=True)
         except Exception:
             pass
         return ("Опишите, что случилось, одним сообщением — передам мастеру, "
                 "и мы это поправим."), self._menu()
+
+    # ------------------------------------------- КБ7/КБ8/КБ11: управление заказом
+    def _supplement_start(self, chat: str, row: dict,
+                          order_id: str) -> tuple[str, dict | None]:
+        """КБ7: «Дополнить заявку» — следующее сообщение уйдёт в заказ."""
+        order = self._own_order(chat, row, order_id)
+        if not order or self._is_final(order):
+            return ("Заявку уже не дополнить — напишите «оператор», мастер "
+                    "поможет."), self._menu()
+        self._await_supplement[chat] = (order_id, time.time() + 86400)
+        return ("Напишите одним сообщением, что добавить к заявке "
+                f"№{order.get('number')}: размеры, материал, цвет, файл. "
+                "Можно прислать и фото — прикреплю к заказу."), self._menu()
+
+    def _supplement_reply(self, chat: str, row: dict, order_id: str,
+                          text: str) -> str:
+        self._await_supplement.pop(chat, None)
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        number = (order or {}).get("number") or ""
+        if order:
+            self.db.execute(
+                "UPDATE orders SET notes=COALESCE(notes,'')||?,updated_at=?"
+                " WHERE id=?",
+                (f"\nДополнение покупателя: {text[:500]}", now_iso(), order_id))
+        try:
+            self.manager.notify_async(
+                f"➕ Дополнение к заказу №{number}\nЧат {chat}\n«{text[:300]}»",
+                buttons=self.master_reply_buttons(chat), critical=True)
+        except Exception:
+            pass
+        self.db.add_event("order", "Дополнение к заявке из бота",
+                          f"№{number}", text[:200],
+                          {"order_id": order_id, "chat_id": chat})
+        self._funnel(chat, "order_supplement", row, order_id=order_id)
+        return (f"Передал мастеру ✓ Дополнение записано в заявку №{number}. "
+                "Ответ придёт здесь же.")
+
+    def _cancel_request(self, chat: str, row: dict,
+                        order_id: str) -> tuple[str, dict | None]:
+        """КБ8: запрос отмены. Бот ничего не отменяет сам — мастер решает."""
+        order = self._own_order(chat, row, order_id)
+        if not order:
+            return "Это не ваш заказ.", self._menu()
+        if self._is_final(order) or str(order.get("status") or "") == "printing":
+            return ("Заказ уже в работе — отмена только через мастера. "
+                    "Напишите «оператор» или опишите проблему кнопкой "
+                    "«Проблема с заказом»."), self._menu()
+        if str(order.get("cancel_requested_at") or ""):
+            return ("Запрос на отмену уже передан ✓ Мастер свяжется здесь же.",
+                    self._menu())
+        number = order.get("number")
+        self.db.execute(
+            "UPDATE orders SET cancel_requested_at=?,updated_at=? WHERE id=?",
+            (now_iso(), now_iso(), order_id))
+        self.db.execute(
+            "UPDATE orders SET notes=COALESCE(notes,'')||? WHERE id=?",
+            (f"\nПокупатель запросил отмену: {now_iso()[:16]}", order_id))
+        try:
+            self.manager.notify_async(
+                f"✖️ Покупатель просит отменить заказ №{number}\nЧат {chat}\n"
+                "Отмените в панели, если согласны, или напишите покупателю: "
+                f"кответ {chat} <текст>",
+                buttons=self.master_reply_buttons(chat), critical=True)
+        except Exception:
+            pass
+        self.db.add_event("order", "Запрос отмены из клиентского бота",
+                          f"№{number}", "",
+                          {"order_id": order_id, "chat_id": chat})
+        self._funnel(chat, "cancel_requested", row, order_id=order_id)
+        return ("Передал мастеру ✓ Запрос на отмену отправлен — подтверждение "
+                "придёт здесь же."), self._menu()
+
+    def _pickup_later_start(self, chat: str, row: dict,
+                            order_id: str) -> tuple[str, dict | None]:
+        """КБ11: «Не могу забрать сегодня» — перенос выдачи."""
+        order = self._own_order(chat, row, order_id)
+        if not order or str(order.get("status") or "") != "ready":
+            return ("Перенос возможен, пока заказ в статусе «Готов». "
+                    "Напишите «оператор» — мастер поможет."), self._menu()
+        self._await_pickup[chat] = (order_id, time.time() + 86400)
+        return (f"Напишите одним сообщением, когда удобно забрать заказ "
+                f"№{order.get('number')} — передам мастеру."), self._menu()
+
+    def _pickup_later_reply(self, chat: str, row: dict, order_id: str,
+                            text: str) -> str:
+        self._await_pickup.pop(chat, None)
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
+        number = (order or {}).get("number") or ""
+        if order:
+            self.db.execute(
+                "UPDATE orders SET notes=COALESCE(notes,'')||?,updated_at=?"
+                " WHERE id=?",
+                (f"\nПеренос выдачи: {text[:300]}", now_iso(), order_id))
+        try:
+            self.manager.notify_async(
+                f"📅 Покупатель переносит выдачу №{number}\nЧат {chat}\n"
+                f"«{text[:300]}»", buttons=self.master_reply_buttons(chat))
+        except Exception:
+            pass
+        self.db.add_event("order", "Перенос выдачи из бота", f"№{number}",
+                          text[:200], {"order_id": order_id, "chat_id": chat})
+        return (f"Передал мастеру ✓ Заказ №{number} подождёт вас. "
+                "Храним столько, сколько указано в «Как получить».")
+
+    # --------------------------------------------------- КБ2: кнопки мастеру
+    def master_reply_buttons(self, chat: str) -> list[tuple[str, str]]:
+        """Кнопки-шаблоны для уведомления мастеру: одно нажатие — готовый
+        ответ покупателю в этот чат. Свои шаблоны приоритетнее библиотеки."""
+        templates = [item for item in self.templates()
+                     if item.get("enabled", True)]
+        if not templates:
+            templates = self.default_templates()
+        buttons: list[tuple[str, str]] = []
+        for item in templates[:3]:
+            label = str(item.get("name") or "")[:24] or "Ответить"
+            buttons.append((label, f"cbot_tpl:{chat}:{item['id']}"))
+        return buttons
 
     def _item_card_payload(self, nom_id: str,
                            page: int = 1) -> tuple[str, bytes, dict]:
@@ -2420,6 +2571,21 @@ class ClientBot:
         # не должны требовать искать команду «оператор».
         keys.append([{"text": "⚠️ Проблема с заказом",
                       "callback_data": f"problem:{order['id']}"}])
+        # КБ7: дополнить активную заявку — размеры, фото уже можно прислать
+        # отдельно, а здесь текст.
+        if not self._is_final(order):
+            keys.append([{"text": "➕ Дополнить заявку",
+                          "callback_data": f"supplement:{order['id']}"}])
+        # КБ8: запрос отмены — только до старта печати, решение за мастером.
+        status = str(order.get("status") or "")
+        if status in ("new", "estimate", "prepay", "queue") \
+                and not str(order.get("cancel_requested_at") or ""):
+            keys.append([{"text": "✖️ Отменить заказ",
+                          "callback_data": f"cancelreq:{order['id']}"}])
+        # КБ11: заказ готов, но сегодня не забрать — перенос выдачи.
+        if status == "ready":
+            keys.append([{"text": "📅 Не могу забрать сегодня",
+                          "callback_data": f"pickuplater:{order['id']}"}])
         keys.append([{"text": "🛍 Каталог", "callback_data": "catalog"},
                      {"text": "📦 Мои заказы", "callback_data": "mine"}])
         return {"inline_keyboard": keys}
@@ -2553,7 +2719,7 @@ class ClientBot:
             " c.status_notify,c.quiet_from,c.quiet_to,c.name chat_name"
             " FROM client_orders l JOIN orders o ON o.id=l.order_id"
             " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
-            " WHERE COALESCE(c.status_notify,1)=1"
+            " WHERE COALESCE(c.status_notify,1)=1 AND COALESCE(c.banned,0)=0"
             " ORDER BY datetime(l.created_at) DESC LIMIT 500")
         for link in links:
             chat, order_id = link["chat_id"], link["order_id"]
@@ -2622,7 +2788,7 @@ class ClientBot:
             "SELECT l.chat_id, l.order_id, c.quiet_from, c.quiet_to FROM client_orders l"
             " JOIN orders o ON o.id=l.order_id"
             " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
-            " WHERE COALESCE(o.client_delivered_at,'')!=''"
+            " WHERE COALESCE(o.client_delivered_at,'')!='' AND COALESCE(c.banned,0)=0"
             "   AND datetime(replace(o.client_delivered_at,'T',' ')) <= datetime('now', '-2 days')")
         for link in links:
             chat, order_id = link["chat_id"], link["order_id"]
@@ -2661,7 +2827,7 @@ class ClientBot:
             self.manager.notify_async(
                 f"👎 Покупатель недоволен\nЗаказ №{number} · чат {chat}\n"
                 f"Спросили подробности — ответить: кответ {chat} <текст>",
-                critical=True)
+                buttons=self.master_reply_buttons(chat), critical=True)
         except Exception:
             pass
         return ("Сожалею 🙏 Опишите, что не так, одним сообщением — передам "
@@ -2678,7 +2844,8 @@ class ClientBot:
         try:
             self.manager.notify_async(
                 f"👎 Детали проблемы — заказ №{number}\nЧат {chat}\n«{text[:400]}»\n"
-                f"Ответить: кответ {chat} <текст>", critical=True)
+                f"Ответить: кответ {chat} <текст>",
+                buttons=self.master_reply_buttons(chat), critical=True)
         except Exception:
             pass
         self.db.add_event("order", "Отзыв с деталями проблемы",
@@ -2695,7 +2862,7 @@ class ClientBot:
             "SELECT l.chat_id, l.order_id, c.quiet_from, c.quiet_to FROM client_orders l"
             " JOIN orders o ON o.id=l.order_id"
             " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
-            " WHERE o.status='ready' AND COALESCE(l.reminded_at,'')=''"
+            " WHERE o.status='ready' AND COALESCE(l.reminded_at,'')='' AND COALESCE(c.banned,0)=0"
             "   AND COALESCE(c.status_notify,1)=1"
             f"   AND datetime(replace(o.updated_at,'T',' ')) <= datetime('now', '-{days} days')")
         for link in links:

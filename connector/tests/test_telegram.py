@@ -383,3 +383,119 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClientBotControlTests(unittest.TestCase):
+    """12.1 — управление клиентским ботом из рабочего Telegram."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.manager = FakeManager(self.db)
+        self.bot = TelegramBot(self.manager)
+        self.db.upsert("client_chats", {
+            "chat_id": "555", "name": "Иван", "created_at": "2026-08-24T10:00:00",
+            "last_seen": "2026-08-24T12:00:00"}, key="chat_id")
+        self.client = SimpleNamespace(
+            sent=[], logged=[], last_poll=0.0,
+            templates=lambda: [
+                {"id": "tpl_quote", "name": "Расчёт готов", "text": "Цена готова",
+                 "enabled": True}],
+            default_templates=lambda: [
+                {"id": "tpl_price_ready", "name": "Цена посчитана",
+                 "text": "Посчитал ваш заказ", "enabled": True}])
+        self.client._reply_keyed = (
+            lambda chat, text, buttons=None, dedupe_key="":
+            self.client.sent.append((chat, text)))
+        self.client._log = lambda *a, **k: self.client.logged.append((a, k))
+        self.client._menu = lambda: {"inline_keyboard": []}
+        self.manager.client_bot = self.client
+
+    def tearDown(self):
+        self.bot.shutdown()
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_bot_pause_start_and_status(self):
+        self.db.set_settings({"client_bot_token": "x", "client_bot_enabled": True})
+        answer = self.bot._client_bot_control("клиент-бот пауза")
+        self.assertIn("выключен", answer)
+        self.assertFalse(bool(self.db.setting("client_bot_enabled")))
+        answer = self.bot._client_bot_control("клиент-бот старт")
+        self.assertTrue(bool(self.db.setting("client_bot_enabled")))
+        self.assertIn("включён", answer)
+        answer = self.bot._client_bot_control("клиент-бот")
+        self.assertIn("включён", answer)
+        self.assertIn("опрос", answer)
+
+    def test_bot_pause_requires_token_to_start(self):
+        self.db.set_settings({"client_bot_enabled": False, "client_bot_token": ""})
+        answer = self.bot._client_bot_control("клиент-бот старт")
+        self.assertIn("токен", answer)
+        self.assertFalse(bool(self.db.setting("client_bot_enabled")))
+
+    def test_ban_and_unban_chat(self):
+        answer = self.bot._client_ban("клиент блок 555")
+        self.assertIn("заблокирован", answer)
+        self.assertEqual(
+            int(self.db.one("SELECT banned n FROM client_chats WHERE chat_id='555'")["n"]), 1)
+        answer = self.bot._client_ban("клиент разблок 555")
+        self.assertIn("разблокирован", answer)
+        self.assertEqual(
+            int(self.db.one("SELECT banned n FROM client_chats WHERE chat_id='555'")["n"]), 0)
+        self.assertEqual(self.bot._client_ban("клиент блок 999"), "Чат 999 не найден среди покупателей.")
+
+    def test_review_answer_sends_and_marks(self):
+        self.db.upsert("orders", {
+            "id": "o1001", "number": "1001", "product": "крючок",
+            "status": "done", "price": 500, "created_at": "2026-08-24T10:00:00",
+            "updated_at": "2026-08-24T10:00:00"})
+        self.db.execute(
+            "INSERT INTO client_reviews(order_id,chat_id,rating,comment,state,"
+            "asked_at,created_at) VALUES('o1001','555','bad','расслоение',"
+            "'needs_attention','2026-08-25T10:00:00','2026-08-25T10:01:00')")
+        answer = self.bot._review_answer("отзыв ответ 555 извините, переделаем бесплатно")
+        self.assertIn("Отправлено", answer)
+        self.assertEqual(self.client.sent,
+                         [("555", "извините, переделаем бесплатно")])
+        review = self.db.one("SELECT * FROM client_reviews WHERE chat_id='555'")
+        self.assertEqual(review["state"], "answered")
+        self.assertIn("переделаем", review["operator_note"])
+        self.assertTrue(review["resolved_at"])
+        # повторного «ждущего» отзыва нет
+        answer = self.bot._review_answer("отзыв ответ 555 ещё текст")
+        self.assertIn("нет отзыва", answer)
+
+    def test_template_button_sends_own_template(self):
+        self.db.execute(
+            "INSERT INTO client_bot_log(at,chat_id,text,answer,kind,direction,"
+            "unread) VALUES('2026-08-24T12:00:00','555','вопрос','—','message',"
+            "'in',1)")
+        answer = self.bot._client_template_button("cbot_tpl:555:tpl_quote")
+        self.assertIn("Отправлено", answer)
+        self.assertIn("Расчёт готов", answer)
+        self.assertEqual(self.client.sent, [("555", "Цена готова")])
+        unread = self.db.one(
+            "SELECT unread FROM client_bot_log WHERE chat_id='555'"
+            " AND direction='in'")["unread"]
+        self.assertEqual(unread, 0)
+
+    def test_template_button_falls_back_to_library(self):
+        answer = self.bot._client_template_button("cbot_tpl:555:tpl_price_ready")
+        self.assertIn("Отправлено", answer)
+        self.assertEqual(self.client.sent, [("555", "Посчитал ваш заказ")])
+
+    def test_template_button_refuses_banned_and_missing(self):
+        self.db.execute("UPDATE client_chats SET banned=1 WHERE chat_id='555'")
+        answer = self.bot._client_template_button("cbot_tpl:555:tpl_quote")
+        self.assertIn("заблокирован", answer)
+        self.assertEqual(self.client.sent, [])
+        answer = self.bot._client_template_button("cbot_tpl:555:tpl_none")
+        self.assertIn("Шаблон удалён", answer)
+
+    def test_groups_for_new_commands(self):
+        from connector.printflow.staff import group_for_word
+        self.assertEqual(group_for_word("клиент-бот"), "staff")
+        self.assertEqual(group_for_word("клиент"), "inbox")
+        self.assertEqual(group_for_word("отзыв"), "inbox")
+        self.assertEqual(group_for_word("", command="cbot_tpl:555:tpl_quote"), "inbox")

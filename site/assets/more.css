@@ -870,3 +870,7 @@ details.nav-more > summary.nav-group-title::after {
 .ops10-item-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.ops10-item p{margin:8px 0;color:var(--text-2);white-space:pre-wrap;word-break:break-word}
 .ops10-item select{max-width:180px}.ops10-rule{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--line);padding:10px 0}.ops10-rule small{display:block;color:var(--text-2);margin-top:3px}.ops10-actions{display:flex;gap:6px;flex-wrap:wrap}.ops10-run{font-size:12px;padding:8px 0;border-bottom:1px solid var(--line)}.ops10-planfact{display:flex;gap:8px;flex-wrap:wrap}.ops10-planfact .tag{padding:8px 10px}.ops10-production-list{margin-top:10px}.ops10-production-row{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:8px 0;font-size:13px}
 @media(max-width:860px){.ops10-grid{grid-template-columns:1fr}.ops10-item-head{display:block}.ops10-item select{max-width:none;width:100%;margin-top:8px}}
+
+/* 12.1: ответ на отзыв прямо в строке (КБ4) */
+.clientbot-review-reply { display: flex; gap: 6px; margin-top: 6px; }
+.clientbot-review-reply input { flex: 1; min-width: 160px; font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; }

@@ -63,6 +63,9 @@ HELP = f"""PrintFlow {APP_VERSION} — панель в кармане.
 • оплата 1500 по 1001 — принять оплату
 • чаты / диалоги — непрочитанные вопросы покупателей
 • кответ 555 текст — ответить покупателю клиентского бота
+• отзыв ответ 555 текст — ответ на плохой отзыв покупателю
+• клиент блок 555 / клиент разблок 555 — спам-фильтр чатов
+• клиент-бот пауза / старт / статус — выключить/включить витрину
 • оплата подтвердить 1001 — вручную подтвердить заявку «Я оплатил»
 • статус 1001 печать — сменить статус заказа
 • новый адресник 2шт 900р Мария — заказ из текста
@@ -468,6 +471,8 @@ class TelegramBot:
             return self.text_doctor()
         if command == "inbox":
             return self._client_inbox()
+        if command.startswith("cbot_tpl:"):
+            return self._client_template_button(command)
         if command in ("plan", "filament", "money", "today", "help"):
             return {"plan": self.text_plan, "filament": self.text_filament,
                     "money": self.text_money, "today": self.text_today,
@@ -820,6 +825,14 @@ class TelegramBot:
             return self._reply(chat, self._pay(text))
         if word in ("кответ", "ответить", "creply"):
             return self._reply(chat, self._client_answer(raw))
+        if word in ("клиент-бот", "кбот"):
+            return self._reply(chat, self._client_bot_control(text))
+        if word == "клиент" and len(text.split()) > 1 \
+                and text.split()[1] in ("блок", "разблок", "бан", "разбан",
+                                        "блокировка"):
+            return self._reply(chat, self._client_ban(text))
+        if text.startswith("отзыв ответ"):
+            return self._reply(chat, self._review_answer(raw))
         if word in ("статус", "status", "принтер", "принтеры"):
             # «принтер 2» — выбрать принтер для команд; «статус 1001 печать» —
             # смена статуса заказа; иначе состояние принтеров.
@@ -2749,6 +2762,132 @@ class TelegramBot:
                           f"{row.get('name') or target}", "",
                           {"chat_id": target})
         return f"Отправлено ✓ {row.get('name') or target} · «{message[:60]}»"
+
+    def _client_bot_control(self, text: str) -> str:
+        """КБ5: «клиент-бот пауза/старт/статус» — управление витриной с телефона."""
+        parts = text.split()
+        action = parts[1] if len(parts) > 1 else "статус"
+        settings = self.db.settings()
+        enabled = bool(settings.get("client_bot_enabled"))
+        has_token = bool(settings.get("client_bot_token"))
+        if action in ("пауза", "стоп", "выключить", "pause", "stop"):
+            self.db.set_settings({"client_bot_enabled": False})
+            self.db.add_event("bot", "Клиентский бот выключен из Telegram",
+                              "«клиент-бот пауза»", "", {})
+            return ("Клиентский бот выключен — покупателям бот не отвечает. "
+                    "Включить: «клиент-бот старт».")
+        if action in ("старт", "включить", "start"):
+            if not has_token:
+                return ("Сначала задайте токен клиентского бота в панели: "
+                        "Настройки → Клиент-бот.")
+            self.db.set_settings({"client_bot_enabled": True})
+            self.db.add_event("bot", "Клиентский бот включён из Telegram",
+                              "«клиент-бот старт»", "", {})
+            return "Клиентский бот включён ✓ Каталог и заявки снова работают."
+        bot = getattr(self.manager, "client_bot", None)
+        alive = bool(bot and bot.last_poll
+                     and time.time() - bot.last_poll < 120)
+        return ("Клиентский бот: "
+                f"{'включён' if enabled else 'выключен'} · "
+                f"опрос {'жив' if alive else 'молчит'}\n"
+                "«клиент-бот пауза» — выключить · «клиент-бот старт» — включить.")
+
+    def _client_ban(self, text: str) -> str:
+        """КБ6: «клиент блок 555» / «клиент разблок 555» — спам-фильтр чатов."""
+        parts = text.split()
+        if len(parts) < 3 or not parts[2].isdigit():
+            return "Формат: «клиент блок 555» или «клиент разблок 555»."
+        action, target = parts[1], parts[2]
+        row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (target,))
+        if not row:
+            return f"Чат {target} не найден среди покупателей."
+        if action in ("блок", "бан", "блокировка"):
+            self.db.execute("UPDATE client_chats SET banned=1 WHERE chat_id=?",
+                            (target,))
+            self.db.add_event("bot", "Чат покупателя заблокирован",
+                              str(row.get("name") or target), "",
+                              {"chat_id": target})
+            return (f"Чат {target} заблокирован: бот молча игнорирует "
+                    "сообщения и не шлёт уведомления. Разблок: "
+                    f"«клиент разблок {target}».")
+        self.db.execute("UPDATE client_chats SET banned=0 WHERE chat_id=?",
+                        (target,))
+        self.db.add_event("bot", "Чат покупателя разблокирован",
+                          str(row.get("name") or target), "",
+                          {"chat_id": target})
+        return f"Чат {target} разблокирован — бот снова отвечает."
+
+    def _review_answer(self, raw: str) -> str:
+        """КБ4: «отзыв ответ 555 <текст>» — ответ покупателю на плохой отзыв."""
+        parts = raw.strip().split(None, 3)
+        if len(parts) < 4 or not parts[2].isdigit():
+            return ("Формат: «отзыв ответ 555 <текст>» — chat_id из "
+                    "уведомления об отзыве.")
+        target, message = parts[2], parts[3].strip()
+        client = getattr(self.manager, "client_bot", None)
+        if not client:
+            return "Клиентский бот не запущен — ответьте в панели (Отзывы)."
+        review = self.db.one(
+            "SELECT * FROM client_reviews WHERE chat_id=?"
+            " AND state IN ('needs_attention','rated')"
+            " ORDER BY datetime(COALESCE(created_at, asked_at)) DESC LIMIT 1",
+            (target,))
+        if not review:
+            return f"У чата {target} нет отзыва, ждущего ответа."
+        order = self.db.one("SELECT number FROM orders WHERE id=?",
+                            (review.get("order_id") or "",)) or {}
+        dedupe = (f"reviewreply:{review['order_id']}:{self._current_update_id}"
+                  if self._current_update_id else "")
+        client._reply_keyed(target, message, client._menu(), dedupe_key=dedupe)
+        row = self.db.one("SELECT name FROM client_chats WHERE chat_id=?",
+                          (target,))
+        client._log(target, (row or {}).get("name") or "", "← ответ на отзыв",
+                    message, kind="answer", direction="out", unread=0,
+                    operator=str(self.db.setting("telegram_chat_id", "") or ""))
+        self.db.execute(
+            "UPDATE client_reviews SET state='answered',operator_note=?,"
+            "resolved_at=? WHERE order_id=? AND chat_id=?",
+            (message[:500], now_iso(), review["order_id"], target))
+        self.db.add_event("order", "Ответ на отзыв покупателю",
+                          f"№{order.get('number') or ''}", message[:200],
+                          {"chat_id": target})
+        return (f"Отправлено ✓ Ответ на отзыв ушёл покупателю "
+                f"{(row or {}).get('name') or target}.")
+
+    def _client_template_button(self, command: str) -> str:
+        """КБ2: кнопка-шаблон из уведомления — готовый ответ покупателю."""
+        parts = command.split(":", 2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            return "Кнопка устарела — напишите «кответ <chat> <текст>»."
+        target, template_id = parts[1], parts[2]
+        client = getattr(self.manager, "client_bot", None)
+        if not client:
+            return "Клиентский бот не запущен."
+        own = [item for item in client.templates() if item.get("enabled", True)]
+        template = next((item for item in own if item["id"] == template_id), None)
+        if not template:
+            template = next((item for item in client.default_templates()
+                             if item["id"] == template_id), None)
+        if not template:
+            return f"Шаблон удалён — напишите «кответ {target} <текст>»."
+        if bool(num((self.db.one(
+                "SELECT banned n FROM client_chats WHERE chat_id=?",
+                (target,)) or {}).get("n"))):
+            return f"Чат {target} заблокирован — сначала «клиент разблок {target}»."
+        message = str(template.get("text") or "")
+        dedupe = (f"tpl:{self._current_update_id}:{target}:{template_id}"
+                  if self._current_update_id else "")
+        client._reply_keyed(target, message, client._menu(), dedupe_key=dedupe)
+        row = self.db.one("SELECT name FROM client_chats WHERE chat_id=?",
+                          (target,))
+        client._log(target, (row or {}).get("name") or "",
+                    f"← шаблон «{template['name']}»", message, kind="answer",
+                    direction="out", unread=0,
+                    operator=str(self.db.setting("telegram_chat_id", "") or ""))
+        self.db.execute("UPDATE client_bot_log SET unread=0"
+                        " WHERE chat_id=? AND direction='in'", (target,))
+        return (f"Отправлено ✓ «{template['name']}» → "
+                f"{(row or {}).get('name') or target}")
 
     def _pay(self, text: str) -> str:
         import re as _re
