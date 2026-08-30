@@ -58,6 +58,15 @@ function initials(name) {
   if (!parts.length) return '—';
   return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
 }
+const AVATAR_EMOJI = ['🐼','🦊','🌵','🐸','🦉','🐙','🦄','🐨','🐯','🦁','🐮','🐷','🐵','🐔','🐧','🐦','🦆','🦅','🦋','🐝','🐞','🌸','🌺','🌻'];
+function avatarEmoji(name, seed) {
+  // Детерминированный эмодзи-аватар: если имени нет — берём из seed (chat_id/id)
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length) return ''; // есть имя — используем initials
+  const idx = Math.abs(parseInt(seed || '0', 10) || hashStr(String(seed || 'anon'))) % AVATAR_EMOJI.length;
+  return AVATAR_EMOJI[idx];
+}
+function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; } return h; }
 const debounce = (fn, ms = 260) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 /* ================================================== Н3: плавный «докрут» числа
