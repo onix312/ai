@@ -10,10 +10,14 @@ const { get, post } = PF.api;
 const COMMANDS = [
   ['старт', 'приветствие, deep-link и главное меню'],
   ['каталог', 'опубликованные позиции, варианты и остаток'],
+  ['свой заказ', 'мастер заявки из 4 шагов с проверкой перед отправкой'],
   ['заказ 3', 'добавить позицию в корзину и оформить заявку'],
+  ['новинки', 'пять последних позиций каталога'],
+  ['как получить', 'адрес, часы и срок хранения готового заказа'],
+  ['отзывы', 'оценки и свежие отзывы покупателей'],
   ['индивидуальный …', 'мастер заявки: задача, файл/фото, срок и контакт'],
   ['фото [1001]', 'добавить референс к заявке по номеру заказа'],
-  ['мои заказы', 'статусы, ETA и кнопка «Статус онлайн»'],
+  ['мои заказы', 'статусы, ETA и счётчик до скидки'],
   ['статус 1001', 'цена, срок, реквизиты и повторный заказ'],
   ['телефон +7…', 'привязать номер только через контакт Telegram'],
   ['оператор', 'связаться с мастерской — ответит человек'],
@@ -33,6 +37,7 @@ const RIGHTS_ORDER = ['view', 'shelf', 'orders', 'finance', 'printers', 'inbox',
 let loadSeq = 0;
 let bound = false;
 let latestTemplates = [];
+let latestDefaults = [];
 
 const text = (value, fallback = '—') => {
   const valueText = String(value ?? '').trim();
@@ -134,13 +139,58 @@ function renderInbox(items, templates = []) {
       + `<div><b>${esc(name)}</b><small>Telegram ID ${esc(chatId)}${last.username ? ' · @' + esc(last.username) : ''}</small></div>`
       + `<span class="tag ${status === 'closed' ? '' : status === 'pending' ? 'warn' : 'ok'}">${esc(inboxStatus(status))}</span></header>`
       + `<div class="clientbot-thread-messages">${messageHtml}</div>`
-      + `<div class="clientbot-reply"><textarea data-reply-input rows="2" maxlength="3800" placeholder="Ответить покупателю…"></textarea>`
+      + `<div class="clientbot-reply"><div class="clientbot-quick" data-quick-row>`
+      + quickReplies().map((item, i) => `<button class="btn sm ghost" type="button" data-quick-reply data-quick-index="${i}" title="${esc(item.text)}">${esc(item.name)}</button>`).join('')
+      + `</div><textarea data-reply-input rows="2" maxlength="3800" placeholder="Ответить покупателю…"></textarea>`
       + (templates.length ? `<select data-inbox-template aria-label="Шаблон ответа"><option value="">Вставить шаблон…</option>${templates.filter((item) => item.enabled !== false).map((item) => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select>` : '')
       + `<div class="clientbot-thread-actions"><button class="btn sm primary" type="button" data-inbox-reply>Ответить</button>`
       + `<button class="btn sm" type="button" data-inbox-read>Прочитано</button>`
       + `<select data-inbox-status aria-label="Статус диалога"><option value="open" ${status === 'open' ? 'selected' : ''}>открыт</option>`
       + `<option value="pending" ${status === 'pending' ? 'selected' : ''}>ждёт ответа</option><option value="closed" ${status === 'closed' ? 'selected' : ''}>закрыт</option></select></div></div></article>`;
   }).join('');
+}
+
+function quickReplies() {
+  // К18: до четырёх заготовок одной кнопкой в каждом диалоге — сначала
+  // свои шаблоны, затем готовая библиотека.
+  const own = (latestTemplates || []).filter((item) => item.enabled !== false);
+  const lib = latestDefaults || [];
+  return own.slice(0, 2).concat(lib.slice(0, own.length >= 2 ? 2 : 4 - own.length)).slice(0, 4);
+}
+
+async function quickReplyAction(button) {
+  const replies = quickReplies();
+  const item = replies[Number(button.dataset.quickIndex || 0)];
+  const thread = button.closest('.clientbot-thread');
+  const input = thread && thread.querySelector('[data-reply-input]');
+  if (item && input) {
+    input.value = item.text || '';
+    input.focus();
+  }
+}
+
+async function defaultTemplateUse(button) {
+  const name = (button.dataset.useName || '').trim();
+  const text = (button.dataset.useText || '').trim();
+  if (!name || !text) return;
+  try {
+    await post('/api/client-bot/template/save', { name, text, actor: 'panel' });
+    toast(`Шаблон «${name}» добавлен к вашим`);
+    await renderBot();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function renderDefaultTemplates(items) {
+  const host = $('cb_default_templates');
+  if (!host) return;
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) { host.innerHTML = ''; return; }
+  host.innerHTML = rows.map((item) => `<div class="clientbot-template clientbot-template-lib">`
+    + `<div class="clientbot-template-lib-head"><b>${esc(item.name || '')}</b>`
+    + `<button class="btn sm" type="button" data-template-use data-use-name="${esc(item.name || '')}" data-use-text="${esc(item.text || '')}">+ К моим</button></div>`
+    + `<div class="clientbot-template-text">${esc(item.text || '')}</div></div>`).join('');
 }
 
 function renderTemplates(items) {
@@ -178,7 +228,7 @@ function renderOrders(items) {
   if (!host) return;
   const rows = Array.isArray(items) ? items : [];
   host.innerHTML = rows.length ? rows.map((item) => `<tr><td><b>№${esc(item.number || '')}</b></td>`
-    + `<td>${esc(item.product || 'Индивидуальная заявка')}${num(item.photos) ? ' 📎' : ''}</td>`
+    + `<td>${esc(item.product || 'Индивидуальная заявка')}${num(item.photos) ? ' 📎' : ''}${item.cancel_requested_at ? ' ✖️ просит отмену' : ''}</td>`
     + `<td>${esc(text(item.name))}</td><td><span class="status-dot">${esc(statusName(item.status))}</span></td>`
     + `<td class="right">${num(item.price) ? money(item.price) : '—'}</td>`
     + `<td class="muted">${esc(item.source || 'direct')}</td><td class="muted">${esc(dt(item.linked_at))}</td></tr>`).join('')
@@ -191,11 +241,19 @@ function renderReviews(items) {
   const rows = Array.isArray(items) ? items : [];
   host.innerHTML = rows.length ? rows.map((item) => {
     const rating = item.rating === 'good' ? '👍 Хорошо' : item.rating === 'bad' ? '👎 Проблема' : '—';
-    const action = item.state === 'resolved' ? '<span class="tag ok">обработан</span>'
+    const stateTag = item.state === 'resolved'
+      ? '<span class="tag ok">обработан</span>'
+      : item.state === 'answered' ? '<span class="tag ok">отвечен</span>'
+        : '<span class="tag warn">в работе</span>';
+    // КБ4: быстрый ответ покупателю прямо из строки отзыва
+    const replyBox = (item.state === 'resolved' || item.state === 'answered') ? ''
+      : `<div class="clientbot-review-reply"><input type="text" maxlength="3800" data-review-reply-text placeholder="Ответ покупателю…" data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">`
+        + `<button class="btn sm primary" type="button" data-review-reply data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">Ответить</button></div>`;
+    const action = item.state === 'resolved' ? '<span class="tag ok">закрыт</span>'
       : `<button class="btn sm" type="button" data-review-resolve data-order-id="${esc(item.order_id)}" data-chat-id="${esc(item.chat_id)}">Закрыть</button>`;
     return `<tr><td><b>№${esc(item.number || item.order_id || '')}</b><br><small class="muted">${esc(item.product || '')}</small></td>`
-      + `<td>${esc(rating)}</td><td>${esc(item.comment || '—')}</td>`
-      + `<td><span class="tag ${item.state === 'resolved' ? 'ok' : 'warn'}">${esc(item.state === 'resolved' ? 'обработан' : 'в работе')}</span></td>`
+      + `<td>${esc(rating)}</td><td>${esc(item.comment || '—')}${replyBox}</td>`
+      + `<td>${stateTag}</td>`
       + `<td class="muted">${esc(dt(item.created_at || item.asked_at))}</td><td>${action}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">Отзывов ещё нет: вопрос отправляется после фактической выдачи.</td></tr>';
 }
@@ -208,7 +266,7 @@ function renderChats(items) {
     + `<br><small class="muted">${item.username ? '@' + esc(item.username) : 'без username'}</small></td>`
     + `<td>${esc(item.tg_user_id || item.chat_id || '—')}</td><td>${esc(item.phone || '—')}</td>`
     + `<td class="right">${nfmt(item.orders)}</td>`
-    + `<td class="muted">${Number(item.marketing_opt_in) ? 'рассылка' : 'только сервис'} · ${Number(item.status_notify) ? 'статусы' : 'без статусов'}</td>`
+    + `<td class="muted">${Number(item.banned) ? '⛔️ заблокирован · ' : ''}${Number(item.marketing_opt_in) ? 'рассылка' : 'только сервис'} · ${Number(item.status_notify) ? 'статусы' : 'без статусов'}</td>`
     + `<td class="muted">${esc(dt(item.last_seen))}</td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">Покупатели ещё не писали.</td></tr>';
 }
@@ -238,6 +296,9 @@ async function renderBot() {
     $('cb_notify').checked = data.notify !== false;
     $('cb_review').checked = data.review !== false;
     $('cb_pickup_days').value = data.pickup_days ?? 3;
+    $('cb_pickup_info').value = data.pickup_info || '';
+    $('cb_ready_photo').checked = data.ready_photo !== false;
+    $('cb_faq_materials').value = data.faq_materials || '';
     $('cb_faq').value = data.faq || '';
     $('cb_pay_info').value = data.pay_info || '';
     $('cb_pay_qr').value = data.pay_qr || '';
@@ -272,8 +333,10 @@ async function renderBot() {
     $('cb_commands').innerHTML = COMMANDS.map(([command, description]) =>
       `<tr><td><b>${esc(command)}</b></td><td class="muted">${esc(description)}</td></tr>`).join('');
     latestTemplates = Array.isArray(data.templates) ? data.templates : [];
+    latestDefaults = Array.isArray(data.default_templates) ? data.default_templates : [];
     renderInbox(data.inbox || [], latestTemplates);
     renderTemplates(latestTemplates);
+    renderDefaultTemplates(latestDefaults);
     renderPayments(data.payments || []);
     renderOrders(data.orders || []);
     renderReviews(data.reviews || []);
@@ -294,6 +357,9 @@ function botPayload() {
     client_bot_notify: $('cb_notify').checked,
     client_bot_review: $('cb_review').checked,
     client_bot_pickup_days: Math.max(0, Math.min(30, Math.round(num($('cb_pickup_days').value, 3)))),
+    client_bot_pickup_info: $('cb_pickup_info').value.trim(),
+    client_bot_ready_photo: $('cb_ready_photo').checked,
+    client_bot_faq_materials: $('cb_faq_materials').value.trim(),
     client_bot_faq: $('cb_faq').value.trim(),
     client_bot_pay_info: $('cb_pay_info').value.trim(),
     client_bot_pay_qr: $('cb_pay_qr').value.trim(),
@@ -441,6 +507,25 @@ async function resolveReview(button) {
   finally { button.disabled = false; }
 }
 
+async function reviewReply(button) {
+  // КБ4: ответ на отзыв уходит покупателю в чат клиентского бота
+  const input = document.querySelector(
+    `[data-review-reply-text][data-chat-id="${button.dataset.chatId}"][data-order-id="${button.dataset.orderId}"]`);
+  const text = input ? input.value.trim() : '';
+  if (!text) { toast('Сначала введите текст ответа'); return; }
+  try {
+    button.disabled = true;
+    await post('/api/client-bot/review/reply', {
+      order_id: button.dataset.orderId,
+      chat_id: button.dataset.chatId,
+      text, actor: 'panel',
+    });
+    toast('Ответ отправлен покупателю');
+    await renderBot();
+  } catch (error) { fail(error); }
+  finally { button.disabled = false; }
+}
+
 async function broadcast() {
   const input = $('cb_broadcast_text');
   const value = input && input.value.trim();
@@ -523,6 +608,11 @@ function bind() {
   $('cb_inbox')?.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (button && (button.matches('[data-inbox-reply]') || button.matches('[data-inbox-read]'))) inboxAction(button);
+    if (button && button.matches('[data-quick-reply]')) quickReplyAction(button);
+  });
+  $('cb_default_templates')?.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-template-use]');
+    if (button) defaultTemplateUse(button);
   });
   $('cb_inbox')?.addEventListener('change', (event) => {
     if (event.target.matches('[data-inbox-status]')) inboxStatusChange(event.target);
@@ -537,8 +627,16 @@ function bind() {
     if (button) paymentAction(button);
   });
   $('cb_reviews')?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-review-resolve]');
-    if (button) resolveReview(button);
+    const button = event.target.closest('button');
+    if (button && button.matches('[data-review-resolve]')) resolveReview(button);
+    if (button && button.matches('[data-review-reply]')) reviewReply(button);
+  });
+  $('cb_reviews')?.addEventListener('keyup', (event) => {
+    if (event.key !== 'Enter' || !event.target.matches('[data-review-reply-text]')) return;
+    const chatId = event.target.dataset.chatId;
+    const orderId = event.target.dataset.orderId;
+    const button = document.querySelector(`[data-review-reply][data-chat-id="${chatId}"][data-order-id="${orderId}"]`);
+    if (button) reviewReply(button);
   });
   bindStaff();
 }

@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -66,6 +66,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("inbox_status", "TEXT DEFAULT 'open'"),
         ("assigned_to", "TEXT DEFAULT ''"),
         ("last_error", "TEXT DEFAULT ''"),
+        # 12.1: чат заблокирован за спам — бот молча игнорирует сообщения
+        ("banned", "INTEGER DEFAULT 0"),
     ],
     "client_bot_log": [
         ("update_id", "TEXT DEFAULT ''"),
@@ -150,6 +152,9 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("nom_id", "TEXT"),                  # позиция номенклатуры (3.0)
         ("warehouse_id", "TEXT"),            # с какого склада отгружаем
         ("reminded_at", "TEXT DEFAULT ''"),  # когда напоминали о долге (B4)
+        # 12.1: покупатель попросил отменить из клиентского бота (КБ8) —
+        # сам бот заказ не отменяет, решение за мастером
+        ("cancel_requested_at", "TEXT DEFAULT ''"),
         ("reserved", "INTEGER DEFAULT 0"),   # зарезервирован ли товар
         ("items_override", "INTEGER DEFAULT 0"),  # явное переопределение состава
         ("gift", "INTEGER DEFAULT 0"),       # подарочный режим (идея 33): цена скрыта
@@ -313,6 +318,7 @@ CREATE TABLE IF NOT EXISTS client_chats (
     inbox_status TEXT DEFAULT 'open',
     assigned_to TEXT DEFAULT '',
     last_error TEXT DEFAULT '',
+    banned INTEGER DEFAULT 0,
     created_at TEXT,
     last_seen TEXT
 );
@@ -574,6 +580,7 @@ CREATE TABLE IF NOT EXISTS orders (
     actual_cost REAL DEFAULT 0,
     auto_cost INTEGER DEFAULT 1,
     items_override INTEGER DEFAULT 0,
+    cancel_requested_at TEXT DEFAULT '',
     client_variant_id TEXT DEFAULT '',
     client_source TEXT DEFAULT '',
     client_request_id TEXT DEFAULT '',
@@ -1538,6 +1545,11 @@ class Database:
         try:
             self.conn.row_factory = sqlite3.Row
             self.conn.execute("PRAGMA journal_mode=WAL")
+            # 12.0: очередь ожидания вместо мгновенного SQLITE_BUSY при
+            # конкурентной записи (панель + боты + бэкап), и обычный для WAL
+            # режим синхронизации — записи не заставляют ждать fsync.
+            self.conn.execute("PRAGMA busy_timeout=5000")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
             self.conn.execute("PRAGMA foreign_keys=ON")
             # SQLite lower() умеет только ASCII — регистронезависимый поиск по
             # кириллице делаем средствами Python.

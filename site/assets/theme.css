@@ -810,3 +810,51 @@ html[data-density="shop"] .kpi .value { font-size: 28px; }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ================================================== 11.1 Н1: иконки
+   Inline-SVG из assets/icons.js наследуют цвет и размер шрифта контекста,
+   поэтому вмешиваться в конкретные модули не нужно: иконка растёт вместе
+   с текстом, в том числе в режиме цеха. Глиф остаётся в разметке запасным
+   вариантом, если icons.js не загрузился. */
+.ic { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ic svg { width: 1em; height: 1em; display: block; }
+.nav-link .ic svg { width: 17px; height: 17px; }
+.cmd-btn .ic svg { width: 18px; height: 18px; }
+.btn .ic svg { width: 15px; height: 15px; }
+.cmd-trigger .ic svg { width: 15px; height: 15px; }
+#burger .ic svg { width: 20px; height: 20px; }
+.icon-btn .ic svg { width: 18px; height: 18px; }
+.lib-card .ic svg { width: 22px; height: 22px; }
+.lib-card .ic { color: var(--accent); }
+
+/* ================================================== 11.1 Н3: живая панель
+   Скелетоны показывают форму раздела до прихода данных, чтобы панель не
+   «мигала» пустыми карточками. Анимация гасится глобальным правилом
+   prefers-reduced-motion в конце файла. */
+.skel {
+  display: inline-block; height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--panel-3) 25%, var(--line) 50%, var(--panel-3) 75%);
+  background-size: 200% 100%;
+  animation: pf-skel 1.35s linear infinite;
+}
+.skel-row { display: flex; padding: 8px 0; }
+.skel-row .skel { height: 11px; }
+.kpi .value .skel { height: 24px; margin: 6px 0 3px; }
+@keyframes pf-skel {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Появление раздела: лёгкий подъём вместо резкой смены экрана. */
+.view.on { animation: pf-view-in .22s var(--ease); }
+@keyframes pf-view-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Явные отключения новых анимаций — двойная страховка к глобальному
+     правилу в конце файла. */
+  .skel { animation: none; }
+  .view.on { animation: none; }
+}

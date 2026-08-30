@@ -61,8 +61,8 @@ class PrintGroupBase(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
     def test_version_and_schema(self):
-        self.assertEqual(APP_VERSION, "11.0.0")
-        self.assertEqual(SCHEMA_VERSION, 14)
+        self.assertEqual(APP_VERSION, "12.1.0")
+        self.assertEqual(SCHEMA_VERSION, 15)
 
 
 class FoldLinesTests(unittest.TestCase):

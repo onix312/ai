@@ -46,6 +46,9 @@ WORD_GROUPS: dict[str, str] = {
     "видео": "view", "живой": "view", "live": "view", "стоп-живой": "view",
     "стопживой": "view", "филамент": "view", "пластик": "view", "катушки": "view",
     "спул": "view", "брак": "view", "дефект": "view", "дефекты": "view",
+    # датчики и доктор: телеметрия и диагностика без изменения данных
+    "датчики": "view", "сенсоры": "view", "ams": "view", "амс": "view", "доктор": "view",
+    "диагностика": "view",
     "рейтинг": "view", "топ": "view", "abc": "view", "изделия": "view",
     "хвосты": "view", "хвост": "view", "дыры": "view", "проверка": "view",
     "сколько": "view", "что": "view", "когда": "view", "следи": "view",
@@ -77,6 +80,9 @@ WORD_GROUPS: dict[str, str] = {
     "оплата": "orders", "оплатить": "orders", "payment": "orders",
     "чаты": "inbox", "диалоги": "inbox", "inbox": "inbox", "клиенты": "inbox",
     "кответ": "inbox", "ответить": "inbox", "creply": "inbox",
+    "отзыв": "inbox", "клиент": "inbox",
+    # 12.1: включение/выключение клиентского бота — только владелец
+    "клиент-бот": "staff", "кбот": "staff",
     "подтвердить": "orders", "отклонить": "orders",
     # принтер
     "пауза": "printers", "pause": "printers", "продолжить": "printers",
@@ -99,6 +105,7 @@ CALLBACK_GROUPS: dict[str, str] = {
     "stop": "printers", "next": "printers", "reprint": "printers",
     "removed": "view",
     "frame": "view", "panel": "view", "plan": "view", "shelf:needs": "view",
+    "sensors": "view", "doctor": "view", "cbot_tpl": "inbox",
     "shelf": "shelf", "sell-menu": "shelf", "shelf-prod-menu": "shelf",
     "shelf-moves": "shelf", "shelf-sales7": "shelf", "shelf-sales30": "shelf",
     # каталог: список и карточка — просмотр, действия — правки

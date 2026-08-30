@@ -19,7 +19,7 @@ from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
 from .config import (BACKUP_DIR, DANGEROUS_AUTOMATION_COMMANDS, UPLOAD_DIR,
                      now_iso, rotate_backups)
-from .db import Database
+from .db import Database, backup_database_file
 from .repo import Repo
 from .telegram_bot import TelegramBot
 from .watchdog import Watchdog
@@ -2752,7 +2752,12 @@ class PrinterManager:
             BACKUP_DIR.mkdir(parents=True, exist_ok=True)
             stamp = now_iso()[:16].replace(":", "").replace("T", "-")
             target = BACKUP_DIR / f"printflow-auto-{stamp}.sqlite3"
-            self.db.backup_to(target)
+            # 12.0: копия через отдельное read-only соединение поверх WAL.
+            # Прежний путь держал блокировку Database на всё время копии и
+            # полной проверки целостности — в эти секунды «зависало всё»:
+            # панель, боты и фоновый цикл. Снимок не менее консистентный,
+            # но больше не останавливает работу цеха.
+            backup_database_file(self.db.path, target)
             rotate_backups(BACKUP_DIR, self.db.setting("backup_keep", 20))
             self._last_backup = now
             self.db.add_event("backup", "Автобэкап", f"Снимок базы: {target.name}")

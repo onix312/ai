@@ -5,8 +5,19 @@
 <link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="generator.css">
 <style>
-  .poster { height: 281mm; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+  /* Постер — общий каркас. Темы (П3) меняют фон и краски,
+     акцентные цвета приходят инлайн-переменными с панели. */
+  .poster {
+    height: 281mm; display: flex; flex-direction: column; position: relative; overflow: hidden;
+    border-radius: 2mm; padding: 2mm;
+    --pf-a: var(--brand); --pf-a2: var(--brand-2);
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    cursor: pointer; transition: box-shadow .12s;
+  }
+  .poster.selected { box-shadow: 0 0 0 3px var(--pf-a); }
   .sheet.a3 .poster { height: 404mm; }
+  .poster.t-dark { background: #10131a; color: #fff; --line: rgba(255,255,255,.22); --ink-soft: rgba(233,238,250,.72); }
+  .poster.t-ink  { background: linear-gradient(160deg, #0b0d12 20%, #171b28 100%); color: #fff; --line: rgba(255,255,255,.22); --ink-soft: rgba(233,238,250,.72); }
   .p-top { display: flex; align-items: center; gap: 5mm; }
   .p-top img { width: 22mm; height: 22mm; }
   .p-word { font-size: 40px; font-weight: 900; letter-spacing: .06em; line-height: 1; }
@@ -15,13 +26,15 @@
   .sheet.a3 .p-tag { font-size: 16px; }
   .p-hero { margin-top: 14mm; font-size: 52px; font-weight: 900; line-height: 1.03; letter-spacing: -.02em; }
   .sheet.a3 .p-hero { font-size: 74px; margin-top: 20mm; }
-  .p-hero em { font-style: normal; background: linear-gradient(120deg, var(--brand), var(--brand-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .poster.compact .p-hero { font-size: 40px; }
+  .sheet.a3 .poster.compact .p-hero { font-size: 56px; }
+  .p-hero em { font-style: normal; background: linear-gradient(120deg, var(--pf-a), var(--pf-a2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .p-lead { margin-top: 8mm; font-size: 17px; line-height: 1.5; color: var(--ink-soft); max-width: 150mm; }
   .sheet.a3 .p-lead { font-size: 23px; max-width: 215mm; }
   .p-list { margin-top: 10mm; display: flex; flex-direction: column; gap: 4mm; }
   .p-item { display: flex; align-items: baseline; gap: 4mm; font-size: 16px; }
   .sheet.a3 .p-item { font-size: 22px; }
-  .p-num { font-size: 13px; font-weight: 900; color: #fff; flex: none; width: 8mm; height: 8mm; border-radius: 50%; background: linear-gradient(135deg, var(--brand), var(--brand-2)); display: inline-flex; align-items: center; justify-content: center; }
+  .p-num { font-size: 13px; font-weight: 900; color: #fff; flex: none; width: 8mm; height: 8mm; border-radius: 50%; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); display: inline-flex; align-items: center; justify-content: center; transform: translateY(1mm); }
   .sheet.a3 .p-num { width: 11mm; height: 11mm; font-size: 17px; }
   .p-item b { font-weight: 750; }
   .p-item span { color: var(--ink-soft); }
@@ -33,96 +46,326 @@
   .p-contact .muted { color: var(--ink-soft); font-size: 13px; }
   .sheet.a3 .p-contact .muted { font-size: 17px; }
   .p-qr { text-align: center; flex: none; }
-  .p-qr svg { width: 38mm; height: 38mm; display: block; }
+  .p-qr svg { width: 38mm; height: 38mm; display: block; background: #fff; padding: 1.5mm; border-radius: 2mm; }
   .sheet.a3 .p-qr svg { width: 52mm; height: 52mm; }
   .p-qr div { font-size: 10px; color: var(--ink-soft); margin-top: 2mm; letter-spacing: .05em; }
-  .p-strip { position: absolute; right: -30mm; top: 60mm; width: 90mm; height: 90mm; background: linear-gradient(135deg, var(--brand), var(--brand-2)); opacity: .07; border-radius: 22mm; transform: rotate(18deg); }
-  .poster.order .p-hero { font-size: 46px; }
-  .sheet.a3 .poster.order .p-hero { font-size: 66px; }
+  .p-strip { position: absolute; right: -30mm; top: 60mm; width: 90mm; height: 90mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); opacity: .07; border-radius: 22mm; transform: rotate(18deg); }
+  .poster.t-dark .p-strip, .poster.t-ink .p-strip { opacity: .16; }
   .steps { display: flex; flex-direction: column; gap: 5mm; margin-top: 10mm; }
   .step { display: flex; gap: 5mm; align-items: flex-start; }
-  .step .sn { font-size: 22px; font-weight: 900; color: var(--brand); line-height: 1; flex: none; width: 12mm; }
+  .step .sn { font-size: 22px; font-weight: 900; background: linear-gradient(120deg, var(--pf-a), var(--pf-a2)); -webkit-background-clip: text; background-clip: text; color: transparent; line-height: 1; flex: none; width: 12mm; }
   .sheet.a3 .step .sn { font-size: 30px; width: 16mm; }
   .step .st { font-size: 17px; font-weight: 750; }
   .sheet.a3 .step .st { font-size: 23px; }
   .step .sd { font-size: 13.5px; color: var(--ink-soft); margin-top: 1mm; line-height: 1.45; }
   .sheet.a3 .step .sd { font-size: 18px; }
+  /* П15 «Мы в Telegram»: крупный QR в центре */
+  .poster.tg { justify-content: flex-start; }
+  .p-bigqr { margin: 14mm auto 0; text-align: center; }
+  .poster.t-dark .p-bigqr svg, .poster.t-ink .p-bigqr svg { background: #fff; }
+  .p-bigqr svg { width: 88mm; height: 88mm; padding: 4mm; background: #fff; border-radius: 4mm; }
+  .sheet.a3 .p-bigqr svg { width: 120mm; height: 120mm; }
+  .p-bigqr .cap { margin-top: 5mm; font-size: 16px; font-weight: 750; letter-spacing: .02em; }
+  .sheet.a3 .p-bigqr .cap { font-size: 22px; }
+  .p-bigqr .cap small { display: block; font-size: 12.5px; color: var(--ink-soft); font-weight: 400; margin-top: 2mm; }
+  /* П16 «Акция»: плашка срока */
+  .p-until { display: inline-flex; align-items: center; gap: 3mm; margin-top: 10mm; padding: 3.5mm 7mm; border-radius: 99mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); color: #fff; font-size: 16px; font-weight: 800; letter-spacing: .02em; align-self: flex-start; }
+  .sheet.a3 .p-until { font-size: 22px; padding: 5mm 9mm; }
+  .p-off { opacity: .38; outline: 2px dashed var(--line); outline-offset: 3mm; position: relative; }
+  .p-off-tag { position: absolute; top: 6mm; right: 6mm; font-size: 11px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 99mm; padding: 1.5mm 5mm; background: rgba(255,255,255,.6); }
+  .poster.t-dark .p-off-tag, .poster.t-ink .p-off-tag { background: rgba(16,19,26,.6); color: rgba(233,238,250,.8); }
+  @media print { .p-off { display: none !important; } }
+
+  /* ------------------------------------------------ правка (не печатается) */
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; }
+  .editor input, .editor select, .editor textarea { font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+  .editor input.wide { min-width: 240px; }
+  .editor textarea.wide { min-width: 320px; }
+  .editor .btn { font-size: 12px; padding: 5px 10px; }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+  .toggles { width: 100%; }
+  .toggles label { font-size: 12px; color: var(--ink-soft); display: inline-flex; align-items: center; gap: 6px; }
+  .legend { font-size: 11.5px; color: var(--ink-soft); }
 </style>
 </head><body>
 <div class="panel noprint">
   <div class="panel-row">
-    <h1><img id="panelMark" src="../assets/brand/nozza-mark-1.svg" alt="">Постеры</h1>
-    <label>Формат <select id="fmt"><option value="a4">A4</option><option value="a3">A3</option></select></label>
-    <label>Город <input type="text" id="city" value="Симферополь" style="min-width:130px"></label>
-    <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
-    <label>Ссылка <input type="text" id="site" value="https://nozza.ru"></label>
-    <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
-    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
-    <button class="btn primary" id="print">Печать</button>
-    <a class="btn" href="логотипы-на-выбор.html">Логотипы</a>
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Постеры — конструктор</h1>
+    <label>Формат <select id="fmt" data-page="fmt"><option value="a4">A4</option><option value="a3">A3</option></select></label>
+    <label>Тема <select id="theme" data-page="theme">
+      <option value="light">Светлая</option>
+      <option value="dark">Тёмная</option>
+      <option value="ink">Чёрная с градиентом</option>
+    </select></label>
+    <label>Акцент <input type="color" id="accent1" data-page="accent1" value="#4f46e5" style="width:34px;padding:2px"></label>
+    <label>Акцент 2 <input type="color" id="accent2" data-page="accent2" value="#7c3aed" style="width:34px;padding:2px"></label>
+    <label>QR ведёт <select id="qrSrc" data-page="qrSrc">
+      <option value="qr">на ссылку QR</option>
+      <option value="tg">в Telegram</option>
+      <option value="custom">на свою ссылку</option>
+    </select></label>
+    <input type="text" id="qrCustom" data-page="qrCustom" placeholder="своя ссылка https://…" style="min-width:170px">
+    <div class="panel-row" data-nz-common="qr"></div>
+    <button class="btn primary" type="button" data-nz-print>Печать</button>
+  </div>
+  <div class="panel-row toggles">
+    <label><input type="checkbox" id="optStrip" data-page="optStrip" checked> Декоративная полоса</label>
+    <label><input type="checkbox" id="optNums" data-page="optNums" checked> Номерки у пунктов</label>
+    <label><input type="checkbox" id="optQr" data-page="optQr" checked> QR в подвале</label>
+    <label><input type="checkbox" id="optCompact" data-page="optCompact"> Компактный заголовок</label>
+    <span class="legend" id="printInfo"></span>
+  </div>
+  <div class="editor">
+    <h3>✏️ Правка постера — кликните по постеру на листе</h3>
+    <div class="row">
+      <label>Заголовок <input id="e_title" class="wide" placeholder="Печатаем"></label>
+      <label>Строка 2 (акцент) <input id="e_em" placeholder="вещи под вас"></label>
+      <label>Слоган <input id="e_slogan" placeholder="Там, где рождается форма · {город}" style="min-width:250px"></label>
+    </div>
+    <div class="row">
+      <label>Описание <textarea id="e_lead" class="wide" rows="2" placeholder="Один-два предложения о том, что вы делаете"></textarea>
+    </div>
+    <div class="row">
+      <label>Пункт <select id="e_item"></select></label>
+      <label>Жирный текст <input id="e_item_b" placeholder="Готовые изделия на полке" style="min-width:220px"></label>
+      <label>Пояснение <input id="e_item_s" placeholder="— забирайте сразу" style="min-width:220px"></label>
+      <button class="btn" type="button" id="btnAdd" title="Добавить пункт">＋</button>
+      <button class="btn danger" type="button" id="btnDel" title="Удалить текущий пункт">🗑</button>
+      <button class="btn" type="button" id="btnUp" title="Поднять пункт">↑</button>
+      <button class="btn" type="button" id="btnDown" title="Опустить пункт">↓</button>
+      <button class="btn" type="button" id="btnDup" title="Дублировать пункт">⧉</button>
+    </div>
+    <div class="row">
+      <label id="e_until_row" hidden>Акция до <input id="e_until" placeholder="до 31 августа" style="min-width:170px"></label>
+      <label><input type="checkbox" id="e_print" checked> Печатать этот постер</label>
+      <span class="legend">Пункты работают и как шаги «Как заказать»: жирный текст — название шага, пояснение — деталь.</span>
+    </div>
   </div>
 </div>
-<div class="note noprint"><b>Куда вешать:</b> постер «Печатаем на месте» — над полкой или на стену за прилавком; постер «Как заказать своё» — рядом с образцами. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра. QR генерируется автоматически. Город Симферополь по умолчанию, сохраняется.</div>
+<div class="note noprint"><b>Куда вешать:</b> «Печатаем вещи под вас» — над полкой или за прилавком; «Как заказать своё» — рядом с образцами; «Мы в Telegram» — у кассы; «Акция» — на видное место и менять по сезону. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра. Кликните по постеру, чтобы править его текст; снятый с печати постер показывается бледным и не попадает в печать. Правки, тема и контакты сохраняются и переносятся кнопками «Сохранить/Загрузить шаблон».</div>
 <div id="sheets"></div>
 <script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
 <script>
 'use strict';
-const $=id=>document.getElementById(id);
-const LS_CONTACT='nozza:contact'; const LS_LOGO='nozza:logo';
-function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
-function saveContact(p){ const c=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...c,...p})); }
-function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
-function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
-const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-let pageStyle=null;
-function setPageSize(a3){ if(!pageStyle){ pageStyle=document.createElement('style'); document.head.appendChild(pageStyle);} pageStyle.textContent=a3?'@page { size: A3; margin: 8mm; }':'@page { size: A4; margin: 8mm; }'; }
-function render(){
-  const a3=$('fmt').value==='a3'; setPageSize(a3);
-  const cls='sheet'+(a3?' a3':'');
-  const city=($('city').value.trim()||'Симферополь');
-  const phone=$('phone').value.trim();
-  const site=$('site').value.trim();
-  const tg=$('tg').value.trim();
-  const logoId=$('logoSel')?$('logoSel').value:loadLogo();
-  const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
-  if($('panelMark')) $('panelMark').src=markSrc;
-  saveContact({city,phone,site,tg}); saveLogo(logoId);
-  const qr=QR.svg(site,{ecl:'M',margin:1});
-  const shortSite=site.replace(/^https?:\/\//,'');
-  const head=`<div class="p-top"><img src="${markSrc}" alt=""><div><div class="p-word">NOZZA</div><div class="p-tag">Там, где рождается форма · ${esc(city)}</div></div></div>`;
-  const foot=`<div class="p-bottom"><div class="p-contact"><b>${esc(phone)}</b><br>${esc(shortSite)} · ${esc(city)}<br><span class="muted">Telegram ${esc(tg)}</span></div><div class="p-qr">${qr}<div>Наведите камеру</div></div></div>`;
-  $('sheets').innerHTML=`
-    <div class="${cls}"><div class="poster"><div class="p-strip"></div>${head}
-      <div class="p-hero">Печатаем<br><em>вещи под вас</em></div>
-      <div class="p-lead">3D-печать по вашим размерам в ${esc(city)}: от держателя для кабеля до партии фирменных табличек. Приносите идею, фото или чертёж — посчитаем при вас.</div>
-      <div class="p-list">
-        <div class="p-item"><span class="p-num">1</span><div><b>Готовые изделия на полке</b> <span>— забирайте сразу</span></div></div>
-        <div class="p-item"><span class="p-num">2</span><div><b>Под заказ за 1–3 дня</b> <span>— цвет и размер на выбор</span></div></div>
-        <div class="p-item"><span class="p-num">3</span><div><b>Ремонт и запчасти</b> <span>— восстановим сломанную деталь</span></div></div>
-        <div class="p-item"><span class="p-num">4</span><div><b>Партии для бизнеса</b> <span>— таблички, держатели, оснастка</span></div></div>
-      </div>${foot}</div></div>
-    <div class="${cls}"><div class="poster order"><div class="p-strip"></div>${head}
-      <div class="p-hero">Как заказать<br><em>своё изделие</em></div>
-      <div class="steps">
-        <div class="step"><div class="sn">01</div><div><div class="st">Покажите, что нужно</div><div class="sd">Фото, эскиз на бумаге, размеры или ссылка на модель — подойдёт любой вариант.</div></div></div>
-        <div class="step"><div class="sn">02</div><div><div class="st">Получите цену и срок</div><div class="sd">Считаем сразу: материал, время печати и работа. Цена фиксируется до начала печати.</div></div></div>
-        <div class="step"><div class="sn">03</div><div><div class="st">Согласуйте образец</div><div class="sd">Для сложных заказов сначала печатаем пробную деталь и проверяем посадку.</div></div></div>
-        <div class="step"><div class="sn">04</div><div><div class="st">Забирайте готовое</div><div class="sd">Сообщим в Telegram, когда будет готово. Обычно 1–3 дня, срочно — в тот же день. Мастерская в ${esc(city)}.</div></div></div>
-      </div>
-      <div class="p-lead" style="margin-top:10mm"><b style="color:var(--ink)">Что мы печатаем чаще всего:</b> органайзеры и подставки, крепления и кронштейны, адресники для питомцев, таблички и указатели, корпуса и заглушки, сувениры с именем.</div>
-      ${foot}</div></div>`;
+const $ = id => document.getElementById(id);
+const LS_KEY = 'posters';
+
+/* Стартовый набор: два классических постера + «Мы в Telegram» + «Акция». */
+const START = [
+  { id: null, tpl: 'services', print: true,
+    title: 'Печатаем', em: 'вещи под вас', slogan: 'Там, где рождается форма · {город}',
+    lead: '3D-печать по вашим размерам в {городе}: от держателя для кабеля до партии фирменных табличек. Приносите идею, фото или чертёж — посчитаем при вас.',
+    items: [
+      { b: 'Готовые изделия на полке', s: '— забирайте сразу' },
+      { b: 'Под заказ за 1–3 дня', s: '— цвет и размер на выбор' },
+      { b: 'Ремонт и запчасти', s: '— восстановим сломанную деталь' },
+      { b: 'Партии для бизнеса', s: '— таблички, держатели, оснастка' },
+    ] },
+  { id: null, tpl: 'order', print: true,
+    title: 'Как заказать', em: 'своё изделие', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Что мы печатаем чаще всего: органайзеры и подставки, крепления и кронштейны, адресники для питомцев, таблички и указатели, корпуса и заглушки, сувениры с именем.',
+    items: [
+      { b: 'Покажите, что нужно', s: 'Фото, эскиз на бумаге, размеры или ссылка на модель — подойдёт любой вариант.' },
+      { b: 'Получите цену и срок', s: 'Считаем сразу: материал, время печати и работа. Цена фиксируется до начала печати.' },
+      { b: 'Согласуйте образец', s: 'Для сложных заказов сначала печатаем пробную деталь и проверяем посадку.' },
+      { b: 'Забирайте готовое', s: 'Сообщим в Telegram, когда будет готово. Обычно 1–3 дня, срочно — в тот же день.' },
+    ] },
+  { id: null, tpl: 'tg', print: true,
+    title: 'Мы в', em: 'Telegram', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Новинки полки, готовые работы и живой процесс печати — подписывайтесь, чтобы не пропускать.',
+    items: [
+      { b: 'Новинки полки', s: '— первыми узнают подписчики' },
+      { b: 'Готовые работы', s: '— фото и истории заказов' },
+      { b: 'Как заказать', s: '— условия и ответы на вопросы' },
+    ] },
+  { id: null, tpl: 'promo', print: true,
+    title: 'Акция!', em: 'на именные сувениры', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Адресники, брелоки и вещи с именем — делаем за один день. Успейте заказать по специальной цене.',
+    until: 'до 31 августа',
+    items: [
+      { b: 'Именной адресник', s: '— 350 ₽ вместо 450 ₽' },
+      { b: 'Брелок с именем', s: '— 200 ₽ при любом заказе' },
+      { b: 'Своё имя или кличка', s: '— любой шрифт и цвет' },
+    ] },
+];
+
+let posters = [];
+let selected = 0;     // индекс постера в правке
+let curItem = 0;      // индекс пункта внутри постера
+
+function load() {
+  const st = NZ.pageState({});
+  posters = Array.isArray(st[LS_KEY]) && st[LS_KEY].length ? st[LS_KEY] : START.map(p => ({ ...p, id: NZ.uid('ps') }));
+  posters.forEach(p => { if (!Array.isArray(p.items)) p.items = []; if (p.print == null) p.print = true; });
+  // П4/П3/П5/П6: если пользователь ни разу не открывал новый конструктор,
+  // тема светлая и все детали включены — вид как раньше.
+  $('fmt').value = st.fmt || 'a4';
+  $('theme').value = st.theme || 'light';
+  $('qrSrc').value = st.qrSrc || 'qr';
+  if (st.optStrip === undefined) $('optStrip').checked = true; else $('optStrip').checked = !!st.optStrip;
+  if (st.optNums === undefined) $('optNums').checked = true; else $('optNums').checked = !!st.optNums;
+  if (st.optQr === undefined) $('optQr').checked = true; else $('optQr').checked = !!st.optQr;
+  $('optCompact').checked = !!st.optCompact;
+  if (!st.accent1) $('accent1').value = '#4f46e5';
+  if (!st.accent2) $('accent2').value = '#7c3aed';
 }
-function init(){
-  const c=loadContact();
-  if(c.city) $('city').value=c.city;
-  if(!c.city || c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
-  if(c.phone) $('phone').value=c.phone;
-  if(c.site) $('site').value=c.site;
-  if(c.tg) $('tg').value=c.tg;
-  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
+function save() {
+  NZ.pageStateSave({
+    [LS_KEY]: posters,
+    fmt: $('fmt').value, theme: $('theme').value, qrSrc: $('qrSrc').value,
+    optStrip: $('optStrip').checked, optNums: $('optNums').checked,
+    optQr: $('optQr').checked, optCompact: $('optCompact').checked,
+  });
 }
-['fmt','city','phone','site','tg','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', render); });
-$('print').addEventListener('click', ()=>window.print());
-init(); render();
+
+function qrLink() {
+  const c = NZ.contact();
+  const src = $('qrSrc').value;
+  if (src === 'custom') return ($('qrCustom').value || '').trim() || c.qrbase || c.site;
+  if (src === 'tg') { const tg = String(c.tg || '').replace(/^@/, ''); return tg ? 'https://t.me/' + tg : c.qrbase; }
+  return c.qrbase || c.site;
+}
+
+const fill = (s, city) => String(s == null ? '' : s)
+  .replace(/\{город\}/g, city).replace(/\{городе\}/g, city);
+
+function foot(qrSvg, opts) {
+  const c = NZ.contact();
+  const city = c.city || 'Симферополь';
+  const short = String(qrLink() || '').replace(/^https?:\/\//, '');
+  const dark = $('theme').value !== 'light';
+  return `<div class="p-bottom"><div class="p-contact"><b>${NZ.esc(c.phone || '')}</b><br>` +
+    `${NZ.esc(short)} · ${NZ.esc(city)}<br><span class="muted">Telegram ${NZ.esc(c.tg || '')}</span></div>` +
+    (opts.qr && qrSvg ? `<div class="p-qr">${qrSvg}<div>Наведите камеру</div></div>` : '') + `</div>`;
+}
+
+function itemsHtml(p, opts) {
+  return p.items.map((it, i) => opts.nums
+    ? `<div class="p-item"><span class="p-num">${i + 1}</span><div><b>${NZ.esc(it.b || '')}</b> <span>${NZ.esc(it.s || '')}</span></div></div>`
+    : `<div class="p-item"><div><b>${NZ.esc(it.b || '')}</b> <span>${NZ.esc(it.s || '')}</span></div></div>`).join('');
+}
+
+function stepsHtml(p) {
+  return p.items.map((it, i) => `<div class="step"><div class="sn">${String(i + 1).padStart(2, '0')}</div>` +
+    `<div><div class="st">${NZ.esc(it.b || '')}</div><div class="sd">${NZ.esc(it.s || '')}</div></div></div>`).join('');
+}
+
+function draw() {
+  save();
+  const a3 = $('fmt').value === 'a3';
+  if (!pageStyle) { pageStyle = document.createElement('style'); document.head.appendChild(pageStyle); }
+  pageStyle.textContent = a3 ? '@page { size: A3; margin: 8mm; }' : '@page { size: A4; margin: 8mm; }';
+
+  const cls = 'sheet' + (a3 ? ' a3' : '');
+  const theme = $('theme').value;
+  const opts = { strip: $('optStrip').checked, nums: $('optNums').checked,
+                 qr: $('optQr').checked, compact: $('optCompact').checked };
+  const accent = `--pf-a:${$('accent1').value};--pf-a2:${$('accent2').value}`;
+  const c = NZ.contact();
+  const city = c.city || 'Симферополь';
+  const qrSvg = NZ.qr(qrLink(), { ecl: 'M', margin: 1 });
+  const mark = NZ.markSrc(theme !== 'light');
+  const sel = p => selected === p ? ' selected' : '';
+
+  const head = p => `<div class="p-top"><img src="${mark}" alt=""><div><div class="p-word">NOZZA</div>` +
+    `<div class="p-tag">${NZ.esc(fill(p.slogan || '', city))}</div></div></div>`;
+  const hero = p => `<div class="p-hero">${NZ.esc(p.title || '')}${p.em ? `<br><em>${NZ.esc(p.em || '')}</em>` : ''}</div>`;
+  const base = p => `t-${theme}${opts.compact ? ' compact' : ''}${p.print ? '' : ' p-off'}${sel(posters.indexOf(p))}`;
+  const off = p => p.print ? '' : `<div class="p-off-tag noprint">не печатается</div>`;
+
+  const tgLinkBig = (() => { const tg = String(c.tg || '').replace(/^@/, ''); return tg ? 'https://t.me/' + tg : qrLink(); })();
+  const bigQr = NZ.qr(tgLinkBig, { ecl: 'M', margin: 1 });
+
+  $('sheets').innerHTML = posters.map(p => {
+    const common = `<div class="poster ${base(p)}" data-idx="${posters.indexOf(p)}" style="${accent}" title="Клик — править этот постер">` +
+      (opts.strip ? '<div class="p-strip"></div>' : '') + off(p) + head(p);
+    if (p.tpl === 'services') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div><div class="p-list">${itemsHtml(p, opts)}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    if (p.tpl === 'order') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="steps">${stepsHtml(p)}</div>` +
+      `<div class="p-lead" style="margin-top:10mm">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    if (p.tpl === 'tg') return `<div class="${cls}"><div class="poster tg ${base(p)}" data-idx="${posters.indexOf(p)}" style="${accent}" title="Клик — править этот постер">` +
+      (opts.strip ? '<div class="p-strip"></div>' : '') + off(p) + head(p) + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-bigqr">${bigQr}<div class="cap">${NZ.esc(c.tg || '')}<small>Наведите камеру — откроется канал</small></div></div>` +
+      `<div class="p-list">${itemsHtml(p, opts)}</div>` + foot(qrSvg, opts) + `</div></div>`;
+    /* promo (П16) */
+    return `<div class="${cls}">` + common + hero(p) +
+      (p.until ? `<div class="p-until">⏳ ${NZ.esc(p.until)}</div>` : '') +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div><div class="p-list">${itemsHtml(p, opts)}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+  }).join('');
+
+  const toPrint = posters.filter(p => p.print).length;
+  $('printInfo').textContent = toPrint
+    ? `В печать попадёт ${toPrint} из ${posters.length} постеров`
+    : `Все постеры сняты с печати — в печать уйдут все`;
+  syncEditor();
+}
+
+let pageStyle = null;
+
+/* ------------------------------------------------------------- редактор */
+function syncEditor() {
+  const p = posters[selected];
+  if (!p) { selected = 0; return draw(); }
+  $('e_title').value = p.title || '';
+  $('e_em').value = p.em || '';
+  $('e_slogan').value = p.slogan || '';
+  $('e_lead').value = p.lead || '';
+  $('e_until').value = p.until || '';
+  $('e_until_row').hidden = p.tpl !== 'promo';
+  $('e_print').checked = !!p.print;
+  curItem = Math.min(curItem, Math.max(0, p.items.length - 1));
+  $('e_item').innerHTML = p.items.map((it, i) =>
+    `<option value="${i}" ${i === curItem ? 'selected' : ''}>${i + 1}. ${NZ.esc((it.b || 'пункт').slice(0, 34))}</option>`).join('');
+  const it = p.items[curItem] || {};
+  $('e_item_b').value = it.b || '';
+  $('e_item_s').value = it.s || '';
+  const disabled = !p.items.length;
+  ['e_item', 'e_item_b', 'e_item_s', 'btnDel', 'btnUp', 'btnDown', 'btnDup'].forEach(id => { $(id).disabled = disabled; });
+}
+
+function bind() {
+  const patch = fn => { fn(posters[selected]); save(); draw(); };
+  $('e_title').addEventListener('input', () => bind(p => { p.title = $('e_title').value; }));
+  $('e_em').addEventListener('input', () => bind(p => { p.em = $('e_em').value; }));
+  $('e_slogan').addEventListener('input', () => bind(p => { p.slogan = $('e_slogan').value; }));
+  $('e_lead').addEventListener('input', () => bind(p => { p.lead = $('e_lead').value; }));
+  $('e_until').addEventListener('input', () => bind(p => { p.until = $('e_until').value; }));
+  $('e_print').addEventListener('change', () => bind(p => { p.print = $('e_print').checked; }));
+
+  $('e_item').addEventListener('change', () => { curItem = +$('e_item').value || 0; syncEditor(); });
+  $('e_item_b').addEventListener('input', () => bind(p => { (p.items[curItem] || {}).b = $('e_item_b').value; }));
+  $('e_item_s').addEventListener('input', () => bind(p => { (p.items[curItem] || {}).s = $('e_item_s').value; }));
+
+  $('btnAdd').addEventListener('click', () => bind(p => { p.items.push({ b: 'Новый пункт', s: '' }); curItem = p.items.length - 1; }));
+  $('btnDel').addEventListener('click', () => bind(p => { p.items.splice(curItem, 1); curItem = Math.max(0, curItem - 1); }));
+  $('btnDup').addEventListener('click', () => bind(p => { p.items.splice(curItem + 1, 0, { ...p.items[curItem] }); curItem += 1; }));
+  $('btnUp').addEventListener('click', () => bind(p => { if (curItem > 0) { [p.items[curItem - 1], p.items[curItem]] = [p.items[curItem], p.items[curItem - 1]]; curItem -= 1; } }));
+  $('btnDown').addEventListener('click', () => bind(p => { if (curItem < p.items.length - 1) { [p.items[curItem + 1], p.items[curItem]] = [p.items[curItem], p.items[curItem + 1]]; curItem += 1; } }));
+
+  $('sheets').addEventListener('click', (ev) => {
+    const el = ev.target.closest('.poster');
+    if (!el) return;
+    selected = +el.getAttribute('data-idx') || 0;
+    curItem = 0;
+    draw();
+  });
+
+  ['fmt', 'theme', 'qrSrc', 'qrCustom', 'accent1', 'accent2', 'optStrip', 'optNums', 'optQr', 'optCompact']
+    .forEach(id => $(id).addEventListener('input', draw));
+}
+
+load();
+NZ.mount(draw);
+bind();
 </script>
 </body></html>

@@ -19,16 +19,20 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
+from . import APP_VERSION
 from .accounting import num, uid
 from .config import now_iso
+from .db import SCHEMA_VERSION, list_backups
 from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = """PrintFlow 8.2 — панель в кармане.
+HELP = f"""PrintFlow {APP_VERSION} — панель в кармане.
 
 Кнопки внизу или команды (без слэша, в любом регистре):
 • панель — всё сразу: печать, деньги, план, долги
+• датчики — температуры, вентиляторы, AMS и HMS одной сводкой
+• доктор — здоровье цеха: бот, связь, резервные копии, диск
 • статус · кадр · очередь — что происходит сейчас
 • филамент · пластик — остатки катушек и прогноз закупки
 • закупка — список покупок · закупка авто — автозаполнить
@@ -59,6 +63,9 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 • оплата 1500 по 1001 — принять оплату
 • чаты / диалоги — непрочитанные вопросы покупателей
 • кответ 555 текст — ответить покупателю клиентского бота
+• отзыв ответ 555 текст — ответ на плохой отзыв покупателю
+• клиент блок 555 / клиент разблок 555 — спам-фильтр чатов
+• клиент-бот пауза / старт / статус — выключить/включить витрину
 • оплата подтвердить 1001 — вручную подтвердить заявку «Я оплатил»
 • статус 1001 печать — сменить статус заказа
 • новый адресник 2шт 900р Мария — заказ из текста
@@ -220,6 +227,7 @@ class TelegramBot:
             [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
             [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
             [("🗂 Каталог", "cmd:cat"), ("📊 Итоги", "cmd:today")],
+            [("🌡 Датчики", "cmd:sensors"), ("🩺 Доктор", "cmd:doctor")],
             [("❔ Помощь", "cmd:help")],
         )
 
@@ -457,8 +465,14 @@ class TelegramBot:
             return self.text_panel() if command == "panel" else self._list_printers(chat)
         if command == "queue":
             return self.text_queue()
+        if command == "sensors":
+            return self.text_sensors()
+        if command == "doctor":
+            return self.text_doctor()
         if command == "inbox":
             return self._client_inbox()
+        if command.startswith("cbot_tpl:"):
+            return self._client_template_button(command)
         if command in ("plan", "filament", "money", "today", "help"):
             return {"plan": self.text_plan, "filament": self.text_filament,
                     "money": self.text_money, "today": self.text_today,
@@ -811,6 +825,14 @@ class TelegramBot:
             return self._reply(chat, self._pay(text))
         if word in ("кответ", "ответить", "creply"):
             return self._reply(chat, self._client_answer(raw))
+        if word in ("клиент-бот", "кбот"):
+            return self._reply(chat, self._client_bot_control(text))
+        if word == "клиент" and len(text.split()) > 1 \
+                and text.split()[1] in ("блок", "разблок", "бан", "разбан",
+                                        "блокировка"):
+            return self._reply(chat, self._client_ban(text))
+        if text.startswith("отзыв ответ"):
+            return self._reply(chat, self._review_answer(raw))
         if word in ("статус", "status", "принтер", "принтеры"):
             # «принтер 2» — выбрать принтер для команд; «статус 1001 печать» —
             # смена статуса заказа; иначе состояние принтеров.
@@ -837,6 +859,10 @@ class TelegramBot:
             return self.stop_live(chat)
         if word in ("очередь", "queue"):
             return self._reply(chat, self.text_queue())
+        if word in ("датчики", "сенсоры", "ams", "амс"):
+            return self._reply(chat, self.text_sensors())
+        if word in ("доктор", "диагностика"):
+            return self._reply(chat, self.text_doctor())
         if word in ("выше", "ниже"):
             return self._reply(chat, self._reorder_queue(text, word))
         if word in ("деньги", "финансы", "money", "прибыль"):
@@ -985,6 +1011,145 @@ class TelegramBot:
         blocks.append(f"Парк: печатают {farm.get('printing', 0)} из {len(printers)}, "
                       f"в очереди {farm.get('queued', 0)}.")
         return "\n\n".join(blocks)
+
+    def text_sensors(self) -> str:
+        """«датчики» (A.1.4): телеметрия парка одной сводкой.
+
+        Только чтение снимка: температуры с целями, вентиляторы, скорость,
+        WiFi/прошивка, AMS (влажность, температура, слоты с остатками) и
+        расшифрованные HMS-коды. Катушка в слоте показывается по имени со
+        склада (сверка по tray_uuid), иначе — тип и цвет слота.
+        """
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        if not printers:
+            return "Принтеры не добавлены."
+        spools = {str(sp.get("tray_uuid") or ""): sp for sp in
+                  self.db.query("SELECT * FROM spools WHERE archived=0")
+                  if str(sp.get("tray_uuid") or "")}
+        blocks = []
+        for snap in printers:
+            info = snap["printer"]
+            temp = snap.get("temperature") or {}
+            fans = snap.get("fans") or {}
+            ams = snap.get("ams") or {}
+            lines = [f"🌡 {snap['name']} — {STATE_RU.get(info['state'], info.get('state_label') or info['state'])}"]
+            if not snap["connection"]["connected"]:
+                lines.append("Нет связи по локальной сети — датчики неактуальны.")
+
+            def t(key: str, target_key: str, title: str) -> str:
+                value = temp.get(key)
+                target = temp.get(target_key)
+                if not value and not target:
+                    return ""
+                out = f"{title} {round(num(value))}°"
+                if num(target) and round(num(target)) != round(num(value)):
+                    out += f" → {round(num(target))}°"
+                return out
+            heads = [t("nozzle", "nozzle_target", "Сопло"),
+                     t("bed", "bed_target", "Стол"),
+                     t("chamber", "", "Камера")]
+            heads = [h for h in heads if h]
+            if heads:
+                lines.append(" · ".join(heads))
+            fan_parts = [f"{title} {round(num(v))}%"
+                         for title, v in (("Обдув", fans.get("part")),
+                                          ("Вспом.", fans.get("aux")),
+                                          ("Камерный", fans.get("chamber")))
+                         if v is not None]
+            if fan_parts:
+                lines.append(" · ".join(fan_parts))
+            speed = []
+            if info.get("speed_label"):
+                speed.append(info["speed_label"])
+            if num(info.get("speed_percent")) and num(info.get("speed_percent")) != 100:
+                speed.append(f"{round(num(info.get('speed_percent')))}%")
+            if info.get("wifi"):
+                speed.append(f"WiFi {info['wifi']}")
+            if info.get("firmware"):
+                speed.append(f"прошивка {info['firmware']}")
+            if speed:
+                lines.append(" · ".join(speed))
+            env = []
+            if ams.get("temperature") is not None:
+                env.append(f"температура {ams['temperature']}°")
+            if ams.get("humidity") is not None:
+                env.append(f"влажность {ams['humidity']}")
+            if env:
+                lines.append(f"AMS ({ams.get('units', 0)} бл.): " + " · ".join(env))
+            for tray in ams.get("trays") or []:
+                spool = spools.get(str(tray.get("uuid") or ""))
+                name = (f"{spool.get('material')} {spool.get('color_name')}".strip()
+                        if spool else
+                        f"{tray.get('type') or 'пластик'} {tray.get('color') or ''}".strip())
+                remain = tray.get("remain")
+                left = f"{round(num(remain))}%" if remain is not None else "—"
+                mark = "▸ " if tray.get("active") else "  · "
+                lines.append(f"{mark}{name} ({tray['label']}) — {left}")
+            for problem in info.get("problems") or []:
+                lines.append(f"⚠ {problem.get('severity_label')}: "
+                             f"{problem.get('title')}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def _doctor_problems(self) -> list[str]:
+        """Короткий список проблем цеха — для «доктора» и утреннего дайджеста (#86).
+
+        Проверяется только локальное: жив ли опрос бота, каналы принтеров,
+        свежесть резервных копий и место на диске. Сеть наружу не ходим —
+        «доктор» должен отвечать даже когда Интернета нет.
+        """
+        problems: list[str] = []
+        if self.last_poll:
+            age = time.time() - self.last_poll
+            if age > 90:
+                problems.append(f"🤖 Бот: последний успешный опрос {int(age)} с назад")
+        else:
+            problems.append("🤖 Бот: ещё не было успешного опроса Telegram")
+        try:
+            from .workshop_v9 import heartbeat_channels
+            channels = heartbeat_channels(self.manager, self.db)
+        except Exception:
+            channels = {}
+        for unit, label in (("mqtt", "MQTT"), ("ftps", "FTPS")):
+            for pr in (channels.get(unit) or {}).get("printers", []):
+                if not pr.get("ok"):
+                    problems.append(f"🔌 {pr.get('name')}: {label} — "
+                                    f"{pr.get('error') or 'нет связи'}")
+        disk = channels.get("disk") or {}
+        if not disk.get("ok", True):
+            problems.append(f"💿 Диск: {disk.get('error') or 'мало места'}")
+        try:
+            backups = list_backups()
+            newest = max((b.get("at") or "" for b in backups), default="")
+            if not newest:
+                problems.append("💾 Резервных копий базы ещё нет")
+            else:
+                try:
+                    from datetime import datetime
+                    age_h = (datetime.now()
+                             - datetime.fromisoformat(str(newest).replace("Z", ""))).total_seconds() / 3600
+                    if age_h > 48:
+                        problems.append(
+                            f"💾 Последняя копия базы {round(age_h)} ч назад")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return problems
+
+    def text_doctor(self) -> str:
+        """«доктор» (#80): здоровье цеха одним сообщением, без внешней сети."""
+        problems = self._doctor_problems()
+        lines = ["🩺 Доктор PrintFlow:"]
+        if problems:
+            lines.append(f"⚠ Проблем: {len(problems)}")
+            lines.extend(f"  · {p}" for p in problems)
+        else:
+            lines.append("✅ Цех здоров: бот, связь, копии и диск — ок.")
+        lines.append(f"Версия {APP_VERSION} · схема {SCHEMA_VERSION}. "
+                     "Подробная диагностика: python pf.py doctor.")
+        return "\n".join(lines)
 
     def text_queue(self) -> str:
         jobs = [j for j in self.manager.queue() if j.get("state") in ("queued", "running", "starting")]
@@ -1191,6 +1356,13 @@ class TelegramBot:
         debts = self.manager.acc.debts()
         if num(debts.get("total")) > 0:
             lines.append(f"💰 Ждут оплаты {_money(debts['total'])} по {debts.get('count', 0)} заказам")
+        # #86 «Утренний авто-доктор»: дайджест сам говорит, здоров ли цех.
+        problems = self._doctor_problems()
+        if problems:
+            lines.append(f"🩺 Цех требует внимания ({len(problems)}):")
+            lines.extend(f"  · {p}" for p in problems[:4])
+        else:
+            lines.append("🩺 Цех здоров: бот, связь, копии и диск — ок.")
         return "\n".join(lines)
 
     def text_weekly(self) -> str:
@@ -2590,6 +2762,132 @@ class TelegramBot:
                           f"{row.get('name') or target}", "",
                           {"chat_id": target})
         return f"Отправлено ✓ {row.get('name') or target} · «{message[:60]}»"
+
+    def _client_bot_control(self, text: str) -> str:
+        """КБ5: «клиент-бот пауза/старт/статус» — управление витриной с телефона."""
+        parts = text.split()
+        action = parts[1] if len(parts) > 1 else "статус"
+        settings = self.db.settings()
+        enabled = bool(settings.get("client_bot_enabled"))
+        has_token = bool(settings.get("client_bot_token"))
+        if action in ("пауза", "стоп", "выключить", "pause", "stop"):
+            self.db.set_settings({"client_bot_enabled": False})
+            self.db.add_event("bot", "Клиентский бот выключен из Telegram",
+                              "«клиент-бот пауза»", "", {})
+            return ("Клиентский бот выключен — покупателям бот не отвечает. "
+                    "Включить: «клиент-бот старт».")
+        if action in ("старт", "включить", "start"):
+            if not has_token:
+                return ("Сначала задайте токен клиентского бота в панели: "
+                        "Настройки → Клиент-бот.")
+            self.db.set_settings({"client_bot_enabled": True})
+            self.db.add_event("bot", "Клиентский бот включён из Telegram",
+                              "«клиент-бот старт»", "", {})
+            return "Клиентский бот включён ✓ Каталог и заявки снова работают."
+        bot = getattr(self.manager, "client_bot", None)
+        alive = bool(bot and bot.last_poll
+                     and time.time() - bot.last_poll < 120)
+        return ("Клиентский бот: "
+                f"{'включён' if enabled else 'выключен'} · "
+                f"опрос {'жив' if alive else 'молчит'}\n"
+                "«клиент-бот пауза» — выключить · «клиент-бот старт» — включить.")
+
+    def _client_ban(self, text: str) -> str:
+        """КБ6: «клиент блок 555» / «клиент разблок 555» — спам-фильтр чатов."""
+        parts = text.split()
+        if len(parts) < 3 or not parts[2].isdigit():
+            return "Формат: «клиент блок 555» или «клиент разблок 555»."
+        action, target = parts[1], parts[2]
+        row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (target,))
+        if not row:
+            return f"Чат {target} не найден среди покупателей."
+        if action in ("блок", "бан", "блокировка"):
+            self.db.execute("UPDATE client_chats SET banned=1 WHERE chat_id=?",
+                            (target,))
+            self.db.add_event("bot", "Чат покупателя заблокирован",
+                              str(row.get("name") or target), "",
+                              {"chat_id": target})
+            return (f"Чат {target} заблокирован: бот молча игнорирует "
+                    "сообщения и не шлёт уведомления. Разблок: "
+                    f"«клиент разблок {target}».")
+        self.db.execute("UPDATE client_chats SET banned=0 WHERE chat_id=?",
+                        (target,))
+        self.db.add_event("bot", "Чат покупателя разблокирован",
+                          str(row.get("name") or target), "",
+                          {"chat_id": target})
+        return f"Чат {target} разблокирован — бот снова отвечает."
+
+    def _review_answer(self, raw: str) -> str:
+        """КБ4: «отзыв ответ 555 <текст>» — ответ покупателю на плохой отзыв."""
+        parts = raw.strip().split(None, 3)
+        if len(parts) < 4 or not parts[2].isdigit():
+            return ("Формат: «отзыв ответ 555 <текст>» — chat_id из "
+                    "уведомления об отзыве.")
+        target, message = parts[2], parts[3].strip()
+        client = getattr(self.manager, "client_bot", None)
+        if not client:
+            return "Клиентский бот не запущен — ответьте в панели (Отзывы)."
+        review = self.db.one(
+            "SELECT * FROM client_reviews WHERE chat_id=?"
+            " AND state IN ('needs_attention','rated')"
+            " ORDER BY datetime(COALESCE(created_at, asked_at)) DESC LIMIT 1",
+            (target,))
+        if not review:
+            return f"У чата {target} нет отзыва, ждущего ответа."
+        order = self.db.one("SELECT number FROM orders WHERE id=?",
+                            (review.get("order_id") or "",)) or {}
+        dedupe = (f"reviewreply:{review['order_id']}:{self._current_update_id}"
+                  if self._current_update_id else "")
+        client._reply_keyed(target, message, client._menu(), dedupe_key=dedupe)
+        row = self.db.one("SELECT name FROM client_chats WHERE chat_id=?",
+                          (target,))
+        client._log(target, (row or {}).get("name") or "", "← ответ на отзыв",
+                    message, kind="answer", direction="out", unread=0,
+                    operator=str(self.db.setting("telegram_chat_id", "") or ""))
+        self.db.execute(
+            "UPDATE client_reviews SET state='answered',operator_note=?,"
+            "resolved_at=? WHERE order_id=? AND chat_id=?",
+            (message[:500], now_iso(), review["order_id"], target))
+        self.db.add_event("order", "Ответ на отзыв покупателю",
+                          f"№{order.get('number') or ''}", message[:200],
+                          {"chat_id": target})
+        return (f"Отправлено ✓ Ответ на отзыв ушёл покупателю "
+                f"{(row or {}).get('name') or target}.")
+
+    def _client_template_button(self, command: str) -> str:
+        """КБ2: кнопка-шаблон из уведомления — готовый ответ покупателю."""
+        parts = command.split(":", 2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            return "Кнопка устарела — напишите «кответ <chat> <текст>»."
+        target, template_id = parts[1], parts[2]
+        client = getattr(self.manager, "client_bot", None)
+        if not client:
+            return "Клиентский бот не запущен."
+        own = [item for item in client.templates() if item.get("enabled", True)]
+        template = next((item for item in own if item["id"] == template_id), None)
+        if not template:
+            template = next((item for item in client.default_templates()
+                             if item["id"] == template_id), None)
+        if not template:
+            return f"Шаблон удалён — напишите «кответ {target} <текст>»."
+        if bool(num((self.db.one(
+                "SELECT banned n FROM client_chats WHERE chat_id=?",
+                (target,)) or {}).get("n"))):
+            return f"Чат {target} заблокирован — сначала «клиент разблок {target}»."
+        message = str(template.get("text") or "")
+        dedupe = (f"tpl:{self._current_update_id}:{target}:{template_id}"
+                  if self._current_update_id else "")
+        client._reply_keyed(target, message, client._menu(), dedupe_key=dedupe)
+        row = self.db.one("SELECT name FROM client_chats WHERE chat_id=?",
+                          (target,))
+        client._log(target, (row or {}).get("name") or "",
+                    f"← шаблон «{template['name']}»", message, kind="answer",
+                    direction="out", unread=0,
+                    operator=str(self.db.setting("telegram_chat_id", "") or ""))
+        self.db.execute("UPDATE client_bot_log SET unread=0"
+                        " WHERE chat_id=? AND direction='in'", (target,))
+        return (f"Отправлено ✓ «{template['name']}» → "
+                f"{(row or {}).get('name') or target}")
 
     def _pay(self, text: str) -> str:
         import re as _re

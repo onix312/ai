@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/theme.css?v=11.0.1">
+<link rel="stylesheet" href="assets/theme.css?v=11.1.0">
 <link rel="stylesheet" href="assets/app.css?v=9.1.2">
 <link rel="stylesheet" href="assets/more.css?v=9.2.2">
 </head><body>
@@ -24,19 +24,19 @@
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
   <div class="nav-group-title">У станка</div>
-  <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic">◈</span>Обзор</a>
-  <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
-  <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
-  <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
+  <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Обзор</a>
+  <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
+  <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
+  <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
   </div>
   <div class="nav-group">
   <div class="nav-group-title">Склад</div>
-  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span></a>
+  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span></a>
   </div>
   <div class="nav-group">
   <div class="nav-group-title">Деньги</div>
-  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы касса налог прибыль долг проводка"><span class="ic">₽</span>Касса</a>
-  <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic">⌁</span>Калькулятор</a>
+  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы касса налог прибыль долг проводка"><span class="ic" data-icon="ruble">₽</span>Касса</a>
+  <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
   </div>
   <div class="nav-group">
   <details class="nav-more" id="nav_more">
@@ -44,16 +44,16 @@
    <div class="nav-more-body">
     <div class="nav-more-section">
      <span class="nav-more-caption">Рост и продажи</span>
-     <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic">◎</span><span>Клиенты</span><small>CRM</small></a>
-     <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic">◫</span><span>Ниши</span><small>Тесты</small></a>
-     <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic">✎</span><span>Контент</span><small>Студия</small></a>
-     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic">◆</span><span>Центр 10.0</span><small>Смена</small></a>
-     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
+     <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span><span>Клиенты</span><small>CRM</small></a>
+     <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span><span>Ниши</span><small>Тесты</small></a>
+     <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic" data-icon="pen">✎</span><span>Контент</span><small>Студия</small></a>
+     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span><span>Центр 10.0</span><small>Смена</small></a>
+     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
     </div>
     <div class="nav-more-section">
      <span class="nav-more-caption">Знания и система</span>
-     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic">▤</span><span>Библиотека</span><small>Гайды</small></a>
-     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные"><span class="ic">⚙</span><span>Настройки</span><small>Цех</small></a>
+     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span><span>Библиотека</span><small>Гайды</small></a>
+     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные"><span class="ic" data-icon="sliders">⚙</span><span>Настройки</span><small>Цех</small></a>
     </div>
    </div>
   </details>
@@ -67,13 +67,13 @@
 
 <div id="main">
  <header id="topbar">
-  <button id="burger" type="button" aria-label="Меню">☰</button>
+  <button id="burger" type="button" aria-label="Меню"><span class="ic" data-icon="menu">☰</span></button>
   <div class="top-title"><b id="top_title">Обзор</b><span id="top_sub">Производство, деньги и принтеры в одном месте</span></div>
   <div class="top-spacer"></div>
-  <button class="cmd-trigger" id="cmd_open" type="button"><span>⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
+  <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
-  <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления">◐</button>
-  <button class="btn primary" id="quick_order" type="button"><span class="ic">+</span>Заказ</button>
+  <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
+  <button class="btn primary" id="quick_order" type="button"><span class="ic" data-icon="plus">+</span>Заказ</button>
  </header>
 
  <div id="cycobar" hidden>
@@ -94,19 +94,19 @@
   <div><span class="eyebrow">Операционная панель</span><h1>Производство сегодня</h1><p>Загрузка парка, деньги и ближайшие сроки.</p></div>
   <div class="head-actions">
    <div class="seg" id="dash_period"><button data-days="7" class="on">7 дней</button><button data-days="30">30 дней</button><button data-days="90">90 дней</button></div>
-   <button class="btn" id="dash_widgets_btn" type="button" title="Показать или скрыть виджеты панели">◫ Виджеты</button>
-   <button class="btn" id="dash_pdf" type="button" title="Распечатать или сохранить в PDF">⎙ PDF</button>
-   <button class="btn" id="dash_refresh" type="button">↻ Обновить</button>
+   <button class="btn" id="dash_widgets_btn" type="button" title="Показать или скрыть виджеты панели"><span class="ic" data-icon="layout">◫</span>Виджеты</button>
+   <button class="btn" id="dash_pdf" type="button" title="Распечатать или сохранить в PDF"><span class="ic" data-icon="printer">⎙</span>PDF</button>
+   <button class="btn" id="dash_refresh" type="button"><span class="ic" data-icon="refresh">↻</span>Обновить</button>
   </div>
  </div>
- <div class="kpi-grid" id="dash_kpis" data-widget="kpis"></div>
+ <div class="kpi-grid" id="dash_kpis" data-widget="kpis"><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div></div>
  <div class="card operator-focus" data-widget="operator_focus" style="margin-top:16px">
   <div class="card-head"><div><h2>Сейчас нужно сделать</h2><p id="operator_focus_sub">Сначала опасное и срочное, потом плановая работа</p></div><button class="btn sm ghost" id="operator_focus_refresh" type="button">↻</button></div>
   <div id="operator_focus"></div>
  </div>
  <div class="card" data-widget="plan" style="margin-top:16px">
   <div class="card-head"><div><h2>План на сегодня</h2><p id="dash_plan_sub">Что печатать следующим — заказы и пополнение полки</p></div><a href="#queue" data-view="queue">Очередь →</a></div>
-  <div id="dash_plan"></div>
+  <div id="dash_plan"><div class="skel-row"><i class="skel" style="width:88%"></i></div><div class="skel-row"><i class="skel" style="width:72%"></i></div><div class="skel-row"><i class="skel" style="width:55%"></i></div></div>
  </div>
  <div class="card" data-widget="health" style="margin-top:16px">
   <div class="card-head"><div><h2>Здоровье бизнеса</h2><p id="dash_health_sub">Цель месяца, касса вперёд и налоги</p></div><a href="#finance" data-view="finance">Финансы →</a></div>
@@ -115,7 +115,7 @@
  <div class="grid g-2-1" style="margin-top:16px">
   <div class="card" data-widget="active">
    <div class="card-head"><div><h2>Активная печать</h2><p id="dash_active_sub">—</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
-   <div id="dash_active"></div>
+   <div id="dash_active"><div class="skel-row"><i class="skel" style="width:46%"></i></div><div class="skel-row"><i class="skel" style="width:78%"></i></div></div>
   </div>
   <div class="card" data-widget="gauge">
    <div class="card-head"><div><h2>Прибыль за час печати</h2><p>Норма — от <span id="dash_gauge_norm">250 ₽</span> за час</p></div></div>
@@ -151,7 +151,7 @@
   </div>
   <div class="card" data-widget="events">
    <div class="card-head"><div><h2>Лента событий</h2><p>Печать, ошибки, склад и заказы</p></div><button class="btn sm ghost" id="dash_events_refresh" type="button">↻</button></div>
-   <div class="event-list" id="dash_events"></div>
+   <div class="event-list" id="dash_events"><div class="skel-row"><i class="skel" style="width:64%"></i></div><div class="skel-row"><i class="skel" style="width:46%"></i></div><div class="skel-row"><i class="skel" style="width:58%"></i></div><div class="skel-row"><i class="skel" style="width:38%"></i></div><div class="skel-row"><i class="skel" style="width:52%"></i></div></div>
   </div>
  </div>
  <div class="card" data-widget="timeline" style="margin-top:16px">
@@ -231,13 +231,13 @@
     <div class="card">
      <div class="card-head"><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><button class="btn sm ghost" id="pr_schedule_btn" type="button">⏱ Отложить</button><span class="chip outline">только LAN</span></div>
      <div class="cmd-grid">
-      <button class="cmd-btn" data-cmd="pause" type="button"><span class="ic">❙❙</span>Пауза</button>
-      <button class="cmd-btn" data-cmd="resume" type="button"><span class="ic">▶</span>Продолжить</button>
-      <button class="cmd-btn" data-cmd="light" type="button"><span class="ic">☀</span>Свет</button>
-      <button class="cmd-btn" data-cmd="refresh" type="button"><span class="ic">⟳</span>Опросить</button>
-      <button class="cmd-btn" data-cmd="keyframes" type="button" id="pr_keyframes_btn" title="Видео печати: архив кадров задания"><span class="ic">▦</span>Видео</button>
-      <button class="cmd-btn" data-cmd="bed_ref" type="button" id="pr_bed_btn" title="Снять эталон пустого стола для проверки «деталь на столе»"><span class="ic">▭</span>Пустой стол</button>
-      <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic">■</span>Стоп</button>
+      <button class="cmd-btn" data-cmd="pause" type="button"><span class="ic" data-icon="pause">❙❙</span>Пауза</button>
+      <button class="cmd-btn" data-cmd="resume" type="button"><span class="ic" data-icon="play">▶</span>Продолжить</button>
+      <button class="cmd-btn" data-cmd="light" type="button"><span class="ic" data-icon="sun">☀</span>Свет</button>
+      <button class="cmd-btn" data-cmd="refresh" type="button"><span class="ic" data-icon="refresh">⟳</span>Опросить</button>
+      <button class="cmd-btn" data-cmd="keyframes" type="button" id="pr_keyframes_btn" title="Видео печати: архив кадров задания"><span class="ic" data-icon="film">▦</span>Видео</button>
+      <button class="cmd-btn" data-cmd="bed_ref" type="button" id="pr_bed_btn" title="Снять эталон пустого стола для проверки «деталь на столе»"><span class="ic" data-icon="bed">▭</span>Пустой стол</button>
+      <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic" data-icon="stop">■</span>Стоп</button>
      </div>
      <div class="notice" id="pr_bed_status" hidden style="margin-top:8px"><span>▭</span><span id="pr_bed_status_text"></span></div>
      <div class="cmd-row">
@@ -1080,6 +1080,9 @@
     <div class="set-row"><div class="sinfo"><b>Уведомления о статусе</b><small>Печать, готовность и изменения срока</small></div><label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Отзывы после выдачи</b><small>Только после фактического «Выдан», не после «На складе»</small></div><label class="switch"><input type="checkbox" id="cb_review" checked><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Напоминание о выдаче</b><small>Дней в статусе «Готов», 0 — выключить</small></div><input type="number" id="cb_pickup_days" min="0" max="30" value="3"></div>
+    <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Как получить</b><small>Адрес и часы — кнопка «🚚 Как получить» в боте и напоминания о выдаче</small></div><textarea id="cb_pickup_info" rows="3" placeholder="Адрес: …&#10;Часы: ежедневно 10:00–20:00"></textarea></div>
+    <div class="set-row"><div class="sinfo"><b>Фото готового заказа</b><small>При статусе «Готов» бот отправляет покупателю снимок из карточки</small></div><label class="switch"><input type="checkbox" id="cb_ready_photo" checked><i></i></label></div>
+    <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Статья «Как выбрать материал»</b><small>Кнопка в мастере заявки; пусто — стандартный текст NOZZA</small></div><textarea id="cb_faq_materials" rows="3" placeholder="PLA — декор и интерьер, PETG — прочность и влага…"></textarea></div>
     <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Реквизиты оплаты</b><small>Ручная сверка: реквизиты/QR СБП → «Я оплатил» → подтверждение сотрудником</small></div><textarea id="cb_pay_info" rows="3" placeholder="СБП по номеру +7…, получатель…"></textarea></div>
     <div class="set-row"><div class="sinfo"><b>QR СБП</b><small>Ссылка на изображение или QR-переход, без обязательного эквайринга</small></div><input type="url" id="cb_pay_qr" placeholder="https://…/qr"></div>
     <div class="set-row"><div class="sinfo"><b>Назначение перевода</b><small>По умолчанию: NOZZA + номер заказа</small></div><input type="text" id="cb_payment_purpose" placeholder="NOZZA {номер заказа}"></div>
@@ -1098,6 +1101,7 @@
    <div class="clientbot-state-list"><span>черновик заявки</span><b>3 шага</b><span>ручная оплата</span><b>ожидает сверки</b><span>статус</span><b>подписанная ссылка</b></div>
    <div class="notice" style="margin-top:12px"><span>💡</span><span>Deep-link <b>/start src_…</b> сохраняется в локальной воронке. Данные аналитики не уходят во внешние сервисы.</span></div>
    <div class="clientbot-templates"><div class="card-head"><div><span class="card-kicker">Inbox</span><h3>Шаблоны ответов</h3><p>Выберите шаблон в диалоге или отредактируйте его здесь.</p></div></div><div id="cb_templates"></div></div>
+  <div class="clientbot-templates clientbot-templates-lib"><div class="card-head"><div><span class="card-kicker">Библиотека</span><h3>Готовые ответы</h3><p>Заготовки под частые ситуации: цена, размеры, выдача, извинение. Кнопка «+» копирует в ваши шаблоны — текст можно править.</p></div></div><div id="cb_default_templates"></div></div>
   </section>
  </div>
  <div class="clientbot-grid clientbot-grid-top">
@@ -1148,35 +1152,35 @@
   <span class="lib-result-count" id="lib_count">Все материалы</span>
  </div>
  <div class="lib-grid" id="lib_grid">
-  <a class="lib-card" href="#library/start" data-article="start"><span class="ic">🚀</span><b>Запуск</b><small>Первая неделя и чек-листы</small></a>
-  <a class="lib-card" href="#library/plan" data-article="plan"><span class="ic">📊</span><b>Бизнес-план</b><small>Экономика и план роста</small></a>
-  <a class="lib-card" href="#library/models" data-article="models"><span class="ic">🧩</span><b>Модели</b><small>Лицензии и ассортимент</small></a>
-  <a class="lib-card" href="#library/tech" data-article="tech"><span class="ic">🛠</span><b>Техника</b><small>Настройки, брак, упаковка</small></a>
-  <a class="lib-card" href="#library/b2b" data-article="b2b"><span class="ic">🤝</span><b>B2B</b><small>Локальный бизнес и скрипты</small></a>
-  <a class="lib-card" href="#library/avito" data-article="avito"><span class="ic">📱</span><b>Авито</b><small>Объявления и ответы</small></a>
-  <a class="lib-card" href="#library/tg" data-article="tg"><span class="ic">✈</span><b>Telegram</b><small>Канал и приём заказов</small></a>
-  <a class="lib-card" href="#library/posts" data-article="posts"><span class="ic">✍</span><b>Посты</b><small>30 готовых шаблонов</small></a>
-  <a class="lib-card" href="#library/content" data-article="content"><span class="ic">🎬</span><b>Контент</b><small>Съёмка и календарь</small></a>
-  <a class="lib-card" href="#library/ip" data-article="ip"><span class="ic">🏛</span><b>ИП и налоги</b><small>Разделение схем</small></a>
-  <a class="lib-card" href="#library/legal" data-article="legal"><span class="ic">⚖</span><b>Юридика</b><small>Маркировка, права, учёт</small></a>
-  <a class="lib-card" href="#library/mats" data-article="mats"><span class="ic">🖨</span><b>Материалы A4</b><small>Ценники и памятки</small></a>
-  <a class="lib-card" href="#library/tpl" data-article="tpl"><span class="ic">✉</span><b>Шаблоны ответов</b><small>Тексты для Авито и Telegram</small></a>
-  <a class="lib-card" href="#library/night" data-article="night"><span class="ic">🌙</span><b>Ночная смена</b><small>Ноль простоя и автономность</small></a>
-  <a class="lib-card" href="#library/auto" data-article="auto"><span class="ic">🤖</span><b>Авто-эжектор</b><small>Снятие деталей без рук</small></a>
-  <a class="lib-card" href="#library/network" data-article="network"><span class="ic">📡</span><b>Сеть и доступ</b><small>Много роутеров, телефон, Telegram</small></a>
-  <a class="lib-card" href="#library/stock" data-article="stock"><span class="ic">🧵</span><b>Стартовый закуп</b><small>PLA: 8 катушек и приоритеты</small></a>
-  <a class="lib-card" href="#library/storefront" data-article="storefront"><span class="ic">🛍</span><b>Витрина и QR-заказ</b><small>Заявки с полки без продавца</small></a>
-  <a class="lib-card" href="#library/bot" data-article="bot"><span class="ic">🤖</span><b>Telegram-панель</b><small>Управление и продажи с телефона</small></a>
-  <a class="lib-card" href="#library/vitrina" data-article="vitrina"><span class="ic">🪧</span><b>3D-витрина</b><small>Что напечатать для самой полки</small></a>
-  <a class="lib-card" href="#library/plastics-step" data-article="plastics-step"><span class="ic">🧪</span><b>Пластики пошагово</b><small>PLA/PETG/TPU/ABS/ASA и др. — сушка, стол, профиль</small></a>
-  <a class="lib-card" href="#library/settings-guide" data-article="settings-guide"><span class="ic">⚙️</span><b>Гайд по настройкам</b><small>Все вкладки — что и зачем менять</small></a>
-  <a class="lib-card" href="#library/faq" data-article="faq"><span class="ic">❓</span><b>FAQ — частые ошибки</b><small>HMS-коды, налипание, паутинки, коробление</small></a>
-  <a class="lib-card" href="#library/camera-cloud" data-article="camera-cloud"><span class="ic">📷</span><b>Камера в облаке</b><small>Почему нет картинки и как починить</small></a>
-  <a class="lib-card" data-library-category="tools" href="/design.html" target="_blank" rel="noopener"><span class="ic">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
-  <a class="lib-card" data-library-category="tools" href="/m.html" target="_blank" rel="noopener"><span class="ic">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
-  <a class="lib-card" data-library-category="tools" href="/track.html" target="_blank" rel="noopener"><span class="ic">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
-  <a class="lib-card" data-library-category="tools" href="/materials/промостенды-67x57.html" target="_blank" rel="noopener"><span class="ic">🪧</span><b>Промостенды 67×57</b><small>Генератор: 100 идей, свой текст, QR и печать на A4</small></a>
-  <a class="lib-card" data-library-category="tools" href="/materials/index.html" target="_blank" rel="noopener"><span class="ic">🖨</span><b>Все материалы A4</b><small>Вывеси, ценники, сертификаты, купоны</small></a>
+  <a class="lib-card" href="#library/start" data-article="start"><span class="ic" data-icon="rocket">🚀</span><b>Запуск</b><small>Первая неделя и чек-листы</small></a>
+  <a class="lib-card" href="#library/plan" data-article="plan"><span class="ic" data-icon="chart">📊</span><b>Бизнес-план</b><small>Экономика и план роста</small></a>
+  <a class="lib-card" href="#library/models" data-article="models"><span class="ic" data-icon="shapes">🧩</span><b>Модели</b><small>Лицензии и ассортимент</small></a>
+  <a class="lib-card" href="#library/tech" data-article="tech"><span class="ic" data-icon="wrench">🛠</span><b>Техника</b><small>Настройки, брак, упаковка</small></a>
+  <a class="lib-card" href="#library/b2b" data-article="b2b"><span class="ic" data-icon="briefcase">🤝</span><b>B2B</b><small>Локальный бизнес и скрипты</small></a>
+  <a class="lib-card" href="#library/avito" data-article="avito"><span class="ic" data-icon="phone">📱</span><b>Авито</b><small>Объявления и ответы</small></a>
+  <a class="lib-card" href="#library/tg" data-article="tg"><span class="ic" data-icon="send">✈</span><b>Telegram</b><small>Канал и приём заказов</small></a>
+  <a class="lib-card" href="#library/posts" data-article="posts"><span class="ic" data-icon="pen">✍</span><b>Посты</b><small>30 готовых шаблонов</small></a>
+  <a class="lib-card" href="#library/content" data-article="content"><span class="ic" data-icon="clapper">🎬</span><b>Контент</b><small>Съёмка и календарь</small></a>
+  <a class="lib-card" href="#library/ip" data-article="ip"><span class="ic" data-icon="bank">🏛</span><b>ИП и налоги</b><small>Разделение схем</small></a>
+  <a class="lib-card" href="#library/legal" data-article="legal"><span class="ic" data-icon="scale">⚖</span><b>Юридика</b><small>Маркировка, права, учёт</small></a>
+  <a class="lib-card" href="#library/mats" data-article="mats"><span class="ic" data-icon="page">🖨</span><b>Материалы A4</b><small>Ценники и памятки</small></a>
+  <a class="lib-card" href="#library/tpl" data-article="tpl"><span class="ic" data-icon="mail">✉</span><b>Шаблоны ответов</b><small>Тексты для Авито и Telegram</small></a>
+  <a class="lib-card" href="#library/night" data-article="night"><span class="ic" data-icon="moon">🌙</span><b>Ночная смена</b><small>Ноль простоя и автономность</small></a>
+  <a class="lib-card" href="#library/auto" data-article="auto"><span class="ic" data-icon="robot">🤖</span><b>Авто-эжектор</b><small>Снятие деталей без рук</small></a>
+  <a class="lib-card" href="#library/network" data-article="network"><span class="ic" data-icon="antenna">📡</span><b>Сеть и доступ</b><small>Много роутеров, телефон, Telegram</small></a>
+  <a class="lib-card" href="#library/stock" data-article="stock"><span class="ic" data-icon="spool">🧵</span><b>Стартовый закуп</b><small>PLA: 8 катушек и приоритеты</small></a>
+  <a class="lib-card" href="#library/storefront" data-article="storefront"><span class="ic" data-icon="bag">🛍</span><b>Витрина и QR-заказ</b><small>Заявки с полки без продавца</small></a>
+  <a class="lib-card" href="#library/bot" data-article="bot"><span class="ic" data-icon="robot">🤖</span><b>Telegram-панель</b><small>Управление и продажи с телефона</small></a>
+  <a class="lib-card" href="#library/vitrina" data-article="vitrina"><span class="ic" data-icon="sign">🪧</span><b>3D-витрина</b><small>Что напечатать для самой полки</small></a>
+  <a class="lib-card" href="#library/plastics-step" data-article="plastics-step"><span class="ic" data-icon="flask">🧪</span><b>Пластики пошагово</b><small>PLA/PETG/TPU/ABS/ASA и др. — сушка, стол, профиль</small></a>
+  <a class="lib-card" href="#library/settings-guide" data-article="settings-guide"><span class="ic" data-icon="sliders">⚙️</span><b>Гайд по настройкам</b><small>Все вкладки — что и зачем менять</small></a>
+  <a class="lib-card" href="#library/faq" data-article="faq"><span class="ic" data-icon="help">❓</span><b>FAQ — частые ошибки</b><small>HMS-коды, налипание, паутинки, коробление</small></a>
+  <a class="lib-card" href="#library/camera-cloud" data-article="camera-cloud"><span class="ic" data-icon="camera">📷</span><b>Камера в облаке</b><small>Почему нет картинки и как починить</small></a>
+  <a class="lib-card" data-library-category="tools" href="/design.html" target="_blank" rel="noopener"><span class="ic" data-icon="shapes">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
+  <a class="lib-card" data-library-category="tools" href="/m.html" target="_blank" rel="noopener"><span class="ic" data-icon="phone">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
+  <a class="lib-card" data-library-category="tools" href="/track.html" target="_blank" rel="noopener"><span class="ic" data-icon="search">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
+  <a class="lib-card" data-library-category="tools" href="/materials/промостенды-67x57.html" target="_blank" rel="noopener"><span class="ic" data-icon="sign">🪧</span><b>Промостенды 67×57</b><small>Генератор: 100 идей, свой текст, QR и печать на A4</small></a>
+  <a class="lib-card" data-library-category="tools" href="/materials/index.html" target="_blank" rel="noopener"><span class="ic" data-icon="page">🖨</span><b>Все материалы A4</b><small>Вывеси, ценники, сертификаты, купоны</small></a>
  </div>
  <div class="lib-empty-state" id="lib_empty" hidden><span>⌕</span><b>Ничего не нашли</b><p>Смените категорию или попробуйте другое слово.</p><button class="btn sm" type="button" id="lib_reset_filters">Показать все материалы</button></div>
  <div id="lib_tpl_wrap" hidden>
@@ -4886,7 +4890,8 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=9.1.2"></script>
-<script src="assets/core.js?v=11.0.1"></script>
+<script src="assets/core.js?v=11.1.0"></script>
+<script src="assets/icons.js?v=11.1.0"></script>
 <script src="assets/printer.js?v=11.0.1"></script>
 <script src="assets/ops.js?v=11.0.1"></script>
 <script src="assets/money.js?v=11.0.1"></script>
@@ -4897,7 +4902,7 @@
 <script src="assets/marketing.js?v=9.2.1"></script>
 <script src="assets/clientbot.js?v=11.0.1"></script>
 <script src="assets/workshop.js?v=11.0.1"></script>
-<script src="assets/app.js?v=11.0.1"></script>
+<script src="assets/app.js?v=11.1.0"></script>
 <script src="assets/ops10.js?v=10.0.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
