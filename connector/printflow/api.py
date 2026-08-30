@@ -565,6 +565,31 @@ class Api:
             pass
         return []
 
+    def _order_photos(self, order_id: str) -> list[dict]:
+        """Фото и файлы заявки заказа с размером и исходным именем.
+
+        12.2 (ЗА6): панель различает снимки производства (upload/camera/client)
+        и файлы, присланные покупателю через клиентского бота (client_file):
+        для них нужны имя файла и размер, чтобы карточка не притворялась
+        картинкой. Файлы клиента сохраняются как client_<order>_<ms>_<name>.
+        """
+        rows = self.db.query(
+            "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC",
+            (order_id,))
+        from .config import PHOTO_DIR
+        for row in rows:
+            name = str(row.get("file") or "")
+            row["size"] = None
+            row["original_name"] = ""
+            try:
+                row["size"] = (PHOTO_DIR / name).stat().st_size if name else None
+            except OSError:
+                pass
+            match = re.match(r"^client_.+?_(\d{13})_(.+)$", name)
+            if match:
+                row["original_name"] = match.group(2)
+        return rows
+
     def _audit(self, entity: str, entity_id: str, action: str, title: str,
                detail: str = "", data: dict | None = None, actor: str = "panel") -> None:
         """Единый журнал операторских действий панели/бота."""
@@ -1537,9 +1562,51 @@ class Api:
         if path == "/api/templates":
             return 200, {"templates": self._templates()}
         if path == "/api/order/photos":
-            return 200, {"photos": self.db.query(
-                "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC",
-                (one("order_id"),))}
+            return 200, {"photos": self._order_photos(one("order_id"))}
+        # 12.2 (ЗА3–ЗА5): нить покупателя у карточке заказа — чат, диалог,
+        # ожидающая оплата, неотвеченный отзыв и шаблоны ответов одним запросом.
+        if path == "/api/client-bot/order-thread":
+            order_id = one("order_id")
+            order = self.db.one(
+                "SELECT id, number, channel, client_source, cancel_requested_at"
+                " FROM orders WHERE id=?", (order_id,))
+            if not order:
+                return 404, {"error": "Заказ не найден"}
+            payload: dict = {
+                "order": order,
+                "chat_id": "", "chat": None, "messages": [], "templates": [],
+                "payment_intent": None, "review": None,
+            }
+            link = self.db.one(
+                "SELECT chat_id FROM client_orders WHERE order_id=?"
+                " ORDER BY rowid DESC LIMIT 1", (order_id,))
+            if link:
+                chat_id = str(link.get("chat_id") or "")
+                payload["chat_id"] = chat_id
+                payload["chat"] = self.db.one(
+                    "SELECT chat_id, name, username, inbox_status, source, banned"
+                    " FROM client_chats WHERE chat_id=?", (chat_id,))
+                rows = self.db.query(
+                    "SELECT at, direction, kind, text, answer, operator"
+                    " FROM client_bot_log WHERE chat_id=?"
+                    " ORDER BY id DESC LIMIT 12", (chat_id,))
+                payload["messages"] = list(reversed(rows))
+                bot = getattr(self.manager, "client_bot", None)
+                if bot:
+                    try:
+                        payload["templates"] = [t for t in bot.templates()
+                                                if t.get("enabled", True)]
+                    except Exception:
+                        payload["templates"] = []
+                payload["payment_intent"] = self.db.one(
+                    "SELECT * FROM client_payment_intents WHERE order_id=?"
+                    " AND status='pending' ORDER BY datetime(created_at) DESC LIMIT 1",
+                    (order_id,))
+                payload["review"] = self.db.one(
+                    "SELECT * FROM client_reviews WHERE order_id=?"
+                    " AND COALESCE(state,'new') NOT IN ('answered','closed','skipped')"
+                    " LIMIT 1", (order_id,))
+            return 200, payload
         if path == "/api/search":
             return 200, {"results": self.repo.search(one("q"))}
         if path == "/api/backup":
@@ -3246,6 +3313,67 @@ class Api:
             self._audit("client_review", f"{order_id}:{chat_id}", "reply",
                         "Ответ на отзыв отправлен покупателю", text[:400], actor=actor)
             return 200, {"ok": True}
+        if path == "/api/client-bot/cancel-ack":
+            # 12.2 (ЗА3): решение мастера по запросу отмены. Бот никогда не
+            # отменяет заказ сам — он только ставит cancel_requested_at;
+            # здесь мастер подтверждает выбор: «оставил в работе» или
+            # «отменён по просьбе покупателя». Отметка снимается в обоих
+            # случаях, чтобы карточка не кричала после разбора.
+            order_id = str(body.get("order_id") or "").strip()
+            action = str(body.get("action") or "keep").strip().lower()
+            actor = str(body.get("actor") or "panel")[:120]
+            order = self.db.one(
+                "SELECT id, number, cancel_requested_at FROM orders WHERE id=?",
+                (order_id,))
+            if not order:
+                raise ValueError("Заказ не найден")
+            if action not in {"keep", "canceled"}:
+                raise ValueError("Действие: keep или canceled")
+            note = ("Отмену запросил покупатель — мастер оставил заказ в работе"
+                    if action == "keep" else
+                    "Отменено мастером по просьбе покупателя")
+            with self.db.transaction():
+                self.db.execute(
+                    "UPDATE orders SET cancel_requested_at='', updated_at=?,"
+                    " notes=CASE WHEN instr(COALESCE(notes,''), ?) > 0"
+                    " THEN notes ELSE COALESCE(notes,'') || char(10) || ? END"
+                    " WHERE id=?",
+                    (now_iso(), note, note, order_id))
+                if action == "canceled":
+                    final = self.db.one(
+                        "SELECT id FROM statuses WHERE is_final=1"
+                        " AND (lower(id) LIKE '%cancel%' OR lower(name) LIKE '%отмен%')"
+                        " ORDER BY position LIMIT 1")
+                    if final:
+                        self.db.execute(
+                            "UPDATE orders SET status=?, updated_at=? WHERE id=?",
+                            (final["id"], now_iso(), order_id))
+            self._audit("order", order_id, "cancel_ack",
+                        "Запрос отмены обработан", note,
+                        {"action": action}, actor)
+            self.db.add_event("orders", "Запрос отмены обработан",
+                              f"№{order.get('number') or ''} · {note}", "",
+                              {"order_id": order_id, "actor": actor})
+            return 200, {"ok": True, "order": self.repo.order(order_id)}
+        if path == "/api/order/photo/to-uploads":
+            # 12.2 (ЗА6): файл из заявки покупателя — в папку uploads, чтобы
+            # его можно было указать как файл печати прямо из карточки заказа.
+            photo = self.db.one("SELECT * FROM order_photos WHERE id=?",
+                                (body.get("id", ""),))
+            if not photo or not photo.get("file"):
+                raise ValueError("Файл не найден")
+            from .config import PHOTO_DIR
+            source = PHOTO_DIR / str(photo["file"])
+            if not source.is_file():
+                raise ValueError("Файл потерян на диске")
+            data = source.read_bytes()
+            original = ""
+            match = re.match(r"^client_.+?_(\d{13})_(.+)$", str(photo["file"]))
+            if match:
+                original = match.group(2)
+            saved_name, _, _ = save_upload(original or str(photo["file"]), data)
+            return 200, {"ok": True, "file": saved_name,
+                         "order_id": photo.get("order_id") or ""}
         if path == "/api/client-bot/broadcast":
             if not bool(self.db.setting("client_bot_marketing_enabled", False)):
                 raise ValueError("Рассылки выключены в настройках")

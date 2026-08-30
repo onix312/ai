@@ -9,7 +9,7 @@ const { get, post, api } = PF.api;
 let editingOrder = null, editingOrderUpdatedAt = '', editingNiche = null, statusDraft = [];
 let fulfillmentDraft = null;
 let aftercareItems = [], aftercareCurrent = null;
-let filters = { q: '', status: '', niche: '' };
+let filters = { q: '', status: '', niche: '', chan: '' };
 let orderView = 'kanban';
 let customerSegment = 'all';
 
@@ -23,6 +23,8 @@ function filtered() {
   return PF.state.orders.filter((o) => {
     if (filters.status && o.status !== filters.status) return false;
     if (filters.niche && o.niche_id !== filters.niche) return false;
+    if (filters.chan === 'telegram' && !isTgOrder(o)) return false;
+    if (filters.chan === 'no-tg' && isTgOrder(o)) return false;
     if (!q) return true;
     return [o.number, o.product, o.customer_name, o.phone, o.file, o.notes]
       .some((v) => String(v || '').toLowerCase().includes(q));
@@ -30,6 +32,23 @@ function filtered() {
 }
 
 /* ============================================================== канбан */
+/* ЗА2: заказ из Telegram (канал или источник клиентского бота) — узнаваем по
+   иконке и уточнению источника; бейдж виден и в карточке, и в таблице. */
+const TG_SOURCES = { telegram: 'заявка из чата', catalog: 'из витрины', custom: 'свой заказ', individual: 'индивидуальная' };
+const isTgOrder = (o) => o.channel === 'telegram' || /^(telegram|catalog|custom|individual)$/.test(String(o.client_source || ''));
+function tgChipOf(o) {
+  const src = TG_SOURCES[o.client_source];
+  return `<span class="channel-chip tg" title="Заказ из Telegram${src ? ' · ' + src : ''} — клиентский бот">`
+    + `<i data-icon="telegram">✈</i>Telegram${src ? ` · ${esc(src)}` : ''}</span>`;
+}
+/* Цвет аватара — детерминированный от имени: один клиент всегда одним тоном. */
+function avColor(name) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return `hsl(${h} 52% 46%)`;
+}
+
 function orderCard(o) {
   const n = PF.niche(o.niche_id);
   const st = PF.status(o.status);
@@ -40,15 +59,20 @@ function orderCard(o) {
   const cls = ['ocard'];
   if (o.priority === 'urgent') cls.push('urgent');
   if (overdue(o)) cls.push('late');
+  if (o.cancel_requested_at) cls.push('cancel-req');
 
   // Приоритет
   let prioBadge = '';
   if (o.priority === 'urgent') {
-    prioBadge = '<span class="prio-tag urgent" title="Срочный заказ">⚡ Срочно</span>';
+    prioBadge = '<span class="prio-tag urgent" title="Срочный заказ"><i data-icon="bolt">⚡</i>Срочно</span>';
   } else if (o.priority === 'high') {
-    prioBadge = '<span class="prio-tag high" title="Высокий приоритет">🔥 Высокий</span>';
+    prioBadge = '<span class="prio-tag high" title="Высокий приоритет"><i data-icon="bolt">🔥</i>Высокий</span>';
   } else if (o.priority === 'low') {
     prioBadge = '<span class="prio-tag low" title="Низкий приоритет">💤 Низкий</span>';
+  }
+  // ЗА3: запрос отмены из Telegram виден прямо на карточке
+  if (o.cancel_requested_at) {
+    prioBadge += '<span class="prio-tag cancel" title="Покупатель просит отменить — решите в карточке"><i data-icon="cancel">✕</i>Просит отмену</span>';
   }
 
   // Канал продаж
@@ -58,19 +82,20 @@ function orderCard(o) {
   };
   const ch = (PF.state.channels || []).find((c) => c.id === o.channel);
   const channelName = ch ? ch.name : (channelAliases[o.channel] || (o.channel && o.channel !== 'direct' ? o.channel : ''));
-  const channelChip = channelName ? `<span class="channel-chip">${esc(channelName)}</span>` : '';
+  const channelChip = isTgOrder(o) ? tgChipOf(o)
+    : (channelName ? `<span class="channel-chip">${esc(channelName)}</span>` : '');
 
   // Срок сдачи
   let dueBadge = '';
   if (o.due) {
     if (overdue(o)) {
-      dueBadge = `<span class="due-badge bad" title="Срок сдачи просрочен">⚠️ ${esc(dateText(o.due))}</span>`;
+      dueBadge = `<span class="due-badge bad" title="Срок сдачи просрочен"><i data-icon="timer">⚠</i>${esc(dateText(o.due))}</span>`;
     } else {
       const today = new Date().toISOString().slice(0, 10);
       if (o.due === today) {
-        dueBadge = '<span class="due-badge warn" title="Срок сегодня">⏳ Сегодня</span>';
+        dueBadge = '<span class="due-badge warn" title="Срок сегодня"><i data-icon="timer">⏳</i>Сегодня</span>';
       } else {
-        dueBadge = `<span class="due-badge" title="Срок сдачи">📅 ${esc(dateText(o.due))}</span>`;
+        dueBadge = `<span class="due-badge" title="Срок сдачи"><i data-icon="timer">📅</i>${esc(dateText(o.due))}</span>`;
       }
     }
   }
@@ -88,12 +113,12 @@ function orderCard(o) {
   }
 
   // Файл печати
-  const fileChip = o.file ? `<div class="file-chip" title="Файл: ${esc(o.file)}">🧊 ${esc(String(o.file).split('/').pop())}</div>` : '';
+  const fileChip = o.file ? `<div class="file-chip" title="Файл: ${esc(o.file)}"><i data-icon="cube">🧊</i>${esc(String(o.file).split('/').pop())}</div>` : '';
 
   // Параметры производства
   const specs = [];
   if (o.material) {
-    specs.push(`<span class="spec-pill mat" title="Материал и цвет">🧵 ${esc(o.material)}${o.color ? ' · ' + esc(o.color) : ''}</span>`);
+    specs.push(`<span class="spec-pill mat" title="Материал и цвет"><i data-icon="spool">🧵</i>${esc(o.material)}${o.color ? ' · ' + esc(o.color) : ''}</span>`);
   }
   if (num(o.grams)) {
     specs.push(`<span class="spec-pill" title="Вес пластика">⚖️ ${nfmt(o.grams)} г</span>`);
@@ -125,6 +150,10 @@ function orderCard(o) {
     qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
   }
 
+  // ЗА1: аватар клиента с инициалами вместо безликой «👤 Имя»
+  const who = o.customer_name || 'Без клиента';
+  const av = `<span class="who-av" style="--av:${avColor(o.customer_name)}" title="${esc(who)}">${esc(initials(who))}</span>`;
+
   return `<article class="${cls.join(' ')}" draggable="true" data-order="${esc(o.id)}">`
     + `<div class="strip" style="background:${esc(st.color)}"></div>`
     + `<div class="ocard-head">`
@@ -136,8 +165,8 @@ function orderCard(o) {
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
     + fileChip
     + `<div class="who-row">`
-    + `<span class="who" title="${esc(o.customer_name || '')}"><span class="who-ic">👤</span>${esc(o.customer_name || 'Без клиента')}</span>`
-    + (o.phone ? `<span class="phone-chip" title="Телефон">${esc(o.phone)}</span>` : '')
+    + `<span class="who">${av}${esc(who)}</span>`
+    + (o.phone ? `<span class="phone-chip" title="Телефон"><i data-icon="phone">📞</i>${esc(o.phone)}</span>` : '')
     + `</div>`
     + (specs.length ? `<div class="ocard-specs">${specs.join('')}</div>` : '')
     + `<div class="ocard-foot">`
@@ -146,11 +175,14 @@ function orderCard(o) {
     + profitChip
     + `</div>`
     + `<div class="ocard-actions">`
-    + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа">✎ Открыть</button>`
-    + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати">⎙ В очередь</button>` : '')
+    + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа"><i data-icon="pen">✎</i> Открыть</button>`
+    + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати"><i data-icon="queue">⎙</i> В очередь</button>` : '')
     + `</div>`
     + `</article>`;
 }
+
+/* ЗА7: маркеры колонок + «докрут» сумм между обновлениями. */
+const kanSums = new Map();
 
 function renderKanban(list) {
   const host = $('orders_kanban');
@@ -163,12 +195,29 @@ function renderKanban(list) {
   host.innerHTML = PF.state.statuses.map((st) => {
     const items = list.filter((o) => o.status === st.id);
     const sum = items.reduce((a, o) => a + num(o.price), 0);
+    const lateN = items.filter(overdue).length;
+    const tgN = items.filter(isTgOrder).length;
+    const cancelN = items.filter((o) => o.cancel_requested_at).length;
+    const marks = [
+      lateN ? `<i class="km late" title="Просроченных: ${lateN}">●</i>` : '',
+      tgN ? `<i class="km tg" title="Из Telegram: ${tgN}"><i data-icon="telegram">✈</i>${tgN}</i>` : '',
+      cancelN ? `<i class="km cancel" title="Запросы на отмену: ${cancelN}"><i data-icon="cancel">✕</i></i>` : '',
+    ].join('');
     return `<div class="kan-col${items.length ? '' : ' empty-col'}" data-status="${esc(st.id)}">`
-      + `<div class="kan-head"><i style="background:${esc(st.color)}"></i><b>${esc(st.name)}</b><span class="n">${items.length}</span></div>`
-      + (sum ? `<div class="kan-sum">${money(sum)}</div>` : '')
+      + `<div class="kan-head"><i style="background:${esc(st.color)}"></i><b>${esc(st.name)}</b>`
+      + `<span class="kan-marks">${marks}</span><span class="n">${items.length}</span></div>`
+      + (sum ? `<div class="kan-sum" data-sum="${esc(st.id)}">${money(sum)}</div>` : '')
       + (items.length ? items.map(orderCard).join('') : '')
       + '</div>';
   }).join('');
+  if (window.PFIcons) window.PFIcons.apply(host);
+  // Н3-приём: сумма колонки мягко докручивается, а не подменяется рывком
+  host.querySelectorAll('.kan-sum').forEach((el) => {
+    const key = el.dataset.sum;
+    const prev = kanSums.get(key);
+    if (prev && prev !== el.textContent) U.countUp(el, prev, el.textContent);
+    kanSums.set(key, el.textContent);
+  });
   bindDrag();
 }
 
@@ -183,11 +232,13 @@ function renderTable(list) {
   $('orders_tbody').innerHTML = list.length ? list.map((o) => {
     const st = PF.status(o.status), n = PF.niche(o.niche_id), econ = o.economics || {};
     const checked = bulkSelected.has(o.id) ? ' checked' : '';
-    return `<tr class="clickable" data-order="${esc(o.id)}">`
+    return `<tr class="clickable${o.cancel_requested_at ? ' cancel-req' : ''}" data-order="${esc(o.id)}">`
       + `<td class="w-check" onclick="event.stopPropagation()"><input type="checkbox" data-bulk="${esc(o.id)}"${checked}></td>`
       + `<td class="strong">№${esc(o.number)}</td>`
       + `<td><b>${esc(o.product)}</b>${o.file ? `<br><small class="muted">${esc(o.file)}</small>` : ''}</td>`
-      + `<td>${esc(o.customer_name || '—')}${o.phone ? `<br><small class="muted">${esc(o.phone)}</small>` : ''}</td>`
+      + `<td>${esc(o.customer_name || '—')}${o.phone ? `<br><small class="muted">${esc(o.phone)}</small>` : ''}`
+      + (isTgOrder(o) ? `<br><span class="channel-chip tg mini" title="Заказ из Telegram"><i data-icon="telegram">✈</i>TG</span>` : '')
+      + (o.cancel_requested_at ? `<br><small class="neg">✕ ${'просит отмену'}</small>` : '') + `</td>`
       + `<td>${n ? `${esc(n.icon || '')} ${esc(n.name)}` : '—'}</td>`
       + `<td><span class="chip" style="background:${esc(st.color)}22;color:${esc(st.color)}">${esc(st.name)}</span></td>`
       + `<td class="right tnum">${o.hours ? nfmt(o.hours, 1) : '—'}</td>`
@@ -219,7 +270,10 @@ function renderOrders() {
 
   $('orders_kanban').hidden = orderView !== 'kanban';
   $('orders_table').hidden = orderView !== 'table';
-  if (orderView === 'kanban') renderKanban(list); else renderTable(list);
+  if (orderView === 'kanban') renderKanban(list); else {
+    renderTable(list);
+    if (window.PFIcons) window.PFIcons.apply($('orders_tbody'));
+  }
   updateBulkBar();
 }
 function text(id, v) { const el = $(id); if (el) el.textContent = v; }
@@ -227,9 +281,18 @@ function text(id, v) { const el = $(id); if (el) el.textContent = v; }
 /* =============================================================== drag */
 let dragId = null;
 function bindDrag() {
+  const board = $('orders_kanban');
   $$('.ocard').forEach((card) => {
-    card.addEventListener('dragstart', () => { dragId = card.dataset.order; card.classList.add('dragging'); });
-    card.addEventListener('dragend', () => { card.classList.remove('dragging'); dragId = null; });
+    card.addEventListener('dragstart', () => {
+      dragId = card.dataset.order;
+      card.classList.add('dragging');
+      if (board) board.classList.add('dragging-any');   // ЗА7: колонки подсказывают «брось сюда»
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      dragId = null;
+      if (board) board.classList.remove('dragging-any');
+    });
   });
   $$('.kan-col').forEach((col) => {
     col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('over'); });
@@ -250,7 +313,15 @@ function bindDrag() {
         toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
         PF.refreshCore();
         PF.refreshFinance();
-      } catch (err) { order.status = prev; renderOrders(); fail(err); }
+      } catch (err) {
+        order.status = prev;
+        renderOrders();
+        // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
+        const host = $('orders_kanban');
+        const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
+        if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
+        fail(err);
+      }
     });
   });
 }
@@ -1070,9 +1141,12 @@ async function openOrder(id, intakeDraft, intakeMeta) {
       + `<span class="amt">${money(j.cost)}</span></div>`).join('');
   }
   renderOrderPhotos((order && order.photos) || []);
+  if (id) loadOrderPhotosFull(id);            // ЗА6: полный список фото и файлов
   renderOrderDefects((order && order.defects) || []);
   renderQcChecklist((order && order.qc_done) || '');
   renderOrderDocuments(null);
+  renderCancelBanner(data);                   // ЗА3: плашка «покупатель просит отмену»
+  loadTgThread(id ? data : null);             // ЗА4/ЗА5: диалог и быстрые действия
   updateEcon();
   openModal('order_modal');
   if (id) {
@@ -1383,17 +1457,204 @@ async function saveOrder(prepareAfter) {
   } catch (e) { fail(e); return null; }
 }
 
+/* ======================================= Telegram-контур карточки (12.2)
+   ЗА3 — баннер «покупатель просит отмену»; ЗА4 — нить диалога с полем
+   ответа; ЗА5 — быстрые действия: подтвердить оплату и ответить на отзыв. */
+let tgThread = null;
+let tgReplyMode = 'reply';
+
+function renderCancelBanner(order) {
+  const wrap = $('of_cancel_wrap');
+  if (!wrap) return;
+  const stamp = String((order && order.cancel_requested_at) || '');
+  wrap.hidden = !stamp;
+  if (stamp) {
+    const sub = $('of_cancel_sub');
+    if (sub) sub.textContent = `Просьба от ${dateTimeText(stamp)} · бот ничего не отменял сам — решение за мастером`;
+  }
+}
+
+async function resolveCancel(action) {
+  if (!editingOrder) return;
+  const label = action === 'canceled'
+    ? 'Перевести заказ в статус отмены и снять отметку?'
+    : 'Отметка «просит отмену» будет снята, заказ останется в работе.';
+  if (action === 'canceled' && !confirmDanger(label)) return;
+  try {
+    const res = await post('/api/client-bot/cancel-ack', { order_id: editingOrder, action, actor: 'panel' });
+    const fresh = (res && res.order) || {};
+    if (action === 'canceled' && fresh.status === (PF.state.orders.find((o) => o.id === editingOrder) || {}).status) {
+      toast('Отметка снята', 'Создайте финальный статус со словом «отмен» в «Статусы» — заказ переведётся в него автоматически', 'warn');
+    } else {
+      toast(action === 'keep' ? 'Оставил в работе' : 'Отмена проведена', `№${fresh.number || ''}`);
+    }
+    await PF.refreshCore();
+    renderCancelBanner({});
+    loadTgThread(fresh.channel === 'telegram' || fresh.client_source ? fresh : null);
+  } catch (e) { fail(e); }
+}
+
+async function loadTgThread(order) {
+  const wrap = $('of_tg_wrap');
+  if (!wrap) return;
+  tgThread = null;
+  tgReplyMode = 'reply';
+  wrap.hidden = true;
+  if (!order || !editingOrder) return;
+  const looksTg = order.channel === 'telegram' || order.client_source || order.cancel_requested_at;
+  if (!looksTg) return;
+  try {
+    const d = await get('/api/client-bot/order-thread', { order_id: editingOrder });
+    if (!d || !d.order || editingOrder !== d.order.id) return;   // карточку уже переоткрыли
+    if (!d.chat_id) return;                                       // чат не привязан — показывать нечего
+    tgThread = d;
+    renderTgBlock(d);
+  } catch (e) { /* коннектор не ответил — лучше скрыть блок, чем показать пустой */ }
+}
+
+function renderTgBlock(d) {
+  const wrap = $('of_tg_wrap');
+  wrap.hidden = false;
+  const chat = d.chat || {};
+  const src = TG_SOURCES[d.order.client_source] || '';
+  const banned = Number(chat.banned) ? ' · чат заблокирован' : '';
+  $('of_tg_sub').textContent = [chat.name || chat.chat_id, src].filter(Boolean).join(' · ') + banned;
+  const msgs = (d.messages || []).filter((m) => m.direction === 'in' || m.direction === 'out');
+  $('of_tg_msgs').innerHTML = msgs.length ? msgs.map((m) => {
+    const incoming = m.direction === 'in';
+    const who = incoming ? (chat.name || 'Покупатель') : (m.operator ? `Мастер · ${m.operator}` : 'Мастер');
+    const body = incoming ? (m.text || '') : (m.answer || m.text || '');
+    return `<div class="tg-msg ${incoming ? 'in' : 'out'}"><small>${esc(who)} · ${esc(dateTimeText(m.at))}</small>`
+      + `<span>${esc(String(body).slice(0, 420))}</span></div>`;
+  }).join('') : '<div class="empty compact"><span>Сообщений нет — напишите первым, бот доставит в Telegram.</span></div>';
+  const chips = [];
+  if (d.payment_intent) {
+    chips.push(`<button class="btn sm ok" type="button" data-tg-pay="${esc(d.payment_intent.id)}" `
+      + `title="Записать оплату ${money(d.payment_intent.amount)} в журнал и подтвердить покупателю в чате">`
+      + `<i data-icon="check">✓</i> Подтвердить оплату ${money(d.payment_intent.amount)}</button>`);
+  }
+  if (d.review) {
+    chips.push('<button class="btn sm" type="button" data-tg-review="1" '
+      + `title="${esc(d.review.rating === 'bad' ? 'Недовольный отзыв' : 'Покупатель оценил работу')}${d.review.comment ? ' — ' + esc(String(d.review.comment).slice(0, 120)) : ''}">`
+      + `<i data-icon="star">★</i> Ответить на отзыв</button>`);
+  }
+  chips.push(`<span class="chip outline" title="Внутренний номер чата · в рабочем боте: «кответ ${esc(String(chat.chat_id || ''))} текст»">✈ ${esc(chat.username ? '@' + chat.username : 'tg:' + chat.chat_id)}</span>`);
+  const chipsHost = $('of_tg_chips');
+  chipsHost.innerHTML = chips.join(' ');
+  const sel = $('of_tg_template');
+  sel.innerHTML = '<option value="">Вставить шаблон…</option>' + (d.templates || [])
+    .map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+  sel.disabled = !(d.templates || []).length;
+  if (window.PFIcons) window.PFIcons.apply(wrap);
+}
+
+function tgSetMode(mode) {
+  tgReplyMode = mode;
+  const box = $('of_tg_reply');
+  const btn = $('of_tg_send');
+  if (!box || !btn) return;
+  if (mode === 'review') {
+    box.placeholder = 'Ответ покупателю на отзыв — уйдёт в чат и пометит отзыв отвеченным';
+    btn.textContent = 'Ответить на отзыв';
+  } else {
+    box.placeholder = 'Ответ покупателю — уйдёт в Telegram через клиентского бота';
+    btn.textContent = 'Отправить в чат';
+  }
+  box.focus();
+}
+
+async function sendTgReply() {
+  if (!tgThread || !tgThread.chat_id || !editingOrder) return;
+  const box = $('of_tg_reply');
+  const value = String(box.value || '').trim();
+  if (!value) return fail(new Error('Введите текст ответа'));
+  const btn = $('of_tg_send');
+  btn.disabled = true;
+  try {
+    if (tgReplyMode === 'review') {
+      await post('/api/client-bot/review/reply', { chat_id: tgThread.chat_id, order_id: editingOrder, text: value });
+      toast('Ответ на отзыв отправлен', 'Отзыв помечен отвеченным');
+    } else {
+      const rid = (window.crypto && crypto.randomUUID) ? `panel-order-${crypto.randomUUID()}` : `panel-order-${Date.now()}`;
+      await post('/api/client-bot/reply', { chat_id: tgThread.chat_id, text: value, request_id: rid });
+      toast('Ответ отправлен', 'Клиентский бот доставит его в чат');
+    }
+    box.value = '';
+    tgSetMode('reply');
+    const d = await get('/api/client-bot/order-thread', { order_id: editingOrder });
+    tgThread = d;
+    renderTgBlock(d);
+  } catch (e) { fail(e); } finally { btn.disabled = false; }
+}
+
+async function confirmTgPayment(intentId) {
+  if (!confirmDanger('Записать оплату и подтвердить её покупателю в чате?')) return;
+  try {
+    await post('/api/client-bot/payment', { intent_id: intentId, action: 'confirm', actor: 'panel' });
+    toast('Оплата подтверждена', 'Проводка в журнале · покупателю ушло подтверждение');
+    await PF.refreshCore();
+    if (editingOrder) {
+      const fresh = await get('/api/order', { id: editingOrder });
+      const paidField = $('of_prepaid');
+      if (paidField) paidField.value = String(Math.max(num(fresh.paid), num(fresh.prepaid)) || '');
+      if (fresh.channel === 'telegram' || fresh.client_source) loadTgThread(fresh);
+    }
+  } catch (e) { fail(e); }
+}
+
 /* ====================================================== фото к заказу */
+/* ЗА6: снимки производства и файлы заявки живут отдельно. Изображения —
+   сеткой с увеличением (О2), документы покупателя — карточками со скачиванием
+   и кнопкой «В печать» (перекладываем в uploads и подставляем в поле файла). */
+const ORDER_FILE_RE = /\.(stl|3mf|gcode|obj|step|stp|zip|rar|7z|pdf|dwg|txt)$/i;
+const orderFileOriginal = (ph) => {
+  const m = /^client_.+?_(\d{13})_(.+)$/.exec(String(ph.file || ''));
+  return m ? m[2] : String(ph.file || 'файл');
+};
+const orderFileSize = (n) => n == null ? '' : (num(n) > 1048576
+  ? `${nfmt(num(n) / 1048576, 1)} МБ` : `${Math.max(1, Math.round(num(n) / 1024))} КБ`);
+
 function renderOrderPhotos(photos) {
   const wrap = $('of_photos_wrap');
   if (!wrap) return;
   wrap.hidden = !photos.length;
-  if (photos.length) {
-    $('of_photos').innerHTML = photos.map((ph) =>
-      `<div class="ophoto"><img src="/api/order/photo.jpg?photo_id=${esc(ph.id)}" alt="">`
-      + `<small>${esc(ph.note || '')}</small>`
-      + `<button class="icon-btn sm" type="button" data-photo-del="${esc(ph.id)}">×</button></div>`).join('');
+  const isFile = (ph) => ph.kind === 'client_file' || ORDER_FILE_RE.test(orderFileOriginal(ph));
+  const fromClient = (ph) => String(ph.kind || '').startsWith('client');
+  const imgs = photos.filter((ph) => !isFile(ph));
+  const files = photos.filter(isFile);
+  const host = $('of_photos');
+  host.innerHTML = imgs.length ? imgs.map((ph) => {
+    const url = `/api/order/photo.jpg?photo_id=${encodeURIComponent(ph.id)}`;
+    const cap = [ph.note, fromClient(ph) ? 'от покупателя' : '', ph.at ? dateText(String(ph.at).slice(0, 10)) : '']
+      .filter(Boolean).join(' · ');
+    return `<div class="ophoto${fromClient(ph) ? ' client' : ''}">`
+      + `<button class="ophoto-zoom" type="button" data-photo-zoom="${esc(ph.id)}" data-src="${esc(url)}" data-cap="${esc(cap)}" title="Клик — крупно"><img src="${esc(url)}" alt="" loading="lazy"></button>`
+      + `<small>${esc(cap)}</small>`
+      + `<button class="icon-btn sm" type="button" data-photo-del="${esc(ph.id)}" title="Удалить">×</button></div>`;
+  }).join('') : (files.length ? '' : '<div class="empty compact"><span>Снимков пока нет.</span></div>');
+  const filesHost = $('of_photo_files');
+  if (filesHost) {
+    filesHost.innerHTML = files.length ? `<div class="ofile-group"><b class="ofile-cap"><i data-icon="cube">▣</i> Материалы заявки</b>`
+      + files.map((ph) => {
+        const name = orderFileOriginal(ph);
+        const printable = /\.(3mf|gcode)$/i.test(name);
+        return `<div class="ofile">`
+          + `<span class="ofic"><i data-icon="cube">▣</i></span>`
+          + `<div class="ofm"><b title="${esc(name)}">${esc(name)}</b>`
+          + `<small>${[orderFileSize(ph.size), fromClient(ph) ? 'прислал покупатель' : 'файл'].filter(Boolean).join(' · ')}</small></div>`
+          + `<a class="btn sm ghost" href="/api/order/photo.jpg?photo_id=${encodeURIComponent(ph.id)}" download="${esc(name)}" title="Скачать на компьютер">↓ Скачать</a>`
+          + (printable ? `<button class="btn sm" type="button" data-photo-use="${esc(ph.id)}" title="Положить в uploads и подставить файлом печати этого заказа">▣ В печать</button>` : '')
+          + `<button class="icon-btn sm" type="button" data-photo-del="${esc(ph.id)}" title="Удалить">×</button></div>`;
+      }).join('') + '</div>' : '';
+    if (window.PFIcons) window.PFIcons.apply(filesHost);
   }
+}
+
+async function loadOrderPhotosFull(orderId) {
+  try {
+    const d = await get('/api/order/photos', { order_id: orderId });
+    if (editingOrder === orderId) renderOrderPhotos(d.photos || []);
+  } catch (e) { /* короткая версия уже на экране */ }
 }
 async function addOrderPhoto(orderId, dataUrl, kind, note) {
   try {
@@ -1430,10 +1691,30 @@ function bindOrderPhotos() {
   });
   const list = $('of_photos');
   if (list) list.addEventListener('click', async (e) => {
+    const zoom = e.target.closest('[data-photo-zoom]');
+    if (zoom) { U.lightbox(zoom.dataset.src, zoom.dataset.cap || ''); return; }
     const btn = e.target.closest('[data-photo-del]');
     if (!btn) return;
     await post('/api/order/photo/delete', { id: btn.dataset.photoDel });
     refreshOrderDetail();
+  });
+  const filesHost = $('of_photo_files');
+  if (filesHost) filesHost.addEventListener('click', async (e) => {
+    const use = e.target.closest('[data-photo-use]');
+    if (use) {
+      try {
+        const r = await post('/api/order/photo/to-uploads', { id: use.dataset.photoUse });
+        const field = $('of_file');
+        if (field) field.value = r.file || '';
+        toast('Файл подставлен в заказ', `${r.file || ''} — проверьте граммы и часы`);
+      } catch (err) { fail(err); }
+      return;
+    }
+    const del = e.target.closest('[data-photo-del]');
+    if (del) {
+      await post('/api/order/photo/delete', { id: del.dataset.photoDel });
+      refreshOrderDetail();
+    }
   });
 }
 async function refreshOrderDetail() {
@@ -1441,6 +1722,7 @@ async function refreshOrderDetail() {
   try {
     const order = await get('/api/order', { id: editingOrder });
     renderOrderPhotos(order.photos || []);
+    loadOrderPhotosFull(editingOrder);
     renderOrderDefects(order.defects || []);
   } catch (e) { /* не критично */ }
 }
@@ -2156,6 +2438,54 @@ function bind() {
     orderView = btn.dataset.mode;
     $$('#orders_view button').forEach((b) => b.classList.toggle('on', b === btn));
     renderOrders();
+  });
+  // ЗА2: фильтр по каналу (Telegram) с запоминанием выбора
+  const chanHost = $('orders_chan');
+  if (chanHost) {
+    const savedChan = U.store.get('pf_orders_chan', '');
+    if (savedChan) {
+      filters.chan = savedChan;
+      $$('#orders_chan button').forEach((b) => b.classList.toggle('on', b.dataset.chan === savedChan));
+    }
+    chanHost.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-chan]');
+      if (!btn) return;
+      filters.chan = btn.dataset.chan;
+      $$('#orders_chan button').forEach((b) => b.classList.toggle('on', b === btn));
+      U.store.set('pf_orders_chan', filters.chan);
+      renderOrders();
+    });
+  }
+  // ЗА3: разбор запроса отмены
+  const keepBtn = $('of_cancel_keep');
+  if (keepBtn) keepBtn.addEventListener('click', () => resolveCancel('keep'));
+  const doCancel = $('of_cancel_do');
+  if (doCancel) doCancel.addEventListener('click', () => resolveCancel('canceled'));
+  // ЗА4: шаблон → в поле ответа
+  const tplSel = $('of_tg_template');
+  if (tplSel) tplSel.addEventListener('change', () => {
+    const t = ((tgThread && tgThread.templates) || []).find((x) => String(x.id) === tplSel.value);
+    if (t) {
+      const box = $('of_tg_reply');
+      box.value = t.text || '';
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    }
+    tplSel.value = '';
+  });
+  const tgSend = $('of_tg_send');
+  if (tgSend) tgSend.addEventListener('click', sendTgReply);
+  const tgBox = $('of_tg_reply');
+  if (tgBox) tgBox.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendTgReply();
+  });
+  // ЗА5: быстрые действия по чипам (оплата, отзыв)
+  const chipsHost = $('of_tg_chips');
+  if (chipsHost) chipsHost.addEventListener('click', (e) => {
+    const pay = e.target.closest('[data-tg-pay]');
+    if (pay) { confirmTgPayment(pay.dataset.tgPay); return; }
+    const review = e.target.closest('[data-tg-review]');
+    if (review) tgSetMode('review');
   });
   document.addEventListener('click', (e) => {
     const actionBtn = e.target.closest('[data-order-action]');

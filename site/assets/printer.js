@@ -51,24 +51,65 @@ function requireLive() {
 function bar(el, percent) { if (el) el.style.width = clamp(num(percent), 0, 100) + '%'; }
 function text(id, value) { const el = $(id); if (el) el.textContent = value; }
 
-/* ============================================================ вкладки */
+/* ================================================ лента парка (12.2, ПР1)
+   Каждый принтер — карточка-«пульт»: кольцо прогресса, состояние, что
+   печатает и сколько осталось, катушки AMS, флажки тревог. Клик — выбрать
+   принтер. Пока live-снимка нет, но принтеры заведены — показываем
+   скелетоны, чтобы вкладка не выглядела пустой (ПР8). */
+const PK_C = 2 * Math.PI * 15.5;   // длина окружности мини-кольца (r = 15.5)
+
 function renderTabs() {
   const live = PF.state.live;
   const list = (live && live.printers) || [];
-  const host = $('pr_tabs');
-  $('pr_empty').hidden = list.length > 0;
-  $('pr_workspace').hidden = list.length === 0;
-  if (!list.length) { host.innerHTML = ''; return; }
+  const host = $('pr_park') || $('pr_tabs');
+  if (!host) return;
+  const configured = (PF.state.printers || []).length;
+  $('pr_empty').hidden = list.length > 0 || configured > 0;
+  $('pr_workspace').hidden = list.length === 0 && configured === 0;
+  if (!list.length) {
+    host.innerHTML = configured && !live
+      ? Array.from({ length: configured }, () =>
+        `<div class="pk-card skel"><span class="pk-ring"><i class="skel" style="width:34px;height:34px;border-radius:50%"></i></span>`
+        + `<span class="pk-main"><i class="skel" style="width:56%;height:12px;display:block"></i>`
+        + `<i class="skel" style="width:82%;height:10px;margin-top:6px;display:block"></i></span></div>`).join('')
+      : '';
+    return;
+  }
   if (!PF.state.activePrinter || !list.some((p) => p.id === PF.state.activePrinter)) {
     PF.state.activePrinter = (live.active && live.active.id) || list[0].id;
   }
   host.innerHTML = list.map((p) => {
     const st = p.printer.state, kind = STATE_KIND[st] || '';
-    const dot = p.connection.connected ? (kind === 'running' ? 'busy' : 'ok') : 'bad';
-    return `<button class="printer-tab${p.id === PF.state.activePrinter ? ' on' : ''}" type="button" data-printer="${esc(p.id)}">`
-      + `<span class="dot ${dot}"></span><span><b>${esc(p.name)}</b>`
-      + `<small>${esc(p.printer.state_label || STATE_LABEL[st] || st)}`
-      + (kind === 'running' ? ` · ${Math.round(num(p.printer.progress))}%` : '') + '</small></span></button>';
+    const conn = p.connection.connected;
+    const progress = clamp(num(p.printer.progress), 0, 100);
+    const running = kind === 'running';
+    const problems = (p.printer.problems || []).length;
+    const alerts = (((p.guard || {}).alerts) || []).length;
+    const maint = num((p.maintenance || {}).due);
+    const trays = ((p.ams || {}).trays) || [];
+    const lowFil = trays.some((t) => t.remain != null && t.remain >= 0 && num(t.remain) < 15);
+    const sw = trays.slice(0, 4).map((t) => {
+      const has = t.present !== false && (t.present || t.generic || t.type || t.uuid);
+      return `<i class="${has ? '' : 'ghost'}" style="background:${esc(t.color || '#38445c')}" title="${esc((t.label || 'Слот') + ' · ' + (has ? (t.type || 'AMS') : 'пусто'))}"></i>`;
+    }).join('');
+    const sub = running
+      ? `${esc(String(p.printer.task || 'Печать').slice(0, 34))} · осталось ${p.printer.remaining_min ? minutesText(p.printer.remaining_min) : '—'}`
+      : conn ? esc(p.printer.state_label || STATE_LABEL[st] || st)
+        : esc(String(p.connection.last_error || 'Нет связи').slice(0, 40));
+    return `<button class="pk-card${p.id === PF.state.activePrinter ? ' on' : ''}${conn ? '' : ' off'}${running ? ' run' : ''}" type="button" data-printer="${esc(p.id)}"`
+      + ` title="${esc(p.name)} · ${esc(p.printer.state_label || STATE_LABEL[st] || st)}">`
+      + `<span class="pk-ring"><svg viewBox="0 0 40 40" aria-hidden="true">`
+      + `<circle class="tr" cx="20" cy="20" r="15.5"/>`
+      + `<circle class="fl" cx="20" cy="20" r="15.5" stroke-dasharray="${PK_C.toFixed(1)}" stroke-dashoffset="${conn ? (PK_C * (1 - progress / 100)).toFixed(1) : PK_C.toFixed(1)}"/>`
+      + `</svg><b>${conn ? (running ? Math.round(progress) + '%' : conn ? '✓' : '') : '◌'}</b></span>`
+      + `<span class="pk-main"><b>${esc(p.name)}</b><small>${sub}</small>`
+      + `<span class="pk-ams">${sw}</span></span>`
+      + `<span class="pk-flags">`
+      + (alerts ? `<i class="fl alarm" title="Тревога сторожа печати">!</i>` : '')
+      + (problems ? `<i class="fl hms" title="HMS: ${problems} — откройте карточку">▲</i>` : '')
+      + (maint ? `<i class="fl maint" title="Нужно обслуживание">⚙</i>` : '')
+      + (lowFil ? `<i class="fl low" title="Мало пластика в AMS">◍</i>` : '')
+      + `</span></button>`;
   }).join('');
 }
 
@@ -121,13 +162,30 @@ function renderLive() {
   }
 
   const progress = clamp(num(p.printer.progress), 0, 100);
-  text('pr_progress', Math.round(progress) + '%');
+  const progEl = $('pr_progress');
+  const progPrev = progEl ? progEl.textContent : '';
+  const progNext = Math.round(progress) + '%';
+  text('pr_progress', progNext);
+  U.countUp(progEl, progPrev, progNext);       // ПР2: плавный докрут процентов
   const ring = $('pr_ring');
   if (ring) ring.style.strokeDashoffset = String(283 - 283 * progress / 100);
+  const layersFill = $('pr_layers_fill');       // ПР2: степпер слоёв под названием задания
+  if (layersFill) {
+    const total = num(p.printer.total_layers);
+    layersFill.parentElement.classList.toggle('on', kind === 'running' && total > 0);
+    layersFill.style.width = total ? `${clamp(progress, 0, 100)}%` : '0%';
+  }
   text('pr_layers', `${nfmt(p.printer.layer)} / ${nfmt(p.printer.total_layers)}`);
   text('pr_remaining', p.printer.remaining_min ? minutesText(p.printer.remaining_min) : '—');
-  text('pr_eta', p.printer.eta ? new Date(p.printer.eta * 1000)
-    .toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—');
+  const etaText = p.printer.eta ? new Date(p.printer.eta * 1000)
+    .toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '—';
+  const etaEl = $('pr_eta');
+  if (etaEl) {
+    const delayed = kind === 'running' && num(p.printer.remaining_min) > 0
+      && num(p.printer.slowdown_min) > 0;   // если прошивка отдаёт поправку — подсветим
+    etaEl.textContent = etaText;
+    etaEl.classList.toggle('delayed', delayed);
+  }
   text('pr_speed', SPEED_LABEL[p.printer.speed_level] || p.printer.speed_label || '—');
   text('pr_wifi', p.printer.wifi || '—');
   const sel = $('pr_speed_sel');
@@ -137,6 +195,10 @@ function renderLive() {
   text('pr_nozzle', nfmt(t.nozzle, 1)); text('pr_nozzle_t', nfmt(t.nozzle_target));
   text('pr_bed', nfmt(t.bed, 1)); text('pr_bed_t', nfmt(t.bed_target));
   text('pr_chamber', t.chamber ? nfmt(t.chamber, 1) : '—');
+  renderTempGauge('nozzle', t.nozzle, t.nozzle_target);
+  renderTempGauge('bed', t.bed, t.bed_target);
+  const chamHint = $('pr_chamber_hint');
+  if (chamHint) chamHint.textContent = num(t.chamber) > 35 ? 'прогрев корпуса' : '';
   const nic = $('pr_nozzle_ic');
   if (nic) nic.classList.toggle('on', num(t.nozzle) > 50);
 
@@ -164,6 +226,41 @@ function renderLive() {
 
   const controls = $$('[data-cmd],[data-set],[data-jog]');
   controls.forEach((b) => { b.disabled = !p.connection.connected; });
+}
+
+/* --------------------------------------------- ПР3: температуры-приборы
+   Полоска «сейчас/цель» + состояние строки (нагрев → пульс-штриховка,
+   в норме → зелёная), а сверху — микро-спарклайн из кэша истории. */
+const sparkCache = { id: '', nozzle: [], bed: [] };
+
+function renderTempGauge(key, nowV, targetV) {
+  const bar = $('pr_' + key + '_bar');
+  const row = $('pr_row_' + key);
+  if (!bar || !row) return;
+  const nv = num(nowV), tv = num(targetV);
+  const scale = tv > 0 ? tv : (key === 'nozzle' ? 260 : 110);
+  bar.style.width = clamp(nv / scale * 100, 0, 100) + '%';
+  const heating = tv > 0 && nv < tv - 8;
+  const atTemp = tv > 0 && !heating && Math.abs(nv - tv) <= 8;
+  row.classList.toggle('heating', heating);
+  row.classList.toggle('at-temp', atTemp);
+  bar.style.setProperty('--tgt', tv > 0 ? clamp(100, 0, 100) + '%' : '');
+  const spark = $('pr_' + key + '_spark');
+  if (spark) spark.innerHTML = sparkPath(sparkCache[key] || []);
+}
+
+/** Линия последних значений для спарклайна; < 4 точек — пустой svg. */
+function sparkPath(values) {
+  const vs = (values || []).slice(-44).map((v) => num(v));
+  if (vs.length < 4) return '';
+  const min = Math.min(...vs), max = Math.max(...vs);
+  const span = Math.max(1e-6, max - min);
+  const pts = vs.map((v, i) => {
+    const x = (i / (vs.length - 1)) * 110;
+    const y = 20 - ((v - min) / span) * 18 + 1;
+    return `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join('');
+  return `<path d="${pts}"/>`;
 }
 
 function amsColorName(hex) {
@@ -203,22 +300,26 @@ function renderAms(p) {
     const present = t.present !== false && (t.present || t.generic || t.type || t.uuid);
     const generic = !!(t.generic || (present && !t.bambulab && !t.uuid));
     const empty = !present;
+    const low = remain != null && remain < 15;
+    const drying = (num(ams.temperature) > 45 && num(ams.humidity) > 0) ? ` · сушка ${Math.round(num(ams.temperature))}°C` : '';
     let spoolHint = '';
     try {
       const sp = (PF.state.spools || []).find((s) => String(s.ams_slot) === String(t.slot) && String(s.printer_id) === String(p.id));
       if (sp && sp.color_name) spoolHint = ' · ' + sp.color_name;
     } catch(e) {}
     const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
-    return `<div class="ams-slot${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}">`
-      + `<div class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></div>`
-      + `<b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}${human && !empty ? ' · ' + esc(human) : ''}</b>`
-      + `<small>${esc(typeLabel)}${human && !empty ? ' · ' + esc(human) : ''}${spoolHint}${remain != null ? ' · ' + Math.round(remain) + '%' : ''}</small>`
-      + (remain != null ? `<div class="bar thin${remain < 15 ? ' warn' : ''}"><i style="width:${clamp(remain, 0, 100)}%"></i></div>` : '')
+    return `<div class="ams-tube${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}${low ? ' low' : ''}"`
+      + ` title="${esc((t.label || ('Слот ' + (num(t.slot) + 1))) + ' · ' + typeLabel + (human && !empty ? ' · ' + human : '') + spoolHint + (remain != null ? ` · ${Math.round(remain)}%` : '') + drying)}">`
+      + `<div class="tube-body"><i class="tube-fill" style="--filament:${esc(t.color || '#cbd5e1')};--lvl:${empty ? 0 : (remain == null ? 100 : clamp(remain, 3, 100))}%"></i>`
+      + `<span class="tube-pct">${empty ? '' : (remain != null ? Math.round(remain) + '%' : '—')}</span>`
+      + (t.active ? '<span class="tube-use" title="Сейчас печатает этим">▶</span>' : '')
+      + '</div>'
+      + `<div class="tube-meta"><b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}</b>`
+      + `<small>${esc(typeLabel)}${human && !empty ? ' · ' + esc(human) : ''}</small>`
+      + `<small class="tube-tags">${generic ? 'сторонний' : (empty ? '' : 'RFID')}${spoolHint ? ' · ' + esc(spoolHint.slice(3)) : ''}</small></div>`
       + '<div class="acts">'
       + (empty ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`)
-      + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}">Тип</button>`
-      + (generic ? `<span class="chip outline" style="margin-left:6px" title="Пластик без RFID Bambu Lab">сторонний</span>` : '')
-      + (t.active ? `<span class="chip ok" style="margin-left:6px">активен</span>` : '')
+      + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}" title="Изменить тип и цвет">Тип</button>`
       + '</div></div>';
   }).join('') + renderAmsSuggestion(p);
 }
@@ -245,12 +346,22 @@ function renderAmsSuggestion(p) {
 const SEV_LABEL = { info: 'Заметка', warn: 'Внимание', error: 'Ошибка', fatal: 'Критично' };
 const SEV_ICON = { info: 'ⓘ', warn: '⚠', error: '✕', fatal: '⛔' };
 
+let eventsCache = [];   // журнал принтера: им же подсвечиваем «последняя ошибка» (ПР6)
+
 function renderHealth(p) {
   const problems = Array.isArray(p.printer.problems) ? p.printer.problems : [];
   const badge = $('pr_health');
+  const badgeText = $('pr_health_text');
   const worst = p.printer.severity || '';
-  badge.className = 'chip ' + (worst === 'fatal' || worst === 'error' ? 'bad' : worst === 'warn' ? 'warn' : 'ok');
-  badge.textContent = problems.length ? `${problems.length} ${plural(problems.length, 'проблема', 'проблемы', 'проблем')}` : 'Нет ошибок';
+  const sev = worst === 'fatal' || worst === 'error' ? 'bad' : worst === 'warn' ? 'warn' : 'ok';
+  badge.className = 'chip ' + sev;
+  if (badgeText) {
+    badgeText.textContent = problems.length
+      ? `${problems.length} ${plural(problems.length, 'проблема', 'проблемы', 'проблем')}` : 'Нет ошибок';
+  } else badge.textContent = problems.length
+    ? `${problems.length} ${plural(problems.length, 'проблема', 'проблемы', 'проблем')}` : 'Нет ошибок';
+  const card = $('pr_health_card');
+  if (card) card.classList.toggle('has-alarm', sev !== 'ok');
   $('pr_errors').innerHTML = problems.length
     ? problems.map((h) => `<div class="hms-item sev-${esc(h.severity || 'warn')}">`
       + `<b>${SEV_ICON[h.severity] || '⚠'} ${esc(h.title || 'Неизвестная ошибка')}</b>`
@@ -259,7 +370,24 @@ function renderHealth(p) {
       + (h.advice ? `<div class="fix">${esc(h.advice)}</div>` : '')
       + (h.url ? `<a href="${esc(h.url)}" target="_blank" rel="noopener">Официальное описание кода ↗</a>` : '')
       + '</div>').join('')
-    : '<div class="empty compact"><span>Активных ошибок нет.</span></div>';
+    : lastErrorLine();
+}
+
+/** Спокойный вид карточки, когда ошибок нет: видно, что следим, и когда была беда. */
+function lastErrorLine() {
+  const bad = (eventsCache || []).find((e) => e.kind === 'error'
+    || /ошибк|сбой|обрыв|fail/i.test(String(e.title || '')));
+  const ok = p_connText();
+  return `<div class="health-ok"><span class="shield" data-icon="shield">✓</span>`
+    + `<span><b>Активных ошибок нет</b><small>${bad
+      ? `последняя — ${esc(String(bad.title).slice(0, 42))} · ${agoText(bad.at)}`
+      : 'с начала наблюдения всё чисто'}${ok ? ' · ' + esc(ok) : ''}</small></span></div>`;
+}
+function p_connText() {
+  const p = active();
+  if (!p) return '';
+  if (!p.connection.connected) return '';
+  return p.connection.last_message ? 'связь ' + agoText(p.connection.last_message) : '';
 }
 
 function plural(n, one, few, many) {
@@ -377,6 +505,14 @@ async function renderChart(p, force) {
   $('pr_chart_legend').innerHTML = series.map((sr) =>
     `<span class="lg"><i style="background:${sr.color}"></i>${esc(sr.name)}</span>`).join('');
   text('pr_chart_sub', `${pts.length} ${plural(pts.length, 'точка', 'точки', 'точек')} · шаг ~1 мин`);
+  // ПР3: те же точки питают микро-спарклайны в строках температур.
+  sparkCache.id = p.id;
+  sparkCache.nozzle = pts.map((x) => num(x.nozzle));
+  sparkCache.bed = pts.map((x) => num(x.bed));
+  ['nozzle', 'bed'].forEach((k) => {
+    const spark = $('pr_' + k + '_spark');
+    if (spark) spark.innerHTML = sparkPath(sparkCache[k]);
+  });
 }
 
 function sparkLines(series, pts) {
@@ -436,6 +572,12 @@ function renderCamera(p) {
     emptyEl.hidden = !!cam.available;
   }
   img.classList.toggle('on', !!cam.available);
+  // ПР5: LIVE мигает чаще, когда кадр совсем свежий, и тускнеет на паузе потока
+  const liveChip = img.parentElement.querySelector('.cam-live');
+  if (liveChip) {
+    liveChip.classList.toggle('fresh', !!cam.available && !demo && num(cam.age) < 3);
+    liveChip.classList.toggle('stale', !!cam.available && num(cam.age) >= 30);
+  }
 
   if (!cam.available) {
     if (camStream) { img.removeAttribute('src'); camStream = ''; }
@@ -470,12 +612,18 @@ function drawShots(p, shots) {
   if (!host) return;
   const empty = $('pr_shots_empty');
   if (empty) empty.hidden = shots.length > 0;
+  // ПР5: кадры, добавленные сторожем (спагетти, «не двигается», перерасход),
+  // подсвечиваются красной рамкой и значком — лента превращается в доказательную базу.
+  const GUARD_NOTE = /спагетти|двигается|перерасход|сторож|не печата/i;
   host.innerHTML = shots.slice(0, 12).map((sh) => {
     const when = shotTime(sh.at);
     const note = sh.note || 'Снимок';
-    return `<img src="/api/printer/shot.jpg?printer_id=${encodeURIComponent(p.id)}&id=${encodeURIComponent(sh.id)}"`
-      + ` alt="${esc(note)}" title="${esc(note + ' · ' + when)}"`
-      + ` data-shot="${esc(sh.id)}" loading="lazy">`;
+    const guard = GUARD_NOTE.test(note);
+    return `<span class="shot-cell${guard ? ' guard' : ''}">`
+      + `<img src="/api/printer/shot.jpg?printer_id=${encodeURIComponent(p.id)}&id=${encodeURIComponent(sh.id)}"`
+      + ` alt="${esc(note)}" title="${esc(note + ' · ' + when + (guard ? ' · кадр сторожа — кликните для увеличения' : ''))}"`
+      + ` data-shot="${esc(sh.id)}" loading="lazy">`
+      + (guard ? '<b>⚠</b>' : '') + '</span>';
   }).join('');
 }
 
@@ -1224,14 +1372,42 @@ async function captureBedReference() {
 }
 
 /* ============================================================= события */
+/* О4: компактная раскладка — плотнее карточки, скрыты подписи-подсказки. */
+const DENSITY_KEY = 'pf_printers_density';
+function applyDensity(on) {
+  const view = $('view-printers');
+  if (view) view.classList.toggle('dense', on);
+  const btn = $('pr_density');
+  if (btn) btn.textContent = on ? '▦ Просторно' : '⇥ Компактно';
+  U.store.set(DENSITY_KEY, on ? '1' : '0');
+}
+
 function bind() {
-  $('pr_tabs').addEventListener('click', (e) => {
+  const park = $('pr_park') || $('pr_tabs');
+  if (park) park.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-printer]');
     if (!btn) return;
     PF.state.activePrinter = btn.dataset.printer;
     renderLive();
     loadFiles();
     loadEvents();
+  });
+  const dens = $('pr_density');
+  if (dens) {
+    applyDensity(U.store.get(DENSITY_KEY, '0') === '1');
+    dens.addEventListener('click', () => {
+      const view = $('view-printers');
+      applyDensity(!(view && view.classList.contains('dense')));
+    });
+  } else applyDensity(U.store.get(DENSITY_KEY, '0') === '1');
+  // ПР5: клик по кадру открывает крупный план (как кнопка «Развернуть»)
+  const frame = document.querySelector('.cam-frame');
+  if (frame) frame.addEventListener('click', (e) => {
+    if (e.target.closest('button, a')) return;
+    const p = active();
+    if (!p || !(p.camera || {}).available) return;
+    $('cam_full').src = camUrl(p, true);
+    openModal('cam_modal');
   });
 
   document.addEventListener('click', async (e) => {
@@ -1660,11 +1836,15 @@ async function loadEvents() {
   try {
     const data = await get('/api/events', { limit: 30, printer_id: PF.state.activePrinter });
     const list = data.events || [];
+    eventsCache = list;                                  // ПР6: для «последней ошибки» в Здоровье
     host.innerHTML = list.length ? list.map((e) => `<div class="event ${esc(e.kind)}"><span class="edot"></span>`
       + `<span class="etext"><b>${esc(e.title)}</b><small>${esc(e.detail || '')}</small></span>`
       + `<time>${esc(dateTimeText(e.at))}</time></div>`).join('')
       : '<div class="empty compact"><span>Событий пока нет.</span></div>';
+    const p = active();
+    if (p && !((p.printer || {}).problems || []).length) renderHealth(p);
   } catch (err) {
+    eventsCache = [];
     host.innerHTML = '<div class="empty compact"><span>Журнал недоступен.</span></div>';
   }
 }

@@ -9,6 +9,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -1150,3 +1151,140 @@ class ClientBot121Tests(unittest.TestCase):
         self.bot._alert_master("555", self.row, "сколько стоит доставка?")
         self.assertEqual(len(captured), 1)
         self.assertTrue(captured[0][2])  # buttons не пустые
+
+
+class ClientBot122PanelTests(unittest.TestCase):
+    """12.2 (ЗА3–ЗА6): контур Telegram у карточки заказа и файлы заявки.
+
+    Эндпоинты проверяются напрямую на Api без HTTP-сервера: order-thread —
+    только чтение, cancel-ack — снятие отметки и перенос в статус отмены,
+    to-uploads — перекладывание файла покупателя в папку загрузок.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        tmp = pathlib.Path(self._tmp.name)
+        self.photo_dir = tmp / "photos"
+        self.upload_dir = tmp / "uploads"
+        self.photo_dir.mkdir()
+        self.db = Database(tmp / "t.sqlite3")
+        self.manager = PrinterManager(self.db, Repo(self.db))
+        self.repo = self.manager.repo
+        self.bot = self.manager.client_bot
+
+        from connector.printflow import api as api_mod
+        from connector.printflow import config as cfg_mod
+        self._patches = [
+            patch.object(api_mod, "UPLOAD_DIR", self.upload_dir),
+            patch.object(cfg_mod, "PHOTO_DIR", self.photo_dir),
+        ]
+        for p in self._patches:
+            p.start()
+
+        self.api = api_mod.Api.__new__(api_mod.Api)
+        self.api.db = self.db
+        self.api.repo = self.repo
+        self.api.manager = self.manager
+        self.order = self.repo.save_order({
+            "product": "Адресник", "customer_name": "Иван", "qty": 1,
+            "channel": "telegram", "client_source": "custom",
+        })
+        self.oid = self.order["id"]
+
+    def tearDown(self):
+        for _ in self._patches:
+            patch.stopall()
+        self.manager.shutdown()
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _link_chat(self, chat: str = "555"):
+        self.db.upsert("client_chats", {
+            "chat_id": chat, "name": "Иван", "username": "ivan",
+            "source": "custom", "created_at": "2026-08-30T10:00:00",
+        }, key="chat_id")
+        self.db.execute(
+            "INSERT INTO client_orders(chat_id,order_id,number,source,created_at)"
+            " VALUES(?,?,?,?,?)",
+            (chat, self.oid, self.order.get("number"), "telegram", "2026-08-30T10:00:00"))
+
+    def test_order_thread_without_chat_link(self):
+        code, payload = self.api.get("/api/client-bot/order-thread", {"order_id": [self.oid]})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["chat_id"], "")
+        self.assertEqual(payload["messages"], [])
+        self.assertIsNone(payload["payment_intent"])
+
+    def test_order_thread_unknown_order(self):
+        code, payload = self.api.get("/api/client-bot/order-thread", {"order_id": ["нет"]})
+        self.assertEqual(code, 404)
+
+    def test_order_thread_carries_chat_messages_actions(self):
+        self._link_chat()
+        self.db.execute(
+            "INSERT INTO client_bot_log(at,chat_id,name,text,kind,direction)"
+            " VALUES(?,?,?,?,?,?)",
+            ("2026-08-30T10:01:00", "555", "Иван", "а когда будет готово?", "message", "in"))
+        self.bot.save_template(name="Срок", text="Готово завтра")
+        self.db.upsert("client_payment_intents", {
+            "id": "pi_1", "order_id": self.oid, "chat_id": "555",
+            "request_id": "req-1", "amount": 700.0, "purpose": "предоплата",
+            "status": "pending", "created_at": "2026-08-30T10:02:00",
+        })
+        code, payload = self.api.get("/api/client-bot/order-thread", {"order_id": [self.oid]})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["chat_id"], "555")
+        self.assertEqual(len(payload["messages"]), 1)
+        self.assertEqual(payload["messages"][0]["direction"], "in")
+        self.assertEqual(payload["payment_intent"]["id"], "pi_1")
+        self.assertIn("Срок", [t["name"] for t in payload["templates"]])
+        self.assertEqual(payload["order"]["client_source"], "custom")
+
+    def test_cancel_ack_keep_clears_flag_and_keeps_order(self):
+        self.db.execute("UPDATE orders SET cancel_requested_at=?, notes='заметка'"
+                        " WHERE id=?", ("2026-08-30T10:05:00", self.oid))
+        code, payload = self.api.post("/api/client-bot/cancel-ack",
+                                      {"order_id": self.oid, "action": "keep"}, {})
+        self.assertEqual(code, 200)
+        fresh = self.db.one("SELECT * FROM orders WHERE id=?", (self.oid,))
+        self.assertFalse(fresh["cancel_requested_at"])
+        self.assertIn("мастер оставил заказ в работе", fresh["notes"])
+        self.assertIn("заметка", fresh["notes"])
+        self.assertEqual(fresh["status"], self.order["status"])
+
+    def test_cancel_ack_canceled_moves_to_final_cancel_status(self):
+        self.db.execute(
+            "INSERT INTO statuses(id,name,color,position,is_final)"
+            " VALUES('canceled','Отменён','#64748b',90,1)")
+        self.db.execute("UPDATE orders SET cancel_requested_at=? WHERE id=?",
+                        ("2026-08-30T10:05:00", self.oid))
+        code, payload = self.api.post("/api/client-bot/cancel-ack",
+                                      {"order_id": self.oid, "action": "canceled"}, {})
+        self.assertEqual(code, 200)
+        fresh = self.db.one("SELECT * FROM orders WHERE id=?", (self.oid,))
+        self.assertEqual(fresh["status"], "canceled")
+        self.assertFalse(fresh["cancel_requested_at"])
+
+    def test_cancel_ack_requires_known_action(self):
+        with self.assertRaises(ValueError):
+            self.api.post("/api/client-bot/cancel-ack",
+                          {"order_id": self.oid, "action": "maybe"}, {})
+
+    def test_photos_endpoint_exposes_size_and_original_name(self):
+        self.bot._attach_file(self.oid, b"solid-data", "leftBracket.3mf", "555", lead=True)
+        code, payload = self.api.get("/api/order/photos", {"order_id": [self.oid]})
+        self.assertEqual(code, 200)
+        photos = payload["photos"]
+        self.assertEqual(len(photos), 1)
+        self.assertEqual(photos[0]["original_name"], "leftBracket.3mf")
+        self.assertEqual(photos[0]["size"], len(b"solid-data"))
+        self.assertEqual(photos[0]["kind"], "client_file")
+
+    def test_to_uploads_copies_client_file_and_returns_name(self):
+        self.bot._attach_file(self.oid, b"solid-data", "pet-holder.stl", "555", lead=True)
+        row = self.db.one("SELECT * FROM order_photos WHERE order_id=?", (self.oid,))
+        code, payload = self.api.post("/api/order/photo/to-uploads", {"id": row["id"]}, {})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["file"], "pet-holder.stl")
+        self.assertTrue((self.upload_dir / "pet-holder.stl").is_file())
+        self.assertEqual((self.upload_dir / "pet-holder.stl").read_bytes(), b"solid-data")
