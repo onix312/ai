@@ -107,20 +107,34 @@ function renderDashboard() {
   legend($('dash_legend'), mode.keys);
 
   const printers = (live && live.printers) || [];
-  $('dash_printers').innerHTML = printers.length ? printers.map((p) => {
+  // ПР9: компактные карточки парка в том же языке, что и лента на «Принтерах».
+  const DPC = 2 * Math.PI * 15.5;
+  $('dash_printers').innerHTML = printers.length ? `<div class="dp-grid">` + printers.map((p) => {
     const st = p.printer.state;
     const running = st === 'RUNNING' || st === 'PREPARE';
     const progress = clamp(num(p.printer.progress), 0, 100);
-    return `<div style="padding:11px 0;border-bottom:1px solid var(--line-soft)">`
-      + `<div style="display:flex;align-items:center;gap:9px">`
-      + `<span class="dot ${p.connection.connected ? (running ? 'busy' : 'ok') : 'bad'}"></span>`
-      + `<b style="flex:1;font-size:13.4px">${esc(p.name)}</b>`
-      + `<span class="chip ${running ? 'accent' : p.connection.connected ? 'ok' : 'outline'}">${esc(p.printer.state_label)}</span></div>`
-      + (running ? `<div class="bar thin" style="margin-top:8px"><i style="width:${progress}%"></i></div>`
-        + `<small class="muted">${esc(p.printer.task || '')} · ${Math.round(progress)}% · осталось ${minutesText(p.printer.remaining_min)}</small>`
-        : `<small class="muted">${esc(p.connection.connected ? 'Готов к печати' : (p.connection.last_error || 'Нет связи'))}</small>`)
-      + '</div>';
-  }).join('') : '<div class="empty compact"><span>Принтер ещё не добавлен.</span></div>';
+    const problems = (p.printer.problems || []).length;
+    const alerts = (((p.guard || {}).alerts) || []).length;
+    const trays = ((p.ams || {}).trays) || [];
+    const sub = running
+      ? `${esc(String(p.printer.task || 'Печать').slice(0, 30))} · осталось ${minutesText(p.printer.remaining_min)}`
+      : esc(p.connection.connected ? (p.printer.state_label || 'Готов к печати') : (p.connection.last_error || 'Нет связи'));
+    return `<button class="dp-card${running ? ' run' : ''}${p.connection.connected ? '' : ' off'}" type="button" data-dp-printer="${esc(p.id)}"`
+      + ` title="${esc(p.name)} — открыть на вкладке «Принтеры»">`
+      + `<span class="dp-ring"><svg viewBox="0 0 40 40" aria-hidden="true">`
+      + `<circle class="tr" cx="20" cy="20" r="15.5"/>`
+      + `<circle class="fl" cx="20" cy="20" r="15.5" stroke-dasharray="${DPC.toFixed(1)}"`
+      + ` style="stroke-dashoffset:${p.connection.connected ? (DPC * (1 - progress / 100)).toFixed(1) : DPC.toFixed(1)}"/>`
+      + `</svg><b>${p.connection.connected ? (running ? Math.round(progress) + '%' : '✓') : '◌'}</b></span>`
+      + `<span class="dp-main"><b>${esc(p.name)}</b>`
+      + `<small>${sub}</small>`
+      + `<span class="dp-sw">${trays.slice(0, 4).map((t) => {
+        const has = t.present !== false && (t.present || t.generic || t.type || t.uuid);
+        return `<i class="${has ? '' : 'ghost'}" style="background:${esc(t.color || '#38445c')}"></i>`;
+      }).join('')}</span></span>`
+      + `<span class="dp-flags">${alerts ? '<i class="flag alarm" title="Тревога сторожа">!</i>' : ''}${problems ? `<i class="flag hms" title="HMS: ${problems}">▲</i>` : ''}</span>`
+      + `</button>`;
+  }).join('') + '</div>' : '<div class="empty compact"><span>Принтер ещё не добавлен.</span></div>';
 
   const due = activeOrders
     .filter((o) => o.due)
@@ -334,8 +348,12 @@ function renderActivePrint() {
   if (eta) facts.push(`Финиш в ${eta}`);
   if (elapsed) facts.push(`Идёт ${minutesText(elapsed)}`);
   $('dash_active_sub').textContent = `${snap.name} · ${info.state_label}`;
-  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}">`
-    + `<div class="ap-main"><b class="ap-pct">${Math.round(progress)}<small>%</small></b>`
+  const APC = 2 * Math.PI * 19;
+  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}${running ? ' run' : ''}">`
+    + `<div class="ap-main"><span class="ap-dial"><span class="ap-ring"><svg viewBox="0 0 44 44" aria-hidden="true">`
+    + `<circle class="tr" cx="22" cy="22" r="19"/>`
+    + `<circle class="fl" cx="22" cy="22" r="19" stroke-dasharray="${APC.toFixed(1)}" style="stroke-dashoffset:${(APC * (1 - progress / 100)).toFixed(1)}"/>`
+    + `</svg></span><b class="ap-pct">${Math.round(progress)}<small>%</small></b></span>`
     + `<div class="ap-info"><b>${esc(info.task || 'Печать')}</b>`
     + (order.number
       ? `<small><a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</a></small>`
@@ -403,23 +421,19 @@ function renderAmsPanel() {
     : 'Температура и влажность —';
   if (!trays.length) { host.innerHTML = dashEmpty('AMS не обнаружен или принтер не на связи.'); return; }
   const threshold = num(PF.state.settings.filament_low_threshold, 15);
-  host.innerHTML = trays.map((t) => {
+  // ПР9: мини-стойка AMS — те же «трубки», что на вкладке «Принтеры», только мельче.
+  host.innerHTML = `<div class="dp-rack">` + trays.map((t) => {
     const remain = t.remain == null || t.remain < 0 ? null : num(t.remain);
     const warn = remain != null && remain < threshold;
     const cname = amsHexToName(t.color) || '';
     const present = t.present !== false && (t.present || t.generic || t.type || t.uuid);
-    const generic = !!(t.generic || (present && !t.bambulab && !t.uuid));
     const empty = !present;
-    const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
-    return `<div class="ams-row${t.active ? ' active' : ''}${empty ? ' empty' : ''}">`
-      + `<span class="swatch" style="--filament:${esc(t.color || '#cbd5e1')}"></span>`
-      + `<div class="ams-info"><b>${esc(t.label || 'Слот')}${cname && !empty ? ' · ' + esc(cname) : ''}</b>`
-      + `<small>${esc(typeLabel)}${cname && !empty ? ' · ' + esc(cname) : ''}${generic ? ' · сторонний' : ''}${t.active ? ' · активен' : ''}</small></div>`
-      + (remain != null
-        ? `<div class="ams-remain${warn ? ' warn' : ''}"><div class="bar thin"><i style="width:${clamp(remain, 0, 100)}%"></i></div><small>${Math.round(remain)}%</small></div>`
-        : '<span class="muted">—</span>')
-      + '</div>';
-  }).join('');
+    const typeLabel = empty ? 'пусто' : (t.type || '?');
+    return `<div class="dp-tube${empty ? ' empty' : ''}${t.active ? ' active' : ''}${warn ? ' low' : ''}"`
+      + ` title="${esc((t.label || 'Слот') + ' · ' + typeLabel + (cname && !empty ? ' · ' + cname : '') + (remain != null ? ' · ' + Math.round(remain) + '%' : ''))}">`
+      + `<i style="--filament:${esc(t.color || '#cbd5e1')};--lvl:${empty ? 0 : (remain == null ? 100 : clamp(remain, 4, 100))}%"></i>`
+      + `<span>${empty ? '' : (remain != null ? Math.round(remain) + '%' : '—')}</span></div>`;
+  }).join('') + '</div>';
 }
 
 /* ============================================== прогноз пластика на очередь */
@@ -2036,6 +2050,13 @@ function showArticle(name) {
 
 /* ============================================================= события */
 function bind() {
+  // ПР9: клик по карточке принтера на Обзоре — выбрать его на вкладке «Принтеры».
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dp-printer]');
+    if (!btn) return;
+    PF.state.activePrinter = btn.dataset.dpPrinter;
+    location.hash = '#printers';
+  });
   $('dash_period').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;

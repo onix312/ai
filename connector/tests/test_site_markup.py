@@ -117,3 +117,47 @@ class SiteMarkupTests(TestCase):
                 parents = self.parser.report_parents[element_id]
                 self.assertTrue(any(parent_id == "finpane-reports" for parent_id, _ in parents))
                 self.assertTrue(any("grid" in classes.split() for _, classes in parents))
+
+    def test_printers_park_and_orders_tg_markup_12_2(self):
+        """12.2: лента парка вместо вкладок, TG-контур карточки, фильтр каналов."""
+        for element_id in ("pr_park", "pr_density", "pr_layers_fill", "pr_nozzle_bar",
+                           "pr_bed_spark", "pr_health_card", "orders_chan",
+                           "of_cancel_wrap", "of_tg_wrap", "of_tg_msgs", "of_tg_chips",
+                           "of_tg_reply", "of_tg_send", "of_photo_files"):
+            with self.subTest(element=element_id):
+                self.assertIn(element_id, self.parser.ids)
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertNotIn('id="pr_tabs"', html)      # вкладки-кнопки заменены парком
+        self.assertIn('class="printer-park"', html)
+        self.assertIn('class="ams-rack" id="pr_ams"', html)
+
+    def test_printers_and_orders_scripts_are_wired_12_2(self):
+        printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        ops = (ROOT / "site" / "assets" / "ops.js").read_text(encoding="utf-8")
+        core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+        icons = (ROOT / "site" / "assets" / "icons.js").read_text(encoding="utf-8")
+        # принтеры: парк, приборы, AMS-трубки, плотность
+        self.assertIn("function renderTabs", printer)
+        self.assertIn("$('pr_park')", printer)
+        self.assertIn("ams-tube", printer)
+        self.assertIn("renderTempGauge", printer)
+        self.assertIn("sparkPath", printer)
+        self.assertIn("pk-card", printer)
+        self.assertIn("pf_printers_density", printer)
+        # заказы: TG-нить, отмена, фото/файлы, фильтр канала
+        self.assertIn("/api/client-bot/order-thread", ops)
+        self.assertIn("/api/client-bot/cancel-ack", ops)
+        self.assertIn("/api/client-bot/review/reply", ops)
+        self.assertIn("/api/client-bot/payment", ops)
+        self.assertIn("/api/order/photo/to-uploads", ops)
+        self.assertIn("loadOrderPhotosFull", ops)
+        self.assertIn("isTgOrder", ops)
+        self.assertIn("orders_chan", ops)
+        # ядро: единый просмотрщик; иконки: набор 12.2
+        self.assertIn("function lightbox", core)
+        self.assertIn("lightbox, lightboxClose", core)
+        for name in ("telegram", "bolt", "cancel", "thermo", "wind", "wifi",
+                     "shield", "timer", "cube", "image", "link", "drop",
+                     "message", "star"):
+            with self.subTest(icon=name):
+                self.assertIn(f"{name}:", icons)

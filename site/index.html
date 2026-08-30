@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
 <link rel="stylesheet" href="assets/theme.css?v=11.1.0">
 <link rel="stylesheet" href="assets/app.css?v=9.1.2">
-<link rel="stylesheet" href="assets/more.css?v=9.2.2">
+<link rel="stylesheet" href="assets/more.css?v=12.2.0">
 </head><body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
@@ -175,13 +175,14 @@
  <div class="view-head">
   <div><span class="eyebrow">Bambu Lab · Live</span><h1>Принтеры</h1><p id="pr_sub">Мониторинг, управление и файлы принтера по локальной сети.</p></div>
   <div class="head-actions">
+   <button class="btn ghost" id="pr_density" type="button" title="Компактная или просторная раскладка карточек">⇥ Компактно</button>
    <button class="btn" id="pr_wall" type="button">▦ Стена</button>
    <button class="btn" id="pr_reconnect" type="button">⟳ Переподключить</button>
    <button class="btn" id="pr_edit" type="button">⚙ Настроить</button>
    <button class="btn primary" id="pr_add" type="button">+ Принтер</button>
   </div>
  </div>
- <div class="printer-tabs" id="pr_tabs"></div>
+ <div class="printer-park" id="pr_park" role="group" aria-label="Парк принтеров"></div>
  <div id="pr_empty" class="empty" hidden><span class="big">◉</span><b>Принтер ещё не добавлен</b><span>Подключите Bambu Lab по локальной сети.</span><button class="btn sm primary" type="button" data-empty-click="pr_add">+ Принтер</button></div>
  <div id="pr_workspace" hidden>
    <div id="pr_alerts" class="alert-strip"></div>
@@ -194,6 +195,7 @@
        <span class="state-badge" id="pr_state">Не в сети</span>
        <h2 id="pr_task">Нет активной печати</h2>
        <p class="sub" id="pr_order">Не связано с заказом</p>
+       <div class="layer-step" title="Прогресс печати по слоям"><i id="pr_layers_fill"></i></div>
       </div>
       <div class="orbit"><svg viewBox="0 0 104 104"><circle class="track" cx="52" cy="52" r="45"></circle><circle class="fill" id="pr_ring" cx="52" cy="52" r="45" stroke-dasharray="283" stroke-dashoffset="283"></circle></svg><div class="cap"><b id="pr_progress">0%</b><span>готово</span></div></div>
      </div>
@@ -211,15 +213,15 @@
     <div class="telemetry">
      <div class="card">
       <div class="card-head"><h3>Температуры</h3><span class="muted" style="font-size:11.6px">сейчас / цель</span></div>
-      <div class="temp-row"><span class="tic hot" id="pr_nozzle_ic">▲</span><span class="name">Сопло</span><b><span id="pr_nozzle">—</span> / <span class="muted" id="pr_nozzle_t">—</span> °C</b></div>
-      <div class="temp-row"><span class="tic bed">▬</span><span class="name">Стол</span><b><span id="pr_bed">—</span> / <span class="muted" id="pr_bed_t">—</span> °C</b></div>
-      <div class="temp-row"><span class="tic cham">□</span><span class="name">Камера</span><b><span id="pr_chamber">—</span> °C</b></div>
+      <div class="temp-row gauge" id="pr_row_nozzle"><span class="tic hot" id="pr_nozzle_ic"><i data-icon="thermo">▲</i></span><span class="name">Сопло</span><b><span id="pr_nozzle">—</span><span class="muted"> / <span id="pr_nozzle_t">—</span></span> °C</b><div class="gbar"><i id="pr_nozzle_bar"></i></div><svg class="tspark" id="pr_nozzle_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      <div class="temp-row gauge" id="pr_row_bed"><span class="tic bed"><i data-icon="bed">▬</i></span><span class="name">Стол</span><b><span id="pr_bed">—</span><span class="muted"> / <span id="pr_bed_t">—</span></span> °C</b><div class="gbar"><i id="pr_bed_bar"></i></div><svg class="tspark" id="pr_bed_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      <div class="temp-row gauge" id="pr_row_chamber"><span class="tic cham"><i data-icon="drop">□</i></span><span class="name">Камера</span><b><span id="pr_chamber">—</span> °C</b><span class="chamber-hint muted" id="pr_chamber_hint"></span></div>
      </div>
      <div class="card">
       <div class="card-head"><h3>Вентиляторы</h3><span class="muted" style="font-size:11.6px">мощность</span></div>
-      <div class="fan-row"><span class="name">Обдув детали</span><b id="pr_fan_part">0%</b><div class="bar thin"><i id="pr_fan_part_bar"></i></div></div>
-      <div class="fan-row"><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div></div>
-      <div class="fan-row"><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Обдув детали</span><b id="pr_fan_part">0%</b><div class="bar thin"><i id="pr_fan_part_bar"></i></div></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div></div>
      </div>
     </div>
     <div class="card">
@@ -282,7 +284,7 @@
     <div class="card">
      <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div>
       <div class="head-actions"><span class="chip warn" id="pr_cam_demo" hidden>Демо</span><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div></div>
-     <div class="cam-frame"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span></div>
+     <div class="cam-frame clickable" title="Клик — крупный план"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span><span class="cam-zoom" data-icon="image" aria-hidden="true">⤢</span></div>
      <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span>
       <button class="btn sm ghost" id="pr_cam_diag" type="button">Диагностика</button>
       <button class="btn sm ghost" id="pr_cam_rtsp" type="button">RTSP</button>
@@ -292,12 +294,12 @@
      <p class="muted shot-hint" id="pr_shots_empty" style="font-size:12px;margin:8px 0 0">Снимки сохраняются здесь: свой таймлапс печати. Сторож добавляет кадр сам, когда что-то пошло не так.</p>
      <div class="shot-strip" id="pr_shots"></div>
     </div>
-    <div class="card">
-     <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
-     <div class="ams-grid" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
+     <div class="card">
+      <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
+     <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
     </div>
-    <div class="card">
-     <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health">Нет ошибок</span></div>
+    <div class="card health-card" id="pr_health_card">
+     <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health"><i data-icon="shield">✓</i><span id="pr_health_text">Нет ошибок</span></span></div>
      <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
     </div>
     <div class="card">
@@ -359,6 +361,7 @@
   <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…"></div>
   <select id="orders_filter_status"><option value="">Все статусы</option></select>
   <select id="orders_filter_niche"><option value="">Все ниши</option></select>
+  <div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
  </div>
  <div class="toolbar" id="bulk_bar" hidden>
@@ -367,7 +370,12 @@
   <button class="btn sm" id="bulk_apply" type="button">Применить</button>
   <button class="btn sm ghost" id="bulk_clear" type="button">Снять выбор</button>
  </div>
- <div id="orders_kanban" class="kanban"></div>
+ <div id="orders_kanban" class="kanban">
+  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:56%"></span></div><div class="ocard"><i class="skel" style="width:40%;height:12px;display:block"></i><i class="skel" style="width:82%;height:14px;margin-top:8px;display:block"></i><i class="skel" style="width:64%;height:10px;margin-top:8px;display:block"></i></div><div class="ocard"><i class="skel" style="width:34%;height:12px;display:block"></i><i class="skel" style="width:76%;height:14px;margin-top:8px;display:block"></i></div></div>
+  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:52%"></span></div><div class="ocard"><i class="skel" style="width:44%;height:12px;display:block"></i><i class="skel" style="width:70%;height:14px;margin-top:8px;display:block"></i></div></div>
+  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:60%"></span></div><div class="ocard"><i class="skel" style="width:38%;height:12px;display:block"></i><i class="skel" style="width:84%;height:14px;margin-top:8px;display:block"></i><i class="skel" style="width:58%;height:10px;margin-top:8px;display:block"></i></div></div>
+  <div class="kan-col kan-skel empty-col"><div class="kan-head"><i class="skel"></i></div></div>
+ </div>
  <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th class="w-check"></th><th>№</th><th>Изделие</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th class="right">Часы</th><th class="right">Граммы</th><th class="right">Цена</th><th class="right">Прибыль</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
 </section>
 
@@ -3784,6 +3792,14 @@
  <div class="modal-head"><div><span class="eyebrow">Карточка заказа</span><h2 id="order_modal_title">Новый заказ</h2><p id="order_modal_sub">Клиент создаётся автоматически по имени и телефону.</p></div><button class="icon-btn" type="button" data-close="order_modal">×</button></div>
  <div class="modal-body">
   <div class="verdict" id="of_intake_hint" hidden></div>
+  <div class="tg-cancel-banner" id="of_cancel_wrap" hidden>
+   <span class="tgc-ic" data-icon="cancel" aria-hidden="true">✕</span>
+   <div class="tgc-body"><b>Покупатель запросил отмену</b><small id="of_cancel_sub">Бот ничего не отменял сам — решение за мастером</small></div>
+   <div class="tgc-acts">
+    <button class="btn sm" type="button" id="of_cancel_keep" title="Оставить заказ в работе и снять отметку">Оставил в работе</button>
+    <button class="btn sm danger" type="button" id="of_cancel_do" title="Перевести заказ в статус отмены и снять отметку">Отменить заказ</button>
+   </div>
+  </div>
   <div class="form-section"><h3>Заказ</h3><div class="form-grid">
    <label class="field span-2"><span>Изделие / работа</span><input id="of_product" placeholder="Например: адресник с именем" list="products_datalist" required></label>
    <div class="field span-2">
@@ -3891,12 +3907,28 @@
    </div>
   </div>
   <div class="form-section" id="of_photos_wrap" hidden>
-   <h3>Фото</h3>
+   <h3>Ход работы и материалы заявки <small class="muted" style="font-weight:normal">снимки производства и файлы покупателя</small></h3>
    <div id="of_photos" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+   <div id="of_photo_files"></div>
    <div style="display:flex;gap:8px;margin-top:10px">
     <button class="btn sm" type="button" id="of_photo_camera">📷 Кадр с камеры</button>
     <button class="btn sm" type="button" id="of_photo_upload_btn">⬆ Загрузить фото</button>
     <input type="file" id="of_photo_file" accept="image/*" hidden>
+   </div>
+  </div>
+  <div class="form-section tg-thread" id="of_tg_wrap" hidden>
+   <div class="tg-thread-head">
+    <h3><i data-icon="telegram">✈</i> Диалог с покупателем</h3>
+    <small class="muted" id="of_tg_sub">заказ из клиентского бота</small>
+   </div>
+   <div class="tg-msgs" id="of_tg_msgs"></div>
+   <div class="tg-chips" id="of_tg_chips"></div>
+   <div class="tg-reply">
+    <textarea id="of_tg_reply" rows="2" placeholder="Ответ покупателю — уйдёт в Telegram через клиентского бота"></textarea>
+    <div class="tg-reply-acts">
+     <select id="of_tg_template" aria-label="Вставить шаблон"><option value="">Вставить шаблон…</option></select>
+     <button class="btn sm primary" type="button" id="of_tg_send">Отправить в чат</button>
+    </div>
    </div>
   </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
@@ -4890,10 +4922,10 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=9.1.2"></script>
-<script src="assets/core.js?v=11.1.0"></script>
-<script src="assets/icons.js?v=11.1.0"></script>
-<script src="assets/printer.js?v=11.0.1"></script>
-<script src="assets/ops.js?v=11.0.1"></script>
+<script src="assets/core.js?v=12.2.0"></script>
+<script src="assets/icons.js?v=12.2.0"></script>
+<script src="assets/printer.js?v=12.2.0"></script>
+<script src="assets/ops.js?v=12.2.0"></script>
 <script src="assets/money.js?v=11.0.1"></script>
 <script src="assets/finance.js?v=11.0.1"></script>
 <script src="assets/shelf.js?v=11.0.1"></script>
@@ -4902,7 +4934,7 @@
 <script src="assets/marketing.js?v=9.2.1"></script>
 <script src="assets/clientbot.js?v=11.0.1"></script>
 <script src="assets/workshop.js?v=11.0.1"></script>
-<script src="assets/app.js?v=11.1.0"></script>
+<script src="assets/app.js?v=12.2.0"></script>
 <script src="assets/ops10.js?v=10.0.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

@@ -202,6 +202,39 @@ function emptyHtml(icon, title, text, cta) {
     + `<span>${esc(text || '')}</span>${btn}</div>`;
 }
 
+/* ====================================================== О2: полноэкранный
+   просмотрщик (12.2). Один оверлей на весь сайт: снимки заказов, кадры
+   камеры, превью материалов. Без внешних библиотек; закрытие — клик по
+   фону, крестик или Esc. */
+function lightbox(src, caption) {
+  let host = $('pf-lightbox');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'pf-lightbox';
+    host.className = 'pf-lb';
+    host.innerHTML = '<button class="icon-btn pf-lb-x" type="button" aria-label="Закрыть">×</button>'
+      + '<figure><img alt=""><figcaption></figcaption></figure>';
+    document.body.appendChild(host);
+    host.addEventListener('click', (e) => { if (!e.target.closest('img')) lightboxClose(); });
+  }
+  const img = host.querySelector('img');
+  img.onload = () => img.classList.add('ready');
+  img.classList.remove('ready');
+  img.src = src;
+  host.querySelector('figcaption').textContent = caption || '';
+  host.classList.add('on');
+  document.addEventListener('keydown', lightboxEsc);
+}
+function lightboxClose() {
+  const host = $('pf-lightbox');
+  if (!host) return;
+  host.classList.remove('on');
+  const img = host.querySelector('img');
+  if (img) img.removeAttribute('src');
+  document.removeEventListener('keydown', lightboxEsc);
+}
+function lightboxEsc(e) { if (e.key === 'Escape') lightboxClose(); }
+
 /** Модалка вместо window.prompt (П22).
     ask({title, sub, fields, ok}) → Promise<object|string|null>.
     Один field без name — строка, как prompt; несколько — объект по name.
@@ -332,7 +365,7 @@ const PF = {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
     dateText, dateTimeText, agoText, todayISO, initials, debounce,
     toast, fail, openModal, closeModal, confirmDanger, ask, emptyHtml, CUR, store, catName,
-    setChannelBar, countUp,
+    setChannelBar, countUp, lightbox, lightboxClose,
   },
   modules: {},
   bus: new EventTarget(),
