@@ -125,6 +125,16 @@ function renderInbox(items, templates = []) {
   const unread = rows.length;
   const badge = $('cb_unread_badge');
   if (badge) { badge.textContent = String(unread); badge.hidden = !unread; }
+  // ВП39: счётчик непрочитанных на вкладке
+  $$('[data-tab-badge="clientbot"]').forEach((el) => {
+    if (unread) {
+      el.textContent = String(unread);
+      el.hidden = false;
+      el.className = 'tab-hits warn';
+    } else {
+      el.hidden = true;
+    }
+  });
   if (!byChat.size) {
     host.innerHTML = `<div class="empty clientbot-empty-state"><span class="empty-icon">✓</span><b>Непрочитанных сообщений нет</b><small>Новые вопросы покупателя появятся здесь.</small></div>`;
     return;

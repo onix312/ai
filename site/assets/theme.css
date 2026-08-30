@@ -694,6 +694,10 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
 .toast.bad .ic { background: var(--bad-soft); color: var(--bad); }
 .toast.warn { border-left: 3px solid var(--warn); }
 .toast.warn .ic { background: var(--warn-soft); color: var(--warn); }
+.toast-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 4px; margin-left: auto; }
+.toast-close:hover { color: var(--ink); }
+.toast-progress { position: absolute; bottom: 0; left: 0; height: 3px; background: var(--accent); width: 100%; }
+@keyframes toastProgress { from { width: 100%; } to { width: 0%; } }
 @keyframes toastIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateX(24px); } }
 

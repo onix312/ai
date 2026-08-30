@@ -177,9 +177,11 @@ function toast(title, sub, kind = 'ok') {
   const box = $('toasts');
   const el = document.createElement('div');
   el.className = 'toast ' + kind;
-  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>`;
+  const dur = kind === 'bad' ? 5200 : 3200;
+  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><button class="toast-close" aria-label="Закрыть">×</button><div class="toast-progress" style="animation:toastProgress ${dur}ms linear forwards"></div>`;
   box.appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, kind === 'bad' ? 5200 : 3200);
+  el.querySelector('.toast-close').onclick = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, dur);
 }
 const fail = (e) => toast('Не получилось', e && e.message ? e.message : String(e), 'bad');
 

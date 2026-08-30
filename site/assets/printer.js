@@ -284,8 +284,14 @@ function renderAms(p) {
   text('pr_ams_count', trays.length
     ? `${occupied.length} из ${trays.length} занято`
     : 'нет данных');
+  const hum = num(ams.humidity);
+  const humZone = hum <= 20 ? { label: 'сухо', color: '#22c55e' }
+    : hum <= 40 ? { label: 'норма', color: '#3b82f6' }
+    : hum <= 60 ? { label: 'влажно', color: '#f59e0b' }
+    : { label: 'крит', color: '#ef4444' };
+  const humBar = hum > 0 ? `<div style="display:inline-block;width:60px;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:0 6px;vertical-align:middle"><div style="width:${Math.min(100, hum)}%;height:100%;background:${humZone.color}"></div></div>` : '';
   text('pr_ams_env', ams.temperature != null || ams.humidity != null
-    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${ams.humidity ?? '—'}`
+    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${humBar}${ams.humidity ?? '—'}% (${humZone.label})`
     : 'Температура и влажность —');
   const pbtn = $('pr_ams_profiles');
   if (pbtn) pbtn.hidden = !trays.length;
