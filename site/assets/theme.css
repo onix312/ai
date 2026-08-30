@@ -3,103 +3,9 @@
    цвет только там, где он что-то сообщает. Палитра сохранена
    (indigo #4f46e5 → violet #7c3aed, текст #131a2b). */
 
-/* ============================================================ токены */
-:root {
-  color-scheme: light;
-
-  --font: "Inter", "Segoe UI", "SF Pro Text", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  --mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", Consolas, monospace;
-
-  /* фирменная палитра */
-  --accent: #4f46e5;
-  --accent-2: #7c3aed;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(79, 70, 229, .10);
-  --accent-line: rgba(79, 70, 229, .28);
-  --accent-glow: rgba(79, 70, 229, .18);
-
-  /* поверхности */
-  --bg: #f3f5fa;
-  /* лёгкий «воздух» сверху: две едва заметные акцентные засветки */
-  --bg-grad:
-    radial-gradient(1200px 500px at 12% -10%, rgba(79, 70, 229, .07), transparent 64%),
-    radial-gradient(1000px 460px at 108% 2%, rgba(124, 58, 237, .06), transparent 60%);
-  --panel: #ffffff;
-  --panel-2: #f8fafc;            /* мягкая подложка внутри карточек */
-  --panel-3: #edf2f7;            /* ховеры, заполнения */
-  --line: #e2e8f0;
-  --line-soft: #edf2f7;
-  --line-strong: #cbd5e1;
-
-  /* текст */
-  --text: #0f172a;
-  --text-2: #334155;
-  --muted: #64748b;
-
-  /* статусы */
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, .12);
-  --warn: #d97706;
-  --warn-soft: rgba(217, 119, 6, .14);
-  --bad: #ef4444;
-  --bad-soft: rgba(239, 68, 68, .12);
-  --info: #0284c7;
-  --info-soft: rgba(2, 132, 199, .12);
-
-  /* геометрия — чуть круглее: интерфейс мягче, «плиточность» уходит */
-  --r-xs: 7px;
-  --r-sm: 10px;
-  --r: 13px;
-  --r-lg: 18px;
-  --r-xl: 22px;
-  --shadow-1: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 12px -4px rgba(15, 23, 42, .08);
-  --shadow-2: 0 4px 12px -2px rgba(15, 23, 42, .08), 0 16px 32px -8px rgba(15, 23, 42, .14);
-  --shadow-3: 0 24px 60px -16px rgba(15, 23, 42, .28);
-  --side-w: 252px;
-  --top-h: 60px;
-  --ease: cubic-bezier(.4, 0, .2, 1);
-}
-
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --accent: #6366f1;
-  --accent-2: #8b5cf6;
-  --accent-ink: #ffffff;
-  --accent-soft: rgba(99, 102, 241, .16);
-  --accent-line: rgba(99, 102, 241, .36);
-  --accent-glow: rgba(99, 102, 241, .25);
-  --bg: #0b0f19;
-  --bg-grad:
-    radial-gradient(1200px 500px at 12% -10%, rgba(99, 102, 241, .09), transparent 64%),
-    radial-gradient(1000px 460px at 108% 2%, rgba(139, 92, 246, .07), transparent 60%);
-  --panel: #111827;
-  --panel-2: #161f33;
-  --panel-3: #1e293b;
-  --line: #1e293b;
-  --line-soft: #182234;
-  --line-strong: #334155;
-  --text: #f8fafc;
-  --text-2: #cbd5e1;
-  --muted: #8191aa;
-  --ok: #10b981;
-  --ok-soft: rgba(16, 185, 129, .15);
-  --warn: #f59e0b;
-  --warn-soft: rgba(245, 158, 11, .15);
-  --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, .15);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, .15);
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, .45), 0 4px 12px -4px rgba(0, 0, 0, .55);
-  --shadow-2: 0 8px 24px -6px rgba(0, 0, 0, .65);
-  --shadow-3: 0 24px 64px -16px rgba(0, 0, 0, .85);
-}
-
-/* акценты (те же токены перекрашиваются) */
-html[data-accent="violet"]  { --accent: #7c3aed; --accent-2: #a855f7; --accent-soft: rgba(124,58,237,.14); --accent-line: rgba(124,58,237,.34); }
-html[data-accent="blue"]    { --accent: #2563eb; --accent-2: #0ea5e9; --accent-soft: rgba(37,99,235,.14);  --accent-line: rgba(37,99,235,.34); }
-html[data-accent="emerald"] { --accent: #059669; --accent-2: #14b8a6; --accent-soft: rgba(5,150,105,.14);  --accent-line: rgba(5,150,105,.34); }
-html[data-accent="amber"]   { --accent: #d97706; --accent-2: #f59e0b; --accent-soft: rgba(217,119,6,.16);  --accent-line: rgba(217,119,6,.36); }
-html[data-accent="rose"]    { --accent: #e11d48; --accent-2: #f43f5e; --accent-soft: rgba(225,29,72,.14);  --accent-line: rgba(225,29,72,.34); }
+/* ============================================================ токены
+   Все токены (палитра, геометрия, тени, акценты, тёмная тема) вынесены
+   в tokens.css — он подключается первым. Здесь остаются только правила. */
 
 /* ============================================================= сброс */
 * { box-sizing: border-box; }
@@ -877,4 +783,367 @@ html[data-density="shop"] .kpi .value { font-size: 28px; }
      правилу в конце файла. */
   .skel { animation: none; }
   .view.on { animation: none; }
+}
+
+/* ==================================================== 13.1: склад и товары
+   Бублик остатка (идея 13), спарклайн продаж (16), сворачиваемые группы
+   плиток (17), режим «витрина глазами покупателя» (18), бейдж «цены
+   просели» (19), таблица с живыми цифрами (Б4). */
+.prod-card .pqty-donut-row { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 2px; }
+.prod-donut {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  background: conic-gradient(var(--ok) calc(var(--p) * 1%), var(--panel-3) 0);
+  position: relative;
+}
+.prod-donut::after {
+  content: ""; position: absolute; inset: 7px; border-radius: 50%;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.prod-donut.warn { background: conic-gradient(var(--warn) calc(var(--p) * 1%), var(--panel-3) 0); }
+.prod-donut.bad { background: conic-gradient(var(--bad) calc(var(--p) * 1%), var(--panel-3) 0); }
+.prod-donut.ok { background: conic-gradient(var(--ok) calc(var(--p) * 1%), var(--panel-3) 0); }
+.prod-card .pfacts .prod-spark { flex: none; opacity: .75; margin-left: 2px; align-self: center; }
+.prod-card .pfacts .prod-spark.up { color: var(--ok); }
+.prod-card .pfacts .prod-spark:not(.up) { color: var(--bad); }
+.prod-card .pfacts span { align-items: center; }
+
+.prod-group { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+.prod-group + .prod-group { margin-top: 14px; }
+.prod-group > summary {
+  display: flex; align-items: baseline; gap: 10px; cursor: pointer;
+  padding: 11px 14px; list-style: none; user-select: none;
+  background: linear-gradient(180deg, var(--panel-2), transparent);
+}
+.prod-group > summary::-webkit-details-marker { display: none; }
+.prod-group > summary::before { content: "▸"; color: var(--muted); transition: transform .18s var(--ease); }
+.prod-group[open] > summary::before { transform: rotate(90deg); }
+.prod-group > summary .pg-name { font-weight: 700; font-size: 13.5px; color: var(--text); }
+.prod-group > summary .pg-count { color: var(--muted); font-size: 11.8px; }
+.prod-group > summary .pg-stock { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--text); }
+.prod-group > summary .pg-margin { font-variant-numeric: tabular-nums; font-size: 12.5px; min-width: 74px; text-align: right; }
+.prod-group > summary .pg-margin.pos { color: var(--ok); }
+.prod-group > summary .pg-margin.neg { color: var(--bad); }
+.prod-group .prod-group-inner {
+  display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  padding: 14px;
+}
+.prod-group .prod-group-inner .prod-card { box-shadow: none; }
+
+.prod-card.shop-eye .pbody { min-height: 92px; }
+.prod-card.shop-eye .pfacts.single { grid-template-columns: 1fr; align-content: start; }
+
+.toolbar-alerts { margin: 0 0 12px; }
+.toolbar-alerts .chip { cursor: pointer; box-shadow: var(--shadow-1); }
+.toolbar-alerts .chip:hover { filter: brightness(1.06); }
+#prod_shop_eye.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ==================================================== 13.1: стеллаж
+   Карта полки (58) и чек-лист проверки (59). */
+.shelf-map { display: grid; gap: 8px; margin: 10px 0; }
+.shelf-cell {
+  display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2);
+  padding: 8px 10px; min-height: 74px; text-align: left; cursor: pointer;
+  font: inherit; color: var(--text);
+}
+.shelf-cell:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); }
+.shelf-cell .cell-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: .04em; }
+.shelf-cell .cell-name { font-size: 12px; font-weight: 600; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.shelf-cell .cell-qty { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); margin-top: auto; }
+.shelf-cell.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--panel-2)); }
+.shelf-cell.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 10%, var(--panel-2)); }
+.shelf-cell.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); background: color-mix(in srgb, var(--bad) 9%, var(--panel-2)); }
+.shelf-cell.empty { border-style: dashed; background: transparent; cursor: default; }
+.shelf-map-legend { display: flex; align-items: center; gap: 6px; font-size: 11.8px; color: var(--muted); flex-wrap: wrap; }
+.shelf-map-legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+.shelf-map-legend .dot.ok { background: var(--ok); }
+.shelf-map-legend .dot.warn { background: var(--warn); }
+.shelf-map-legend .dot.bad { background: var(--bad); }
+.shelf-map-legend .muted { margin-left: auto; }
+
+.shelf-check-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 13px; }
+.shelf-check-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 6px;
+  border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.shelf-check-row:last-child { border-bottom: none; }
+.shelf-check-row.done { opacity: .62; }
+.shelf-check-row .check-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.shelf-check-row .check-name small { color: var(--muted); }
+.shelf-check-row .check-time { font-variant-numeric: tabular-nums; font-size: 11.5px; min-width: 44px; text-align: right; }
+
+/* ==================================================== 13.1: доска контента
+   План недели пн–вс (60) и превью поста как в Telegram (61). */
+.mk-board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; min-width: 0; }
+.mk-board-col {
+  border: 1px dashed var(--line); border-radius: 12px; padding: 8px;
+  min-height: 132px; display: flex; flex-direction: column; gap: 6px;
+  background: var(--panel-2);
+}
+.mk-board-col.drag-over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel-2)); }
+.mk-board-day { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; font-size: 12.5px; color: var(--text); }
+.mk-board-day small { font-weight: 500; color: var(--muted); font-size: 10.5px; }
+.mk-board-add {
+  flex: 1; border: 1px dashed var(--line); border-radius: 10px; background: transparent;
+  color: var(--muted); font-size: 20px; cursor: pointer; min-height: 84px; transition: all .15s var(--ease);
+}
+.mk-board-add:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.mk-board-card {
+  position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  padding: 8px 26px 8px 10px; cursor: grab; font-size: 11.8px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  box-shadow: var(--shadow-1); transition: box-shadow .15s var(--ease), transform .15s var(--ease);
+}
+.mk-board-card:hover { box-shadow: var(--shadow-2); }
+.mk-board-card.dragging { opacity: .55; transform: rotate(2deg); }
+.mk-board-card [data-board-del] { position: absolute; top: 3px; right: 3px; }
+.mk-board-card .mk-board-text { white-space: pre-line; }
+.mk-board-card:active { cursor: grabbing; }
+
+.tg-preview-card {
+  max-width: 460px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--panel); box-shadow: var(--shadow-1); overflow: hidden;
+}
+.tg-preview-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.tg-preview-av {
+  width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2, var(--accent)));
+  color: #fff; font-size: 17px; flex: none;
+}
+.tg-preview-meta { display: flex; flex-direction: column; line-height: 1.25; }
+.tg-preview-meta b { font-size: 13px; }
+.tg-preview-meta small { color: var(--muted); font-size: 11px; }
+.tg-preview-body { padding: 12px 14px; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.tg-preview-foot {
+  display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 11.5px;
+}
+#mk_board_count.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); color: var(--ok); }
+@media (max-width: 1100px) { .mk-board { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 720px) { .mk-board { grid-template-columns: repeat(2, 1fr); } }
+
+/* ==================================================== 13.1: библиотека
+   Поиск с подсветкой (64) и бейдж «прочитано» (65). */
+#lib_grid .lib-card mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--text); border-radius: 4px; padding: 0 2px; }
+.lib-read-badge {
+  position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 600;
+  color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent);
+  padding: 2px 7px; border-radius: 99px;
+}
+
+/* ==================================================== 13.1: принтеры
+   Пульс активной печати (З2-15) и спарклайны вентиляторов (З1-23). */
+#pr_job.running .orbit {
+  animation: pr-breathe 2.6s var(--ease) infinite;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+#pr_job.running .orbit .cap { transition: transform .26s var(--ease); }
+@keyframes pr-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+.printer-grid .fan-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.printer-grid .fan-row .tspark { flex: none; width: 60px; height: 12px; opacity: .75; }
+.printer-grid .fan-row .tspark path { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+#pr_row_chamber .tspark { width: 60px; height: 12px; opacity: .75; margin-left: auto; }
+#pr_row_chamber .tspark path { stroke: var(--ok); stroke-width: 1.6; fill: none; }
+@media (prefers-reduced-motion: reduce) {
+  #pr_job.running .orbit { animation: none; }
+}
+
+/* ==================================================== 13.1: дашборд
+   Перетаскивание виджетов (66) и рекорды цеха (41). */
+#view-dashboard > * { position: relative; }
+.dash-grip {
+  position: absolute; top: 10px; right: 12px; z-index: 5;
+  width: 26px; height: 26px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: grab; font-size: 13px;
+  display: grid; place-items: center; opacity: 0; transition: opacity .15s var(--ease), border-color .15s var(--ease);
+}
+#view-dashboard > *:hover .dash-grip { opacity: .85; }
+.dash-grip:hover { border-color: var(--line); color: var(--text); }
+#view-dashboard > .dragging { opacity: .55; outline: 1px dashed var(--accent); outline-offset: 4px; }
+#view-dashboard > .drop-target { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.dash-records {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px;
+  padding-bottom: 12px; border-bottom: 1px dashed var(--line);
+}
+.dash-record {
+  display: flex; flex-direction: column; gap: 1px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2);
+  min-width: 128px;
+}
+.dash-record i { font-style: normal; font-size: 15px; }
+.dash-record b { font-variant-numeric: tabular-nums; font-size: 14.5px; color: var(--text); }
+.dash-record small { color: var(--muted); font-size: 10.8px; }
+@media (prefers-reduced-motion: reduce) {
+  #view-dashboard > .dragging { transition: none; }
+}
+
+/* ============================================ 13.1: дизайн-система (З2)
+   3 · tabular-nums везде, где цифры; 5 · единый empty-state (паттерн уже
+   есть — добавляем глобальные правила); 20 · плавные переходы статусов;
+   22 · «приподнимание» карточек; 21 · акцентное кольцо активной карточки. */
+table.data td, table.data th, .kpi .value, .tx-row .amt,
+.dash-record b, .job-facts b, .prod-card .pfacts b, .shelf-card .sfacts b,
+.clientbot-thread small, .cb-log-row time, .who-row, .queue-card time {
+  font-variant-numeric: tabular-nums;
+}
+.chip, .state-badge, .tag, .tab-hits, .toast, .dot {
+  transition: background-color .25s var(--ease), color .25s var(--ease),
+    border-color .25s var(--ease), opacity .25s var(--ease);
+}
+.lift { transition: transform .18s var(--ease), box-shadow .18s var(--ease), border-color .18s var(--ease); }
+.lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--accent-line); }
+.accent-ring { outline: 2px solid var(--accent); outline-offset: 1px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 22%, transparent); }
+.prod-card.active { outline: 2px solid var(--accent); outline-offset: 1px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* Призрак при drag-n-drop (19): перетаскиваемая карточка канбана слегка
+   повёрнута и «парит», целевая колонка подсвечивается рамкой. */
+.ocard.dragging, .ocard.drag-ghost, .queue-item.dragging {
+  opacity: .55; transform: rotate(2.5deg) scale(1.02);
+  box-shadow: var(--shadow-3); z-index: 20;
+}
+.kan-col.over, .kanban-col.drop-hover {
+  outline: 2px dashed var(--accent); outline-offset: -6px; border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* 10/11/12: доступность — атрибуты на <html> ставятся из настроек. */
+html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+  animation-duration: .001s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001s !important;
+}
+html[data-contrast="on"] {
+  --line: #3c4257;
+  --text: #0b1020;
+  --muted: #3c4257;
+  --panel: #ffffff;
+  --panel-2: #f1f3f9;
+}
+html[data-theme="dark"][data-contrast="on"] {
+  --line: #7b84a0;
+  --text: #f4f6ff;
+  --muted: #b6bdd4;
+  --panel: #0c1020;
+  --panel-2: #131a30;
+}
+html[data-contrast="on"] .chip, html[data-contrast="on"] .state-badge,
+html[data-contrast="on"] .card, html[data-contrast="on"] .prod-card,
+html[data-contrast="on"] .shelf-card, html[data-contrast="on"] .spool,
+html[data-contrast="on"] .lib-card { border-width: 1.5px; }
+html[data-contrast="on"] .kpi, html[data-contrast="on"] table.data tr { border-color: var(--line); }
+
+/* Режим дальтоников: статусы дублируются штриховкой, а не только цветом. */
+html[data-colorblind="on"] .chip.warn,
+html[data-colorblind="on"] .state-badge.warn,
+html[data-colorblind="on"] .tag.warn {
+  background-image: repeating-linear-gradient(45deg, transparent 0 5px, color-mix(in srgb, currentColor 14%, transparent) 5px 10px);
+}
+html[data-colorblind="on"] .chip.bad,
+html[data-colorblind="on"] .state-badge.bad,
+html[data-colorblind="on"] .tag.warn.bad,
+html[data-colorblind="on"] .state-badge.error {
+  background-image: repeating-linear-gradient(-45deg, transparent 0 5px, color-mix(in srgb, currentColor 16%, transparent) 5px 10px);
+}
+html[data-colorblind="on"] .bar.warn i, html[data-colorblind="on"] .bar.bad i {
+  background-image: repeating-linear-gradient(45deg, transparent 0 6px, rgba(255,255,255,.35) 6px 9px);
+}
+html[data-colorblind="on"] .dot.bad, html[data-colorblind="on"] .dot.warn { box-shadow: inset 0 0 0 2px currentColor; }
+
+/* 44: ленивый рендер — браузер рисует только видимые части вкладки. */
+.view { content-visibility: auto; contain-intrinsic-size: 1px 600px; }
+.view.on { content-visibility: visible; }
+
+/* 53: генеративный фон шапки — CSS-«слои печати» без единой картинки. */
+.view-head {
+  position: relative; overflow: hidden;
+  background:
+    linear-gradient(180deg, transparent 0 62%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 62% 63%, transparent 63% 100%),
+    repeating-linear-gradient(180deg,
+      color-mix(in srgb, var(--accent) 3.5%, transparent) 0 1px,
+      transparent 1px 7px);
+}
+.view-head::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background: radial-gradient(ellipse 120% 90% at 85% -20%,
+    color-mix(in srgb, var(--accent) 9%, transparent), transparent 55%);
+}
+.view-head > * { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .lift, .prod-card, .shelf-card, .spool, .lib-card { transition: none; }
+}
+
+/* ==================================================== 13.1 (43): сплэш
+   Логотип «печатается» слоями: каждый слой выезжает слева, как печать
+   от первого слоя к последнему; финальная точка — «капля» филамента. */
+.splash .splash-svg { display: block; }
+.splash .splash-layer {
+  transform-box: fill-box; transform-origin: left center;
+  animation: splash-layer .42s var(--ease) backwards;
+  animation-delay: calc(var(--l) * .16s + .1s);
+}
+.splash .splash-dot { transform-origin: center; }
+@keyframes splash-layer {
+  from { transform: scaleX(0); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+.splash .splash-mark { position: relative; }
+.splash .splash-mark > i {
+  position: absolute; inset: -14px; border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent), transparent 65%);
+  animation: splash-glow 1.8s var(--ease) infinite;
+  pointer-events: none;
+}
+@keyframes splash-glow {
+  0%, 100% { opacity: .5; transform: scale(.96); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash .splash-layer { animation: none; }
+  .splash .splash-mark > i { animation: none; }
+}
+
+/* ==================================================== 13.1: очередь
+   Мини-таймлайн задания (З1-5) и плашка дефицита пластика (З1-6). */
+.q-timeline { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; vertical-align: middle; }
+.q-timeline i {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--line-strong);
+  display: inline-block;
+}
+.q-timeline i[data-step="старт"] { background: var(--accent); }
+.q-timeline i[data-step="финиш"] { background: var(--ok); }
+.q-timeline em { width: 8px; height: 1px; background: var(--line-strong); }
+.q-deficit { margin-top: 6px; padding: 6px 10px; font-size: 12px; }
+
+/* 13.1 (63): карточка «Следующий шаг» в библиотеке — маршрут ведёт дальше. */
+.library-next {
+  display: flex; align-items: center; gap: 13px; width: 100%;
+  margin: 2px 0 18px; padding: 14px 16px;
+  border-radius: var(--r-lg);
+  border: 1px dashed var(--accent-line); background: linear-gradient(135deg, var(--accent-soft), transparent 62%);
+  box-shadow: var(--shadow-1);
+}
+.library-next[hidden] { display: none; }
+.library-next-ic {
+  flex: none; width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 19px;
+  background: var(--accent); color: #fff; box-shadow: var(--shadow-2);
+  animation: libNextPulse 2.2s var(--ease) infinite;
+}
+@keyframes libNextPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-line); }
+  50% { box-shadow: 0 0 0 7px transparent; }
+}
+.library-next-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.library-next-copy .card-kicker { font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+.library-next-copy b { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+.library-next-copy small { font-size: 12.2px; color: var(--muted); line-height: 1.45; }
+.library-next .btn { flex: none; }
+@media (max-width: 560px) {
+  .library-next { flex-wrap: wrap; }
+  .library-next .btn { width: 100%; }
 }

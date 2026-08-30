@@ -222,7 +222,9 @@ class Stock:
         """Статистика продаж для всех позиций одним запросом.
 
         Результат совпадает с sales_stats(nom_id) по каждой позиции, но
-        вместо трёх запросов на товар в списке товаров выполняется один."""
+        вместо трёх запросов на товар в списке товаров выполняется один.
+        Дополнительно считается посуточная динамика за 7 дней (sold_days)
+        для мини-спарклайна в плитке товара (13.1, идея 16)."""
         since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()
         since30 = (datetime.now() - timedelta(days=30)).isoformat()
         rows = self.db.query(
@@ -233,18 +235,34 @@ class Stock:
             " FROM stock_moves WHERE doc_kind='sale' AND qty<0"
             " GROUP BY nom_id", (since7, since30))
         out: dict[str, dict[str, Any]] = {}
+        # Посуточные продажи одним запросом: {nom_id: {date: qty}}
+        day_rows = self.db.query(
+            "SELECT nom_id, substr(at, 1, 10) d, COALESCE(SUM(-qty),0) v"
+            " FROM stock_moves WHERE doc_kind='sale' AND qty<0 AND at>=?"
+            " GROUP BY nom_id, d", (since7,))
+        per_day: dict[str, dict[str, float]] = {}
+        for r in day_rows:
+            per_day.setdefault(r["nom_id"], {})[r["d"]] = num(r["v"])
         for row in rows:
             sold7 = num(row["s7"])
+            days = []
+            for i in range(SALE_DAYS - 1, -1, -1):
+                key = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+                days.append(round((per_day.get(row["nom_id"]) or {}).get(key, 0.0), 1))
             out[row["nom_id"]] = {
                 "sold_7": round(sold7, 1),
                 "sold_30": round(num(row["s30"]), 1),
                 "rate_per_day": round(sold7 / SALE_DAYS, 2) if sold7 else 0.0,
                 "last_sale": row.get("last_sale") or "",
+                "sold_days": days,
             }
         return out
 
     def sales_stats(self, nom_id: str) -> dict[str, Any]:
-        """Продажи за 7 и 30 дней, скорость, дата последней продажи."""
+        """Продажи за 7 и 30 дней, скорость, дата последней продажи.
+
+        Формат совпадает с sales_stats_all (включая sold_days — посуточную
+        динамику за 7 дней для спарклайна, 13.1 идея 16)."""
         since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()
         since30 = (datetime.now() - timedelta(days=30)).isoformat()
         sold7 = self._sold(nom_id, since7)
@@ -253,8 +271,18 @@ class Stock:
             "SELECT MAX(at) a FROM stock_moves WHERE nom_id=? AND doc_kind='sale'",
             (nom_id,)) or {}
         rate = sold7 / SALE_DAYS if sold7 else 0.0
+        day_rows = self.db.query(
+            "SELECT substr(at, 1, 10) d, COALESCE(SUM(-qty),0) v"
+            " FROM stock_moves WHERE nom_id=? AND doc_kind='sale' AND qty<0 AND at>=?"
+            " GROUP BY d", (nom_id, since7))
+        per_day = {r["d"]: num(r["v"]) for r in day_rows}
+        days = []
+        for i in range(SALE_DAYS - 1, -1, -1):
+            key = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            days.append(round(per_day.get(key, 0.0), 1))
         return {"sold_7": round(sold7, 1), "sold_30": round(sold30, 1),
-                "rate_per_day": round(rate, 2), "last_sale": last.get("a") or ""}
+                "rate_per_day": round(rate, 2), "last_sale": last.get("a") or "",
+                "sold_days": days}
 
     def _sold(self, nom_id: str, since: str) -> float:
         row = self.db.one(

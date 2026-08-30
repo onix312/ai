@@ -159,7 +159,46 @@ function renderDashboard() {
   renderAmsPanel();
   renderFilamentForecast();
   renderTimeline();
+  renderRecords();
   applyWidgets();
+  applyDashOrder();
+}
+
+/* ============================================ 13.1 (41): рекорды цеха
+   «Самая долгая печать 14 ч 22 м», «лучший день 12 400 ₽» — гордость
+   цифрами, без отдельного отчёта. Считается из уже загруженных данных. */
+function renderRecords() {
+  const host = $('dash_records');
+  if (!host) return;
+  const history = (PF.state.jobs && PF.state.jobs.history) || [];
+  const series = (PF.state.finance && PF.state.finance.series) || [];
+  const records = [];
+  const finished = history.filter((j) => j.state === 'done' || j.state === 'complete');
+  const longest = finished.reduce((best, j) => {
+    const min = Math.max(num(j.minutes), num(j.est_minutes));
+    return min > best.min ? { min, j } : best;
+  }, { min: 0, j: null });
+  if (longest.j) {
+    records.push({ icon: '⏱', label: 'Самая долгая печать', value: minutesText(longest.min),
+      sub: longest.j.name || longest.j.file || 'задание' });
+  }
+  const bestDay = series.reduce((best, row) => (num(row.income) > best.income ? { income: num(row.income), row } : best), { income: 0, row: null });
+  if (bestDay.row) {
+    records.push({ icon: '🏆', label: 'Лучший день по доходам', value: money(bestDay.income),
+      sub: dateText(bestDay.row.day) });
+  }
+  const heavy = finished.reduce((best, j) => {
+    const g = num(j.grams) || num(j.est_grams);
+    return g > best.g ? { g, j } : best;
+  }, { g: 0, j: null });
+  if (heavy.j && heavy.g > 0) {
+    records.push({ icon: '◍', label: 'Самая тяжёлая деталь', value: nfmt(heavy.g) + ' г',
+      sub: heavy.j.name || heavy.j.file || 'задание' });
+  }
+  if (!records.length) { host.hidden = true; host.innerHTML = ''; return; }
+  host.hidden = false;
+  host.innerHTML = records.map((r) => `<span class="dash-record" title="${esc(r.sub)}">`
+    + `<i>${r.icon}</i><b>${esc(r.value)}</b><small>${esc(r.label)}</small></span>`).join('');
 }
 
 function renderOperatorFocus() {
@@ -311,6 +350,84 @@ function saveWidgetPrefs(list) { store.set(WIDGET_KEY, JSON.stringify(list)); }
 function applyWidgets() {
   const prefs = widgetPrefs();
   $$('[data-widget]').forEach((el) => el.classList.toggle('hidden', !prefs.includes(el.dataset.widget)));
+}
+
+/* ============================================ 13.1 (66): перетаскивание
+   виджетов дашборда. Каждый строит свой утренний экран: за ручку «⠿»
+   карточка перетаскивается выше/ниже, порядок сохраняется в localStorage. */
+const DASH_ORDER_KEY = 'pf_dash_order';
+function dashRowId(row) {
+  if (row.dataset.widget) return row.dataset.widget;
+  const first = row.querySelector('[data-widget]');
+  return first ? first.dataset.widget : '';
+}
+function dashOrder() {
+  try {
+    const v = JSON.parse(store.get(DASH_ORDER_KEY, 'null'));
+    if (Array.isArray(v) && v.length) return v;
+  } catch (e) { /* повреждено — начнём с текущего */ }
+  return [];
+}
+function applyDashOrder() {
+  const saved = dashOrder();
+  if (!saved.length) return;
+  const view = $('view-dashboard');
+  if (!view) return;
+  const rows = $$(':scope > *', view).filter((el) => !el.classList.contains('view-head') && dashRowId(el));
+  const current = rows.map(dashRowId);
+  const wanted = saved.filter((id) => current.includes(id)).concat(current.filter((id) => !saved.includes(id)));
+  if (current.join() === wanted.join()) return;
+  const byId = new Map(rows.map((r) => [dashRowId(r), r]));
+  wanted.forEach((id) => { const row = byId.get(id); if (row) view.appendChild(row); });
+}
+function initDashDrag() {
+  const view = $('view-dashboard');
+  if (!view || view.dataset.drag) return;
+  view.dataset.drag = '1';
+  let dragRow = null;
+  const rows = $$(':scope > *', view).filter((el) => !el.classList.contains('view-head'));
+  rows.forEach((row) => {
+    const grip = document.createElement('button');
+    grip.type = 'button';
+    grip.className = 'dash-grip';
+    grip.title = 'Перетащите, чтобы изменить порядок на утреннем экране';
+    grip.setAttribute('aria-label', 'Изменить порядок виджета');
+    grip.innerHTML = '<span aria-hidden="true">⠿</span>';
+    row.appendChild(grip);
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      if (!e.target.closest('.dash-grip')) { e.preventDefault(); return; }
+      dragRow = row;
+      row.classList.add('dragging');
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dashRowId(row)); }
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!dragRow || dragRow === row) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-target'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drop-target');
+      if (!dragRow || dragRow === row) return;
+      const all = $$(':scope > *', view).filter((el) => !el.classList.contains('view-head'));
+      const from = all.indexOf(dragRow);
+      const to = all.indexOf(row);
+      view.insertBefore(dragRow, to < from ? row : row.nextSibling);
+      const order = $$(':scope > *', view).filter((el) => !el.classList.contains('view-head'))
+        .map(dashRowId).filter(Boolean);
+      store.set(DASH_ORDER_KEY, JSON.stringify(order));
+      dragRow.classList.remove('dragging');
+      dragRow = null;
+      toast('Порядок сохранён', 'Утренний экран теперь такой');
+    });
+    row.addEventListener('dragend', () => {
+      dragRow = null;
+      rows.forEach((r) => r.classList.remove('dragging', 'drop-target'));
+    });
+  });
 }
 function renderWidgetsList() {
   const prefs = widgetPrefs();
@@ -1697,7 +1814,79 @@ function updateLibProgress() {
   const done = all.filter((c) => c.checked).length;
   $('lib_progress').textContent = `${done} / ${all.length}`;
   $('lib_bar').style.width = (all.length ? done / all.length * 100 : 0) + '%';
+  renderLibNext();
 }
+
+/* 13.1 (63): «Следующий шаг» — маршрут ведёт, а не просто показывает %.
+   Находим первый неотмеченный пункт любого чек-листа и показываем карточку
+   с кнопкой «Открыть гайд» (или «всё отмечено»). */
+const LIB_SCROLL_PREFIX = 'printflow:library:scroll:';
+const LIB_READ_KEY = 'printflow:library:read';
+function libReadSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(LIB_READ_KEY) || '[]')); } catch (e) { return new Set(); }
+}
+function libReadSave(set) {
+  try { localStorage.setItem(LIB_READ_KEY, JSON.stringify([...set])); } catch (e) { /* ок */ }
+}
+function renderLibNext() {
+  const block = $('lib_next');
+  if (!block) return;
+  const all = $$('#library-body input[type=checkbox]');
+  const firstOpen = all.find((c) => !c.checked);
+  const titleEl = $('lib_next_title');
+  const subEl = $('lib_next_sub');
+  const btn = $('lib_next_btn');
+  if (!firstOpen) {
+    titleEl.textContent = 'Все чек-листы отмечены!';
+    subEl.textContent = `Готово: ${all.filter((c) => c.checked).length} из ${all.length} пунктов.`;
+    btn.textContent = 'К началу';
+    btn.onclick = () => showArticle('');
+    block.hidden = false;
+    return;
+  }
+  const article = firstOpen.closest('.library-article');
+  const name = article && article.dataset.article;
+  const title = libraryArticleTitle(article) || 'Гайд';
+  const heading = firstOpen.closest('h2, h3, .sechead');
+  titleEl.textContent = title;
+  subEl.textContent = heading ? `Отметьте: «${heading.textContent.replace(/\s+/g, ' ').trim().slice(0, 60)}»` : `Осталось ${all.length - all.filter((c) => c.checked).length} пунктов — продолжите «${title}»`;
+  btn.textContent = 'Открыть гайд';
+  btn.onclick = () => { if (name) showArticle(name); };
+  block.hidden = false;
+}
+
+/* 13.1 (64): подсветка совпадений поиска в карточках библиотеки.
+   Пересобираем только <b>/<small> — иконка и бейдж «прочитано» остаются. */
+function highlightLibCard(card, query) {
+  const b = card.querySelector('b');
+  const small = card.querySelector('small');
+  const mark = (text) => {
+    if (!query) return esc(text);
+    const idx = text.toLowerCase().indexOf(query);
+    if (idx === -1) return esc(text);
+    return esc(text.slice(0, idx)) + `<mark>${esc(text.slice(idx, idx + query.length))}</mark>` + esc(text.slice(idx + query.length));
+  };
+  if (b) b.innerHTML = mark(b.textContent);
+  if (small) small.innerHTML = mark(small.textContent);
+}
+
+/* 13.1 (65): бейдж «прочитано» на карточках главной. */
+function refreshLibReadBadges() {
+  const read = libReadSet();
+  $$('#lib_grid .lib-card').forEach((card) => {
+    let badge = card.querySelector('.lib-read-badge');
+    const name = card.dataset.article || '';
+    const isRead = read.has(name);
+    if (isRead && !badge) {
+      badge = document.createElement('span');
+      badge.className = 'lib-read-badge';
+      badge.textContent = '✓ прочитано';
+      card.appendChild(badge);
+    }
+    if (badge) badge.hidden = !isRead;
+  });
+}
+
 function initCopyButtons() {
   $$('#library-body pre').forEach((pre) => {
     if (pre.querySelector('.copy')) return;
@@ -1935,6 +2124,9 @@ const LIBRARY_CATEGORY_LABELS = {
 };
 const LIBRARY_RECENT_KEY = 'printflow:library:last-article';
 let libraryFilter = 'all';
+/* 13.1 (65): один глобальный обработчик прокрутки — вешаем и снимаем,
+   чтобы повторные открытия статей не копили слушателей. */
+let libraryScrollHandler = null;
 
 function libraryArticleById(name) {
   return $$('#library-body .library-article').find((article) => article.dataset.article === name) || null;
@@ -1984,7 +2176,8 @@ function filterLibrary() {
   const count = $('lib_count');
   const empty = $('lib_empty');
   const cards = $$('#lib_grid .lib-card');
-  const query = String((input || {}).value || '').trim().toLowerCase();
+  const rawQuery = String((input || {}).value || '').trim();
+  const query = rawQuery.toLowerCase();
   let visible = 0;
   cards.forEach((card) => {
     const category = card.dataset.libraryCategory || 'tools';
@@ -1992,11 +2185,14 @@ function filterLibrary() {
     const on = (libraryFilter === 'all' || category === libraryFilter) && (!query || text.includes(query));
     card.hidden = !on;
     if (on) visible += 1;
+    // 13.1 (64): совпадения в <mark>, а не просто «нашлось/не нашлось»
+    if (on && query) highlightLibCard(card, rawQuery);
   });
   if (count) count.textContent = query || libraryFilter !== 'all'
     ? `Найдено ${visible} из ${cards.length}`
     : `Все материалы · ${cards.length}`;
   if (empty) empty.hidden = visible > 0;
+  if (!query) refreshLibReadBadges();
 }
 
 function initLibraryDiscovery() {
@@ -2030,6 +2226,13 @@ function showArticle(name) {
     article.classList.toggle('on', on);
     if (on) activeArticle = article;
   });
+  // 13.1 (65): «прочитано» и возврат к месту остановки
+  if (activeArticle && name) {
+    const read = libReadSet();
+    if (!read.has(name)) { read.add(name); libReadSave(read); }
+    const saved = Number(store.get(LIB_SCROLL_PREFIX + name, '0')) || 0;
+    if (saved > 4) requestAnimationFrame(() => window.scrollTo(0, saved));
+  }
   const shown = Boolean(activeArticle);
   $('lib_grid').hidden = shown;
   const discovery = $('lib_discovery');
@@ -2041,8 +2244,26 @@ function showArticle(name) {
   if (tpl) tpl.hidden = name !== 'tpl';
   if (name === 'tpl') loadTemplates();
   renderArticleNavigation(activeArticle);
-  if (shown) rememberLibraryArticle(name, activeArticle);
-  else {
+  // 13.1 (З2-6): хлебная крошка «Библиотека → гайд» в шапке раздела
+  const libView = $('view-library');
+  const eyebrow = libView && libView.querySelector('.view-head .eyebrow');
+  if (eyebrow) {
+    const title = activeArticle ? libraryArticleTitle(activeArticle) : '';
+    eyebrow.textContent = title ? `Библиотека → ${title}` : 'База знаний · маршрут вместо папки файлов';
+  }
+  if (shown) {
+    rememberLibraryArticle(name, activeArticle);
+    // 13.1 (65): память прокрутки — сохраняем место, где остановились
+    if (libraryScrollHandler) window.removeEventListener('scroll', libraryScrollHandler);
+    libraryScrollHandler = U.debounce(() => {
+      if (name) store.set(LIB_SCROLL_PREFIX + name, String(window.scrollY || 0));
+    }, 300);
+    window.addEventListener('scroll', libraryScrollHandler, { passive: true });
+  } else {
+    if (libraryScrollHandler) {
+      window.removeEventListener('scroll', libraryScrollHandler);
+      libraryScrollHandler = null;
+    }
     renderLibraryHome();
     filterLibrary();
   }
@@ -2368,6 +2589,7 @@ PF.on('ready', () => {
   renderSettings();
   initLibraryChecks();
   initCopyButtons();
+  initDashDrag();
   initTemplatesEditor();
   loadEnvelopes();
   refreshTimeline();

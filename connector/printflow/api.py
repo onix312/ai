@@ -2166,6 +2166,34 @@ class Api:
             )}
         if path == "/api/jobs/cancel":
             return 200, {"ok": True, "job": self.manager.cancel_job(body.get("id", ""))}
+        if path == "/api/jobs/reorder":
+            # 13.1 (4): перестановка очереди с панели — та же механика,
+            # что «выше/ниже» в Telegram-боте: обмен приоритетами с соседом.
+            direction = str(body.get("direction") or "up")
+            if direction not in ("up", "down"):
+                raise ValueError("direction: up или down")
+            job_id = str(body.get("id") or "")
+            jobs = self.db.query(
+                "SELECT id, priority FROM print_jobs WHERE state='queued'"
+                " ORDER BY priority DESC, datetime(created_at)")
+            if len(jobs) < 2:
+                raise ValueError("В очереди меньше двух заданий")
+            index = next((i for i, j in enumerate(jobs) if j["id"] == job_id), None)
+            if index is None:
+                raise ValueError("Задание не стоит в очереди")
+            neighbor_index = index - 1 if direction == "up" else index + 1
+            if neighbor_index < 0:
+                raise ValueError("Задание уже первое в очереди")
+            if neighbor_index >= len(jobs):
+                raise ValueError("Задание уже последнее в очереди")
+            target, neighbor = jobs[index], jobs[neighbor_index]
+            step = 1 if direction == "up" else -1
+            self.db.execute("UPDATE print_jobs SET priority=? WHERE id=?",
+                            (int(num(neighbor.get("priority"))) + step, target["id"]))
+            self.db.add_event("queue", "Очередь: задание передвинуто",
+                              f"{target.get('name') or ''} {direction}", "",
+                              {"job_id": target["id"], "direction": direction})
+            return 200, {"ok": True, "direction": direction}
         if path == "/api/jobs/save":
             body.setdefault("id", uid("job"))
             body.setdefault("created_at", now_iso())

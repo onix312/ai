@@ -81,7 +81,8 @@ class Nomenclature:
         bal = balances.get(nom_id) or {"qty": 0.0, "value": 0.0, "cost": 0.0}
         qty = num(bal["qty"])
         stats = ((stats_map or {}).get(nom_id)
-                 or {"sold_7": 0.0, "sold_30": 0.0, "rate_per_day": 0.0, "last_sale": ""})
+                 or {"sold_7": 0.0, "sold_30": 0.0, "rate_per_day": 0.0, "last_sale": "",
+                     "sold_days": []})
         status, days_left, plan = self.stock.status_of(
             qty, num(row.get("min_qty")), stats, num(row.get("max_qty")))
         reserved = (num((reserved_map or {}).get(nom_id))
@@ -118,6 +119,7 @@ class Nomenclature:
             "sold_30": stats["sold_30"],
             "rate_per_day": stats["rate_per_day"],
             "last_sale": stats["last_sale"],
+            "sold_days": stats.get("sold_days") or [],
             "days_left": days_left,
             "status": status,
             "plan_qty": plan,

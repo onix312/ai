@@ -7,7 +7,6 @@
 
 const { $, esc, num, nfmt, money, toast, fail, store, todayISO } = PF.ui;
 const { get } = PF.api;
-
 const PERIODS = [7, 30, 90];
 let contentDays = Number(store.get('pf.content.days', '7'));
 if (!PERIODS.includes(contentDays)) contentDays = 7;
@@ -161,6 +160,9 @@ function renderWeek(data) {
   setGeneratedEditor('mk_week', data.text || 'Пока нет фактов для истории цеха.');
   setText('mk_week_sub', `${nfmt(numbers.jobs_done)} заданий · ${money(numbers.income)} · ${ruPeriod(data.period_days || contentDays)}`);
   setText('mk_week_meta', `Факты за ${ruPeriod(data.period_days || contentDays)} · отредактируйте тон перед публикацией`);
+  // 13.1 (61): превью в Telegram обновляется вместе с генератором
+  renderTgPreview(textValue('mk_week'));
+  renderBoard();
 }
 
 function renderSocial(data) {
@@ -485,10 +487,160 @@ function allLabelsSheet() {
 }
 
 /* ============================================================= bind */
+/* ================================ 13.1 (60–62): доска контента недели
+   План пн–вс с перетаскиванием карточек (как канбан заказов), кнопкой
+   «положить сюда текущий текст» (подстановка фактов цеха) и счётчиком
+   «N из 7 постов готово» в шапке. Хранится в localStorage этого браузера —
+   это план, а не учёт. */
+const WEEK_DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const BOARD_KEY = 'pf.content.board';
+
+function boardState() {
+  try { return JSON.parse(localStorage.getItem(BOARD_KEY) || '{}'); } catch (e) { return {}; }
+}
+function saveBoardState(state) {
+  try { localStorage.setItem(BOARD_KEY, JSON.stringify(state)); } catch (e) { /* ок */ }
+}
+function boardReadyCount() {
+  const state = boardState();
+  return WEEK_DAYS.filter((_, i) => state[i]).length;
+}
+function renderBoard() {
+  const host = $('mk_board');
+  if (!host) return;
+  const state = boardState();
+  host.innerHTML = WEEK_DAYS.map((day, i) => {
+    const card = state[i];
+    return `<div class="mk-board-col" data-day="${i}">`
+      + `<div class="mk-board-day">${day}${card ? `<small>${esc(card.time || '')}</small>` : ''}</div>`
+      + (card
+        ? `<div class="mk-board-card" draggable="true" data-day="${i}" data-board-card="${i}" title="Перетащите в другой день · клик — превью в Telegram">`
+          + `<span class="mk-board-text">${esc((card.title || card.text || '').slice(0, 130))}</span>`
+          + `<button class="icon-btn sm" type="button" data-board-del="${i}" title="Убрать с доски">×</button></div>`
+        : `<button class="mk-board-add" type="button" data-board-add="${i}" title="Положить сюда текущий текст (факты цеха)">+</button>`)
+      + '</div>';
+  }).join('');
+  const counter = $('mk_board_count');
+  if (counter) {
+    const n = boardReadyCount();
+    counter.textContent = `${n} из ${WEEK_DAYS.length} дней`;
+    counter.className = 'chip outline' + (n === WEEK_DAYS.length ? ' ok' : '');
+  }
+}
+function bindContentBoard() {
+  const host = $('mk_board');
+  if (!host) return;
+  host.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-board-del]');
+    if (del) {
+      e.stopPropagation();
+      const state = boardState();
+      delete state[del.dataset.boardDel];
+      saveBoardState(state);
+      renderBoard();
+      toast('Убрали с доски', WEEK_DAYS[Number(del.dataset.boardDel)]);
+      return;
+    }
+    const add = e.target.closest('[data-board-add]');
+    if (add) {
+      const source = (textValue('mk_week') || '').trim() || (textValue('mk_social') || '').trim();
+      if (!source) {
+        toast('Сначала соберите пост', 'Нажмите «↻ Обновить» — текст появится в «Истории цеха»', 'warn');
+        return;
+      }
+      const state = boardState();
+      const title = source.split('\n')[0].slice(0, 60) || 'Пост';
+      state[add.dataset.boardAdd] = { text: source, title, time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) };
+      saveBoardState(state);
+      renderBoard();
+      toast('Пост на доске', `${WEEK_DAYS[Number(add.dataset.boardAdd)]} · можно перетащить в другой день`);
+      return;
+    }
+    const card = e.target.closest('[data-board-card]');
+    if (card) {
+      const state = boardState();
+      const item = state[card.dataset.boardCard];
+      if (item) renderTgPreview(item.text || '', `${WEEK_DAYS[Number(card.dataset.boardCard)]} · ${item.title || ''}`);
+    }
+  });
+  // Перетаскивание между днями — тот же жест, что в канбане заказов.
+  let dragFrom = null;
+  host.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('[data-board-card]');
+    if (!card) return;
+    dragFrom = card.dataset.boardCard;
+    card.classList.add('dragging');
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  });
+  host.addEventListener('dragend', (e) => {
+    const card = e.target.closest('[data-board-card]');
+    if (card) card.classList.remove('dragging');
+    dragFrom = null;
+  });
+  host.addEventListener('dragover', (e) => {
+    const col = e.target.closest('.mk-board-col');
+    if (!col) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  });
+  host.addEventListener('drop', (e) => {
+    const col = e.target.closest('.mk-board-col');
+    if (!col || dragFrom == null) return;
+    e.preventDefault();
+    const to = col.dataset.day;
+    if (String(to) === String(dragFrom)) return;
+    const state = boardState();
+    const card = state[dragFrom];
+    if (!card) return;
+    delete state[dragFrom];
+    state[to] = card;
+    saveBoardState(state);
+    renderBoard();
+    toast('Перенесли пост', `${WEEK_DAYS[Number(dragFrom)]} → ${WEEK_DAYS[Number(to)]}`);
+  });
+  const reset = $('mk_board_reset');
+  if (reset) {
+    reset.addEventListener('click', () => {
+      if (!window.confirm('Очистить доску контента на эту неделю?')) return;
+      try { localStorage.removeItem(BOARD_KEY); } catch (err) { /* ок */ }
+      renderBoard();
+      toast('Доска очищена');
+    });
+  }
+}
+/* 13.1 (61): превью поста — мини-макет сообщения в Telegram. */
+function renderTgPreview(text, title) {
+  const host = $('mk_tg_preview');
+  if (!host) return;
+  const value = String(text || '').trim();
+  const sub = $('mk_preview_sub');
+  if (sub) sub.textContent = title
+    ? `Превью: ${title}`
+    : 'Живой макет «Истории цеха» — как увидит канал.';
+  if (!value) {
+    host.innerHTML = '<div class="empty compact"><span>Текст «Истории цеха» появится здесь по мере набора.</span></div>';
+    return;
+  }
+  host.innerHTML = `<div class="tg-preview-card">`
+    + `<div class="tg-preview-head"><span class="tg-preview-av" aria-hidden="true">🖨</span>`
+    + `<span class="tg-preview-meta"><b>NOZZA · 3D-печать</b><small>${esc(title || 'Пост из фактов')} · только что</small></span></div>`
+    + `<div class="tg-preview-body">${esc(value).replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>')}</div>`
+    + `<div class="tg-preview-foot"><span>👁 0</span><span>💬 0</span><span>↗</span></div></div>`;
+}
+
 function bind() {
   document.querySelectorAll('.mk-editor').forEach((editor) => {
     if (!editor.readOnly) editor.addEventListener('input', () => { editor.dataset.dirty = '1'; });
   });
+
+  // 13.1 (60–62): доска контента, превью в Telegram, счётчик недели
+  bindContentBoard();
+  const mkWeek = $('mk_week');
+  if (mkWeek) {
+    mkWeek.addEventListener('input', debounce(() => {
+      renderTgPreview(mkWeek.value || '');
+    }, 180));
+  }
 
   $('mk_tabs').addEventListener('click', (event) => {
     const button = event.target.closest('[data-mk-pane]');

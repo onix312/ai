@@ -2,7 +2,7 @@
    клиенты, ниши и настройка статусов. Все данные — с сервера. */
 (() => {
 'use strict';
-const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, minutesText, dateText, dateTimeText,
+const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, hoursText, minutesText, dateText, dateTimeText,
   todayISO, initials, debounce, toast, fail, openModal, closeModal, confirmDanger } = U;
 const { get, post, api } = PF.api;
 
@@ -11,12 +11,35 @@ let fulfillmentDraft = null;
 let aftercareItems = [], aftercareCurrent = null;
 let filters = { q: '', status: '', niche: '', chan: '' };
 let orderView = 'kanban';
+let orderDensity = false;
 let customerSegment = 'all';
 
 const PRIORITY = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
 
 const overdue = (o) => o.due && o.due < todayISO() && !PF.isFinal(o);
 const dueSoon = (o) => o.due && o.due === todayISO() && !PF.isFinal(o);
+
+/* 13.1 (29): «через 5 ч 20 мин» / «завтра» — живой отсчёт до дедлайна. */
+function liveDueText(due) {
+  const ms = new Date(due + 'T23:59:59').getTime() - Date.now();
+  if (ms <= 0) return 'сегодня';
+  const h = Math.floor(ms / 36e5);
+  if (h < 1) return `через ${Math.max(1, Math.round(ms / 6e4))} мин`;
+  if (h < 24) {
+    const m = Math.round((ms % 36e5) / 6e4);
+    return `через ${h} ч${m ? ' ' + m + ' мин' : ''}`;
+  }
+  return `через ${Math.round(h / 24)} дн`;
+}
+function tickLiveDues() {
+  if (!document.querySelector('#view-orders.on')) return;
+  $$('.due-live').forEach((el) => {
+    const until = el.dataset.until;
+    const txt = el.querySelector('.due-live-txt');
+    if (until && txt) txt.textContent = liveDueText(until.slice(0, 10));
+  });
+}
+setInterval(tickLiveDues, 60000);
 
 function filtered() {
   const q = filters.q.trim().toLowerCase();
@@ -38,8 +61,9 @@ const TG_SOURCES = { telegram: 'заявка из чата', catalog: 'из ви
 const isTgOrder = (o) => o.channel === 'telegram' || /^(telegram|catalog|custom|individual)$/.test(String(o.client_source || ''));
 function tgChipOf(o) {
   const src = TG_SOURCES[o.client_source];
-  return `<span class="channel-chip tg" title="Заказ из Telegram${src ? ' · ' + src : ''} — клиентский бот">`
-    + `<i data-icon="telegram">✈</i>Telegram${src ? ` · ${esc(src)}` : ''}</span>`;
+  // 13.1 (40): бейдж кликабелен — одним кликом в клиент-бот
+  return `<button type="button" class="channel-chip tg" data-tg-open="${esc(o.id)}" title="Заказ из Telegram${src ? ' · ' + src : ''} — открыть клиент-бот">`
+    + `<i data-icon="telegram">✈</i>Telegram${src ? ` · ${esc(src)}` : ''}</button>`;
 }
 /* Цвет аватара — детерминированный от имени: один клиент всегда одним тоном. */
 function avColor(name) {
@@ -85,15 +109,20 @@ function orderCard(o) {
   const channelChip = isTgOrder(o) ? tgChipOf(o)
     : (channelName ? `<span class="channel-chip">${esc(channelName)}</span>` : '');
 
-  // Срок сдачи
+  // Срок сдачи + 13.1 (29): живой отсчёт «до дедлайна» на ближайших заказах
   let dueBadge = '';
   if (o.due) {
     if (overdue(o)) {
       dueBadge = `<span class="due-badge bad" title="Срок сдачи просрочен"><i data-icon="timer">⚠</i>${esc(dateText(o.due))}</span>`;
     } else {
       const today = new Date().toISOString().slice(0, 10);
+      const dueMs = new Date(o.due + 'T23:59:59').getTime();
+      const hoursLeft = (dueMs - Date.now()) / 36e5;
       if (o.due === today) {
         dueBadge = '<span class="due-badge warn" title="Срок сегодня"><i data-icon="timer">⏳</i>Сегодня</span>';
+      } else if (hoursLeft <= 72) {
+        dueBadge = `<span class="due-badge warn due-live" data-until="${esc(o.due)}T23:59:59" title="До срока сдачи">`
+          + `<i data-icon="timer">⏳</i><span class="due-live-txt">${liveDueText(o.due)}</span></span>`;
       } else {
         dueBadge = `<span class="due-badge" title="Срок сдачи"><i data-icon="timer">📅</i>${esc(dateText(o.due))}</span>`;
       }
@@ -150,9 +179,18 @@ function orderCard(o) {
     qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
   }
 
-  // ЗА1: аватар клиента с инициалами вместо безликой «👤 Имя»
-  const who = o.customer_name || 'Без клиента';
-  const av = `<span class="who-av" style="--av:${avColor(o.customer_name)}" title="${esc(who)}">${esc(initials(who))}</span>`;
+  // ЗА1 + 13.1 (39): инициалы, а у безымянных — детерминированный эмодзи-аватар
+  const who = o.customer_name || '';
+  const avGlyph = who ? esc(initials(who)) : esc(U.avatarEmoji('', o.id) || '👤');
+  const av = `<span class="who-av" style="--av:${avColor(o.customer_name)}" title="${esc(who || 'Без клиента')}">${avGlyph}</span>`;
+
+  // 13.1 (32): прогресс печати прямо на карточке — «а оно уже печатается?»
+  const job = (PF.state.jobs.queue || []).find((j) => j.state === 'running' && j.order && j.order.id === o.id);
+  const printProg = job
+    ? `<div class="ocard-print" title="Задание связано: ${esc(job.name || job.file || 'печать')}">`
+      + `<div class="bar thin"><i style="width:${clamp(num(job.progress), 0, 100)}%"></i></div>`
+      + `<small><i data-icon="printer">◉</i> Печатается · ${Math.round(clamp(num(job.progress), 0, 100))}%</small></div>`
+    : '';
 
   return `<article class="${cls.join(' ')}" draggable="true" data-order="${esc(o.id)}">`
     + `<div class="strip" style="background:${esc(st.color)}"></div>`
@@ -164,8 +202,9 @@ function orderCard(o) {
     + `</div>`
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
     + fileChip
+    + printProg
     + `<div class="who-row">`
-    + `<span class="who">${av}${esc(who)}</span>`
+    + `<span class="who">${av}${who ? esc(who) : '<span class="muted">Без клиента</span>'}</span>`
     + (o.phone ? `<span class="phone-chip" title="Телефон"><i data-icon="phone">📞</i>${esc(o.phone)}</span>` : '')
     + `</div>`
     + (specs.length ? `<div class="ocard-specs">${specs.join('')}</div>` : '')
@@ -269,6 +308,9 @@ function renderOrders() {
   }
 
   $('orders_kanban').hidden = orderView !== 'kanban';
+  $('orders_kanban').classList.toggle('compact', orderDensity);
+  const odens = $('orders_density');
+  if (odens) odens.classList.toggle('on', orderDensity);
   $('orders_table').hidden = orderView !== 'table';
   if (orderView === 'kanban') renderKanban(list); else {
     renderTable(list);
@@ -2430,6 +2472,41 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('orders_search').addEventListener('input', debounce((e) => { filters.q = e.target.value; renderOrders(); }, 180));
+  // 13.1 (33): компактные карточки канбана
+  const odens = $('orders_density');
+  if (odens) odens.addEventListener('click', () => {
+    orderDensity = !orderDensity;
+    const kanban = $('orders_kanban');
+    if (kanban) kanban.classList.toggle('compact', orderDensity);
+    odens.classList.toggle('on', orderDensity);
+    toast(orderDensity ? 'Компактный канбан' : 'Обычный канбан');
+  });
+  // 13.1 (18): ховер-превью заказа в таблице — мини-карточка у курсора
+  const hoverCard = document.createElement('div');
+  hoverCard.className = 'hover-card';
+  hoverCard.hidden = true;
+  document.body.appendChild(hoverCard);
+  const tbody = $('orders_tbody');
+  if (tbody) {
+    tbody.addEventListener('mouseover', (e) => {
+      const row = e.target.closest('tr[data-order]');
+      if (!row) { hoverCard.hidden = true; return; }
+      const order = PF.state.orders.find((x) => x.id === row.dataset.order);
+      if (!order) { hoverCard.hidden = true; return; }
+      const st = PF.status(order.status), econ = order.economics || {};
+      hoverCard.innerHTML = `<b>№${esc(order.number)} · ${esc(order.product || 'Без названия')}</b>`
+        + `<span class="chip" style="background:${esc(st.color)}22;color:${esc(st.color)}">${esc(st.name)}</span>`
+        + `<small>${esc(order.customer_name || 'Без клиента')}${order.phone ? ' · ' + esc(order.phone) : ''}</small>`
+        + `<small>${money(order.price)}${order.due ? ' · срок ' + esc(dateText(order.due)) : ''}${econ.profit != null ? ' · ' + money(econ.profit) : ''}</small>`;
+      const rect = row.getBoundingClientRect();
+      hoverCard.hidden = false;
+      hoverCard.style.left = Math.min(innerWidth - 260, rect.left + rect.width + 10) + 'px';
+      hoverCard.style.top = Math.max(8, rect.top - 4) + 'px';
+    });
+    tbody.addEventListener('mouseout', (e) => {
+      if (!e.target.closest('tr[data-order]')) hoverCard.hidden = true;
+    });
+  }
   $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; renderOrders(); });
   $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; renderOrders(); });
   $('orders_view').addEventListener('click', (e) => {
@@ -2505,6 +2582,14 @@ function bind() {
     }
     const ne = e.target.closest('[data-niche-edit]');
     if (ne) { openNiche(ne.dataset.nicheEdit); }
+    // 13.1 (40): клик по Telegram-бейджу — маршрут в клиент-бот
+    const tgOpen = e.target.closest('[data-tg-open]');
+    if (tgOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      PF.go('clientbot');
+      toast('Клиент-бот открыт', 'Найдите диалог по имени клиента');
+    }
   });
 
   const spoolAdd = $('of_spool_add');

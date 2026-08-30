@@ -11,10 +11,23 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/theme.css?v=11.1.0">
-<link rel="stylesheet" href="assets/app.css?v=9.1.2">
-<link rel="stylesheet" href="assets/more.css?v=12.2.0">
+<link rel="stylesheet" href="assets/tokens.css?v=13.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=13.1.0">
+<link rel="stylesheet" href="assets/app.css?v=13.1.0">
+<link rel="stylesheet" href="assets/more.css?v=13.1.0">
 </head><body>
+<a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
+<div class="top-load" id="top_load" hidden aria-hidden="true"></div>
+<div class="splash" id="splash" aria-hidden="true"><div class="splash-mark"><svg class="splash-svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA">
+   <defs><linearGradient id="splashGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4f46e5"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient></defs>
+   <rect class="splash-layer" x="2" y="2" width="68" height="68" rx="18" fill="url(#splashGrad)" style="--l:0"/>
+   <rect class="splash-layer" x="16" y="16" width="40" height="6" rx="3" fill="#fff" opacity=".95" style="--l:1"/>
+   <rect class="splash-layer" x="19" y="26" width="34" height="6" rx="3" fill="#fff" opacity=".85" style="--l:2"/>
+   <rect class="splash-layer" x="23" y="36" width="26" height="6" rx="3" fill="#fff" opacity=".72" style="--l:3"/>
+   <rect class="splash-layer" x="27" y="46" width="18" height="6" rx="3" fill="#fff" opacity=".58" style="--l:4"/>
+   <circle class="splash-layer splash-dot" cx="36" cy="61" r="4" fill="#fff" opacity=".95" style="--l:5"/>
+  </svg><i></i></div><b>NOZZA · PrintFlow</b><span>Печатаем панель…</span></div>
+<button class="up-btn" id="up_btn" type="button" aria-label="Наверх" hidden>↑</button>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="pfgrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="var(--accent)"></stop><stop offset="100%" stop-color="var(--accent-2)"></stop></linearGradient></defs></svg>
 
 <div id="shell">
@@ -72,6 +85,7 @@
   <div class="top-spacer"></div>
   <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
+  <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
   <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
   <button class="btn primary" id="quick_order" type="button"><span class="ic" data-icon="plus">+</span>Заказ</button>
  </header>
@@ -161,6 +175,7 @@
  <div class="grid2" style="margin-top:16px">
   <div class="card" data-widget="achievements">
    <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div><a href="#marketing" data-view="marketing">Контент →</a></div>
+   <div class="dash-records" id="dash_records" hidden></div>
    <div id="dash_achievements" class="muted">Загружаем…</div>
   </div>
   <div class="card" data-widget="heartbeat">
@@ -196,6 +211,7 @@
        <h2 id="pr_task">Нет активной печати</h2>
        <p class="sub" id="pr_order">Не связано с заказом</p>
        <div class="layer-step" title="Прогресс печати по слоям"><i id="pr_layers_fill"></i></div>
+       <span class="chip warn" id="pr_frozen" hidden style="margin-top:6px;font-size:11px"></span>
       </div>
       <div class="orbit"><svg viewBox="0 0 104 104"><circle class="track" cx="52" cy="52" r="45"></circle><circle class="fill" id="pr_ring" cx="52" cy="52" r="45" stroke-dasharray="283" stroke-dashoffset="283"></circle></svg><div class="cap"><b id="pr_progress">0%</b><span>готово</span></div></div>
      </div>
@@ -215,28 +231,29 @@
       <div class="card-head"><h3>Температуры</h3><span class="muted" style="font-size:11.6px">сейчас / цель</span></div>
       <div class="temp-row gauge" id="pr_row_nozzle"><span class="tic hot" id="pr_nozzle_ic"><i data-icon="thermo">▲</i></span><span class="name">Сопло</span><b><span id="pr_nozzle">—</span><span class="muted"> / <span id="pr_nozzle_t">—</span></span> °C</b><div class="gbar"><i id="pr_nozzle_bar"></i></div><svg class="tspark" id="pr_nozzle_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
       <div class="temp-row gauge" id="pr_row_bed"><span class="tic bed"><i data-icon="bed">▬</i></span><span class="name">Стол</span><b><span id="pr_bed">—</span><span class="muted"> / <span id="pr_bed_t">—</span></span> °C</b><div class="gbar"><i id="pr_bed_bar"></i></div><svg class="tspark" id="pr_bed_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
-      <div class="temp-row gauge" id="pr_row_chamber"><span class="tic cham"><i data-icon="drop">□</i></span><span class="name">Камера</span><b><span id="pr_chamber">—</span> °C</b><span class="chamber-hint muted" id="pr_chamber_hint"></span></div>
+      <div class="temp-row gauge" id="pr_row_chamber"><span class="tic cham"><i data-icon="drop">□</i></span><span class="name">Камера</span><b><span id="pr_chamber">—</span> °C</b><span class="chamber-hint muted" id="pr_chamber_hint"></span><svg class="tspark" id="pr_chamber_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
      </div>
      <div class="card">
       <div class="card-head"><h3>Вентиляторы</h3><span class="muted" style="font-size:11.6px">мощность</span></div>
-      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Обдув детали</span><b id="pr_fan_part">0%</b><div class="bar thin"><i id="pr_fan_part_bar"></i></div></div>
-      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div></div>
-      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Обдув детали</span><b id="pr_fan_part">0%</b><div class="bar thin"><i id="pr_fan_part_bar"></i></div><svg class="tspark" id="pr_fan_part_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Дополнительный</span><b id="pr_fan_aux">0%</b><div class="bar thin"><i id="pr_fan_aux_bar"></i></div><svg class="tspark" id="pr_fan_aux_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+      <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div><svg class="tspark" id="pr_fan_cham_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
      </div>
     </div>
-    <div class="card">
-     <div class="card-head"><div><h2>История показателей</h2><p id="pr_chart_sub">Температуры и обдув за последние часы</p></div>
-      <select id="pr_chart_range" class="mini-sel"><option value="60">1 час</option><option value="180" selected>3 часа</option><option value="720">12 часов</option><option value="1440">Сутки</option></select></div>
+    <details class="pulse-sec card">
+     <summary><div><h2>История показателей</h2><p id="pr_chart_sub">Температуры и обдув за последние часы</p></div>
+      <select id="pr_chart_range" class="mini-sel"><option value="60">1 час</option><option value="180" selected>3 часа</option><option value="720">12 часов</option><option value="1440">Сутки</option></select></summary>
      <div id="pr_chart" class="chart-box"><div class="empty compact"><span>Накапливаем историю — точки появятся через несколько минут.</span></div></div>
      <div id="pr_chart_legend" class="legend"></div>
-    </div>
-    <div class="card">
-     <div class="card-head"><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><button class="btn sm ghost" id="pr_schedule_btn" type="button">⏱ Отложить</button><span class="chip outline">только LAN</span></div>
+    </details>
+    <details class="pulse-sec card">
+     <summary><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><button class="btn sm ghost" id="pr_schedule_btn" type="button">⏱ Отложить</button><span class="chip outline">только LAN</span></summary>
      <div class="cmd-grid">
       <button class="cmd-btn" data-cmd="pause" type="button"><span class="ic" data-icon="pause">❙❙</span>Пауза</button>
       <button class="cmd-btn" data-cmd="resume" type="button"><span class="ic" data-icon="play">▶</span>Продолжить</button>
       <button class="cmd-btn" data-cmd="light" type="button"><span class="ic" data-icon="sun">☀</span>Свет</button>
       <button class="cmd-btn" data-cmd="refresh" type="button"><span class="ic" data-icon="refresh">⟳</span>Опросить</button>
+      <button class="cmd-btn" data-cmd="snapshot" type="button" title="Текущий кадр камеры — крупно"><span class="ic" data-icon="camera">◉</span>Кадр</button>
       <button class="cmd-btn" data-cmd="keyframes" type="button" id="pr_keyframes_btn" title="Видео печати: архив кадров задания"><span class="ic" data-icon="film">▦</span>Видео</button>
       <button class="cmd-btn" data-cmd="bed_ref" type="button" id="pr_bed_btn" title="Снять эталон пустого стола для проверки «деталь на столе»"><span class="ic" data-icon="bed">▭</span>Пустой стол</button>
       <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic" data-icon="stop">■</span>Стоп</button>
@@ -277,7 +294,7 @@
       </div>
       <p class="muted" style="font-size:12px">Калибровка занимает несколько минут и недоступна во время печати.</p>
      </div></details>
-    </div>
+    </details>
    </div>
 
    <div class="grid" style="gap:16px">
@@ -334,13 +351,22 @@
   <div><span class="eyebrow">Производство</span><h1>Очередь печати</h1><p>Общая очередь на весь парк: задания стартуют вручную или автоматически.</p></div>
   <div class="head-actions"><label class="check"><span class="switch"><input type="checkbox" id="queue_auto"><i></i></span>Автозапуск</label><button class="btn" id="queue_next" type="button">▶ Запустить следующее</button><button class="btn primary" id="queue_add" type="button">+ Задание</button></div>
  </div>
+ <div class="toolbar queue-toolbar">
+  <div class="search-box"><input id="queue_search" type="search" placeholder="Задание, файл, принтер, заказ…" autocomplete="off"></div>
+  <div class="seg" id="queue_search_mode" role="group" aria-label="Где искать">
+   <button type="button" data-qmode="jobs" class="on">Задания</button>
+   <button type="button" data-qmode="history">Журнал</button>
+  </div>
+  <span class="spacer"></span>
+  <button class="btn sm ghost" id="queue_group" type="button" title="Сгруппировать задания по принтерам">▦ По принтерам</button>
+ </div>
  <div class="grid g-2-1">
   <div class="card">
    <div class="card-head"><div><h2>В работе и в очереди</h2><p id="queue_sub">—</p></div><div class="seg" id="queue_filter"><button type="button" data-filter="all" class="on">Все</button><button type="button" data-filter="queued">Ожидают</button><button type="button" data-filter="active">В работе</button><button type="button" data-filter="unassigned">Без принтера</button></div></div>
    <div id="queue_list"></div>
   </div>
   <div class="card">
-   <div class="card-head"><div><h2>Журнал печати</h2><p>Завершённые задания и брак</p></div><input id="history_search" placeholder="Поиск по журналу…" style="width:200px;max-width:45%"></div>
+   <div class="card-head"><div><h2>Журнал печати</h2><p>Завершённые задания и брак</p></div><span class="chip outline" id="history_count" hidden></span></div>
    <div id="queue_history"></div>
   </div>
  </div>
@@ -363,6 +389,7 @@
   <select id="orders_filter_niche"><option value="">Все ниши</option></select>
   <div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
+  <button class="btn sm ghost" id="orders_density" type="button" title="Компактные карточки канбана">⇥ Компактно</button>
  </div>
  <div class="toolbar" id="bulk_bar" hidden>
   <span class="chip" id="bulk_count">Выбрано 0</span>
@@ -599,8 +626,11 @@
   <select id="prod_group"><option value="">Все группы</option></select>
   <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option><option value="showcase">Для магазина</option></select>
   <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
+  <select id="prod_sort" title="Сортировка плиток"><option value="">Порядок по умолчанию</option><option value="margin">По марже</option><option value="sold7">По продажам 7 дн.</option><option value="days">Кончается первым</option><option value="price">По цене</option></select>
+  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые">👁 Витрина</button>
   <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
  </div>
+ <div class="toolbar-alerts" id="prod_warn_badge" hidden></div>
  <div class="prod-grid" id="prod_grid"></div>
  <div class="table-wrap" id="prod_table" hidden><table class="data"><thead><tr>
   <th>Код</th><th>Товар</th><th>Группа</th><th class="right">Остаток</th><th class="right">Резерв</th>
@@ -689,6 +719,8 @@
    <a class="btn" href="/order.html" target="_blank" rel="noopener">🛍 Витрина</a>
    <a class="btn" href="/price-tags.html" target="_blank" rel="noopener">▦ Конструктор ценников</a>
    <button class="btn" id="shelf_inventory_btn" type="button">✓ Инвентаризация</button>
+   <button class="btn" id="shelf_map_btn" type="button" title="Схема полки по ячейкам A1, B2…">🗺 Карта полки</button>
+   <button class="btn" id="shelf_check_btn" type="button" title="Чек-лист «пересчитал / выставил» — инвентаризация без бумажки">☑ Проверка полки</button>
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
    <button class="btn" id="shelf_transfer_btn" type="button">📦 Со склада</button>
@@ -987,6 +1019,14 @@
    <textarea id="mk_social" class="mk-editor" rows="9" spellcheck="true" aria-label="Соцсетевой пакет">Загружаем…</textarea>
    <div class="mk-editor-foot"><span>Разделители подскажут, что отправить в шапку, пост и сторис</span><a href="#library/tg" data-view="library" data-article="tg">Как публиковать в Telegram →</a></div>
   </section>
+  <section class="card mk-board-card">
+   <div class="card-head"><div><span class="card-kicker">План недели</span><h2>Доска контента</h2><p>Разложите заготовки по дням — перетаскивайте карточки между колонками.</p></div><div class="mk-card-actions"><span class="chip outline" id="mk_board_count">0 из 7 дней</span><button class="btn sm ghost" type="button" id="mk_board_reset" title="Очистить доску">↺ Сброс</button></div></div>
+   <div class="mk-board" id="mk_board"></div>
+  </section>
+  <section class="card mk-preview-card">
+   <div class="card-head"><div><span class="card-kicker">Глазами подписчика</span><h2>Превью поста в Telegram</h2><p id="mk_preview_sub">Живой макет «Истории цеха» — как увидит канал.</p></div></div>
+   <div class="mk-tg-preview" id="mk_tg_preview"><div class="empty compact"><span>Текст «Истории цеха» появится здесь по мере набора.</span></div></div>
+  </section>
  </div>
 
  <div class="mk-pane" id="mkpane-sales" role="tabpanel" hidden>
@@ -1129,7 +1169,7 @@
  </div>
  <div class="clientbot-grid clientbot-grid-bottom">
   <section class="card clientbot-card"><div class="card-head"><div><span class="card-kicker">UTM/deep-link</span><h2>Воронка</h2><p>События за последние 30 дней.</p></div></div><div id="cb_analytics" class="clientbot-analytics"></div><div class="clientbot-broadcast"><input id="cb_broadcast_text" type="text" placeholder="Текст opt-in рассылки"><button class="btn sm" id="cb_broadcast" type="button">Отправить по согласию</button></div></section>
-  <section class="card clientbot-card"><div class="card-head"><div><h2>Диалоги</h2><p>Последние входящие и ответы бота/оператора.</p></div></div><div class="table-wrap clientbot-table"><table class="data"><thead><tr><th>Время</th><th>Клиент</th><th>Направление</th><th>Сообщение</th><th>Ответ</th></tr></thead><tbody id="cb_log"></tbody></table></div></section>
+  <section class="card clientbot-card"><div class="card-head"><div><h2>Диалоги</h2><p>Последние входящие и ответы бота/оператора.</p></div></div><div class="clientbot-log" id="cb_log" aria-live="polite"></div></section>
  </div>
 </section>
 
@@ -1152,6 +1192,11 @@
    <button type="button" class="library-route route-start" data-library-open="start"><span>01</span><b>Начать</b><small>Первая неделя и ассортимент</small><i>→</i></button>
    <button type="button" class="library-route route-sales" data-library-open="b2b"><span>02</span><b>Продать</b><small>B2B, Авито, Telegram и витрина</small><i>→</i></button>
    <button type="button" class="library-route route-workshop" data-library-open="tech"><span>03</span><b>Сделать стабильно</b><small>Техника, пластики и смена</small><i>→</i></button>
+  </div>
+  <div class="library-next" id="lib_next" hidden>
+   <span class="library-next-ic">➜</span>
+   <div class="library-next-copy"><span class="card-kicker">Следующий шаг</span><b id="lib_next_title">—</b><small id="lib_next_sub">Отметьте пункт чек-листа — и маршрут подскажет, что дальше.</small></div>
+   <button class="btn sm primary" type="button" id="lib_next_btn">Открыть гайд</button>
   </div>
  </section>
  <div class="lib-discovery" id="lib_discovery">
@@ -3722,10 +3767,16 @@
     <div id="set_staff"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Оформление</h2><p>Тема и акцент интерфейса</p></div></div>
+    <div class="card-head"><div><h2>Оформление</h2><p>Тема, акцент и доступность интерфейса</p></div></div>
     <div class="set-row"><div class="sinfo"><b>Тема</b><small>Светлая, тёмная или как в системе</small></div>
      <select id="set_theme"><option value="system">Системная</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select></div>
     <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
+    <div class="set-row"><div class="sinfo"><b>Меньше анимаций</b><small>Отключить движения: перекрывает настройку системы (reduced motion)</small></div>
+     <label class="check"><span class="switch"><input type="checkbox" id="set_motion_off"><i></i></span>Выключено</label></div>
+    <div class="set-row"><div class="sinfo"><b>Высокий контраст</b><small>Усиленные границы и тёмнее текст — для проектора у станка</small></div>
+     <label class="check"><span class="switch"><input type="checkbox" id="set_contrast"><i></i></span>Включено</label></div>
+    <div class="set-row"><div class="sinfo"><b>Режим дальтоников</b><small>Статусы дублируются штриховкой и иконками — не только цветом</small></div>
+     <label class="check"><span class="switch"><input type="checkbox" id="set_colorblind"><i></i></span>Включено</label></div>
    </div>
    <div class="card" data-set-card>
     <div class="card-head"><div><h2>NOZZA tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
@@ -4653,7 +4704,8 @@
     <label>Начальный остаток, шт<input id="shf_qty" type="number" min="0" step="1" placeholder="10"></label>
     <label>Мин. остаток для предупреждения, шт<input id="shf_min" type="number" min="0" step="1" placeholder="3"></label>
    </div>
-   <label style="margin-top:10px">Внутренняя заметка<input id="shf_note"></label>
+    <label style="margin-top:10px">Ячейка на схеме полки<input id="shf_cell" placeholder="A1, B3… — оставьте пустым, если без места"></label>
+    <label style="margin-top:10px">Внутренняя заметка<input id="shf_note"></label>
   </section>
   <section class="form-section">
    <h3>Ценник</h3>
@@ -4695,6 +4747,21 @@
  <div class="modal-foot"><button class="btn danger" type="button" id="shelf_delete" hidden>Удалить</button><span class="spacer"></span>
   <button class="btn" type="button" data-close="shelf_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_save">Сохранить</button></div>
+</dialog>
+
+<dialog id="shelf_map_modal" class="modal">
+ <div class="modal-head"><div><h3>Карта полки</h3><p>Ячейки A1, B2… — как товар лежит на самом деле</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_map_modal">✕</button></div>
+ <div class="modal-body" id="shelf_map_host"></div>
+</dialog>
+
+<dialog id="shelf_check_modal" class="modal">
+ <div class="modal-head"><div><h3>Проверка полки</h3><p>Пересчитали и выставили — отметьте, проверка хранится на этом устройстве</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_check_modal">✕</button></div>
+ <div class="modal-body" id="shelf_check_host"></div>
+ <div class="modal-foot"><span class="spacer"></span>
+  <button class="btn ghost" type="button" id="shelf_check_reset">Сбросить отметки</button>
+  <button class="btn primary" type="button" data-close="shelf_check_modal">Готово</button></div>
 </dialog>
 
 <dialog id="shelf_produce_modal" class="modal">
@@ -4921,21 +4988,22 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=9.1.2"></script>
-<script src="assets/core.js?v=12.2.0"></script>
-<script src="assets/icons.js?v=12.2.0"></script>
-<script src="assets/printer.js?v=12.2.0"></script>
-<script src="assets/ops.js?v=12.2.0"></script>
-<script src="assets/money.js?v=11.0.1"></script>
-<script src="assets/finance.js?v=11.0.1"></script>
-<script src="assets/shelf.js?v=11.0.1"></script>
-<script src="assets/products.js?v=11.0.1"></script>
-<script src="assets/bridge.js?v=11.0.0"></script>
-<script src="assets/marketing.js?v=9.2.1"></script>
-<script src="assets/clientbot.js?v=11.0.1"></script>
-<script src="assets/workshop.js?v=11.0.1"></script>
-<script src="assets/app.js?v=12.2.0"></script>
-<script src="assets/ops10.js?v=10.0.0"></script>
+<script src="assets/qr.js?v=13.1.0"></script>
+<script src="assets/core.js?v=13.1.0"></script>
+<script src="assets/icons.js?v=13.1.0"></script>
+<script src="assets/printer.js?v=13.1.0"></script>
+<script src="assets/queue.js?v=13.1.0"></script>
+<script src="assets/ops.js?v=13.1.0"></script>
+<script src="assets/money.js?v=13.1.0"></script>
+<script src="assets/finance.js?v=13.1.0"></script>
+<script src="assets/shelf.js?v=13.1.0"></script>
+<script src="assets/products.js?v=13.1.0"></script>
+<script src="assets/bridge.js?v=13.1.0"></script>
+<script src="assets/marketing.js?v=13.1.0"></script>
+<script src="assets/clientbot.js?v=13.1.0"></script>
+<script src="assets/workshop.js?v=13.1.0"></script>
+<script src="assets/app.js?v=13.1.0"></script>
+<script src="assets/ops10.js?v=13.1.0"></script>
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
    Регистрируется только там, где браузер это разрешает (localhost/HTTPS). */
