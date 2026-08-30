@@ -261,5 +261,125 @@ class TelegramQuietHoursTests(unittest.TestCase):
             self.assertFalse(PrinterManager.tg_quiet_now(self.fake))
 
 
+class _SensorManager(FakeManager):
+    """Менеджер с очередью и пустым парком: нужен дайджесту и доктору."""
+
+    def __init__(self, db, snapshot=None):
+        super().__init__(db, snapshot)
+        self.printers = {}
+
+    def queue(self) -> list:
+        return []
+
+
+def _printer_snapshot() -> dict:
+    """Снимок одного P1S: температуры, вентиляторы, AMS на 4 слота, HMS."""
+    return {"printers": [{
+        "id": "p1", "name": "P1S",
+        "printer": {
+            "state": "RUNNING", "task": "адресник", "progress": 47,
+            "speed_label": "Бесшумная", "speed_percent": 60,
+            "wifi": "-52dBm", "firmware": "01.06.02.00",
+            "problems": [{"code": "0300-4006", "title": "Затор сопла",
+                          "severity": "warn", "severity_label": "Внимание"}],
+        },
+        "connection": {"connected": True},
+        "temperature": {"nozzle": 220, "nozzle_target": 220,
+                        "bed": 55, "bed_target": 60, "chamber": 34},
+        "fans": {"part": 80, "aux": 30, "chamber": 0},
+        "ams": {
+            "units": 1, "humidity": 3, "temperature": 32,
+            "trays": [
+                {"id": "10", "label": "AMS 1 · слот 1", "type": "PLA",
+                 "color": "#000000", "remain": 74, "uuid": "uuid-black",
+                 "active": True},
+                {"id": "11", "label": "AMS 1 · слот 2", "type": "PETG",
+                 "color": "#ffffff", "remain": None, "uuid": "uuid-white",
+                 "active": False},
+            ],
+        },
+        "guard": {"alerts": []}, "maintenance": {"due": 0}, "job": {},
+    }]}
+
+
+class TelegramSensorsDoctorTests(unittest.TestCase):
+    """«датчики» (A.1.4) и «доктор» (#80) + здоровье в дайджесте (#86)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.manager = _SensorManager(self.db, _printer_snapshot())
+        self.bot = TelegramBot(self.manager)
+
+    def tearDown(self):
+        self.bot.shutdown()
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _spool(self, uuid: str, material: str, color: str):
+        self.db.upsert("spools", {
+            "id": f"s-{uuid}", "material": material, "color_name": color,
+            "remaining_grams": 740, "total_grams": 1000, "archived": 0,
+            "tray_uuid": uuid, "created_at": "2026-08-01T10:00:00",
+        })
+
+    def test_sensors_shows_telemetry_ams_and_hms(self):
+        self._spool("uuid-black", "PLA", "Чёрный")
+        text = self.bot.text_sensors()
+        for fragment in ("Сопло 220°", "Стол 55° → 60°", "Камера 34°",
+                         "Обдув 80%", "Бесшумная", "WiFi -52dBm",
+                         "влажность 3", "PLA Чёрный (AMS 1 · слот 1) — 74%",
+                         "PETG #ffffff (AMS 1 · слот 2) — —",
+                         "Внимание: Затор сопла"):
+            self.assertIn(fragment, text)
+
+    def test_sensors_without_printers(self):
+        self.manager._snapshot = {"printers": []}
+        self.assertEqual(self.bot.text_sensors(), "Принтеры не добавлены.")
+
+    def test_doctor_healthy_when_all_channels_live(self):
+        import time as _time
+        from unittest import mock as _mock
+        self.bot.last_poll = _time.time()
+        fresh = _time.strftime("%Y-%m-%dT%H:%M:%S")
+        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+                         return_value=[{"at": fresh}]):
+            text = self.bot.text_doctor()
+        self.assertIn("Цех здоров", text)
+        self.assertIn("схема", text)
+
+    def test_doctor_flags_silent_bot_and_stale_backup(self):
+        import time as _time
+        from datetime import datetime as _dt, timedelta as _td
+        from unittest import mock as _mock
+        self.bot.last_poll = 0.0
+        stale = (_dt.now() - _td(hours=80)).strftime("%Y-%m-%dT%H:%M:%S")
+        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+                         return_value=[{"at": stale}]):
+            text = self.bot.text_doctor()
+        self.assertIn("Проблем: 2", text)
+        self.assertIn("не было успешного опроса", text)
+        self.assertIn("копия базы", text)
+
+    def test_digest_carries_health_verdict(self):
+        import time as _time
+        from unittest import mock as _mock
+        self.bot.last_poll = _time.time()
+        fresh = _time.strftime("%Y-%m-%dT%H:%M:%S")
+        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+                         return_value=[{"at": fresh}]):
+            text = self.bot.text_digest()
+        self.assertIn("Цех здоров", text)
+
+    def test_digest_lists_problems(self):
+        from unittest import mock as _mock
+        self.bot.last_poll = 0.0
+        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+                         return_value=[]):
+            text = self.bot.text_digest()
+        self.assertIn("Цех требует внимания", text)
+        self.assertIn("не было успешного опроса", text)
+
+
 if __name__ == "__main__":
     unittest.main()

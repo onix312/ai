@@ -19,8 +19,10 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
+from . import APP_VERSION
 from .accounting import num, uid
 from .config import now_iso
+from .db import SCHEMA_VERSION, list_backups
 from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -29,6 +31,8 @@ HELP = """PrintFlow 8.2 — панель в кармане.
 
 Кнопки внизу или команды (без слэша, в любом регистре):
 • панель — всё сразу: печать, деньги, план, долги
+• датчики — температуры, вентиляторы, AMS и HMS одной сводкой
+• доктор — здоровье цеха: бот, связь, резервные копии, диск
 • статус · кадр · очередь — что происходит сейчас
 • филамент · пластик — остатки катушек и прогноз закупки
 • закупка — список покупок · закупка авто — автозаполнить
@@ -220,6 +224,7 @@ class TelegramBot:
             [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
             [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
             [("🗂 Каталог", "cmd:cat"), ("📊 Итоги", "cmd:today")],
+            [("🌡 Датчики", "cmd:sensors"), ("🩺 Доктор", "cmd:doctor")],
             [("❔ Помощь", "cmd:help")],
         )
 
@@ -457,6 +462,10 @@ class TelegramBot:
             return self.text_panel() if command == "panel" else self._list_printers(chat)
         if command == "queue":
             return self.text_queue()
+        if command == "sensors":
+            return self.text_sensors()
+        if command == "doctor":
+            return self.text_doctor()
         if command == "inbox":
             return self._client_inbox()
         if command in ("plan", "filament", "money", "today", "help"):
@@ -837,6 +846,10 @@ class TelegramBot:
             return self.stop_live(chat)
         if word in ("очередь", "queue"):
             return self._reply(chat, self.text_queue())
+        if word in ("датчики", "сенсоры", "ams", "амс"):
+            return self._reply(chat, self.text_sensors())
+        if word in ("доктор", "диагностика"):
+            return self._reply(chat, self.text_doctor())
         if word in ("выше", "ниже"):
             return self._reply(chat, self._reorder_queue(text, word))
         if word in ("деньги", "финансы", "money", "прибыль"):
@@ -985,6 +998,145 @@ class TelegramBot:
         blocks.append(f"Парк: печатают {farm.get('printing', 0)} из {len(printers)}, "
                       f"в очереди {farm.get('queued', 0)}.")
         return "\n\n".join(blocks)
+
+    def text_sensors(self) -> str:
+        """«датчики» (A.1.4): телеметрия парка одной сводкой.
+
+        Только чтение снимка: температуры с целями, вентиляторы, скорость,
+        WiFi/прошивка, AMS (влажность, температура, слоты с остатками) и
+        расшифрованные HMS-коды. Катушка в слоте показывается по имени со
+        склада (сверка по tray_uuid), иначе — тип и цвет слота.
+        """
+        state = self.manager.snapshot()
+        printers = state.get("printers") or []
+        if not printers:
+            return "Принтеры не добавлены."
+        spools = {str(sp.get("tray_uuid") or ""): sp for sp in
+                  self.db.query("SELECT * FROM spools WHERE archived=0")
+                  if str(sp.get("tray_uuid") or "")}
+        blocks = []
+        for snap in printers:
+            info = snap["printer"]
+            temp = snap.get("temperature") or {}
+            fans = snap.get("fans") or {}
+            ams = snap.get("ams") or {}
+            lines = [f"🌡 {snap['name']} — {STATE_RU.get(info['state'], info.get('state_label') or info['state'])}"]
+            if not snap["connection"]["connected"]:
+                lines.append("Нет связи по локальной сети — датчики неактуальны.")
+
+            def t(key: str, target_key: str, title: str) -> str:
+                value = temp.get(key)
+                target = temp.get(target_key)
+                if not value and not target:
+                    return ""
+                out = f"{title} {round(num(value))}°"
+                if num(target) and round(num(target)) != round(num(value)):
+                    out += f" → {round(num(target))}°"
+                return out
+            heads = [t("nozzle", "nozzle_target", "Сопло"),
+                     t("bed", "bed_target", "Стол"),
+                     t("chamber", "", "Камера")]
+            heads = [h for h in heads if h]
+            if heads:
+                lines.append(" · ".join(heads))
+            fan_parts = [f"{title} {round(num(v))}%"
+                         for title, v in (("Обдув", fans.get("part")),
+                                          ("Вспом.", fans.get("aux")),
+                                          ("Камерный", fans.get("chamber")))
+                         if v is not None]
+            if fan_parts:
+                lines.append(" · ".join(fan_parts))
+            speed = []
+            if info.get("speed_label"):
+                speed.append(info["speed_label"])
+            if num(info.get("speed_percent")) and num(info.get("speed_percent")) != 100:
+                speed.append(f"{round(num(info.get('speed_percent')))}%")
+            if info.get("wifi"):
+                speed.append(f"WiFi {info['wifi']}")
+            if info.get("firmware"):
+                speed.append(f"прошивка {info['firmware']}")
+            if speed:
+                lines.append(" · ".join(speed))
+            env = []
+            if ams.get("temperature") is not None:
+                env.append(f"температура {ams['temperature']}°")
+            if ams.get("humidity") is not None:
+                env.append(f"влажность {ams['humidity']}")
+            if env:
+                lines.append(f"AMS ({ams.get('units', 0)} бл.): " + " · ".join(env))
+            for tray in ams.get("trays") or []:
+                spool = spools.get(str(tray.get("uuid") or ""))
+                name = (f"{spool.get('material')} {spool.get('color_name')}".strip()
+                        if spool else
+                        f"{tray.get('type') or 'пластик'} {tray.get('color') or ''}".strip())
+                remain = tray.get("remain")
+                left = f"{round(num(remain))}%" if remain is not None else "—"
+                mark = "▸ " if tray.get("active") else "  · "
+                lines.append(f"{mark}{name} ({tray['label']}) — {left}")
+            for problem in info.get("problems") or []:
+                lines.append(f"⚠ {problem.get('severity_label')}: "
+                             f"{problem.get('title')}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    def _doctor_problems(self) -> list[str]:
+        """Короткий список проблем цеха — для «доктора» и утреннего дайджеста (#86).
+
+        Проверяется только локальное: жив ли опрос бота, каналы принтеров,
+        свежесть резервных копий и место на диске. Сеть наружу не ходим —
+        «доктор» должен отвечать даже когда Интернета нет.
+        """
+        problems: list[str] = []
+        if self.last_poll:
+            age = time.time() - self.last_poll
+            if age > 90:
+                problems.append(f"🤖 Бот: последний успешный опрос {int(age)} с назад")
+        else:
+            problems.append("🤖 Бот: ещё не было успешного опроса Telegram")
+        try:
+            from .workshop_v9 import heartbeat_channels
+            channels = heartbeat_channels(self.manager, self.db)
+        except Exception:
+            channels = {}
+        for unit, label in (("mqtt", "MQTT"), ("ftps", "FTPS")):
+            for pr in (channels.get(unit) or {}).get("printers", []):
+                if not pr.get("ok"):
+                    problems.append(f"🔌 {pr.get('name')}: {label} — "
+                                    f"{pr.get('error') or 'нет связи'}")
+        disk = channels.get("disk") or {}
+        if not disk.get("ok", True):
+            problems.append(f"💿 Диск: {disk.get('error') or 'мало места'}")
+        try:
+            backups = list_backups()
+            newest = max((b.get("at") or "" for b in backups), default="")
+            if not newest:
+                problems.append("💾 Резервных копий базы ещё нет")
+            else:
+                try:
+                    from datetime import datetime
+                    age_h = (datetime.now()
+                             - datetime.fromisoformat(str(newest).replace("Z", ""))).total_seconds() / 3600
+                    if age_h > 48:
+                        problems.append(
+                            f"💾 Последняя копия базы {round(age_h)} ч назад")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return problems
+
+    def text_doctor(self) -> str:
+        """«доктор» (#80): здоровье цеха одним сообщением, без внешней сети."""
+        problems = self._doctor_problems()
+        lines = ["🩺 Доктор PrintFlow:"]
+        if problems:
+            lines.append(f"⚠ Проблем: {len(problems)}")
+            lines.extend(f"  · {p}" for p in problems)
+        else:
+            lines.append("✅ Цех здоров: бот, связь, копии и диск — ок.")
+        lines.append(f"Версия {APP_VERSION} · схема {SCHEMA_VERSION}. "
+                     "Подробная диагностика: python pf.py doctor.")
+        return "\n".join(lines)
 
     def text_queue(self) -> str:
         jobs = [j for j in self.manager.queue() if j.get("state") in ("queued", "running", "starting")]
@@ -1191,6 +1343,13 @@ class TelegramBot:
         debts = self.manager.acc.debts()
         if num(debts.get("total")) > 0:
             lines.append(f"💰 Ждут оплаты {_money(debts['total'])} по {debts.get('count', 0)} заказам")
+        # #86 «Утренний авто-доктор»: дайджест сам говорит, здоров ли цех.
+        problems = self._doctor_problems()
+        if problems:
+            lines.append(f"🩺 Цех требует внимания ({len(problems)}):")
+            lines.extend(f"  · {p}" for p in problems[:4])
+        else:
+            lines.append("🩺 Цех здоров: бот, связь, копии и диск — ок.")
         return "\n".join(lines)
 
     def text_weekly(self) -> str:
