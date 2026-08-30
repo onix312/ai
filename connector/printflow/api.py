@@ -1345,6 +1345,7 @@ class Api:
                                                            "") or "")}
         if path == "/api/client-bot":
             bot = getattr(self.manager, "client_bot", None)
+            from .client_bot import DEFAULT_TEMPLATES
             settings = self.db.settings()
             data = {
                 "enabled": bool(settings.get("client_bot_enabled")),
@@ -1355,6 +1356,9 @@ class Api:
                 "faq": str(settings.get("client_bot_faq") or ""),
                 "review": bool(settings.get("client_bot_review", True)),
                 "pickup_days": int(num(settings.get("client_bot_pickup_days"), 3)),
+                "pickup_info": str(settings.get("client_bot_pickup_info") or ""),
+                "ready_photo": bool(settings.get("client_bot_ready_photo", True)),
+                "faq_materials": str(settings.get("client_bot_faq_materials") or ""),
                 "pay_info": str(settings.get("client_bot_pay_info") or ""),
                 "pay_qr": str(settings.get("client_bot_pay_qr") or ""),
                 "payment_purpose": str(settings.get("client_bot_payment_purpose") or ""),
@@ -1383,6 +1387,8 @@ class Api:
                     " ORDER BY datetime(p.created_at) DESC LIMIT 60"),
                 "analytics": (bot.analytics(30) if bot else {}),
                 "templates": (bot.templates() if bot else []),
+                "default_templates": (bot.default_templates() if bot
+                                      else [dict(item) for item in DEFAULT_TEMPLATES]),
                 "reviews": self.db.query(
                     "SELECT r.order_id, r.chat_id, r.rating, r.comment, r.state,"
                     " r.asked_at, r.created_at, r.resolved_at, r.operator_note,"
@@ -3279,6 +3285,8 @@ class Api:
                               "client_bot_welcome", "client_bot_notify",
                               "client_bot_catalog", "client_bot_faq",
                               "client_bot_review", "client_bot_pickup_days",
+                              "client_bot_pickup_info", "client_bot_ready_photo",
+                              "client_bot_faq_materials",
                               "client_bot_pay_info", "client_bot_pay_qr",
                               "client_bot_payment_purpose", "client_bot_quiet_hours_enabled",
                               "client_bot_quiet_from", "client_bot_quiet_to",

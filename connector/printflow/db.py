@@ -1538,6 +1538,11 @@ class Database:
         try:
             self.conn.row_factory = sqlite3.Row
             self.conn.execute("PRAGMA journal_mode=WAL")
+            # 12.0: очередь ожидания вместо мгновенного SQLITE_BUSY при
+            # конкурентной записи (панель + боты + бэкап), и обычный для WAL
+            # режим синхронизации — записи не заставляют ждать fsync.
+            self.conn.execute("PRAGMA busy_timeout=5000")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
             self.conn.execute("PRAGMA foreign_keys=ON")
             # SQLite lower() умеет только ASCII — регистронезависимый поиск по
             # кириллице делаем средствами Python.

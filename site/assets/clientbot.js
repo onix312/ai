@@ -10,10 +10,14 @@ const { get, post } = PF.api;
 const COMMANDS = [
   ['старт', 'приветствие, deep-link и главное меню'],
   ['каталог', 'опубликованные позиции, варианты и остаток'],
+  ['свой заказ', 'мастер заявки из 4 шагов с проверкой перед отправкой'],
   ['заказ 3', 'добавить позицию в корзину и оформить заявку'],
+  ['новинки', 'пять последних позиций каталога'],
+  ['как получить', 'адрес, часы и срок хранения готового заказа'],
+  ['отзывы', 'оценки и свежие отзывы покупателей'],
   ['индивидуальный …', 'мастер заявки: задача, файл/фото, срок и контакт'],
   ['фото [1001]', 'добавить референс к заявке по номеру заказа'],
-  ['мои заказы', 'статусы, ETA и кнопка «Статус онлайн»'],
+  ['мои заказы', 'статусы, ETA и счётчик до скидки'],
   ['статус 1001', 'цена, срок, реквизиты и повторный заказ'],
   ['телефон +7…', 'привязать номер только через контакт Telegram'],
   ['оператор', 'связаться с мастерской — ответит человек'],
@@ -33,6 +37,7 @@ const RIGHTS_ORDER = ['view', 'shelf', 'orders', 'finance', 'printers', 'inbox',
 let loadSeq = 0;
 let bound = false;
 let latestTemplates = [];
+let latestDefaults = [];
 
 const text = (value, fallback = '—') => {
   const valueText = String(value ?? '').trim();
@@ -134,13 +139,58 @@ function renderInbox(items, templates = []) {
       + `<div><b>${esc(name)}</b><small>Telegram ID ${esc(chatId)}${last.username ? ' · @' + esc(last.username) : ''}</small></div>`
       + `<span class="tag ${status === 'closed' ? '' : status === 'pending' ? 'warn' : 'ok'}">${esc(inboxStatus(status))}</span></header>`
       + `<div class="clientbot-thread-messages">${messageHtml}</div>`
-      + `<div class="clientbot-reply"><textarea data-reply-input rows="2" maxlength="3800" placeholder="Ответить покупателю…"></textarea>`
+      + `<div class="clientbot-reply"><div class="clientbot-quick" data-quick-row>`
+      + quickReplies().map((item, i) => `<button class="btn sm ghost" type="button" data-quick-reply data-quick-index="${i}" title="${esc(item.text)}">${esc(item.name)}</button>`).join('')
+      + `</div><textarea data-reply-input rows="2" maxlength="3800" placeholder="Ответить покупателю…"></textarea>`
       + (templates.length ? `<select data-inbox-template aria-label="Шаблон ответа"><option value="">Вставить шаблон…</option>${templates.filter((item) => item.enabled !== false).map((item) => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select>` : '')
       + `<div class="clientbot-thread-actions"><button class="btn sm primary" type="button" data-inbox-reply>Ответить</button>`
       + `<button class="btn sm" type="button" data-inbox-read>Прочитано</button>`
       + `<select data-inbox-status aria-label="Статус диалога"><option value="open" ${status === 'open' ? 'selected' : ''}>открыт</option>`
       + `<option value="pending" ${status === 'pending' ? 'selected' : ''}>ждёт ответа</option><option value="closed" ${status === 'closed' ? 'selected' : ''}>закрыт</option></select></div></div></article>`;
   }).join('');
+}
+
+function quickReplies() {
+  // К18: до четырёх заготовок одной кнопкой в каждом диалоге — сначала
+  // свои шаблоны, затем готовая библиотека.
+  const own = (latestTemplates || []).filter((item) => item.enabled !== false);
+  const lib = latestDefaults || [];
+  return own.slice(0, 2).concat(lib.slice(0, own.length >= 2 ? 2 : 4 - own.length)).slice(0, 4);
+}
+
+async function quickReplyAction(button) {
+  const replies = quickReplies();
+  const item = replies[Number(button.dataset.quickIndex || 0)];
+  const thread = button.closest('.clientbot-thread');
+  const input = thread && thread.querySelector('[data-reply-input]');
+  if (item && input) {
+    input.value = item.text || '';
+    input.focus();
+  }
+}
+
+async function defaultTemplateUse(button) {
+  const name = (button.dataset.useName || '').trim();
+  const text = (button.dataset.useText || '').trim();
+  if (!name || !text) return;
+  try {
+    await post('/api/client-bot/template/save', { name, text, actor: 'panel' });
+    toast(`Шаблон «${name}» добавлен к вашим`);
+    await renderBot();
+  } catch (error) {
+    fail(error);
+  }
+}
+
+function renderDefaultTemplates(items) {
+  const host = $('cb_default_templates');
+  if (!host) return;
+  const rows = Array.isArray(items) ? items : [];
+  if (!rows.length) { host.innerHTML = ''; return; }
+  host.innerHTML = rows.map((item) => `<div class="clientbot-template clientbot-template-lib">`
+    + `<div class="clientbot-template-lib-head"><b>${esc(item.name || '')}</b>`
+    + `<button class="btn sm" type="button" data-template-use data-use-name="${esc(item.name || '')}" data-use-text="${esc(item.text || '')}">+ К моим</button></div>`
+    + `<div class="clientbot-template-text">${esc(item.text || '')}</div></div>`).join('');
 }
 
 function renderTemplates(items) {
@@ -238,6 +288,9 @@ async function renderBot() {
     $('cb_notify').checked = data.notify !== false;
     $('cb_review').checked = data.review !== false;
     $('cb_pickup_days').value = data.pickup_days ?? 3;
+    $('cb_pickup_info').value = data.pickup_info || '';
+    $('cb_ready_photo').checked = data.ready_photo !== false;
+    $('cb_faq_materials').value = data.faq_materials || '';
     $('cb_faq').value = data.faq || '';
     $('cb_pay_info').value = data.pay_info || '';
     $('cb_pay_qr').value = data.pay_qr || '';
@@ -272,8 +325,10 @@ async function renderBot() {
     $('cb_commands').innerHTML = COMMANDS.map(([command, description]) =>
       `<tr><td><b>${esc(command)}</b></td><td class="muted">${esc(description)}</td></tr>`).join('');
     latestTemplates = Array.isArray(data.templates) ? data.templates : [];
+    latestDefaults = Array.isArray(data.default_templates) ? data.default_templates : [];
     renderInbox(data.inbox || [], latestTemplates);
     renderTemplates(latestTemplates);
+    renderDefaultTemplates(latestDefaults);
     renderPayments(data.payments || []);
     renderOrders(data.orders || []);
     renderReviews(data.reviews || []);
@@ -294,6 +349,9 @@ function botPayload() {
     client_bot_notify: $('cb_notify').checked,
     client_bot_review: $('cb_review').checked,
     client_bot_pickup_days: Math.max(0, Math.min(30, Math.round(num($('cb_pickup_days').value, 3)))),
+    client_bot_pickup_info: $('cb_pickup_info').value.trim(),
+    client_bot_ready_photo: $('cb_ready_photo').checked,
+    client_bot_faq_materials: $('cb_faq_materials').value.trim(),
     client_bot_faq: $('cb_faq').value.trim(),
     client_bot_pay_info: $('cb_pay_info').value.trim(),
     client_bot_pay_qr: $('cb_pay_qr').value.trim(),
@@ -523,6 +581,11 @@ function bind() {
   $('cb_inbox')?.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (button && (button.matches('[data-inbox-reply]') || button.matches('[data-inbox-read]'))) inboxAction(button);
+    if (button && button.matches('[data-quick-reply]')) quickReplyAction(button);
+  });
+  $('cb_default_templates')?.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-template-use]');
+    if (button) defaultTemplateUse(button);
   });
   $('cb_inbox')?.addEventListener('change', (event) => {
     if (event.target.matches('[data-inbox-status]')) inboxStatusChange(event.target);

@@ -54,11 +54,14 @@ API = "https://api.telegram.org/bot{token}/{method}"
 HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 
 • каталог — что есть на полке, с ценами и кнопками
+• свой заказ — мастер заявки из 4 шагов (описание, размеры, назначение, проверка)
 • заказ 3 — заказать позицию №3 из каталога
+• новинки — последние позиции каталога
 • корзина — проверить выбранные позиции и оформить заявку
-• индивидуальный <задача> — печать по вашему заданию (можно фото)
-• мои заказы — статусы ваших заказов
+• мои заказы — статусы ваших заказов и счётчик до скидки
 • статус 1001 — статус заказа по номеру
+• как получить — адрес, часы и сколько храним готовый заказ
+• отзывы — что говорят покупатели
 • телефон +7… — привязать телефон к заказам с полки
 • оператор — связаться с мастерской, ответит человек
 • вопрос-ответ — материалы, сроки, как заказать
@@ -66,7 +69,8 @@ HELP = """NOZZA — 3D-печать на заказ. Что я умею:
 
 Как считается индивидуальный заказ: пришлите задачу, размеры или фото —
 мастер посчитает цену и срок, и вы получите ответ здесь же. Кнопки под
-сообщениями работают так же, как команды."""
+сообщениями работают так же, как команды. В любой момент можно прислать
+фото, эскиз или STL/3MF — файл прикрепляется к заявке."""
 
 # Частые вопросы: только подтверждённые формулировки из контекста «О нас» —
 # без обещаний свойств материалов и сроков, которых нет.
@@ -91,8 +95,66 @@ SHARE_TEXT = "Каталог NOZZA — 3D-печать под задачу"
 PAGE_SIZE = 8  # позиций каталога на странице (кнопки-карточки, одна в ряд)
 
 WELCOME = ("Здравствуйте! Это бот мастерской NOZZA — «Там, где рождается форма».\n\n"
-           "Здесь можно посмотреть готовые вещи на полке, заказать печать по своей "
-           "задаче и следить за статусом заказа.\n\nНапишите «помощь» — покажу команды.")
+           "Две дороги:\n"
+           "🛍 «Каталог» — готовые вещи с ценами\n"
+           "✏️ «Свой заказ» — печать по вашей задаче\n\n"
+           "Статус заказа и оплата — здесь же. Напишите «помощь» — покажу команды.")
+
+# К18: библиотека готовых ответов оператора. Панель показывает их одним
+# кликом в диалогах; свои шаблоны по-прежнему редактируются в вкладке.
+DEFAULT_TEMPLATES: list[dict] = [
+    {"id": "tpl_price_ready", "name": "Цена посчитана",
+     "text": "Посчитал ваш заказ: укажите цену и срок. Если подходит — подтвержу "
+             "и поставлю в очередь."},
+    {"id": "tpl_ask_dimensions", "name": "Уточнить размеры",
+     "text": "Чтобы посчитать точно, пришлите размеры детали (Д×Ш×В, мм) и фото "
+             "или эскиз, если есть."},
+    {"id": "tpl_ask_purpose", "name": "Уточнить назначение",
+     "text": "Подскажите, где будет использоваться деталь и какая нагрузка? "
+             "По назначению подберу материал (PLA или PETG)."},
+    {"id": "tpl_ready_pickup", "name": "Готов к выдаче",
+     "text": "Заказ готов! Ждём вас — напишите, когда удобно подъехать, "
+             "и адрес с часами: кнопка «Как получить» в боте."},
+    {"id": "tpl_payment_ok", "name": "Оплата получена",
+     "text": "Оплату получил, спасибо! Заказ в работе, о статусе напишу здесь же."},
+    {"id": "tpl_delay", "name": "Задержка",
+     "text": "По вашему заказу небольшая задержка — назову причину и новую дату. "
+             "Извините за ожидание!"},
+    {"id": "tpl_redo", "name": "Переделаем бесплатно",
+     "text": "Извините за неудачу с заказом! Переделаем бесплатно — напишите, "
+             "когда удобно забрать."},
+    {"id": "tpl_repeat", "name": "Повтор заказа",
+     "text": "Можем повторить ваш заказ по прежней цене. Ответьте «да» — "
+             "поставлю в очередь."},
+    {"id": "tpl_delivery", "name": "Самовывоз или доставка",
+     "text": "Можно забрать самовывозом (адрес — кнопка «Как получить» в боте) "
+             "или отправить transport-компанией за ваш счёт."},
+    {"id": "tpl_material_advice", "name": "Совет по материалу",
+     "text": "Для этой задачи советую PETG: прочнее и не боится влаги. PLA — "
+             "дешевле, подходит для интерьера и декора."},
+    {"id": "tpl_decline", "name": "Не берёмся",
+     "text": "Эту задачу не сможем выполнить с гарантией качества, извините. "
+             "Могу предложить альтернативу — напишу вариант."},
+    {"id": "tpl_in_print", "name": "Уже в печати",
+     "text": "Ваш заказ уже в печати — пришлю фото готовой детали, как сниму "
+             "со стола."},
+]
+
+# К16: контекстная статья мастера — показывается кнопкой в шагах заявки.
+FAQ_MATERIALS = """🧱 Как выбрать материал
+
+PLA — самый доступный: декор, макеты, интерьерные вещи, держатели без
+нагрузки. Не любит жару (солнечный подоконник, салон машины) и воду.
+
+PETG — прочнее и не боится влаги: функциональные детали, уличное
+использование, ёмкости, крепления. Чуть дороже и капризнее в печати.
+
+Гибкий TPU и другие specialty-материалы — только по договорённости:
+не для каждой задачи оправданы.
+
+Если сомневаетесь — просто напишите назначение детали (шаг 3), мастер
+подберёт материал сам. Свой текст этой статьи мастерская может задать
+в панели."""
 
 
 def _money(value: float) -> str:
@@ -1035,6 +1097,26 @@ class ClientBot:
             return self.text_my_orders(chat, row), self._orders_keyboard(chat, row)
         if data == "faq":
             return self.text_faq(), self._menu()
+        if data.startswith("faq:"):
+            return self._faq_article(chat, data.split(":", 1)[1])
+        if data == "custom":
+            return self._wizard_start(chat, row)
+        if data == "draft_send":
+            return self._draft_send(chat, row)
+        if data == "draft_skip":
+            return self._draft_skip(chat, row)
+        if data == "draft_cancel":
+            return self._draft_cancel(chat)
+        if data.startswith("draft_edit:"):
+            return self._draft_edit(chat, data.split(":", 1)[1])
+        if data == "new":
+            return self.text_new(), self._new_keyboard()
+        if data == "reviews":
+            return self.text_reviews(), self._menu()
+        if data == "pickup":
+            return self.text_pickup(), self._menu()
+        if data.startswith("problem:"):
+            return self._problem_report(chat, row, data.split(":", 1)[1])
         if data == "help":
             return HELP, self._menu()
         if data == "operator":
@@ -1043,10 +1125,12 @@ class ClientBot:
 
     def _menu(self) -> dict:
         return _keyboard(
-            [("🛍 Каталог", "catalog"), ("📦 Мои заказы", "mine")],
-            [("🛒 Корзина", "cart"), ("💛 Избранное", "wishlist")],
+            [("🛍 Каталог", "catalog"), ("✏️ Свой заказ", "custom")],
+            [("📦 Мои заказы", "mine"), ("🛒 Корзина", "cart")],
+            [("💛 Избранное", "wishlist"), ("🆕 Новинки", "new")],
+            [("❓ Вопрос-ответ", "faq"), ("⭐ Отзывы", "reviews")],
+            [("🚚 Как получить", "pickup"), ("❔ Помощь", "help")],
             [("🔔 Статусы", "notify"), ("📣 Рассылка", "marketing")],
-            [("❓ Вопрос-ответ", "faq"), ("❔ Помощь", "help")],
             [("👤 Связаться с оператором", "operator")],
         )
 
@@ -1095,7 +1179,10 @@ class ClientBot:
                         "вопрос-ответ", "избранное", "wishlist", "любимое", "уведомления",
                         "уведомление", "рассылка", "отписаться", "корзина", "cart",
                         "оформить", "checkout", "оператор", "оператора", "человек",
-                        "связаться", "связь", "контакт", "поддержка"):
+                        "связаться", "связь", "контакт", "поддержка",
+                        "свой", "своя", "новинки", "новинка", "отзывы", "отзыв",
+                        "получить", "получение", "забрать", "выдача", "самовывоз",
+                        "индивидуальный", "индивидуальная", "печать", "задача"):
             draft_answer, draft_buttons = self._draft_reply(chat, row, raw)
             if draft_answer:
                 return draft_answer, draft_buttons
@@ -1134,8 +1221,22 @@ class ClientBot:
             if word in ("заказ", "order") and number:
                 return self._order_item(chat, row, number), self._menu()
             return self._order_card(chat, row, number)
+        if word in ("свой", "своя") or text in ("свой заказ", "своя заявка", "свой заказ"):
+            # Кнопка и текст — один вход в мастер заявки (К1).
+            return self._wizard_start(chat, row)
+        if word in ("новинки", "новинка"):
+            return self.text_new(), self._new_keyboard()
+        if word in ("отзывы", "отзыв"):
+            return self.text_reviews(), self._menu()
+        if word in ("получить", "получение", "забрать", "выдача", "самовывоз") \
+                or text in ("как получить", "как забрать"):
+            return self.text_pickup(), self._menu()
         if text.startswith("индивидуальн") or word in ("печать", "задача"):
-            return self._custom_order(chat, row, raw), self._menu()
+            task = _re.sub(r"^\s*индивидуальн\w*\s*[:\-]?\s*", "", raw.strip(),
+                           flags=_re.IGNORECASE).strip()
+            if not task:
+                return self._wizard_start(chat, row)
+            return self._create_custom_order(chat, row, task), self._menu()
         if word in ("телефон", "phone", "номер") or text.startswith("+7") or text.startswith("8 9"):
             # Набранный номер не является доказательством владения им. Сохраняем
             # его только как неподтверждённый; заказы по нему не раскрываются.
@@ -1190,6 +1291,12 @@ class ClientBot:
         """
         name = row.get("name") or "Без имени"
         self._funnel(chat, "contact_operator", row)
+        # К17: честное ожидание из фактической статистики ответов.
+        sla = self.operator_sla_minutes()
+        eta = ""
+        if sla > 0:
+            eta = (f" Обычно отвечаем в течение ~{max(1, int(round(sla)))} мин."
+                   if sla < 300 else " Обычно отвечаем в течение нескольких часов.")
         try:
             self.manager.notify_async(
                 f"👤 Покупатель просит связаться с оператором\n"
@@ -1197,7 +1304,8 @@ class ClientBot:
                 critical=True)
         except Exception:
             pass
-        return ("Передал мастерской ✓ Оператор ответит в этом чате. Пока можете "
+        return ("Передал мастерской ✓ Оператор ответит в этом чате."
+                f"{eta} Пока можете "
                 "посмотреть «каталог», задать «вопрос-ответ» или просто написать "
                 "вопрос текстом — он не потеряется.")
 
@@ -1385,6 +1493,9 @@ class ClientBot:
                 "hours": num(item["item"].get("hours")),
                 "note": "из корзины",
             })
+        # К9: каждый 5-й заказ — скидка 10%, применяется сразу в чеке.
+        cart_total = sum(num(item["price"]) * num(item["qty"], 1) for item in items)
+        loyalty = self._loyalty_discount(chat, row, cart_total)
         order = self.manager.repo.save_order({
             "product": ", ".join(str(item["name"]) for item in items)[:240],
             "customer_name": row.get("name") or "Покупатель", "phone": row.get("phone") or "",
@@ -1394,6 +1505,7 @@ class ClientBot:
             "nom_id": items[0]["nom_id"] if len(items) == 1 else "",
             "client_variant_id": items[0].get("variant_id") if len(items) == 1 else "",
             "items": items, "notes": "Заказ из корзины клиентского бота",
+            "discount": loyalty if loyalty > 0 else 0,
         })
         self._link_order(chat, row, order, source="telegram", update_id=self._current_update_id)
         # Резервируем готовые варианты после проверки свободного остатка. Если
@@ -1434,7 +1546,12 @@ class ClientBot:
                 critical=True)
         except Exception:
             pass
-        return f"Заявка из корзины принята ✓\nНомер заказа — №{order.get('number')}.\nМастер подтвердит цену и срок."
+        answer = (f"Заявка из корзины принята ✓\nНомер заказа — №{order.get('number')}.\n"
+                  "Мастер подтвердит цену и срок.")
+        if loyalty > 0:
+            answer += (f"\n\n🎉 Это ваш {(len(self._finished_orders(chat, row)) + 1)}-й заказ — "
+                       f"скидка 10% ({_money(loyalty)}) уже учтена в чеке.")
+        return answer
 
     def _toggle_marketing(self, chat: str, row: dict) -> str:
         if not bool(self._settings().get("client_bot_marketing_enabled", False)):
@@ -1586,6 +1703,98 @@ class ClientBot:
         url = ("https://t.me/share/url?url=" + urllib.parse.quote(link, safe="")
                + "&text=" + urllib.parse.quote(SHARE_TEXT, safe=""))
         return {"text": "📤 Поделиться каталогом", "url": url}
+
+    def text_new(self) -> str:
+        """К10: новинки каталога — пять последних опубликованных позиций."""
+        rows = self._catalog_rows()
+        if not rows:
+            return ("Новинок пока нет. Напишите «индивидуальный» + задача — "
+                    "посчитаем печать под вас.")
+        fresh = sorted(enumerate(rows, 1),
+                       key=lambda pair: str((pair[1] or {}).get("created_at") or ""),
+                       reverse=True)[:5]
+        lines = ["🆕 Новинки каталога:", ""]
+        for index, item in fresh:
+            qty = num(item.get("qty"))
+            tail = " · есть на полке" if qty > 0 else " · под заказ"
+            lines.append(f"{index}. {item.get('name')} — {_money(item.get('price'))}{tail}")
+        lines += ["", "Заказ: «заказ <номер>» или кнопкой. Весь каталог — «каталог»."]
+        return "\n".join(lines)
+
+    def _new_keyboard(self) -> dict:
+        rows = self._catalog_rows()
+        if not rows:
+            return self._menu()
+        fresh = sorted(enumerate(rows, 1),
+                       key=lambda pair: str((pair[1] or {}).get("created_at") or ""),
+                       reverse=True)[:5]
+        keys = [[{"text": f"🆕 {item.get('name')} · {_money(item.get('price'))}"[:64],
+                  "callback_data": f"item:{item['id']}:1"}]
+                for _index, item in fresh]
+        keys.append([{"text": "🛍 Каталог", "callback_data": "catalog"},
+                     {"text": "📦 Мои заказы", "callback_data": "mine"}])
+        return {"inline_keyboard": keys}
+
+    def text_pickup(self) -> str:
+        """К12: адрес, часы и срок хранения готового заказа."""
+        settings = self._settings()
+        info = str(settings.get("client_bot_pickup_info") or "").strip()
+        days = int(num(settings.get("client_bot_pickup_days"), 3))
+        lines = ["🚚 Как получить заказ:", ""]
+        if info:
+            lines += [info, ""]
+        else:
+            lines += ["Адрес и часы работы подскажет оператор — «оператор».", ""]
+        if days > 0:
+            lines.append(f"Готовый заказ храним {days} дн. и напомним, если "
+                         "забудете.")
+        lines.append("Статус и оплата — в карточке заказа («мои заказы»).")
+        return "\n".join(lines)
+
+    def text_reviews(self) -> str:
+        """К15: витрина доверия — оценки и свежие отзывы с текстом."""
+        good = int(num((self.db.one(
+            "SELECT COUNT(*) n FROM client_reviews WHERE rating='good'") or {}).get("n")))
+        bad = int(num((self.db.one(
+            "SELECT COUNT(*) n FROM client_reviews WHERE rating='bad'") or {}).get("n")))
+        if not good and not bad:
+            return ("Отзывов пока нет — они появятся после первых выдач. "
+                    "Станьте первым 🙂")
+        lines = [f"⭐ Отзывы о мастерской: 👍 {good} · 👎 {bad}", ""]
+        comments = self.db.query(
+            "SELECT r.comment, r.rating, o.number FROM client_reviews r"
+            " LEFT JOIN orders o ON o.id=r.order_id"
+            " WHERE COALESCE(r.comment,'')!=''"
+            " ORDER BY datetime(COALESCE(r.created_at, r.asked_at)) DESC LIMIT 3")
+        if comments:
+            for row in comments:
+                mark = "👍" if str(row.get("rating")) == "good" else "👎"
+                lines.append(f"{mark} «{str(row.get('comment'))[:180]}»")
+                lines.append("")
+        else:
+            lines.append("Оценки уже есть — текстовые отзывы появятся позже.")
+            lines.append("")
+        lines.append("Спасибо каждому за доверие!")
+        return "\n".join(lines)
+
+    def _problem_report(self, chat: str, row: dict,
+                        order_id: str) -> tuple[str, dict | None]:
+        """К14: кнопка «Проблема с заказом» — ждём описание и будим мастера."""
+        order = self._own_order(chat, row, order_id)
+        if not order:
+            return ("Это не ваш заказ — опишите проблему текстом, мастер "
+                    "поможет."), self._menu()
+        self._await_problem[chat] = (order_id, time.time() + 86400)
+        self._funnel(chat, "problem_reported", row, order_id=order_id)
+        try:
+            self.manager.notify_async(
+                f"⚠️ Покупатель сообщает проблему\nЗаказ №{order.get('number')} · "
+                f"чат {chat}\nЖдём описания — ответить: кответ {chat} <текст>",
+                critical=True)
+        except Exception:
+            pass
+        return ("Опишите, что случилось, одним сообщением — передам мастеру, "
+                "и мы это поправим."), self._menu()
 
     def _item_card_payload(self, nom_id: str,
                            page: int = 1) -> tuple[str, bytes, dict]:
@@ -1781,12 +1990,10 @@ class ClientBot:
         task = _re.sub(r"^\s*индивидуальн\w*\s*[:\-]?\s*", "", raw.strip(),
                        flags=_re.IGNORECASE).strip()
         if not task:
-            self.db.upsert("client_bot_drafts", {
-                "chat_id": chat, "step": "description", "data": "{}",
-                "created_at": now_iso(), "updated_at": now_iso()}, key="chat_id")
-            self._funnel(chat, "custom_started", row)
-            return ("Индивидуальная заявка — шаг 1 из 3. Опишите, что напечатать. "
-                    "Черновик сохранён; можно вернуться после перезапуска бота.")
+            # Пустая команда — только начало мастера: сама заявка создаётся
+            # кнопкой «Отправить» на шаге проверки (К2).
+            answer, _buttons = self._wizard_start(chat, row)
+            return answer
         return self._create_custom_order(chat, row, task)
 
     def _create_custom_order(self, chat: str, row: dict, task: str,
@@ -1803,6 +2010,12 @@ class ClientBot:
             notes += f"\nРазмеры: {dimensions[:300]}"
         if purpose:
             notes += f"\nНазначение: {purpose[:300]}"
+        # К9: в индивидуальной заявке цену называет мастер — скидку применяет
+        # он сам, но видит пометку сразу.
+        loyalty_hint = ""
+        if self._loyalty_discount(chat, row, 1000) > 0:
+            notes += "\nЛояльность: 5-й заказ — напомнить скидку 10%"
+            loyalty_hint = " Это ваш 5-й заказ — действует скидка 10%."
         order = self.manager.repo.save_order({
             "product": task[:120],
             "customer_name": row.get("name") or "Покупатель",
@@ -1830,35 +2043,165 @@ class ClientBot:
             pass
         return ("Заявка принята ✓ Номер — №"
                 f"{number}.\nДля расчёта пришлите сюда размеры (Д×Ш×В), "
-                "назначение и фото/эскиз. Мастер ответит с ценой и сроком.")
+                "назначение и фото/эскиз. Мастер ответит с ценой и сроком."
+                + loyalty_hint)
 
-    def _draft_reply(self, chat: str, row: dict, raw: str) -> tuple[str, dict | None]:
+    # ------------------------------------------------- мастер «Свой заказ» (К1-К4)
+    def _wizard_start(self, chat: str, row: dict) -> tuple[str, dict]:
+        """Начать мастер заявки: 3 вопроса + проверка перед отправкой."""
+        self.db.upsert("client_bot_drafts", {
+            "chat_id": chat, "step": "description", "data": "{}",
+            "created_at": now_iso(), "updated_at": now_iso()}, key="chat_id")
+        self._funnel(chat, "custom_started", row)
+        return ("✏️ Своя заявка — шаг 1 из 4.\n\n"
+                "Опишите, что нужно напечатать: что это, для чего, сколько штук.\n\n"
+                "📎 Можно сразу прислать фото, эскиз или STL/3MF — прикреплю к заявке.",
+                self._wizard_keyboard())
+
+    def _wizard_keyboard(self) -> dict:
+        return _keyboard(
+            [("⏭ Пропустить шаг", "draft_skip")],
+            [("🧱 Как выбрать материал?", "faq:materials")],
+            [("↩️ Отменить заявку", "draft_cancel")],
+        )
+
+    def _draft_confirm_keyboard(self) -> dict:
+        return _keyboard(
+            [("✅ Отправить заявку", "draft_send")],
+            [("✏️ Изменить описание", "draft_edit:description")],
+            [("📏 Изменить размеры", "draft_edit:dimensions"),
+             ("🎯 Изменить назначение", "draft_edit:purpose")],
+            [("↩️ Отменить", "draft_cancel")],
+        )
+
+    def _draft_data(self, chat: str) -> tuple[dict | None, dict]:
+        """(черновик, данные) — черновика может не быть."""
         draft = self.db.one("SELECT * FROM client_bot_drafts WHERE chat_id=?", (chat,))
         if not draft:
-            return "", None
+            return None, {}
         try:
             data = json.loads(draft.get("data") or "{}")
         except (TypeError, ValueError):
             data = {}
+        return draft, data
+
+    def _draft_summary(self, chat: str) -> str:
+        draft, data = self._draft_data(chat)
+        if not draft:
+            return "Заявка уже отправлена ✓ Новая — кнопка «✏️ Свой заказ»."
+        lines = ["✏️ Шаг 4 из 4 — проверьте заявку:", ""]
+        lines.append(f"Что печатаем: {str(data.get('description') or '—').strip() or '—'}")
+        lines.append(f"Размеры: {str(data.get('dimensions') or '—').strip() or '—'}")
+        lines.append(f"Назначение: {str(data.get('purpose') or '—').strip() or '—'}")
+        lines += ["", "Всё верно? Нажмите «✅ Отправить заявку» — мастер посчитает "
+                  "цену и срок и ответит здесь же. Что-то не так — измените поле "
+                  "кнопкой."]
+        return "\n".join(lines)
+
+    def _draft_reply(self, chat: str, row: dict, raw: str) -> tuple[str, dict | None]:
+        draft, data = self._draft_data(chat)
+        if not draft:
+            return "", None
         step = draft.get("step") or "description"
         text = raw.strip()
         if step == "description":
             data["description"] = text[:500]
-            next_step = "dimensions"
-            answer = "Шаг 2 из 3. Укажите размеры или напишите «нет»."
+            answer = ("Шаг 2 из 4. Размеры детали (Д×Ш×В, мм). Не знаете точно — "
+                      "«⏭ Пропустить шаг», мастер спросит. 📎 Фото с линейкой "
+                      "тоже подойдёт — прикреплю к заявке.")
+            next_step, buttons = "dimensions", self._wizard_keyboard()
         elif step == "dimensions":
             data["dimensions"] = text[:300]
-            next_step = "purpose"
-            answer = "Шаг 3 из 3. Для чего нужна деталь и какой материал предпочтительнее?"
-        else:
+            answer = ("Шаг 3 из 4. Для чего деталь и где будет жить? По назначению "
+                      "мастер подберёт материал — подсказка кнопкой ниже.")
+            next_step, buttons = "purpose", self._wizard_keyboard()
+        elif step == "purpose":
             data["purpose"] = text[:300]
-            answer = self._create_custom_order(chat, row, data.get("description") or text,
-                                                dimensions=data.get("dimensions") or "",
-                                                purpose=data.get("purpose") or "")
-            self.db.execute("DELETE FROM client_bot_drafts WHERE chat_id=?", (chat,))
-            return answer, self._menu()
+            # Шаг проверки (К2): заявка уходит только по кнопке.
+            self.db.execute("UPDATE client_bot_drafts SET step=?,data=?,updated_at=?"
+                            " WHERE chat_id=?",
+                            ("confirm", json.dumps(data, ensure_ascii=False),
+                             now_iso(), chat))
+            return self._draft_summary(chat), self._draft_confirm_keyboard()
+        else:
+            # На шаге проверки текст не отправляет заявку — только кнопки,
+            # чтобы случайное сообщение не создало заказ.
+            return self._draft_summary(chat), self._draft_confirm_keyboard()
         self.db.execute("UPDATE client_bot_drafts SET step=?,data=?,updated_at=? WHERE chat_id=?",
                         (next_step, json.dumps(data, ensure_ascii=False), now_iso(), chat))
+        return answer, buttons
+
+    def _draft_send(self, chat: str, row: dict) -> tuple[str, dict | None]:
+        draft, data = self._draft_data(chat)
+        if not draft:
+            return "Заявка уже отправлена ✓ Новая — кнопка «✏️ Свой заказ».", self._menu()
+        if not str(data.get("description") or "").strip():
+            self.db.execute("UPDATE client_bot_drafts SET step='description' WHERE chat_id=?",
+                            (chat,))
+            return "Шаг 1 из 4: сначала опишите, что напечатать.", self._wizard_keyboard()
+        answer = self._create_custom_order(chat, row, data.get("description") or "",
+                                           dimensions=data.get("dimensions") or "",
+                                           purpose=data.get("purpose") or "")
+        self.db.execute("DELETE FROM client_bot_drafts WHERE chat_id=?", (chat,))
+        return answer, self._menu()
+
+    def _draft_skip(self, chat: str, row: dict) -> tuple[str, dict | None]:
+        draft, data = self._draft_data(chat)
+        if not draft:
+            return "Заявки нет — начните кнопкой «✏️ Свой заказ».", self._menu()
+        step = draft.get("step") or "description"
+        if step == "description":
+            return ("Описание пропустить нельзя — без него мастеру нечего считать.",
+                    self._wizard_keyboard())
+        if step == "dimensions":
+            data.pop("dimensions", None)
+            answer = ("Хорошо, размеры уточним позже. Шаг 3 из 4: для чего деталь "
+                      "и где будет жить?")
+            next_step, buttons = "purpose", self._wizard_keyboard()
+        elif step == "purpose":
+            data.pop("purpose", None)
+            self.db.execute("UPDATE client_bot_drafts SET step='confirm',data=?,updated_at=?"
+                            " WHERE chat_id=?",
+                            (json.dumps(data, ensure_ascii=False), now_iso(), chat))
+            return self._draft_summary(chat), self._draft_confirm_keyboard()
+        else:
+            return self._draft_summary(chat), self._draft_confirm_keyboard()
+        self.db.execute("UPDATE client_bot_drafts SET step=?,data=?,updated_at=? WHERE chat_id=?",
+                        (next_step, json.dumps(data, ensure_ascii=False), now_iso(), chat))
+        return answer, buttons
+
+    def _draft_edit(self, chat: str, step: str) -> tuple[str, dict | None]:
+        if step not in ("description", "dimensions", "purpose"):
+            return "Не понял кнопку — напишите «помощь».", self._menu()
+        self.db.execute("UPDATE client_bot_drafts SET step=? WHERE chat_id=?",
+                        (step, chat))
+        prompts = {
+            "description": "Шаг 1 из 4 заново: опишите, что нужно напечатать.",
+            "dimensions": "Шаг 2 из 4 заново: размеры детали (Д×Ш×В, мм).",
+            "purpose": "Шаг 3 из 4 заново: для чего деталь и где будет жить?",
+        }
+        return prompts[step], self._wizard_keyboard()
+
+    def _draft_cancel(self, chat: str) -> tuple[str, dict | None]:
+        self.db.execute("DELETE FROM client_bot_drafts WHERE chat_id=?", (chat,))
+        return ("Заявка отменена, черновик удалён. Начать заново — кнопка "
+                "«✏️ Свой заказ»."), self._menu()
+
+    def _faq_article(self, chat: str, key: str) -> tuple[str, dict | None]:
+        """К16: контекстная подсказка. Открытый мастер не сбрасывается —
+        после статьи покупатель продолжает с того же шага."""
+        if key == "materials":
+            text = str(self._settings().get("client_bot_faq_materials") or "").strip()
+            answer = text or FAQ_MATERIALS
+        else:
+            answer = self.text_faq()
+        draft = self.db.one("SELECT step FROM client_bot_drafts WHERE chat_id=?",
+                            (chat,))
+        if draft:
+            if str(draft.get("step") or "") == "confirm":
+                return answer + "\n\n—\n" + self._draft_summary(chat), \
+                    self._draft_confirm_keyboard()
+            return answer, self._wizard_keyboard()
         return answer, self._menu()
 
     def _save_phone(self, chat: str, row: dict, text: str,
@@ -1922,8 +2265,95 @@ class ClientBot:
                          f" — {self._status_label(order)}{due}")
         if len(orders) > 10:
             lines.append(f"…и ещё {len(orders) - 10}")
+        # К9: счётчик лояльности — каждый 5-й заказ со скидкой 10%.
+        finished = len(self._finished_orders(chat, row))
+        if finished:
+            left = 5 - (finished % 5)
+            if left == 1:
+                lines.append(f"\n🎉 Завершённых заказов: {finished} — следующий со "
+                             "скидкой 10%!")
+            else:
+                lines.append(f"\nЗавершённых заказов: {finished} · до скидки 10% "
+                             f"(каждый 5-й): {left}.")
         lines.append("\nПодробнее: «статус <номер>».")
         return "\n".join(lines)
+
+    def _finished_orders(self, chat: str, row: dict) -> list[dict]:
+        """Завершённые (выданные) заказы чата — база счётчика лояльности."""
+        return [order for order in self._linked_orders(chat, row)
+                if self._is_final(order)
+                and str(order.get("status") or "") != "cancelled"]
+
+    def _loyalty_discount(self, chat: str, row: dict, total: float) -> float:
+        """К9: каждый 5-й заказ — −10%. Скидку применяет только бот на позиции
+        с известной ценой (каталог/корзина); в индивидуальных заявках мастер
+        видит пометку и учитывает её сам."""
+        finished = len(self._finished_orders(chat, row))
+        if finished > 0 and finished % 5 == 4 and total > 0:
+            return round(total * 0.10, 2)
+        return 0.0
+
+    def _send_ready_photo(self, chat: str, order: dict) -> None:
+        """К7: снимок готового изделия покупателю, если фото есть в карточке."""
+        if not bool(self._settings().get("client_bot_ready_photo", True)):
+            return
+        photo = self.db.one(
+            "SELECT * FROM order_photos WHERE order_id=?"
+            " ORDER BY at DESC LIMIT 1", (order.get("id") or "",))
+        name = str((photo or {}).get("file") or "")
+        if not name:
+            return
+        try:
+            from .config import PHOTO_DIR
+            raw = (PHOTO_DIR / name).read_bytes()
+        except OSError:
+            return
+        caption = (f"📸 Заказ №{order.get('number')} «{order.get('product')}» "
+                   "готов — так он выглядит перед выдачей.")
+        try:
+            self._send_photo(chat, caption, raw, self._order_card_keyboard(order),
+                             dedupe_key=f"readyphoto:{chat}:{order.get('id')}")
+        except Exception:
+            pass
+
+    def operator_sla_minutes(self) -> float:
+        """К17: среднее время ответа оператора за 30 дней, минуты.
+
+        Считаем от последнего входящего сообщения чата до ответа мастера
+        (kind='answer'). Разрывы больше суток не учитываем — это не ответ,
+        а забытый диалог.
+        """
+        from datetime import timedelta
+        since = (datetime.now() - timedelta(days=30)).isoformat()
+        rows = self.db.query(
+            "SELECT chat_id, direction, kind, at FROM client_bot_log"
+            " WHERE at>=? ORDER BY id ASC", (since,))
+        last_in: dict[str, str] = {}
+        deltas: list[float] = []
+        for item in rows:
+            chat = str(item.get("chat_id") or "")
+            if not chat:
+                continue
+            if str(item.get("direction")) == "in":
+                last_in[chat] = str(item.get("at") or "")
+            elif str(item.get("kind")) == "answer":
+                previous = last_in.pop(chat, "")
+                if not previous:
+                    continue
+                try:
+                    delta = (datetime.fromisoformat(str(item.get("at")))
+                             - datetime.fromisoformat(previous)).total_seconds() / 60
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= delta <= 1440:
+                    deltas.append(delta)
+        if len(deltas) < 3:
+            return 0.0
+        return round(sum(deltas) / len(deltas), 1)
+
+    def default_templates(self) -> list[dict]:
+        """К18: библиотека готовых ответов — панель предлагает их одним кликом."""
+        return [dict(item) for item in DEFAULT_TEMPLATES]
 
     def text_order_status(self, chat: str, row: dict, number: str) -> str:
         if not number:
@@ -1986,6 +2416,10 @@ class ClientBot:
                 {"text": "✅ Согласен", "callback_data": f"quote_yes:{order['id']}"},
                 {"text": "↩️ Обсудить", "callback_data": f"quote_no:{order['id']}"},
             ])
+        # К14: прямой вход в поддержку из карточки — брак или «не подошло»
+        # не должны требовать искать команду «оператор».
+        keys.append([{"text": "⚠️ Проблема с заказом",
+                      "callback_data": f"problem:{order['id']}"}])
         keys.append([{"text": "🛍 Каталог", "callback_data": "catalog"},
                      {"text": "📦 Мои заказы", "callback_data": "mine"}])
         return {"inline_keyboard": keys}
@@ -2145,6 +2579,9 @@ class ClientBot:
                 self.db.execute("UPDATE client_orders SET last_notified_status=? WHERE chat_id=? AND order_id=?",
                                 (status, chat, order_id))
                 self._notified[(chat, order_id)] = status
+                # К7: встречаем покупателя снимком готовой детали.
+                if status == "ready":
+                    self._send_ready_photo(chat, order)
                 self._log(chat, link.get("chat_name") or "", "",
                           f"№{order.get('number')}: {status}", kind="push", direction="out",
                           unread=0, order_id=order_id, source=link.get("source") or "")
@@ -2271,9 +2708,14 @@ class ClientBot:
             self.db.execute("UPDATE client_orders SET reminded_at=?"
                             " WHERE chat_id=? AND order_id=?",
                             (now_iso(), chat, order_id))
+            # К12: сразу первая строка «Как получить» — адрес/часы, чтобы
+            # напоминание отвечало на вопрос «куда ехать», а не будило новый.
+            info = str(self._settings().get("client_bot_pickup_info") or "").strip()
+            hint = f"\n{info.splitlines()[0].strip()}" if info else ""
             self._reply_keyed(chat, f"Заказ №{order.get('number')} "
-                                  f"«{order.get('product')}» готов и ждёт вас. "
-                                  "Если забрали — извините за беспокойство 🙂",
+                                  f"«{order.get('product')}» готов и ждёт вас."
+                                  f"{hint}"
+                                  "\nЕсли забрали — извините за беспокойство 🙂",
                                   self._menu(),
                                   dedupe_key=f"pickup:{chat}:{order_id}")
             self._log(chat, "", "→ pickup", f"№{order.get('number')}: ждёт",
@@ -2302,6 +2744,7 @@ class ClientBot:
             "funnel_events": count("SELECT COUNT(*) n FROM client_bot_funnel"),
             "outbox_pending": count("SELECT COUNT(*) n FROM client_bot_outbox WHERE state='pending'"),
             "last_poll": self.last_poll,
+            "sla_minutes": self.operator_sla_minutes(),
         }
 
     def analytics(self, days: int = 30) -> dict:

@@ -1080,6 +1080,9 @@
     <div class="set-row"><div class="sinfo"><b>Уведомления о статусе</b><small>Печать, готовность и изменения срока</small></div><label class="switch"><input type="checkbox" id="cb_notify" checked><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Отзывы после выдачи</b><small>Только после фактического «Выдан», не после «На складе»</small></div><label class="switch"><input type="checkbox" id="cb_review" checked><i></i></label></div>
     <div class="set-row"><div class="sinfo"><b>Напоминание о выдаче</b><small>Дней в статусе «Готов», 0 — выключить</small></div><input type="number" id="cb_pickup_days" min="0" max="30" value="3"></div>
+    <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Как получить</b><small>Адрес и часы — кнопка «🚚 Как получить» в боте и напоминания о выдаче</small></div><textarea id="cb_pickup_info" rows="3" placeholder="Адрес: …&#10;Часы: ежедневно 10:00–20:00"></textarea></div>
+    <div class="set-row"><div class="sinfo"><b>Фото готового заказа</b><small>При статусе «Готов» бот отправляет покупателю снимок из карточки</small></div><label class="switch"><input type="checkbox" id="cb_ready_photo" checked><i></i></label></div>
+    <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Статья «Как выбрать материал»</b><small>Кнопка в мастере заявки; пусто — стандартный текст NOZZA</small></div><textarea id="cb_faq_materials" rows="3" placeholder="PLA — декор и интерьер, PETG — прочность и влага…"></textarea></div>
     <div class="set-row clientbot-wide-row"><div class="sinfo"><b>Реквизиты оплаты</b><small>Ручная сверка: реквизиты/QR СБП → «Я оплатил» → подтверждение сотрудником</small></div><textarea id="cb_pay_info" rows="3" placeholder="СБП по номеру +7…, получатель…"></textarea></div>
     <div class="set-row"><div class="sinfo"><b>QR СБП</b><small>Ссылка на изображение или QR-переход, без обязательного эквайринга</small></div><input type="url" id="cb_pay_qr" placeholder="https://…/qr"></div>
     <div class="set-row"><div class="sinfo"><b>Назначение перевода</b><small>По умолчанию: NOZZA + номер заказа</small></div><input type="text" id="cb_payment_purpose" placeholder="NOZZA {номер заказа}"></div>
@@ -1098,6 +1101,7 @@
    <div class="clientbot-state-list"><span>черновик заявки</span><b>3 шага</b><span>ручная оплата</span><b>ожидает сверки</b><span>статус</span><b>подписанная ссылка</b></div>
    <div class="notice" style="margin-top:12px"><span>💡</span><span>Deep-link <b>/start src_…</b> сохраняется в локальной воронке. Данные аналитики не уходят во внешние сервисы.</span></div>
    <div class="clientbot-templates"><div class="card-head"><div><span class="card-kicker">Inbox</span><h3>Шаблоны ответов</h3><p>Выберите шаблон в диалоге или отредактируйте его здесь.</p></div></div><div id="cb_templates"></div></div>
+  <div class="clientbot-templates clientbot-templates-lib"><div class="card-head"><div><span class="card-kicker">Библиотека</span><h3>Готовые ответы</h3><p>Заготовки под частые ситуации: цена, размеры, выдача, извинение. Кнопка «+» копирует в ваши шаблоны — текст можно править.</p></div></div><div id="cb_default_templates"></div></div>
   </section>
  </div>
  <div class="clientbot-grid clientbot-grid-top">

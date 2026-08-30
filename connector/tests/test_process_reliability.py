@@ -76,18 +76,15 @@ class BackupRotationTests(unittest.TestCase):
 class AutoBackupTests(unittest.TestCase):
     def test_existing_copy_sets_due_time_and_failures_retry_hourly(self):
         class FakeDB:
+            """12.0: автобэкап идёт через отдельное ro-соединение
+            (backup_database_file), а не через блокирующий db.backup_to."""
             def __init__(self):
                 self.calls = 0
                 self.fail = False
+                self.path = "db.sqlite3"
 
             def setting(self, key, default=None):
                 return {"auto_backup_days": 1, "backup_keep": 20}.get(key, default)
-
-            def backup_to(self, target):
-                self.calls += 1
-                if self.fail:
-                    raise OSError("диск недоступен")
-                target.write_bytes(b"sqlite")
 
             def add_event(self, *args, **kwargs):
                 pass
@@ -97,8 +94,16 @@ class AutoBackupTests(unittest.TestCase):
         manager.db = FakeDB()
         manager._last_backup = 0.0
         manager._last_backup_attempt = 0.0
+
+        def fake_backup(source, target):
+            manager.db.calls += 1
+            if manager.db.fail:
+                raise OSError("диск недоступен")
+            pathlib.Path(target).write_bytes(b"sqlite")
+
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch("connector.printflow.manager.BACKUP_DIR", pathlib.Path(tmp)), \
+                mock.patch("connector.printflow.manager.backup_database_file", fake_backup), \
                 mock.patch("connector.printflow.manager.time.time", return_value=now):
             existing = pathlib.Path(tmp) / "printflow-auto-existing.sqlite3"
             existing.write_bytes(b"sqlite")
