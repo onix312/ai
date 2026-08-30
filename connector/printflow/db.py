@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -261,6 +261,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("tag_color", "TEXT DEFAULT '#4f46e5'"),
         ("tag_note", "TEXT DEFAULT ''"),
         ("tag_old_price", "REAL DEFAULT 0"),
+        # 13.1 (58): ячейка на схеме полки («A1», «B3»…) — карта вместо списка
+        ("cell", "TEXT DEFAULT ''"),
     ],
     "shelf_moves": [
         # Внешний ключ строки чека делает повторную отправку из 1С безопасной.

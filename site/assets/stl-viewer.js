@@ -43,6 +43,38 @@ function parseSTL(buffer) {
   return { vertices, normals, triangles };
 }
 
+/* 13.1 (З2-47): парсинг STL уходит в Web Worker (stl-worker.js), чтобы
+   большие модели не вешали интерфейс. Если Worker недоступен (file://,
+   старый браузер) — парсим здесь же, как раньше. */
+let stlWorker = null;
+try {
+  if (typeof Worker !== 'undefined' && window.location.protocol !== 'file:') {
+    stlWorker = new Worker('assets/stl-worker.js');
+  }
+} catch (e) { stlWorker = null; }
+
+function parseSTLInWorker(stlBuffer) {
+  return new Promise((resolve) => {
+    const done = (e) => {
+      stlWorker.removeEventListener('message', done);
+      stlWorker.removeEventListener('error', done);
+      const d = e.data;
+      if (d && d.ok) {
+        resolve({
+          vertices: new Float32Array(d.vertices),
+          normals: new Float32Array(d.normals),
+          triangles: d.triangles,
+        });
+      } else {
+        resolve(null);
+      }
+    };
+    stlWorker.addEventListener('message', done);
+    stlWorker.addEventListener('error', done);
+    stlWorker.postMessage({ buffer: stlBuffer }, [stlBuffer]);
+  });
+}
+
 /**
  * Создаёт 3D viewer с Three.js.
  * @param {HTMLElement} host - контейнер
@@ -71,29 +103,49 @@ function createViewer(host, stlBuffer, opts = {}) {
   const height = opts.height || 500;
   const color = opts.color || 0x4f46e5;
 
-  const parsed = parseSTL(stlBuffer);
+  const build = (parsed) => {
+    // Создаём сцену
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf9fafb);
 
-  // Создаём сцену
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf9fafb);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    camera.position.z = 5;
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-  camera.position.z = 5;
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    host.appendChild(renderer.domElement);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(width, height);
-  host.appendChild(renderer.domElement);
+    // Создаём геометрию
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(parsed.vertices, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(parsed.normals, 3));
 
-  // Создаём геометрию
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(parsed.vertices, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(parsed.normals, 3));
+    const material = new THREE.MeshPhongMaterial({ color, specular: 0x111111, shininess: 30 });
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+    return { scene, camera, renderer, geometry, mesh };
+  };
 
-  const material = new THREE.MeshPhongMaterial({ color, specular: 0x111111, shininess: 30 });
-  const mesh = new THREE.Mesh(geometry, material);
-  scene.add(mesh);
+  if (stlWorker) {
+    // 13.1 (З2-47): разбор — в воркере, интерфейс не подвисает.
+    parseSTLInWorker(stlBuffer).then((parsed) => {
+      if (!parsed) { host.innerHTML = '<div class="stl-viewer-placeholder"><p>Не удалось разобрать модель в фоне — попробуйте ещё раз.</p></div>'; return; }
+      const view = build(parsed);
+      initOrbit(view);
+    });
+    return;
+  }
+  const view = build(parseSTL(stlBuffer));
+  initOrbit(view);
 
-  // Освещение
+  initOrbit(view);
+}
+
+/** Освещение, центрирование и вращение — общая часть для синхронного
+    и воркерного пути (13.1, З2-47). */
+function initOrbit(view) {
+  const { scene, camera, renderer, geometry, mesh } = view;
+
   const light1 = new THREE.DirectionalLight(0xffffff, 0.8);
   light1.position.set(1, 1, 1);
   scene.add(light1);
@@ -152,7 +204,6 @@ function createViewer(host, stlBuffer, opts = {}) {
     renderer.render(scene, camera);
   }
   animate();
-
   // Статистика
   const stats = document.createElement('div');
   stats.className = 'stl-stats';

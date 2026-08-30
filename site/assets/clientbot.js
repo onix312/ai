@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 
-const { $, esc, num, money, nfmt, toast, fail, agoText, ask } = PF.ui;
+const { $, esc, num, money, nfmt, toast, fail, agoText, ask, dateText } = PF.ui;
 const { get, post } = PF.api;
 
 const COMMANDS = [
@@ -143,16 +143,20 @@ function renderInbox(items, templates = []) {
     const last = messages[0] || {};
     const name = text(last.name, last.username ? '@' + last.username : `Чат ${chatId}`);
     const status = last.inbox_status || 'open';
+    // 13.1 (44): спящие диалоги приглушаются и получают пометку «молчит с …»
+    const lastAt = Date.parse(last.at || '');
+    const sleeping = !!(lastAt && Date.now() - lastAt > 30 * 86400e3);
     const messageHtml = messages.slice(0, 5).map((item) => `<div class="clientbot-message ${item.direction === 'out' ? 'out' : 'in'}">`
       + `<div>${esc(item.text || '')}</div><small>${esc(dt(item.at))}${item.kind && item.kind !== 'message' ? ' · ' + esc(item.kind) : ''}</small></div>`).join('');
-    return `<article class="clientbot-thread" data-chat-id="${esc(chatId)}"><header class="clientbot-thread-head">`
-      + `<div><b>${esc(name)}</b><small>Telegram ID ${esc(chatId)}${last.username ? ' · @' + esc(last.username) : ''}</small></div>`
+    return `<article class="clientbot-thread${sleeping ? ' sleeping' : ''}" data-chat-id="${esc(chatId)}"><header class="clientbot-thread-head">`
+      + `<div><b>${esc(name)}</b><small>Telegram ID ${esc(chatId)}${last.username ? ' · @' + esc(last.username) : ''}${sleeping ? ` · молчит с ${esc(dateText(new Date(lastAt)))}` : ''}</small></div>`
       + `<span class="tag ${status === 'closed' ? '' : status === 'pending' ? 'warn' : 'ok'}">${esc(inboxStatus(status))}</span></header>`
       + `<div class="clientbot-thread-messages">${messageHtml}</div>`
       + `<div class="clientbot-reply"><div class="clientbot-quick" data-quick-row>`
       + quickReplies().map((item, i) => `<button class="btn sm ghost" type="button" data-quick-reply data-quick-index="${i}" title="${esc(item.text)}">${esc(item.name)}</button>`).join('')
       + `</div><textarea data-reply-input rows="2" maxlength="3800" placeholder="Ответить покупателю…"></textarea>`
-      + (templates.length ? `<select data-inbox-template aria-label="Шаблон ответа"><option value="">Вставить шаблон…</option>${templates.filter((item) => item.enabled !== false).map((item) => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</select>` : '')
+      // 13.1 (42): шаблоны ответов — чипами с превью, вместо выпадающего списка
+      + (templates.length ? `<div class="clientbot-tpl-chips">${templates.filter((item) => item.enabled !== false).slice(0, 6).map((item, i) => `<button class="btn sm ghost" type="button" data-tpl-index="${i}" title="${esc(item.text || '')}">✎ ${esc(item.name)}</button>`).join('')}</div>` : '')
       + `<div class="clientbot-thread-actions"><button class="btn sm primary" type="button" data-inbox-reply>Ответить</button>`
       + `<button class="btn sm" type="button" data-inbox-read>Прочитано</button>`
       + `<select data-inbox-status aria-label="Статус диалога"><option value="open" ${status === 'open' ? 'selected' : ''}>открыт</option>`
@@ -285,10 +289,19 @@ function renderLog(items) {
   const host = $('cb_log');
   if (!host) return;
   const rows = Array.isArray(items) ? items : [];
-  host.innerHTML = rows.length ? rows.slice(0, 80).map((item) => `<tr><td class="muted">${esc(dt(item.at))}</td>`
-    + `<td>${esc(text(item.name, item.chat_id || '—'))}</td><td>${esc(item.direction === 'out' ? 'ответ' : item.direction === 'system' ? 'система' : 'входящее')}</td>`
-    + `<td>${esc(item.text || '')}</td><td class="muted">${esc(item.answer || item.operator || '')}</td></tr>`).join('')
-    : '<tr><td colspan="5" class="empty">Диалогов пока нет.</td></tr>';
+  // 13.1 (41): диалоги — пузырями, как в Telegram: входящее слева, ответ справа
+  host.innerHTML = rows.length ? rows.slice(0, 80).map((item) => {
+    const out = item.direction === 'out';
+    const system = item.direction === 'system';
+    const name = text(item.name, item.chat_id || '—');
+    const av = esc(U.avatarEmoji('', item.chat_id) || '👤');
+    const answer = (item.answer || item.operator) && !out
+      ? `<div class="cb-bubble-answer"><b>Ответ оператора</b><p>${esc(item.answer || item.operator)}</p></div>` : '';
+    return `<div class="cb-bubble-row ${out ? 'out' : system ? 'sys' : 'in'}">`
+      + `<span class="cb-bubble-av" aria-hidden="true">${system ? '⚙' : av}</span>`
+      + `<div class="cb-bubble"><b>${esc(name)}</b><p>${esc(item.text || '')}</p>`
+      + `<small>${esc(dt(item.at))} · ${out ? 'ответ' : system ? 'система' : 'входящее'}</small></div>${answer}</div>`;
+  }).join('') : '<div class="empty compact"><span>Диалогов пока нет — сюда придут входящие и ответы.</span></div>';
 }
 
 /* ============================================================ клиент-бот */
@@ -418,6 +431,18 @@ function inboxTemplateChange(select) {
     input.focus();
   }
   select.value = '';
+}
+
+// 13.1 (42): чип шаблона — тот же эффект, что у выпадающего списка, но без меню
+function inboxTemplateChip(button) {
+  const thread = button.closest('[data-chat-id]');
+  const input = thread && thread.querySelector('[data-reply-input]');
+  const index = Number(button.dataset.tplIndex || 0);
+  const template = (latestTemplates || []).filter((item) => item.enabled !== false)[index];
+  if (input && template) {
+    input.value = template.text || '';
+    input.focus();
+  }
 }
 
 async function templateAction(button) {
@@ -619,6 +644,8 @@ function bind() {
     const button = event.target.closest('button');
     if (button && (button.matches('[data-inbox-reply]') || button.matches('[data-inbox-read]'))) inboxAction(button);
     if (button && button.matches('[data-quick-reply]')) quickReplyAction(button);
+    // 13.1 (42): чип шаблона — вставить текст в поле ответа
+    if (button && button.matches('[data-tpl-index]')) inboxTemplateChip(button);
   });
   $('cb_default_templates')?.addEventListener('click', (event) => {
     const button = event.target.closest('button[data-template-use]');

@@ -273,7 +273,8 @@ function filtered() {
   const group = ($('prod_group') || {}).value || '';
   const kind = ($('prod_kind') || {}).value || '';
   const status = ($('prod_status') || {}).value || '';
-  return data.items.filter((i) => {
+  const sort = ($('prod_sort') || {}).value || '';
+  const list = data.items.filter((i) => {
     if (group && i.group_id !== group) return false;
     if (kind && i.kind !== kind) return false;
     if (status === 'unprofitable' && i.profitable !== false) return false;
@@ -284,6 +285,21 @@ function filtered() {
     }
     return true;
   });
+  // 13.1 (15): сортировка плиток — «что допечатать» видно без открытия плана
+  if (sort === 'margin') {
+    list.sort((a, b) => (num(b.margin) / Math.max(1, num(b.price)) * 100) - (num(a.margin) / Math.max(1, num(a.price)) * 100));
+  } else if (sort === 'sold7') {
+    list.sort((a, b) => num(b.sold_7) - num(a.sold_7));
+  } else if (sort === 'days') {
+    list.sort((a, b) => {
+      const ad = a.days_left == null ? 1e9 : num(a.days_left);
+      const bd = b.days_left == null ? 1e9 : num(b.days_left);
+      return ad - bd;
+    });
+  } else if (sort === 'price') {
+    list.sort((a, b) => num(a.price) - num(b.price));
+  }
+  return list;
 }
 
 function render() {
@@ -303,45 +319,117 @@ function render() {
   $('prod_grid').hidden = viewMode !== 'cards';
   $('prod_table').hidden = viewMode !== 'table';
   if (viewMode === 'cards') renderCards(list); else renderTable(list);
+
+  // 13.1 (19): бейдж «цены просели» — клик фильтрует убыточные
+  const bad = $('prod_warn_badge');
+  if (bad) {
+    const unprof = data.items.filter((i) => !num(i.display_only) && i.profitable === false);
+    if (unprof.length) {
+      bad.hidden = false;
+      bad.innerHTML = `<button class="chip warn clickable" type="button" id="prod_warn_btn" title="Показать только убыточные">`
+        + `<i data-icon="trend">📉</i> Цены просели у ${unprof.length} ${plural(unprof.length, 'товара', 'товаров', 'товара')}</button>`;
+      const btn = $('prod_warn_btn');
+      if (btn) btn.addEventListener('click', () => {
+        const sel = $('prod_status');
+        if (sel) { sel.value = 'unprofitable'; }
+        render();
+      });
+    } else {
+      bad.hidden = true;
+      bad.innerHTML = '';
+    }
+  }
+}
+
+/** 13.1: русская плюрализация для подписей («1 товар / 2 товара / 5 товаров»). */
+function plural(n, one, few, many) {
+  const v = Math.abs(n) % 100, d = v % 10;
+  if (v > 10 && v < 20) return many;
+  if (d > 1 && d < 5) return few;
+  if (d === 1) return one;
+  return many;
 }
 
 function renderCards(list) {
   const KIND_ICONS = { kit: '◫', material: '◍', semi: '⚙', service: '★', product: '📦', showcase: '🛍' };
   const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
-  $('prod_grid').innerHTML = list.length ? list.map((i) => {
+  const shopEye = !!($('prod_shop_eye') || {}).dataset && $('prod_shop_eye')?.classList.contains('on');
+  const card = (i) => {
     const st = i.status || 'ok';
     const disp = !!i.display_only;
     const cls = disp ? '' : (STATUS_CLASS[st] || '');
     const unprofit = !disp && i.profitable === false;
     const minQ = num(i.min_qty) || 5;
-    const stockPct = Math.min(100, Math.max(0, Math.round(num(i.qty) / minQ * 50)));
+    const free = Math.max(0, num(i.free));
+    const reserved = Math.max(0, num(i.reserved));
+    const total = free + reserved;
+    const stockPct = Math.min(100, Math.max(0, total ? Math.round(free / total * 100) : (disp ? 100 : 0)));
     const stockHealthCls = disp ? 'ok' : (st === 'ok' ? 'ok' : (st === 'low' ? 'warn' : 'bad'));
     const marginPct = num(i.price) ? Math.round(num(i.margin) / num(i.price) * 100) : 0;
     const daysLeftCls = i.days_left == null ? 'muted' : (i.days_left < 3 ? 'neg' : (i.days_left < 7 ? 'warn-text' : 'pos'));
     const kindIc = KIND_ICONS[i.kind] || '📦';
     const statusIc = disp ? '🛍' : (STATUS_ICONS[st] || '◻');
     const statusLabel = disp ? 'Для магазина' : (STATUS_LABEL[st] || st);
+    const hiddenInBot = i.kind === 'product' && !num(i.client_bot_published, 1);
+    // 13.1 (16): мини-спарклайн продаж — 7 дней, тренд виден без клика
+    const spark = (() => {
+      const days = Array.isArray(i.sold_days) ? i.sold_days : [];
+      const peak = Math.max(1, ...days);
+      if (!days.length || !days.some((v) => v > 0)) return '';
+      const pts = days.map((v, idx) => {
+        const x = idx / Math.max(1, days.length - 1) * 60;
+        const y = 18 - (num(v) / peak) * 16;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      const trend = num(days[days.length - 1]) > num(days[days.length - 2]);
+      return `<svg class="prod-spark ${trend ? 'up' : ''}" viewBox="0 0 60 20" width="60" height="20" aria-hidden="true">`
+        + `<polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`
+        + `<circle cx="60" cy="${(18 - num(days[days.length - 1]) / peak * 16).toFixed(1)}" r="1.8" fill="currentColor"/></svg>`;
+    })();
+    // 13.1 (13): бублик остатка — свободно/резерв/витрина формой, а не числом
+    const donut = disp
+      ? '<span class="prod-donut ok" style="--p:100" title="Витрина — без учёта остатков"></span>'
+      : `<span class="prod-donut ${stockHealthCls}" style="--p:${total ? stockPct : 0}" title="Свободно ${nfmt(free)} · резерв ${nfmt(reserved)}"></span>`;
+    // 13.1 (18): «полка глазами покупателя» — только то, что видит клиент в боте
+    if (shopEye) {
+      return `<article class="prod-card shop-eye ${st}" data-nom="${esc(i.id)}">`
+        + '<div class="phead">'
+        + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
+          : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
+        + `<div class="pinfo"><div class="pinfo-top"><h3>${esc(i.name)}</h3></div>`
+        + `<small class="muted">${i.kind === 'product' ? '' : esc(KIND_LABEL[i.kind] || '')}</small></div>`
+        + `<button class="icon-btn sm" type="button" data-nom-edit="${esc(i.id)}" title="Открыть карточку">✎</button></div>`
+        + '<div class="pbody">'
+        + `<div class="pfacts single"><span>Цена в боте <b>${money(i.price)}</b></span>`
+        + `<span>${hiddenInBot ? '🙈 не показывается покупателям' : '✓ на витрине'}</span></div></div>`
+        + (hiddenInBot
+          ? '<div class="pacts"><span class="chip bad">🙈 скрыт</span><span class="spacer"></span>'
+            + `<button class="btn sm" type="button" data-nom-show="${esc(i.id)}" title="Опубликовать в клиент-боте">Показать</button></div>`
+          : '<div class="pacts"><span class="chip ok">🛍 в витрине</span><span class="spacer"></span>'
+            + `<button class="btn sm" type="button" data-nom-edit="${esc(i.id)}">Карточка</button></div>`)
+        + '</article>';
+    }
     return `<article class="prod-card ${st}" data-nom="${esc(i.id)}">`
       + '<div class="phead">'
       + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
       + `<div class="pinfo">`
       + `<div class="pinfo-top"><h3>${esc(i.name)}</h3><span class="prod-kind-tag ${esc(i.kind || 'product')}">${esc(KIND_LABEL[i.kind] || 'Товар')}</span></div>`
-      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''}${i.kind === 'product' && !num(i.client_bot_published, 1) ? ' · 🙈 скрыт в боте' : ''}</small>`
+      + `<small class="muted">${esc(i.code || '')}${i.sku ? ' · ' + esc(i.sku) : ''}${hiddenInBot ? ' · 🙈 скрыт в боте' : ''}</small>`
       + `</div>`
       + `<button class="icon-btn sm" type="button" data-nom-edit="${esc(i.id)}" title="Открыть карточку">✎</button></div>`
       + '<div class="pbody">'
       + `<div class="pqty ${cls}"><div class="pqty-num"><b>${nfmt(i.qty)}</b><span>${esc(i.unit || 'шт')}</span></div>`
-      + `<div class="bar thin prod-stock-bar ${stockHealthCls}"><i style="width:${stockPct}%"></i></div>`
+      + `<div class="pqty-donut-row">${donut}`
       + (disp ? '<small class="muted">витрина · без учёта остатков</small>'
-        : (num(i.reserved) ? `<small class="muted reserve-tag">резерв ${nfmt(i.reserved)} шт</small>` : `<small class="muted free-tag">${nfmt(i.free)} своб.</small>`))
-      + '</div>'
+        : (num(i.reserved) ? `<small class="muted reserve-tag">резерв ${nfmt(i.reserved)} шт · ${nfmt(i.free)} своб.</small>` : `<small class="muted free-tag">${nfmt(i.free)} своб.</small>`))
+      + '</div></div>'
       + '<div class="pfacts">'
       + `<span>Цена <b>${money(i.price)}</b></span>`
       + `<span>С/с <b>${disp ? '—' : money(i.cost)}</b></span>`
       + `<span>Маржа <b class="${num(i.margin) >= 0 ? 'pos' : 'neg'}">${disp ? '—' : money(i.margin) + ` <small class="pct">(${marginPct}%)</small>`}</b></span>`
       + `<span>₽/час <b class="${unprofit ? 'neg' : 'pos'}">${num(i.hours) ? money(i.profit_per_hour) : '—'}</b></span>`
-      + `<span>7 дн. <b>${disp ? '—' : nfmt(i.sold_7) + ' шт'}</b></span>`
+      + `<span>7 дн. <b>${disp ? '—' : nfmt(i.sold_7) + ' шт'}</b>${spark}</span>`
       + (disp ? '<span class="muted">ценник/QR — со стеллажа</span>'
         : (i.days_left != null ? `<span>Хватит <b class="${daysLeftCls}">${nfmt(i.days_left, 1)} дн.</b></span>`
           : '<span class="muted">продаж нет</span>'))
@@ -355,11 +443,39 @@ function renderCards(list) {
         + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
         + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`)
       + '</div></article>';
-  }).join('') : (data.items.length
+  };
+  if (shopEye || !data.groups.length || $('prod_group').value) {
+    $('prod_grid').innerHTML = list.length ? list.map(card).join('') : (data.items.length
+      ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
+      : emptyBox('▩', 'Номенклатура пуста',
+        'Добавьте товар — модель, нормативы печати и цену. Остальное система посчитает сама.',
+        { label: '+ Товар', click: 'prod_add' }));
+    U.stagger($('prod_grid'));
+    return;
+  }
+  // 13.1 (17): сворачиваемые группы с подытогом остатка
+  const byGroup = new Map();
+  list.forEach((i) => {
+    const gid = i.group_id || '';
+    if (!byGroup.has(gid)) byGroup.set(gid, []);
+    byGroup.get(gid).push(i);
+  });
+  const groupsHtml = [...byGroup.entries()].map(([gid, items]) => {
+    const g = data.groups.find((x) => x.id === gid);
+    const qtySum = items.reduce((a, i) => a + num(i.qty), 0);
+    const valSum = items.reduce((a, i) => a + num(i.margin), 0);
+    return `<details class="prod-group${g ? '' : ' nogroup'}"><summary>`
+      + `<span class="pg-name">${esc(g ? g.name : 'Без категории')}</span>`
+      + `<span class="pg-count">${items.length} ${plural(items.length, 'позиция', 'позиции', 'позиций')}</span>`
+      + `<span class="pg-stock">${nfmt(qtySum)} шт</span>`
+      + `<span class="pg-margin ${valSum >= 0 ? 'pos' : 'neg'}">${money(valSum)}</span>`
+      + `</summary><div class="prod-group-inner">${items.map(card).join('')}</div></details>`;
+  }).join('');
+  $('prod_grid').innerHTML = groupsHtml || (data.items.length
     ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
-    : emptyBox('▩', 'Номенклатура пуста',
-      'Добавьте товар — модель, нормативы печати и цену. Остальное система посчитает сама.',
+    : emptyBox('▩', 'Номенклатура пуста', 'Добавьте товар — модель, нормативы печати и цену.',
       { label: '+ Товар', click: 'prod_add' }));
+  U.stagger($('prod_grid'));
 }
 
 function renderTable(list) {
@@ -378,14 +494,15 @@ function renderTable(list) {
       + `<td class="tnum muted">${esc(i.code || '')}</td>`
       + `<td class="strong">${esc(i.name)}${vitrine}${i.sku ? `<small class="muted"> · ${esc(i.sku)}</small>` : ''}</td>`
       + `<td>${esc(group ? group.name : '—')}</td>`
+      // Б4: таблица больше не врёт — те же цифры, что в плитках
       + `<td class="right tnum">${nfmt(i.qty)}</td>`
-      + `<td class="right tnum muted">—</td>`
-      + `<td class="right tnum muted">—</td>`
+      + `<td class="right tnum ${num(i.reserved) ? 'warn-text' : 'muted'}">${disp ? '—' : nfmt(i.reserved)}</td>`
+      + `<td class="right tnum">${disp ? '—' : nfmt(i.free)}</td>`
       + `<td class="right tnum">${money(i.price)}</td>`
       + `<td class="right tnum muted">${disp ? '—' : money(i.cost)}</td>`
-      + `<td class="right tnum muted">${disp ? '—' : (num(i.margin) >= 0 ? money(i.margin) : money(i.margin))}</td>`
-      + `<td class="right tnum muted">—</td>`
-      + `<td class="right tnum muted">${disp ? '—' : nfmt(i.sold_7)}</td>`
+      + `<td class="right tnum ${num(i.margin) >= 0 ? '' : 'neg'}">${disp ? '—' : money(i.margin)}</td>`
+      + `<td class="right tnum ${!disp && num(i.hours) && i.profitable === false ? 'neg' : ''}">${disp || !num(i.hours) ? '—' : money(i.profit_per_hour)}</td>`
+      + `<td class="right tnum">${disp ? '—' : nfmt(i.sold_7)}</td>`
       + `<td><span class="chip ${disp ? '' : (STATUS_CLASS[i.status] || '')}">${statusIc} ${esc(statusLabel)}</span></td>`
       + `<td class="right">${disp ? '<span class="muted">не печатается</span>' : `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену этого товара">↻</button> <button class="btn sm" type="button" data-nom-batch="${esc(i.id)}">⎙</button>`}</td></tr>`;
   }).join('') : `<tr><td colspan="13">${data.items.length
@@ -1236,13 +1353,18 @@ function openWh(id) {
 }
 
 /* ========================================================= быстрая продажа */
-function openQuickSale() {
+function openQuickSale(item) {
   fillSelectors();
   const retail = data.warehouses.find((w) => num(w.retail));
   if (retail) $('qs_warehouse').value = retail.id;
   $('qs_discount').value = 0;
   $('qs_search').value = '';
   renderQuickRows();
+  // 13.1 (20): продажа из «фокуса» — плитка уже выбрана, остаётся ввести количество
+  if (item && item.id) {
+    const input = $(`[data-qs-qty="${CSS.escape(item.id)}"]`);
+    if (input) { input.value = 1; input.focus(); input.select(); }
+  }
   openModal('quicksale_modal');
 }
 
@@ -1318,9 +1440,16 @@ function bind() {
   // --- товары
   $('prod_add').addEventListener('click', () => openNom());
   $('prod_search').addEventListener('input', debounce(render, 200));
-  ['prod_group', 'prod_kind', 'prod_status'].forEach((id) =>
+  ['prod_group', 'prod_kind', 'prod_status', 'prod_sort'].forEach((id) =>
     $(id).addEventListener('change', render));
   $('prod_warehouse').addEventListener('change', refresh);
+  // 13.1 (18): режим «полка глазами покупателя»
+  $('prod_shop_eye').addEventListener('click', () => {
+    const btn = $('prod_shop_eye');
+    btn.classList.toggle('on');
+    render();
+    if (btn.classList.contains('on')) toast('Витрина глазами покупателя', 'Плитки показывают только то, что видит клиент в боте');
+  });
   $('prod_view').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-mode]');
     if (!btn) return;
@@ -1328,6 +1457,46 @@ function bind() {
     $$('button', $('prod_view')).forEach((b) => b.classList.toggle('on', b === btn));
     render();
   });
+  // 13.1 (20): горячие клавиши склада — N новый товар, S продажа, R пересчёт
+  let lastNomFocus = '';
+  document.addEventListener('keydown', (e) => {
+    if (!document.querySelector('#view-products.on')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
+    if (typing) return;
+    const k = e.key.toLowerCase();
+    if (k === 'n') { e.preventDefault(); openNom(); }
+    else if (k === 's') {
+      e.preventDefault();
+      const id = lastNomFocus;
+      const item = id && data.items.find((i) => i.id === id);
+      if (!item) {
+        const first = $('prod_grid') && $('prod_grid').querySelector('.prod-card[data-nom]');
+        if (!first) return;
+        const firstItem = data.items.find((i) => i.id === first.dataset.nom);
+        if (!firstItem) return;
+        return openQuickSale(firstItem);
+      }
+      openQuickSale(item);
+    }
+    else if (k === 'r') {
+      e.preventDefault();
+      const id = lastNomFocus;
+      if (!id) return;
+      const first = $('prod_grid') && $('prod_grid').querySelector('.prod-card[data-nom]');
+      recalcNomPrices(id || (first && first.dataset.nom));
+    }
+  });
+  // «фокус» плитки — последняя, по которой кликнули или на которую навели
+  $('prod_grid').addEventListener('click', (e) => {
+    const card = e.target.closest('.prod-card[data-nom]');
+    if (card) lastNomFocus = card.dataset.nom;
+  });
+  $('prod_grid').addEventListener('mouseover', (e) => {
+    const card = e.target.closest('.prod-card[data-nom]');
+    if (card) lastNomFocus = card.dataset.nom;
+  });
+
   $('prod_sale_btn').addEventListener('click', openQuickSale);
   $('prod_plan_btn').addEventListener('click', openPlan);
   $('prod_recalc').addEventListener('click', async () => {
@@ -1346,6 +1515,18 @@ function bind() {
     if (recalc) { e.stopPropagation(); return recalcNomPrices(recalc.dataset.nomRecalc); }
     const batch = e.target.closest('[data-nom-batch]');
     if (batch) { e.stopPropagation(); return openBatch(batch.dataset.nomBatch); }
+    const show = e.target.closest('[data-nom-show]');
+    if (show) {
+      e.stopPropagation();
+      const item = data.items.find((i) => i.id === show.dataset.nomShow);
+      if (!item) return;
+      try {
+        await post('/api/nomenclature/save', { id: item.id, client_bot_published: 1 });
+        await refresh();
+        toast('Показано в витрине', `${item.name} теперь виден покупателям`);
+      } catch (err) { fail(err); }
+      return;
+    }
     const sell = e.target.closest('[data-nom-sell]');
     if (!sell) {
       const edit = e.target.closest('[data-nom-edit]');

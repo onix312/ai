@@ -1203,4 +1203,21 @@ class Repo:
                 (like, like, like, limit)):
             results.append({"type": "printer", "id": row["id"], "title": row["name"],
                             "subtitle": f"{row['model'] or ''} {row['host'] or ''}".strip()})
+        # 13.1 (12): товары номенклатуры и документы — единый поиск по панели
+        for row in self.db.query(
+                "SELECT id, name, code, sku, unit, archived FROM nomenclature"
+                " WHERE archived=0 AND (pylower(name) LIKE ? OR pylower(code) LIKE ?"
+                " OR pylower(sku) LIKE ?) LIMIT ?",
+                (like, like, like, limit)):
+            results.append({"type": "product", "id": row["id"],
+                            "title": row["name"] or row["code"] or "",
+                            "subtitle": " · ".join(x for x in
+                                                    [row["code"], row["sku"], row["unit"] or "шт"] if x)})
+        for row in self.db.query(
+                "SELECT id, number, kind, note FROM documents"
+                " WHERE pylower(number) LIKE ? OR pylower(note) LIKE ? LIMIT ?",
+                (like, like, limit)):
+            results.append({"type": "document", "id": row["id"],
+                            "title": f"Документ {row['number'] or row['id']} · {row['kind']}",
+                            "subtitle": (row["note"] or "")[:60]})
         return results[:limit]

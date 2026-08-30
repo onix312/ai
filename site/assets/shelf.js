@@ -4,7 +4,7 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeText,
-  agoText, toast, fail, openModal, closeModal, confirmDanger } = U;
+  agoText, todayISO, toast, fail, openModal, closeModal, confirmDanger } = U;
 const { get, post } = PF.api;
 
 let editingShelf = null;
@@ -185,6 +185,120 @@ function renderShelf() {
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
+/* ============================ 13.1 (58): карта полки — сетка ячеек
+   Позиции с заполненной ячейкой (A1, B3…) раскладываются по схеме:
+   колонки — буквы, ряды — цифры. Пустые ячейки видны пунктиром,
+   занятые — цветом здоровья остатка. Клик по ячейке открывает позицию. */
+function shelfMapCells() {
+  const items = (shelfData.items || []).filter((i) => (i.cell || '').trim());
+  const byCell = new Map();
+  items.forEach((i) => byCell.set(i.cell.trim().toUpperCase(), i));
+  // Размер сетки по максимальной букве и цифре (до 8×8)
+  let rows = 1, cols = 1;
+  items.forEach((i) => {
+    const m = /^([A-Z])(\d{1,2})$/.exec((i.cell || '').trim().toUpperCase());
+    if (!m) return;
+    cols = Math.max(cols, m[1].charCodeAt(0) - 64);
+    rows = Math.max(rows, parseInt(m[2], 10));
+  });
+  cols = Math.min(cols, 10); rows = Math.min(rows, 10);
+  return { byCell, rows, cols };
+}
+function openShelfMap() {
+  const { byCell, rows, cols } = shelfMapCells();
+  const mapped = (shelfData.items || []).filter((i) => (i.cell || '').trim()).length;
+  const host = $('shelf_map_host');
+  if (!host) return;
+  if (!mapped) {
+    host.innerHTML = '<div class="empty compact"><span>🗺</span><b>Ячейки ещё не назначены</b>'
+      + '<span>Откройте позицию и укажите ячейку (A1, B3…) — карта соберётся сама.</span></div>';
+    openModal('shelf_map_modal');
+    return;
+  }
+  let grid = '';
+  for (let r = rows; r >= 1; r--) {
+    for (let c = 1; c <= cols; c++) {
+      const cell = String.fromCharCode(64 + c) + r;
+      const item = byCell.get(cell);
+      if (item) {
+        const st = item.status || 'ok';
+        const warn = st === 'dead' || st === 'empty' ? 'bad' : st === 'low' ? 'warn' : 'ok';
+        const days = item.days_left;
+        grid += `<button type="button" class="shelf-cell ${warn}" data-shelf-cell="${esc(item.id)}" title="${esc(item.name)} · ${nfmt(item.qty)} шт${days != null ? ' · хватит на ' + nfmt(days, 1) + ' дн.' : ''}">`
+          + `<b class="cell-tag">${cell}</b><span class="cell-name">${esc(item.name)}</span>`
+          + `<span class="cell-qty">${nfmt(item.qty)} шт</span></button>`;
+      } else {
+        grid += `<span class="shelf-cell empty" title="Ячейка ${cell} свободна"><b class="cell-tag">${cell}</b></span>`;
+      }
+    }
+  }
+  host.innerHTML = `<div class="shelf-map-legend"><span class="dot ok"></span>в наличии <span class="dot warn"></span>мало `
+    + `<span class="dot bad"></span>пусто/мёртвый сток <span class="muted">· клик — позиция</span></div>`
+    + `<div class="shelf-map" style="grid-template-columns:repeat(${cols}, minmax(86px, 1fr))">${grid}</div>`
+    + `<small class="muted">${mapped} из ${(shelfData.items || []).length} позиций на карте · остальные без ячейки</small>`;
+  openModal('shelf_map_modal');
+}
+
+/* ============================ 13.1 (59): проверка полки
+   Чек-лист «пересчитал / выставил» на сегодня: отметки с временем живут
+   в localStorage (по дате), расхождения остатка (пусто/мало/план) подсвечены
+   сразу — инвентаризация без бумажки. */
+const CHECK_KEY = 'pf_shelf_check_';
+function shelfCheckState() {
+  try {
+    return JSON.parse(localStorage.getItem(CHECK_KEY + todayISO()) || '{}');
+  } catch (e) { return {}; }
+}
+function openShelfCheck() {
+  const host = $('shelf_check_host');
+  if (!host) return;
+  const items = shelfData.items || [];
+  if (!items.length) {
+    host.innerHTML = '<div class="empty compact"><span>☑</span><b>Полка пуста</b>'
+      + '<span>Добавьте позиции — и проверка соберётся сама.</span></div>';
+    openModal('shelf_check_modal');
+    return;
+  }
+  const done = shelfCheckState();
+  const all = items.map((i) => {
+    const st = i.status || 'ok';
+    const warn = st === 'dead' || st === 'empty' ? 'bad' : st === 'low' ? 'warn' : 'ok';
+    const checked = !!done[i.id];
+    const discrepancy = st === 'empty' || st === 'low' || num(i.plan_qty) > 0;
+    return `<label class="shelf-check-row ${checked ? 'done' : ''}" data-check-id="${esc(i.id)}">`
+      + `<span class="switch"><input type="checkbox" data-shelf-check="${esc(i.id)}"${checked ? ' checked' : ''}><i></i></span>`
+      + `<span class="check-name">${esc(i.name)}<small>${esc(i.cell || 'без ячейки')} · остаток ${nfmt(i.qty)} шт</small></span>`
+      + (discrepancy ? `<span class="chip ${warn}">${st === 'empty' ? 'пусто' : st === 'low' ? 'мало' : 'нужно напечатать ' + nfmt(i.plan_qty)}</span>` : `<span class="chip ok">ок</span>`)
+      + `<span class="check-time muted">${checked ? esc(done[i.id]) : ''}</span></label>`;
+  }).join('');
+  const n = Object.keys(done).length;
+  host.innerHTML = `<div class="shelf-check-head"><b>Проверка полки · ${esc(todayISO())}</b>`
+    + `<span class="muted">отмечено ${n} из ${items.length}</span></div>${all}`
+    + `<small class="muted">Отметки хранятся на этом устройстве — в конце дня нажмите «сбросить».</small>`;
+  openModal('shelf_check_modal');
+  const list = $('shelf_check_host');
+  if (list) {
+    list.addEventListener('change', (e) => {
+      const cb = e.target.closest('[data-shelf-check]');
+      if (!cb) return;
+      const state = shelfCheckState();
+      if (cb.checked) {
+        state[cb.dataset.shelfCheck] = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      } else {
+        delete state[cb.dataset.shelfCheck];
+      }
+      try { localStorage.setItem(CHECK_KEY + todayISO(), JSON.stringify(state)); } catch (err) { /* нет места */ }
+      const row = cb.closest('[data-check-id]');
+      if (row) row.classList.toggle('done', cb.checked);
+      const time = row && row.querySelector('.check-time');
+      if (time) time.textContent = cb.checked ? state[cb.dataset.shelfCheck] : '';
+      const nDone = Object.keys(shelfCheckState()).length;
+      const head = $('shelf_check_host') && $('shelf_check_host').querySelector('.shelf-check-head .muted');
+      if (head) head.textContent = `отмечено ${nDone} из ${items.length}`;
+    });
+  }
+}
+
 /* ============================================================ фильтры */
 function filteredShelfItems() {
   const all = shelfData.items || [];
@@ -281,7 +395,7 @@ function openShelf(id) {
   const d = i || {
     name: '', catalog_id: '', nom_id: '', price: '', cost_per_unit: '', qty: 0,
     min_qty: '', note: '', barcode: '', sku: '', tag_template: 'standard', tag_variant: 'clean',
-    tag_badge: '', tag_color: '#4f46e5', tag_note: '', tag_old_price: 0,
+    tag_badge: '', tag_color: '#4f46e5', tag_note: '', tag_old_price: 0, cell: '',
   };
   $('shf_name').value = d.name || '';
   $('shf_nom_id').value = d.nom_id || '';
@@ -299,6 +413,8 @@ function openShelf(id) {
   $('shf_tag_color').value = /^#[0-9a-f]{6}$/i.test(d.tag_color || '') ? d.tag_color : '#4f46e5';
   $('shf_tag_note').value = d.tag_note || '';
   $('shf_tag_old_price').value = num(d.tag_old_price) || '';
+  // 13.1 (58): ячейка на схеме полки
+  $('shf_cell').value = d.cell || '';
   $('shf_catalog_id').innerHTML = '<option value="">Без привязки</option>'
     + (PF.state.catalog || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('shf_catalog_id').value = d.catalog_id || '';
@@ -343,6 +459,7 @@ async function saveShelf() {
     tag_color: $('shf_tag_color').value,
     tag_note: $('shf_tag_note').value.trim(),
     tag_old_price: num($('shf_tag_old_price').value),
+    cell: ($('shf_cell').value || '').trim().toUpperCase(),
   };
   if (!payload.name) return fail(new Error('Укажите название позиции'));
 
@@ -657,6 +774,27 @@ function bind() {
   $('shelf_sale_save').addEventListener('click', saveSales);
   $('shelf_inventory_btn').addEventListener('click', () => openInventory());
   $('shelf_inventory_save').addEventListener('click', saveInventory);
+  // 13.1 (58): карта полки — сетка ячеек вместо простыни
+  $('shelf_map_btn').addEventListener('click', openShelfMap);
+  // 13.1 (59): чек-лист «пересчитал / выставил» с временем и подсветкой расхождений
+  $('shelf_check_btn').addEventListener('click', openShelfCheck);
+  const resetCheck = $('shelf_check_reset');
+  if (resetCheck) {
+    resetCheck.addEventListener('click', () => {
+      try { localStorage.removeItem(CHECK_KEY + todayISO()); } catch (e) { /* ок */ }
+      openShelfCheck();
+      toast('Отметки сброшены');
+    });
+  }
+  const mapHost = $('shelf_map_host');
+  if (mapHost) {
+    mapHost.addEventListener('click', (e) => {
+      const cell = e.target.closest('[data-shelf-cell]');
+      if (!cell) return;
+      closeModal('shelf_map_modal');
+      openShelfCard(cell.dataset.shelfCell);
+    });
+  }
   $('sif_item').addEventListener('change', (e) => {
     const item = (shelfData.items || []).find((x) => x.id === e.target.value);
     if (item) { $('sif_expected').textContent = nfmt(item.qty); $('sif_actual').value = item.qty; }

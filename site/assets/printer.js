@@ -32,7 +32,6 @@ const DANGER = {
 };
 
 let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null, filesPath = '/';
-let queueFilter = 'all';
 let camStream = '', camSession = Date.now();     // ключ живого MJPEG-соединения
 let shotsKey = '';                              // чтобы не перезапрашивать архив зря
 let chartCache = { id: '', minutes: 0, at: 0, points: [] };
@@ -89,8 +88,12 @@ function renderTabs() {
     const trays = ((p.ams || {}).trays) || [];
     const lowFil = trays.some((t) => t.remain != null && t.remain >= 0 && num(t.remain) < 15);
     const sw = trays.slice(0, 4).map((t) => {
+      // 13.1 (24): остаток на «трубке» AMS — затемнение снизу по проценту
       const has = t.present !== false && (t.present || t.generic || t.type || t.uuid);
-      return `<i class="${has ? '' : 'ghost'}" style="background:${esc(t.color || '#38445c')}" title="${esc((t.label || 'Слот') + ' · ' + (has ? (t.type || 'AMS') : 'пусто'))}"></i>`;
+      const remain = num(t.remain, -1);
+      const pct = remain >= 0 ? clamp(remain, 0, 100) : null;
+      return `<span class="pk-tube${has ? '' : ' ghost'}" title="${esc((t.label || 'Слот') + ' · ' + (has ? (t.type || 'AMS') : 'пусто') + (pct != null ? ` · остаток ${Math.round(pct)}%` : ''))}">`
+        + `<i class="pk-tube-body" style="background:${esc(t.color || '#38445c')}">${pct != null ? `<b style="height:${Math.round(pct)}%"></b>` : ''}</i></span>`;
     }).join('');
     const sub = running
       ? `${esc(String(p.printer.task || 'Печать').slice(0, 34))} · осталось ${p.printer.remaining_min ? minutesText(p.printer.remaining_min) : '—'}`
@@ -123,6 +126,17 @@ function renderLive() {
 
   pill.hidden = false;
   const st = p.printer.state, kind = STATE_KIND[st] || '';
+  // 13.1 (26): контекстные команды — «Пауза» только при печати, «Продолжить»
+  // только в паузе, «Стоп» приглушён вне работы.
+  const cmdBtnEl = (cmd) => document.querySelector(`.cmd-btn[data-cmd="${cmd}"]`);
+  const pauseBtnEl = cmdBtnEl('pause'), resumeBtnEl = cmdBtnEl('resume'), stopBtnEl = cmdBtnEl('stop');
+  if (pauseBtnEl || resumeBtnEl || stopBtnEl) {
+    const isRun = kind === 'running';
+    const isPaused = st === 'PAUSE' || st === 'PAUSED';
+    if (pauseBtnEl) pauseBtnEl.hidden = !isRun;
+    if (resumeBtnEl) resumeBtnEl.hidden = !isPaused;
+    if (stopBtnEl) stopBtnEl.hidden = !(isRun || isPaused);
+  }
   $('live_dot').className = 'dot ' + (p.connection.connected ? (kind === 'running' ? 'busy' : 'ok') : 'bad');
   text('live_name', p.name);
   text('live_state', (p.printer.state_label || STATE_LABEL[st] || st)
@@ -192,19 +206,42 @@ function renderLive() {
   if (sel && document.activeElement !== sel) sel.value = String(p.printer.speed_level || 2);
 
   const t = p.temperature;
-  text('pr_nozzle', nfmt(t.nozzle, 1)); text('pr_nozzle_t', nfmt(t.nozzle_target));
-  text('pr_bed', nfmt(t.bed, 1)); text('pr_bed_t', nfmt(t.bed_target));
-  text('pr_chamber', t.chamber ? nfmt(t.chamber, 1) : '—');
-  renderTempGauge('nozzle', t.nozzle, t.nozzle_target);
-  renderTempGauge('bed', t.bed, t.bed_target);
+  // 13.1 (25): «замороженная» телеметрия — при обрыве связи показываем
+  // последние известные значения с пометкой «данные N мин назад», а не «—».
+  const lastGood = (window.__pfLastGood = window.__pfLastGood || {});
+  const frozen = !p.connection.connected;
+  let tShow = t;
+  let frozenMin = 0;
+  if (frozen) {
+    const lg = lastGood[p.id];
+    if (lg) {
+      tShow = lg.t;
+      frozenMin = Math.max(1, Math.round((Date.now() - lg.at) / 60000));
+    }
+  } else if (Number.isFinite(num(t.nozzle))) {
+    lastGood[p.id] = { at: Date.now(), t, fans: p.fans, progress: num(p.printer.progress), task: p.printer.task || '' };
+  }
+  const frozenBadge = $('pr_frozen');
+  if (frozenBadge) {
+    frozenBadge.hidden = !frozen || !lastGood[p.id];
+    if (frozen && lastGood[p.id]) {
+      frozenBadge.textContent = `данные ${frozenMin} мин назад — связь прервалась, показываем последнее известное`;
+    }
+  }
+  text('pr_nozzle', nfmt(tShow.nozzle, 1)); text('pr_nozzle_t', nfmt(tShow.nozzle_target));
+  text('pr_bed', nfmt(tShow.bed, 1)); text('pr_bed_t', nfmt(tShow.bed_target));
+  text('pr_chamber', tShow.chamber ? nfmt(tShow.chamber, 1) : '—');
+  renderTempGauge('nozzle', tShow.nozzle, tShow.nozzle_target);
+  renderTempGauge('bed', tShow.bed, tShow.bed_target);
   const chamHint = $('pr_chamber_hint');
-  if (chamHint) chamHint.textContent = num(t.chamber) > 35 ? 'прогрев корпуса' : '';
+  if (chamHint) chamHint.textContent = num(tShow.chamber) > 35 ? 'прогрев корпуса' : '';
   const nic = $('pr_nozzle_ic');
-  if (nic) nic.classList.toggle('on', num(t.nozzle) > 50);
+  if (nic) nic.classList.toggle('on', num(tShow.nozzle) > 50);
 
-  text('pr_fan_part', Math.round(num(p.fans.part)) + '%'); bar($('pr_fan_part_bar'), p.fans.part);
-  text('pr_fan_aux', Math.round(num(p.fans.aux)) + '%'); bar($('pr_fan_aux_bar'), p.fans.aux);
-  text('pr_fan_cham', Math.round(num(p.fans.chamber)) + '%'); bar($('pr_fan_cham_bar'), p.fans.chamber);
+  const fansShow = (frozen && lastGood[p.id]) ? lastGood[p.id].fans : p.fans;
+  text('pr_fan_part', Math.round(num(fansShow.part)) + '%'); bar($('pr_fan_part_bar'), fansShow.part);
+  text('pr_fan_aux', Math.round(num(fansShow.aux)) + '%'); bar($('pr_fan_aux_bar'), fansShow.aux);
+  text('pr_fan_cham', Math.round(num(fansShow.chamber)) + '%'); bar($('pr_fan_cham_bar'), fansShow.chamber);
 
   text('pr_firmware', p.printer.firmware ? 'Прошивка ' + p.printer.firmware : 'Прошивка —');
   text('pr_sub', p.connection.connected
@@ -515,7 +552,10 @@ async function renderChart(p, force) {
   sparkCache.id = p.id;
   sparkCache.nozzle = pts.map((x) => num(x.nozzle));
   sparkCache.bed = pts.map((x) => num(x.bed));
-  ['nozzle', 'bed'].forEach((k) => {
+  sparkCache.chamber = pts.map((x) => num(x.chamber));
+  sparkCache.fan_part = pts.map((x) => num(x.fan_part));
+  sparkCache.fan_aux = pts.map((x) => num(x.fan_aux));
+  ['nozzle', 'bed', 'chamber', 'fan_part', 'fan_aux'].forEach((k) => {
     const spark = $('pr_' + k + '_spark');
     if (spark) spark.innerHTML = sparkPath(sparkCache[k]);
   });
@@ -915,6 +955,18 @@ async function command(name, value, opts) {
   } catch (e) { fail(e); }
 }
 
+/* 13.1 (29): текущий кадр камеры — в полноэкранный просмотрщик. */
+async function openCameraSnapshot() {
+  const p = active();
+  if (!p) return fail(new Error('Принтер ещё не добавлен'));
+  try {
+    const src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
+    const probe = await fetch(src, { method: 'HEAD' });
+    if (!probe.ok) throw new Error(probe.status === 503 ? 'Кадр ещё не получен — проверьте камеру' : `Камера: ${probe.status}`);
+    U.lightbox(src, `${p.name} · камера — сейчас`);
+  } catch (e) { fail(e); }
+}
+
 /* ======================================================== файлы SD */
 function fileIcon(name) { return /\.3mf$/i.test(name) ? '◲' : '⎘'; }
 function sizeText(bytes) {
@@ -1054,71 +1106,9 @@ function printPayload() {
   };
 }
 
-/* ============================================================ очередь */
-function jobStateChip(state) {
-  const map = {
-    queued: ['outline', 'В очереди'], uploading: ['accent', 'Загрузка файла'],
-    starting: ['accent', 'Стартует'], running: ['accent', 'Печатает'],
-    done: ['ok', 'Готово'], failed: ['bad', 'Брак'], cancelled: ['warn', 'Отменено'],
-  };
-  const [cls, label] = map[state] || ['outline', state];
-  return `<span class="chip ${cls}">${esc(label)}</span>`;
-}
-function renderQueue() {
-  const queue = PF.state.jobs.queue || [];
-  const history = PF.state.jobs.history || [];
-  const running = queue.filter((j) => j.state === 'running').length;
-  text('queue_sub', `${queue.length} в работе и в очереди · ${running} печатается`);
-  const tag = $('nav_queue_tag');
-  tag.hidden = !queue.length;
-  tag.textContent = String(queue.length);
-  tag.className = 'tag' + (running ? ' live' : '');
-
-  const shownQueue = queue.filter((j) => queueFilter === 'all'
-    || (queueFilter === 'queued' && j.state === 'queued')
-    || (queueFilter === 'active' && ['uploading', 'starting', 'running'].includes(j.state))
-    || (queueFilter === 'unassigned' && j.state === 'queued' && !j.printer_id));
-  $$('#queue_filter button').forEach((b) => b.classList.toggle('on', b.dataset.filter === queueFilter));
-  $('queue_list').innerHTML = shownQueue.length ? shownQueue.map((j) => {
-    const i = queue.indexOf(j);
-    const printer = PF.state.printers.find((p) => p.id === j.printer_id);
-    const order = j.order;
-    return `<div class="queue-item${j.state === 'running' ? ' running' : ''}">`
-      + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
-      + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
-      + (order ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">заказ №${esc(order.number)}</a>` : '')
-      + (j.mixed_label ? ` · <span class="chip outline" title="Смешанная плита">${esc(j.mixed_label)}</span>` : '')
-      + (num(j.no_auto) ? ' · без автостарта' : '')
-      + (num(j.est_minutes) ? ` · оценка ${minutesText(j.est_minutes)}${num(j.est_grams) ? ' · ~' + nfmt(j.est_grams) + ' г' : ''}` : '')
-      + '</small>'
-      + (j.state === 'running' ? `<div class="bar thin" style="margin-top:6px"><i style="width:${clamp(num(j.progress), 0, 100)}%"></i></div>` : '')
-      + '</div><div class="acts">'
-      + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу">🔗 К заказу</button>` : '')
-      + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания">✨ Новый</button>` : '')
-      + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
-      + `<button class="btn sm ghost" type="button" data-job-clone="${esc(j.id)}" title="Копия в очередь">⧉</button>`
-      + (j.state === 'queued' ? `<button class="btn sm ghost" type="button" data-job-noauto="${esc(j.id)}" title="Автостарт">${num(j.no_auto) ? 'авто вкл' : 'без авто'}</button>` : '')
-      + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
-      + '</div></div>';
-  }).join('') : (queue.length
-    ? '<div class="empty compact"><span>В этом фильтре заданий нет.</span></div>'
-    : '<div class="empty"><span class="big">≡</span><b>Очередь пуста</b><span>Нет заданий — добавьте файл в очередь.</span>'
-      + '<button class="btn sm primary" type="button" data-empty-click="queue_add">+ Задание</button></div>');
-
-  const hq = ($('history_search') || {}).value || '';
-  const hfiltered = hq ? history.filter((j) => String(j.name || j.file || '').toLowerCase().includes(hq.toLowerCase())) : history;
-  $('queue_history').innerHTML = hfiltered.length ? hfiltered.slice(0, 24).map((j) => `<div class="tx-row" data-passport="${esc(j.id)}" title="Паспорт печати — план против факта">`
-    + `<span class="tx-ic ${j.state === 'done' ? 'income' : 'expense'}">${j.state === 'done' ? '✓' : '✕'}</span>`
-    + `<div class="tx-body"><b>${esc(j.name || j.file || 'Печать')}</b>`
-    + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г`
-    + (num(j.est_minutes) ? ' · оценка была ' + minutesText(j.est_minutes) : '') + '</small></div>'
-    + `<span class="amt">${money(j.cost)}</span></div>`).join('')
-    : '<div class="empty compact"><span>' + (hq ? 'Ничего не найдено.' : 'Завершённых печатей пока нет.') + '</span></div>';
-  $$('#queue_history [data-passport]').forEach((row) => {
-    row.addEventListener('click', () => openPassport(row.dataset.passport));
-  });
-}
-$('history_search').addEventListener('input', U.debounce(renderQueue, 200));
+/* Очередь и журнал печати вынесены в queue.js (13.1, Б2):
+   рендер, поиск, группировка, drag-приоритет и паспорт живут там.
+   Здесь остаются действия над заданиями и данные парка. */
 
 async function preflightAndConfirmJob(job, printerId) {
   const check = await post('/api/printer/preflight', {
@@ -1151,39 +1141,7 @@ async function startNextJob() {
   } catch (e) { fail(e); }
 }
 
-/* ==================================================== паспорт печати */
-async function openPassport(jobId) {
-  try {
-    const p = await get('/api/job/passport?id=' + encodeURIComponent(jobId));
-    const j = p.job || {};
-    $('jp_title').textContent = j.name || j.file || 'Печать';
-    $('jp_sub').textContent = p.order && p.order.number
-      ? `Заказ №${p.order.number} · ${p.order.product || ''}` : 'Без привязки к заказу';
-    const pvf = p.plan_vs_fact || {};
-    const parts = [];
-    parts.push(`<table class="data"><thead><tr><th>Параметр</th><th class="right">План (слайсер)</th><th class="right">Факт</th><th class="right">Отклонение</th></tr></thead><tbody>
-      <tr><td>Время печати</td><td class="right">${pvf.minutes ? minutesText(pvf.minutes.plan) : '—'}</td><td class="right">${minutesText(num(j.duration_min))}</td><td class="right">${pvf.minutes ? pvf.minutes.diff_pct + '%' : '—'}</td></tr>
-      <tr><td>Пластик</td><td class="right">${pvf.grams ? nfmt(pvf.grams.plan, 1) + ' г' : '—'}</td><td class="right">${nfmt(num(j.grams), 1)} г</td><td class="right">${pvf.grams ? pvf.grams.diff_pct + '%' : '—'}</td></tr>
-      </tbody></table>`);
-    if (pvf.minutes) parts.push(`<p class="muted">${esc(pvf.minutes.verdict)} · ${esc(pvf.grams.verdict)}</p>`);
-    if (p.error_decoded && p.error_decoded.title) {
-      parts.push(`<div class="notice bad"><span>✕</span><span><b>${esc(p.error_decoded.title)}</b><br>${esc(p.error_decoded.advice || '')}</span></div>`);
-    }
-    if ((p.guard || []).length) {
-      parts.push('<h3 style="margin:12px 0 4px">Сторож за время печати</h3>');
-      p.guard.forEach((g) => {
-        const actions = g.data && g.data.actions && g.data.actions.length ? '<br><small>Сделано: ' + esc(g.data.actions.join(', ')) + '</small>' : '';
-        parts.push(`<div class="notice warn"><span>⚠</span><span><b>${esc(g.title)}</b>${g.detail ? '<br>' + esc(g.detail) : ''}${actions}</span></div>`);
-      });
-    }
-    if ((p.photos || []).length) {
-      parts.push('<h3 style="margin:12px 0 4px">Фото</h3><div style="display:flex;gap:8px;flex-wrap:wrap">'
-        + p.photos.map((ph) => `<img src="/api/order/photo.jpg?photo_id=${esc(ph.id)}" style="width:120px;border-radius:8px" alt="">`).join('') + '</div>');
-    }
-    $('jp_body').innerHTML = parts.join('');
-    openModal('job_passport_modal');
-  } catch (e) { fail(e); }
-}
+/* Паспорт печати переехал в queue.js (13.1, Б2). */
 
 /* ==================================================== профиль принтера */
 function openPrinterModal(id) {
@@ -1422,6 +1380,8 @@ function bind() {
       const name = cmd.dataset.cmd;
       if (name === 'keyframes') { openKeyframes(); return; }
       if (name === 'bed_ref') { captureBedReference(); return; }
+      // 13.1 (29): «Кадр» — текущий кадр камеры в просмотрщике, без сохранения
+      if (name === 'snapshot') { openCameraSnapshot(); return; }
       const value = cmd.dataset.value !== undefined ? num(cmd.dataset.value) : undefined;
       command(name, value, { label: cmd.textContent.trim() });
       return;
@@ -1754,12 +1714,6 @@ function bind() {
 
   $('queue_add').addEventListener('click', openJob);
   $('queue_next').addEventListener('click', startNextJob);
-  $('queue_filter').addEventListener('click', (e) => {
-    const button = e.target.closest('[data-filter]');
-    if (!button) return;
-    queueFilter = button.dataset.filter || 'all';
-    renderQueue();
-  });
   $('jf_local_file').addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
     queueLocalFile = file || null;
@@ -2021,7 +1975,6 @@ PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   loadBedReference();
 });
 PF.on('live', () => { renderLive(); });
-PF.on('data', () => { renderQueue(); });
 PF.on('printers', () => { renderTabs(); });
 PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); }

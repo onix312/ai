@@ -108,6 +108,112 @@ const store = {
   },
 };
 
+/* ============================================ 13.1: визуальные помощники
+   Микро-взаимодействия панели: «подскок» счётчиков, кнопка-галочка,
+   staggered-появление карточек, конфетти финиша, тонкая полоса загрузки. */
+function bump(el) {
+  if (!el) return;
+  el.classList.remove('bump');
+  void el.offsetWidth;                       // перезапуск CSS-анимации
+  el.classList.add('bump');
+}
+function flashOk(btn) {
+  if (!btn) return;
+  const old = btn.dataset.flashOld || btn.innerHTML;
+  btn.dataset.flashOld = old;
+  btn.innerHTML = '<span aria-hidden="true">✓</span>';
+  btn.classList.add('flash-ok');
+  clearTimeout(btn._flashT);
+  btn._flashT = setTimeout(() => { btn.innerHTML = old; btn.classList.remove('flash-ok'); }, 800);
+}
+function stagger(host, limit = 14) {
+  if (!host || !host.children) return;
+  for (let i = 0; i < host.children.length && i < limit; i++) {
+    host.children[i].style.setProperty('--i', String(i));
+  }
+}
+function confetti(origin) {
+  if (MOTION_OFF && MOTION_OFF.matches) return;
+  const host = document.body;
+  const rect = origin && origin.getBoundingClientRect
+    ? origin.getBoundingClientRect() : { left: innerWidth / 2, top: 90 };
+  const colors = ['#4f46e5', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9'];
+  for (let i = 0; i < 14; i++) {
+    const s = document.createElement('i');
+    s.className = 'confetti-bit';
+    s.style.left = (rect.left + (Math.random() * 44 - 22)) + 'px';
+    s.style.top = (rect.top + Math.random() * 12) + 'px';
+    s.style.background = colors[i % colors.length];
+    s.style.setProperty('--dx', (Math.random() * 180 - 90) + 'px');
+    s.style.setProperty('--dy', (70 + Math.random() * 150) + 'px');
+    s.style.setProperty('--rot', (Math.random() * 560 - 280) + 'deg');
+    host.appendChild(s);
+    setTimeout(() => s.remove(), 1500);
+  }
+}
+
+/* Тонкая полоса загрузки под шапкой: появляется на время живых запросов. */
+let loadCount = 0;
+const fetchOrig = window.fetch;
+window.fetch = function fetchWithBar(...args) {
+  loadCount += 1;
+  const bar = $('top_load');
+  if (bar) { bar.hidden = false; }
+  const done = () => {
+    loadCount = Math.max(0, loadCount - 1);
+    const b = $('top_load');
+    if (b && !loadCount) { b.classList.add('done'); setTimeout(() => { b.classList.remove('done'); b.hidden = true; }, 320); }
+  };
+  try {
+    return fetchOrig.apply(this, args).then((r) => { done(); return r; }, (e) => { done(); throw e; });
+  } catch (e) { done(); throw e; }
+};
+
+/* 13.1 (28): чип-детект номеров заказов. В поле поиска «№ 1001» →
+   рядом появляется кнопка «Заказ №1001 — открыть»; один клик вместо
+   ручного перехода на вкладку заказов. */
+function wireNumberChip(input, opts) {
+  if (!input || input.dataset.chip) return;
+  input.dataset.chip = '1';
+  const wrap = document.createElement('div');
+  wrap.className = 'num-chip-wrap';
+  input.parentNode.insertBefore(wrap, input.nextSibling);
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'num-chip';
+  chip.hidden = true;
+  chip.innerHTML = '<span aria-hidden="true">▦</span><span></span>';
+  wrap.appendChild(chip);
+  const label = chip.querySelector('span:last-child');
+  const check = debounce(() => {
+    const m = /(?:№\s*)?(\d{3,5})/.exec(String(input.value || '').trim());
+    if (!m) { chip.hidden = true; return; }
+    const number = m[1];
+    const order = (PF.state.orders || []).find((o) => String(o.number) === number);
+    if (!order) { chip.hidden = true; return; }
+    label.textContent = `Заказ №${number} — открыть`;
+    chip.hidden = false;
+    chip.onclick = () => {
+      input.value = '';
+      chip.hidden = true;
+      PF.go('orders');
+      if (PF.modules.ops && PF.modules.ops.openOrder) PF.modules.ops.openOrder(order.id);
+    };
+  }, 220);
+  input.addEventListener('input', check);
+  return chip;
+}
+
+/* Кнопка «наверх»: появляется после 600px прокрутки любой вкладки. */
+const upBtn = $('up_btn');
+if (upBtn) {
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY || document.documentElement.scrollTop || 0;
+    upBtn.hidden = y < 600;
+  }, { passive: true });
+  upBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: MOTION_OFF && MOTION_OFF.matches ? 'auto' : 'smooth' }));
+}
+
 /* ============================================================== HTTP */
 let offline = false;
 function setOffline(flag, reason) {
@@ -173,15 +279,25 @@ const post = (path, body) => api(path, { body: body || {} });
 
 /* ============================================================= тосты */
 const ICONS = { ok: '✓', bad: '✕', warn: '⚠', info: 'ℹ' };
-function toast(title, sub, kind = 'ok') {
+function toast(title, sub, kind = 'ok', action = null) {
   const box = $('toasts');
   const el = document.createElement('div');
   el.className = 'toast ' + kind;
   const dur = kind === 'bad' ? 5200 : 3200;
-  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><button class="toast-close" aria-label="Закрыть">×</button><div class="toast-progress" style="animation:toastProgress ${dur}ms linear forwards"></div>`;
+  const act = (action && action.label)
+    ? `<button class="toast-action" type="button">${esc(action.label)}</button>` : '';
+  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>${act}<button class="toast-close" aria-label="Закрыть">×</button><div class="toast-progress" style="animation:toastProgress ${dur}ms linear forwards"></div>`;
   box.appendChild(el);
-  el.querySelector('.toast-close').onclick = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, dur);
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('.toast-close').onclick = close;
+  const actionBtn = el.querySelector('.toast-action');
+  if (actionBtn) {
+    actionBtn.onclick = () => {
+      try { if (action && action.run) action.run(); } catch (e) { fail(e); }
+      close();
+    };
+  }
+  setTimeout(close, dur);
 }
 const fail = (e) => toast('Не получилось', e && e.message ? e.message : String(e), 'bad');
 
@@ -374,9 +490,10 @@ const PF = {
   api: { get, post, api },
   ui: {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
-    dateText, dateTimeText, agoText, todayISO, initials, debounce,
+    dateText, dateTimeText, agoText, todayISO, initials, avatarEmoji, debounce,
     toast, fail, openModal, closeModal, confirmDanger, ask, emptyHtml, CUR, store, catName,
     setChannelBar, countUp, lightbox, lightboxClose,
+    bump, flashOk, stagger, confetti, wireNumberChip,
   },
   modules: {},
   bus: new EventTarget(),
@@ -566,8 +683,17 @@ function showView(name, sub) {
   $$('.view').forEach((v) => {
     const active = v.id === 'view-' + name;
     v.classList.toggle('on', active);
+    v.classList.toggle('enter', active);     // 13.1: лёгкий fade-вход вкладки
     v.hidden = !active;
   });
+  // 13.1 (42): утреннее приветствие на Обзоре до 11:00 — тёплый старт дня
+  if (name === 'dashboard') {
+    const h1 = document.querySelector('#view-dashboard .view-head h1');
+    if (h1) {
+      const hour = new Date().getHours();
+      h1.textContent = (hour >= 5 && hour < 11) ? 'Доброе утро, цех!' : 'Производство сегодня';
+    }
+  }
   $$('.nav-link').forEach((a) => {
     const group = (a.dataset.views || '').split(/\s+/).filter(Boolean);
     const on = a.dataset.view === name || group.includes(name);
@@ -623,23 +749,68 @@ if (window.matchMedia) {
     if ((PF.state.settings.theme || 'system') === 'system') applyTheme();
   });
 }
+/* Плотность интерфейса (Б8): обычный вид → компактно → режим цеха.
+   Компактно — меньше воздуха по всей панели (tokens.css), режим цеха —
+   крупные кнопки у станка. Выбор живёт в localStorage. */
+const DENSITY_ORDER = ['desk', 'compact', 'shop'];
+const DENSITY_LABEL = {
+  desk: ['Обычный вид', 'Больше данных на экране'],
+  compact: ['Компактно', 'Меньше воздуха, больше строк'],
+  shop: ['Режим цеха', 'Крупные кнопки у станка'],
+};
 function applyDensity() {
-  const on = store.get('pf_density', '') === 'shop';
-  document.documentElement.dataset.density = on ? 'shop' : 'desk';
+  const cur = store.get('pf_density', '');
+  const on = DENSITY_ORDER.includes(cur) ? cur : 'desk';
+  document.documentElement.dataset.density = on;
   const btn = $('density_btn');
   if (btn) {
-    btn.classList.toggle('on', on);
-    btn.title = on ? 'Обычный вид (сейчас режим цеха)' : 'Режим цеха: крупные кнопки, меньше воздуха';
+    btn.classList.toggle('on', on !== 'desk');
+    btn.title = DENSITY_LABEL[on][0] + ' — клик переключит';
   }
 }
 applyDensity();
 const densBtn = $('density_btn');
 if (densBtn) densBtn.addEventListener('click', () => {
-  const next = store.get('pf_density', '') === 'shop' ? '' : 'shop';
-  store.set('pf_density', next);
+  const cur = store.get('pf_density', '');
+  const idx = Math.max(0, DENSITY_ORDER.indexOf(DENSITY_ORDER.includes(cur) ? cur : 'desk'));
+  const next = DENSITY_ORDER[(idx + 1) % DENSITY_ORDER.length];
+  store.set('pf_density', next === 'desk' ? '' : next);
   applyDensity();
-  toast(next === 'shop' ? 'Режим цеха' : 'Обычный вид', next === 'shop' ? 'Крупные кнопки у станка' : 'Больше данных на экране');
+  const [name, sub] = DENSITY_LABEL[next];
+  toast(name, sub);
 });
+
+/* ============================ 13.1 (З2-10/11/12): доступность интерфейса
+   «Меньше анимаций» (перекрывает prefers-reduced-motion), «Высокий
+   контраст» и «Режим дальтоников» — атрибуты на <html>, стили в theme.css. */
+function applyAccessibility() {
+  const root = document.documentElement;
+  root.dataset.motion = store.get('pf_motion_off', '') === '1' ? 'off' : '';
+  root.dataset.contrast = store.get('pf_contrast', '') === '1' ? 'on' : '';
+  root.dataset.colorblind = store.get('pf_colorblind', '') === '1' ? 'on' : '';
+  const mo = $('set_motion_off');
+  if (mo) mo.checked = root.dataset.motion === 'off';
+  const ct = $('set_contrast');
+  if (ct) ct.checked = root.dataset.contrast === 'on';
+  const cb = $('set_colorblind');
+  if (cb) cb.checked = root.dataset.colorblind === 'on';
+}
+applyAccessibility();
+const bindAccessibility = () => {
+  const wire = (id, key) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      store.set(key, el.checked ? '1' : '');
+      applyAccessibility();
+      toast(el.checked ? 'Включено' : 'Выключено', el.closest('.set-row') ? el.closest('.set-row').querySelector('.sinfo b').textContent : '');
+    });
+  };
+  wire('set_motion_off', 'pf_motion_off');
+  wire('set_contrast', 'pf_contrast');
+  wire('set_colorblind', 'pf_colorblind');
+};
+PF.on('ready', bindAccessibility);
 
 $('theme_btn').addEventListener('click', async () => {
   const order = ['system', 'light', 'dark'];
@@ -707,13 +878,16 @@ const searchRemote = debounce(async (q) => {
     const data = await get('/api/search', { q });
     const found = (data.results || []).map((r) => ({
       group: 'Найдено',
-      icon: { order: '▦', customer: '◎', spool: '◍', printer: '◉' }[r.type] || '•',
+      icon: { order: '▦', customer: '◎', spool: '◍', printer: '◉', product: '▩', document: '📄' }[r.type] || '•',
       title: r.title, sub: r.subtitle,
       run: () => {
         if (r.type === 'order') { PF.go('orders'); PF.modules.ops && PF.modules.ops.openOrder(r.id); }
         else if (r.type === 'customer') PF.go('customers');
         else if (r.type === 'spool') { PF.go('inventory'); PF.modules.money && PF.modules.money.openSpool(r.id); }
         else if (r.type === 'printer') { PF.state.activePrinter = r.id; PF.go('printers'); }
+        // 13.1 (12): товары и документы — единый поиск из палитры
+        else if (r.type === 'product') { PF.go('products'); PF.modules.products && PF.modules.products.openNom(r.id); }
+        else if (r.type === 'document') { PF.go('documents'); PF.modules.products && PF.modules.products.openDoc(r.id); }
       },
     }));
     const local = filterCommands($('palette_input').value);
@@ -1044,4 +1218,20 @@ async function start() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
 else start();
+
+/* 13.1 (43): экран «панель печатается» — прячем после готовности,
+   страховка — 6 секунд (если коннектор молчит). */
+function dismissSplash() {
+  const splash = $('splash');
+  if (!splash) return;
+  splash.classList.add('done');
+  setTimeout(() => splash.remove(), 520);
+}
+PF.on('ready', () => { setTimeout(dismissSplash, 260); });
+setTimeout(dismissSplash, 6000);
+
+/* 13.1 (28): чип-детект номеров — поиск заказов, документов и текст заявки. */
+wireNumberChip($('orders_search'));
+wireNumberChip($('doc_search'));
+wireNumberChip($('intake_text'));
 })();
