@@ -701,6 +701,22 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
 @keyframes toastIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateX(24px); } }
 
+/* ------------------------------------------------------- G-code viewer */
+.gcode-viewer { display: flex; flex-direction: column; gap: 12px; }
+.gcode-canvas { background: #f9fafb; border: 1px solid var(--line); border-radius: 8px; padding: 12px; aspect-ratio: 1; max-width: 500px; margin: 0 auto; }
+.gcode-canvas svg { width: 100%; height: 100%; }
+.gcode-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.gcode-controls input[type="range"] { flex: 1; min-width: 120px; }
+.gcode-stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+
+/* ------------------------------------------------------- STL/3MF viewer */
+.stl-viewer-placeholder { padding: 24px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; }
+.stl-viewer-placeholder h3 { margin: 0 0 12px; font-size: 16px; color: #92400e; }
+.stl-viewer-placeholder p { margin: 8px 0; font-size: 14px; }
+.stl-viewer-placeholder ol { margin: 8px 0; padding-left: 24px; }
+.stl-viewer-placeholder code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.stl-stats { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 12px; flex-wrap: wrap; }
+
 /* ------------------------------------------------------- офлайн-баннер */
 #offline-bar {
   display: none; align-items: center; gap: 12px;
