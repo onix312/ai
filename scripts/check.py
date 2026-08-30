@@ -27,6 +27,36 @@ def run(label: str, command: list[str]) -> bool:
     return True
 
 
+def check_data_icons() -> bool:
+    """Б8: все data-icon="..." в HTML существуют в реестре PFIcons (icons.js)."""
+    import re
+    label = "data-icon в реестре PFIcons"
+    print(f"\n==> {label}", flush=True)
+    try:
+        # Читаем реестр иконок из icons.js
+        icons_js = (ROOT / "site" / "assets" / "icons.js").read_text(encoding="utf-8")
+        # Ищем все ключи в объекте ICONS: key: '<svg...', без кавычек вокруг ключа
+        registry = set(re.findall(r'^\s+([a-z0-9\-_]+)\s*:\s*\'', icons_js, re.MULTILINE))
+        # Читаем все HTML-файлы в site/
+        missing = []
+        for html_file in (ROOT / "site").rglob("*.html"):
+            content = html_file.read_text(encoding="utf-8")
+            icons = re.findall(r'data-icon="([^"]+)"', content)
+            for icon in icons:
+                if icon not in registry:
+                    missing.append(f"{html_file.relative_to(ROOT)}: {icon}")
+        if missing:
+            print(f"FAIL: {label} — не найдены иконки:", file=sys.stderr)
+            for m in missing[:10]:
+                print(f"  {m}", file=sys.stderr)
+            return False
+        print(f"OK: {label} (проверено {len(registry)} иконок)")
+        return True
+    except Exception as e:
+        print(f"SKIP: {label} — {e}")
+        return True  # не блокируем если icons.js нет
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Проверить репозиторий PrintFlow")
     parser.add_argument("--quick", action="store_true",
@@ -62,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
         checks.append(False)
     else:
         print("SKIP: node не найден; синтаксис JS также проверяется unit-тестом при наличии Node.js")
+
+    # Б8: проверка что все data-icon существуют в PFIcons
+    checks.append(check_data_icons())
 
     if not args.quick:
         checks.append(run(

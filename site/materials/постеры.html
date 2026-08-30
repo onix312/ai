@@ -71,6 +71,74 @@
   /* П16 «Акция»: плашка срока */
   .p-until { display: inline-flex; align-items: center; gap: 3mm; margin-top: 10mm; padding: 3.5mm 7mm; border-radius: 99mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); color: #fff; font-size: 16px; font-weight: 800; letter-spacing: .02em; align-self: flex-start; }
   .sheet.a3 .p-until { font-size: 22px; padding: 5mm 9mm; }
+  /* П9 «Витрина-QR»: сетка товаров + крупный QR */
+  .p-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; margin-top: 10mm; }
+  .sheet.a3 .p-grid { gap: 6mm; }
+  .p-card { background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 3mm; padding: 4mm; text-align: center; }
+  .poster.t-dark .p-card, .poster.t-ink .p-card { background: rgba(255,255,255,.05); }
+  .p-card .p-img { width: 100%; aspect-ratio: 1; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); border-radius: 2mm; margin-bottom: 3mm; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; }
+  .sheet.a3 .p-card .p-img { font-size: 44px; }
+  .p-card .p-name { font-size: 13px; font-weight: 700; margin-bottom: 2mm; }
+  .sheet.a3 .p-card .p-name { font-size: 18px; }
+  .p-card .p-price { font-size: 15px; font-weight: 900; color: var(--pf-a); }
+  .sheet.a3 .p-card .p-price { font-size: 21px; }
+  /* П10 «B2B-партнёрам»: деловой стиль */
+  .p-b2b { margin-top: 10mm; display: flex; flex-direction: column; gap: 5mm; }
+  .p-b2b-item { display: flex; gap: 4mm; align-items: flex-start; padding: 4mm; background: rgba(255,255,255,.06); border-left: 3px solid var(--pf-a); border-radius: 2mm; }
+  .poster.t-dark .p-b2b-item, .poster.t-ink .p-b2b-item { background: rgba(255,255,255,.04); }
+  .p-b2b-item .icon { font-size: 24px; flex: none; }
+  .sheet.a3 .p-b2b-item .icon { font-size: 32px; }
+  .p-b2b-item .text { flex: 1; }
+  .p-b2b-item .text b { font-size: 15px; display: block; margin-bottom: 2mm; }
+  .sheet.a3 .p-b2b-item .text b { font-size: 21px; }
+  .p-b2b-item .text span { font-size: 12px; color: var(--ink-soft); }
+  .sheet.a3 .p-b2b-item .text span { font-size: 17px; }
+  /* П11 «Ремонт и апгрейд»: прайс-сетка */
+  .p-repair { margin-top: 10mm; display: grid; grid-template-columns: repeat(2, 1fr); gap: 4mm; }
+  .sheet.a3 .p-repair { gap: 6mm; }
+  .p-repair-item { padding: 5mm; background: rgba(255,255,255,.08); border-radius: 3mm; border: 1px solid var(--line); }
+  .poster.t-dark .p-repair-item, .poster.t-ink .p-repair-item { background: rgba(255,255,255,.05); }
+  .p-repair-item .name { font-size: 14px; font-weight: 700; margin-bottom: 2mm; }
+  .sheet.a3 .p-repair-item .name { font-size: 20px; }
+  .p-repair-item .price { font-size: 18px; font-weight: 900; color: var(--pf-a); }
+  .sheet.a3 .p-repair-item .price { font-size: 25px; }
+  .p-repair-item .desc { font-size: 11px; color: var(--ink-soft); margin-top: 2mm; }
+  .sheet.a3 .p-repair-item .desc { font-size: 15px; }
+  /* П12 «Именные сувениры»: примеры + поле «ваше имя» */
+  .p-named { margin-top: 10mm; display: flex; flex-direction: column; gap: 6mm; }
+  .p-named-examples { display: flex; gap: 4mm; justify-content: center; }
+  .p-named-ex { width: 60mm; height: 40mm; background: linear-gradient(135deg, var(--pf-a), var(--pf-a2)); border-radius: 3mm; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 900; color: #fff; }
+  .sheet.a3 .p-named-ex { width: 85mm; height: 56mm; font-size: 28px; }
+  .p-named-input { margin-top: 6mm; padding: 6mm; border: 2px dashed var(--pf-a); border-radius: 4mm; text-align: center; }
+  .p-named-input .label { font-size: 14px; color: var(--ink-soft); margin-bottom: 3mm; }
+  .sheet.a3 .p-named-input .label { font-size: 20px; }
+  .p-named-input .field { font-size: 28px; font-weight: 900; color: var(--pf-a); min-height: 12mm; border-bottom: 2px solid var(--line); }
+  .sheet.a3 .p-named-input .field { font-size: 40px; min-height: 17mm; }
+  /* П13 «Срочно! 24 часа»: яркий постер-молния */
+  .poster.urgent { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%) !important; color: #fff !important; }
+  .poster.urgent .p-hero { font-size: 64px; }
+  .sheet.a3 .poster.urgent .p-hero { font-size: 90px; }
+  .poster.urgent .p-hero em { background: linear-gradient(120deg, #fbbf24, #f59e0b) !important; -webkit-background-clip: text !important; background-clip: text !important; color: transparent !important; }
+  .poster.urgent .p-tag, .poster.urgent .p-lead, .poster.urgent .p-contact .muted { color: rgba(255,255,255,.85) !important; }
+  .p-urgent-badge { display: inline-flex; align-items: center; gap: 3mm; margin-top: 8mm; padding: 4mm 8mm; background: #fbbf24; color: #991b1b; border-radius: 99mm; font-size: 20px; font-weight: 900; letter-spacing: .03em; align-self: flex-start; }
+  .sheet.a3 .p-urgent-badge { font-size: 28px; padding: 6mm 12mm; }
+  .p-urgent-list { margin-top: 10mm; display: flex; flex-direction: column; gap: 4mm; }
+  .p-urgent-item { display: flex; align-items: baseline; gap: 4mm; font-size: 16px; }
+  .sheet.a3 .p-urgent-item { font-size: 22px; }
+  .p-urgent-item .icon { font-size: 20px; }
+  .sheet.a3 .p-urgent-item .icon { font-size: 28px; }
+  /* П14 «Потрогай материалы»: образцы с тактильными зонами */
+  .p-samples { margin-top: 10mm; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5mm; }
+  .sheet.a3 .p-samples { gap: 7mm; }
+  .p-sample { padding: 5mm; background: rgba(255,255,255,.1); border-radius: 3mm; text-align: center; border: 2px solid var(--line); }
+  .poster.t-dark .p-sample, .poster.t-ink .p-sample { background: rgba(255,255,255,.06); }
+  .p-sample .swatch { width: 100%; aspect-ratio: 1; border-radius: 50%; margin-bottom: 3mm; border: 3px solid var(--line); }
+  .p-sample .name { font-size: 14px; font-weight: 700; margin-bottom: 2mm; }
+  .sheet.a3 .p-sample .name { font-size: 20px; }
+  .p-sample .props { font-size: 11px; color: var(--ink-soft); line-height: 1.4; }
+  .sheet.a3 .p-sample .props { font-size: 15px; }
+  .p-touch-hint { margin-top: 8mm; padding: 4mm; background: rgba(255,255,255,.08); border-radius: 3mm; text-align: center; font-size: 13px; color: var(--ink-soft); }
+  .sheet.a3 .p-touch-hint { font-size: 18px; padding: 6mm; }
   .p-off { opacity: .38; outline: 2px dashed var(--line); outline-offset: 3mm; position: relative; }
   .p-off-tag { position: absolute; top: 6mm; right: 6mm; font-size: 11px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 99mm; padding: 1.5mm 5mm; background: rgba(255,255,255,.6); }
   .poster.t-dark .p-off-tag, .poster.t-ink .p-off-tag { background: rgba(16,19,26,.6); color: rgba(233,238,250,.8); }
@@ -146,7 +214,7 @@
     </div>
   </div>
 </div>
-<div class="note noprint"><b>Куда вешать:</b> «Печатаем вещи под вас» — над полкой или за прилавком; «Как заказать своё» — рядом с образцами; «Мы в Telegram» — у кассы; «Акция» — на видное место и менять по сезону. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра. Кликните по постеру, чтобы править его текст; снятый с печати постер показывается бледным и не попадает в печать. Правки, тема и контакты сохраняются и переносятся кнопками «Сохранить/Загрузить шаблон».</div>
+<div class="note noprint"><b>Куда вешать:</b> «Печатаем вещи под вас» — над полкой или за прилавком; «Как заказать своё» — рядом с образцами; «Мы в Telegram» — у кассы; «Акция» — на видное место и менять по сезону; «Витрина» — над стеллажом с готовыми изделиями; «B2B-партнёрам» — в зоне переговоров; «Ремонт» — у входа или в сервисной зоне; «Именные сувениры» — у кассы для импульсных покупок; «Срочно! 24 часа» — на видное место для срочных клиентов; «Потрогай материалы» — рядом с образцами пластиков. Формат A3 читается с 3–4 метров, A4 — с 1,5 метра. Кликните по постеру, чтобы править его текст; снятый с печати постер показывается бледным и не попадает в печать. Правки, тема и контакты сохраняются и переносятся кнопками «Сохранить/Загрузить шаблон».</div>
 <div id="sheets"></div>
 <script src="../assets/qr.js"></script>
 <script src="nz.js"></script>
@@ -191,6 +259,64 @@ const START = [
       { b: 'Именной адресник', s: '— 350 ₽ вместо 450 ₽' },
       { b: 'Брелок с именем', s: '— 200 ₽ при любом заказе' },
       { b: 'Своё имя или кличка', s: '— любой шрифт и цвет' },
+    ] },
+  { id: null, tpl: 'showcase', print: true,
+    title: 'Витрина', em: 'готовых изделий', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Сканируйте QR-код и закажите с телефона. Все изделия в наличии — забирайте сразу.',
+    items: [
+      { b: '🎁', s: 'Адресник · 450 ₽' },
+      { b: '🔑', s: 'Брелок · 250 ₽' },
+      { b: '📱', s: 'Подставка · 350 ₽' },
+      { b: '🏷️', s: 'Табличка · 300 ₽' },
+      { b: '🎯', s: 'Держатель · 400 ₽' },
+      { b: '⭐', s: 'Сувенир · 200 ₽' },
+    ] },
+  { id: null, tpl: 'b2b', print: true,
+    title: 'Печатаем', em: 'для бизнеса', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Партии изделий, корпоративные сувениры и производственная оснастка. Работаем по договору, закрывающие документы.',
+    items: [
+      { b: '🏭', s: 'Партии от 10 штук' },
+      { b: '📋', s: 'Договор и счёт' },
+      { b: '⏱️', s: 'Сроки от 3 дней' },
+      { b: '🎨', s: 'Любой цвет и материал' },
+    ] },
+  { id: null, tpl: 'repair', print: true,
+    title: 'Ремонт', em: 'и апгрейд принтеров', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Восстановим ваш 3D-принтер: чистка, калибровка, замена деталей. Диагностика бесплатно.',
+    items: [
+      { b: 'Чистка сопла', s: '800 ₽' },
+      { b: 'Калибровка стола', s: '1200 ₽' },
+      { b: 'Замена термобарьера', s: '1500 ₽' },
+      { b: 'Настройка AMS', s: '1000 ₽' },
+      { b: 'Обновление прошивки', s: '600 ₽' },
+      { b: 'Диагностика', s: 'Бесплатно' },
+    ] },
+  { id: null, tpl: 'named', print: true,
+    title: 'Именные', em: 'сувениры за 30 минут', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Брелоки, адресники и медальоны с вашим именем или кличкой питомца. Любой цвет и шрифт.',
+    items: [
+      { b: 'Алексей', s: '' },
+      { b: 'Мурка', s: '' },
+      { b: 'Boss', s: '' },
+    ] },
+  { id: null, tpl: 'urgent', print: true,
+    title: 'Срочная печать', em: 'за 24 часа', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Нужно срочно? Напечатаем за сутки с наценкой 50%. Работаем без выходных.',
+    items: [
+      { b: '⚡', s: 'Готово за 24 часа' },
+      { b: '💰', s: 'Наценка 50%' },
+      { b: '📞', s: 'Звоните прямо сейчас' },
+    ] },
+  { id: null, tpl: 'samples', print: true,
+    title: 'Потрогай', em: 'материалы', slogan: 'Там, где рождается форма · {город}',
+    lead: 'Пощупайте образцы пластиков перед заказом. Поможем выбрать материал под вашу задачу.',
+    items: [
+      { b: 'PLA', s: 'Дом, декор', color: '#10b981' },
+      { b: 'PETG', s: 'Улица, нагрузка', color: '#3b82f6' },
+      { b: 'TPU', s: 'Гибкость, амортизация', color: '#f59e0b' },
+      { b: 'ABS', s: 'Прочность, температура', color: '#ef4444' },
+      { b: 'ASA', s: 'УФ-стойкость', color: '#8b5cf6' },
+      { b: 'PA-CF', s: 'Карбон, максимальная прочность', color: '#1f2937' },
     ] },
 ];
 
@@ -296,6 +422,40 @@ function draw() {
       `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
       `<div class="p-bigqr">${bigQr}<div class="cap">${NZ.esc(c.tg || '')}<small>Наведите камеру — откроется канал</small></div></div>` +
       `<div class="p-list">${itemsHtml(p, opts)}</div>` + foot(qrSvg, opts) + `</div></div>`;
+    /* П9 showcase: сетка товаров + QR */
+    if (p.tpl === 'showcase') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-grid">${p.items.map(it => `<div class="p-card"><div class="p-img">${NZ.esc(it.b || '')}</div><div class="p-name">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    /* П10 b2b: деловой стиль */
+    if (p.tpl === 'b2b') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-b2b">${p.items.map(it => `<div class="p-b2b-item"><div class="icon">${NZ.esc(it.b || '')}</div><div class="text"><b>${NZ.esc(it.s || '')}</b></div></div>`).join('')}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    /* П11 repair: прайс-сетка */
+    if (p.tpl === 'repair') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-repair">${p.items.map(it => `<div class="p-repair-item"><div class="name">${NZ.esc(it.b || '')}</div><div class="price">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    /* П12 named: примеры + поле */
+    if (p.tpl === 'named') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-named"><div class="p-named-examples">${p.items.slice(0, 3).map(it => `<div class="p-named-ex">${NZ.esc(it.b || '')}</div>`).join('')}</div>` +
+      `<div class="p-named-input"><div class="label">Ваше имя или кличка питомца</div><div class="field">___________</div></div></div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    /* П13 urgent: яркий постер */
+    if (p.tpl === 'urgent') return `<div class="${cls}"><div class="poster urgent ${base(p)}" data-idx="${posters.indexOf(p)}" title="Клик — править этот постер">` +
+      off(p) + head(p) + hero(p) +
+      `<div class="p-urgent-badge">⚡ +50% к цене</div>` +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-urgent-list">${p.items.map(it => `<div class="p-urgent-item"><span class="icon">${NZ.esc(it.b || '')}</span><span>${NZ.esc(it.s || '')}</span></div>`).join('')}</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
+    /* П14 samples: образцы материалов */
+    if (p.tpl === 'samples') return `<div class="${cls}">` + common + hero(p) +
+      `<div class="p-lead">${NZ.esc(fill(p.lead || '', city))}</div>` +
+      `<div class="p-samples">${p.items.map(it => `<div class="p-sample"><div class="swatch" style="background:${NZ.esc(it.color || '#999')}"></div><div class="name">${NZ.esc(it.b || '')}</div><div class="props">${NZ.esc(it.s || '')}</div></div>`).join('')}</div>` +
+      `<div class="p-touch-hint">👆 Потрогайте образцы перед заказом</div>` +
+      foot(qrSvg, opts) + `</div></div>`;
     /* promo (П16) */
     return `<div class="${cls}">` + common + hero(p) +
       (p.until ? `<div class="p-until">⏳ ${NZ.esc(p.until)}</div>` : '') +

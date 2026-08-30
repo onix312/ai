@@ -69,7 +69,7 @@ function renderTabs() {
   if (!list.length) {
     host.innerHTML = configured && !live
       ? Array.from({ length: configured }, () =>
-        `<div class="pk-card skel"><span class="pk-ring"><i class="skel" style="width:34px;height:34px;border-radius:50%"></i></span>`
+        `<div class="pk-card skel" aria-busy="true"><span class="pk-ring"><i class="skel" style="width:34px;height:34px;border-radius:50%"></i></span>`
         + `<span class="pk-main"><i class="skel" style="width:56%;height:12px;display:block"></i>`
         + `<i class="skel" style="width:82%;height:10px;margin-top:6px;display:block"></i></span></div>`).join('')
       : '';
@@ -284,8 +284,14 @@ function renderAms(p) {
   text('pr_ams_count', trays.length
     ? `${occupied.length} из ${trays.length} занято`
     : 'нет данных');
+  const hum = num(ams.humidity);
+  const humZone = hum <= 20 ? { label: 'сухо', color: '#22c55e' }
+    : hum <= 40 ? { label: 'норма', color: '#3b82f6' }
+    : hum <= 60 ? { label: 'влажно', color: '#f59e0b' }
+    : { label: 'крит', color: '#ef4444' };
+  const humBar = hum > 0 ? `<div style="display:inline-block;width:60px;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:0 6px;vertical-align:middle"><div style="width:${Math.min(100, hum)}%;height:100%;background:${humZone.color}"></div></div>` : '';
   text('pr_ams_env', ams.temperature != null || ams.humidity != null
-    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${ams.humidity ?? '—'}`
+    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${humBar}${ams.humidity ?? '—'}% (${humZone.label})`
     : 'Температура и влажность —');
   const pbtn = $('pr_ams_profiles');
   if (pbtn) pbtn.hidden = !trays.length;
@@ -926,7 +932,7 @@ async function loadFiles() {
     // Облачный принтер без локального IP: сервер сам попробует найти IP
     // (SSDP) и Access Code (облачный список устройств) — тогда SD-карта
     // станет видимой по FTPS. Если не вышло — показываем облачную историю.
-    host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
+    host.innerHTML = '<div class="skeleton" aria-busy="true" style="height:60px"></div>';
     try {
       const sd = await get('/api/printer/files', { printer_id: p.id, path: filesPath || '/' });
       if (!sd.error) { renderFileList(sd); return; }
@@ -949,7 +955,7 @@ async function loadFiles() {
     host.innerHTML = '<div class="empty compact"><span>Принтер не на связи — список файлов недоступен.</span></div>';
     return;
   }
-  host.innerHTML = '<div class="skeleton" style="height:60px"></div>';
+  host.innerHTML = '<div class="skeleton" aria-busy="true" style="height:60px"></div>';
   try {
     const data = await get('/api/printer/files', { printer_id: p.id, path: filesPath || '/' });
     if (data.error) { host.innerHTML = `<div class="notice"><span>ℹ</span><span>${esc(data.error)}</span></div>`; return; }
@@ -1246,7 +1252,7 @@ PF.refreshBootstrapPrinters = async () => {
 
 async function discover() {
   const box = $('pf_discovered');
-  box.innerHTML = '<div class="skeleton" style="height:44px"></div>';
+  box.innerHTML = '<div class="skeleton" aria-busy="true" style="height:44px"></div>';
   try {
     const data = await get('/api/printer/discover');
     const list = data.found || [];
@@ -1814,7 +1820,7 @@ function bind() {
     const host = (p && p.host) || '';
     const box = $('pr_net');
     if (!host) { box.innerHTML = '<div class="empty compact"><span>У принтера не задан IP-адрес.</span></div>'; return; }
-    box.innerHTML = '<div class="skeleton" style="height:44px"></div>';
+    box.innerHTML = '<div class="skeleton" aria-busy="true" style="height:44px"></div>';
     try {
       const data = await get('/api/network/diagnose', { host });
       const dot = { ok: 'ok', warn: 'warn', bad: 'bad' }[data.level] || '';

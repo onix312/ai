@@ -227,8 +227,8 @@ class TelegramBot:
             [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
             [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
             [("🗂 Каталог", "cmd:cat"), ("📊 Итоги", "cmd:today")],
-            [("🌡 Датчики", "cmd:sensors"), ("🩺 Доктор", "cmd:doctor")],
-            [("❔ Помощь", "cmd:help")],
+            [("📈 Неделя", "cmd:weekly"), ("🌡 Датчики", "cmd:sensors")],
+            [("🩺 Доктор", "cmd:doctor"), ("❔ Помощь", "cmd:help")],
         )
 
     def _reply_keyboard(self, chat: str, text: str) -> None:
@@ -473,9 +473,10 @@ class TelegramBot:
             return self._client_inbox()
         if command.startswith("cbot_tpl:"):
             return self._client_template_button(command)
-        if command in ("plan", "filament", "money", "today", "help"):
+        if command in ("plan", "filament", "money", "today", "weekly", "help"):
             return {"plan": self.text_plan, "filament": self.text_filament,
                     "money": self.text_money, "today": self.text_today,
+                    "weekly": self.text_weekly,
                     "help": lambda: HELP}[command]()
         if command == "pause":
             return self.do_command("pause", "Печать поставлена на паузу", chat=chat)

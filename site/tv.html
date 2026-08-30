@@ -129,6 +129,18 @@ tick();
 clock();
 setInterval(tick, 5000);
 setInterval(clock, 1000);
+
+// Б6. Авто-ротация ТВ: ?rotate=30 переключает tv/monitor каждые 30 сек
+const rotate = parseInt(qs.get('rotate') || '0', 10);
+if (rotate > 0) {
+  const modes = ['tv', 'monitor'];
+  let mi = 0;
+  setInterval(() => {
+    mi = (mi + 1) % modes.length;
+    document.body.classList.remove('tv', 'monitor');
+    document.body.classList.add(modes[mi]);
+  }, rotate * 1000);
+}
 </script>
 </body>
 </html>

@@ -58,6 +58,15 @@ function initials(name) {
   if (!parts.length) return '—';
   return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
 }
+const AVATAR_EMOJI = ['🐼','🦊','🌵','🐸','🦉','🐙','🦄','🐨','🐯','🦁','🐮','🐷','🐵','🐔','🐧','🐦','🦆','🦅','🦋','🐝','🐞','🌸','🌺','🌻'];
+function avatarEmoji(name, seed) {
+  // Детерминированный эмодзи-аватар: если имени нет — берём из seed (chat_id/id)
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length) return ''; // есть имя — используем initials
+  const idx = Math.abs(parseInt(seed || '0', 10) || hashStr(String(seed || 'anon'))) % AVATAR_EMOJI.length;
+  return AVATAR_EMOJI[idx];
+}
+function hashStr(s) { let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; } return h; }
 const debounce = (fn, ms = 260) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 /* ================================================== Н3: плавный «докрут» числа
@@ -168,9 +177,11 @@ function toast(title, sub, kind = 'ok') {
   const box = $('toasts');
   const el = document.createElement('div');
   el.className = 'toast ' + kind;
-  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>`;
+  const dur = kind === 'bad' ? 5200 : 3200;
+  el.innerHTML = `<span class="ic">${ICONS[kind] || ICONS.info}</span><span><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span><button class="toast-close" aria-label="Закрыть">×</button><div class="toast-progress" style="animation:toastProgress ${dur}ms linear forwards"></div>`;
   box.appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, kind === 'bad' ? 5200 : 3200);
+  el.querySelector('.toast-close').onclick = () => { el.classList.add('out'); setTimeout(() => el.remove(), 260); };
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 260); }, dur);
 }
 const fail = (e) => toast('Не получилось', e && e.message ? e.message : String(e), 'bad');
 
