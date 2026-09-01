@@ -353,7 +353,8 @@ function plural(n, one, few, many) {
 function renderCards(list) {
   const KIND_ICONS = { kit: '◫', material: '◍', semi: '⚙', service: '★', product: '📦', showcase: '🛍' };
   const STATUS_ICONS = { ok: '✓', low: '⚠', empty: '✕', dead: '💤', none: '◻' };
-  const shopEye = !!($('prod_shop_eye') || {}).dataset && $('prod_shop_eye')?.classList.contains('on');
+  const shopEyeEl = $('prod_shop_eye');
+  const shopEye = !!(shopEyeEl && shopEyeEl.dataset && shopEyeEl.classList && shopEyeEl.classList.contains('on'));
   const card = (i) => {
     const st = i.status || 'ok';
     const disp = !!i.display_only;
@@ -463,7 +464,9 @@ function renderCards(list) {
         + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`)
       + '</div></article>';
   };
-  if (shopEye || !data.groups.length || $('prod_group').value) {
+  const prodGroupEl = $('prod_group');
+  const prodGroupVal = prodGroupEl ? prodGroupEl.value : '';
+  if (shopEye || !data.groups.length || prodGroupVal) {
     $('prod_grid').innerHTML = list.length ? list.map(card).join('') : (data.items.length
       ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
       : emptyBox('▩', 'Номенклатура пуста',
@@ -472,7 +475,18 @@ function renderCards(list) {
     U.stagger($('prod_grid'));
     return;
   }
-  // 13.1 (17): сворачиваемые группы с подытогом остатка
+  // 13.1 (17): сворачиваемые группы с подытогом остатка.
+  // БАГ-ФИКС: сохраняем состояние раскрытых <details> перед перерисовкой,
+  // чтобы автообновление (setInterval / PF.on('data')) не сворачивало
+  // категории, которые пользователь раскрыл.
+  const openGroups = new Set();
+  const existingGrid = $('prod_grid');
+  if (existingGrid) {
+    existingGrid.querySelectorAll('details.prod-group[open]').forEach((d) => {
+      const nameEl = d.querySelector('.pg-name');
+      if (nameEl) openGroups.add(nameEl.textContent);
+    });
+  }
   const byGroup = new Map();
   list.forEach((i) => {
     const gid = i.group_id || '';
@@ -481,17 +495,20 @@ function renderCards(list) {
   });
   const groupsHtml = [...byGroup.entries()].map(([gid, items]) => {
     const g = data.groups.find((x) => x.id === gid);
+    const groupName = g ? g.name : 'Без категории';
     const qtySum = items.reduce((a, i) => a + num(i.qty), 0);
     const valSum = items.reduce((a, i) => a + num(i.margin), 0);
-    return `<details class="prod-group${g ? '' : ' nogroup'}"><summary>`
-      + `<span class="pg-name">${esc(g ? g.name : 'Без категории')}</span>`
+    const wasOpen = openGroups.has(groupName);
+    return `<details class="prod-group${g ? '' : ' nogroup'}"${wasOpen ? ' open' : ''}><summary>`
+      + `<span class="pg-name">${esc(groupName)}</span>`
       + `<span class="pg-count">${items.length} ${plural(items.length, 'позиция', 'позиции', 'позиций')}</span>`
       + `<span class="pg-stock">${nfmt(qtySum)} шт</span>`
       + `<span class="pg-margin ${valSum >= 0 ? 'pos' : 'neg'}">${money(valSum)}</span>`
       + `</summary><div class="prod-group-inner">${items.map(card).join('')}</div></details>`;
   }).join('');
   const gridEl = $('prod_grid');
-  if (gridEl) gridEl.classList.toggle('shelf3d', !!(($('prod_shelf3d') || {}).classList || []).contains('on'));
+  const shelf3dEl = $('prod_shelf3d');
+  if (gridEl) gridEl.classList.toggle('shelf3d', !!(shelf3dEl && shelf3dEl.classList && shelf3dEl.classList.contains('on')));
   $('prod_grid').innerHTML = groupsHtml || (data.items.length
     ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
     : emptyBox('▩', 'Номенклатура пуста', 'Добавьте товар — модель, нормативы печати и цену.',
@@ -1910,6 +1927,7 @@ PF.on('ready', () => {
   refreshBatches();
 });
 PF.on('data', () => {
+  _lastProductsRefresh = Date.now();
   if (document.querySelector('#view-products.on')) refresh();
   if (document.querySelector('#view-batches.on')) refreshBatches();
 });
@@ -1919,10 +1937,20 @@ PF.on('view', (d) => {
   if (d.view === 'documents') refreshDocs();
   if (d.view === 'warehouses') { refresh().then(renderWarehouses); }
 });
+// БАГ-ФИКС: убран слепой setInterval, который каждые 30 секунд перерисовывал
+// товары и сворачивал раскрытые категории (<details>). Обновление данных
+// уже обеспечивается SSE-стримом и core.js (polling/SSE + PF.emit('data')).
+// Оставляем только страховочный интервал с защитой от повторной перерисовки,
+// когда SSE недоступен, и увеличиваем его до 60 секунд.
+let _lastProductsRefresh = 0;
 setInterval(() => {
+  // Не дублируем обновление, если данные пришли менее 30 секунд назад
+  // через SSE или PF.on('data').
+  if (Date.now() - _lastProductsRefresh < 30000) return;
+  _lastProductsRefresh = Date.now();
   if (document.querySelector('#view-products.on')) refresh();
   if (document.querySelector('#view-batches.on')) refreshBatches();
-}, 30000);
+}, 60000);
 
 PF.modules.products = { refresh, openNom, openBatch, openDoc, openDocWizard, openQuickSale, openPlan };
 /* 14.0 (идея 57): #products/<id>, #batches/<id>, #documents/<id>. */

@@ -1475,20 +1475,27 @@ function showKfFrame() {
   $('kf_cap').textContent = `Кадр ${kfIndex + 1} из ${kfFrames.length}`;
   $('kf_seek').value = String(kfIndex);
 }
-$('kf_play').addEventListener('click', () => {
-  if (kfTimer) return;
-  kfTimer = setInterval(() => {
-    kfIndex = (kfIndex + 1) % kfFrames.length;
+// БАГ-ФИКС: обработчики кейфреймов были привязаны при инициализации модуля
+// без проверки существования элементов — если в HTML нет keyframes_modal,
+// модуль падал с Cannot read properties of null. Перенесены в bindKeyframes()
+// с null-check, вызываются из bind().
+function bindKeyframes() {
+  const play = $('kf_play'), stop = $('kf_stop'), seek = $('kf_seek');
+  if (play) play.addEventListener('click', () => {
+    if (kfTimer) return;
+    kfTimer = setInterval(() => {
+      kfIndex = (kfIndex + 1) % kfFrames.length;
+      showKfFrame();
+    }, 1200);
+    play.hidden = true;
+    if (stop) stop.hidden = false;
+  });
+  if (stop) stop.addEventListener('click', stopKeyframes);
+  if (seek) seek.addEventListener('input', (e) => {
+    kfIndex = num(e.target.value);
     showKfFrame();
-  }, 1200);
-  $('kf_play').hidden = true;
-  $('kf_stop').hidden = false;
-});
-$('kf_stop').addEventListener('click', stopKeyframes);
-$('kf_seek').addEventListener('input', (e) => {
-  kfIndex = num(e.target.value);
-  showKfFrame();
-});
+  });
+}
 
 /* ============================================== 8.5: стол (#10) */
 let bedRef = null;
@@ -1979,6 +1986,7 @@ function bind() {
     } catch (err) { fail(err); }
   });
 
+  bindKeyframes();
   $('pr_events_refresh').addEventListener('click', loadEvents);
 
   // Диагностика связи (5.0): порты принтера и сравнение подсети.

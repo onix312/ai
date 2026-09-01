@@ -174,11 +174,14 @@ function renderShelf() {
   const moves = shelfData.moves || [];
   $('shelf_moves').innerHTML = moves.length ? moves.slice(0, 40).map((m) => {
     const positive = num(m.qty) > 0;
-    return `<div class="tx-row">`
+    const undone = !!num(m.undone);
+    const canUndo = !undone && !positive && (m.kind === 'sale' || m.kind === 'online');
+    return `<div class="tx-row${undone ? ' undone' : ''}">`
       + `<span class="tx-ic ${positive ? 'income' : 'expense'}">${positive ? '↑' : '↓'}</span>`
-      + `<div class="tx-body"><b>${esc(m.item_name || 'Позиция')} · ${esc(KIND_LABEL[m.kind] || m.kind)}</b>`
-      + `<small>${esc(dateTimeText(m.at))}${m.note ? ' · ' + esc(m.note) : ''}</small></div>`
-      + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)} шт${num(m.price) ? ' · ' + money(num(m.price) * Math.abs(num(m.qty))) : ''}</span>`
+      + `<div class="tx-body"><b${undone ? ' style="text-decoration:line-through;opacity:.55"' : ''}>${esc(m.item_name || 'Позиция')} · ${esc(KIND_LABEL[m.kind] || m.kind)}</b>`
+      + `<small${undone ? ' style="opacity:.55"' : ''}>${esc(dateTimeText(m.at))}${m.note ? ' · ' + esc(m.note) : ''}</small></div>`
+      + `<span class="amt ${positive ? 'pos' : 'neg'}"${undone ? ' style="text-decoration:line-through;opacity:.55"' : ''}>${positive ? '+' : ''}${nfmt(m.qty)} шт${num(m.price) ? ' · ' + money(num(m.price) * Math.abs(num(m.qty))) : ''}</span>`
+      + (canUndo ? `<button class="btn sm ghost" type="button" data-shelf-undo="${esc(m.id)}" title="Отменить продажу" style="margin-left:8px;flex:none">↶</button>` : '')
       + `</div>`;
   }).join('') : '<div class="empty compact"><span>Движений пока нет.</span></div>';
 }
@@ -307,7 +310,9 @@ function filteredShelfItems() {
     if (shelfFilter.linkedOnly && !i.barcode) return false;
     const st = shelfFilter.status;
     if (st === 'needs') {
-      if (!(i.status === 'empty' || i.low || i.dead || num(i.plan_qty) > 0)) return false;
+      // БАГ-ФИКС: i.low и i.dead не существуют как отдельные поля —
+      // статус хранится в i.status строкой ('low', 'dead', 'empty', 'ok').
+      if (!(i.status === 'empty' || i.status === 'low' || i.status === 'dead' || num(i.plan_qty) > 0)) return false;
     } else if (st && i.status !== st) {
       return false;
     }
@@ -799,6 +804,23 @@ function bind() {
     const item = (shelfData.items || []).find((x) => x.id === e.target.value);
     if (item) { $('sif_expected').textContent = nfmt(item.qty); $('sif_actual').value = item.qty; }
   });
+  // Отмена продажи: возврат штук на стеллаж + удаление проводки
+  const movesHost = $('shelf_moves');
+  if (movesHost) {
+    movesHost.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-shelf-undo]');
+      if (!btn) return;
+      const moveId = btn.dataset.shelfUndo;
+      if (!moveId) return;
+      if (!confirmDanger('Отменить продажу? Штуки вернутся на стеллаж, проводка удалится.')) return;
+      try {
+        await post('/api/shelf/sale/undo', { move_id: moveId });
+        await refreshShelf();
+        PF.refreshFinance();
+        toast('Продажа отменена');
+      } catch (err) { fail(err); }
+    });
+  }
 
   $('shelf_qr_print').addEventListener('click', () => {
     const title = $('shelf_qr_modal').querySelector('h3');
@@ -841,10 +863,21 @@ function bind() {
 function round2(v) { return Math.round(num(v) * 100) / 100; }
 
 /* =============================================================== старт */
+// БАГ-ФИКС: setInterval и PF.on('data') оба вызывали refreshShelf() —
+// двойное обновление каждые 30 сек при активных данных. Шина событий обновляет
+// вкладку мгновенно, а таймер оставлен как запасной канал на случай пропуска
+// события (60 сек, с деупликацией по timestamp последнего обновления).
+let _lastShelfRefresh = 0;
+function guardedShelfRefresh() {
+  const now = Date.now();
+  if (now - _lastShelfRefresh < 2000) return;
+  _lastShelfRefresh = now;
+  refreshShelf();
+}
 PF.on('ready', () => { bind(); refreshShelf(); });
-PF.on('data', () => { if (document.querySelector('#view-shelf.on')) refreshShelf(); });
+PF.on('data', () => { if (document.querySelector('#view-shelf.on')) guardedShelfRefresh(); });
 PF.on('view', (d) => { if (d.view === 'shelf') refreshShelf(); });
-setInterval(() => { if (document.querySelector('#view-shelf.on')) refreshShelf(); }, 30000);
+setInterval(() => { if (document.querySelector('#view-shelf.on')) guardedShelfRefresh(); }, 60000);
 
 PF.modules.shelf = { refreshShelf, openShelf, openProduce, openSales, openInventory,
   get shelfSummary() { return shelfSummaryText(); } };

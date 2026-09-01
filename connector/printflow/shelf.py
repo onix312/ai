@@ -183,7 +183,8 @@ class Shelf:
     def _sum_sold(self, item_id: str, since: str) -> float:
         row = self.db.one(
             "SELECT COALESCE(SUM(-qty),0) v FROM shelf_moves"
-            " WHERE item_id=? AND kind IN ('sale','online') AND qty<0 AND at>=?",
+            " WHERE item_id=? AND kind IN ('sale','online') AND qty<0"
+            " AND COALESCE(undone,0)=0 AND at>=?",
             (item_id, since)) or {}
         return num(row.get("v"))
 
@@ -274,7 +275,15 @@ class Shelf:
             params.append(item_id)
         sql += " ORDER BY datetime(m.at) DESC LIMIT ?"
         params.append(int(limit))
-        return self.db.query(sql, params)
+        rows = self.db.query(sql, params)
+        # Отменённые продажи остаются в журнале (аудит), но помечаются —
+        # фронтенд рисует их перечёркнутыми и не учитывает в статистике.
+        for row in rows:
+            try:
+                row["undone"] = int(row.get("undone") or 0)
+            except (TypeError, ValueError):
+                row["undone"] = 0
+        return rows
 
     def _move(self, item_id: str, kind: str, qty: float, price: float = 0.0,
               job_id: str = "", tx_id: str = "", note: str = "",
@@ -376,6 +385,55 @@ class Shelf:
                                      num(row.get("price")), channel,
                                      row.get("note", "")))
         return results
+
+    def undo_sale(self, move_id: str) -> dict:
+        """Отменить продажу со стеллажа: вернуть штуки и снять проводку.
+
+        Возвращает остатки на стеллаж, удаляет связанную финансовую проводку
+        (если она была) и помечает движение как отменённое. Отмена возможна
+        только для движений kind='sale' или kind='online' с отрицательным qty.
+        """
+        move = self.db.one("SELECT * FROM shelf_moves WHERE id=?", (move_id,))
+        if not move:
+            raise ValueError("Движение не найдено")
+        if move.get("kind") not in ("sale", "online"):
+            raise ValueError("Отменять можно только продажи")
+        if num(move.get("qty")) >= 0:
+            raise ValueError("Это движение не является расходом")
+        if str(move.get("undone") or "") == "1":
+            raise ValueError("Продажа уже отменена")
+
+        item_id = str(move.get("item_id") or "")
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not item:
+            raise ValueError("Позиция стеллажа не найдена")
+
+        qty = abs(num(move.get("qty")))
+        price = num(move.get("price"))
+        tx_id = str(move.get("tx_id") or "")
+
+        with self.db.transaction():
+            # 1) Пометить движение как отменённое
+            self.db.execute(
+                "UPDATE shelf_moves SET undone=1, note=COALESCE(note,'') || ' · ОТМЕНЕНО'"
+                " WHERE id=?", (move_id,))
+            # 2) Вернуть штуки на стеллаж
+            self.db.execute(
+                "UPDATE shelf_items SET qty=qty+?, updated_at=? WHERE id=?",
+                (round(qty, 2), now_iso(), item_id))
+            # 3) Удалить связанную финансовую проводку (если была)
+            if tx_id:
+                self.db.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
+                self.db.execute(
+                    "UPDATE shelf_moves SET tx_id=NULL WHERE id=?", (move_id,))
+
+        self.db.add_event("shelf", "Отмена продажи на стеллаже",
+                          f"{item.get('name') or ''} +{round(qty)} шт (возврат)",
+                          data={"item_id": item_id, "move_id": move_id,
+                                "qty": qty, "price": price, "had_tx": bool(tx_id)})
+        return {"ok": True, "item_id": item_id, "qty": qty,
+                "refunded": bool(tx_id),
+                "item": self.item(item_id)}
 
     # ------------------------------------------------------- касса и 1С
     def cashier_lookup(self, code: str) -> dict | None:

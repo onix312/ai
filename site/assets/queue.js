@@ -264,7 +264,9 @@ function renderHistory() {
     + `<small>${esc(dateTimeText(j.finished_at))} · ${minutesText(j.duration_min)} · ${nfmt(j.grams)} г`
     + (num(j.est_minutes) ? ' · оценка была ' + minutesText(j.est_minutes) : '') + '</small></div>'
     + `<span class="amt">${money(j.cost)}</span></div>`).join('')
-    : (hq
+    // БАГ-ФИКС: hq — массив (всегда truthy), поэтому пустой журнал без поиска
+    // раньше показывал «Ничего не найдено». Проверяем наличие поискового запроса.
+    : (q
       ? '<div class="empty compact"><span>⌕</span><b>Ничего не найдено</b><span>Попробуйте другое слово.</span></div>'
       : '<div class="empty"><span class="big">✓</span><b>Журнал пока пуст</b><span>Сюда попадут завершённые печати: время, граммы, себестоимость и паспорт план/факт.</span></div>');
   if (hq.length > historyLimit) {

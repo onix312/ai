@@ -2591,6 +2591,8 @@ class Api:
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),
                                         body.get("note", ""))
+        if path == "/api/shelf/sale/undo":
+            return 200, self.shelf.undo_sale(body.get("move_id", "") or body.get("id", ""))
         if path == "/api/shelf/1c/sale":
             return 200, self.shelf.sale_from_1c(
                 body.get("barcode") or body.get("code") or "",

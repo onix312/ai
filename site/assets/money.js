@@ -92,10 +92,13 @@ function renderStock() {
     kpi('Материалов', String(materials), 'разных типов'),
   ].join('');
 
-  const tag = $('nav_products_tag');
-  if (tag) {
-    tag.hidden = !low.length;
-    tag.textContent = String(low.length);
+  // БАГ-ФИКС: не перезаписываем nav_products_tag (он принадлежит products.js
+  // и показывает количество товаров с низким остатком). Для склада пластика
+  // используем отдельный бейдж nav_inventory_tag, если он есть.
+  const invTag = $('nav_inventory_tag');
+  if (invTag) {
+    invTag.hidden = !low.length;
+    invTag.textContent = String(low.length);
   }
 
   const locLabel = { shop: 'магазин', home: 'дом', ams: 'AMS', dry: 'сушка', other: 'другое' };
