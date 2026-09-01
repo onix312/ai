@@ -823,36 +823,23 @@ class BambuPrinter:
             p = copy.deepcopy(self.raw.get("print", {}))
             version = copy.deepcopy(self.version)
         ams_raw = p.get("ams") if isinstance(p.get("ams"), dict) else {}
+        vt_tray = p.get("vt_tray") if isinstance(p.get("vt_tray"), dict) else None
         units = ams_raw.get("ams") if isinstance(ams_raw.get("ams"), list) else []
         tray_now = str(ams_raw.get("tray_now", ""))
-        trays = []
-        for unit in units:
-            for tray in unit.get("tray", []) or []:
-                color = str(tray.get("tray_color") or "").strip()
-                global_id = f"{unit.get('id', 0)}{tray.get('id', 0)}"
-                # Остаток катушки: на большинстве прошивок 0–100, но на части
-                # приходит в десятых долях процента (0–1000). Нормализуем, иначе
-                # в интерфейсе «1000%», а предупреждение о низком остатке не сработает.
-                remain = None
-                if tray.get("remain") is not None:
-                    raw = as_num(tray.get("remain"), -1)
-                    if raw >= 0:
-                        if raw > 100:
-                            raw = raw / 10.0
-                        remain = round(max(0.0, min(100.0, raw)), 1)
-                trays.append({
-                    "id": global_id,
-                    "unit": int(as_num(unit.get("id"))),
-                    "slot": int(as_num(tray.get("id"))),
-                    "label": f"AMS {int(as_num(unit.get('id'))) + 1} · слот {int(as_num(tray.get('id'))) + 1}",
-                    "type": tray.get("tray_type") or tray.get("tray_sub_brands") or "",
-                    "color": "#" + color[:6] if len(color) >= 6 else "#cbd5e1",
-                    "remain": remain,
-                    "uuid": tray.get("tray_uuid", ""),
-                    "nozzle_min": tray.get("nozzle_temp_min"),
-                    "nozzle_max": tray.get("nozzle_temp_max"),
-                    "active": tray_now in (global_id, str(tray.get("id"))),
-                })
+        try:
+            trays = parse_ams_trays(ams_raw, vt_tray)
+        except Exception:
+            trays = []
+            for unit in units:
+                for tray in unit.get("tray", []) or []:
+                    trays.append(_ams_tray_dict(
+                        int(as_num(unit.get("id"))),
+                        int(as_num(tray.get("id"))),
+                        tray,
+                        True,
+                        bool(_clean_tray_uuid(tray.get("tray_uuid", ""))),
+                        tray_now,
+                    ))
         state = str(p.get("gcode_state") or ("OFFLINE" if not self.connected else "IDLE")).upper()
         task = p.get("subtask_name") or p.get("gcode_file") or ""
         firmware = next((x.get("sw_ver", "") for x in version if x.get("name") == "ota"), "")

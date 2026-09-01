@@ -106,6 +106,12 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
     """Свести катушки в AMS с таблицей spools.
 
     Возвращает счётчики: created / updated / unbound.
+    Фиксы:
+      * пустой слот (present=False) отвязывает катушку с ams_sync=1, чистит
+        tray_uuid и location=shop, чтобы не плодить 50 AMS-фантомов;
+      * unbind всегда чистит tray_uuid + location;
+      * проверяем ams_sync старой катушки перед отвязкой;
+      * обновляем location=ams при привязке.
     """
     result = {"created": 0, "updated": 0, "unbound": 0}
     trays = (snap.get("ams") or {}).get("trays") or []
@@ -116,15 +122,28 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
     for tray in trays:
         tray_uuid = _clean_uuid(tray.get("uuid"))
         material = str(tray.get("type") or "").strip()
-        if not _tray_occupied(tray):
-            continue  # пустой слот
         slot = "" if tray.get("slot") is None else str(tray.get("slot"))
         label = tray.get("label") or (f"Слот {slot}" if slot else "AMS")
         remain = tray.get("remain")
         color = _normalize_hex(str(tray.get("color") or ""))
         generic = _tray_generic(tray)
 
-        # 1) ищем катушку по RFID-метке, затем по привязке принтер+слот
+        if not _tray_occupied(tray):
+            if slot != "":
+                by_slot = db.one(
+                    "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
+                    (printer_id, slot))
+                if by_slot and int(num(by_slot.get("ams_sync"), 1)) == 1:
+                    db.execute(
+                        "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                        (now_iso(), by_slot["id"]))
+                    result["unbound"] += 1
+                    db.add_event(
+                        "spool", "Катушка отвязана от слота",
+                        f"{label}: слот опустел — катушка возвращена на склад",
+                        printer_id, {"spool_id": by_slot["id"], "slot": slot})
+            continue
+
         spool = None
         if tray_uuid:
             spool = db.one("SELECT * FROM spools WHERE tray_uuid=? AND archived=0",
@@ -134,36 +153,32 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
                 (printer_id, slot))
             if by_slot:
-                old_uuid = _clean_uuid(by_slot.get("tray_uuid"))
-                swapped = bool(tray_uuid and old_uuid and old_uuid != tray_uuid)
-                # RFID-катушку сняли, вставили стороннюю без метки — это другая
-                # физическая катушка, старую не обновляем под generic.
-                replaced_by_generic = bool(old_uuid and not tray_uuid and generic)
-                if swapped or replaced_by_generic:
-                    # В слоте теперь другая катушка: старую отвязываем,
-                    # ниже заведём новую. Остаток старой не трогаем.
-                    db.execute(
-                        "UPDATE spools SET ams_slot='', updated_at=? WHERE id=?",
-                        (now_iso(), by_slot["id"]))
-                    result["unbound"] += 1
-                    db.add_event(
-                        "spool", "Катушка отвязана от слота",
-                        f"{label}: в AMS теперь другая катушка",
-                        printer_id, {"spool_id": by_slot["id"], "slot": slot})
-                else:
+                if int(num(by_slot.get("ams_sync"), 1)) != 1:
                     spool = by_slot
+                else:
+                    old_uuid = _clean_uuid(by_slot.get("tray_uuid"))
+                    swapped = bool(tray_uuid and old_uuid and old_uuid != tray_uuid)
+                    replaced_by_generic = bool(old_uuid and not tray_uuid and generic)
+                    if swapped or replaced_by_generic:
+                        db.execute(
+                            "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                            (now_iso(), by_slot["id"]))
+                        result["unbound"] += 1
+                        db.add_event(
+                            "spool", "Катушка отвязана от слота",
+                            f"{label}: в AMS теперь другая катушка",
+                            printer_id, {"spool_id": by_slot["id"], "slot": slot})
+                    else:
+                        spool = by_slot
 
         if spool:
-            # 2) катушка известна — обновляем только «автоматические» поля
             if not int(num(spool.get("ams_sync"), 1)):
-                continue  # пользователь ведёт её вручную
+                continue
             updates: list[str] = []
             params: list[Any] = []
             if tray_uuid and tray_uuid != _clean_uuid(spool.get("tray_uuid")):
                 updates.append("tray_uuid=?")
                 params.append(tray_uuid)
-            # Тип из AMS заполняем только если у катушки его ещё нет:
-            # автосозданный generic без RFID ждёт кнопку «Тип», ручной выбор не затираем.
             if material and not str(spool.get("material") or "").strip():
                 updates.append("material=?")
                 params.append(material)
@@ -179,12 +194,10 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 if abs(fresh - num(spool.get("remaining_grams"))) > 1.0:
                     updates.append("remaining_grams=?")
                     params.append(fresh)
-            # цвет из AMS: заполняем только если у катушки пустое имя/hex-дефолт
             if color:
                 cur_hex = _normalize_hex(str(spool.get("color_hex") or ""))
                 cur_name = str(spool.get("color_name") or "").strip()
                 if (not cur_name) or cur_hex in ("", "#4B5563", "#333333", "#CBD5E1"):
-                    # не затираем ручной выбор, но пустые/дефолтные — заполняем
                     if cur_hex != color:
                         updates.append("color_hex=?")
                         params.append(color)
@@ -193,14 +206,17 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                         if cname:
                             updates.append("color_name=?")
                             params.append(cname)
+            if str(spool.get("location") or "") != "ams":
+                updates.append("location=?")
+                params.append("ams")
             updates.append("synced_at=?")
             params.append(now_iso())
-            db.execute(
-                f"UPDATE spools SET {', '.join(updates)}, updated_at=? WHERE id=?",
-                (*params, now_iso(), spool["id"]))
-            result["updated"] += 1
+            if updates:
+                db.execute(
+                    f"UPDATE spools SET {', '.join(updates)}, updated_at=? WHERE id=?",
+                    (*params, now_iso(), spool["id"]))
+                result["updated"] += 1
         elif auto_create and material:
-            # 3) катушки нет на складе — заводим сами
             total = 1000.0
             remaining = total
             if remain is not None and num(remain, -1) >= 0:
@@ -215,12 +231,11 @@ def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
                 "color_hex": hex_norm,
                 "total_grams": total,
                 "remaining_grams": remaining,
-                # Нельзя считать неизвестную RFID-катушку оплаченной/оценённой:
-                # цена и масса уточняются оператором перед производством.
                 "price": 0,
                 "printer_id": printer_id,
                 "ams_slot": slot,
                 "tray_uuid": tray_uuid,
+                "location": "ams",
                 "ams_sync": 1,
                 "synced_at": now_iso(),
                 "verified": 0,
