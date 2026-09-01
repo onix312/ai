@@ -886,6 +886,78 @@ function restoreCalc() {
 }
 
 /* ============================================================ каталог */
+function _amsSlotLabel(n) {
+  const ams = Math.floor(n / 4) + 1;
+  const slot = (n % 4) + 1;
+  return `AMS${ams} слот ${slot} (id ${n})`;
+}
+function _rebuildAmsSlotSelect() {
+  const sel = $('sf_ams_slot');
+  const hint = $('sf_ams_slot_hint');
+  if (!sel) return;
+  const printerId = ($('sf_printer_id') && $('sf_printer_id').value) || '';
+  const currentVal = sel.dataset.current || '';
+  const spools = PF.state.spools || [];
+  const occupied = {};
+  for (const sp of spools) {
+    if (editingSpool && sp.id === editingSpool) continue;
+    if (printerId && sp.printer_id && sp.printer_id !== printerId) continue;
+    const slotStr = String(sp.ams_slot ?? '').trim();
+    if (slotStr === '') continue;
+    if (num(sp.archived)) continue;
+    if (num(sp.remaining_grams) <= 0 && slotStr !== '254') continue;
+    if (!occupied[slotStr] || (printerId && sp.printer_id === printerId)) {
+      occupied[slotStr] = sp;
+    }
+  }
+  const opts = [];
+  opts.push(`<option value="">— Не в AMS (на складе) —</option>`);
+  for (let i = 0; i <= 15; i++) {
+    const key = String(i);
+    const occ = occupied[key];
+    let label = `${i}: ${_amsSlotLabel(i)}`;
+    if (occ) {
+      label += ` — занят: ${esc(occ.material || '')} ${esc(occ.color_name || occ.id)}${occ.printer_id && !printerId ? ` [${esc(occ.printer_id)}]` : ''}`;
+    } else {
+      label += ' — свободно';
+    }
+    opts.push(`<option value="${i}">${label}</option>`);
+  }
+  const occ254 = occupied['254'];
+  if (occ254 || currentVal === '254') {
+    let label = `254: внешний слот`;
+    if (occ254) label += ` — занят: ${esc(occ254.material || '')} ${esc(occ254.color_name || '')}`;
+    opts.push(`<option value="254">${label}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  if (currentVal !== undefined) {
+    sel.value = currentVal;
+    if (sel.value !== currentVal && currentVal !== '') {
+      const extra = document.createElement('option');
+      extra.value = currentVal;
+      extra.textContent = `${currentVal}: текущий слот`;
+      sel.appendChild(extra);
+      sel.value = currentVal;
+    }
+  }
+  if (hint) {
+    const v = sel.value;
+    if (!v) {
+      hint.textContent = 'Катушка будет на складе (shop), AMS не затронут.';
+      hint.style.color = '';
+    } else {
+      const occ = occupied[v];
+      if (occ) {
+        hint.textContent = `⚠ Слот ${v} уже занят катушкой ${occ.material || ''} ${occ.color_name || occ.id}. При сохранении потребуется подтверждение force (старая катушка вернётся на склад).`;
+        hint.style.color = 'var(--warn,#b45309)';
+      } else {
+        hint.textContent = `Слот ${v} свободен. При сохранении location → AMS, принтер → ${printerId || 'как выбран'}.`;
+        hint.style.color = '';
+      }
+    }
+  }
+}
+
 function openSpool(id) {
   editingSpool = id || null;
   const s = id ? PF.state.spools.find((x) => x.id === id) : null;
@@ -896,8 +968,10 @@ function openSpool(id) {
     ams_sync: 1,
   };
   editingSpoolUpdatedAt = id ? String(d.updated_at || '') : '';
-  ['material', 'brand', 'color_name', 'color_hex', 'total_grams', 'remaining_grams', 'price', 'ams_slot']
+  ['material', 'brand', 'color_name', 'color_hex', 'total_grams', 'remaining_grams', 'price']
     .forEach((k) => { $('sf_' + k).value = d[k] ?? ''; });
+  const slotSel = $('sf_ams_slot');
+  if (slotSel) slotSel.dataset.current = String(d.ams_slot ?? '').trim();
   if ($('sf_location')) $('sf_location').value = d.location || 'shop';
   if ($('sf_location_note')) $('sf_location_note').value = d.location_note || '';
   if ($('sf_price_per_kg')) $('sf_price_per_kg').value = d.price_per_kg || '';
@@ -913,6 +987,10 @@ function openSpool(id) {
   $('sf_printer_id').innerHTML = '<option value="">Не закреплена</option>' + PF.state.printers
     .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   $('sf_printer_id').value = d.printer_id || '';
+  // Построить dropdown слотов с учётом принтера
+  _rebuildAmsSlotSelect();
+  if (slotSel) slotSel.value = String(d.ams_slot ?? '').trim();
+
   $('spool_modal_title').textContent = id ? 'Катушка: ' + (d.material + ' ' + d.color_name).trim() : 'Новая катушка';
   $('spool_delete').hidden = !id;
   openModal('spool_modal');
@@ -1119,6 +1197,16 @@ function bind() {
     window.open('/labels.html?kind=spool', '_blank', 'noopener');
   });
   $('spool_add').addEventListener('click', () => openSpool());
+  const spoolCleanup = $('spool_cleanup');
+  if (spoolCleanup) spoolCleanup.addEventListener('click', async () => {
+    if (!confirmDanger('Очистить фантомные катушки AMS? Дубли слотов будут архивированы, пустые отвязаны от AMS и возвращены на склад.')) return;
+    try {
+      const res = await post('/api/spool/cleanup-phantoms', {});
+      toast('Очистка AMS завершена', `Архивировано ${res.archived || 0}, исправлено ${res.cleared || 0} · дублей ${res.dup_groups || 0} · фантомов ${res.phantoms || 0}`);
+      await PF.refreshCore();
+      PF.refreshFinance();
+    } catch (e) { fail(e); }
+  });
   const shoppingAuto = $('shopping_auto');
   if (shoppingAuto) shoppingAuto.addEventListener('click', async () => {
     try {
@@ -1131,7 +1219,44 @@ function bind() {
     $(id).addEventListener('input', shoppingReceiptSummary);
   });
   $('sr_submit').addEventListener('click', submitShoppingReceive);
+  // live занятость слотов при смене принтера/слота
+  const _printerSel = $('sf_printer_id');
+  if (_printerSel) {
+    _printerSel.addEventListener('change', () => {
+      const slotSel = $('sf_ams_slot');
+      if (slotSel) {
+        // сохраняем выбор слота в dataset, чтобы rebuild не сбрасывал
+        slotSel.dataset.current = slotSel.value || slotSel.dataset.current || '';
+      }
+      _rebuildAmsSlotSelect();
+    });
+  }
+  const _slotSel = $('sf_ams_slot');
+  if (_slotSel) {
+    _slotSel.addEventListener('change', () => {
+      _slotSel.dataset.current = _slotSel.value;
+      _rebuildAmsSlotSelect();
+      // авто-переключение места: слот есть → AMS, нет → магазин
+      const locSel = $('sf_location');
+      if (locSel) {
+        if (_slotSel.value) {
+          if (locSel.value === 'shop') locSel.value = 'ams';
+        } else {
+          if (locSel.value === 'ams') locSel.value = 'shop';
+        }
+      }
+    });
+  }
+
   $('spool_save').addEventListener('click', async () => {
+    const slotVal = ($('sf_ams_slot') && $('sf_ams_slot').value || '').trim();
+    let locVal = ($('sf_location') && $('sf_location').value) || 'shop';
+    // UX: если выбран слот — по умолчанию AMS, иначе shop если был ams
+    if (slotVal) {
+      if (locVal === 'shop') locVal = 'ams';
+    } else {
+      if (locVal === 'ams') locVal = 'shop';
+    }
     const payload = {
       id: editingSpool || '',
       ...(editingSpoolUpdatedAt ? { expected_updated_at: editingSpoolUpdatedAt } : {}),
@@ -1142,11 +1267,11 @@ function bind() {
       total_grams: num($('sf_total_grams').value, 1000),
       remaining_grams: num($('sf_remaining_grams').value),
       price: num($('sf_price').value),
-      ams_slot: $('sf_ams_slot').value.trim(),
+      ams_slot: slotVal,
       printer_id: $('sf_printer_id').value,
       ams_sync: $('sf_ams_sync') && $('sf_ams_sync').checked ? 1 : 0,
       verified: $('sf_verified') && $('sf_verified').checked ? 1 : 0,
-      location: ($('sf_location') && $('sf_location').value) || 'shop',
+      location: locVal,
       location_note: ($('sf_location_note') && $('sf_location_note').value) || '',
       price_per_kg: $('sf_price_per_kg') ? num($('sf_price_per_kg').value) : 0,
     };
@@ -1154,10 +1279,26 @@ function bind() {
       const result = await post('/api/spool/save', payload);
       editingSpoolUpdatedAt = String((result.spool || {}).updated_at || '');
       closeModal('spool_modal');
-      toast('Катушка сохранена', `${payload.material} ${payload.color_name}`);
+      toast('Катушка сохранена', `${payload.material} ${payload.color_name}${slotVal ? ` → слот ${slotVal}` : ''}`);
       await PF.refreshCore();
       PF.refreshFinance();
-    } catch (e) { fail(e); }
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (msg.includes('уже занят') && msg.includes('Слот')) {
+        if (confirmDanger(`${msg}\n\nПодтвердите: освободить слот и переместить старую катушку на склад?`)) {
+          try {
+            const result = await post('/api/spool/save', { ...payload, force: true });
+            editingSpoolUpdatedAt = String((result.spool || {}).updated_at || '');
+            closeModal('spool_modal');
+            toast('Катушка сохранена (force)', `${payload.material} ${payload.color_name} → слот ${slotVal}`);
+            await PF.refreshCore();
+            PF.refreshFinance();
+            return;
+          } catch (e2) { fail(e2); return; }
+        }
+      }
+      fail(e);
+    }
   });
   $('spool_delete').addEventListener('click', async () => {
     if (!editingSpool || !confirmDanger('Удалить катушку со склада? История расхода сохранится.')) return;

@@ -51,7 +51,7 @@ class PrinterManager:
         self._restock_reported: set[str] = set()
         self._cost_limit_reported: set[str] = set()
         self._dry_reported: float = 0.0
-        self._last_ams_sync = 0.0
+        self._last_ams_sync: dict[str, float] = {}
         self._last_cloud_sync: dict[str, float] = {}
         self._last_backup = 0.0
         self._last_backup_attempt = 0.0
@@ -2833,9 +2833,13 @@ class PrinterManager:
              поставили другую катушку, чем учтено на складе.
         """
         now = time.time()
-        if now - self._last_ams_sync < 300:
+        last = self._last_ams_sync.get(printer.id, 0.0) if isinstance(self._last_ams_sync, dict) else 0.0
+        if now - last < 300:
             return
-        self._last_ams_sync = now
+        if isinstance(self._last_ams_sync, dict):
+            self._last_ams_sync[printer.id] = now
+        else:
+            self._last_ams_sync = now
         # Автосбор: карточка принтера и катушки AMS → база (можно править руками)
         try:
             from .ams_sync import sync_ams_spools, sync_printer_info

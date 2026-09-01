@@ -80,6 +80,11 @@ class Api:
             except Exception:
                 pass
         self.repo = Repo(self.db)
+        # Автоочистка фантомов AMS при старте — убирает 50 дублей из склада
+        try:
+            self.repo.cleanup_ams_phantoms()
+        except Exception:
+            pass
         self.acc = Accounting(self.db)
         self.manager = PrinterManager(self.db, self.repo)
         from .shelf import Shelf
@@ -2349,26 +2354,43 @@ class Api:
 
         # --- склад, каталог, деньги
         if path == "/api/spool/save":
-            slot = str(body.get("ams_slot") or "").strip()
+            # Нормализуем слот для проверки занятости: 0-15, archived=0, remaining>0
+            raw_slot = str(body.get("ams_slot") or "").strip()
+            norm_slot = ""
+            if raw_slot != "":
+                try:
+                    import re as _re
+                    m = _re.search(r"(\d+)\s*$", raw_slot)
+                    cand = m.group(1) if m else raw_slot
+                    iv = int(float(cand))
+                    if 0 <= iv <= 15 or iv == 254:
+                        norm_slot = str(iv)
+                except Exception:
+                    norm_slot = ""
             printer_id = str(body.get("printer_id") or "").strip()
             spool_id = str(body.get("id") or "").strip()
-            if slot and printer_id:
+            if norm_slot and printer_id:
                 other = self.db.one(
                     "SELECT * FROM spools WHERE id<>? AND printer_id=? AND ams_slot=?"
-                    " AND remaining_grams>0",
-                    (spool_id or "__new__", printer_id, slot),
+                    " AND archived=0 AND remaining_grams>0",
+                    (spool_id or "__new__", printer_id, norm_slot),
                 )
                 if other and body.get("force") is not True:
                     raise ValueError(
-                        f"Слот {slot} уже занят катушкой "
+                        f"Слот {norm_slot} уже занят катушкой "
                         f"{other.get('material') or ''} {other.get('color_name') or other['id']}. "
                         "Снимите её или подтвердите force."
                     )
                 if other and body.get("force") is True:
-                    self.db.execute(
-                        "UPDATE spools SET ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
-                        (now_iso(), other["id"]),
-                    )
+                    # Отвязка старой катушки должна чистить tray_uuid и возвращать на склад
+                    if int((other.get("ams_sync") or 1)) == 1 or True:
+                        self.db.execute(
+                            "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                            (now_iso(), other["id"]),
+                        )
+            # Передаём нормализованный слот дальше, repo.save_spool ещё раз нормализует
+            if norm_slot != raw_slot and raw_slot != "":
+                body["ams_slot"] = norm_slot
             return 200, {"ok": True, "spool": self.repo.save_spool(body)}
         if path == "/api/spool/delete":
             self.repo.delete_spool(body.get("id", ""))
@@ -2930,8 +2952,9 @@ class Api:
             tray_uuid = str(body.get("tray_uuid") or "").strip()
             push_ams = body.get("push_ams") not in (False, 0, "0", "false")
             if not slot:
+                # Отвязка: чистим tray_uuid, location=shop
                 self.db.execute(
-                    "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
+                    "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
                     (printer_id or None, now_iso(), spool_id))
                 self.db.add_event("spool", "Катушка отвязана от AMS",
                                   f"{spool.get('material')} {spool.get('color_name')}",
@@ -2941,11 +2964,23 @@ class Api:
                 slot_n = int(float(slot))
             except (TypeError, ValueError) as exc:
                 raise ValueError("Слот AMS: 0–15") from exc
-            if not 0 <= slot_n <= 15:
+            if not 0 <= slot_n <= 15 and slot_n != 254:
                 raise ValueError("Слот AMS: 0–15")
             slot = str(slot_n)
+            # Проверка занятости слота с учётом archived
+            if printer_id:
+                other = self.db.one(
+                    "SELECT * FROM spools WHERE id<>? AND printer_id=? AND ams_slot=? AND archived=0 AND remaining_grams>0",
+                    (spool_id, printer_id, slot))
+                if other and body.get("force") is not True:
+                    raise ValueError(
+                        f"Слот {slot} уже занят катушкой {other.get('material') or ''} {other.get('color_name') or other['id']}")
+                if other and body.get("force") is True:
+                    self.db.execute(
+                        "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                        (now_iso(), other["id"]))
             self.db.execute(
-                "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, updated_at=? WHERE id=?",
+                "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, location='ams', updated_at=? WHERE id=?",
                 (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
             pushed, push_error = False, ""
             manager = getattr(self, "manager", None)
@@ -2969,6 +3004,9 @@ class Api:
             if push_error:
                 result["push_error"] = push_error
             return 200, result
+        if path == "/api/spool/cleanup-phantoms":
+            stats = self.repo.cleanup_ams_phantoms()
+            return 200, {"ok": True, **stats, "spools": self.repo.spools()}
         if path == "/api/update-check":
             return 200, self.updater.report(force=True)
         if path == "/api/update/apply":

@@ -174,7 +174,7 @@ class WorkshopV9:
         printer_id = str(printer_id or spool.get("printer_id") or "").strip()
         if slot in (None, ""):
             self.db.execute(
-                "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
+                "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
                 (printer_id or None, now_iso(), spool_id),
             )
             self._slot_history(printer_id, "", spool_id, "unbind", note)
@@ -183,14 +183,14 @@ class WorkshopV9:
             slot_n = int(float(slot))
         except (TypeError, ValueError) as exc:
             raise ValueError("Слот AMS: 0–15") from exc
-        if not 0 <= slot_n <= 15:
+        if not 0 <= slot_n <= 15 and slot_n != 254:
             raise ValueError("Слот AMS: 0–15")
         slot_s = str(slot_n)
         if not printer_id:
             raise ValueError("Чтобы занять слот, укажите принтер")
         other = self.db.one(
             "SELECT * FROM spools WHERE id<>? AND printer_id=? AND ams_slot=? "
-            "AND remaining_grams>0",
+            "AND archived=0 AND remaining_grams>0",
             (spool_id, printer_id, slot_s),
         )
         if other and not force:
@@ -201,7 +201,7 @@ class WorkshopV9:
             )
         if other and force:
             self.db.execute(
-                "UPDATE spools SET ams_slot='', tray_uuid='', updated_at=? WHERE id=?",
+                "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
                 (now_iso(), other["id"]),
             )
             self._slot_history(printer_id, slot_s, other["id"], "evict", f"освободили для {spool_id}")

@@ -636,6 +636,49 @@ class Repo:
         if new:
             data.setdefault("created_at", now_iso())
             data.setdefault("remaining_grams", data.get("total_grams", 1000))
+
+        # Нормализация AMS слота: 0-15 строка, иначе пусто
+        raw_slot = str(data.get("ams_slot") or "").strip()
+        norm_slot = ""
+        if raw_slot != "":
+            try:
+                # допускаем "AMS 1 · слот 2" или просто число
+                # ищем последнее число в строке
+                import re
+                m = re.search(r"(\d+)\s*$", raw_slot)
+                candidate = m.group(1) if m else raw_slot
+                iv = int(candidate)
+                if 0 <= iv <= 15 or iv == 254:  # 254 = внешний слот
+                    norm_slot = str(iv)
+            except Exception:
+                norm_slot = ""
+        data["ams_slot"] = norm_slot
+
+        # Синхронизация location и tray_uuid с наличием слота
+        if norm_slot == "":
+            data["tray_uuid"] = ""
+            if str(data.get("location") or "").strip() == "ams":
+                data["location"] = "shop"
+        else:
+            # Если слот указан — катушка в AMS
+            if not str(data.get("location") or "").strip():
+                data["location"] = "ams"
+            else:
+                # если явно указали shop но слот есть — всё равно ams, чтобы не плодить фантомы
+                if str(data.get("location")).strip() not in ("ams", "shop", "home", "dry", "other"):
+                    data["location"] = "ams"
+                elif str(data.get("location")).strip() != "ams":
+                    # пользователь указал слот — считаем что в AMS, но не затираем если dry/other?
+                    # Логика: если слот есть, location должен быть ams, иначе склад покажет AMS отдельно
+                    if str(data.get("location")).strip() == "shop":
+                        # shop + slot = противоречие, но пользователь явно привязывает — ставим ams
+                        data["location"] = "ams"
+            # printer_id обязателен при слоте, но не блокируем сохранение — проверит API
+
+        # location по умолчанию
+        if not str(data.get("location") or "").strip():
+            data["location"] = "shop"
+
         data["updated_at"] = now_iso()
         return self.db.upsert("spools", data)
 
@@ -643,6 +686,91 @@ class Repo:
         if not spool_id:
             raise ValueError("Не указана катушка")
         self.db.delete("spools", spool_id)
+
+    def cleanup_ams_phantoms(self) -> dict:
+        """Убрать фантомные катушки AMS: дубли слотов и пустые материалы.
+
+        Возвращает счётчики архивированных и очищенных.
+        """
+        archived = 0
+        cleared = 0
+        # 1. Дубли одного слота на одном принтере: оставляем самую свежую
+        dup_groups = self.db.query(
+            "SELECT printer_id, ams_slot, COUNT(*) cnt FROM spools "
+            "WHERE archived=0 AND ams_slot<>'' AND printer_id<>'' "
+            "GROUP BY printer_id, ams_slot HAVING cnt>1"
+        )
+        for g in dup_groups:
+            pid = g["printer_id"]
+            slot = g["ams_slot"]
+            rows = self.db.query(
+                "SELECT id, updated_at, remaining_grams FROM spools "
+                "WHERE archived=0 AND printer_id=? AND ams_slot=? "
+                "ORDER BY datetime(updated_at) DESC",
+                (pid, slot),
+            )
+            # оставляем первый, остальные архивируем если пустые или старые
+            for old in rows[1:]:
+                # если у старой катушки 0 грамм или нет tray_uuid — точно фантом
+                self.db.execute(
+                    "UPDATE spools SET archived=1, ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                    (now_iso(), old["id"]),
+                )
+                archived += 1
+
+        # 2. Фантомы с пустым материалом и нулевым остатком в AMS
+        phantoms = self.db.query(
+            "SELECT * FROM spools WHERE archived=0 AND ams_slot<>'' AND "
+            "(COALESCE(material,'')='' OR remaining_grams<=0) AND "
+            "(COALESCE(tray_uuid,'')='' OR verified=0)"
+        )
+        for ph in phantoms:
+            # Если катушка никогда не проверялась и без цены — архивируем
+            if num(ph.get("price")) == 0 and num(ph.get("verified")) == 0:
+                self.db.execute(
+                    "UPDATE spools SET archived=1, ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                    (now_iso(), ph["id"]),
+                )
+                archived += 1
+            else:
+                # иначе просто отвязываем от AMS
+                self.db.execute(
+                    "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                    (now_iso(), ph["id"]),
+                )
+                cleared += 1
+
+        # 3. Катушки с location=ams но без слота — исправляем location
+        no_slot_ams = self.db.query(
+            "SELECT id FROM spools WHERE archived=0 AND location='ams' AND (ams_slot IS NULL OR ams_slot='')"
+        )
+        for r in no_slot_ams:
+            self.db.execute(
+                "UPDATE spools SET location='shop', updated_at=? WHERE id=?",
+                (now_iso(), r["id"]),
+            )
+            cleared += 1
+
+        # 4. Катушки с slot но location=shop — исправляем на ams
+        slot_shop = self.db.query(
+            "SELECT id FROM spools WHERE archived=0 AND ams_slot<>'' AND location='shop' AND remaining_grams>0"
+        )
+        for r in slot_shop:
+            self.db.execute(
+                "UPDATE spools SET location='ams', updated_at=? WHERE id=?",
+                (now_iso(), r["id"]),
+            )
+            cleared += 1
+
+        if archived or cleared:
+            self.db.add_event(
+                "spool",
+                "Очистка фантомов AMS",
+                f"архивировано {archived}, отвязано/исправлено {cleared}",
+                "",
+                {"archived": archived, "cleared": cleared},
+            )
+        return {"archived": archived, "cleared": cleared, "dup_groups": len(dup_groups), "phantoms": len(phantoms)}
 
     # ---------------------------------------------------------------- каталог
     def catalog(self) -> list[dict]:
