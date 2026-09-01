@@ -122,7 +122,9 @@ class CameraWorker:
     def _demo_tick(self) -> bool:
         """Показать следующий демо-кадр. False, если демо выключено."""
         cfg = self.get_config() or {}
-        if not cfg.get("demo"):
+        # Если принудительно включен демо-режим (например, камера недоступна),
+        # показываем демо-кадры независимо от настройки cfg.demo.
+        if not cfg.get("demo") and not self.demo:
             return False
         frames = demo_frames()
         if not frames:
@@ -190,8 +192,10 @@ class CameraWorker:
                                     self._publish(frame)
             except Exception as exc:  # соединение восстанавливается автоматически
                 self.error = str(exc)
-                # Принтера нет в сети — не оставляем экран пустым, если
-                # пользователь включил демонстрационный режим.
+                # Если камера недоступна, переходим в демо-режим,
+                # если пользователь не отключил демо полностью.
+                if not self.demo:
+                    self.demo = True
                 if not self._demo_tick():
                     self._stop.wait(4)
 
