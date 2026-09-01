@@ -325,7 +325,7 @@ function render() {
 }
 
 PF.on('ready', () => { bind(); render(); });
-PF.on('data', render);
+PF.on('data', PF.whenView('queue', render));
 PF.on('view', (d) => {
   if (d.view === 'queue') { historyLimit = 24; render(); }
 });

@@ -1882,4 +1882,8 @@ setInterval(() => {
 }, 30000);
 
 PF.modules.products = { refresh, openNom, openBatch, openDoc, openDocWizard, openQuickSale, openPlan };
+/* 14.0 (идея 57): #products/<id>, #batches/<id>, #documents/<id>. */
+PF.deepLink('products', (id) => openNom(id));
+PF.deepLink('batches', (id) => openBatch(id));
+PF.deepLink('documents', (id) => openDoc(id));
 })();

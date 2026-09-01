@@ -3086,9 +3086,14 @@ function bind() {
 
 /* =============================================================== старт */
 PF.on('ready', () => { bind(); fillSelectors(); renderNiches(); });
-PF.on('data', () => { fillSelectors(); renderOrders(); renderCustomers(); });
-PF.on('finance', () => { renderNiches(); });
+PF.on('data', PF.whenView(['orders', 'customers'], () => {
+  if (PF.viewOn('orders')) { fillSelectors(); renderOrders(); }
+  if (PF.viewOn('customers')) renderCustomers();
+}));
+PF.on('finance', PF.whenView('niches', () => { renderNiches(); }));
 PF.on('view', (detail) => { if (detail.view === 'customers') loadAftercare(); });
 
 PF.modules.ops = { openOrder, openOrderFulfillment, openOrderStock, openNiche, renderOrders, fillSelectors, loadAftercare };
+/* 14.0 (идея 57): #orders/<id> открывает карточку заказа. */
+PF.deepLink('orders', (id) => openOrder(id));
 })();

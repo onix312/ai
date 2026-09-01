@@ -249,12 +249,33 @@ function setChannelBar(channels) {
   text.textContent = 'Нет связи: ' + bad.join(' · ');
 }
 
+/* Н2: сквозной id запроса. Один на попытку — при retry вызывающий код
+   передаёт тот же ключ, поэтому в логе цепочка собирается целиком. */
+function requestId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID().slice(0, 16);
+  return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+/* Ключ идемпотентности для записи: одинаковое действие, отправленное дважды
+   (двойной клик, повтор после таймаута), сервер выполнит один раз. */
+function idempotencyKey(path, body) {
+  const raw = path + '\u0000' + (typeof body === 'string' ? body : JSON.stringify(body || {}));
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
+  return 'pf-' + (hash >>> 0).toString(36);
+}
+
 async function api(path, options) {
   const opts = Object.assign({ headers: {} }, options || {});
+  const isWrite = !!(opts.body || (opts.method || '').toUpperCase() === 'POST');
   if (opts.body && !(opts.body instanceof FormData)) {
     opts.method = opts.method || 'POST';
     opts.headers['Content-Type'] = 'application/json';
     if (typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  }
+  opts.headers['X-Request-Id'] = opts.requestId || requestId();
+  if (isWrite && !opts.headers['Idempotency-Key']) {
+    opts.headers['Idempotency-Key'] = opts.idempotencyKey
+      || idempotencyKey(path.split('?')[0], opts.body);
   }
   let res;
   try {
@@ -266,7 +287,17 @@ async function api(path, options) {
   const text = await res.text();
   let data = {};
   if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text.slice(0, 300) }; } }
-  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  // Н2: id запроса из заголовка — по нему сбой находится в connector.log.
+  const rid = res.headers && res.headers.get ? (res.headers.get('X-Request-Id') || '') : '';
+  if (rid && data && typeof data === 'object') data.request_id = data.request_id || rid;
+  if (!res.ok) {
+    const message = data.error || `Ошибка ${res.status}`;
+    throw new Error(rid ? `${message} · ${rid}` : message);
+  }
+  // Н2: повтор уже выполнен — говорим об этом, а не показываем тишину.
+  if (data && data.replayed && !opts.silentReplay) {
+    toast('Уже обработано', 'Повторный запрос не создал вторую запись', 'info');
+  }
   setOffline(false);
   return data;
 }
@@ -479,6 +510,69 @@ function catName(id) {
   return (found && found.name) || CAT_FALLBACK[code] || code;
 }
 
+/* ====================================================== шаблонизатор
+   Идея 55/З15: разметка собирается тегом PF.html, который экранирует ВСЁ
+   подставляемое по умолчанию. Сырой HTML — только явной пометкой raw().
+   Это убирает целый класс опечаток «забыл esc()» и делает рендер читаемым.
+
+     PF.html`<b>${name}</b>`            → экранированное имя
+     PF.html`<div>${PF.raw(icon)}</div>`→ осознанно без экранирования
+     PF.html`<ul>${rows.map(rowHtml)}</ul>` → массивы склеиваются
+
+   Результат — строка; вставка выполняется PF.render(host, markup). */
+function safeHtml(value) {
+  if (value === null || value === undefined || value === false) return '';
+  if (value && value.__raw === true) return value.raw;
+  if (Array.isArray(value)) return value.map(safeHtml).join('');
+  return esc(value);
+}
+function html(strings, ...values) {
+  let out = '';
+  for (let i = 0; i < strings.length; i++) {
+    out += strings[i];
+    if (i < values.length) out += safeHtml(values[i]);
+  }
+  return out;
+}
+const raw = (value) => ({ __raw: true, raw: String(value == null ? '' : value) });
+function render(host, markup) {
+  if (!host) return null;
+  host.innerHTML = String(markup == null ? '' : markup);
+  return host;
+}
+
+/* ======================================================= единый формат
+   Идея 66: одно место, где числа превращаются в человеческий текст.
+   Раньше копии format-функций жили в ops10.js (свой `esc10`, свой
+   `fmtAt`), в tv.html и m.html — и расходились. Теперь панель, ТВ и
+   мобильная берут формат отсюда: PF.fmt.grams(1234) → «1,23 кг». */
+const fmt = {
+  money, nfmt, pct,
+  hours: hoursText,
+  minutes: minutesText,
+  date: dateText,
+  dateTime: dateTimeText,
+  ago: agoText,
+  /** Вес пластика: граммы до килограмма, килограммы с двумя знаками. */
+  grams(value) {
+    const g = num(value);
+    if (!g) return '—';
+    if (g < 1000) return nfmt(Math.round(g)) + ' г';
+    return nfmt(g / 1000, 2) + ' кг';
+  },
+  /** Количество штук: целое, с неразрывным пробелом в тысячах. */
+  qty(value) {
+    const n = num(value);
+    if (!Number.isFinite(n)) return '—';
+    return nfmt(Math.round(n * 100) / 100, n % 1 ? 1 : 0);
+  },
+  /** Короткая дата-время для списков: «31.08 14:20». */
+  stamp(iso) {
+    if (!iso) return '—';
+    return dateTimeText(iso);
+  },
+};
+
 /* ========================================================= состояние */
 const PF = {
   state: {
@@ -494,6 +588,8 @@ const PF = {
     toast, fail, openModal, closeModal, confirmDanger, ask, emptyHtml, CUR, store, catName,
     setChannelBar, countUp, lightbox, lightboxClose,
     bump, flashOk, stagger, confetti, wireNumberChip,
+    // 14.0 (55/66): шаблонизатор с автоэкранированием и единый форматтер
+    html, raw, render, fmt,
   },
   modules: {},
   bus: new EventTarget(),
@@ -501,6 +597,87 @@ const PF = {
 window.PF = PF;
 PF.emit = (name, detail) => PF.bus.dispatchEvent(new CustomEvent(name, { detail }));
 PF.on = (name, fn) => PF.bus.addEventListener(name, (e) => fn(e.detail));
+
+/* Подписка «когда панель готова». Модули, которые подгружаются лениво
+   (идея 47), подключаются уже ПОСЛЕ события 'ready' — обычный PF.on('ready')
+   у них не сработает никогда. PF.onReady вызывает fn сразу, если панель
+   уже поднята, и честно ждёт события, если ещё нет. */
+PF.ready = false;
+PF.onReady = (fn) => {
+  if (PF.ready) { fn(); return; }
+  PF.on('ready', fn);
+};
+
+/* ============================================ ленивая загрузка модулей
+   Идея 47: тяжёлые разделы (контент-студия, клиент-бот, центр смены)
+   грузятся при первом входе, а не вместе со стартом панели. Скрипт
+   регистрирует инициализацию через PF.module(name, init); загрузчик
+   поднимает файл с тем же пином версии, что и остальные ассеты. */
+const ASSET_VERSION = (() => {
+  const tag = document.querySelector('script[src*="assets/"][src*="?v="]');
+  const match = tag && /[?&]v=([^&]+)/.exec(tag.getAttribute('src') || '');
+  return match ? match[1] : '';
+})();
+const LAZY_MODULES = {
+  marketing: ['marketing.js'],
+  clientbot: ['clientbot.js'],
+  ops10: ['ops10.js'],
+};
+const lazyLoaded = new Set();
+const lazyPending = new Map();
+PF.module = (name, init) => {
+  lazyLoaded.add(name);
+  // Ошибку инициализации не прячем: иначе раздел выглядит живым, но не
+  // работает (ровно так в панель уехали Б1/Б2). Пусть падает громко.
+  if (typeof init === 'function') init();
+};
+PF.loadModule = (name) => {
+  if (lazyLoaded.has(name)) return Promise.resolve(true);
+  if (lazyPending.has(name)) return lazyPending.get(name);
+  const files = LAZY_MODULES[name];
+  if (!files) return Promise.resolve(false);
+  const job = Promise.all(files.map((file) => new Promise((resolve, reject) => {
+    const src = 'assets/' + file + (ASSET_VERSION ? '?v=' + ASSET_VERSION : '');
+    if (document.querySelector(`script[data-lazy="${file}"]`)) { resolve(); return; }
+    const tag = document.createElement('script');
+    tag.src = src;
+    tag.dataset.lazy = file;
+    tag.onload = () => resolve();
+    tag.onerror = () => reject(new Error('Не удалось загрузить ' + file));
+    document.head.appendChild(tag);
+  }))).then(() => {
+    // Модуль может зарегистрироваться позже (скрипт исполняется синхронно,
+    // но страховка дешёвая): если регистрации нет — считаем загруженным.
+    lazyLoaded.add(name);
+    return true;
+  }).catch((e) => { console.error(e); return false; });
+  lazyPending.set(name, job);
+  return job;
+};
+PF.isLazyLoaded = (name) => lazyLoaded.has(name);
+
+/* Видимость раздела: рендерить скрытые вкладки незачем (идея 45). */
+PF.viewOn = (name) => {
+  const view = document.getElementById('view-' + name);
+  return !!view && view.classList.contains('on');
+};
+PF.whenView = (names, fn) => (...args) => {
+  const list = Array.isArray(names) ? names : [names];
+  return list.some((name) => PF.viewOn(name)) ? fn(...args) : undefined;
+};
+
+/* Единственный способ менять настройки в состоянии (Б3/14).
+
+   Раньше модули писали `PF.state.settings = res.settings` напрямую: если
+   сервер отвечал без поля settings (ошибка, частичный ответ, старый кэш),
+   состояние становилось undefined и падала вся панель — каждый вызов
+   money()/CUR() читает settings. Теперь ответ сливается с текущим
+   состоянием, а пустой ответ не уничтожает то, что уже есть. */
+PF.setSettings = (patch) => {
+  const next = (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : null;
+  PF.state.settings = { ...(PF.state.settings || {}), ...(next || {}) };
+  return PF.state.settings;
+};
 
 PF.status = (id) => PF.state.statuses.find((s) => s.id === id) || { id, name: id || '—', color: '#64748b' };
 PF.niche = (id) => PF.state.niches.find((n) => n.id === id) || null;
@@ -711,6 +888,13 @@ function showView(name, sub) {
   $('side').classList.remove('show');
   const scrim = $('scrim'); if (scrim) scrim.remove();
   PF.emit('view', { view: name, sub });
+  // Идея 47: раздел может жить в отдельном файле, который грузится при
+  // первом входе. После загрузки повторяем событие — модуль отрисуется.
+  if (LAZY_MODULES[name] && !lazyLoaded.has(name)) {
+    PF.loadModule(name).then((ok) => {
+      if (ok && currentView === name) PF.emit('view', { view: name, sub, lazy: true });
+    });
+  }
   store.set('pf_last_view', name);
   if (STOCK_IDS.has(name)) store.set('pf_last_stock', name);
   // После перерисовки и обработки hash браузером повторно фиксируем начало.
@@ -727,6 +911,24 @@ function routeFromHash() {
   const [name, sub] = raw.split('/');
   showView(name, sub);
 }
+/* ================================================== глубокие ссылки (57)
+   `#orders/123` открывает карточку заказа, `#products/abc` — товар,
+   `#customers/xyz` — клиента. Без этого ссылки из Telegram, QR-кодов и
+   уведомлений могли вести только «в раздел», и оператор искал нужную
+   карточку руками. Модуль регистрирует открыватель через PF.deepLink,
+   а роутер вызывает его после показа раздела. */
+PF.deepLinks = {};
+PF.deepLink = (view, opener) => { PF.deepLinks[view] = opener; };
+PF.on('view', (detail) => {
+  if (!detail || !detail.sub) return;
+  const opener = PF.deepLinks[detail.view];
+  if (!opener) return;
+  // Карточка может требовать данных, которые ещё не пришли: ждём 'data'.
+  const run = () => { try { opener(detail.sub); } catch (e) { console.error(e); } };
+  if ((PF.state.orders || []).length || (PF.state.nomenclature || []).length) run();
+  else PF.on('data', function once() { run(); PF.bus.removeEventListener('data', once); });
+});
+
 PF.go = (view, sub) => {
   const hash = '#' + view + (sub ? '/' + sub : '');
   if (location.hash === hash) showView(view, sub);
@@ -1042,7 +1244,7 @@ $('quick_order').addEventListener('click', () => PF.modules.ops && PF.modules.op
 async function bootstrap() {
   const data = await get('/api/bootstrap');
   PF.state.version = data.version;
-  PF.state.settings = data.settings || {};
+  PF.setSettings(data.settings);
   PF.state.printers = data.printers || [];
   PF.state.statuses = data.statuses || [];
   PF.state.niches = data.niches || [];
@@ -1205,6 +1407,7 @@ async function start() {
   } catch (e) {
     setOffline(true, 'Запустите PrintFlow: python pf.py');
   }
+  PF.ready = true;
   PF.emit('ready');
   try { await refreshCore(); } catch (e) { /* офлайн */ }
   try { await refreshFinance(PF.state.financeDays); } catch (e) { /* офлайн */ }

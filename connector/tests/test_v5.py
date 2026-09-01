@@ -107,13 +107,19 @@ class ClientsTests(unittest.TestCase):
 
         У старых заказов деньги могли лежать в поле prepaid; если paid при
         этом отличалось, раньше RFM брал paid и занижал оборот клиента.
+
+        14.0 (Б7): дата заказа считается от «сейчас», а не пишется строкой.
+        Прежняя абсолютная дата 2026-08-01 выпала из окна `days=30` ровно
+        через 30 дней после написания теста, и проверка молча покраснела.
         """
+        from datetime import datetime, timedelta, timezone
         from connector.printflow.clients import Clients
+        recent = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         self.db.upsert("customers", {"id": "c1", "name": "Мария"})
         self.db.upsert("orders", {
             "id": "o1", "customer_id": "c1", "product": "Адресник",
             "price": 1000, "paid": 200, "prepaid": 500,
-            "status": "done", "created_at": "2026-08-01T00:00:00",
+            "status": "done", "created_at": recent,
         })
         rows = Clients(self.db).rfm(days=30)
         self.assertEqual(rows[0]["paid"], 500)

@@ -61,7 +61,7 @@ class LocalQueueTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_same_filename_does_not_overwrite_another_queued_model(self):
-        with patch("connector.printflow.api.UPLOAD_DIR", self.root / "uploads"):
+        with patch("connector.printflow.config.UPLOAD_DIR", self.root / "uploads"):
             first, _, created_first = save_upload("C:\\models\\part.3mf", b"first")
             second, _, created_second = save_upload("C:\\models\\part.3mf", b"second")
         self.assertTrue(created_first)
@@ -122,7 +122,7 @@ class LocalQueueTests(unittest.TestCase):
         handler.api = SimpleNamespace(manager=self.manager)
         sent = {}
         handler.send_json = lambda code, payload: sent.update(code=code, payload=payload)
-        with patch("connector.printflow.api.UPLOAD_DIR", self.root / "uploads"):
+        with patch("connector.printflow.config.UPLOAD_DIR", self.root / "uploads"):
             handler.handle_job_upload()
         self.assertEqual(sent["code"], 200)
         self.assertEqual(sent["payload"]["job"]["file"], "model.gcode")

@@ -1,74 +1,230 @@
-/* PrintFlow 10.0: единый центр смены, inbox и безопасная песочница правил. */
-(() => {
-  'use strict';
-  const $ = (id) => document.getElementById(id);
-  const esc10 = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const stages = {new:'Новое', qualifying:'Уточнить', quoted:'Расчёт', awaiting:'Ждём согласование', order:'Заказ', won:'Успешно', lost:'Потеряно'};
-  const stageOptions = (current) => Object.entries(stages).map(([key, label]) => `<option value="${key}"${key === (current || 'new') ? ' selected' : ''}>${label}</option>`).join('');
-  const fmtAt = (v) => v ? new Date(v).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+/* PrintFlow 14.0 — Центр смены: воронка обращений, inbox, оборудование,
+   план/факт производства и безопасная песочница правил.
 
-  function renderPipeline(items) {
-    const host = $('ops10_pipeline'); if (!host) return;
-    const counts = Object.fromEntries((items || []).map((x) => [x.stage, x.count]));
-    host.innerHTML = Object.entries(stages).map(([key, label]) => `<div class="kpi"><small>${label}</small><b>${counts[key] || 0}</b><span>обращений</span></div>`).join('');
-  }
-  function renderInbox(items) {
-    const host = $('ops10_inbox'); if (!host) return;
-    if (!items.length) { host.innerHTML = '<div class="empty compact"><span>Обращений пока нет.</span></div>'; return; }
-    host.innerHTML = items.map((x) => `<article class="ops10-item">
-      <div class="ops10-item-head"><div><b>${esc10(x.name || x.username || ('Чат ' + x.chat_id))}</b><small class="muted"> · ${esc10(x.chat_id)} · ${fmtAt(x.at || x.last_seen)}</small></div><span class="tag ${x.unread ? 'warn' : ''}">${x.unread ? 'новое' : 'прочитано'}</span></div>
-      <p>${esc10(x.text || 'Нет текста последнего сообщения')}</p>
-      <div class="ops10-actions"><select data-inbox-stage="${esc10(x.chat_id)}" aria-label="Стадия обращения">${stageOptions(x.pipeline_stage)}</select><button class="btn sm" data-inbox-read="${esc10(x.chat_id)}" type="button">Прочитано</button><a class="btn sm ghost" href="#clientbot" data-view="clientbot">Открыть диалог</a></div>
-    </article>`).join('');
-    host.querySelectorAll('[data-inbox-stage]').forEach((select) => select.addEventListener('change', async () => {
-      try { await post('/api/ops10/inbox/stage', {chat_id: select.dataset.inboxStage, stage: select.value}); toast('Стадия сохранена', stages[select.value]); load(); }
-      catch (e) { fail(e); }
-    }));
-    host.querySelectorAll('[data-inbox-read]').forEach((button) => button.addEventListener('click', async () => {
-      try { await post('/api/client-bot/read', {chat_id: button.dataset.inboxRead, actor:'panel'}); load(); }
-      catch (e) { fail(e); }
-    }));
-  }
-  function renderPrinters(printers) {
-    const host = $('ops10_printers'); if (!host) return;
-    if (!printers || !printers.length) { host.innerHTML = '<div class="empty compact"><span>Принтеры не подключены. Добавьте Bambu Lab в разделе «Принтеры».</span></div>'; return; }
-    host.innerHTML = printers.map((p) => {
-      const info = p.printer || {}, conn = p.connection || {}, ams = p.ams || {}, job = p.job || {};
-      const trays = ams.trays || [], active = trays.filter((t) => t.active || t.remain != null).slice(0, 8);
-      const progress = Math.max(0, Math.min(100, Number(info.progress || 0)));
-      const low = active.filter((t) => Number.isFinite(Number(t.remain)) && Number(t.remain) < 15).length;
-      return `<article class="ops10-printer"><div class="ops10-item-head"><b>${esc10(p.name || info.name || 'Принтер')}</b><span class="tag ${conn.connected ? 'ok' : 'bad'}">${conn.connected ? 'онлайн' : 'офлайн'}</span></div><small>${esc10(info.state_label || info.state || 'Ожидание')} · ${esc10(info.task || 'нет активной печати')}</small><div class="bar"><i style="width:${progress}%"></i></div><small>Печать: ${progress}% · AMS: ${active.length ? active.length + ' слотов' : 'нет данных'}${low ? ' · мало пластика: ' + low : ''}</small><div class="chips">${active.map((t) => `<span class="tag">${esc10(t.material || '—')} ${esc10(t.color || '')} · ${t.remain == null ? '—' : Math.round(Number(t.remain)) + '%'}</span>`).join('') || '<span class="muted">Слоты AMS пока не переданы</span>'}</div></article>`;
-    }).join('');
-  }
-  function renderProduction(data) {
-    const stats = data?.planfact || {}, fact = $('ops10_planfact'), list = $('ops10_production_list');
-    if (!fact || !list) return;
-    fact.innerHTML = `<span class="tag">Завершено: ${Number(stats.total || 0)}</span><span class="tag">Факт: ${Math.round(Number(stats.fact_minutes || 0))} мин</span><span class="tag">Пластик: ${Math.round(Number(stats.fact_grams || 0))} г</span><span class="tag ${Number(stats.failed || 0) ? 'warn' : ''}">Брак/сбой: ${Number(stats.failed || 0)}</span>`;
-    const jobs = (data?.queue || []).slice(0, 8);
-    list.innerHTML = jobs.length ? jobs.map((j) => `<div class="ops10-production-row"><span><b>${esc10(j.name || 'Задание')}</b><small class="muted"> · ${esc10(j.state || 'queued')} · ${esc10(j.printer_id || 'парк')}</small></span><span>${Number(j.est_minutes || 0) ? Math.round(Number(j.est_minutes)) + ' мин' : 'оценка —'}</span></div>`).join('') : '<div class="empty compact"><span>Очередь свободна.</span></div>';
-  }
-  function renderRules(rules, runs) {
-    const host = $('ops10_rules'), log = $('ops10_runs'); if (!host || !log) return;
-    host.innerHTML = rules.length ? rules.map((r) => `<div class="ops10-rule"><div><b>${esc10(r.name)}</b><small>${esc10(r.event)} → ${esc10(r.action)} · ${r.enabled ? 'включено' : 'выключено'}</small></div><div class="ops10-actions"><button class="btn sm" data-rule-dry="${esc10(r.id)}" type="button">Проверить</button><label class="switch"><input type="checkbox" data-rule-enabled="${esc10(r.id)}"${Number(r.enabled) ? ' checked' : ''}><i></i></label></div></div>`).join('') : '<div class="empty compact"><span>Правил нет. Добавьте их в Настройках → Автоматизация.</span></div>';
-    host.querySelectorAll('[data-rule-enabled]').forEach((el) => el.addEventListener('change', async () => { try { await post('/api/rules/toggle', {id:el.dataset.ruleEnabled, enabled:el.checked}); load(); } catch (e) { fail(e); } }));
-    host.querySelectorAll('[data-rule-dry]').forEach((el) => el.addEventListener('click', async () => {
-      try { const data = await post('/api/rules/simulate', {rule_id:el.dataset.ruleDry, context:{name:'тестовый объект', detail:'dry-run из Центра смены', number:'1001', product:'тест', status:'ready', days:14, grams:50, pct:10}}); const hit = (data.items || []).find((x) => x.matched); toast('Dry-run выполнен', hit ? hit.preview || 'Действие будет выполнено' : 'Условия не совпали', hit ? 'info' : 'warn'); load(); }
-      catch (e) { fail(e); }
-    }));
-    log.innerHTML = runs.length ? runs.slice(0, 12).map((r) => `<div class="ops10-run"><b>${esc10(r.mode === 'dry_run' ? 'Dry-run' : 'Факт')}</b> · ${esc10(r.action)} · ${r.matched ? 'условие совпало' : 'не совпало'}<br><span class="muted">${fmtAt(r.at)} · ${esc10(r.preview || 'без текста')}</span></div>`).join('') : '<div class="empty compact"><span>Проверок пока нет.</span></div>';
-  }
-  async function load() {
-    try { const data = await get('/api/ops10/overview'); renderPipeline(data.pipeline); renderPrinters(data.printers || []); renderInbox(data.inbox || []); renderRules(data.rules || [], data.rule_runs || []); renderProduction(await get('/api/ops10/production')); }
-    catch (e) { const host = $('ops10_inbox'); if (host) host.innerHTML = `<div class="notice bad"><span>✕</span><span>${esc10(e.message)}</span></div>`; }
-  }
-  function init() {
-    if (!$('view-ops10')) return;
-    $('ops10_refresh')?.addEventListener('click', load);
-    $('ops10_simulate_queue')?.addEventListener('click', async () => {
-      try { const data = await post('/api/ops10/queue/simulate', {job_ids: []}); const minutes = Number(data.total_minutes || 0); toast('Симуляция очереди', minutes ? `Суммарная оценка: ${Math.round(minutes)} мин. Запуск не выполнен.` : 'Очередь пуста', 'info'); } catch (e) { fail(e); }
+   14.0 (Б2/З10): файл переписан с нуля. Прежняя версия не импортировала
+   ни одного хелпера — `get`, `post`, `toast`, `fail` вызывались как
+   необъявленные глобалы, поэтому раздел не мог загрузить данные в принципе
+   (ReferenceError в первом же обработчике), а `esc` был продублирован
+   своим `esc10`. Теперь: PF.api/PF.ui, шаблонизатор PF.html с
+   автоэкранированием (55), единый форматтер PF.fmt (66), ленивая загрузка
+   при первом входе в раздел (47) и рендер только видимой вкладки (45). */
+(() => {
+'use strict';
+const U = PF.ui;
+const { $, esc, num, toast, fail, debounce, emptyHtml, html, raw, render, fmt } = U;
+const { get, post } = PF.api;
+
+const STAGES = {
+  new: 'Новое', qualifying: 'Уточнить', quoted: 'Расчёт',
+  awaiting: 'Ждём согласование', order: 'Заказ', won: 'Успешно', lost: 'Потеряно',
+};
+const STAGE_ORDER = Object.keys(STAGES);
+let overview = null;
+let production = null;
+
+/* ============================================================ воронка */
+function stageOptions(current) {
+  return html`${STAGE_ORDER.map((key) => html`
+    <option value="${key}"${key === (current || 'new') ? raw(' selected') : raw('')}>${STAGES[key]}</option>`)}`;
+}
+
+function renderPipeline(items) {
+  const counts = {};
+  (items || []).forEach((row) => { counts[row.stage] = num(row.count); });
+  render($('ops10_pipeline'), STAGE_ORDER.map((key) => html`
+    <div class="kpi"><small>${STAGES[key]}</small><b>${counts[key] || 0}</b><span>обращений</span></div>`).join(''));
+}
+
+/* ========================================================= inbox (CRM) */
+function inboxRow(row) {
+  const name = row.name || row.username || ('Чат ' + row.chat_id);
+  return html`
+    <article class="ops10-item">
+      <div class="ops10-item-head">
+        <div><b>${name}</b><small class="muted"> · ${row.chat_id} · ${fmt.stamp(row.at || row.last_seen)}</small></div>
+        <span class="tag ${row.unread ? 'warn' : ''}">${row.unread ? 'новое' : 'прочитано'}</span>
+      </div>
+      <p>${row.text || 'Нет текста последнего сообщения'}</p>
+      <div class="ops10-actions">
+        <select data-inbox-stage="${row.chat_id}" aria-label="Стадия обращения">${stageOptions(row.pipeline_stage)}</select>
+        <button class="btn sm" data-inbox-read="${row.chat_id}" type="button">Прочитано</button>
+        <a class="btn sm ghost" href="#clientbot" data-view="clientbot">Открыть диалог</a>
+      </div>
+    </article>`;
+}
+
+function renderInbox(items) {
+  const host = $('ops10_inbox');
+  if (!host) return;
+  if (!items || !items.length) { render(host, emptyHtml('Обращений пока нет', 'Когда покупатель напишет в бот, диалог появится здесь.')); return; }
+  render(host, items.map(inboxRow).join(''));
+  host.querySelectorAll('[data-inbox-stage]').forEach((select) => {
+    select.addEventListener('change', async () => {
+      try {
+        await post('/api/ops10/inbox/stage', { chat_id: select.dataset.inboxStage, stage: select.value });
+        toast('Стадия сохранена', STAGES[select.value] || select.value);
+        await load();
+      } catch (e) { fail(e); }
     });
-    PF.on?.('ready', load);
-    if (location.hash === '#ops10') load();
+  });
+  host.querySelectorAll('[data-inbox-read]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await post('/api/client-bot/read', { chat_id: button.dataset.inboxRead, actor: 'panel' });
+        await load();
+      } catch (e) { fail(e); }
+    });
+  });
+}
+
+/* ======================================================== оборудование */
+function renderPrinters(printers) {
+  const host = $('ops10_printers');
+  if (!host) return;
+  if (!printers || !printers.length) {
+    render(host, emptyHtml('Принтеры не подключены', 'Добавьте Bambu Lab в разделе «Принтеры» — здесь появится телеметрия.'));
+    return;
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+  render(host, printers.map((item) => {
+    const info = item.printer || {};
+    const conn = item.connection || {};
+    const ams = item.ams || {};
+    const trays = (ams.trays || []).filter((t) => t.active || t.remain != null).slice(0, 8);
+    const progress = Math.max(0, Math.min(100, num(info.progress)));
+    const low = trays.filter((t) => num(t.remain) < 15).length;
+    return html`
+      <article class="ops10-printer">
+        <div class="ops10-item-head">
+          <b>${item.name || info.name || 'Принтер'}</b>
+          <span class="tag ${conn.connected ? 'ok' : 'bad'}">${conn.connected ? 'онлайн' : 'офлайн'}</span>
+        </div>
+        <small>${info.state_label || info.state || 'Ожидание'} · ${info.task || 'нет активной печати'}</small>
+        <div class="bar"><i style="width:${progress}%"></i></div>
+        <small>Печать: ${progress}% · AMS: ${trays.length ? trays.length + ' слотов' : 'нет данных'}${low ? ' · мало пластика: ' + low : ''}</small>
+        <div class="chips">${trays.length
+          ? trays.map((t) => html`<span class="tag">${t.material || '—'} ${t.color || ''} · ${t.remain == null ? '—' : Math.round(num(t.remain)) + '%'}</span>`).join('')
+          : raw('<span class="muted">Слоты AMS пока не переданы</span>')}</div>
+      </article>`;
+  }).join(''));
+}
+
+/* ========================================================== план/факт */
+function renderProduction() {
+  const stats = (production && production.planfact) || {};
+  const fact = $('ops10_planfact');
+  const list = $('ops10_production_list');
+  if (!fact || !list) return;
+  render(fact, html`
+    <span class="tag">Завершено: ${num(stats.total)}</span>
+    <span class="tag">Факт: ${Math.round(num(stats.fact_minutes))} мин</span>
+    <span class="tag">Пластик: ${fmt.grams(stats.fact_grams)}</span>
+    <span class="tag ${num(stats.failed) ? 'warn' : ''}">Брак/сбой: ${num(stats.failed)}</span>`);
+  const jobs = ((production && production.queue) || []).slice(0, 8);
+  render(list, jobs.length
+    ? jobs.map((job) => html`
+      <div class="ops10-production-row">
+        <span><b>${job.name || 'Задание'}</b><small class="muted"> · ${job.state || 'queued'} · ${job.printer_id || 'парк'}</small></span>
+        <span>${num(job.est_minutes) ? Math.round(num(job.est_minutes)) + ' мин' : 'оценка —'}</span>
+      </div>`).join('')
+    : emptyHtml('Очередь свободна', 'Задания появятся здесь сразу после добавления в очередь.'));
+}
+
+/* ======================================================== правила (DSL) */
+function renderRules(rules, runs) {
+  const host = $('ops10_rules');
+  const log = $('ops10_runs');
+  if (!host || !log) return;
+  render(host, (rules || []).length
+    ? rules.map((rule) => html`
+      <div class="ops10-rule">
+        <div><b>${rule.name}</b><small>${rule.event} → ${rule.action} · ${rule.enabled ? 'включено' : 'выключено'}</small></div>
+        <div class="ops10-actions">
+          <button class="btn sm" data-rule-dry="${rule.id}" type="button">Проверить</button>
+          <label class="switch"><input type="checkbox" data-rule-enabled="${rule.id}"${num(rule.enabled) ? raw(' checked') : raw('')}><i></i></label>
+        </div>
+      </div>`).join('')
+    : emptyHtml('Правил нет', 'Добавьте их в Настройках → Автоматизация.'));
+
+  host.querySelectorAll('[data-rule-enabled]').forEach((box) => {
+    box.addEventListener('change', async () => {
+      try {
+        await post('/api/rules/toggle', { id: box.dataset.ruleEnabled, enabled: box.checked });
+        await load();
+      } catch (e) { fail(e); }
+    });
+  });
+  host.querySelectorAll('[data-rule-dry]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        const data = await post('/api/rules/simulate', {
+          rule_id: button.dataset.ruleDry,
+          context: { name: 'тестовый объект', detail: 'dry-run из Центра смены',
+            number: '1001', product: 'тест', status: 'ready', days: 14, grams: 50, pct: 10 },
+        });
+        const hit = (data.items || []).find((item) => item.matched);
+        toast('Dry-run выполнен',
+          hit ? (hit.preview || 'Действие будет выполнено') : 'Условия не совпали',
+          hit ? 'info' : 'warn');
+        await load();
+      } catch (e) { fail(e); }
+    });
+  });
+
+  render(log, (runs || []).length
+    ? runs.slice(0, 12).map((row) => html`
+      <div class="ops10-run">
+        <b>${row.mode === 'dry_run' ? 'Dry-run' : 'Факт'}</b> · ${row.action} ·
+        ${row.matched ? 'условие совпало' : 'условие не совпало'}<br>
+        <span class="muted">${fmt.stamp(row.at)} · ${row.preview || 'без текста'}</span>
+      </div>`).join('')
+    : emptyHtml('Проверок пока нет', 'Нажмите «Проверить» у правила — сценарий пройдёт без изменений в цехе.'));
+}
+
+/* ============================================================= загрузка */
+async function load() {
+  try {
+    const [head, body] = await Promise.all([
+      get('/api/ops10/overview'),
+      get('/api/ops10/production'),
+    ]);
+    overview = head || {};
+    production = body || {};
+    renderPipeline(overview.pipeline);
+    renderPrinters(overview.printers || []);
+    renderInbox(overview.inbox || []);
+    renderRules(overview.rules || [], overview.rule_runs || []);
+    renderProduction();
+  } catch (e) {
+    const host = $('ops10_inbox');
+    if (host) {
+      render(host, html`<div class="notice bad"><span>✕</span><span>${e && e.message ? e.message : 'Не удалось загрузить данные'}</span></div>`);
+    }
+  }
+}
+
+async function simulateQueue() {
+  try {
+    const data = await post('/api/ops10/queue/simulate', { job_ids: [] });
+    const minutes = num(data.total_minutes);
+    toast('Симуляция очереди',
+      minutes ? `Суммарная оценка: ${Math.round(minutes)} мин. Запуск не выполнен.` : 'Очередь пуста',
+      'info');
+  } catch (e) { fail(e); }
+}
+
+function bind() {
+  const refresh = $('ops10_refresh');
+  if (refresh) refresh.addEventListener('click', () => { load(); });
+  const simulate = $('ops10_simulate_queue');
+  if (simulate) simulate.addEventListener('click', simulateQueue);
+  // Живые данные: обновляем только когда раздел действительно открыт (45),
+  // и не чаще раза в 4 секунды — телеметрия приходит пачками.
+  PF.on('live', debounce(() => { if (PF.viewOn('ops10')) load(); }, 4000));
+}
+
+PF.module('ops10', () => {
+  bind();
+  if (PF.viewOn('ops10') || location.hash === '#ops10') load();
+});
+PF.on('view', (detail) => { if (detail && detail.view === 'ops10') load(); });
 })();

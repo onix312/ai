@@ -147,6 +147,18 @@ class TelegramBot:
         self._cat_query: dict[str, str] = {}   # chat -> поисковый запрос каталога
         self._pending_del: dict[str, tuple] = {}  # chat -> (nom_id, время запроса)
         self._pending_recalc_all: dict[str, float] = {}  # chat -> время запроса
+        # 14.0 (идеи 73, 74): транспорт, журнал update и очередь исходящих —
+        # общие с клиентским ботом (модуль tg), а не своя копия в каждом боте.
+        from .tg import Outbox, Transport, UpdateLedger
+        self.transport = Transport(
+            lambda: str(self._settings().get("telegram_token", "") or ""), "staff")
+        self.ledger = UpdateLedger(self.db, "telegram_bot_updates")
+        self.outbox = Outbox(
+            self.db,
+            sender=lambda method, payload, timeout=15: self._call(
+                method, payload, timeout=timeout),
+            table="telegram_outbox",
+            token_provider=self.transport.token_provider)
         self._thread = threading.Thread(target=self._loop, name="pf-bot", daemon=True)
         self._thread.start()
 
@@ -158,67 +170,35 @@ class TelegramBot:
         return self.db.settings(include_secrets=True)
 
     def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
-        token = self._settings().get("telegram_token", "")
-        if not token:
-            return {}
-        url = API.format(token=token, method=method)
-        data = urllib.parse.urlencode(params).encode()
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, data=data),
-                                        timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8", "ignore"))
-        except Exception:
-            return {}
+        """Вызов Bot API через общий транспорт (идея 73)."""
+        return self.transport.call(method, params, timeout=timeout)
 
     def _claim_update(self, update: dict) -> bool | None:
-        """Занять update рабочего бота; живую обработку не перехватываем."""
-        update_id = str(update.get("update_id") or "").strip()
-        if not update_id:
-            return True
-        cur = self.db.execute(
-            "INSERT OR IGNORE INTO telegram_bot_updates(update_id,state,received_at)"
-            " VALUES(?,'processing',?)", (update_id, now_iso()))
-        if cur.rowcount:
-            return True
-        existing = self.db.one(
-            "SELECT state,received_at FROM telegram_bot_updates WHERE update_id=?",
-            (update_id,)) or {}
-        state = str(existing.get("state") or "")
-        if state == "done":
-            return None
-        stale = state == "failed"
-        if state == "processing":
-            try:
-                received = datetime.fromisoformat(str(existing.get("received_at") or ""))
-                if received.tzinfo is None:
-                    received = received.astimezone()
-                stale = (datetime.now().astimezone() - received).total_seconds() >= 300
-            except (TypeError, ValueError, OverflowError):
-                stale = False
-        if not stale:
-            return False
-        stamp = now_iso()
-        if state == "processing":
-            cur = self.db.execute(
-                "UPDATE telegram_bot_updates SET state='processing',received_at=?,error=''"
-                " WHERE update_id=? AND state='processing' AND received_at=?",
-                (stamp, update_id, existing.get("received_at")))
-        else:
-            cur = self.db.execute(
-                "UPDATE telegram_bot_updates SET state='processing',received_at=?,error=''"
-                " WHERE update_id=? AND state='failed'", (stamp, update_id))
-        return True if cur.rowcount else False
+        """Занять update рабочего бота в общем журнале (идея 73)."""
+        return self.ledger.claim(update)
 
     def _finish_update(self, update_id: str, ok: bool = True, error: str = "") -> None:
-        if not update_id:
-            return
-        self.db.execute(
-            "UPDATE telegram_bot_updates SET state=?,processed_at=?,error=? WHERE update_id=?",
-            ("done" if ok else "failed", now_iso(), str(error or "")[:500], update_id))
+        """Отметить update обработанным или ошибкой."""
+        self.ledger.finish(str(update_id or ""), ok, error)
 
     def _reply(self, chat: str, text: str) -> None:
-        self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
-                                   "disable_web_page_preview": "true"}, timeout=15)
+        """Ответ сотруднику через очередь исходящих (идея 74).
+
+        Сообщение кладётся в `telegram_outbox` и сразу отправляется; при
+        обрыве сети строка остаётся в очереди и уйдёт на следующем витке
+        опроса — раньше ответ терялся молча.
+        """
+        payload = {"chat_id": chat, "text": str(text or "")[:3800],
+                   "disable_web_page_preview": "true"}
+        row = self.outbox.add(str(chat), "sendMessage", payload,
+                              dedupe_key=f"reply:{chat}:{hash(payload['text'])}")
+        self.outbox.send(row)
+
+    def _reply_photo(self, chat: str, path, caption: str = "") -> None:
+        """Фото сотруднику через ту же очередь."""
+        payload = {"chat_id": chat, "caption": str(caption or "")[:1024]}
+        row = self.outbox.add(str(chat), "sendPhoto", payload, file_path=str(path))
+        self.outbox.send(row)
 
     def _inline_menu(self) -> dict:
         """Главное inline-меню сотрудника, общее для всех карточек."""
@@ -253,6 +233,7 @@ class TelegramBot:
                 })
                 if result.get("ok"):
                     self.last_poll = time.time()
+                    self.outbox.drain(batch=10)  # дозаправка недосланных (идея 74)
                 for update in (result.get("result") or []):
                     update_id = str(update.get("update_id") or "")
                     claim = self._claim_update(update)
@@ -726,20 +707,8 @@ class TelegramBot:
         return str((order or {}).get("number") or "")
 
     def _download_file(self, file_id: str) -> bytes | None:
-        """Скачать файл из Telegram (getFile → скачивание)."""
-        token = self._settings().get("telegram_token", "")
-        if not token:
-            return None
-        try:
-            info = self._call("getFile", {"file_id": file_id})
-            path = str((info.get("result") or {}).get("file_path") or "")
-            if not path:
-                return None
-            url = f"https://api.telegram.org/file/bot{token}/{path}"
-            with urllib.request.urlopen(url, timeout=30) as response:
-                return response.read()
-        except Exception:
-            return None
+        """Скачать файл из Telegram через общий транспорт (идея 73)."""
+        return self.transport.download_file(file_id, call=self._call)
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е")

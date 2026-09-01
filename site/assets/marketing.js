@@ -5,7 +5,7 @@
 (() => {
 'use strict';
 
-const { $, esc, num, nfmt, money, toast, fail, store, todayISO } = PF.ui;
+const { $, esc, num, nfmt, money, toast, fail, store, todayISO, debounce } = PF.ui;
 const { get } = PF.api;
 const PERIODS = [7, 30, 90];
 let contentDays = Number(store.get('pf.content.days', '7'));
@@ -733,12 +733,15 @@ function bind() {
   activatePane(currentPane, false);
 }
 
-PF.on('ready', () => {
+/* 14.0 (47): файл грузится лениво при первом входе в раздел, поэтому
+   инициализация идёт через PF.module — событие 'ready' к этому моменту
+   уже прошло, и обычный PF.on('ready') не сработал бы никогда. */
+PF.module('marketing', () => {
   bind();
   loadBusinessCustomers();
-  // При открытии страницы сразу по ссылке #marketing событие маршрута уже
-  // могло прийти до загрузки этого файла. В этом случае запускаем студию тут.
-  if (document.querySelector('#view-marketing.on')) refreshContent({ quiet: true }).catch(fail);
+  // При открытии страницы сразу по ссылке #marketing раздел уже видим —
+  // запускаем студию сразу, не дожидаясь события маршрута.
+  if (PF.viewOn('marketing')) refreshContent({ quiet: true }).catch(fail);
 });
 PF.on('data', () => {
   if (document.querySelector('#view-marketing.on')) loadBusinessCustomers();

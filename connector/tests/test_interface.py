@@ -155,9 +155,13 @@ class TestJavaScriptSyntax(unittest.TestCase):
         self.assertTrue(files, "JS-файлов не найдено")
         for js in files:
             with self.subTest(js=js.name):
+                # 14.0 (Б8): запас 300 с вместо 60. Одиночный `node --check`
+                # занимает ~0,03 с, но в полном прогоне (900+ тестов) машина
+                # занята, и запуск node вставал в очередь дольше минуты —
+                # проверка падала по таймауту при живом синтаксисе.
                 result = subprocess.run(
                     ["node", "--check", str(js)],
-                    capture_output=True, text=True, timeout=60)
+                    capture_output=True, text=True, timeout=300)
                 self.assertEqual(0, result.returncode,
                                  f"{js.name}: {result.stderr.strip()}")
 

@@ -1175,7 +1175,7 @@ class ClientBot122PanelTests(unittest.TestCase):
         from connector.printflow import api as api_mod
         from connector.printflow import config as cfg_mod
         self._patches = [
-            patch.object(api_mod, "UPLOAD_DIR", self.upload_dir),
+            patch.object(cfg_mod, "UPLOAD_DIR", self.upload_dir),
             patch.object(cfg_mod, "PHOTO_DIR", self.photo_dir),
         ]
         for p in self._patches:

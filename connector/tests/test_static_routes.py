@@ -33,12 +33,19 @@ class Recorder:
         return b"".join(self.chunks)
 
 
-def serve(path: str) -> tuple[int, dict, bytes]:
-    """Выполнить serve_static и вернуть (код, заголовки, тело)."""
+def serve(path: str, raw_path: str = "", headers: dict | None = None
+          ) -> tuple[int, dict, bytes]:
+    """Выполнить serve_static и вернуть (код, заголовки, тело).
+
+    `raw_path` — строка запроса как её видит сервер (с `?v=…`): по ней
+    определяется, версионированный ли ассет. `headers` — для проверки ETag.
+    """
     handler = Handler.__new__(Handler)
     handler.request_version = "HTTP/1.1"
     handler.command = "GET"
-    handler.requestline = f"GET {path} HTTP/1.1"
+    handler.requestline = f"GET {raw_path or path} HTTP/1.1"
+    handler.path = raw_path or path
+    handler.headers = SimpleNamespace(get=lambda key, _d=None: (headers or {}).get(key, _d))
     handler.server = SimpleNamespace(flags=[])
     handler.close_connection = False
     handler.wfile = Recorder()
@@ -108,8 +115,42 @@ class TestContentTypes(unittest.TestCase):
         self.assertIn(b"startsWith('/api/')", body)
 
     def test_pages_are_not_cached_but_images_are(self):
+        """14.0 (идея 41): HTML не кэшируется, картинки — короткий кэш."""
         self.assertEqual(serve("/index.html")[1]["Cache-Control"], "no-store")
-        self.assertEqual(serve("/assets/brand/favicon.svg")[1]["Cache-Control"], "max-age=3600")
+        self.assertEqual(serve("/assets/brand/favicon.svg")[1]["Cache-Control"],
+                         "public, max-age=3600")
+
+    def test_versioned_assets_are_immutable(self):
+        """Ассет с пином ?v= можно держать год: пин меняется с релизом.
+
+        Раньше even версионированные JS/CSS отдавались с no-store, и панель
+        на телефоне/ТВ перекачивала ~1,5 МБ при каждом открытии.
+        """
+        code, headers, body = serve("/assets/core.js", "/assets/core.js?v=15.0.0")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["Cache-Control"], "public, max-age=31536000, immutable")
+        self.assertTrue(body)
+
+    def test_unversioned_script_keeps_short_cache(self):
+        """Без пина — короткий кэш: файл мог измениться без смены адреса."""
+        _, headers, _ = serve("/assets/core.js", "/assets/core.js")
+        self.assertEqual(headers["Cache-Control"], "public, max-age=3600")
+
+    def test_etag_is_sent_and_304_on_match(self):
+        """ETag позволяет браузеру не перекачивать неизменный файл."""
+        _, first, _ = serve("/assets/brand/favicon.svg")
+        etag = first.get("ETag")
+        self.assertTrue(etag, "ETag не отправлен")
+        code, second, body = serve("/assets/brand/favicon.svg",
+                                   headers={"If-None-Match": etag})
+        self.assertEqual(code, 304)
+        self.assertEqual(second.get("ETag"), etag)
+        self.assertEqual(body, b"", "при 304 тело отправлять нельзя")
+
+    def test_service_worker_never_gets_immutable_cache(self):
+        """sw.js всегда no-store — иначе обновление оболочки не приедет."""
+        _, headers, _ = serve("/sw.js", "/sw.js?v=15.0.0")
+        self.assertEqual(headers["Cache-Control"], "no-store")
 
 
 class TestDirectoryEscape(unittest.TestCase):

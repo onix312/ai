@@ -30,6 +30,9 @@ jobs:
       - name: Быстрые проверки
         run: python scripts/check.py --quick --require-tools
 
+      - name: Headless-стенд панели
+        run: node scripts/panel-check.js
+
   tests:
     name: Тесты · Python ${{ matrix.python }}
     runs-on: ubuntu-latest

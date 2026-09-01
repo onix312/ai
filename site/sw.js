@@ -12,7 +12,13 @@
    по обычному http с телефона браузер его не разрешает — это ограничение
    браузеров, а не PrintFlow. Панель на телефоне работает и без него. */
 
-const CACHE = 'printflow-shell-v20';
+const CACHE = 'printflow-shell-v22';
+/* Оболочка панели: всё, без чего интерфейс не соберётся офлайн.
+   Список сверяется с index.html тестом test_pwa_shell — если в разметку
+   добавили скрипт или стиль, проверка упадёт и напомнит внести его сюда.
+   Раньше список вёлся вручную и разошёлся: bridge.js, ops10.js,
+   workshop.js и gcode-viewer.js не кэшировались, и офлайн-панель падала
+   на первом же незагруженном модуле. */
 const SHELL = [
   '/',
   '/index.html',
@@ -30,13 +36,17 @@ const SHELL = [
   '/assets/queue.js',
   '/assets/stl-viewer.js',
   '/assets/stl-worker.js',
+  '/assets/gcode-viewer.js',
   '/assets/ops.js',
+  '/assets/ops10.js',
   '/assets/money.js',
   '/assets/finance.js',
   '/assets/products.js',
   '/assets/printer.js',
   '/assets/shelf.js',
   '/assets/qr.js',
+  '/assets/bridge.js',
+  '/assets/workshop.js',
   '/assets/marketing.js',
   '/assets/clientbot.js',
   '/assets/brand/nozza-logo.svg',

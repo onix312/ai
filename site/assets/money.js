@@ -1428,8 +1428,8 @@ function bind() {
 
 /* =============================================================== старт */
 PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); });
-PF.on('data', () => { renderStock(); renderCatalog(); });
-PF.on('finance', renderFinance);
+PF.on('data', PF.whenView(['inventory', 'calc'], () => { renderStock(); renderCatalog(); }));
+PF.on('finance', PF.whenView(['inventory', 'calc', 'finance'], renderFinance));
 PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });
 
 // ------------------------------------------------------- экспорт расчёта

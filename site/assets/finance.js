@@ -907,8 +907,8 @@ PF.on('ready', () => {
     loadAbc();
   });
 });
-PF.on('money', renderAll);
-PF.on('finance', () => { if (PF.state.money) renderAll(); });
+PF.on('money', PF.whenView(['finance', 'calc'], renderAll));
+PF.on('finance', PF.whenView(['finance', 'calc'], () => { if (PF.state.money) renderAll(); }));
 PF.on('view', (d) => {
   if (d.view === 'finance' || d.view === 'settings') { refreshMoney(); refreshShelfCash(); }
 });

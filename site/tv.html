@@ -1,15 +1,20 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#4f46e5">
 <title>NOZZA · ТВ-режим</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="assets/tokens.css?v=15.0.0">
 <style>
-:root { --bg: #0a0e19; --card: #111827; --line: #1f2a44; --text: #e5e7eb; --muted: #8b96ad; --accent: #f97316; }
+/* 14.0 (Б12): палитра больше не своя — общие токены tokens.css
+   (data-theme="dark" на <html>). m.html переехал на токены в 13.1,
+   теперь и ТВ показывает тот же бренд, что и панель. */
+:root { --card: var(--panel); }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-  font-family: Arial, Helvetica, sans-serif; overflow: hidden; }
+  font-family: var(--font); overflow: hidden; }
 #wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; height: 100%; padding: 22px; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
   padding: 24px; display: flex; flex-direction: column; min-width: 0; }
