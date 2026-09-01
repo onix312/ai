@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/tokens.css?v=15.0.0">
-<link rel="stylesheet" href="assets/theme.css?v=15.0.0">
-<link rel="stylesheet" href="assets/app.css?v=15.0.0">
-<link rel="stylesheet" href="assets/more.css?v=15.0.0">
+<link rel="stylesheet" href="assets/tokens.css?v=15.2.0">
+<link rel="stylesheet" href="assets/theme.css?v=15.2.0">
+<link rel="stylesheet" href="assets/app.css?v=15.2.0">
+<link rel="stylesheet" href="assets/more.css?v=15.2.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -218,7 +218,7 @@
      <div class="job-facts">
       <div><span>Слой</span><b id="pr_layers">— / —</b></div>
       <div><span>Осталось</span><b id="pr_remaining">—</b></div>
-      <div><span>Завершится</span><b id="pr_eta">—</b></div>
+      <div><span>Завершится</span><b id="pr_eta">—</b> <span class="eta-clock" id="pr_eta_clock" title="Стрелка — момент окончания на циферблате суток"></span></div>
       <div><span>Скорость</span><b id="pr_speed">—</b></div>
       <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
       <div><span>Потрачено</span><b id="pr_spent">—</b></div>
@@ -257,6 +257,8 @@
       <button class="cmd-btn" data-cmd="keyframes" type="button" id="pr_keyframes_btn" title="Видео печати: архив кадров задания"><span class="ic" data-icon="film">▦</span>Видео</button>
       <button class="cmd-btn" data-cmd="bed_ref" type="button" id="pr_bed_btn" title="Снять эталон пустого стола для проверки «деталь на столе»"><span class="ic" data-icon="bed">▭</span>Пустой стол</button>
       <button class="cmd-btn danger" data-cmd="stop" type="button"><span class="ic" data-icon="stop">■</span>Стоп</button>
+      <button class="cmd-btn" id="pr_map_btn" type="button" title="Разметить углы стола на эталонном кадре (119)"><span class="ic" data-icon="hexagon">◫</span>Разметка стола</button>
+      <button class="cmd-btn" id="pr_map_toggle" type="button" title="Проекция плиты поверх видео: контуры объектов (119)"><span class="ic" data-icon="layout">▤</span>Проекция плиты</button>
      </div>
      <div class="notice" id="pr_bed_status" hidden style="margin-top:8px"><span>▭</span><span id="pr_bed_status_text"></span></div>
      <div class="cmd-row">
@@ -301,7 +303,7 @@
     <div class="card">
      <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div>
       <div class="head-actions"><span class="chip warn" id="pr_cam_demo" hidden>Демо</span><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div></div>
-     <div class="cam-frame clickable" title="Клик — крупный план"><img id="pr_cam" alt="Камера принтера"><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span><span class="cam-zoom" data-icon="image" aria-hidden="true">⤢</span></div>
+     <div class="cam-frame clickable" title="Клик — крупный план"><img id="pr_cam" alt="Камера принтера"><svg id="pr_cam_map" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span><span class="cam-fps chip outline" hidden style="font-size:10.5px;padding:1px 7px"></span><span class="cam-zoom" data-icon="image" aria-hidden="true">⤢</span></div>
      <div class="cam-foot"><span id="pr_cam_age">—</span><span class="top-spacer"></span>
       <button class="btn sm ghost" id="pr_cam_diag" type="button">Диагностика</button>
       <button class="btn sm ghost" id="pr_cam_rtsp" type="button">RTSP</button>
@@ -442,7 +444,7 @@
   <div class="head-actions">
    <div class="seg" id="fin_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
    <button class="btn" id="fin_export_tx" type="button">↓ CSV</button>
-   <button class="btn" id="fin_month_close" type="button">🧾 Закрыть месяц</button>
+   <button class="btn" id="fin_month_close" type="button"><i data-icon="page">🧾</i> Закрыть месяц</button>
    <button class="btn primary" id="fin_add" type="button">+ Проводка</button>
   </div>
  </div>
@@ -627,7 +629,9 @@
   <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option><option value="showcase">Для магазина</option></select>
   <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
   <select id="prod_sort" title="Сортировка плиток"><option value="">Порядок по умолчанию</option><option value="margin">По марже</option><option value="sold7">По продажам 7 дн.</option><option value="days">Кончается первым</option><option value="price">По цене</option></select>
-  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые">👁 Витрина</button>
+  <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
+  <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)" style="height:32px"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
+  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Витрина</button>
   <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
  </div>
  <div class="toolbar-alerts" id="prod_warn_badge" hidden></div>
@@ -3946,6 +3950,19 @@
    <label class="field span-2"><span>Заметки</span><textarea id="of_notes" rows="3"></textarea></label>
   </div></div>
   <div class="form-section" id="of_jobs_wrap" hidden><h3>Печати по заказу</h3><div id="of_jobs"></div></div>
+  <div class="form-section" id="tl_wrap" hidden>
+   <h3 style="display:flex;align-items:center;gap:10px">Таймлапс печати (№47)<span class="chip outline" style="font-size:11px" id="tl_chip" hidden></span></h3>
+   <div id="tl_jobs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" hidden></div>
+   <div id="tl_stage" style="position:relative;max-width:520px;border-radius:12px;overflow:hidden;background:var(--bg-soft,#111)">
+    <img id="tl_img" alt="Кадр таймлапса" style="width:100%;display:block;aspect-ratio:4/3;object-fit:cover">
+    <div style="position:absolute;left:8px;bottom:8px;right:8px;display:flex;align-items:center;gap:8px;background:rgba(2,6,23,.72);border-radius:10px;padding:6px 10px">
+     <button class="btn sm" type="button" id="tl_play" title="Играть/пауза">▶</button>
+     <input type="range" id="tl_range" min="0" max="0" value="0" step="1" style="flex:1">
+     <span id="tl_counter" style="font-size:12px;color:#e2e8f0;min-width:52px;text-align:right"></span>
+    </div>
+   </div>
+   <p class="muted" id="tl_hint" style="font-size:12px;margin:6px 0 0"></p>
+  </div>
   <div class="form-section">
    <h3 style="display:flex;align-items:center;gap:10px">Чек-лист качества
     <button class="btn sm ghost" type="button" id="order_defect_btn">✕ Записать брак</button></h3>
@@ -3977,7 +3994,9 @@
    <div class="tg-thread-head">
     <h3><i data-icon="telegram">✈</i> Диалог с покупателем</h3>
     <small class="muted" id="of_tg_sub">заказ из клиентского бота</small>
+    <button class="btn sm ghost" type="button" id="of_tg_summary_btn" title="Короткое резюме переписки: открытые вопросы, суммы, сроки (№61)">⌘ Резюме диалога</button>
    </div>
+   <div id="of_tg_summary" class="verdict" hidden style="margin-bottom:8px;white-space:pre-line"></div>
    <div class="tg-msgs" id="of_tg_msgs"></div>
    <div class="tg-chips" id="of_tg_chips"></div>
    <div class="tg-reply">
@@ -3996,6 +4015,7 @@
     <button class="btn sm" type="button" data-b2b-kind="invoice">Счёт</button>
     <button class="btn sm" type="button" data-b2b-kind="cp">КП</button>
     <button class="btn sm" type="button" data-b2b-kind="receipt">Товарный чек</button>
+    <button class="btn sm" type="button" data-b2b-kind="pickup" title="Термочек выдачи: состав, оплата, QR трекинга"><i data-icon="page">🧾</i> Чек выдачи</button>
     <button class="btn sm primary" type="button" data-b2b-kind="waybill">Накладная</button>
    </div>
    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px">
@@ -4994,21 +5014,21 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=15.0.0"></script>
-<script src="assets/core.js?v=15.0.0"></script>
-<script src="assets/icons.js?v=15.0.0"></script>
-<script src="assets/printer.js?v=15.0.0"></script>
-<script src="assets/queue.js?v=15.0.0"></script>
-<script src="assets/ops.js?v=15.0.0"></script>
-<script src="assets/money.js?v=15.0.0"></script>
-<script src="assets/finance.js?v=15.0.0"></script>
-<script src="assets/shelf.js?v=15.0.0"></script>
-<script src="assets/products.js?v=15.0.0"></script>
-<script src="assets/bridge.js?v=15.0.0"></script>
+<script src="assets/qr.js?v=15.2.0"></script>
+<script src="assets/core.js?v=15.2.0"></script>
+<script src="assets/icons.js?v=15.2.0"></script>
+<script src="assets/printer.js?v=15.2.0"></script>
+<script src="assets/queue.js?v=15.2.0"></script>
+<script src="assets/ops.js?v=15.2.0"></script>
+<script src="assets/money.js?v=15.2.0"></script>
+<script src="assets/finance.js?v=15.2.0"></script>
+<script src="assets/shelf.js?v=15.2.0"></script>
+<script src="assets/products.js?v=15.2.0"></script>
+<script src="assets/bridge.js?v=15.2.0"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=15.0.0"></script>
-<script src="assets/app.js?v=15.0.0"></script>
+<script src="assets/workshop.js?v=15.2.0"></script>
+<script src="assets/app.js?v=15.2.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.
@@ -5019,4 +5039,20 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   });
 }
 </script>
+<dialog class="modal" id="bedmap_modal">
+ <div class="card pad-0" style="padding:18px">
+  <div class="card-head"><div><h2>Разметка стола</h2>
+   <p>Кликните четыре угла стола на эталонном кадре по порядку: передний-левый → передний-правый → задний-правий → задний-левый</p></div>
+   <button class="icon-btn" type="button" data-close="bedmap_modal" aria-label="Закрыть">×</button></div>
+  <div id="bedmap_stage" style="position:relative;max-width:640px;margin:0 auto;cursor:crosshair">
+   <img id="bedmap_img" alt="Эталон пустого стола" style="width:100%;display:block;border-radius:10px">
+   <svg id="bedmap_svg" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%"></svg>
+  </div>
+  <p class="muted" id="bedmap_hint" style="margin:10px 0 0">Эталон стола загружается…</p>
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+   <button class="btn ghost" id="bedmap_reset" type="button">Сбросить</button>
+   <button class="btn primary" id="bedmap_save" type="button" disabled>Сохранить разметку</button>
+  </div>
+ </div>
+</dialog>
 </body></html>

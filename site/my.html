@@ -7,6 +7,12 @@
 <style>
 :root { --bg: #0d1220; --card: #141c30; --line: #24304e; --text: #e5e7eb; --muted: #8b96ad; --accent: #f97316; --ok: #22c55e; }
 * { box-sizing: border-box; }
+/* В67: сезон витрины — лента и акцент приходят из настроек панели */
+.season-ribbon { display:none; padding:7px 14px; font-size:13px; text-align:center; letter-spacing:.3px; }
+html[data-season="newyear"] .season-ribbon { display:block; background:linear-gradient(90deg,#0e7490,#164e63); color:#ecfeff; }
+html[data-season="spring"] .season-ribbon { display:block; background:linear-gradient(90deg,#db2777,#be185d); color:#fff1f7; }
+html[data-season="autumn"] .season-ribbon { display:block; background:linear-gradient(90deg,#b45309,#92400e); color:#fffbeb; }
+
 body { margin: 0; background: var(--bg); color: var(--text);
   font-family: Arial, Helvetica, sans-serif; min-height: 100vh; }
 .shell { max-width: 640px; margin: 0 auto; padding: 30px 18px 60px; }
@@ -39,6 +45,7 @@ h1 { font-size: 20px; margin: 18px 0 4px; }
 </style>
 </head>
 <body>
+<div class="season-ribbon"></div>
 <div class="shell">
   <div class="brand"><b>NOZZA</b><span>личный уголок заказчика</span></div>
   <div id="content"><div class="empty">Проверяем код…</div></div>
@@ -64,6 +71,23 @@ async function main() {
     return;
   }
   try {
+
+/* В67: сезон витрины — одна публичная настройка */
+(function () {
+  var SEASON_TEXT = {
+    newyear: '❄ Новый год близко — успейте заказать подарки',
+    spring: '❀ Весна идёт — печатаем к 8 Марта',
+    autumn: '🍂 Осенний сезон печати — очередь растёт'
+  };
+  fetch('/api/public/season').then(function (r) { return r.json(); }).then(function (d) {
+    var season = d && d.season;
+    if (!season || season === 'none') return;
+    document.documentElement.setAttribute('data-season', season);
+    var ribbon = document.querySelector('.season-ribbon');
+    if (ribbon && SEASON_TEXT[season]) ribbon.textContent = SEASON_TEXT[season];
+  }).catch(function () {});
+})();
+
     const res = await fetch('/api/public/my?code=' + encodeURIComponent(code.toUpperCase()));
     const d = await res.json();
     if (!res.ok || d.error) {

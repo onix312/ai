@@ -1182,6 +1182,42 @@ class Api:
             items = self.nom.items(one("group_id"), one("kind"), one("search"),
                                    one("warehouse_id"),
                                    one("archived") == "1")
+            # В61/В63: свотчи цветовых вариантов и продажи за 30 дней —
+            # данные для бейджей витрины («Новинка», «Хит», «Последний»).
+            # Обе подкладки декоративно-безопасные: при ошибке список
+            # остаётся прежним, просто без свотчей и бейджей.
+            try:
+                variants: dict[str, list[dict]] = {}
+                for v in self.db.query(
+                        "SELECT nom_id, name, color_name, color_hex"
+                        " FROM nom_variants WHERE archived=0 ORDER BY position"):
+                    nom_id = str(v.get("nom_id") or "")
+                    if not nom_id:
+                        continue
+                    variants.setdefault(nom_id, []).append({
+                        "name": v.get("name") or "",
+                        "color_name": v.get("color_name") or "",
+                        "color_hex": v.get("color_hex") or "",
+                    })
+                for item in items:
+                    item["variants"] = variants.get(str(item.get("id") or ""), [])
+            except Exception:
+                pass
+            try:
+                from datetime import datetime, timedelta
+
+                cutoff = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+                sold: dict[str, float] = {}
+                for row in self.db.query(
+                        "SELECT si.nom_id AS nid, SUM(-sm.qty) AS sold"
+                        " FROM shelf_moves sm JOIN shelf_items si ON si.id=sm.item_id"
+                        " WHERE sm.kind='sale' AND sm.at>=? AND COALESCE(si.nom_id,'')<>''"
+                        " GROUP BY si.nom_id", (cutoff,)):
+                    sold[str(row.get("nid") or "")] = num(row.get("sold"))
+                for item in items:
+                    item["sold30"] = round(sold.get(str(item.get("id") or ""), 0.0), 3)
+            except Exception:
+                pass
             # Без фильтров список полный — сводка считается по нему же и не
             # декорирует номенклатуру второй раз. С фильтрами сводка остаётся
             # глобальной (по всему складу) и считает свой проход, как раньше.

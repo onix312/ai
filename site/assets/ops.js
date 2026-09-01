@@ -199,6 +199,7 @@ function orderCard(o) {
     + qtyBadge
     + prioBadge
     + channelChip
+    + chatBadgeHtml(o.id)
     + `</div>`
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
     + fileChip
@@ -223,8 +224,37 @@ function orderCard(o) {
 /* ЗА7: маркеры колонок + «докрут» сумм между обновлениями. */
 const kanSums = new Map();
 
+/* В40: по каким заказам покупатель ждёт ответа — пузырь переписки.
+   Один лёгкий GET на обновление данных, а не разбор всей ленты. */
+const chatBadges = new Map();
+let chatBadgesAt = 0;
+async function refreshChatBadges(force) {
+  if (!force && Date.now() - chatBadgesAt < 120000) return;
+  try {
+    const data = await get('/api/conversations/by-order');
+    const counts = (data && data.counts) || {};
+    chatBadges.clear();
+    Object.entries(counts).forEach(([orderId, cnt]) => {
+      if (num(cnt) > 0) chatBadges.set(orderId, num(cnt));
+    });
+    chatBadgesAt = Date.now();
+  } catch (e) { /* тихо: пузырь — подсказка, а не критичные данные */ }
+}
+function chatBadgeHtml(orderId) {
+  const cnt = chatBadges.get(orderId) || 0;
+  if (!cnt) return '';
+  return `<button class="chat-badge" type="button" data-chat-open="${esc(orderId)}"`
+    + ` title="Клиент ждёт ответа: ${cnt} в диалоге"><i data-icon="message">💬</i>${cnt}</button>`;
+}
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-chat-open]');
+  if (!chip) return;
+  location.hash = '#clientbot';
+});
+
 function renderKanban(list) {
   const host = $('orders_kanban');
+  refreshChatBadges();
   if (!PF.state.orders.length) {
     host.innerHTML = '<div class="empty"><span class="big">▦</span><b>Заказов нет</b>'
       + '<span>Нет заказов — создайте из сообщения или с нуля.</span>'
@@ -1184,6 +1214,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   }
   renderOrderPhotos((order && order.photos) || []);
   if (id) loadOrderPhotosFull(id);            // ЗА6: полный список фото и файлов
+  loadOrderTimelapse(id, (order && order.jobs) || []);   // №47: таймлапс печати
   renderOrderDefects((order && order.defects) || []);
   renderQcChecklist((order && order.qc_done) || '');
   renderOrderDocuments(null);
@@ -1353,6 +1384,7 @@ async function confirmOrderFulfillment() {
     const moneyResult = num(result.collected) > 0
       ? `получено ${money(result.collected)}`
       : num(result.debt) > 0 ? `оставлен долг ${money(result.debt)}` : 'оплачен ранее';
+    U.successFx();
     toast('Заказ выдан', `${moneyResult}${copied ? ' · текст клиенту скопирован' : ''}`);
     fulfillmentDraft = null;
     await PF.refreshCore();
@@ -1587,7 +1619,43 @@ function renderTgBlock(d) {
   sel.innerHTML = '<option value="">Вставить шаблон…</option>' + (d.templates || [])
     .map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
   sel.disabled = !(d.templates || []).length;
+  $('of_tg_summary').hidden = true;             // №61: резюме перезапрашивается по клику
   if (window.PFIcons) window.PFIcons.apply(wrap);
+}
+
+/* №61: резюме диалога — локально-экстрактивный разбор на сервере */
+async function loadThreadSummary() {
+  if (!editingOrder) return;
+  const box = $('of_tg_summary');
+  box.hidden = false;
+  box.className = 'verdict';
+  box.innerHTML = '<span class="muted">Собираю резюме переписки…</span>';
+  try {
+    const d = await get('/api/client-bot/thread-summary', { order_id: editingOrder });
+    if (!d) throw new Error('Пустой ответ');
+    if (d.empty) {
+      box.className = 'verdict warn';
+      box.textContent = d.verdict || 'Переписки по заказу ещё нет';
+      return;
+    }
+    const parts = [`<b>${esc(d.verdict || '')}</b>`];
+    (d.open_questions || []).forEach((q) => {
+      parts.push(`<div style="margin-top:6px">❓ Без ответа: ${esc(q.text)}<br><small class="muted">${esc(dateTimeText(q.at))}</small></div>`);
+    });
+    if ((d.amounts || []).length) parts.push(`<div>₽ Суммы: ${esc(d.amounts.join(', '))}</div>`);
+    if ((d.deadlines || []).length) parts.push(`<div>📅 Сроки: ${esc(d.deadlines.join(', '))}</div>`);
+    if ((d.phones || []).length) parts.push(`<div>☎ Телефон: ${esc(d.phones[0])}</div>`);
+    if ((d.highlights || []).length) {
+      const last = d.highlights[d.highlights.length - 1];
+      parts.push(`<div style="margin-top:6px">Последнее по делу: «${esc(last.text)}»<br><small class="muted">${esc(dateTimeText(last.at))}</small></div>`);
+    }
+    parts.push(`<small class="muted" style="display:block;margin-top:6px">${esc(d.counts.in)} сообщений от покупателя, ${d.counts.out} ваших · резюме собрано локально, без внешних сервисов</small>`);
+    box.className = `verdict ${d.last_direction === 'in' || (d.open_questions || []).length ? 'warn' : 'ok'}`;
+    box.innerHTML = parts.join('');
+  } catch (e) {
+    box.className = 'verdict bad';
+    box.textContent = 'Резюме не собралось: ' + e.message;
+  }
 }
 
 function tgSetMode(mode) {
@@ -1633,6 +1701,7 @@ async function confirmTgPayment(intentId) {
   if (!confirmDanger('Записать оплату и подтвердить её покупателю в чате?')) return;
   try {
     await post('/api/client-bot/payment', { intent_id: intentId, action: 'confirm', actor: 'panel' });
+    U.successFx();
     toast('Оплата подтверждена', 'Проводка в журнале · покупателю ушло подтверждение');
     await PF.refreshCore();
     if (editingOrder) {
@@ -1690,6 +1759,102 @@ function renderOrderPhotos(photos) {
       }).join('') + '</div>' : '';
     if (window.PFIcons) window.PFIcons.apply(filesHost);
   }
+}
+
+
+/* ---------------------- №47: таймлапс заказа ----------------------
+   Кейфреймы снимает коннектор во время печати (keyframe_interval_min,
+   PHOTO_DIR/keyframes/<job_id>). Здесь — проигрыватель в карточке заказа:
+   /api/job/keyframes отдаёт список кадров, /api/job/keyframe.jpg — сам кадр. */
+const tl = { timer: 0, pos: 0, frames: [], jobId: '', speedMs: 400 };
+
+function tlStop() {
+  if (tl.timer) { clearInterval(tl.timer); tl.timer = 0; }
+  const btn = $('tl_play');
+  if (btn) btn.textContent = '▶';
+}
+
+function tlShow(pos) {
+  if (!tl.frames.length) return;
+  tl.pos = clamp(pos, 0, tl.frames.length - 1);
+  const name = tl.frames[tl.pos];
+  $('tl_img').src = `/api/job/keyframe.jpg?id=${encodeURIComponent(tl.jobId)}&name=${encodeURIComponent(name)}`;
+  $('tl_range').value = String(tl.pos);
+  $('tl_counter').textContent = `${tl.pos + 1}/${tl.frames.length}`;
+}
+
+function tlPlayPause() {
+  if (tl.timer) { tlStop(); return; }
+  if (!tl.frames.length) return;
+  if (tl.pos >= tl.frames.length - 1) tl.pos = 0;
+  $('tl_play').textContent = '⏸';
+  tl.timer = setInterval(() => {
+    if (tl.pos >= tl.frames.length - 1) { tlStop(); return; }
+    tlShow(tl.pos + 1);
+  }, tl.speedMs);
+}
+
+function tlSelectJob(jobId, jobName, frames) {
+  tlStop();
+  tl.jobId = jobId;
+  tl.frames = frames || [];
+  tl.pos = 0;
+  $('tl_range').max = String(Math.max(0, tl.frames.length - 1));
+  $('tl_chip').hidden = false;
+  $('tl_chip').textContent = `${tl.frames.length} кадров`;
+  $('tl_hint').textContent = frames && frames.length
+    ? `Задание «${jobName}» · кадр раз в ${(tl.speedMs / 1000).toFixed(1)} с. Интервал съёмки настраивается: Настройки → Печать → «Кейфрейм-интервал».`
+    : '';
+  if (tl.frames.length) tlShow(0);
+}
+
+async function loadOrderTimelapse(orderId, jobs) {
+  const wrap = $('tl_wrap');
+  if (!wrap) return;
+  tlStop();
+  wrap.hidden = true;
+  if (!orderId) return;
+  const withIds = (jobs || []).filter((j) => j && j.id);
+  if (!withIds.length) return;
+  let found = [];
+  await Promise.all(withIds.map(async (j) => {
+    try {
+      const d = await get(`/api/job/keyframes?id=${encodeURIComponent(j.id)}`);
+      if (d && d.frames && d.frames.length) found.push({ id: j.id, name: j.name || j.file || j.id, frames: d.frames });
+    } catch (e) { /* задание без кейфреймов — просто пропускаем */ }
+  }));
+  found.sort((a, b) => b.frames.length - a.frames.length);
+  const picker = $('tl_jobs');
+  picker.innerHTML = '';
+  if (!found.length) return;
+  wrap.hidden = false;
+  if (found.length > 1) {
+    picker.hidden = false;
+    picker.innerHTML = found.map((j, i) =>
+      `<button class="btn sm ${i ? 'ghost' : ''}" type="button" data-tl-job="${esc(j.id)}">${esc(j.name)} · ${j.frames.length}</button>`).join('');
+    picker.querySelectorAll('[data-tl-job]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const j = found.find((x) => x.id === btn.getAttribute('data-tl-job'));
+        if (!j) return;
+        picker.querySelectorAll('[data-tl-job]').forEach((b) => b.classList.add('ghost'));
+        btn.classList.remove('ghost');
+        tlSelectJob(j.id, j.name, j.frames);
+      });
+    });
+  } else {
+    picker.hidden = true;
+  }
+  tlSelectJob(found[0].id, found[0].name, found[0].frames);
+}
+
+function bindTimelapseControls() {
+  $('tl_play').addEventListener('click', tlPlayPause);
+  $('tl_range').addEventListener('input', () => { tlStop(); tlShow(num($('tl_range').value)); });
+  $('tl_img').addEventListener('error', () => {
+    if (!$('tl_wrap').hidden) $('tl_hint').textContent = 'Кадр не загрузился — возможно, файл удалён архиватором.';
+  });
+  const modal = $('order_modal');
+  if (modal) modal.addEventListener('close', tlStop);   // карточка закрыта — плеер молчит
 }
 
 async function loadOrderPhotosFull(orderId) {
@@ -2022,6 +2187,65 @@ function renderCustomerInsights(customers, repeat, withoutContact) {
     + `<article class="more-insight ok"><span>Повторных покупателей</span><b>${nfmt(repeat)}</b><small>${customers.length ? `${nfmt(repeat / customers.length * 100)}% от базы` : 'появятся после второго заказа'}</small></article>`
     + `<article class="more-insight ${withoutContact ? 'warn' : ''}"><span>Выручка по базе</span><b>${money(revenue)}</b><small>${withoutContact ? `без контакта: ${nfmt(withoutContact)} · повторные дали ${money(repeatRevenue)}` : `повторные дали ${money(repeatRevenue)}`}</small></article>`;
 }
+/* В35: схематичная карта клиентов — зоны по адресам, толщина = выручка.
+   Без внешних карт: сетка плиток «зона → клиентов и сумма», как схема города. */
+function zoneKeyOf(address) {
+  const raw = String(address || '').trim();
+  if (!raw) return '';
+  return raw.split(/[,;]/)[0].replace(/\s*\d+[\w/\-]*\s*$/, '').trim().slice(0, 42);
+}
+
+function ensureCustomerMapHost() {
+  const table = document.querySelector('#view-customers .customers-table');
+  if (!table) return null;
+  let card = document.getElementById('cust_map_card');
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'cust_map_card';
+    card.style.marginTop = '16px';
+    card.innerHTML = '<div class="card-head"><div><h2>Карта клиентов (В35)</h2>'
+      + '<p>Схема по адресам из профилей: чем толще полоса — тем больше выручки приносит зона</p></div></div>'
+      + '<div class="cust-map" id="cust_map"></div>';
+    table.parentElement.insertBefore(card, table);
+  }
+  return card.querySelector('#cust_map');
+}
+
+function renderCustomerMap() {
+  const host = ensureCustomerMapHost();
+  if (!host) return;
+  const finals = PF.finalStatusIds ? PF.finalStatusIds() : [];
+  const revenue = new Map();
+  (PF.state.orders || []).forEach((o) => {
+    if (!finals.includes(o.status)) return;
+    const key = o.customer_id || o.customer_name || '';
+    revenue.set(key, (revenue.get(key) || 0) + num(o.price));
+  });
+  const zones = new Map();
+  (PF.state.customers || []).forEach((c) => {
+    const zone = zoneKeyOf(c.address);
+    if (!zone) return;
+    const sum = revenue.get(c.id) || revenue.get(c.name) || 0;
+    const entry = zones.get(zone) || { count: 0, sum: 0 };
+    entry.count += 1;
+    entry.sum += sum;
+    zones.set(zone, entry);
+  });
+  if (!zones.size) {
+    host.innerHTML = '<div class="empty compact"><span>◌</span><b>Адресов пока нет</b>'
+      + '<span>Заполните адрес клиента в карточке — зона появится на схеме.</span></div>';
+    return;
+  }
+  const max = Math.max(1, ...[...zones.values()].map((z) => z.sum));
+  host.innerHTML = [...zones.entries()]
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .map(([zone, z]) => `<div class="cust-zone" style="--heat:${(z.sum / max).toFixed(2)}" title="Клиентов: ${z.count} · закрытых заказов на ${money(z.sum)}">`
+      + `<div style="display:flex;align-items:center;gap:6px"><b>${esc(zone)}</b><span class="cz-sum">${money(z.sum)}</span></div>`
+      + `<small>${nfmt(z.count)} ${z.count === 1 ? 'клиент' : (z.count < 5 ? 'клиента' : 'клиентов')}</small></div>`)
+    .join('');
+}
+
 function renderCustomers() {
   const q = ($('customers_search').value || '').trim().toLowerCase();
   const customers = PF.state.customers || [];
@@ -2040,7 +2264,7 @@ function renderCustomers() {
     const segment = num(customer.orders) > 2 ? ['ok', 'Постоянный']
       : num(customer.orders) > 1 ? ['accent', 'Повторный'] : ['outline', 'Новый'];
     const contact = customerHasContact(customer);
-    return `<tr><td><div class="cell-user"><span class="avatar">${esc(initials(customer.name))}</span>`
+    return `<tr><td><div class="cell-user"><span class="avatar" style="--av:${esc(U.avColor(customer.name))}">${esc(initials(customer.name))}</span>`
       + `<span><b>${esc(customer.name || 'Без имени')}</b>${customer.company ? `<small>${esc(customer.company)}</small>` : ''}</span></div></td>`
       + `<td>${esc(customer.phone || '—')}${customer.messenger ? `<br><small class="muted">${esc(customer.messenger)}</small>` : ''}${!contact ? '<br><small class="neg">нет контакта</small>' : ''}</td>`
       + `<td class="right tnum">${nfmt(customer.orders)}</td>`
@@ -2053,6 +2277,7 @@ function renderCustomers() {
     ? '<div class="empty compact"><span>В этом сегменте никого не найдено.</span></div>'
     : '<div class="empty"><span class="big">◎</span><b>Клиентов нет</b><span>Появятся после первого заказа.</span>'
       + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'}</td></tr>`;
+  renderCustomerMap();
 }
 
 /* =============================================== обратная связь после продажи */
@@ -2879,6 +3104,8 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('order_defect_btn').addEventListener('click', () => openDefect(editingOrder));
+  bindTimelapseControls();                     // №47: таймлапс в карточке заказа
+  $('of_tg_summary_btn').addEventListener('click', loadThreadSummary);   // №61
   $('df_job').addEventListener('change', () => refreshDefectPreview(true));
   $('defect_reason').addEventListener('change', () => refreshDefectPreview(false));
   $('df_grams').addEventListener('input', debounce(() => refreshDefectPreview(false), 180));

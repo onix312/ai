@@ -58,6 +58,9 @@ META: dict[str, dict] = {
     # --- налоги
     "tax_mode": ("tax", "Режим налогообложения",
                  {"choices": ("none", "npd", "usn6", "usn15", "patent", "manual")}),
+    # --- витрина (В67): сезонное оформление публичных страниц
+    "shop_season": ("clientbot", "Сезон витрины",
+                    {"choices": ("none", "newyear", "spring", "autumn")}),
     "npd_rate_person": ("tax", "НПД с физлиц, %", {"min": 0, "max": 100}),
     "npd_rate_company": ("tax", "НПД с юрлиц, %", {"min": 0, "max": 100}),
     "usn_income_rate": ("tax", "УСН «доходы», %", {"min": 0, "max": 100}),
@@ -68,6 +71,8 @@ META: dict[str, dict] = {
     "vat_threshold": ("tax", "Порог освобождения от НДС, ₽", {"min": 0}),
     # --- принтеры
     "printer_investment": ("printers", "Вложения в парк, ₽", {"min": 0}),
+    "camera_fps_max": ("printers", "Предел FPS камеры (0 = без предела)",
+                       {"min": 0, "max": 30}),
     "encrypt_access_code": ("printers", "Шифровать access-коды принтеров", {}),
     "auto_start_next": ("printers", "Автозапуск следующего задания", {}),
     "auto_resume": ("printers", "Авто-возобновление после сбоя", {}),

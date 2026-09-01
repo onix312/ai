@@ -390,9 +390,25 @@ function renderCards(list) {
     const donut = disp
       ? '<span class="prod-donut ok" style="--p:100" title="Витрина — без учёта остатков"></span>'
       : `<span class="prod-donut ${stockHealthCls}" style="--p:${total ? stockPct : 0}" title="Свободно ${nfmt(free)} · резерв ${nfmt(reserved)}"></span>`;
+    // В63: стикеры витрины — по фактам, а не по настроению
+    const stickers = [];
+    const createdDays = i.created_at
+      ? (Date.now() - new Date(String(i.created_at).replace(' ', 'T')).getTime()) / 864e5 : NaN;
+    if (Number.isFinite(createdDays) && createdDays <= 14) stickers.push('<span class="sticker new" title="Позиция появилась на витрине за последние 14 дней">НОВИНКА</span>');
+    if (num(i.sold30) >= 3) stickers.push('<span class="sticker hit" title="Продаж за 30 дней: ' + nfmt(i.sold30) + '">ХИТ</span>');
+    if (!disp && num(i.qty) > 0 && num(i.qty) <= 2) stickers.push('<span class="sticker last" title="Осталось ' + nfmt(i.qty) + ' шт">ПОСЛЕДНИЙ</span>');
+    // В61: свотчи цветовых вариантов изделия
+    const variants = Array.isArray(i.variants) ? i.variants.slice(0, 6) : [];
+    const swatches = variants.length
+      ? '<div class="swatches" title="Варианты цвета: ' + esc(variants.map((v) => v.color_name || v.name || '').filter(Boolean).join(', ')) + '">'
+        + variants.map((v) => '<span class="swatch' + (v.color_hex ? '' : ' no-color') + '"'
+          + ' style="' + (v.color_hex ? 'background:' + esc(String(v.color_hex)) : '') + '"></span>').join('')
+        + '</div>'
+      : '';
     // 13.1 (18): «полка глазами покупателя» — только то, что видит клиент в боте
     if (shopEye) {
       return `<article class="prod-card shop-eye ${st}" data-nom="${esc(i.id)}">`
+        + stickers.join('')
         + '<div class="phead">'
         + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
           : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
@@ -410,6 +426,7 @@ function renderCards(list) {
         + '</article>';
     }
     return `<article class="prod-card ${st}" data-nom="${esc(i.id)}">`
+      + stickers.join('')
       + '<div class="phead">'
       + (i.photo ? `<img class="pphoto" src="/api/nomenclature/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="pphoto ph ${esc(i.kind || 'product')}">${kindIc}</span>`)
@@ -433,7 +450,9 @@ function renderCards(list) {
       + (disp ? '<span class="muted">ценник/QR — со стеллажа</span>'
         : (i.days_left != null ? `<span>Хватит <b class="${daysLeftCls}">${nfmt(i.days_left, 1)} дн.</b></span>`
           : '<span class="muted">продаж нет</span>'))
-      + '</div></div>'
+      + '</div>'
+      + swatches
+      + '</div>'
       + '<div class="pacts">'
       + `<span class="chip ${cls}">${statusIc} ${esc(statusLabel)}</span>`
       + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">📉 убыточный</span>' : '')
@@ -471,6 +490,8 @@ function renderCards(list) {
       + `<span class="pg-margin ${valSum >= 0 ? 'pos' : 'neg'}">${money(valSum)}</span>`
       + `</summary><div class="prod-group-inner">${items.map(card).join('')}</div></details>`;
   }).join('');
+  const gridEl = $('prod_grid');
+  if (gridEl) gridEl.classList.toggle('shelf3d', !!(($('prod_shelf3d') || {}).classList || []).contains('on'));
   $('prod_grid').innerHTML = groupsHtml || (data.items.length
     ? emptyBox('⌕', 'Ничего не найдено', 'Измените фильтры или поиск.')
     : emptyBox('▩', 'Номенклатура пуста', 'Добавьте товар — модель, нормативы печати и цену.',
@@ -1450,6 +1471,28 @@ function bind() {
     render();
     if (btn.classList.contains('on')) toast('Витрина глазами покупателя', 'Плитки показывают только то, что видит клиент в боте');
   });
+  // В59: витрина-полка в перспективе — товары «стоят на досках»
+  const shelfBtn = $('prod_shelf3d');
+  if (shelfBtn) {
+    if (U.store.get('pf.prod.shelf3d', '0') === '1') shelfBtn.classList.add('on');
+    shelfBtn.addEventListener('click', () => {
+      shelfBtn.classList.toggle('on');
+      U.store.set('pf.prod.shelf3d', shelfBtn.classList.contains('on') ? '1' : '0');
+      render();
+    });
+  }
+  // В67: сезон витрины — лента на публичных страницах (shelf.html, my.html)
+  const seasonSel = $('prod_season');
+  if (seasonSel) {
+    seasonSel.value = String(PF.state.settings.shop_season || 'none');
+    seasonSel.addEventListener('change', async () => {
+      try {
+        await post('/api/settings', { shop_season: seasonSel.value });
+        PF.state.settings.shop_season = seasonSel.value;
+        toast('Сезон витрины обновлён', 'Публичные страницы показывают ленту сразу');
+      } catch (err) { fail(err); }
+    });
+  }
   $('prod_view').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-mode]');
     if (!btn) return;

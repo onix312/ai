@@ -97,6 +97,8 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 return self.serve_camera_frame((query.get("printer_id") or [""])[0])
             if path == "/api/printer/camera.mjpeg":
                 return self.serve_camera_stream((query.get("printer_id") or [""])[0])
+            if path == "/api/camera/bed-ref.jpg":
+                return self.serve_bed_reference()
             if path == "/api/printer/shot.jpg":
                 return self.serve_shot((query.get("printer_id") or [""])[0],
                                        (query.get("id") or [""])[0])
@@ -363,6 +365,19 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "max-age=3600")
         self.end_headers()
         self.wfile.write(frame)
+
+    def serve_bed_reference(self):
+        """Эталон пустого стола — фон для калибровки проекции (119)."""
+        from .config import PHOTO_DIR
+
+        target = PHOTO_DIR / "bed_reference.jpg"
+        if not target.is_file():
+            return self.send_json(404, {"error": "Эталон стола не снят — нажмите «Пустой стол» на вкладке принтера"})
+        try:
+            data = target.read_bytes()
+        except OSError:
+            return self.send_json(500, {"error": "Эталон стола не читается"})
+        self._send_bytes(data, "image/jpeg")
 
     def serve_camera_stream(self, printer_id: str):
         printer = self.api.manager.get(printer_id)

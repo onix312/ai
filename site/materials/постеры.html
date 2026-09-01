@@ -171,6 +171,7 @@
     </select></label>
     <label>Акцент <input type="color" id="accent1" data-page="accent1" value="#4f46e5" style="width:34px;padding:2px"></label>
     <label>Акцент 2 <input type="color" id="accent2" data-page="accent2" value="#7c3aed" style="width:34px;padding:2px"></label>
+    <span id="paletteRow" style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center"></span>
     <label>QR ведёт <select id="qrSrc" data-page="qrSrc">
       <option value="qr">на ссылку QR</option>
       <option value="tg">в Telegram</option>
@@ -339,6 +340,38 @@ function load() {
   $('optCompact').checked = !!st.optCompact;
   if (!st.accent1) $('accent1').value = '#4f46e5';
   if (!st.accent2) $('accent2').value = '#7c3aed';
+  buildPalettes();
+}
+
+// В83: палитры постеров пресетами — бренд и сезоны, один клик = два акцента.
+function buildPalettes() {
+  const row = document.getElementById('paletteRow');
+  if (!row || row.dataset.ready === '1') return;
+  row.dataset.ready = '1';
+  const PALETTES = [
+    ['Бренд', '#4f46e5', '#7c3aed'],
+    ['Неон', '#06b6d4', '#a21caf'],
+    ['Новогодние', '#0e7490', '#155e75'],
+    ['8 Марта', '#db2777', '#be185d'],
+    ['Осень', '#b45309', '#92400e'],
+    ['Графит', '#334155', '#0f172a'],
+    ['Лайм', '#16a34a', '#65a30d'],
+  ];
+  row.innerHTML = PALETTES.map((p, i) =>
+    `<button class="btn" type="button" data-pl="${i}" title="Палитра «${p[0]}»">`
+    + `<span style="display:inline-flex;vertical-align:-3px;margin-right:5px">`
+    + `<i style="width:12px;height:12px;border-radius:50%;background:${p[1]};display:inline-block;border:1.5px solid #fff;margin-left:-5px"></i>`
+    + `<i style="width:12px;height:12px;border-radius:50%;background:${p[2]};display:inline-block;border:1.5px solid #fff"></i></span>${p[0]}</button>`).join('');
+  row.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-pl]');
+    if (!btn) return;
+    const pal = PALETTES[Number(btn.dataset.pl)];
+    if (!pal) return;
+    $('accent1').value = pal[1];
+    $('accent2').value = pal[2];
+    if (typeof draw === 'function') draw();
+    save();
+  });
 }
 function save() {
   NZ.pageStateSave({

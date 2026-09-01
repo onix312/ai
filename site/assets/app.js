@@ -2728,6 +2728,279 @@ PF.on('view', (d) => {
   }
 });
 
+
+/* ================================================= 15.1 (В-серия) */
+
+/* В2: карты-шторки Обзора — карточка раскрывается на месте, контекст
+   страницы не теряется. Состояние шторки запоминается по виджету. */
+function initDashboardFolds() {
+  const dash = document.getElementById('view-dashboard');
+  if (!dash || dash.dataset.foldsReady === '1') return;
+  dash.dataset.foldsReady = '1';
+  $$('.card[data-widget]', dash).forEach((cardEl) => {
+    const head = cardEl.querySelector('.card-head');
+    if (!head || head.querySelector('.fold-caret')) return;
+    const fold = document.createElement('div');
+    fold.className = 'card-fold';
+    [...cardEl.children].forEach((child) => {
+      if (child !== head && !child.classList.contains('card-fold')) fold.appendChild(child);
+    });
+    cardEl.appendChild(fold);
+    const caret = document.createElement('span');
+    caret.className = 'fold-caret';
+    caret.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 14.5l6-5.5 6 5.5"/></svg>';
+    head.appendChild(caret);
+    const widget = cardEl.dataset.widget || '';
+    if (U.store.get('pf.fold.' + widget, '0') === '1') cardEl.classList.add('folded');
+    cardEl.classList.add('card-foldable');
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('a, button, input, select, label')) return;
+      cardEl.classList.toggle('folded');
+      U.store.set('pf.fold.' + widget, cardEl.classList.contains('folded') ? '1' : '0');
+    });
+  });
+}
+initDashboardFolds();
+
+/* В82: превью-макеты генераторов в Библиотеке — плитка «как будет
+   выглядеть» рисуется стилями по типу материала. */
+const GEN_THUMB_CLASS = [
+  ['вывеси', 'g-sign'], ['воблеры', 'g-wobbler'], ['визитки', 'g-card'],
+  ['постеры', 'g-poster'], ['ценники', 'g-tag'], ['наклейки', 'g-tag'],
+  ['сертификаты', 'g-card'], ['шапки', 'g-poster'], ['авито', 'g-card'],
+  ['контент-план', 'g-poster'], ['памятка', 'g-sign'], ['о-нас', 'g-poster'],
+];
+function decorateGeneratorCards() {
+  $$('.mat').forEach((mat) => {
+    if (mat.querySelector('.gen-thumb')) return;
+    const href = (mat.querySelector('a[href]') || {}).getAttribute?.('href') || '';
+    const hit = GEN_THUMB_CLASS.find(([key]) => href.includes(key));
+    if (!hit) return;
+    const thumb = document.createElement('div');
+    thumb.className = 'gen-thumb ' + hit[1];
+    thumb.setAttribute('aria-hidden', 'true');
+    mat.insertBefore(thumb, mat.firstChild);
+  });
+}
+
+/* В79/В80/В81: галерея 3D-моделей в Библиотеке — мозаика, облако фасетов
+   и шторное сравнение версий. Модели берутся из реестра /api/models. */
+const modelState = { loaded: false, items: [], facets: new Set() };
+
+function modelFacets(m) {
+  const tags = [];
+  if (m.complexity) tags.push('сложность: ' + m.complexity);
+  if (m.source) tags.push('источник: ' + m.source);
+  if (m.nom_id) tags.push('в товарах');
+  const dims = [num(m.dim_x), num(m.dim_y), num(m.dim_z)].filter((v) => v > 0);
+  if (dims.length === 3) tags.push(Math.max(...dims) > 120 ? 'крупная' : (Math.max(...dims) < 40 ? 'мелкая' : 'средняя'));
+  if (num(m.versions_count, 0) > 1 || num(m.version, 0) > 1) tags.push('есть версии');
+  return tags;
+}
+
+function renderModelGallery() {
+  const host = document.getElementById('model_gallery');
+  if (!host) return;
+  const items = modelState.items.filter((m) => {
+    if (!modelState.facets.size) return true;
+    const tags = modelFacets(m);
+    return [...modelState.facets].every((f) => tags.includes(f));
+  });
+  const cloud = document.getElementById('model_facets');
+  if (cloud) {
+    const freq = new Map();
+    modelState.items.forEach((m) => modelFacets(m).forEach((t) => freq.set(t, (freq.get(t) || 0) + 1)));
+    cloud.innerHTML = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([tag, cnt]) =>
+      `<button class="tg${modelState.facets.has(tag) ? ' on' : ''}" type="button" data-facet="${esc(tag)}">${esc(tag)}<small>${cnt}</small></button>`).join('');
+  }
+  if (!modelState.items.length) {
+    host.innerHTML = '<div class="empty compact"><span>◇</span><b>Моделей в реестре нет</b>'
+      + '<span>Реестр наполняется из конструктора изделий и карточек товаров.</span></div>';
+    return;
+  }
+  host.innerHTML = items.length ? items.map((m) => {
+    const dims = [num(m.dim_x), num(m.dim_y), num(m.dim_z)].filter((v) => v > 0);
+    return `<article class="model-tile" data-model-open="${esc(m.id)}" title="Сравнить версии (В81)">`
+      + `<div class="mt-art"><i data-icon="cube">◇</i></div>`
+      + `<h4>${esc(m.name || 'Модель')}</h4>`
+      + `<div class="mt-meta"><span class="chip outline">v${esc(m.version || '1.0')}</span>`
+      + (dims.length === 3 ? `<span>${nfmt(dims[0], 1)}×${nfmt(dims[1], 1)}×${nfmt(dims[2], 1)} мм</span>` : '')
+      + (m.updated_at ? `<span>${esc(U.dateText(m.updated_at))}</span>` : '')
+      + '</div></article>';
+  }).join('')
+    : '<div class="empty compact"><span>⌕</span><b>Под выбранные фасеты ничего не подошло</b><span>Снимите пару меток в облаке.</span></div>';
+}
+
+async function loadModelGallery() {
+  const host = document.getElementById('model_gallery');
+  if (!host) return;
+  if (!modelState.loaded) host.innerHTML = U.skeletonStack(4);
+  try {
+    const data = await get('/api/models');
+    modelState.items = (data && data.models) || [];
+    modelState.loaded = true;
+    renderModelGallery();
+  } catch (e) {
+    host.innerHTML = `<div class="empty compact"><span>!</span><b>Реестр моделей недоступен</b><span>${esc(e.message || '')}</span></div>`;
+  }
+}
+
+/* В81: шторное сравнение двух версий модели. */
+async function openModelCompare(modelId) {
+  let model = null;
+  try {
+    model = await get('/api/model', { id: modelId });
+  } catch (e) { return fail(e); }
+  if (!model) return;
+  const versions = (model.versions && model.versions.length ? model.versions : [{ version: model.version, note: model.notes || '' }]).slice(-3);
+  if (versions.length < 2) {
+    toast('Версий пока одна', 'Сравнение появится после второй версии модели', 'info');
+    return;
+  }
+  const left = versions[versions.length - 2];
+  const right = versions[versions.length - 1];
+  const pane = (v, title) => `<div class="cmp-pane"><div>`
+    + `<svg class="cmp-dim" viewBox="0 0 200 110" aria-hidden="true">`
+    + `<rect x="30" y="18" width="140" height="74" rx="6" fill="none" stroke="var(--line-strong)"/>`
+    + `<path d="M30 100h140M100 18v74" stroke="var(--line)" stroke-dasharray="4 4"/>`
+    + `<text x="100" y="12" text-anchor="middle" font-size="9" fill="var(--muted)">${esc(String(num(model.dim_x, 0)))} мм</text>`
+    + `<text x="8" y="58" font-size="9" fill="var(--muted)">${esc(String(num(model.dim_y, 0)))}</text></svg>`
+    + `<b style="display:block;text-align:center;margin-top:8px">${esc(title)} v${esc(v.version || '')}</b>`
+    + `<small class="muted" style="display:block;text-align:center">${esc(v.note || v.file || '')}</small></div></div>`;
+  let box = document.getElementById('model_cmp_modal');
+  if (!box) {
+    box = document.createElement('dialog');
+    box.id = 'model_cmp_modal';
+    box.className = 'modal wide';
+    box.innerHTML = '<div class="card pad-0" style="padding:18px">'
+      + '<div class="card-head"><div><h2 id="model_cmp_title">Сравнение версий</h2>'
+      + '<p>Тяните шторку: слева — предыдущая версия, справа — новая</p></div>'
+      + '<button class="icon-btn" type="button" data-close="model_cmp_modal" aria-label="Закрыть">×</button></div>'
+      + '<div class="cmp-wrap" id="model_cmp_wrap"></div>'
+      + '<input class="cmp-range" id="model_cmp_range" type="range" min="5" max="95" value="50" aria-label="Положение шторки">'
+      + '<div class="cmp-labels"><span id="model_cmp_l"></span><span id="model_cmp_r"></span></div></div>';
+    document.body.appendChild(box);
+  }
+  const wrap = box.querySelector('#model_cmp_wrap');
+  wrap.style.setProperty('--cmp', '50%');
+  wrap.innerHTML = pane(right, 'Новая') + `<div class="cmp-top">${pane(left, 'Прежняя')}</div><div class="cmp-divider"></div>`;
+  box.querySelector('#model_cmp_title').textContent = `Сравнение версий · ${model.name || 'модель'}`;
+  box.querySelector('#model_cmp_l').textContent = `Прежняя: v${left.version || ''}`;
+  box.querySelector('#model_cmp_r').textContent = `Новая: v${right.version || ''}`;
+  const range = box.querySelector('#model_cmp_range');
+  range.value = '50';
+  range.oninput = () => wrap.style.setProperty('--cmp', range.value + '%');
+  openModal('model_cmp_modal');
+}
+
+function bindModelGallery() {
+  document.addEventListener('click', (e) => {
+    const facet = e.target.closest('[data-facet]');
+    if (facet) {
+      const tag = facet.dataset.facet || '';
+      if (modelState.facets.has(tag)) modelState.facets.delete(tag);
+      else modelState.facets.add(tag);
+      renderModelGallery();
+      return;
+    }
+    const tile = e.target.closest('[data-model-open]');
+    if (tile) openModelCompare(tile.dataset.modelOpen);
+  });
+}
+bindModelGallery();
+
+
+/* Контейнеры галереи моделей в Библиотеке + вход в раздел. */
+function ensureModelGalleryHost() {
+  const home = document.getElementById('library_home');
+  if (!home || document.getElementById('model_gallery_card')) return;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = 'model_gallery_card';
+  card.style.marginTop = '16px';
+  card.innerHTML = '<div class="card-head"><div><h2>Галерея моделей (В79)</h2>'
+    + '<p>Мозаика реестра 3D-моделей: клик по плитке — сравнение версий шторкой</p></div></div>'
+    + '<div class="tag-cloud" id="model_facets" title="В80: фасеты реестра — чем чаще встречается метка, тем она крупнее"></div>'
+    + '<div class="model-masonry" id="model_gallery"></div>';
+  home.insertBefore(card, home.firstChild);
+}
+
+PF.on('view', (d) => {
+  if (d.view !== 'library') return;
+  ensureModelGalleryHost();
+  loadModelGallery();
+  decorateGeneratorCards();
+});
+
+/* В84: живой справочник стиля в Настройках — токены из :root, клик копирует значение. */
+function ensureStyleGuideHost() {
+  const view = document.getElementById('view-settings');
+  if (!view || document.getElementById('styleguide_card')) return view.querySelector('#styleguide_card');
+  const card = document.createElement('div');
+  card.className = 'card styleguide';
+  card.id = 'styleguide_card';
+  card.style.marginTop = '16px';
+  card.innerHTML = '<div class="card-head"><div><h2>Стиль панели (В84)</h2>'
+    + '<p>Живые токены дизайна: клик по образцу копирует значение</p></div></div>'
+    + '<div class="sg-colors" id="sg_colors"></div>'
+    + '<div class="sg-row" id="sg_typo"></div>'
+    + '<div class="sg-row" id="sg_surfaces"></div>'
+    + '<div class="sg-row" id="sg_buttons"></div>';
+  view.appendChild(card);
+  return card;
+}
+
+function copyText(text) {
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(
+    () => toast('Скопировано', text, 'info'),
+    () => {});
+}
+
+function renderStyleGuide() {
+  const card = ensureStyleGuideHost();
+  if (!card) return;
+  const cs = getComputedStyle(document.documentElement);
+  const colors = [
+    ['--accent', 'Акцент'], ['--accent-2', 'Акцент 2'], ['--ok', 'Успех'],
+    ['--warn', 'Внимание'], ['--bad', 'Ошибка'], ['--info', 'Инфо'],
+    ['--bg', 'Фон'], ['--panel', 'Панель'], ['--panel-2', 'Панель 2'],
+    ['--line', 'Линия'], ['--text', 'Текст'], ['--muted', 'Приглушённый'],
+  ];
+  const colorsHost = card.querySelector('#sg_colors');
+  colorsHost.innerHTML = colors.map(([token, label]) => {
+    const value = cs.getPropertyValue(token).trim() || '#000';
+    return `<div class="sg-color" data-copy="${esc(value)}" title="Скопировать ${esc(value)}">`
+      + `<i style="background:${esc(value)}"></i><span>${esc(token)} · ${esc(value)}</span></div>`;
+  }).join('');
+  card.querySelector('#sg_typo').innerHTML = '<div class="sg-typo">'
+    + `<span style="font:800 24px/1 var(--font)">Aa ${esc((cs.getPropertyValue('--font').split(',')[0] || '').replace(/"/g, ''))}</span>`
+    + `<span style="font:600 15px/1.3 var(--font)">Заголовок карточки 15.5px</span>`
+    + `<span style="font:400 12.5px/1.4 var(--font);color:var(--muted)">Основной текст 12.5–13.3px, подписи — приглушённым</span>`
+    + `<span style="font:700 12px/1 var(--mono)">0123456789 · JetBrains Mono для цифр</span></div>`;
+  card.querySelector('#sg_surfaces').innerHTML =
+    '<div class="sg-surface">лист · elev-1</div>'
+    + '<div class="sg-surface s2">парящий · elev-2</div>'
+    + '<div class="sg-surface s3">модалка · elev-3</div>';
+  card.querySelector('#sg_buttons').innerHTML =
+    '<button class="btn primary" type="button" data-nocopy>Основная</button>'
+    + '<button class="btn" type="button" data-nocopy>Обычная</button>'
+    + '<button class="btn ghost" type="button" data-nocopy>Тихая</button>'
+    + '<span class="chip ok">чип успех</span>'
+    + '<span class="chip warn">чип внимание</span>'
+    + '<span class="chip bad">чип ошибка</span>';
+}
+
+PF.on('view', (d) => {
+  if (d.view !== 'settings') return;
+  renderStyleGuide();
+});
+document.addEventListener('click', (e) => {
+  const sw = e.target.closest('[data-copy]');
+  if (!sw || e.target.closest('[data-nocopy]')) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(sw.dataset.copy || '')
+    .then(() => toast('Скопировано', sw.dataset.copy, 'info'), () => {});
+});
+
 PF.modules.settings = { downloadBackup, renderSettings, saveSettings, resetSettings, filterSettings,
   renderDiag, refreshDiag };
 })();

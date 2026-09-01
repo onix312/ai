@@ -59,6 +59,30 @@ class CameraWorker:
         self._subscribers: set[threading.Event] = set()
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _tls_context() -> ssl.SSLContext:
+        """TLS-контекст для камеры.
+
+        Принтеры Bambu отдают камеру со слабыми ключами: OpenSSL 3.x с
+        SECLEVEL=2 по умолчанию отвергает рукопожатие («no suitable key
+        share», «dh key too small») — и камера «ломается» после обновления
+        Python, хотя принтер здоров. Для FTPS это уже чинили (ftps.py),
+        здесь — тот же фикс во всех местах подключения.
+        """
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        try:
+            context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        except (AttributeError, ValueError):   # старые сборки ssl
+            pass
+        try:
+            context.set_ciphers("DEFAULT@SECLEVEL=1")
+        except ssl.SSLError:
+            pass
+        return context
+
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -125,25 +149,32 @@ class CameraWorker:
                 continue
             self._no_lan = False
             try:
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
                 with socket.create_connection((host, self.PORT), timeout=8) as raw:
-                    with context.wrap_socket(raw, server_hostname=host) as sock:
+                    with self._tls_context().wrap_socket(raw, server_hostname=host) as sock:
                         sock.settimeout(12)
                         sock.sendall(self._auth_packet(code))
                         self.error = ""
                         self.demo = False
                         buf = bytearray()
+                        # Ограничитель FPS: камера отдаёт до ~30 к/с, для наблюдения
+                        # достаточно camera_fps_max; лишние кадры отбрасываются до
+                        # публикации — CPU ниже, последний кадр всегда свежий.
+                        fps_max = 0.0
+                        try:
+                            fps_max = float((self.get_config() or {}).get("camera_fps_max") or 0)
+                        except (TypeError, ValueError):
+                            fps_max = 0.0
+                        min_interval = (1.0 / fps_max) if fps_max > 0 else 0.0
+                        last_pub = 0.0
                         while not self._stop.is_set():
-                            chunk = sock.recv(65536)
+                            chunk = sock.recv(262144)
                             if not chunk:
                                 raise ConnectionError("камера закрыла соединение")
                             buf.extend(chunk)
                             while True:
                                 start = buf.find(b"\xff\xd8\xff")
                                 if start < 0:
-                                    if len(buf) > 2_000_000:
+                                    if len(buf) > 4_000_000:
                                         del buf[:-4]
                                     break
                                 end = buf.find(b"\xff\xd9", start + 3)
@@ -151,8 +182,12 @@ class CameraWorker:
                                     if start:
                                         del buf[:start]
                                     break
-                                self._publish(bytes(buf[start:end + 2]))
+                                frame = bytes(buf[start:end + 2])
                                 del buf[:end + 2]
+                                now = time.monotonic()
+                                if now - last_pub >= min_interval:
+                                    last_pub = now
+                                    self._publish(frame)
             except Exception as exc:  # соединение восстанавливается автоматически
                 self.error = str(exc)
                 # Принтера нет в сети — не оставляем экран пустым, если
@@ -230,11 +265,8 @@ def port_open(host: str, port: int, timeout: float = 3.0) -> bool:
 def tls_handshake(host: str, port: int, timeout: float = 4.0) -> tuple[bool, str]:
     """TLS-рукопожатие с камерой (сертификат не проверяем — принтер свой)."""
     try:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
         with socket.create_connection((host, port), timeout=timeout) as raw:
-            with context.wrap_socket(raw, server_hostname=host):
+            with CameraWorker._tls_context().wrap_socket(raw, server_hostname=host):
                 return True, "камера отвечает по TLS"
     except OSError as exc:
         return False, str(exc)
@@ -243,11 +275,8 @@ def tls_handshake(host: str, port: int, timeout: float = 4.0) -> tuple[bool, str
 def grab_frame(host: str, code: str, timeout: float = 6.0) -> tuple[bool, str]:
     """Авторизация и ожидание первого JPEG-кадра — честная проверка «до конца»."""
     try:
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
         with socket.create_connection((host, 6000), timeout=timeout) as raw:
-            with context.wrap_socket(raw, server_hostname=host) as sock:
+            with CameraWorker._tls_context().wrap_socket(raw, server_hostname=host) as sock:
                 sock.settimeout(timeout)
                 sock.sendall(CameraWorker._auth_packet(code))
                 buf = bytearray()

@@ -77,6 +77,7 @@ function renderQueue() {
   const body = queueGrouped ? renderGrouped(shown) : shown.map(queueItemHtml).join('');
   host.innerHTML = body;
   U.stagger(host);
+  decorateQueuePlates();
   // 7: живое задание подсвечено и видно сразу при входе на вкладку
   const live = host.querySelector('.queue-item.live');
   if (live) {
@@ -123,7 +124,8 @@ function queueItemHtml(j) {
       + steps.map(([n]) => `<i data-step="${esc(n)}"></i>`).join('<em></em>') + '</span>' : '';
   return `<div class="queue-item${j.state === 'running' ? ' running live' : ''}" draggable="${j.state === 'queued' ? 'true' : 'false'}"`
     + ` data-job-id="${esc(j.id)}" data-pos="${i}">`
-    + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
+      + `<div class="q-plate" data-plate="${esc(j.file || '')}" title="Превью плиты из файла задания">▦</div>`
+      + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
     + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
     + (queuedPos ? ` · <span class="chip outline">№ ${queuedPos} в очереди</span>` : '')
     + (order ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">заказ №${esc(order.number)}</a>` : '')
@@ -138,13 +140,55 @@ function queueItemHtml(j) {
       : (j.state === 'queued'
         ? `<div class="bar thin qbar-ghost" style="margin-top:6px" title="Порядок можно менять перетаскиванием"><i style="width:${queuedPos ? Math.max(4, 100 / Math.max(1, queuedPos)) : 0}%"></i></div>` : ''))
     + '</div><div class="acts">'
-    + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу">🔗 К заказу</button>` : '')
-    + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания">✨ Новый</button>` : '')
+    + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу"><i data-icon="link">🔗</i> К заказу</button>` : '')
+    + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания"><i data-icon="sparkles">✨</i> Новый</button>` : '')
     + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
-    + `<button class="btn sm ghost" type="button" data-job-clone="${esc(j.id)}" title="Копия в очередь">⧉</button>`
+    + `<button class="btn sm ghost" type="button" data-job-clone="${esc(j.id)}" title="Копия в очередь"><i data-icon="copy">⧉</i></button>`
     + (j.state === 'queued' ? `<button class="btn sm ghost" type="button" data-job-noauto="${esc(j.id)}" title="Автостарт">${num(j.no_auto) ? 'авто вкл' : 'без авто'}</button>` : '')
     + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`
     + '</div></div>';
+}
+
+/* ================================================= превью плит (В25) */
+/* Миниатюра берётся один раз на файл и кэшируется в памяти вкладки:
+   живое обновление очереди не должно штормить коннектор распаковками. */
+const plateCache = new Map();
+const platePending = new Set();
+
+function decorateQueuePlates() {
+  const host = $('queue_list');
+  if (!host) return;
+  const cells = $$('[data-plate]', host);
+  cells.forEach((cell) => {
+    const name = cell.dataset.plate || '';
+    if (!/\.3mf$/i.test(name)) return;                 // превью только у 3MF
+    if (plateCache.has(name)) {
+      const b64 = plateCache.get(name);
+      if (b64) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.src = 'data:image/png;base64,' + b64;
+        cell.textContent = '';
+        cell.appendChild(img);
+      }
+      return;                                          // нет превью — глyф остаётся
+    }
+    if (platePending.has(name)) return;
+    platePending.add(name);
+    get('/api/jobs/plate', { name }).then((data) => {
+      const b64 = (data && data.b64) || '';
+      plateCache.set(name, b64);
+      if (b64 && cell.isConnected) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.src = 'data:image/png;base64,' + b64;
+        cell.textContent = '';
+        cell.appendChild(img);
+      }
+    }).catch(() => {
+      plateCache.set(name, '');
+    }).finally(() => platePending.delete(name));
+  });
 }
 
 /* ================================================= группировка (3) */

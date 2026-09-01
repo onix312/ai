@@ -133,6 +133,13 @@ class PrinterManager:
                     self.printers[pid] = printer
                     if record.get("enabled", 1):
                         printer.start()
+            # 15.2: настройки камеры (предел FPS) проталкиваются в живые воркеры.
+            cam_cfg = {"camera_fps_max": self.db.setting("camera_fps_max", 0.0) or 0.0}
+            for printer in self.printers.values():
+                try:
+                    printer.camera_settings = dict(cam_cfg)
+                except Exception:
+                    continue
             for pid in records:
                 try:
                     self.guard.seed_maintenance(pid)
