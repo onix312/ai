@@ -1448,11 +1448,17 @@ class Accounting:
         today = date.today()
         start = today - timedelta(days=days - 1)
         money: dict[str, dict[str, float]] = {}
+        # БАГ-ФИКС: включаем сумму комиссий (fee) в агрегацию по дням,
+        # чтобы график прибыли совпадал с P&L.
         for row in self.db.query(
-                "SELECT substr(at,1,10) d, kind, COALESCE(SUM(amount),0) v"
+                "SELECT substr(at,1,10) d, kind,"
+                " COALESCE(SUM(amount),0) v, COALESCE(SUM(fee),0) f"
                 " FROM transactions WHERE substr(at,1,10)>=? GROUP BY d, kind",
                 (start.isoformat(),)):
-            money.setdefault(row["d"], {})[row["kind"]] = num(row["v"])
+            d = money.setdefault(row["d"], {})
+            d[row["kind"]] = num(row["v"])
+            if row["kind"] == "income":
+                d["fee"] = d.get("fee", 0) + num(row["f"])
         stats = {r["day"]: r for r in self.db.query(
             "SELECT day, SUM(print_minutes) print_minutes, SUM(grams) grams,"
             " SUM(jobs_done) jobs_done FROM printer_stats WHERE day>=? GROUP BY day",
@@ -1462,11 +1468,19 @@ class Accounting:
             day = (start + timedelta(days=i)).isoformat()
             m = money.get(day, {})
             st = stats.get(day, {})
+            # БАГ-ФИКС: прибыль на графике считалась как income−expense,
+            # а в summary() — income−fees−expense−taxes. Из-за этого линия
+            # прибыли на графике завышалась относительно отчёта.
+            income_d = round(num(m.get("income")), 2)
+            expense_d = round(num(m.get("expense")), 2)
+            fees_d = round(num(m.get("fee")), 2)
+            # Корректировки кассы (kind='correction') не входят в P&L.
+            profit_d = round(income_d - expense_d - fees_d, 2)
             series.append({
                 "day": day,
-                "income": round(num(m.get("income")), 2),
-                "expense": round(num(m.get("expense")), 2),
-                "profit": round(num(m.get("income")) - num(m.get("expense")), 2),
+                "income": income_d,
+                "expense": expense_d,
+                "profit": profit_d,
                 "hours": round(num(st.get("print_minutes")) / 60, 2),
                 "grams": round(num(st.get("grams")), 1),
                 "jobs": int(num(st.get("jobs_done"))),

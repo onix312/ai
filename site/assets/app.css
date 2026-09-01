@@ -749,6 +749,7 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .tx-row b { display: block; font-weight: 600; font-size: 13.3px; }
 .tx-row small { display: block; font-size: 11.6px; color: var(--muted); margin-top: 1px; }
 .tx-row .amt { font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tx-row.undone { opacity: .55; background: color-mix(in srgb, var(--muted) 6%, transparent); }
 
 /* ======================================================= центр действий */
 .owner-cash {
