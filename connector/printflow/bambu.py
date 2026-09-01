@@ -278,10 +278,14 @@ class BambuPrinter:
         self.previous_error = ""
         self.previous_power_loss_signal = False
         self.session: dict[str, Any] | None = None
+        # camera_settings injects db settings from the manager (15.2): FPS limiter
+        # camera_fps_max lives in the general settings, the camera does not know about the db.
+        self.camera_settings: dict = {}
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
                                             "access_code": self.record.get("access_code"),
                                             "demo": bool(self.record.get("camera_demo")),
-                                            "cloud": self.mode == "cloud"})
+                                            "cloud": self.mode == "cloud",
+                                            **self.camera_settings})
         self._stop = threading.Event()
         self._watchdog: threading.Thread | None = None
 
@@ -451,7 +455,8 @@ class BambuPrinter:
         self.camera = CameraWorker(lambda: {"host": self.record.get("host"),
                                             "access_code": self.record.get("access_code"),
                                             "demo": bool(self.record.get("camera_demo")),
-                                            "cloud": self.mode == "cloud"})
+                                            "cloud": self.mode == "cloud",
+                                            **self.camera_settings})
         if self.record.get("enabled", 1):
             self.camera.start()
             self.connect()

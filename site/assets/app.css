@@ -2343,3 +2343,15 @@ html[data-season="autumn"] .season-ribbon {
 html[data-season="newyear"] .accent-bg { background: #0e7490 !important; }
 html[data-season="spring"] .accent-bg { background: #db2777 !important; }
 html[data-season="autumn"] .accent-bg { background: #b45309 !important; }
+
+/* 15.2 — 119: проекция плиты на живое видео */
+.cmd-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.bedmap-obj { fill: rgba(56, 189, 248, .14); stroke: #38bdf8; stroke-width: 3;
+  stroke-dasharray: 14 8; cursor: pointer; vector-effect: non-scaling-stroke; }
+.bedmap-obj:hover { fill: rgba(56, 189, 248, .30); stroke-width: 4; }
+.bedmap-label { fill: #7dd3fc; font-size: 26px; paint-order: stroke; stroke: rgba(2, 6, 23, .8);
+  stroke-width: 6px; pointer-events: none; }
+#bedmap_svg .bedmap-dot { fill: #38bdf8; stroke: #0c4a6e; stroke-width: .4; vector-effect: non-scaling-stroke; }
+#bedmap_svg .bedmap-polyline { stroke: #38bdf8; stroke-width: .6; stroke-dasharray: 2 1.4; vector-effect: non-scaling-stroke; }
+#bedmap_svg .bedmap-fill { fill: rgba(56, 189, 248, .12); stroke: #38bdf8; stroke-width: .6; vector-effect: non-scaling-stroke; }
+#bedmap_svg .bedmap-label { font-size: 2.6px; stroke-width: .5px; }

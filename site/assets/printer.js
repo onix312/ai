@@ -33,6 +33,10 @@ const DANGER = {
 
 let filesCache = [], pendingFile = null, editingPrinter = null, queueLocalFile = null, filesPath = '/';
 let camStream = '', camSession = Date.now();     // ключ живого MJPEG-соединения
+let bedMapOn = {};        // 119: тумблер проекции плиты по printer_id
+let bedMapKey = '';       // 119: последний нарисованный набор полигонов (не перерисовывать зря)
+let bedMapBusy = false;
+let bedMapCache = null;   // 119: последние полученные объекты (для клика-исключения)
 let shotsKey = '';                              // чтобы не перезапрашивать архив зря
 let chartCache = { id: '', minutes: 0, at: 0, points: [] };
 let wallTimer = 0, maintTask = null;
@@ -296,6 +300,7 @@ function renderLive() {
   }
   renderHealth(p);
   renderCamera(p);
+  updateBedProjection(p);
   renderAlerts(p);
   renderMaintenance(p);
   renderJobCost(p);
@@ -664,6 +669,20 @@ function renderCamera(p) {
     liveChip.classList.toggle('fresh', !!cam.available && !demo && num(cam.age) < 3);
     liveChip.classList.toggle('stale', !!cam.available && num(cam.age) >= 30);
   }
+  // 15.2: FPS потока виден рядом с LIVE — «камера живая» становится цифрой
+  const fpsChip = img.parentElement.querySelector('.cam-fps');
+  if (fpsChip) {
+    const fpsVal = num(cam.fps);
+    fpsChip.hidden = !cam.available || demo || !fpsVal;
+    fpsChip.textContent = fpsVal ? fpsVal.toFixed(1) + ' к/с' : '';
+  }
+  // 15.2: сторож потока. Сервер обрывает MJPEG по таймеру, а браузер при
+  // обрыве multipart не всегда дёргает onerror — картинка «замерзает».
+  // Возраст кадра приходит по SSE; вырос порог — пересобираем поток.
+  if (cam.available && !demo && camStream && num(cam.age) > 15) {
+    camSession = Date.now();
+    camStream = '';
+  }
 
   if (!cam.available) {
     if (camStream) { img.removeAttribute('src'); camStream = ''; }
@@ -672,11 +691,131 @@ function renderCamera(p) {
   const key = p.id + ':' + camSession;
   if (camStream !== key) {
     camStream = key;
-    img.onerror = () => { camStream = ''; };       // сорвался поток — соберём заново
+    img.onerror = () => {                          // сорвался поток — соберём заново
+      camStream = '';
+      camSession = Date.now();
+    };
     img.src = camUrl(p, true);
     if ($('cam_modal').open) $('cam_full').src = camUrl(p, true);
   }
   renderShots(p);
+}
+
+
+/* --------------------------- 119: проекция плиты на живое видео ---------------------------
+   Эталон пустого стола калибруется четырьмя кликами (гомография на сервере),
+   дальше /api/camera/projection отдаёт контуры объектов задания в долях кадра.
+   Панель рисует их SVG-оверлеем поверх MJPEG; клик по контуру — исключить объект. */
+
+function bedMapSvg() { return $('pr_cam_map'); }
+
+function drawBedMap(objects) {
+  const svg = bedMapSvg();
+  if (!svg) return;
+  bedMapCache = objects && objects.length ? objects : null;
+  if (!objects || !objects.length) { if (svg.childNodes.length) svg.innerHTML = ''; bedMapKey = ''; return; }
+  const sig = JSON.stringify(objects);
+  if (sig === bedMapKey) return;              // те же объекты — не дёргаем DOM
+  bedMapKey = sig;
+  const parts = [];
+  objects.forEach((o, i) => {
+    if (!o.pts || o.pts.length !== 4) return;
+    const pts = o.pts.map((pt) => `${(num(pt[0]) * 1000).toFixed(1)},${(num(pt[1]) * 1000).toFixed(1)}`).join(' ');
+    parts.push(`<polygon points="${pts}" class="bedmap-obj" data-bedmap-i="${i}" style="pointer-events:auto"/>`);
+    const cx = o.pts.reduce((acc, pt) => acc + num(pt[0]), 0) / 4 * 1000;
+    const cy = o.pts.reduce((acc, pt) => acc + num(pt[1]), 0) / 4 * 1000;
+    const label = esc(String(o.name || 'Объект')).slice(0, 22);
+    parts.push(`<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" class="bedmap-label" style="pointer-events:none">${i + 1}. ${label}</text>`);
+  });
+  svg.innerHTML = parts.join('');
+}
+
+async function updateBedProjection(p) {
+  const svg = bedMapSvg();
+  if (!svg) return;
+  const on = !!bedMapOn[p.id];
+  svg.classList.toggle('on', on);
+  if (!on || !p || !p.camera || !p.camera.available) { if (!on) drawBedMap(null); return; }
+  if (bedMapBusy) return;
+  bedMapBusy = true;
+  try {
+    const data = await api(`/api/camera/projection?printer_id=${encodeURIComponent(p.id)}`);
+    if (data && data.has_map) drawBedMap(data.objects || []);
+    else drawBedMap(null);
+  } catch (e) { drawBedMap(null); }
+  finally { bedMapBusy = false; }
+}
+
+function bindBedMapClicks() {
+  const svg = bedMapSvg();
+  if (!svg) return;
+  svg.addEventListener('click', (ev) => {
+    const poly = ev.target.closest('[data-bedmap-i]');
+    if (!poly) return;
+    const idx = num(poly.getAttribute('data-bedmap-i'), -1);
+    const p = active();
+    if (!p || idx < 0 || !bedMapCache || !bedMapCache[idx]) return;
+    const obj = bedMapCache[idx];
+    if (!confirmDanger(`Исключить «${obj.name}» из печати? Объект будет пропущен командой skip_objects.`)) return;
+    command('skip_objects', [obj.id], { confirm: '', label: 'исключить объект (проекция)' });
+  });
+}
+
+/* --- модалка калибровки: 4 клика по углам стола на эталоне --- */
+const bedmapPts = [];
+
+function bedmapRender() {
+  const svg = $('bedmap_svg');
+  if (!svg) return;
+  const parts = [];
+  const labels = ['1 перед-лево', '2 перед-право', '3 зад-право', '4 зад-лево'];
+  bedmapPts.forEach((pt, i) => {
+    parts.push(`<circle cx="${(pt[0] * 100).toFixed(2)}" cy="${(pt[1] * 100).toFixed(2)}" r="0.9" class="bedmap-dot"/>`);
+    parts.push(`<text x="${(pt[0] * 100 + 1.4).toFixed(2)}" y="${(pt[1] * 100 - 1.2).toFixed(2)}" class="bedmap-label" font-size="2.6">${labels[i] || ''}</text>`);
+  });
+  if (bedmapPts.length >= 2) {
+    const ptsAttr = bedmapPts.map((pt) => `${(pt[0] * 100).toFixed(2)},${(pt[1] * 100).toFixed(2)}`).join(' ');
+    parts.push(`<polyline points="${ptsAttr}" class="bedmap-polyline" fill="none"/>`);
+    if (bedmapPts.length === 4) {
+      parts.push(`<polygon points="${ptsAttr}" class="bedmap-fill"/>`);
+    }
+  }
+  svg.innerHTML = parts.join('');
+  $('bedmap_save').disabled = bedmapPts.length !== 4;
+  $('bedmap_hint').textContent = bedmapPts.length >= 4
+    ? 'Все четыре угла размечены — сохраняйте'
+    : `Угол ${bedmapPts.length + 1} из 4: ${labels[bedmapPts.length] || ''}`;
+}
+
+function openBedMapModal() {
+  bedmapPts.length = 0;
+  bedmapRender();
+  const img = $('bedmap_img');
+  img.src = '/api/camera/bed-ref.jpg?ts=' + Date.now();
+  img.onerror = () => {
+    $('bedmap_hint').textContent = 'Эталона стола нет: снимите «Пустой стол» на вкладке принтера (кнопка рядом с камерой) и вернитесь';
+  };
+  openModal('bedmap_modal');
+}
+
+async function saveBedMap() {
+  if (bedmapPts.length !== 4) return;
+  try {
+    await post('/api/camera/calibrate', { printer_id: PF.state.activePrinter, corners: bedmapPts.slice() });
+    toast('Стол размечен', 'Проекция плиты готова — включите её кнопкой под камерой');
+    closeModal('bedmap_modal');
+    bedMapKey = '';
+  } catch (e) { fail(e); }
+}
+
+async function resetBedMap() {
+  try {
+    await post('/api/camera/calibrate/reset', { printer_id: PF.state.activePrinter });
+    toast('Калибровка сброшена', '', 'info');
+    bedmapPts.length = 0;
+    bedmapRender();
+    bedMapKey = '';
+  } catch (e) { fail(e); }
 }
 
 function renderShots(p) {
@@ -1626,6 +1765,32 @@ function bind() {
     camSession = Date.now(); camStream = '';        // новый ключ — поток пересоберётся
     PF.poll();
   });
+  /* 119: разметка стола и проекция плиты */
+  $('pr_map_btn').addEventListener('click', openBedMapModal);
+  $('pr_map_toggle').addEventListener('click', () => {
+    const p = active();
+    if (!p) return fail(new Error('Принтер ещё не добавлен'));
+    bedMapOn[p.id] = !bedMapOn[p.id];
+    $('pr_map_toggle').classList.toggle('active', !!bedMapOn[p.id]);
+    bedMapKey = '';
+    updateBedProjection(p);
+    toast(bedMapOn[p.id] ? 'Проекция плиты включена' : 'Проекция плиты выключена',
+      bedMapOn[p.id] ? 'Контуры объектов задания появятся поверх видео' : '', 'info');
+  });
+  $('bedmap_stage').addEventListener('click', (ev) => {
+    if (bedmapPts.length >= 4) return;
+    const img = $('bedmap_img');
+    const r = img.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    bedmapPts.push([
+      Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
+      Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height)),
+    ]);
+    bedmapRender();
+  });
+  $('bedmap_save').addEventListener('click', saveBedMap);
+  $('bedmap_reset').addEventListener('click', resetBedMap);
+  bindBedMapClicks();
   $('pr_cam_full').addEventListener('click', () => {
     const p = active();
     if (!p) return;

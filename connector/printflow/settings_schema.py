@@ -71,6 +71,8 @@ META: dict[str, dict] = {
     "vat_threshold": ("tax", "Порог освобождения от НДС, ₽", {"min": 0}),
     # --- принтеры
     "printer_investment": ("printers", "Вложения в парк, ₽", {"min": 0}),
+    "camera_fps_max": ("printers", "Предел FPS камеры (0 = без предела)",
+                       {"min": 0, "max": 30}),
     "encrypt_access_code": ("printers", "Шифровать access-коды принтеров", {}),
     "auto_start_next": ("printers", "Автозапуск следующего задания", {}),
     "auto_resume": ("printers", "Авто-возобновление после сбоя", {}),

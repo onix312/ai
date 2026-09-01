@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .accounting import num
@@ -334,6 +335,94 @@ def jobs_plate(api: Any, ctx: Ctx):
         _PLATE_CACHE.pop(next(iter(_PLATE_CACHE)))
     _PLATE_CACHE[str(path)] = (mtime, b64)
     return 200, {"ok": True, "b64": b64}
+
+
+@router.post("/api/camera/calibrate", audit="Камера: калибровка стола (119)")
+def camera_calibrate(api: Any, ctx: Ctx):
+    """Сохранить четыре угла стола на кадре (доли 0..1)."""
+    body = ctx.body
+    printer_id = str(body.get("printer_id") or "").strip()
+    if not printer_id:
+        raise ValueError("Не указан принтер")
+    corners = body.get("corners")
+    from .bed_projection import corners_valid, save_calibration
+
+    if not corners_valid(corners if isinstance(corners, list) else []):
+        raise ValueError("Нужны 4 угла стола в долях кадра (обход: перед-лево, "
+                         "перед-право, зад-право, зад-лево)")
+    save_calibration(api.db, printer_id, corners)
+    return 200, {"ok": True}
+
+
+@router.post("/api/camera/calibrate/reset", audit="Камера: сброс калибровки (119)")
+def camera_calibrate_reset(api: Any, ctx: Ctx):
+    printer_id = str((ctx.body or {}).get("printer_id") or "").strip()
+    if not printer_id:
+        raise ValueError("Не указан принтер")
+    from .bed_projection import reset_calibration
+
+    reset_calibration(api.db, printer_id)
+    return 200, {"ok": True}
+
+
+@router.get("/api/camera/projection", doc="Объекты плиты в долях кадра камеры (119)")
+def camera_projection(api: Any, ctx: Ctx):
+    """Что и где напечатано: полигоны объектов поверх живого видео."""
+    printer_id = ctx.one("printer_id")
+    printer = api.manager.get(printer_id) if hasattr(api, "manager") else None
+    if printer is None:
+        return 404, {"error": "Принтер не найден"}
+
+    from .bed_projection import corners_valid, load_calibration, running_job
+
+    corners = load_calibration(api.db, printer_id)
+    calibrated = corners_valid(corners)
+    running = running_job(api.db, printer_id)
+    if running is None:
+        return 200, {"calibrated": calibrated, "has_map": False,
+                     "reason": "Сейчас на этом принтере ничего не печатается"}
+
+    job_file = str(running.get("file") or "")
+    if not job_file.lower().endswith(".3mf"):
+        return 200, {"calibrated": calibrated, "has_map": False,
+                     "reason": "У задания нет локального 3MF — карту плиты собрать не из чего"}
+    from .config import UPLOAD_DIR
+    from .http_helpers import safe_file
+
+    path = safe_file(UPLOAD_DIR, job_file.replace("\\\\", "/").rsplit("/", 1)[-1])
+    if path is None or not path.is_file():
+        return 200, {"calibrated": calibrated, "has_map": False,
+                     "reason": "Файл задания не найден локально"}
+    if not calibrated:
+        return 200, {"calibrated": False, "has_map": False,
+                     "reason": "Сначала разметьте стол: кнопка «Разметка стола» под камерой"}
+
+    from .plate_map import plate_map_3mf
+
+    mapping = plate_map_3mf(path) or {}
+    objects = mapping.get("objects") or []
+    plate = mapping.get("plate") or {}
+    if not objects or not plate:
+        return 200, {"calibrated": True, "has_map": False,
+                     "reason": "В файле нет объектов плиты"}
+    from .bed_projection import project_objects
+
+    projected = project_objects(corners, float(plate.get("w") or 256),
+                                float(plate.get("h") or 256), objects)
+    return 200, {"calibrated": True, "has_map": True, "job": running.get("name") or "",
+                 "objects": projected}
+
+
+# ------------------------------------------------------------------ 61
+# Резюме диалога покупателя: локально-экстрактивный разбор client_bot_log.
+@router.get("/api/client-bot/thread-summary", doc="Резюме переписки по заказу (61)")
+def client_thread_summary(api: Any, ctx: Ctx):
+    order_id = ctx.one("order_id")
+    if not order_id:
+        raise ValueError("Не указан заказ")
+    from .thread_summary import summary_for_order
+
+    return 200, summary_for_order(api.db, order_id)
 
 
 @router.post("/api/workshop/shift", audit="Смена: отметка чек-листа")

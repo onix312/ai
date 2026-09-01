@@ -1214,6 +1214,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   }
   renderOrderPhotos((order && order.photos) || []);
   if (id) loadOrderPhotosFull(id);            // ЗА6: полный список фото и файлов
+  loadOrderTimelapse(id, (order && order.jobs) || []);   // №47: таймлапс печати
   renderOrderDefects((order && order.defects) || []);
   renderQcChecklist((order && order.qc_done) || '');
   renderOrderDocuments(null);
@@ -1618,7 +1619,43 @@ function renderTgBlock(d) {
   sel.innerHTML = '<option value="">Вставить шаблон…</option>' + (d.templates || [])
     .map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
   sel.disabled = !(d.templates || []).length;
+  $('of_tg_summary').hidden = true;             // №61: резюме перезапрашивается по клику
   if (window.PFIcons) window.PFIcons.apply(wrap);
+}
+
+/* №61: резюме диалога — локально-экстрактивный разбор на сервере */
+async function loadThreadSummary() {
+  if (!editingOrder) return;
+  const box = $('of_tg_summary');
+  box.hidden = false;
+  box.className = 'verdict';
+  box.innerHTML = '<span class="muted">Собираю резюме переписки…</span>';
+  try {
+    const d = await get('/api/client-bot/thread-summary', { order_id: editingOrder });
+    if (!d) throw new Error('Пустой ответ');
+    if (d.empty) {
+      box.className = 'verdict warn';
+      box.textContent = d.verdict || 'Переписки по заказу ещё нет';
+      return;
+    }
+    const parts = [`<b>${esc(d.verdict || '')}</b>`];
+    (d.open_questions || []).forEach((q) => {
+      parts.push(`<div style="margin-top:6px">❓ Без ответа: ${esc(q.text)}<br><small class="muted">${esc(dateTimeText(q.at))}</small></div>`);
+    });
+    if ((d.amounts || []).length) parts.push(`<div>₽ Суммы: ${esc(d.amounts.join(', '))}</div>`);
+    if ((d.deadlines || []).length) parts.push(`<div>📅 Сроки: ${esc(d.deadlines.join(', '))}</div>`);
+    if ((d.phones || []).length) parts.push(`<div>☎ Телефон: ${esc(d.phones[0])}</div>`);
+    if ((d.highlights || []).length) {
+      const last = d.highlights[d.highlights.length - 1];
+      parts.push(`<div style="margin-top:6px">Последнее по делу: «${esc(last.text)}»<br><small class="muted">${esc(dateTimeText(last.at))}</small></div>`);
+    }
+    parts.push(`<small class="muted" style="display:block;margin-top:6px">${esc(d.counts.in)} сообщений от покупателя, ${d.counts.out} ваших · резюме собрано локально, без внешних сервисов</small>`);
+    box.className = `verdict ${d.last_direction === 'in' || (d.open_questions || []).length ? 'warn' : 'ok'}`;
+    box.innerHTML = parts.join('');
+  } catch (e) {
+    box.className = 'verdict bad';
+    box.textContent = 'Резюме не собралось: ' + e.message;
+  }
 }
 
 function tgSetMode(mode) {
@@ -1722,6 +1759,102 @@ function renderOrderPhotos(photos) {
       }).join('') + '</div>' : '';
     if (window.PFIcons) window.PFIcons.apply(filesHost);
   }
+}
+
+
+/* ---------------------- №47: таймлапс заказа ----------------------
+   Кейфреймы снимает коннектор во время печати (keyframe_interval_min,
+   PHOTO_DIR/keyframes/<job_id>). Здесь — проигрыватель в карточке заказа:
+   /api/job/keyframes отдаёт список кадров, /api/job/keyframe.jpg — сам кадр. */
+const tl = { timer: 0, pos: 0, frames: [], jobId: '', speedMs: 400 };
+
+function tlStop() {
+  if (tl.timer) { clearInterval(tl.timer); tl.timer = 0; }
+  const btn = $('tl_play');
+  if (btn) btn.textContent = '▶';
+}
+
+function tlShow(pos) {
+  if (!tl.frames.length) return;
+  tl.pos = clamp(pos, 0, tl.frames.length - 1);
+  const name = tl.frames[tl.pos];
+  $('tl_img').src = `/api/job/keyframe.jpg?id=${encodeURIComponent(tl.jobId)}&name=${encodeURIComponent(name)}`;
+  $('tl_range').value = String(tl.pos);
+  $('tl_counter').textContent = `${tl.pos + 1}/${tl.frames.length}`;
+}
+
+function tlPlayPause() {
+  if (tl.timer) { tlStop(); return; }
+  if (!tl.frames.length) return;
+  if (tl.pos >= tl.frames.length - 1) tl.pos = 0;
+  $('tl_play').textContent = '⏸';
+  tl.timer = setInterval(() => {
+    if (tl.pos >= tl.frames.length - 1) { tlStop(); return; }
+    tlShow(tl.pos + 1);
+  }, tl.speedMs);
+}
+
+function tlSelectJob(jobId, jobName, frames) {
+  tlStop();
+  tl.jobId = jobId;
+  tl.frames = frames || [];
+  tl.pos = 0;
+  $('tl_range').max = String(Math.max(0, tl.frames.length - 1));
+  $('tl_chip').hidden = false;
+  $('tl_chip').textContent = `${tl.frames.length} кадров`;
+  $('tl_hint').textContent = frames && frames.length
+    ? `Задание «${jobName}» · кадр раз в ${(tl.speedMs / 1000).toFixed(1)} с. Интервал съёмки настраивается: Настройки → Печать → «Кейфрейм-интервал».`
+    : '';
+  if (tl.frames.length) tlShow(0);
+}
+
+async function loadOrderTimelapse(orderId, jobs) {
+  const wrap = $('tl_wrap');
+  if (!wrap) return;
+  tlStop();
+  wrap.hidden = true;
+  if (!orderId) return;
+  const withIds = (jobs || []).filter((j) => j && j.id);
+  if (!withIds.length) return;
+  let found = [];
+  await Promise.all(withIds.map(async (j) => {
+    try {
+      const d = await get(`/api/job/keyframes?id=${encodeURIComponent(j.id)}`);
+      if (d && d.frames && d.frames.length) found.push({ id: j.id, name: j.name || j.file || j.id, frames: d.frames });
+    } catch (e) { /* задание без кейфреймов — просто пропускаем */ }
+  }));
+  found.sort((a, b) => b.frames.length - a.frames.length);
+  const picker = $('tl_jobs');
+  picker.innerHTML = '';
+  if (!found.length) return;
+  wrap.hidden = false;
+  if (found.length > 1) {
+    picker.hidden = false;
+    picker.innerHTML = found.map((j, i) =>
+      `<button class="btn sm ${i ? 'ghost' : ''}" type="button" data-tl-job="${esc(j.id)}">${esc(j.name)} · ${j.frames.length}</button>`).join('');
+    picker.querySelectorAll('[data-tl-job]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const j = found.find((x) => x.id === btn.getAttribute('data-tl-job'));
+        if (!j) return;
+        picker.querySelectorAll('[data-tl-job]').forEach((b) => b.classList.add('ghost'));
+        btn.classList.remove('ghost');
+        tlSelectJob(j.id, j.name, j.frames);
+      });
+    });
+  } else {
+    picker.hidden = true;
+  }
+  tlSelectJob(found[0].id, found[0].name, found[0].frames);
+}
+
+function bindTimelapseControls() {
+  $('tl_play').addEventListener('click', tlPlayPause);
+  $('tl_range').addEventListener('input', () => { tlStop(); tlShow(num($('tl_range').value)); });
+  $('tl_img').addEventListener('error', () => {
+    if (!$('tl_wrap').hidden) $('tl_hint').textContent = 'Кадр не загрузился — возможно, файл удалён архиватором.';
+  });
+  const modal = $('order_modal');
+  if (modal) modal.addEventListener('close', tlStop);   // карточка закрыта — плеер молчит
 }
 
 async function loadOrderPhotosFull(orderId) {
@@ -2971,6 +3104,8 @@ function bind() {
     } catch (e) { fail(e); }
   });
   $('order_defect_btn').addEventListener('click', () => openDefect(editingOrder));
+  bindTimelapseControls();                     // №47: таймлапс в карточке заказа
+  $('of_tg_summary_btn').addEventListener('click', loadThreadSummary);   // №61
   $('df_job').addEventListener('change', () => refreshDefectPreview(true));
   $('defect_reason').addEventListener('change', () => refreshDefectPreview(false));
   $('df_grams').addEventListener('input', debounce(() => refreshDefectPreview(false), 180));
