@@ -12,6 +12,12 @@
   :root { --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8; }
  }
  * { box-sizing: border-box; }
+ /* В67: сезон витрины — лента и акцент приходят из настроек панели */
+ .season-ribbon { display:none; padding:7px 14px; font-size:13px; text-align:center; letter-spacing:.3px; }
+ html[data-season="newyear"] .season-ribbon { display:block; background:linear-gradient(90deg,#0e7490,#164e63); color:#ecfeff; }
+ html[data-season="spring"] .season-ribbon { display:block; background:linear-gradient(90deg,#db2777,#be185d); color:#fff1f7; }
+ html[data-season="autumn"] .season-ribbon { display:block; background:linear-gradient(90deg,#b45309,#92400e); color:#fffbeb; }
+
  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
  .wrap { max-width:420px; margin:0 auto; padding:20px 16px 40px; }
  .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); }
@@ -40,6 +46,7 @@
 </style>
 </head>
 <body>
+<div class="season-ribbon"></div>
 <div class="wrap">
  <div class="logo">NOZZA<small>Там, где рождается форма</small></div>
  <div class="card">
@@ -112,7 +119,24 @@
   }
 
   function load() {
-    fetch(API).then(function (r) { return r.json(); }).then(function (d) {
+
+  /* В67: сезон витрины — одна публичная настройка */
+  (function () {
+    var SEASON_TEXT = {
+      newyear: '❄ Новый год близко — успейте заказать подарки',
+      spring: '❀ Весна идёт — печатаем к 8 Марта',
+      autumn: '🍂 Осенний сезон печати — очередь растёт'
+    };
+    fetch('/api/public/season').then(function (r) { return r.json(); }).then(function (d) {
+      var season = d && d.season;
+      if (!season || season === 'none') return;
+      document.documentElement.setAttribute('data-season', season);
+      var ribbon = document.querySelector('.season-ribbon');
+      if (ribbon && SEASON_TEXT[season]) ribbon.textContent = SEASON_TEXT[season];
+    }).catch(function () {});
+  })();
+
+  fetch(API).then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.id) { item = d; render(); }
       else { $('#name').textContent = 'Позиция не найдена'; $('#sellForm').hidden = true; }
     }).catch(function () {

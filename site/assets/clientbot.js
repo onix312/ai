@@ -294,11 +294,15 @@ function renderLog(items) {
     const out = item.direction === 'out';
     const system = item.direction === 'system';
     const name = text(item.name, item.chat_id || '—');
-    const av = esc(U.avatarEmoji('', item.chat_id) || '👤');
+    // В34: у диалога с именем — цветные инициалы, у безымянного — эмодзи
+    const hasName = String(item.name || '').trim().length > 0;
+    const av = hasName
+      ? `<span class="msg-av" style="--av:${esc(U.avColor(item.name))}">${esc(U.initials(item.name))}</span>`
+      : esc(U.avatarEmoji('', item.chat_id) || '👤');
     const answer = (item.answer || item.operator) && !out
       ? `<div class="cb-bubble-answer"><b>Ответ оператора</b><p>${esc(item.answer || item.operator)}</p></div>` : '';
     return `<div class="cb-bubble-row ${out ? 'out' : system ? 'sys' : 'in'}">`
-      + `<span class="cb-bubble-av" aria-hidden="true">${system ? '⚙' : av}</span>`
+      + `<span class="cb-bubble-av" aria-hidden="true"${hasName && !system ? ` style="--av:${esc(U.avColor(item.name))}"` : ''}>${system ? '⚙' : av}</span>`
       + `<div class="cb-bubble"><b>${esc(name)}</b><p>${esc(item.text || '')}</p>`
       + `<small>${esc(dt(item.at))} · ${out ? 'ответ' : system ? 'система' : 'входящее'}</small></div>${answer}</div>`;
   }).join('') : '<div class="empty compact"><span>Диалогов пока нет — сюда придут входящие и ответы.</span></div>';

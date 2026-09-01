@@ -315,8 +315,8 @@ details.nav-more:not([open]) > summary.nav-group-title::after { content: "▸"; 
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-1);
-  padding: 18px;
+  box-shadow: var(--elev-1);
+  padding: var(--sp-4);
 }
 .card.pad-0 { padding: 0; }
 .card-head {
@@ -581,8 +581,8 @@ dialog#palette[open] { animation: modalIn .18s var(--ease); }
   display: flex; flex-direction: column; gap: 10px; max-width: 360px;
 }
 .toast {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 12px 14px; border-radius: var(--r);
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  padding: var(--sp-3); border-radius: var(--r);
   background: var(--panel); border: 1px solid var(--line);
   box-shadow: var(--shadow-2); font-size: 13.3px;
   animation: toastIn .26s var(--ease);

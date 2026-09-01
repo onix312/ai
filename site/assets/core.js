@@ -312,8 +312,30 @@ const post = (path, body) => api(path, { body: body || {} });
 const ICONS = { ok: '✓', bad: '✕', warn: '⚠', info: 'ℹ' };
 function toast(title, sub, kind = 'ok', action = null) {
   const box = $('toasts');
+  // В96: повторяющиеся события группируются в один тост со счётчиком,
+  // вместо каскада одинаковых плашек.
+  const twin = [...box.children].find((t) =>
+    t.dataset.group === title && !t.classList.contains('out'));
+  if (twin && !action) {
+    const counter = twin.querySelector('.toast-count');
+    const seen = (parseInt(twin.dataset.seen || '1', 10) || 1) + 1;
+    twin.dataset.seen = String(seen);
+    if (counter) counter.textContent = String(seen);
+    else {
+      const badge = document.createElement('span');
+      badge.className = 'toast-count';
+      badge.textContent = String(seen);
+      twin.querySelector('b').appendChild(badge);
+    }
+    bump(twin);
+    clearTimeout(twin._timer);
+    twin._timer = setTimeout(() => twin.classList.add('out'), 3200);
+    return twin;
+  }
   const el = document.createElement('div');
   el.className = 'toast ' + kind;
+  el.dataset.group = title;
+  el.dataset.seen = '1';
   const dur = kind === 'bad' ? 5200 : 3200;
   const act = (action && action.label)
     ? `<button class="toast-action" type="button">${esc(action.label)}</button>` : '';
@@ -331,6 +353,55 @@ function toast(title, sub, kind = 'ok', action = null) {
   setTimeout(close, dur);
 }
 const fail = (e) => toast('Не получилось', e && e.message ? e.message : String(e), 'bad');
+
+/* ================================================== 15.1 (В-серия): общие хелперы */
+
+/* В34: детерминированный цвет аватара по имени — тот же алгоритм, что
+   в канбане заказов; один цвет = один человек во всех списках. */
+function avColor(name) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return `hsl(${h} 52% 46%)`;
+}
+
+/* В95: кнопка «занята», пока идёт запрос. Спиннер внутри кнопки вместо
+   тишины; повторный клик невозможен. */
+async function withBusy(btn, fn) {
+  if (!btn) return fn();
+  if (btn.classList.contains('busy')) return undefined;
+  btn.classList.add('busy');
+  try {
+    return await fn();
+  } finally {
+    btn.classList.remove('busy');
+  }
+}
+
+/* В92: галочка успеха поверх действия — выдача, оплата, сохранение
+   читаются как событие, а не как молчаливая перерисовка. */
+function successFx() {
+  if (MOTION_OFF && MOTION_OFF.matches) return;
+  document.querySelectorAll('.pf-success').forEach((el) => el.remove());
+  const fx = document.createElement('div');
+  fx.className = 'pf-success';
+  fx.innerHTML = '<i><svg viewBox="0 0 24 24" aria-hidden="true">'
+    + '<path d="M5 13l4.4 4.4L19 8"/></svg></i>';
+  document.body.appendChild(fx);
+  setTimeout(() => fx.remove(), 900);
+}
+
+/* В96: тост с кнопкой «Вернуть» — живёт дольше обычного. */
+function toastUndo(title, sub, run) {
+  toast(title, sub, 'warn', { label: 'Вернуть', run });
+}
+
+/* В89: стопка скелетонов для ещё не заполненных списков. */
+function skeletonStack(rows = 4, widths = [86, 64, 78, 52]) {
+  return '<div class="skel-stack">' + Array.from({ length: rows }, (_, i) =>
+    `<div class="skel-row"><i class="skel" style="width:${widths[i % widths.length]}%"></i></div>`).join('')
+    + '</div>';
+}
 
 /* =========================================================== диалоги */
 function openModal(id) { const d = $(id); if (d && !d.open) d.showModal(); }
@@ -590,6 +661,8 @@ const PF = {
     bump, flashOk, stagger, confetti, wireNumberChip,
     // 14.0 (55/66): шаблонизатор с автоэкранированием и единый форматтер
     html, raw, render, fmt,
+    // 15.1 (В-серия): аватары, занятая кнопка, успех, undo, скелетоны
+    avColor, withBusy, successFx, toastUndo, skeletonStack,
   },
   modules: {},
   bus: new EventTarget(),
@@ -897,6 +970,15 @@ function showView(name, sub) {
   }
   store.set('pf_last_view', name);
   if (STOCK_IDS.has(name)) store.set('pf_last_stock', name);
+  // В89: пока панель ещё не получила первые данные, список раздела не
+  // «мигает» пустотой — показывает скелетон будущих строк.
+  if (!PF.ready) {
+    const skelHosts = { queue: 'queue_list', products: 'prod_grid',
+      customers: 'customers_tbody', finance: 'fin_tx' };
+    const skelId = skelHosts[name];
+    const skelHost = skelId ? $(skelId) : null;
+    if (skelHost && !skelHost.childElementCount) skelHost.innerHTML = skeletonStack(5);
+  }
   // После перерисовки и обработки hash браузером повторно фиксируем начало.
   requestAnimationFrame(resetViewScroll);
   setTimeout(resetViewScroll, 0);

@@ -199,6 +199,7 @@ function orderCard(o) {
     + qtyBadge
     + prioBadge
     + channelChip
+    + chatBadgeHtml(o.id)
     + `</div>`
     + `<h4>${esc(o.product || 'Без названия')}</h4>`
     + fileChip
@@ -223,8 +224,37 @@ function orderCard(o) {
 /* ЗА7: маркеры колонок + «докрут» сумм между обновлениями. */
 const kanSums = new Map();
 
+/* В40: по каким заказам покупатель ждёт ответа — пузырь переписки.
+   Один лёгкий GET на обновление данных, а не разбор всей ленты. */
+const chatBadges = new Map();
+let chatBadgesAt = 0;
+async function refreshChatBadges(force) {
+  if (!force && Date.now() - chatBadgesAt < 120000) return;
+  try {
+    const data = await get('/api/conversations/by-order');
+    const counts = (data && data.counts) || {};
+    chatBadges.clear();
+    Object.entries(counts).forEach(([orderId, cnt]) => {
+      if (num(cnt) > 0) chatBadges.set(orderId, num(cnt));
+    });
+    chatBadgesAt = Date.now();
+  } catch (e) { /* тихо: пузырь — подсказка, а не критичные данные */ }
+}
+function chatBadgeHtml(orderId) {
+  const cnt = chatBadges.get(orderId) || 0;
+  if (!cnt) return '';
+  return `<button class="chat-badge" type="button" data-chat-open="${esc(orderId)}"`
+    + ` title="Клиент ждёт ответа: ${cnt} в диалоге"><i data-icon="message">💬</i>${cnt}</button>`;
+}
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-chat-open]');
+  if (!chip) return;
+  location.hash = '#clientbot';
+});
+
 function renderKanban(list) {
   const host = $('orders_kanban');
+  refreshChatBadges();
   if (!PF.state.orders.length) {
     host.innerHTML = '<div class="empty"><span class="big">▦</span><b>Заказов нет</b>'
       + '<span>Нет заказов — создайте из сообщения или с нуля.</span>'
@@ -1353,6 +1383,7 @@ async function confirmOrderFulfillment() {
     const moneyResult = num(result.collected) > 0
       ? `получено ${money(result.collected)}`
       : num(result.debt) > 0 ? `оставлен долг ${money(result.debt)}` : 'оплачен ранее';
+    U.successFx();
     toast('Заказ выдан', `${moneyResult}${copied ? ' · текст клиенту скопирован' : ''}`);
     fulfillmentDraft = null;
     await PF.refreshCore();
@@ -1633,6 +1664,7 @@ async function confirmTgPayment(intentId) {
   if (!confirmDanger('Записать оплату и подтвердить её покупателю в чате?')) return;
   try {
     await post('/api/client-bot/payment', { intent_id: intentId, action: 'confirm', actor: 'panel' });
+    U.successFx();
     toast('Оплата подтверждена', 'Проводка в журнале · покупателю ушло подтверждение');
     await PF.refreshCore();
     if (editingOrder) {
@@ -2022,6 +2054,65 @@ function renderCustomerInsights(customers, repeat, withoutContact) {
     + `<article class="more-insight ok"><span>Повторных покупателей</span><b>${nfmt(repeat)}</b><small>${customers.length ? `${nfmt(repeat / customers.length * 100)}% от базы` : 'появятся после второго заказа'}</small></article>`
     + `<article class="more-insight ${withoutContact ? 'warn' : ''}"><span>Выручка по базе</span><b>${money(revenue)}</b><small>${withoutContact ? `без контакта: ${nfmt(withoutContact)} · повторные дали ${money(repeatRevenue)}` : `повторные дали ${money(repeatRevenue)}`}</small></article>`;
 }
+/* В35: схематичная карта клиентов — зоны по адресам, толщина = выручка.
+   Без внешних карт: сетка плиток «зона → клиентов и сумма», как схема города. */
+function zoneKeyOf(address) {
+  const raw = String(address || '').trim();
+  if (!raw) return '';
+  return raw.split(/[,;]/)[0].replace(/\s*\d+[\w/\-]*\s*$/, '').trim().slice(0, 42);
+}
+
+function ensureCustomerMapHost() {
+  const table = document.querySelector('#view-customers .customers-table');
+  if (!table) return null;
+  let card = document.getElementById('cust_map_card');
+  if (!card) {
+    card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'cust_map_card';
+    card.style.marginTop = '16px';
+    card.innerHTML = '<div class="card-head"><div><h2>Карта клиентов (В35)</h2>'
+      + '<p>Схема по адресам из профилей: чем толще полоса — тем больше выручки приносит зона</p></div></div>'
+      + '<div class="cust-map" id="cust_map"></div>';
+    table.parentElement.insertBefore(card, table);
+  }
+  return card.querySelector('#cust_map');
+}
+
+function renderCustomerMap() {
+  const host = ensureCustomerMapHost();
+  if (!host) return;
+  const finals = PF.finalStatusIds ? PF.finalStatusIds() : [];
+  const revenue = new Map();
+  (PF.state.orders || []).forEach((o) => {
+    if (!finals.includes(o.status)) return;
+    const key = o.customer_id || o.customer_name || '';
+    revenue.set(key, (revenue.get(key) || 0) + num(o.price));
+  });
+  const zones = new Map();
+  (PF.state.customers || []).forEach((c) => {
+    const zone = zoneKeyOf(c.address);
+    if (!zone) return;
+    const sum = revenue.get(c.id) || revenue.get(c.name) || 0;
+    const entry = zones.get(zone) || { count: 0, sum: 0 };
+    entry.count += 1;
+    entry.sum += sum;
+    zones.set(zone, entry);
+  });
+  if (!zones.size) {
+    host.innerHTML = '<div class="empty compact"><span>◌</span><b>Адресов пока нет</b>'
+      + '<span>Заполните адрес клиента в карточке — зона появится на схеме.</span></div>';
+    return;
+  }
+  const max = Math.max(1, ...[...zones.values()].map((z) => z.sum));
+  host.innerHTML = [...zones.entries()]
+    .sort((a, b) => b[1].sum - a[1].sum)
+    .map(([zone, z]) => `<div class="cust-zone" style="--heat:${(z.sum / max).toFixed(2)}" title="Клиентов: ${z.count} · закрытых заказов на ${money(z.sum)}">`
+      + `<div style="display:flex;align-items:center;gap:6px"><b>${esc(zone)}</b><span class="cz-sum">${money(z.sum)}</span></div>`
+      + `<small>${nfmt(z.count)} ${z.count === 1 ? 'клиент' : (z.count < 5 ? 'клиента' : 'клиентов')}</small></div>`)
+    .join('');
+}
+
 function renderCustomers() {
   const q = ($('customers_search').value || '').trim().toLowerCase();
   const customers = PF.state.customers || [];
@@ -2040,7 +2131,7 @@ function renderCustomers() {
     const segment = num(customer.orders) > 2 ? ['ok', 'Постоянный']
       : num(customer.orders) > 1 ? ['accent', 'Повторный'] : ['outline', 'Новый'];
     const contact = customerHasContact(customer);
-    return `<tr><td><div class="cell-user"><span class="avatar">${esc(initials(customer.name))}</span>`
+    return `<tr><td><div class="cell-user"><span class="avatar" style="--av:${esc(U.avColor(customer.name))}">${esc(initials(customer.name))}</span>`
       + `<span><b>${esc(customer.name || 'Без имени')}</b>${customer.company ? `<small>${esc(customer.company)}</small>` : ''}</span></div></td>`
       + `<td>${esc(customer.phone || '—')}${customer.messenger ? `<br><small class="muted">${esc(customer.messenger)}</small>` : ''}${!contact ? '<br><small class="neg">нет контакта</small>' : ''}</td>`
       + `<td class="right tnum">${nfmt(customer.orders)}</td>`
@@ -2053,6 +2144,7 @@ function renderCustomers() {
     ? '<div class="empty compact"><span>В этом сегменте никого не найдено.</span></div>'
     : '<div class="empty"><span class="big">◎</span><b>Клиентов нет</b><span>Появятся после первого заказа.</span>'
       + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'}</td></tr>`;
+  renderCustomerMap();
 }
 
 /* =============================================== обратная связь после продажи */

@@ -101,6 +101,7 @@ function renderTabs() {
         : esc(String(p.connection.last_error || 'Нет связи').slice(0, 40));
     return `<button class="pk-card${p.id === PF.state.activePrinter ? ' on' : ''}${conn ? '' : ' off'}${running ? ' run' : ''}" type="button" data-printer="${esc(p.id)}"`
       + ` title="${esc(p.name)} · ${esc(p.printer.state_label || STATE_LABEL[st] || st)}">`
+      + printerSilhouette(p)
       + `<span class="pk-ring"><svg viewBox="0 0 40 40" aria-hidden="true">`
       + `<circle class="tr" cx="20" cy="20" r="15.5"/>`
       + `<circle class="fl" cx="20" cy="20" r="15.5" stroke-dasharray="${PK_C.toFixed(1)}" stroke-dashoffset="${conn ? (PK_C * (1 - progress / 100)).toFixed(1) : PK_C.toFixed(1)}"/>`
@@ -117,6 +118,44 @@ function renderTabs() {
 }
 
 /* ======================================================== телеметрия */
+/* В11: живой силуэт принтера — машина вместо процентов. Сопло/стол
+   подсвечиваются фактическим нагревом, дверца «дышит» во время печати. */
+function printerSilhouette(p) {
+  const t = p.temperature || {};
+  const nozzleHot = num(t.nozzle) > 90;
+  const bedHot = num(t.bed) > 35;
+  const running = STATE_KIND[p.printer.state] === 'running';
+  const cls = ['psil', nozzleHot ? 'hot-nozzle' : '', bedHot ? 'hot-bed' : '',
+    running ? 'is-running' : ''].filter(Boolean).join(' ');
+  const temps = `Сопло ${nfmt(t.nozzle, 0)}° · стол ${nfmt(t.bed, 0)}°`;
+  return `<svg class="${cls}" width="34" height="30" viewBox="0 0 48 42" aria-hidden="true" role="img">`
+    + `<title>${esc(temps)}</title>`
+    + '<rect class="p-body" x="4" y="2" width="40" height="38" rx="5"/>'
+    + '<rect class="p-door" x="9" y="12" width="30" height="22" rx="3"/>'
+    + '<rect class="p-bed" x="12" y="28" width="24" height="3.4" rx="1.6"/>'
+    + '<rect class="p-nozzle" x="21.4" y="14" width="5.2" height="9.4" rx="1.4"/>'
+    + '<path class="p-body" d="M14 6.4h20"/>'
+    + '</svg>';
+}
+
+/* В12: ETA-циферблат — «во сколько закончится» читается как положение
+   стрелки на обычных часах, а не как ещё одно число. */
+function renderEtaClock(etaUnix, late) {
+  const host = $('pr_eta_clock');
+  if (!host) return;
+  if (!etaUnix) { host.innerHTML = ''; return; }
+  const d = new Date(etaUnix * 1000);
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  const deg = (minutes / 720) * 360;
+  const ticks = [0, 90, 180, 270].map((a) =>
+    `<line class="ec-tick" x1="12" y1="3.4" x2="12" y2="5.6" transform="rotate(${a} 12 12)"/>`).join('');
+  host.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">'
+    + `<circle class="ec-face" cx="12" cy="12" r="10"/>${ticks}`
+    + `<line class="ec-hand" x1="12" y1="12.6" x2="12" y2="5.8" transform="rotate(${deg.toFixed(1)} 12 12)"/>`
+    + '<circle class="ec-dot" cx="12" cy="12" r="1.6"/></svg>';
+  host.classList.toggle('late', Boolean(late));
+}
+
 function renderLive() {
   renderTabs();
   const p = active();
@@ -199,6 +238,7 @@ function renderLive() {
       && num(p.printer.slowdown_min) > 0;   // если прошивка отдаёт поправку — подсветим
     etaEl.textContent = etaText;
     etaEl.classList.toggle('delayed', delayed);
+    renderEtaClock(p.printer.eta, delayed);
   }
   text('pr_speed', SPEED_LABEL[p.printer.speed_level] || p.printer.speed_label || '—');
   text('pr_wifi', p.printer.wifi || '—');
@@ -1458,10 +1498,12 @@ function bind() {
         || (PF.state.jobs.history || []).find((x) => x.id === js.dataset.jobStart);
       if (!job) return fail(new Error('Задание не найдено в текущем списке'));
       try {
-        if (!await preflightAndConfirmJob(job, PF.state.activePrinter || job.printer_id || '')) return;
-        await post('/api/jobs/start', { id: job.id, printer_id: PF.state.activePrinter || job.printer_id || '',
-          confirmed: true, preflight_acknowledged: true });
-        toast('Задание запущено'); PF.refreshCore();
+        await U.withBusy(js, async () => {
+          if (!await preflightAndConfirmJob(job, PF.state.activePrinter || job.printer_id || '')) return;
+          await post('/api/jobs/start', { id: job.id, printer_id: PF.state.activePrinter || job.printer_id || '',
+            confirmed: true, preflight_acknowledged: true });
+          toast('Задание запущено'); PF.refreshCore();
+        });
       } catch (err) { fail(err); }
       return;
     }
@@ -1482,7 +1524,13 @@ function bind() {
     if (jc) {
       if (!confirmDanger('Отменить задание? Если оно печатается — печать будет остановлена.')) return;
       post('/api/jobs/cancel', { id: jc.dataset.jobCancel })
-        .then(() => { toast('Задание отменено'); PF.refreshCore(); }).catch(fail);
+        .then(() => {
+          // В96: отмена не «сжигает» работу — вернёт копию задания в очередь.
+          U.toastUndo('Задание отменено', 'Вернуть его копию в очередь?',
+            () => post('/api/workshop/clone', { id: jc.dataset.jobCancel })
+              .then(() => { toast('Копия вернулась в очередь'); PF.refreshCore(); }).catch(fail));
+          PF.refreshCore();
+        }).catch(fail);
       return;
     }
     const found = e.target.closest('[data-found]');

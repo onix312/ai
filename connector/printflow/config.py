@@ -178,6 +178,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "client_bot_quiet_from": "22:00", # тихие часы клиентских уведомлений
     "client_bot_quiet_to": "08:00",
     "client_bot_track_url": "",       # базовый URL панели для кнопки «Статус онлайн»
+    "shop_season": "none",            # сезон витрины (В67): none|newyear|spring|autumn
     "client_bot_marketing_enabled": False,
     # последний подтверждённый Telegram update_id + 1; техническое состояние,
     # не показывается клиентам и не содержит секретов

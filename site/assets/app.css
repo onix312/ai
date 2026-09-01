@@ -1927,3 +1927,419 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .shelf-forecast .row .bar i.gap { background: #ef4444; }
 .shelf-forecast .gap-warn { color: #ef4444; font-weight: 600; }
 p-warn { color: #ef4444; font-weight: 600; }
+
+/* ================================================== 15.1 — В-серия: визуал
+   Ниже — стили утверждённого визуального пакета (В2, В11, В12, В25, В34,
+   В35, В36, В40, В59, В61, В63, В67, В79–В89, В92, В94–В96). Все размеры —
+   из шкалы --sp-*, тени — из карты --elev-*, темпы — из --t-*. */
+
+/* ---- В95: кнопка с нажимом и состоянием «занят» ---------------------- */
+.btn:active, .icon-btn:active, .chip:active, .seg button:active {
+  transform: translateY(1px) scale(.98);
+}
+.btn.busy, .icon-btn.busy {
+  pointer-events: none;
+  opacity: .72;
+}
+.btn.busy::after, .icon-btn.busy::after {
+  content: "";
+  display: inline-block;
+  width: 12px; height: 12px;
+  margin-left: 6px;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pfSpin .7s linear infinite;
+}
+@keyframes pfSpin { to { transform: rotate(360deg); } }
+
+/* ---- В92: анимация успеха (галочка поверх действия) ------------------ */
+.pf-success {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.pf-success i {
+  width: 84px; height: 84px;
+  border-radius: 50%;
+  background: var(--ok);
+  display: grid; place-items: center;
+  box-shadow: var(--elev-3), 0 0 0 10px var(--ok-soft);
+  animation: pfSuccessPop .58s var(--ease) forwards;
+}
+.pf-success svg { width: 44px; height: 44px; }
+.pf-success path {
+  stroke: #fff; stroke-width: 4.5; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 48; stroke-dashoffset: 48;
+  animation: pfCheckDraw .42s var(--ease) .16s forwards;
+}
+@keyframes pfSuccessPop {
+  0% { transform: scale(.4); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes pfCheckDraw { to { stroke-dashoffset: 0; } }
+
+/* ---- В96: группировка тостов и счётчик повторов ---------------------- */
+.toast .toast-count {
+  min-width: 20px; height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11.5px; font-weight: 700;
+  display: inline-grid; place-items: center;
+  margin-left: 6px;
+}
+
+/* ---- В2: карты-шторки на Обзоре --------------------------------------- */
+.card-foldable > .card-head { cursor: pointer; user-select: none; }
+.card-foldable > .card-head .fold-caret {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: inline-grid; place-items: center;
+  color: var(--muted);
+  background: var(--panel-3);
+  transition: transform var(--t-fast) var(--ease);
+  flex: none;
+}
+.card-foldable.folded > .card-head .fold-caret { transform: rotate(-180deg); }
+.card-foldable.folded > .card-fold { display: none; }
+.card-foldable.folded { padding-bottom: 8px; }
+
+/* ---- В11: живой силуэт принтера --------------------------------------- */
+.psil { display: block; color: var(--muted); }
+.psil .p-body { stroke: currentColor; fill: none; stroke-width: 2; }
+.psil .p-door { fill: var(--accent-soft); stroke: var(--accent-line); stroke-width: 1.4; }
+.psil .p-bed { fill: var(--panel-3); stroke: currentColor; stroke-width: 1.4; transition: fill var(--t-med) var(--ease); }
+.psil .p-nozzle { fill: var(--muted); transition: fill var(--t-med) var(--ease), filter var(--t-med) var(--ease); }
+.psil.hot-nozzle .p-nozzle { fill: var(--warn); filter: drop-shadow(0 0 3px var(--warn)); }
+.psil.hot-bed .p-bed { fill: var(--warn-soft); stroke: var(--warn); }
+.psil.is-running .p-door { animation: psilGlow 2.4s ease-in-out infinite; }
+@keyframes psilGlow { 50% { fill: var(--accent-glow); } }
+
+/* ---- В12: циферблат «во сколько закончится» --------------------------- */
+.eta-clock { display: inline-grid; place-items: center; vertical-align: middle; }
+.eta-clock .ec-face { stroke: var(--line-strong); fill: var(--panel-2); }
+.eta-clock .ec-tick { stroke: var(--line-strong); stroke-width: 1; }
+.eta-clock .ec-hand { stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; transition: transform var(--t-med) var(--ease); }
+.eta-clock .ec-dot { fill: var(--accent); }
+.eta-clock.late .ec-hand { stroke: var(--bad); }
+.eta-clock.late .ec-dot { fill: var(--bad); }
+
+/* ---- В25: превью плиты на строке очереди ------------------------------ */
+.q-plate {
+  width: 46px; height: 46px;
+  flex: none;
+  border-radius: var(--r-sm);
+  background:
+    repeating-linear-gradient(45deg, var(--panel-3) 0 6px, var(--panel-2) 6px 12px);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  display: grid; place-items: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+.q-plate img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---- В34: детерминированный цвет аватаров ----------------------------- */
+.who-av, .avatar, .msg-av {
+  background: var(--av, var(--panel-3));
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ---- В35: схематичная карта клиентов ---------------------------------- */
+.cust-map {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.cust-zone {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel-2);
+  padding: var(--sp-2) var(--sp-3);
+  min-height: 64px;
+  display: flex; flex-direction: column; gap: 2px;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+}
+.cust-zone::before {
+  content: "";
+  position: absolute; inset: auto 0 0 0;
+  height: 4px;
+  background: var(--accent);
+  opacity: calc(.18 + var(--heat, 0) * .82);
+}
+.cust-zone b { font-size: 12.5px; line-height: 1.25; }
+.cust-zone small { color: var(--muted); }
+.cust-zone .cz-sum { margin-left: auto; font-weight: 700; font-size: 12.5px; color: var(--accent); }
+
+/* ---- В40: пузырь переписки на карточке заказа ------------------------- */
+.chat-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 7px;
+  border-radius: 10px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: 11.5px; font-weight: 700;
+  cursor: pointer;
+  border: 0;
+}
+.chat-badge:hover { filter: brightness(1.06); }
+
+/* ---- В59: витрина-полка в перспективе --------------------------------- */
+.prod-grid.shelf3d {
+  perspective: 1100px;
+  gap: var(--sp-4) var(--sp-4);
+}
+.prod-grid.shelf3d .prod-card {
+  transform: rotateX(3deg);
+  transform-origin: 50% 100%;
+  transition: transform var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease);
+  box-shadow: var(--elev-1);
+  position: relative;
+}
+.prod-grid.shelf3d .prod-card::after {
+  content: "";
+  position: absolute; left: -6%; right: -6%; bottom: -8px; height: 8px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--line-strong), var(--line));
+  box-shadow: 0 6px 10px -6px rgba(15, 23, 42, .5);
+}
+.prod-grid.shelf3d .prod-card:hover { transform: rotateX(0deg) translateY(-2px); box-shadow: var(--elev-2); z-index: 1; }
+
+/* ---- В61: свотчи вариантов цвета --------------------------------------- */
+.swatches { display: flex; gap: 5px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
+.swatch {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--panel);
+  box-shadow: 0 0 0 1.5px var(--line-strong);
+  flex: none;
+}
+.swatch.no-color { background: conic-gradient(#f87171,#fbbf24,#34d399,#60a5fa,#c084fc,#f87171); }
+
+/* ---- В63: бейджи-стикеры витрины --------------------------------------- */
+.prod-card { position: relative; }
+.sticker {
+  position: absolute; top: 10px; left: -7px;
+  z-index: 2;
+  padding: 3px 9px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .4px;
+  color: #fff;
+  border-radius: 3px 6px 6px 3px;
+  box-shadow: var(--elev-1);
+  pointer-events: none;
+}
+.sticker::before {
+  content: "";
+  position: absolute; left: 0; bottom: -5px;
+  border: 3px solid transparent;
+  border-top-color: inherit;
+  border-left-color: inherit;
+  filter: brightness(.75);
+}
+.sticker.new  { background: var(--info); }
+.sticker.hit  { background: var(--warn); }
+.sticker.last { background: var(--bad); }
+.sticker.new::before  { border-top-color: var(--info); border-left-color: var(--info); }
+.sticker.hit::before  { border-top-color: var(--warn); border-left-color: var(--warn); }
+.sticker.last::before { border-top-color: var(--bad); border-left-color: var(--bad); }
+
+/* ---- В79: мозаичная галерея моделей ------------------------------------ */
+.model-masonry { columns: 3 220px; column-gap: var(--sp-3); margin-top: var(--sp-3); }
+.model-tile {
+  break-inside: avoid;
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+  box-shadow: var(--elev-1);
+  padding: var(--sp-3);
+  cursor: pointer;
+  transition: box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+}
+.model-tile:hover { box-shadow: var(--elev-2); transform: translateY(-1px); }
+.model-tile .mt-art {
+  height: 96px;
+  border-radius: var(--r-sm);
+  background:
+    radial-gradient(120px 60px at 50% 110%, var(--accent-soft), transparent),
+    repeating-linear-gradient(0deg, transparent 0 11px, var(--line-soft) 11px 12px);
+  display: grid; place-items: center;
+  color: var(--accent);
+  margin-bottom: var(--sp-2);
+  font-size: 30px;
+}
+.model-tile h4 { font-size: 13.5px; margin-bottom: 2px; }
+.model-tile .mt-meta { color: var(--muted); font-size: 11.5px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- В80: облако тегов-фасетов ------------------------------------------ */
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-2); }
+.tag-cloud .tg {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tag-cloud .tg small { color: var(--muted); font-size: 11px; margin-left: 3px; }
+.tag-cloud .tg.on {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---- В81: слайдер «до/после» версий модели ------------------------------ */
+.cmp-wrap { position: relative; border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); min-height: 220px; }
+.cmp-pane { display: grid; place-items: center; padding: var(--sp-4); background: var(--panel-2); }
+.cmp-pane .cmp-dim { width: 100%; max-width: 320px; }
+.cmp-top {
+  position: absolute; inset: 0;
+  clip-path: inset(0 calc(100% - var(--cmp, 50%)) 0 0);
+  border-right: 2px solid var(--accent);
+}
+.cmp-divider {
+  position: absolute; top: 0; bottom: 0;
+  left: var(--cmp, 50%);
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.cmp-range { width: 100%; margin-top: var(--sp-2); accent-color: var(--accent); }
+.cmp-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* ---- В82: превью-макеты генераторов ------------------------------------- */
+.gen-thumb {
+  height: 64px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  margin-bottom: var(--sp-2);
+  position: relative;
+  overflow: hidden;
+}
+.gen-thumb::before, .gen-thumb::after { content: ""; position: absolute; }
+.gen-thumb.g-sign::before {
+  inset: 14px 18px auto; height: 22px;
+  background: var(--accent-soft); border: 1.5px solid var(--accent-line); border-radius: 4px;
+}
+.gen-thumb.g-sign::after {
+  left: 26px; right: 26px; top: 42px; height: 4px;
+  background: var(--line-strong); border-radius: 2px;
+}
+.gen-thumb.g-card::before {
+  inset: 16px auto 16px 14px; width: 38%;
+  background: var(--accent); opacity: .85; border-radius: 4px;
+}
+.gen-thumb.g-card::after {
+  left: 58%; right: 12px; top: 20px; height: 5px;
+  background: var(--line-strong); border-radius: 2px;
+  box-shadow: 0 12px 0 -1px var(--line), 0 24px 0 -2px var(--line-soft);
+}
+.gen-thumb.g-wobbler::before {
+  left: 50%; top: 8px; transform: translateX(-50%);
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--accent-glow); border: 2px solid var(--accent-line);
+}
+.gen-thumb.g-wobbler::after {
+  left: 50%; bottom: 6px; transform: translateX(-50%);
+  width: 54px; height: 5px; background: var(--line-strong); border-radius: 2px;
+}
+.gen-thumb.g-poster::before {
+  inset: 8px 22px 22px;
+  background: linear-gradient(160deg, var(--accent), var(--accent-2));
+  opacity: .88; border-radius: 4px;
+}
+.gen-thumb.g-poster::after {
+  left: 22px; right: 22px; bottom: 8px; height: 8px;
+  background: var(--line-strong); border-radius: 2px;
+}
+.gen-thumb.g-tag::before {
+  left: 12px; top: 16px; width: 60%; height: 26px;
+  background: var(--panel); border: 1.5px solid var(--line-strong); border-radius: 4px;
+}
+.gen-thumb.g-tag::after {
+  right: 10px; top: 20px; width: 18px; height: 18px;
+  background:
+    repeating-conic-gradient(var(--text) 0 25%, transparent 0 50%) 0 0/6px 6px,
+    var(--panel);
+  border: 1px solid var(--line-strong); border-radius: 2px;
+}
+
+/* ---- В83: палитры постеров ---------------------------------------------- */
+.palette-row { display: flex; gap: 8px; flex-wrap: wrap; margin: var(--sp-2) 0; }
+.palette-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  padding: 4px 10px 4px 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.palette-pick.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.palette-pick .dots { display: inline-flex; }
+.palette-pick .dots i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--panel); margin-left: -4px; }
+.palette-pick .dots i:first-child { margin-left: 0; }
+
+/* ---- В84: живой справочник стиля ---------------------------------------- */
+.styleguide .sg-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: var(--sp-2); }
+.sg-color {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  cursor: copy;
+  background: var(--panel);
+}
+.sg-color i { display: block; height: 40px; border-bottom: 1px solid var(--line); }
+.sg-color span { display: block; padding: 5px 8px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.sg-row { display: flex; gap: var(--sp-3); flex-wrap: wrap; align-items: center; margin-top: var(--sp-3); }
+.sg-typo { display: flex; flex-direction: column; gap: 6px; }
+.sg-surface { width: 132px; height: 64px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); display: grid; place-items: center; font-size: 11.5px; color: var(--muted); }
+.sg-surface.s2 { box-shadow: var(--elev-2); }
+.sg-surface.s3 { box-shadow: var(--elev-3); }
+
+/* ---- В89: скелетоны списков ---------------------------------------------- */
+.skel-stack { display: grid; gap: var(--sp-2); }
+.skel-stack .skel-row { padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--r); background: var(--panel); }
+
+/* ---- В67: сезонная лента публичных страниц -------------------------------- */
+.season-ribbon {
+  display: none;
+  width: 100%;
+  padding: 7px 14px;
+  font-size: 13px;
+  text-align: center;
+  letter-spacing: .3px;
+}
+html[data-season="newyear"] .season-ribbon {
+  display: block;
+  background: linear-gradient(90deg, #0e7490, #164e63);
+  color: #ecfeff;
+}
+html[data-season="spring"] .season-ribbon {
+  display: block;
+  background: linear-gradient(90deg, #db2777, #be185d);
+  color: #fff1f7;
+}
+html[data-season="autumn"] .season-ribbon {
+  display: block;
+  background: linear-gradient(90deg, #b45309, #92400e);
+  color: #fffbeb;
+}
+html[data-season="newyear"] .accent-bg { background: #0e7490 !important; }
+html[data-season="spring"] .accent-bg { background: #db2777 !important; }
+html[data-season="autumn"] .accent-bg { background: #b45309 !important; }

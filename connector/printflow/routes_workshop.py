@@ -278,6 +278,64 @@ def workshop_clone(api: Any, ctx: Ctx):
     return workshop(api).clone_job(str(body.get("id") or body.get("job_id") or ""))
 
 
+# ------------------------------------------------------------------ В25
+# Превью плиты на строке очереди: Bambu Studio кладёт PNG-превью внутрь 3MF
+# (Metadata/plate_*.png). Достаём его один раз и кэшируем по пути+mtime,
+# чтобы живое обновление очереди не разархивировало файлы заново.
+_PLATE_CACHE: dict[str, tuple[float, str]] = {}
+_PLATE_CACHE_MAX = 96
+
+
+@router.get("/api/jobs/plate", doc="Превью плиты задания из 3MF (В25)")
+def jobs_plate(api: Any, ctx: Ctx):
+    """PNG-превью плиты 3MF в base64: миниатюра на строке очереди."""
+    raw_name = str(ctx.one("name") or "").strip()
+    if not raw_name:
+        return 404, {"error": "Не указан файл задания"}
+    from .config import UPLOAD_DIR
+    from .http_helpers import safe_file
+
+    base = raw_name.replace("\\\\", "/").rsplit("/", 1)[-1]
+    path = safe_file(UPLOAD_DIR, base)
+    if path is None or not path.is_file():
+        return 404, {"error": "Файл задания не найден локально"}
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return 404, {"error": "Файл задания недоступен"}
+
+    cached = _PLATE_CACHE.get(str(path))
+    if cached and cached[0] == mtime:
+        return 200, {"ok": True, "b64": cached[1]}
+
+    b64 = ""
+    try:
+        from .estimate import parse_3mf_complete
+
+        detail = parse_3mf_complete(path)
+        thumbs = detail.get("thumbnails") if isinstance(detail, dict) else None
+        if isinstance(thumbs, dict) and thumbs:
+            # «Без подсветки» компактнее; иначе первый попавшийся PNG плиты.
+            for key, value in thumbs.items():
+                if "no_light" in str(key) and str(value):
+                    b64 = str(value)
+                    break
+            if not b64:
+                for key, value in thumbs.items():
+                    if str(key).endswith(".png") and str(value):
+                        b64 = str(value)
+                        break
+    except Exception:
+        b64 = ""
+    if not b64:
+        return 404, {"error": "В файле нет превью плиты"}
+
+    if len(_PLATE_CACHE) >= _PLATE_CACHE_MAX:
+        _PLATE_CACHE.pop(next(iter(_PLATE_CACHE)))
+    _PLATE_CACHE[str(path)] = (mtime, b64)
+    return 200, {"ok": True, "b64": b64}
+
+
 @router.post("/api/workshop/shift", audit="Смена: отметка чек-листа")
 def workshop_shift_check(api: Any, ctx: Ctx):
     body = ctx.body

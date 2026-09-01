@@ -67,3 +67,40 @@ def openapi_stats(api: Any, ctx: Ctx):
     from . import openapi as service
     return {"spec": service.counts(service.build()),
             "registry": api.router.count() if hasattr(api, "router") else None}
+
+
+# ------------------------------------------------------------------ В40
+# Пузырь переписки на карточке заказа: канбану не нужны сами диалоги —
+# только «по каким заказам клиент ждёт ответа». Один лёгкий вызов вместо
+# разбора ленты на клиенте.
+@router.get("/api/conversations/by-order", doc="Диалоги, ждущие ответа, по заказам (В40)")
+def conversations_by_order(api: Any, ctx: Ctx):
+    """Счётчик «ждут ответа» в разрезе заказа: {order_id: количество}."""
+    from .conversations import Conversations
+
+    service = getattr(api, "conversations", None)
+    if service is None:
+        service = api.conversations = Conversations(api.db)
+    counts: dict[str, int] = {}
+    try:
+        rows = service.threads(limit=300, needs_answer=True)
+    except Exception:
+        rows = []
+    for row in rows:
+        order_id = str((row or {}).get("order_id") or "").strip()
+        if not order_id:
+            continue
+        unread = int(row.get("unread") or 0)
+        counts[order_id] = counts.get(order_id, 0) + (unread if unread > 0 else 1)
+    return 200, {"counts": counts}
+
+
+# ------------------------------------------------------------------ В67
+# Сезонная тема публичных страниц: витрина и «Мои заказы» читают один
+# публичный ключ настроек; сам ключ правится в панели (Товары → Витрина).
+@router.get("/api/public/season", public=True, doc="Сезонная тема публичных страниц (В67)")
+def public_season(api: Any, ctx: Ctx):
+    season = str(api.db.setting("shop_season", "") or "none").strip().lower()
+    if season not in ("none", "newyear", "spring", "autumn"):
+        season = "none"
+    return 200, {"season": season}

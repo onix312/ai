@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/tokens.css?v=15.0.0">
-<link rel="stylesheet" href="assets/theme.css?v=15.0.0">
-<link rel="stylesheet" href="assets/app.css?v=15.0.0">
-<link rel="stylesheet" href="assets/more.css?v=15.0.0">
+<link rel="stylesheet" href="assets/tokens.css?v=15.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=15.1.0">
+<link rel="stylesheet" href="assets/app.css?v=15.1.0">
+<link rel="stylesheet" href="assets/more.css?v=15.1.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -218,7 +218,7 @@
      <div class="job-facts">
       <div><span>Слой</span><b id="pr_layers">— / —</b></div>
       <div><span>Осталось</span><b id="pr_remaining">—</b></div>
-      <div><span>Завершится</span><b id="pr_eta">—</b></div>
+      <div><span>Завершится</span><b id="pr_eta">—</b> <span class="eta-clock" id="pr_eta_clock" title="Стрелка — момент окончания на циферблате суток"></span></div>
       <div><span>Скорость</span><b id="pr_speed">—</b></div>
       <div><span>Wi-Fi</span><b id="pr_wifi">—</b></div>
       <div><span>Потрачено</span><b id="pr_spent">—</b></div>
@@ -442,7 +442,7 @@
   <div class="head-actions">
    <div class="seg" id="fin_period"><button data-days="7">7</button><button data-days="30" class="on">30</button><button data-days="90">90</button><button data-days="365">365</button></div>
    <button class="btn" id="fin_export_tx" type="button">↓ CSV</button>
-   <button class="btn" id="fin_month_close" type="button">🧾 Закрыть месяц</button>
+   <button class="btn" id="fin_month_close" type="button"><i data-icon="page">🧾</i> Закрыть месяц</button>
    <button class="btn primary" id="fin_add" type="button">+ Проводка</button>
   </div>
  </div>
@@ -627,7 +627,9 @@
   <select id="prod_kind"><option value="">Все виды</option><option value="product">Товар</option><option value="semi">Полуфабрикат</option><option value="kit">Комплект</option><option value="material">Материал</option><option value="service">Услуга</option><option value="showcase">Для магазина</option></select>
   <select id="prod_status"><option value="">Любой статус</option><option value="low">Мало</option><option value="empty">Кончился</option><option value="dead">Мёртвый сток</option><option value="unprofitable">Убыточные</option></select>
   <select id="prod_sort" title="Сортировка плиток"><option value="">Порядок по умолчанию</option><option value="margin">По марже</option><option value="sold7">По продажам 7 дн.</option><option value="days">Кончается первым</option><option value="price">По цене</option></select>
-  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые">👁 Витрина</button>
+  <button class="btn sm ghost" id="prod_shelf3d" type="button" title="Витрина-полка в перспективе (В59)"><i data-icon="bag">📦</i> Полка 3D</button>
+  <select class="btn sm ghost" id="prod_season" title="Сезон витрины — лента на публичных страницах (В67)" style="height:32px"><option value="none">Без сезона</option><option value="newyear">Новый год</option><option value="spring">8 Марта</option><option value="autumn">Осень</option></select>
+  <button class="btn sm ghost" id="prod_shop_eye" type="button" title="Плитки как их видит покупатель в боте: фото, цена, скрытые"><i data-icon="eye">👁</i> Витрина</button>
   <div class="seg" id="prod_view"><button data-mode="cards" class="on">Плитки</button><button data-mode="table">Таблица</button></div>
  </div>
  <div class="toolbar-alerts" id="prod_warn_badge" hidden></div>
@@ -3996,6 +3998,7 @@
     <button class="btn sm" type="button" data-b2b-kind="invoice">Счёт</button>
     <button class="btn sm" type="button" data-b2b-kind="cp">КП</button>
     <button class="btn sm" type="button" data-b2b-kind="receipt">Товарный чек</button>
+    <button class="btn sm" type="button" data-b2b-kind="pickup" title="Термочек выдачи: состав, оплата, QR трекинга"><i data-icon="page">🧾</i> Чек выдачи</button>
     <button class="btn sm primary" type="button" data-b2b-kind="waybill">Накладная</button>
    </div>
    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px">
@@ -4994,21 +4997,21 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=15.0.0"></script>
-<script src="assets/core.js?v=15.0.0"></script>
-<script src="assets/icons.js?v=15.0.0"></script>
-<script src="assets/printer.js?v=15.0.0"></script>
-<script src="assets/queue.js?v=15.0.0"></script>
-<script src="assets/ops.js?v=15.0.0"></script>
-<script src="assets/money.js?v=15.0.0"></script>
-<script src="assets/finance.js?v=15.0.0"></script>
-<script src="assets/shelf.js?v=15.0.0"></script>
-<script src="assets/products.js?v=15.0.0"></script>
-<script src="assets/bridge.js?v=15.0.0"></script>
+<script src="assets/qr.js?v=15.1.0"></script>
+<script src="assets/core.js?v=15.1.0"></script>
+<script src="assets/icons.js?v=15.1.0"></script>
+<script src="assets/printer.js?v=15.1.0"></script>
+<script src="assets/queue.js?v=15.1.0"></script>
+<script src="assets/ops.js?v=15.1.0"></script>
+<script src="assets/money.js?v=15.1.0"></script>
+<script src="assets/finance.js?v=15.1.0"></script>
+<script src="assets/shelf.js?v=15.1.0"></script>
+<script src="assets/products.js?v=15.1.0"></script>
+<script src="assets/bridge.js?v=15.1.0"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=15.0.0"></script>
-<script src="assets/app.js?v=15.0.0"></script>
+<script src="assets/workshop.js?v=15.1.0"></script>
+<script src="assets/app.js?v=15.1.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

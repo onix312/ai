@@ -9,6 +9,7 @@ from __future__ import annotations
 from .accounting import num
 from .config import now_iso
 from .db import Database
+from urllib.parse import quote
 
 
 def _esc(value) -> str:
@@ -131,6 +132,82 @@ def _requisites(db: Database) -> dict:
     }
 
 
+def _pickup_receipt(order: dict, req: dict, number: str, customer: str,
+                    cur: str, lines: list[dict], track_url: str) -> str:
+    """Чек выдачи заказа (В36): термолента 80 мм, перфорация, QR трекинга."""
+    from .qrgen import svg as qr_svg
+
+    paid = num(order.get("paid")) + num(order.get("prepaid"))
+    price = num(order.get("price"))
+    left = max(0.0, price - paid)
+    closed = str(order.get("closed_at") or "")
+    issued = (closed or now_iso()).replace("T", " ")[:16]
+    status = "Выдан полностью" if closed else "Выдача"
+
+    def line(name: str, amount: float) -> str:
+        return (f"<div class=\"ln\"><span>{_esc(name)}</span>"
+                f"<b>{_fmt(amount)}</b></div>")
+
+    items_html = "".join(line(str(ln.get("name") or "Позиция"), num(ln.get("amount"), 0))
+                         for ln in (lines or []))
+    qr = ""
+    if track_url:
+        try:
+            qr = ("<div class=\"qr\">" + qr_svg(track_url, level="M", scale=3, border=2)
+                  + "</div><div class=\"qr-cap\">Отсканируйте — статус заказа онлайн</div>")
+        except Exception:
+            qr = ""
+    return (
+        "<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+        f"<title>Чек выдачи №{_esc(number)}</title>"
+        "<style>"
+        "@page{size:80mm auto;margin:4mm}"
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{font-family:'JetBrains Mono','Courier New',monospace;color:#111;"
+        "font-size:11px;width:72mm;margin:0 auto}"
+        ".rc{padding:4mm 3mm;border:1px dashed #999;border-radius:2px}"
+        ".rc-head{text-align:center;border-bottom:1px dashed #bbb;padding-bottom:3mm;margin-bottom:3mm}"
+        ".rc-brand{font-size:16px;font-weight:800;letter-spacing:2px}"
+        ".rc-sub{font-size:9px;color:#555;margin-top:1mm}"
+        ".rc-title{font-size:13px;font-weight:800;margin:3mm 0;text-align:center;"
+        "border-top:1px dashed #bbb;border-bottom:1px dashed #bbb;padding:2mm 0}"
+        ".kv{display:flex;justify-content:space-between;gap:4mm;font-size:10px;margin:1mm 0}"
+        ".kv span{color:#555}.kv b{text-align:right}"
+        ".ln{display:flex;justify-content:space-between;gap:4mm;font-size:10px;margin:1mm 0;"
+        "border-bottom:1px dotted #ddd;padding-bottom:1mm}"
+        ".total{display:flex;justify-content:space-between;font-size:13px;font-weight:800;"
+        "border-top:1px solid #111;border-bottom:1px double #111;padding:2mm 0;margin-top:2mm}"
+        ".qr{display:block;margin:4mm auto 1mm;width:26mm;height:26mm}"
+        ".qr-cap{text-align:center;font-size:8.5px;color:#555}"
+        ".sign-line{margin-top:7mm;font-size:9.5px;color:#333}"
+        ".sign-line i{display:inline-block;width:34mm;border-bottom:1px dashed #111}"
+        ".rc-foot{margin-top:4mm;text-align:center;font-size:8.5px;color:#777;"
+        "border-top:1px dashed #bbb;padding-top:2mm}"
+        "@media print{.no-print{display:none}}"
+        ".no-print{display:block;margin:6mm auto;padding:8px 16px;background:#4f46e5;"
+        "color:#fff;border:0;border-radius:8px;font-size:12px;cursor:pointer}"
+        "</style></head><body>"
+        "<button class=\"no-print\" onclick=\"window.print()\">Печать чека</button>"
+        "<div class=\"rc\">"
+        f"<div class=\"rc-head\"><div class=\"rc-brand\">{_esc(req['legal_name'])}</div>"
+        f"<div class=\"rc-sub\">{_esc('ИНН ' + str(req['inn'])) if req['inn'] else '3D-печать · локальное производство'}</div></div>"
+        "<div class=\"rc-title\">ЧЕК ВЫДАЧИ ЗАКАЗА</div>"
+        f"<div class=\"kv\"><span>Заказ</span><b>№ {_esc(number)}</b></div>"
+        f"<div class=\"kv\"><span>Клиент</span><b>{_esc(customer or 'частное лицо')}</b></div>"
+        f"<div class=\"kv\"><span>Статус</span><b>{_esc(status)}</b></div>"
+        f"<div class=\"kv\"><span>Выдан</span><b>{_esc(issued)}</b></div>"
+        f"{items_html}"
+        f"<div class=\"total\"><span>ИТОГО</span><span>{_fmt(price)} {_esc(cur)}</span></div>"
+        f"<div class=\"kv\"><span>Оплачено</span><b>{_fmt(paid)} {_esc(cur)}</b></div>"
+        f"<div class=\"kv\"><span>{'Долг' if left > 0.005 else 'Остаток'}</span>"
+        f"<b>{_fmt(left)} {_esc(cur)}</b></div>"
+        f"{qr}"
+        "<div class=\"sign-line\">Заказ получил, претензий нет <i>&nbsp;</i></div>"
+        f"<div class=\"rc-foot\">{_esc(req['legal_name'])} · спасибо, что печатаете у нас!</div>"
+        "</div></body></html>"
+    )
+
+
 class B2B:
     def __init__(self, db: Database):
         self.db = db
@@ -185,6 +262,20 @@ class B2B:
         kind = str(kind or "invoice").strip().lower()
         if kind in ("накладная", "tn", "torg12", "rn"):
             kind = "waybill"
+
+        # ------------------------------------------------------------------ В36
+        # Квитанция-чек выдачи: узкая «термолента» вместо A4-документа.
+        # Печатная форма подтверждения: состав, сумма, оплата, QR трекинга
+        # и строка «получил, претензий нет». Возвращается отдельным HTML
+        # со своей таблицей стилей — общий A4-каркас не используется.
+        if kind in ("pickup", "выдача", "квитанция"):
+            track_base = str(self.db.setting("client_bot_track_url") or "").strip().rstrip("/")
+            track_link = (track_base + "/track.html?number="
+                          + quote(str(number), safe="")) if (track_base and number) else ""
+            receipt_lines = lines if items else [
+                {"name": product, "amount": total}]
+            return _pickup_receipt(order, req, number, customer, cur,
+                                   receipt_lines, track_link)
 
         if kind == "receipt":
             title = "Товарный чек"
