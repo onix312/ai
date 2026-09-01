@@ -291,6 +291,19 @@ CREATE TABLE IF NOT EXISTS staff (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_chat ON staff(chat_id);
 
+-- 14.0 (Н54): подписки сотрудников на события. Раньше любое уведомление
+-- уходило в один общий чат: мастер по печати получал сообщения про деньги,
+-- а бухгалтер — про кончившийся пластик. Теперь каждый выбирает своё,
+-- а общий чат остаётся запасным каналом для критичного.
+CREATE TABLE IF NOT EXISTS staff_subscriptions (
+    staff_id TEXT NOT NULL,
+    event TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT,
+    PRIMARY KEY (staff_id, event)
+);
+CREATE INDEX IF NOT EXISTS idx_staff_subs_event ON staff_subscriptions(event, enabled);
+
 -- Одноразовые коды приглашения: «старт PF-XXXX» в чат бота — и человек
 -- автоматически становится сотрудником/руководителем без ручного ввода chat_id.
 CREATE TABLE IF NOT EXISTS staff_invites (
@@ -444,6 +457,26 @@ CREATE TABLE IF NOT EXISTS client_bot_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_client_outbox_due
     ON client_bot_outbox(state, available_at, id);
+
+-- 14.0 (идея 74): очередь исходящих внутреннего бота. Раньше надёжный
+-- outbox был только у клиентского бота, а бот сотрудников терял
+-- уведомления при обрыве сети: сообщение уходило напрямую в Telegram.
+CREATE TABLE IF NOT EXISTS telegram_outbox (
+    id TEXT PRIMARY KEY,
+    dedupe_key TEXT UNIQUE,
+    chat_id TEXT DEFAULT '',
+    method TEXT DEFAULT 'sendMessage',
+    payload TEXT DEFAULT '{}',
+    file_path TEXT DEFAULT '',
+    state TEXT DEFAULT 'pending',   -- pending | sending | sent | failed
+    attempts INTEGER DEFAULT 0,
+    available_at TEXT,
+    last_error TEXT DEFAULT '',
+    created_at TEXT,
+    sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_outbox_due
+    ON telegram_outbox(state, available_at, id);
 
 -- Подтверждение ручной оплаты: заявка клиента отдельно от кассового платежа.
 CREATE TABLE IF NOT EXISTS client_payment_intents (

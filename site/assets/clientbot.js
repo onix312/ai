@@ -304,6 +304,101 @@ function renderLog(items) {
   }).join('') : '<div class="empty compact"><span>Диалогов пока нет — сюда придут входящие и ответы.</span></div>';
 }
 
+/* Н55: единая лента диалогов — покупатели, отзывы и сотрудники в одном месте.
+   Раньше «кому я должен ответить» собиралось обходом трёх вкладок. */
+const CONV_CHANNEL = { client: 'Покупатель', review: 'Отзыв', staff: 'Сотрудник' };
+function renderConversations(threads, summary) {
+  const host = $('cb_conversations');
+  if (!host) return;
+  const rows = Array.isArray(threads) ? threads : [];
+  const counts = (summary && summary.counts) || {};
+  const badge = Object.keys(counts).filter((k) => counts[k]).map((k) => `${CONV_CHANNEL[k] || k}: ${counts[k]}`);
+  if (!rows.length) {
+    host.innerHTML = '<div class="empty compact"><span>Диалогов по фильтру нет — все отвечены.</span></div>';
+    return;
+  }
+  host.innerHTML = rows.map((row) => {
+    const waiting = ['waiting', 'needs_attention', 'new'].includes(row.state);
+    return `<div class="cb-bubble-row ${waiting ? 'in' : 'out'}" data-conv="${esc(row.id)}">`
+      + `<span class="cb-bubble-av" aria-hidden="true">${row.channel === 'review' ? '★' : row.channel === 'staff' ? '⚙' : '👤'}</span>`
+      + `<div class="cb-bubble"><b>${esc(row.name || row.chat_id || '—')}`
+      + ` <span class="chip ${waiting ? 'warn' : 'outline'}">${esc(CONV_CHANNEL[row.channel] || row.channel)}</span></b>`
+      + `<p>${esc(row.text || '')}</p>`
+      + `<small>${esc(agoText(row.at))} · ${esc(row.state)}${row.unread ? ` · непрочитанных ${row.unread}` : ''}</small>`
+      + `${row.channel === 'client' ? `<div class="cb-bubble-answer"><button type="button" class="btn tiny" data-conv-open="${esc(row.chat_id)}">Открыть диалог</button></div>` : ''}`
+      + `</div></div>`;
+  }).join('')
+    + (badge.length ? `<p class="muted" style="font-size:12px;margin-top:8px">Ждут ответа — ${esc(badge.join(' · '))}</p>` : '');
+  host.querySelectorAll('[data-conv-open]').forEach((btn) => {
+    btn.onclick = () => {
+      const chatId = btn.dataset.convOpen;
+      const input = document.querySelector('[data-reply-chat="' + chatId + '"]');
+      if (input) { input.scrollIntoView({ behavior: 'smooth', block: 'center' }); input.focus(); }
+      else toast('Ответ в этом чате', 'Откройте вкладку «Входящие» и выберите диалог', 'info');
+    };
+  });
+}
+async function refreshConversations() {
+  const host = $('cb_conversations');
+  if (!host) return;
+  const channel = ($('cb_conv_channel') || {}).value || '';
+  const onlyAnswer = !!($('cb_conv_answer') || {}).checked;
+  try {
+    const data = await get('/api/conversations', { channel, needs_answer: onlyAnswer ? '1' : '' });
+    renderConversations(data.threads, data.summary);
+  } catch (error) {
+    host.innerHTML = `<div class="empty compact"><span>Не удалось загрузить: ${esc(error.message || error)}</span></div>`;
+  }
+}
+
+/* Н52: очередь исходящих — что не ушло покупателям и почему */
+function renderOutbox(rows, staffRows) {
+  const host = $('cb_outbox');
+  if (!host) return;
+  const list = Array.isArray(rows) ? rows : [];
+  const staff = Array.isArray(staffRows) ? staffRows : [];
+  if (!list.length && !staff.length) {
+    host.innerHTML = '<tr><td colspan="6"><div class="empty compact">'
+      + '<span>Всё доставлено — очередь пуста.</span></div></td></tr>';
+    return;
+  }
+  const stateLabel = (state) => (state === 'failed' ? 'ошибка'
+    : state === 'sending' ? 'отправляется' : 'ждёт');
+  const clientRows = list.map((row) => `<tr data-outbox="${esc(row.id)}">`
+    + `<td>${esc(row.name || row.chat_id || '—')}</td>`
+    + `<td class="cb-outbox-text">${esc(row.text || row.method || '')}</td>`
+    + `<td><span class="tag ${row.state === 'failed' ? 'bad' : 'warn'}">${esc(stateLabel(row.state))}</span></td>`
+    + `<td class="right">${esc(String(row.attempts || 0))}</td>`
+    + `<td class="cb-outbox-err">${esc(row.last_error || '—')}</td>`
+    + `<td class="right nowrap"><button type="button" class="btn tiny" data-outbox-retry="${esc(row.id)}">Повтор</button> `
+    + `<button type="button" class="btn tiny ghost" data-outbox-drop="${esc(row.id)}">Списать</button></td></tr>`).join('');
+  const staffRowsHtml = staff.map((row) => `<tr>`
+    + `<td>Сотрудники</td><td class="cb-outbox-text">${esc(row.method || '')}</td>`
+    + `<td><span class="tag warn">${esc(stateLabel(row.state))}</span></td>`
+    + `<td class="right">${esc(String(row.attempts || 0))}</td>`
+    + `<td class="cb-outbox-err">${esc(row.last_error || '—')}</td><td></td></tr>`).join('');
+  host.innerHTML = clientRows + staffRowsHtml;
+  host.querySelectorAll('[data-outbox-retry]').forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        const answer = await post('/api/client-bot/outbox/retry', { id: btn.dataset.outboxRetry });
+        toast('Повторено', `доставлено ${answer.sent || 0} из ${answer.retried || 0}`,
+          answer.sent ? 'ok' : 'warn');
+        renderBot();
+      } catch (e) { fail(e); }
+    };
+  });
+  host.querySelectorAll('[data-outbox-drop]').forEach((btn) => {
+    btn.onclick = async () => {
+      try {
+        await post('/api/client-bot/outbox/drop', { id: btn.dataset.outboxDrop });
+        toast('Списано', 'Сообщение убрано из очереди', 'info');
+        renderBot();
+      } catch (e) { fail(e); }
+    };
+  });
+}
+
 /* ============================================================ клиент-бот */
 async function renderBot() {
   const view = $('view-clientbot');
@@ -313,6 +408,11 @@ async function renderBot() {
   try {
     const data = await get('/api/client-bot');
     if (seq !== loadSeq) return;
+    // Н52: очередь исходящих грузим отдельно — она не должна тормозить форму.
+    get('/api/client-bot/outbox').then((queue) => {
+      if (seq === loadSeq) renderOutbox(queue.rows, queue.staff_rows);
+    }).catch(() => {});
+    refreshConversations();
 
     $('cb_enabled').checked = !!data.enabled;
     $('cb_catalog').checked = data.catalog !== false;
@@ -590,9 +690,10 @@ async function renderStaff() {
   const rows = (data.staff || []).map((member) => `<div class="set-row" data-staff-id="${esc(member.id)}">`
     + `<div class="sinfo"><b>${esc(member.name || 'Без имени')}${Number(member.active) ? '' : ' · отключён'}</b>`
     + `<small>${esc(member.role_name || member.role || '')} · chat_id ${esc(member.chat_id || '')}${member.note ? ' · ' + esc(member.note) : ''}<br>Права: ${esc(rights(member.role))}</small></div>`
-    + `<div class="btn-grid">${Number(member.active)
+    + `<div class="btn-grid"><button class="btn sm" type="button" data-subs-toggle="${esc(member.id)}">Уведомления</button>${Number(member.active)
       ? `<button class="btn sm" type="button" data-staff-off="${esc(member.id)}">Отключить</button>`
-      : `<button class="btn sm" type="button" data-staff-on="${esc(member.id)}">Вернуть</button>`}</div></div>`).join('');
+      : `<button class="btn sm" type="button" data-staff-on="${esc(member.id)}">Вернуть</button>`}</div></div>`
+    + `<div class="subs-panel" data-subs-panel="${esc(member.id)}" hidden></div>`).join('');
   const invites = (data.invites || []).filter((item) => !Number(item.used));
   const inviteRows = invites.length ? invites.map((item) => `<div class="set-row"><div class="sinfo"><b>${esc(item.code)}</b>`
     + `<small>${esc(item.role_name || item.role || '')}${item.name ? ' · ' + esc(item.name) : ''} — напишите боту: старт ${esc(item.code)}</small></div>`
@@ -622,6 +723,15 @@ function bindStaff() {
         const result = await post('/api/staff/invite', { role: 'employee' });
         toast(`Код ${result.invite.code}`, `Напишите рабочему боту: старт ${result.invite.code}`); renderStaff(); return;
       }
+      // Н54: подписки на события вместо рассылки всего всем.
+      const toggle = target.closest('[data-subs-toggle]');
+      if (toggle) { await toggleSubsPanel(toggle.dataset.subsToggle); return; }
+      const reset = target.closest('[data-subs-reset]');
+      if (reset) {
+        await post('/api/staff/subscriptions/reset', { staff_id: reset.dataset.subsReset });
+        await toggleSubsPanel(reset.dataset.subsReset, true);
+        toast('Подписки сброшены', 'Вернулись значения по умолчанию'); return;
+      }
       const off = target.closest('[data-staff-off]');
       if (off) { await post('/api/staff/delete', { id: off.dataset.staffOff }); renderStaff(); return; }
       const on = target.closest('[data-staff-on]');
@@ -630,6 +740,50 @@ function bindStaff() {
       if (del) { await post('/api/staff/invite/delete', { code: del.dataset.inviteDel }); renderStaff(); }
     } catch (error) { fail(error); }
   });
+  host.addEventListener('change', async (event) => {
+    const box = event.target.closest('[data-subs-event]');
+    if (!box) return;
+    const staffId = box.dataset.subsStaff;
+    try {
+      const result = await post('/api/staff/subscriptions',
+        { staff_id: staffId, events: { [box.dataset.subsEvent]: box.checked } });
+      const saved = result.current || {};
+      const on = Object.keys(saved).filter((key) => saved[key]).length;
+      toast('Подписка сохранена', `У ${box.dataset.subsName || 'сотрудника'} включено событий: ${on}`);
+    } catch (error) {
+      box.checked = !box.checked;   // откатываем галочку, если сервер отказал
+      fail(error);
+    }
+  });
+}
+
+/* Н54: какие события получает конкретный сотрудник.
+   Раньше любое уведомление уходило всей команде: ночной дефект будил
+   бухгалтера, а бухгалтерские алерты — мастера. */
+async function toggleSubsPanel(staffId, forceOpen) {
+  const panel = document.querySelector(`[data-subs-panel="${staffId}"]`);
+  if (!panel) return;
+  if (!forceOpen && !panel.hidden) { panel.hidden = true; return; }
+  panel.hidden = false;
+  panel.innerHTML = '<p class="muted" style="font-size:12.5px">Загружаем список событий…</p>';
+  let data;
+  try { data = await get('/api/staff/subscriptions', { staff_id: staffId }); }
+  catch (error) { panel.innerHTML = `<p class="muted">Не удалось загрузить: ${esc(error.message || error)}</p>`; return; }
+  const current = data.current || {};
+  const groups = {};
+  (data.events || []).forEach((item) => {
+    (groups[item.group] = groups[item.group] || []).push(item);
+  });
+  const boxes = Object.keys(groups).map((group) => `<div class="subs-group"><b>${esc(group)}</b><div class="subs-items">`
+    + groups[group].map((item) => {
+      const on = staffId in current ? !!current[item.event] : !!item.default;
+      return `<label class="check"><input type="checkbox" data-subs-event="${esc(item.event)}"`
+        + ` data-subs-staff="${esc(staffId)}" data-subs-name="${esc(item.label)}"${on ? ' checked' : ''}>`
+        + `${esc(item.label)}${item.default ? ' <span class="muted">(по умолчанию)</span>' : ''}</label>`;
+    }).join('') + '</div></div>').join('');
+  panel.innerHTML = `<p class="muted" style="font-size:12.5px">Отмеченное приходит этому человеку;`
+    + ` остальные события ему не отправляются.</p>${boxes}`
+    + `<button class="btn sm" type="button" data-subs-reset="${esc(staffId)}">Сбросить к умолчаниям</button>`;
 }
 
 function bind() {
@@ -678,14 +832,44 @@ function bind() {
   bindStaff();
 }
 
-PF.on('ready', () => {
+/* 14.0 (47): ленивая загрузка — инициализация через PF.module. */
+PF.module('clientbot', () => {
   bind();
-  if ($('view-clientbot')?.classList.contains('on')) renderBot();
+  if (PF.viewOn('clientbot')) renderBot();
 });
 PF.on('view', (detail) => {
   if (detail && detail.view === 'clientbot') renderBot();
   if (detail && detail.view === 'settings') renderStaff();
 });
 PF.on('bootstrap', () => { if ($('view-clientbot')?.classList.contains('on')) renderBot(); });
-PF.modules.clientbot = { renderBot, renderStaff, saveBot, testBot };
+PF.on('view', (name) => {
+  if (name !== 'clientbot') return;
+  const retry = $('cb_outbox_retry');
+  if (retry && !retry.dataset.bound) {
+    retry.dataset.bound = '1';
+    retry.onclick = async () => {
+      try {
+        const answer = await post('/api/client-bot/outbox/retry', {});
+        toast('Очередь повторена',
+          `доставлено ${answer.sent || 0} из ${answer.retried || 0}`,
+          answer.sent ? 'ok' : 'warn');
+        renderBot();
+      } catch (e) { fail(e); }
+    };
+  }
+});
+
+PF.on('view', (name) => {
+  if (name !== 'clientbot') return;
+  [['cb_conv_channel', 'change'], ['cb_conv_answer', 'change']].forEach(([id, event]) => {
+    const el = $(id);
+    if (el && !el.dataset.bound) {
+      el.dataset.bound = '1';
+      el.addEventListener(event, () => refreshConversations());
+    }
+  });
+});
+
+PF.modules.clientbot = { renderBot, renderStaff, saveBot, testBot, renderOutbox,
+  renderConversations, refreshConversations, toggleSubsPanel };
 })();

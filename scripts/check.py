@@ -96,6 +96,18 @@ def main(argv: list[str] | None = None) -> int:
     # Б8: проверка что все data-icon существуют в PFIcons
     checks.append(check_data_icons())
 
+    # 14.0 (94): headless-стенд панели. node --check ловит только синтаксис,
+    # а обращение к необъявленной переменной (Б1/Б2) видно лишь при загрузке
+    # скриптов с заглушкой DOM.
+    if node:
+        checks.append(run("Headless-стенд панели (необъявленные переменные)",
+                          [node, "scripts/panel-check.js"]))
+    elif args.require_tools:
+        print("FAIL: node не найден", file=sys.stderr)
+        checks.append(False)
+    else:
+        print("SKIP: node не найден — стенд панели не запущен")
+
     if not args.quick:
         checks.append(run(
             "Unit-тесты",

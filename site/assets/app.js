@@ -1655,7 +1655,7 @@ async function resetSettings() {
   if (!confirmDanger('Вернуть настройки к заводским? Заказы, клиенты и проводки останутся на месте.')) return;
   try {
     const res = await post('/api/settings/reset', {});
-    PF.state.settings = res.settings;
+    PF.setSettings(res.settings);
     PF.applyTheme();
     renderSettings();
     toast('Настройки сброшены', 'Вернулись значения по умолчанию');
@@ -1676,7 +1676,7 @@ async function saveSettings() {
   payload.accent = PF.state.settings.accent || 'indigo';
   try {
     const res = await post('/api/settings', payload);
-    PF.state.settings = res.settings;
+    PF.setSettings(res.settings);
     PF.applyTheme();
     renderSettings();
     toast('Настройки сохранены', 'Расчёты пересчитаны по новым тарифам');
@@ -2036,7 +2036,7 @@ async function renderProfiles(){
     const data=await get('/api/settings/profiles');
     const list=data.profiles||[];
     host.innerHTML = list.length ? list.map(p=>`<div class="set-row"><div class="sinfo"><b>${esc(p.name)}</b><small>${esc(p.at||'')}</small></div><button class="btn sm" data-prof-restore="${esc(p.id)}">Восстановить</button><button class="icon-btn sm danger" data-prof-del="${esc(p.id)}">×</button></div>`).join('') : '<div class="empty compact"><span>Снапшотов нет — сохраните текущий набор.</span></div>';
-    host.querySelectorAll('[data-prof-restore]').forEach(b=>b.addEventListener('click', async()=>{ if(!confirmDanger('Восстановить снапшот «'+b.dataset.profRestore+'»? Текущие настройки будут перезаписаны.')) return; try{ await post('/api/settings/profile/restore',{id:b.dataset.profRestore}); PF.state.settings=(await get('/api/settings')).settings; renderSettings(); toast('Настройки восстановлены'); }catch(e){fail(e);} }));
+    host.querySelectorAll('[data-prof-restore]').forEach(b=>b.addEventListener('click', async()=>{ if(!confirmDanger('Восстановить снапшот «'+b.dataset.profRestore+'»? Текущие настройки будут перезаписаны.')) return; try{ await post('/api/settings/profile/restore',{id:b.dataset.profRestore}); PF.setSettings((await get('/api/settings')).settings); renderSettings(); toast('Настройки восстановлены'); }catch(e){fail(e);} }));
     host.querySelectorAll('[data-prof-del]').forEach(b=>b.addEventListener('click', async()=>{ await post('/api/settings/profile/delete',{id:b.dataset.profDel}); renderProfiles(); }));
   }catch(e){ host.innerHTML='<div class="notice bad"><span>✕</span><span>'+esc(e.message)+'</span></div>';}
 }
@@ -2607,16 +2607,20 @@ PF.on('ready', () => {
   setInterval(refreshHeartbeat, 60000);
   setInterval(refreshAchievements, 300000);
 });
-PF.on('data', renderDashboard);
+/* 14.0 (идея 45): перерисовка только видимого раздела. Телеметрия
+   печатящего принтера приходила пачками и заставляла перерисовывать
+   заказы, клиентов, склад, каталог и контент — все 19 разделов сразу.
+   Шапка (cycobar) видна всегда, поэтому она без охраны. */
+PF.on('data', PF.whenView('dashboard', renderDashboard));
 PF.on('data', renderCycobar);
-PF.on('live', renderDashboard);
+PF.on('live', PF.whenView('dashboard', renderDashboard));
 PF.on('live', renderCycobar);
-PF.on('finance', renderDashboard);
-PF.on('money', renderDashboard);
-PF.on('events', renderEvents);
-PF.on('printers', renderSettings);
+PF.on('finance', PF.whenView('dashboard', renderDashboard));
+PF.on('money', PF.whenView('dashboard', renderDashboard));
+PF.on('events', PF.whenView('dashboard', renderEvents));
+PF.on('printers', PF.whenView('settings', renderSettings));
 PF.on('printers', renderCycobar);
-PF.on('bootstrap', renderSettings);
+PF.on('bootstrap', PF.whenView('settings', renderSettings));
 PF.on('money', () => { if (document.querySelector('#view-settings.on')) renderSettings(); });
 PF.on('view', (d) => {
   if (d.view === 'library') showArticle(d.sub || '');
@@ -2631,5 +2635,99 @@ window.addEventListener('resize', U.debounce(() => {
   if (document.querySelector('#view-finance.on') && PF.modules.money) PF.modules.money.renderFinance();
 }, 220));
 
-PF.modules.settings = { downloadBackup, renderSettings, saveSettings, resetSettings, filterSettings };
+/* Н1: карточка «Самодиагностика» — один снимок состояния коннектора.
+   Данные берём из /api/diagnostics: тот же источник, что у бота и pf doctor,
+   поэтому панель не может показать здоровье, отличное от реального. */
+let diagReport = null;
+function diagRow(ok, title, note, badge) {
+  return `<div class="mini-row"><span class="dot ${ok ? 'on' : 'bad'}"></span>`
+    + `<div class="mbody"><b>${esc(title)}</b><small>${esc(note || '')}</small></div>`
+    + `<span class="chip ${ok ? 'ok' : 'warn'}">${esc(badge || (ok ? 'ок' : 'внимание'))}</span></div>`;
+}
+function renderDiag(report) {
+  const host = $('set_diag');
+  if (!host) return;
+  diagReport = report || diagReport;
+  const r = diagReport;
+  if (!r) { host.innerHTML = '<span>Нет данных.</span>'; return; }
+  const rows = [];
+  const threads = r.threads || {};
+  const missing = threads.missing || [];
+  rows.push(diagRow(!missing.length, 'Потоки',
+    `всего ${threads.total || 0}` + (missing.length ? ` · не запущены: ${missing.join(', ')}` : ' · все на месте'),
+    missing.length ? `${missing.length} нет` : 'ок'));
+  const db = r.database || {};
+  rows.push(diagRow(!!db.exists, 'База данных',
+    `${nfmt((db.size || 0) / 1024)} КБ · таблиц ${db.tables || 0} · WAL ${nfmt((db.wal_size || 0) / 1024)} КБ`
+    + ` · схема ${db.schema_version || 0} из ${(r.schema || {}).current || 0}`,
+    (r.schema || {}).matches === false ? 'схема' : 'ок'));
+  const backups = r.backups || {};
+  rows.push(diagRow((backups.count || 0) > 0, 'Резервные копии',
+    `${backups.count || 0} шт.` + (backups.last_at ? ` · последняя ${agoText(backups.last_at)}` : ' · копий нет'),
+    backups.count ? 'ок' : 'нет'));
+  const errors = r.errors || {};
+  rows.push(diagRow((errors.errors || 0) === 0, 'Ошибки в журнале',
+    `${errors.errors || 0} за ${errors.window_hours || 24} ч`,
+    errors.errors ? String(errors.errors) : 'ок'));
+  const outbox = r.outbox || {};
+  if (outbox && outbox.total_pending != null) {
+    const stuck = (outbox.staff && outbox.staff.pending) || 0;
+    const client = (outbox.client && outbox.client.pending) || 0;
+    const lastErr = (outbox.staff && outbox.staff.last_error)
+      || (outbox.client && outbox.client.last_error) || '';
+    rows.push(diagRow(outbox.total_pending === 0, 'Очередь в Telegram',
+      `сотрудникам ${stuck} · покупателям ${client}` + (lastErr ? ` · ${lastErr}` : ''),
+      outbox.total_pending === 0 ? 'ок' : String(outbox.total_pending)));
+  }
+  const farm = r.farm || {};
+  if (farm && farm.printers != null) {
+    rows.push(diagRow(true, 'Парк принтеров',
+      `${farm.online || 0}/${farm.printers || 0} онлайн · печатают ${farm.printing || 0} · в очереди ${r.queue || 0}`,
+      `${farm.online || 0}/${farm.printers || 0}`));
+  }
+  const services = r.services || {};
+  rows.push(diagRow(true, 'Сервисы',
+    ['бот сотрудников', 'клиент-бот', 'облачный мост', 'шлюз Studio']
+      .filter((_, i) => [services.telegram_bot, services.client_bot,
+        services.bambu_cloud, services.studio_gateway][i]).join(', ') || 'ничего не настроено',
+    'инфо'));
+  const rt = r.router || {};
+  host.innerHTML = rows.join('')
+    + `<p class="muted" style="font-size:12px;margin-top:8px">PrintFlow ${esc(r.version || '')}`
+    + ` · Python ${esc(r.python || '')} · аптайм ${Math.floor((r.uptime_sec || 0) / 60)} мин`
+    + ` · маршрутов ${rt.registered || 0} · снято ${esc(r.at || '')}</p>`;
+}
+async function refreshDiag() {
+  const host = $('set_diag');
+  if (!host) return;
+  try {
+    const report = await get('/api/diagnostics');
+    renderDiag(report);
+  } catch (error) {
+    host.innerHTML = `<span>Не удалось снять показания: ${esc(error.message || error)}</span>`;
+  }
+}
+PF.on('view', (d) => {
+  if (d.view !== 'settings') return;
+  refreshDiag();
+  const refresh = $('diag_refresh');
+  if (refresh && !refresh.dataset.bound) {
+    refresh.dataset.bound = '1';
+    refresh.onclick = () => refreshDiag();
+  }
+  const copy = $('diag_copy');
+  if (copy && !copy.dataset.bound) {
+    copy.dataset.bound = '1';
+    copy.onclick = async () => {
+      try {
+        const text = await get('/api/diagnostics/report');
+        if (navigator.clipboard) await navigator.clipboard.writeText(text.text || '');
+        toast('Отчёт скопирован', 'Можно вставить в чат поддержки', 'ok');
+      } catch (error) { fail(error); }
+    };
+  }
+});
+
+PF.modules.settings = { downloadBackup, renderSettings, saveSettings, resetSettings, filterSettings,
+  renderDiag, refreshDiag };
 })();

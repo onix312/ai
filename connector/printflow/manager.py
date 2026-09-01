@@ -2433,10 +2433,15 @@ class PrinterManager:
 
     def notify_async(self, text: str, photo: bytes | None = None,
                      buttons: list[tuple[str, str]] | None = None,
-                     critical: bool = False) -> None:
-        """Отправить сообщение в фоне, чтобы не тормозить поток телеметрии."""
+                     critical: bool = False, event: str = "") -> None:
+        """Отправить сообщение в фоне, чтобы не тормозить поток телеметрии.
+
+        `event` (Н54) — имя события из реестра подписок: сообщение уйдёт
+        только тем сотрудникам, которые на него подписаны.
+        """
         threading.Thread(target=self.send_telegram,
                          args=(text, photo, buttons, critical),
+                         kwargs={"event": event},
                          daemon=True).start()
 
     def tg_quiet_now(self) -> bool:
@@ -2461,7 +2466,7 @@ class PrinterManager:
 
     def send_telegram(self, text: str, photo: bytes | None = None,
                       buttons: list[tuple[str, str]] | None = None,
-                      critical: bool = False) -> dict:
+                      critical: bool = False, event: str = "") -> dict:
         settings = self.db.settings(include_secrets=True)
         token, chat = settings.get("telegram_token"), settings.get("telegram_chat_id")
         if not token or not chat:
@@ -2472,18 +2477,42 @@ class PrinterManager:
         if buttons:
             reply_markup = json.dumps({"inline_keyboard": [
                 [{"text": t, "callback_data": d} for t, d in buttons]]})
+        # Н54: событие уходит подписанным сотрудникам; общий чат — запасной
+        # канал (и единственный, если подписок нет или событие критичное).
+        targets: list[str] = []
         try:
-            if photo:
-                return self._send_photo(token, str(chat), text, photo, reply_markup)
-            data = urllib.parse.urlencode({"chat_id": chat, "text": text,
-                                           "reply_markup": reply_markup,
-                                           "disable_web_page_preview": "true"}).encode()
-            request = urllib.request.Request(
-                f"https://api.telegram.org/bot{token}/sendMessage", data=data)
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return {"ok": response.status == 200}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            from . import subscriptions
+            plan = subscriptions.route(self.db, event, critical=critical)
+            targets = [c for c in plan["chats"] if c and c != str(chat)]
+            if plan["use_fallback"]:
+                targets.insert(0, str(chat))
+        except Exception:
+            targets = [str(chat)]
+        if not targets:
+            return {"ok": True, "skipped": "no_subscribers"}
+        last: dict = {"ok": True, "sent": 0}
+        for target in targets:
+            try:
+                if photo:
+                    answer = self._send_photo(token, target, text, photo, reply_markup)
+                else:
+                    data = urllib.parse.urlencode(
+                        {"chat_id": target, "text": text,
+                         "reply_markup": reply_markup,
+                         "disable_web_page_preview": "true"}).encode()
+                    request = urllib.request.Request(
+                        f"https://api.telegram.org/bot{token}/sendMessage", data=data)
+                    with urllib.request.urlopen(request, timeout=10) as response:
+                        answer = {"ok": response.status == 200}
+                if answer.get("ok"):
+                    last["sent"] = int(last.get("sent") or 0) + 1
+                else:
+                    last = {"ok": False, "error": answer.get("error") or "Telegram отклонил",
+                            "sent": last.get("sent")}
+            except Exception as exc:
+                last = {"ok": False, "error": str(exc), "sent": last.get("sent")}
+        last["recipients"] = len(targets)
+        return last
 
     @staticmethod
     def _send_photo(token: str, chat: str, caption: str, photo: bytes,

@@ -198,6 +198,20 @@ class ClientBot:
         self._await_pickup: dict[str, tuple[str, float]] = {}
         self._bot_username = ""      # @username бота, для кнопки «Поделиться»
         self._bot_user_id_cache = ""  # числовой id бота (getMe), для проверки ответов
+        # 14.0 (идея 73): транспорт, журнал update и outbox — общие с рабочим
+        # ботом (модуль tg). Свои копии этих подсистем удалены.
+        from .tg import Outbox, Transport, UpdateLedger
+        self.transport = Transport(
+            lambda: str(self._settings().get("client_bot_token", "") or ""), "client")
+        self.ledger = UpdateLedger(self.db, "client_bot_updates")
+        # Отправитель ищется в момент вызова: тесты подменяют bot._call,
+        # и очередь обязана ходить через ту же подмену.
+        self.outbox = Outbox(
+            self.db,
+            sender=lambda method, payload, timeout=15: self._call(
+                method, payload, timeout=timeout),
+            photo_sender=lambda payload, raw: self._send_photo_now(payload, raw),
+            token_provider=self.transport.token_provider)
         self._thread = threading.Thread(target=self._loop, name="pf-client-bot",
                                         daemon=True)
         self._thread.start()
@@ -269,126 +283,30 @@ class ClientBot:
             self.db.set_settings({"client_bot_templates": templates})
 
     def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
-        token = self._settings().get("client_bot_token", "")
-        if not token:
-            return {}
-        url = API.format(token=token, method=method)
-        data = urllib.parse.urlencode(params).encode()
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, data=data),
-                                        timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8", "ignore"))
-        except Exception:
-            return {}
+        """Вызов Bot API через общий транспорт (идея 73)."""
+        return self.transport.call(method, params, timeout=timeout)
 
     def _outbox_add(self, chat: str, method: str, payload: dict,
                     dedupe_key: str = "", file_path: str = "") -> dict | None:
-        """Поставить исходящее сообщение в постоянную очередь.
+        """Запись в очередь исходящих через общий модуль tg (идея 73)."""
+        return self.outbox.add(str(chat), str(method or "sendMessage"),
+                               payload, dedupe_key=dedupe_key, file_path=file_path)
 
-        Важное свойство: сначала создаётся запись в SQLite, затем выполняется
-        HTTP-вызов Telegram. При падении процесса между этими шагами worker на
-        следующем запуске повторит доставку, а уникальный dedupe_key не даст
-        отправить одно и то же уведомление дважды.
-        """
-        key = str(dedupe_key or "").strip()[:240]
-        if key:
-            existing = self.db.one(
-                "SELECT * FROM client_bot_outbox WHERE dedupe_key=?", (key,))
-            if existing:
-                return existing
-        stamp = now_iso()
-        ident = uid("cbout")
-        # Пустой ключ должен быть NULL: UNIQUE допускает много NULL, но не
-        # допускает несколько пустых строк. Обычные сообщения без dedupe_key
-        # иначе начали бы теряться после первой отправки.
-        db_key = key or None
-        self.db.execute(
-            "INSERT OR IGNORE INTO client_bot_outbox"
-            "(id,dedupe_key,chat_id,method,payload,file_path,state,attempts,available_at,created_at)"
-            " VALUES(?,?,?,?,? ,?, 'pending',0,?,?)",
-            (ident, db_key, str(chat), method,
-             json.dumps(payload, ensure_ascii=False), str(file_path or ""), stamp, stamp),
-        )
-        return self.db.one("SELECT * FROM client_bot_outbox WHERE id=?", (ident,)) \
-            or (self.db.one("SELECT * FROM client_bot_outbox WHERE dedupe_key=?", (key,)) if key else None)
-
-    def _outbox_send(self, row: dict) -> bool:
-        """Синхронно попробовать доставить одну запись очереди."""
-        try:
-            payload = json.loads(row.get("payload") or "{}")
-        except (TypeError, ValueError):
-            payload = {}
-        claim = self.db.execute(
-            "UPDATE client_bot_outbox SET state='sending',available_at=? WHERE id=? AND state='pending'",
-            (now_iso(), row.get("id")))
-        if not claim.rowcount:
-            current = self.db.one("SELECT state FROM client_bot_outbox WHERE id=?",
-                                  (row.get("id"),)) or {}
-            return current.get("state") == "sent"
-        row["state"] = "sending"
-        result: dict = {}
-        if row.get("method") == "sendPhoto":
-            raw = b""
-            path = str(row.get("file_path") or "")
-            if path:
-                try:
-                    raw = Path(path).read_bytes()
-                except OSError:
-                    raw = b""
-            if raw:
-                result = self._send_photo_now(payload, raw)
-        else:
-            result = self._call(str(row.get("method") or "sendMessage"),
-                                payload, timeout=15)
-        if result.get("ok"):
-            self.db.execute(
-                "UPDATE client_bot_outbox SET state='sent',sent_at=?,last_error='' WHERE id=?",
-                (now_iso(), row["id"]),
-            )
-            path = str(row.get("file_path") or "")
-            if path:
-                try:
-                    Path(path).unlink(missing_ok=True)
-                except OSError:
-                    pass
-            return True
-        attempts = int(num(row.get("attempts"))) + 1
-        # Экспоненциальная пауза ограничена пятью минутами; запись не удаляем.
-        delay = min(300, 2 ** min(attempts, 8))
-        available = datetime.fromtimestamp(time.time() + delay).astimezone().isoformat()
-        self.db.execute(
-            "UPDATE client_bot_outbox SET state='pending',attempts=?,available_at=?,last_error=? WHERE id=?",
-            (attempts, available, "Telegram не подтвердил доставку", row["id"]),
-        )
-        return False
-
-    def _drain_outbox(self, limit: int = 30) -> int:
-        """Доставить due-сообщения; вызывается после polling и тестируется отдельно."""
-        self.db.execute(
-            "UPDATE client_bot_outbox SET state='pending'"
-            " WHERE state='sending' AND datetime(replace(available_at,'T',' '))"
-            " <= datetime('now','-300 seconds')")
-        rows = self.db.query(
-            "SELECT * FROM client_bot_outbox WHERE state='pending'"
-            " AND (available_at IS NULL OR available_at='' OR"
-            " datetime(replace(available_at,'T',' '))<=datetime('now'))"
-            " ORDER BY datetime(replace(created_at,'T',' ')), id LIMIT ?",
-            (max(1, int(limit)),))
-        sent = 0
-        for row in rows:
-            if self._outbox_send(row):
-                sent += 1
-        return sent
+    def _outbox_send(self, row: dict | None) -> bool:
+        """Отправка строки очереди: файл multipart, прочее — Bot API."""
+        return self.outbox.send(row)
 
     def _reply(self, chat: str, text: str, buttons: dict | None = None,
                dedupe_key: str = "") -> None:
+        """Ответ покупателю через durable outbox (идея 73)."""
         params: dict = {"chat_id": chat, "text": text[:3800],
                         "disable_web_page_preview": "true"}
         if buttons:
             params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
         if not dedupe_key and self._current_update_id:
             digest = hashlib.sha256(
-                (str(chat) + "\0" + str(text) + "\0" + json.dumps(buttons or {}, sort_keys=True)).encode()
+                (str(chat) + "\0" + str(text) + "\0"
+                 + json.dumps(buttons or {}, sort_keys=True)).encode()
             ).hexdigest()[:24]
             dedupe_key = f"update:{self._current_update_id}:message:{digest}"
         row = self._outbox_add(str(chat), "sendMessage", params, dedupe_key)
@@ -404,35 +322,6 @@ class ClientBot:
             if "dedupe_key" not in str(exc):
                 raise
             self._reply(chat, text, buttons)
-
-    def _send_photo_now(self, params: dict, raw: bytes) -> dict:
-        """Непосредственная multipart-отправка без изменения outbox."""
-        token = self._settings().get("client_bot_token", "")
-        if not token or not raw:
-            return {}
-        boundary = f"pfcb{int(time.time() * 1000)}"
-        parts: list[bytes] = []
-        def field(name: str, value: str) -> None:
-            parts.append(f"--{boundary}\r\nContent-Disposition: form-data;"
-                         f' name="{name}"\r\n\r\n{value}\r\n'.encode())
-        for key, value in params.items():
-            if key != "chat_id":
-                field(key, str(value))
-        field("chat_id", str(params.get("chat_id") or ""))
-        parts.append(f"--{boundary}\r\nContent-Disposition: form-data;"
-                     f' name="photo"; filename="item.jpg"\r\n'
-                     f"Content-Type: image/jpeg\r\n\r\n".encode())
-        parts.append(raw)
-        parts.append(f"\r\n--{boundary}--\r\n".encode())
-        url = API.format(token=token, method="sendPhoto")
-        try:
-            request = urllib.request.Request(
-                url, data=b"".join(parts),
-                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-            with urllib.request.urlopen(request, timeout=20) as response:
-                return json.loads(response.read().decode("utf-8", "ignore"))
-        except Exception:
-            return {}
 
     def _send_photo(self, chat: str, caption: str, raw: bytes,
                     buttons: dict | None = None, dedupe_key: str = "") -> None:
@@ -450,26 +339,19 @@ class ClientBot:
         if buttons:
             params["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
         if not dedupe_key and self._current_update_id:
-            dedupe_key = f"update:{self._current_update_id}:photo:{hashlib.sha256((chat + caption).encode()).hexdigest()[:24]}"
+            dedupe_key = (f"update:{self._current_update_id}:photo:"
+                          + hashlib.sha256((chat + caption).encode()).hexdigest()[:24])
         row = self._outbox_add(chat, "sendPhoto", params, dedupe_key, str(path))
         if row and row.get("state") != "sent":
             self._outbox_send(row)
 
-    def _download_file(self, file_id: str) -> bytes | None:
-        """Скачать файл покупателя (getFile → скачивание), как во внутреннем боте."""
-        token = self._settings().get("client_bot_token", "")
-        if not token or not file_id:
-            return None
-        try:
-            info = self._call("getFile", {"file_id": file_id})
-            path = str((info.get("result") or {}).get("file_path") or "")
-            if not path:
-                return None
-            url = f"https://api.telegram.org/file/bot{token}/{path}"
-            with urllib.request.urlopen(url, timeout=30) as response:
-                return response.read()
-        except Exception:
-            return None
+    def _drain_outbox(self, batch: int = 10) -> int:
+        """Слив очереди: надёжная доставка сообщений покупателям."""
+        return self.outbox.drain(batch=batch)
+
+    def _send_photo_now(self, payload: dict, raw: bytes | None = None) -> dict:
+        """Фото multipart'ом через общий транспорт (идея 73)."""
+        return self.outbox._multipart_photo(payload, raw)
 
     def _username(self) -> str:
         """@username бота для кнопки «Поделиться» (getMe, кэшируется)."""
@@ -539,71 +421,17 @@ class ClientBot:
         return self.db.upsert("client_chats", patch, key="chat_id")
 
     def _claim_update(self, update: dict) -> bool | None:
-        """Атомарно занять update_id; повторная доставка не исполняется.
+        """Занять update в общем журнале клиентского бота (идея 73).
 
-        ``True`` означает «обработать», ``False`` — «временно не трогать»,
-        ``None`` — update уже успешно завершён (polling может подтвердить
-        offset, но побочный эффект повторять нельзя). Упавший update переводим
-        обратно в processing, чтобы ошибка сети/процесса не оставила очередь
-        навсегда заблокированной.
+        Трёхзначный возврат сохраняется: `True` — обработать, `False` —
+        занят другим потоком, `None` — уже выполнен (offset подтверждать
+        можно, побочный эффект повторять нельзя).
         """
-        update_id = str(update.get("update_id") or "").strip()
-        if not update_id:
-            return True
-        callback = update.get("callback_query") or {}
-        message = update.get("message") or callback.get("message") or {}
-        chat = str((message.get("chat") or {}).get("id") or "")
-        kind = "callback" if callback else "message"
-        cur = self.db.execute(
-            "INSERT OR IGNORE INTO client_bot_updates"
-            "(update_id,chat_id,kind,state,received_at) VALUES(?,?,?,?,?)",
-            (update_id, chat, kind, "processing", now_iso()))
-        if cur.rowcount:
-            return True
-        existing = self.db.one(
-            "SELECT state,received_at FROM client_bot_updates WHERE update_id=?", (update_id,)) or {}
-        state = str(existing.get("state") or "")
-        if state == "done":
-            return None
-        # Не перехватываем живую обработку: второй поток/экземпляр бота
-        # должен дождаться её завершения. Повторяем только failed или запись,
-        # которая действительно зависла дольше пяти минут.
-        stale = state == "failed"
-        if state == "processing":
-            try:
-                received = datetime.fromisoformat(str(existing.get("received_at") or ""))
-                if received.tzinfo is None:
-                    received = received.astimezone()
-                stale = (datetime.now().astimezone() - received).total_seconds() >= 300
-            except (TypeError, ValueError, OverflowError):
-                stale = False
-        if not stale:
-            return False
-        now = now_iso()
-        if state == "processing":
-            cur = self.db.execute(
-                "UPDATE client_bot_updates SET state='processing',received_at=?,error=''"
-                " WHERE update_id=? AND state='processing' AND received_at=?",
-                (now, update_id, existing.get("received_at")),
-            )
-        else:
-            cur = self.db.execute(
-                "UPDATE client_bot_updates SET state='processing',received_at=?,error=''"
-                " WHERE update_id=? AND state='failed'",
-                (now, update_id),
-            )
-        if cur.rowcount:
-            return True
-        latest = self.db.one("SELECT state FROM client_bot_updates WHERE update_id=?",
-                             (update_id,)) or {}
-        return None if latest.get("state") == "done" else False
+        return self.ledger.claim(update)
 
     def _finish_update(self, update_id: str, ok: bool = True, error: str = "") -> None:
-        if not update_id:
-            return
-        self.db.execute(
-            "UPDATE client_bot_updates SET state=?,processed_at=?,error=? WHERE update_id=?",
-            ("done" if ok else "failed", now_iso(), str(error or "")[:500], update_id))
+        """Отметить update обработанным или ошибкой."""
+        self.ledger.finish(str(update_id or ""), ok, error)
 
     def _funnel(self, chat: str, event: str, row: dict | None = None,
                 *, order_id: str = "", nom_id: str = "", source: str = "",
@@ -950,6 +778,10 @@ class ClientBot:
         meta = self.db.one("SELECT is_final FROM statuses WHERE id=?",
                            (order.get("status") or "",))
         return bool(meta and num(meta.get("is_final")))
+
+    def _download_file(self, file_id: str) -> bytes | None:
+        """Файл покупателя через общий транспорт (идея 73)."""
+        return self.transport.download_file(file_id, call=self._call)
 
     def _no_text_reply(self, chat: str, row: dict,
                        message: dict) -> tuple[str, dict | None]:
@@ -2913,6 +2745,65 @@ class ClientBot:
             "last_poll": self.last_poll,
             "sla_minutes": self.operator_sla_minutes(),
         }
+
+    # ------------------------------------------------- очередь исходящих (Н52)
+    def outbox_rows(self, limit: int = 50, only_stuck: bool = False) -> list[dict]:
+        """Не доставленные сообщения покупателям: что, кому, почему.
+
+        Глубина очереди была видна только числом в статистике; когда бот
+        «молчит», владельцу нужно видеть именно строки: какое сообщение
+        застряло, сколько раз пробовали и что ответил Telegram.
+        """
+        sql = ("SELECT id, chat_id, method, payload, state, attempts, last_error,"
+               " created_at, available_at FROM client_bot_outbox WHERE state!='sent'")
+        if only_stuck:
+            sql += " AND (attempts>0 OR state='failed')"
+        sql += " ORDER BY datetime(replace(created_at,'T',' ')) DESC LIMIT ?"
+        rows = self.db.query(sql, (max(1, min(int(limit or 50), 200)),))
+        out = []
+        for row in rows:
+            try:
+                payload = json.loads(row.get("payload") or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            text = str(payload.get("text") or payload.get("caption") or "")
+            name = ""
+            chat = str(row.get("chat_id") or "")
+            profile = self.db.one("SELECT name FROM client_chats WHERE chat_id=?", (chat,))
+            if profile:
+                name = str(profile.get("name") or "")
+            out.append({
+                "id": row.get("id"), "chat_id": chat, "name": name,
+                "method": row.get("method"), "state": row.get("state"),
+                "attempts": int(row.get("attempts") or 0),
+                "last_error": str(row.get("last_error") or ""),
+                "created_at": row.get("created_at"),
+                "available_at": row.get("available_at"),
+                "text": text[:240],
+            })
+        return out
+
+    def outbox_retry(self, row_id: str = "") -> dict:
+        """Повторить доставку: одну строку или всю очередь сразу."""
+        rows = ([{"id": str(row_id)}] if row_id else
+                self.db.query("SELECT id FROM client_bot_outbox WHERE state!='sent'"
+                              " ORDER BY datetime(replace(created_at,'T',' ')) LIMIT 100"))
+        sent = 0
+        for row in rows:
+            full = self.db.one("SELECT * FROM client_bot_outbox WHERE id=?", (row.get("id"),))
+            if not full:
+                continue
+            self.db.execute("UPDATE client_bot_outbox SET state='pending', available_at=''"
+                            " WHERE id=?", (row.get("id"),))
+            if self._outbox_send(full):
+                sent += 1
+        return {"ok": True, "retried": len(rows), "sent": sent}
+
+    def outbox_drop(self, row_id: str) -> dict:
+        """Списать недоставимое сообщение (токен сменился, чат заблокирован)."""
+        cur = self.db.execute("DELETE FROM client_bot_outbox WHERE id=? AND state!='sent'",
+                              (str(row_id or ""),))
+        return {"ok": bool(cur.rowcount), "dropped": int(cur.rowcount or 0)}
 
     def analytics(self, days: int = 30) -> dict:
         """Локальная воронка Telegram: источники, события и конверсия."""

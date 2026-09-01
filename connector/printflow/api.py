@@ -25,135 +25,43 @@ from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
                      ensure_dirs, now_iso)
 from .db import Database, friendly_sqlite_error
 from .manager import PrinterManager
+from .idempotency import IdempotencyStore, extract_key as extract_idempotency_key
+from .rate_limit import client_key, limiter
 from .repo import Repo
+from . import static_serve
+from .uploads import UploadMixin
+from .http_handler import Handler
+from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
+                           MAX_UPLOAD, _form_bool, _upload_filename,
+                           begin_request, parse_multipart, rate_bucket,
+                           request_length, request_origin_allowed,
+                           safe_file, save_upload)
+from .router import register_all as register_routes, router
 
-MAX_UPLOAD = 400 * 1024 * 1024  # 400 МБ — с запасом на крупные 3MF
-MAX_JSON = 2 * 1024 * 1024      # JSON не содержит моделей и не должен занимать сотни МБ
+# 14.0 (идея 1): маршруты объявляются декораторами в модулях-роутерах,
+# поэтому регистрируем их при импорте — иначе тесты, которые собирают Api
+# вручную (без __init__), видят пустой реестр.
+register_routes()
+
 
 # Браузер штатно закрывает долгие SSE/MJPEG-соединения при обновлении страницы,
 # закрытии вкладки и переходе в сон. На разных ОС это проявляется разными
 # подклассами ConnectionError (на Windows в том числе ConnectionAbortedError,
 # WinError 10053), поэтому все эти варианты должны завершаться без traceback.
-CLIENT_DISCONNECT_ERRORS = (
-    BrokenPipeError,
-    ConnectionResetError,
-    ConnectionAbortedError,
-)
-
-
-def safe_file(root: Path, name: str) -> Path | None:
-    """Вернуть путь только если он действительно находится внутри root."""
-    base = root.resolve()
-    target = (base / name).resolve()
-    try:
-        target.relative_to(base)
-    except ValueError:
-        return None
-    return target
-
-
-def request_length(raw: str | None, limit: int) -> tuple[int, bool]:
-    """Проверить Content-Length до чтения тела: ``(размер, превышен_ли)``."""
-    try:
-        length = int(raw or 0)
-    except (TypeError, ValueError):
-        raise ValueError("Некорректный Content-Length") from None
-    if length < 0:
-        raise ValueError("Некорректный Content-Length")
-    return length, length > limit
-
-
-def request_origin_allowed(origin: str | None, host: str | None) -> bool:
-    """Разрешить API-клиент без Origin или браузер строго с того же Host.
-
-    Разрешение любого адреса из частной подсети недостаточно: вредоносная
-    страница на соседнем устройстве иначе могла бы управлять принтером.
-    """
-    if not origin:
-        return True
-    parsed = urllib.parse.urlparse(origin)
-    return (parsed.scheme in ("http", "https") and bool(host)
-            and parsed.netloc.casefold() == host.strip().casefold())
-
-
-def parse_multipart(body: bytes, boundary: str) -> tuple[dict[str, str], tuple[str, bytes] | None]:
-    """Минимальный разбор multipart/form-data: текстовые поля и один файл."""
-    fields: dict[str, str] = {}
-    upload: tuple[str, bytes] | None = None
-    marker = b"--" + boundary.encode()
-    for chunk in body.split(marker):
-        if not chunk or chunk in (b"--\r\n", b"--", b"\r\n"):
-            continue
-        head, _, data = chunk.partition(b"\r\n\r\n")
-        if not _:
-            continue
-        data = data[:-2] if data.endswith(b"\r\n") else data
-        headers = head.decode("utf-8", "ignore")
-        disposition = next((line for line in headers.splitlines()
-                            if line.lower().startswith("content-disposition")), "")
-        name_match = re.search(r'name="([^"]*)"', disposition)
-        file_match = re.search(r'filename="([^"]*)"', disposition)
-        if not name_match:
-            continue
-        if file_match and file_match.group(1):
-            upload = (file_match.group(1), data)
-        else:
-            fields[name_match.group(1)] = data.decode("utf-8", "ignore")
-    return fields, upload
-
-
-def _upload_filename(raw_name: str) -> str:
-    """Нормализовать имя файла из multipart независимо от ОС клиента."""
-    # Браузер Windows иногда присылает полный путь с обратными слешами.
-    name = Path(str(raw_name or "").replace("\\", "/")).name.strip()
-    if not name or name in {".", ".."} or "\x00" in name:
-        raise ValueError("Некорректное имя файла")
-    return name
-
-
-def save_upload(name: str, data: bytes) -> tuple[str, Path, bool]:
-    """Сохранить модель в uploads и не затереть другой файл с тем же именем.
-
-    Возвращает фактическое имя, путь и признак создания нового файла. Файлы
-    с одинаковым именем, но разным содержимым получают короткий суффикс хеша:
-    задания в очереди никогда не начинают печатать содержимое чужой загрузки.
-    """
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    requested = _upload_filename(name)
-    suffix = Path(requested).suffix
-    stem = requested[:-len(suffix)] if suffix else requested
-    target = UPLOAD_DIR / requested
-    digest = hashlib.sha256(data).hexdigest()[:10]
-    if target.exists():
-        try:
-            same = target.stat().st_size == len(data) and hashlib.sha256(
-                target.read_bytes()).hexdigest()[:10] == digest
-        except OSError:
-            same = False
-        if not same:
-            target = UPLOAD_DIR / f"{stem}-{digest}{suffix}"
-            # Коллизия хеша крайне маловероятна, но не затираем файл и при ней.
-            counter = 2
-            while target.exists():
-                target = UPLOAD_DIR / f"{stem}-{digest}-{counter}{suffix}"
-                counter += 1
-    created = not target.exists()
-    if created:
-        target.write_bytes(data)
-    return target.name, target, created
-
-
-def _form_bool(value: object, default: bool = False) -> bool:
-    if value is None or value == "":
-        return default
-    return str(value).strip().casefold() in {"1", "true", "yes", "on", "да"}
 
 
 class Api:
     """Логика маршрутов, отделённая от транспорта."""
 
+    # Н13: флаг «не ходить наружу» — тесты и офлайн-режим не должны дёргать
+    # Telegram при сохранении настроек.
+    settings_offline = False
+
     def __init__(self):
         ensure_dirs()
+        # 14.0 (идея 1): регистрируем маршруты из модулей-роутеров до того,
+        # как придёт первый запрос.
+        register_routes()
         self.db = Database()
         # Шина событий: сервер сам сообщает вкладкам, что изменилось,
         # вместо того чтобы каждая из них опрашивала его по таймеру.
@@ -227,6 +135,10 @@ class Api:
             pass
         self.live = LiveBroadcaster(self.bus, self.manager)
         self.live.start()
+        # 14.0 (идея 5): повтор изменяющего запроса с тем же ключом не плодит
+        # сущности — ответ первого выполнения возвращается как есть.
+        self.idempotency = IdempotencyStore(self.db)
+        self.search = None
         self.last_host = ""
         self.listen_host = "127.0.0.1"
         self.listen_port = 8080
@@ -989,13 +901,46 @@ class Api:
                         (name, now_iso(), item_id))
         return {"ok": True, "photo": name}
 
+    # ------------------------------------------------- проверка токенов (Н13)
+    _TOKEN_FIELDS = (("telegram_token", "Бот сотрудников"),
+                     ("client_bot_token", "Клиентский бот"))
+
+    def _check_bot_tokens(self, patch: dict) -> dict:
+        """Проверить изменённые токены ботов через getMe.
+
+        Отвечаем по каждому изменённому токену: `ok` — токен принят,
+        `username` — под каким именем бот виден в Telegram. Ошибка не
+        блокирует сохранение (сеть может лежать), но приходит в `warnings`,
+        поэтому владелец узнаёт о мёртвом токене в момент сохранения,
+        а не через сутки из пустого журнала бота.
+        """
+        from .tg import check_token
+        verdicts: dict = {}
+        for key, label in self._TOKEN_FIELDS:
+            if key not in patch:
+                continue
+            value = str(patch.get(key) or "").strip()
+            if not value or value == str(self.db.setting(key, "") or ""):
+                continue                      # не меняли — не дёргаем Telegram
+            if self.settings_offline:
+                verdicts[key] = {"ok": True, "skipped": True, "username": "",
+                                 "error": ""}
+                continue
+            try:
+                verdicts[key] = {**check_token(value), "label": label}
+            except Exception as exc:          # проверка не должна ронять сохранение
+                verdicts[key] = {"ok": False, "username": "", "label": label,
+                                 "error": f"проверка не выполнена: {exc}"}
+        return verdicts
+
     # ------------------------------------------------------------------- GET
     def get(self, path: str, query: dict) -> tuple[int, object]:
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
-        from .v9_api import dispatch_get
-        v9 = dispatch_get(self, path, query)
-        if v9 is not None:
-            return v9
+        # 14.0 (идеи 1, 9, З3): сначала реестр маршрутов, затем legacy-цепочка.
+        # Маршруты переносятся в реестр порциями, поэтому оба пути живые.
+        routed = router.dispatch(self, "GET", path, query=query)
+        if routed is not None:
+            return routed
 
         if path == "/api/health":
             return 200, {"ok": True, "version": APP_VERSION,
@@ -1083,7 +1028,7 @@ class Api:
                                            "сети: укажите IP принтера (экран → Настройки → "
                                            "WLAN) и Access Code в карточке принтера.")}
                 printer = self.printer_or_fail(one("printer_id"))
-            from .v9_api import _files_payload
+            from .routes_workshop import _files_payload
             return 200, _files_payload(printer, one("path", "/"))
         if path == "/api/orders":
             return 200, {"orders": self.repo.orders(one("status"), one("q"), one("niche_id"))}
@@ -1368,6 +1313,13 @@ class Api:
                                   for r, rights in ROLE_RIGHTS.items()},
                          "owner_chat": str(self.db.setting("telegram_chat_id",
                                                            "") or "")}
+        if path == "/api/staff/subscriptions":
+            # Н54: реестр событий и выбор сотрудника.
+            from . import subscriptions
+            staff_id = one("staff_id") or one("id")
+            return 200, {"ok": True, "events": subscriptions.catalog(),
+                         "staff_id": staff_id,
+                         "current": subscriptions.get(self.db, staff_id) if staff_id else {}}
         if path == "/api/client-bot":
             bot = getattr(self.manager, "client_bot", None)
             from .client_bot import DEFAULT_TEMPLATES
@@ -1433,6 +1385,40 @@ class Api:
                     " ORDER BY datetime(l.created_at) DESC LIMIT 50"),
             }
             return 200, data
+        if path == "/api/conversations":
+            # Н55: одна лента вместо трёх вкладок.
+            from .conversations import Conversations
+            service = getattr(self, "conversations", None)
+            if service is None:
+                service = self.conversations = Conversations(self.db)
+            rows = service.threads(
+                int(num(one("limit"), 50)),
+                channel=one("channel"), q=one("q"),
+                unread_only=one("unread") in ("1", "true", "yes"),
+                needs_answer=one("needs_answer") in ("1", "true", "yes"))
+            return 200, {"ok": True, "threads": rows, "summary": service.summary()}
+        if path == "/api/conversations/thread":
+            from .conversations import Conversations
+            service = getattr(self, "conversations", None)
+            if service is None:
+                service = self.conversations = Conversations(self.db)
+            key = one("id") or one("key")
+            if not key:
+                raise ValueError("Не указан диалог")
+            return 200, {"ok": True, **service.thread(key, int(num(one("limit"), 100)))}
+        if path == "/api/client-bot/outbox":
+            # Н52: что не доставлено покупателям и почему.
+            bot = getattr(self.manager, "client_bot", None)
+            if bot is None:
+                return 200, {"ok": True, "rows": [], "bot": False}
+            stuck = one("stuck") in ("1", "true", "yes")
+            rows = bot.outbox_rows(int(num(one("limit"), 50)), only_stuck=stuck)
+            staff = self.db.query(
+                "SELECT id, chat_id, method, state, attempts, last_error, created_at"
+                " FROM telegram_outbox WHERE state!='sent'"
+                " ORDER BY datetime(replace(created_at,'T',' ')) DESC LIMIT 50")
+            return 200, {"ok": True, "bot": True, "rows": rows, "staff_rows": staff,
+                         "client_pending": len(rows), "staff_pending": len(staff)}
         if path == "/api/client-bot/inbox":
             return 200, {"items": self.db.query(
                 "SELECT l.*,c.username,c.inbox_status,c.assigned_to FROM client_bot_log l"
@@ -1910,10 +1896,9 @@ class Api:
     # ------------------------------------------------------------------ POST
     def post(self, path: str, body: dict, query: dict) -> tuple[int, object]:
         pid = body.get("printer_id") or (query.get("printer_id") or [""])[0]
-        from .v9_api import dispatch_post
-        v9 = dispatch_post(self, path, body, query)
-        if v9 is not None:
-            return v9
+        routed = router.dispatch(self, "POST", path, body=body, query=query)
+        if routed is not None:
+            return routed
 
         # --- Bambu Cloud: вход, код, выход
         if path == "/api/cloud/login":
@@ -2969,6 +2954,20 @@ class Api:
                     patch["bank_rules"] = parsed if isinstance(parsed, list) else []
                 except json.JSONDecodeError:
                     patch["bank_rules"] = []
+            # 14.0 (идея 10): настройки проходят через схему. Неизвестный ключ
+            # больше не создаёт настройку-призрак, «abc» в тарифе не
+            # превращается в 0 молча, а значение вне диапазона режется.
+            from . import settings_schema
+            patch, schema_warnings, unknown_keys = settings_schema.validate(patch)
+            if unknown_keys:
+                from .logging_setup import log
+                log().warning("Настройки: проигнорированы неизвестные ключи: %s",
+                              ", ".join(unknown_keys[:20]))
+            # Н13: токен бота проверяется сразу, а не через сутки в логе.
+            token_checks = self._check_bot_tokens(patch)
+            schema_warnings.extend(
+                f"{label}: {verdict['error']}"
+                for label, verdict in token_checks.items() if not verdict.get("ok"))
             settings = self.db.set_settings(patch)
             if set(patch) & {"ftps_timeout", "ftps_retries", "ftps_block_kb",
                              "mqtt_keepalive", "mqtt_backoff"}:
@@ -2985,7 +2984,9 @@ class Api:
                         studio.reload()
                     except Exception:
                         pass
-            return 200, {"ok": True, "settings": settings}
+            return 200, {"ok": True, "settings": settings,
+                         "warnings": schema_warnings, "ignored": unknown_keys,
+                         "token_checks": token_checks}
         if path == "/api/shopping/add":
             return 200, {"ok": True, "item": self.shopping.add(body)}
         if path == "/api/shopping/toggle":
@@ -3088,7 +3089,18 @@ class Api:
             from .db import make_backup
             result = make_backup()
             if result.get("ok"):
-                self.db.add_event("backup", "Ручная копия базы", result["file"], "", {})
+                # 14.0 (идея 21): вместе с базой сохраняем файловые хранилища —
+                # uploads, photos, library. Иначе после восстановления база
+                # ссылается на файлы, которых больше нет.
+                from . import files_backup
+                files = files_backup.make_files_backup()
+                result["files"] = {k: v for k, v in files.items() if k != "manifest"}
+                result["files_manifest"] = files.get("manifest", {})
+                self.db.add_event(
+                    "backup", "Ручная копия базы",
+                    f"{result['file']}"
+                    + (f" + {files.get('file')}" if files.get("file") else ""),
+                    "", {})
             return 200, result
         if path == "/api/system/restore":
             from .db import request_restore
@@ -3156,6 +3168,27 @@ class Api:
         if path == "/api/telegram/test":
             self.db.set_settings({k: v for k, v in body.items() if k.startswith("telegram")})
             return 200, self.manager.send_telegram("PrintFlow: проверка уведомлений прошла успешно.")
+        if path == "/api/staff/subscriptions":
+            # Н54: сохранение подписок; неизвестные события отбрасываются.
+            from . import subscriptions
+            staff_id = str(body.get("staff_id") or body.get("id") or "")
+            if not staff_id:
+                raise ValueError("Не указан сотрудник")
+            events = body.get("events")
+            if not isinstance(events, dict):
+                raise ValueError("Ожидается объект «событие: флаг»")
+            unknown = sorted(k for k in events if not subscriptions.is_known(str(k)))
+            current = subscriptions.set_many(self.db, staff_id, events)
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "staff_id": staff_id, "current": current,
+                         "ignored": unknown}
+        if path == "/api/staff/subscriptions/reset":
+            from . import subscriptions
+            staff_id = str(body.get("staff_id") or body.get("id") or "")
+            if not staff_id:
+                raise ValueError("Не указан сотрудник")
+            return 200, {"ok": True, "staff_id": staff_id,
+                         "current": subscriptions.reset(self.db, staff_id)}
         if path == "/api/staff/save":
             from .staff import Staff
             staff = Staff(self.db)
@@ -3185,6 +3218,19 @@ class Api:
             from .staff import Staff
             Staff(self.db).invite_delete(str(body.get("code") or ""))
             return 200, {"ok": True}
+        if path == "/api/client-bot/outbox/retry":
+            bot = getattr(self.manager, "client_bot", None)
+            if bot is None:
+                raise ValueError("Клиентский бот не запущен")
+            return 200, bot.outbox_retry(str(body.get("id") or ""))
+        if path == "/api/client-bot/outbox/drop":
+            bot = getattr(self.manager, "client_bot", None)
+            if bot is None:
+                raise ValueError("Клиентский бот не запущен")
+            row_id = str(body.get("id") or "")
+            if not row_id:
+                raise ValueError("Не указан id сообщения")
+            return 200, bot.outbox_drop(row_id)
         if path == "/api/client-bot/template/save":
             client = getattr(self.manager, "client_bot", None)
             if not client:
@@ -3888,672 +3934,6 @@ class Api:
             "items": [dict(r) for r in items],
             "brand_card": bool(self.db.setting("brand_card_enabled", True)),
         }
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = f"PrintFlow/{APP_VERSION}"
-    api: Api = None  # назначается при запуске
-
-    def log_message(self, fmt, *args):  # тише в консоли
-        if "--verbose" in getattr(self.server, "flags", []):
-            super().log_message(fmt, *args)
-
-    def handle_one_request(self):
-        try:
-            super().handle_one_request()
-        except CLIENT_DISCONNECT_ERRORS:
-            self.close_connection = True
-
-    # ---------------------------------------------------------------- ответы
-    def send_json(self, code: int, payload) -> None:
-        data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
-        try:
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(data)
-        except CLIENT_DISCONNECT_ERRORS:
-            # Пользователь закрыл вкладку или перешёл в другой раздел — не ошибка.
-            self.close_connection = True
-
-    def check_origin(self) -> bool:
-        return request_origin_allowed(
-            self.headers.get("Origin"), self.headers.get("Host"))
-
-    # ------------------------------------------------------------------- GET
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
-        self.api.last_host = self.headers.get("Host", "")
-        try:
-            if path == "/api/printer/camera.jpg":
-                return self.serve_camera_frame((query.get("printer_id") or [""])[0])
-            if path == "/api/printer/camera.mjpeg":
-                return self.serve_camera_stream((query.get("printer_id") or [""])[0])
-            if path == "/api/printer/shot.jpg":
-                return self.serve_shot((query.get("printer_id") or [""])[0],
-                                       (query.get("id") or [""])[0])
-            if path == "/api/shelf/photo.jpg":
-                return self.serve_shelf_photo((query.get("id") or [""])[0])
-            if path == "/api/nomenclature/photo.jpg":
-                return self.serve_nom_photo((query.get("id") or [""])[0])
-            if path == "/api/order/photo.jpg":
-                return self.serve_order_photo((query.get("photo_id") or [""])[0])
-            if path == "/api/job/keyframe.jpg":
-                job_id = (query.get("id") or query.get("job_id") or [""])[0]
-                return self.serve_keyframe(job_id, (query.get("name") or [""])[0])
-            if path == "/api/order/pack":
-                return self.serve_pack_sheet((query.get("id") or [""])[0])
-            if path == "/api/design/stl":
-                return self.serve_design_stl(query)
-            if path == "/api/design/preview":
-                return self.serve_design_preview(query)
-            if path in ("/api/b2b/doc", "/api/b2b"):
-                return self.serve_b2b_doc(query)
-            if path == "/api/stream":
-                return self.serve_sse()
-            if path == "/api/uploads":
-                return self.serve_upload((query.get("file") or query.get("name") or [""])[0])
-            if path.startswith("/api/"):
-                code, payload = self.api.get(path, query)
-                return self.send_json(code, payload)
-            return self.serve_static(path)
-        except CLIENT_DISCONNECT_ERRORS:
-            return
-        except TimeoutError:
-            return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
-        except sqlite3.DatabaseError as exc:
-            try:
-                from .logging_setup import log
-                log().exception("Ошибка SQLite при GET %s", path)
-            except Exception:
-                pass
-            return self.send_json(503, {"error": friendly_sqlite_error(exc)})
-        except (OSError, ConnectionError) as exc:
-            return self.send_json(503, {"error": str(exc)})
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        except Exception as exc:
-            try:
-                from .logging_setup import log
-                log().exception("Ошибка GET %s", path)
-            except Exception:
-                pass
-            return self.send_json(500, {"error": str(exc)})
-
-    def serve_camera_frame(self, printer_id: str):
-        printer = self.api.manager.get(printer_id)
-        frame = printer.camera.frame if printer else None
-        if not frame:
-            return self.send_json(503, {"error": (printer.camera.error if printer else "")
-                                        or "Кадр ещё не получен"})
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(len(frame)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(frame)
-
-    def serve_sse(self):
-        """Server-Sent Events: сервер сам присылает изменения.
-
-        Три вида сообщений:
-          * ``telemetry`` — новое состояние парка (шлётся, только когда принтер
-            действительно что-то прислал);
-          * ``event`` — новая запись в журнале: печать началась, заказ закрыт,
-            пластик списан;
-          * ``resync`` — вкладка отстала (спящий телефон), нужно перечитать всё.
-
-        Поллинг на стороне браузера остаётся страховкой на случай прокси,
-        который режет длинные соединения.
-        """
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "keep-alive")
-        self.send_header("X-Accel-Buffering", "no")  # nginx не должен буферизовать
-        self.end_headers()
-
-        def send(kind: str, payload: object) -> None:
-            data = json.dumps(payload, ensure_ascii=False, default=str)
-            self.wfile.write(f"event: {kind}\ndata: {data}\n\n".encode("utf-8"))
-            self.wfile.flush()
-
-        try:
-            self.wfile.write(b"retry: 3000\n\n")  # переподключение через 3 с
-            send("telemetry", self.api.manager.snapshot())
-            with self.api.bus.subscription() as subscriber:
-                while True:
-                    message = subscriber.get(timeout=20.0)
-                    if message is None:
-                        self.wfile.write(b": ping\n\n")  # держим соединение живым
-                        self.wfile.flush()
-                        continue
-                    send(message[0], message[1])
-        except CLIENT_DISCONNECT_ERRORS:
-            pass
-        except Exception:
-            try:
-                from .logging_setup import log
-
-                log().debug("Поток событий закрыт", exc_info=True)
-            except Exception:
-                pass
-        finally:
-            self.close_connection = True
-
-    def _send_bytes(self, data: bytes, ctype: str, download: str = "") -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        if download:
-            from urllib.parse import quote
-            self.send_header("Content-Disposition",
-                             f"attachment; filename*=UTF-8''{quote(download)}")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def serve_design_stl(self, query: dict):
-        """Генерация STL конструктором изделий (5.0) — скачивание файла."""
-        from .design import generate
-        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
-        shape = one("shape", "number_plate")
-        params = {"number": one("number", "1"), "text": one("text", ""),
-                  "width": num(one("width", "40")),
-                  "height": num(one("height", "24")), "thickness": num(one("thickness", "2")),
-                  "font_h": num(one("font_h", "1.4")), "diameter": num(one("diameter", "30")),
-                  "depth": num(one("depth", "40"))}
-        try:
-            data = generate(shape, params)
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        name = f"nozza-{shape}-{one('number', '1')}.stl"
-        self._send_bytes(data, "model/stl", download=name)
-
-    def serve_design_preview(self, query: dict):
-        from .design import preview_svg
-        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
-        shape = one("shape", "number_plate")
-        params = {"number": one("number", "1"), "text": one("text", ""),
-                  "width": num(one("width", "40")),
-                  "height": num(one("height", "24")), "diameter": num(one("diameter", "30")),
-                  "depth": num(one("depth", "40"))}
-        self._send_bytes(preview_svg(shape, params).encode("utf-8"),
-                         "image/svg+xml; charset=utf-8")
-
-    def serve_b2b_doc(self, query: dict):
-        """Документ B2B (счёт / КП / товарный чек) как печатная HTML-страница.
-
-        group=0 отключает сворачивание мелких товаров в печатные группы —
-        форма печатается построчно, как состав заказа."""
-        one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
-        html = self.api.b2b.document(one("id"), one("kind", "invoice"),
-                                     group=one("group", "1") != "0")
-        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
-
-    def serve_photo_file(self, name: str):
-        from .config import PHOTO_DIR
-        target = safe_file(PHOTO_DIR, name) if name else None
-        if not target or not target.is_file():
-            return self.send_json(404, {"error": "Фото не найдено"})
-        data = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", mimetypes.guess_type(target.name)[0] or "image/jpeg")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "max-age=3600")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def serve_shelf_photo(self, item_id: str):
-        """Фото позиции стеллажа из каталога данных."""
-        item = self.api.db.one("SELECT photo FROM shelf_items WHERE id=?", (item_id,))
-        return self.serve_photo_file((item or {}).get("photo") or "")
-
-    def serve_nom_photo(self, nom_id: str):
-        """Фото карточки номенклатуры."""
-        row = self.api.db.one("SELECT photo FROM nomenclature WHERE id=?", (nom_id,))
-        return self.serve_photo_file((row or {}).get("photo") or "")
-
-    # ------------------------------------------------ 8.5: вспомогательные
-    def serve_keyframe(self, job_id: str, name: str):
-        """Кейфрейм видео печати (идея 61)."""
-        from .config import PHOTO_DIR
-        d = (PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
-        if not d or not d.is_dir() or "/" in name or "\\" in name or name.startswith("."):
-            return self.send_json(400, {"error": "Недопустимый файл"})
-        f = d / name
-        if not f.is_file():
-            return self.send_json(404, {"error": "Кейфрейм не найден"})
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Cache-Control", "max-age=3600")
-        self.end_headers()
-        self.wfile.write(f.read_bytes())
-
-    def serve_pack_sheet(self, order_id: str):
-        """Печатная карточка упаковки (A4, 1:1)."""
-        import html as _html
-        data = self.api._pack_data(order_id)
-        o = data["order"]
-        h = lambda v: _html.escape("" if v is None else str(v))
-        rows = ""
-        for it in data["items"]:
-            rows += (f"<tr><td>{h(it.get('name') or o['product'])}</td>"
-                     f"<td>{h(it.get('qty') or '')}</td></tr>")
-        if not rows:
-            rows = f"<tr><td>{h(o['product'])}</td><td>{h(o['qty'])}</td></tr>"
-        brand = ("<li>Бренд-карточка NOZZA (идея 42)</li>"
-                 if data["brand_card"] else "")
-        html = f"""<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
-<title>Карточка упаковки — заказ №{o['number']}</title>
-<style>
-  @page {{ size: A4; margin: 8mm; }}
-  body {{ font-family: Arial, sans-serif; color: #131a2b; }}
-  .sheet {{ width: 194mm; margin: 0 auto; }}
-  h1 {{ font-size: 18pt; margin: 0 0 2mm; }}
-  .meta {{ color: #6b7280; font-size: 10pt; margin-bottom: 4mm; }}
-  table {{ border-collapse: collapse; width: 100%; margin-bottom: 5mm; }}
-  td, th {{ border: 1px solid #d1d5db; padding: 2.5mm 3mm; font-size: 11pt; }}
-  th {{ background: #f3f4f6; text-align: left; }}
-  .check {{ list-style: none; padding: 0; margin: 0; }}
-  .check li {{ font-size: 12pt; margin-bottom: 2.5mm; }}
-  .check li:before {{ content: "☐ "; color: #4f46e5; font-weight: bold; }}
-  .foot {{ margin-top: 6mm; font-size: 9pt; color: #6b7280; }}
-  @media print {{ .noprint {{ display: none; }} }}
-</style></head><body><div class="sheet">
-  <button class="noprint" onclick="window.print()"
-    style="font-size:11pt;padding:4px 14px;margin-bottom:4mm;cursor:pointer">⎙ Печать</button>
-  <h1>Карточка упаковки · заказ №{o['number']}</h1>
-  <div class="meta">Клиент: {o['customer_name'] or '—'} · NOZZA · PrintFlow</div>
-  <table><tr><th>Изделие</th><th>Кол-во</th></tr>{rows}</table>
-  <h3 style="font-size:12pt">Что положить</h3>
-  <ul class="check">
-    <li>Изделие (проверено по чек-листу качества)</li>
-    {brand}
-    <li>Бирка с названием и QR (если есть)</li>
-    <li>Упаковка: плёнка/коробка, вложение — бумага, не воздух</li>
-    <li>Если заказ подарок — без ценника</li>
-  </ul>
-  <div class="foot">Сформировано автоматически · {time.strftime('%d.%m.%Y %H:%M')}</div>
-</div></body></html>"""
-        self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
-
-    def serve_order_photo(self, photo_id: str):
-        """Фото заказа по id записи order_photos."""
-        row = self.api.db.one("SELECT file FROM order_photos WHERE id=?", (photo_id,))
-        return self.serve_photo_file((row or {}).get("file") or "")
-
-    def serve_shot(self, printer_id: str, shot_id: str):
-        """Отдать сохранённый кадр из архива камеры."""
-        printer = self.api.manager.get(printer_id)
-        frame = printer.camera.snapshot_frame(shot_id) if printer else None
-        if not frame:
-            return self.send_json(404, {"error": "Кадр не найден"})
-        self.send_response(200)
-        self.send_header("Content-Type", "image/jpeg")
-        self.send_header("Content-Length", str(len(frame)))
-        self.send_header("Cache-Control", "max-age=3600")
-        self.end_headers()
-        self.wfile.write(frame)
-
-    def serve_camera_stream(self, printer_id: str):
-        printer = self.api.manager.get(printer_id)
-        if not printer:
-            return self.send_json(404, {"error": "Принтер не найден"})
-        self.send_response(200)
-        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=pfframe")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        event = printer.camera.subscribe()
-        try:
-            deadline = time.time() + 600  # поток живёт не дольше 10 минут
-            while time.time() < deadline:
-                if not event.wait(10):
-                    continue
-                event.clear()
-                frame = printer.camera.frame
-                if not frame:
-                    continue
-                self.wfile.write(b"--pfframe\r\nContent-Type: image/jpeg\r\n"
-                                 + f"Content-Length: {len(frame)}\r\n\r\n".encode())
-                self.wfile.write(frame)
-                self.wfile.write(b"\r\n")
-        except (CLIENT_DISCONNECT_ERRORS, TimeoutError, OSError):
-            pass
-        finally:
-            printer.camera.unsubscribe(event)
-
-    def serve_static(self, path: str):
-        rel = urllib.parse.unquote(path.lstrip("/")) or "index.html"
-        target = safe_file(SITE, rel)
-        if target is None:
-            return self.send_error(403, "Forbidden")
-        if target.is_dir():
-            target = target / "index.html"
-        if not target.exists() and not target.suffix:
-            # Короткие адреса без расширения: /m, /order, /track, /shelf.
-            # Их проще диктовать вслух и печатать на ценнике.
-            alias = safe_file(SITE, rel + ".html")
-            if alias is not None and alias.exists():
-                target = alias
-        if not target.exists() and target.suffix == ".htm":
-            # Внешняя ссылка на старое расширение не должна превращаться в
-            # 404: браузер затем сможет загрузить API и собрать макет.
-            alias = safe_file(SITE, rel[:-4] + ".html")
-            if alias is not None and alias.exists():
-                target = alias
-        if not target.exists():
-            return self.send_error(404, "Not Found")
-        ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-        if target.suffix == ".webmanifest":   # mimetypes про него ещё не знает
-            ctype = "application/manifest+json"
-        if ctype.startswith("text/") or ctype in ("application/javascript", "application/json",
-                                                  "application/manifest+json"):
-            ctype += "; charset=utf-8"
-        data = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store" if target.suffix in (".html", ".js", ".css") else "max-age=3600")
-        self.end_headers()
-        self.wfile.write(data)
-
-    # ------------------------------------------------------------------ POST
-    def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
-        if not self.check_origin():
-            return self.send_json(403, {"error": "Запрос отклонён: посторонний источник"})
-        try:
-            if path == "/api/printer/upload":
-                return self.handle_upload(query)
-            if path == "/api/jobs/upload":
-                return self.handle_job_upload()
-            if path == "/api/estimate/upload":
-                return self.handle_estimate_upload()
-            length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
-            if too_large:
-                return self.send_json(413, {"error": "JSON-запрос слишком большой"})
-            raw = self.rfile.read(length) if length else b"{}"
-            try:
-                body = json.loads(raw.decode("utf-8") or "{}")
-            except json.JSONDecodeError:
-                return self.send_json(400, {"error": "Некорректный JSON"})
-            if not isinstance(body, dict):
-                return self.send_json(400, {"error": "Ожидается объект JSON"})
-            code, payload = self.api.post(path, body, query)
-            return self.send_json(code, payload)
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        except CLIENT_DISCONNECT_ERRORS:
-            return
-        except TimeoutError:
-            return self.send_json(504, {"error": "Принтер не отвечает: проверьте IP и локальную сеть"})
-        except sqlite3.DatabaseError as exc:
-            try:
-                from .logging_setup import log
-                log().exception("Ошибка SQLite при POST %s", path)
-            except Exception:
-                pass
-            return self.send_json(503, {"error": friendly_sqlite_error(exc)})
-        except (OSError, ConnectionError) as exc:
-            return self.send_json(503, {"error": str(exc)})
-        except Exception as exc:
-            try:
-                from .logging_setup import log
-                log().exception("Ошибка POST %s", path)
-            except Exception:
-                pass
-            return self.send_json(500, {"error": str(exc)})
-
-    def serve_upload(self, name: str):
-        """Скачать сохранённый 3MF/G-code из папки uploads."""
-        safe_name = Path(name or "").name
-        target = safe_file(UPLOAD_DIR, safe_name) if safe_name else None
-        if not target or not target.is_file():
-            return self.send_json(404, {"error": "Файл не найден в uploads"})
-        ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        self._send_bytes(target.read_bytes(), ctype, download=target.name)
-
-    def _multipart_upload(self) -> tuple[dict[str, str], tuple[str, bytes] | None]:
-        """Прочитать один multipart-файл с общей проверкой размера и boundary."""
-        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
-        if too_large:
-            raise ValueError("Файл слишком большой")
-        content_type = self.headers.get("Content-Type", "")
-        boundary = ""
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("boundary="):
-                boundary = part[9:].strip('"')
-        if not boundary:
-            raise ValueError("Ожидается multipart/form-data")
-        return parse_multipart(self.rfile.read(length), boundary)
-
-    def handle_job_upload(self):
-        """Сохранить локальный файл и сразу поставить его в очередь.
-
-        Очередь не должна требовать, чтобы модель сначала лежала на SD-карте:
-        при ручном старте менеджер сам загрузит локальную копию на выбранный
-        принтер (или передаст её Bambu Cloud)."""
-        fields, upload = self._multipart_upload()
-        if not upload:
-            return self.send_json(400, {"error": "Файл не передан"})
-        if not upload[1]:
-            return self.send_json(400, {"error": "Файл пустой"})
-        try:
-            requested_name = _upload_filename(upload[0])
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
-            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        name, local, created = save_upload(requested_name, upload[1])
-        payload = {
-            "name": str(fields.get("name") or Path(name).stem).strip() or Path(name).stem,
-            "file": name,
-            "printer_id": str(fields.get("printer_id") or "").strip(),
-            "order_id": str(fields.get("order_id") or "").strip(),
-            "plate": max(1, int(num(fields.get("plate"), 1) or 1)),
-            "priority": int(num(fields.get("priority"), 0)),
-            "use_ams": _form_bool(fields.get("use_ams"), True),
-            "bed_level": _form_bool(fields.get("bed_level"), True),
-            "flow_cali": _form_bool(fields.get("flow_cali"), False),
-            "timelapse": _form_bool(fields.get("timelapse"), False),
-            "source": "local-upload",
-            "allow_auto_start": _form_bool(fields.get("allow_auto_start"), True),
-        }
-        try:
-            job = self.api.manager.enqueue(payload)
-        except Exception:
-            # Если именно эта загрузка не стала заданием, не оставляем мусор.
-            if created:
-                try:
-                    local.unlink()
-                except OSError:
-                    pass
-            raise
-        return self.send_json(200, {"ok": True, "file": name, "saved": name,
-                                    "job": job, "source": "upload"})
-
-    def handle_estimate_upload(self):
-        """Сохранить выбранный 3MF/G-code в uploads и вернуть вес плиты."""
-        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
-        if too_large:
-            return self.send_json(413, {"error": "Файл слишком большой"})
-        content_type = self.headers.get("Content-Type", "")
-        boundary = ""
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("boundary="):
-                boundary = part[9:].strip('"')
-        if not boundary:
-            return self.send_json(400, {"error": "Ожидается multipart/form-data"})
-        fields, upload = parse_multipart(self.rfile.read(length), boundary)
-        if not upload:
-            return self.send_json(400, {"error": "Файл не передан"})
-        if not upload[1]:
-            return self.send_json(400, {"error": "Файл пустой"})
-        try:
-            requested_name = _upload_filename(upload[0])
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
-            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        name, local, _created = save_upload(requested_name, upload[1])
-        estimate = {}
-        try:
-            from .estimate import estimate_file
-            estimate = estimate_file(local) or {}
-        except Exception:
-            estimate = {}
-        grams = num(estimate.get("total_grams")) or num(estimate.get("grams"))
-        minutes = num(estimate.get("total_minutes")) or num(estimate.get("minutes"))
-        order_id = (fields or {}).get("order_id", "")
-        if order_id:
-            order = self.api.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
-            if order:
-                sets, params = ["file=?", "updated_at=?"], [name, now_iso()]
-                if grams and not num(order.get("grams")):
-                    sets.append("grams=?")
-                    params.append(grams)
-                if minutes and not num(order.get("hours")):
-                    sets.append("hours=?")
-                    params.append(round(minutes / 60.0, 2))
-                params.append(order_id)
-                self.api.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", params)
-        return self.send_json(200, {
-            "ok": True, "file": name, "saved": name, "source": "upload",
-            "grams": grams, "minutes": minutes,
-            "hours": round(minutes / 60.0, 2) if minutes else 0.0,
-            "material": estimate.get("material") or "",
-            "color": estimate.get("color") or "",
-            "estimate": estimate,
-        })
-
-    def handle_upload(self, query: dict):
-        """Приём файла модели и отправка его на принтер по FTPS."""
-        length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
-        if too_large:
-            return self.send_json(413, {"error": "Файл слишком большой"})
-        content_type = self.headers.get("Content-Type", "")
-        boundary = ""
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("boundary="):
-                boundary = part[9:].strip('"')
-        if not boundary:
-            return self.send_json(400, {"error": "Ожидается multipart/form-data"})
-        fields, upload = parse_multipart(self.rfile.read(length), boundary)
-        if not upload:
-            return self.send_json(400, {"error": "Файл не передан"})
-        if not upload[1]:
-            return self.send_json(400, {"error": "Файл пустой"})
-        try:
-            requested_name = _upload_filename(upload[0])
-        except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
-        if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
-            return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
-        name, local, _created = save_upload(requested_name, upload[1])
-        printer_id = fields.get("printer_id", "") or (query.get("printer_id") or [""])[0]
-        printer = self.api.manager.get(printer_id)
-        if not printer:
-            return self.send_json(400, {"error": "Принтер не настроен"})
-        # 8.0: FTPS прогресс через шину
-        def _progress(sent, total=0):
-            try:
-                pct = round(sent / total * 100) if total else 0
-                self.api.bus.publish("upload_progress", {"name": name, "sent": sent, "total": total, "percent": pct})
-            except Exception:
-                pass
-        # Облачный принтер: файл уходит в облачное хранилище Bambu, принтер
-        # скачает его сам при запуске (диспетчеризация через /my/task).
-        # При недоступности облака и живом LAN — прежний FTPS-путь.
-        if printer.mode == "cloud":
-            from . import bambu_cloud
-            token, uid, region = self.api._cloud_session()
-            cloud_error = ""
-            if token and uid:
-                try:
-                    manifest = bambu_cloud.upload_project(
-                        local, token, uid, region, progress=self.api._cloud_progress(name))
-                    manifest["at"] = now_iso()
-                    self.api.manager.cloud_manifest_path(name).write_text(
-                        json.dumps(manifest), encoding="utf-8")
-                    result = {"ok": True, "cloud": True, "name": name,
-                              "size": len(upload[1]), **manifest}
-                    self.api.db.add_event("upload", "Файл загружен в Bambu Cloud",
-                                          name, printer.id, {"bytes": len(upload[1])})
-                    cloud_sent = True
-                except bambu_cloud.CloudError as exc:
-                    cloud_error = str(exc)
-                    cloud_sent = False
-            else:
-                cloud_sent = False
-            if not cloud_sent:
-                # Прежде чем сдаться, пробуем дозаполнить IP/Access Code
-                # облачного принтера — тогда FTPS-фолбэк сработает.
-                if not (printer.record.get("host") and printer.record.get("access_code")):
-                    try:
-                        self.api._ensure_lan_access(printer)
-                        printer = self.api.manager.get(printer_id) or printer
-                    except Exception:
-                        pass
-                if printer.record.get("host") and printer.record.get("access_code"):
-                    self.api.db.add_event("cloud", "Облачная заливка не удалась — FTPS",
-                                          cloud_error or "нет входа в Bambu Cloud",
-                                          printer.id, {"file": name})
-                    try:
-                        result = printer.files.upload(local, name, progress=_progress)
-                    except TypeError:
-                        result = printer.files.upload(local, name)
-                    self.api.bus.publish("upload_progress",
-                                         {"name": name, "sent": result.get("size", 0),
-                                          "total": result.get("total", 0) or len(upload[1]),
-                                          "percent": 100})
-                    self.api.db.add_event("upload", "Файл загружен на принтер (FTPS)",
-                                          name, printer.id, result)
-                else:
-                    return self.send_json(502, {
-                        "error": ("Не удалось загрузить файл: облако Bambu недоступно, "
-                                  "а локальная сеть принтера не настроена. "
-                                  + (cloud_error or "Выполните вход в Bambu Cloud."))})
-        else:
-            try:
-                result = printer.files.upload(local, name, progress=_progress)
-            except TypeError:
-                result = printer.files.upload(local, name)
-            try:
-                self.api.bus.publish("upload_progress", {"name": name, "sent": result.get("size",0), "total": result.get("total",0) or len(upload[1]), "percent": 100})
-            except Exception:
-                pass
-            self.api.db.add_event("upload", "Файл загружен на принтер", name, printer.id, result)
-        # оценка печати до запуска: время и граммы из 3MF/G-code
-        estimate = {}
-        try:
-            from .estimate import estimate_file
-            estimate = estimate_file(local)
-        except Exception:
-            estimate = {}
-        order_id = fields.get("order_id", "")
-        if order_id:
-            # 3MF/G-code автозаполняет заказ: файл всегда, а вес/время/материал/
-            # цвет — только если поле пустое (ручные правки не перетираем).
-            sets, params = ["file=?", "updated_at=?"], [name, now_iso()]
-            order = self.api.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
-            if order:
-                for field in ("grams", "hours", "material", "color"):
-                    value = estimate.get(field)
-                    if value and not (order.get(field) or "").strip():
-                        sets.append(f"{field}=?")
-                        params.append(value if field in ("material", "color")
-                                      else num(value))
-            params.append(order_id)
-            self.api.db.execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", params)
-        return self.send_json(200, {"ok": True, "estimate": estimate, **result})
-
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True

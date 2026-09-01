@@ -26,3 +26,15 @@ python scripts/check.py --quick
 До активации обязательным источником результата остаётся локальная команда
 `python scripts/check.py`. Dependabot еженедельно проверяет Python-пакеты
 (`.github/dependabot.yml`).
+
+> **Установка (один раз, вручную).** GitHub App, работающий в сессиях Arena,
+> не имеет права `workflows`, поэтому файл `.github/workflows/ci.yml` из
+> сессии не пушится. Скопируйте канонический шаблон руками:
+>
+> ```bash
+> mkdir -p .github/workflows && cp docs/ci-workflow.yml .github/workflows/ci.yml
+> git add .github/workflows/ci.yml && git commit -m "CI: включить стенд панели"
+> ```
+>
+> Локально тот же набор проверок даёт `python scripts/check.py` — стенд панели
+> (`node scripts/panel-check.js`) входит в него отдельным шагом.

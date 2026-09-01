@@ -1974,8 +1974,8 @@ PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
   tag.textContent = String(total);
   loadBedReference();
 });
-PF.on('live', () => { renderLive(); });
-PF.on('printers', () => { renderTabs(); });
+PF.on('live', PF.whenView('printers', () => { renderLive(); }));
+PF.on('printers', PF.whenView('printers', () => { renderTabs(); }));
 PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); }
 });

@@ -61,7 +61,7 @@ class PrintGroupBase(unittest.TestCase):
 
 class VersionTests(unittest.TestCase):
     def test_version_and_schema(self):
-        self.assertEqual(APP_VERSION, "13.1.0")
+        self.assertEqual(APP_VERSION, "15.0.0")
         self.assertEqual(SCHEMA_VERSION, 16)
 
 
