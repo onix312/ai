@@ -79,9 +79,9 @@ class StaffRoleTests(unittest.TestCase):
         self.staff.add("Ваня", "employee", "222")
         replies: list[str] = []
         self.bot._reply = lambda chat, text: replies.append(text)
-        self.bot.sell_keyboard = lambda chat: replies.append("клавиатура продажи")
+        self.bot.sell_home_keyboard = lambda chat: replies.append("продажа кнопками")
         self.bot._dispatch("222", "продажа")
-        self.assertIn("клавиатура продажи", replies)
+        self.assertIn("продажа кнопками", replies)
 
     def test_bot_denies_printer_control_for_employee(self):
         self.staff.add("Ваня", "employee", "222")
