@@ -158,6 +158,32 @@ class ShelfCashBotTests(unittest.TestCase):
         self.assertIn("1 000", text)
         self.assertIn("в кассе магазина", text)
 
+    def test_shelf_text_shows_online_money_separately(self):
+        item = _shelf_item(self.db)
+        self.shelf.sale(item["id"], 1, 700, channel="shelf")
+        self.shelf.sale(item["id"], 1, 800, channel="online")
+        text = self.bot.text_shelf()
+        self.assertIn("Онлайн (Авито/ТГ)", text)
+        self.assertIn("800", text)
+        # онлайн не прибавляется к кассе магазина
+        self.assertIn("на счёте", text)
+
+    def test_cash_menu_shows_online_row(self):
+        item = _shelf_item(self.db)
+        self.shelf.sale(item["id"], 1, 800, channel="online")
+        text = self.bot.text_shelf_cash()
+        self.assertIn("Онлайн (Авито/ТГ)", text)
+        self.assertIn("800", text)
+        self.assertIn("на счёте", text)
+
+    def test_cash_screen_has_online_income(self):
+        item = _shelf_item(self.db)
+        self.shelf.sale(item["id"], 1, 900, channel="online")
+        cash = self.shelf.shop_cash()
+        self.assertEqual(cash["shelf_income"], 0)  # в кассу магазина не входит
+        self.assertEqual(cash["online_income"], 900)
+        self.assertEqual(cash["in_shop"], 0)
+
     def test_shelf_text_without_items_is_honest(self):
         text = self.bot.text_shelf()
         self.assertIn("Стеллаж пуст", text)

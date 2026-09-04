@@ -1851,6 +1851,11 @@ class TelegramBot:
             answer += ("\n\n📈 Сегодня: "
                        f"{round(today.get('qty', 0), 1)} шт · {_money(today.get('money', 0))}"
                        f" · в кассе магазина {_money(cash.get('in_shop', 0))}")
+            online_money = num(today.get("online_money", 0))
+            online_total = num(cash.get("online_income", 0))
+            if online_money > 0 or online_total > 0:
+                answer += (f"\n🌐 Онлайн (Авито/ТГ): сегодня {_money(online_money)} · "
+                           f"всего {_money(online_total)} — на счёте, не в кассе")
         return answer
 
     def text_shelf_cash(self) -> str:
@@ -1862,10 +1867,14 @@ class TelegramBot:
         lines = [
             "💰 Касса стеллажа",
             f"• Продано сегодня: {round(today.get('qty', 0), 1)} шт · "
-            f"{_money(today.get('money', 0))}",
+            f"{_money(today.get('money', 0))}"
+            f" (полка {_money(today.get('shop_money', 0))} · "
+            f"онлайн {_money(today.get('online_money', 0))})",
             f"• Продано за все время: {_money(cash.get('shelf_income'))}",
             f"• Забрали из магазина: {_money(cash.get('collected_total'))}",
             f"• Лежит в магазине: {_money(cash.get('in_shop'))}",
+            f"• Онлайн (Авито/ТГ): {_money(cash.get('online_income'))}"
+            " — на счёте, в кассу магазина не входит",
             "",
             "Быстрая выемка — кнопками ниже. Точная сумма: «забрали 5000».",
         ]
@@ -1880,6 +1889,7 @@ class TelegramBot:
             "💰 Касса стеллажа",
             f"• Лежит в магазине: {_money(in_shop)}",
             f"• Забрали за все время: {_money(cash.get('collected_total'))}",
+            f"• Онлайн (Авито/ТГ): {_money(cash.get('online_income'))} — на счёте",
             "",
             "Кнопки — быстрая выемка. Точная сумма: «забрали 2500».",
         ]

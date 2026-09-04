@@ -87,6 +87,18 @@ class ShelfCashTests(unittest.TestCase):
         state = self.shelf.shop_cash()
         self.assertEqual(state["shelf_income"], 0)
         self.assertEqual(state["in_shop"], 0)
+        self.assertEqual(state["online_income"], 500)
+
+    def test_online_and_shop_money_split_today(self):
+        """«Сегодня» различает полку и онлайн — для кассы и счёта."""
+        self.shelf.sale("s1", 2, 0, channel="shelf", note="полка")
+        self.shelf.sale("s1", 1, 0, channel="online", note="Авито")
+        today = self.shelf.today_sales()
+        self.assertEqual(today["qty"], 3)
+        self.assertEqual(today["money"], 1500)
+        self.assertEqual(today["shop_money"], 1000)
+        self.assertEqual(today["online_money"], 500)
+        self.assertEqual(today["online_qty"], 1)
 
     def test_today_sales_counts_only_active_moves(self):
         """«Продано сегодня»: считаются продажи, отменённые — нет."""

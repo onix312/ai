@@ -545,19 +545,41 @@ class Shelf:
     def today_sales(self) -> dict[str, float]:
         """Продажи со стеллажа с начала сегодняшнего дня (учётные, без отменённых).
 
-        Денюги и штуки считаются по движениям вида sale/online с отрицательным
-        количеством: отменённые продажи (undone=1) не участвуют.
+        Деньги и штуки считаются по движениям вида sale/online с отрицательным
+        количеством: отменённые продажи (undone=1) не участвуют. Разбивка
+        shop/online нужна, чтобы «касса магазина» и «деньги на счёте» не
+        смешивались в одном числе.
         """
         day = now_iso()[:10]
         row = self.db.one(
-            "SELECT COALESCE(SUM(-qty),0) qty, COALESCE(SUM(-qty*price),0) money"
+            "SELECT COALESCE(SUM(-qty),0) qty, COALESCE(SUM(-qty*price),0) money,"
+            " COALESCE(SUM(CASE WHEN kind='online' THEN -qty ELSE 0 END),0) online_qty,"
+            " COALESCE(SUM(CASE WHEN kind='online' THEN -qty*price ELSE 0 END),0) online_money"
             " FROM shelf_moves"
             " WHERE kind IN ('sale','online') AND qty<0 AND COALESCE(undone,0)=0"
             " AND substr(at,1,10)=?", (day,)) or {}
+        total_qty = num(row.get("qty"))
+        total_money = num(row.get("money"))
+        online_qty = num(row.get("online_qty"))
+        online_money = num(row.get("online_money"))
         return {
-            "qty": round(num(row.get("qty")), 1),
-            "money": round(num(row.get("money")), 2),
+            "qty": round(total_qty, 1),
+            "money": round(total_money, 2),
+            "online_qty": round(online_qty, 1),
+            "online_money": round(online_money, 2),
+            "shop_money": round(total_money - online_money, 2),
         }
+
+    def online_income(self) -> float:
+        """Всё, что продано со стеллажа онлайн (Авито/Telegram) за всю историю.
+
+        Эти деньги физически не лежат в кассе магазина — они на счёте, поэтому
+        в `shop_cash().in_shop` не входят, но показываются отдельной строкой.
+        """
+        row = self.db.one(
+            "SELECT COALESCE(SUM(-qty*price),0) v FROM shelf_moves"
+            " WHERE kind='online' AND qty<0 AND COALESCE(undone,0)=0") or {}
+        return round(num(row.get("v")), 2)
 
     def summary(self) -> dict[str, Any]:
         items = self.items()
@@ -607,6 +629,8 @@ class Shelf:
         Деньги от продаж со стеллажа учитываются доходом в PrintFlow, но
         физически остаются в кассе магазина. Разница между накопленным доходом
         и выемками — это остаток, который должен быть в кассе (для сверки).
+        Онлайн-продажи (kind='online') в кассу магазина не входят — они на
+        счёте, поэтому отдаются отдельными полями.
         """
         income = self._shelf_income()
         collected = sum(num(c.get("amount")) for c in self.collections())
@@ -614,6 +638,7 @@ class Shelf:
             "shelf_income": round(income, 2),
             "collected_total": round(collected, 2),
             "in_shop": round(income - collected, 2),
+            "online_income": self.online_income(),
             "collections": self.collections(),
         }
 

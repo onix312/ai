@@ -24,7 +24,7 @@ from connector.tests.test_phase11 import make_api, make_db  # noqa: E402
 
 class VersionTests(unittest.TestCase):
     def test_app_and_schema(self):
-        self.assertEqual(APP_VERSION, "15.2.2")
+        self.assertEqual(APP_VERSION, "15.2.3")
         self.assertEqual(SCHEMA_VERSION, 16)
 
 
@@ -309,7 +309,7 @@ class ApiDispatchTests(unittest.TestCase):
         api.workshop = WorkshopV9(api.db, Repo(api.db))
         code, payload = api.get("/api/workshop/about", {})
         self.assertEqual(code, 200)
-        self.assertEqual(payload["version"], "15.2.2")
+        self.assertEqual(payload["version"], "15.2.3")
 
         class Files:
             def list_files(self, path="/"):

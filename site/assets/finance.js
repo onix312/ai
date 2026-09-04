@@ -266,13 +266,15 @@ async function refreshShelfCash() {
 function renderShelfCash() {
   const host = $('shelf_cash_kpis');
   if (!host) return;
-  const c = shelfCash || { shelf_income: 0, collected_total: 0, in_shop: 0, collections: [] };
+  const c = shelfCash || { shelf_income: 0, collected_total: 0, in_shop: 0, online_income: 0, collections: [] };
   host.innerHTML = [
     kpi('Продано со стеллажа', money(c.shelf_income), 'доход за всю историю', num(c.shelf_income) ? 'ok' : ''),
     kpi('Забрали из магазина', money(c.collected_total), 'выемки наличных', num(c.collected_total) ? '' : ''),
     kpi('Лежит в магазине', money(c.in_shop),
       num(c.in_shop) ? 'должно быть в кассе магазина' : 'касса сведена',
       num(c.in_shop) ? 'warn' : 'ok'),
+    kpi('Онлайн-деньги (Авито/ТГ)', money(c.online_income),
+      num(c.online_income) ? 'на счёте, не в кассе магазина' : 'продаж онлайн не было'),
   ].join('');
   const list = $('shelf_cash_list');
   if (!list) return;

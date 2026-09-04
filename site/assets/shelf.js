@@ -200,13 +200,15 @@ function renderShelfCash() {
   const host = $('shelf_cash_mini');
   if (!host) return;
   const s = shelfData.summary || {};
-  const c = shelfData.cash || { shelf_income: 0, collected_total: 0, in_shop: 0, collections: [] };
+  const c = shelfData.cash || { shelf_income: 0, collected_total: 0, in_shop: 0, online_income: 0, collections: [] };
   host.innerHTML = [
     shelfKpi('Продано сегодня', `${nfmt(s.sold_today)} шт`, money(s.sold_today_money)),
     shelfKpi('Лежит в кассе магазина', money(c.in_shop),
       num(c.in_shop) ? 'заберите и запишите выемку' : 'касса сведена',
       num(c.in_shop) ? 'warn' : 'ok'),
     shelfKpi('Забрали за всё время', money(c.collected_total), 'выемки наличных'),
+    shelfKpi('Онлайн-деньги (Авито/ТГ)', money(c.online_income),
+      num(c.online_income) ? 'на счёте, не в кассе магазина' : 'продаж онлайн не было'),
   ].join('');
   const list = $('shelf_cash_mini_list');
   if (!list) return;
@@ -222,7 +224,7 @@ async function collectShelfCash() {
   const c = shelfData.cash || { in_shop: 0 };
   const ans = await ask({
     title: 'Забрали из кассы магазина',
-    sub: `В кассе должно быть ${money(c.in_shop)}. Запишите фактическую выемку.`,
+    sub: `В кассе должно быть ${money(c.in_shop)}. Онлайн-продажи (Авито/ТГ) сюда не входят — они на счёте.`,
     ok: 'Записать',
     fields: [
       { name: 'amount', label: 'Сумма, ₽', type: 'number', value: '', placeholder: String(Math.round(num(c.in_shop))), min: 1, step: 1, hint: 'Можно забрать не всё — например, часть оставить на сдачу.' },
