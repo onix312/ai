@@ -792,6 +792,13 @@ class Api:
             raise ValueError(
                 "Оплата не редактируется в карточке заказа; используйте журнал платежей"
             )
+        # JSON-поля формы приходят строками, но прямой вызов API может
+        # прислать списки/словари — нормализуем в строку, как ждёт БД.
+        import json as _json
+        for key in ("spools", "items", "colors", "qc_done"):
+            value = body.get(key)
+            if isinstance(value, (list, dict)):
+                body[key] = _json.dumps(value, ensure_ascii=False)
         with self.db.transaction():
             order = self.repo.save_order(body)
             # У заказа может быть только один актуальный резерв. При изменении
@@ -1307,6 +1314,13 @@ class Api:
             return 200, {"balances": self.stock.balances(one("warehouse_id")),
                          "moves": self.stock.moves(one("nom_id"), one("warehouse_id"),
                                                    int(num(one("limit", "80"), 80)))}
+        if path == "/api/order/filament-fact":
+            # План пластика заказа (катушки, граммы) против факта списаний
+            # с принтера (идеи 60, 68).
+            oid = one("id")
+            if not oid:
+                return 400, {"error": "Укажите заказ"}
+            return 200, self.acc.filament_plan_vs_actual(oid)
         if path == "/api/stock/turnover":
             return 200, {"rows": self.stock.turnover(one("from"), one("to"),
                                                      one("warehouse_id"))}
@@ -1320,6 +1334,12 @@ class Api:
                 return 404, {"error": "Склад не найден"}
             return 200, {"warehouse": wh,
                          "positions": self.stock.warehouse_positions(wid)}
+        if path == "/api/stock/writeoffs":
+            # Сводка ручных списаний для блока «куда девается» (идея 6)
+            days = int(num(one("days", "30"), 30))
+            stats = self.stock.manual_stats(days=days)
+            recent = self.stock.manual_recent(days=days)
+            return 200, {"stats": stats, "recent": recent}
         # ---------------------------------------------------------- документы
         if path == "/api/documents":
             return 200, {"documents": self.docs.list(
@@ -2512,6 +2532,8 @@ class Api:
                 br["filament_by_spools"] = True
                 br["spool_shortage"] = spool_info["shortage"]
                 br["spool_have"] = spool_info["have"]
+                br["spool_lines"] = spool_info["lines"]  # идея 63
+                br["spool_rows"] = spool_info["rows"]
             return 200, br
         if path == "/api/calc/price":
             cost = num(body.get("cost"))
@@ -2769,19 +2791,24 @@ class Api:
         if path == "/api/reserve/release":
             return 200, {"ok": True, "released": self.stock.release(
                 body.get("id", ""), body.get("order_id", ""))}
-        # ----------------------------------------- ручные корректировки «−1/+1»
+        # ----------------------------------------- ручные корректировки «−N/+N»
         if path == "/api/stock/adjust":
-            # Простая ручная корректировка остатка (списание/оприходование
-            # одной штуки). Не продажа: касса, выручка, маржа и статистика
-            # продаж не затрагиваются — только движение регистра + аудит.
+            # Простая ручная корректировка остатка (списание/оприходование;
+            # кнопка шлёт ±1, диалог «−N/+N» — произвольное количество, идея
+            # 1; причина — идея 2). Не продажа: касса, выручка, маржа и
+            # статистика продаж не затрагиваются — только регистр + аудит.
             delta = num(body.get("delta"))
-            if delta not in (-1.0, 1.0):
-                return 400, {"error": "Корректировка меняет остаток ровно на 1 шт"}
+            if delta == 0:
+                return 400, {"error": "Корректировка не меняет остаток (0)"}
             if not body.get("nom_id") or not body.get("warehouse_id"):
                 return 400, {"error": "Укажите позицию и склад"}
+            reason = str(body.get("reason") or "")
+            if reason and reason not in ("брак", "потеря", "найдено",
+                                         "подарок", "пересчёт", "своё"):
+                return 400, {"error": "Неизменная причина корректировки"}
             move = self.stock.manual_adjust(
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
-                delta, str(body.get("note") or ""))
+                delta, str(body.get("note") or ""), reason)
             return 200, {"ok": True, "move": move,
                          "qty": self.stock.qty(move["nom_id"], move["warehouse_id"])}
         if path == "/api/stock/revert":

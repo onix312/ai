@@ -92,11 +92,33 @@ class StockAdjustTests(unittest.TestCase):
         self.assertEqual(self.stock.qty("nom-1", "wh-1"), 3.0)
         self.assertEqual(move["doc_kind"], "manual")
 
-    def test_delta_must_be_unit(self):
-        with self.assertRaises(ValueError):
-            self.stock.manual_adjust("nom-1", "wh-1", -3)
+    def test_zero_delta_rejected(self):
         with self.assertRaises(ValueError):
             self.stock.manual_adjust("nom-1", "wh-1", 0)
+
+    def test_minus_n_amount(self):
+        # идея 1: корректировка количества (3 шт), стоимость по средней
+        move = self.stock.manual_adjust("nom-1", "wh-1", -3, reason="брак")
+        self.assertEqual(move["qty"], -3.0)
+        self.assertEqual(move["cost"], -300.0)
+        self.assertEqual(self.stock.qty("nom-1", "wh-1"), 1.0)
+        self.assertIn("[Брак]", move["note"])
+
+    def test_minus_n_blocked_over_free(self):
+        with self.assertRaises(ValueError):
+            self.stock.manual_adjust("nom-1", "wh-1", -99, reason="брак")
+
+    def test_plus_n_and_stats(self):
+        self.stock.manual_adjust("nom-1", "wh-1", 2, reason="найдено")
+        self.assertEqual(self.stock.qty("nom-1", "wh-1"), 6.0)
+        stats = self.stock.manual_stats(days=7)
+        self.assertEqual(stats["total_qty"], 0.0)  # оприходование не списание
+        self.stock.manual_adjust("nom-1", "wh-1", -1, reason="брак")
+        stats = self.stock.manual_stats(days=7)
+        self.assertEqual(stats["total_qty"], 1.0)
+        recent = self.stock.manual_recent(days=7)
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["nom_name"], "Адресник")
 
     def test_unknown_nom_or_warehouse(self):
         with self.assertRaises(ValueError):

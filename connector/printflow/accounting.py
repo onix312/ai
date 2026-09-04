@@ -108,20 +108,27 @@ class Accounting:
         складе (архив/удалены), пропускаются — по ним предупредит вызывающий
         код, а расчёт цены не ломается.
         """
-        out: list[dict] = []
-        total_cost = 0.0
-        total_grams = 0.0
-        total_have = 0.0
+        # Сначала группируем граммы по катушкам: одна катушка может быть
+        # указана в двух строках заказа (идея 65 — одна кончается, продолжает
+        # другая тут не при чём, но дубли строк не должны ломать нехватку).
+        grams_by_spool: dict[str, float] = {}
         for item in spool_items or []:
             if not isinstance(item, dict):
                 continue
             spool_id = str(item.get("spool_id") or "")
             grams = num(item.get("grams"))
-            if not spool_id or grams <= 0:
-                continue
+            if spool_id and grams > 0:
+                grams_by_spool[spool_id] = grams_by_spool.get(spool_id, 0.0) + grams
+        out: list[dict] = []
+        total_cost = 0.0
+        total_grams = 0.0
+        total_have = 0.0
+        for spool_id, grams in grams_by_spool.items():
             spool = self.db.one(
                 "SELECT * FROM spools WHERE id=? AND archived=0", (spool_id,))
             if not spool:
+                # Катушка исчезла/в архиве: не искажаем итог по граммам и
+                # нехватке — строку отдадим, но расчёт ведём по живым.
                 out.append({"spool_id": spool_id, "grams": round(grams, 1),
                             "cost": 0.0, "missing": True})
                 continue
@@ -140,10 +147,36 @@ class Accounting:
                         "price_per_kg": round(num(spool.get("price"), 0)
                                               / weight * 1000, 2),
                         "cost": cost})
+        def fmt(x: float) -> str:
+            x = round(num(x), 1)
+            return str(int(x)) if abs(x - int(x)) < 1e-9 else str(x)
+
         return {"cost": round(total_cost, 2), "grams": round(total_grams, 1),
                 "have": round(total_have, 1),
                 "shortage": round(max(0.0, total_grams - total_have), 1),
-                "rows": out}
+                "rows": out,
+                # строки для сметы с подписями цены/остатка (идея 63)
+                "lines": [f"{r['material'] or 'Катушка'} {r['color_name'] or ''}".strip()
+                          + f": {fmt(r['grams'])} г × {r['price_per_kg']:.0f} ₽/кг = {r['cost']:.0f} ₽"
+                          for r in out if not r.get("missing")]}
+
+    def filament_plan_vs_actual(self, order_id: str) -> dict:
+        """План (катушки заказа, граммы) против факта списаний filament_usage
+        по заказу (идеи 60 и 68). Факт уже хранится — списание при печати
+        пишет spool_id, grams и стоимость конкретной катушки."""
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,)) or {}
+        plan = self.spools_filament_cost(self._order_spool_items(order))
+        rows = self.db.query(
+            "SELECT f.spool_id, f.grams, f.cost, f.note, s.material, s.color_name"
+            " FROM filament_usage f LEFT JOIN spools s ON s.id=f.spool_id"
+            " WHERE f.order_id=? ORDER BY datetime(f.at)", (order_id,))
+        actual_grams = round(sum(num(r["grams"]) for r in rows), 1)
+        actual_cost = round(sum(num(r["cost"]) for r in rows), 2)
+        diff = round(actual_grams - plan["grams"], 1)
+        return {"plan_grams": plan["grams"], "plan_cost": plan["cost"],
+                "actual_grams": actual_grams, "actual_cost": actual_cost,
+                "diff_grams": diff,
+                "actual_rows": [dict(r) for r in rows]}
 
     def cost_breakdown(self, grams: float, hours: float, spool_price: float | None = None,
                        spool_weight: float | None = None, manual_minutes: float = 0.0,

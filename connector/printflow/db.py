@@ -272,6 +272,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # связанная финансовая проводка удалена. Движение остаётся в журнале для аудита.
         ("undone", "INTEGER DEFAULT 0"),
     ],
+    "warehouses": [
+        # Цветной маркер склада на карточках (идея 20); пусто — цвет по виду.
+        ("color", "TEXT DEFAULT ''"),
+    ],
 }
 
 SCHEMA = """

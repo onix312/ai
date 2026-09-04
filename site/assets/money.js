@@ -163,6 +163,8 @@ function renderStock() {
       + `<div class="nums"><em>${nfmt(s.remaining_grams)} г</em><span class="muted">/ ${nfmt(s.total_grams)} г</span><span class="spacer"></span><b class="spool-cost">${money(s.value)}</b></div>`
       + `<div class="bar ${p < 15 ? (p <= 0 ? 'bad' : 'warn') : 'ok'}"><i style="width:${p}%"></i></div>`
       + `<div class="spool-sub-row"><small class="muted used">израсходовано ${nfmt(s.used_grams)} г</small>`
+      // идея 57: сколько граммов ушло в обрезки/продувку
+      + (num(s.scrap_grams) ? `<small class="muted" title="Списано как обрезки/продувка">✂ обрезки ${nfmt(s.scrap_grams)} г</small>` : '')
       + (s.last_dry ? `<small class="spool-dry-tag" title="Сушка">♨ ${esc(dateText(s.last_dry))}</small>` : '')
       + `</div>`
       + '</div></div>'

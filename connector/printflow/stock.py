@@ -27,6 +27,10 @@ PLAN_DAYS = 7                   # на сколько дней вперёд пл
 MANUAL_KIND = "manual"
 MANUAL_NOTE_MINUS = "ручное списание"
 MANUAL_NOTE_PLUS = "ручное оприходование"
+# Причины ручной корректировки (идея 2): короткий список + своя заметка.
+MANUAL_REASONS = ("брак", "потеря", "найдено", "подарок", "пересчёт", "своё")
+REASON_LABEL = {"брак": "Брак", "потеря": "Потеря", "найдено": "Найдено",
+                "подарок": "Подарок", "пересчёт": "Пересчёт", "своё": "Своё"}
 
 
 class Stock:
@@ -54,20 +58,22 @@ class Stock:
         """Убрать движения документа — используется при распроведении."""
         self.db.execute("DELETE FROM stock_moves WHERE doc_id=?", (doc_id,))
 
-    # --------------------------------------------- ручные корректировки «−1/+1»
+    # --------------------------------------------- ручные корректировки «−N/+N»
     def manual_adjust(self, nom_id: str, warehouse_id: str, delta: float,
-                      note: str = "") -> dict:
-        """Ручная корректировка остатка одной штукой: «−1» списание, «+1»
-        оприходование. Не продажа: не трогает кассу, выручку, долги и
-        статистику продаж — только движение регистра и аудит.
+                      note: str = "", reason: str = "") -> dict:
+        """Ручная корректировка остатка: «−1» — списание одной штуки,
+        «−N»/«+N» — корректировка количества (идея 1). Не продажа: не
+        трогает кассу, выручку, долги и статистику продаж — только движение
+        регистра и аудит.
 
         Списание защищено: уходить может только свободный остаток
         (остаток минус активные резервы) — резерв под заказ сломать нельзя.
-        Дробный остаток (кг/м) минусуется на 1 единицу измерения.
+        `reason` — причина из списка MANUAL_REASONS (идея 2); попадает
+        в заметку движения для фильтра и в текст события аудита.
         """
         delta = round(num(delta), 3)
-        if delta not in (-1.0, 1.0):
-            raise ValueError("Кнопка корректировки меняет остаток ровно на 1 шт")
+        if delta == 0:
+            raise ValueError("Корректировка не меняет остаток (0)")
         nom = self.db.one("SELECT name, unit FROM nomenclature WHERE id=?",
                           (nom_id,))
         if not nom:
@@ -76,42 +82,82 @@ class Stock:
                          (warehouse_id,))
         if not wh:
             raise ValueError("Склад не найден")
+        reason = (reason or "").strip().lower()
+        if reason and reason not in MANUAL_REASONS:
+            reason = "своё"
+        amount = abs(delta)
         unit = str(nom.get("unit") or "шт")
         qty = self.qty(nom_id, warehouse_id)
         reserved = self.reserved(nom_id, warehouse_id)
         free = qty - reserved
+        reason_tag = f"[{REASON_LABEL.get(reason, reason)}] " if reason else ""
         if delta < 0:
             # Списываем только свободное: зарезервированное под заказ —
             # неприкосновенно. Сервер — последний рубеж, кнопка на фронте
             # уже неактивна.
-            if free < 1 - 1e-9:
-                if reserved > 0:
+            if free < amount - 1e-9:
+                if reserved > 0 and free < 1e-9:
                     raise ValueError(
                         f"Списать нельзя: {round(reserved, 3)} {unit} "
                         "в резерве под заказы")
-                raise ValueError(f"На складе «{wh['name']}» нет свободного остатка")
-            # Штучные товары: целую штуку можно списать только если она есть.
-            if unit in ("шт", "шт.", "piece", "pcs") and qty < 1 - 1e-9:
-                raise ValueError(f"На складе только {round(qty, 3)} {unit}")
+                raise ValueError(
+                    f"На складе «{wh['name']}» свободно {round(free, 3)} {unit}, "
+                    f"а списать просят {round(amount, 3)}")
             avg = self.avg_cost(nom_id, warehouse_id)
-            cost = -round(avg, 2)          # расход уходит по средней
+            cost = -round(avg * amount, 2)   # расход по средней
             action, note_default = "Списание", MANUAL_NOTE_MINUS
         else:
-            # Оприходование найденной штуки приходуем по текущей средней:
+            # Оприходование найденных штук приходуем по текущей средней:
             # если средней нет (новая позиция) — по нулевой цене, деньги
             # корректировка не двигает в любом случае.
             avg = self.avg_cost(nom_id, warehouse_id)
-            cost = round(avg, 2)
+            cost = round(avg * amount, 2)
             action, note_default = "Оприходование", MANUAL_NOTE_PLUS
+        full_note = (reason_tag + (str(note).strip() or note_default)).strip()
         move = self.add_move(nom_id, warehouse_id, delta, cost,
-                             doc_kind=MANUAL_KIND, note=note or note_default)
+                             doc_kind=MANUAL_KIND, note=full_note)
         self.db.add_event(
-            "stock", f"Склад: {action.lower()} 1 шт",
+            "stock", f"Склад: {action.lower()} {round(amount, 3)} {unit}",
             f"{nom.get('name') or nom_id} · склад «{wh['name']}» · "
-            f"движение {move['id']} · {note or note_default}",
+            f"движение {move['id']} · {full_note}",
             "", {"move_id": move["id"], "nom_id": nom_id,
-                 "warehouse_id": warehouse_id, "delta": delta})
+                 "warehouse_id": warehouse_id, "delta": delta,
+                 "reason": reason})
         return move
+
+    def manual_stats(self, nom_id: str = "", days: int = 7) -> dict:
+        """Ручные списания за период (идеи 5 и 6): штуки и сумма по позициям
+        и в целом. Причина видна в заметке движения ([Брак] и т.п.)."""
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        sql = ("SELECT nom_id, COALESCE(SUM(-qty),0) q, COALESCE(SUM(-cost),0) c"
+               " FROM stock_moves WHERE doc_kind=? AND qty<0 AND at>=?")
+        params: list[Any] = [MANUAL_KIND, since]
+        if nom_id:
+            sql += " AND nom_id=?"
+            params.append(nom_id)
+        sql += " GROUP BY nom_id"
+        per_nom = {}
+        total_q = total_c = 0.0
+        for r in self.db.query(sql, params):
+            q = round(num(r["q"]), 3)
+            c = round(max(0.0, num(r["c"])), 2)
+            per_nom[r["nom_id"]] = {"qty": q, "value": c}
+            total_q += q
+            total_c += c
+        return {"days": days, "total_qty": round(total_q, 3),
+                "total_value": round(total_c, 2), "per_nom": per_nom}
+
+    def manual_recent(self, days: int = 30, limit: int = 50) -> list[dict]:
+        """Последние ручные списания — для панели «куда девается» (идея 6)."""
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        return self.db.query(
+            "SELECT m.nom_id, m.warehouse_id, m.qty, m.cost, m.at, m.note,"
+            " n.name nom_name, w.name warehouse_name FROM stock_moves m"
+            " LEFT JOIN nomenclature n ON n.id=m.nom_id"
+            " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
+            " WHERE m.doc_kind=? AND m.qty<0 AND m.at>=?"
+            " ORDER BY datetime(m.at) DESC LIMIT ?",
+            (MANUAL_KIND, since, int(limit)))
 
     def revert_manual(self, move_id: str) -> dict:
         """Откат ручной корректировки — удаление движения (как распроведение

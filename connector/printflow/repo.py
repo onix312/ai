@@ -472,6 +472,10 @@ class Repo:
         row["last_dry"] = (dry or {}).get("at") or ""
         row["last_dry_min"] = num((dry or {}).get("minutes"))
         row["last_dry_temp"] = num((dry or {}).get("temp"))
+        scrap = self.db.one(
+            "SELECT COALESCE(SUM(grams),0) g FROM filament_scrap WHERE spool_id=?",
+            (row["id"],))
+        row["scrap_grams"] = round(num((scrap or {}).get("g")), 1)  # идея 57
         return row
 
     # ------------------------------------------------------------- материалы

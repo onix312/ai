@@ -64,19 +64,22 @@ class Nomenclature:
         # статистика продаж, резервы и базовый тип цен — массово.
         stats_map = self.stock.sales_stats_all()
         reserved_map = self.stock.reserved_all(warehouse_id)
+        manual_map = self.stock.manual_stats(days=7)["per_nom"]  # идея 5
         base_type = self._base_type()
         out = []
         for row in rows:
             out.append(self._decorate(row, balances, prices, target, warehouse_id,
                                       stats_map=stats_map, reserved_map=reserved_map,
-                                      base_type=base_type))
+                                      base_type=base_type,
+                                      manual_map=manual_map))
         return out
 
     def _decorate(self, row: dict, balances: dict, prices: dict,
                   target: float, warehouse_id: str = "",
                   stats_map: dict | None = None,
                   reserved_map: dict | None = None,
-                  base_type: str = "") -> dict:
+                  base_type: str = "",
+                  manual_map: dict | None = None) -> dict:
         nom_id = row["id"]
         bal = balances.get(nom_id) or {"qty": 0.0, "value": 0.0, "cost": 0.0}
         qty = num(bal["qty"])
@@ -123,6 +126,9 @@ class Nomenclature:
             "days_left": days_left,
             "status": status,
             "plan_qty": plan,
+            # ручные списания за 7 дней (идея 5): видно потери на плитке
+            "manual_written": (manual_map or {}).get(nom_id, {}).get("qty", 0.0),
+            "manual_written_value": (manual_map or {}).get(nom_id, {}).get("value", 0.0),
         }
 
     def _norm_cost(self, row: dict) -> float:
