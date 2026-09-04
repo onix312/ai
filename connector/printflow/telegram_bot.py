@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import json
 import re as _re
 import threading
@@ -27,69 +28,27 @@ from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = f"""PrintFlow {APP_VERSION} — панель в кармане.
+HELP = f"""PrintFlow {APP_VERSION} — цех в кармане.
 
-Кнопки внизу или команды (без слэша, в любом регистре):
-• панель — всё сразу: печать, деньги, план, долги
-• датчики — температуры, вентиляторы, AMS и HMS одной сводкой
-• доктор — здоровье цеха: бот, связь, резервные копии, диск
-• статус · кадр · очередь — что происходит сейчас
-• филамент · пластик — остатки катушек и прогноз закупки
-• закупка — список покупок · закупка авто — автозаполнить
-• таймлапс · кадры — последние снимки печати одним сообщением
-• живой — автообновляемый дашборд (стоп живой — выключить)
-• деньги · день — финансы
-• итоги недели · итоги месяца — отчёты по запросу
-• долги · брак · рейтинг — должники, потери на браке, ABC изделий
-• сколько осталось / что печатает / когда закончит / сколько заработал
-• стеллаж / полка — остаток, дефицит, приход, продажи и движения с кнопками
-• продажа — продать со стеллажа (−1 шт)
-• приход — меню прихода; «приход Адресник 5» — приход на позицию
-• движения стеллажа — последние приходы/продажи/списания
-• продажи стеллажа — что ушло за 7 дней, по позициям
-• касса — сколько от стеллажа лежит в магазине; «забрали 5000» — выемка
-• каталог — меню каталога: карточки, витрина бота, группы (поиск: «каталог адресник»)
-• цена <товар> <сумма> — новая базовая цена
-• товар <Название> <цена> — новая позиция каталога (покупателям не видна)
-• скрыть/показать <товар> — убрать/вернуть в витрину клиентского бота
-• скрыть/показать витрину — выключить/включить витрину целиком
-• описание <товар> <текст> — текст в карточке покупателя
-• норматив <товар> <граммы> <часы> · минималка <товар> <мин> [макс]
-• архив <товар> · вернуть <товар> · удалить <товар> (подтверждение: … да)
-• пересчёт <товар> — цена от себестоимости · «пересчёт все» — по всему каталогу
-• группы — список групп каталога
-• план — что печатать сегодня
-• выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
-• оплата 1500 по 1001 — принять оплату
-• чаты / диалоги — непрочитанные вопросы покупателей
-• кответ 555 текст — ответить покупателю клиентского бота
-• отзыв ответ 555 текст — ответ на плохой отзыв покупателю
-• клиент блок 555 / клиент разблок 555 — спам-фильтр чатов
-• клиент-бот пауза / старт / статус — выключить/включить витрину
-• оплата подтвердить 1001 — вручную подтвердить заявку «Я оплатил»
-• статус 1001 печать — сменить статус заказа
-• новый адресник 2шт 900р Мария — заказ из текста
-• принтер — список парка · принтер 2 — выбрать принтер
-• пауза / продолжить / свет — управление
-• пропустить 2 — исключить объект N из печати
-• выше 1001 · ниже 1001 — порядок заданий в очереди
-• поток 90 — процент подачи филамента (50–150%)
-• повторить / повторить 1001 — подготовить повтор после разбора брака
-• следи 1001 — прогресс заказа каждые 10%
-• простой — сколько простаивает принтер и что теряем
-• фото — прикрепить фото к заказу (или «фото 1001»)
-• стоп — прервать печать (подтверждение: стоп да)
+Все действия — кнопками ниже:
+🛒 Продать · 📦 Полка · 💰 Касса · 📷 Кадр · 📊 Итоги · ⚙️ Ещё
 
-Команда:
-• код — узнать свой chat_id (для добавления в команду)
-• команда — список участников и ролей
-• сотрудник Имя 123456 / руководитель Имя 123456 — добавить
-• пригласить сотрудник Имя — одноразовый код: «старт PF-XXXX»
-• убрать 123456 — отключить участника
+Если бот попросит цифру, сумму или имя — просто напишите.
+Важное я пришлю сам: печать, низкий остаток, кассу, заказы."""
 
-Роли: сотрудник — обзоры, полка, каталог (просмотр) и фото; руководитель —
-плюс деньги, заказы, принтеры и правки каталога; владелец — всё. Можно писать
-без слэша и в любом регистре."""
+
+# Кнопки нижней панели главного меню → команда диспетчера. Кнопка — основной
+# интерфейс; текстовые команды остаются скрытым способом для опытных.
+REPLY_ALIASES: dict[str, str] = {
+    "🛒 продать": "продажа", "продать": "продажа",
+    "📦 полка": "стеллаж", "полка": "стеллаж",
+    "💰 касса": "касса", "касса": "касса",
+    "📷 кадр": "кадр", "кадр": "кадр",
+    "📊 итоги": "день", "итоги": "день",
+    "⚙️ ещё": "more", "⚙️ еще": "more",
+    "ещё": "more", "еще": "more", "more": "more",
+}
+
 
 STATE_RU = {
     "RUNNING": "печатает", "IDLE": "свободен", "PAUSE": "на паузе",
@@ -123,6 +82,83 @@ def _keyboard(*rows: list[tuple[str, str]]) -> dict:
     }
 
 
+# ------------------------------------------------------------- подсказки
+# Словарь «что человек мог иметь в виду» → команда, которая реально сработает.
+# Используется, когда бот не узнал сообщение: вместо сухого отказа предлагаем
+# ближайшую команду кнопкой (идея «человеческого» бота).
+_SUGGEST_VOCAB: list[tuple[str, str]] = [
+    ("панель", "панель"), ("главное меню", "панель"), ("меню", "панель"),
+    ("статус", "статус"), ("состояние", "статус"),
+    ("датчики", "датчики"), ("сенсоры", "датчики"), ("температура", "датчики"),
+    ("доктор", "доктор"), ("диагностика", "доктор"), ("здоровье", "доктор"),
+    ("план", "план"), ("печатать", "план"),
+    ("очередь", "очередь"), ("задания", "очередь"), ("журнал", "очередь"),
+    ("кадр", "кадр"), ("камера", "кадр"), ("снимок", "кадр"), ("фото", "кадр"),
+    ("таймлапс", "таймлапс"), ("видео", "таймлапс"),
+    ("живой", "живой"), ("live", "живой"),
+    ("стеллаж", "стеллаж"), ("полка", "стеллаж"), ("склад", "стеллаж"),
+    ("продажа", "продажа"), ("продать", "продажа"), ("selling", "продажа"),
+    ("приход", "приход"), ("положить", "приход"), ("пополнить", "приход"),
+    ("движения стеллажа", "движения стеллажа"), ("движения", "движения стеллажа"),
+    ("движения полки", "движения стеллажа"), ("движение", "движения стеллажа"),
+    ("продажи стеллажа", "продажи стеллажа"),
+    ("продажи полки", "продажи стеллажа"), ("продажи полка", "продажи стеллажа"),
+    ("касса", "касса"), ("выемка", "касса"), ("забрали", "забрали"),
+    ("деньги", "деньги"), ("финансы", "деньги"), ("прибыль", "деньги"),
+    ("сегодня", "сегодня"), ("итоги", "итоги недели"), ("неделя", "итоги недели"),
+    ("месяц", "итоги месяца"), ("отчет", "итоги недели"), ("отчёт", "итоги недели"),
+    ("долги", "долги"), ("должники", "долги"), ("брак", "брак"), ("дефект", "брак"),
+    ("рейтинг", "рейтинг"), ("abc", "рейтинг"), ("топ", "рейтинг"),
+    ("простой", "простой"), ("заработок", "деньги"), ("заработал", "деньги"),
+    ("сколько", "сколько осталось"), ("сколько осталось", "сколько осталось"),
+    ("филамент", "филамент"), ("пластик", "филамент"), ("катушки", "филамент"),
+    ("закупка", "закупка"), ("покупки", "закупка"), ("шоппинг", "закупка"),
+    ("каталог", "каталог"), ("номенклатура", "каталог"), ("товары", "каталог"),
+    ("цена", "цена"), ("группы", "группы"),
+    ("новый", "новый заказ"), ("заказ", "новый заказ"), ("создать", "новый заказ"),
+    ("выдать", "выдать"), ("выдал", "выдать"), ("выдача", "выдать"),
+    ("оплата", "оплата"), ("оплатить", "оплата"),
+    ("чаты", "чаты"), ("диалоги", "чаты"), ("inbox", "чаты"),
+    ("кответ", "кответ"), ("ответить", "кответ"),
+    ("клиент-бот", "клиент-бот"), ("витрина", "клиент-бот"),
+    ("пауза", "пауза"), ("продолжить", "продолжить"), ("свет", "свет"),
+    ("стоп", "стоп"), ("поток", "поток"), ("пропустить", "пропустить"),
+    ("повторить", "повторить"), ("перепечатать", "повторить"),
+    ("следи", "следи"), ("подпишись", "следи"),
+    ("помощь", "помощь"), ("help", "помощь"), ("что умеешь", "помощь"),
+    ("код", "код"), ("команда", "команда"), ("сотрудники", "команда"),
+    ("сотрудник", "сотрудник"), ("пригласить", "пригласить"),
+    ("принтеры", "принтер"), ("принтер", "принтер"),
+]
+
+
+def suggest_command(raw: str) -> str:
+    """Ближайшая известная команда для непонятого сообщения.
+
+    Возвращает '' если совпадение слабое — тогда честно зовём «помощь»,
+    а не угадываем наугад.
+    """
+    text = _re.sub(r"\s+", " ", str(raw or "").lower().replace("ё", "е")).strip()
+    if len(text) < 3:
+        return ""
+    tokens = [w for w in text.split() if len(w) >= 3] or [text]
+    best, best_score = "", 0.0
+    for phrase, canonical in _SUGGEST_VOCAB:
+        # Точное совпадение словами — самое сильное; «брак» не должно
+        # находиться внутри «абракадабра», поэтому смотрим границы слова.
+        pattern = _re.compile(rf"\b{_re.escape(phrase)}\b")
+        if pattern.search(text):
+            return canonical
+        score = max(
+            difflib.SequenceMatcher(None, text, phrase).ratio(),
+            max((difflib.SequenceMatcher(None, token, phrase).ratio()
+                 for token in tokens), default=0.0),
+        )
+        if score > best_score:
+            best_score, best = score, canonical
+    return best if best_score >= 0.62 else ""
+
+
 class TelegramBot:
     """Фоновый слушатель команд. Запускается только когда включён в настройках."""
 
@@ -142,6 +178,11 @@ class TelegramBot:
         self._watched: dict[str, dict] = {}  # chat -> {number, last_milestone}
         self._sell_page: dict[str, int] = {}  # chat -> страница меню продаж
         self._prod_page: dict[str, int] = {}  # chat -> страница меню прихода
+        # 15.4: флоу продажи кнопками (позиция → количество → цена → канал → ✅)
+        self._sell_flow: dict[str, dict] = {}  # chat -> {item, qty, price, channel}
+        # 15.4: ожидание факта сверки кассы: chat -> время запроса (iso)
+        self._cash_reconcile: dict[str, str] = {}
+        self._client_reply_to: dict[str, str] = {}  # chat -> client_chat_id
         self._cat_page: dict[str, int] = {}   # chat -> страница меню каталога
         self._cat_filter: dict[str, str] = {}  # chat -> фильтр списка каталога
         self._cat_query: dict[str, str] = {}   # chat -> поисковый запрос каталога
@@ -204,20 +245,187 @@ class TelegramBot:
         """Главное inline-меню сотрудника, общее для всех карточек."""
         return _keyboard(
             [("🖨 Принтеры", "cmd:printers"), ("≡ Очередь", "cmd:queue")],
-            [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
-            [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
+            [("🛍 Стеллаж", "cmd:shelf"), ("📥 Inbox", "cmd:inbox")],
+            [("🧵 AMS / пластик", "cmd:filament"), ("💰 Касса", "cmd:shelf-cash")],
+            [("⚑ План", "cmd:plan"), ("₽ Деньги", "cmd:money")],
             [("🗂 Каталог", "cmd:cat"), ("📊 Итоги", "cmd:today")],
-            [("📈 Неделя", "cmd:weekly"), ("🌡 Датчики", "cmd:sensors")],
             [("🩺 Доктор", "cmd:doctor"), ("❔ Помощь", "cmd:help")],
         )
 
-    def _reply_keyboard(self, chat: str, text: str) -> None:
-        """Сообщение с постоянной inline-клавиатурой."""
-        keyboard = self._inline_menu()
+    def more_keyboard(self, chat: str, message_id: str = "") -> None:
+        """«Ещё» — остальные разделы кнопками.
+
+        Права проверяются на каждой кнопке отдельно: сотрудник увидит
+        очередь и катушки, а «Деньги» получит отказ-подсказку (кнопкой
+        «Показать владельцу» в будущем — сейчас честный отказ роли).
+        """
+        buttons = [
+            [{"text": "🖨 Очередь печати", "callback_data": "cmd:queue"},
+             {"text": "🏭 Принтеры", "callback_data": "cmd:printers"}],
+            [{"text": "📦 Заказы", "callback_data": "cmd:orders"},
+             {"text": "👥 Клиенты", "callback_data": "cmd:clients"}],
+            [{"text": "🧵 Катушки / AMS", "callback_data": "cmd:filament"},
+             {"text": "📋 Каталог", "callback_data": "cmd:cat"}],
+            [{"text": "📅 План печати", "callback_data": "cmd:plan"},
+             {"text": "💰 Деньги", "callback_data": "cmd:money"}],
+            [{"text": "🔧 Доктор", "callback_data": "cmd:doctor"},
+             {"text": "👥 Команда", "callback_data": "cmd:team"}],
+            [{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+             {"text": "❔ Помощь", "callback_data": "cmd:help"}],
+        ]
+        self._send_menu(chat, "⚙️ Ещё — остальное тоже кнопками:", buttons,
+                        message_id)
+
+    def queue_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Очередь печати кнопками: задания + управление принтером."""
+        text = self.text_queue()
+        buttons = []
+        for job in self.manager.queue()[:6]:
+            order = job.get("order") or {}
+            title = (order.get("number") and f"№{order['number']} "
+                     f"{order.get('product') or ''}" or job.get("name") or "задание")
+            if job.get("state") == "running":
+                buttons.append([{"text": f"▶ {str(title)[:40]} (печатается)",
+                                 "callback_data": "cmd:queue"}])
+            else:
+                buttons.append([{"text": f"⏳ {str(title)[:40]}",
+                                 "callback_data": "cmd:queue"}])
+        buttons.append([{"text": "▶ Следующее", "callback_data": "cmd:next"},
+                        {"text": "✅ Снял деталь", "callback_data": "cmd:removed"}])
+        buttons.append([{"text": "❙❙ Пауза", "callback_data": "cmd:pause"},
+                        {"text": "▶ Продолжить", "callback_data": "cmd:resume"},
+                        {"text": "◉ Кадр", "callback_data": "cmd:frame"}])
+        buttons.append([{"text": "■ Стоп", "callback_data": "cmd:stop"},
+                        {"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, text, buttons, message_id)
+
+    # ------------------------------------------- 15.4: заказы и клиенты
+    def _active_orders(self, limit: int = 12) -> list[dict]:
+        return self.db.query(
+            "SELECT * FROM orders WHERE COALESCE(closed_at,'')=''"
+            " ORDER BY datetime(created_at) DESC LIMIT ?", (int(limit),))
+
+    def orders_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Список активных заказов кнопками → карточка заказа."""
+        rows = self._active_orders()
+        if not rows:
+            text = "📦 Активных заказов нет.\nНовый: «новый адресник 2шт 900р Мария»."
+            buttons = [[{"text": "🏠 В меню", "callback_data": "cmd:menu"}]]
+            return self._send_menu(chat, text, buttons, message_id)
+        lines = [f"📦 Активные заказы: {len(rows)}", ""]
+        buttons = []
+        for order in rows:
+            title = f"№{order.get('number')} · {str(order.get('product') or '')[:18]}"
+            if order.get("customer_name"):
+                title += f" · {str(order['customer_name'])[:14]}"
+            lines.append(title)
+            buttons.append([{"text": title[:60],
+                             "callback_data": f"cmd:order:{order['number']}"}])
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def order_card(self, chat: str, number: str, message_id: str = "") -> None:
+        order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+        if not order:
+            return self._reply(chat, f"Заказ №{number} не найден.")
+        due = num(self.manager.acc.order_economics(order).get("debt"))
+        lines = [f"📦 Заказ №{number}",
+                 f"• {order.get('product') or '—'} × {round(num(order.get('qty')),1)} шт",
+                 f"• Клиент: {order.get('customer_name') or '—'}"
+                 + (f" · {order.get('phone')}" if order.get("phone") else ""),
+                 f"• Статус: {order.get('status') or 'новый'}",
+                 f"• Цена: {_money(order.get('price'))} · Оплачено: "
+                 f"{_money(max(num(order.get('prepaid')), num(order.get('paid'))))}",
+                 f"• Долг: {_money(due)}",
+                 f"• Срок: {order.get('due') or '—'}",
+                 f"• Задание: {order.get('file') or 'файл не привязан'}"]
+        buttons = []
+        if due > 0:
+            buttons.append([{"text": f"💰 Оплатить долг · {_money(due)}",
+                             "callback_data": f"cmd:order-pay:{number}"}])
+        buttons.append([{"text": "📝 В работу", "callback_data": f"cmd:order-status:{number}:printing"},
+                        {"text": "✅ Готов", "callback_data": f"cmd:order-ready:{number}"}])
+        buttons.append([{"text": "📦 Выдать (оплачен)", "callback_data": f"cmd:order-fulfill:{number}:paid"},
+                        {"text": "📦 Выдать (в долг)", "callback_data": f"cmd:order-fulfill:{number}:debt"}])
+        buttons.append([{"text": "◉ Следить", "callback_data": f"cmd:watch:{number}"},
+                        {"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def clients_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Клиенты клиентского бота кнопками → карточка клиента."""
+        rows = self.db.query(
+            "SELECT chat_id, name, phone, last_seen FROM client_chats"
+            " WHERE COALESCE(banned,0)=0 ORDER BY datetime(last_seen) DESC LIMIT 12")
+        if not rows:
+            text = "👥 Клиентов пока нет — они появятся после первого вопроса в клиентском боте."
+            buttons = [[{"text": "🏠 В меню", "callback_data": "cmd:menu"}]]
+            return self._send_menu(chat, text, buttons, message_id)
+        lines = [f"👥 Клиенты: {len(rows)}", ""]
+        buttons = []
+        for row in rows:
+            label = f"{str(row.get('name') or 'Клиент')[:24]} · {row.get('phone') or '—'}"
+            lines.append(label)
+            buttons.append([{"text": label[:60],
+                             "callback_data": f"cmd:client:{row['chat_id']}"}])
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def client_card(self, chat: str, client_chat: str, message_id: str = "") -> None:
+        row = self.db.one("SELECT * FROM client_chats WHERE chat_id=?", (client_chat,))
+        if not row:
+            return self._reply(chat, "Клиент не найден.")
+        orders = self.db.query(
+            "SELECT number, product, status, price, prepaid FROM orders"
+            " WHERE customer_id=? ORDER BY datetime(created_at) DESC LIMIT 5",
+            (row.get("customer_id") or "",))
+        lines = [f"👤 {row.get('name') or 'Клиент'}",
+                 f"• Телефон: {row.get('phone') or '—'}",
+                 f"• @{row.get('username')}" if row.get("username") else "",
+                 f"• Последний визит: {str(row.get('last_seen') or '—')[:16].replace('T',' ')}",
+                 f"• Источник: {row.get('source') or '—'}"]
+        if orders:
+            lines.append("")
+            lines.append("Последние заказы:")
+            for o in orders:
+                lines.append(f"• №{o.get('number')} {o.get('product') or ''} · {o.get('status') or ''}")
+        buttons = [[{"text": "💬 Ответить клиенту", "callback_data": f"cmd:client-reply:{client_chat}"}],
+                   [{"text": "📦 Заказы", "callback_data": "cmd:orders"},
+                    {"text": "🏠 В меню", "callback_data": "cmd:menu"}]]
+        self._send_menu(chat, "\n".join([l for l in lines if l]), buttons, message_id)
+
+    def client_reply_prompt(self, chat: str, client_chat: str) -> None:
+        self._client_reply_to[chat] = client_chat
+        self._reply(chat, f"✏️ Напишите ответ клиенту {client_chat[:8]}… "
+                          "одним сообщением.")
+
+    def _main_reply_keyboard(self) -> dict:
+        """Нижняя reply-панель главного меню: 6 кнопок, без команд.
+
+        Reply-клавиатура всегда на виду — именно она делает бота «кнопочным».
+        Вложенные списки и действия — inline-кнопками (см. shelf_keyboard).
+        """
+        return {
+            "keyboard": [
+                ["🛒 Продать", "📦 Полка", "💰 Касса"],
+                ["📷 Кадр", "📊 Итоги", "⚙️ Ещё"],
+            ],
+            "resize_keyboard": True,
+            "is_persistent": True,
+            "one_time_keyboard": False,
+        }
+
+    def _send_main_menu(self, chat: str, text: str = HELP) -> None:
+        """Главное меню: короткий текст + постоянная reply-панель."""
         self._call("sendMessage", {
-            "chat_id": chat, "text": text[:3800], "disable_web_page_preview": "true",
-            "reply_markup": json.dumps(keyboard, ensure_ascii=False),
+            "chat_id": chat, "text": str(text or HELP)[:3800],
+            "disable_web_page_preview": "true",
+            "reply_markup": json.dumps(self._main_reply_keyboard(),
+                                       ensure_ascii=False),
         }, timeout=15)
+
+    def _reply_keyboard(self, chat: str, text: str) -> None:
+        """Ответ с нижней панелью главного меню (кнопки — основной вход)."""
+        self._send_main_menu(chat, text)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -264,6 +472,7 @@ class TelegramBot:
                 self._maybe_weekly(settings)
                 self._maybe_live()
                 self._maybe_watch()
+                self._maybe_shelf_low(settings)
             except Exception:
                 self._stop.wait(10)
 
@@ -282,6 +491,30 @@ class TelegramBot:
         chat = str(settings.get("telegram_chat_id") or "")
         if chat:
             self.manager.notify_async(self.text_digest())
+
+    def _maybe_shelf_low(self, settings: dict) -> None:
+        """Низкий остаток полки: напоминание раз в день + кнопка «Полка»."""
+        try:
+            rows = self.db.query(
+                "SELECT * FROM shelf_items WHERE active=1 AND min_qty>0"
+                " AND qty<=min_qty ORDER BY qty LIMIT 10")
+        except Exception:
+            return
+        if not rows:
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        if str(settings.get("shelf_low_last") or "") == today:
+            return
+        self.db.set_settings({"shelf_low_last": today})
+        lines = [f"⚠ На полке заканчивается ({len(rows)}):"]
+        for row in rows[:6]:
+            lines.append(f"• {row.get('name')} — {round(num(row.get('qty')),1)} шт "
+                         f"(минимум {round(num(row.get('min_qty')),1)})")
+        lines.append("\nЗаказать или пополнить — кнопкой.")
+        self.manager.notify_async(
+            "\n".join(lines),
+            buttons=[("📦 Полка", "cmd:shelf"), ("🛒 Продать", "cmd:sell-home")],
+            event="shelf:low")
 
     def _maybe_weekly(self, settings: dict) -> None:
         """Еженедельный отчёт: день недели (1=пн) и время."""
@@ -397,6 +630,125 @@ class TelegramBot:
                 return self.shelf_produce_keyboard(chat, page, message_id=message_id)
             page = self._page_from_command(command, "sell-menu", self._sell_page, chat)
             return self.sell_keyboard(chat, page, message_id=message_id)
+        # Касса стеллажа и быстрые выемки: правим то же сообщение кнопками.
+        if command in ("shelf-cash", "shelf-cash-menu") \
+                or command.startswith(("shelf-cash-w:", "shelf-cash-reconcile",
+                                       "shelf-cash-undo:")):
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            if command.startswith("shelf-cash-w:"):
+                self._reply(chat, self.do_shelf_collect(command.split(":", 1)[1]))
+                return self.shelf_cash_keyboard(chat, message_id=message_id)
+            if command == "shelf-cash-reconcile":
+                return self.cash_reconcile_start(chat, message_id)
+            if command.startswith("shelf-cash-undo:"):
+                try:
+                    from .shelf import Shelf
+                    Shelf(self.db).delete_collection(command.split(":", 1)[-1])
+                    text = "↩️ Последняя выемка отменена — деньги вернулись в кассу."
+                except Exception as exc:
+                    text = f"Не получилось отменить: {exc}"
+                self._reply(chat, text)
+                return self.shelf_cash_keyboard(chat, message_id=message_id)
+            return self.shelf_cash_keyboard(chat, message_id=message_id)
+        # Подсказка-кнопка: выполнить исправленную команду как обычный текст.
+        # Права проверяем по целевой команде так же, как в текстовом пути.
+        # Продажа кнопками (15.4): топ → количество → цена → канал → ✅.
+        if command in ("sell-home", "sell-menu") or command.startswith((
+                "sell-item:", "sell-qty:", "sell-price:", "sell-channel:",
+                "sell-confirm", "sell-cancel")):
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            if command == "sell-home":
+                return self.sell_home_keyboard(chat, message_id)
+            if command == "sell-menu":
+                return self.sell_keyboard(chat, message_id=message_id)
+            if command.startswith("sell-item:"):
+                return self.sell_flow_qty(chat, command.split(":")[-1], message_id)
+            if command.startswith("sell-qty:"):
+                return self.sell_flow_price(chat, num(command.split(":")[-1]), message_id)
+            if command.startswith("sell-price:"):
+                price = command.split(":")[-1]
+                if price == "custom":
+                    return self._reply(chat, "✏️ Напишите цену за штуку числом (например 450)")
+                return self.sell_flow_channel(chat, num(price) or 0, message_id)
+            if command.startswith("sell-channel:"):
+                flow = self._sell_flow.get(chat) or {}
+                flow["channel"] = command.split(":")[-1]
+                self._sell_flow[chat] = flow
+                return self.sell_flow_confirm(chat, message_id)
+            if command == "sell-confirm":
+                return self._reply(chat, self.sell_flow_do(chat))
+            return self._reply(chat, self.sell_flow_cancel(chat))
+        # Главное меню и «Ещё»: навигация, доступную любой роли.
+        if command == "menu":
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id,
+                                               "text": "Главное меню"})
+            return self._send_main_menu(chat)
+        if command == "more":
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            return self.more_keyboard(chat, message_id=message_id)
+        if command.startswith("goto:"):
+            target = command[5:].strip()
+            if not target:
+                self._call("answerCallbackQuery",
+                           {"callback_query_id": callback_id, "text": "Команда пуста"})
+                return
+            tword = target.split()[0]
+            tdigits = any(w.isdigit() for w in target.split()[1:])
+            tgroup = group_for_word(tword, text_has_digits=tdigits)
+            if tgroup and tgroup not in who["allowed"]:
+                self._call("answerCallbackQuery", {
+                    "callback_query_id": callback_id,
+                    "text": f"Недоступно для роли «{ROLE_NAMES.get(who['role'])}»"})
+                return
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            return self._dispatch(chat, target)
+        # Очередь печати кнопками: правка того же сообщения.
+        if command == "queue":
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            return self.queue_keyboard(
+                chat, message_id=str(message.get("message_id") or ""))
+        # Заказы и клиенты кнопками (15.4).
+        if command in ("orders", "clients") or command.startswith((
+                "order:", "order-pay:", "order-status:", "order-ready:",
+                "order-fulfill:", "watch:", "client:", "client-reply:")):
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            if command == "orders":
+                return self.orders_keyboard(chat, message_id)
+            if command == "clients":
+                return self.clients_keyboard(chat, message_id)
+            if command.startswith("client-reply:"):
+                return self.client_reply_prompt(chat, command.split(":", 1)[-1])
+            if command.startswith("client:"):
+                return self.client_card(chat, command.split(":", 1)[-1], message_id)
+            if command.startswith("order:"):
+                return self.order_card(chat, command.split(":", 1)[-1], message_id)
+            if command.startswith("order-pay:"):
+                number = command.split(":", 1)[-1]
+                order = self.db.one("SELECT * FROM orders WHERE number=?", (number,))
+                due = num(self.manager.acc.order_economics(order).get("debt")) if order else 0
+                self._reply(chat, self._pay(f"оплата {due} по {number}") if due > 0
+                            else "Долга нет — заказ уже оплачен.")
+                return self.order_card(chat, number, message_id)
+            if command.startswith("order-status:"):
+                _, number, status = command.split(":", 2)
+                self._reply(chat, self._set_status(f"статус {number} {status}"))
+                return self.order_card(chat, number, message_id)
+            if command.startswith("order-ready:"):
+                number = command.split(":", 1)[-1]
+                self._reply(chat, self.order_ready(f"готов {number}"))
+                return self.order_card(chat, number, message_id)
+            if command.startswith("order-fulfill:"):
+                _, number, mode = command.split(":", 2)
+                token = "оплачен" if mode == "paid" else "в долг"
+                self._reply(chat, self._fulfill(f"выдать {number} {token}"))
+                return self.orders_keyboard(chat, message_id)
+            if command.startswith("watch:"):
+                self._reply(chat, self._watch_order(chat, command.split(":", 1)[-1]))
+                return
         # Меню каталога и карточки позиций правят то же сообщение, как стеллаж.
         if command == "cat" or command.startswith(("cati", "cat-hide", "cat-show",
                                                    "cat-archive", "cat-restore",
@@ -498,6 +850,12 @@ class TelegramBot:
             return self.do_shelf_sell(command.split(":", 1)[1])
         if command.startswith("shelf-prod:"):
             return self.do_shelf_produce(command.split(":", 1)[1])
+        if command == "shelf-cash":
+            return self.text_shelf_cash()
+        if command.startswith("shelf-cash-w:"):
+            return self.do_shelf_collect(command.split(":", 1)[1])
+        if command == "team":
+            return self._staff_command(chat, "list", "")
         if command == "shelf-moves":
             return self.text_shelf_moves()
         if command == "shelf-sales7":
@@ -712,10 +1070,26 @@ class TelegramBot:
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е")
+        # Кнопки нижней панели приходят обычным текстом — превращаем их
+        # в команды сразу, до разбора слов («ещё» не имеет текстовой команды).
+        text = REPLY_ALIASES.get(text.strip(), text)
         for emoji in "🖨📷≡₽⚑🛍🛒📦📊⚠❔▦▤·🗂":
             text = text.replace(emoji, " ")
         text = text.strip()
         word = text.split()[0] if text else ""
+
+        # Активный флоу продажи: «своя цена» — число забираем себе.
+        flow = self._sell_flow.get(chat) or {}
+        if flow.get("await") == "price" and _re.fullmatch(r"[\d\s.,]+", text):
+            return self.sell_flow_channel(
+                chat, num(text.replace(" ", "").replace(",", ".")))
+        # Сверка кассы: ждём факт наличных числом.
+        if chat in self._cash_reconcile and _re.fullmatch(r"[\d\s.,]+", text):
+            return self._reply(chat, self._cash_fact(chat, text))
+        # Ответ клиенту: любое сообщение уходит в клиентский бот.
+        if chat in self._client_reply_to:
+            cid = self._client_reply_to.pop(chat)
+            return self._reply(chat, self._client_answer(f"кответ {cid} {raw}"))
 
         # Команда: управление участниками (владелец; руководитель — наполовину).
         if word in ("команда", "сотрудники", "team"):
@@ -741,6 +1115,8 @@ class TelegramBot:
 
         if word in ("start", "help", "старт", "помощь", "меню", "?"):
             return self._reply_keyboard(chat, HELP)
+        if word == "more":
+            return self.more_keyboard(chat)
         if text.startswith("закрыть месяц"):
             return self._reply(chat, self._month_close(text))
         if word in ("панель", "panel", "дашборд"):
@@ -756,7 +1132,7 @@ class TelegramBot:
         if text.startswith("продажи стеллаж") or text in ("продажи за неделю", "продажи полки"):
             return self._reply(chat, self.text_shelf_sales(7))
         if word in ("продажа", "продать", "продажи", "sell"):
-            return self.sell_keyboard(chat)
+            return self.sell_home_keyboard(chat)
         if word in ("приход", "положить", "пополнить"):
             # «приход» — меню быстрого прихода; «приход Адресник 5» — конкретной позиции.
             return self._shelf_produce_text(chat, text)
@@ -828,7 +1204,7 @@ class TelegramBot:
         if word in ("стоп-живой", "стопживой", "стоп живой"):
             return self.stop_live(chat)
         if word in ("очередь", "queue"):
-            return self._reply(chat, self.text_queue())
+            return self.queue_keyboard(chat)
         if word in ("датчики", "сенсоры", "ams", "амс"):
             return self._reply(chat, self.text_sensors())
         if word in ("доктор", "диагностика"):
@@ -838,7 +1214,7 @@ class TelegramBot:
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
         if word == "касса":
-            return self._reply(chat, self.text_shop_cash())
+            return self.shelf_cash_keyboard(chat)
         if word in ("забрали", "выемка"):
             return self._reply(chat, self.do_collect_from_shop(text))
         if word in ("день", "сегодня", "итоги"):
@@ -908,7 +1284,34 @@ class TelegramBot:
             return self._reply(chat, self.do_stop(chat, text))
         if word in ("готов", "ready"):
             return self._reply(chat, self.order_ready(text))
-        self._reply(chat, "Не понял команду. Напишите «помощь» — покажу список.")
+        self._unknown(chat, raw)
+
+    def _unknown(self, chat: str, raw: str) -> None:
+        """Непонятое сообщение: подсказка + кнопки, а не сухой отказ."""
+        suggestion = suggest_command(raw)
+        if suggestion:
+            lines = [
+                f"Не понял «{raw.strip()[:60]}».",
+                f"Возможно, вы имели в виду «{suggestion}» — нажмите кнопку, "
+                "и я выполню.",
+                "",
+                "Или вернитесь в меню — там всё кнопками.",
+            ]
+            buttons = [[{"text": suggestion, "callback_data": f"cmd:goto:{suggestion}"}],
+                       [{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+                        {"text": "❔ Помощь", "callback_data": "cmd:help"}]]
+        else:
+            lines = [
+                "Не узнал такую команду.",
+                "Нажмите кнопку ниже — я покажу, что умею.",
+            ]
+            buttons = [[{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+                        {"text": "❔ Помощь", "callback_data": "cmd:help"}],
+                       [{"text": "🖥 Что происходит", "callback_data": "cmd:panel"}]]
+        self._call("sendMessage", {
+            "chat_id": chat, "text": "\n".join(lines)[:3800],
+            "reply_markup": json.dumps({"inline_keyboard": buttons}, ensure_ascii=False),
+        }, timeout=15)
 
     # -------------------------------------------------------------- ответы
     def order_ready(self, raw: str) -> str:
@@ -1170,22 +1573,31 @@ class TelegramBot:
                 note = str(r.get("note") or "").strip()
                 lines.append(f"· {_money(r.get('amount'))} — {when}"
                              + (f" ({note[:40]})" if note else ""))
-        lines.append("\nЗаписать выемку: «забрали 5000» · «забрали 5000 картой».")
+        lines.append("\nЗаписать выемку: «забрали 5000» · «забрали 2500 картой» ·"
+                     " «забрали все».")
         return "\n".join(lines)
 
     def do_collect_from_shop(self, text: str) -> str:
-        """«забрали 5000» — отметить выемку наличных из кассы магазина."""
+        """«забрали 5000» или «забрали все» — выемка из кассы магазина."""
         from .shelf import Shelf
+        shelf = Shelf(self.db)
         m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)?", text)
+        state = shelf.shop_cash()
         if not m:
-            return self.text_shop_cash()
-        amount = num(m.group(1).replace(" ", "").replace(",", "."))
-        note = text[m.end():].strip()[:120]
+            if any(w in text.replace("ё", "е") for w in ("все", "всё", "всего")):
+                amount = num(state.get("in_shop"))
+                if amount <= 0:
+                    return "В кассе магазина сейчас нет денег от стеллажа."
+            else:
+                return self.text_shop_cash()
+        else:
+            amount = num(m.group(1).replace(" ", "").replace(",", "."))
+        note = text[m.end():].strip() if m else ""
         try:
-            Shelf(self.db).add_collection(amount, note)
+            shelf.add_collection(amount, str(note)[:120])
         except ValueError as exc:
             return f"Не получилось: {exc}"
-        c = Shelf(self.db).shop_cash()
+        c = shelf.shop_cash()
         return (f"✅ Забрали из магазина {_money(amount)}.\n"
                 f"Осталось в магазине: {_money(c.get('in_shop'))}.")
 
@@ -1691,7 +2103,8 @@ class TelegramBot:
         позиции, которые надо проверить или пополнить физически.
         """
         from .shelf import Shelf
-        items = Shelf(self.db).items()
+        shelf = Shelf(self.db)
+        items = shelf.items()
         if not items:
             return "🛍 Стеллаж пуст: активных позиций пока нет."
         needs = [i for i in items if i.get("status") in ("empty", "low", "dead") or num(i.get("plan_qty")) > 0]
@@ -1725,18 +2138,148 @@ class TelegramBot:
             lines.append(f"• {item.get('name') or 'Без названия'} — {round(num(item.get('qty')), 1)} шт · {status}{extra}")
         if len(rows) > 8:
             lines.append(f"… ещё {len(rows) - 8} поз. в полной панели.")
+        today = shelf.today_sales()
+        cash = shelf.shop_cash()
+        answer = "\n".join(lines)
+        if not only_needs:
+            answer += ("\n\n📈 Сегодня: "
+                       f"{round(today.get('qty', 0), 1)} шт · {_money(today.get('money', 0))}"
+                       f" · в кассе магазина {_money(cash.get('in_shop', 0))}")
+            online_money = num(today.get("online_money", 0))
+            online_total = num(cash.get("online_income", 0))
+            if online_money > 0 or online_total > 0:
+                answer += (f"\n🌐 Онлайн (Авито/ТГ): сегодня {_money(online_money)} · "
+                           f"всего {_money(online_total)} — на счёте, не в кассе")
+        return answer
+
+    def text_shelf_cash(self) -> str:
+        """Касса стеллажа: сколько лежит в магазине и как записать выемку."""
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        cash = shelf.shop_cash()
+        today = shelf.today_sales()
+        lines = [
+            "💰 Касса стеллажа",
+            f"• Продано сегодня: {round(today.get('qty', 0), 1)} шт · "
+            f"{_money(today.get('money', 0))}"
+            f" (полка {_money(today.get('shop_money', 0))} · "
+            f"онлайн {_money(today.get('online_money', 0))})",
+            f"• Продано за все время: {_money(cash.get('shelf_income'))}",
+            f"• Забрали из магазина: {_money(cash.get('collected_total'))}",
+            f"• Лежит в магазине: {_money(cash.get('in_shop'))}",
+            f"• Онлайн (Авито/ТГ): {_money(cash.get('online_income'))}"
+            " — на счёте, в кассу магазина не входит",
+            "",
+            "Быстрая выемка — кнопками ниже. Точная сумма: «забрали 5000».",
+        ]
         return "\n".join(lines)
 
+    def shelf_cash_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Меню кассы стеллажа: кнопки быстрой выемки + назад к полке."""
+        from .shelf import Shelf
+        cash = Shelf(self.db).shop_cash()
+        in_shop = num(cash.get("in_shop"))
+        lines = [
+            "💰 Касса стеллажа",
+            f"• Лежит в магазине: {_money(in_shop)}",
+            f"• Забрали за все время: {_money(cash.get('collected_total'))}",
+            f"• Онлайн (Авито/ТГ): {_money(cash.get('online_income'))} — на счёте",
+            "",
+            "Кнопки — быстрая выемка. Точная сумма: «забрали 2500».",
+        ]
+        buttons = []
+        if in_shop >= 0.005:
+            row = []
+            for amount in (1000, 5000):
+                if in_shop + 0.004 < amount:
+                    continue
+                row.append({"text": f"Забрали {_money(amount)}",
+                            "callback_data": f"cmd:shelf-cash-w:{amount}"})
+            if row:
+                buttons.append(row)
+            buttons.append([{"text": f"Забрать всё · {_money(in_shop)}",
+                             "callback_data": "cmd:shelf-cash-w:all"}])
+        buttons.append([{"text": "🧾 Сверка кассы", "callback_data": "cmd:shelf-cash-reconcile"},
+                        {"text": "📊 Итог дня", "callback_data": "cmd:today"}])
+        last = Shelf(self.db).collections(1)
+        if last:
+            row = last[0]
+            buttons.append([{"text": f"↩️ Отменить {_money(row.get('amount'))} "
+                                     f"(последняя выемка)",
+                             "callback_data": f"cmd:shelf-cash-undo:{row['id']}"}])
+        buttons.append([{"text": "← Назад к полке", "callback_data": "cmd:shelf"}])
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def cash_reconcile_start(self, chat: str, message_id: str = "") -> None:
+        """Сверка: показать ожидаемый остаток и попросить факт числом."""
+        from .shelf import Shelf
+        cash = Shelf(self.db).shop_cash()
+        expected = num(cash.get("in_shop"))
+        self._cash_reconcile[chat] = now_iso()
+        lines = ["🧾 Сверка кассы магазина",
+                 f"По учёту в кассе: {_money(expected)}",
+                 "Напишите фактическую сумму числом (например 1450).",
+                 "Разницу посчитаю сам."]
+        self._send_menu(chat, "\n".join(lines), [], message_id)
+
+    def cash_reconcile_cancel(self, chat: str) -> None:
+        self._cash_reconcile.pop(chat, None)
+
+    def _cash_fact(self, chat: str, text: str) -> str:
+        """Факт наличных при сверке: разница считается и пишется в журнал."""
+        from .shelf import Shelf
+        self._cash_reconcile.pop(chat, None)
+        shelf = Shelf(self.db)
+        cash = shelf.shop_cash()
+        expected = num(cash.get("in_shop"))
+        fact = num(text.replace(" ", "").replace(",", "."))
+        diff = round(fact - expected, 2)
+        line = (f"✅ Сверка: в кассе {_money(fact)} — как по учёту."
+                if abs(diff) < 0.005 else
+                f"⚠ Сверка: факт {_money(fact)}, по учёту {_money(expected)}. "
+                f"Разница {_money(abs(diff))} ({'недостача' if diff < 0 else 'излишек'}).")
+        try:
+            self.db.add_event("money", "Сверка кассы магазина", line, chat, data={
+                "expected": expected, "fact": fact, "diff": diff})
+        except Exception:
+            pass
+        return line + "\n\nПроверьте выемки или сделайте инвентаризацию полки."
+
+    def do_shelf_collect(self, spec: str) -> str:
+        """Быстрая выемка из кассы магазина: сумма или «all» (забрать всё)."""
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        state = shelf.shop_cash()
+        in_shop = num(state.get("in_shop"))
+        if in_shop <= 0.005:
+            return "В кассе магазина сейчас нет денег от стеллажа."
+        spec = str(spec or "").strip().lower()
+        amount = in_shop if spec in ("all", "все", "всё") else num(spec)
+        if amount <= 0:
+            return "Укажите сумму: «забрали 5000»."
+        if amount > in_shop + 0.005:
+            return (f"В магазине лежит только {_money(in_shop)} — "
+                    f"забрать {_money(amount)} нельзя.")
+        try:
+            shelf.add_collection(round(amount, 2), note="выемка из Telegram")
+        except ValueError as exc:
+            return f"Не получилось: {exc}"
+        left = shelf.shop_cash().get("in_shop")
+        return f"✅ Забрали {_money(amount)}. В кассе магазина осталось {_money(left)}."
+
     def shelf_keyboard(self, chat: str) -> None:
-        """Панель стеллажа: обзор, дефицит, продажи, приход, движения, план."""
+        """Панель стеллажа: обзор, дефицит, продажи, приход, касса, движения."""
         text = self.text_shelf()
         buttons = [
             [{"text": "⚠ Нужны на полку", "callback_data": "cmd:shelf:needs"},
              {"text": "🛒 Продать", "callback_data": "cmd:sell-menu"}],
             [{"text": "📥 Приход +1", "callback_data": "cmd:shelf-prod-menu"},
-             {"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"}],
-            [{"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"},
-             {"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
+             {"text": "💰 Касса", "callback_data": "cmd:shelf-cash"}],
+            [{"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"},
+             {"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"}],
+            [{"text": "🔄 Обновить", "callback_data": "cmd:shelf"},
+             {"text": "🏠 В меню", "callback_data": "cmd:menu"}],
         ]
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
@@ -1801,6 +2344,7 @@ class TelegramBot:
                    {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:sell-menu"},
                    {"text": "▶", "callback_data": "cmd:sell-menu:next"}]
             buttons.append(nav)
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
         self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_sell(self, nom_id: str) -> str:
@@ -1822,21 +2366,169 @@ class TelegramBot:
         except Exception as exc:
             return f"Не получилось продать: {exc}"
 
+    # ------------------------------------------------ 15.4: продажа кнопками
+    def _sell_top_rows(self, limit: int = 5) -> list[dict]:
+        """Топ продаж полки за 7 дней (штуки, без отменённых) — «часто продаём»."""
+        since = (datetime.now() - timedelta(days=7)).isoformat()
+        rows = self.db.query(
+            "SELECT item_id, COALESCE(SUM(-qty),0) sold, "
+            " COALESCE(SUM(-qty*price),0) money FROM shelf_moves"
+            " WHERE kind IN ('sale','online') AND COALESCE(undone,0)=0"
+            " AND datetime(at)>=? GROUP BY item_id"
+            " HAVING sold>0 ORDER BY sold DESC LIMIT ?", (since, int(limit)))
+        out = []
+        for row in rows:
+            item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                               (row["item_id"],))
+            if not item:
+                continue
+            item["sold"] = num(row.get("sold"))
+            item["sold_money"] = num(row.get("money"))
+            out.append(item)
+        return out
+
+    def sell_home_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Главный экран продажи: «Часто продаём» + «Все товары»."""
+        top = self._sell_top_rows()
+        lines = ["🛒 Продажа — выберите товар:", ""]
+        buttons = []
+        if top:
+            lines.append("🔥 Часто продаём (7 дней):")
+            for item in top:
+                lines.append(f"• {item.get('name')} — {round(num(item['sold']),1)} шт за неделю")
+                buttons.append([{"text": f"🔥 {str(item.get('name'))[:30]} · "
+                                         f"{_money(item.get('price'))}",
+                                 "callback_data": f"cmd:sell-item:{item['id']}"}])
+            lines.append("")
+        buttons.append([{"text": "📋 Все товары", "callback_data": "cmd:sell-menu"}])
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def sell_flow_qty(self, chat: str, item_id: str, message_id: str = "") -> None:
+        """Шаг 1: количество — кнопки 1/2/5/10 и «своё число»."""
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1", (item_id,))
+        if not item:
+            self._reply(chat, "Позиция не найдена.")
+            return
+        self._sell_flow[chat] = {"item": item_id, "qty": 1.0,
+                                 "price": num(item.get("price")), "channel": "",
+                                 "await": "qty"}
+        lines = [f"✅ {item.get('name')} — остаток {round(num(item['qty']),1)} шт.",
+                 "Сколько продать?"]
+        buttons = [[{"text": "1 шт", "callback_data": "cmd:sell-qty:1"},
+                    {"text": "2 шт", "callback_data": "cmd:sell-qty:2"},
+                    {"text": "5 шт", "callback_data": "cmd:sell-qty:5"}],
+                   [{"text": "10 шт", "callback_data": "cmd:sell-qty:10"}],
+                   [{"text": "⏹ Отмена", "callback_data": "cmd:sell-cancel"}]]
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def sell_flow_price(self, chat: str, qty: float, message_id: str = "") -> None:
+        """Шаг 2: цена — по умолчанию или своя (скидка)."""
+        flow = self._sell_flow.get(chat) or {}
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                           (flow.get("item") or "",))
+        if not item:
+            return self._reply(chat, "Позиция не найдена.")
+        default = num(item.get("price"))
+        flow.update({"qty": num(qty) or 1, "await": "price"})
+        self._sell_flow[chat] = flow
+        total = default * num(flow.get("qty") or 1)
+        lines = [f"{item.get('name')} × {round(num(flow.get('qty')),1)} шт.",
+                 "Цена за штуку (по умолчанию — ценник):"]
+        buttons = [[{"text": f"Ценник · {_money(default)} · итого {_money(total)}",
+                     "callback_data": "cmd:sell-price:default"}],
+                   [{"text": "✏️ Своя цена (напишите число)",
+                     "callback_data": "cmd:sell-price:custom"}],
+                   [{"text": "⏹ Отмена", "callback_data": "cmd:sell-cancel"}]]
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def sell_flow_channel(self, chat: str, price: float, message_id: str = "") -> None:
+        """Шаг 3: канал — полка (в кассу) или онлайн (на счёт)."""
+        flow = self._sell_flow.get(chat) or {}
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                           (flow.get("item") or "",))
+        if not item:
+            return self._reply(chat, "Позиция не найдена.")
+        flow["price"] = num(price) if price and price > 0 else num(item.get("price"))
+        flow["await"] = "channel"
+        self._sell_flow[chat] = flow
+        qty = num(flow.get("qty") or 1)
+        total = flow["price"] * qty
+        lines = [f"{item.get('name')} × {round(qty,1)} шт · {_money(flow['price'])}/шт",
+                 f"Итого: {_money(total)}",
+                 "Куда деньги?"]
+        buttons = [[{"text": "🏪 Полка — в кассу магазина",
+                     "callback_data": "cmd:sell-channel:shelf"},
+                    {"text": "🌐 Онлайн (Авито/ТГ) — на счёт",
+                     "callback_data": "cmd:sell-channel:online"}],
+                   [{"text": "⏹ Отмена", "callback_data": "cmd:sell-cancel"}]]
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def sell_flow_confirm(self, chat: str, message_id: str = "") -> None:
+        """Шаг 4: подтверждение на кнопке — продажа не происходит без ✅."""
+        flow = self._sell_flow.get(chat) or {}
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                           (flow.get("item") or "",))
+        if not item:
+            return self._reply(chat, "Позиция не найдена.")
+        qty = num(flow.get("qty") or 1)
+        price = num(flow.get("price") or item.get("price"))
+        channel = flow.get("channel") or "shelf"
+        flow["await"] = "confirm"
+        self._sell_flow[chat] = flow
+        channel_label = "онлайн (на счёте)" if channel == "online" else "в кассу магазина"
+        total = price * qty
+        lines = ["✅ Подтвердите продажу:",
+                 f"{item.get('name')} × {round(qty,1)} шт × {_money(price)} = {_money(total)}",
+                 f"Деньги: {channel_label}",
+                 f"Остаток после: {round(max(0, num(item['qty']) - qty),1)} шт"]
+        buttons = [[{"text": f"✅ Продать · {_money(total)}",
+                     "callback_data": "cmd:sell-confirm"}],
+                   [{"text": "⏹ Отмена", "callback_data": "cmd:sell-cancel"}]]
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def sell_flow_do(self, chat: str) -> str:
+        """Выполнить подтверждённую продажу по сохранённому флоу."""
+        flow = self._sell_flow.pop(chat, {})
+        item_id = flow.get("item") or ""
+        if not item_id:
+            return "Начните продажу заново: «Продать»."
+        qty = num(flow.get("qty") or 1)
+        price = num(flow.get("price") or 0)
+        channel = flow.get("channel") or "shelf"
+        return self.do_shelf_sell(item_id, qty, price=price, channel=channel)
+
+    def sell_flow_cancel(self, chat: str) -> str:
+        self._sell_flow.pop(chat, {})
+        return "Продажа отменена. Ничего не списано."
+
     # ----------------------------------------------------- стеллаж из ТГ
-    def do_shelf_sell(self, item_id: str, qty: float = 1) -> str:
-        """Списать штуки с физической позиции стеллажа и записать доход."""
+    def do_shelf_sell(self, item_id: str, qty: float = 1,
+                      price: float | None = None, channel: str = "shelf") -> str:
+        """Списать штуки с физической позиции стеллажа и записать доход.
+
+        15.4: цена и канал — параметры флоу продажи; «−1»-продажа (старый
+        путь) по-прежнему работает с ценой ценника и каналом «shelf».
+        """
         from .shelf import Shelf
         shelf = Shelf(self.db)
         item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1", (item_id,))
         if not item:
             return "Позиция стеллажа не найдена."
         qty = num(qty) or 1
+        if qty > num(item.get("qty")) + 0.004:
+            return (f"На стеллаже только {round(num(item.get('qty')),1)} шт — "
+                    f"продать {round(qty,1)} нельзя.")
+        if channel not in ("shelf", "online"):
+            channel = "shelf"
+        price = num(price) if price is not None else num(item.get("price"))
         try:
-            shelf.sale(item_id, qty, 0, channel="shelf", note="продажа из Telegram")
+            shelf.sale(item_id, qty, price, channel=channel,
+                       note="продажа из Telegram")
             left = num(item.get("qty")) - qty
-            price = num(item.get("price"))
             money = f" · {_money(price * qty)}" if price else " (без цены)"
-            return (f"✅ Продано {round(qty)} шт «{item.get('name')}»{money}. "
+            where = "на счёт (Авито/ТГ)" if channel == "online" else "в кассу магазина"
+            return (f"✅ Продано {round(qty)} шт «{item.get('name')}»{money} — {where}. "
                     f"Осталось {round(max(0, left),1)} шт.")
         except Exception as exc:
             return f"Не получилось продать: {exc}"
@@ -1864,6 +2556,7 @@ class TelegramBot:
                    {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:shelf-prod-menu"},
                    {"text": "▶", "callback_data": "cmd:shelf-prod-menu:next"}]
             buttons.append(nav)
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
         self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_shelf_produce(self, item_id: str, qty: float = 1) -> str:
@@ -2556,7 +3249,6 @@ class TelegramBot:
 
     def text_shelf_sales(self, days: int = 7) -> str:
         """Что реально продалось со стеллажа за период, по позициям."""
-        from .shelf import Shelf
         from datetime import datetime, timedelta
         since = (datetime.now() - timedelta(days=days)).isoformat()
         rows = self.db.query(

@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/tokens.css?v=15.2.0">
-<link rel="stylesheet" href="assets/theme.css?v=15.2.0">
-<link rel="stylesheet" href="assets/app.css?v=15.2.0">
-<link rel="stylesheet" href="assets/more.css?v=15.2.0">
+<link rel="stylesheet" href="assets/tokens.css?v=15.4.0">
+<link rel="stylesheet" href="assets/theme.css?v=15.4.0">
+<link rel="stylesheet" href="assets/app.css?v=15.4.0">
+<link rel="stylesheet" href="assets/more.css?v=15.4.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -44,7 +44,7 @@
   </div>
   <div class="nav-group">
   <div class="nav-group-title">Склад</div>
-  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span></a>
+  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
   </div>
   <div class="nav-group">
   <div class="nav-group-title">Деньги</div>
@@ -744,6 +744,14 @@
   <label class="check"><span class="switch"><input type="checkbox" id="shelf_filter_linked"><i></i></span>Только с кодом 1С</label>
  </div>
  <div class="kpi-grid" id="shelf_kpis"></div>
+ <div class="card" id="shelf_cash_widget" style="margin-top:16px">
+  <div class="card-head">
+   <div><h2>Касса магазина</h2><p>Деньги от стеллажа лежат физически в кассе — заберите и запишите выемку</p></div>
+   <button class="btn sm primary" id="shelf_cash_take" type="button">💰 Забрали…</button>
+  </div>
+  <div class="kpi-grid" id="shelf_cash_mini"></div>
+  <div id="shelf_cash_mini_list" style="margin-top:8px"></div>
+ </div>
  <div class="shelf-grid" id="shelf_grid"></div>
  <div class="card" style="margin-top:16px">
   <div class="card-head"><div><h2>Движения стеллажа</h2><p>Приход, продажи, списания и инвентаризации</p></div></div>
@@ -5015,21 +5023,21 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=15.2.0"></script>
-<script src="assets/core.js?v=15.2.0"></script>
-<script src="assets/icons.js?v=15.2.0"></script>
-<script src="assets/printer.js?v=15.2.0"></script>
-<script src="assets/queue.js?v=15.2.0"></script>
-<script src="assets/ops.js?v=15.2.0"></script>
-<script src="assets/money.js?v=15.2.0"></script>
-<script src="assets/finance.js?v=15.2.0"></script>
-<script src="assets/shelf.js?v=15.2.0"></script>
-<script src="assets/products.js?v=15.2.0"></script>
-<script src="assets/bridge.js?v=15.2.0"></script>
+<script src="assets/qr.js?v=15.4.0"></script>
+<script src="assets/core.js?v=15.4.0"></script>
+<script src="assets/icons.js?v=15.4.0"></script>
+<script src="assets/printer.js?v=15.4.0"></script>
+<script src="assets/queue.js?v=15.4.0"></script>
+<script src="assets/ops.js?v=15.4.0"></script>
+<script src="assets/money.js?v=15.4.0"></script>
+<script src="assets/finance.js?v=15.4.0"></script>
+<script src="assets/shelf.js?v=15.4.0"></script>
+<script src="assets/products.js?v=15.4.0"></script>
+<script src="assets/bridge.js?v=15.4.0"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=15.2.0"></script>
-<script src="assets/app.js?v=15.2.0"></script>
+<script src="assets/workshop.js?v=15.4.0"></script>
+<script src="assets/app.js?v=15.4.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

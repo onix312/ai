@@ -108,6 +108,14 @@ CALLBACK_GROUPS: dict[str, str] = {
     "sensors": "view", "doctor": "view", "cbot_tpl": "inbox",
     "shelf": "shelf", "sell-menu": "shelf", "shelf-prod-menu": "shelf",
     "shelf-moves": "shelf", "shelf-sales7": "shelf", "shelf-sales30": "shelf",
+    "shelf-cash": "shelf", "shelf-cash-w": "shelf",
+    "help": "view", "goto": "view",
+    # главное меню и «Ещё» видны всем; внутри «Ещё» права проверяются по кнопке
+    "menu": "view", "more": "view", "team": "view",
+    # 15.4: заказы кнопками (руководитель+), клиенты — из общего inbox
+    "orders": "orders", "order": "orders", "order-pay": "orders",
+    "order-status": "orders", "order-ready": "orders", "order-fulfill": "orders",
+    "watch": "view", "clients": "inbox", "client": "inbox", "client-reply": "inbox",
     # каталог: список и карточка — просмотр, действия — правки
     "cat": "view", "cati": "view",
     "cat-hide": "catalog", "cat-show": "catalog", "cat-archive": "catalog",
