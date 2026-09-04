@@ -108,6 +108,8 @@ CALLBACK_GROUPS: dict[str, str] = {
     "sensors": "view", "doctor": "view", "cbot_tpl": "inbox",
     "shelf": "shelf", "sell-menu": "shelf", "shelf-prod-menu": "shelf",
     "shelf-moves": "shelf", "shelf-sales7": "shelf", "shelf-sales30": "shelf",
+    "shelf-cash": "shelf", "shelf-cash-w": "shelf",
+    "help": "view", "goto": "view",
     # каталог: список и карточка — просмотр, действия — правки
     "cat": "view", "cati": "view",
     "cat-hide": "catalog", "cat-show": "catalog", "cat-archive": "catalog",

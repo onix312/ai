@@ -542,6 +542,23 @@ class Shelf:
                 "item": self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))}
 
     # ------------------------------------------------------------- сводка
+    def today_sales(self) -> dict[str, float]:
+        """Продажи со стеллажа с начала сегодняшнего дня (учётные, без отменённых).
+
+        Денюги и штуки считаются по движениям вида sale/online с отрицательным
+        количеством: отменённые продажи (undone=1) не участвуют.
+        """
+        day = now_iso()[:10]
+        row = self.db.one(
+            "SELECT COALESCE(SUM(-qty),0) qty, COALESCE(SUM(-qty*price),0) money"
+            " FROM shelf_moves"
+            " WHERE kind IN ('sale','online') AND qty<0 AND COALESCE(undone,0)=0"
+            " AND substr(at,1,10)=?", (day,)) or {}
+        return {
+            "qty": round(num(row.get("qty")), 1),
+            "money": round(num(row.get("money")), 2),
+        }
+
     def summary(self) -> dict[str, Any]:
         items = self.items()
         qty = sum(num(i["qty"]) for i in items)
@@ -551,12 +568,15 @@ class Shelf:
         dead = [i for i in items if i["dead"]]
         low = [i for i in items if i["low"]]
         plan = sum(int(num(i["plan_qty"])) for i in items)
+        today = self.today_sales()
         return {
             "items": len(items),
             "qty": round(qty, 1),
             "value": round(value, 2),
             "sold_7": round(sold7, 1),
             "sold_7_money": round(sold7_money, 2),
+            "sold_today": today["qty"],
+            "sold_today_money": today["money"],
             "dead": len(dead),
             "dead_value": round(sum(num(i["stock_value"]) for i in dead), 2),
             "low": len(low),

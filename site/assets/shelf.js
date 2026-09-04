@@ -4,11 +4,11 @@
 (() => {
 'use strict';
 const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeText,
-  agoText, todayISO, toast, fail, openModal, closeModal, confirmDanger } = U;
+  agoText, todayISO, toast, fail, ask, openModal, closeModal, confirmDanger } = U;
 const { get, post } = PF.api;
 
 let editingShelf = null;
-let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null };
+let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null, cash: null };
 let stockGoods = [];
 let shelfFilter = { q: '', status: '', linkedOnly: false };
 
@@ -50,15 +50,17 @@ function syncShelfTagVariant() {
 /* ============================================================== загрузка */
 async function refreshShelf() {
   try {
-    const [data, moves, tags, forecast, head] = await Promise.all([
+    const [data, moves, tags, forecast, head, cash] = await Promise.all([
       get('/api/shelf'), get('/api/shelf/moves', { limit: 60 }),
       get('/api/shelf/tags').catch(() => ({ hit: [], new: [], last: [] })),
       get('/api/shelf/forecast', { days: 7 }).catch(() => ({ days: 7, items: [] })),
       get('/api/content/shelf-header', { days: 7 }).catch(() => null),
+      get('/api/shelf/cash').catch(() => null),
     ]);
     shelfData = {
       items: data.items || [], summary: data.summary || {}, moves: moves.moves || [],
       tags: tags || {}, forecast: forecast.items || [], head: head || null,
+      cash: cash || null,
     };
     if (document.querySelector('#view-shelf.on')) renderShelf();
     updateNavTag();
@@ -120,15 +122,18 @@ function renderShelf() {
         : `останется ${nfmt(f.projected)} шт${f.gap ? ` <span class="gap-warn">(не хватит ${nfmt(f.gap)})</span>` : ''}`}</span></div>`
     ).join('')}
    </div>` : '';
+  const cash = shelfData.cash || null;
   $('shelf_kpis').innerHTML =
     headHtml + [
       shelfKpi('Штук на стеллаже', nfmt(s.qty), `${nfmt(s.items)} позиций`),
       shelfKpi('Остаток в рублях', money(s.value), 'по себестоимости (заморожено)'),
+      shelfKpi('Продано сегодня', `${nfmt(s.sold_today)} шт`, `${money(s.sold_today_money)}`),
       shelfKpi('Продано за 7 дней', `${nfmt(s.sold_7)} шт`, `${money(s.sold_7_money)}`),
       shelfKpi('Мёртвый сток', String(s.dead || 0), s.dead_value ? `${money(s.dead_value)} заморожено` : 'нет позиций без продаж',
         s.dead ? 'bad' : 'ok'),
       shelfKpi('План пополнения', `${nfmt(s.plan_qty)} шт`, 'напечатать, чтобы хватило на 7 дней'),
     ].join('') + fcHtml;
+  renderShelfCash();
 
   const items = filteredShelfItems();
   const emptyText = (shelfData.items || []).length
@@ -187,6 +192,61 @@ function renderShelf() {
 }
 
 function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+/* ================================================= касса стеллажа (виджет)
+   Прямо на вкладке полки: сколько продано сегодня, сколько лежит в кассе
+   магазина и как записать выемку — не уходя в «Кассу». */
+function renderShelfCash() {
+  const host = $('shelf_cash_mini');
+  if (!host) return;
+  const s = shelfData.summary || {};
+  const c = shelfData.cash || { shelf_income: 0, collected_total: 0, in_shop: 0, collections: [] };
+  host.innerHTML = [
+    shelfKpi('Продано сегодня', `${nfmt(s.sold_today)} шт`, money(s.sold_today_money)),
+    shelfKpi('Лежит в кассе магазина', money(c.in_shop),
+      num(c.in_shop) ? 'заберите и запишите выемку' : 'касса сведена',
+      num(c.in_shop) ? 'warn' : 'ok'),
+    shelfKpi('Забрали за всё время', money(c.collected_total), 'выемки наличных'),
+  ].join('');
+  const list = $('shelf_cash_mini_list');
+  if (!list) return;
+  const rows = (c.collections || []).slice(0, 3);
+  list.innerHTML = rows.length
+    ? rows.map((r) => `<div class="mini-row">`
+      + `<div class="mbody"><b>${money(r.amount)}</b><small>${esc(dateText(r.at))}${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
+      + `<button class="icon-btn sm" type="button" data-shelf-cash-undo="${esc(r.id)}" title="Отменить выемку">✕</button></div>`).join('')
+    : '';
+}
+
+async function collectShelfCash() {
+  const c = shelfData.cash || { in_shop: 0 };
+  const ans = await ask({
+    title: 'Забрали из кассы магазина',
+    sub: `В кассе должно быть ${money(c.in_shop)}. Запишите фактическую выемку.`,
+    ok: 'Записать',
+    fields: [
+      { name: 'amount', label: 'Сумма, ₽', type: 'number', value: '', placeholder: String(Math.round(num(c.in_shop))), min: 1, step: 1, hint: 'Можно забрать не всё — например, часть оставить на сдачу.' },
+      { name: 'note', label: 'Комментарий', type: 'text', value: '', placeholder: 'наличные / инкассация…', required: false },
+    ],
+  });
+  if (!ans) return;
+  const amount = num(ans.amount);
+  if (amount <= 0) return fail(new Error('Укажите сумму больше нуля'));
+  try {
+    await post('/api/shelf/cash/collect', { amount, note: String(ans.note || '').trim() });
+    await refreshShelf();
+    toast('Выемка записана', `${money(amount)} — остаток кассы обновлён`);
+  } catch (e) { fail(e); }
+}
+
+async function undoShelfCash(id) {
+  if (!id || !confirmDanger('Отменить выемку? Деньги вернутся в остаток кассы магазина.')) return;
+  try {
+    await post('/api/shelf/cash/collect/delete', { id });
+    await refreshShelf();
+    toast('Выемка отменена');
+  } catch (e) { fail(e); }
+}
 
 /* ============================ 13.1 (58): карта полки — сетка ячеек
    Позиции с заполненной ячейкой (A1, B3…) раскладываются по схеме:
@@ -779,6 +839,14 @@ function bind() {
   $('shelf_sale_save').addEventListener('click', saveSales);
   $('shelf_inventory_btn').addEventListener('click', () => openInventory());
   $('shelf_inventory_save').addEventListener('click', saveInventory);
+  // 15.2.2: касса стеллажа прямо на вкладке полки
+  if ($('shelf_cash_take')) $('shelf_cash_take').addEventListener('click', collectShelfCash);
+  if ($('shelf_cash_mini_list')) {
+    $('shelf_cash_mini_list').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-shelf-cash-undo]');
+      if (btn) undoShelfCash(btn.dataset.shelfCashUndo);
+    });
+  }
   // 13.1 (58): карта полки — сетка ячеек вместо простыни
   $('shelf_map_btn').addEventListener('click', openShelfMap);
   // 13.1 (59): чек-лист «пересчитал / выставил» с временем и подсветкой расхождений

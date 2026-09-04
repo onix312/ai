@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import json
 import re as _re
 import threading
@@ -27,69 +28,45 @@ from .staff import ROLE_NAMES, Staff, gate, group_for_word
 
 API = "https://api.telegram.org/bot{token}/{method}"
 
-HELP = f"""PrintFlow {APP_VERSION} — панель в кармане.
+HELP = f"""PrintFlow {APP_VERSION} — цех в кармане.
 
-Кнопки внизу или команды (без слэша, в любом регистре):
-• панель — всё сразу: печать, деньги, план, долги
-• датчики — температуры, вентиляторы, AMS и HMS одной сводкой
-• доктор — здоровье цеха: бот, связь, резервные копии, диск
-• статус · кадр · очередь — что происходит сейчас
-• филамент · пластик — остатки катушек и прогноз закупки
-• закупка — список покупок · закупка авто — автозаполнить
-• таймлапс · кадры — последние снимки печати одним сообщением
-• живой — автообновляемый дашборд (стоп живой — выключить)
-• деньги · день — финансы
-• итоги недели · итоги месяца — отчёты по запросу
-• долги · брак · рейтинг — должники, потери на браке, ABC изделий
-• сколько осталось / что печатает / когда закончит / сколько заработал
-• стеллаж / полка — остаток, дефицит, приход, продажи и движения с кнопками
-• продажа — продать со стеллажа (−1 шт)
-• приход — меню прихода; «приход Адресник 5» — приход на позицию
-• движения стеллажа — последние приходы/продажи/списания
-• продажи стеллажа — что ушло за 7 дней, по позициям
-• касса — сколько от стеллажа лежит в магазине; «забрали 5000» — выемка
-• каталог — меню каталога: карточки, витрина бота, группы (поиск: «каталог адресник»)
-• цена <товар> <сумма> — новая базовая цена
-• товар <Название> <цена> — новая позиция каталога (покупателям не видна)
-• скрыть/показать <товар> — убрать/вернуть в витрину клиентского бота
-• скрыть/показать витрину — выключить/включить витрину целиком
-• описание <товар> <текст> — текст в карточке покупателя
-• норматив <товар> <граммы> <часы> · минималка <товар> <мин> [макс]
-• архив <товар> · вернуть <товар> · удалить <товар> (подтверждение: … да)
-• пересчёт <товар> — цена от себестоимости · «пересчёт все» — по всему каталогу
-• группы — список групп каталога
-• план — что печатать сегодня
-• выдать 1001 — закрыть заказ, зачислить оплату, текст клиенту
-• оплата 1500 по 1001 — принять оплату
-• чаты / диалоги — непрочитанные вопросы покупателей
-• кответ 555 текст — ответить покупателю клиентского бота
-• отзыв ответ 555 текст — ответ на плохой отзыв покупателю
-• клиент блок 555 / клиент разблок 555 — спам-фильтр чатов
-• клиент-бот пауза / старт / статус — выключить/включить витрину
-• оплата подтвердить 1001 — вручную подтвердить заявку «Я оплатил»
-• статус 1001 печать — сменить статус заказа
-• новый адресник 2шт 900р Мария — заказ из текста
-• принтер — список парка · принтер 2 — выбрать принтер
-• пауза / продолжить / свет — управление
-• пропустить 2 — исключить объект N из печати
-• выше 1001 · ниже 1001 — порядок заданий в очереди
-• поток 90 — процент подачи филамента (50–150%)
-• повторить / повторить 1001 — подготовить повтор после разбора брака
-• следи 1001 — прогресс заказа каждые 10%
-• простой — сколько простаивает принтер и что теряем
-• фото — прикрепить фото к заказу (или «фото 1001»)
-• стоп — прервать печать (подтверждение: стоп да)
+Одно слово (без слэша, в любом регистре) — и я отвечу:
 
-Команда:
-• код — узнать свой chat_id (для добавления в команду)
-• команда — список участников и ролей
-• сотрудник Имя 123456 / руководитель Имя 123456 — добавить
-• пригласить сотрудник Имя — одноразовый код: «старт PF-XXXX»
-• убрать 123456 — отключить участника
+👀 Посмотреть
+• статус · кадр · очередь · датчики · доктор · план
+• таймлапс · живой — картинки с принтера
 
-Роли: сотрудник — обзоры, полка, каталог (просмотр) и фото; руководитель —
-плюс деньги, заказы, принтеры и правки каталога; владелец — всё. Можно писать
-без слэша и в любом регистре."""
+🛍 Полка (доступно сотруднику)
+• стеллаж — остатки и дефицит одним взглядом
+• продажа — меню «−1 шт» по цене ценника
+• приход — меню «+1 шт» (или «приход Адресник 5»)
+• движения · продажи стеллажа · касса
+• «забрали 5000» — записать выемку из кассы магазина
+
+💰 Деньги (руководитель+)
+• деньги · сегодня · итоги недели · итоги месяца
+• долги · брак · рейтинг · простой
+
+📦 Заказы (руководитель+)
+• «новый Адресник 2шт 900р Мария» — заказ из текста
+• выдать 1001 · оплата 1500 по 1001 · статус 1001 печать
+• следи 1001 — прогресс каждые 10% · фото — снимок к заказу
+
+🖨 Печать (руководитель+)
+• пауза · продолжить · свет · стоп · поток 90
+• пропустить 2 · выше 1001 · ниже 1001 · повторить
+
+🗂 Каталог (руководитель+)
+• каталог · цена Адресник 500 · товар Название цена
+• пересчёт все · архив Адресник · группы · описание
+
+👥 Команда
+• код — свой chat_id · команда — список команды
+• пригласить сотрудник Имя · убрать 123456
+
+Роли: сотрудник — обзоры и полка; руководитель — ещё деньги,
+заказы, печать и каталог; владелец — всё."""
+
 
 STATE_RU = {
     "RUNNING": "печатает", "IDLE": "свободен", "PAUSE": "на паузе",
@@ -121,6 +98,83 @@ def _keyboard(*rows: list[tuple[str, str]]) -> dict:
             for row in rows
         ]
     }
+
+
+# ------------------------------------------------------------- подсказки
+# Словарь «что человек мог иметь в виду» → команда, которая реально сработает.
+# Используется, когда бот не узнал сообщение: вместо сухого отказа предлагаем
+# ближайшую команду кнопкой (идея «человеческого» бота).
+_SUGGEST_VOCAB: list[tuple[str, str]] = [
+    ("панель", "панель"), ("главное меню", "панель"), ("меню", "панель"),
+    ("статус", "статус"), ("состояние", "статус"),
+    ("датчики", "датчики"), ("сенсоры", "датчики"), ("температура", "датчики"),
+    ("доктор", "доктор"), ("диагностика", "доктор"), ("здоровье", "доктор"),
+    ("план", "план"), ("печатать", "план"),
+    ("очередь", "очередь"), ("задания", "очередь"), ("журнал", "очередь"),
+    ("кадр", "кадр"), ("камера", "кадр"), ("снимок", "кадр"), ("фото", "кадр"),
+    ("таймлапс", "таймлапс"), ("видео", "таймлапс"),
+    ("живой", "живой"), ("live", "живой"),
+    ("стеллаж", "стеллаж"), ("полка", "стеллаж"), ("склад", "стеллаж"),
+    ("продажа", "продажа"), ("продать", "продажа"), ("selling", "продажа"),
+    ("приход", "приход"), ("положить", "приход"), ("пополнить", "приход"),
+    ("движения стеллажа", "движения стеллажа"), ("движения", "движения стеллажа"),
+    ("движения полки", "движения стеллажа"), ("движение", "движения стеллажа"),
+    ("продажи стеллажа", "продажи стеллажа"),
+    ("продажи полки", "продажи стеллажа"), ("продажи полка", "продажи стеллажа"),
+    ("касса", "касса"), ("выемка", "касса"), ("забрали", "забрали"),
+    ("деньги", "деньги"), ("финансы", "деньги"), ("прибыль", "деньги"),
+    ("сегодня", "сегодня"), ("итоги", "итоги недели"), ("неделя", "итоги недели"),
+    ("месяц", "итоги месяца"), ("отчет", "итоги недели"), ("отчёт", "итоги недели"),
+    ("долги", "долги"), ("должники", "долги"), ("брак", "брак"), ("дефект", "брак"),
+    ("рейтинг", "рейтинг"), ("abc", "рейтинг"), ("топ", "рейтинг"),
+    ("простой", "простой"), ("заработок", "деньги"), ("заработал", "деньги"),
+    ("сколько", "сколько осталось"), ("сколько осталось", "сколько осталось"),
+    ("филамент", "филамент"), ("пластик", "филамент"), ("катушки", "филамент"),
+    ("закупка", "закупка"), ("покупки", "закупка"), ("шоппинг", "закупка"),
+    ("каталог", "каталог"), ("номенклатура", "каталог"), ("товары", "каталог"),
+    ("цена", "цена"), ("группы", "группы"),
+    ("новый", "новый заказ"), ("заказ", "новый заказ"), ("создать", "новый заказ"),
+    ("выдать", "выдать"), ("выдал", "выдать"), ("выдача", "выдать"),
+    ("оплата", "оплата"), ("оплатить", "оплата"),
+    ("чаты", "чаты"), ("диалоги", "чаты"), ("inbox", "чаты"),
+    ("кответ", "кответ"), ("ответить", "кответ"),
+    ("клиент-бот", "клиент-бот"), ("витрина", "клиент-бот"),
+    ("пауза", "пауза"), ("продолжить", "продолжить"), ("свет", "свет"),
+    ("стоп", "стоп"), ("поток", "поток"), ("пропустить", "пропустить"),
+    ("повторить", "повторить"), ("перепечатать", "повторить"),
+    ("следи", "следи"), ("подпишись", "следи"),
+    ("помощь", "помощь"), ("help", "помощь"), ("что умеешь", "помощь"),
+    ("код", "код"), ("команда", "команда"), ("сотрудники", "команда"),
+    ("сотрудник", "сотрудник"), ("пригласить", "пригласить"),
+    ("принтеры", "принтер"), ("принтер", "принтер"),
+]
+
+
+def suggest_command(raw: str) -> str:
+    """Ближайшая известная команда для непонятого сообщения.
+
+    Возвращает '' если совпадение слабое — тогда честно зовём «помощь»,
+    а не угадываем наугад.
+    """
+    text = _re.sub(r"\s+", " ", str(raw or "").lower().replace("ё", "е")).strip()
+    if len(text) < 3:
+        return ""
+    tokens = [w for w in text.split() if len(w) >= 3] or [text]
+    best, best_score = "", 0.0
+    for phrase, canonical in _SUGGEST_VOCAB:
+        # Точное совпадение словами — самое сильное; «брак» не должно
+        # находиться внутри «абракадабра», поэтому смотрим границы слова.
+        pattern = _re.compile(rf"\b{_re.escape(phrase)}\b")
+        if pattern.search(text):
+            return canonical
+        score = max(
+            difflib.SequenceMatcher(None, text, phrase).ratio(),
+            max((difflib.SequenceMatcher(None, token, phrase).ratio()
+                 for token in tokens), default=0.0),
+        )
+        if score > best_score:
+            best_score, best = score, canonical
+    return best if best_score >= 0.62 else ""
 
 
 class TelegramBot:
@@ -204,10 +258,10 @@ class TelegramBot:
         """Главное inline-меню сотрудника, общее для всех карточек."""
         return _keyboard(
             [("🖨 Принтеры", "cmd:printers"), ("≡ Очередь", "cmd:queue")],
-            [("📥 Inbox", "cmd:inbox"), ("⚑ План", "cmd:plan")],
-            [("🧵 AMS / пластик", "cmd:filament"), ("₽ Деньги", "cmd:money")],
+            [("🛍 Стеллаж", "cmd:shelf"), ("📥 Inbox", "cmd:inbox")],
+            [("🧵 AMS / пластик", "cmd:filament"), ("💰 Касса", "cmd:shelf-cash")],
+            [("⚑ План", "cmd:plan"), ("₽ Деньги", "cmd:money")],
             [("🗂 Каталог", "cmd:cat"), ("📊 Итоги", "cmd:today")],
-            [("📈 Неделя", "cmd:weekly"), ("🌡 Датчики", "cmd:sensors")],
             [("🩺 Доктор", "cmd:doctor"), ("❔ Помощь", "cmd:help")],
         )
 
@@ -397,6 +451,32 @@ class TelegramBot:
                 return self.shelf_produce_keyboard(chat, page, message_id=message_id)
             page = self._page_from_command(command, "sell-menu", self._sell_page, chat)
             return self.sell_keyboard(chat, page, message_id=message_id)
+        # Касса стеллажа и быстрые выемки: правим то же сообщение кнопками.
+        if command in ("shelf-cash", "shelf-cash-menu") \
+                or command.startswith("shelf-cash-w:"):
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            if command.startswith("shelf-cash-w:"):
+                self.do_shelf_collect(command.split(":", 1)[1])
+            return self.shelf_cash_keyboard(chat, message_id=message_id)
+        # Подсказка-кнопка: выполнить исправленную команду как обычный текст.
+        # Права проверяем по целевой команде так же, как в текстовом пути.
+        if command.startswith("goto:"):
+            target = command[5:].strip()
+            if not target:
+                self._call("answerCallbackQuery",
+                           {"callback_query_id": callback_id, "text": "Команда пуста"})
+                return
+            tword = target.split()[0]
+            tdigits = any(w.isdigit() for w in target.split()[1:])
+            tgroup = group_for_word(tword, text_has_digits=tdigits)
+            if tgroup and tgroup not in who["allowed"]:
+                self._call("answerCallbackQuery", {
+                    "callback_query_id": callback_id,
+                    "text": f"Недоступно для роли «{ROLE_NAMES.get(who['role'])}»"})
+                return
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            return self._dispatch(chat, target)
         # Меню каталога и карточки позиций правят то же сообщение, как стеллаж.
         if command == "cat" or command.startswith(("cati", "cat-hide", "cat-show",
                                                    "cat-archive", "cat-restore",
@@ -498,6 +578,10 @@ class TelegramBot:
             return self.do_shelf_sell(command.split(":", 1)[1])
         if command.startswith("shelf-prod:"):
             return self.do_shelf_produce(command.split(":", 1)[1])
+        if command == "shelf-cash":
+            return self.text_shelf_cash()
+        if command.startswith("shelf-cash-w:"):
+            return self.do_shelf_collect(command.split(":", 1)[1])
         if command == "shelf-moves":
             return self.text_shelf_moves()
         if command == "shelf-sales7":
@@ -838,7 +922,7 @@ class TelegramBot:
         if word in ("деньги", "финансы", "money", "прибыль"):
             return self._reply(chat, self.text_money())
         if word == "касса":
-            return self._reply(chat, self.text_shop_cash())
+            return self.shelf_cash_keyboard(chat)
         if word in ("забрали", "выемка"):
             return self._reply(chat, self.do_collect_from_shop(text))
         if word in ("день", "сегодня", "итоги"):
@@ -908,7 +992,32 @@ class TelegramBot:
             return self._reply(chat, self.do_stop(chat, text))
         if word in ("готов", "ready"):
             return self._reply(chat, self.order_ready(text))
-        self._reply(chat, "Не понял команду. Напишите «помощь» — покажу список.")
+        self._unknown(chat, raw)
+
+    def _unknown(self, chat: str, raw: str) -> None:
+        """Непонятое сообщение: подсказка + кнопки, а не сухой отказ."""
+        suggestion = suggest_command(raw)
+        if suggestion:
+            lines = [
+                f"Не понял «{raw.strip()[:60]}».",
+                f"Возможно, вы имели в виду «{suggestion}» — нажмите кнопку, "
+                "и я выполню.",
+                "",
+                "Или нажмите «Помощь» — покажу, что умею.",
+            ]
+            buttons = [[{"text": suggestion, "callback_data": f"cmd:goto:{suggestion}"}],
+                       [{"text": "❔ Помощь", "callback_data": "cmd:help"}]]
+        else:
+            lines = [
+                "Не узнал такую команду.",
+                "Напишите одно слово из подсказки ниже — я пойму.",
+            ]
+            buttons = [[{"text": "❔ Помощь", "callback_data": "cmd:help"}],
+                       [{"text": "🖥 Что происходит", "callback_data": "cmd:panel"}]]
+        self._call("sendMessage", {
+            "chat_id": chat, "text": "\n".join(lines)[:3800],
+            "reply_markup": json.dumps({"inline_keyboard": buttons}, ensure_ascii=False),
+        }, timeout=15)
 
     # -------------------------------------------------------------- ответы
     def order_ready(self, raw: str) -> str:
@@ -1170,22 +1279,31 @@ class TelegramBot:
                 note = str(r.get("note") or "").strip()
                 lines.append(f"· {_money(r.get('amount'))} — {when}"
                              + (f" ({note[:40]})" if note else ""))
-        lines.append("\nЗаписать выемку: «забрали 5000» · «забрали 5000 картой».")
+        lines.append("\nЗаписать выемку: «забрали 5000» · «забрали 2500 картой» ·"
+                     " «забрали все».")
         return "\n".join(lines)
 
     def do_collect_from_shop(self, text: str) -> str:
-        """«забрали 5000» — отметить выемку наличных из кассы магазина."""
+        """«забрали 5000» или «забрали все» — выемка из кассы магазина."""
         from .shelf import Shelf
+        shelf = Shelf(self.db)
         m = _re.search(r"(\d[\d\s.,]*)\s*(?:р|руб|₽)?", text)
+        state = shelf.shop_cash()
         if not m:
-            return self.text_shop_cash()
-        amount = num(m.group(1).replace(" ", "").replace(",", "."))
-        note = text[m.end():].strip()[:120]
+            if any(w in text.replace("ё", "е") for w in ("все", "всё", "всего")):
+                amount = num(state.get("in_shop"))
+                if amount <= 0:
+                    return "В кассе магазина сейчас нет денег от стеллажа."
+            else:
+                return self.text_shop_cash()
+        else:
+            amount = num(m.group(1).replace(" ", "").replace(",", "."))
+        note = text[m.end():].strip() if m else ""
         try:
-            Shelf(self.db).add_collection(amount, note)
+            shelf.add_collection(amount, str(note)[:120])
         except ValueError as exc:
             return f"Не получилось: {exc}"
-        c = Shelf(self.db).shop_cash()
+        c = shelf.shop_cash()
         return (f"✅ Забрали из магазина {_money(amount)}.\n"
                 f"Осталось в магазине: {_money(c.get('in_shop'))}.")
 
@@ -1691,7 +1809,8 @@ class TelegramBot:
         позиции, которые надо проверить или пополнить физически.
         """
         from .shelf import Shelf
-        items = Shelf(self.db).items()
+        shelf = Shelf(self.db)
+        items = shelf.items()
         if not items:
             return "🛍 Стеллаж пуст: активных позиций пока нет."
         needs = [i for i in items if i.get("status") in ("empty", "low", "dead") or num(i.get("plan_qty")) > 0]
@@ -1725,18 +1844,93 @@ class TelegramBot:
             lines.append(f"• {item.get('name') or 'Без названия'} — {round(num(item.get('qty')), 1)} шт · {status}{extra}")
         if len(rows) > 8:
             lines.append(f"… ещё {len(rows) - 8} поз. в полной панели.")
+        today = shelf.today_sales()
+        cash = shelf.shop_cash()
+        answer = "\n".join(lines)
+        if not only_needs:
+            answer += ("\n\n📈 Сегодня: "
+                       f"{round(today.get('qty', 0), 1)} шт · {_money(today.get('money', 0))}"
+                       f" · в кассе магазина {_money(cash.get('in_shop', 0))}")
+        return answer
+
+    def text_shelf_cash(self) -> str:
+        """Касса стеллажа: сколько лежит в магазине и как записать выемку."""
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        cash = shelf.shop_cash()
+        today = shelf.today_sales()
+        lines = [
+            "💰 Касса стеллажа",
+            f"• Продано сегодня: {round(today.get('qty', 0), 1)} шт · "
+            f"{_money(today.get('money', 0))}",
+            f"• Продано за все время: {_money(cash.get('shelf_income'))}",
+            f"• Забрали из магазина: {_money(cash.get('collected_total'))}",
+            f"• Лежит в магазине: {_money(cash.get('in_shop'))}",
+            "",
+            "Быстрая выемка — кнопками ниже. Точная сумма: «забрали 5000».",
+        ]
         return "\n".join(lines)
 
+    def shelf_cash_keyboard(self, chat: str, message_id: str = "") -> None:
+        """Меню кассы стеллажа: кнопки быстрой выемки + назад к полке."""
+        from .shelf import Shelf
+        cash = Shelf(self.db).shop_cash()
+        in_shop = num(cash.get("in_shop"))
+        lines = [
+            "💰 Касса стеллажа",
+            f"• Лежит в магазине: {_money(in_shop)}",
+            f"• Забрали за все время: {_money(cash.get('collected_total'))}",
+            "",
+            "Кнопки — быстрая выемка. Точная сумма: «забрали 2500».",
+        ]
+        buttons = []
+        if in_shop >= 0.005:
+            row = []
+            for amount in (1000, 5000):
+                if in_shop + 0.004 < amount:
+                    continue
+                row.append({"text": f"Забрали {_money(amount)}",
+                            "callback_data": f"cmd:shelf-cash-w:{amount}"})
+            if row:
+                buttons.append(row)
+            buttons.append([{"text": f"Забрать всё · {_money(in_shop)}",
+                             "callback_data": "cmd:shelf-cash-w:all"}])
+        buttons.append([{"text": "← Назад к полке", "callback_data": "cmd:shelf"}])
+        self._send_menu(chat, "\n".join(lines), buttons, message_id)
+
+    def do_shelf_collect(self, spec: str) -> str:
+        """Быстрая выемка из кассы магазина: сумма или «all» (забрать всё)."""
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        state = shelf.shop_cash()
+        in_shop = num(state.get("in_shop"))
+        if in_shop <= 0.005:
+            return "В кассе магазина сейчас нет денег от стеллажа."
+        spec = str(spec or "").strip().lower()
+        amount = in_shop if spec in ("all", "все", "всё") else num(spec)
+        if amount <= 0:
+            return "Укажите сумму: «забрали 5000»."
+        if amount > in_shop + 0.005:
+            return (f"В магазине лежит только {_money(in_shop)} — "
+                    f"забрать {_money(amount)} нельзя.")
+        try:
+            shelf.add_collection(round(amount, 2), note="выемка из Telegram")
+        except ValueError as exc:
+            return f"Не получилось: {exc}"
+        left = shelf.shop_cash().get("in_shop")
+        return f"✅ Забрали {_money(amount)}. В кассе магазина осталось {_money(left)}."
+
     def shelf_keyboard(self, chat: str) -> None:
-        """Панель стеллажа: обзор, дефицит, продажи, приход, движения, план."""
+        """Панель стеллажа: обзор, дефицит, продажи, приход, касса, движения."""
         text = self.text_shelf()
         buttons = [
             [{"text": "⚠ Нужны на полку", "callback_data": "cmd:shelf:needs"},
              {"text": "🛒 Продать", "callback_data": "cmd:sell-menu"}],
             [{"text": "📥 Приход +1", "callback_data": "cmd:shelf-prod-menu"},
-             {"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"}],
-            [{"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"},
-             {"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
+             {"text": "💰 Касса", "callback_data": "cmd:shelf-cash"}],
+            [{"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"},
+             {"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"}],
+            [{"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
         ]
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
@@ -2556,7 +2750,6 @@ class TelegramBot:
 
     def text_shelf_sales(self, days: int = 7) -> str:
         """Что реально продалось со стеллажа за период, по позициям."""
-        from .shelf import Shelf
         from datetime import datetime, timedelta
         since = (datetime.now() - timedelta(days=days)).isoformat()
         rows = self.db.query(
