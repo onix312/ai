@@ -174,6 +174,8 @@ function renderStock() {
       + '<div class="acts tools">'
       + `<button class="btn sm ghost" type="button" data-spool-dry="${esc(s.id)}" title="Записать сушку${dryInfo}">♨ Сушка</button>`
       + `<button class="btn sm ghost" type="button" data-spool-qr="${esc(s.id)}" title="QR-код для наклейки на катушку">◫ QR</button>`
+      // Катушка из AMS без цены/бренда — кандидат на привязку к складской
+      + (spoolIsAmsPhantom(s) ? `<button class="btn sm ghost" type="button" data-spool-link="${esc(s.id)}" title="Это уже заведённая катушка на складе — привязать слот AMS к ней">🔗 Складская</button>` : '')
       + `<button class="btn sm ghost" type="button" data-spool-edit="${esc(s.id)}" title="Карточка катушки">✎ Изменить</button>`
       + '</div></article>';
   }).join('');
@@ -1047,6 +1049,52 @@ function openTx(kind) {
   openModal('tx_modal');
 }
 
+/* =================================== привязка катушки AMS к складской */
+// Фантом AMS: катушка заведена синхронизацией принтера (стоит в слоте),
+// но не верифицирована и без цены/бренда — кандидат на привязку к уже
+// существующей складской катушке.
+function spoolIsAmsPhantom(s) {
+  if (!s) return false;
+  const inSlot = (String(s.ams_slot || '') !== '' || String(s.location || '') === 'ams');
+  const notVerified = !num(s.verified, 1);
+  const noPrice = !num(s.price);
+  return inSlot && notVerified && (noPrice || !String(s.brand || '').trim());
+}
+
+async function linkAmsSpool(phantomId) {
+  const phantom = (PF.state.spools || []).find((x) => x.id === phantomId);
+  if (!phantom) return fail(new Error('Катушка не найдена'));
+  // Кандидаты на складе: не фантомы (верифицированные или с ценой),
+  // без активной привязки к слоту — чтобы не отобрать слот у другой катушки.
+  const candidates = (PF.state.spools || []).filter((s) =>
+    s.id !== phantomId
+    && String(s.ams_slot || '') === ''
+    && !spoolIsAmsPhantom(s));
+  if (!candidates.length) {
+    return fail(new Error('Нет подходящих катушек на складе — заведите катушку в карточке «Склад пластика» или уточните цену существующей.'));
+  }
+  const options = candidates.map((s) => ({
+    value: s.id,
+    label: `${s.material || '—'} ${s.color_name || ''} · ${nfmt(s.remaining_grams)} г`
+      + `${num(s.price) ? ' · ' + money(Math.round(num(s.price) / Math.max(1, num(s.total_grams, 1000)) * 1000)) + '/кг' : ''}`,
+  }));
+  const ans = await ask({
+    eyebrow: 'Привязка AMS',
+    title: `К какой складской катушке привязать «${phantom.material || ''} ${phantom.color_name || 'без названия'}»?`,
+    sub: 'Слот AMS, tray-привязка и история списаний переедут на выбранную катушку. Остаток и цена берутся складские; запись из AMS будет убрана в архив.',
+    fields: [{ name: 'target', label: 'Складская катушка', type: 'select', options }],
+    ok: 'Привязать',
+  });
+  if (!ans || !ans.target) return;
+  if (!confirmDanger('Привязать катушку AMS к выбранной складской? Остаток на складе не изменится, дубль из AMS архивируется.')) return;
+  try {
+    await post('/api/spool/link-ams', { phantom_id: phantomId, target_id: ans.target });
+    toast('Катушка привязана', 'AMS-слот теперь ведёт на складскую катушку');
+    await PF.refreshCore();
+    PF.refreshFinance && PF.refreshFinance();
+  } catch (err) { fail(err); }
+}
+
 /* ============================================================= события */
 function bind() {
   /* ===================== мастер «Закрыть месяц» (H4) ===================== */
@@ -1385,6 +1433,8 @@ function bind() {
     if (qr) { openSpoolQr(qr.dataset.spoolQr); return; }
     const edit = e.target.closest('[data-spool-edit]');
     if (edit) return openSpool(edit.dataset.spoolEdit);
+    const link = e.target.closest('[data-spool-link]');
+    if (link) { await linkAmsSpool(link.dataset.spoolLink); return; }
     const scrap = e.target.closest('[data-spool-scrap]');
     if (scrap) {
       const grams = await ask({

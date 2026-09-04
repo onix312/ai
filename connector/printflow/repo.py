@@ -687,6 +687,91 @@ class Repo:
             raise ValueError("Не указана катушка")
         self.db.delete("spools", spool_id)
 
+    def link_ams_spool(self, phantom_id: str, target_id: str) -> dict:
+        """Привязать катушку, которую показывает AMS, к уже заведённой
+        катушке склада.
+
+        Катушка из AMS (фантом: без цены/бренда, ``ams_sync=1``) уступает
+        место складской: на складскую переезжают привязка к слоту принтера
+        (``printer_id``/``ams_slot``/``tray_uuid``), AMS-синхронизация и
+        история расхода ``filament_usage`` и ссылки в заказах
+        (``orders.spools``). Остаток и цена берутся складские — склад
+        остаётся источником правды по учёту (решение заказчика). Фантом
+        архивируется, чтобы не висеть дублем.
+        """
+        phantom_id = str(phantom_id or "").strip()
+        target_id = str(target_id or "").strip()
+        if not phantom_id or not target_id:
+            raise ValueError("Выберите катушку AMS и катушку склада")
+        if phantom_id == target_id:
+            raise ValueError("Это одна и та же катушка")
+        phantom = self.db.one("SELECT * FROM spools WHERE id=? AND archived=0",
+                              (phantom_id,))
+        if not phantom:
+            raise ValueError("Катушка AMS не найдена")
+        target = self.db.one("SELECT * FROM spools WHERE id=? AND archived=0",
+                             (target_id,))
+        if not target:
+            raise ValueError("Складская катушка не найдена")
+        # Если на целевом слоте уже стоит другая активная катушка —
+        # подстрахуемся от двойной привязки слота.
+        if phantom.get("printer_id") and phantom.get("ams_slot") not in (None, ""):
+            occupant = self.db.one(
+                "SELECT id FROM spools WHERE id<>? AND id<>? AND archived=0"
+                " AND printer_id=? AND ams_slot=?",
+                (phantom_id, target_id, phantom["printer_id"], phantom["ams_slot"]))
+            if occupant:
+                raise ValueError(
+                    "Слот уже занят другой катушкой — сначала отвяжите её")
+        # 1) привязка слота/AMS переезжает на складскую катушку
+        self.db.execute(
+            "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?,"
+            " location='ams', ams_sync=? , synced_at=?, updated_at=? WHERE id=?",
+            (phantom.get("printer_id") or target.get("printer_id") or "",
+             phantom.get("ams_slot") or "",
+             phantom.get("tray_uuid") or "",
+             int(num(phantom.get("ams_sync"), 1)),
+             now_iso(), now_iso(), target_id))
+        # 2) история расхода с фантома — на складскую
+        moved = self.db.execute(
+            "UPDATE filament_usage SET spool_id=? WHERE spool_id=?",
+            (target_id, phantom_id)).rowcount
+        # 3) ссылки в заказах (JSON orders.spools) — на складскую
+        orders = self.db.query(
+            "SELECT id, spools FROM orders WHERE spools LIKE ?",
+            (f"%{phantom_id}%",))
+        for order in orders:
+            try:
+                rows = json.loads(order.get("spools") or "[]")
+            except json.JSONDecodeError:
+                continue
+            changed = False
+            for row in rows:
+                if isinstance(row, dict) and str(row.get("spool_id") or "") == phantom_id:
+                    row["spool_id"] = target_id
+                    changed = True
+            if changed:
+                self.db.execute("UPDATE orders SET spools=? WHERE id=?",
+                                (json.dumps(rows, ensure_ascii=False), order["id"]))
+        # 4) фантом архивируем (не удаляем — история и события ссылаются на id)
+        self.db.execute(
+            "UPDATE spools SET archived=1, ams_slot='', tray_uuid='',"
+            " printer_id='', location='shop', label_note=?, updated_at=? WHERE id=?",
+            (f"Привязана к складской катушке {target_id} при синхронизации AMS",
+             now_iso(), phantom_id))
+        self.db.add_event(
+            "spool", "Катушка AMS привязана к складской",
+            f"{phantom.get('material') or 'Катушка'} {phantom.get('color_name') or ''} "
+            f"→ складская {target.get('material') or ''} {target.get('color_name') or ''} "
+            f"(остаток {round(num(target.get('remaining_grams')))} г). "
+            f"Перенесено списаний: {moved}.",
+            phantom.get("printer_id") or "",
+            {"phantom_id": phantom_id, "target_id": target_id,
+             "moved_usage": moved,
+             "slot": phantom.get("ams_slot")})
+        return {"ok": True, "spool": self.spool(target_id),
+                "archived": phantom_id, "moved_usage": moved}
+
     def cleanup_ams_phantoms(self) -> dict:
         """Убрать фантомные катушки AMS: дубли слотов и пустые материалы.
 

@@ -2403,6 +2403,13 @@ class Api:
         if path == "/api/spool/delete":
             self.repo.delete_spool(body.get("id", ""))
             return 200, {"ok": True}
+        if path == "/api/spool/link-ams":
+            # Катушку, которую показывает AMS, привязываем к уже заведённой
+            # складской катушке: привязка слота и история переезжают на неё,
+            # фантом архивируется. Остаток и цена — складские.
+            result = self.repo.link_ams_spool(
+                str(body.get("phantom_id", "")), str(body.get("target_id", "")))
+            return 200, result
         if path == "/api/spool/consume":
             # id и spool_id — синонимы: UI шлёт id выбранной катушки
             return 200, self.acc.consume_filament(
@@ -2479,7 +2486,11 @@ class Api:
             return 200, {"ok": True, "transaction": tx, "tax": self.acc.tax_report()}
 
         if path == "/api/calc/cost":
-            return 200, self.acc.cost_breakdown(
+            # Катушки заказа (список [{spool_id, grams}]): пластик считается
+            # по их фактическим ценам со склада; нехватка граммов возвращается
+            # мягким предупреждением (заказ сохранить можно).
+            spool_info = self.acc.spools_filament_cost(body.get("spools") or [])
+            br = self.acc.cost_breakdown(
                 num(body.get("grams")), num(body.get("hours")),
                 num(body.get("spool_price")) or None, num(body.get("spool_weight")) or None,
                 num(body.get("manual_minutes")), num(body.get("qty"), 1),
@@ -2495,7 +2506,13 @@ class Api:
                 remove_minutes=num(body.get("remove_minutes")),
                 sand_minutes=num(body.get("sand_minutes")),
                 paint_minutes=num(body.get("paint_minutes")),
-                model_prep_minutes=num(body.get("model_prep_minutes")))
+                model_prep_minutes=num(body.get("model_prep_minutes")),
+                filament_cost=spool_info["cost"] if spool_info["grams"] > 0 else None)
+            if spool_info["grams"] > 0:
+                br["filament_by_spools"] = True
+                br["spool_shortage"] = spool_info["shortage"]
+                br["spool_have"] = spool_info["have"]
+            return 200, br
         if path == "/api/calc/price":
             cost = num(body.get("cost"))
             breakdown = None

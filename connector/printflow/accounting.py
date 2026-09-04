@@ -94,6 +94,57 @@ class Accounting:
             total += num(row["amount"]) / divider.get(row["period"], 1.0)
         return round(total, 2)
 
+    def spools_filament_cost(self, spool_items: list | None) -> dict:
+        """Фактическая стоимость пластика заказа по выбранным катушкам.
+
+        Принимает список строк заказа ``[{"spool_id": "...", "grams": 120}, ...]``.
+        В отличие от расчёта по справочной цене материала, каждая строка
+        считается по фактической цене и весу своей катушки со склада —
+        это и есть «корректная стоимость заказа» при мультицвете (разные
+        катушки могут иметь разную цену за кг).
+
+        Возвращает ``{"cost": ₽, "grams": г, "have": г на складе,
+        "shortage": г нехватки, "rows": [...]}``. Катушки, которых нет на
+        складе (архив/удалены), пропускаются — по ним предупредит вызывающий
+        код, а расчёт цены не ломается.
+        """
+        out: list[dict] = []
+        total_cost = 0.0
+        total_grams = 0.0
+        total_have = 0.0
+        for item in spool_items or []:
+            if not isinstance(item, dict):
+                continue
+            spool_id = str(item.get("spool_id") or "")
+            grams = num(item.get("grams"))
+            if not spool_id or grams <= 0:
+                continue
+            spool = self.db.one(
+                "SELECT * FROM spools WHERE id=? AND archived=0", (spool_id,))
+            if not spool:
+                out.append({"spool_id": spool_id, "grams": round(grams, 1),
+                            "cost": 0.0, "missing": True})
+                continue
+            weight = max(1.0, num(spool.get("total_grams"), 1000))
+            unit = num(spool.get("price"), 0) / weight
+            cost = round(grams * unit, 2)
+            remaining = num(spool.get("remaining_grams"))
+            total_cost += cost
+            total_grams += grams
+            total_have += min(remaining, grams)
+            out.append({"spool_id": spool_id,
+                        "material": spool.get("material") or "",
+                        "color_name": spool.get("color_name") or "",
+                        "grams": round(grams, 1),
+                        "remaining": round(remaining, 1),
+                        "price_per_kg": round(num(spool.get("price"), 0)
+                                              / weight * 1000, 2),
+                        "cost": cost})
+        return {"cost": round(total_cost, 2), "grams": round(total_grams, 1),
+                "have": round(total_have, 1),
+                "shortage": round(max(0.0, total_grams - total_have), 1),
+                "rows": out}
+
     def cost_breakdown(self, grams: float, hours: float, spool_price: float | None = None,
                        spool_weight: float | None = None, manual_minutes: float = 0.0,
                        qty: float = 1.0, design_minutes: float = 0.0,
@@ -104,7 +155,8 @@ class Accounting:
                        warmup_minutes: float = 0.0,
                        remove_minutes: float = 0.0, sand_minutes: float = 0.0,
                        paint_minutes: float = 0.0,
-                       model_prep_minutes: float = 0.0) -> dict[str, float]:
+                       model_prep_minutes: float = 0.0,
+                       filament_cost: float | None = None) -> dict[str, float]:
         """Полная раскладка себестоимости партии.
 
         Модель ввода «плита vs штука»:
@@ -202,7 +254,11 @@ class Accounting:
         total_grams += purge_grams
 
         # --- расчёт стоимости ---
-        filament = total_grams * price / weight
+        # Если вызывающий код уже посчитал пластик по фактическим катушкам
+        # заказа (их цены на складе могут отличаться от справочной цены
+        # материала) — берём готовую сумму; иначе считаем по средней цене.
+        filament = num(filament_cost) if filament_cost is not None \
+            else total_grams * price / weight
         energy_kwh = total_hours * num(s["power_kw"], 0.15)
         energy = energy_kwh * num(s["energy_price"], 6)
         amortization = total_hours * num(s["amortization_per_hour"], 12)
@@ -713,6 +769,20 @@ class Accounting:
             return num(price) * self.tax_rate_for(payer) / 100.0
         return 0.0
 
+    def _order_spool_items(order: dict) -> list:
+        """Строки катушек заказа: JSON-строка из БД или список с фронта."""
+        raw = (order or {}).get("spools")
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                return []
+        return []
+    _order_spool_items = staticmethod(_order_spool_items)
+
     def order_economics(self, order: dict) -> dict[str, float]:
         """Экономика заказа: комиссии, доставка, налог и реальные деньги."""
         s = self.db.settings()
@@ -731,11 +801,18 @@ class Accounting:
         qty = 1.0 if has_items else num(order.get("qty"), 1)
         cost = num(order.get("actual_cost")) or num(order.get("cost"))
         if not cost:
-            cost = self.cost_breakdown(grams, hours,
-                                       manual_minutes=num(order.get("manual_minutes")),
-                                       qty=qty,
-                                       design_minutes=num(order.get("design_minutes")),
-                                       delivery=num(order.get("delivery")))["total"]
+            # Пластик по фактическим катушкам заказа: заказчик выбирает
+            # конкретные катушки в граммах, себестоимость идёт по их реальным
+            # ценам со склада, а не по справочной цене материала.
+            spool_info = self.spools_filament_cost(self._order_spool_items(order))
+            br = self.cost_breakdown(
+                grams, hours,
+                manual_minutes=num(order.get("manual_minutes")),
+                qty=qty,
+                design_minutes=num(order.get("design_minutes")),
+                delivery=num(order.get("delivery")),
+                filament_cost=spool_info["cost"] if spool_info["grams"] > 0 else None)
+            cost = br["total"]
 
         ch = self.channel(order.get("channel") or "")
         fee = num(order.get("fee"))

@@ -572,14 +572,14 @@ function renderSpoolRows(json) {
     + '<button class="icon-btn sm danger" type="button" data-spool-del title="Убрать катушку">×</button></div>';
   host.innerHTML = (rows.length ? rows : [{}]).map(rowHtml).join('');
 }
-function collectSpoolRows() {
+function collectSpoolRows(parsed = false) {
   const out = [];
   $$('#of_spool_rows .of-spool-row').forEach((row) => {
     const id = (row.querySelector('[data-spool-sel]') || {}).value || '';
     const grams = num((row.querySelector('[data-spool-grams]') || {}).value);
     if (id) out.push({ spool_id: id, grams });
   });
-  return JSON.stringify(out);
+  return parsed ? out : JSON.stringify(out);
 }
 
 function snapshotSpoolRows() {
@@ -1450,14 +1450,27 @@ async function updateEcon() {
   const k = multi ? 1 : qty;
   let cost = num($('of_cost').value);
   let auto = null;
-  if (!cost && (grams || hours)) {
+  // Катушки заказа: пластик считаем по фактическим ценам выбранных
+  // катушек склада (решение заказчика), а не по справочной цене материала.
+  const spoolRows = collectSpoolRows(true).filter((r) => r.spool_id && num(r.grams) > 0);
+  if (!cost && (grams || hours || spoolRows.length)) {
     try {
-      auto = await post('/api/calc/cost', { grams: grams * k, hours: hours * k, manual_minutes: manual });
+      auto = await post('/api/calc/cost', {
+        grams: grams * k, hours: hours * k, manual_minutes: manual,
+        spools: spoolRows,
+      });
       cost = num(auto.total);
       if (orderIsMulti() && !($('of_items_override') && $('of_items_override').checked)) {
         $('of_cost').value = String(cost);
       }
     } catch (e) { /* офлайн — оставим 0 */ }
+  }
+  // Мягкое предупреждение о нехватке пластика (заказ не блокируем).
+  let spoolNote = '';
+  if (auto && num(auto.spool_shortage) > 0) {
+    spoolNote = `<br><b class="warn-text">⚠ На выбранных катушках не хватает ${nfmt(auto.spool_shortage)} г пластика — пополните или выберите другую катушку.</b>`;
+  } else if (auto && auto.filament_by_spools) {
+    spoolNote = `<br><small class="muted">Пластик посчитан по фактическим катушкам склада: ${money(auto.filament)}.</small>`;
   }
   // Цена одинакова во всех режимах: это сумма заказа, не цена за штуку.
   const total = price;
@@ -1473,6 +1486,7 @@ async function updateEcon() {
     + (left ? ` · осталось получить ${money(left)}` : '')
     + (kind === 'bad' ? '<br>Ниже нормы: поднимите цену, уменьшите время печати или откажитесь.' : '')
     + (kind === 'ok' ? '<br>Заказ в норме по прибыли за час принтера.' : '')
+    + spoolNote
     + '</div>';
 }
 const updateEconDebounced = debounce(updateEcon, 350);
@@ -2835,7 +2849,13 @@ function bind() {
       distributeSpoolGrams();
     });
     spoolHost.addEventListener('change', (e) => {
-      if (e.target.matches('[data-spool-sel]')) distributeSpoolGrams();
+      if (e.target.matches('[data-spool-sel]')) {
+        distributeSpoolGrams();
+        updateEconDebounced();  // смена катушки меняет фактическую цену пластика
+      }
+    });
+    spoolHost.addEventListener('input', (e) => {
+      if (e.target.matches('[data-spool-grams]')) updateEconDebounced();
     });
   }
   const spoolAuto = $('of_spool_auto');
