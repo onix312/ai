@@ -110,6 +110,8 @@ CALLBACK_GROUPS: dict[str, str] = {
     "shelf-moves": "shelf", "shelf-sales7": "shelf", "shelf-sales30": "shelf",
     "shelf-cash": "shelf", "shelf-cash-w": "shelf",
     "help": "view", "goto": "view",
+    # главное меню и «Ещё» видны всем; внутри «Ещё» права проверяются по кнопке
+    "menu": "view", "more": "view", "team": "view",
     # каталог: список и карточка — просмотр, действия — правки
     "cat": "view", "cati": "view",
     "cat-hide": "catalog", "cat-show": "catalog", "cat-archive": "catalog",

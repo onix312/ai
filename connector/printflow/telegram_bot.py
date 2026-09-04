@@ -30,42 +30,24 @@ API = "https://api.telegram.org/bot{token}/{method}"
 
 HELP = f"""PrintFlow {APP_VERSION} — цех в кармане.
 
-Одно слово (без слэша, в любом регистре) — и я отвечу:
+Все действия — кнопками ниже:
+🛒 Продать · 📦 Полка · 💰 Касса · 📷 Кадр · 📊 Итоги · ⚙️ Ещё
 
-👀 Посмотреть
-• статус · кадр · очередь · датчики · доктор · план
-• таймлапс · живой — картинки с принтера
+Если бот попросит цифру, сумму или имя — просто напишите.
+Важное я пришлю сам: печать, низкий остаток, кассу, заказы."""
 
-🛍 Полка (доступно сотруднику)
-• стеллаж — остатки и дефицит одним взглядом
-• продажа — меню «−1 шт» по цене ценника
-• приход — меню «+1 шт» (или «приход Адресник 5»)
-• движения · продажи стеллажа · касса
-• «забрали 5000» — записать выемку из кассы магазина
 
-💰 Деньги (руководитель+)
-• деньги · сегодня · итоги недели · итоги месяца
-• долги · брак · рейтинг · простой
-
-📦 Заказы (руководитель+)
-• «новый Адресник 2шт 900р Мария» — заказ из текста
-• выдать 1001 · оплата 1500 по 1001 · статус 1001 печать
-• следи 1001 — прогресс каждые 10% · фото — снимок к заказу
-
-🖨 Печать (руководитель+)
-• пауза · продолжить · свет · стоп · поток 90
-• пропустить 2 · выше 1001 · ниже 1001 · повторить
-
-🗂 Каталог (руководитель+)
-• каталог · цена Адресник 500 · товар Название цена
-• пересчёт все · архив Адресник · группы · описание
-
-👥 Команда
-• код — свой chat_id · команда — список команды
-• пригласить сотрудник Имя · убрать 123456
-
-Роли: сотрудник — обзоры и полка; руководитель — ещё деньги,
-заказы, печать и каталог; владелец — всё."""
+# Кнопки нижней панели главного меню → команда диспетчера. Кнопка — основной
+# интерфейс; текстовые команды остаются скрытым способом для опытных.
+REPLY_ALIASES: dict[str, str] = {
+    "🛒 продать": "продажа", "продать": "продажа",
+    "📦 полка": "стеллаж", "полка": "стеллаж",
+    "💰 касса": "касса", "касса": "касса",
+    "📷 кадр": "кадр", "кадр": "кадр",
+    "📊 итоги": "день", "итоги": "день",
+    "⚙️ ещё": "more", "⚙️ еще": "more",
+    "ещё": "more", "еще": "more", "more": "more",
+}
 
 
 STATE_RU = {
@@ -265,13 +247,56 @@ class TelegramBot:
             [("🩺 Доктор", "cmd:doctor"), ("❔ Помощь", "cmd:help")],
         )
 
-    def _reply_keyboard(self, chat: str, text: str) -> None:
-        """Сообщение с постоянной inline-клавиатурой."""
-        keyboard = self._inline_menu()
+    def more_keyboard(self, chat: str, message_id: str = "") -> None:
+        """«Ещё» — остальные разделы кнопками.
+
+        Права проверяются на каждой кнопке отдельно: сотрудник увидит
+        очередь и катушки, а «Деньги» получит отказ-подсказку (кнопкой
+        «Показать владельцу» в будущем — сейчас честный отказ роли).
+        """
+        buttons = [
+            [{"text": "🖨 Очередь печати", "callback_data": "cmd:queue"},
+             {"text": "🏭 Принтеры", "callback_data": "cmd:printers"}],
+            [{"text": "🧵 Катушки / AMS", "callback_data": "cmd:filament"},
+             {"text": "📋 Каталог", "callback_data": "cmd:cat"}],
+            [{"text": "📅 План печати", "callback_data": "cmd:plan"},
+             {"text": "💰 Деньги", "callback_data": "cmd:money"}],
+            [{"text": "🔧 Доктор", "callback_data": "cmd:doctor"},
+             {"text": "👥 Команда", "callback_data": "cmd:team"}],
+            [{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+             {"text": "❔ Помощь", "callback_data": "cmd:help"}],
+        ]
+        self._send_menu(chat, "⚙️ Ещё — остальное тоже кнопками:", buttons,
+                        message_id)
+
+    def _main_reply_keyboard(self) -> dict:
+        """Нижняя reply-панель главного меню: 6 кнопок, без команд.
+
+        Reply-клавиатура всегда на виду — именно она делает бота «кнопочным».
+        Вложенные списки и действия — inline-кнопками (см. shelf_keyboard).
+        """
+        return {
+            "keyboard": [
+                ["🛒 Продать", "📦 Полка", "💰 Касса"],
+                ["📷 Кадр", "📊 Итоги", "⚙️ Ещё"],
+            ],
+            "resize_keyboard": True,
+            "is_persistent": True,
+            "one_time_keyboard": False,
+        }
+
+    def _send_main_menu(self, chat: str, text: str = HELP) -> None:
+        """Главное меню: короткий текст + постоянная reply-панель."""
         self._call("sendMessage", {
-            "chat_id": chat, "text": text[:3800], "disable_web_page_preview": "true",
-            "reply_markup": json.dumps(keyboard, ensure_ascii=False),
+            "chat_id": chat, "text": str(text or HELP)[:3800],
+            "disable_web_page_preview": "true",
+            "reply_markup": json.dumps(self._main_reply_keyboard(),
+                                       ensure_ascii=False),
         }, timeout=15)
+
+    def _reply_keyboard(self, chat: str, text: str) -> None:
+        """Ответ с нижней панелью главного меню (кнопки — основной вход)."""
+        self._send_main_menu(chat, text)
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -461,6 +486,15 @@ class TelegramBot:
             return self.shelf_cash_keyboard(chat, message_id=message_id)
         # Подсказка-кнопка: выполнить исправленную команду как обычный текст.
         # Права проверяем по целевой команде так же, как в текстовом пути.
+        # Главное меню и «Ещё»: навигация, доступную любой роли.
+        if command == "menu":
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id,
+                                               "text": "Главное меню"})
+            return self._send_main_menu(chat)
+        if command == "more":
+            self._call("answerCallbackQuery", {"callback_query_id": callback_id})
+            message_id = str(message.get("message_id") or "")
+            return self.more_keyboard(chat, message_id=message_id)
         if command.startswith("goto:"):
             target = command[5:].strip()
             if not target:
@@ -582,6 +616,8 @@ class TelegramBot:
             return self.text_shelf_cash()
         if command.startswith("shelf-cash-w:"):
             return self.do_shelf_collect(command.split(":", 1)[1])
+        if command == "team":
+            return self._staff_command(chat, "list", "")
         if command == "shelf-moves":
             return self.text_shelf_moves()
         if command == "shelf-sales7":
@@ -796,6 +832,9 @@ class TelegramBot:
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = raw.lower().lstrip("/").replace("ё", "е")
+        # Кнопки нижней панели приходят обычным текстом — превращаем их
+        # в команды сразу, до разбора слов («ещё» не имеет текстовой команды).
+        text = REPLY_ALIASES.get(text.strip(), text)
         for emoji in "🖨📷≡₽⚑🛍🛒📦📊⚠❔▦▤·🗂":
             text = text.replace(emoji, " ")
         text = text.strip()
@@ -825,6 +864,8 @@ class TelegramBot:
 
         if word in ("start", "help", "старт", "помощь", "меню", "?"):
             return self._reply_keyboard(chat, HELP)
+        if word == "more":
+            return self.more_keyboard(chat)
         if text.startswith("закрыть месяц"):
             return self._reply(chat, self._month_close(text))
         if word in ("панель", "panel", "дашборд"):
@@ -1003,16 +1044,18 @@ class TelegramBot:
                 f"Возможно, вы имели в виду «{suggestion}» — нажмите кнопку, "
                 "и я выполню.",
                 "",
-                "Или нажмите «Помощь» — покажу, что умею.",
+                "Или вернитесь в меню — там всё кнопками.",
             ]
             buttons = [[{"text": suggestion, "callback_data": f"cmd:goto:{suggestion}"}],
-                       [{"text": "❔ Помощь", "callback_data": "cmd:help"}]]
+                       [{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+                        {"text": "❔ Помощь", "callback_data": "cmd:help"}]]
         else:
             lines = [
                 "Не узнал такую команду.",
-                "Напишите одно слово из подсказки ниже — я пойму.",
+                "Нажмите кнопку ниже — я покажу, что умею.",
             ]
-            buttons = [[{"text": "❔ Помощь", "callback_data": "cmd:help"}],
+            buttons = [[{"text": "🏠 В меню", "callback_data": "cmd:menu"},
+                        {"text": "❔ Помощь", "callback_data": "cmd:help"}],
                        [{"text": "🖥 Что происходит", "callback_data": "cmd:panel"}]]
         self._call("sendMessage", {
             "chat_id": chat, "text": "\n".join(lines)[:3800],
@@ -1906,6 +1949,7 @@ class TelegramBot:
             buttons.append([{"text": f"Забрать всё · {_money(in_shop)}",
                              "callback_data": "cmd:shelf-cash-w:all"}])
         buttons.append([{"text": "← Назад к полке", "callback_data": "cmd:shelf"}])
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
         self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_shelf_collect(self, spec: str) -> str:
@@ -1940,7 +1984,8 @@ class TelegramBot:
              {"text": "💰 Касса", "callback_data": "cmd:shelf-cash"}],
             [{"text": "🧾 Движения", "callback_data": "cmd:shelf-moves"},
              {"text": "📊 Продажи 7 дн", "callback_data": "cmd:shelf-sales7"}],
-            [{"text": "🔄 Обновить", "callback_data": "cmd:shelf"}],
+            [{"text": "🔄 Обновить", "callback_data": "cmd:shelf"},
+             {"text": "🏠 В меню", "callback_data": "cmd:menu"}],
         ]
         self._call("sendMessage", {"chat_id": chat, "text": text[:3800],
                                    "reply_markup": json.dumps({"inline_keyboard": buttons})}, timeout=15)
@@ -2005,6 +2050,7 @@ class TelegramBot:
                    {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:sell-menu"},
                    {"text": "▶", "callback_data": "cmd:sell-menu:next"}]
             buttons.append(nav)
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
         self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_sell(self, nom_id: str) -> str:
@@ -2068,6 +2114,7 @@ class TelegramBot:
                    {"text": f"{page + 1}/{total_pages}", "callback_data": "cmd:shelf-prod-menu"},
                    {"text": "▶", "callback_data": "cmd:shelf-prod-menu:next"}]
             buttons.append(nav)
+        buttons.append([{"text": "🏠 В меню", "callback_data": "cmd:menu"}])
         self._send_menu(chat, "\n".join(lines), buttons, message_id)
 
     def do_shelf_produce(self, item_id: str, qty: float = 1) -> str:

@@ -246,6 +246,127 @@ class ShelfCashBotTests(unittest.TestCase):
         self.assertEqual(self.shelf.shop_cash()["in_shop"], 0)
 
 
+class MainMenuButtonTests(unittest.TestCase):
+    """Каркас бота-кнопок (15.4.0): нижняя панель, «Ещё», навигация.
+
+    Команды остаются скрытым способом, кнопки — основной вход: ни одна
+    функция не требует знать команду.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.db.set_settings({"telegram_chat_id": "111"})
+        self.manager = FakeManager(self.db)
+        self.bot = TelegramBot(self.manager)
+
+    def tearDown(self):
+        self.bot.shutdown()
+        self.db.close()
+        self._tmp.cleanup()
+
+    def test_main_reply_keyboard_has_six_buttons(self):
+        markup = self.bot._main_reply_keyboard()
+        flat = [b for row in markup["keyboard"] for b in row]
+        self.assertEqual(
+            flat, ["🛒 Продать", "📦 Полка", "💰 Касса",
+                   "📷 Кадр", "📊 Итоги", "⚙️ Ещё"])
+        self.assertTrue(markup.get("is_persistent"))
+
+    def test_help_has_no_command_list(self):
+        from connector.printflow.telegram_bot import HELP
+        self.assertIn("кнопками", HELP)
+        self.assertIn("⚙️ Ещё", HELP)
+        self.assertNotIn("продажа —", HELP)
+        self.assertNotIn("• стеллаж", HELP)
+
+    def test_help_sends_reply_keyboard(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._dispatch("111", "помощь")
+        msg = [p for m, p in calls if m == "sendMessage"][-1]
+        self.assertIn('"keyboard"', msg["reply_markup"])
+        self.assertIn("кнопками", msg["text"])
+
+    def test_reply_alias_more_opens_more_menu(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._dispatch("111", "⚙️ Ещё")
+        msg = [p for m, p in calls if m == "sendMessage"][-1]
+        markup = msg["reply_markup"]
+        for cmd in ("cmd:queue", "cmd:printers", "cmd:filament", "cmd:cat",
+                    "cmd:plan", "cmd:money", "cmd:doctor", "cmd:team",
+                    "cmd:menu", "cmd:help"):
+            self.assertIn(cmd, markup)
+
+    def test_reply_alias_sell_opens_shelf_menu(self):
+        _shelf_item(self.db)
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._dispatch("111", "🛒 Продать")
+        msg = [p for m, p in calls if m == "sendMessage"][-1]
+        self.assertIn("shelf-sell:", msg["reply_markup"])
+        self.assertIn("cmd:menu", msg["reply_markup"])
+
+    def test_menu_callback_sends_main_menu(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._handle_callback({
+            "id": "cb-menu",
+            "message": {"message_id": 7, "chat": {"id": "111"}},
+            "data": "cmd:menu",
+        }, "111")
+        send = [p for m, p in calls if m == "sendMessage"]
+        self.assertTrue(send)
+        self.assertIn('"keyboard"', send[-1]["reply_markup"])
+        answered = [p for m, p in calls if m == "answerCallbackQuery"]
+        self.assertTrue(answered)
+
+    def test_more_callback_edits_same_message(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._handle_callback({
+            "id": "cb-more",
+            "message": {"message_id": 8, "chat": {"id": "111"}},
+            "data": "cmd:more",
+        }, "111")
+        edit = [p for m, p in calls if m == "editMessageText"]
+        self.assertTrue(edit)
+        self.assertIn("cmd:team", edit[-1]["reply_markup"])
+
+    def test_team_callback_returns_staff_list(self):
+        text = self.bot._run_command("team", "111")
+        self.assertIsInstance(text, str)
+        self.assertTrue(text.strip())
+
+    def test_every_screen_has_home_button(self):
+        _shelf_item(self.db)
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot.shelf_keyboard("111")
+        self.bot.sell_keyboard("111")
+        self.bot.shelf_cash_keyboard("111")
+        self.bot.shelf_produce_keyboard("111")
+        for m, p in calls:
+            if m == "sendMessage" and "reply_markup" in p:
+                self.assertIn("cmd:menu", p["reply_markup"])
+
+    def test_unknown_offers_menu_button(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: \
+            calls.append((method, params)) or {"ok": True}
+        self.bot._dispatch("111", "ываяыва")
+        markup = calls[-1][1]["reply_markup"]
+        self.assertIn("cmd:menu", markup)
+        self.assertIn("cmd:help", markup)
+
+
 def num(value, default=0.0):
     try:
         return float(value)
