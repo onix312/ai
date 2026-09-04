@@ -1312,6 +1312,14 @@ class Api:
                                                      one("warehouse_id"))}
         if path == "/api/reserves":
             return 200, {"reserves": self.stock.reserves()}
+        if path == "/api/warehouse/positions":
+            wid = one("id")
+            wh = self.db.one(
+                "SELECT * FROM warehouses WHERE id=? AND archived=0", (wid,))
+            if not wh:
+                return 404, {"error": "Склад не найден"}
+            return 200, {"warehouse": wh,
+                         "positions": self.stock.warehouse_positions(wid)}
         # ---------------------------------------------------------- документы
         if path == "/api/documents":
             return 200, {"documents": self.docs.list(
@@ -2744,6 +2752,24 @@ class Api:
         if path == "/api/reserve/release":
             return 200, {"ok": True, "released": self.stock.release(
                 body.get("id", ""), body.get("order_id", ""))}
+        # ----------------------------------------- ручные корректировки «−1/+1»
+        if path == "/api/stock/adjust":
+            # Простая ручная корректировка остатка (списание/оприходование
+            # одной штуки). Не продажа: касса, выручка, маржа и статистика
+            # продаж не затрагиваются — только движение регистра + аудит.
+            delta = num(body.get("delta"))
+            if delta not in (-1.0, 1.0):
+                return 400, {"error": "Корректировка меняет остаток ровно на 1 шт"}
+            if not body.get("nom_id") or not body.get("warehouse_id"):
+                return 400, {"error": "Укажите позицию и склад"}
+            move = self.stock.manual_adjust(
+                body.get("nom_id", ""), body.get("warehouse_id", ""),
+                delta, str(body.get("note") or ""))
+            return 200, {"ok": True, "move": move,
+                         "qty": self.stock.qty(move["nom_id"], move["warehouse_id"])}
+        if path == "/api/stock/revert":
+            return 200, {"ok": True,
+                         "result": self.stock.revert_manual(body.get("move_id", ""))}
         # ---------------------------------------------------------- документы
         if path == "/api/document/save":
             return 200, {"ok": True, "document": self.docs.save(body)}
@@ -3741,7 +3767,6 @@ class Api:
             return 200, {"ok": True}
         # --- 8.5: Фаза 11 --------------------------------------------------
         if path == "/api/wish/save":
-            from .accounting import uid
             customer_id = str(body.get("customer_id") or "")
             text = str(body.get("text") or "").strip()
             if not customer_id or not text:
@@ -3825,7 +3850,6 @@ class Api:
                 return 400, {"error": str(exc)}
         if path == "/api/order/brand-card":
             # Бренд-карточка в заказ (идея 42): design.py -> очередь печати.
-            from .accounting import uid
             from .config import UPLOAD_DIR
             order_id = str(body.get("order_id") or "")
             order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))

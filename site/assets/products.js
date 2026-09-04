@@ -105,7 +105,7 @@ const STATUS_LABEL = { ok: 'В наличии', low: 'Мало', empty: 'Кон�
 const STATUS_CLASS = { ok: 'ok', low: 'warn', empty: 'bad', dead: 'bad', none: '' };
 const DOC_KIND = { receipt: 'Приход', sale: 'Продажа', move: 'Перемещение',
   writeoff: 'Списание', inventory: 'Инвентаризация', production: 'Производство',
-  return: 'Возврат', pricing: 'Установка цен' };
+  return: 'Возврат', pricing: 'Установка цен', manual: 'Корректировка' };
 
 /* ============================================================== загрузка */
 async function refresh() {
@@ -657,8 +657,21 @@ async function openNom(id) {
   // остатки
   const wh = d.warehouses || [];
   $('nf_stock_box').innerHTML = (id ? (wh.length
-    ? '<div class="wh-rows">' + wh.map((w) => `<div class="wh-row"><span>${esc(w.name)}</span>`
-      + `<b>${nfmt(w.qty)}</b><small class="muted">${money(w.value)}</small></div>`).join('') + '</div>'
+    ? '<div class="wh-rows">' + wh.map((w) => {
+      const minusOff = num(w.free) < 1;
+      return `<div class="wh-row"><span>${esc(w.name)}<small class="muted">`
+        + (num(w.reserved) ? `резерв ${nfmt(w.reserved)} · ` : '')
+        + `свободно ${nfmt(w.free)} · ${money(w.value)}</small></span>`
+        + `<b>${nfmt(w.qty)}</b>`
+        + `<button class="btn sm danger" type="button" data-nom-adj="-1" data-wh="${esc(w.warehouse_id)}"`
+        + (minusOff ? ' disabled title="'
+          + (num(w.reserved) ? 'Всё в резерве под заказы' : 'Свободного остатка нет') + '"'
+          : ` title="Убрать 1 шт со склада «${esc(w.name)}» — без последствий для денег"`)
+        + '>−1</button>'
+        + `<button class="btn sm" type="button" data-nom-adj="1" data-wh="${esc(w.warehouse_id)}"`
+        + ' title="Оприходовать 1 найденную шт — без последствий для денег">+1</button>'
+        + '</div>';
+    }).join('') + '</div>'
     : '<div class="empty compact"><span>Остатков нет ни на одном складе.</span></div>')
     : '<div class="empty compact"><span>Сохраните карточку, чтобы вести остатки.</span></div>')
     + (d.fact && d.fact.batches ? `<div class="notice" style="margin-top:10px"><span>ⓘ</span><span>`
@@ -723,12 +736,18 @@ const updateNomCost = debounce(async () => {
 
 function moveRow(m) {
   const positive = num(m.qty) > 0;
+  // Ручную корректировку («−1»/«+1») можно откатить всегда, пока движение
+  // существует: кнопка «Вернуть» рядом. Документы откатываются распроведением.
+  const revert = m.doc_kind === 'manual'
+    ? `<button class="btn sm" type="button" data-move-revert="${esc(m.id)}" data-wh="${esc(m.warehouse_id || '')}" title="Откатить корректировку — остаток восстановится">↩️ Вернуть</button>`
+    : '';
   return '<div class="tx-row">'
     + `<span class="tx-ic ${positive ? 'income' : 'expense'}">${positive ? '↑' : '↓'}</span>`
     + `<div class="tx-body"><b>${esc(DOC_KIND[m.doc_kind] || m.doc_kind || 'Движение')}`
     + (m.doc_number ? ` · ${esc(m.doc_number)}` : '') + '</b>'
     + `<small>${esc(dateTimeText(m.at))} · ${esc(m.warehouse_name || '')}${m.note ? ' · ' + esc(m.note) : ''}</small></div>`
-    + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)}</span></div>`;
+    + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)}</span>`
+    + revert + '</div>';
 }
 
 function renderSpec() {
@@ -1075,6 +1094,7 @@ const DOC_EVENT = {
   inventory: { title: 'Пересчитал остатки', sub: 'Факт не совпал с учётом' },
   production: { title: 'Произвёл', sub: 'Готовое с принтера на склад' },
   return: { title: 'Вернули', sub: 'Клиент принёс товар обратно' },
+  manual: { title: 'Скорректировал', sub: 'Ручное списание или оприходование' },
   pricing: { title: 'Поменял цены', sub: 'Новый прайс без движения штук' },
 };
 
@@ -1334,6 +1354,7 @@ async function renderWarehouses() {
       + `<div class="whead"><span class="wh-ic ${esc(w.kind || 'shelf')}">${ic}</span>`
       + `<div class="wh-info"><h3>${esc(w.name)}</h3><small class="muted">${esc(w.address || WH_KIND[w.kind] || 'Место хранения')}</small></div>`
       + (num(w.retail) ? '<span class="chip ok">розница</span>' : '')
+      + `<button class="btn sm" type="button" data-wh-pos="${esc(w.id)}" title="Позиции склада — ручные корректировки «−1»/«+1»">Позиции</button>`
       + `<button class="icon-btn sm" type="button" data-wh-edit="${esc(w.id)}" title="Изменить">✎</button></div>`
       + `<div class="wbody"><div class="wnum"><b>${nfmt(w.qty)}</b><span>шт</span></div>`
       + `<div class="wval">${money(w.value)}</div></div>`
@@ -1388,6 +1409,83 @@ function openWh(id) {
   $('wh_modal_title').textContent = id ? 'Склад: ' + d.name : 'Новый склад';
   $('wh_delete').hidden = !id;
   openModal('wh_modal');
+}
+
+/* ======================================= позиции склада: «−1» / «+1» */
+let whPosState = { warehouse_id: '', name: '' };
+
+async function openWhPositions(warehouseId) {
+  whPosState.warehouse_id = warehouseId || '';
+  let res = { warehouse: {}, positions: [] };
+  try { res = await get('/api/warehouse/positions', { id: warehouseId }); } catch (e) { return fail(e); }
+  whPosState.name = (res.warehouse || {}).name || 'Склад';
+  $('whpos_title').textContent = 'Позиции · ' + whPosState.name;
+  renderWhPositions(res.positions || []);
+  openModal('whpos_modal');
+}
+
+function renderWhPositions(positions) {
+  $('whpos_rows').innerHTML = positions.length ? positions.map((p) => {
+    const minusOff = num(p.free) < 1;
+    return '<div class="tx-row whpos-row">'
+      + `<div class="tx-body"><b>${esc(p.name)}</b>`
+      + `<small>остаток ${nfmt(p.qty)} ${esc(p.unit || 'шт')}`
+      + (num(p.reserved) ? ` · в резерве ${nfmt(p.reserved)}` : '')
+      + ` · свободно ${nfmt(p.free)}`
+      + ` · ${money(p.cost)}/шт</small></div>`
+      + `<span class="amt">${nfmt(p.qty)}</span>`
+      + `<button class="btn sm danger" type="button" data-adj="-1" data-nom="${esc(p.nom_id)}"`
+      + (minusOff ? ' disabled title="'
+        + (num(p.reserved) ? 'Всё в резерве под заказы' : 'На складе пусто') + '"'
+        : ` title="Убрать 1 шт со склада «${esc(whPosState.name)}» — без последствий для денег"`)
+      + '>−1</button>'
+      + `<button class="btn sm" type="button" data-adj="1" data-nom="${esc(p.nom_id)}"`
+      + ' title="Оприходовать 1 найденную шт — без последствий для денег">+1</button>'
+      + '</div>';
+  }).join('')
+    : '<div class="empty compact"><span>На складе нет позиций с остатком.</span></div>';
+}
+
+async function adjustStock(nomId, warehouseId, delta, warehouseName) {
+  const item = data.items.find((i) => i.id === nomId);
+  const name = item ? item.name : 'товар';
+  const wh = warehouseName || (data.warehouses.find((w) => w.id === warehouseId) || {}).name || 'склад';
+  const verb = delta < 0 ? 'Убрать' : 'Добавить';
+  const tail = delta < 0
+    ? 'Списание без последствий: продажа, касса и отчёты не затрагиваются. Действие можно вернуть.'
+    : 'Оприходование без последствий: касса и отчёты не затрагиваются. Действие можно вернуть.';
+  if (!confirmDanger(`${verb} 1 шт «${name}» со склада «${wh}»?\n\n${tail}`)) return;
+  try {
+    const res = await post('/api/stock/adjust', {
+      nom_id: nomId, warehouse_id: warehouseId, delta,
+    });
+    await afterStockChanged();
+    if ($('whpos_modal') && $('whpos_modal').open) {
+      const r2 = await get('/api/warehouse/positions', { id: warehouseId });
+      renderWhPositions(r2.positions || []);
+    }
+    toastUndo(delta < 0 ? 'Списано 1 шт' : 'Оприходовано 1 шт',
+      `${name} · склад «${wh}» · вернуть можно здесь или в истории движений`,
+      () => revertStock(res.move.id, warehouseId));
+  } catch (e) { fail(e); }
+}
+
+async function revertStock(moveId, warehouseId) {
+  try {
+    await post('/api/stock/revert', { move_id: moveId });
+    await afterStockChanged();
+    if ($('whpos_modal') && $('whpos_modal').open && warehouseId) {
+      const r2 = await get('/api/warehouse/positions', { id: warehouseId });
+      renderWhPositions(r2.positions || []);
+    }
+    toast('Корректировка возвращена', 'Движение откатано, остаток восстановлен');
+  } catch (e) { fail(e); }
+}
+
+async function afterStockChanged() {
+  await refresh();
+  renderWarehouses();
+  if ($('nom_modal') && $('nom_modal').open && editingNom) openNom(editingNom);
 }
 
 /* ========================================================= быстрая продажа */
@@ -1837,8 +1935,30 @@ function bind() {
   $('wh_add').addEventListener('click', () => openWh());
   $('wh_types_btn').addEventListener('click', openPriceTypes);
   $('wh_grid').addEventListener('click', (e) => {
+    const pos = e.target.closest('[data-wh-pos]');
+    if (pos) return openWhPositions(pos.dataset.whPos);
     const edit = e.target.closest('[data-wh-edit]');
     if (edit) openWh(edit.dataset.whEdit);
+  });
+  // Позиции склада: «−1» / «+1» по строкам
+  $('whpos_rows').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-adj]');
+    if (!btn || btn.disabled) return;
+    adjustStock(btn.dataset.nom, whPosState.warehouse_id, num(btn.dataset.adj), whPosState.name);
+  });
+  // Карточка товара: «−1» / «+1» в разрезе по складам и «Вернуть» в движениях
+  $('nom_modal').addEventListener('click', (e) => {
+    const adj = e.target.closest('[data-nom-adj]');
+    if (adj && !adj.disabled && editingNom) {
+      const wh = data.warehouses.find((x) => x.id === adj.dataset.wh);
+      return adjustStock(editingNom, adj.dataset.wh, num(adj.dataset.nomAdj),
+        wh ? wh.name : '');
+    }
+    const rev = e.target.closest('[data-move-revert]');
+    if (rev) {
+      if (!confirmDanger('Вернуть эту корректировку? Движение будет откатано, остаток восстановится.')) return;
+      return revertStock(rev.dataset.moveRevert, rev.dataset.wh || '');
+    }
   });
   $('wh_save').addEventListener('click', async () => {
     const payload = {

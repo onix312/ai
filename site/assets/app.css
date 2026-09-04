@@ -1712,6 +1712,8 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 .wh-row:last-child { border-bottom: 0; }
 .wh-row span { flex: 1; color: var(--text-2); }
 .wh-row b { font-variant-numeric: tabular-nums; }
+.wh-row .btn.sm { align-self: center; flex: none; }
+.whpos-row .btn.sm { flex: none; padding: 4px 10px; }
 
 /* ==================================================== документы склада */
 .doc-kind-chip {

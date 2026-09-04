@@ -4702,6 +4702,16 @@
   <button class="btn primary" type="button" id="wh_save">Сохранить</button></div>
 </form></dialog>
 
+<!-- ============================================ ПОЗИЦИИ СКЛАДА -->
+<dialog class="modal wide" id="whpos_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Склад</span><h2 id="whpos_title">Позиции склада</h2>
+  <p>Ручная корректировка одной кнопкой: «−1» — убрать штуку без последствий для денег, «+1» — оприходовать найденную. Любое действие возвращается кнопкой «Вернуть».</p></div>
+  <button class="icon-btn" type="button" data-close="whpos_modal">×</button></div>
+ <div class="modal-body"><div id="whpos_rows"></div></div>
+ <div class="modal-foot"><span class="spacer"></span>
+  <button class="btn" type="button" data-close="whpos_modal">Готово</button></div>
+</form></dialog>
+
 <!-- ============================================ ТИПЫ ЦЕН -->
 <dialog class="modal narrow" id="ptype_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Ценообразование</span><h2>Типы цен</h2><p>Розница, опт, B2B — своя наценка у каждого</p></div>
