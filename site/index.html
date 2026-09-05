@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/tokens.css?v=15.4.0">
-<link rel="stylesheet" href="assets/theme.css?v=15.4.0">
-<link rel="stylesheet" href="assets/app.css?v=15.4.0">
-<link rel="stylesheet" href="assets/more.css?v=15.4.0">
+<link rel="stylesheet" href="assets/tokens.css?v=15.7.0">
+<link rel="stylesheet" href="assets/theme.css?v=15.7.0">
+<link rel="stylesheet" href="assets/app.css?v=15.7.0">
+<link rel="stylesheet" href="assets/more.css?v=15.7.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -707,6 +707,10 @@
    <th class="right">Приход</th><th class="right">Расход</th>
    <th class="right">Кон. кол-во</th><th class="right">Кон. сумма</th></tr></thead>
    <tbody id="turn_tbody"></tbody></table></div>
+ </div>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Списания и потери</h2><p id="wo_sub">Ручные корректировки со складов — куда девается товар</p></div></div>
+  <div id="wh_writeoffs"></div>
  </div>
  <div class="card" style="margin-top:16px">
   <div class="card-head"><div><h2>Резервы</h2><p>Товар, отложенный под заказы</p></div></div>
@@ -3912,6 +3916,7 @@
     <div id="of_spool_rows"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
      <button class="btn sm ghost" type="button" id="of_spool_add">+ Катушка</button>
+     <button class="btn sm ghost" type="button" id="of_spool_pick" title="Подобрать самую полную катушку под материал и цвет заказа">🎯 Подобрать</button>
      <button class="btn sm ghost" type="button" id="of_spool_auto">⟳ Катушки из AMS</button>
      <small class="muted">Граммы заполняются из веса задания и списываются после завершения печати. Мультицвет: своя строка на каждый слот.</small>
     </div>
@@ -3944,6 +3949,7 @@
    <label class="field"><span>Получено по журналу, ₽</span><input id="of_prepaid" type="number" min="0" step="any" readonly><small class="hint">Только просмотр. Предоплата, оплата и возврат записываются отдельными операциями в разделе «Деньги».</small></label>
    <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
    <div class="span-2" id="of_econ"></div>
+   <div class="span-2" id="of_filament_fact"></div>
   </div></div>
   <div class="form-section" id="of_production_wrap" hidden>
    <h3>Готовность производства</h3>
@@ -4695,11 +4701,22 @@
    <option value="transit">В пути</option><option value="material">Материалы</option></select></label>
   <label class="field"><span>Адрес / место</span><input id="wf_address" placeholder="ТЦ Север, 2 этаж"></label>
   <label class="check span-2"><input type="checkbox" id="wf_retail"> Розничная точка — продажи идут отсюда по умолчанию</label>
+  <label class="field span-2"><span>Цвет карточки (необязательно)</span><input id="wf_color" type="color" value="#4f46e5" style="height:34px;padding:2px"></label>
   <label class="field span-2"><span>Комментарий</span><input id="wf_note"></label>
  </div></div>
  <div class="modal-foot"><button class="btn danger" type="button" id="wh_delete">Удалить</button><span class="spacer"></span>
   <button class="btn" type="button" data-close="wh_modal">Отмена</button>
   <button class="btn primary" type="button" id="wh_save">Сохранить</button></div>
+</form></dialog>
+
+<!-- ============================================ ПОЗИЦИИ СКЛАДА -->
+<dialog class="modal wide" id="whpos_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Склад</span><h2 id="whpos_title">Позиции склада</h2>
+  <p>Ручная корректировка одной кнопкой: «−1» — убрать штуку без последствий для денег, «+1» — оприходовать найденную. Любое действие возвращается кнопкой «Вернуть».</p></div>
+  <button class="icon-btn" type="button" data-close="whpos_modal">×</button></div>
+ <div class="modal-body"><div id="whpos_rows"></div></div>
+ <div class="modal-foot"><span class="spacer"></span>
+  <button class="btn" type="button" data-close="whpos_modal">Готово</button></div>
 </form></dialog>
 
 <!-- ============================================ ТИПЫ ЦЕН -->
@@ -5023,21 +5040,21 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=15.4.0"></script>
-<script src="assets/core.js?v=15.4.0"></script>
-<script src="assets/icons.js?v=15.4.0"></script>
-<script src="assets/printer.js?v=15.4.0"></script>
-<script src="assets/queue.js?v=15.4.0"></script>
-<script src="assets/ops.js?v=15.4.0"></script>
-<script src="assets/money.js?v=15.4.0"></script>
-<script src="assets/finance.js?v=15.4.0"></script>
-<script src="assets/shelf.js?v=15.4.0"></script>
-<script src="assets/products.js?v=15.4.0"></script>
-<script src="assets/bridge.js?v=15.4.0"></script>
+<script src="assets/qr.js?v=15.7.0"></script>
+<script src="assets/core.js?v=15.7.0"></script>
+<script src="assets/icons.js?v=15.7.0"></script>
+<script src="assets/printer.js?v=15.7.0"></script>
+<script src="assets/queue.js?v=15.7.0"></script>
+<script src="assets/ops.js?v=15.7.0"></script>
+<script src="assets/money.js?v=15.7.0"></script>
+<script src="assets/finance.js?v=15.7.0"></script>
+<script src="assets/shelf.js?v=15.7.0"></script>
+<script src="assets/products.js?v=15.7.0"></script>
+<script src="assets/bridge.js?v=15.7.0"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=15.4.0"></script>
-<script src="assets/app.js?v=15.4.0"></script>
+<script src="assets/workshop.js?v=15.7.0"></script>
+<script src="assets/app.js?v=15.7.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

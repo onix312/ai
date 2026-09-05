@@ -21,6 +21,17 @@ SALE_DAYS = 7                   # окно расчёта скорости пр�
 DEAD_DAYS = 14                  # без продаж столько дней — мёртвый сток
 PLAN_DAYS = 7                   # на сколько дней вперёд планируем запас
 
+# Ручная корректировка одной кнопкой («−1»/«+1» на складе): это не продажа
+# и не документ, а правка остатка с основанием-движением. Финансовые отчёты,
+# касса, выручка и статистика продаж такие движения не видят.
+MANUAL_KIND = "manual"
+MANUAL_NOTE_MINUS = "ручное списание"
+MANUAL_NOTE_PLUS = "ручное оприходование"
+# Причины ручной корректировки (идея 2): короткий список + своя заметка.
+MANUAL_REASONS = ("брак", "потеря", "найдено", "подарок", "пересчёт", "своё")
+REASON_LABEL = {"брак": "Брак", "потеря": "Потеря", "найдено": "Найдено",
+                "подарок": "Подарок", "пересчёт": "Пересчёт", "своё": "Своё"}
+
 
 class Stock:
     """Остатки, себестоимость и аналитика по регистру движений."""
@@ -46,6 +57,175 @@ class Stock:
     def drop_doc_moves(self, doc_id: str) -> None:
         """Убрать движения документа — используется при распроведении."""
         self.db.execute("DELETE FROM stock_moves WHERE doc_id=?", (doc_id,))
+
+    # --------------------------------------------- ручные корректировки «−N/+N»
+    def manual_adjust(self, nom_id: str, warehouse_id: str, delta: float,
+                      note: str = "", reason: str = "") -> dict:
+        """Ручная корректировка остатка: «−1» — списание одной штуки,
+        «−N»/«+N» — корректировка количества (идея 1). Не продажа: не
+        трогает кассу, выручку, долги и статистику продаж — только движение
+        регистра и аудит.
+
+        Списание защищено: уходить может только свободный остаток
+        (остаток минус активные резервы) — резерв под заказ сломать нельзя.
+        `reason` — причина из списка MANUAL_REASONS (идея 2); попадает
+        в заметку движения для фильтра и в текст события аудита.
+        """
+        delta = round(num(delta), 3)
+        if delta == 0:
+            raise ValueError("Корректировка не меняет остаток (0)")
+        nom = self.db.one("SELECT name, unit FROM nomenclature WHERE id=?",
+                          (nom_id,))
+        if not nom:
+            raise ValueError("Позиция не найдена")
+        wh = self.db.one("SELECT name FROM warehouses WHERE id=? AND archived=0",
+                         (warehouse_id,))
+        if not wh:
+            raise ValueError("Склад не найден")
+        reason = (reason or "").strip().lower()
+        if reason and reason not in MANUAL_REASONS:
+            reason = "своё"
+        amount = abs(delta)
+        unit = str(nom.get("unit") or "шт")
+        qty = self.qty(nom_id, warehouse_id)
+        reserved = self.reserved(nom_id, warehouse_id)
+        free = qty - reserved
+        reason_tag = f"[{REASON_LABEL.get(reason, reason)}] " if reason else ""
+        if delta < 0:
+            # Списываем только свободное: зарезервированное под заказ —
+            # неприкосновенно. Сервер — последний рубеж, кнопка на фронте
+            # уже неактивна.
+            if free < amount - 1e-9:
+                if reserved > 0 and free < 1e-9:
+                    raise ValueError(
+                        f"Списать нельзя: {round(reserved, 3)} {unit} "
+                        "в резерве под заказы")
+                raise ValueError(
+                    f"На складе «{wh['name']}» свободно {round(free, 3)} {unit}, "
+                    f"а списать просят {round(amount, 3)}")
+            avg = self.avg_cost(nom_id, warehouse_id)
+            cost = -round(avg * amount, 2)   # расход по средней
+            action, note_default = "Списание", MANUAL_NOTE_MINUS
+        else:
+            # Оприходование найденных штук приходуем по текущей средней:
+            # если средней нет (новая позиция) — по нулевой цене, деньги
+            # корректировка не двигает в любом случае.
+            avg = self.avg_cost(nom_id, warehouse_id)
+            cost = round(avg * amount, 2)
+            action, note_default = "Оприходование", MANUAL_NOTE_PLUS
+        full_note = (reason_tag + (str(note).strip() or note_default)).strip()
+        move = self.add_move(nom_id, warehouse_id, delta, cost,
+                             doc_kind=MANUAL_KIND, note=full_note)
+        self.db.add_event(
+            "stock", f"Склад: {action.lower()} {round(amount, 3)} {unit}",
+            f"{nom.get('name') or nom_id} · склад «{wh['name']}» · "
+            f"движение {move['id']} · {full_note}",
+            "", {"move_id": move["id"], "nom_id": nom_id,
+                 "warehouse_id": warehouse_id, "delta": delta,
+                 "reason": reason})
+        return move
+
+    def manual_stats(self, nom_id: str = "", days: int = 7) -> dict:
+        """Ручные списания за период (идеи 5 и 6): штуки и сумма по позициям
+        и в целом. Причина видна в заметке движения ([Брак] и т.п.)."""
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        sql = ("SELECT nom_id, COALESCE(SUM(-qty),0) q, COALESCE(SUM(-cost),0) c"
+               " FROM stock_moves WHERE doc_kind=? AND qty<0 AND at>=?")
+        params: list[Any] = [MANUAL_KIND, since]
+        if nom_id:
+            sql += " AND nom_id=?"
+            params.append(nom_id)
+        sql += " GROUP BY nom_id"
+        per_nom = {}
+        total_q = total_c = 0.0
+        for r in self.db.query(sql, params):
+            q = round(num(r["q"]), 3)
+            c = round(max(0.0, num(r["c"])), 2)
+            per_nom[r["nom_id"]] = {"qty": q, "value": c}
+            total_q += q
+            total_c += c
+        return {"days": days, "total_qty": round(total_q, 3),
+                "total_value": round(total_c, 2), "per_nom": per_nom}
+
+    def manual_recent(self, days: int = 30, limit: int = 50) -> list[dict]:
+        """Последние ручные списания — для панели «куда девается» (идея 6)."""
+        since = (datetime.now() - timedelta(days=days)).isoformat()
+        return self.db.query(
+            "SELECT m.nom_id, m.warehouse_id, m.qty, m.cost, m.at, m.note,"
+            " n.name nom_name, w.name warehouse_name FROM stock_moves m"
+            " LEFT JOIN nomenclature n ON n.id=m.nom_id"
+            " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
+            " WHERE m.doc_kind=? AND m.qty<0 AND m.at>=?"
+            " ORDER BY datetime(m.at) DESC LIMIT ?",
+            (MANUAL_KIND, since, int(limit)))
+
+    def revert_manual(self, move_id: str) -> dict:
+        """Откат ручной корректировки — удаление движения (как распроведение
+        документа): остаток и средняя себестоимость восстанавливаются
+        пересчётом регистра, пара «списание/возврат» не висит в оборотке.
+        Факт отката остаётся в журнале аудита.
+        """
+        move = self.db.one("SELECT * FROM stock_moves WHERE id=?", (move_id,))
+        if not move:
+            raise ValueError("Движение уже возвращено или не найдено")
+        if move.get("doc_kind") != MANUAL_KIND:
+            raise ValueError("Вернуть можно только ручную корректировку — "
+                             "для документов есть распроведение")
+        nom = self.db.one("SELECT name FROM nomenclature WHERE id=?",
+                          (move.get("nom_id"),)) or {}
+        wh = self.db.one("SELECT name FROM warehouses WHERE id=?",
+                         (move.get("warehouse_id"),)) or {}
+        delta = num(move.get("qty"))
+        if delta > 0:
+            # Откатываем оприходование (+1) — штука из регистра уходит.
+            # Нельзя, если свободного остатка уже нет: найденную штуку
+            # успели зарезервировать под заказ или продать, откат создал бы
+            # минус/недобор по резерву.
+            free = (self.qty(move["nom_id"], move.get("warehouse_id") or "")
+                    - self.reserved(move["nom_id"], move.get("warehouse_id") or ""))
+            if free < 1 - 1e-9:
+                raise ValueError(
+                    "Вернуть нельзя: штуки уже нет в свободном остатке "
+                    "(ушла продажей или в резерв под заказ)")
+        # Откат списания (−1) только добавляет штуку обратно на склад —
+        # минус он создать не может, поэтому ограничений по остатку нет:
+        # если после списания остаток распродан до нуля, откат корректно
+        # показывает, что списанная по ошибке штука всё же на месте.
+        self.db.execute("DELETE FROM stock_moves WHERE id=?", (move_id,))
+        self.db.add_event(
+            "stock", "Склад: корректировка возвращена",
+            f"{nom.get('name') or move.get('nom_id')} · склад "
+            f"«{wh.get('name') or move.get('warehouse_id')}» · "
+            f"откат движения {move_id} ({'+' if delta > 0 else '−'}1 шт)",
+            "", {"move_id": move_id, "nom_id": move.get("nom_id"),
+                 "warehouse_id": move.get("warehouse_id"),
+                 "reverted_delta": delta})
+        return {"id": move_id, "ok": True}
+
+    def warehouse_positions(self, warehouse_id: str) -> list[dict]:
+        """Позиции одного склада для экрана «Позиции»: остаток, резерв,
+        свободное, себестоимость и стоимость. Архивные позиции скрываем."""
+        reserved_map = self.reserved_all(warehouse_id)
+        sql = ("SELECT m.nom_id, COALESCE(n.name,'Удалённая позиция') name,"
+               " COALESCE(n.archived,0) archived, COALESCE(n.unit,'шт') unit,"
+               " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
+               " FROM stock_moves m LEFT JOIN nomenclature n ON n.id=m.nom_id"
+               " WHERE m.warehouse_id=? GROUP BY m.nom_id HAVING q<>0"
+               " ORDER BY name")
+        out: list[dict] = []
+        for r in self.db.query(sql, (warehouse_id,)):
+            if num(r.get("archived")):
+                continue
+            q = round(num(r["q"]), 3)
+            reserved = round(num(reserved_map.get(r["nom_id"], 0.0)), 3)
+            out.append({
+                "nom_id": r["nom_id"], "name": r["name"],
+                "unit": r["unit"] or "шт", "qty": q,
+                "reserved": reserved, "free": round(q - reserved, 3),
+                "value": round(max(0.0, num(r["c"])), 2),
+                "cost": round(max(0.0, num(r["c"])) / q, 2) if q > 0 else 0.0,
+            })
+        return out
 
     # -------------------------------------------------------------- остатки
     def qty(self, nom_id: str, warehouse_id: str = "", variant_id: str = "") -> float:
@@ -129,15 +309,23 @@ class Stock:
         return list(rows.values())
 
     def by_warehouse(self, nom_id: str) -> list[dict]:
-        """Разрез остатка по складам для карточки товара."""
+        """Разрез остатка по складам для карточки товара (с резервом и
+        свободным остатком — на них опираются кнопки «−1»/«+1»)."""
         rows = self.db.query(
             "SELECT m.warehouse_id, w.name, COALESCE(SUM(m.qty),0) q,"
             " COALESCE(SUM(m.cost),0) c FROM stock_moves m"
             " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
             " WHERE m.nom_id=? GROUP BY m.warehouse_id HAVING q<>0", (nom_id,))
-        return [{"warehouse_id": r["warehouse_id"], "name": r["name"] or "Склад",
-                 "qty": round(num(r["q"]), 3),
-                 "value": round(max(0.0, num(r["c"])), 2)} for r in rows]
+        out = []
+        for r in rows:
+            q = round(num(r["q"]), 3)
+            reserved = round(self.reserved(nom_id, r["warehouse_id"]), 3)
+            out.append({"warehouse_id": r["warehouse_id"],
+                        "name": r["name"] or "Склад",
+                        "qty": q, "reserved": reserved,
+                        "free": round(q - reserved, 3),
+                        "value": round(max(0.0, num(r["c"])), 2)})
+        return out
 
     def moves(self, nom_id: str = "", warehouse_id: str = "", limit: int = 100) -> list[dict]:
         sql = ("SELECT m.*, n.name nom_name, w.name warehouse_name,"

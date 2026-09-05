@@ -105,7 +105,7 @@ const STATUS_LABEL = { ok: 'В наличии', low: 'Мало', empty: 'Кон�
 const STATUS_CLASS = { ok: 'ok', low: 'warn', empty: 'bad', dead: 'bad', none: '' };
 const DOC_KIND = { receipt: 'Приход', sale: 'Продажа', move: 'Перемещение',
   writeoff: 'Списание', inventory: 'Инвентаризация', production: 'Производство',
-  return: 'Возврат', pricing: 'Установка цен' };
+  return: 'Возврат', pricing: 'Установка цен', manual: 'Корректировка' };
 
 /* ============================================================== загрузка */
 async function refresh() {
@@ -459,9 +459,12 @@ function renderCards(list) {
       + (unprofit ? '<span class="chip bad" title="Прибыль за час печати ниже нормы">📉 убыточный</span>' : '')
       + '<span class="spacer"></span>'
       + (num(i.plan_qty) ? `<span class="plan-hint">напечатать ${nfmt(i.plan_qty)}</span>` : '')
+      // идея 5: подсветка ручных списаний за неделю
+      + (num(i.manual_written) ? `<span class="chip warn" title="Ручных списаний за 7 дней: ${nfmt(i.manual_written)} шт">⚠ −${nfmt(i.manual_written)}/7д</span>` : '')
       + (disp ? '<span class="muted">не печатается партией</span>' : `<button class="btn sm" type="button" data-nom-recalc="${esc(i.id)}" title="Пересчитать цену только этого товара">↻</button>`
         + `<button class="btn sm" type="button" data-nom-batch="${esc(i.id)}" title="Напечатать партию">⎙</button>`
-        + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт">−1</button>`)
+        + `<button class="btn sm danger" type="button" data-nom-writeoff="${esc(i.id)}" title="Списать 1 шт без последствий для денег (ручная корректировка)">Списать</button>`
+        + `<button class="btn sm" type="button" data-nom-sell="${esc(i.id)}" title="Продать 1 шт за ${money(i.price)}">Продать</button>`)
       + '</div></article>';
   };
   const prodGroupEl = $('prod_group');
@@ -657,8 +660,21 @@ async function openNom(id) {
   // остатки
   const wh = d.warehouses || [];
   $('nf_stock_box').innerHTML = (id ? (wh.length
-    ? '<div class="wh-rows">' + wh.map((w) => `<div class="wh-row"><span>${esc(w.name)}</span>`
-      + `<b>${nfmt(w.qty)}</b><small class="muted">${money(w.value)}</small></div>`).join('') + '</div>'
+    ? '<div class="wh-rows">' + wh.map((w) => {
+      const minusOff = num(w.free) < 1;
+      return `<div class="wh-row"><span>${esc(w.name)}<small class="muted">`
+        + (num(w.reserved) ? `резерв ${nfmt(w.reserved)} · ` : '')
+        + `свободно ${nfmt(w.free)} · ${money(w.value)}</small></span>`
+        + `<b>${nfmt(w.qty)}</b>`
+        + `<button class="btn sm danger" type="button" data-nom-adj="-1" data-wh="${esc(w.warehouse_id)}"`
+        + (minusOff ? ' disabled title="'
+          + (num(w.reserved) ? 'Всё в резерве под заказы' : 'Свободного остатка нет') + '"'
+          : ` title="Убрать 1 шт со склада «${esc(w.name)}» — без последствий для денег"`)
+        + '>−1</button>'
+        + `<button class="btn sm" type="button" data-nom-adj="1" data-wh="${esc(w.warehouse_id)}"`
+        + ' title="Оприходовать 1 найденную шт — без последствий для денег">+1</button>'
+        + '</div>';
+    }).join('') + '</div>'
     : '<div class="empty compact"><span>Остатков нет ни на одном складе.</span></div>')
     : '<div class="empty compact"><span>Сохраните карточку, чтобы вести остатки.</span></div>')
     + (d.fact && d.fact.batches ? `<div class="notice" style="margin-top:10px"><span>ⓘ</span><span>`
@@ -723,12 +739,18 @@ const updateNomCost = debounce(async () => {
 
 function moveRow(m) {
   const positive = num(m.qty) > 0;
+  // Ручную корректировку («−1»/«+1») можно откатить всегда, пока движение
+  // существует: кнопка «Вернуть» рядом. Документы откатываются распроведением.
+  const revert = m.doc_kind === 'manual'
+    ? `<button class="btn sm" type="button" data-move-revert="${esc(m.id)}" data-wh="${esc(m.warehouse_id || '')}" title="Откатить корректировку — остаток восстановится">↩️ Вернуть</button>`
+    : '';
   return '<div class="tx-row">'
     + `<span class="tx-ic ${positive ? 'income' : 'expense'}">${positive ? '↑' : '↓'}</span>`
     + `<div class="tx-body"><b>${esc(DOC_KIND[m.doc_kind] || m.doc_kind || 'Движение')}`
     + (m.doc_number ? ` · ${esc(m.doc_number)}` : '') + '</b>'
     + `<small>${esc(dateTimeText(m.at))} · ${esc(m.warehouse_name || '')}${m.note ? ' · ' + esc(m.note) : ''}</small></div>`
-    + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)}</span></div>`;
+    + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)}</span>`
+    + revert + '</div>';
 }
 
 function renderSpec() {
@@ -1075,6 +1097,7 @@ const DOC_EVENT = {
   inventory: { title: 'Пересчитал остатки', sub: 'Факт не совпал с учётом' },
   production: { title: 'Произвёл', sub: 'Готовое с принтера на склад' },
   return: { title: 'Вернули', sub: 'Клиент принёс товар обратно' },
+  manual: { title: 'Скорректировал', sub: 'Ручное списание или оприходование' },
   pricing: { title: 'Поменял цены', sub: 'Новый прайс без движения штук' },
 };
 
@@ -1330,10 +1353,12 @@ async function renderWarehouses() {
 
   $('wh_grid').innerHTML = list.length ? list.map((w) => {
     const ic = WH_ICONS[w.kind] || '📦';
-    return `<article class="wh-card" data-wh="${esc(w.id)}">`
+    const colorStyle = w.color ? ` style="--wh-accent:${esc(w.color)};border-left:4px solid ${esc(w.color)}"` : '';
+    return `<article class="wh-card"${colorStyle} data-wh="${esc(w.id)}">`
       + `<div class="whead"><span class="wh-ic ${esc(w.kind || 'shelf')}">${ic}</span>`
       + `<div class="wh-info"><h3>${esc(w.name)}</h3><small class="muted">${esc(w.address || WH_KIND[w.kind] || 'Место хранения')}</small></div>`
       + (num(w.retail) ? '<span class="chip ok">розница</span>' : '')
+      + `<button class="btn sm" type="button" data-wh-pos="${esc(w.id)}" title="Позиции склада — ручные корректировки «−1»/«+1»">Позиции</button>`
       + `<button class="icon-btn sm" type="button" data-wh-edit="${esc(w.id)}" title="Изменить">✎</button></div>`
       + `<div class="wbody"><div class="wnum"><b>${nfmt(w.qty)}</b><span>шт</span></div>`
       + `<div class="wval">${money(w.value)}</div></div>`
@@ -1355,6 +1380,30 @@ async function renderWarehouses() {
     : '<div class="empty compact"><span>Активных резервов нет.</span></div>';
 
   loadTurnover();
+  loadWriteoffs();
+  // идея 99: одноразовая подсказка о новых кнопках склада
+  if (!U.store.get('pf.hint.adj155')) {
+    U.store.set('pf.hint.adj155', '1');
+    setTimeout(() => toast('Склад: ручные корректировки',
+      'Кнопка «Позиции» на складе → «−1» убирает штуку без последствий для денег, «+1» — оприходует найденную. Любое действие возвращается.', 'info'), 600);
+  }
+}
+
+// идея 6: сводка ручных списаний «куда девается»
+async function loadWriteoffs() {
+  const host = $('wh_writeoffs');
+  if (!host) return;
+  let data2 = { stats: { total_qty: 0, total_value: 0 }, recent: [] };
+  try { data2 = await get('/api/stock/writeoffs', { days: 30 }); } catch (e) { /* офлайн */ }
+  const s = data2.stats || {};
+  $('wo_sub').textContent = `За 30 дней списано вручную: ${nfmt(s.total_qty)} шт на ${money(s.total_value)}`;
+  const rows = (data2.recent || []).slice(0, 8);
+  host.innerHTML = rows.length ? rows.map((r) =>
+    '<div class="tx-row"><span class="tx-ic expense">−</span>'
+    + `<div class="tx-body"><b>${esc(r.nom_name || 'Позиция')}</b>`
+    + `<small>${esc(dateTimeText(r.at))} · склад «${esc(r.warehouse_name || '—')}»${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
+    + `<span class="amt neg">${nfmt(-num(r.qty))} шт</span></div>`).join('')
+    : '<div class="empty compact"><span>Ручных списаний за 30 дней нет.</span></div>';
 }
 
 async function loadTurnover() {
@@ -1384,10 +1433,144 @@ function openWh(id) {
   $('wf_kind').value = d.kind || 'shelf';
   $('wf_address').value = d.address || '';
   $('wf_retail').checked = !!num(d.retail);
+  if ($('wf_color')) $('wf_color').value = d.color || '#4f46e5';
   $('wf_note').value = d.note || '';
   $('wh_modal_title').textContent = id ? 'Склад: ' + d.name : 'Новый склад';
   $('wh_delete').hidden = !id;
   openModal('wh_modal');
+}
+
+/* ======================================= позиции склада: «−1» / «+1» */
+let whPosState = { warehouse_id: '', name: '' };
+
+async function openWhPositions(warehouseId) {
+  whPosState.warehouse_id = warehouseId || '';
+  let res = { warehouse: {}, positions: [] };
+  try { res = await get('/api/warehouse/positions', { id: warehouseId }); } catch (e) { return fail(e); }
+  whPosState.name = (res.warehouse || {}).name || 'Склад';
+  $('whpos_title').textContent = 'Позиции · ' + whPosState.name;
+  renderWhPositions(res.positions || []);
+  openModal('whpos_modal');
+}
+
+function renderWhPositions(positions) {
+  $('whpos_rows').innerHTML = positions.length ? positions.map((p) => {
+    const minusOff = num(p.free) < 1;
+    return '<div class="tx-row whpos-row">'
+      + `<div class="tx-body"><b>${esc(p.name)}</b>`
+      + `<small>остаток ${nfmt(p.qty)} ${esc(p.unit || 'шт')}`
+      + (num(p.reserved) ? ` · в резерве ${nfmt(p.reserved)}` : '')
+      + ` · свободно ${nfmt(p.free)}`
+      + ` · ${money(p.cost)}/шт</small></div>`
+      + `<span class="amt">${nfmt(p.qty)}</span>`
+      + `<button class="btn sm danger" type="button" data-adj="-1" data-nom="${esc(p.nom_id)}"`
+      + (minusOff ? ' disabled title="'
+        + (num(p.reserved) ? 'Всё в резерве под заказы' : 'На складе пусто') + '"'
+        : ` title="Убрать 1 шт со склада «${esc(whPosState.name)}» — без последствий для денег"`)
+      + '>−1</button>'
+      + `<button class="btn sm" type="button" data-adj="1" data-nom="${esc(p.nom_id)}"`
+      + ' title="Оприходовать 1 найденную шт — без последствий для денег">+1</button>'
+      + `<button class="btn sm ghost" type="button" data-adj-more="-1" data-nom="${esc(p.nom_id)}" title="Списать несколько штук с указанием причины">−N</button>`
+      + `<button class="btn sm ghost" type="button" data-adj-more="1" data-nom="${esc(p.nom_id)}" title="Оприходовать несколько штук">+N</button>`
+      + '</div>';
+  }).join('')
+    : '<div class="empty compact"><span>На складе нет позиций с остатком.</span></div>';
+}
+
+// Диалог корректировки количества с причиной (идеи 1, 2)
+async function adjustStockMore(nomId, warehouseId, sign) {
+  const positions = (await get('/api/warehouse/positions', { id: warehouseId })).positions || [];
+  const p = positions.find((x) => x.nom_id === nomId);
+  if (!p) return fail(new Error('Позиция не найдена'));
+  const reasons = [
+    { value: 'брак', label: 'Брак' }, { value: 'потеря', label: 'Потеря' },
+    { value: 'подарок', label: 'Подарок' }, { value: 'пересчёт', label: 'Пересчёт' },
+    { value: 'своё', label: 'Своё (заметка)' },
+  ];
+  const ans = await ask({
+    eyebrow: sign < 0 ? 'Списание' : 'Оприходование',
+    title: `${p.name} · склад «${whPosState.name}»`,
+    sub: sign < 0
+      ? `Свободно ${nfmt(p.free)} ${p.unit}. Списание без последствий для денег; в оборотке будет видно как корректировка.`
+      : `Сейчас ${nfmt(p.qty)} ${p.unit}. Найденные штуки приходуются по текущей себестоимости, деньги не двигаются.`,
+    fields: [
+      { name: 'amount', label: 'Количество, шт', type: 'number', value: '1',
+        min: sign < 0 ? 0.1 : 0.1, step: 'any', required: true },
+      { name: 'reason', label: 'Причина', type: 'select', options: sign < 0
+        ? reasons
+        : [{ value: 'найдено', label: 'Найдено' }, { value: 'пересчёт', label: 'Пересчёт' },
+           { value: 'своё', label: 'Своё (заметка)' }] },
+      { name: 'note', label: 'Заметка (необязательно)', type: 'text', value: '', placeholder: 'сломалась при печати / переезд' },
+    ],
+    ok: sign < 0 ? 'Списать' : 'Оприходовать',
+  });
+  if (!ans) return;
+  const amount = num(ans.amount);
+  if (!amount || amount <= 0) return fail(new Error('Укажите количество больше нуля'));
+  if (sign < 0 && amount > num(p.free) + 1e-9) {
+    return fail(new Error(`Свободно только ${nfmt(p.free)} ${p.unit}`));
+  }
+  const okMsg = sign < 0 ? `Списать ${nfmt(amount)} шт «${p.name}»?\n\nКасса и отчёты продаж не затрагиваются, действие можно вернуть.`
+    : `Оприходовать ${nfmt(amount)} шт «${p.name}»?\n\nДеньги не двигаются, действие можно вернуть.`;
+  if (!confirmDanger(okMsg)) return;
+  try {
+    const res = await post('/api/stock/adjust', {
+      nom_id: nomId, warehouse_id: warehouseId, delta: sign * amount,
+      reason: ans.reason, note: ans.note || '',
+    });
+    await afterStockChanged();
+    renderWhPositions((await get('/api/warehouse/positions', { id: warehouseId })).positions || []);
+    toastUndo(sign < 0 ? `Списано ${nfmt(amount)} шт` : `Оприходовано ${nfmt(amount)} шт`,
+      `${p.name} · склад «${whPosState.name}»`,
+      () => revertStock(res.move.id, warehouseId));
+  } catch (e) { fail(e); }
+}
+
+async function adjustStock(nomId, warehouseId, delta, warehouseName) {
+  const item = data.items.find((i) => i.id === nomId);
+  const name = item ? item.name : 'товар';
+  const wh = warehouseName || (data.warehouses.find((w) => w.id === warehouseId) || {}).name || 'склад';
+  const verb = delta < 0 ? 'Убрать' : 'Добавить';
+  const tail = delta < 0
+    ? 'Списание без последствий: продажа, касса и отчёты не затрагиваются. Действие можно вернуть.'
+    : 'Оприходование без последствий: касса и отчёты не затрагиваются. Действие можно вернуть.';
+  if (!confirmDanger(`${verb} 1 шт «${name}» со склада «${wh}»?\n\n${tail}`)) return;
+  try {
+    const res = await post('/api/stock/adjust', {
+      nom_id: nomId, warehouse_id: warehouseId, delta,
+    });
+    await afterStockChanged();
+    if ($('whpos_modal') && $('whpos_modal').open) {
+      const r2 = await get('/api/warehouse/positions', { id: warehouseId });
+      renderWhPositions(r2.positions || []);
+    }
+    // Идея 98: тост прямо говорит, что деньги не тронуты — спокойствие владельца
+    toastUndo(delta < 0 ? 'Списано 1 шт' : 'Оприходовано 1 шт',
+      `${name} · склад «${wh}» · касса и продажи не затронуты`,
+      () => revertStock(res.move.id, warehouseId));
+    // идея 97: короткая «пульсация» числа остатка
+    document.querySelectorAll(`[data-nom="${nomId}"] .pqty-num b, .whpos-row .amt`).forEach((el) => {
+      el.classList.remove('qty-flash'); void el.offsetWidth; el.classList.add('qty-flash');
+    });
+  } catch (e) { fail(e); }
+}
+
+async function revertStock(moveId, warehouseId) {
+  try {
+    await post('/api/stock/revert', { move_id: moveId });
+    await afterStockChanged();
+    if ($('whpos_modal') && $('whpos_modal').open && warehouseId) {
+      const r2 = await get('/api/warehouse/positions', { id: warehouseId });
+      renderWhPositions(r2.positions || []);
+    }
+    toast('Корректировка возвращена', 'Движение откатано, остаток восстановлен');
+  } catch (e) { fail(e); }
+}
+
+async function afterStockChanged() {
+  await refresh();
+  renderWarehouses();
+  if ($('nom_modal') && $('nom_modal').open && editingNom) openNom(editingNom);
 }
 
 /* ========================================================= быстрая продажа */
@@ -1602,6 +1785,26 @@ function bind() {
         await Promise.all([refresh(), refreshDocs()]);
         PF.refreshFinance && PF.refreshFinance();
         toast('Продано', item.name);
+      } catch (err) { fail(err); }
+    }
+    // идея 3: ручное списание одной кнопкой прямо с плитки товара
+    const writeoff = e.target.closest('[data-nom-writeoff]');
+    if (writeoff) {
+      e.stopPropagation();
+      const item = data.items.find((i) => i.id === writeoff.dataset.nomWriteoff);
+      if (!item) return;
+      // Розничный склад по умолчанию: списываем со склада с остатком.
+      const wh = data.warehouses.find((w) => num(w.retail)) || data.warehouses[0];
+      if (!wh) return fail(new Error('Сначала заведите склад'));
+      if (num(item.free) < 1) return fail(new Error('Нет свободного остатка для списания'));
+      if (!confirmDanger(`Списать 1 шт «${item.name}» со склада «${wh.name}»?\n\nЭто не продажа: касса и отчёты не затрагиваются.`)) return;
+      try {
+        const res = await post('/api/stock/adjust', {
+          nom_id: item.id, warehouse_id: wh.id, delta: -1, reason: 'брак' });
+        await refresh();
+        renderWarehouses();
+        toastUndo('Списано 1 шт', `${item.name} · склад «${wh.name}» — без последствий для денег`,
+          () => revertStock(res.move.id, wh.id));
       } catch (err) { fail(err); }
     }
   };
@@ -1837,13 +2040,38 @@ function bind() {
   $('wh_add').addEventListener('click', () => openWh());
   $('wh_types_btn').addEventListener('click', openPriceTypes);
   $('wh_grid').addEventListener('click', (e) => {
+    const pos = e.target.closest('[data-wh-pos]');
+    if (pos) return openWhPositions(pos.dataset.whPos);
     const edit = e.target.closest('[data-wh-edit]');
     if (edit) openWh(edit.dataset.whEdit);
+  });
+  // Позиции склада: «−1» / «+1» по строкам и «−N/+N» с причиной
+  $('whpos_rows').addEventListener('click', (e) => {
+    const more = e.target.closest('[data-adj-more]');
+    if (more) return adjustStockMore(more.dataset.nom, whPosState.warehouse_id, num(more.dataset.adjMore));
+    const btn = e.target.closest('[data-adj]');
+    if (!btn || btn.disabled) return;
+    adjustStock(btn.dataset.nom, whPosState.warehouse_id, num(btn.dataset.adj), whPosState.name);
+  });
+  // Карточка товара: «−1» / «+1» в разрезе по складам и «Вернуть» в движениях
+  $('nom_modal').addEventListener('click', (e) => {
+    const adj = e.target.closest('[data-nom-adj]');
+    if (adj && !adj.disabled && editingNom) {
+      const wh = data.warehouses.find((x) => x.id === adj.dataset.wh);
+      return adjustStock(editingNom, adj.dataset.wh, num(adj.dataset.nomAdj),
+        wh ? wh.name : '');
+    }
+    const rev = e.target.closest('[data-move-revert]');
+    if (rev) {
+      if (!confirmDanger('Вернуть эту корректировку? Движение будет откатано, остаток восстановится.')) return;
+      return revertStock(rev.dataset.moveRevert, rev.dataset.wh || '');
+    }
   });
   $('wh_save').addEventListener('click', async () => {
     const payload = {
       id: editingWh || '', name: $('wf_name').value.trim(), kind: $('wf_kind').value,
       address: $('wf_address').value.trim(), retail: $('wf_retail').checked ? 1 : 0,
+      color: ($('wf_color') ? $('wf_color').value : '') || '',
       note: $('wf_note').value.trim(),
     };
     if (!payload.name) return fail(new Error('Укажите название склада'));

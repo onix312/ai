@@ -554,6 +554,12 @@ function spoolLabel(s) {
   const slot = s.ams_slot !== '' && s.ams_slot != null ? ` · слот ${s.ams_slot}` : '';
   return `${s.material} ${s.color_name}${slot}`;
 }
+// Идея 72: короткая метка места катушки (AMS-слот / магазин / дом / сушка)
+function spoolPlace(s) {
+  if (s.ams_slot !== '' && s.ams_slot != null) return `AMS${s.ams_slot}`;
+  const map = { shop: 'магазин', home: 'дом', ams: 'AMS', dry: 'сушка', other: 'прочее' };
+  return map[s.location] || 'склад';
+}
 function renderSpoolRows(json) {
   const host = $('of_spool_rows');
   if (!host) return;
@@ -563,23 +569,52 @@ function renderSpoolRows(json) {
     host.innerHTML = '<small class="muted">Склад пуст — добавьте катушки в разделе «Склад пластика».</small>';
     return;
   }
+  // В выпадающем списке видно цену за кг, остаток и место (идеи 52, 72)
   const options = (selected) => '<option value="">— выбрать катушку —</option>'
-    + spools.map((s) => `<option value="${esc(s.id)}"${s.id === selected ? ' selected' : ''}>`
-      + `${esc(spoolLabel(s))} · ${nfmt(s.remaining_grams)} г</option>`).join('');
+    + spools.map((s) => {
+      const perKg = Math.round(num(s.price) / Math.max(1, num(s.total_grams, 1000)) * 1000);
+      const low = num(s.remaining_grams) < 100 ? ' ⚠' : '';
+      return `<option value="${esc(s.id)}"${s.id === selected ? ' selected' : ''}>`
+        + `${esc(spoolLabel(s))} · ${nfmt(s.remaining_grams)} г · ${money(perKg)}/кг · ${esc(spoolPlace(s))}${low}</option>`;
+    }).join('');
   const rowHtml = (r) => '<div class="of-spool-row">'
     + `<select data-spool-sel>${options(r.spool_id || '')}</select>`
     + `<input type="number" min="0" step="any" placeholder="граммы" data-spool-grams value="${r.grams != null ? esc(String(r.grams)) : ''}" title="Сколько граммов спишется с этой катушки">`
+    // идея 51: если выбранная катушка — не привязанный к AMS фантом, можно привязать прямо здесь
+    + '<button class="btn xs ghost" type="button" data-spool-link-row title="Это катушка из AMS — привязать к складской">🔗</button>'
     + '<button class="icon-btn sm danger" type="button" data-spool-del title="Убрать катушку">×</button></div>';
   host.innerHTML = (rows.length ? rows : [{}]).map(rowHtml).join('');
 }
-function collectSpoolRows() {
+
+// Идея 59: подобрать катушки под материал/цвет заказа в один клик
+function pickSpoolsForOrder() {
+  const material = ($('of_material') || {}).value || '';
+  const color = ($('of_color') || {}).value || '';
+  const spools = (PF.state.spools || []).filter((s) => !num(s.archived) && num(s.remaining_grams) > 0);
+  let pool = spools;
+  if (material) pool = pool.filter((s) => String(s.material || '').toUpperCase() === material.toUpperCase()
+    || String(s.material || '').toLowerCase().includes(material.toLowerCase()));
+  if (color) {
+    const words = color.toLowerCase().split(/[\s+,]+/).filter(Boolean);
+    pool = pool.filter((s) => words.some((w) => w && String(s.color_name || '').toLowerCase().includes(w)));
+  }
+  if (!pool.length) return fail(new Error('На складе нет катушки с таким материалом/цветом — проверьте склад пластика'));
+  // берём самую полную подходящую
+  pool.sort((a, b) => num(b.remaining_grams) - num(a.remaining_grams));
+  const chosen = pool[0];
+  renderSpoolRows(JSON.stringify([{ spool_id: chosen.id, grams: 0 }]));
+  distributeSpoolGrams(true);
+  updateEconDebounced();
+  toast('Катушка подобрана', `${spoolLabel(chosen)} · ${nfmt(chosen.remaining_grams)} г`);
+}
+function collectSpoolRows(parsed = false) {
   const out = [];
   $$('#of_spool_rows .of-spool-row').forEach((row) => {
     const id = (row.querySelector('[data-spool-sel]') || {}).value || '';
     const grams = num((row.querySelector('[data-spool-grams]') || {}).value);
     if (id) out.push({ spool_id: id, grams });
   });
-  return JSON.stringify(out);
+  return parsed ? out : JSON.stringify(out);
 }
 
 function snapshotSpoolRows() {
@@ -1226,6 +1261,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
     loadOrderReadiness(id);
     loadOrderCompletion(id);
     loadOrderDocuments(id);
+    loadFilamentFact(id);
   }
   // Автоподстановка граммов: если поле пустое, попробуем взять вес плиты
   // с принтера / файла / базы товаров. Ручной ввод не перезаписываем.
@@ -1450,14 +1486,37 @@ async function updateEcon() {
   const k = multi ? 1 : qty;
   let cost = num($('of_cost').value);
   let auto = null;
-  if (!cost && (grams || hours)) {
+  // Катушки заказа: пластик считаем по фактическим ценам выбранных
+  // катушек склада (решение заказчика), а не по справочной цене материала.
+  const spoolRows = collectSpoolRows(true).filter((r) => r.spool_id && num(r.grams) > 0);
+  if (!cost && (grams || hours || spoolRows.length)) {
     try {
-      auto = await post('/api/calc/cost', { grams: grams * k, hours: hours * k, manual_minutes: manual });
+      auto = await post('/api/calc/cost', {
+        grams: grams * k, hours: hours * k, manual_minutes: manual,
+        spools: spoolRows,
+      });
       cost = num(auto.total);
       if (orderIsMulti() && !($('of_items_override') && $('of_items_override').checked)) {
         $('of_cost').value = String(cost);
       }
     } catch (e) { /* офлайн — оставим 0 */ }
+  }
+  // Мягкое предупреждение о нехватке пластика (заказ не блокируем).
+  let spoolNote = '';
+  if (auto && num(auto.spool_shortage) > 0) {
+    spoolNote = `<br><b class="warn-text">⚠ На выбранных катушках не хватает ${nfmt(auto.spool_shortage)} г пластика — пополните или выберите другую катушку.</b>`;
+  } else if (auto && auto.filament_by_spools) {
+    // идея 63: построчная разбивка «что сколько стоит»
+    const lines = (auto.spool_lines || []).map((l) => esc(l)).join('<br>');
+    spoolNote = `<br><small class="muted">Пластик по фактическим катушкам: <b>${money(auto.filament)}</b>${lines ? '<br>' + lines : ''}.</small>`;
+  }
+  // идея 64: граммы заказа должны совпадать с суммой по катушкам
+  if (spoolRows.length) {
+    const spoolGrams = spoolRows.reduce((a, r) => a + num(r.grams), 0);
+    const totalGrams = num($('of_grams').value) * k;
+    if (totalGrams > 0 && Math.abs(totalGrams - spoolGrams) > Math.max(5, totalGrams * 0.05)) {
+      spoolNote += `<br><b class="warn-text">⚠ Вес заказа ${nfmt(totalGrams)} г, а по катушкам ${nfmt(spoolGrams)} г — проверьте распределение.</b>`;
+    }
   }
   // Цена одинакова во всех режимах: это сумма заказа, не цена за штуку.
   const total = price;
@@ -1473,9 +1532,27 @@ async function updateEcon() {
     + (left ? ` · осталось получить ${money(left)}` : '')
     + (kind === 'bad' ? '<br>Ниже нормы: поднимите цену, уменьшите время печати или откажитесь.' : '')
     + (kind === 'ok' ? '<br>Заказ в норме по прибыли за час принтера.' : '')
+    + spoolNote
     + '</div>';
 }
 const updateEconDebounced = debounce(updateEcon, 350);
+
+// Идеи 60/68: план пластика заказа против факта списаний с принтера.
+async function loadFilamentFact(orderId) {
+  const host = $('of_filament_fact');
+  if (!host || !orderId) return;
+  try {
+    const r = await get('/api/order/filament-fact', { id: orderId });
+    if (!num(r.actual_grams)) { host.innerHTML = ''; return; }
+    const diff = num(r.diff_grams);
+    const cls = Math.abs(diff) > 10 ? 'warn' : 'ok';
+    host.innerHTML = `<div class="verdict ${cls}" style="margin-top:8px">`
+      + `<b>Факт пластика:</b> ${nfmt(r.actual_grams)} г (${money(r.actual_cost)})`
+      + ` · план ${nfmt(r.plan_grams)} г`
+      + (Math.abs(diff) > 0.5 ? ` · ${diff > 0 ? '+' : ''}${nfmt(diff)} г к плану` : ' · по плану')
+      + '</div>';
+  } catch (e) { host.innerHTML = ''; }
+}
 
 async function saveOrder(prepareAfter) {
   const payload = { id: editingOrder || '' };
@@ -2835,11 +2912,31 @@ function bind() {
       distributeSpoolGrams();
     });
     spoolHost.addEventListener('change', (e) => {
-      if (e.target.matches('[data-spool-sel]')) distributeSpoolGrams();
+      if (e.target.matches('[data-spool-sel]')) {
+        distributeSpoolGrams();
+        updateEconDebounced();  // смена катушки меняет фактическую цену пластика
+      }
+    });
+    spoolHost.addEventListener('input', (e) => {
+      if (e.target.matches('[data-spool-grams]')) updateEconDebounced();
+    });
+    // идея 51: привязать выбранную в строке AMS-катушку к складской прямо из заказа
+    spoolHost.addEventListener('click', async (e) => {
+      const linkBtn = e.target.closest('[data-spool-link-row]');
+      if (!linkBtn) return;
+      const row = linkBtn.closest('.of-spool-row');
+      const spoolId = (row.querySelector('[data-spool-sel]') || {}).value || '';
+      if (!spoolId) return fail(new Error('Сначала выберите катушку в строке'));
+      if (typeof linkAmsSpool === 'function') {
+        await linkAmsSpool(spoolId);
+        renderSpoolRows(snapshotSpoolRows());
+      }
     });
   }
   const spoolAuto = $('of_spool_auto');
   if (spoolAuto) spoolAuto.addEventListener('click', autoSpoolsFromAms);
+  const spoolPick = $('of_spool_pick');
+  if (spoolPick) spoolPick.addEventListener('click', pickSpoolsForOrder);
 
   /* ---- состав заказа (мультизаказ) ---- */
   const itemAdd = $('of_item_add');
