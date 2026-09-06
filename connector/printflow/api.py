@@ -800,8 +800,11 @@ class Api:
             )
         # JSON-поля формы приходят строками, но прямой вызов API может
         # прислать списки/словари — нормализуем в строку, как ждёт БД.
+        # ВНИМАНИЕ: items сюда НЕ входит — это состав заказа (позиции на
+        # плите), он хранится в таблице order_items, а не строкой в orders,
+        # и должен дойти до repo._save_order_items как настоящий список.
         import json as _json
-        for key in ("spools", "items", "colors", "qc_done"):
+        for key in ("spools", "colors", "qc_done"):
             value = body.get(key)
             if isinstance(value, (list, dict)):
                 body[key] = _json.dumps(value, ensure_ascii=False)

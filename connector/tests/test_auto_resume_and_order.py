@@ -210,6 +210,27 @@ class ConvertPrintToOrderTests(unittest.TestCase):
         self.assertTrue(body.get("ok"))
         self.assertEqual(body["order"]["product"], "Grip Handle")
 
+    def test_concurrent_converts_create_single_order(self):
+        # «С печати создаётся два заказа» — регрессия из-за задвоенного вызова
+        # (двойной клик / дублирующий обработчик клика / сетевой ретрай).
+        # Конвертация выполняется атомарно в одной write-транзакции: даже при
+        # шквале почти одновременных вызовов одной печати должен появиться
+        # ровно один заказ, а создавших = ровно один.
+        from concurrent.futures import ThreadPoolExecutor
+
+        def run(_idx):
+            try:
+                return self.manager.convert_active_to_order("pr_test")
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(run, range(12)))
+        orders = self.db.query("SELECT * FROM orders")
+        self.assertEqual(len(orders), 1, f"ожидался один заказ, получено {len(orders)}")
+        created = [r for r in results if r.get("created")]
+        self.assertEqual(len(created), 1)
+
 
 class AutoResumePowerLossTests(unittest.TestCase):
     def setUp(self):

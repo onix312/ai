@@ -8,15 +8,20 @@ from __future__ import annotations
 import pathlib
 import sys
 import tempfile
+import time
+import types
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.accounting import Accounting, num  # noqa: E402
+from connector.printflow.api import Api  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.repo import Repo, uid  # noqa: E402
+from connector.printflow.stock import Stock  # noqa: E402
 
 
 class MultiOrderTests(unittest.TestCase):
@@ -171,6 +176,60 @@ class MultiOrderTests(unittest.TestCase):
         self.assertAlmostEqual(order["price"], 1500.0)
         detail = self.repo.order(order["id"])
         self.assertEqual(detail["items"], [])
+
+    def _api(self):
+        """Api-обёртка как в HTTP-слое: именно через неё форма шлёт items.
+
+        Регрессия №40471b98: api.save_order сериализовал items (состав заказа)
+        в JSON-строку вместе с spools/colors/qc_done, а repo._save_order_items
+        ждёт настоящий список — из-за этого падало «Состав заказа должен быть
+        списком позиций» и НИ ОДИН заказ нельзя было сохранить из панели.
+        items не хранится в orders, а раскладывается по таблице order_items.
+        """
+        api = Api.__new__(Api)
+        api.db = self.db
+        api.repo = self.repo
+        api.stock = Stock(self.db)
+        api.acc = self.repo.acc
+        api.shelf = mock.Mock()
+        api.manager = types.SimpleNamespace(printers={}, bot=None)
+        api.bus = types.SimpleNamespace(publish=lambda *a, **k: None)
+        api.started_at = time.time()
+        api.last_host = "test"
+        return api
+
+    def test_api_save_order_accepts_items_list(self):
+        a = self._nom("Адресник", 20, 1.0, 300)
+        b = self._nom("Крючок", 5, 0.2, 50)
+        # Тело как у формы карточки заказа: items — это список (JSON-массив).
+        body = {
+            "customer_name": "Иван", "phone": "777",
+            "items": [
+                {"nom_id": a["id"], "name": "Адресник", "qty": 3,
+                 "price": 300, "grams": 20, "hours": 1.0},
+                {"nom_id": b["id"], "name": "Крючок", "qty": 4,
+                 "price": 50, "grams": 5, "hours": 0.2},
+            ],
+            "status": "new",
+        }
+        res = self._api().save_order(body)
+        order = res["order"]
+        self.assertTrue(res["ok"])
+        self.assertAlmostEqual(order["price"], 1100.0)
+        self.assertAlmostEqual(order["qty"], 7)
+        detail = self.repo.order(order["id"])
+        self.assertEqual(len(detail["items"]), 2)
+
+    def test_api_save_order_accepts_empty_items(self):
+        # Простой заказ без мультисостава: items приходит пустым списком.
+        res = self._api().save_order({
+            "customer_name": "Пётр", "phone": "778",
+            "product": "Печать на заказ", "price": 999,
+            "qty": 1, "items": [], "status": "new",
+        })
+        order = res["order"]
+        self.assertTrue(res["ok"])
+        self.assertAlmostEqual(order["price"], 999.0)
 
 
 if __name__ == "__main__":
