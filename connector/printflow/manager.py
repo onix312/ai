@@ -1818,11 +1818,12 @@ class PrinterManager:
         if not task:
             task = f"Печать {printer.record.get('name', 'Bambu Lab')}"
 
-        # Если задание уже связано с заказом — возвращаем его
-        if job and job.get("order_id"):
-            order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
-            if order:
-                return {"ok": True, "order": order, "job": job, "created": False}
+        # Запоминаем задание, найденное до тяжёлых расчётов: если к моменту
+        # атомарной конвертации оно успеет завершиться, привяжем именно его,
+        # а не создадим осиротевший дубль. Сама проверка привязки повторяется
+        # внутри транзакции — там и решается «создать заказ или вернуть уже
+        # созданный» под write-lock.
+        top_job_id = job["id"] if job else ""
 
         # Очищаем имя для названия изделия
         clean = task.rsplit("/", 1)[-1]
@@ -1879,23 +1880,6 @@ class PrinterManager:
         elif grams_source and grams_source != "printer":
             grams_note = f"Оценка из слайсера: {grams} г / {hours} ч."
 
-        # Обеспечиваем наличие записи в print_jobs
-        if not job:
-            job = self.db.upsert("print_jobs", {
-                "id": uid("job"),
-                "printer_id": printer.id,
-                "name": task,
-                "file": task,
-                "state": "running" if snap["printer"].get("state") in ("RUNNING", "PREPARE", "PAUSE") else "queued",
-                "source": "printer",
-                "started_at": now_iso(),
-                "created_at": now_iso(),
-                "grams": grams,
-                "duration_min": round(elapsed_min, 1),
-                "progress": num(snap["printer"].get("progress")),
-                "layers": int(num(snap["printer"].get("total_layers"))),
-            })
-
         order_data = {
             "product": (extra or {}).get("product") or product_name,
             "material": (extra or {}).get("material") or material,
@@ -1915,14 +1899,48 @@ class PrinterManager:
                       + (f". {grams_note}" if grams_note else "")),
             "auto_cost": 1,
         }
-        order = self.repo.save_order(order_data)
-        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order["id"], job["id"]))
-        job["order_id"] = order["id"]
-        self.db.add_event(
-            "order", "Печать преобразована в заказ",
-            f"Заказ №{order.get('number')} · {order.get('product')}",
-            printer.id, {"order_id": order["id"], "job_id": job["id"]})
-        return {"ok": True, "order": order, "job": job, "created": True}
+        # Атомарная конвертация. Один физический клик/ретрай не должен породить
+        # второй заказ: «найти активное задание → если не привязано — создать
+        # заказ и привязать» выполняется в одной write-транзакции. Параллельные
+        # вызовы (двойной клик, задвоенный обработчик клика, сетевой ретрай)
+        # сериализуются БД, и проигравший видит уже привязанный заказ и
+        # возвращает его, не создавая дубль.
+        with self.db.transaction():
+            job = self.db.one(
+                "SELECT * FROM print_jobs WHERE printer_id=? AND state IN ('running','starting','queued')"
+                " ORDER BY datetime(created_at) DESC LIMIT 1", (printer.id,))
+            if job and job.get("order_id"):
+                order = self.db.one("SELECT * FROM orders WHERE id=?", (job["order_id"],))
+                if order:
+                    return {"ok": True, "order": order, "job": job, "created": False}
+            # Задание могло перейти в done между первым чтением и транзакцией —
+            # тогда связываем то, что уже было найдено (печать завершена).
+            if not job and top_job_id:
+                job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (top_job_id,))
+            if not job:
+                job = self.db.upsert("print_jobs", {
+                    "id": uid("job"),
+                    "printer_id": printer.id,
+                    "name": task,
+                    "file": task,
+                    "state": "running" if snap["printer"].get("state") in ("RUNNING", "PREPARE", "PAUSE") else "queued",
+                    "source": "printer",
+                    "started_at": now_iso(),
+                    "created_at": now_iso(),
+                    "grams": grams,
+                    "duration_min": round(elapsed_min, 1),
+                    "progress": num(snap["printer"].get("progress")),
+                    "layers": int(num(snap["printer"].get("total_layers"))),
+                })
+            order = self.repo.save_order(order_data)
+            self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?",
+                            (order["id"], job["id"]))
+            job["order_id"] = order["id"]
+            self.db.add_event(
+                "order", "Печать преобразована в заказ",
+                f"Заказ №{order.get('number')} · {order.get('product')}",
+                printer.id, {"order_id": order["id"], "job_id": job["id"]})
+            return {"ok": True, "order": order, "job": job, "created": True}
 
     def convert_job_to_order(self, job_id: str, extra: dict | None = None) -> dict:
         """Преобразовать задание из очереди или истории в заказ."""
@@ -1968,14 +1986,24 @@ class PrinterManager:
             "notes": f"Преобразовано из задания {job.get('id')}",
             "auto_cost": 1,
         }
-        order = self.repo.save_order(order_data)
-        self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?", (order["id"], job["id"]))
-        job["order_id"] = order["id"]
-        self.db.add_event(
-            "order", "Задание преобразовано в заказ",
-            f"Заказ №{order.get('number')} · {order.get('product')}",
-            job.get("printer_id") or "", {"order_id": order["id"], "job_id": job["id"]})
-        return {"ok": True, "order": order, "job": job, "created": True}
+        # Атомарно: повторная проверка привязки и создание заказа выполняются в
+        # одной write-транзакции, чтобы задвоенный запрос/двойной клик не создал
+        # второй заказ для одного и того же задания печати.
+        with self.db.transaction():
+            locked = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+            if locked.get("order_id"):
+                order = self.db.one("SELECT * FROM orders WHERE id=?", (locked["order_id"],))
+                if order:
+                    return {"ok": True, "order": order, "job": locked, "created": False}
+            order = self.repo.save_order(order_data)
+            self.db.execute("UPDATE print_jobs SET order_id=? WHERE id=?",
+                            (order["id"], job_id))
+            locked["order_id"] = order["id"]
+            self.db.add_event(
+                "order", "Задание преобразовано в заказ",
+                f"Заказ №{order.get('number')} · {order.get('product')}",
+                job.get("printer_id") or "", {"order_id": order["id"], "job_id": job_id})
+            return {"ok": True, "order": order, "job": locked, "created": True}
 
     # ------------------------------------------------------------- авто-продолжение (Крым / сбои питания)
     def _mark_restart_recovery_candidates(self) -> None:

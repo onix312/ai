@@ -1229,14 +1229,6 @@ document.addEventListener('click', (e) => {
     }
     return;
   }
-  const convBtn = e.target.closest('[data-convert-order]');
-  if (convBtn) {
-    e.preventDefault();
-    if (PF.modules.printer && PF.modules.printer.convertActiveToOrder) {
-      PF.modules.printer.convertActiveToOrder(convBtn.dataset.convertOrder || PF.state.activePrinter);
-    }
-    return;
-  }
   const link = e.target.closest('a[data-view]');
   if (!link) return;
   e.preventDefault();
