@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="light" data-accent="indigo"><head>
+<html lang="ru" data-theme="dark" data-accent="indigo"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -7,14 +7,16 @@
 <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/brand/nozza-mark.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#4f46e5">
+<meta name="theme-color" content="#0b0f19">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<link rel="stylesheet" href="assets/tokens.css?v=15.7.0">
-<link rel="stylesheet" href="assets/theme.css?v=15.7.0">
-<link rel="stylesheet" href="assets/app.css?v=15.7.0">
-<link rel="stylesheet" href="assets/more.css?v=15.7.0">
+<script src="assets/theme-init.js?v=17.0.0"></script>
+<link rel="stylesheet" href="assets/tokens.css?v=17.0.0">
+<link rel="stylesheet" href="assets/fonts.css?v=17.0.0">
+<link rel="stylesheet" href="assets/theme.css?v=17.0.0">
+<link rel="stylesheet" href="assets/app.css?v=17.0.0">
+<link rel="stylesheet" href="assets/more.css?v=17.0.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -36,40 +38,34 @@
  <label class="nav-find"><span>⌕</span><input id="nav_find" type="search" placeholder="Найти раздел…" autocomplete="off"></label>
  <div class="side-scroll" id="nav_scroll">
   <div class="nav-group">
-  <div class="nav-group-title">У станка</div>
+  <div class="nav-group-title">Цех</div>
   <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Обзор</a>
   <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
   <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
   <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
+  <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span><span>Центр 10.0</span><small>Смена</small></a>
   </div>
   <div class="nav-group">
-  <div class="nav-group-title">Склад</div>
-  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
-  </div>
-  <div class="nav-group">
-  <div class="nav-group-title">Деньги</div>
-  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы касса налог прибыль долг проводка"><span class="ic" data-icon="ruble">₽</span>Касса</a>
+  <div class="nav-group-title">Продажи</div>
+  <a class="nav-link" href="#products" data-view="products" data-views="products batches documents warehouses shelf inventory" data-find="товар номенклатура sku партия документ склад стеллаж пластик катушка инвентарь"><span class="ic" data-icon="box">▩</span>Склад<span class="tag warn" id="nav_products_tag" hidden></span><span class="tag" id="nav_shelf_tag" hidden></span><span class="tag" id="nav_inventory_tag" hidden></span></a>
   <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
+  <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span><span>Клиенты</span><small>CRM</small></a>
+  <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span><span>Ниши</span><small>Тесты</small></a>
+  <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic" data-icon="pen">✎</span><span>Контент</span><small>Студия</small></a>
   </div>
   <div class="nav-group">
-  <details class="nav-more" id="nav_more">
-   <summary class="nav-group-title"><span>Ещё</span><small>Рост и система</small></summary>
-   <div class="nav-more-body">
-    <div class="nav-more-section">
-     <span class="nav-more-caption">Рост и продажи</span>
-     <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span><span>Клиенты</span><small>CRM</small></a>
-     <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span><span>Ниши</span><small>Тесты</small></a>
-     <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic" data-icon="pen">✎</span><span>Контент</span><small>Студия</small></a>
-     <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span><span>Центр 10.0</span><small>Смена</small></a>
-     <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
-    </div>
-    <div class="nav-more-section">
-     <span class="nav-more-caption">Знания и система</span>
-     <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span><span>Библиотека</span><small>Гайды</small></a>
-     <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные"><span class="ic" data-icon="sliders">⚙</span><span>Настройки</span><small>Цех</small></a>
-    </div>
-   </div>
-  </details>
+  <div class="nav-group-title">Касса</div>
+  <a class="nav-link" href="#finance" data-view="finance" data-find="финансы учёт налог прибыль долг проводка доход расход"><span class="ic" data-icon="ruble">₽</span>Финансы</a>
+  <a class="nav-link nav-link-ext" href="/sbp.html" data-find="сбп входящие qr платёж оплата банк"><span class="ic" data-icon="qr">▦</span><span>СБП · входящие</span><small>страница →</small></a>
+  <a class="nav-link nav-link-ext" href="/cashier.html" data-find="касса мобильная продажа телефон чек выручка"><span class="ic" data-icon="cart">🛒</span><span>Мобильная касса</span><small>страница →</small></a>
+  <a class="nav-link nav-link-ext" href="/bank.html" data-find="банк поступления выписка сопоставление"><span class="ic" data-icon="bank">▤</span><span>Банк</span><small>поступления →</small></a>
+  </div>
+  <div class="nav-group">
+  <div class="nav-group-title">Система</div>
+  <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
+  <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span><span>Библиотека</span><small>Гайды</small></a>
+  <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span><span>Страницы</span><small>хаб</small></a>
+  <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span><span>Настройки</span><small>Цех</small></a>
   </div>
   <p class="nav-empty" id="nav_empty" hidden>Нет такого раздела. Попробуйте «принтер», «касса», «пластик».</p>
  </div>
@@ -3579,6 +3575,26 @@
 </section>
 
 <!-- ================================================== НАСТРОЙКИ -->
+<!-- ================================================== СТРАНИЦЫ (хаб 17.0) -->
+<section class="view" id="view-pages">
+ <div class="view-head">
+  <div><span class="eyebrow">Локальная сеть · все экраны</span><h1>Страницы</h1><p>Касса, СБП, банк, витрины и ТВ — открываются с телефона и компьютера в локальной сети. QR наводит камеру телефона на нужный адрес.</p></div>
+  <div class="head-actions">
+   <button class="btn ghost" id="pages_open_all" type="button" hidden></button>
+  </div>
+ </div>
+ <pf-pages-hub id="pages_hub" aria-label="Хаб страниц PrintFlow"></pf-pages-hub>
+ <div class="card" style="margin-top:16px">
+  <div class="card-head"><div><h2>Как открыть с телефона</h2><p>Все страницы работают без интернета в той же сети, что и запущенный PrintFlow.</p></div></div>
+  <ol class="muted" style="margin:0;padding-left:20px;line-height:1.7;font-size:13.5px">
+   <li>Запустите PrintFlow на этом компьютере (ярлык или <code>python pf.py</code>).</li>
+   <li>Телефон должен быть подключён к тому же Wi-Fi (локальная сеть).</li>
+   <li>Нажмите кнопку QR на карточке страницы и наведите камеру телефона.</li>
+   <li>Кассовые страницы (СБП, касса, банк) спросят код доступа — он задаётся в «Настройки → Касса».</li>
+  </ol>
+ </div>
+</section>
+
 <section class="view" id="view-settings">
  <div class="view-head">
   <div><span class="eyebrow">Система · только то, что влияет на расчёты</span><h1>Настройки</h1><p>Тарифы, налоги, автоматизация и данные. Секреты остаются только на этом компьютере.</p></div>
@@ -3600,7 +3616,11 @@
   <button data-pane="pricing"><span aria-hidden="true">₽</span>Цены</button>
   <button data-pane="money"><span aria-hidden="true">▤</span>Учёт денег</button>
   <button data-pane="production"><span aria-hidden="true">◉</span>Производство</button>
+  <button data-pane="cashier"><span aria-hidden="true">🧾</span>Касса</button>
+  <button data-pane="sbp"><span aria-hidden="true">▦</span>СБП</button>
+  <button data-pane="bank"><span aria-hidden="true">🏦</span>Банк</button>
   <button data-pane="system"><span aria-hidden="true">⚙</span>Система</button>
+  <button data-pane="all"><span aria-hidden="true">☷</span>Все настройки</button>
  </div>
  <div class="set-empty" id="set_no_results" hidden>По запросу ничего не нашлось. Очистите поиск, чтобы увидеть все настройки.</div>
 
@@ -3767,6 +3787,57 @@
     <div id="set_printers"></div>
    </div>
   </div>
+ </div>
+
+ <!-- ------------------------------------------------------- касса (17.0) -->
+ <div class="pane" id="setpane-cashier">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Мобильная касса</h2><p>Страница «Касса» открывается с телефона у стеллажа. Вход защищён кодом.</p></div>
+     <a class="btn sm" href="/cashier.html" target="_blank" rel="noopener">Открыть →</a></div>
+    <div id="set_cashier_fields"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Счёт по умолчанию</h2><p>Куда падают продажи без уточнения (настраивается также во вкладке «Учёт денег»).</p></div></div>
+    <div id="set_cashier_account"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- --------------------------------------------------------- СБП (17.0) -->
+ <div class="pane" id="setpane-sbp">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>СБП · входящие</h2><p>Приём платежей по QR без эквайринга. Страница входящих — на телефоне кассира.</p></div>
+     <a class="btn sm" href="/sbp.html" target="_blank" rel="noopener">Открыть страницу →</a></div>
+    <div id="set_sbp_fields"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- --------------------------------------------------------- банк (17.0) -->
+ <div class="pane" id="setpane-bank">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Поступления из банка</h2><p>Выписка CSV из банка: сопоставление с заказами и авто-подтверждение СБП.</p></div>
+     <a class="btn sm" href="/bank.html" target="_blank" rel="noopener">Открыть страницу →</a></div>
+    <div id="set_bank_fields"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Как подключить выписку</h2><p>CSV из интернет-банка → «Поступления банка». Дубли по дате+сумме+названию пропускаются.</p></div></div>
+    <div class="notice"><span>ℹ</span><span>Авто-подтверждение включается во вкладке «СБП» и срабатывает только при точной сумме и единственном ожидающем платеже в окне сопоставления.</span></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------ все 222 настройки (17.0) -->
+ <div class="pane" id="setpane-all">
+  <div class="toolbar" style="align-items:center">
+   <div class="search-box"><input id="set_all_search" type="search" placeholder="Поиск по всем 222 настройкам…" aria-label="Поиск по всем настройкам"></div>
+   <label class="check" style="margin:0"><span class="switch"><input type="checkbox" id="set_all_advanced"><i></i></span>Показать технические</label>
+   <span class="muted" id="set_all_count" style="font-size:12.5px"></span>
+  </div>
+  <div id="set_all_fields"></div>
  </div>
 
  <!-- ------------------------------------------------------- система -->
@@ -5040,21 +5111,22 @@
 
 <div id="toasts"></div>
 
-<script src="assets/qr.js?v=15.7.0"></script>
-<script src="assets/core.js?v=15.7.0"></script>
-<script src="assets/icons.js?v=15.7.0"></script>
-<script src="assets/printer.js?v=15.7.0"></script>
-<script src="assets/queue.js?v=15.7.0"></script>
-<script src="assets/ops.js?v=15.7.0"></script>
-<script src="assets/money.js?v=15.7.0"></script>
-<script src="assets/finance.js?v=15.7.0"></script>
-<script src="assets/shelf.js?v=15.7.0"></script>
-<script src="assets/products.js?v=15.7.0"></script>
-<script src="assets/bridge.js?v=15.7.0"></script>
+<script src="assets/qr.js?v=17.0.0"></script>
+<script src="assets/core.js?v=17.0.0"></script>
+<script src="assets/icons.js?v=17.0.0"></script>
+<script src="assets/printer.js?v=17.0.0"></script>
+<script src="assets/queue.js?v=17.0.0"></script>
+<script src="assets/ops.js?v=17.0.0"></script>
+<script src="assets/money.js?v=17.0.0"></script>
+<script src="assets/finance.js?v=17.0.0"></script>
+<script src="assets/shelf.js?v=17.0.0"></script>
+<script src="assets/products.js?v=17.0.0"></script>
+<script src="assets/bridge.js?v=17.0.0"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
-<script src="assets/workshop.js?v=15.7.0"></script>
-<script src="assets/app.js?v=15.7.0"></script>
+<script src="assets/workshop.js?v=17.0.0"></script>
+<script src="assets/app.js?v=17.0.0"></script>
+<script type="module" src="assets/dist/printflow-app.js?v=17.0.0"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>
 /* Служебный воркер: мгновенный старт панели и работа при мигании сети.

@@ -1064,6 +1064,143 @@ function settingGroup(list) {
   }).join('');
 }
 
+/* ============================================ 17.0 (И4): форма из схемы.
+   Простые ключи (тумблер/число/строка/select) рендерятся из /api/settings/
+   schema, сложные блоки остаются ручными карточками — решение заказчика
+   №7 (гибрид). Секреты не показываем значением, json-поля сворачиваем в
+   «Все настройки» и парсим при сохранении. */
+let schemaCache = null;
+async function loadSettingsSchema() {
+  if (schemaCache) return schemaCache;
+  schemaCache = await get('/api/settings/schema');
+  return schemaCache;
+}
+
+/** Один контрол по описанию поля схемы. */
+function schemaControl(f) {
+  const s = PF.state.settings;
+  const k = f.key, val = s[k];
+  const attr = `data-setting="${k}"`;
+  if (f.secret) {
+    const has = Boolean(s[k]);
+    return `<input type="password" autocomplete="new-password" ${attr}
+      data-secret="1" placeholder="${has ? '•••••••• сохранён — не трогать' : 'не задан'}">`;
+  }
+  if (f.choices) {
+    return `<select ${attr}>` + f.choices.map((c) =>
+      `<option value="${esc(c)}"${String(val) === String(c) ? ' selected' : ''}>${esc(c)}</option>`).join('') + '</select>';
+  }
+  if (f.type === 'bool') {
+    return `<label class="switch"><input type="checkbox" ${attr}${val ? ' checked' : ''}><i></i></label>`;
+  }
+  if (f.type === 'json') {
+    return `<textarea ${attr} data-json="1" rows="4" style="width:100%;font-family:var(--mono);font-size:12px">${esc(JSON.stringify(val ?? f.default, null, 1))}</textarea>`;
+  }
+  if (f.type === 'int' || f.type === 'float') {
+    const step = f.type === 'int' ? '1' : 'any';
+    return `<input type="number" step="${step}" ${f.min != null ? `min="${f.min}"` : ''} ${f.max != null ? `max="${f.max}"` : ''} ${attr} value="${esc(String(val ?? f.default ?? ''))}">`;
+  }
+  return `<input type="text" ${attr} ${f.max_len ? `maxlength="${f.max_len}"` : ''} value="${esc(String(val ?? f.default ?? ''))}">`;
+}
+
+/** Карточка-обёртка для полей одной группы. */
+function schemaCard(title, sub, fields, opts = {}) {
+  const rows = fields.map((f) => {
+    const adv = f.advanced ? ' data-advanced="1"' : '';
+    return `<div class="set-row"${adv}><div class="sinfo"><b>${esc(f.label)}</b>`
+      + (f.advanced ? '<small>техническое</small>' : '')
+      + `</div>${schemaControl(f)}</div>`;
+  }).join('');
+  return `<div class="card" data-set-card data-schema-group="${opts.group || ''}">`
+    + `<div class="card-head"><div><h2>${esc(title)}</h2><p>${esc(sub || '')}</p></div></div>`
+    + rows + '</div>';
+}
+
+/** Поля схемы по группам. */
+async function schemaFields(groups) {
+  const d = await loadSettingsSchema();
+  const out = {};
+  for (const g of groups) out[g] = (d.fields[g] || []);
+  return out;
+}
+
+/** Вкладка «Все настройки»: все группы карточками, технические свёрнуты. */
+async function renderAllSettings() {
+  const host = $('set_all_fields');
+  if (!host) return;
+  const d = await loadSettingsSchema();
+  host.innerHTML = d.groups.map((g) =>
+    schemaCard(g.title, g.id === 'system' ? 'Системные и технические ключи' : '', d.fields[g.id] || [], { group: g.id })
+  ).join('');
+  const cnt = $('set_all_count');
+  const adv = $('set_all_advanced');
+  const apply = () => {
+    const showAdv = adv.checked;
+    let visible = 0;
+    $$('[data-schema-group]', host).forEach((card) => {
+      let n = 0;
+      $$('[data-advanced]', card).forEach((r) => {
+        const on = showAdv;
+        r.classList.toggle('hidden', !on);
+        if (on) n++;
+      });
+      n += $$('.set-row:not([data-advanced])', card).length;
+      card.classList.toggle('hidden', n === 0);
+      visible += n;
+    });
+    cnt.textContent = `${visible} из ${d.count} настроек`;
+  };
+  applyAllSettingsFilter();
+  apply();
+  adv.onchange = () => { apply(); applyAllSettingsFilter(); };
+  $('set_all_search').oninput = U.debounce((e) => applyAllSettingsFilter(e.target.value), 120);
+}
+
+/** Фильтр внутри вкладки «Все настройки». */
+function applyAllSettingsFilter(q0) {
+  const input = $('set_all_search');
+  const raw = (q0 !== undefined ? q0 : (input ? input.value : '')) || '';
+  const q = String(raw).trim().toLowerCase();
+  const host = $('set_all_fields');
+  if (!host) return;
+  $$('[data-schema-group]', host).forEach((card) => {
+    let any = false;
+    $$('.set-row', card).forEach((r) => {
+      const hit = !q || r.textContent.toLowerCase().includes(q) ||
+        ((r.querySelector('[data-setting]') || {}).dataset || {}).setting?.includes(q);
+      r.classList.toggle('hidden', !hit);
+      if (hit && !r.hidden) any = true;
+    });
+    card.classList.toggle('hidden', !any);
+  });
+}
+
+/** Поля для вкладок «Касса» / «СБП» / «Банк» из схемы. */
+async function renderCashierSettings() {
+  const d = await loadSettingsSchema();
+  const s = PF.state.settings;
+  const mk = (groups) => groups.flatMap((g) => d.fields[g] || [])
+    .filter((f) => !f.secret && f.type !== 'json')
+    .map((f) => settingRow(f.key, f.label, f.advanced ? 'Технический ключ' : '', schemaControl(f)))
+    .join('');
+
+  const cEl = $('set_cashier_fields');
+  if (cEl) cEl.innerHTML = mk(['cashier']);
+  const acc = $('set_cashier_account');
+  if (acc) {
+    const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
+    acc.innerHTML = settingRow('default_account', 'Касса по умолчанию', 'Куда попадают деньги без уточнения',
+      `<select data-setting="default_account">` + (accounts.map((a) =>
+        `<option value="${esc(a.id)}"${(s.default_account || 'cash') === a.id ? ' selected' : ''}>${esc(a.name)}</option>`).join('')
+        || '<option value="cash">Наличные</option>') + '</select>');
+  }
+  const sbpEl = $('set_sbp_fields');
+  if (sbpEl) sbpEl.innerHTML = mk(['sbp']);
+  const bankEl = $('set_bank_fields');
+  if (bankEl) bankEl.innerHTML = mk(['bank']);
+}
+
+
 /* Bambu Cloud: вход в аккаунт для управления принтером без LAN Only Mode. */
 async function renderCloudSettings(s) {
   const el = $('set_cloud');
@@ -1442,6 +1579,13 @@ function renderSettings() {
   $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
     button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
   });
+  // 17.0 (И4): вкладки «Касса / СБП / Банк» и «Все настройки» строятся из схемы
+  renderCashierSettings().catch(() => {});
+  renderAllSettings().catch(() => {
+    if ($('set_all_fields')) {
+      $('set_all_fields').innerHTML = '<div class="empty compact"><span>Схема настроек недоступна — проверьте связь с коннектором.</span></div>';
+    }
+  });
   renderUpdateInfo();
 }
 
@@ -1666,12 +1810,22 @@ async function resetSettings() {
 
 async function saveSettings() {
   const payload = {};
+  const jsonErrors = [];
   $$('[data-setting]').forEach((el) => {
     const k = el.dataset.setting;
+    // Пустой секрет = «не менять» (сервер хранит коды/токены вне браузера)
+    if (el.dataset.secret === '1' && !el.value) return;
     if (el.type === 'checkbox') payload[k] = el.checked;
     else if (el.type === 'number') payload[k] = num(el.value);
-    else payload[k] = el.value;
+    else if (el.dataset.json === '1') {
+      try { payload[k] = JSON.parse(el.value || 'null'); }
+      catch (e) { jsonErrors.push(k); }
+    } else payload[k] = el.value;
   });
+  if (jsonErrors.length) {
+    toast('Проверьте JSON', 'Не распознаны поля: ' + jsonErrors.join(', '));
+    return;
+  }
   payload.theme = $('set_theme').value;
   payload.accent = PF.state.settings.accent || 'indigo';
   try {

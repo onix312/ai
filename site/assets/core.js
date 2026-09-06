@@ -896,6 +896,7 @@ const VIEWS = {
   marketing: { title: 'Контент', sub: 'Посты, карточки, отчёты и таблички — генераторы 8.5' },
   clientbot: { title: 'Клиент-бот', sub: 'Telegram-бот для покупателей: витрина, заказы, статусы' },
   library: { title: 'Библиотека', sub: 'Инструкции, скрипты и материалы' },
+  pages: { title: 'Страницы', sub: 'Хаб LAN-страниц: касса, СБП, банк, витрины, ТВ' },
   settings: { title: 'Настройки', sub: 'Тарифы, автоматизация и данные' },
 };
 /* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
@@ -1019,13 +1020,28 @@ PF.go = (view, sub) => {
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 window.addEventListener('hashchange', routeFromHash);
 
-/* ============================================================== тема */
+/* ============================================================== тема
+   17.0 (решение №1): по умолчанию ТЁМНАЯ. Выбор пользователя живёт в
+   настройках (theme) и зеркалируется в localStorage('pf_theme'), чтобы
+   единая тема действовала на всех LAN-страницах (theme-init.js в <head>). */
+function themePref() {
+  const s = PF.state.settings && PF.state.settings.theme;
+  if (s === 'system' || s === 'light' || s === 'dark') return s;
+  const ls = store.get('pf_theme', '');
+  if (ls === 'system' || ls === 'light' || ls === 'dark') return ls;
+  return 'dark';                              // дефолт 17.0 — тёмная
+}
 function applyTheme() {
-  const pref = PF.state.settings.theme || 'system';
+  const pref = themePref();
   const dark = pref === 'dark' || (pref === 'system' &&
-    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ||
+    (pref === 'system' && !window.matchMedia);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  document.documentElement.dataset.accent = PF.state.settings.accent || 'indigo';
+  const accent = (PF.state.settings && PF.state.settings.accent) ||
+    store.get('pf_accent', 'indigo') || 'indigo';
+  document.documentElement.dataset.accent = accent;
+  store.set('pf_theme', pref);               // зеркало для всех страниц
+  store.set('pf_accent', accent);
 }
 PF.applyTheme = applyTheme;
 if (window.matchMedia) {

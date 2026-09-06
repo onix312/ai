@@ -1,8 +1,10 @@
-/* PrintFlow 13.1 — единый файл дизайн-токенов.
-   Палитра, геометрия, тени и акценты всей панели. Подключается ПЕРВЫМ
-   (до app.css / theme.css / more.css): остальные файлы ссылаются на эти
-   переменные и не переопределяют их. Тёмная тема — тот же набор токенов
-   через html[data-theme="dark"]. */
+/* PrintFlow 17.0 — единый файл дизайн-токенов.
+   Палитра, геометрия, тени, типографика и компонентные токены всей панели.
+   Подключается ПЕРВЫМ (до app.css / theme.css / more.css): остальные файлы
+   ссылаются на эти переменные и не переопределяют их. Тёмная тема — тот же
+   набор токенов через html[data-theme="dark"]; по умолчанию (решение 17.0 №1)
+   интерфейс тёмный. Шрифты Inter / JetBrains Mono — локальные (fonts.css). */
+@import url("fonts.css");
 
 /* ============================================================ токены */
 :root {
@@ -10,6 +12,22 @@
 
   --font: "Inter", "Segoe UI", "SF Pro Text", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* 17.0 — типографическая шкала (rem, шаг от базовых 15px панели) */
+  --fs-xs: 11.5px;
+  --fs-sm: 12.5px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --lh-tight: 1.25;
+  --lh-base: 1.5;
+  --fw-normal: 450;
+  --fw-medium: 550;
+  --fw-bold: 700;
+  --fw-heavy: 850;
 
   /* фирменная палитра */
   --accent: #4f46e5;
@@ -163,3 +181,106 @@ html[data-density="compact"] .table-wrap table.data th { padding: 7px 10px; }
   --elev-2: var(--shadow-2);
   --elev-3: var(--shadow-3);
 }
+
+/* ============================================ 17.0 — компонентные токены
+   Единые состояния для всех кнопок/полей/карточек: hover/active/disabled/
+   focus. Компоненты ссылаются на эти переменные и не задают свои цвета. */
+:root {
+  /* кнопки */
+  --btn-bg: var(--panel);
+  --btn-bg-hover: var(--panel-3);
+  --btn-bg-active: var(--line-strong);
+  --btn-line: var(--line);
+  --btn-text: var(--text);
+  --btn-primary-bg: linear-gradient(135deg, var(--accent), var(--accent-2));
+  --btn-primary-text: var(--accent-ink);
+  --btn-primary-shadow: 0 6px 18px -8px var(--accent-glow);
+  --btn-danger-bg: var(--bad);
+  --btn-ghost-bg: transparent;
+  --btn-disabled-opacity: .45;
+  --btn-radius: var(--r-sm);
+  --btn-h: 36px;
+  --btn-h-sm: 30px;
+  --btn-px: 14px;
+
+  /* поля ввода */
+  --input-bg: var(--panel-2);
+  --input-bg-focus: var(--panel);
+  --input-line: var(--line);
+  --input-line-focus: var(--accent);
+  --input-text: var(--text);
+  --input-placeholder: var(--muted);
+  --input-radius: var(--r-sm);
+  --input-h: 36px;
+
+  /* фокус для доступности (виден на обеих темах) */
+  --focus-ring: 0 0 0 3px var(--accent-glow);
+
+  /* карточки */
+  --card-bg: var(--panel);
+  --card-line: var(--line);
+  --card-radius: var(--r-lg);
+  --card-pad: var(--sp-5);
+  --card-hover-y: -2px;
+
+  /* тосты/поповеры */
+  --toast-bg: var(--panel);
+  --toast-line: var(--line);
+  --toast-shadow: var(--elev-2);
+
+  /* модалки */
+  --modal-bg: var(--panel);
+  --modal-overlay: rgba(8, 12, 22, .55);
+  --modal-shadow: var(--elev-3);
+  --modal-radius: var(--r-xl);
+
+  /* чипы/теги/бейджи статусов */
+  --chip-radius: 999px;
+
+  /* переходы состояний */
+  --state-t: var(--t-fast) var(--ease);
+}
+
+html[data-theme="dark"] {
+  --modal-overlay: rgba(2, 4, 10, .68);
+}
+
+/* Глобальные состояния интерактивных элементов (17.0): один паттерн на всю
+   панель и страницы. Тонкая обводка фокуса обязательна для a11y. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--r-xs);
+}
+button, .btn, a.nav-link, input, select, textarea {
+  transition: background-color var(--state-t), border-color var(--state-t),
+    color var(--state-t), box-shadow var(--state-t), transform var(--state-t);
+}
+button:disabled, .btn[disabled], .btn.disabled {
+  opacity: var(--btn-disabled-opacity);
+  pointer-events: none;
+}
+
+/* ============================================ 17.0 (И1): внешние пункты меню
+   Ссылки на LAN-страницы (СБП, мобильная касса, банк) живут в сайдбаре
+   рядом с вкладками, но ведут на отдельные страницы — даём им лёгкое
+   отличие: приглушённая подложка, иконка-стрелка справа при наведении. */
+.nav-link.nav-link-ext {
+  position: relative;
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  margin: 2px 10px;
+  padding-left: 12px;
+}
+.nav-link.nav-link-ext small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.nav-link.nav-link-ext:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.nav-link.nav-link-ext .ic { color: var(--accent); }

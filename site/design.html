@@ -1,6 +1,24 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
+<script src="/assets/theme-init.js?v=17.0.0"></script>
+<style>
+/* 17.0 data-theme bridge: ручная тёмная тема действует на страницах со своей палитрой */
+:root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: light) {
+  :root[data-theme="dark"] {
+    --bg:#0d1220; --panel:#151b30; --line:#263049; --text:#e7ecf7; --muted:#94a3b8;
+    --bg-soft:#151b30; --accent-soft:rgba(129,140,248,.14);
+  }
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:#f4f6fb; --panel:#fff; --line:#dde4f1; --text:#17203a; --muted:#64748b;
+    --bg-soft:#fff; --accent-soft:rgba(79,70,229,.1);
+  }
+}
+</style>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
@@ -106,5 +124,6 @@
   syncParams();
 })();
 </script>
+<script src="/assets/theme-toggle.js?v=17.0.0" defer></script>
 </body>
 </html>
