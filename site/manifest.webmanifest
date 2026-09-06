@@ -24,6 +24,9 @@
     }
   ],
   "shortcuts": [
+    { "name": "Касса", "url": "/cashier.html" },
+    { "name": "СБП · входящие", "url": "/sbp.html" },
+    { "name": "Поступления банка", "url": "/bank.html" },
     { "name": "Мини-панель у станка", "url": "/m" },
     { "name": "Очередь печати", "url": "/#queue" },
     { "name": "Новый заказ", "url": "/#orders" }
