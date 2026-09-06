@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#4f46e5">
+<title>NOZZA · СБП · входящие</title>
+<link rel="stylesheet" href="assets/tokens.css?v=16.0.0">
+<style>
+ * { box-sizing:border-box; margin:0; padding:0; }
+ body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:560px; margin:0 auto; padding:18px 14px 44px; }
+ .top { display:flex; align-items:center; gap:11px; margin-bottom:14px; }
+ .top img { width:36px; height:36px; }
+ .top b { font-size:17px; }
+ .top small { display:block; color:var(--muted); font-size:11.5px; }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:14px; margin-bottom:12px; }
+ .card h3 { font-size:14px; margin-bottom:10px; }
+ .row { display:flex; align-items:center; gap:10px; padding:11px 0; border-bottom:1px solid var(--line); }
+ .row:last-child { border-bottom:0; }
+ .row .t { flex:1; min-width:0; }
+ .row b { font-size:13.5px; }
+ .row small { display:block; color:var(--muted); font-size:11px; margin-top:1px; }
+ .amt { font-weight:750; font-size:15px; white-space:nowrap; }
+ .btn { padding:11px 13px; border:0; border-radius:11px; font-weight:700; font-size:13px; cursor:pointer; color:#fff; }
+ .btn:active { transform:scale(.97); }
+ .btn.ok { background:var(--ok); }
+ .btn.warn { background:var(--warn); }
+ .btn.bad { background:var(--bad); }
+ .btn.ghost { background:var(--line); color:var(--text); }
+ .badge { font-size:10.5px; font-weight:750; padding:3px 8px; border-radius:99px; white-space:nowrap; }
+ .badge.pending { background:rgba(217,138,42,.18); color:var(--warn); }
+ .badge.new { background:var(--line); color:var(--muted); }
+ .badge.confirmed { background:rgba(46,160,67,.18); color:var(--ok); }
+ .badge.rejected { background:rgba(214,58,58,.16); color:var(--bad); }
+ .badge.refunded { background:rgba(148,163,184,.2); color:var(--muted); }
+ input { width:100%; margin-top:6px; padding:12px; border:1px solid var(--line); border-radius:11px;
+   background:var(--bg); color:var(--text); font-size:15px; }
+ label { display:block; font-size:12.5px; color:var(--muted); }
+ .hint { font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5; }
+ .empty { color:var(--muted); font-size:13px; text-align:center; padding:10px 0; }
+ .msg { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:#fff; color:#12203c;
+   padding:11px 17px; border-radius:11px; font-size:13px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
+   opacity:0; pointer-events:none; transition:opacity .2s; max-width:90vw; }
+ .msg.on { opacity:1; }
+ .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+ <div class="top">
+  <img src="assets/brand/nozza-mark-white.svg" alt="">
+  <div><b>СБП · входящие платежи</b><small>ручное подтверждение поступления</small></div>
+ </div>
+
+ <div class="card">
+  <h3>Новый платёж по заказу</h3>
+  <label>Номер заказа<input id="orderNum" inputmode="numeric" placeholder="Например: 1001"></label>
+  <div id="orderInfo" class="hint" hidden></div>
+  <label>Сумма<input id="amount" inputmode="decimal" placeholder="₽"></label>
+  <div style="display:flex;gap:8px;margin-top:12px">
+   <button class="btn ok" id="bCreate" type="button" style="flex:1">Создать платёж</button>
+  </div>
+ </div>
+
+ <div class="card">
+  <h3>Ожидают подтверждения <span class="muted" id="pendingCount"></span></h3>
+  <div id="pending"></div>
+ </div>
+
+ <div class="card">
+  <h3>Последние</h3>
+  <div id="recent"></div>
+ </div>
+
+ <div class="card" id="settingsCard">
+  <h3>Настройки СБП</h3>
+  <div id="settings" class="hint"></div>
+ </div>
+</div>
+<div class="msg" id="msg"></div>
+<script>
+"use strict";
+var $ = function (id) { return document.getElementById(id); };
+var state = { orderId: "", debt: 0, pending: [], recent: [] };
+
+function toast(text) {
+  var m = $("msg"); m.textContent = text; m.classList.add("on");
+  clearTimeout(toast._t); toast._t = setTimeout(function () { m.classList.remove("on"); }, 2600);
+}
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+  return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+function money(v) { var n = Number(v) || 0; return (Math.round(n * 100) / 100) + " ₽"; }
+
+function api(path, body) {
+  return fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function (r) { return r.json().then(function (j) {
+    if (!r.ok) { throw new Error(j && j.error ? j.error : ("HTTP " + r.status)); }
+    return j;
+  }); });
+}
+function reqId() { return "ui-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10); }
+
+function badge(status) {
+  var names = { new: "новая", pending: "ожидает", confirmed: "подтверждена", rejected: "отклонена", refunded: "возврат" };
+  return '<span class="badge ' + esc(status) + '">' + (names[status] || esc(status)) + "</span>";
+}
+
+function renderPending() {
+  var box = $("pending");
+  $("pendingCount").textContent = state.pending.length ? ("· " + state.pending.length) : "";
+  if (!state.pending.length) { box.innerHTML = '<div class="empty">Нет платежей, ожидающих сверки</div>'; return; }
+  box.innerHTML = state.pending.map(function (p) {
+    return '<div class="row">' +
+      '<div class="t"><b>№' + esc(p.number) + " · " + money(p.amount) + "</b>" +
+      "<small>" + esc(p.purpose || "—") +
+      (p.order_number ? (" · заказ №" + esc(p.order_number)) : "") + "</small></div>" +
+      '<button class="btn ok" data-act="confirm" data-id="' + esc(p.id) + '">Подтвердить</button>' +
+      '<button class="btn warn" data-act="reject" data-id="' + esc(p.id) + '">Отклонить</button>' +
+      "</div>";
+  }).join("");
+}
+
+function renderRecent() {
+  var box = $("recent");
+  if (!state.recent.length) { box.innerHTML = '<div class="empty">Платежей пока нет</div>'; return; }
+  box.innerHTML = state.recent.map(function (p) {
+    var refund = p.status === "confirmed"
+      ? '<button class="btn bad" data-act="refund" data-id="' + esc(p.id) + '">Возврат</button>' : "";
+    return '<div class="row">' +
+      '<div class="t"><b>№' + esc(p.number) + " · " + money(p.amount) + "</b> " + badge(p.status) +
+      "<small>" + esc(p.purpose || "—") +
+      (p.order_number ? (" · заказ №" + esc(p.order_number)) : "") +
+      (p.confirmed_by ? (" · " + esc(p.confirmed_by)) : "") + "</small></div>" +
+      '<div style="display:flex;gap:6px">' + refund + "</div></div>";
+  }).join("");
+}
+
+function renderSettings(s) {
+  $("settings").innerHTML = [
+    s.enabled ? "Приём СБП включён" : "<b>Приём СБП отключён в настройках</b>",
+    "Счёт: " + esc(s.account_name || "—") + " (" + esc(s.account_id || "—") + ")",
+    s.bank_name ? "Банк: " + esc(s.bank_name) : "",
+    s.shop_qr ? "Статический QR магазина задан" : "Статический QR магазина не задан (настройка sbp_shop_qr)",
+  ].filter(Boolean).join("<br>");
+}
+
+function load() {
+  api("/api/sbp/state").then(function (s) {
+    state.pending = s.pending || [];
+    state.recent = s.recent || [];
+    renderPending();
+    renderRecent();
+    renderSettings(s.settings || {});
+  }).catch(function (e) { toast("Ошибка: " + e.message); });
+}
+
+$("orderNum").addEventListener("change", function () {
+  var num = this.value.trim();
+  if (!num) { state.orderId = ""; state.debt = 0; $("orderInfo").hidden = true; return; }
+  api("/api/orders?q=" + encodeURIComponent(num)).then(function (r) {
+    var list = (r.orders || []).filter(function (o) { return String(o.number) === num; });
+    if (!list.length) list = r.orders || [];
+    if (!list.length) { state.orderId = ""; state.debt = 0;
+      $("orderInfo").hidden = false; $("orderInfo").textContent = "Заказ не найден"; return; }
+    var o = list[0], debt = Number((o.economics && o.economics.debt) || 0);
+    state.orderId = o.id; state.debt = Math.max(0, debt);
+    $("orderInfo").hidden = false;
+    $("orderInfo").textContent = o.number + " · " + (o.product || "") + " · долг " + money(state.debt);
+    if (!$("amount").value) $("amount").value = Math.round(state.debt * 100) / 100;
+  }).catch(function (e) { toast("Ошибка: " + e.message); });
+});
+
+$("bCreate").addEventListener("click", function () {
+  var amount = parseFloat($("amount").value);
+  if (!state.orderId) { toast("Сначала укажите номер заказа"); return; }
+  if (!(amount > 0)) { toast("Сумма должна быть больше нуля"); return; }
+  if (!confirm("Создать СБП-платёж " + money(amount) + " по заказу №" + $("orderNum").value.trim() + "?")) return;
+  api("/api/sbp/create", { order_id: state.orderId, amount: amount, request_id: reqId(), actor: "panel" })
+    .then(function (p) {
+      toast(p.already_recorded ? "Такой платёж уже есть" : "Платёж создан — ожидает сверки");
+      $("orderNum").value = ""; $("amount").value = ""; $("orderInfo").hidden = true;
+      state.orderId = ""; state.debt = 0; load();
+    }).catch(function (e) { toast("Ошибка: " + e.message); });
+});
+
+document.addEventListener("click", function (ev) {
+  var b = ev.target.closest("button[data-act]");
+  if (!b) return;
+  var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
+  if (act === "confirm") {
+    if (!confirm("Подтвердить поступление? Деньги будут записаны в журнал и закроют долг заказа.")) return;
+    api("/api/sbp/confirm", { id: id, actor: "panel" })
+      .then(function () { toast("Оплата подтверждена ✓"); load(); })
+      .catch(function (e) { toast("Ошибка: " + e.message); });
+  } else if (act === "reject") {
+    var reason = prompt("Причина отклонения:", "Оплата не поступила");
+    if (reason === null) return;
+    api("/api/sbp/reject", { id: id, reason: reason, actor: "panel" })
+      .then(function () { toast("Платёж отклонён"); load(); })
+      .catch(function (e) { toast("Ошибка: " + e.message); });
+  } else if (act === "refund") {
+    if (!confirm("Возврат СБП. Подтверждаю: возврат выполнен в банке.")) return;
+    api("/api/sbp/refund", { id: id, bank_done: "1", note: "возврат клиенту", actor: "owner" })
+      .then(function () { toast("Возврат проведён ✓"); load(); })
+      .catch(function (e) { toast("Ошибка: " + e.message); });
+  }
+});
+
+load();
+</script>
+</body>
+</html>

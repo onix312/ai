@@ -223,6 +223,15 @@ class ClientBot:
     def _settings(self) -> dict:
         return self.db.settings(include_secrets=True)
 
+    def _sbp(self):
+        """Ленивый доступ к СБП-ядру (Касса 16.0)."""
+        service = getattr(self, "_sbp_service", None)
+        if service is None:
+            from .sbp import Sbp
+            service = Sbp(self.db, self.manager.acc)
+            self._sbp_service = service
+        return service
+
     def templates(self) -> list[dict]:
         """Шаблоны ответов оператора из локальной настройки.
 
@@ -2350,9 +2359,28 @@ class ClientBot:
                     "пришлите «телефон +7…», привяжу номер.")
         due = f"\nОжидаем к: {str(order.get('due'))[:10]}" if order.get("due") else ""
         qty = num(order.get("qty"))
+        pay_line = self._payment_line(chat, order)
         return (f"Заказ №{order.get('number')}\n{order.get('product')}\n"
                 f"Статус: {self._status_label(order)}"
-                + (f"\nКоличество: {qty:g}" if qty > 1 else "") + due)
+                + (f"\nКоличество: {qty:g}" if qty > 1 else "")
+                + (pay_line if pay_line else "") + due)
+
+    def _payment_line(self, chat: str, order: dict) -> str:
+        """Строка состояния оплаты для карточки заказа (Касса 16.0)."""
+        due = max(0.0, num(order.get("price")) - num(order.get("discount")) -
+                   max(num(order.get("paid")), num(order.get("prepaid"))))
+        if due <= 0:
+            return "\n✅ Оплачено"
+        row = self.db.one(
+            "SELECT status FROM client_payment_intents"
+            " WHERE order_id=? AND chat_id=? ORDER BY datetime(created_at) DESC LIMIT 1",
+            (order.get("id") or "", chat))
+        status = str((row or {}).get("status") or "")
+        if status == "pending":
+            return "\n💳 Оплата: ожидает подтверждения"
+        if status == "confirmed":
+            return "\n💳 Оплата: подтверждена"
+        return ""
 
     def _order_card(self, chat: str, row: dict,
                     number: str) -> tuple[str, dict | None]:
@@ -2449,6 +2477,9 @@ class ClientBot:
         settings = self._settings()
         pay_info = str(settings.get("client_bot_pay_info") or "").strip()
         qr = str(settings.get("client_bot_pay_qr") or "").strip()
+        if not qr:
+            # Касса 16.0: статический QR СБП магазина — запасной вариант.
+            qr = str(settings.get("sbp_shop_qr") or "").strip()
         if self._is_final(order):
             return (f"Заказ №{order.get('number')} уже закрыт — оплата не нужна.",
                     self._menu())
@@ -2479,7 +2510,8 @@ class ClientBot:
         keys = {"inline_keyboard": [
             [{"text": "✅ Я оплатил", "callback_data": f"paid:{order['id']}"}],
         ]}
-        qr = str(self._settings().get("client_bot_pay_qr") or "").strip()
+        qr = (str(self._settings().get("client_bot_pay_qr") or "").strip()
+              or str(self._settings().get("sbp_shop_qr") or "").strip())
         if qr.startswith(("http://", "https://", "tg://")):
             keys["inline_keyboard"].append([{"text": "▣ Открыть QR СБП", "url": qr}])
         keys["inline_keyboard"].append(
@@ -2524,6 +2556,21 @@ class ClientBot:
             if existing:
                 return "Сообщение уже передано мастеру ✓ Заявка на сверку ожидает ручного подтверждения.", self._menu()
             raise
+        # Касса 16.0: платёж живёт в ядре СБП (статусы new→pending→confirmed),
+        # деньги и долг меняются только при подтверждении владельцем/кассиром.
+        sbp_id = ""
+        if self._sbp().enabled():
+            try:
+                sbp = self._sbp().create(
+                    amount=round(due, 2), order_id=order_id, chat_id=chat,
+                    purpose=purpose, note="Клиентский бот",
+                    request_id=f"client-intent:{intent_id}", actor="клиент")
+                sbp_id = str(sbp.get("id") or "")
+                self.db.execute(
+                    "UPDATE client_payment_intents SET sbp_id=? WHERE id=?",
+                    (sbp_id, intent_id))
+            except ValueError:
+                pass  # СБП выключен или долг ушёл — заявка на сверку уже есть
         try:
             self.manager.notify_async(
                 f"💳 Покупатель сообщил об оплате\n№{number} · {_money(due)}\n"

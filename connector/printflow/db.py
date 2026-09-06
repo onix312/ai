@@ -25,6 +25,10 @@ SCHEMA_VERSION = 16
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
 ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "client_payment_intents": [
+        # связанный СБП-платёж (Касса 16.0): подтверждение идёт через ядро СБП
+        ("sbp_id", "TEXT DEFAULT ''"),
+    ],
     "materials": [
         # встроенный тип из каталога (можно править под себя; 0 — свой материал)
         ("builtin", "INTEGER DEFAULT 0"),
@@ -501,6 +505,7 @@ CREATE TABLE IF NOT EXISTS client_payment_intents (
     confirmed_at TEXT DEFAULT '',
     confirmed_by TEXT DEFAULT '',
     payment_id TEXT DEFAULT '',
+    sbp_id TEXT DEFAULT '',       -- связанный СБП-платёж (Касса 16.0)
     reject_reason TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_client_payment_order
@@ -1259,6 +1264,82 @@ CREATE TABLE IF NOT EXISTS shift_checks (
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_shift_checks_day ON shift_checks(day, item_id);
+
+-- Касса 16.0: СБП-платежи. Жизненный цикл new → pending → confirmed /
+-- rejected / refunded. Деньги (проводка в журнал и долг заказа) меняются
+-- ТОЛЬКО при подтверждении; отмена и возврат — явные операции с аудитом.
+-- request_id защищает от дублей при повторном нажатии/обновлении страницы.
+CREATE TABLE IF NOT EXISTS sbp_payments (
+    id TEXT PRIMARY KEY,
+    number TEXT DEFAULT '',      -- человекочитаемый № для экрана «Входящие»
+    order_id TEXT DEFAULT '',    -- основание: заказ (или '' для продажи с полки)
+    sale_id TEXT DEFAULT '',     -- основание: продажа со стеллажа (касса)
+    chat_id TEXT DEFAULT '',     -- связь с клиентским ботом
+    amount REAL DEFAULT 0,
+    currency TEXT DEFAULT 'RUB',
+    purpose TEXT DEFAULT '',     -- назначение платежа (основание)
+    status TEXT DEFAULT 'new',   -- new | pending | confirmed | rejected | refunded
+    request_id TEXT DEFAULT '',  -- идемпотентность создания
+    account_id TEXT DEFAULT '',  -- счёт, на который записан подтверждённый платёж
+    qr_kind TEXT DEFAULT 'dynamic',  -- static | dynamic
+    qr_payload TEXT DEFAULT '',  -- ссылка/содержимое QR (динамический)
+    note TEXT DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT,
+    confirmed_at TEXT DEFAULT '',
+    confirmed_by TEXT DEFAULT '',
+    payment_id TEXT DEFAULT '',  -- строка payments после подтверждения
+    tx_id TEXT DEFAULT '',       -- проводка в журнале после подтверждения
+    rejected_at TEXT DEFAULT '',
+    rejected_by TEXT DEFAULT '',
+    reject_reason TEXT DEFAULT '',
+    refunded_at TEXT DEFAULT '',
+    refunded_by TEXT DEFAULT '',
+    refund_note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sbp_status ON sbp_payments(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_sbp_order ON sbp_payments(order_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sbp_request
+    ON sbp_payments(request_id) WHERE request_id<>'';
+
+-- Касса 16.0: продажи мобильной кассы. Одна строка — одна продажа (наличная
+-- или СБП) с корзиной (items JSON). СБП-продажа: до подтверждения stock не
+-- списывается и выручка не пишется; confirmed_at — отметка подтверждения.
+CREATE TABLE IF NOT EXISTS cashier_sales (
+    id TEXT PRIMARY KEY,
+    payment_id TEXT DEFAULT '',   -- СБП-платёж ('' для наличной продажи)
+    method TEXT DEFAULT 'cash',   -- cash | sbp
+    amount REAL DEFAULT 0,
+    items TEXT DEFAULT '[]',      -- JSON [{item_id, qty, price, name}]
+    cashier TEXT DEFAULT '',
+    request_id TEXT DEFAULT '',   -- идемпотентность создания
+    created_at TEXT,
+    confirmed_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cashier_sales_payment ON cashier_sales(payment_id);
+CREATE INDEX IF NOT EXISTS idx_cashier_sales_created ON cashier_sales(created_at);
+
+-- Касса 16.0, раунд «авто-СБП»: поступления из банка (выписка/API/вебхук).
+-- external_key — идемпотентность импорта: повторная загрузка не задваивает.
+CREATE TABLE IF NOT EXISTS bank_receipts (
+    id TEXT PRIMARY KEY,
+    external_key TEXT DEFAULT '',
+    source TEXT DEFAULT '',      -- tbank_csv | api | webhook
+    at TEXT DEFAULT '',          -- время операции из банка
+    amount REAL DEFAULT 0,
+    currency TEXT DEFAULT 'RUB',
+    counterparty TEXT DEFAULT '',
+    purpose TEXT DEFAULT '',
+    status TEXT DEFAULT 'new',   -- new | matched | confirmed | unmatched | review
+    sbp_id TEXT DEFAULT '',      -- связанный СБП-платёж
+    matched_at TEXT DEFAULT '',
+    matched_by TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    created_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_receipts_key
+    ON bank_receipts(external_key) WHERE external_key<>'';
+CREATE INDEX IF NOT EXISTS idx_bank_receipts_status ON bank_receipts(status, created_at);
 """
 
 

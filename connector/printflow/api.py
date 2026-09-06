@@ -123,6 +123,12 @@ class Api:
         self.stocker = OrderStocker(self.db, self.repo, self.stock, self.docs, self.acc)
         from .receivables import Receivables
         self.receivables = Receivables(self.db, self.repo, self.acc)
+        from .sbp import Sbp
+        self.sbp = Sbp(self.db, self.acc)
+        from .cashier import Cashier
+        self.cashier = Cashier(self.db, self.acc, self.shelf, self.sbp)
+        from .bank_receipts import BankReceipts
+        self.bank = BankReceipts(self.db, self.acc, self.sbp)
         from .defect_recovery import DefectRecovery
         self.defect_recovery = DefectRecovery(self.db, self.manager)
         from .aftercare import CustomerAftercare
@@ -3462,6 +3468,12 @@ class Api:
             client = getattr(self.manager, "client_bot", None)
             if action in {"reject", "rejected"}:
                 reason = str(body.get("reason") or "Оплата не подтверждена").strip()[:500]
+                # Касса 16.0: отменяем и связанный СБП-платёж, чтобы статусы не расходились.
+                if str(intent.get("sbp_id") or ""):
+                    try:
+                        self.sbp.reject(intent["sbp_id"], reason=reason, actor=actor)
+                    except ValueError:
+                        pass
                 self.db.execute("UPDATE client_payment_intents SET status='rejected',reject_reason=?,confirmed_at=?,confirmed_by=?,updated_at=? WHERE id=?",
                                 (reason, now_iso(), actor, now_iso(), intent_id))
                 if client:
@@ -3470,12 +3482,25 @@ class Api:
                                         client._menu(), dedupe_key=f"payment:{intent_id}:rejected")
                 self._audit("payment_intent", intent_id, "reject", "Отклонено подтверждение оплаты", reason, actor=actor)
                 return 200, {"ok": True, "intent": self.db.one("SELECT * FROM client_payment_intents WHERE id=?", (intent_id,))}
-            payment = self.acc.add_payment(
-                intent["order_id"], num(intent.get("amount")), "payment",
-                str(body.get("account_id") or ""),
-                str(body.get("method") or "СБП (ручная сверка)"),
-                f"Подтверждено по заявке клиента {intent_id}",
-                request_id=f"client-intent:{intent_id}")
+            # Касса 16.0: деньги идут через ядро СБП (счёт «СБП», статусы, аудит).
+            # Старые заявки без sbp_id подтверждаем прежним путём — ничего не ломаем.
+            if str(intent.get("sbp_id") or "") and self.sbp.enabled():
+                sbp_result = self.sbp.confirm(
+                    intent["sbp_id"], actor=actor,
+                    note=f"Подтверждено по заявке клиента {intent_id}")
+                payment = {
+                    "id": sbp_result.get("payment_id") or "",
+                    "tx_id": sbp_result.get("tx_id") or "",
+                    "amount": sbp_result.get("amount"),
+                    "account_id": sbp_result.get("account_id") or "",
+                }
+            else:
+                payment = self.acc.add_payment(
+                    intent["order_id"], num(intent.get("amount")), "payment",
+                    str(body.get("account_id") or ""),
+                    str(body.get("method") or "СБП (ручная сверка)"),
+                    f"Подтверждено по заявке клиента {intent_id}",
+                    request_id=f"client-intent:{intent_id}")
             self.db.execute("UPDATE client_payment_intents SET status='confirmed',confirmed_at=?,confirmed_by=?,payment_id=?,updated_at=? WHERE id=?",
                             (now_iso(), actor, payment.get("id") or "", now_iso(), intent_id))
             if client:

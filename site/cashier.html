@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#4f46e5">
+<title>NOZZA · Касса</title>
+<link rel="stylesheet" href="assets/tokens.css?v=16.0.0">
+<style>
+ * { box-sizing:border-box; margin:0; padding:0; }
+ body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+ .wrap { max-width:640px; margin:0 auto; padding:14px 14px 150px; }
+ .top { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+ .top img { width:34px; height:34px; }
+ .top b { font-size:16px; }
+ .top .sp { flex:1; }
+ .tabs { display:flex; gap:8px; margin-bottom:12px; }
+ .tab { flex:1; padding:11px; border-radius:11px; border:1px solid var(--line); background:var(--panel);
+   color:var(--text); font-weight:700; font-size:14px; cursor:pointer; text-align:center; }
+ .tab.on { background:var(--accent); border-color:transparent; color:#fff; }
+ .search { width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:11px;
+   background:var(--panel); color:var(--text); font-size:15px; margin-bottom:10px; }
+ .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+ .tile { position:relative; border:1px solid var(--line); background:var(--panel); border-radius:14px;
+   padding:14px 12px; cursor:pointer; user-select:none; -webkit-user-select:none; }
+ .tile:active { transform:scale(.97); }
+ .tile .n { font-size:13.5px; font-weight:650; line-height:1.25; min-height:34px; }
+ .tile .p { font-size:17px; font-weight:750; margin-top:4px; font-variant-numeric:tabular-nums; }
+ .tile .q { display:inline-block; margin-top:6px; font-size:11.5px; font-weight:650; padding:2px 8px;
+   border-radius:99px; background:var(--line); color:var(--muted); }
+ .tile .q.low { background:rgba(217,119,6,.18); color:var(--warn); }
+ .tile .q.empty { background:rgba(239,68,68,.16); color:var(--bad); }
+ .tile .in { position:absolute; top:10px; right:10px; min-width:22px; height:22px; padding:0 6px;
+   border-radius:99px; background:var(--accent); color:#fff; font-size:12px; font-weight:750;
+   display:none; align-items:center; justify-content:center; }
+ .tile.sel { border-color:var(--accent); }
+ .tile.sel .in { display:flex; }
+ .cart { position:fixed; left:0; right:0; bottom:0; background:var(--panel); border-top:1px solid var(--line);
+   padding:12px 14px calc(12px + env(safe-area-inset-bottom)); }
+ .cart .inner { max-width:640px; margin:0 auto; display:flex; align-items:center; gap:12px; }
+ .cart .sum { flex:1; min-width:0; }
+ .cart .sum b { font-size:20px; font-weight:750; font-variant-numeric:tabular-nums; display:block; }
+ .cart .sum small { color:var(--muted); font-size:11.5px; }
+ .btn { padding:13px 16px; border:0; border-radius:12px; font-weight:750; font-size:14px; cursor:pointer; color:#fff; }
+ .btn:active { transform:scale(.97); }
+ .btn.pay { background:var(--ok); }
+ .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--text); font-size:13px; padding:11px 13px; }
+ .btn.bad { background:var(--bad); }
+ .btn.warn { background:var(--warn); }
+ .btn:disabled { opacity:.45; }
+ .modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:flex-end; z-index:50; }
+ .modal.on { display:flex; }
+ .sheet { width:100%; max-width:640px; margin:0 auto; background:var(--panel); border-radius:20px 20px 0 0;
+   padding:18px 16px calc(18px + env(safe-area-inset-bottom)); }
+ .sheet h3 { font-size:15px; margin-bottom:12px; }
+ .payrow { display:flex; align-items:center; gap:12px; width:100%; padding:16px 14px; border:1px solid var(--line);
+   border-radius:14px; background:var(--bg); color:var(--text); font-size:15px; font-weight:700; cursor:pointer; margin-bottom:10px; }
+ .payrow .ic { font-size:22px; }
+ .payrow small { display:block; font-weight:500; color:var(--muted); font-size:11.5px; }
+ .row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--line); }
+ .row:last-child { border-bottom:0; }
+ .row .t { flex:1; min-width:0; }
+ .row b { font-size:14px; }
+ .row small { display:block; color:var(--muted); font-size:11px; margin-top:1px; }
+ .amt { font-weight:750; font-size:15px; white-space:nowrap; }
+ .empty { color:var(--muted); font-size:13px; text-align:center; padding:16px 0; }
+ .login { max-width:360px; margin:0 auto; padding-top:40px; text-align:center; }
+ .login img { width:56px; height:56px; margin-bottom:10px; }
+ .login h2 { font-size:18px; margin-bottom:4px; }
+ .login p { color:var(--muted); font-size:13px; margin-bottom:18px; }
+ .login input { width:100%; padding:14px; text-align:center; font-size:20px; letter-spacing:.3em;
+   border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--text); }
+ .msg { position:fixed; left:50%; bottom:120px; transform:translateX(-50%); background:#fff; color:#12203c;
+   padding:11px 17px; border-radius:11px; font-size:13px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
+   opacity:0; pointer-events:none; transition:opacity .2s; max-width:90vw; z-index:60; }
+ .msg.on { opacity:1; }
+</style>
+</head>
+<body>
+
+<div class="login" id="login">
+ <img src="assets/brand/nozza-mark-white.svg" alt="">
+ <h2>Касса NOZZA</h2>
+ <p>Введите код кассы магазина</p>
+ <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
+ <button class="btn pay" id="bLogin" type="button" style="width:100%;margin-top:12px">Войти</button>
+</div>
+
+<div id="app" hidden>
+ <div class="wrap">
+  <div class="top">
+   <img src="assets/brand/nozza-mark-white.svg" alt="">
+   <div><b>Касса</b><small id="shopLabel" style="display:block;color:var(--muted);font-size:11px">полка · LAN</small></div>
+   <div class="sp"></div>
+   <button class="btn ghost" id="bLogout" type="button">Выход</button>
+  </div>
+
+  <div class="tabs">
+   <button class="tab on" id="tabSell" type="button">Продажа</button>
+   <button class="tab" id="tabIn" type="button">Входящие</button>
+  </div>
+
+  <div id="viewSell">
+   <input class="search" id="search" placeholder="Поиск товара…">
+   <div class="grid" id="grid"></div>
+  </div>
+
+  <div id="viewIn" hidden>
+   <div id="incoming"></div>
+  </div>
+ </div>
+
+ <div class="cart" id="cartBar" hidden>
+  <div class="inner">
+   <div class="sum"><b id="cartTotal">0 ₽</b><small id="cartCount">0 поз.</small></div>
+   <button class="btn ghost" id="bClear" type="button">Очистить</button>
+   <button class="btn pay" id="bPay" type="button">Оплатить</button>
+  </div>
+ </div>
+</div>
+
+<div class="modal" id="modal">
+ <div class="sheet">
+  <h3 id="modalTitle">Оплата</h3>
+  <button class="payrow" id="payCash" type="button"><span class="ic">💵</span>
+   <span>Наличные<small>деньги в кассу магазина</small></span></button>
+  <button class="payrow" id="paySbp" type="button"><span class="ic">📱</span>
+   <span>СБП<small>QR/перевод — подтверждение по поступлению</small></span></button>
+  <button class="btn ghost" id="bCancel" type="button" style="width:100%">Отмена</button>
+ </div>
+</div>
+
+<div class="msg" id="msg"></div>
+
+<script>
+"use strict";
+var $ = function (id) { return document.getElementById(id); };
+var state = { token: localStorage.getItem("cashier_token") || "", items: [], cart: {}, sbpEnabled: true };
+
+function toast(t) { var m = $("msg"); m.textContent = t; m.classList.add("on");
+  clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove("on"); }, 2600); }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+  return { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]; }); }
+function money(v) { var n = Number(v) || 0; return (Math.round(n*100)/100).toLocaleString("ru-RU") + " ₽"; }
+function reqId() { return "ui-" + Date.now() + "-" + Math.random().toString(36).slice(2,10); }
+
+function api(path, body) {
+  var init = body ? { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) }
+                  : { method:"GET" };
+  return fetch(path, init).then(function (r) {
+    return r.json().then(function (j) {
+      if (!r.ok) { var e = new Error(j && j.error ? j.error : ("HTTP " + r.status)); e.raw = j; throw e; }
+      return j;
+    });
+  });
+}
+function withToken(p) { return state.token + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(state.token); }
+
+function loggedIn() { return !!state.token; }
+function showApp(on) { $("login").hidden = on; $("app").hidden = !on; }
+function setTab(tab) {
+  $("tabSell").classList.toggle("on", tab === "sell");
+  $("tabIn").classList.toggle("on", tab === "in");
+  $("viewSell").hidden = tab !== "sell";
+  $("viewIn").hidden = tab !== "in";
+  $("cartBar").hidden = tab !== "sell";
+  if (tab === "in") loadIncoming();
+}
+
+// ---------------------------------------------------------------- логин
+function doLogin() {
+  var code = $("code").value.trim();
+  if (!code) { toast("Введите код"); return; }
+  api("/api/cashier/login", { code: code }).then(function (r) {
+    state.token = r.token; localStorage.setItem("cashier_token", r.token);
+    showApp(true); loadCatalog();
+  }).catch(function (e) { toast(e.message); });
+}
+$("bLogin").addEventListener("click", doLogin);
+$("code").addEventListener("keydown", function (ev) { if (ev.key === "Enter") doLogin(); });
+$("bLogout").addEventListener("click", function () {
+  api("/api/cashier/logout", { token: state.token }).catch(function(){});
+  state.token = ""; localStorage.removeItem("cashier_token"); state.cart = {};
+  showApp(false); $("code").value = "";
+});
+
+// ---------------------------------------------------------------- полка
+function loadCatalog() {
+  api(withToken("/api/cashier/catalog")).then(function (c) {
+    state.items = c.items || []; state.sbpEnabled = !!c.sbp_enabled;
+    $("shopLabel").textContent = "в кассе: " + money((c.shop_cash && c.shop_cash.in_shop) || 0);
+    renderGrid();
+  }).catch(function (e) { sessionError(e); });
+}
+function sessionError(e) {
+  if (/сессия|код/i.test(e.message)) { state.token = ""; localStorage.removeItem("cashier_token");
+    showApp(false); toast("Сессия истекла — войдите снова"); }
+  else toast(e.message);
+}
+
+function renderGrid() {
+  var q = ($("search").value || "").toLowerCase();
+  var box = $("grid");
+  var list = state.items.filter(function (it) { return !q || (it.name || "").toLowerCase().indexOf(q) >= 0; });
+  if (!list.length) { box.innerHTML = '<div class="empty" style="grid-column:1/3">Товаров нет</div>'; return; }
+  box.innerHTML = list.map(function (it) {
+    var qty = Number(it.qty) || 0;
+    var qc = it.status === "empty" || qty <= 0 ? "empty" : (it.status === "low" ? "low" : "");
+    var inCart = state.cart[it.id] || 0;
+    return '<div class="tile' + (inCart ? " sel" : "") + '" data-id="' + esc(it.id) + '">' +
+      '<span class="in">' + inCart + "</span>" +
+      '<div class="n">' + esc(it.name) + "</div>" +
+      '<div class="p">' + money(it.price) + "</div>" +
+      '<span class="q ' + qc + '">' + (qty ? ("остаток " + qty) : "нет") + "</span></div>";
+  }).join("");
+  renderCart();
+}
+
+function renderCart() {
+  var entries = Object.keys(state.cart).map(function (id) {
+    var it = state.items.find(function (x) { return x.id === id; }) || {};
+    return { id: id, qty: state.cart[id], price: Number(it.price) || 0, name: it.name || "" };
+  }).filter(function (e) { return e.qty > 0; });
+  var total = entries.reduce(function (s, e) { return s + e.price * e.qty; }, 0);
+  var count = entries.reduce(function (s, e) { return s + e.qty; }, 0);
+  $("cartTotal").textContent = money(total);
+  $("cartCount").textContent = count + " поз.";
+  $("bPay").disabled = !count;
+}
+
+$("grid").addEventListener("click", function (ev) {
+  var t = ev.target.closest(".tile"); if (!t) return;
+  var id = t.getAttribute("data-id");
+  var it = state.items.find(function (x) { return x.id === id; });
+  if (!it || (Number(it.qty) || 0) <= 0) { toast("Нет в наличии"); return; }
+  state.cart[id] = Math.min((state.cart[id] || 0) + 1, Math.floor(Number(it.qty) || 0));
+  renderGrid();
+});
+$("bClear").addEventListener("click", function () { state.cart = {}; renderGrid(); });
+$("search").addEventListener("input", renderGrid);
+
+$("tabSell").addEventListener("click", function () { setTab("sell"); });
+$("tabIn").addEventListener("click", function () { setTab("in"); });
+
+// ---------------------------------------------------------------- оплата
+$("bPay").addEventListener("click", function () {
+  var count = Object.keys(state.cart).reduce(function (s, k) { return s + (state.cart[k] || 0); }, 0);
+  if (!count) return;
+  $("modalTitle").textContent = "Оплата · " + $("cartTotal").textContent;
+  $("paySbp").style.display = state.sbpEnabled ? "flex" : "none";
+  $("modal").classList.add("on");
+});
+$("bCancel").addEventListener("click", function () { $("modal").classList.remove("on"); });
+
+function cartRows() {
+  return Object.keys(state.cart).map(function (id) {
+    return { item_id: id, qty: state.cart[id] };
+  }).filter(function (r) { return r.qty > 0; });
+}
+
+$("payCash").addEventListener("click", function () {
+  $("modal").classList.remove("on");
+  var items = cartRows();
+  if (!items.length) return;
+  api("/api/cashier/sell", { token: state.token, method: "cash", items: items, request_id: reqId() })
+    .then(function (r) { toast("Продано " + money(r.amount) + " наличными"); state.cart = {}; loadCatalog(); })
+    .catch(function (e) { sessionError(e); });
+});
+$("paySbp").addEventListener("click", function () {
+  $("modal").classList.remove("on");
+  var items = cartRows();
+  if (!items.length) return;
+  api("/api/cashier/sell", { token: state.token, method: "sbp", items: items, request_id: reqId() })
+    .then(function (r) {
+      toast("СБП-платёж создан — подтвердите во «Входящие»");
+      state.cart = {}; loadCatalog(); setTab("in");
+    }).catch(function (e) { sessionError(e); });
+});
+
+// ---------------------------------------------------------------- входящие
+function loadIncoming() {
+  api(withToken("/api/cashier/incoming")).then(function (r) {
+    var box = $("incoming");
+    var list = r.payments || [];
+    if (!list.length) { box.innerHTML = '<div class="empty">Нет СБП-продаж, ожидающих сверки</div>'; return; }
+    box.innerHTML = list.map(function (p) {
+      var names = (p.items || []).map(function (i) { return esc(i.name) + " × " + i.qty; }).join(", ");
+      return '<div class="row">' +
+        '<div class="t"><b>' + money(p.amount) + "</b><small>" + (names || esc(p.purpose || "—")) + "</small></div>" +
+        '<button class="btn pay" data-act="confirm" data-id="' + esc(p.payment_id) + '" style="padding:10px 12px;font-size:12.5px">Подтвердить</button>' +
+        '<button class="btn warn" data-act="reject" data-id="' + esc(p.payment_id) + '" style="padding:10px 12px;font-size:12.5px">Отклонить</button>' +
+        "</div>";
+    }).join("");
+  }).catch(function (e) { sessionError(e); });
+}
+
+document.addEventListener("click", function (ev) {
+  var b = ev.target.closest("button[data-act]"); if (!b) return;
+  var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
+  if (act === "confirm") {
+    if (!confirm("Подтвердить поступление СБП? Склад спишется и выручка запишется.")) return;
+    api("/api/cashier/confirm-sbp", { token: state.token, payment_id: id })
+      .then(function () { toast("Подтверждено ✓"); loadIncoming(); loadCatalog(); })
+      .catch(function (e) { sessionError(e); });
+  } else if (act === "reject") {
+    var reason = prompt("Причина отклонения:", "Оплата не поступила");
+    if (reason === null) return;
+    api("/api/cashier/reject-sbp", { token: state.token, payment_id: id, reason: reason })
+      .then(function () { toast("Отклонено"); loadIncoming(); })
+      .catch(function (e) { sessionError(e); });
+  }
+});
+
+// ---------------------------------------------------------------- старт
+if (loggedIn()) { showApp(true); loadCatalog(); } else { showApp(false); }
+</script>
+</body>
+</html>

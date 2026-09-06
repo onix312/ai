@@ -41,6 +41,7 @@ GROUPS = {
     "clientbot": "Клиентский бот и витрина",
     "automation": "Автоматизация и правила",
     "storage": "Склад и материалы",
+    "cashier": "Касса и СБП",
     "documents": "Документы и реквизиты",
     "interface": "Интерфейс",
     "system": "Система и данные",
@@ -92,6 +93,16 @@ META: dict[str, dict] = {
     "studio_gateway_enabled": ("printers", "Шлюз Bambu Studio включён", {}),
     # --- склад
     "target_stock_days": ("storage", "Целевой запас, дней", {"min": 0, "max": 365}),
+    # --- касса и СБП (Касса 16.0)
+    "sbp_enabled": ("cashier", "Приём СБП включён", {}),
+    "sbp_account_id": ("cashier", "Счёт для СБП", {"max_len": 32}),
+    "sbp_shop_qr": ("cashier", "Статический QR магазина (СБП)", {"max_len": 300}),
+    "sbp_bank_name": ("cashier", "Название банка СБП", {"max_len": 80}),
+    "sbp_payment_note": ("cashier", "Назначение перевода СБП", {"max_len": 200}),
+    "sbp_auto_confirm": ("cashier", "Авто-подтверждение СБП по банку", {}),
+    "sbp_match_window_hours": ("cashier", "Окно сопоставления поступлений, ч",
+                               {"min": 1, "max": 168}),
+    "cashier_code": ("cashier", "Код кассы (вход кассира)", {"max_len": 32}),
     # --- документы
     "legal_name": ("documents", "Наименование для документов", {"max_len": 200}),
     "inn": ("documents", "ИНН", {"max_len": 32}),
