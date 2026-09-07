@@ -46,6 +46,10 @@
    opacity:0; pointer-events:none; transition:opacity .2s; max-width:90vw; }
  .msg.on { opacity:1; }
  .muted { color:var(--muted); }
+ .qrbox { display:flex; justify-content:center; margin-top:12px; }
+ .qrbox svg { width:min(220px,60vw); height:auto; background:#fff; padding:10px; border-radius:14px; }
+ @media print { body * { visibility:hidden; } .qrbox, .qrbox * { visibility:visible; }
+   .qrbox { position:absolute; inset:0; align-items:center; } }
 </style>
 </head>
 <body>
@@ -78,9 +82,15 @@
  <div class="card" id="settingsCard">
   <h3>Настройки СБП</h3>
   <div id="settings" class="hint"></div>
+  <div class="qrbox" id="shopQr" hidden></div>
+  <div id="qrInfo" class="hint"></div>
+  <div style="display:flex;gap:8px;margin-top:10px">
+   <button class="btn ghost" id="bPrintQr" type="button" style="flex:1" hidden>Распечатать QR на кассу</button>
+  </div>
  </div>
 </div>
 <div class="msg" id="msg"></div>
+<script src="/assets/qr.js?v=17.0.1"></script>
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
@@ -141,6 +151,19 @@ function renderRecent() {
   }).join("");
 }
 
+function renderPaymentQr(q) {
+  var box = $("shopQr"), btn = $("bPrintQr"), info = $("qrInfo");
+  var svg = q.svg || (q.text && window.QR ? window.QR.svg(q.text, { size: 220, margin: 2 }) : "");
+  box.innerHTML = svg; box.hidden = !svg; btn.hidden = !svg;
+  var kind = { gost: "Свой QR по реквизитам (ГОСТ Р 56042-2014): сумма и назначение внутри",
+               link: "Платёжная ссылка банка",
+               static: "Статический QR магазина (СБП): сумму вводит покупатель",
+               dynamic: "Динамический QR банка" }[q.kind] || "";
+  var problems = (q.problems || []).map(function (p) {
+    return "• " + esc(p.label) + " — " + esc(p.message); }).join("<br>");
+  info.innerHTML = [kind, q.hint ? esc(q.hint) : "", problems].filter(Boolean).join("<br>");
+}
+
 function renderSettings(s) {
   $("settings").innerHTML = [
     s.enabled ? "Приём СБП включён" : "<b>Приём СБП отключён в настройках</b>",
@@ -150,6 +173,10 @@ function renderSettings(s) {
   ].filter(Boolean).join("<br>");
 }
 
+document.addEventListener("click", function (ev) {
+  if (ev.target && ev.target.id === "bPrintQr") window.print();
+});
+
 function load() {
   api("/api/sbp/state").then(function (s) {
     state.pending = s.pending || [];
@@ -158,6 +185,9 @@ function load() {
     renderRecent();
     renderSettings(s.settings || {});
   }).catch(function (e) { toast("Ошибка: " + e.message); });
+  // Платёжный QR на примере 1000 ₽: видно, что именно покажет касса.
+  api("/api/payment/qr?amount=1000&purpose=" + encodeURIComponent("Оплата в магазине"))
+    .then(renderPaymentQr).catch(function () {});
 }
 
 $("orderNum").addEventListener("change", function () {

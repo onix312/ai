@@ -25,6 +25,31 @@ def sbp_settings(api: Any, ctx: Ctx):
     return _sbp(api).settings()
 
 
+@router.get("/api/payment/qr",
+            doc="Платёжный QR: строка и SVG (ГОСТ Р 56042-2014, ссылка или QR магазина)")
+def payment_qr(api: Any, ctx: Ctx):
+    """Код оплаты на любую сумму — для кассы, счёта, ценника и бота.
+
+    Генерируется локально: ни банковского API, ни внешних сервисов.
+    """
+    from .accounting import num
+    from .payment_qr import build
+    return build(api.db,
+                 amount=num(ctx.one("amount", "0")),
+                 purpose=str(ctx.one("purpose", "") or ""),
+                 number=str(ctx.one("number", "") or ""))
+
+
+@router.get("/api/payment/qr/check",
+            doc="Проверка реквизитов платёжного QR: чего не хватает")
+def payment_qr_check(api: Any, ctx: Ctx):
+    from .payment_qr import check, mode_of, requisites
+    req = requisites(api.db)
+    problems = check(req)
+    return {"mode": mode_of(api.db), "requisites": req, "problems": problems,
+            "ready": not problems}
+
+
 @router.get("/api/sbp/state", doc="Экран «Входящие платежи»: сводка и список pending")
 def sbp_state(api: Any, ctx: Ctx):
     return _sbp(api).state()
