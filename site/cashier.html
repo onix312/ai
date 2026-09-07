@@ -3,11 +3,16 @@
 <head>
 <script src="/assets/theme-init.js?v=17.0.1"></script>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Касса NOZZA">
+<link rel="manifest" href="/cashier.webmanifest">
 <title>NOZZA · Касса</title>
-<link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
+<link rel="stylesheet" href="/assets/tokens.css?v=17.0.1">
+<link rel="stylesheet" href="/assets/fonts.css?v=17.0.1">
 <style>
  *{box-sizing:border-box;margin:0;padding:0}
  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent}
@@ -119,13 +124,32 @@
  .login input:focus{border-color:var(--accent)}
  .msg{position:fixed;left:50%;bottom:122px;transform:translateX(-50%);background:#111827;color:#fff;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:650;box-shadow:0 10px 30px -10px rgba(0,0,0,.7);opacity:0;pointer-events:none;transition:opacity .22s,transform .22s;max-width:92vw;z-index:60;border:1px solid rgba(255,255,255,.08)}
  .msg.on{opacity:1;transform:translateX(-50%) translateY(0)}
+ .loading{color:var(--muted);text-align:center;padding:32px 16px;font-size:13px}
+ button:focus-visible,input:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px}
+ @media(max-width:520px){
+  .wrap{padding:8px 10px 152px}
+  .top{gap:7px;padding:8px 2px 12px}
+  .brand{gap:7px;min-width:0}.brand img{width:34px;height:34px}.brand small{max-width:125px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill{padding:5px 7px}.pill.ok{display:none}.iconbtn{flex:0 0 36px}
+  .cart .inner{gap:7px;display:grid;grid-template-columns:minmax(82px,1fr) auto auto}
+  .cart .sum{grid-column:1/-1;display:flex;align-items:baseline;gap:8px}.cart .sum b{font-size:18px}.cart .sum small{margin-left:auto}
+  .cart .btn{min-height:42px}.cart #bToggleCart{grid-column:1}.cart #bClear{grid-column:2}.cart #bPay{grid-column:3}
+  .cartList{max-height:46vh;overflow:auto}.row{flex-wrap:wrap}.row .t{flex-basis:calc(100% - 8px)}
+  #incoming .row{align-items:stretch}#incoming .row .t{flex-basis:100%}#incoming .btn{flex:1}
+  .sheet{max-height:calc(100dvh - 20px);overflow:auto}
+ }
+ @media(max-width:350px){
+  .grid{grid-template-columns:1fr}#countPill{display:none}.brand small{max-width:100px}
+  .cart .inner{grid-template-columns:1fr 1fr}.cart #bToggleCart{display:none}.cart #bClear{grid-column:1}.cart #bPay{grid-column:2}
+ }
+ @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
 
 <div class="login" id="login">
  <div class="loginCard">
-  <img src="assets/brand/nozza-mark-white.svg" alt="">
+  <img src="/assets/brand/nozza-mark-white.svg" alt="NOZZA">
   <h2>Касса NOZZA</h2>
   <p>Введите код кассы из раздела <b>Настройки → Касса и СБП</b>.<br>Работает только в одной Wi-Fi сети с PrintFlow.</p>
   <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
@@ -138,7 +162,7 @@
  <div class="wrap">
   <div class="top">
    <div class="brand">
-    <img src="assets/brand/nozza-mark-white.svg" alt="">
+    <img src="/assets/brand/nozza-mark-white.svg" alt="NOZZA">
     <div><b>Касса</b><small id="shopLabel">полка · LAN</small></div>
    </div>
    <div class="sp"></div>
@@ -213,17 +237,22 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", cat:"", search:""};
+var state = {token: localStorage.getItem("cashier_token")||"", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", cat:"", search:"", loading:false, saleRequest:{cash:"",sbp:""}};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>\"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function money(v){var n=Number(v)||0;return (Math.round(n*100)/100).toLocaleString("ru-RU")+" ₽";}
 function reqId(){return "ui-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);}
 function api(path,body){
-  var init=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:{method:"GET"};
-  return fetch(path,init).then(function(r){return r.json().then(function(j){if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}return j;});});
+  var init=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),cache:"no-store"}:{method:"GET",cache:"no-store"};
+  return fetch(path,init).then(function(r){
+    return r.text().then(function(text){
+      var j={};try{j=text?JSON.parse(text):{};}catch(_e){if(!r.ok)throw new Error("Сервер вернул ошибку "+r.status);throw new Error("Некорректный ответ сервера");}
+      if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}return j;
+    });
+  }).catch(function(e){if(e instanceof TypeError)throw new Error("Нет связи с PrintFlow — проверьте Wi-Fi и сервер");throw e;});
 }
-function withToken(p){return p+(p.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(state.token);}
+function withToken(p){return p + (p.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(state.token);}
 function loggedIn(){return !!state.token;}
 function showApp(on){$("login").hidden=on;$("app").hidden=!on;}
 
@@ -255,6 +284,7 @@ $("bLogout").addEventListener("click",function(){
 
 // catalog
 function loadCatalog(){
+  $("grid").innerHTML='<div class="loading" style="grid-column:1/-1">Обновляем товары…</div>';
   api(withToken("/api/cashier/catalog")).then(function(c){
     state.items=c.items||[];
     state.cats=c.categories||[];
@@ -388,6 +418,7 @@ $("grid").addEventListener("click",function(ev){
   var max=Math.floor(Number(it.qty)||0);
   if(cur>=max){toast("Больше нет в наличии");return;}
   state.cart[id]=cur+1;
+  state.saleRequest={cash:"",sbp:""};
   renderGrid();
 });
 function changeQty(id,delta){
@@ -400,13 +431,14 @@ function changeQty(id,delta){
     if(next>max){toast("Максимум "+max);next=max;}
     state.cart[id]=next;
   }
+  state.saleRequest={cash:"",sbp:""};
   renderGrid();
 }
 document.addEventListener("click",function(ev){
   var inc=ev.target.closest("[data-inc]"); if(inc){changeQty(inc.getAttribute("data-inc"),1);return;}
   var dec=ev.target.closest("[data-dec]"); if(dec){changeQty(dec.getAttribute("data-dec"),-1);return;}
 });
-$("bClear").addEventListener("click",function(){state.cart={};renderGrid();});
+$("bClear").addEventListener("click",function(){state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();});
 $("search").addEventListener("input",function(){state.search=$("search").value;renderGrid();});
 $("bClearSearch").addEventListener("click",function(){$("search").value="";state.search="";renderGrid();$("search").focus();});
 
@@ -442,20 +474,27 @@ $("modal").addEventListener("click",function(ev){if(ev.target===$("modal"))$("mo
 function cartRows(){
   return Object.keys(state.cart).map(function(id){return {item_id:id,qty:state.cart[id]};}).filter(function(r){return r.qty>0;});
 }
-$("payCash").addEventListener("click",function(){
-  $("modal").classList.remove("on");
-  var items=cartRows(); if(!items.length) return;
-  api("/api/cashier/sell",{token:state.token,method:"cash",items:items,request_id:reqId()})
-    .then(function(r){toast("Продано "+money(r.amount)+" наличными");state.cart={};loadCatalog();})
-    .catch(function(e){sessionError(e);});
-});
-$("paySbp").addEventListener("click",function(){
-  $("modal").classList.remove("on");
-  var items=cartRows(); if(!items.length) return;
-  api("/api/cashier/sell",{token:state.token,method:"sbp",items:items,request_id:reqId()})
-    .then(function(r){state.cart={};loadCatalog();showPaymentQr(r);})
-    .catch(function(e){sessionError(e);});
-});
+function setSaleBusy(on){
+  state.loading=on;$("payCash").disabled=on;$("paySbp").disabled=on;$("bPay").disabled=on||!cartRows().length;
+}
+function sellCart(method){
+  if(state.loading)return;
+  var items=cartRows();if(!items.length)return;
+  // Ключ сохраняется при сетевой ошибке: повтор кассира вернёт результат
+  // первой операции, а не создаст вторую продажу.
+  state.saleRequest[method]=state.saleRequest[method]||reqId();
+  setSaleBusy(true);
+  api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method]})
+    .then(function(r){
+      state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
+      if(method==="cash")toast(r.already_recorded?"Продажа уже была записана":"Продано "+money(r.amount)+" наличными");
+      loadCatalog();if(method==="sbp")showPaymentQr(r);
+    })
+    .catch(function(e){sessionError(e);})
+    .finally(function(){setSaleBusy(false);});
+}
+$("payCash").addEventListener("click",function(){sellCart("cash");});
+$("paySbp").addEventListener("click",function(){sellCart("sbp");});
 
 function showPaymentQr(sale){
   var qr=sale.qr||{};
@@ -515,6 +554,10 @@ document.addEventListener("click",function(ev){
 
 // старт
 if(loggedIn()){showApp(true);loadCatalog();}else{showApp(false);}
+window.addEventListener("online",function(){if(loggedIn())loadCatalog();});
+if("serviceWorker" in navigator&&window.isSecureContext){
+  window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});
+}
 </script>
 <script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
 </body>

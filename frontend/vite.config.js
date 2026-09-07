@@ -11,6 +11,7 @@ export default defineConfig({
     outDir: resolve(__dirname, '../site/assets/dist'),
     emptyOutDir: true,
     target: 'es2020',
+    minify: 'terser',
     assetsDir: '.',
     entryFileNames: 'printflow-app.js',
     chunkFileNames: 'chunks/[name].js',

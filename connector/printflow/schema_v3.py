@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS nom_groups (
     name TEXT DEFAULT '',
     code TEXT DEFAULT '',
     niche_id TEXT,
+    color TEXT DEFAULT '#6366f1',   -- цвет категории в кассе и каталоге
     markup REAL DEFAULT 0,          -- наценка группы по умолчанию, %
     vat REAL DEFAULT 0,
     position INTEGER DEFAULT 0,

@@ -1,0 +1,27 @@
+{
+  "name": "NOZZA · Мобильная касса",
+  "short_name": "Касса",
+  "description": "Продажи, остатки и СБП в локальной сети PrintFlow",
+  "lang": "ru",
+  "id": "/cashier.html",
+  "start_url": "/cashier.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1117",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/assets/brand/nozza-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
