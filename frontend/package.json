@@ -1,6 +1,6 @@
 {
   "name": "printflow-frontend",
-  "version": "17.0.0",
+  "version": "17.0.1",
   "private": true,
   "description": "PrintFlow 17.0 — фронтенд-компоненты (Lit), собираются Vite в site/assets/dist. Исходники тут, собранный бандл коммитится — запуск без Node работает.",
   "type": "module",

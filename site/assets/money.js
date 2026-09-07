@@ -1087,10 +1087,11 @@ async function linkAmsSpool(phantomId) {
     fields: [{ name: 'target', label: 'Складская катушка', type: 'select', options }],
     ok: 'Привязать',
   });
-  if (!ans || !ans.target) return;
+  const targetId = (typeof ans === 'object' && ans !== null) ? ans.target : ans;
+  if (!targetId) return;
   if (!confirmDanger('Привязать катушку AMS к выбранной складской? Остаток на складе не изменится, дубль из AMS архивируется.')) return;
   try {
-    await post('/api/spool/link-ams', { phantom_id: phantomId, target_id: ans.target });
+    await post('/api/spool/link-ams', { phantom_id: phantomId, target_id: targetId });
     toast('Катушка привязана', 'AMS-слот теперь ведёт на складскую катушку');
     await PF.refreshCore();
     PF.refreshFinance && PF.refreshFinance();
@@ -1695,5 +1696,5 @@ function applyPreset(name) {
   toast('Пресет', name);
 }
 
-PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset, applyAmsToCalc, loadCalcMaterials };
+PF.modules.money = { openSpool, openCatalog, openTx, runCalc, renderFinance, exportCalc, applyPreset, applyAmsToCalc, loadCalcMaterials, linkAmsSpool };
 })();

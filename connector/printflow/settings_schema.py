@@ -69,8 +69,6 @@ TECHNICAL_KEYS = frozenset({
 META: dict[str, dict] = {
     # --- деньги и тарифы
     "target_profit_per_hour": ("money", "Целевая прибыль в час", {"min": 0, "max": 100000}),
-    "electricity_rate": ("money", "Тариф электроэнергии, ₽/кВт·ч", {"min": 0, "max": 100}),
-    "machine_cost_per_hour": ("money", "Амортизация станка, ₽/час", {"min": 0, "max": 100000}),
     "labor_rate": ("money", "Ставка оператора, ₽/час", {"min": 0, "max": 100000}),
     "currency": ("money", "Валюта отображения", {"max_len": 8}),
     # --- налоги
@@ -92,15 +90,11 @@ META: dict[str, dict] = {
     "camera_fps_max": ("printers", "Предел FPS камеры (0 = без предела)",
                        {"min": 0, "max": 30}),
     "encrypt_access_code": ("printers", "Шифровать access-коды принтеров", {}),
-    "auto_start_next": ("printers", "Автозапуск следующего задания", {}),
-    "auto_resume": ("printers", "Авто-возобновление после сбоя", {}),
     # --- telegram
     "telegram_token": ("telegram", "Токен бота сотрудников", {"secret": True}),
     "telegram_chat_id": ("telegram", "Chat ID владельца", {"max_len": 64}),
     "client_bot_token": ("clientbot", "Токен клиентского бота", {"secret": True}),
     "client_bot_enabled": ("clientbot", "Клиентский бот включён", {}),
-    "client_quiet_from": ("clientbot", "Тихие часы: начало", {"max_len": 8}),
-    "client_quiet_to": ("clientbot", "Тихие часы: конец", {"max_len": 8}),
     # --- облако и шлюз
     "cloud_email": ("printers", "Аккаунт Bambu Cloud", {"max_len": 128}),
     "cloud_region": ("printers", "Регион Bambu Cloud", {"choices": ("global", "china")}),
@@ -108,8 +102,6 @@ META: dict[str, dict] = {
     "cloud_uid": ("printers", "UID облака", {"secret": True}),
     "studio_gateway_access_code": ("printers", "Access Code шлюза Studio", {"secret": True}),
     "studio_gateway_enabled": ("printers", "Шлюз Bambu Studio включён", {}),
-    # --- склад
-    "target_stock_days": ("storage", "Целевой запас, дней", {"min": 0, "max": 365}),
     # --- касса (Касса 16.0): вход кассира
     "cashier_code": ("cashier", "Код кассы (вход кассира)", {"max_len": 32}),
     # --- СБП (Касса 16.0)
@@ -129,13 +121,10 @@ META: dict[str, dict] = {
     # --- интерфейс
     "theme": ("interface", "Тема оформления", {"choices": ("system", "light", "dark")}),
     "accent": ("interface", "Акцентный цвет", {"max_len": 32}),
-    "density": ("interface", "Плотность интерфейса",
-                {"choices": ("desk", "compact", "shop")}),
     # --- система
     "public_url": ("system", "Публичный адрес панели", {"max_len": 300}),
     "backup_keep": ("system", "Сколько бэкапов хранить", {"min": 1, "max": 200}),
     "backup_auto_export": ("system", "Автоэкспорт бэкапов", {}),
-    "lan_mode": ("system", "Доступ из локальной сети", {}),
 }
 
 # 17.0 (И4): META покрывает ВСЕ 222 ключа DEFAULT_SETTINGS — раньше было 50.

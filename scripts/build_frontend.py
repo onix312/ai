@@ -66,6 +66,13 @@ def main() -> int:
 
     run(["npm", "run", "build"], FRONTEND)
 
+    # Зачистка trailing whitespace для чистого git diff --check
+    for f in DIST.rglob("*.js"):
+        if f.is_file():
+            text = f.read_text(encoding="utf-8")
+            cleaned = "\n".join(line.rstrip() for line in text.splitlines()) + "\n"
+            f.write_text(cleaned, encoding="utf-8")
+
     print("\nГотово. Бандл:")
     for f in sorted(DIST.rglob("*")):
         if f.is_file():

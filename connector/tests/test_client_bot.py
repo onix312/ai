@@ -1288,3 +1288,17 @@ class ClientBot122PanelTests(unittest.TestCase):
         self.assertEqual(payload["file"], "pet-holder.stl")
         self.assertTrue((self.upload_dir / "pet-holder.stl").is_file())
         self.assertEqual((self.upload_dir / "pet-holder.stl").read_bytes(), b"solid-data")
+
+    def test_repeat_button_in_finished_order_card(self):
+        # Привязываем заказ к чату 555
+        self.bot._link_order("555", {}, {"id": self.oid}, source="telegram")
+        # Переводим заказ в статус done (финальный)
+        self.db.execute("UPDATE orders SET status='done' WHERE id=?", (self.oid,))
+        order = self.db.one("SELECT * FROM orders WHERE id=?", (self.oid,))
+        kb = self.bot._order_card_keyboard(order)
+        buttons = [b for row in kb["inline_keyboard"] for b in row]
+        repeat_btn = [b for b in buttons if b.get("callback_data") == f"repeat:{self.oid}"]
+        self.assertTrue(repeat_btn, "Должна быть кнопка повтора для завершённого заказа")
+        # Выполняем повтор
+        res = self.bot._repeat_order("555", {}, self.oid)
+        self.assertIn("Повтор заказа создан", res)
