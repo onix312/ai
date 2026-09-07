@@ -9,6 +9,12 @@
 
 Деньги от стеллажа попадают в кассу PrintFlow только если при продаже указана
 цена; быстрое списание «−N шт» движений денег не делает.
+
+И2 «единый регистр»: витрина — зона регистра ``stock_moves`` (склад
+kind='shelf'). Операции связанных с номенклатурой позиций пишут движение
+зоны и обновляют ``shelf_items.qty`` в одной транзакции; расход защищён
+свободным остатком (резервы и холды). Позиции без связки живут только в
+``shelf_moves``, как раньше. Документы по зоне не проводятся — её ведёт полка.
 """
 from __future__ import annotations
 
@@ -196,6 +202,62 @@ class Shelf:
         row["moves"] = self.moves(item_id, limit=40)
         return row
 
+    def items_for_nom(self, nom_id: str) -> list[dict]:
+        """Активные позиции полки, связанные с карточкой номенклатуры.
+
+        Связка — те же три пути, что в `_linked_nomenclature`, только в
+        обратную сторону: прямой nom_id, catalog_id→catalog.nom_id и
+        обратный legacy_shelf_id.
+        """
+        nom_id = str(nom_id or "").strip()
+        if not nom_id:
+            return []
+        return self.db.query(
+            "SELECT * FROM shelf_items WHERE active=1 AND (nom_id=?"
+            " OR catalog_id IN (SELECT id FROM catalog WHERE nom_id=?)"
+            " OR id IN (SELECT legacy_shelf_id FROM nomenclature"
+            "           WHERE id=? AND legacy_shelf_id<>''))"
+            " ORDER BY rowid",
+            (nom_id, nom_id, nom_id))
+
+    # --------------------------------------------- витрина-зона регистра (И2)
+    def _register_leg(self, item: dict, doc_kind: str, delta: float,
+                      note: str, unit_cost: float = 0.0,
+                      check_free: bool = True) -> dict | None:
+        """Движение витрины-зоны единого регистра.
+
+        Возвращает движение или None, когда писать нечего: позиция не
+        связана с номенклатурой либо склада-витрины нет (старая база без
+        v3) — такие продажи живут только в `shelf_moves`, как раньше.
+        Расход (-delta) защищён свободным остатком: зарезервированное под
+        заказ и холды СБП со склада не уйдут. Инвентаризация проверку
+        обходит осознанно (`check_free=False`): факт есть факт, недостача
+        при активных резервах станет видимым отрицательным свободным
+        остатком, а не скрытым расхождением.
+        """
+        from .stock import Stock
+        stock = Stock(self.db)
+        zone = stock.shelf_warehouse()
+        if not zone:
+            return None
+        nom = self._linked_nomenclature(item)
+        if not nom:
+            return None
+        nom_id = nom["id"]
+        delta = round(num(delta), 3)
+        if not delta:
+            return None
+        if delta < 0 and check_free:
+            free = stock.free(nom_id, zone)
+            if free < -delta - 1e-9:
+                name = item.get("name") or nom.get("name") or nom_id
+                raise ValueError(
+                    f"«{name}»: на витрине свободно {round(free, 3)} шт — "
+                    f"отпустить {round(-delta, 3)} нельзя (остальное в резерве)")
+        unit = num(unit_cost) or stock.avg_cost(nom_id, zone)
+        return stock.add_move(nom_id, zone, delta, round(unit * delta, 2),
+                              doc_kind=doc_kind, note=note)
+
     def save_item(self, data: dict) -> dict:
         data = dict(data)
         new = not data.get("id")
@@ -321,11 +383,16 @@ class Shelf:
         if cost and not num(item["cost_per_unit"]):
             self.db.execute("UPDATE shelf_items SET cost_per_unit=? WHERE id=?",
                             (round(cost, 2), item_id))
-        move = self._move(item_id, "produce", qty, job_id=job_id,
-                          note=note or "Приход на стеллаж")
+        with self.db.transaction():
+            move = self._move(item_id, "produce", qty, job_id=job_id,
+                              note=note or "Приход на стеллаж")
+            leg = self._register_leg(item, "receipt", qty,
+                                     note or "Приход на стеллаж",
+                                     unit_cost=cost or num(item.get("cost_per_unit")))
         self.db.add_event("shelf", "Приход на стеллаж",
                           f"{item.get('name') or ''} +{round(qty)} шт",
-                          data={"item_id": item_id, "qty": qty})
+                          data={"item_id": item_id, "qty": qty,
+                                "register_move_id": (leg or {}).get("id") or ""})
         return {"ok": True, "move": move, "item": self.db.one(
             "SELECT * FROM shelf_items WHERE id=?", (item_id,))}
 
@@ -352,24 +419,29 @@ class Shelf:
         price = num(price) if num(price) > 0 else num(item.get("price"))
         tx = None
         kind = "online" if channel == "online" else "sale"
-        if price > 0 and record_income:
-            tx = self.acc.add_transaction(
-                "income", "sale", price * qty,
-                f"Стеллаж: {item.get('name') or ''} × {round(qty)}",
-                note=f"{note} · {channel}" .strip(), auto=False,
-                channel="online" if channel == "online" else "shelf",
-                payer="person")
-        move = self._move(item_id, kind, -qty, price=price,
-                          tx_id=tx.get("id") if tx else "",
-                          note=note or f"Продажа ({channel})",
-                          source=source, external_id=external_id)
+        sale_note = note or f"Продажа ({channel})"
+        with self.db.transaction():
+            if price > 0 and record_income:
+                tx = self.acc.add_transaction(
+                    "income", "sale", price * qty,
+                    f"Стеллаж: {item.get('name') or ''} × {round(qty)}",
+                    note=f"{note} · {channel}" .strip(), auto=False,
+                    channel="online" if channel == "online" else "shelf",
+                    payer="person")
+            move = self._move(item_id, kind, -qty, price=price,
+                              tx_id=tx.get("id") if tx else "",
+                              note=sale_note,
+                              source=source, external_id=external_id)
+            # Единый регистр: связанная позиция списывает и зону витрины.
+            leg = self._register_leg(item, "sale", -qty, sale_note)
         self.db.add_event("shelf", "Продажа со стеллажа",
                           f"{item.get('name') or ''} −{round(qty)} шт"
                           + (f" на {round(price * qty)} ₽" if price else ""),
                           data={"item_id": item_id, "qty": qty, "price": price,
                                 "source": source, "external_id": external_id,
-                                "income_recorded": bool(tx)})
-        return {"ok": True, "move": move, "tx": tx,
+                                "income_recorded": bool(tx),
+                                "register_move_id": (leg or {}).get("id") or ""})
+        return {"ok": True, "move": move, "tx": tx, "register_move": leg,
                 "item": self.item(item_id)}
 
     def sales_many(self, rows: list[dict], channel: str = "shelf") -> list[dict]:
@@ -426,6 +498,10 @@ class Shelf:
                 self.db.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
                 self.db.execute(
                     "UPDATE shelf_moves SET tx_id=NULL WHERE id=?", (move_id,))
+            # 4) Вернуть штуки в зону витрины встречным движением. Связки
+            # «движение полки ↔ движение регистра» нет, поэтому не удаление,
+            # а честная сторно-запись: в оборотке видно и продажу, и возврат.
+            self._register_leg(item, "sale", qty, f"отмена продажи {move_id}")
 
         self.db.add_event("shelf", "Отмена продажи на стеллаже",
                           f"{item.get('name') or ''} +{round(qty)} шт (возврат)",
@@ -515,7 +591,9 @@ class Shelf:
             raise ValueError("Количество должно быть больше нуля")
         if self._qty(item_id) < qty:
             raise ValueError("Списать больше, чем есть на стеллаже")
-        move = self._move(item_id, "writeoff", -qty, note=note)
+        with self.db.transaction():
+            move = self._move(item_id, "writeoff", -qty, note=note)
+            self._register_leg(item, "writeoff", -qty, note or "Списание")
         self.db.add_event("shelf", "Списание со стеллажа",
                           f"{item.get('name') or ''} −{round(qty)} шт · {note}",
                           data={"item_id": item_id, "qty": qty})
@@ -531,8 +609,22 @@ class Shelf:
         if actual < 0:
             raise ValueError("Факт не может быть отрицательным")
         diff = round(actual - expected, 2)
-        move = self._move(item_id, "inventory", diff,
-                          note=note or f"Инвентаризация: было {round(expected)} шт, стало {round(actual)} шт")
+        inv_note = note or (f"Инвентаризация: было {round(expected)} шт,"
+                            f" стало {round(actual)} шт")
+        with self.db.transaction():
+            move = self._move(item_id, "inventory", diff, note=inv_note)
+            # Регистр выравниваем не на diff полки, а на факт: если учёт
+            # когда-то разъехался (старые прямые проводки в зону), один
+            # пересчёт закрывает расхождение и в полке, и в регистре.
+            nom = self._linked_nomenclature(item)
+            if nom:
+                from .stock import Stock
+                stock = Stock(self.db)
+                zone = stock.shelf_warehouse()
+                if zone:
+                    reg_delta = round(actual - stock.qty(nom["id"], zone), 3)
+                    self._register_leg(item, "inventory", reg_delta, inv_note,
+                                       check_free=False)
         self.db.add_event(
             "shelf", "Инвентаризация",
             f"{item.get('name') or ''}: ожидалось {round(expected)} шт, факт {round(actual)} шт"
@@ -772,18 +864,19 @@ class Shelf:
                             item_id: str = "", note: str = "") -> dict:
         """Переместить готовый товар с учётного склада на стеллаж магазина.
 
-        Правила:
-        • перемещать можно только то, что есть: остаток на складе-источнике
-          должен быть ≥ 1 шт, а запрошенное количество — целое, от 1 и не
-          больше остатка;
-        • регистр остатков: расход со склада-источника. Стеллаж — витрина,
-          не склад: штуки уходят из учёта склада и появляются в ``shelf_items``.
-          Приход на склад kind='shelf' не пишем — продажа со стеллажа регистр
-          не трогает, и остаток иначе зависал бы в «Товарах» навсегда;
+        Правила (И2 «единый регистр»):
+        • перемещать можно только свободное: остаток источника минус
+          активные резервы должен быть ≥ 1 шт, а запрошенное количество —
+          целое, от 1 и не больше свободного;
+        • регистр остатков получает пару движений «перемещение»: расход со
+          склада-источника и приход на склад-витрину (kind='shelf').
+          Продажа со стеллажа списывает зону, остаток нигде не зависает;
         • стеллаж получает приход штук с себестоимостью по средней складской.
 
         Позиция стеллажа находится по item_id, по связке nomenclature.
         legacy_shelf_id или по имени; если её нет — создаётся автоматически.
+        Найденная по имени позиция усыновляется (ей проставляется nom_id):
+        сам факт перемещения доказывает связку.
         """
         nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         if not nom:
@@ -800,7 +893,7 @@ class Shelf:
         qty = float(round(qty)) if piece_unit else round(qty, 3)
         from .stock import Stock
         stock = Stock(self.db)
-        available = stock.qty(nom_id, warehouse_id)
+        available = stock.free(nom_id, warehouse_id)
         if available < qty:
             raise ValueError(f"На складе только {round(available, 3)} {unit}, "
                              f"а переместить просят {round(qty, 3)} {unit}")
@@ -812,49 +905,57 @@ class Shelf:
         # указали цену, себестоимость на стеллаже остаётся нулевой.
         unit_cost = 0.0 if display_only else stock.avg_cost(nom_id, warehouse_id)
         cost = round(unit_cost * qty, 2)
-        # Расход со склада-источника. На стеллаж — только shelf_items, без
-        # второго движения на склад kind='shelf'.
-        stock.add_move(nom_id, warehouse_id, -qty, -cost, doc_kind="move",
-                       note=note or "перемещение на стеллаж")
-        # 2) позиция стеллажа: найти или создать
-        item = None
-        if item_id:
-            item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
-        if not item and nom.get("legacy_shelf_id"):
-            item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
-                               (nom["legacy_shelf_id"],))
-        if not item:
-            item = self.db.one(
-                "SELECT * FROM shelf_items WHERE active=1 AND lower(name)=lower(?)",
-                (str(nom.get("name") or ""),))
-        if not item:
-            from .nomenclature import Nomenclature
-            price = 0.0
-            try:
-                prices = Nomenclature(self.db)._all_prices().get(nom_id) or {}
-                price = num(prices.get(Nomenclature(self.db)._base_type()))
-            except Exception:
+        move_note = (note or "перемещение на стеллаж").strip()
+        with self.db.transaction():
+            # 1) регистр: расход с источника + приход на витрину-зону
+            stock.add_move(nom_id, warehouse_id, -qty, -cost, doc_kind="move",
+                           note=move_note)
+            # 2) позиция стеллажа: найти или создать
+            item = None
+            if item_id:
+                item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+            if not item and nom.get("legacy_shelf_id"):
+                item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
+                                   (nom["legacy_shelf_id"],))
+            if not item:
+                item = self.db.one(
+                    "SELECT * FROM shelf_items WHERE active=1 AND lower(name)=lower(?)",
+                    (str(nom.get("name") or ""),))
+            if not item:
+                from .nomenclature import Nomenclature
                 price = 0.0
-            item = self.save_item({
-                "name": nom.get("name") or "Товар со склада",
-                "nom_id": nom_id,
-                "barcode": nom.get("barcode") or "",
-                "sku": nom.get("sku") or nom.get("code") or "",
-                "price": price, "cost_per_unit": unit_cost,
-                "photo": nom.get("photo") or "",
-                "note": "создано перемещением со склада",
-            })
-        if unit_cost and not num(item.get("cost_per_unit")):
-            self.db.execute("UPDATE shelf_items SET cost_per_unit=? WHERE id=?",
-                            (round(unit_cost, 2), item["id"]))
-        move = self._move(item["id"], "produce", qty,
-                          note=(note or f"перемещение со склада "
-                                        f"«{warehouse_id}»").strip())
+                try:
+                    prices = Nomenclature(self.db)._all_prices().get(nom_id) or {}
+                    price = num(prices.get(Nomenclature(self.db)._base_type()))
+                except Exception:
+                    price = 0.0
+                item = self.save_item({
+                    "name": nom.get("name") or "Товар со склада",
+                    "nom_id": nom_id,
+                    "barcode": nom.get("barcode") or "",
+                    "sku": nom.get("sku") or nom.get("code") or "",
+                    "price": price, "cost_per_unit": unit_cost,
+                    "photo": nom.get("photo") or "",
+                    "note": "создано перемещением со склада",
+                })
+            elif not str(item.get("nom_id") or "").strip():
+                # Усыновление связки: позиция нашлась по имени/legacy —
+                # фиксируем, что это витрина именно этой номенклатуры.
+                self.db.execute("UPDATE shelf_items SET nom_id=?, updated_at=? WHERE id=?",
+                                (nom_id, now_iso(), item["id"]))
+                item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item["id"],))
+            if unit_cost and not num(item.get("cost_per_unit")):
+                self.db.execute("UPDATE shelf_items SET cost_per_unit=? WHERE id=?",
+                                (round(unit_cost, 2), item["id"]))
+            move = self._move(item["id"], "produce", qty, note=move_note)
+            leg = self._register_leg(item, "move", qty, move_note, unit_cost=unit_cost)
         self.db.add_event("shelf", "Перемещение со склада на стеллаж",
                           f"{nom.get('name') or ''} +{round(qty)} шт",
                           data={"nom_id": nom_id, "warehouse_id": warehouse_id,
-                                "item_id": item["id"], "qty": qty, "cost": cost})
+                                "item_id": item["id"], "qty": qty, "cost": cost,
+                                "register_move_id": (leg or {}).get("id") or ""})
         return {"ok": True, "move": move, "qty": qty, "cost": cost,
+                "register_move": leg,
                 "item": self.db.one("SELECT * FROM shelf_items WHERE id=?",
                                     (item["id"],))}
 

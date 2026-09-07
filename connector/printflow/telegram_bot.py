@@ -2349,19 +2349,37 @@ class TelegramBot:
 
     def do_sell(self, nom_id: str) -> str:
         from .documents import Documents
+        from .shelf import Shelf
         item = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         if not item:
             return "Позиция не найдена."
+        name = item.get("name") or "позиция"
+        # И2: штуку с витрины продаёт полка — полка, регистр и деньги
+        # списываются разом. Без витринной позиции — продажа со склада.
+        try:
+            positions = Shelf(self.db).items_for_nom(nom_id)
+        except Exception:
+            positions = []
+        if positions:
+            try:
+                price = num(positions[0].get("price")) or Documents(self.db).price_of(nom_id)
+                Shelf(self.db).sale(positions[0]["id"], 1, price, channel="shelf",
+                                    note="продажа из Telegram")
+                return f"Продано 1 шт «{name}» — списано с витрины и учтено в кассе."
+            except Exception as exc:
+                return f"Не получилось продать: {exc}"
         warehouse = self.db.one(
-            "SELECT id FROM warehouses WHERE archived=0 AND retail=1 ORDER BY position LIMIT 1") \
-            or self.db.one("SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+            "SELECT id FROM warehouses WHERE archived=0 AND retail=1 AND kind<>'shelf'"
+            " ORDER BY position LIMIT 1") \
+            or self.db.one(
+                "SELECT id FROM warehouses WHERE archived=0 AND kind<>'shelf'"
+                " ORDER BY position LIMIT 1")
         if not warehouse:
             return "Не настроен склад."
         docs = Documents(self.db)
         try:
             docs.quick_sale([{"nom_id": nom_id, "qty": 1}], warehouse["id"],
                             "shop", "", "продажа из Telegram")
-            name = item.get("name") or "позиция"
             return f"Продано 1 шт «{name}» — проведено и учтено в кассе."
         except Exception as exc:
             return f"Не получилось продать: {exc}"

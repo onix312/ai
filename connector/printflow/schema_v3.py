@@ -218,6 +218,7 @@ CREATE TABLE IF NOT EXISTS reserves (
     qty REAL DEFAULT 0,
     order_id TEXT,
     doc_id TEXT,
+    kind TEXT DEFAULT 'reserve',    -- reserve|hold: заказ или холд СБП-продажи
     state TEXT DEFAULT 'active',    -- active|released
     note TEXT DEFAULT ''
 );

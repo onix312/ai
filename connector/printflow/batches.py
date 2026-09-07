@@ -356,9 +356,16 @@ class Batches:
         return self.get(row["id"]) or {}
 
     def _default_warehouse(self) -> str:
+        # Партия принимается на учётный склад, а не на витрину: витрину
+        # пополняет перемещение (иначе готовое невидимо на полке).
         row = self.db.one(
-            "SELECT id FROM warehouses WHERE archived=0 AND retail=1 ORDER BY position LIMIT 1"
-        ) or self.db.one("SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+            "SELECT id FROM warehouses WHERE archived=0 AND retail=1"
+            " AND kind<>'shelf' ORDER BY position LIMIT 1"
+        ) or self.db.one(
+            "SELECT id FROM warehouses WHERE archived=0 AND kind<>'shelf'"
+            " ORDER BY position LIMIT 1"
+        ) or self.db.one(
+            "SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
         if not row:
             raise ValueError("Не настроен ни один склад")
         return row["id"]

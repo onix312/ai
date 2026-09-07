@@ -5,9 +5,11 @@
 
 * наличные — продажа сразу через ``shelf.sale`` (канал in_shop, как в панели
   и боте — один учёт);
-* СБП — платёж создаётся со статусом new/pending, склад НЕ списывается и
-  выручка НЕ пишется до подтверждения; при подтверждении кассиром в одной
-  транзакции списывается склад и записывается доход на счёт СБП;
+* СБП (И2) — товар сразу откладывается на полку и встаёт в холд (резерв
+  продажи): вторая продажа тех же штук не пройдёт. Выручка НЕ пишется до
+  подтверждения; при подтверждении в одной транзакции холд снимается,
+  склад списывается, доход идёт на счёт СБП. Отклонение и таймаут
+  (``sbp_hold_hours``) снимают холд, товар остаётся на полке свободным;
 * вход — общий код магазина (настройка ``cashier_code``), сессия в памяти;
 * возвраты СБП кассиру недоступны — только руководитель/владелец в панели.
 
@@ -215,6 +217,9 @@ class Cashier:
         # перемещения на полку. Переиспользуем его вместо второго тяжёлого
         # запроса по регистру остатков и резервам.
         offer = _offer if _offer is not None else self.stock_offer()
+        # Удержания витрины-зоны (резервы под заказы, холды СБП): связанные
+        # позиции показывают доступность сверх физического остатка полки.
+        _zone, zone_held = self._zone_held()
         items: list[dict] = []
         by_nom: dict[str, dict] = {}
         by_name: dict[str, dict] = {}
@@ -227,6 +232,8 @@ class Cashier:
         for it in shelf_raw:
             nom_id = str(it.get("nom_id") or "").strip()
             shelf_qty = round(num(it.get("qty")), 3)
+            held = round(num(zone_held.get(nom_id)), 3) if nom_id else 0.0
+            free_qty = round(max(0.0, shelf_qty - held), 3)
             nm = nom_map.get(nom_id) or {}
             has_photo = bool(it.get("photo")) or bool(nm.get("photo_file"))
             # photo_url приоритет: shelf photo, затем nomenclature
@@ -239,7 +246,8 @@ class Cashier:
             row = {
                 "id": it["id"], "name": it.get("name") or "",
                 "price": round(num(it.get("price")), 2),
-                "qty": shelf_qty, "shelf_qty": shelf_qty, "stock_qty": 0.0,
+                "qty": free_qty, "shelf_qty": shelf_qty, "stock_qty": 0.0,
+                "held": held,
                 "status": str(it.get("status") or "ok"), "source": "shelf",
                 "photo": has_photo,
                 "photo_url": photo_url,
@@ -367,6 +375,64 @@ class Cashier:
         """Каталог, разложенный по id — для валидации корзины."""
         return {str(it["id"]): it for it in self.catalog(_offer=offer)["items"]}
 
+    # ------------------------------------------------------------- холды СБП
+    def _hold_ttl(self) -> float:
+        try:
+            ttl = num(self.db.setting("sbp_hold_hours", 24), 24)
+        except Exception:
+            ttl = 24.0
+        return ttl if ttl > 0 else 24.0
+
+    def _release_expired_holds(self) -> int:
+        """Ленивое снятие просроченных холдов — без фоновых задач."""
+        try:
+            from .stock import Stock
+            return Stock(self.db).release_expired_holds(self._hold_ttl())
+        except Exception:
+            return 0
+
+    def _release_sale_holds(self, sale_id: str) -> int:
+        try:
+            from .stock import Stock
+            return Stock(self.db).release(doc_id=sale_id)
+        except Exception:
+            return 0
+
+    def _hold_rows(self, rows: list[dict], sale_id: str) -> None:
+        """Холды строк продажи на витрине-зоне.
+
+        Без связки с номенклатурой или без склада-витрины холд невозможен —
+        такие строки продаются по-старому (проверка в момент подтверждения).
+        """
+        from .stock import Stock
+        stock = Stock(self.db)
+        zone = stock.shelf_warehouse()
+        if not zone:
+            return
+        for row in rows:
+            nom_id = str(row.get("nom_id") or "").strip()
+            if not nom_id:
+                # Связка могла появиться усыновлением при перемещении.
+                item = self.db.one("SELECT nom_id FROM shelf_items WHERE id=?",
+                                   (str(row.get("item_id") or ""),)) or {}
+                nom_id = str(item.get("nom_id") or "").strip()
+                row["nom_id"] = nom_id
+            if not nom_id:
+                continue
+            stock.hold(nom_id, zone, num(row["qty"]), sale_id)
+
+    def _zone_held(self) -> tuple[str, dict[str, float]]:
+        """Витрина-зона и карта удержаний на ней {nom_id: qty}."""
+        try:
+            from .stock import Stock
+            stock = Stock(self.db)
+            zone = stock.shelf_warehouse()
+            if not zone:
+                return "", {}
+            return zone, stock.reserved_all(zone)
+        except Exception:
+            return "", {}
+
     # -------------------------------------------- авто-пополнение витрины
     def _shelf_qty(self, item_id: str) -> float:
         row = self.db.one("SELECT qty FROM shelf_items WHERE id=?", (item_id,)) or {}
@@ -414,13 +480,20 @@ class Cashier:
             return self._pull_from_stock(
                 nom_id, qty, offer,
                 note=f"Касса: продажа со склада · {row.get('name') or nom_id}")
-        shortage = round(qty - self._shelf_qty(item_id), 3)
+        nom_id = str(row.get("nom_id") or "")
+        if not nom_id:
+            item = self.db.one("SELECT nom_id FROM shelf_items WHERE id=?",
+                               (item_id,)) or {}
+            nom_id = str(item.get("nom_id") or "")
+            row["nom_id"] = nom_id
+        on_shelf = self._shelf_qty(item_id)
+        if nom_id:
+            # Захолдированное под другую продажу со склада не добираем —
+            # недостающее везём со складов, чужой холд не трогаем.
+            _zone, held_map = self._zone_held()
+            on_shelf = round(max(0.0, on_shelf - num(held_map.get(nom_id))), 3)
+        shortage = round(qty - on_shelf, 3)
         if shortage > 1e-9:
-            nom_id = str(row.get("nom_id") or "")
-            if not nom_id:
-                item = self.db.one("SELECT nom_id FROM shelf_items WHERE id=?",
-                                   (item_id,)) or {}
-                nom_id = str(item.get("nom_id") or "")
             if not nom_id:
                 raise ValueError(
                     f"«{row.get('name') or item_id}»: на витрине не хватает "
@@ -438,6 +511,7 @@ class Cashier:
         Идемпотентно по ``request_id`` (двойное нажатие не создаёт две продажи).
         """
         self.require(token)
+        self._release_expired_holds()
         method = str(method or "cash").strip().lower()
         if method not in METHODS:
             raise ValueError("Способ оплаты: наличные (cash) или СБП (sbp)")
@@ -518,6 +592,13 @@ class Cashier:
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = True
             else:
+                # Товар откладываем на полку сразу (физически — кассиру в
+                # руки) и ставим в холд: деньги придут позже, а штуки уже
+                # заняты. Всё в одной транзакции: ошибка холда откатывает
+                # и перемещение, и платёж.
+                for row in rows:
+                    row["item_id"] = self._ensure_on_shelf(row, offer)
+                    row["source"] = "shelf"
                 # Назначение — из серверной корзины (названия каталога, не
                 # клиента): «NOZZA: Адресник × 2». Состав — в платёж целиком.
                 composition = [{"name": r["name"], "qty": r["qty"],
@@ -526,6 +607,7 @@ class Cashier:
                     amount=total, order_id="", items=composition,
                     note="Касса", request_id=f"cashier:{sale_id}" if not request_id else request_id,
                     actor=cashier, qr_kind="dynamic")
+                self._hold_rows(rows, sale_id)
                 self.db.execute(
                     "INSERT INTO cashier_sales"
                     "(id,payment_id,method,amount,items,cashier,request_id,created_at)"
@@ -569,18 +651,35 @@ class Cashier:
     # ------------------------------------------------- подтверждение СБП
     def incoming(self) -> dict:
         """СБП-продажи кассы, ожидающие сверки (только продажи, не заказы)."""
+        self._release_expired_holds()
         rows = self.db.query(
             "SELECT s.*, p.number, p.status, p.purpose FROM cashier_sales s"
             " JOIN sbp_payments p ON p.id=s.payment_id"
             " WHERE s.method='sbp' AND COALESCE(s.confirmed_at,'')=''"
             " AND p.status IN ('new','pending')"
             " ORDER BY datetime(s.created_at) DESC LIMIT 50")
+        holds_map: dict[str, list] = {}
+        sale_ids = [str(r.get("id") or "") for r in rows if r.get("id")]
+        if sale_ids:
+            try:
+                marks = ",".join("?" for _ in sale_ids)
+                for hold in self.db.query(
+                        "SELECT r.doc_id, r.qty, r.at, n.name nom_name FROM reserves r"
+                        " LEFT JOIN nomenclature n ON n.id=r.nom_id"
+                        f" WHERE r.doc_id IN ({marks}) AND r.kind='hold'"
+                        " AND r.state='active' ORDER BY datetime(r.at)",
+                        sale_ids):
+                    holds_map.setdefault(str(hold.get("doc_id") or ""),
+                                         []).append(hold)
+            except Exception:
+                holds_map = {}
         out = []
         for row in rows:
             try:
                 row["items"] = json.loads(row.get("items") or "[]")
             except json.JSONDecodeError:
                 row["items"] = []
+            row["holds"] = holds_map.get(str(row.get("id") or ""), [])
             out.append(row)
         return {"payments": out, "sbp_enabled": self.sbp.enabled()}
 
@@ -592,6 +691,7 @@ class Cashier:
         вызов не списывает склад и не пишет проводку повторно.
         """
         self.require(token)
+        self._release_expired_holds()
         sale = self.db.one("SELECT * FROM cashier_sales WHERE payment_id=?", (payment_id,))
         if not sale:
             raise ValueError("Продажа не найдена")
@@ -608,6 +708,9 @@ class Cashier:
             sale = self.db.one("SELECT * FROM cashier_sales WHERE payment_id=?", (payment_id,))
             if str(sale.get("confirmed_at") or ""):
                 return {**self._sale_result(sale), "already_recorded": True}
+            # 0) свой холд снимаем до проверок: иначе свободный остаток не
+            # увидит отложенный под эту же продажу товар и проверка упадёт.
+            self._release_sale_holds(sale["id"])
             # 1) остатки проверяем до денег: не хватает — ничего не трогаем.
             # Смотрим единый каталог: за время сверки товар могли продать с
             # витрины, но он мог и приехать на склад. Один снимок регистра
@@ -650,8 +753,12 @@ class Cashier:
         if str(sale.get("method") or "") != "sbp":
             raise ValueError("Это не СБП-продажа")
         cashier = str(sale.get("cashier") or "кассир")[:120]
-        payment = self.sbp.reject(payment_id, reason=reason or "Оплата не поступила",
-                                  actor=cashier)
+        # Холд снимаем в одной транзакции с отклонением: товар остаётся на
+        # полке и снова свободен для продажи.
+        with self.db.transaction():
+            self._release_sale_holds(sale["id"])
+            payment = self.sbp.reject(payment_id, reason=reason or "Оплата не поступила",
+                                      actor=cashier)
         self._audit(sale["id"], "reject_sbp", "СБП-продажа отклонена",
                     f"{num(sale['amount']):g} ₽", actor=cashier)
         return {**self._sale_result(sale), "payment": payment}

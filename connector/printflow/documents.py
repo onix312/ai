@@ -182,6 +182,10 @@ class Documents:
         }.get(doc["kind"])
         if not handler:
             raise ValueError(f"Не умею проводить: {doc['kind']}")
+        # И2: витрину ведёт полка, а не документы — иначе регистр зоны и
+        # shelf_items разъедутся. Приход на витрину — перемещением со
+        # склада, продажа — кассой/полкой, правки — корректировкой «−1/+1».
+        self._no_shelf_zone(doc.get("warehouse_id"), doc.get("warehouse_to_id"))
 
         with self.db.transaction():
             cost_total = handler(doc, items)
@@ -239,7 +243,11 @@ class Documents:
         revenue = 0.0
         for item in items:
             qty = num(item["qty"])
-            available = self.stock.qty(item["nom_id"], wh)
+            # Свободный остаток + собственный резерв заказа: чужой резерв
+            # сломать нельзя, а свой — можно (накладная его же и снимает).
+            available = (self.stock.free(item["nom_id"], wh)
+                         + self._order_reserved(item["nom_id"], wh,
+                                                str(doc.get("order_id") or "")))
             if available < qty:
                 name = item.get("nom_name") or "позиция"
                 raise ValueError(f"«{name}»: на складе {round(available, 1)} шт, продаём {round(qty, 1)}")
@@ -273,7 +281,7 @@ class Documents:
         total = 0.0
         for item in items:
             qty = num(item["qty"])
-            available = self.stock.qty(item["nom_id"], src)
+            available = self.stock.free(item["nom_id"], src)
             if available < qty:
                 name = item.get("nom_name") or "позиция"
                 raise ValueError(f"«{name}»: на складе-источнике {round(available, 1)} шт")
@@ -296,7 +304,7 @@ class Documents:
         total = 0.0
         for item in items:
             qty = num(item["qty"])
-            available = self.stock.qty(item["nom_id"], wh)
+            available = self.stock.free(item["nom_id"], wh)
             if available < qty:
                 name = item.get("nom_name") or "позиция"
                 raise ValueError(f"«{name}»: списываем {round(qty, 1)}, а есть {round(available, 1)}")
@@ -346,7 +354,7 @@ class Documents:
                     continue
                 comp_unit = self.stock.avg_cost(comp["nom_id"], wh)
                 comp_sum = comp_unit * need
-                available = self.stock.qty(comp["nom_id"], wh)
+                available = self.stock.free(comp["nom_id"], wh)
                 if available < need:
                     raise ValueError(
                         f"Не хватает «{comp.get('name') or comp['nom_id']}»:"
@@ -407,11 +415,35 @@ class Documents:
             " WHERE si.spec_id=? ORDER BY si.line", (spec["id"],))
 
     def _default_warehouse(self) -> str:
+        # Витрина — последний кандидат: документы по зоне не проводятся,
+        # дефолт должен указывать на учётный склад.
         row = self.db.one(
-            "SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+            "SELECT id FROM warehouses WHERE archived=0"
+            " ORDER BY CASE WHEN kind='shelf' THEN 1 ELSE 0 END, position LIMIT 1")
         if not row:
             raise ValueError("Не настроен ни один склад")
         return row["id"]
+
+    def _no_shelf_zone(self, *warehouse_ids: str) -> None:
+        """Запретить проведение по складу-витрине (её ведёт полка)."""
+        for warehouse_id in warehouse_ids:
+            if warehouse_id and self.stock.is_shelf_zone(warehouse_id):
+                wh = self.db.one("SELECT name FROM warehouses WHERE id=?",
+                                 (warehouse_id,)) or {}
+                raise ValueError(
+                    f"Склад «{wh.get('name') or warehouse_id}» — витрина: "
+                    "остатки ведёт полка, документы здесь не проводятся")
+
+    def _order_reserved(self, nom_id: str, warehouse_id: str,
+                        order_id: str) -> float:
+        """Активный резерв заказа — кредит при продаже по этому заказу."""
+        if not order_id:
+            return 0.0
+        row = self.db.one(
+            "SELECT COALESCE(SUM(qty),0) v FROM reserves"
+            " WHERE nom_id=? AND warehouse_id=? AND order_id=? AND state='active'",
+            (nom_id, warehouse_id, order_id)) or {}
+        return round(num(row.get("v")), 3)
 
     def _audit(self, entity_id: str, action: str, title: str) -> None:
         self.db.execute(
