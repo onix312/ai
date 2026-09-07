@@ -142,6 +142,63 @@ class Cashier:
             entry["sources"].sort(key=lambda s: num(s.get("qty")), reverse=True)
         return offer
 
+    def _nom_map(self, nom_ids: list[str]) -> dict[str, dict]:
+        """Карта nom_id → {group_id, group_name, niche_id, niche_name, photo, color}"""
+        if not nom_ids:
+            return {}
+        # группы
+        groups = {g["id"]: g for g in self.db.query("SELECT id,name,color FROM nom_groups WHERE archived=0")}
+        niches = {n["id"]: n for n in self.db.query("SELECT id,name,color,icon FROM niches WHERE active=1")}
+        out: dict[str, dict] = {}
+        # batch query
+        placeholders = ",".join("?" for _ in nom_ids)
+        try:
+            rows = self.db.query(f"SELECT id, group_id, niche_id, photo FROM nomenclature WHERE id IN ({placeholders})", nom_ids)
+        except Exception:
+            rows = []
+        for r in rows:
+            gid = str(r.get("group_id") or "")
+            nid = str(r.get("niche_id") or "")
+            g = groups.get(gid) or {}
+            nch = niches.get(nid) or {}
+            out[r["id"]] = {
+                "group_id": gid,
+                "group_name": g.get("name") or "",
+                "group_color": g.get("color") or "",
+                "niche_id": nid,
+                "niche_name": nch.get("name") or "",
+                "niche_color": nch.get("color") or "",
+                "niche_icon": nch.get("icon") or "",
+                "photo_file": r.get("photo") or "",
+            }
+        return out
+
+    def _categories(self) -> list[dict]:
+        """Список категорий для кассы: группы номенклатуры + ниши."""
+        groups = self.db.query("SELECT id,name,color FROM nom_groups WHERE archived=0 ORDER BY position, name")
+        niches = self.db.query("SELECT id,name,color,icon FROM niches WHERE active=1 ORDER BY position, name")
+        cats: list[dict] = []
+        # ниши как категории верхнего уровня
+        for n in niches:
+            cats.append({
+                "id": f"niche:{n['id']}",
+                "kind": "niche",
+                "raw_id": n["id"],
+                "name": n.get("name") or "Без названия",
+                "color": n.get("color") or "#6366f1",
+                "icon": n.get("icon") or "◆",
+            })
+        for g in groups:
+            cats.append({
+                "id": f"group:{g['id']}",
+                "kind": "group",
+                "raw_id": g["id"],
+                "name": g.get("name") or "Без названия",
+                "color": g.get("color") or "#6366f1",
+                "icon": "",
+            })
+        return cats
+
     def catalog(self) -> dict[str, Any]:
         """Единый каталог кассы: витрина + свободные остатки складов.
 
@@ -150,25 +207,48 @@ class Cashier:
         наличии», когда товар лежит на складе в соседней комнате. Товары,
         которых на витрине нет вовсе, приходят виртуальными позициями
         ``stock:<nom_id>`` и материализуются на полке при продаже.
+
+        Расширенная версия: фото-URL, категории (группы/ниши), цвета.
         """
         offer = self.stock_offer()
         items: list[dict] = []
         by_nom: dict[str, dict] = {}
         by_name: dict[str, dict] = {}
         by_id: dict[str, dict] = {}
-        for it in self.shelf.items():
-            if not it.get("active"):
-                continue
+        # собрать все nom_id для мапы категорий
+        shelf_raw = [it for it in self.shelf.items() if it.get("active")]
+        all_nom_ids = list({str(it.get("nom_id") or "").strip() for it in shelf_raw if str(it.get("nom_id") or "").strip()} | set(offer.keys()))
+        nom_map = self._nom_map(all_nom_ids)
+
+        for it in shelf_raw:
             nom_id = str(it.get("nom_id") or "").strip()
             shelf_qty = round(num(it.get("qty")), 3)
+            nm = nom_map.get(nom_id) or {}
+            has_photo = bool(it.get("photo")) or bool(nm.get("photo_file"))
+            # photo_url приоритет: shelf photo, затем nomenclature
+            if it.get("photo"):
+                photo_url = f"/api/shelf/photo.jpg?id={it['id']}"
+            elif nm.get("photo_file"):
+                photo_url = f"/api/nomenclature/photo.jpg?id={nom_id}"
+            else:
+                photo_url = ""
             row = {
                 "id": it["id"], "name": it.get("name") or "",
                 "price": round(num(it.get("price")), 2),
                 "qty": shelf_qty, "shelf_qty": shelf_qty, "stock_qty": 0.0,
                 "status": str(it.get("status") or "ok"), "source": "shelf",
-                "photo": bool(it.get("photo")), "barcode": it.get("barcode") or "",
+                "photo": has_photo,
+                "photo_url": photo_url,
+                "barcode": it.get("barcode") or "",
                 "sku": it.get("sku") or "", "nom_id": nom_id,
                 "unit": str(it.get("unit") or "шт"), "warehouse_name": "",
+                "group_id": nm.get("group_id") or "",
+                "group_name": nm.get("group_name") or "",
+                "group_color": nm.get("group_color") or "",
+                "niche_id": nm.get("niche_id") or "",
+                "niche_name": nm.get("niche_name") or "",
+                "niche_color": nm.get("niche_color") or "",
+                "niche_icon": nm.get("niche_icon") or "",
             }
             items.append(row)
             by_id[row["id"]] = row
@@ -177,10 +257,8 @@ class Cashier:
             name_key = str(row["name"]).strip().lower()
             if name_key:
                 by_name.setdefault(name_key, row)
-        # Склад → витрина: остаток склада прибавляем к связанной позиции полки.
-        # Связь ищем так же, как ``transfer_from_stock``: по nom_id, по
-        # legacy_shelf_id номенклатуры и по имени — чтобы один товар не давал
-        # два плитки в кассе.
+
+        # Склад → витрина
         for nom_id, entry in offer.items():
             target = by_nom.get(nom_id)
             if target is None:
@@ -200,29 +278,54 @@ class Cashier:
                 target["qty"] = round(num(target["qty"]) + stock_qty, 3)
                 target["price"] = target["price"] or round(num(entry.get("price")), 2)
                 target["warehouse_name"] = target["warehouse_name"] or source_name
+                # дополнить фото если у shelf не было, а у nom есть
+                if not target.get("photo_url") and (entry.get("photo") or nom_map.get(nom_id, {}).get("photo_file")):
+                    target["photo_url"] = f"/api/nomenclature/photo.jpg?id={nom_id}"
+                    target["photo"] = True
                 by_nom.setdefault(nom_id, target)
                 continue
+            nm = nom_map.get(nom_id) or {}
+            has_photo = bool(entry.get("photo")) or bool(nm.get("photo_file"))
+            photo_url = f"/api/nomenclature/photo.jpg?id={nom_id}" if has_photo else ""
             items.append({
                 "id": f"{STOCK_PREFIX}{nom_id}", "name": entry.get("name") or "",
                 "price": round(num(entry.get("price")), 2), "qty": stock_qty,
                 "shelf_qty": 0.0, "stock_qty": stock_qty,
                 "status": "ok", "source": "stock",
-                "photo": bool(entry.get("photo")), "barcode": "", "sku": "",
+                "photo": has_photo,
+                "photo_url": photo_url,
+                "barcode": "", "sku": "",
                 "nom_id": nom_id, "unit": str(entry.get("unit") or "шт"),
                 "warehouse_name": source_name,
+                "group_id": nm.get("group_id") or "",
+                "group_name": nm.get("group_name") or "",
+                "group_color": nm.get("group_color") or "",
+                "niche_id": nm.get("niche_id") or "",
+                "niche_name": nm.get("niche_name") or "",
+                "niche_color": nm.get("niche_color") or "",
+                "niche_icon": nm.get("niche_icon") or "",
             })
         for row in items:
-            # Полка пуста, но склад закрывает продажу — это не «нет в наличии»
             if num(row["qty"]) <= 0:
                 row["status"] = "empty"
             elif row["status"] == "empty":
                 row["status"] = "ok"
             row["price_missing"] = num(row["price"]) <= 0
+            # категория для фильтра: приоритет niche, затем group
+            if row.get("niche_id"):
+                row["category_id"] = f"niche:{row['niche_id']}"
+                row["category_name"] = row.get("niche_name") or "Без категории"
+            elif row.get("group_id"):
+                row["category_id"] = f"group:{row['group_id']}"
+                row["category_name"] = row.get("group_name") or "Без категории"
+            else:
+                row["category_id"] = ""
+                row["category_name"] = "Без категории"
         items.sort(key=lambda x: (str(x.get("name") or "").lower(), x["id"]))
         return {
             "items": items,
+            "categories": self._categories(),
             "sbp_enabled": self.sbp.enabled(),
-            # картинку в каталоге не гоняем — она нужна только на экране оплаты
             "sbp": self.payment_qr(with_svg=False),
             "shop_cash": self.shelf.shop_cash(),
         }

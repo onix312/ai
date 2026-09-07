@@ -71,9 +71,14 @@ const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function qr(link, opts) {
-  if (!link || !window.QR) return '';
+  if (!link) return '';
+  if (!window.QR || typeof window.QR.svg !== 'function') {
+    // QR lib ещё не загрузился — вернём заглушку, а после загрузки перерисуем
+    setTimeout(function(){ if (drawFn) { try { drawFn(); } catch(e){} } }, 400);
+    return '<div style="display:grid;place-items:center;width:72px;height:72px;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:10px;line-height:1.2;text-align:center;padding:4px">QR<br>загрузка…</div>';
+  }
   try { return QR.svg(link, Object.assign({ ecl: 'M', margin: 1 }, opts || {})); }
-  catch (e) { return ''; }
+  catch (e) { return '<div style="color:#b42318;font-size:11px">QR ошибка: '+esc(e.message||'')+'</div>'; }
 }
 
 function copy(text, btn, okLabel) {
