@@ -2462,11 +2462,20 @@ class ClientBot:
             return order
         return None
 
-    def _payment_purpose(self, number: str) -> str:
+    def _payment_purpose(self, number: str, order_id: str = "") -> str:
+        """Назначение перевода: шаблон владельца или состав заказа (18.0)."""
         purpose = str(self._settings().get("client_bot_payment_purpose") or "").strip()
         purpose = purpose.replace("{номер заказа}", str(number or ""))
         purpose = purpose.replace("{number}", str(number or ""))
-        return purpose or f"NOZZA {number}"
+        if purpose:
+            return purpose
+        from .payment_purpose import build as build_purpose
+        sbp = self._sbp()
+        lines = sbp.order_lines(order_id) if order_id else []
+        if lines:
+            return build_purpose(lines, sbp.brand(), f"№{number or ''}".strip(),
+                                 sbp.purpose_limit())
+        return f"{sbp.brand()} №{number or ''}".strip()
 
     def _pay_card(self, chat: str, row: dict,
                   order_id: str) -> tuple[str, dict | None]:
@@ -2504,7 +2513,7 @@ class ClientBot:
                 return (f"Сумма предоплаты по заказу №{number} уточняется — "
                         "мастер напишет реквизиты в этом чате.", self._menu())
             return "По этому заказу задолженности уже нет — повторная оплата не нужна.", self._menu()
-        purpose = self._payment_purpose(number)
+        purpose = self._payment_purpose(number, order_id)
         pay_details = pay_info or "Откройте QR СБП кнопкой ниже."
         title = (f"💳 Предоплата по заказу №{number}"
                  if is_prepay else f"💳 Заказ №{number}")
@@ -2545,7 +2554,7 @@ class ClientBot:
             return ("Сообщение уже передано мастеру ✓ Заявка на сверку ожидает "
                     "ручного подтверждения."), self._menu()
         intent_id = uid("payint")
-        purpose = self._payment_purpose(number)
+        purpose = self._payment_purpose(number, order_id)
         try:
             self.db.execute(
                 "INSERT INTO client_payment_intents"
@@ -2569,6 +2578,7 @@ class ClientBot:
                 sbp = self._sbp().create(
                     amount=round(due, 2), order_id=order_id, chat_id=chat,
                     purpose=purpose, note="Клиентский бот",
+                    items=self._sbp().order_lines(order_id),
                     request_id=f"client-intent:{intent_id}", actor="клиент")
                 sbp_id = str(sbp.get("id") or "")
                 self.db.execute(

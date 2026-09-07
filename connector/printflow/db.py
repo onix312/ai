@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -33,6 +33,11 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "client_payment_intents": [
         # связанный СБП-платёж (Касса 16.0): подтверждение идёт через ядро СБП
         ("sbp_id", "TEXT DEFAULT ''"),
+    ],
+    "sbp_payments": [
+        # полный состав оплаты (18.0): JSON [{name, qty, price}] — банковское
+        # назначение короткое, а состав корзины не теряется никогда
+        ("items", "TEXT DEFAULT '[]'"),
     ],
     "materials": [
         # встроенный тип из каталога (можно править под себя; 0 — свой материал)
@@ -1283,6 +1288,7 @@ CREATE TABLE IF NOT EXISTS sbp_payments (
     amount REAL DEFAULT 0,
     currency TEXT DEFAULT 'RUB',
     purpose TEXT DEFAULT '',     -- назначение платежа (основание)
+    items TEXT DEFAULT '[]',     -- полный состав: JSON [{name, qty, price}] (18.0)
     status TEXT DEFAULT 'new',   -- new | pending | confirmed | rejected | refunded
     request_id TEXT DEFAULT '',  -- идемпотентность создания
     account_id TEXT DEFAULT '',  -- счёт, на который записан подтверждённый платёж

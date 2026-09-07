@@ -215,6 +215,12 @@
   <h3 id="qrTitle">СБП · оплата</h3>
   <div class="qrbox" id="qrBox"></div>
   <div class="qrnote" id="qrNote"></div>
+  <div id="qrActions" style="display:none;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+   <a class="btn pay" id="bQrOpen" style="flex:1;text-align:center;text-decoration:none;display:none" target="_blank" rel="noopener">Открыть оплату</a>
+   <button class="btn ghost" id="bQrCopy" type="button" style="flex:1;display:none">Скопировать</button>
+   <button class="btn ghost" id="bQrShare" type="button" style="flex:1;display:none">Поделиться</button>
+   <button class="btn ghost" id="bQrSave" type="button" style="flex:1;display:none">QR файлом</button>
+  </div>
   <button class="btn pay" id="bQrPaid" type="button" style="width:100%;margin-bottom:9px">✓ Оплата пришла — подтвердить</button>
   <button class="btn ghost" id="bQrLater" type="button" style="width:100%">Позже · во «Входящие»</button>
  </div>
@@ -498,15 +504,58 @@ $("paySbp").addEventListener("click",function(){sellCart("sbp");});
 
 function showPaymentQr(sale){
   var qr=sale.qr||{};
+  var diag=qr.diagnostics||{};
   state.pendingPayment=sale.payment_id||"";
+  state.qrText=qr.text||"";
   $("qrTitle").textContent="СБП · "+money(sale.amount);
   var box=$("qrBox");
   var svg=qr.svg||(qr.text&&window.QR?window.QR.svg(qr.text,{size:240,margin:2}):"");
+  state.qrSvg=svg||"";
   box.innerHTML=svg||('<div class="empty">'+esc(qr.hint||"QR не настроен")+'</div>');
-  var kind={gost:"Оплата по QR: сумма и назначение уже внутри",link:"Ссылка банка с суммой "+money(sale.amount),dynamic:"Динамический QR банка · "+money(sale.amount),static:"QR магазина · покупатель вводит сумму "+money(sale.amount)}[qr.kind]||"";
-  $("qrNote").innerHTML=[kind,qr.bank_name?"Банк: "+esc(qr.bank_name):"", "Склад спишется и выручка запишется только после подтверждения"].filter(Boolean).join("<br>");
+  var lines=[];
+  if(qr.purpose)lines.push("Назначение: "+esc(qr.purpose));
+  if(diag.why)lines.push(esc(diag.why));
+  else{
+    var kind={gost:"Оплата по QR: сумма и назначение уже внутри",link:"Ссылка банка с суммой "+money(sale.amount),dynamic:"Динамический QR банка · "+money(sale.amount),static:"QR магазина · покупатель вводит сумму "+money(sale.amount)}[qr.kind]||"";
+    if(kind)lines.push(kind);
+  }
+  if(qr.bank_name)lines.push("Банк: "+esc(qr.bank_name));
+  lines.push("Склад спишется и выручка запишется только после подтверждения");
+  $("qrNote").innerHTML=lines.join("<br>");
+  // Кнопки: «Открыть» — только для безопасной https-ссылки (сервер + проверка).
+  var hasText=!!qr.text;
+  var canOpen=!!(hasText&&qr.open_url&&qr.open_url.indexOf("https://")===0&&diag.can_open);
+  $("qrActions").style.display=(hasText||canOpen)?"flex":"none";
+  var bOpen=$("bQrOpen");
+  bOpen.style.display=canOpen?"block":"none";
+  if(canOpen)bOpen.href=qr.open_url;
+  $("bQrCopy").style.display=hasText?"block":"none";
+  $("bQrShare").style.display=(hasText&&navigator.share)?"block":"none";
+  $("bQrSave").style.display=svg?"block":"none";
   $("qrModal").classList.add("on");
 }
+function qrFallbackCopy(t){
+  var ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();
+  try{document.execCommand("copy");toast("Скопировано ✓");}catch(e){toast("Не скопировалось");}
+  document.body.removeChild(ta);
+}
+$("bQrCopy").addEventListener("click",function(){
+  var t=state.qrText||"";if(!t)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){toast("Скопировано ✓");},function(){qrFallbackCopy(t);});
+  }else qrFallbackCopy(t);
+});
+$("bQrShare").addEventListener("click",function(){
+  var t=state.qrText||"";if(!t||!navigator.share)return;
+  navigator.share({title:"Оплата NOZZA",text:t}).catch(function(){});
+});
+$("bQrSave").addEventListener("click",function(){
+  var svg=state.qrSvg||"";if(!svg)return;
+  var blob=new Blob([svg],{type:"image/svg+xml"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="oplata-qr.svg";
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},600);
+});
 $("bQrLater").addEventListener("click",function(){
   $("qrModal").classList.remove("on");
   toast("СБП-платёж ждёт сверки во «Входящих»");

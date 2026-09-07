@@ -27,6 +27,7 @@ from typing import Any
 
 from .accounting import Accounting, num, uid
 from .config import now_iso
+from .payment_purpose import build as build_purpose
 from .sbp import Sbp, STATUS_PENDING
 from .shelf import Shelf
 
@@ -517,8 +518,12 @@ class Cashier:
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = True
             else:
+                # Назначение — из серверной корзины (названия каталога, не
+                # клиента): «NOZZA: Адресник × 2». Состав — в платёж целиком.
+                composition = [{"name": r["name"], "qty": r["qty"],
+                                "price": r["price"]} for r in rows]
                 payment = self.sbp.create(
-                    amount=total, order_id="", purpose=f"Продажа на кассе · {len(rows)} поз.",
+                    amount=total, order_id="", items=composition,
                     note="Касса", request_id=f"cashier:{sale_id}" if not request_id else request_id,
                     actor=cashier, qr_kind="dynamic")
                 self.db.execute(
@@ -534,9 +539,13 @@ class Cashier:
                 # QR для покупателя: динамический от банка или статический
                 # QR магазина — рисуется на экране кассы
                 payload_out["qr"] = self.payment_qr(payment, total)
+        label = str(payload_out.get("payment", {}).get("purpose") or "")
+        if not label:
+            # Наличные без банковского назначения — состав для журнала.
+            label = build_purpose(rows, brand="")
         self._audit(sale_id, "sell", "Продажа на кассе", f"{method} · {total:g} ₽", actor=cashier)
         self.db.add_event("shelf", "Продажа на кассе",
-                          f"{method} · {total:g} ₽ · {len(rows)} поз.",
+                          f"{method} · {total:g} ₽ · {label}",
                           data={"sale_id": sale_id, "method": method, "cashier": cashier})
         return payload_out
 

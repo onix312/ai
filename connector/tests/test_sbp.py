@@ -248,7 +248,8 @@ class SbpRouteTests(unittest.TestCase):
                       "actor": "panel"})
             self.assertEqual(status, 200)
             self.assertEqual(body["status"], STATUS_NEW)
-            self.assertEqual(body["purpose"], "Оплата заказа №1001")
+            # 18.0: назначение по заказу — из состава, а не «Оплата заказа №…»
+            self.assertEqual(body["purpose"], "NOZZA №1001: Адресник × 1")
         finally:
             db.close()
 

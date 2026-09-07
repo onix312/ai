@@ -499,7 +499,7 @@ class ClientBotTests(unittest.TestCase):
         card = [p for p in self._sends(sent) if "350" in p["text"]]
         self.assertTrue(card)
         self.assertIn("СБП", card[0]["text"])
-        self.assertIn("NOZZA 1001", card[0]["text"])
+        self.assertIn("NOZZA №1001", card[0]["text"])
         notified = self._notify()
         sent.clear()
         self.bot._handle(self._cb(f"paid:o1001"))

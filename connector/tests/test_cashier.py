@@ -398,7 +398,8 @@ class CashierSbpQrTests(unittest.TestCase):
         self.assertEqual(sale["qr"]["text"], "https://qr.nspk.ru/AS100012345")
         self.assertEqual(sale["qr"]["kind"], "static")
         self.assertEqual(sale["qr"]["amount"], 1000)
-        self.assertIn("Продажа на кассе", sale["qr"]["purpose"])
+        # 18.0: назначение — из товаров, а не «Продажа на кассе · N поз.»
+        self.assertEqual(sale["qr"]["purpose"], "NOZZA: Адресник × 2")
 
     def test_dynamic_payment_qr_wins_over_shop_qr(self):
         """Если банк выдал динамический QR с суммой — показываем его."""

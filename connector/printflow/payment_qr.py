@@ -32,7 +32,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 from .accounting import num
 
@@ -58,8 +60,58 @@ _SPACES = re.compile(r"\s+")
 
 def _clean(value: Any, limit: int = 0) -> str:
     """Значение реквизита без разделителей формата и лишних пробелов."""
-    text = _SPACES.sub(" ", str(value or "").replace("|", " ")).strip()
+    text = str(value or "").replace("|", " ")
+    # Управляющие символы в QR не пускаем (кроме пробельных — они схлопнутся).
+    text = "".join(ch for ch in text
+                   if ch in " \t\n\r\f\v" or unicodedata.category(ch) != "Cc")
+    text = _SPACES.sub(" ", text).strip()
     return text[:limit] if limit else text
+
+
+def safe_open_url(text: Any) -> str:
+    """Можно ли открыть payload кнопкой «Открыть оплату».
+
+    Разрешён только ``https://`` без логина/пароля в адресе: ``javascript:``,
+    ``data:``, deep link приложений и ссылки с пробелами/кавычками —
+    не открываем. Домен не ограничиваем жёстким списком (банки разные),
+    но возвращаем его отдельно в ``domain_of`` для показа и диагностики.
+    """
+    raw = str(text or "").strip()
+    if not raw or len(raw) > 2000:
+        return ""
+    if any(ch.isspace() for ch in raw):
+        return ""
+    if "<" in raw or ">" in raw or '"' in raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return ""
+    if parts.scheme.lower() != "https":
+        return ""
+    if not parts.hostname:
+        return ""
+    if parts.username or parts.password:
+        return ""
+    return raw
+
+
+def domain_of(text: Any) -> str:
+    """Домен payload-ссылки для диагностики (пусто — не ссылка)."""
+    try:
+        return str(urlsplit(str(text or "").strip()).hostname or "")
+    except ValueError:
+        return ""
+
+
+def qr_purpose_of(kind: str, text: str) -> str:
+    """Назначение, фактически лежащее внутри QR (ГОСТ: поле Purpose)."""
+    if kind != "gost" or not text:
+        return ""
+    for part in str(text).split("|"):
+        if part.startswith("Purpose="):
+            return part[len("Purpose="):]
+    return ""
 
 
 def _digits(value: Any) -> str:
@@ -183,7 +235,11 @@ def _fits(payload: str) -> bool:
 
 def link_payload(template: str, amount: float = 0.0, purpose: str = "",
                  number: str = "") -> str:
-    """Платёжная ссылка банка с подстановкой суммы и назначения."""
+    """Платёжная ссылка банка с подстановкой суммы и назначения.
+
+    Назначение и номер URL-кодируются: пробелы и ``&`` иначе рвут ссылку
+    (18.0 — раньше подставлялись как есть и ломали платёж).
+    """
     text = str(template or "").strip()
     if not text:
         return ""
@@ -191,8 +247,8 @@ def link_payload(template: str, amount: float = 0.0, purpose: str = "",
     rub = f"{value:.2f}".rstrip("0").rstrip(".") if value else ""
     return (text.replace("{amount}", rub)
                 .replace("{amount_kop}", str(kopecks(value)) if value else "")
-                .replace("{number}", str(number or ""))
-                .replace("{purpose}", _clean(purpose)))
+                .replace("{number}", quote(str(number or ""), safe=""))
+                .replace("{purpose}", quote(_clean(purpose), safe="")))
 
 
 def render_svg(text: str, scale: int = 5) -> str:
@@ -307,9 +363,73 @@ def build(db, amount: float = 0.0, purpose: str = "", number: str = "",
         elif mode == "static":
             result["hint"] = ("QR магазина не задан: вставьте ссылку из банка в "
                               "настройку «Статический QR магазина (СБП)»")
+        result["diagnostics"] = _diagnostics(result, template, purpose)
+        result["open_url"] = ""
+        result["can_open"] = False
         return result
     if with_svg:
         result["svg"] = render_svg(result["text"])
         if not result["svg"]:
             result["hint"] = "Строка не помещается в QR — сократите реквизиты"
+    result["diagnostics"] = _diagnostics(result, template, purpose)
+    result["open_url"] = str(result["diagnostics"]["open_url"])
+    result["can_open"] = bool(result["diagnostics"]["can_open"])
     return result
+
+
+DIAG_SOURCE = {
+    "dynamic": "bank_dynamic", "gost": "gost_local",
+    "link": "bank_link_template", "static": "shop_static", "": "none",
+}
+
+
+def _diagnostics(result: dict[str, Any], template: str,
+                 purpose: str) -> dict[str, Any]:
+    """Безопасная диагностика QR для кассы и панели (18.0).
+
+    Отвечает на вопросы «что внутри», «откроется ли банк» и «почему текст» —
+    без секретов: только тип, домен и флаги. ``purpose_in_qr=None`` означает
+    «содержимое кода банка нам неизвестно» (честное «не знаю»).
+    """
+    kind = str(result.get("kind") or "")
+    text = str(result.get("text") or "")
+    open_url = safe_open_url(text) if text else ""
+    domain = domain_of(text) if open_url else ""
+    qr_purpose = qr_purpose_of(kind, text)
+    if kind == "gost":
+        purpose_in_qr: bool | None = bool(qr_purpose)
+        purpose_truncated = bool(purpose) and qr_purpose != purpose
+    elif kind == "link":
+        purpose_in_qr = bool(purpose) and "{purpose}" in str(template or "")
+        purpose_truncated = False
+    elif kind in ("dynamic", "static"):
+        purpose_in_qr = None
+        purpose_truncated = False
+    else:
+        purpose_in_qr = False
+        purpose_truncated = False
+    can_open = bool(open_url)
+    if kind == "gost":
+        why = ("Платёжный QR по реквизитам: камера покажет текст. "
+               "Откройте приложение банка и отсканируйте внутри него.")
+        fallback = "bank_app"
+    elif kind == "link":
+        why = (f"Ссылка банка ({domain}): камера предложит открыть."
+               if domain else "Ссылка банка: камера предложит открыть.")
+        fallback = "web"
+    elif kind == "dynamic":
+        why = "Динамический QR банка: сумма внутри."
+        fallback = "web" if can_open else "bank_app"
+    elif kind == "static":
+        why = "QR магазина: сумму вводит покупатель."
+        fallback = "web" if can_open else "bank_app"
+    else:
+        why = str(result.get("hint") or "QR не настроен")
+        fallback = "none"
+    return {
+        "kind": kind, "source": DIAG_SOURCE.get(kind, "none"), "domain": domain,
+        "static": kind == "static", "amount_in_qr": bool(result.get("amount_in_qr")),
+        "purpose_in_qr": purpose_in_qr, "purpose_truncated": purpose_truncated,
+        "qr_purpose": qr_purpose, "open_url": open_url, "can_open": can_open,
+        "expect_bank_chooser": can_open, "fallback": fallback, "why": why,
+    }

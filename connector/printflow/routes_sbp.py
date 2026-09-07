@@ -33,11 +33,14 @@ def payment_qr(api: Any, ctx: Ctx):
     Генерируется локально: ни банковского API, ни внешних сервисов.
     """
     from .accounting import num
+    from .payment_purpose import sanitize
     from .payment_qr import build
+    # Ручной QR (счёт/ценник): назначение от клиента чистим и режем —
+    # управляющие символы и бесконечные строки в код не пускаем.
     return build(api.db,
                  amount=num(ctx.one("amount", "0")),
-                 purpose=str(ctx.one("purpose", "") or ""),
-                 number=str(ctx.one("number", "") or ""))
+                 purpose=sanitize(ctx.one("purpose", ""), 210),
+                 number=sanitize(ctx.one("number", ""), 64))
 
 
 @router.get("/api/payment/qr/check",
