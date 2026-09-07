@@ -116,6 +116,18 @@ class PfPagesHub extends LitElement {
       color: var(--text-2); margin-bottom: var(--sp-4);
     }
     .qr-actions { display: flex; gap: var(--sp-3); justify-content: center; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+      border: 1px solid var(--btn-line); background: var(--btn-bg); color: var(--btn-text);
+      border-radius: var(--btn-radius); padding: 8px 16px; font-size: var(--fs-sm);
+      font-weight: var(--fw-medium); cursor: pointer; text-decoration: none; line-height: 1.2;
+      transition: background var(--t-fast), border-color var(--t-fast);
+    }
+    .btn:hover { background: var(--btn-bg-hover); }
+    .btn.primary {
+      background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+    }
+    .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
     @media (prefers-reduced-motion: reduce) {
       .pcard { transition: none; }
       .pcard:hover { transform: none; }

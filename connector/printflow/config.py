@@ -251,7 +251,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "installed_sha": "",            # что установлено (для режима без git)
     "last_update_at": "",           # когда обновлялись в последний раз
     # Интерфейс
-    "theme": "system",
+    "theme": "dark",
     "accent": "indigo",
     # --- 8.0: Мост Bambu Studio ------------------------------------------
     "watch_folder_enabled": False,

@@ -305,6 +305,7 @@ function renderLive() {
   renderMaintenance(p);
   renderJobCost(p);
   renderChart(p);
+  refreshEnough();
 
   const controls = $$('[data-cmd],[data-set],[data-jog]');
   controls.forEach((b) => { b.disabled = !p.connection.connected; });

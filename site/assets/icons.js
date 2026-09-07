@@ -74,7 +74,7 @@ const ICONS = {
 
   /* --- 17.0: хаб страниц и касса --- */
   qr: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><path d="M13.5 13.5h3.2v3.2M20.5 13.5v.01M16.7 20.5h3.8M13.5 20.5v.01M16.7 17.1v3.4"/>',
-  cart: '<path d="M3 4.5h2l2.2 11.2a1.6 1.6 0 0 0 1.6 1.3h7.7a1.6 1.6 0 0 0 1.6-1.3L20 8H6"/>',
+  cart: '<path d="M3 4.5h2l2.2 11.2a1.6 1.6 0 0 0 1.6 1.3h7.7a1.6 1.6 0 0 0 1.6-1.3L20 8H6"/><circle cx="9" cy="19.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="16" cy="19.5" r="1.3" fill="currentColor" stroke="none"/>',
   track: '<circle cx="12" cy="11" r="3"/><path d="M12 2.5c-4 0-7.5 3.6-7.5 8.2 0 5.4 7.5 10.8 7.5 10.8s7.5-5.4 7.5-10.8c0-4.6-3.5-8.2-7.5-8.2z"/>',
   user: '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20.5c.8-3.6 3.8-5.4 7.5-5.4s6.7 1.8 7.5 5.4"/>',
   tv: '<rect x="3" y="5" width="18" height="13" rx="2"/><path d="M8.5 21.5h7M12 18v3.5"/>',

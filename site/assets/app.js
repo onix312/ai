@@ -1107,7 +1107,7 @@ function schemaControl(f) {
 function schemaCard(title, sub, fields, opts = {}) {
   const rows = fields.map((f) => {
     const adv = f.advanced ? ' data-advanced="1"' : '';
-    return `<div class="set-row"${adv}><div class="sinfo"><b>${esc(f.label)}</b>`
+    return `<div class="set-row"${adv} data-set-row><div class="sinfo"><b>${esc(f.label)}</b>`
       + (f.advanced ? '<small>техническое</small>' : '')
       + `</div>${schemaControl(f)}</div>`;
   }).join('');
@@ -1517,7 +1517,7 @@ function renderSettings() {
         s.has_studio_gateway_access_code
           ? 'Сохранён — оставьте пустым, чтобы не менять. Studio спросит этот код при подключении.'
           : 'Задайте сами: Studio спросит его при подключении. Пусто при включении — сгенерируется и повторно не покажется.',
-        '<input type="password" autocomplete="new-password" data-setting="studio_gateway_access_code" placeholder="'
+        '<input type="password" autocomplete="new-password" data-setting="studio_gateway_access_code" data-secret="1" placeholder="'
           + (s.has_studio_gateway_access_code ? '••••••••' : 'задайте код') + '">');
     get('/api/studio/status').then((data) => {
       const el = $('studio_status');
@@ -1550,7 +1550,7 @@ function renderSettings() {
   $('set_tg').innerHTML = settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
     `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
     + settingRow('telegram_token', 'Bot Token', s.has_telegram_token ? 'Сохранён — оставьте пустым, чтобы не менять' : 'Получите у @BotFather',
-      '<input type="password" autocomplete="new-password" data-setting="telegram_token" placeholder="' + (s.has_telegram_token ? '••••••••' : 'токен') + '">')
+      '<input type="password" autocomplete="new-password" data-setting="telegram_token" data-secret="1" placeholder="' + (s.has_telegram_token ? '••••••••' : 'токен') + '">')
     + settingRow('telegram_chat_id', 'Chat ID', 'Ваш идентификатор в Telegram',
       `<input type="text" data-setting="telegram_chat_id" value="${esc(String(s.telegram_chat_id || ''))}">`)
     + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
@@ -1725,7 +1725,7 @@ function renderUpdateInfo() {
 let settingsPane = 'business';
 
 function selectSettingsPane(name) {
-  const known = ['business', 'tax', 'pricing', 'money', 'production', 'system'];
+  const known = ['business', 'tax', 'pricing', 'money', 'production', 'cashier', 'sbp', 'bank', 'all', 'system'];
   if (!known.includes(name)) return;
   settingsPane = name;
   const search = $('set_search');
@@ -2533,6 +2533,22 @@ function bind() {
     const tabs = $('set_tabs');
     if (tabs) tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+  const settingsHost = $('view-settings');
+  if (settingsHost) {
+    const syncSettingEl = (e) => {
+      const k = e.target.dataset && e.target.dataset.setting;
+      if (!k || e.target.type === 'file') return;
+      const isCb = e.target.type === 'checkbox';
+      const val = isCb ? e.target.checked : e.target.value;
+      $$(`[data-setting="${k}"]`, settingsHost).forEach((el) => {
+        if (el === e.target) return;
+        if (isCb && el.type === 'checkbox') el.checked = val;
+        else if (!isCb && el.type !== 'checkbox') el.value = val;
+      });
+    };
+    settingsHost.addEventListener('input', syncSettingEl);
+    settingsHost.addEventListener('change', syncSettingEl);
+  }
   $('set_search').addEventListener('input', U.debounce((e) => filterSettings(e.target.value), 150));
   $('set_tax_mode').addEventListener('change', (e) => {
     // Показываем поля выбранного режима сразу, не дожидаясь сохранения.

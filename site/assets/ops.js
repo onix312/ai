@@ -2927,8 +2927,9 @@ function bind() {
       const row = linkBtn.closest('.of-spool-row');
       const spoolId = (row.querySelector('[data-spool-sel]') || {}).value || '';
       if (!spoolId) return fail(new Error('Сначала выберите катушку в строке'));
-      if (typeof linkAmsSpool === 'function') {
-        await linkAmsSpool(spoolId);
+      const linkFn = typeof linkAmsSpool === 'function' ? linkAmsSpool : (PF.modules.money && PF.modules.money.linkAmsSpool);
+      if (typeof linkFn === 'function') {
+        await linkFn(spoolId);
         renderSpoolRows(snapshotSpoolRows());
       }
     });
@@ -2937,6 +2938,8 @@ function bind() {
   if (spoolAuto) spoolAuto.addEventListener('click', autoSpoolsFromAms);
   const spoolPick = $('of_spool_pick');
   if (spoolPick) spoolPick.addEventListener('click', pickSpoolsForOrder);
+  const nomCreateBtn = $('of_nom_create');
+  if (nomCreateBtn) nomCreateBtn.addEventListener('click', createProductFromOrder);
 
   /* ---- состав заказа (мультизаказ) ---- */
   const itemAdd = $('of_item_add');

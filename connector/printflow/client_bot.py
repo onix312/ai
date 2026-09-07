@@ -2216,8 +2216,9 @@ class ClientBot:
                 "для безопасной проверки нажмите «Отправить номер».\n"
                 "После этого напишите «мои заказы».")
 
-    def _linked_orders(self, chat: str, row: dict) -> list[dict]:
+    def _linked_orders(self, chat: str, row: dict | None) -> list[dict]:
         """Заказы чата: прямые ссылки + совпадение по телефону."""
+        row = row or {}
         orders: dict[str, dict] = {}
         for link in self.db.query(
                 "SELECT order_id FROM client_orders WHERE chat_id=?", (chat,)):
@@ -2446,6 +2447,10 @@ class ClientBot:
         if status == "ready":
             keys.append([{"text": "📅 Не могу забрать сегодня",
                           "callback_data": f"pickuplater:{order['id']}"}])
+        # Повтор завершённого заказа по прежней конфигурации
+        if self._is_final(order):
+            keys.append([{"text": "🔁 Повторить заказ",
+                          "callback_data": f"repeat:{order['id']}"}])
         keys.append([{"text": "🛍 Каталог", "callback_data": "catalog"},
                      {"text": "📦 Мои заказы", "callback_data": "mine"}])
         return {"inline_keyboard": keys}
