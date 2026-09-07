@@ -33,6 +33,30 @@ def add_item(db: Database, item_id: str = "s1", qty: float = 10, price: float = 
         "cost_per_unit": 120, "active": 1})
 
 
+class CashierSchemaTests(unittest.TestCase):
+    def test_old_nom_groups_gets_color_column(self):
+        """База до 17.0 не должна ронять каталог ошибкой no such column."""
+        folder = tempfile.TemporaryDirectory()
+        _held.append(folder)
+        path = pathlib.Path(folder.name) / "old-cashier.sqlite3"
+        db = Database(path)
+        db.close()
+        import sqlite3
+        connection = sqlite3.connect(path)
+        connection.execute("ALTER TABLE nom_groups DROP COLUMN color")
+        connection.commit()
+        connection.close()
+
+        migrated = Database(path)
+        try:
+            columns = {row["name"] for row in migrated.query("PRAGMA table_info(nom_groups)")}
+            self.assertIn("color", columns)
+            self.assertEqual(migrated.one("SELECT color FROM nom_groups LIMIT 1")["color"],
+                             "#6366f1")
+        finally:
+            migrated.close()
+
+
 class CashierTests(unittest.TestCase):
     def setUp(self):
         self.db = make_db()
@@ -98,6 +122,17 @@ class CashierTests(unittest.TestCase):
         self.assertIn(p["status"], ("new", "pending"))
         self.assertEqual(p["amount"], 1000)
 
+    def test_sbp_retry_returns_same_payment_and_qr_payload(self):
+        first = self.cashier.sell(
+            [{"item_id": "s1", "qty": 2}], "sbp", self.token, request_id="mobile-1")
+        again = self.cashier.sell(
+            [{"item_id": "s1", "qty": 2}], "sbp", self.token, request_id="mobile-1")
+        self.assertTrue(again["already_recorded"])
+        self.assertEqual(again["sale_id"], first["sale_id"])
+        self.assertEqual(again["payment_id"], first["payment_id"])
+        self.assertIn("qr", again)
+        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM cashier_sales")["n"], 1)
+
     def test_sbp_confirm_deducts_stock_and_writes_income_on_sbp_account(self):
         r = self.cashier.sell([{"item_id": "s1", "qty": 2}], "sbp", self.token)
         c = self.cashier.confirm_sbp(r["payment_id"], self.token)
@@ -126,6 +161,8 @@ class CashierTests(unittest.TestCase):
         self.assertEqual(
             self.db.one("SELECT status FROM sbp_payments WHERE id=?", (r["payment_id"],))["status"],
             "rejected")
+        self.assertEqual(self.cashier.incoming()["payments"], [],
+                         "отклонённая оплата не должна оставаться во входящих")
 
     def test_sbp_confirm_fails_cleanly_on_shortfall(self):
         """Полку продали во время сверки — подтверждение не должно ничего сломать."""

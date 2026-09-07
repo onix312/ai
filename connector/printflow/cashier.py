@@ -199,7 +199,7 @@ class Cashier:
             })
         return cats
 
-    def catalog(self) -> dict[str, Any]:
+    def catalog(self, *, _offer: dict[str, dict] | None = None) -> dict[str, Any]:
         """Единый каталог кассы: витрина + свободные остатки складов.
 
         Позиция полки, связанная с номенклатурой, показывает суммарную
@@ -210,7 +210,10 @@ class Cashier:
 
         Расширенная версия: фото-URL, категории (группы/ниши), цвета.
         """
-        offer = self.stock_offer()
+        # Продажа уже получает снимок доступного склада для последующего
+        # перемещения на полку. Переиспользуем его вместо второго тяжёлого
+        # запроса по регистру остатков и резервам.
+        offer = _offer if _offer is not None else self.stock_offer()
         items: list[dict] = []
         by_nom: dict[str, dict] = {}
         by_name: dict[str, dict] = {}
@@ -359,9 +362,9 @@ class Cashier:
         qr["purpose"] = purpose or str(qr.get("purpose") or "")
         return qr
 
-    def _catalog_index(self) -> dict[str, dict]:
+    def _catalog_index(self, offer: dict[str, dict] | None = None) -> dict[str, dict]:
         """Каталог, разложенный по id — для валидации корзины."""
-        return {str(it["id"]): it for it in self.catalog()["items"]}
+        return {str(it["id"]): it for it in self.catalog(_offer=offer)["items"]}
 
     # -------------------------------------------- авто-пополнение витрины
     def _shelf_qty(self, item_id: str) -> float:
@@ -456,10 +459,21 @@ class Cashier:
                 existing = self.db.one(
                     "SELECT * FROM cashier_sales WHERE request_id=?", (request_id,))
                 if existing:
-                    return self._sale_result(existing, already_recorded=True)
-            # валидация остатков и цены до любых изменений
-            index = self._catalog_index()
+                    result = self._sale_result(existing, already_recorded=True)
+                    if str(existing.get("method") or "") == "sbp":
+                        payment = self.db.one(
+                            "SELECT * FROM sbp_payments WHERE id=?",
+                            (existing.get("payment_id") or "",)) or {}
+                        result["payment"] = payment
+                        result["qr"] = self.payment_qr(payment, num(existing.get("amount")))
+                        result["paid"] = bool(str(existing.get("confirmed_at") or ""))
+                    else:
+                        result["paid"] = True
+                    return result
+            # Один снимок склада используется и для проверки корзины, и для
+            # перемещения товара: не выполняем тяжёлый расчёт остатков дважды.
             offer = self.stock_offer()
+            index = self._catalog_index(offer)
             rows = []
             total = 0.0
             for entry in payload:
@@ -550,6 +564,7 @@ class Cashier:
             "SELECT s.*, p.number, p.status, p.purpose FROM cashier_sales s"
             " JOIN sbp_payments p ON p.id=s.payment_id"
             " WHERE s.method='sbp' AND COALESCE(s.confirmed_at,'')=''"
+            " AND p.status IN ('new','pending')"
             " ORDER BY datetime(s.created_at) DESC LIMIT 50")
         out = []
         for row in rows:
@@ -586,9 +601,10 @@ class Cashier:
                 return {**self._sale_result(sale), "already_recorded": True}
             # 1) остатки проверяем до денег: не хватает — ничего не трогаем.
             # Смотрим единый каталог: за время сверки товар могли продать с
-            # витрины, но он мог и приехать на склад.
-            index = self._catalog_index()
+            # витрины, но он мог и приехать на склад. Один снимок регистра
+            # используем и для проверки, и для последующего перемещения.
             offer = self.stock_offer()
+            index = self._catalog_index(offer)
             for row in rows:
                 item = index.get(str(row.get("item_id") or ""))
                 if not item:
