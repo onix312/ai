@@ -32,6 +32,9 @@
    border-radius:99px; background:var(--line); color:var(--muted); }
  .tile .q.low { background:rgba(217,119,6,.18); color:var(--warn); }
  .tile .q.empty { background:rgba(239,68,68,.16); color:var(--bad); }
+ .tile .q.wh { margin-left:6px; background:var(--accent-soft); color:var(--accent); }
+ .tile .noprice { font-size:12.5px; font-weight:650; color:var(--warn); }
+ .tile.off { opacity:.72; }
  .tile .in { position:absolute; top:10px; right:10px; min-width:22px; height:22px; padding:0 6px;
    border-radius:99px; background:var(--accent); color:#fff; font-size:12px; font-weight:750;
    display:none; align-items:center; justify-content:center; }
@@ -66,6 +69,10 @@
  .row small { display:block; color:var(--muted); font-size:11px; margin-top:1px; }
  .amt { font-weight:750; font-size:15px; white-space:nowrap; }
  .empty { color:var(--muted); font-size:13px; text-align:center; padding:16px 0; }
+ .qrbox { display:flex; justify-content:center; margin-bottom:12px; }
+ .qrbox svg { width:min(240px,62vw); height:auto; background:#fff; padding:10px; border-radius:14px; }
+ .qrbox .empty { max-width:280px; line-height:1.5; }
+ .qrnote { color:var(--muted); font-size:12px; text-align:center; line-height:1.5; margin-bottom:14px; }
  .login { max-width:360px; margin:0 auto; padding-top:40px; text-align:center; }
  .login img { width:56px; height:56px; margin-bottom:10px; }
  .login h2 { font-size:18px; margin-bottom:4px; }
@@ -103,7 +110,7 @@
   </div>
 
   <div id="viewSell">
-   <input class="search" id="search" placeholder="Поиск товара…">
+   <input class="search" id="search" placeholder="Поиск: название, штрихкод, артикул…">
    <div class="grid" id="grid"></div>
   </div>
 
@@ -132,12 +139,24 @@
  </div>
 </div>
 
+<div class="modal" id="qrModal">
+ <div class="sheet">
+  <h3 id="qrTitle">СБП · оплата</h3>
+  <div class="qrbox" id="qrBox"></div>
+  <div class="qrnote" id="qrNote"></div>
+  <button class="btn pay" id="bQrPaid" type="button" style="width:100%;margin-bottom:9px">Оплата пришла — подтвердить</button>
+  <button class="btn ghost" id="bQrLater" type="button" style="width:100%">Позже · во «Входящие»</button>
+ </div>
+</div>
+
 <div class="msg" id="msg"></div>
 
+<script src="/assets/qr.js?v=17.0.1"></script>
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
-var state = { token: localStorage.getItem("cashier_token") || "", items: [], cart: {}, sbpEnabled: true };
+var state = { token: localStorage.getItem("cashier_token") || "", items: [], cart: {},
+  sbpEnabled: true, sbp: {}, pendingPayment: "" };
 
 function toast(t) { var m = $("msg"); m.textContent = t; m.classList.add("on");
   clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove("on"); }, 2600); }
@@ -156,7 +175,10 @@ function api(path, body) {
     });
   });
 }
-function withToken(p) { return state.token + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(state.token); }
+// GET-запросы кассы авторизуются токеном в query. Раньше здесь по ошибке
+// возвращался сам токен вместо пути — запрос уходил на «/ck_…?token=…»,
+// каталог не приходил и касса показывала «Товаров нет».
+function withToken(p) { return p + (p.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(state.token); }
 
 function loggedIn() { return !!state.token; }
 function showApp(on) { $("login").hidden = on; $("app").hidden = !on; }
@@ -189,7 +211,7 @@ $("bLogout").addEventListener("click", function () {
 // ---------------------------------------------------------------- полка
 function loadCatalog() {
   api(withToken("/api/cashier/catalog")).then(function (c) {
-    state.items = c.items || []; state.sbpEnabled = !!c.sbp_enabled;
+    state.items = c.items || []; state.sbpEnabled = !!c.sbp_enabled; state.sbp = c.sbp || {};
     $("shopLabel").textContent = "в кассе: " + money((c.shop_cash && c.shop_cash.in_shop) || 0);
     renderGrid();
   }).catch(function (e) { sessionError(e); });
@@ -201,19 +223,42 @@ function sessionError(e) {
 }
 
 function renderGrid() {
-  var q = ($("search").value || "").toLowerCase();
+  var q = ($("search").value || "").trim().toLowerCase();
   var box = $("grid");
-  var list = state.items.filter(function (it) { return !q || (it.name || "").toLowerCase().indexOf(q) >= 0; });
-  if (!list.length) { box.innerHTML = '<div class="empty" style="grid-column:1/3">Товаров нет</div>'; return; }
+  var list = state.items.filter(function (it) {
+    if (!q) return true;
+    return [it.name, it.barcode, it.sku].some(function (v) {
+      return String(v || "").toLowerCase().indexOf(q) >= 0;
+    });
+  });
+  if (!list.length) {
+    box.innerHTML = '<div class="empty" style="grid-column:1/3">' +
+      (q ? "Ничего не найдено по «" + esc($("search").value.trim()) + "»"
+         : (state.items.length ? "Товаров нет"
+            : "Товаров нет: заведите позиции на витрине или оприходуйте " +
+              "готовую продукцию на склад — касса покажет их сама")) +
+      "</div>";
+    renderCart();
+    return;
+  }
   box.innerHTML = list.map(function (it) {
     var qty = Number(it.qty) || 0;
+    var stockQty = Number(it.stock_qty) || 0;
     var qc = it.status === "empty" || qty <= 0 ? "empty" : (it.status === "low" ? "low" : "");
     var inCart = state.cart[it.id] || 0;
-    return '<div class="tile' + (inCart ? " sel" : "") + '" data-id="' + esc(it.id) + '">' +
+    var hint = "";
+    if (stockQty > 0) {
+      hint = '<span class="q wh" title="' + esc(it.warehouse_name || "склад") + '">склад ' +
+        stockQty + "</span>";
+    }
+    var price = it.price_missing ? '<span class="noprice">цена не задана</span>' : money(it.price);
+    return '<div class="tile' + (inCart ? " sel" : "") + (it.price_missing ? " off" : "") +
+      '" data-id="' + esc(it.id) + '">' +
       '<span class="in">' + inCart + "</span>" +
       '<div class="n">' + esc(it.name) + "</div>" +
-      '<div class="p">' + money(it.price) + "</div>" +
-      '<span class="q ' + qc + '">' + (qty ? ("остаток " + qty) : "нет") + "</span></div>";
+      '<div class="p">' + price + "</div>" +
+      '<span class="q ' + qc + '">' + (qty ? ("остаток " + qty) : "нет") + "</span>" + hint +
+      "</div>";
   }).join("");
   renderCart();
 }
@@ -235,6 +280,7 @@ $("grid").addEventListener("click", function (ev) {
   var id = t.getAttribute("data-id");
   var it = state.items.find(function (x) { return x.id === id; });
   if (!it || (Number(it.qty) || 0) <= 0) { toast("Нет в наличии"); return; }
+  if (it.price_missing) { toast("Цена не задана — укажите её в номенклатуре"); return; }
   state.cart[id] = Math.min((state.cart[id] || 0) + 1, Math.floor(Number(it.qty) || 0));
   renderGrid();
 });
@@ -250,6 +296,13 @@ $("bPay").addEventListener("click", function () {
   if (!count) return;
   $("modalTitle").textContent = "Оплата · " + $("cartTotal").textContent;
   $("paySbp").style.display = state.sbpEnabled ? "flex" : "none";
+  var sbpHint = $("paySbp").querySelector("small");
+  if (sbpHint) {
+    var kind = (state.sbp && state.sbp.kind) || "";
+    sbpHint.textContent = kind === "gost" ? "QR с суммой — покажем на экране"
+      : (kind ? "QR покажем на экране — подтвердите по поступлению"
+              : "QR не настроен: подтверждение по поступлению");
+  }
   $("modal").classList.add("on");
 });
 $("bCancel").addEventListener("click", function () { $("modal").classList.remove("on"); });
@@ -274,8 +327,48 @@ $("paySbp").addEventListener("click", function () {
   if (!items.length) return;
   api("/api/cashier/sell", { token: state.token, method: "sbp", items: items, request_id: reqId() })
     .then(function (r) {
-      toast("СБП-платёж создан — подтвердите во «Входящие»");
-      state.cart = {}; loadCatalog(); setTab("in");
+      state.cart = {}; loadCatalog();
+      showPaymentQr(r);
+    }).catch(function (e) { sessionError(e); });
+});
+
+// ------------------------------------------------------- QR оплаты по СБП
+// Картинку рисует сам PrintFlow из строки банка (статический QR магазина
+// или динамический payload платежа) — внешние сервисы не нужны.
+function showPaymentQr(sale) {
+  var qr = sale.qr || {};
+  state.pendingPayment = sale.payment_id || "";
+  $("qrTitle").textContent = "СБП · " + money(sale.amount);
+  var box = $("qrBox");
+  // Картинку рисует сервер (ГОСТ-код с суммой) — на телефоне остаётся
+  // только показать её; если сервер QR не собрал, пробуем локальный qr.js.
+  var svg = qr.svg || (qr.text && window.QR ? window.QR.svg(qr.text, { size: 240, margin: 2 }) : "");
+  box.innerHTML = svg || ('<div class="empty">' + esc(qr.hint || "QR не настроен") + "</div>");
+  var kind = {
+    gost: "Оплата по QR: сумма и назначение уже внутри",
+    link: "Ссылка банка с суммой " + money(sale.amount),
+    dynamic: "Динамический QR банка · " + money(sale.amount),
+    static: "QR магазина · покупатель вводит сумму " + money(sale.amount)
+  }[qr.kind] || "";
+  $("qrNote").innerHTML = [
+    kind,
+    qr.bank_name ? "Банк: " + esc(qr.bank_name) : "",
+    "Склад спишется и выручка запишется только после подтверждения"
+  ].filter(Boolean).join("<br>");
+  $("qrModal").classList.add("on");
+}
+$("bQrLater").addEventListener("click", function () {
+  $("qrModal").classList.remove("on");
+  toast("СБП-платёж ждёт сверки во «Входящих»");
+  setTab("in");
+});
+$("bQrPaid").addEventListener("click", function () {
+  var id = state.pendingPayment;
+  if (!id) { $("qrModal").classList.remove("on"); return; }
+  api("/api/cashier/confirm-sbp", { token: state.token, payment_id: id })
+    .then(function () {
+      $("qrModal").classList.remove("on"); state.pendingPayment = "";
+      toast("Оплата подтверждена ✓"); loadCatalog();
     }).catch(function (e) { sessionError(e); });
 });
 
