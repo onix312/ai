@@ -50,6 +50,7 @@
 <div class="foot"><div class="qr" id="qr">ВСТАВЬТЕ<br>СЮДА<br>QR-КОД</div><div class="txt"><div class="big">Спросите на кассе</div><div class="sm">Покажем образцы и примем данные для расчёта.<br>Новинки и готовые заказы — в Telegram.</div></div></div>
 </div>
 <script src="../assets/qr.js"></script>
+<script>window.QR_FALLBACK=1;if(!window.QR)window.QR={svg:function(){return '<div style="font-size:10px;color:#94a3b8">QR…</div>';}};</script>
 <script>
 // QR и знак берём из общих настроек генераторов (localStorage), плейсхолдер заменяем живым кодом.
 (function(){
