@@ -155,16 +155,43 @@ class PfPagesHub extends LitElement {
     return location.origin + href;
   }
 
+  firstUpdated() {
+    // Если qr.js / icons.js загрузились позже dist (гонка скриптов), подождём их появления и перерисуем
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      const hasQR = !!(window.QR && window.QR.svg);
+      const hasIcons = !!(window.PFIcons && window.PFIcons.svg);
+      if ((hasQR && hasIcons) || tries > 20) {
+        clearInterval(iv);
+        this.requestUpdate();
+      }
+    }, 250);
+  }
+
   qrSvg(href) {
-    const QR = window.QR;
-    if (!QR) return '';
-    return QR.svg(this.absUrl(href), { ecl: 'M', size: 240, margin: 1, dark: '#0f172a', light: '#ffffff' });
+    try {
+      const QR = window.QR;
+      if (!QR || typeof QR.svg !== 'function') return '';
+      return QR.svg(this.absUrl(href), { ecl: 'M', size: 240, margin: 1, dark: '#0f172a', light: '#ffffff' });
+    } catch (e) {
+      return '';
+    }
   }
 
   iconSvg(name) {
-    const reg = (window.PFIcons && window.PFIcons.svg) ? window.PFIcons.svg(name) : '';
-    return reg;
+    try {
+      if (window.PFIcons && typeof window.PFIcons.svg === 'function') {
+        const svg = window.PFIcons.svg(name);
+        if (svg) return svg;
+      }
+    } catch (e) {}
+    // fallback — простой глиф, чтобы карточка не была пустой
+    const fallback = { dashboard:'◫', ruble:'₽', qr:'▦', bank:'🏦', printer:'🖨', shelf:'📦', tv:'📺', cart:'🛒', track:'📍', user:'👤', spool:'🧵', tag:'🏷', pen:'✏' };
+    return `<span style="font-size:18px">${fallback[name]||'◈'}</span>`;
   }
+
+  qrAvailable() { return !!(window.QR && typeof window.QR.svg === 'function'); }
 
   render() {
     const pages = this.pages;
@@ -214,7 +241,9 @@ class PfPagesHub extends LitElement {
           <div class="qr-modal">
             <h3>${this.qrFor.title}</h3>
             <p>Наведите камеру телефона — страница откроется в локальной сети</p>
-            <div class="qr-box" .innerHTML=${this.qrSvg(this.qrFor.href)}></div>
+            ${this.qrAvailable()
+              ? html`<div class="qr-box" .innerHTML=${this.qrSvg(this.qrFor.href)}></div>`
+              : html`<div class="qr-box" style="display:grid;place-items:center;color:var(--muted);font-size:13px;line-height:1.4">QR-генератор загружается…<br>обновление страницы помогает</div>`}
             <div class="qr-addr">${this.absUrl(this.qrFor.href)}</div>
             <div class="qr-actions">
               <button type="button" class="btn" @click=${() => (this.qrFor = null)}>Закрыть</button>

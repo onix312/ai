@@ -211,7 +211,7 @@ function buildTagInner(item, opts, globalIdx){
   let qr='';
   if(opts.qr){
     const link=(opts.qrbase||'')+encodeURIComponent(item.id||'');
-    qr=QR.svg(link,{ecl:'M',margin:1});
+    try{ qr=(window.QR&&QR.svg)? QR.svg(link,{ecl:'M',margin:1}) : '<div style="font-size:7px;color:#94a3b8">QR…</div>'; }catch(e){ qr=''; }
   }
   const metaParts=[];
   if(item.material) metaParts.push(item.material);
