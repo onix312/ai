@@ -170,3 +170,8 @@ class SiteMarkupTests(TestCase):
                      "message", "star"):
             with self.subTest(icon=name):
                 self.assertIn(f"{name}:", icons)
+
+    def test_bedmap_copy_has_no_typo(self):
+        html = INDEX_HTML.read_text(encoding="utf-8")
+        self.assertIn("задний-правый", html)
+        self.assertNotIn("задний-правий", html)

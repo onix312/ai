@@ -1124,15 +1124,20 @@ function wallRender(data) {
 async function command(name, value, opts) {
   opts = opts || {};
   try {
+    const btn = opts.button || null;
+    if (btn && btn.classList && btn.classList.contains('busy')) return undefined;
     const p = requireLive();
     const ask = opts.confirm || DANGER[name];
-    if (ask && !confirmDanger(ask)) return;
-    await post('/api/printer/command', {
-      printer_id: p.id, command: name, value, confirmed: Boolean(ask),
+    if (ask && !confirmDanger(ask)) return undefined;
+    return await U.withBusy(btn, async () => {
+      await post('/api/printer/command', {
+        printer_id: p.id, command: name, value, confirmed: Boolean(ask),
+      });
+      toast('Команда отправлена', opts.label || name);
+      setTimeout(PF.poll, 500);
+      return true;
     });
-    toast('Команда отправлена', opts.label || name);
-    setTimeout(PF.poll, 500);
-  } catch (e) { fail(e); }
+  } catch (e) { fail(e); return undefined; }
 }
 
 /* 13.1 (29): текущий кадр камеры — в полноэкранный просмотрщик. */
@@ -1570,24 +1575,24 @@ function bind() {
       // 13.1 (29): «Кадр» — текущий кадр камеры в просмотрщике, без сохранения
       if (name === 'snapshot') { openCameraSnapshot(); return; }
       const value = cmd.dataset.value !== undefined ? num(cmd.dataset.value) : undefined;
-      command(name, value, { label: cmd.textContent.trim() });
+      command(name, value, { label: cmd.textContent.trim(), button: cmd });
       return;
     }
     const jog = e.target.closest('[data-jog]');
     if (jog) {
       const [axis, dist] = jog.dataset.jog.split(':');
-      command('move', { axis, distance: num(dist) }, { confirm: '', label: `${axis} ${dist} мм` });
+      command('move', { axis, distance: num(dist) }, { confirm: '', label: `${axis} ${dist} мм`, button: jog });
       return;
     }
     const set = e.target.closest('[data-set]');
     if (set) {
       const map = { nozzle_temp: 'pr_set_nozzle', bed_temp: 'pr_set_bed', part_fan: 'pr_set_fan',
                     speed_pct: 'pr_set_speed', flow: 'pr_set_flow' };
-      command(set.dataset.set, num($(map[set.dataset.set]).value), { label: set.dataset.set });
+      command(set.dataset.set, num($(map[set.dataset.set]).value), { label: set.dataset.set, button: set });
       return;
     }
     const load = e.target.closest('[data-ams-load]');
-    if (load) { command('load_filament', num(load.dataset.amsLoad), { confirm: 'Подать филамент из этого слота? Сопло нагреется.' }); return; }
+    if (load) { command('load_filament', num(load.dataset.amsLoad), { confirm: 'Подать филамент из этого слота? Сопло нагреется.', button: load }); return; }
     const amsEdit = e.target.closest('[data-ams-edit]');
     if (amsEdit) {
       const [unit, tray] = amsEdit.dataset.amsEdit.split(':');
@@ -1605,7 +1610,7 @@ function bind() {
       const type = String(typed || '').trim();
       if (!type) return;
       command('ams_filament', { ams_id: num(unit), tray_id: num(tray), type: type.toUpperCase(), color: amsEdit.dataset.color },
-        { confirm: `Записать материал ${type.toUpperCase()} в слот AMS?`, label: 'AMS ' + type });
+        { confirm: `Записать материал ${type.toUpperCase()} в слот AMS?`, label: 'AMS ' + type, button: amsEdit });
       return;
     }
     const sd = e.target.closest('[data-sd-path]');
@@ -1732,16 +1737,18 @@ function bind() {
   });
 
   $('pr_speed_apply').addEventListener('click', () =>
-    command('speed', num($('pr_speed_sel').value, 2), { label: 'скорость' }));
+    command('speed', num($('pr_speed_sel').value, 2), { label: 'скорость', button: $('pr_speed_apply') }));
   $('pr_skip_apply').addEventListener('click', () =>
     command('skip_objects', [num($('pr_skip_obj').value, 1)], {
       confirm: 'Исключить этот объект из печати? Он больше не будет печататься.',
-      label: 'пропустить объект' }));
+      label: 'пропустить объект', button: $('pr_skip_apply') }));
   $('pr_reconnect').addEventListener('click', async () => {
     try {
-      await post('/api/printer/connect', { printer_id: PF.state.activePrinter });
-      toast('Переподключаемся', 'Обычно занимает 5–10 секунд');
-      setTimeout(PF.poll, 1500);
+      await U.withBusy($('pr_reconnect'), async () => {
+        await post('/api/printer/connect', { printer_id: PF.state.activePrinter });
+        toast('Переподключаемся', 'Обычно занимает 5–10 секунд');
+        setTimeout(PF.poll, 1500);
+      });
     } catch (e) { fail(e); }
   });
   $('pr_add').addEventListener('click', () => openPrinterModal());
