@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=17.0.1">
 <link rel="stylesheet" href="assets/app.css?v=17.0.1">
-<link rel="stylesheet" href="assets/more.css?v=17.0.1">
+<link rel="stylesheet" href="assets/more.css?v=17.1.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -198,8 +198,17 @@
  <div id="pr_workspace" hidden>
    <div id="pr_alerts" class="alert-strip"></div>
    <div id="pr_enough" class="notice" hidden><span>◍</span><span id="pr_enough_text">Проверяем пластик на следующее задание…</span></div>
-  <div class="printer-grid">
-   <div class="grid" style="gap:16px">
+  <div class="ptab-bar" id="pr_detail_tabs" role="tablist" aria-label="Детали принтера">
+   <button type="button" class="ptab on" data-ptab="overview" role="tab" aria-selected="true">◈ Обзор</button>
+   <button type="button" class="ptab" data-ptab="camera" role="tab" aria-selected="false">◉ Камера</button>
+   <button type="button" class="ptab" data-ptab="ams" role="tab" aria-selected="false">▦ AMS и катушки<span class="ptab-dot" id="pr_ptab_ams_dot" hidden></span></button>
+   <button type="button" class="ptab" data-ptab="files" role="tab" aria-selected="false">▤ Файлы</button>
+   <button type="button" class="ptab" data-ptab="care" role="tab" aria-selected="false">✓ ТО и здоровье<span class="ptab-dot" id="pr_ptab_care_dot" hidden></span></button>
+   <button type="button" class="ptab" data-ptab="log" role="tab" aria-selected="false">≡ Журнал</button>
+  </div>
+  <div class="ptab-pane on" id="ptab-overview" role="tabpanel">
+   <div class="printer-grid">
+    <div class="grid" style="gap:16px">
     <article class="job-card" id="pr_job">
      <div class="job-top">
       <div class="info">
@@ -222,7 +231,17 @@
       <div class="wide"><span>Прибыль / окупаемость</span><b id="pr_job_profit">—</b></div>
      </div>
     </article>
-    <div class="telemetry">
+    <div class="card" id="pr_ready_card">
+     <div class="card-head"><div><h2>Готовность к старту</h2><p id="pr_ready_sub">Проверяем следующее задание…</p></div><span class="chip" id="pr_ready_chip">—</span></div>
+     <div id="pr_ready"><div class="empty compact"><span>Проверяем очередь и AMS…</span></div></div>
+    </div>
+    <div class="card" id="pr_suggest_card">
+     <div class="card-head"><div><h2>Что печатать следующим</h2><p>Подбор задания под этот принтер и его слоты AMS</p></div><button class="btn sm" id="pr_suggest_btn" type="button">Подобрать</button></div>
+     <div id="pr_suggest"><div class="empty compact"><span>Нажмите «Подобрать» — сравним очередь со слотами AMS.</span></div></div>
+    </div>
+    </div>
+    <div class="grid" style="gap:16px">
+<div class="telemetry">
      <div class="card">
       <div class="card-head"><h3>Температуры</h3><span class="muted" style="font-size:11.6px">сейчас / цель</span></div>
       <div class="temp-row gauge" id="pr_row_nozzle"><span class="tic hot" id="pr_nozzle_ic"><i data-icon="thermo">▲</i></span><span class="name">Сопло</span><b><span id="pr_nozzle">—</span><span class="muted"> / <span id="pr_nozzle_t">—</span></span> °C</b><div class="gbar"><i id="pr_nozzle_bar"></i></div><svg class="tspark" id="pr_nozzle_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
@@ -236,13 +255,15 @@
       <div class="fan-row"><span class="tic fan"><i data-icon="wind">≋</i></span><span class="name">Камера</span><b id="pr_fan_cham">0%</b><div class="bar thin"><i id="pr_fan_cham_bar"></i></div><svg class="tspark" id="pr_fan_cham_spark" viewBox="0 0 110 22" preserveAspectRatio="none" aria-hidden="true"></svg></div>
      </div>
     </div>
-    <details class="pulse-sec card">
+<details class="pulse-sec card">
      <summary><div><h2>История показателей</h2><p id="pr_chart_sub">Температуры и обдув за последние часы</p></div>
       <select id="pr_chart_range" class="mini-sel"><option value="60">1 час</option><option value="180" selected>3 часа</option><option value="720">12 часов</option><option value="1440">Сутки</option></select></summary>
      <div id="pr_chart" class="chart-box"><div class="empty compact"><span>Накапливаем историю — точки появятся через несколько минут.</span></div></div>
      <div id="pr_chart_legend" class="legend"></div>
     </details>
-    <details class="pulse-sec card">
+    </div>
+   </div>
+<details class="pulse-sec card" style="margin-top:16px">
      <summary><div><h2>Управление</h2><p>Опасные команды требуют подтверждения</p></div><button class="btn sm ghost" id="pr_schedule_btn" type="button">⏱ Отложить</button><span class="chip outline">только LAN</span></summary>
      <div class="cmd-grid">
       <button class="cmd-btn" data-cmd="pause" type="button"><span class="ic" data-icon="pause">❙❙</span>Пауза</button>
@@ -293,10 +314,9 @@
       <p class="muted" style="font-size:12px">Калибровка занимает несколько минут и недоступна во время печати.</p>
      </div></details>
     </details>
-   </div>
-
-   <div class="grid" style="gap:16px">
-    <div class="card">
+  </div>
+  <div class="ptab-pane" id="ptab-camera" role="tabpanel" hidden>
+<div class="card">
      <div class="card-head"><div><h2>Камера</h2><p id="pr_cam_status">Нет сигнала</p></div>
       <div class="head-actions"><span class="chip warn" id="pr_cam_demo" hidden>Демо</span><button class="icon-btn sm" id="pr_cam_reload" type="button">↻</button></div></div>
      <div class="cam-frame clickable" title="Клик — крупный план"><img id="pr_cam" alt="Камера принтера"><svg id="pr_cam_map" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg><div class="cam-empty" id="pr_cam_empty"><span class="big">◉</span>Ожидаем видеопоток<br><small>порт 6000 · только локальная сеть</small></div><span class="cam-live"><i></i>LIVE</span><span class="cam-fps chip outline" hidden style="font-size:10.5px;padding:1px 7px"></span><span class="cam-zoom" data-icon="image" aria-hidden="true">⤢</span></div>
@@ -309,35 +329,42 @@
      <p class="muted shot-hint" id="pr_shots_empty" style="font-size:12px;margin:8px 0 0">Снимки сохраняются здесь: свой таймлапс печати. Сторож добавляет кадр сам, когда что-то пошло не так.</p>
      <div class="shot-strip" id="pr_shots"></div>
     </div>
-     <div class="card">
+  </div>
+  <div class="ptab-pane" id="ptab-ams" role="tabpanel" hidden>
+<div class="card">
       <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
+     <div id="pr_ams_new"></div>
      <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
     </div>
-    <div class="card health-card" id="pr_health_card">
-     <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health"><i data-icon="shield">✓</i><span id="pr_health_text">Нет ошибок</span></span></div>
-     <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
-    </div>
-    <div class="card">
-     <div class="card-head"><div><h2>Связь</h2><p>Порты 8883/6000/990 и подсеть</p></div><button class="btn sm" id="pr_net_btn" type="button">Проверить</button></div>
-     <div id="pr_net"><div class="empty compact"><span>Нажмите «Проверить», чтобы узнать, отвечает ли принтер.</span></div></div>
-    </div>
-    <div class="card">
-     <div class="card-head"><div><h2>Наработка и ТО</h2><p id="pr_runtime">Наработка —</p></div><span class="chip" id="pr_maint_badge">—</span></div>
-     <div id="pr_maint"><div class="empty compact"><span>Список работ появится после подключения принтера.</span></div></div>
-    </div>
-   </div>
   </div>
-
-  <div class="grid g2" style="margin-top:16px">
-   <div class="card">
+  <div class="ptab-pane" id="ptab-files" role="tabpanel" hidden>
+<div class="card">
     <div class="card-head"><div><h2>Файлы на принтере</h2><p>FTPS 990 · 3MF и G-code с SD-карты</p></div><button class="btn sm" id="pr_files_refresh" type="button">↻ Обновить</button></div>
     <div class="dropzone" id="pr_drop"><span class="big">⇪</span><b>Перетащите 3MF или G-code</b><span class="muted">или <button class="btn sm" id="pr_upload_btn" type="button">выберите файл</button></span></div>
     <input type="file" id="pr_file_input" accept=".3mf,.gcode" hidden>
     <div id="pr_files" style="margin-top:12px"><div class="empty compact"><span>Список появится после подключения по FTPS.</span></div></div>
    </div>
-   <div class="card">
+  </div>
+  <div class="ptab-pane" id="ptab-care" role="tabpanel" hidden>
+   <div class="grid g2" style="gap:16px">
+<div class="card health-card" id="pr_health_card">
+     <div class="card-head"><div><h2>Здоровье</h2><p id="pr_firmware">Прошивка —</p></div><span class="chip ok" id="pr_health"><i data-icon="shield">✓</i><span id="pr_health_text">Нет ошибок</span></span></div>
+     <div id="pr_errors"><div class="empty compact"><span>Активных ошибок нет.</span></div></div>
+    </div>
+<div class="card">
+     <div class="card-head"><div><h2>Связь</h2><p>Порты 8883/6000/990 и подсеть</p></div><button class="btn sm" id="pr_net_btn" type="button">Проверить</button></div>
+     <div id="pr_net"><div class="empty compact"><span>Нажмите «Проверить», чтобы узнать, отвечает ли принтер.</span></div></div>
+    </div>
+<div class="card">
+     <div class="card-head"><div><h2>Наработка и ТО</h2><p id="pr_runtime">Наработка —</p></div><span class="chip" id="pr_maint_badge">—</span></div>
+     <div id="pr_maint"><div class="empty compact"><span>Список работ появится после подключения принтера.</span></div></div>
+   </div>
+  </div>
+  <div class="ptab-pane" id="ptab-log" role="tabpanel" hidden>
+<div class="card">
     <div class="card-head"><div><h2>Журнал принтера</h2><p>Старт, пауза, завершение, ошибки, команды</p></div><button class="btn sm ghost" id="pr_events_refresh" type="button">↻</button></div>
     <div class="event-list" id="pr_events"></div>
+  </div>
    </div>
   </div>
  </div>
@@ -5043,6 +5070,24 @@
   <button class="btn primary" type="button" id="rule_save">Создать</button></div>
 </dialog>
 
+<!-- ================================================== Привязка катушки к слоту AMS -->
+<dialog id="ams_bind_modal" class="modal">
+ <div class="modal-head"><div><h3 id="ab_title">Привязка катушки</h3><p id="ab_sub">Выберите катушку со склада</p></div>
+  <button class="icon-btn" type="button" data-close="ams_bind_modal">✕</button></div>
+ <div class="modal-body">
+  <div id="ab_current"></div>
+  <div class="search-box" style="margin-top:10px"><input id="ab_search" type="search" placeholder="Материал, цвет, бренд…" autocomplete="off"></div>
+  <div class="ab-filters" id="ab_filters"></div>
+  <label class="check" style="margin-top:8px"><span class="switch"><input type="checkbox" id="ab_only_stock" checked><i></i></span>Только с остатком</label>
+  <div id="ab_list" style="margin-top:10px"></div>
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="ab_push" checked> Записать тип и цвет в слот AMS</label>
+  <div class="notice" id="ab_choice" hidden style="margin-top:10px"><span>→</span><span id="ab_choice_text"></span></div>
+ </div>
+ <div class="modal-foot"><button class="btn danger" type="button" id="ab_unbind" hidden>Отвязать</button><span class="spacer"></span>
+  <button class="btn" type="button" data-close="ams_bind_modal">Отмена</button>
+  <button class="btn primary" type="button" id="ab_bind" disabled>Привязать</button></div>
+</dialog>
+
 <!-- ================================================== AMS-профили -->
 <dialog id="ams_profile_modal" class="modal">
  <div class="modal-head"><div><h3>Профили AMS</h3><p>Наборы слотов: «основной», «под заказ #123» — применяются в один клик</p></div>
@@ -5114,7 +5159,7 @@
 <script src="assets/qr.js?v=17.0.1"></script>
 <script src="assets/core.js?v=17.0.1"></script>
 <script src="assets/icons.js?v=17.0.1"></script>
-<script src="assets/printer.js?v=17.0.1"></script>
+<script src="assets/printer.js?v=17.1.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=17.0.1"></script>
 <script src="assets/money.js?v=17.0.1"></script>
