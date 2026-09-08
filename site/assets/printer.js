@@ -703,6 +703,22 @@ async function doAbUnbind(btn) {
   } catch (e) { fail(e); }
 }
 function bindPicker() {
+  /* Открытие пикера. Точки входа одни и те же (data-pslot="<printer>:<slot>"):
+     мини-слот на карточке принтера, кнопка «⇄ Склад» во вкладке «AMS и катушки»
+     и «Привязать» в баннере непривязанных слотов. Делегируем на document —
+     разметка перерисовывается на каждом опросе телеметрии. */
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-pslot]');
+    if (!el || el.disabled) return;
+    e.preventDefault();
+    const raw = String(el.dataset.pslot || '');
+    const idx = raw.lastIndexOf(':');
+    const pid = idx < 0 ? raw : raw.slice(0, idx);
+    const slot = idx < 0 ? '0' : raw.slice(idx + 1);
+    if (!pid) return;
+    if (String(PF.state.activePrinter || '') !== pid) selectPrinter(pid);
+    openSlotPicker(pid, slot);
+  });
   const list = $('ab_list');
   if (list) list.addEventListener('click', (e) => {
     const row = e.target.closest('[data-ab-pick]');
