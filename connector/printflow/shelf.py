@@ -581,8 +581,14 @@ class Shelf:
             ))
         return "\ufeff" + stream.getvalue()
 
-    def writeoff(self, item_id: str, qty: float, note: str = "Списание") -> dict:
-        """Списание штук без продажи: порча, потеря, подарок."""
+    def writeoff(self, item_id: str, qty: float, note: str = "Списание", *,
+                 register_leg: bool = True) -> dict:
+        """Списание штук без продажи: порча, потеря, подарок.
+
+        ``register_leg=False`` — только нога полки (карточка + журнал), без
+        движения зоны витрины: для выдачи заказа, где зону уже списала сама
+        выдача. Двойного списания зоны быть не должно.
+        """
         item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
         if not item:
             raise ValueError("Позиция стеллажа не найдена")
@@ -593,7 +599,8 @@ class Shelf:
             raise ValueError("Списать больше, чем есть на стеллаже")
         with self.db.transaction():
             move = self._move(item_id, "writeoff", -qty, note=note)
-            self._register_leg(item, "writeoff", -qty, note or "Списание")
+            if register_leg:
+                self._register_leg(item, "writeoff", -qty, note or "Списание")
         self.db.add_event("shelf", "Списание со стеллажа",
                           f"{item.get('name') or ''} −{round(qty)} шт · {note}",
                           data={"item_id": item_id, "qty": qty})

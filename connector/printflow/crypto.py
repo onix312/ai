@@ -150,3 +150,35 @@ def decrypt(token: str) -> str:
 
 def is_encrypted(token: str) -> bool:
     return bool(token) and token.startswith(PREFIX)
+
+
+# ---------------------------------------------------------------- PIN кассиров
+# PIN нельзя зашифровать обратимо (украденный ключ = все PIN), поэтому —
+# только хеш с солью: сверка идёт через verify_pin, восстановить PIN из базы
+# нельзя. Формат: pin:v1:<iter>:<hex(salt)>:<hex(dk)>.
+PIN_PREFIX = "pin:v1:"
+_PIN_ITERATIONS = 100_000
+_PIN_SALT_BYTES = 16
+
+
+def hash_pin(pin: str) -> str:
+    """Хеш PIN для хранения в ``staff.pin_hash`` (PBKDF2-HMAC-SHA256)."""
+    salt = secrets.token_bytes(_PIN_SALT_BYTES)
+    dk = hashlib.pbkdf2_hmac("sha256", str(pin or "").encode("utf-8"),
+                             salt, _PIN_ITERATIONS)
+    return (f"{PIN_PREFIX}{_PIN_ITERATIONS}:{salt.hex()}:{dk.hex()}")
+
+
+def verify_pin(pin: str, hashed: str) -> bool:
+    """Сверить PIN с хешем. Чужой формат — всегда False (не роняем вход)."""
+    hashed = str(hashed or "")
+    if not hashed.startswith(PIN_PREFIX):
+        return False
+    try:
+        iters, salt_hex, dk_hex = hashed[len(PIN_PREFIX):].split(":")
+        want = bytes.fromhex(dk_hex)
+        got = hashlib.pbkdf2_hmac("sha256", str(pin or "").encode("utf-8"),
+                                  bytes.fromhex(salt_hex), int(iters))
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(got, want)

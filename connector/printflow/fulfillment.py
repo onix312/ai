@@ -159,6 +159,41 @@ class OrderFulfillment:
             "external_sent": False,
         }
 
+    def _mirror_shelf_issue(self, order: dict, nom_id: str,
+                            warehouse_id: str, qty: float) -> None:
+        """Зеркало выдачи со склада-витрины на карточки полки.
+
+        Регистр — источник правды, но физика ушла с полки: связанные карточки
+        списываем уходом (без ноги регистра — её уже написала выдача).
+        Не хватает на карточках — честная ошибка: выдача откатывается целиком,
+        чинится инвентаризацией/перемещением и повторяется.
+        """
+        from .shelf import Shelf
+        if not nom_id or not self.stock.is_shelf_zone(warehouse_id):
+            return
+        items = Shelf(self.db).items_for_nom(nom_id)
+        if not items:
+            return  # витрина без карточки — зеркалить нечего
+        left = round(num(qty), 3)
+        shelf = Shelf(self.db)
+        note = f"выдача заказа №{order.get('number') or ''}"
+        for item in items:
+            if left <= 1e-9:
+                break
+            have = num(item.get("qty"))
+            if have <= 0:
+                continue
+            take = round(min(left, have), 3)
+            shelf.writeoff(str(item.get("id") or ""), take, note,
+                           register_leg=False)
+            left = round(left - take, 3)
+        if left > 1e-9:
+            raise ValueError(
+                f"На полке не хватает «{items[0].get('name') or nom_id}» "
+                f"для выдачи заказа №{order.get('number') or ''}: "
+                f"нужно {num(qty):g}, на карточках меньше. "
+                f"Проверьте полку инвентаризацией и повторите выдачу")
+
     def fulfill(
         self,
         order_id: str,
@@ -248,6 +283,12 @@ class OrderFulfillment:
                             doc_id=order_id, doc_kind="sale", variant_id=variant_id,
                             note=f"выдача заказа №{order.get('number') or ''}",
                         )
+                        # Выдача со склада-витрины забирает штуки физически с
+                        # полки: зеркалим уходом карточке (только нога полки —
+                        # зону уже списало движение выше). Всё в транзакции
+                        # выдачи: нехватка на карточке откатывает выдачу.
+                        self._mirror_shelf_issue(
+                            order, nom_id, str(warehouse_id or ""), qty)
                 self.stock.release(order_id=order_id)
 
             final = self.db.one(

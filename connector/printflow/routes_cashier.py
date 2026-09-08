@@ -81,3 +81,31 @@ def cashier_reject_sbp(api: Any, ctx: Ctx):
         str(ctx.arg("payment_id", "") or ctx.arg("id", "") or "").strip(),
         _token(ctx),
         reason=str(ctx.arg("reason", "") or "").strip())
+
+
+@router.get("/api/cashier/shift/current", doc="Открытая смена с живым расчётом")
+def cashier_shift_current(api: Any, ctx: Ctx):
+    return _cashier(api).current_shift(_token(ctx))
+
+
+@router.post("/api/cashier/shift/open", audit="Касса: смена открыта",
+             doc="Открыть смену: зафиксировать стартовый пересчёт ящика")
+def cashier_shift_open(api: Any, ctx: Ctx):
+    return _cashier(api).open_shift(
+        _token(ctx), ctx.num("open_cash", 0))
+
+
+@router.post("/api/cashier/shift/close", audit="Касса: смена закрыта",
+             doc="Закрыть смену: пересчёт ящика, расчёт сервера, расхождение")
+def cashier_shift_close(api: Any, ctx: Ctx):
+    return _cashier(api).close_shift(
+        _token(ctx), ctx.num("close_cash", 0),
+        note=str(ctx.arg("note", "") or ""))
+
+
+@router.post("/api/cashier/collect", audit="Касса: выемка",
+             doc="Выемка из ящика (только старший, в пределах остатка)")
+def cashier_collect(api: Any, ctx: Ctx):
+    return _cashier(api).collect(
+        _token(ctx), ctx.num("amount", 0),
+        note=str(ctx.arg("note", "") or ""))

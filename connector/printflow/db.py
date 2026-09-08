@@ -35,6 +35,14 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # ожидающей СБП-продажи (снимается подтверждением/отклонением/таймаутом).
         ("kind", "TEXT DEFAULT 'reserve'"),
     ],
+    "staff": [
+        # И3: личный PIN для входа в кассу (хеш pin:v1:…, сам PIN не хранится).
+        ("pin_hash", "TEXT DEFAULT ''"),
+    ],
+    "shelf_collections": [
+        # И3: смена, во время которой прошла выемка ('' — выемка вне смены).
+        ("shift_id", "TEXT DEFAULT ''"),
+    ],
     "client_payment_intents": [
         # связанный СБП-платёж (Касса 16.0): подтверждение идёт через ядро СБП
         ("sbp_id", "TEXT DEFAULT ''"),
@@ -1334,6 +1342,24 @@ CREATE TABLE IF NOT EXISTS cashier_sales (
 );
 CREATE INDEX IF NOT EXISTS idx_cashier_sales_payment ON cashier_sales(payment_id);
 CREATE INDEX IF NOT EXISTS idx_cashier_sales_created ON cashier_sales(created_at);
+
+-- И3: смены кассы. Один физический ящик — одна открытая смена на всех;
+-- open_cash/close_cash — пересчёт кассира, income_cash/collected/diff —
+-- расчёт сервера при закрытии (не доверяем клиенту).
+CREATE TABLE IF NOT EXISTS cashier_shifts (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT DEFAULT '',
+    cashier TEXT DEFAULT '',
+    opened_at TEXT,
+    closed_at TEXT DEFAULT '',
+    open_cash REAL DEFAULT 0,
+    close_cash REAL DEFAULT 0,
+    income_cash REAL DEFAULT 0,
+    collected REAL DEFAULT 0,
+    diff REAL DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cashier_shifts_open ON cashier_shifts(closed_at);
 
 -- Касса 16.0, раунд «авто-СБП»: поступления из банка (выписка/API/вебхук).
 -- external_key — идемпотентность импорта: повторная загрузка не задваивает.

@@ -21,6 +21,7 @@ from typing import Any
 
 from .accounting import uid
 from .config import now_iso
+from .crypto import hash_pin, verify_pin
 
 ROLES = ("owner", "manager", "employee")
 ROLE_NAMES = {"owner": "владелец", "manager": "руководитель",
@@ -140,14 +141,19 @@ class Staff:
         self.db = db
 
     # -------------------------------------------------------------- список
+    @staticmethod
+    def _public(row: dict) -> dict:
+        # Хеш PIN наружу не отдаём никогда — только флаг «PIN задан».
+        row["has_pin"] = bool(row.pop("pin_hash", ""))
+        row["role_name"] = ROLE_NAMES.get(row.get("role"), "сотрудник")
+        return row
+
     def all(self, active_only: bool = False) -> list[dict]:
         sql = "SELECT * FROM staff"
         if active_only:
             sql += " WHERE active=1"
         rows = self.db.query(sql + " ORDER BY datetime(created_at), name")
-        for row in rows:
-            row["role_name"] = ROLE_NAMES.get(row.get("role"), "сотрудник")
-        return rows
+        return [self._public(row) for row in rows]
 
     def by_chat(self, chat_id: str) -> dict | None:
         if not chat_id:
@@ -165,9 +171,12 @@ class Staff:
         if role == "owner":
             raise ValueError("Владелец задаётся настройкой Chat ID — роль не выдаётся кодом")
         chat_id = str(chat_id or "").strip()
-        if not chat_id or not chat_id.lstrip("-").isdigit():
+        if chat_id and not chat_id.lstrip("-").isdigit():
             raise ValueError("chat_id должен быть числом Telegram (узнать: «код» в боте)")
-        existing = self.db.one("SELECT * FROM staff WHERE chat_id=?", (chat_id,))
+        # Пустой chat_id — кассовый участник без Telegram: только касса по PIN.
+        # Такие строки не дедуплицируются (иначе второй кассир затёр бы первого).
+        existing = self.db.one("SELECT * FROM staff WHERE chat_id=?",
+                               (chat_id,)) if chat_id else None
         if existing:
             row = self.db.upsert("staff", {
                 "id": existing["id"], "name": name, "role": role,
@@ -181,8 +190,7 @@ class Staff:
                 "active": 1, "created_at": now_iso()})
         self.db.add_event("bot", "Команда: участник добавлен",
                           f"{name} ({ROLE_NAMES.get(role, role)}) chat_id {chat_id}")
-        row["role_name"] = ROLE_NAMES.get(row.get("role"), role)
-        return row
+        return self._public(row)
 
     def remove(self, ident: str) -> dict:
         """Деактивировать по chat_id, имени или id (увольнение обратимо)."""
@@ -203,6 +211,56 @@ class Staff:
     def restore(self, staff_id: str) -> dict:
         self.db.execute("UPDATE staff SET active=1 WHERE id=?", (staff_id,))
         return self.db.one("SELECT * FROM staff WHERE id=?", (staff_id,)) or {}
+
+    # ------------------------------------------------------------------- PIN
+    def set_pin(self, staff_id: str, pin: str) -> dict:
+        """Задать/снять личный PIN кассы. Пустой PIN — снять.
+
+        PIN — 4–8 цифр, уникален среди активных: два одинаковых PIN
+        сделали бы вход неоднозначным. В базе только хеш (см. crypto).
+        """
+        row = self.db.one("SELECT * FROM staff WHERE id=?",
+                          (str(staff_id or "").strip(),))
+        if not row:
+            raise ValueError("Сотрудник не найден")
+        pin = str(pin or "").strip()
+        if not pin:
+            self.db.execute("UPDATE staff SET pin_hash='' WHERE id=?",
+                            (row["id"],))
+            self.db.add_event("bot", "Команда: PIN кассы снят",
+                              str(row.get("name") or ""))
+            return self._public(self.db.one("SELECT * FROM staff WHERE id=?",
+                                            (row["id"],)) or {})
+        if not pin.isdigit() or not 4 <= len(pin) <= 8:
+            raise ValueError("PIN — 4–8 цифр")
+        for other in self.db.query(
+                "SELECT id, pin_hash FROM staff "
+                "WHERE active=1 AND pin_hash<>'' AND id<>?", (row["id"],)):
+            if verify_pin(pin, other.get("pin_hash") or ""):
+                raise ValueError("Такой PIN уже занят другим сотрудником")
+        self.db.execute("UPDATE staff SET pin_hash=? WHERE id=?",
+                        (hash_pin(pin), row["id"]))
+        self.db.add_event("bot", "Команда: PIN кассы установлен",
+                          str(row.get("name") or ""))
+        return self._public(self.db.one("SELECT * FROM staff WHERE id=?",
+                                        (row["id"],)) or {})
+
+    def find_by_pin(self, pin: str) -> dict | None:
+        """Активный сотрудник по PIN — для входа в кассу."""
+        pin = str(pin or "").strip()
+        if not pin:
+            return None
+        for row in self.db.query(
+                "SELECT * FROM staff WHERE active=1 AND pin_hash<>''"):
+            if verify_pin(pin, row.get("pin_hash") or ""):
+                return self._public(row)
+        return None
+
+    def pins_count(self) -> int:
+        """Сколько активных сотрудников с PIN — триггер режима ролей кассы."""
+        row = self.db.one("SELECT COUNT(*) c FROM staff "
+                          "WHERE active=1 AND pin_hash<>''")
+        return int((row or {}).get("c") or 0)
 
     # ------------------------------------------------------------- приглашения
     def invites(self) -> list[dict]:

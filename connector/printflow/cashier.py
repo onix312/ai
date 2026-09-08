@@ -10,7 +10,10 @@
   подтверждения; при подтверждении в одной транзакции холд снимается,
   склад списывается, доход идёт на счёт СБП. Отклонение и таймаут
   (``sbp_hold_hours``) снимают холд, товар остаётся на полке свободным;
-* вход — общий код магазина (настройка ``cashier_code``), сессия в памяти;
+* вход — личный PIN сотрудника (``staff.pin_hash``) или общий код магазина
+  (настройка ``cashier_code``), сессия в памяти с ролью;
+* смена — один открытый денежный ящик на всех; выемка и закрытие чужой
+  смены — только роль «старший» (manager), проверяется на сервере;
 * возвраты СБП кассиру недоступны — только руководитель/владелец в панели.
 
 Каталог кассы — единый (WMS 4.0). Кассир видит не только позиции витрины
@@ -69,15 +72,46 @@ class Cashier:
             self._sessions.pop(t, None)
 
     def login(self, code: str) -> dict:
-        expected = str(self.db.setting("cashier_code", "") or "").strip()
-        if not expected:
-            raise ValueError("Код кассы не задан — настройте его в панели (Касса и СБП)")
-        if str(code or "").strip() != expected:
-            raise ValueError("Неверный код кассы")
+        """Вход по личному PIN сотрудника или общему коду магазина.
+
+        PIN ищется первым: сессия получает имя и роль из ``staff``. Общий
+        код — запасной путь: пока не заведено ни одного PIN, он даёт роль
+        «старший» (старые одиночные установки работают как раньше), после
+        появления PIN — только «кассир» (выемка и чужие смены закрыты).
+        """
+        from .staff import Staff
+        staff = Staff(self.db)
+        code = str(code or "").strip()
         self._gc()
-        token = uid("ck")
-        self._sessions[token] = {"ts": time.time(), "role": "employee"}
-        return {"token": token, "role": "employee", "expires_in": SESSION_TTL}
+        if code:
+            member = staff.find_by_pin(code)
+            if member:
+                role = str(member.get("role") or "employee")
+                if role not in ("manager", "employee"):
+                    role = "employee"
+                token = uid("ck")
+                self._sessions[token] = {
+                    "ts": time.time(), "role": role,
+                    "staff_id": member.get("id") or "",
+                    "name": str(member.get("name") or ""),
+                }
+                return {"token": token, "role": role,
+                        "name": str(member.get("name") or ""),
+                        "expires_in": SESSION_TTL}
+        expected = str(self.db.setting("cashier_code", "") or "").strip()
+        pins = staff.pins_count()
+        if not expected and pins == 0:
+            raise ValueError("Код кассы не задан — настройте его в панели (Касса и СБП)")
+        if code and code == expected:
+            role = "manager" if pins == 0 else "employee"
+            token = uid("ck")
+            self._sessions[token] = {"ts": time.time(), "role": role,
+                                     "legacy": True}
+            return {"token": token, "role": role, "name": "",
+                    "legacy": True, "expires_in": SESSION_TTL}
+        if pins > 0:
+            raise ValueError("Неверный PIN или код кассы")
+        raise ValueError("Неверный код кассы")
 
     def logout(self, token: str) -> dict:
         self._sessions.pop(str(token or "").strip(), None)
@@ -89,6 +123,17 @@ class Cashier:
         if not session:
             raise ValueError("Сессия кассы истекла — введите код снова")
         return session
+
+    def require_role(self, token: str, *roles: str) -> dict:
+        """Сессия с одной из ролей — права проверяются на сервере."""
+        session = self.require(token)
+        if str(session.get("role") or "") not in roles:
+            raise ValueError("Нужно право руководителя — позовите старшего")
+        return session
+
+    @staticmethod
+    def _session_name(session: dict) -> str:
+        return str(session.get("name") or "").strip()[:120]
 
     # ------------------------------------------------------------- каталог
     def stock_offer(self) -> dict[str, dict]:
@@ -509,8 +554,9 @@ class Cashier:
         """Продажа корзины. Наличные — сразу в журнал; СБП — платёж до сверки.
 
         Идемпотентно по ``request_id`` (двойное нажатие не создаёт две продажи).
+        Имя кассира берём из сессии (PIN), а не из запроса: клиенту не доверяем.
         """
-        self.require(token)
+        session = self.require(token)
         self._release_expired_holds()
         method = str(method or "cash").strip().lower()
         if method not in METHODS:
@@ -526,7 +572,10 @@ class Cashier:
             payload.append({"item_id": item_id, "qty": round(qty, 2)})
         if not payload:
             raise ValueError("Корзина пуста")
-        cashier = str(cashier_name or "кассир")[:120]
+        # PIN-сессия знает имя — оно главнее присланного клиентом; общий код
+        # имени не имеет — оставляем присланное (старые клиенты) или «кассир».
+        cashier = (self._session_name(session)
+                   or str(cashier_name or "").strip()[:120] or "кассир")
         request_id = str(request_id or "").strip()[:120]
 
         with self.db.transaction():
@@ -688,9 +737,10 @@ class Cashier:
 
         Одна транзакция: остатки проверяются заново (за время сверки полку мог
         продать другой кассир), списание и деньги проходят вместе. Повторный
-        вызов не списывает склад и не пишет проводку повторно.
+        вызов не списывает склад и не пишет проводку повторно. Подтвердить
+        может любой кассир смены — авторство фиксируем по сессии.
         """
-        self.require(token)
+        session = self.require(token)
         self._release_expired_holds()
         sale = self.db.one("SELECT * FROM cashier_sales WHERE payment_id=?", (payment_id,))
         if not sale:
@@ -703,7 +753,8 @@ class Cashier:
             rows = json.loads(sale.get("items") or "[]")
         except json.JSONDecodeError:
             rows = []
-        cashier = str(sale.get("cashier") or "кассир")[:120]
+        cashier = (self._session_name(session)
+                   or str(sale.get("cashier") or "кассир")[:120])
         with self.db.transaction():
             sale = self.db.one("SELECT * FROM cashier_sales WHERE payment_id=?", (payment_id,))
             if str(sale.get("confirmed_at") or ""):
@@ -745,14 +796,19 @@ class Cashier:
         return result
 
     def reject_sbp(self, payment_id: str, token: str, *, reason: str = "") -> dict:
-        """Отклонить СБП-продажу: деньги не трогаем, склад не списывали."""
-        self.require(token)
+        """Отклонить СБП-продажу: деньги не трогаем, склад не списывали.
+
+        Доступно любому кассиру (рутинная сверка «не пришло»), но авторство
+        и причина фиксируются в аудите — мошенничество видно руководителю.
+        """
+        session = self.require(token)
         sale = self.db.one("SELECT * FROM cashier_sales WHERE payment_id=?", (payment_id,))
         if not sale:
             raise ValueError("Продажа не найдена")
         if str(sale.get("method") or "") != "sbp":
             raise ValueError("Это не СБП-продажа")
-        cashier = str(sale.get("cashier") or "кассир")[:120]
+        cashier = (self._session_name(session)
+                   or str(sale.get("cashier") or "кассир")[:120])
         # Холд снимаем в одной транзакции с отклонением: товар остаётся на
         # полке и снова свободен для продажи.
         with self.db.transaction():
@@ -763,14 +819,159 @@ class Cashier:
                     f"{num(sale['amount']):g} ₽", actor=cashier)
         return {**self._sale_result(sale), "payment": payment}
 
+    # ------------------------------------------------------- смены и выемка
+    def _open_shift(self) -> dict | None:
+        return self.db.one(
+            "SELECT * FROM cashier_shifts WHERE COALESCE(closed_at,'')=''"
+            " ORDER BY datetime(opened_at) LIMIT 1")
+
+    def _shift_totals(self, opened_at: str, end: str) -> dict[str, float]:
+        """Расчёт смены за окно [opened_at, end): наличные и выемки.
+
+        Наличными считаем доходы канала ``shelf`` — туда падают наличные
+        продажи кассы и панели (один физический ящик). СБП и «онлайн» в ящик
+        не попадают. Деньги фискальных продаж 1С показываем отдельной строкой
+        ``income_1c``: по ленте неизвестно, нал это или карта, — в расчёт
+        ожидаемого остатка их не включаем, владелец сверяет глазами.
+        """
+        opened_at = str(opened_at or "")
+        end = str(end or "")
+        income = self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM transactions"
+            " WHERE kind='income' AND channel='shelf' AND at>=? AND at<?",
+            (opened_at, end)) or {}
+        collected = self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM shelf_collections"
+            " WHERE at>=? AND at<?", (opened_at, end)) or {}
+        one_c = self.db.one(
+            "SELECT COALESCE(SUM(-qty*price),0) s FROM shelf_moves"
+            " WHERE kind='sale' AND source='1c' AND qty<0"
+            " AND COALESCE(undone,0)=0 AND at>=? AND at<?",
+            (opened_at, end)) or {}
+        return {"income_cash": round(num(income.get("s")), 2),
+                "collected": round(num(collected.get("s")), 2),
+                "income_1c": round(num(one_c.get("s")), 2)}
+
+    def current_shift(self, token: str) -> dict:
+        """Открытая смена с живым расчётом — для экрана «Смена»."""
+        self.require(token)
+        shift = self._open_shift()
+        if not shift:
+            return {"open": False, "shift": None}
+        totals = self._shift_totals(str(shift.get("opened_at") or ""),
+                                    now_iso())
+        expected = round(num(shift.get("open_cash")) + totals["income_cash"]
+                         - totals["collected"], 2)
+        return {"open": True, "shift": shift, "live": {**totals, "expected": expected}}
+
+    def open_shift(self, token: str, open_cash: float = 0.0) -> dict:
+        """Открыть смену: пересчитать ящик и зафиксировать старт."""
+        session = self.require(token)
+        busy = self._open_shift()
+        if busy:
+            raise ValueError(
+                f"Смена уже открыта ({busy.get('cashier') or 'кассир'}, "
+                f"с {str(busy.get('opened_at') or '')[:16]}) — сначала закройте её")
+        open_cash = round(num(open_cash), 2)
+        if open_cash < 0:
+            raise ValueError("В ящике не может быть меньше нуля")
+        cashier = self._session_name(session) or "кассир"
+        shift_id = uid("shf")
+        stamp = now_iso()
+        self.db.execute(
+            "INSERT INTO cashier_shifts(id,staff_id,cashier,opened_at,open_cash)"
+            " VALUES(?,?,?,?,?)",
+            (shift_id, str(session.get("staff_id") or ""), cashier,
+             stamp, open_cash))
+        self._audit(shift_id, "open_shift", "Смена открыта",
+                    f"{open_cash:g} ₽ в ящике", entity="cashier_shift",
+                    actor=cashier)
+        return self.current_shift(token)
+
+    def close_shift(self, token: str, close_cash: float,
+                    note: str = "") -> dict:
+        """Закрыть смену: пересчёт ящика, расчёт сервера, расхождение.
+
+        Чужую смену закрывает только старший. Расхождение не блокирует
+        закрытие — оно фиксируется в аудите и событии (недостача/излишек).
+        """
+        session = self.require(token)
+        shift = self._open_shift()
+        if not shift:
+            raise ValueError("Открытой смены нет — нечего закрывать")
+        # Именная смена — только владелец или старший; безымянную (открыта
+        # по общему коду) закрывает любой у ящика — анонимные сессии
+        # неразличимы, это тот же уровень доверия, что и общий код.
+        holder = str(shift.get("staff_id") or "")
+        me = str(session.get("staff_id") or "")
+        if holder and me != holder \
+                and str(session.get("role") or "") != "manager":
+            raise ValueError("Это чужая смена — закрыть может только старший")
+        close_cash = round(num(close_cash), 2)
+        if close_cash < 0:
+            raise ValueError("В ящике не может быть меньше нуля")
+        stamp = now_iso()
+        totals = self._shift_totals(str(shift.get("opened_at") or ""), stamp)
+        expected = round(num(shift.get("open_cash")) + totals["income_cash"]
+                         - totals["collected"], 2)
+        diff = round(close_cash - expected, 2)
+        note = str(note or "").strip()[:500]
+        cashier = self._session_name(session) or "кассир"
+        with self.db.transaction():
+            self.db.execute(
+                "UPDATE cashier_shifts SET closed_at=?, close_cash=?,"
+                " income_cash=?, collected=?, diff=?, note=? WHERE id=?",
+                (stamp, close_cash, totals["income_cash"], totals["collected"],
+                 diff, note, shift["id"]))
+        self._audit(shift["id"], "close_shift", "Смена закрыта",
+                    f"факт {close_cash:g} ₽ · расчёт {expected:g} ₽ · "
+                    f"расхождение {diff:+g} ₽" + (f" · {note}" if note else ""),
+                    entity="cashier_shift", actor=cashier)
+        self.db.add_event(
+            "money", "Смена закрыта",
+            f"{cashier}: факт {close_cash:g} ₽, расчёт {expected:g} ₽ "
+            f"(расхождение {diff:+g} ₽)",
+            data={"shift_id": shift["id"], "diff": diff})
+        out = self.db.one("SELECT * FROM cashier_shifts WHERE id=?",
+                          (shift["id"],)) or {}
+        out["expected"] = expected
+        out["income_1c"] = totals["income_1c"]
+        return {"ok": True, "shift": out}
+
+    def collect(self, token: str, amount: float, note: str = "") -> dict:
+        """Выемка из ящика — только старший, только в пределах остатка.
+
+        Привязывается к открытой смене (если есть) — смена видит выемку
+        в своём расчёте. Лимит остатка проверяет ``shelf.add_collection``.
+        """
+        session = self.require_role(token, "manager")
+        amount = round(num(amount), 2)
+        if amount <= 0:
+            raise ValueError("Сумма выемки должна быть больше нуля")
+        cashier = self._session_name(session) or "старший"
+        note = str(note or "").strip()[:500]
+        with self.db.transaction():
+            collection = self.shelf.add_collection(amount, note)
+            shift = self._open_shift()
+            shift_id = str((shift or {}).get("id") or "")
+            if shift_id:
+                self.db.execute("UPDATE shelf_collections SET shift_id=?"
+                                " WHERE id=?", (shift_id, collection["id"]))
+        self._audit(collection["id"], "collect", "Выемка из ящика",
+                    f"{amount:g} ₽" + (f" · {note}" if note else "")
+                    + (f" · смена {shift_id}" if shift_id else " · вне смены"),
+                    entity="cashier_shift", actor=cashier)
+        return {"ok": True, "collection": collection, "shift_id": shift_id}
+
     # ---------------------------------------------------------------- аудит
     def _audit(self, entity_id: str, action: str, title: str,
-               detail: str = "", data: dict | None = None, actor: str = "panel") -> None:
+               detail: str = "", data: dict | None = None, actor: str = "panel",
+               entity: str = "cashier_sale") -> None:
         try:
             self.db.execute(
                 "INSERT INTO audit_log(at,entity,entity_id,action,title,detail,data)"
                 " VALUES(?,?,?,?,?,?,?)",
-                (now_iso(), "cashier_sale", entity_id, action, title, detail,
+                (now_iso(), entity, entity_id, action, title, detail,
                  json.dumps({"actor": actor or "panel", **(data or {})}, ensure_ascii=False)))
         except Exception:
             pass

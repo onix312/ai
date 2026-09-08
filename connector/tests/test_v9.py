@@ -34,7 +34,8 @@ class Schema12Tests(unittest.TestCase):
         self.addCleanup(db.close)
         tables = {r["name"] for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")}
         for name in ("workshop_docs", "ams_slot_history", "filament_scrap",
-                     "suppliers", "plate_presets", "shift_checks"):
+                     "suppliers", "plate_presets", "shift_checks",
+                     "cashier_shifts"):
             self.assertIn(name, tables)
         spool_cols = {r["name"] for r in db.query("PRAGMA table_info(spools)")}
         self.assertTrue({"location", "price_per_kg", "received_doc_id"} <= spool_cols)

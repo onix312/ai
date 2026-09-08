@@ -1344,11 +1344,14 @@ async function renderWarehouses() {
   const list = res.warehouses || [];
   const totalQty = list.reduce((s, w) => s + num(w.qty), 0);
   const totalValue = list.reduce((s, w) => s + num(w.value), 0);
+  const holdCount = (res.reserves || []).filter((r) => r.kind === 'hold').length;
+  const reserveCount = (res.reserves || []).length - holdCount;
   $('wh_kpis').innerHTML = [
     kpi('Складов', String(list.length), 'мест хранения'),
     kpi('Всего штук', nfmt(totalQty), 'по всем складам'),
     kpi('Запас в рублях', money(totalValue), 'замороженный капитал'),
-    kpi('В резерве', `${nfmt(res.reserved)} шт`, `${(res.reserves || []).length} резерв(ов) под заказы`),
+    kpi('В резерве', `${nfmt(res.reserved)} шт`,
+        `${reserveCount} резерв. · ${holdCount} холд. СБП`),
   ].join('');
 
   $('wh_grid').innerHTML = list.length ? list.map((w) => {
@@ -1370,13 +1373,21 @@ async function renderWarehouses() {
       { label: '+ Склад', click: 'wh_add' });
 
   const reserves = res.reserves || [];
-  $('wh_reserves').innerHTML = reserves.length ? reserves.map((r) =>
-    '<div class="tx-row"><span class="tx-ic">⛨</span>'
-    + `<div class="tx-body"><b>${esc(r.nom_name || '')}</b>`
-    + `<small>${esc(dateTimeText(r.at))}${r.order_number ? ' · заказ ' + esc(r.order_number) : ''}`
-    + `${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
-    + `<span class="amt">${nfmt(r.qty)} шт</span>`
-    + `<button class="btn sm" type="button" data-reserve-release="${esc(r.id)}">Снять</button></div>`).join('')
+  // И3: холды СБП — тем же списком, но своей строкой: это товар, отложенный
+  // под ожидающую оплату (снимется подтверждением/отклонением/таймаутом).
+  // Кнопка «Снять» — ручной запасной выход руководителя.
+  $('wh_reserves').innerHTML = reserves.length ? reserves.map((r) => {
+    const hold = r.kind === 'hold';
+    const ref = hold
+      ? `холд СБП · продажа ${esc(String(r.doc_id || '').slice(-6) || '—')}`
+      : (r.order_number ? `заказ ${esc(r.order_number)}` : 'резерв');
+    return `<div class="tx-row"><span class="tx-ic">${hold ? '🔒' : '⛨'}</span>`
+      + `<div class="tx-body"><b>${esc(r.nom_name || '')}</b>`
+      + `<small>${esc(dateTimeText(r.at))} · ${ref}`
+      + `${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
+      + `<span class="amt">${nfmt(r.qty)} шт</span>`
+      + `<button class="btn sm" type="button" data-reserve-release="${esc(r.id)}" title="${hold ? 'Снять холд вручную (запасной выход)' : 'Снять резерв'}">Снять</button></div>`;
+  }).join('')
     : '<div class="empty compact"><span>Активных резервов нет.</span></div>';
 
   loadTurnover();
