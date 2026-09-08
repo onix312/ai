@@ -47,7 +47,7 @@ CHAIN.get = (prop) => {
 function makeElement(key) {
   const base = {
     id: key || '', tagName: 'DIV', nodeName: 'DIV', nodeType: 1,
-    style: {}, dataset: {}, value: '', textContent: '', innerHTML: '',
+    style: { setProperty(){}, getPropertyValue(){return ''}, removeProperty(){}, getPropertyPriority(){return ''} }, dataset: {}, value: '', textContent: '', innerHTML: '',
     hidden: false, checked: false, open: false, disabled: false, href: '', src: '',
     classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     children: [], childNodes: [], files: [], options: [], length: 0,
@@ -75,6 +75,7 @@ function makeElement(key) {
     getContext() { return null; },
     play() { return Promise.resolve(); }, pause() {},
   };
+  base.parentElement = base; base.parentNode = base; base.firstChild = base; base.lastChild = base;
   return new Proxy(base, {
     get(target, prop) { return prop in target ? target[prop] : CHAIN.get(prop); },
     set(target, prop, value) { target[prop] = value; return true; },
@@ -267,15 +268,83 @@ phaseViews();
 phaseEvents();
 phaseClicks();
 
+function phaseLiveRealistic() {
+  if (!ctx.PF || !ctx.PF.modules || !ctx.PF.modules.printer || typeof ctx.PF.modules.printer.renderLive !== 'function') return;
+  try {
+    const livePrinter = {
+      id: 'p1',
+      name: 'P1S Test',
+      connection: { connected: true, mode: 'lan', host: '192.168.1.100', last_error: '', last_message: new Date().toISOString() },
+      printer: { state: 'IDLE', state_label: 'Готов', progress: 0, task: '', layer: 0, total_layers: 0, remaining_min: 0, eta: null, speed_level: 2, wifi: '-65 dBm', firmware: '01.08.00.00', problems: [], severity: '' },
+      temperature: { nozzle: 205, nozzle_target: 210, bed: 60, bed_target: 60, chamber: 32 },
+      fans: { part: 30, aux: 0, chamber: 0 },
+      ams: {
+        temperature: 38.6,
+        humidity: 42,
+        trays: [
+          { id: '00', unit: 0, slot: 0, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 1', type: 'PLA', color: '#ff0000', remain: 80, uuid: 'uuid-pla-red', active: false, present: true, bambulab: true, generic: false },
+          { id: '01', unit: 0, slot: 1, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 2', type: 'PETG', color: '#00ff00', remain: 5, uuid: '', active: true, present: true, bambulab: false, generic: true },
+          { id: '02', unit: 0, slot: 2, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 3', type: '', color: '#cbd5e1', remain: null, uuid: '', active: false, present: false, bambulab: false, generic: false },
+          { id: '03', unit: 0, slot: 3, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 4', type: 'ABS', color: '#0000ff', remain: 50, uuid: 'uuid-abs-blue', active: false, present: true, bambulab: true, generic: false }
+        ]
+      },
+      camera: { available: true, demo: false, age: 1, shots: 3, fps: 15, error: '' },
+      guard: { alerts: [{ title: '\u0422\u0435\u0441\u0442 \u0442\u0440\u0435\u0432\u043e\u0433\u0438', severity: 'warn', reason: '\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u0442\u0435\u043d\u0434\u0430', advice: '', at: new Date().toISOString(), actions: [] }] },
+      maintenance: { hours: 123, due: 1, soon: 1, tasks: [{ id: 't1', task: '\u0421\u043c\u0430\u0437\u043a\u0430', percent: 90, due: true, soon: false, left_hours: -2, every_hours: 100, last_at: new Date().toISOString() }] },
+      job: null
+    };
+    ctx.PF.state.spools = [
+      { id: 'spool-1', material: 'PLA', color_name: '\u041a\u0440\u0430\u0441\u043d\u044b\u0439', color_hex: '#ff0000', remaining_grams: 850, brand: 'Bambu', archived: 0, printer_id: 'p1', ams_slot: '0', tray_uuid: 'uuid-pla-red', percent: 85, location: 'ams' },
+      { id: 'spool-2', material: 'ABS', color_name: '\u0421\u0438\u043d\u0438\u0439', color_hex: '#0000ff', remaining_grams: 400, brand: 'Generic', archived: 0, printer_id: 'p1', ams_slot: '3', tray_uuid: 'uuid-abs-blue', percent: 40, location: 'ams' },
+      { id: 'spool-3', material: 'PETG', color_name: '\u0417\u0435\u043b\u0435\u043d\u044b\u0439', color_hex: '#00ff00', remaining_grams: 120, brand: 'Test', archived: 0, printer_id: '', ams_slot: '', tray_uuid: '', percent: 20, location: 'warehouse' }
+    ];
+    ctx.PF.state.jobs = {
+      queue: [
+        { id: 'job-1', name: '\u0422\u0435\u0441\u0442\u043e\u0432\u0430\u044f \u0434\u0435\u0442\u0430\u043b\u044c', file: 'test.3mf', printer_id: 'p1', state: 'queued', plate: 1, priority: 0, ams_mapping: '[]', order_id: 'order-1', created_at: new Date().toISOString() },
+        { id: 'job-2', name: '\u0414\u0440\u0443\u0433\u0430\u044f \u0434\u0435\u0442\u0430\u043b\u044c', file: 'other.3mf', printer_id: '', state: 'queued', plate: 1, priority: 1, ams_mapping: '[]', created_at: new Date().toISOString() }
+      ],
+      history: []
+    };
+    ctx.PF.state.orders = [
+      { id: 'order-1', number: '1001', product: '\u0422\u0435\u0441\u0442', status: 'new', material: 'PLA', color: '\u043a\u0440\u0430\u0441\u043d\u044b\u0439', file: 'test.3mf' }
+    ];
+    if (!ctx.PF.state.printers || !ctx.PF.state.printers.length) {
+      ctx.PF.state.printers = [{ id: 'p1', name: 'P1S Test', model: 'P1S', mode: 'lan', host: '192.168.1.100', serial: 'TEST123', has_ams: 1, enabled: 1 }];
+    }
+    ctx.PF.state.live = {
+      printers: [livePrinter],
+      active: livePrinter,
+      farm: { printing: 0, load: 0, queued: 2 }
+    };
+    ctx.PF.state.activePrinter = 'p1';
+    try { ctx.PF.go('printers'); } catch (e) { if (e && e.name === 'ReferenceError') throw e; }
+    try { ctx.PF.modules.printer.renderLive(); } catch (e) { problems.push(['renderLive realistic', e]); }
+    try {
+      const maybeTabs = ctx.PF.modules.printer.renderTabs || (typeof ctx.renderTabs === 'function' ? ctx.renderTabs : null);
+      if (maybeTabs) maybeTabs();
+    } catch (e) { problems.push(['renderTabs realistic', e]); }
+    try { vm.runInContext('if (typeof renderTabs === "function") renderTabs();', ctx); } catch (e) { if (e && e.name === 'ReferenceError') problems.push(['renderTabs global realistic', e]); }
+  } catch (e) {
+    problems.push(['live-realistic setup', e]);
+  }
+}
+phaseLiveRealistic();
+
 /* ================================================================ отчёт */
 setTimeout(() => {
-  const isReference = (entry) => entry.error && entry.error.name === 'ReferenceError';
+  const isReference = (entry) => {
+    const err = entry.error || entry[1];
+    return err && err.name === 'ReferenceError';
+  };
+  const getError = (entry) => entry.error || entry[1];
   const blocking = [];
   loadErrors.filter(isReference).forEach((entry) => {
     blocking.push('загрузка ' + entry.file + ': ' + entry.error.message + '\n    ' +
       String(entry.error.stack || '').split('\n')[1]);
   });
-  problems.filter(isReference).forEach(([where, error]) => {
+  problems.filter(isReference).forEach((entry) => {
+    const where = entry[0] || entry.where;
+    const error = getError(entry);
     blocking.push(where + ': ' + error.message + '\n    ' +
       String(error.stack || '').split('\n')[1]);
   });
@@ -283,9 +352,14 @@ setTimeout(() => {
 
   console.log('Панель: файлов ' + all.length + ' (сразу ' + eager.length + ', лениво ' + lazy.length + ')');
   if (VERBOSE) {
-    const noise = problems.filter((entry) => entry.error.name !== 'ReferenceError');
+    const noise = problems.filter((entry) => {
+      const err = entry.error || entry[1];
+      return err && err.name !== 'ReferenceError';
+    });
     const seen = new Set();
-    noise.forEach(([where, error]) => {
+    noise.forEach((entry) => {
+      const where = entry[0] || entry.where;
+      const error = entry.error || entry[1];
       const line = where + ': ' + error.name + ': ' + error.message;
       if (!seen.has(line)) { seen.add(line); console.log('  [справочно] ' + line); }
     });
