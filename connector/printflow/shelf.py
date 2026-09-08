@@ -399,13 +399,14 @@ class Shelf:
     def sale(self, item_id: str, qty: float, price: float = 0.0,
              channel: str = "shelf", note: str = "", *,
              record_income: bool = True, source: str = "",
-             external_id: str = "") -> dict:
+             external_id: str = "", keep_zero_price: bool = False) -> dict:
         """Продажа штук со стеллажа.
 
         Обычная ручная продажа пишет доход в PrintFlow. Интеграция с 1С передаёт
         ``record_income=False``: 1С остаётся источником денег, а PrintFlow только
         уменьшает физический остаток. ``source + external_id`` защищают от
-        повторной отправки одной строки чека.
+        повторной отправки одной строки чека. ``keep_zero_price`` (скидка 100%
+        в кассе): нулевая цена — осознанная, к каталожной не возвращаемся.
         """
         item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
         if not item:
@@ -416,7 +417,9 @@ class Shelf:
         left = self._qty(item_id)
         if left < qty:
             raise ValueError(f"На стеллаже только {round(left)} шт — продать {round(qty)} нельзя")
-        price = num(price) if num(price) > 0 else num(item.get("price"))
+        price = num(price)
+        if price <= 0 and not keep_zero_price:
+            price = num(item.get("price"))
         tx = None
         kind = "online" if channel == "online" else "sale"
         sale_note = note or f"Продажа ({channel})"

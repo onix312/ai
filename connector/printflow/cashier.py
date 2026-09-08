@@ -549,15 +549,44 @@ class Cashier:
         return item_id
 
     # ------------------------------------------------------------- продажа
+    def _discount_approval(self, session: dict, manager_pin: str) -> str:
+        """Имя утвердившего скидку — PIN активного старшего.
+
+        Пока PIN не заведены (режим одного владельца) подтверждения не надо:
+        утверждает сам владелец — консистентно с выемкой из И3. Сам PIN
+        в логи, аудит и события не попадает никогда — только имя.
+        """
+        from .staff import Staff
+        staff = Staff(self.db)
+        if staff.pins_count() == 0:
+            return self._session_name(session) or "владелец"
+        member = staff.find_by_pin(manager_pin)
+        if not member or str(member.get("role") or "") != "manager":
+            raise ValueError("Скидку подтверждает PIN старшего")
+        return str(member.get("name") or "старший")
+
     def sell(self, items: list, method: str, token: str, *,
-             request_id: str = "", cashier_name: str = "") -> dict:
+             request_id: str = "", cashier_name: str = "",
+             discount_pct: float = 0.0, manager_pin: str = "",
+             box_id: str = "") -> dict:
         """Продажа корзины. Наличные — сразу в журнал; СБП — платёж до сверки.
 
         Идемпотентно по ``request_id`` (двойное нажатие не создаёт две продажи).
         Имя кассира берём из сессии (PIN), а не из запроса: клиенту не доверяем.
+        Скидка — процентом на чек, только с PIN старшего; сервер пересчитывает
+        цены сам по каталогу. Учёт нетто: выручка — сумма со скидкой.
         """
         session = self.require(token)
         self._release_expired_holds()
+        box_id = self._box(box_id)
+        pct = round(num(discount_pct), 2)
+        if pct < 0 or pct > 100:
+            raise ValueError("Скидка — 0–100%")
+        approved_by = ""
+        if pct > 0:
+            # Подтверждение — до транзакции: отказ не создаёт ни движений,
+            # ни платежа, ни строки продажи.
+            approved_by = self._discount_approval(session, manager_pin)
         method = str(method or "cash").strip().lower()
         if method not in METHODS:
             raise ValueError("Способ оплаты: наличные (cash) или СБП (sbp)")
@@ -600,6 +629,7 @@ class Cashier:
             index = self._catalog_index(offer)
             rows = []
             total = 0.0
+            list_total = 0.0
             for entry in payload:
                 item = index.get(entry["item_id"])
                 if not item:
@@ -614,13 +644,22 @@ class Cashier:
                     raise ValueError(
                         f"«{item.get('name') or entry['item_id']}»: цена не задана — "
                         "укажите её в номенклатуре или на ценнике")
+                charged = round(price * (100.0 - pct) / 100.0, 2) if pct else round(price, 2)
                 rows.append({"item_id": entry["item_id"], "qty": entry["qty"],
-                             "price": round(price, 2), "name": str(item.get("name") or ""),
+                             "price": charged, "list_price": round(price, 2),
+                             "discount_pct": pct,
+                             "name": str(item.get("name") or ""),
                              "nom_id": str(item.get("nom_id") or ""),
                              "source": str(item.get("source") or "shelf")})
-                total += price * entry["qty"]
+                total += charged * entry["qty"]
+                list_total += price * entry["qty"]
             total = round(total, 2)
-            if total <= 0:
+            list_total = round(list_total, 2)
+            discount_amount = round(list_total - total, 2)
+            gift = method == "cash" and pct >= 100
+            if total <= 0 and not gift:
+                if method == "sbp":
+                    raise ValueError("Нулевая сумма — только за наличные (дарение)")
                 raise ValueError("Сумма продажи должна быть больше нуля")
             sale_id = uid("cs")
             stamp = now_iso()
@@ -629,14 +668,20 @@ class Cashier:
                     # недостающее приезжает со склада движением регистра
                     row["item_id"] = self._ensure_on_shelf(row, offer)
                     row["source"] = "shelf"
-                    self.shelf.sale(row["item_id"], row["qty"], row["price"],
-                                    channel="shelf", note="Касса: наличные")
+                    # Цены со скидкой — финальные: нулевую не возвращаем
+                    # к каталожной (дарение), иначе подарили бы за деньги.
+                    done = self.shelf.sale(row["item_id"], row["qty"], row["price"],
+                                           channel="shelf", note="Касса: наличные",
+                                           keep_zero_price=pct > 0)
+                    # Связка для отмены: движение полки за строкой продажи.
+                    row["move_id"] = str((done.get("move") or {}).get("id") or "")
                 self.db.execute(
                     "INSERT INTO cashier_sales"
-                    "(id,payment_id,method,amount,items,cashier,request_id,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?)",
+                    "(id,payment_id,method,amount,items,cashier,request_id,created_at,"
+                    " discount_pct,discount_amount,box_id)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (sale_id, "", "cash", total, json.dumps(rows, ensure_ascii=False),
-                     cashier, request_id, stamp))
+                     cashier, request_id, stamp, pct, discount_amount, box_id))
                 result = self.db.one("SELECT * FROM cashier_sales WHERE id=?", (sale_id,))
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = True
@@ -659,10 +704,12 @@ class Cashier:
                 self._hold_rows(rows, sale_id)
                 self.db.execute(
                     "INSERT INTO cashier_sales"
-                    "(id,payment_id,method,amount,items,cashier,request_id,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?)",
+                    "(id,payment_id,method,amount,items,cashier,request_id,created_at,"
+                    " discount_pct,discount_amount,box_id)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (sale_id, payment["id"], "sbp", total,
-                     json.dumps(rows, ensure_ascii=False), cashier, request_id, stamp))
+                     json.dumps(rows, ensure_ascii=False), cashier, request_id, stamp,
+                     pct, discount_amount, box_id))
                 result = self.db.one("SELECT * FROM cashier_sales WHERE id=?", (sale_id,))
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = False
@@ -674,10 +721,27 @@ class Cashier:
         if not label:
             # Наличные без банковского назначения — состав для журнала.
             label = build_purpose(rows, brand="")
-        self._audit(sale_id, "sell", "Продажа на кассе", f"{method} · {total:g} ₽", actor=cashier)
+        detail = f"{method} · {total:g} ₽"
+        if pct > 0:
+            detail += f" · скидка {pct:g}% ({approved_by})"
+        if gift:
+            detail += " · дарение"
+        self._audit(sale_id, "sell", "Продажа на кассе", detail, actor=cashier)
         self.db.add_event("shelf", "Продажа на кассе",
                           f"{method} · {total:g} ₽ · {label}",
-                          data={"sale_id": sale_id, "method": method, "cashier": cashier})
+                          data={"sale_id": sale_id, "method": method,
+                                "cashier": cashier, "discount_pct": pct,
+                                "discount_approved_by": approved_by})
+        if pct > 0:
+            # Скидка видна владельцу отдельной строкой в ленте — при
+            # нетто-выручке это единственный быстрый счёт щедрости.
+            self.db.add_event(
+                "shelf", "Скидка на кассе",
+                f"{pct:g}% · −{discount_amount:g} ₽ · утвердил {approved_by}"
+                + (" · дарение" if gift else ""),
+                data={"sale_id": sale_id, "discount_pct": pct,
+                      "discount_amount": discount_amount,
+                      "approved_by": approved_by})
         return payload_out
 
     def _sale_result(self, sale: dict, already_recorded: bool = False) -> dict:
@@ -685,15 +749,22 @@ class Cashier:
             items = json.loads(sale.get("items") or "[]")
         except json.JSONDecodeError:
             items = []
+        amount = round(num(sale.get("amount")), 2)
+        discount = round(num(sale.get("discount_amount")), 2)
         return {
             "ok": True,
             "sale_id": sale["id"],
             "method": sale.get("method") or "cash",
-            "amount": round(num(sale.get("amount")), 2),
+            "amount": amount,
             "items": items,
             "cashier": sale.get("cashier") or "",
             "payment_id": sale.get("payment_id") or "",
             "confirmed": bool(str(sale.get("confirmed_at") or "")),
+            "cancelled": bool(str(sale.get("cancelled_at") or "")),
+            "discount_pct": round(num(sale.get("discount_pct")), 2),
+            "discount_amount": discount,
+            "list_amount": round(amount + discount, 2),
+            "box_id": str(sale.get("box_id") or ""),
             "already_recorded": already_recorded,
         }
 
@@ -781,8 +852,11 @@ class Cashier:
             for row in rows:
                 row["item_id"] = self._ensure_on_shelf(row, offer)
                 row["source"] = "shelf"
-                self.shelf.sale(row["item_id"], row["qty"], row["price"],
-                                channel="shelf", note="Касса: СБП", record_income=False)
+                done = self.shelf.sale(row["item_id"], row["qty"], row["price"],
+                                       channel="shelf", note="Касса: СБП",
+                                       record_income=False,
+                                       keep_zero_price=num(row.get("discount_pct")) > 0)
+                row["move_id"] = str((done.get("move") or {}).get("id") or "")
             # 3) деньги на счёт СБП + статус платежа
             payment = self.sbp.confirm(payment_id, actor=cashier, note=note or "")
             self.db.execute(
@@ -819,11 +893,107 @@ class Cashier:
                     f"{num(sale['amount']):g} ₽", actor=cashier)
         return {**self._sale_result(sale), "payment": payment}
 
+    # ------------------------------------------------------- отмена продажи
+    def shift_sales(self, token: str, box_id: str = "") -> dict:
+        """Продажи открытой смены — для экрана «Смена» и отмены."""
+        self.require(token)
+        box_id = self._box(box_id)
+        shift = self._open_shift(box_id)
+        if not shift:
+            return {"open": False, "shift": None, "box_id": box_id,
+                    "sales": []}
+        rows = self.db.query(
+            "SELECT s.*, p.status pay_status FROM cashier_sales s"
+            " LEFT JOIN sbp_payments p ON p.id=s.payment_id"
+            " WHERE COALESCE(s.box_id,'')=? AND s.created_at>=?"
+            # datetime режет микросекунды: продажи в одну секунду
+            # упорядочиваем по вставке (новые сверху).
+            " ORDER BY datetime(s.created_at) DESC, s.rowid DESC LIMIT 100",
+            (box_id, str(shift.get("opened_at") or "")))
+        sales = []
+        for row in rows:
+            try:
+                row["items"] = json.loads(row.get("items") or "[]")
+            except json.JSONDecodeError:
+                row["items"] = []
+            row["cancelled"] = bool(str(row.get("cancelled_at") or ""))
+            row["confirmed"] = bool(str(row.get("confirmed_at") or ""))
+            sales.append(row)
+        return {"open": True, "shift": shift, "box_id": box_id, "sales": sales}
+
+    def cancel_sale(self, sale_id: str, token: str) -> dict:
+        """Отменить наличную продажу текущей открытой смены.
+
+        Любой кассир (решение И4), но только наличные и только в окне смены:
+        отмена удаляет проводку, поэтому переписывать прошлое нельзя.
+        СБП-продажи — из панели (там же возврат денег из банка).
+        """
+        session = self.require(token)
+        sale = self.db.one("SELECT * FROM cashier_sales WHERE id=?",
+                           (str(sale_id or "").strip(),))
+        if not sale:
+            raise ValueError("Продажа не найдена")
+        if str(sale.get("method") or "") != "cash":
+            raise ValueError("СБП-возврат — из панели")
+        if str(sale.get("cancelled_at") or ""):
+            return {**self._sale_result(sale), "already": True}
+        if not self._shift_covering(str(sale.get("created_at") or "")):
+            raise ValueError("Продажа не из текущей смены — отмена из панели")
+        try:
+            rows = json.loads(sale.get("items") or "[]")
+        except json.JSONDecodeError:
+            rows = []
+        if not rows:
+            raise ValueError("В продаже нет строк — отмена из панели")
+        for row in rows:
+            if not str(row.get("move_id") or ""):
+                raise ValueError("Продажа до обновления — отмена из панели")
+        author = self._session_name(session) or "кассир"
+        with self.db.transaction():
+            fresh = self.db.one("SELECT * FROM cashier_sales WHERE id=?",
+                                (sale["id"],))
+            if str(fresh.get("cancelled_at") or ""):
+                return {**self._sale_result(fresh), "already": True}
+            for row in rows:
+                # undo_sale: штуки назад, проводка удаляется, сторно в зону.
+                self.shelf.undo_sale(str(row.get("move_id") or ""))
+            self.db.execute("UPDATE cashier_sales SET cancelled_at=? WHERE id=?",
+                            (now_iso(), sale["id"]))
+        done = self.db.one("SELECT * FROM cashier_sales WHERE id=?",
+                           (sale["id"],))
+        result = self._sale_result(done)
+        self._audit(sale["id"], "cancel_sale", "Продажа на кассе отменена",
+                    f"{num(sale.get('amount')):g} ₽", actor=author)
+        self.db.add_event("shelf", "Отмена продажи в кассе",
+                          f"{num(sale.get('amount')):g} ₽ · {author}",
+                          data={"sale_id": sale["id"],
+                                "amount": num(sale.get("amount")),
+                                "cashier": author})
+        return {**result, "already": False}
+
     # ------------------------------------------------------- смены и выемка
-    def _open_shift(self) -> dict | None:
+    @staticmethod
+    def _box(box_id: str = "") -> str:
+        """Нормализованный id ящика ('' — основной)."""
+        return str(box_id or "").strip()[:64]
+
+    def _open_shift(self, box_id: str = "") -> dict | None:
         return self.db.one(
             "SELECT * FROM cashier_shifts WHERE COALESCE(closed_at,'')=''"
-            " ORDER BY datetime(opened_at) LIMIT 1")
+            " AND COALESCE(box_id,'')=? ORDER BY datetime(opened_at) LIMIT 1",
+            (self._box(box_id),))
+
+    def _shift_covering(self, created_at: str) -> dict | None:
+        """Открытая смена, в окно которой попадает продажа (любой ящик).
+
+        Продажа привязана к ящику, но отмена ищет покрывающую смену без
+        привязки: деньги физически возвращаются из текущего ящика, а
+        разводка наличных по ящикам — будущий раунд (см. box_id).
+        """
+        return self.db.one(
+            "SELECT * FROM cashier_shifts WHERE COALESCE(closed_at,'')=''"
+            " AND opened_at<=? ORDER BY datetime(opened_at) DESC LIMIT 1",
+            (str(created_at or ""),))
 
     def _shift_totals(self, opened_at: str, end: str) -> dict[str, float]:
         """Расчёт смены за окно [opened_at, end): наличные и выемки.
@@ -852,26 +1022,30 @@ class Cashier:
                 "collected": round(num(collected.get("s")), 2),
                 "income_1c": round(num(one_c.get("s")), 2)}
 
-    def current_shift(self, token: str) -> dict:
+    def current_shift(self, token: str, box_id: str = "") -> dict:
         """Открытая смена с живым расчётом — для экрана «Смена»."""
         self.require(token)
-        shift = self._open_shift()
+        shift = self._open_shift(box_id)
         if not shift:
-            return {"open": False, "shift": None}
+            return {"open": False, "shift": None, "box_id": self._box(box_id)}
         totals = self._shift_totals(str(shift.get("opened_at") or ""),
                                     now_iso())
         expected = round(num(shift.get("open_cash")) + totals["income_cash"]
                          - totals["collected"], 2)
         return {"open": True, "shift": shift, "live": {**totals, "expected": expected}}
 
-    def open_shift(self, token: str, open_cash: float = 0.0) -> dict:
+    def open_shift(self, token: str, open_cash: float = 0.0,
+                   box_id: str = "") -> dict:
         """Открыть смену: пересчитать ящик и зафиксировать старт."""
         session = self.require(token)
-        busy = self._open_shift()
+        box_id = self._box(box_id)
+        busy = self._open_shift(box_id)
         if busy:
             raise ValueError(
                 f"Смена уже открыта ({busy.get('cashier') or 'кассир'}, "
-                f"с {str(busy.get('opened_at') or '')[:16]}) — сначала закройте её")
+                f"с {str(busy.get('opened_at') or '')[:16]})"
+                + (f" · ящик {box_id}" if box_id else "")
+                + " — сначала закройте её")
         open_cash = round(num(open_cash), 2)
         if open_cash < 0:
             raise ValueError("В ящике не может быть меньше нуля")
@@ -879,24 +1053,26 @@ class Cashier:
         shift_id = uid("shf")
         stamp = now_iso()
         self.db.execute(
-            "INSERT INTO cashier_shifts(id,staff_id,cashier,opened_at,open_cash)"
-            " VALUES(?,?,?,?,?)",
+            "INSERT INTO cashier_shifts(id,staff_id,cashier,opened_at,open_cash,box_id)"
+            " VALUES(?,?,?,?,?,?)",
             (shift_id, str(session.get("staff_id") or ""), cashier,
-             stamp, open_cash))
+             stamp, open_cash, box_id))
         self._audit(shift_id, "open_shift", "Смена открыта",
-                    f"{open_cash:g} ₽ в ящике", entity="cashier_shift",
-                    actor=cashier)
-        return self.current_shift(token)
+                    f"{open_cash:g} ₽ в ящике"
+                    + (f" · ящик {box_id}" if box_id else ""),
+                    entity="cashier_shift", actor=cashier)
+        return self.current_shift(token, box_id)
 
     def close_shift(self, token: str, close_cash: float,
-                    note: str = "") -> dict:
+                    note: str = "", box_id: str = "") -> dict:
         """Закрыть смену: пересчёт ящика, расчёт сервера, расхождение.
 
         Чужую смену закрывает только старший. Расхождение не блокирует
         закрытие — оно фиксируется в аудите и событии (недостача/излишек).
         """
         session = self.require(token)
-        shift = self._open_shift()
+        box_id = self._box(box_id)
+        shift = self._open_shift(box_id)
         if not shift:
             raise ValueError("Открытой смены нет — нечего закрывать")
         # Именная смена — только владелец или старший; безымянную (открыта
@@ -925,26 +1101,30 @@ class Cashier:
                  diff, note, shift["id"]))
         self._audit(shift["id"], "close_shift", "Смена закрыта",
                     f"факт {close_cash:g} ₽ · расчёт {expected:g} ₽ · "
-                    f"расхождение {diff:+g} ₽" + (f" · {note}" if note else ""),
+                    f"расхождение {diff:+g} ₽" + (f" · {note}" if note else "")
+                    + (f" · ящик {box_id}" if box_id else ""),
                     entity="cashier_shift", actor=cashier)
         self.db.add_event(
             "money", "Смена закрыта",
             f"{cashier}: факт {close_cash:g} ₽, расчёт {expected:g} ₽ "
-            f"(расхождение {diff:+g} ₽)",
-            data={"shift_id": shift["id"], "diff": diff})
+            f"(расхождение {diff:+g} ₽)"
+            + (f" · ящик {box_id}" if box_id else ""),
+            data={"shift_id": shift["id"], "diff": diff, "box_id": box_id})
         out = self.db.one("SELECT * FROM cashier_shifts WHERE id=?",
                           (shift["id"],)) or {}
         out["expected"] = expected
         out["income_1c"] = totals["income_1c"]
         return {"ok": True, "shift": out}
 
-    def collect(self, token: str, amount: float, note: str = "") -> dict:
+    def collect(self, token: str, amount: float, note: str = "",
+                box_id: str = "") -> dict:
         """Выемка из ящика — только старший, только в пределах остатка.
 
         Привязывается к открытой смене (если есть) — смена видит выемку
         в своём расчёте. Лимит остатка проверяет ``shelf.add_collection``.
         """
         session = self.require_role(token, "manager")
+        box_id = self._box(box_id)
         amount = round(num(amount), 2)
         if amount <= 0:
             raise ValueError("Сумма выемки должна быть больше нуля")
@@ -952,7 +1132,7 @@ class Cashier:
         note = str(note or "").strip()[:500]
         with self.db.transaction():
             collection = self.shelf.add_collection(amount, note)
-            shift = self._open_shift()
+            shift = self._open_shift(box_id)
             shift_id = str((shift or {}).get("id") or "")
             if shift_id:
                 self.db.execute("UPDATE shelf_collections SET shift_id=?"
