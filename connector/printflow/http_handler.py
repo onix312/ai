@@ -445,11 +445,17 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 return self.send_json(400, {"error": "Некорректный JSON"})
             if not isinstance(body, dict):
                 return self.send_json(400, {"error": "Ожидается объект JSON"})
+            key = extract_idempotency_key(body, self.headers)
+            # /api/jobs/start пока живёт в legacy-ветке api.post, но сам
+            # менеджер уже умеет дедупликацию по start_request_id. Связываем
+            # общий Idempotency-Key панели с этим полем, чтобы сетевой ретрай
+            # одного и того же клика не запускал задание повторно.
+            if path == "/api/jobs/start" and key and not str(body.get("start_request_id") or "").strip():
+                body["start_request_id"] = key
             # Идемпотентность (идея 5): для маршрутов, помеченных в реестре,
             # повтор с тем же ключом возвращает прежний ответ, а не создаёт
             # вторую сущность.
             route = router.find("POST", path)
-            key = extract_idempotency_key(body, self.headers)
             if route is not None and route.idempotent and key:
                 store = self.api.idempotency
                 found, cached = store.get(key, path)

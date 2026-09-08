@@ -1982,8 +1982,13 @@ function bind() {
     try {
       await post('/api/settings', { auto_queue: e.target.checked });
       PF.state.settings.auto_queue = e.target.checked;
+      const safetyGate = !!PF.state.settings.unattended_dangerous_actions;
       toast(e.target.checked ? 'Автозапуск включён' : 'Автозапуск выключен',
-        e.target.checked ? 'Следующее задание стартует само' : 'Задания запускаются вручную');
+        e.target.checked
+          ? (safetyGate
+              ? 'Следующее задание стартует само'
+              : 'Safety-gate выключен: задания пока запускаются вручную')
+          : 'Задания запускаются вручную');
     } catch (err) { fail(err); }
   });
 

@@ -6,6 +6,7 @@ from unittest import TestCase
 
 ROOT = Path(__file__).resolve().parents[2]
 INDEX_HTML = ROOT / "site" / "index.html"
+CASHIER_HTML = ROOT / "site" / "cashier.html"
 VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
@@ -73,6 +74,14 @@ class SiteMarkupTests(TestCase):
         errors = list(self.parser.errors)
         if self.parser.stack:
             errors.append(f"не закрыты теги: {self.parser.stack[-5:]}")
+        self.assertEqual(errors, [])
+
+    def test_cashier_has_balanced_markup(self):
+        parser = _StructureParser()
+        parser.feed(CASHIER_HTML.read_text(encoding="utf-8"))
+        errors = list(parser.errors)
+        if parser.stack:
+            errors.append(f"не закрыты теги: {parser.stack[-5:]}")
         self.assertEqual(errors, [])
 
     def test_no_duplicate_ids_across_all_pages(self):

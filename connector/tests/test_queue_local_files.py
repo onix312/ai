@@ -48,6 +48,19 @@ class PrinterStub:
         pass
 
 
+class FlakyStartPrinter(PrinterStub):
+    def __init__(self):
+        super().__init__()
+        self.fail_once = True
+
+    def start_print(self, *args, **kwargs):
+        self.starts.append((args, kwargs))
+        if self.fail_once:
+            self.fail_once = False
+            raise ConnectionError("MQTT недоступен")
+        return {"ok": True}
+
+
 class LocalQueueTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -97,6 +110,21 @@ class LocalQueueTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.start_job(job["id"], printer.id)
         self.assertEqual(len(printer.starts), 1)
+
+    def test_failed_start_clears_request_id_so_same_click_can_retry(self):
+        printer = FlakyStartPrinter()
+        self.manager.printers[printer.id] = printer
+        job = self.manager.enqueue({"file": "on-sd.3mf", "printer_id": printer.id})
+        with self.assertRaisesRegex(ConnectionError, "MQTT недоступен"):
+            self.manager.start_job(job["id"], printer.id, start_request_id="req-1")
+        row = self.db.one("SELECT state, COALESCE(start_request_id,'') start_request_id"
+                          " FROM print_jobs WHERE id=?", (job["id"],))
+        self.assertEqual(row["state"], "queued")
+        self.assertEqual(row["start_request_id"], "")
+        started = self.manager.start_job(job["id"], printer.id, start_request_id="req-1")
+        self.assertEqual(started["state"], "starting")
+        self.assertFalse(started.get("already_started"))
+        self.assertEqual(len(printer.starts), 2)
 
     def test_multipart_upload_creates_queue_job_without_printer(self):
         boundary = "----printflow-test"
