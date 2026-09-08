@@ -1315,6 +1315,12 @@ class Api:
             return 200, self.track_order(one("number"), one("phone"), one("token"))
         # ------------------------------------------------------------- склады
         if path == "/api/warehouses":
+            # И3: просроченные холды снимаются лениво — список всегда свежий.
+            try:
+                self.stock.release_expired_holds(
+                    num(self.db.setting("sbp_hold_hours", 24), 24))
+            except Exception:
+                pass
             return 200, {"warehouses": self.stock.warehouse_totals(),
                          "reserves": self.stock.reserves(),
                          "reserved": round(sum(num(r.get("qty"))
@@ -1334,6 +1340,11 @@ class Api:
             return 200, {"rows": self.stock.turnover(one("from"), one("to"),
                                                      one("warehouse_id"))}
         if path == "/api/reserves":
+            try:
+                self.stock.release_expired_holds(
+                    num(self.db.setting("sbp_hold_hours", 24), 24))
+            except Exception:
+                pass
             return 200, {"reserves": self.stock.reserves()}
         if path == "/api/warehouse/positions":
             wid = one("id")
@@ -3361,6 +3372,13 @@ class Api:
         if path == "/api/staff/restore":
             from .staff import Staff
             member = Staff(self.db).restore(str(body.get("id") or ""))
+            self.bus.publish("resync", {})
+            return 200, {"ok": True, "member": member}
+        if path == "/api/staff/pin":
+            # И3: личный PIN кассы (пустой — снять). Хеш наружу не отдаётся.
+            from .staff import Staff
+            member = Staff(self.db).set_pin(str(body.get("id") or ""),
+                                            str(body.get("pin") or ""))
             self.bus.publish("resync", {})
             return 200, {"ok": True, "member": member}
         if path == "/api/staff/invite":

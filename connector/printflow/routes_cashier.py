@@ -62,7 +62,10 @@ def cashier_sell(api: Any, ctx: Ctx):
         str(ctx.arg("method", "cash") or "cash"),
         _token(ctx),
         request_id=str(ctx.arg("request_id", "") or "").strip(),
-        cashier_name=str(ctx.arg("cashier_name", "") or "").strip())
+        cashier_name=str(ctx.arg("cashier_name", "") or "").strip(),
+        discount_pct=ctx.num("discount_pct", 0),
+        manager_pin=str(ctx.arg("manager_pin", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))
 
 
 @router.post("/api/cashier/confirm-sbp", audit="Касса: СБП подтверждена",
@@ -81,3 +84,49 @@ def cashier_reject_sbp(api: Any, ctx: Ctx):
         str(ctx.arg("payment_id", "") or ctx.arg("id", "") or "").strip(),
         _token(ctx),
         reason=str(ctx.arg("reason", "") or "").strip())
+
+
+@router.post("/api/cashier/sale/cancel", audit="Касса: продажа отменена",
+             doc="Отменить наличную продажу текущей смены (любой кассир)")
+def cashier_sale_cancel(api: Any, ctx: Ctx):
+    return _cashier(api).cancel_sale(
+        str(ctx.arg("sale_id", "") or ctx.arg("id", "") or "").strip(),
+        _token(ctx))
+
+
+@router.get("/api/cashier/shift/sales", doc="Продажи открытой смены")
+def cashier_shift_sales(api: Any, ctx: Ctx):
+    return _cashier(api).shift_sales(
+        _token(ctx), str(ctx.arg("box_id", "") or ""))
+
+
+@router.get("/api/cashier/shift/current", doc="Открытая смена с живым расчётом")
+def cashier_shift_current(api: Any, ctx: Ctx):
+    return _cashier(api).current_shift(
+        _token(ctx), str(ctx.arg("box_id", "") or ""))
+
+
+@router.post("/api/cashier/shift/open", audit="Касса: смена открыта",
+             doc="Открыть смену: зафиксировать стартовый пересчёт ящика")
+def cashier_shift_open(api: Any, ctx: Ctx):
+    return _cashier(api).open_shift(
+        _token(ctx), ctx.num("open_cash", 0),
+        str(ctx.arg("box_id", "") or ""))
+
+
+@router.post("/api/cashier/shift/close", audit="Касса: смена закрыта",
+             doc="Закрыть смену: пересчёт ящика, расчёт сервера, расхождение")
+def cashier_shift_close(api: Any, ctx: Ctx):
+    return _cashier(api).close_shift(
+        _token(ctx), ctx.num("close_cash", 0),
+        note=str(ctx.arg("note", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))
+
+
+@router.post("/api/cashier/collect", audit="Касса: выемка",
+             doc="Выемка из ящика (только старший, в пределах остатка)")
+def cashier_collect(api: Any, ctx: Ctx):
+    return _cashier(api).collect(
+        _token(ctx), ctx.num("amount", 0),
+        note=str(ctx.arg("note", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))

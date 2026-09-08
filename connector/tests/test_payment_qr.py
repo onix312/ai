@@ -143,7 +143,11 @@ class LinkTemplateTests(unittest.TestCase):
             "https://www.tbank.ru/rm/shop/?amount={amount}&purpose={purpose}",
             1234.5, "Заказ 12")
         self.assertIn("amount=1234.5", link)
-        self.assertIn("purpose=Заказ 12", link)
+        # 18.0: назначение URL-кодируется — пробел иначе рвёт ссылку.
+        self.assertIn("purpose=", link)
+        self.assertNotIn("purpose=Заказ 12", link)
+        from urllib.parse import unquote
+        self.assertIn("purpose=Заказ 12", unquote(link))
 
     def test_kopecks_placeholder(self):
         self.assertIn("=95000", payment_qr.link_payload("https://pay?sum={amount_kop}", 950))

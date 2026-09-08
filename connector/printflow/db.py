@@ -20,7 +20,7 @@ from .config import (BACKUP_DIR, DB_FILE, DEFAULT_ACCOUNTS, DEFAULT_CHANNELS,
                      DEFAULT_STATUSES, EXTRA_STATUSES, RESTORE_REQUEST, ensure_dirs,
                      now_iso, rotate_backups)
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
@@ -30,9 +30,43 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # создавались схемой v3 без этой колонки и падали на загрузке каталога.
         ("color", "TEXT DEFAULT '#6366f1'"),
     ],
+    "reserves": [
+        # И2 «единый регистр»: вид удержания — резерв под заказ или холд
+        # ожидающей СБП-продажи (снимается подтверждением/отклонением/таймаутом).
+        ("kind", "TEXT DEFAULT 'reserve'"),
+    ],
+    "staff": [
+        # И3: личный PIN для входа в кассу (хеш pin:v1:…, сам PIN не хранится).
+        ("pin_hash", "TEXT DEFAULT ''"),
+    ],
+    "shelf_collections": [
+        # И3: смена, во время которой прошла выемка ('' — выемка вне смены).
+        ("shift_id", "TEXT DEFAULT ''"),
+    ],
+    "cashier_sales": [
+        # И4: отмена наличной продажи ('' — активна, иначе штамп отмены).
+        ("cancelled_at", "TEXT DEFAULT ''"),
+        # И4: скидка старшего — процент на чек и сумма скидки в рублях
+        # (каталог минус нетто; аналитика щедрости при нетто-выручке).
+        ("discount_pct", "REAL DEFAULT 0"),
+        ("discount_amount", "REAL DEFAULT 0"),
+        # И4: задел под второй ящик — продажи привязаны к ящику смены.
+        ("box_id", "TEXT DEFAULT ''"),
+    ],
+    "cashier_shifts": [
+        # И4: задел под второй ящик ('' — основной). Правило «одна открытая
+        # смена» действует в пределах ящика; разводка in_shop по ящикам и
+        # выбор ящика в UI — отдельный будущий раунд.
+        ("box_id", "TEXT DEFAULT ''"),
+    ],
     "client_payment_intents": [
         # связанный СБП-платёж (Касса 16.0): подтверждение идёт через ядро СБП
         ("sbp_id", "TEXT DEFAULT ''"),
+    ],
+    "sbp_payments": [
+        # полный состав оплаты (18.0): JSON [{name, qty, price}] — банковское
+        # назначение короткое, а состав корзины не теряется никогда
+        ("items", "TEXT DEFAULT '[]'"),
     ],
     "materials": [
         # встроенный тип из каталога (можно править под себя; 0 — свой материал)
@@ -1283,6 +1317,7 @@ CREATE TABLE IF NOT EXISTS sbp_payments (
     amount REAL DEFAULT 0,
     currency TEXT DEFAULT 'RUB',
     purpose TEXT DEFAULT '',     -- назначение платежа (основание)
+    items TEXT DEFAULT '[]',     -- полный состав: JSON [{name, qty, price}] (18.0)
     status TEXT DEFAULT 'new',   -- new | pending | confirmed | rejected | refunded
     request_id TEXT DEFAULT '',  -- идемпотентность создания
     account_id TEXT DEFAULT '',  -- счёт, на который записан подтверждённый платёж
@@ -1323,6 +1358,24 @@ CREATE TABLE IF NOT EXISTS cashier_sales (
 );
 CREATE INDEX IF NOT EXISTS idx_cashier_sales_payment ON cashier_sales(payment_id);
 CREATE INDEX IF NOT EXISTS idx_cashier_sales_created ON cashier_sales(created_at);
+
+-- И3: смены кассы. Один физический ящик — одна открытая смена на всех;
+-- open_cash/close_cash — пересчёт кассира, income_cash/collected/diff —
+-- расчёт сервера при закрытии (не доверяем клиенту).
+CREATE TABLE IF NOT EXISTS cashier_shifts (
+    id TEXT PRIMARY KEY,
+    staff_id TEXT DEFAULT '',
+    cashier TEXT DEFAULT '',
+    opened_at TEXT,
+    closed_at TEXT DEFAULT '',
+    open_cash REAL DEFAULT 0,
+    close_cash REAL DEFAULT 0,
+    income_cash REAL DEFAULT 0,
+    collected REAL DEFAULT 0,
+    diff REAL DEFAULT 0,
+    note TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cashier_shifts_open ON cashier_shifts(closed_at);
 
 -- Касса 16.0, раунд «авто-СБП»: поступления из банка (выписка/API/вебхук).
 -- external_key — идемпотентность импорта: повторная загрузка не задваивает.
@@ -1690,6 +1743,7 @@ class Database:
             self._seed()
             self._seed_v3()
             self._migrate_v3_data()
+            self._migrate_shelf_zone()
             # Реестр моделей 6.0
             try:
                 from .model_registry import ModelRegistry
@@ -2067,6 +2121,120 @@ class Database:
 
         self.add_event("system", "Данные перенесены в учёт 3.0",
                        f"Номенклатура: {len(set(list(catalog_map.values()) + list(shelf_map.values())))} позиций")
+
+    def _migrate_shelf_zone(self) -> None:
+        """Сверка витрины с регистром (И2 «единый регистр»).
+
+        С v3-миграции полка жила отдельно от регистра: баланс зоны «Полка
+        магазина» застыл на моменте переноса. Выравниваем его под текущий
+        физический остаток связанных позиций — по каждой номенклатуре одно
+        движение-инвентаризация с явной пометкой. Выполняется один раз:
+        признак — настройка `migrated_shelf_zone` плюс маркер в заметках
+        движений (повторный запуск ничего не дописывает).
+        """
+        with self.lock:
+            done = self.conn.execute(
+                "SELECT value FROM settings WHERE key='migrated_shelf_zone'").fetchone()
+        if done and json.loads(done[0]) is True:
+            return
+        try:
+            adjusted = self._do_migrate_shelf_zone()
+        except Exception as exc:  # миграция не должна ронять запуск
+            self.add_event("error", "Миграция витрины-зоны не завершена", str(exc))
+            return
+        self.execute(
+            "INSERT INTO settings(key,value) VALUES('migrated_shelf_zone','true')"
+            " ON CONFLICT(key) DO UPDATE SET value='true'")
+        if adjusted:
+            self.add_event("system", "Витрина сверена с регистром",
+                           f"Выровнено позиций: {adjusted}")
+
+    def _do_migrate_shelf_zone(self) -> int:
+        from .config import now_iso as _now
+        import uuid as _uuid
+
+        def new_id(prefix: str) -> str:
+            return f"{prefix}_{_uuid.uuid4().hex[:10]}"
+
+        def fnum(value, default=0.0) -> float:
+            try:
+                result = float(str(value).replace(",", "."))
+                return result if result == result else default
+            except (TypeError, ValueError):
+                return default
+
+        zone = self.one(
+            "SELECT id FROM warehouses WHERE kind='shelf' AND archived=0"
+            " ORDER BY position LIMIT 1")
+        if not zone:
+            return 0
+        zone_id = zone["id"]
+        # Маркер прошлой сверки — вторая линия идемпотентности.
+        if self.one("SELECT id FROM stock_moves WHERE warehouse_id=?"
+                    " AND note LIKE 'начальный остаток витрины%' LIMIT 1",
+                    (zone_id,)):
+            return 0
+
+        def resolve_nom(item: dict) -> str:
+            direct = str(item.get("nom_id") or "").strip()
+            if direct and self.one("SELECT id FROM nomenclature WHERE id=?", (direct,)):
+                return direct
+            catalog_id = str(item.get("catalog_id") or "").strip()
+            if catalog_id:
+                row = self.one("SELECT nom_id FROM catalog WHERE id=?", (catalog_id,)) or {}
+                if str(row.get("nom_id") or "").strip():
+                    return str(row["nom_id"]).strip()
+                row = self.one(
+                    "SELECT id FROM nomenclature WHERE legacy_catalog_id=? LIMIT 1",
+                    (catalog_id,))
+                if row:
+                    return row["id"]
+            row = self.one(
+                "SELECT id FROM nomenclature WHERE legacy_shelf_id=? LIMIT 1",
+                (item.get("id") or "",))
+            return row["id"] if row else ""
+
+        # Хотим: суммарный остаток активных позиций по каждой номенклатуре.
+        want: dict[str, float] = {}
+        unit: dict[str, float] = {}
+        for item in self.query("SELECT * FROM shelf_items WHERE active=1"):
+            qty = fnum(item.get("qty"))
+            if abs(qty) < 0.0005:
+                continue
+            nom_id = resolve_nom(item)
+            if not nom_id:
+                continue
+            want[nom_id] = round(want.get(nom_id, 0.0) + qty, 3)
+            if nom_id not in unit:
+                unit[nom_id] = fnum(item.get("cost_per_unit"))
+        if not want:
+            return 0
+        have: dict[str, dict] = {}
+        for row in self.query(
+                "SELECT nom_id, COALESCE(SUM(qty),0) q, COALESCE(SUM(cost),0) c"
+                " FROM stock_moves WHERE warehouse_id=? GROUP BY nom_id",
+                (zone_id,)):
+            have[row["nom_id"]] = {"q": fnum(row["q"]), "c": fnum(row["c"])}
+        adjusted = 0
+        for nom_id, want_qty in sorted(want.items()):
+            have_qty = (have.get(nom_id) or {}).get("q", 0.0)
+            have_cost = (have.get(nom_id) or {}).get("c", 0.0)
+            diff = round(want_qty - have_qty, 3)
+            if abs(diff) < 0.001:
+                continue
+            if diff > 0:
+                cost = round(diff * unit.get(nom_id, 0.0), 2)
+            else:
+                avg = round(have_cost / have_qty, 2) if have_qty > 0 else 0.0
+                cost = round(diff * avg, 2)
+            self.upsert("stock_moves", {
+                "id": new_id("mv"), "at": _now(), "doc_kind": "inventory",
+                "nom_id": nom_id, "warehouse_id": zone_id,
+                "qty": diff, "cost": cost,
+                "note": f"начальный остаток витрины: было {have_qty:g},"
+                        f" стало {want_qty:g} (миграция И2)"})
+            adjusted += 1
+        return adjusted
 
     def query(self, sql: str, params: Iterable = ()) -> list[dict]:
         with self.lock:

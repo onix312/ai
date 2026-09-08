@@ -110,6 +110,8 @@ META: dict[str, dict] = {
     "sbp_shop_qr": ("sbp", "Статический QR магазина (СБП)", {"max_len": 300}),
     "sbp_bank_name": ("sbp", "Название банка СБП", {"max_len": 80}),
     "sbp_payment_note": ("sbp", "Назначение перевода СБП", {"max_len": 200}),
+    "sbp_purpose_limit": ("sbp", "Длина назначения из товаров", {"min": 20, "max": 210}),
+    "sbp_hold_hours": ("sbp", "Холд СБП: часов до автоснятия", {"min": 1, "max": 168}),
     # --- платёжный QR (генерируем сами)
     "pay_qr_mode": ("sbp", "Режим платёжного QR",
                     {"choices": ("auto", "gost", "link", "static", "off")}),

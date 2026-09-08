@@ -62,6 +62,16 @@
  .qb.low{background:rgba(217,119,6,.9);color:#fff}
  .qb.empty{background:rgba(239,68,68,.9);color:#fff}
  .qb.wh{background:rgba(79,70,229,.9);color:#fff}
+ .qb.hold{background:rgba(139,92,246,.92);color:#fff}
+ .qb.disc{background:rgba(16,185,129,.92);color:#fff}
+ .shift .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px}
+ .shift .card h4{font-size:13px;margin-bottom:10px;letter-spacing:-.01em}
+ .shift .kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
+ .shift .kv:last-child{border-bottom:0}
+ .shift .kv b{font-variant-numeric:tabular-nums;white-space:nowrap}
+ .fld{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--text);font-size:16px;outline:0;margin-bottom:8px;font-variant-numeric:tabular-nums}
+ .fld:focus{border-color:var(--accent)}
+ .hint{color:var(--muted);font-size:12px;line-height:1.5;margin:6px 0 10px}
  .qb.catb{background:rgba(255,255,255,.9);color:#111827;border:1px solid rgba(0,0,0,.06)}
  [data-theme=dark] .qb.catb{background:rgba(31,41,55,.9);color:#e5e7eb;border-color:rgba(255,255,255,.08)}
  .inBadge{position:absolute;right:8px;top:8px;min-width:26px;height:26px;padding:0 8px;border-radius:99px;background:var(--accent);color:#fff;font-size:13px;font-weight:800;display:none;align-items:center;justify-content:center;box-shadow:0 4px 14px -6px var(--accent)}
@@ -167,6 +177,7 @@
    </div>
    <div class="sp"></div>
    <div class="pill ok" id="sbpPill" hidden>СБП</div>
+   <div class="pill" id="whoPill" hidden></div>
    <div class="pill" id="countPill">0 тов.</div>
    <button class="iconbtn" id="bLogout" type="button" title="Выйти">⎋</button>
   </div>
@@ -174,6 +185,7 @@
   <div class="tabs">
    <button class="tab on" id="tabSell" type="button">🛒 Продажа</button>
    <button class="tab" id="tabIn" type="button">⏳ Входящие</button>
+   <button class="tab" id="tabShift" type="button">🧾 Смена</button>
   </div>
 
   <div id="viewSell">
@@ -204,6 +216,11 @@
 <div class="modal" id="modal">
  <div class="sheet">
   <h3 id="modalTitle">Оплата</h3>
+  <div style="display:flex;gap:8px;margin-bottom:6px">
+   <input class="fld" id="discPct" inputmode="decimal" placeholder="Скидка, %" style="margin:0">
+   <input class="fld" id="discPin" type="password" inputmode="numeric" placeholder="PIN старшего" style="margin:0">
+  </div>
+  <div class="hint">Скидка в % на чек — подтверждает PIN старшего.</div>
   <button class="payrow" id="payCash" type="button"><span class="ic">💵</span><span>Наличные<small>деньги в кассу магазина — сразу в учёт</small></span></button>
   <button class="payrow" id="paySbp" type="button"><span class="ic">📱</span><span>СБП<small id="sbpHint">QR/перевод — подтверждение по поступлению</small></span></button>
   <button class="btn ghost" id="bCancel" type="button" style="width:100%">Отмена</button>
@@ -215,6 +232,12 @@
   <h3 id="qrTitle">СБП · оплата</h3>
   <div class="qrbox" id="qrBox"></div>
   <div class="qrnote" id="qrNote"></div>
+  <div id="qrActions" style="display:none;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+   <a class="btn pay" id="bQrOpen" style="flex:1;text-align:center;text-decoration:none;display:none" target="_blank" rel="noopener">Открыть оплату</a>
+   <button class="btn ghost" id="bQrCopy" type="button" style="flex:1;display:none">Скопировать</button>
+   <button class="btn ghost" id="bQrShare" type="button" style="flex:1;display:none">Поделиться</button>
+   <button class="btn ghost" id="bQrSave" type="button" style="flex:1;display:none">QR файлом</button>
+  </div>
   <button class="btn pay" id="bQrPaid" type="button" style="width:100%;margin-bottom:9px">✓ Оплата пришла — подтвердить</button>
   <button class="btn ghost" id="bQrLater" type="button" style="width:100%">Позже · во «Входящие»</button>
  </div>
@@ -237,7 +260,7 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", cat:"", search:"", loading:false, saleRequest:{cash:"",sbp:""}};
+var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", cat:"", search:"", loading:false, saleRequest:{cash:"",sbp:""}};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>\"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -278,7 +301,9 @@ $("bLogin").addEventListener("click",doLogin);
 $("code").addEventListener("keydown",function(ev){if(ev.key==="Enter")doLogin();});
 $("bLogout").addEventListener("click",function(){
   api("/api/cashier/logout",{token:state.token}).catch(function(){});
-  state.token="";localStorage.removeItem("cashier_token");state.cart={};
+  state.token="";state.name="";state.role="";
+  localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");
+  state.cart={};
   showApp(false);$("code").value="";
 });
 
@@ -354,11 +379,13 @@ function renderGrid(){
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
     var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">📦</div>' : '<div class="ph">📦</div>';
     var wh=stockQty>0? '<span class="qb wh" title="'+esc(it.warehouse_name||'склад')+'">склад '+stockQty+'</span>' : '';
+    var held=Number(it.held)||0;
+    var holdBadge=held>0? '<span class="qb hold">холд '+held+'</span>' : '';
     var catBadge=catName? '<span class="qb catb">'+esc(catName)+'</span>' : '';
     var qtyBadge=qty? '<span class="qb qty '+(qc||'')+'">'+(qc==="empty"?"нет":(qty<=5? 'остаток '+qty : qty+' шт'))+'</span>' : '<span class="qb qty empty">нет</span>';
     var sku=it.barcode||it.sku? '<span class="sku">'+esc(it.barcode||it.sku)+'</span>' : '';
     return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'">'
-      +'<div class="imgBox">'+img+'<div class="badgeRow">'+qtyBadge+wh+catBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
+      +'<div class="imgBox">'+img+'<div class="badgeRow">'+qtyBadge+wh+holdBadge+catBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
       +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div>'+sku+'</div>'
       +'</div>';
   }).join("");
@@ -454,11 +481,24 @@ $("bCartClose") && $("bCartClose").addEventListener("click",function(){$("cartMo
 $("bToggleCart").addEventListener("dblclick",function(){$("cartModal").classList.add("on");});
 $("bCartPay") && $("bCartPay").addEventListener("click",function(){$("cartModal").classList.remove("on");$("bPay").click();});
 
+function cartTotal(){
+  return Object.keys(state.cart).reduce(function(s,id){
+    var it=state.items.find(function(x){return x.id===id;})||{};
+    return s+(Number(it.price)||0)*(state.cart[id]||0);
+  },0);
+}
+function discPct(){var n=parseNum($("discPct").value);return (n>0&&n<=100)?n:0;}
+function refreshPayTitle(){
+  var total=cartTotal(),pct=discPct();
+  var net=Math.round(total*(100-pct))/100;
+  $("modalTitle").textContent="Оплата · "+money(pct>0?net:total)+(pct>0?(" (скидка "+pct+"%)"):"");
+}
+$("discPct").addEventListener("input",refreshPayTitle);
 // оплата
 $("bPay").addEventListener("click",function(){
   var count=Object.keys(state.cart).reduce(function(s,k){return s+(state.cart[k]||0);},0);
   if(!count) return;
-  $("modalTitle").textContent="Оплата · "+$("cartTotal").textContent;
+  $("discPct").value="";$("discPin").value="";refreshPayTitle();
   $("paySbp").style.display=state.sbpEnabled?"flex":"none";
   var hint=$("sbpHint");
   if(hint){
@@ -484,11 +524,11 @@ function sellCart(method){
   // первой операции, а не создаст вторую продажу.
   state.saleRequest[method]=state.saleRequest[method]||reqId();
   setSaleBusy(true);
-  api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method]})
+  api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method],discount_pct:discPct(),manager_pin:$("discPin").value.trim()})
     .then(function(r){
       state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
       if(method==="cash")toast(r.already_recorded?"Продажа уже была записана":"Продано "+money(r.amount)+" наличными");
-      loadCatalog();if(method==="sbp")showPaymentQr(r);
+      loadCatalog();refreshShift();if(method==="sbp")showPaymentQr(r);
     })
     .catch(function(e){sessionError(e);})
     .finally(function(){setSaleBusy(false);});
@@ -498,15 +538,58 @@ $("paySbp").addEventListener("click",function(){sellCart("sbp");});
 
 function showPaymentQr(sale){
   var qr=sale.qr||{};
+  var diag=qr.diagnostics||{};
   state.pendingPayment=sale.payment_id||"";
+  state.qrText=qr.text||"";
   $("qrTitle").textContent="СБП · "+money(sale.amount);
   var box=$("qrBox");
   var svg=qr.svg||(qr.text&&window.QR?window.QR.svg(qr.text,{size:240,margin:2}):"");
+  state.qrSvg=svg||"";
   box.innerHTML=svg||('<div class="empty">'+esc(qr.hint||"QR не настроен")+'</div>');
-  var kind={gost:"Оплата по QR: сумма и назначение уже внутри",link:"Ссылка банка с суммой "+money(sale.amount),dynamic:"Динамический QR банка · "+money(sale.amount),static:"QR магазина · покупатель вводит сумму "+money(sale.amount)}[qr.kind]||"";
-  $("qrNote").innerHTML=[kind,qr.bank_name?"Банк: "+esc(qr.bank_name):"", "Склад спишется и выручка запишется только после подтверждения"].filter(Boolean).join("<br>");
+  var lines=[];
+  if(qr.purpose)lines.push("Назначение: "+esc(qr.purpose));
+  if(diag.why)lines.push(esc(diag.why));
+  else{
+    var kind={gost:"Оплата по QR: сумма и назначение уже внутри",link:"Ссылка банка с суммой "+money(sale.amount),dynamic:"Динамический QR банка · "+money(sale.amount),static:"QR магазина · покупатель вводит сумму "+money(sale.amount)}[qr.kind]||"";
+    if(kind)lines.push(kind);
+  }
+  if(qr.bank_name)lines.push("Банк: "+esc(qr.bank_name));
+  lines.push("Склад спишется и выручка запишется только после подтверждения");
+  $("qrNote").innerHTML=lines.join("<br>");
+  // Кнопки: «Открыть» — только для безопасной https-ссылки (сервер + проверка).
+  var hasText=!!qr.text;
+  var canOpen=!!(hasText&&qr.open_url&&qr.open_url.indexOf("https://")===0&&diag.can_open);
+  $("qrActions").style.display=(hasText||canOpen)?"flex":"none";
+  var bOpen=$("bQrOpen");
+  bOpen.style.display=canOpen?"block":"none";
+  if(canOpen)bOpen.href=qr.open_url;
+  $("bQrCopy").style.display=hasText?"block":"none";
+  $("bQrShare").style.display=(hasText&&navigator.share)?"block":"none";
+  $("bQrSave").style.display=svg?"block":"none";
   $("qrModal").classList.add("on");
 }
+function qrFallbackCopy(t){
+  var ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();
+  try{document.execCommand("copy");toast("Скопировано ✓");}catch(e){toast("Не скопировалось");}
+  document.body.removeChild(ta);
+}
+$("bQrCopy").addEventListener("click",function(){
+  var t=state.qrText||"";if(!t)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){toast("Скопировано ✓");},function(){qrFallbackCopy(t);});
+  }else qrFallbackCopy(t);
+});
+$("bQrShare").addEventListener("click",function(){
+  var t=state.qrText||"";if(!t||!navigator.share)return;
+  navigator.share({title:"Оплата NOZZA",text:t}).catch(function(){});
+});
+$("bQrSave").addEventListener("click",function(){
+  var svg=state.qrSvg||"";if(!svg)return;
+  var blob=new Blob([svg],{type:"image/svg+xml"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="oplata-qr.svg";
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},600);
+});
 $("bQrLater").addEventListener("click",function(){
   $("qrModal").classList.remove("on");
   toast("СБП-платёж ждёт сверки во «Входящих»");
@@ -516,7 +599,7 @@ $("bQrPaid").addEventListener("click",function(){
   var id=state.pendingPayment;
   if(!id){$("qrModal").classList.remove("on");return;}
   api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
-    .then(function(){$("qrModal").classList.remove("on");state.pendingPayment="";toast("Оплата подтверждена ✓");loadCatalog();})
+    .then(function(){$("qrModal").classList.remove("on");state.pendingPayment="";toast("Оплата подтверждена ✓");loadCatalog();refreshShift();})
     .catch(function(e){sessionError(e);});
 });
 $("qrModal").addEventListener("click",function(ev){if(ev.target===$("qrModal")){$("qrModal").classList.remove("on");}});
@@ -529,7 +612,9 @@ function loadIncoming(){
     if(!list.length){box.innerHTML='<div class="empty">Нет СБП-продаж, ожидающих сверки<br><span style="font-size:12px;opacity:.7">Здесь появляются продажи по СБП до подтверждения</span></div>';return;}
     box.innerHTML=list.map(function(p){
       var names=(p.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
-      return '<div class="row"><div class="t"><b>'+money(p.amount)+'</b><small>'+(names||esc(p.purpose||"—"))+'</small></div>'
+      var holds=(p.holds||[]).map(function(h){return esc(h.nom_name||"товар")+" × "+h.qty;}).join(", ");
+      var holdLine=holds? '<br>🔒 отложено: '+holds : '';
+      return '<div class="row"><div class="t"><b>'+money(p.amount)+'</b><small>'+(names||esc(p.purpose||"—"))+holdLine+'</small></div>'
         +'<button class="btn pay sm" data-act="confirm" data-id="'+esc(p.payment_id)+'">Подтвердить</button>'
         +'<button class="btn ghost sm" data-act="reject" data-id="'+esc(p.payment_id)+'">Отклонить</button></div>';
     }).join("");
@@ -541,7 +626,7 @@ document.addEventListener("click",function(ev){
   if(act==="confirm"){
     if(!confirm("Подтвердить поступление СБП? Склад спишется и выручка запишется.")) return;
     api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
-      .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();})
+      .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();refreshShift();})
       .catch(function(e){sessionError(e);});
   }else if(act==="reject"){
     var reason=prompt("Причина отклонения:","Оплата не поступила");
@@ -552,13 +637,110 @@ document.addEventListener("click",function(ev){
   }
 });
 
+// смена
+function parseNum(v){var n=Number(String(v==null?"":v).replace(",",".").replace(/[^\d.\-]/g,""));return isFinite(n)?n:0;}
+function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
+function loadShift(){
+  var box=$("shiftBox");
+  box.innerHTML='<div class="loading">Загружаем смену…</div>';
+  api(withToken("/api/cashier/shift/current")).then(function(r){renderShift(box,r);if(r.open)loadShiftSales();}).catch(function(e){sessionError(e);});
+}
+function refreshShift(){if(!$("viewShift").hidden)loadShift();}
+function renderShift(box,r){
+  if(!r.open){
+    box.innerHTML='<div class="card"><h4>Смена закрыта</h4>'
+      +'<div class="hint">Пересчитайте деньги в ящике и введите сумму — с неё начнётся расчёт смены.</div>'
+      +'<input class="fld" id="shiftOpenCash" inputmode="decimal" placeholder="В ящике, ₽">'
+      +'<button class="btn pay" id="bShiftOpen" type="button" style="width:100%">Открыть смену</button></div>';
+    $("bShiftOpen").addEventListener("click",function(){
+      api("/api/cashier/shift/open",{token:state.token,open_cash:parseNum($("shiftOpenCash").value)})
+        .then(function(){toast("Смена открыта ✓");loadShift();loadCatalog();})
+        .catch(function(e){sessionError(e);});
+    });
+    return;
+  }
+  var s=r.shift||{},live=r.live||{};
+  var opened=String(s.opened_at||"").replace("T"," ").slice(0,16);
+  var manager=state.role==="manager";
+  var html='<div class="card"><h4>Смена открыта · '+esc(s.cashier||"кассир")+'</h4>'
+    +kv("Открыта",esc(opened||"—"))
+    +kv("В ящике на старте",money(s.open_cash))
+    +kv("Наличная выручка",money(live.income_cash))
+    +kv("Выемки",money(live.collected))
+    +(Number(live.income_1c)? kv("Продажи 1С (справка)",money(live.income_1c)) : '')
+    +kv("Должно быть в ящике",money(live.expected))
+    +'</div>'
+    +'<div class="card"><h4>Закрыть смену</h4>'
+    +'<div class="hint">Пересчитайте ящик. Расхождение не блокирует закрытие — оно запишется в учёт.</div>'
+    +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
+    +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+    +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>'
+    +'<div class="card"><h4>Выемка'+(manager?"":" · только старший")+'</h4>'
+    +'<input class="fld" id="shiftCollect" inputmode="decimal" placeholder="Сумма, ₽">'
+    +'<input class="fld" id="shiftCollectNote" placeholder="Куда/зачем (необязательно)" style="font-size:14px">'
+    +'<button class="btn warn" id="bShiftCollect" type="button" style="width:100%"'+(manager?"":" disabled")+'>Забрать из ящика</button></div>';
+  html+='<div class="card"><h4>Продажи смены</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
+  box.innerHTML=html;
+  $("bShiftClose").addEventListener("click",function(){
+    if(!confirm("Закрыть смену? Расхождение запишется в учёт."))return;
+    api("/api/cashier/shift/close",{token:state.token,close_cash:parseNum($("shiftCloseCash").value),note:$("shiftNote").value})
+      .then(function(d){
+        var diff=Number((d.shift||{}).diff)||0;
+        toast(diff===0?"Смена закрыта · ровно ✓":("Смена закрыта · расхождение "+(diff>0?"+":"")+money(diff).replace(" ₽","")+" ₽"));
+        loadShift();loadCatalog();
+      })
+      .catch(function(e){sessionError(e);});
+  });
+  if(manager)$("bShiftCollect").addEventListener("click",function(){
+    api("/api/cashier/collect",{token:state.token,amount:parseNum($("shiftCollect").value),note:$("shiftCollectNote").value})
+      .then(function(){toast("Выемка записана ✓");loadShift();loadCatalog();})
+      .catch(function(e){sessionError(e);});
+  });
+}
+function loadShiftSales(){
+  api(withToken("/api/cashier/shift/sales")).then(function(r){
+    var box=$("shiftSales");if(!box)return;
+    var list=r.sales||[];
+    if(!list.length){box.innerHTML='<div class="hint">Продаж пока нет.</div>';return;}
+    box.innerHTML=list.map(function(s){
+      var t=String(s.created_at||"").replace("T"," ").slice(11,16);
+      var names=(s.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
+      var disc=Number(s.discount_pct)>0?' <span class="qb disc">−'+s.discount_pct+'%</span>':"";
+      var st=s.cancelled?'<span class="qb empty">отменена</span>'
+        :(s.method==="sbp"?'<span class="qb low">СБП · '+(s.confirmed?"✓":"⏳")+'</span>':'<span class="qb qty">нал</span>');
+      var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>':"";
+      return '<div class="row"><div class="t"><b>'+money(s.amount)+'</b><small>'+esc(t)+' · '+esc(s.cashier||"")+disc+'<br>'+(names||"—")+'</small></div>'+st+btn+'</div>';
+    }).join("");
+  }).catch(function(){});
+}
+document.addEventListener("click",function(ev){
+  var b=ev.target.closest("[data-cancel]");if(!b)return;
+  if(!confirm("Отменить продажу? Деньги вернутся покупателю, товар — на полку."))return;
+  api("/api/cashier/sale/cancel",{token:state.token,sale_id:b.getAttribute("data-cancel")})
+    .then(function(){toast("Продажа отменена ✓");loadShift();loadCatalog();})
+    .catch(function(e){sessionError(e);});
+});
+$("tabShift").addEventListener("click",function(){setTab("shift");});
+
 // старт
-if(loggedIn()){showApp(true);loadCatalog();}else{showApp(false);}
+if(loggedIn()){renderWho();showApp(true);loadCatalog();}else{showApp(false);}
 window.addEventListener("online",function(){if(loggedIn())loadCatalog();});
 if("serviceWorker" in navigator&&window.isSecureContext){
   window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});
 }
 </script>
 <script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
+</body>
+</html>
+-toggle.js?v=17.0.1" defer></script>
+</body>
+</html>
+w.js").catch(function(){});});
+}
+</script>
+<script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
+</body>
+</html>
+-toggle.js?v=17.0.1" defer></script>
 </body>
 </html>

@@ -161,5 +161,101 @@ class OrderFulfillmentTests(unittest.TestCase):
             self.repo.save_order({"product": "Сразу закрытый", "status": "done"})
 
 
+class FulfillmentShelfMirrorTests(unittest.TestCase):
+    """И3: выдача заказа со склада-витрины зеркалится на карточки полки."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self.tmp.name) / "mirror.sqlite3")
+        self.repo = Repo(self.db)
+        self.acc = Accounting(self.db)
+        self.stock = Stock(self.db)
+        self.service = OrderFulfillment(self.db, self.repo, self.stock, self.acc)
+        self.db.upsert("warehouses", {
+            "id": "wh-zone", "name": "Витрина", "kind": "shelf",
+            "archived": 0, "position": 0})
+        self.db.upsert("warehouses", {
+            "id": "wh-home", "name": "Домашний", "kind": "home",
+            "archived": 0, "position": 1})
+        self.db.upsert("nomenclature", {
+            "id": "nom-1", "name": "Адресник", "unit": "шт"})
+        self.stock.add_move("nom-1", "wh-zone", 10, 0, doc_kind="receipt",
+                            note="старт")
+        self.db.upsert("shelf_items", {
+            "id": "sh-1", "name": "Адресник", "nom_id": "nom-1",
+            "qty": 10, "price": 500, "active": 1})
+
+    def tearDown(self):
+        self.db.close()
+        self.tmp.cleanup()
+
+    def order(self, order_id="order-1", **overrides):
+        data = {"id": order_id, "number": "1001", "product": "Адресник",
+                "customer_name": "Мария", "status": "ready",
+                "quality": "passed", "qty": 2, "price": 1000, "paid": 0,
+                "reserved": 1, "created_at": now_iso(),
+                "updated_at": now_iso()}
+        data.update(overrides)
+        return self.db.upsert("orders", data)
+
+    def shelf_qty(self):
+        return num(self.db.one(
+            "SELECT qty FROM shelf_items WHERE id='sh-1'")["qty"])
+
+    def test_zone_issue_mirrors_to_shelf_card(self):
+        self.order()
+        self.stock.reserve("nom-1", 2, "order-1", warehouse_id="wh-zone")
+        self.service.fulfill("order-1", handoff_confirmed=True,
+                             payment_action="debt")
+        self.assertEqual(self.shelf_qty(), 8)
+        move = self.db.one(
+            "SELECT * FROM shelf_moves WHERE item_id='sh-1'"
+            " ORDER BY rowid DESC")
+        self.assertEqual(move["kind"], "writeoff")
+        self.assertIn("1001", move["note"])
+        # зона списана один раз — движением выдачи, без второй ноги
+        self.assertEqual(self.stock.qty("nom-1", "wh-zone"), 8)
+        self.assertEqual(self.db.one(
+            "SELECT COUNT(*) n FROM stock_moves WHERE doc_id='order-1'")["n"],
+            1)
+        self.assertEqual(
+            self.db.one("SELECT COUNT(*) n FROM reserves"
+                        " WHERE order_id='order-1' AND state='active'")["n"], 0)
+
+    def test_shelf_shortfall_rolls_back_issue(self):
+        self.order()
+        self.stock.reserve("nom-1", 2, "order-1", warehouse_id="wh-zone")
+        self.db.execute("UPDATE shelf_items SET qty=1 WHERE id='sh-1'")
+        with self.assertRaisesRegex(ValueError, "не хватает"):
+            self.service.fulfill("order-1", handoff_confirmed=True,
+                                 payment_action="debt")
+        self.assertEqual(
+            self.db.one("SELECT status FROM orders WHERE id='order-1'")["status"],
+            "ready")
+        self.assertEqual(self.stock.qty("nom-1", "wh-zone"), 10)
+        self.assertEqual(self.shelf_qty(), 1)
+        self.assertEqual(
+            self.db.one("SELECT COUNT(*) n FROM reserves"
+                        " WHERE order_id='order-1' AND state='active'")["n"], 1)
+
+    def test_plain_warehouse_issue_ignores_shelf(self):
+        self.stock.add_move("nom-1", "wh-home", 10, 0, doc_kind="receipt",
+                            note="старт")
+        self.order()
+        self.stock.reserve("nom-1", 2, "order-1", warehouse_id="wh-home")
+        self.service.fulfill("order-1", handoff_confirmed=True,
+                             payment_action="debt")
+        self.assertEqual(self.shelf_qty(), 10)  # полка не тронута
+        self.assertEqual(self.stock.qty("nom-1", "wh-home"), 8)
+
+    def test_zone_without_card_issues_cleanly(self):
+        self.db.execute("UPDATE shelf_items SET active=0 WHERE id='sh-1'")
+        self.order()
+        self.stock.reserve("nom-1", 2, "order-1", warehouse_id="wh-zone")
+        self.service.fulfill("order-1", handoff_confirmed=True,
+                             payment_action="debt")
+        self.assertEqual(self.stock.qty("nom-1", "wh-zone"), 8)
+
+
 if __name__ == "__main__":
     unittest.main()

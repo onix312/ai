@@ -19,6 +19,8 @@ from typing import Any
 
 from .accounting import Accounting, num, uid
 from .config import now_iso
+from .payment_purpose import build as build_purpose
+from .payment_purpose import sanitize as sanitize_purpose
 
 # Статусы платежа и терминальные состояния.
 STATUS_NEW = "new"
@@ -82,6 +84,52 @@ class Sbp:
             return f"Оплата заказа №{number}"
         return "Оплата заказа PrintFlow"
 
+    def brand(self) -> str:
+        """Префикс магазина для назначения (настройка company_name)."""
+        return (str(self.db.setting("company_name", "NOZZA") or "NOZZA").strip()
+                or "NOZZA")
+
+    def purpose_limit(self) -> int:
+        """Макс. длина назначения из товаров (настройка, 20–210)."""
+        try:
+            value = int(self.db.setting("sbp_purpose_limit", 140))
+        except (TypeError, ValueError):
+            value = 140
+        return max(20, min(210, value))
+
+    def order_lines(self, order_id: str) -> list[dict]:
+        """Состав заказа серверными данными: позиции + fallback на изделие.
+
+        Названия — из ``order_items``/номенклатуры,Qty — из заказа. Если
+        позиций нет, а у заказа заполнено поле ``product`` — одна строка
+        из него. Клиентские названия сюда не попадают никогда.
+        """
+        lines: list[dict] = []
+        try:
+            rows = self.db.query(
+                "SELECT name, qty, price, nom_id FROM order_items"
+                " WHERE order_id=? ORDER BY position, name", (order_id,))
+        except Exception:
+            rows = []
+        for row in rows:
+            name = str(row.get("name") or "").strip()
+            if not name and row.get("nom_id"):
+                nom = self.db.one("SELECT name FROM nomenclature WHERE id=?",
+                                  (row["nom_id"],)) or {}
+                name = str(nom.get("name") or "").strip()
+            if not name:
+                continue
+            lines.append({"name": name, "qty": num(row.get("qty"), 1),
+                          "price": round(num(row.get("price")), 2)})
+        if not lines and order_id:
+            order = self.db.one("SELECT product, qty FROM orders WHERE id=?",
+                                (order_id,)) or {}
+            product = str(order.get("product") or "").strip()
+            if product:
+                lines.append({"name": product,
+                              "qty": num(order.get("qty"), 1) or 1})
+        return lines
+
     # ------------------------------------------------------------- вспомогат.
     def _require_enabled(self) -> None:
         if not self.enabled():
@@ -113,11 +161,17 @@ class Sbp:
     def create(self, *, amount: float, order_id: str = "", sale_id: str = "",
                chat_id: str = "", purpose: str = "", note: str = "",
                request_id: str = "", actor: str = "panel",
-               qr_kind: str = "dynamic", qr_payload: str = "") -> dict:
+               qr_kind: str = "dynamic", qr_payload: str = "",
+               items: list | None = None) -> dict:
         """Создать СБП-платёж (new). Деньги и долг на этом шаге НЕ меняются.
 
         Идемпотентно по ``request_id``: повтор с тем же ключом вернёт уже
-        созданный платёж с ``already_recorded=True``.
+        созданный платёж с ``already_recorded=True`` — то же назначение и
+        тот же состав.
+
+        Назначение (18.0): явно переданное → из ``items`` → из состава
+        заказа → шаблон/стандарт. Состав всегда сохраняется в ``items``:
+        переименование товара позже назначение не меняет.
         """
         self._require_enabled()
         amount = round(num(amount), 2)
@@ -154,15 +208,37 @@ class Sbp:
             qr_kind = str(qr_kind or "dynamic").strip().lower()
             if qr_kind not in ("static", "dynamic"):
                 qr_kind = "dynamic"
-            purpose = (str(purpose or "").strip()
-                       or self.purpose_text(str(order.get("number") or "") if order else ""))
+            composition = [dict(r) for r in (items or []) if isinstance(r, dict)]
+            if not composition and order_id:
+                composition = self.order_lines(order_id)
+            purpose = sanitize_purpose(purpose, 500)
+            if not purpose and order:
+                # Шаблон владельца — только для заказов (там есть {number}).
+                template = str(self.db.setting("sbp_payment_note", "")
+                               or "").strip()
+                if template:
+                    purpose = template.replace(
+                        "{number}", str(order.get("number") or ""))
+            if not purpose and composition:
+                ref = ""
+                if order:
+                    ref = f"№{order.get('number') or ''}".strip()
+                purpose = build_purpose(composition, self.brand(), ref,
+                                        self.purpose_limit())
+            if not purpose:
+                purpose = self.purpose_text(
+                    str(order.get("number") or "") if order else "")
+            try:
+                items_json = json.dumps(composition, ensure_ascii=False)[:20000]
+            except (TypeError, ValueError):
+                items_json = "[]"
             self.db.execute(
                 "INSERT INTO sbp_payments"
-                "(id,number,order_id,sale_id,chat_id,amount,currency,purpose,status,"
+                "(id,number,order_id,sale_id,chat_id,amount,currency,purpose,items,status,"
                 " request_id,account_id,qr_kind,qr_payload,note,created_at,updated_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (pid, number, order_id or "", sale_id or "", chat_id or "",
-                 amount, "RUB", purpose, STATUS_NEW, request_id,
+                 amount, "RUB", purpose, items_json, STATUS_NEW, request_id,
                  self.account_id(), qr_kind, str(qr_payload or "")[:2000],
                  str(note or "")[:1000], stamp, stamp))
         row = self._get(pid)

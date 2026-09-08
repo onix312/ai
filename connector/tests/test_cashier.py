@@ -249,8 +249,11 @@ class CashierStockCatalogTests(unittest.TestCase):
         # склад списан движением регистра, а не правкой остатка
         self.assertEqual(self.stock.qty("nom1", "home"), 3)
         moves = self.db.query("SELECT qty, doc_kind FROM stock_moves ORDER BY rowid")
-        self.assertEqual([m["doc_kind"] for m in moves], ["receipt", "move"])
+        # И2: приход → расход со склада → приход на витрину → продажа с витрины
+        self.assertEqual([m["doc_kind"] for m in moves],
+                         ["receipt", "move", "move", "sale"])
         self.assertEqual(moves[-1]["qty"], -2)
+        self.assertEqual(self.stock.qty("nom1", "shelf"), 0)  # привезли и продали
         # позиция витрины создалась сама и сразу продана
         item = self.db.one("SELECT * FROM shelf_items")
         self.assertEqual(item["nom_id"], "nom1")
@@ -269,9 +272,12 @@ class CashierStockCatalogTests(unittest.TestCase):
 
     def test_sale_tops_up_shelf_from_stock_when_short(self):
         """Продаём больше, чем на полке: недостающее приезжает со склада."""
+        from connector.printflow.shelf import Shelf
         self.cashier.sell([{"item_id": "stock:nom1", "qty": 1}], "cash", self.token)
         item_id = self.db.one("SELECT id FROM shelf_items")["id"]
-        self.db.execute("UPDATE shelf_items SET qty=1 WHERE id=?", (item_id,))
+        # И2: витрину пополняем приходом (полка + регистр разом), а не прямым
+        # UPDATE — прямое число в обход регистра единый учёт не признаёт.
+        Shelf(self.db).produce(item_id, 1)
         self.cashier.sell([{"item_id": item_id, "qty": 3}], "cash", self.token)
         self.assertEqual(self.db.one("SELECT qty FROM shelf_items")["qty"], 0)
         self.assertEqual(self.stock.qty("nom1", "home"), 2)  # 5 − 1 − 2
@@ -290,14 +296,25 @@ class CashierStockCatalogTests(unittest.TestCase):
             self.cashier.sell([{"item_id": "stock:nom1", "qty": 1}], "cash", self.token)
         self.assertEqual(self.stock.qty("nom1", "home"), 5)
 
-    def test_sbp_sale_from_stock_moves_nothing_until_confirm(self):
+    def test_sbp_sale_from_stock_pulls_and_holds_until_confirm(self):
+        """И2: СБП-продажа сразу откладывает товар на полку и ставит холд."""
         r = self.cashier.sell([{"item_id": "stock:nom1", "qty": 2}], "sbp", self.token)
         self.assertFalse(r["paid"])
-        self.assertEqual(self.stock.qty("nom1", "home"), 5)
-        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM shelf_items")["n"], 0)
+        # товар переехал на витрину и занят холдом, денег пока нет
+        self.assertEqual(self.stock.qty("nom1", "home"), 3)
+        self.assertEqual(self.db.one("SELECT qty FROM shelf_items")["qty"], 2)
+        hold = self.db.one("SELECT * FROM reserves WHERE doc_id=? AND state='active'",
+                           (r["sale_id"],))
+        self.assertIsNotNone(hold)
+        self.assertEqual(hold["kind"], "hold")
+        self.assertEqual(hold["qty"], 2)
+        self.assertIsNone(self.db.one("SELECT * FROM transactions WHERE kind='income'"))
         self.cashier.confirm_sbp(r["payment_id"], self.token)
         self.assertEqual(self.stock.qty("nom1", "home"), 3)
         self.assertEqual(self.db.one("SELECT qty FROM shelf_items")["qty"], 0)
+        self.assertEqual(self.db.one(
+            "SELECT COUNT(*) n FROM reserves WHERE doc_id=? AND state='active'",
+            (r["sale_id"],))["n"], 0)
         tx = self.db.one("SELECT * FROM transactions WHERE kind='income'")
         self.assertEqual(tx["account_id"], "sbp")
         self.assertEqual(tx["amount"], 1400)
@@ -398,7 +415,8 @@ class CashierSbpQrTests(unittest.TestCase):
         self.assertEqual(sale["qr"]["text"], "https://qr.nspk.ru/AS100012345")
         self.assertEqual(sale["qr"]["kind"], "static")
         self.assertEqual(sale["qr"]["amount"], 1000)
-        self.assertIn("Продажа на кассе", sale["qr"]["purpose"])
+        # 18.0: назначение — из товаров, а не «Продажа на кассе · N поз.»
+        self.assertEqual(sale["qr"]["purpose"], "NOZZA: Адресник × 2")
 
     def test_dynamic_payment_qr_wins_over_shop_qr(self):
         """Если банк выдал динамический QR с суммой — показываем его."""

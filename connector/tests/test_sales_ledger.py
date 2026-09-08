@@ -24,8 +24,11 @@ class SalesLedgerTests(unittest.TestCase):
         self.acc = Accounting(self.db)
         self.nom = Nomenclature(self.db)
         self.docs = Documents(self.db)
+        # И2: документы по витрине не проводятся (её ведёт полка) —
+        # для документных продаж берём учётный склад.
         self.wh = self.db.one(
-            "SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+            "SELECT id FROM warehouses WHERE archived=0 AND kind<>'shelf'"
+            " ORDER BY position LIMIT 1")
 
     def tearDown(self):
         self.db.close()

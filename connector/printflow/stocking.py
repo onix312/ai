@@ -111,7 +111,8 @@ class OrderStocker:
         default_wh = str(order.get("warehouse_id") or "").strip()
         if not default_wh:
             cand = self.db.one(
-                "SELECT id FROM warehouses WHERE archived=0 ORDER BY position LIMIT 1")
+                "SELECT id FROM warehouses WHERE archived=0"
+                " ORDER BY CASE WHEN kind='shelf' THEN 1 ELSE 0 END, position LIMIT 1")
             default_wh = (cand or {}).get("id") or ""
 
         return {

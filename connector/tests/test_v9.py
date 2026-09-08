@@ -25,7 +25,7 @@ from connector.tests.test_phase11 import make_api, make_db  # noqa: E402
 class VersionTests(unittest.TestCase):
     def test_app_and_schema(self):
         self.assertEqual(APP_VERSION, "17.0.1")
-        self.assertEqual(SCHEMA_VERSION, 16)
+        self.assertEqual(SCHEMA_VERSION, 17)
 
 
 class Schema12Tests(unittest.TestCase):
@@ -34,7 +34,8 @@ class Schema12Tests(unittest.TestCase):
         self.addCleanup(db.close)
         tables = {r["name"] for r in db.query("SELECT name FROM sqlite_master WHERE type='table'")}
         for name in ("workshop_docs", "ams_slot_history", "filament_scrap",
-                     "suppliers", "plate_presets", "shift_checks"):
+                     "suppliers", "plate_presets", "shift_checks",
+                     "cashier_shifts"):
             self.assertIn(name, tables)
         spool_cols = {r["name"] for r in db.query("PRAGMA table_info(spools)")}
         self.assertTrue({"location", "price_per_kg", "received_doc_id"} <= spool_cols)
@@ -54,7 +55,7 @@ class Schema12Tests(unittest.TestCase):
             conn.close()
             db = Database(path)
             self.addCleanup(db.close)
-            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 16)
+            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 17)
             cols = {r["name"] for r in db.query("PRAGMA table_info(spools)")}
             self.assertIn("location", cols)
             job_cols = {r["name"] for r in db.query("PRAGMA table_info(print_jobs)")}
@@ -72,7 +73,7 @@ class Schema12Tests(unittest.TestCase):
             conn.close()
             db = Database(path)
             self.addCleanup(db.close)
-            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 16)
+            self.assertEqual(db.conn.execute("PRAGMA user_version").fetchone()[0], 17)
             nom_cols = {r["name"] for r in db.query("PRAGMA table_info(nomenclature)")}
             self.assertIn("print_group", nom_cols)
 

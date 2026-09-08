@@ -691,10 +691,16 @@ async function renderStaff() {
   const roles = data.roles || {};
   const rights = (role) => RIGHTS_ORDER.filter((right) => ((roles[role] || {}).rights || []).includes(right))
     .map((right) => ROLE_RIGHTS_LABEL[right]).join(' · ') || '—';
+  // И3: личный PIN для входа в кассу (4–8 цифр, уникален). Сам PIN сервер
+  // не отдаёт — только флаг has_pin; ввод нового PIN затирает старый.
   const rows = (data.staff || []).map((member) => `<div class="set-row" data-staff-id="${esc(member.id)}">`
     + `<div class="sinfo"><b>${esc(member.name || 'Без имени')}${Number(member.active) ? '' : ' · отключён'}</b>`
-    + `<small>${esc(member.role_name || member.role || '')} · chat_id ${esc(member.chat_id || '')}${member.note ? ' · ' + esc(member.note) : ''}<br>Права: ${esc(rights(member.role))}</small></div>`
-    + `<div class="btn-grid"><button class="btn sm" type="button" data-subs-toggle="${esc(member.id)}">Уведомления</button>${Number(member.active)
+    + `<small>${esc(member.role_name || member.role || '')}${member.chat_id ? ' · chat_id ' + esc(member.chat_id) : ' · без Telegram — только касса'}${member.note ? ' · ' + esc(member.note) : ''}<br>Права: ${esc(rights(member.role))}</small></div>`
+    + `<div class="sinfo"><b>PIN кассы</b><small>${member.has_pin ? 'задан ●●●●' : 'не задан'}</small></div>`
+    + `<input type="password" inputmode="numeric" autocomplete="off" data-pin-input="${esc(member.id)}" placeholder="4–8 цифр" style="max-width:104px">`
+    + `<div class="btn-grid"><button class="btn sm" type="button" data-pin-set="${esc(member.id)}">PIN</button>`
+    + (member.has_pin ? `<button class="btn sm" type="button" data-pin-clear="${esc(member.id)}">Снять PIN</button>` : '')
+    + `<button class="btn sm" type="button" data-subs-toggle="${esc(member.id)}">Уведомления</button>${Number(member.active)
       ? `<button class="btn sm" type="button" data-staff-off="${esc(member.id)}">Отключить</button>`
       : `<button class="btn sm" type="button" data-staff-on="${esc(member.id)}">Вернуть</button>`}</div></div>`
     + `<div class="subs-panel" data-subs-panel="${esc(member.id)}" hidden></div>`).join('');
@@ -705,7 +711,7 @@ async function renderStaff() {
     : '<p class="muted" style="font-size:12.5px">Активных кодов нет. Код одноразовый и не хранит пароль.</p>';
   host.innerHTML = `<div class="notice"><span>ℹ</span><span>Владелец — Chat ID из настроек: <b>${data.owner_chat ? esc(data.owner_chat) : 'не задан'}</b>. Права разделены по ролям.</span></div>`
     + (rows || '<p class="muted" style="font-size:12.5px">Команда пуста — добавьте сотрудника или руководителя.</p>')
-    + `<div class="card-head" style="margin-top:14px"><div><h3>Добавить участника</h3><p>chat_id человек узнает командой «код» в рабочем боте</p></div></div>`
+    + `<div class="card-head" style="margin-top:14px"><div><h3>Добавить участника</h3><p>chat_id человек узнает командой «код» в рабочем боте; пустой chat_id — доступ только в кассу по PIN</p></div></div>`
     + `<div class="set-row"><div class="sinfo"><b>Имя</b><small>Как показывать в списке</small></div><input type="text" id="staff_name" placeholder="Ваня" style="max-width:150px">`
     + `<select id="staff_role"><option value="employee">сотрудник</option><option value="manager">руководитель</option></select><input type="text" id="staff_chat" placeholder="chat_id" style="max-width:130px">`
     + `<button class="btn sm primary" type="button" id="staff_add">Добавить</button></div>`
@@ -735,6 +741,20 @@ function bindStaff() {
         await post('/api/staff/subscriptions/reset', { staff_id: reset.dataset.subsReset });
         await toggleSubsPanel(reset.dataset.subsReset, true);
         toast('Подписки сброшены', 'Вернулись значения по умолчанию'); return;
+      }
+      const pinSet = target.closest('[data-pin-set]');
+      if (pinSet) {
+        const id = pinSet.dataset.pinSet;
+        const input = host.querySelector(`[data-pin-input="${id}"]`);
+        const pin = (input && input.value || '').trim();
+        if (!pin) { toast('Введите PIN', '4–8 цифр — поле слева от кнопки'); return; }
+        await post('/api/staff/pin', { id, pin });
+        toast('PIN установлен', 'Вход в кассу — по новому PIN'); renderStaff(); return;
+      }
+      const pinClear = target.closest('[data-pin-clear]');
+      if (pinClear) {
+        await post('/api/staff/pin', { id: pinClear.dataset.pinClear, pin: '' });
+        toast('PIN снят', 'Вход по PIN для сотрудника закрыт'); renderStaff(); return;
       }
       const off = target.closest('[data-staff-off]');
       if (off) { await post('/api/staff/delete', { id: off.dataset.staffOff }); renderStaff(); return; }

@@ -129,7 +129,8 @@ function renderPending() {
     return '<div class="row">' +
       '<div class="t"><b>№' + esc(p.number) + " · " + money(p.amount) + "</b>" +
       "<small>" + esc(p.purpose || "—") +
-      (p.order_number ? (" · заказ №" + esc(p.order_number)) : "") + "</small></div>" +
+      (p.order_number ? (" · заказ №" + esc(p.order_number)) : "") +
+      (itemsText(p) ? ("<br>Состав: " + esc(itemsText(p))) : "") + "</small></div>" +
       '<button class="btn ok" data-act="confirm" data-id="' + esc(p.id) + '">Подтвердить</button>' +
       '<button class="btn warn" data-act="reject" data-id="' + esc(p.id) + '">Отклонить</button>' +
       "</div>";
@@ -146,7 +147,8 @@ function renderRecent() {
       '<div class="t"><b>№' + esc(p.number) + " · " + money(p.amount) + "</b> " + badge(p.status) +
       "<small>" + esc(p.purpose || "—") +
       (p.order_number ? (" · заказ №" + esc(p.order_number)) : "") +
-      (p.confirmed_by ? (" · " + esc(p.confirmed_by)) : "") + "</small></div>" +
+      (p.confirmed_by ? (" · " + esc(p.confirmed_by)) : "") +
+      (itemsText(p) ? ("<br>Состав: " + esc(itemsText(p))) : "") + "</small></div>" +
       '<div style="display:flex;gap:6px">' + refund + "</div></div>";
   }).join("");
 }
@@ -159,9 +161,24 @@ function renderPaymentQr(q) {
                link: "Платёжная ссылка банка",
                static: "Статический QR магазина (СБП): сумму вводит покупатель",
                dynamic: "Динамический QR банка" }[q.kind] || "";
+  var d = q.diagnostics || {};
   var problems = (q.problems || []).map(function (p) {
     return "• " + esc(p.label) + " — " + esc(p.message); }).join("<br>");
-  info.innerHTML = [kind, q.hint ? esc(q.hint) : "", problems].filter(Boolean).join("<br>");
+  info.innerHTML = [kind,
+    q.purpose ? "Назначение: " + esc(q.purpose) : "",
+    d.why ? esc(d.why) : "",
+    d.can_open ? "Открывается кнопкой «Открыть оплату»" + (d.domain ? " (" + esc(d.domain) + ")" : "") : "",
+    d.purpose_truncated ? "Назначение в QR сокращено — полное в платеже" : "",
+    q.hint ? esc(q.hint) : "", problems].filter(Boolean).join("<br>");
+}
+
+function itemsText(p) {
+  try {
+    var arr = JSON.parse(p.items || "[]");
+    if (!arr || !arr.length) return "";
+    var s = arr.map(function (r) { return (r.name || "?") + " × " + (r.qty == null ? 1 : r.qty); }).join("; ");
+    return s.length > 200 ? s.slice(0, 200) + "…" : s;
+  } catch (e) { return ""; }
 }
 
 function renderSettings(s) {

@@ -32,6 +32,14 @@ MANUAL_REASONS = ("брак", "потеря", "найдено", "подарок"
 REASON_LABEL = {"брак": "Брак", "потеря": "Потеря", "найдено": "Найдено",
                 "подарок": "Подарок", "пересчёт": "Пересчёт", "своё": "Своё"}
 
+# Виды удержаний в `reserves.kind` (И2 «единый регистр»):
+# reserve — резерв под заказ, hold — холд ожидающей СБП-продажи кассы.
+# Оба уменьшают свободный остаток; холд снимается подтверждением,
+# отклонением или таймаутом (sbp_hold_hours).
+HOLD_KIND = "hold"
+RESERVE_KIND = "reserve"
+HOLD_TTL_HOURS_DEFAULT = 24
+
 
 class Stock:
     """Остатки, себестоимость и аналитика по регистру движений."""
@@ -57,6 +65,31 @@ class Stock:
     def drop_doc_moves(self, doc_id: str) -> None:
         """Убрать движения документа — используется при распроведении."""
         self.db.execute("DELETE FROM stock_moves WHERE doc_id=?", (doc_id,))
+
+    # -------------------------------------------------- витрина-зона (И2)
+    def shelf_warehouse(self) -> str:
+        """Id склада-витрины (первый активный kind='shelf') или ''.
+
+        Витрина — зона единого регистра: полка пишет сюда движения, а
+        `shelf_items.qty` держится синхронно в тех же транзакциях.
+        """
+        row = self.db.one(
+            "SELECT id FROM warehouses WHERE kind='shelf' AND archived=0"
+            " ORDER BY position LIMIT 1") or {}
+        return str(row.get("id") or "")
+
+    def is_shelf_zone(self, warehouse_id: str) -> bool:
+        """Склад — витрина (остатки ведёт полка, а не документы)?"""
+        if not warehouse_id:
+            return False
+        row = self.db.one("SELECT kind FROM warehouses WHERE id=?",
+                          (warehouse_id,)) or {}
+        return str(row.get("kind") or "") == "shelf"
+
+    def free(self, nom_id: str, warehouse_id: str = "", variant_id: str = "") -> float:
+        """Свободный остаток: остаток минус активные резервы и холды."""
+        return round(self.qty(nom_id, warehouse_id, variant_id)
+                     - self.reserved(nom_id, warehouse_id, variant_id), 3)
 
     # --------------------------------------------- ручные корректировки «−N/+N»
     def manual_adjust(self, nom_id: str, warehouse_id: str, delta: float,
@@ -114,8 +147,13 @@ class Stock:
             cost = round(avg * amount, 2)
             action, note_default = "Оприходование", MANUAL_NOTE_PLUS
         full_note = (reason_tag + (str(note).strip() or note_default)).strip()
-        move = self.add_move(nom_id, warehouse_id, delta, cost,
-                             doc_kind=MANUAL_KIND, note=full_note)
+        with self.db.transaction():
+            move = self.add_move(nom_id, warehouse_id, delta, cost,
+                                 doc_kind=MANUAL_KIND, note=full_note)
+            # Витрина-зона: корректировка зеркалится на полку той же
+            # транзакцией — иначе регистр и полка разъедутся. Без связанной
+            # позиции зеркалить нечего: движение остаётся только в регистре.
+            self._mirror_to_shelf(nom_id, warehouse_id, delta, move["id"], full_note)
         self.db.add_event(
             "stock", f"Склад: {action.lower()} {round(amount, 3)} {unit}",
             f"{nom.get('name') or nom_id} · склад «{wh['name']}» · "
@@ -124,6 +162,45 @@ class Stock:
                  "warehouse_id": warehouse_id, "delta": delta,
                  "reason": reason})
         return move
+
+    def _mirror_to_shelf(self, nom_id: str, warehouse_id: str, delta: float,
+                         move_id: str, note: str) -> dict | None:
+        """Продублировать движение зоны на полку (первая связанная позиция).
+
+        Возвращает движение полки или None (не зона / нет позиции).
+        Маркер ``витрина-корр:<id>`` в заметке связывает пару для отката.
+        """
+        if not self.is_shelf_zone(warehouse_id):
+            return None
+        from .shelf import Shelf
+        shelf = Shelf(self.db)
+        items = shelf.items_for_nom(nom_id)
+        if not items:
+            return None
+        item = items[0]
+        if num(item.get("qty")) + delta < -1e-9:
+            raise ValueError(
+                f"На полке «{item.get('name') or ''}» {round(num(item.get('qty')), 3)} шт — "
+                f"скорректировать на {round(delta, 3)} нельзя. "
+                "Сначала сверьте полку инвентаризацией")
+        return shelf._move(item["id"], "writeoff" if delta < 0 else "produce",
+                           delta, note=f"витрина-корр:{move_id} {note}".strip())
+
+    def _unmirror_from_shelf(self, move_id: str) -> int:
+        """Убрать зеркальные движения полки при откате корректировки зоны.
+
+        Как распроведение: строки журнала удаляются, штуки возвращаются.
+        Возвращает число убранных движений.
+        """
+        rows = self.db.query(
+            "SELECT * FROM shelf_moves WHERE note LIKE ?",
+            (f"%витрина-корр:{move_id}%",))
+        for row in rows:
+            self.db.execute(
+                "UPDATE shelf_items SET qty=qty-?, updated_at=? WHERE id=?",
+                (round(num(row.get("qty")), 2), now_iso(), row.get("item_id")))
+            self.db.execute("DELETE FROM shelf_moves WHERE id=?", (row["id"],))
+        return len(rows)
 
     def manual_stats(self, nom_id: str = "", days: int = 7) -> dict:
         """Ручные списания за период (идеи 5 и 6): штуки и сумма по позициям
@@ -191,7 +268,9 @@ class Stock:
         # минус он создать не может, поэтому ограничений по остатку нет:
         # если после списания остаток распродан до нуля, откат корректно
         # показывает, что списанная по ошибке штука всё же на месте.
-        self.db.execute("DELETE FROM stock_moves WHERE id=?", (move_id,))
+        with self.db.transaction():
+            self.db.execute("DELETE FROM stock_moves WHERE id=?", (move_id,))
+            mirrored = self._unmirror_from_shelf(move_id)
         self.db.add_event(
             "stock", "Склад: корректировка возвращена",
             f"{nom.get('name') or move.get('nom_id')} · склад "
@@ -199,8 +278,8 @@ class Stock:
             f"откат движения {move_id} ({'+' if delta > 0 else '−'}1 шт)",
             "", {"move_id": move_id, "nom_id": move.get("nom_id"),
                  "warehouse_id": move.get("warehouse_id"),
-                 "reverted_delta": delta})
-        return {"id": move_id, "ok": True}
+                 "reverted_delta": delta, "mirrored": mirrored})
+        return {"id": move_id, "ok": True, "mirrored": mirrored}
 
     def warehouse_positions(self, warehouse_id: str) -> list[dict]:
         """Позиции одного склада для экрана «Позиции»: остаток, резерв,
@@ -371,21 +450,43 @@ class Stock:
         return round(num(row.get("v")), 3)
 
     def reserve(self, nom_id: str, qty: float, order_id: str = "",
-                warehouse_id: str = "", note: str = "", variant_id: str = "") -> dict:
+                warehouse_id: str = "", note: str = "", variant_id: str = "",
+                kind: str = "", doc_id: str = "") -> dict:
         qty = num(qty)
         if qty <= 0:
             raise ValueError("Количество резерва должно быть больше нуля")
-        free = (self.qty(nom_id, warehouse_id, variant_id)
-                - self.reserved(nom_id, warehouse_id, variant_id))
+        free = self.free(nom_id, warehouse_id, variant_id)
         if free < qty:
             raise ValueError(f"Свободно только {round(free, 1)} шт — зарезервировать {round(qty, 1)} нельзя")
+        kind = str(kind or RESERVE_KIND).strip() or RESERVE_KIND
+        if kind not in (RESERVE_KIND, HOLD_KIND):
+            raise ValueError(f"Неизвестный вид удержания: {kind}")
         return self.db.upsert("reserves", {
             "id": uid("rsv"), "at": now_iso(), "nom_id": nom_id,
             "variant_id": variant_id or None, "warehouse_id": warehouse_id or None,
             "qty": round(qty, 3), "order_id": order_id or None,
+            "doc_id": doc_id or None, "kind": kind,
             "state": "active", "note": note})
 
-    def release(self, reserve_id: str = "", order_id: str = "") -> int:
+    def hold(self, nom_id: str, warehouse_id: str, qty: float,
+             sale_id: str, note: str = "") -> dict:
+        """Холд ожидающей СБП-продажи: товар отложен, деньги ещё не пришли.
+
+        Холд занимает свободный остаток (вторая продажа тех же штук не
+        пройдёт), снимается подтверждением/отклонением продажи или
+        таймаутом `sbp_hold_hours`.
+        """
+        sale_id = str(sale_id or "").strip()
+        if not sale_id:
+            raise ValueError("Холд требует id продажи")
+        if not warehouse_id:
+            raise ValueError("Холд требует склад")
+        return self.reserve(nom_id, qty, warehouse_id=warehouse_id, kind=HOLD_KIND,
+                            doc_id=sale_id,
+                            note=note or f"холд СБП-продажи {sale_id}")
+
+    def release(self, reserve_id: str = "", order_id: str = "",
+                doc_id: str = "") -> int:
         if reserve_id:
             self.db.execute("UPDATE reserves SET state='released' WHERE id=?", (reserve_id,))
             return 1
@@ -394,7 +495,38 @@ class Stock:
                 "UPDATE reserves SET state='released' WHERE order_id=? AND state='active'",
                 (order_id,))
             return cur.rowcount or 0
+        if doc_id:
+            cur = self.db.execute(
+                "UPDATE reserves SET state='released' WHERE doc_id=? AND state='active'",
+                (doc_id,))
+            return cur.rowcount or 0
         return 0
+
+    def sale_holds(self, sale_id: str) -> list[dict]:
+        """Активные холды одной кассовой продажи — для экрана сверки."""
+        if not sale_id:
+            return []
+        return self.db.query(
+            "SELECT r.*, n.name nom_name FROM reserves r"
+            " LEFT JOIN nomenclature n ON n.id=r.nom_id"
+            " WHERE r.doc_id=? AND r.kind=? AND r.state='active'"
+            " ORDER BY datetime(r.at)", (sale_id, HOLD_KIND))
+
+    def release_expired_holds(self, ttl_hours: float = 0.0) -> int:
+        """Снять просроченные холды СБП (покупатель так и не оплатил).
+
+        Возвращает число снятых. Вызывается лениво из точек кассы —
+        отдельного фонового процесса не требует.
+        """
+        ttl = num(ttl_hours) or HOLD_TTL_HOURS_DEFAULT
+        if ttl <= 0:
+            return 0
+        cutoff = (datetime.now() - timedelta(hours=ttl)).isoformat()
+        cur = self.db.execute(
+            "UPDATE reserves SET state='released'"
+            " WHERE kind=? AND state='active' AND at<?",
+            (HOLD_KIND, cutoff))
+        return cur.rowcount or 0
 
     def reserves(self, active_only: bool = True) -> list[dict]:
         sql = ("SELECT r.*, n.name nom_name, o.number order_number FROM reserves r"
