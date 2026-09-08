@@ -48,6 +48,12 @@ class PanelSmokeTests(unittest.TestCase):
         check = (ROOT / "scripts" / "check.py").read_text(encoding="utf-8")
         self.assertIn("panel-check.js", check)
 
+    def test_auto_queue_message_mentions_safety_gate(self):
+        """UI не должен обещать автозапуск, если safety-gate ещё выключен."""
+        printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        self.assertIn("unattended_dangerous_actions", printer)
+        self.assertIn("Safety-gate выключен: задания пока запускаются вручную", printer)
+
 
 if __name__ == "__main__":
     unittest.main()

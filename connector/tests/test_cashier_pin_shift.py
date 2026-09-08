@@ -476,7 +476,20 @@ class CashierShiftPageTests(unittest.TestCase):
 
     def test_cashier_identity_and_holds_shown(self):
         for needle in ("whoPill", "cashier_name", "cashier_role",
-                       "holdBadge", "qb hold", "p.holds", "отложено"):
+                       "cashier_legacy", "function renderWho", "holdBadge",
+                       "p.holds", "отложено"):
+            self.assertIn(needle, self.page)
+
+    def test_single_document_tail_and_theme_toggle(self):
+        self.assertEqual(self.page.count("</body>"), 1)
+        self.assertEqual(self.page.count("</html>"), 1)
+        self.assertEqual(self.page.count("/assets/theme-toggle.js?v=17.0.1"), 1)
+        self.assertEqual(self.page.split("</html>", 1)[1].strip(), "")
+
+    def test_shift_tab_really_switches_views(self):
+        for needle in ('$("tabShift").classList.toggle("on",state.tab==="shift")',
+                       '$("viewShift").hidden=state.tab!=="shift"',
+                       'if(state.tab==="shift") loadShift();'):
             self.assertIn(needle, self.page)
 
     def test_inline_script_parses(self):

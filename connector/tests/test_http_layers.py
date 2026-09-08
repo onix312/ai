@@ -11,10 +11,13 @@
 """
 from __future__ import annotations
 
+import io
+import json
 import pathlib
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -251,6 +254,48 @@ class HandlerWiringTests(unittest.TestCase):
     def test_client_disconnect_errors_cover_browser_closes(self):
         self.assertIn(ConnectionResetError, CLIENT_DISCONNECT_ERRORS)
         self.assertIn(ConnectionAbortedError, CLIENT_DISCONNECT_ERRORS)
+
+
+class HandlerJobsStartBridgeTests(unittest.TestCase):
+    def test_jobs_start_uses_idempotency_key_as_start_request_id(self):
+        body = {
+            "id": "job-1",
+            "printer_id": "printer-1",
+            "confirmed": True,
+            "preflight_acknowledged": True,
+        }
+        raw = json.dumps(body).encode("utf-8")
+        seen = {}
+
+        def fake_post(path, payload, query):
+            seen["path"] = path
+            seen["payload"] = dict(payload)
+            return 200, {"ok": True}
+
+        handler = Handler.__new__(Handler)
+        handler.path = "/api/jobs/start"
+        handler.headers = {
+            "Content-Length": str(len(raw)),
+            "Content-Type": "application/json",
+            "Idempotency-Key": "same-click",
+            "Host": "panel.local",
+        }
+        handler.rfile = io.BytesIO(raw)
+        handler.api = SimpleNamespace(
+            post=fake_post,
+            idempotency=SimpleNamespace(get=lambda *a, **k: (False, None),
+                                        put=lambda *a, **k: None),
+            last_host="",
+        )
+        sent = {}
+        handler.send_json = lambda code, payload: sent.update(code=code, payload=payload)
+
+        handler.do_POST()
+
+        self.assertEqual(seen["path"], "/api/jobs/start")
+        self.assertEqual(seen["payload"]["start_request_id"], "same-click")
+        self.assertEqual(sent["code"], 200)
+        self.assertEqual(sent["payload"], {"ok": True})
 
 
 if __name__ == "__main__":

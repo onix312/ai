@@ -1002,9 +1002,13 @@ class PrinterManager:
                                     subtask_name=job.get("name", ""))
         except Exception:
             # Ошибка загрузки/старта не должна оставлять задание в процессе.
+            # start_request_id тоже очищаем: повтор того же клика после сбоя
+            # должен реально попробовать запустить задание заново, а не
+            # выглядеть как «уже стартовало» при состоянии queued.
             self.db.execute(
                 "UPDATE print_jobs SET state='queued', started_at=NULL, resume_eligible=0,"
-                "manual_paused=0, power_loss_at='', resume_attempts=0, resume_reason='' WHERE id=?"
+                "manual_paused=0, power_loss_at='', resume_attempts=0, resume_reason='',"
+                "start_request_id='' WHERE id=?"
                 " AND state IN ('uploading','starting')", (job_id,))
             raise
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
