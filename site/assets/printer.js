@@ -54,12 +54,41 @@ function requireLive() {
 function bar(el, percent) { if (el) el.style.width = clamp(num(percent), 0, 100) + '%'; }
 function text(id, value) { const el = $(id); if (el) el.textContent = value; }
 
-/* ================================================ лента парка (12.2, ПР1)
-   Каждый принтер — карточка-«пульт»: кольцо прогресса, состояние, что
-   печатает и сколько осталось, катушки AMS, флажки тревог. Клик — выбрать
-   принтер. Пока live-снимка нет, но принтеры заведены — показываем
-   скелетоны, чтобы вкладка не выглядела пустой (ПР8). */
-const PK_C = 2 * Math.PI * 15.5;   // длина окружности мини-кольца (r = 15.5)
+/* ================================================ парк принтеров (17.1)
+   Каждый принтер — живая карточка: статус, задача, прогресс, температуры,
+   кликабельные AMS-слоты (тап — привязка катушки), светофор готовности
+   к старту (N4) и крупные действия. Клик по карточке — выбрать принтер
+   и показать детали ниже. Пока live-снимка нет, но принтеры заведены —
+   показываем скелетоны, чтобы вкладка не выглядела пустой. */
+
+/** Сквозной номер слота 0–15 (совпадает с серверным _ams_slot_num). */
+function traySlotNum(t) { return num(t.unit) * 4 + num(t.slot); }
+function trayPresent(t) {
+  return t.present !== false && (t.present || t.generic || t.type || t.uuid);
+}
+/** Складская катушка, привязанная к слоту (не архивная). */
+function spoolForSlot(pid, slot) {
+  const key = String(slot);
+  return ((PF.state.spools || []).find((s) => !num(s.archived)
+    && String(s.printer_id || '') === String(pid)
+    && String(s.ams_slot ?? '') === key)) || null;
+}
+/** Запасной матч по RFID-метке трея — помогает, если нумерация слотов
+   у принтера и склада разошлась, а метка катушки совпала. */
+function spoolByUuid(pid, uuid) {
+  if (!uuid) return null;
+  return ((PF.state.spools || []).find((s) => !num(s.archived)
+    && String(s.printer_id || '') === String(pid)
+    && String(s.tray_uuid || '') === String(uuid))) || null;
+}
+function slotSpool(pid, tray) {
+  return spoolForSlot(pid, traySlotNum(tray)) || spoolByUuid(pid, tray.uuid);
+}
+/** Слоты, где AMS видит пластик, а складской привязки нет (N5). */
+function unboundTrays(p) {
+  const trays = ((p.ams || {}).trays) || [];
+  return trays.filter((t) => trayPresent(t) && t.type && !slotSpool(p.id, t));
+}
 
 function renderTabs() {
   const live = PF.state.live;
@@ -72,53 +101,631 @@ function renderTabs() {
   if (!list.length) {
     host.innerHTML = configured && !live
       ? Array.from({ length: configured }, () =>
-        `<div class="pk-card skel" aria-busy="true"><span class="pk-ring"><i class="skel" style="width:34px;height:34px;border-radius:50%"></i></span>`
-        + `<span class="pk-main"><i class="skel" style="width:56%;height:12px;display:block"></i>`
-        + `<i class="skel" style="width:82%;height:10px;margin-top:6px;display:block"></i></span></div>`).join('')
+        '<div class="pk-card pcard skel" aria-busy="true"><i class="skel" style="width:46%;height:14px"></i>'
+        + '<i class="skel" style="width:82%;height:11px"></i>'
+        + '<i class="skel" style="width:64%;height:44px"></i></div>').join('')
       : '';
     return;
   }
   if (!PF.state.activePrinter || !list.some((p) => p.id === PF.state.activePrinter)) {
     PF.state.activePrinter = (live.active && live.active.id) || list[0].id;
   }
-  host.innerHTML = list.map((p) => {
-    const st = p.printer.state, kind = STATE_KIND[st] || '';
-    const conn = p.connection.connected;
-    const progress = clamp(num(p.printer.progress), 0, 100);
-    const running = kind === 'running';
-    const problems = (p.printer.problems || []).length;
-    const alerts = (((p.guard || {}).alerts) || []).length;
-    const maint = num((p.maintenance || {}).due);
+  host.innerHTML = list.map(pcardHtml).join('');
+  list.forEach((p) => paintCardDots(p.id));
+}
+
+/** Одна карточка принтера: всё для решения «что с ним делать» — в одном месте. */
+function pcardHtml(p) {
+  const pr = p.printer || {};
+  const connObj = p.connection || {};
+  const conn = !!connObj.connected;
+  const st = pr.state || 'UNKNOWN';
+  const kind = STATE_KIND[st] || '';
+  const running = kind === 'running';
+  const isPaused = st === 'PAUSE' || st === 'PAUSED';
+  const progress = clamp(num(pr.progress), 0, 100);
+  const t = p.temperature || {};
+  const trays = ((p.ams || {}).trays) || [];
+  const alerts = (((p.guard || {}).alerts) || []).length;
+  const problems = (pr.problems || []).length;
+  const maintDue = num((p.maintenance || {}).due);
+  const lowFil = trays.some((x) => trayPresent(x) && x.remain != null && num(x.remain) < 15);
+  const unbound = unboundTrays(p).length;
+  const isOn = p.id === PF.state.activePrinter;
+
+  const job = ((PF.state.jobs || {}).queue || [])
+    .find((j) => j.printer_id === p.id && (j.state === 'running' || j.state === 'starting'));
+  const order = (job && job.order) || (p.job && p.job.order) || null;
+  const eta = pr.eta ? new Date(pr.eta * 1000)
+    .toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+
+  let taskLine;
+  if (running || isPaused) {
+    taskLine = esc(String(pr.task || 'Печать').slice(0, 60))
+      + (order && order.number
+        ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">№${esc(order.number)}</a>` : '');
+  } else if (conn) {
+    taskLine = esc(pr.state_label || STATE_LABEL[st] || st);
+  } else {
+    taskLine = esc(String(connObj.last_error || 'Нет связи').slice(0, 80));
+  }
+
+  const flags = (alerts ? `<span class="fl alarm">! ${alerts}</span>` : '')
+    + (problems ? `<span class="fl hms">▲ ${problems}</span>` : '')
+    + (maintDue ? `<span class="fl maint">⚙ ${maintDue}</span>` : '')
+    + (lowFil ? '<span class="fl low">◍ мало пластика</span>' : '')
+    + (unbound ? `<span class="fl low">▦ ${unbound} без привязки</span>` : '');
+
+  const slots = trays.length
+    ? `<div class="pc-slots">${trays.map((x) => pslotHtml(p, x)).join('')}</div>`
+    : '<div class="pc-meta"><span>AMS: нет данных</span></div>';
+
+  let actions = '';
+  if (!conn) {
+    actions = `<div class="pc-off-acts"><button class="pc-btn" type="button" data-preconnect="${esc(p.id)}">⟳ Переподключить</button>`
+      + `<button class="pc-btn ghost" type="button" data-pnet="${esc(p.id)}" title="Диагностика связи">⚙</button></div>`;
+  } else if (running) {
+    actions = `<div class="pc-actions"><button class="pc-btn" type="button" data-pcmd="pause" data-pid="${esc(p.id)}">⏸ Пауза</button>`
+      + `<button class="pc-btn danger" type="button" data-pcmd="stop" data-pid="${esc(p.id)}">⏹ Стоп</button>`
+      + `<button class="pc-btn ghost" type="button" data-pcmd="light" data-pid="${esc(p.id)}" title="Свет камеры">☀</button>`
+      + `<button class="pc-btn ghost" type="button" data-pdetail="${esc(p.id)}" title="Детали принтера">⋯</button></div>`;
+  } else if (isPaused) {
+    actions = `<div class="pc-actions"><button class="pc-btn primary" type="button" data-pcmd="resume" data-pid="${esc(p.id)}">▶ Продолжить</button>`
+      + `<button class="pc-btn danger" type="button" data-pcmd="stop" data-pid="${esc(p.id)}">⏹ Стоп</button>`
+      + `<button class="pc-btn ghost" type="button" data-pcmd="light" data-pid="${esc(p.id)}" title="Свет камеры">☀</button>`
+      + `<button class="pc-btn ghost" type="button" data-pdetail="${esc(p.id)}" title="Детали принтера">⋯</button></div>`;
+  } else {
+    const cand = candidateJobFor(p.id);
+    const startBtn = cand.job
+      ? `<button class="pc-btn primary" type="button" data-pstart="${esc(p.id)}">▶ Запустить</button>`
+      : `<button class="pc-btn primary" type="button" data-padd="${esc(p.id)}">+ Задание</button>`;
+    actions = `<div class="pc-actions">${startBtn}`
+      + `<button class="pc-btn ghost" type="button" data-pcmd="light" data-pid="${esc(p.id)}" title="Свет камеры">☀</button>`
+      + `<button class="pc-btn ghost" type="button" data-pdetail="${esc(p.id)}" title="Детали принтера">⋯</button></div>`;
+  }
+
+  // N4: светофор имеет смысл только на свободном принтере на связи.
+  const dots = conn && !running && !isPaused
+    ? `<button class="pc-dots" id="pc-dots-${esc(p.id)}" type="button" data-pready="${esc(p.id)}" title="Готовность к старту — открыть детали"><span class="rd"></span><span class="rd"></span><span class="rd"></span><span>проверяем…</span></button>`
+    : '';
+
+  const temper = `<div class="pc-meta"><span>🌡 <b>${nfmt(t.nozzle, 0)}/${nfmt(t.nozzle_target, 0)}°</b></span>`
+    + `<span>🛏 <b>${nfmt(t.bed, 0)}/${nfmt(t.bed_target, 0)}°</b></span>`
+    + (t.chamber ? `<span>□ <b>${nfmt(t.chamber, 0)}°</b></span>` : '')
+    + (pr.layer ? `<span>слой <b>${nfmt(pr.layer)}/${nfmt(pr.total_layers)}</b></span>` : '')
+    + (pr.remaining_min ? `<span>осталось <b>${minutesText(pr.remaining_min)}</b></span>` : '')
+    + (eta ? `<span>финиш <b>${esc(eta)}</b></span>` : '') + '</div>';
+
+  let hint = '';
+  if (conn && !running && !isPaused) {
+    const top = scoreJobsFor(p.id)[0];
+    if (top) {
+      hint = `<div class="pc-note info"><span class="grow">💡 Дальше: <b>${esc(top.job.name || top.job.file || 'задание')}</b> — ${esc(top.why[0] || '')}</span>`
+        + `<button class="btn sm ghost" type="button" data-psuggest="${esc(p.id)}">Все</button></div>`;
+    } else if (!((PF.state.jobs || {}).queue || []).some((j) => j.state === 'queued')) {
+      hint = '<div class="pc-note"><span class="grow">Очередь пуста — добавьте задание.</span></div>';
+    }
+  }
+
+  const prog = (running || isPaused)
+    ? `<div class="pc-prog"><span class="track"><i style="width:${Math.round(progress)}%"></i></span><b>${Math.round(progress)}%</b></div>`
+    : '';
+
+  return `<article class="pk-card pcard${isOn ? ' on' : ''}${conn ? '' : ' off'}${running ? ' run' : ''}" data-pcard="${esc(p.id)}" aria-label="${esc(p.name)}">`
+    + `<div class="pc-head">${printerSilhouette(p)}<span class="pc-title"><b>${esc(p.name)}</b>`
+    + `<small>${esc(conn ? (connObj.host || (connObj.mode === 'cloud' ? 'Bambu Cloud' : 'локальная сеть')) : 'не в сети')}</small></span>`
+    + `<span class="state-badge ${kind}">${esc(pr.state_label || STATE_LABEL[st] || st)}</span>`
+    + `<span class="pc-conn${conn ? '' : ' bad'}"></span></div>`
+    + `<div class="pc-task">${taskLine}</div>`
+    + prog + temper + dots + slots
+    + (flags ? `<div class="pc-flags">${flags}</div>` : '') + hint + actions
+    + '</article>';
+}
+
+/** Мини-слот AMS на карточке: цвет, материал, остаток, привязка. Тап — пикер. */
+function pslotHtml(p, x) {
+  const slot = traySlotNum(x);
+  const has = trayPresent(x);
+  const remain = x.remain == null ? null : num(x.remain);
+  const bound = has ? slotSpool(p.id, x) : null;
+  const cls = ['pslot'];
+  if (x.active) cls.push('active');
+  if (!has) cls.push('ghost');
+  else if (!bound) cls.push('unbound');
+  if (remain != null && remain < 15 && has) cls.push('low');
+  const sub = !has ? 'пусто'
+    : (bound ? `${bound.material || ''} ${bound.color_name || ''}`.trim() : 'не привязан');
+  const title = `${x.label || ('Слот ' + (slot + 1))} · ${has ? (x.type || 'AMS') : 'пусто'}`
+    + (bound ? ` · ${bound.material || ''} ${bound.color_name || ''} · ${Math.round(num(bound.remaining_grams))} г` : '')
+    + (remain != null ? ` · ${Math.round(remain)}%` : '') + ' — клик: привязка катушки';
+  return `<button class="${cls.join(' ')}" type="button" data-pslot="${esc(p.id)}:${slot}" title="${esc(title)}">`
+    + `<span class="sw" style="background:${esc(x.color || '#cbd5e1')}"></span>`
+    + `<span class="tx">${esc((x.type || (has ? 'AMS' : '—')) + ' · ' + (slot + 1))}<small>${esc(sub)}</small></span>`
+    + (remain != null && has ? `<span class="pc">${Math.round(remain)}%</span>` : '')
+    + '</button>';
+}
+
+/** Выбрать принтер: подсветить карточку, обновить детали, подтянуть файлы и журнал. */
+function selectPrinter(pid, opts) {
+  if (!pid) return;
+  opts = opts || {};
+  const changed = PF.state.activePrinter !== pid;
+  PF.state.activePrinter = pid;
+  renderLive();
+  if (changed) { loadFiles(); loadEvents(); }
+  if (opts.tab) selectPtab(opts.tab);
+  if (opts.scroll) {
+    const el = $(opts.scroll);
+    if (el && el.scrollIntoView) {
+      try { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      catch (e) { el.scrollIntoView(); }
+    }
+  }
+}
+
+/* ================================================== вкладки деталей (17.1) */
+const PTAB_KEY = 'pf_printers_ptab';
+const PTAB_NAMES = ['overview', 'camera', 'ams', 'files', 'care', 'log'];
+function selectPtab(name) {
+  if (PTAB_NAMES.indexOf(name) < 0) name = 'overview';
+  $$('#pr_detail_tabs [data-ptab]').forEach((b) => {
+    const on = b.dataset.ptab === name;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  PTAB_NAMES.forEach((n) => {
+    const pane = $('ptab-' + n);
+    if (pane) pane.hidden = n !== name;
+  });
+  U.store.set(PTAB_KEY, name);
+}
+/** Точки-тревоги на вкладках: AMS (непривязанные/пустеющие слоты) и ТО/здоровье. */
+function updatePtabDots(p) {
+  const amsDot = $('pr_ptab_ams_dot');
+  if (amsDot) {
     const trays = ((p.ams || {}).trays) || [];
-    const lowFil = trays.some((t) => t.remain != null && t.remain >= 0 && num(t.remain) < 15);
-    const sw = trays.slice(0, 4).map((t) => {
-      // 13.1 (24): остаток на «трубке» AMS — затемнение снизу по проценту
-      const has = t.present !== false && (t.present || t.generic || t.type || t.uuid);
-      const remain = num(t.remain, -1);
-      const pct = remain >= 0 ? clamp(remain, 0, 100) : null;
-      return `<span class="pk-tube${has ? '' : ' ghost'}" title="${esc((t.label || 'Слот') + ' · ' + (has ? (t.type || 'AMS') : 'пусто') + (pct != null ? ` · остаток ${Math.round(pct)}%` : ''))}">`
-        + `<i class="pk-tube-body" style="background:${esc(t.color || '#38445c')}">${pct != null ? `<b style="height:${Math.round(pct)}%"></b>` : ''}</i></span>`;
-    }).join('');
-    const sub = running
-      ? `${esc(String(p.printer.task || 'Печать').slice(0, 34))} · осталось ${p.printer.remaining_min ? minutesText(p.printer.remaining_min) : '—'}`
-      : conn ? esc(p.printer.state_label || STATE_LABEL[st] || st)
-        : esc(String(p.connection.last_error || 'Нет связи').slice(0, 40));
-    return `<button class="pk-card${p.id === PF.state.activePrinter ? ' on' : ''}${conn ? '' : ' off'}${running ? ' run' : ''}" type="button" data-printer="${esc(p.id)}"`
-      + ` title="${esc(p.name)} · ${esc(p.printer.state_label || STATE_LABEL[st] || st)}">`
-      + printerSilhouette(p)
-      + `<span class="pk-ring"><svg viewBox="0 0 40 40" aria-hidden="true">`
-      + `<circle class="tr" cx="20" cy="20" r="15.5"/>`
-      + `<circle class="fl" cx="20" cy="20" r="15.5" stroke-dasharray="${PK_C.toFixed(1)}" stroke-dashoffset="${conn ? (PK_C * (1 - progress / 100)).toFixed(1) : PK_C.toFixed(1)}"/>`
-      + `</svg><b>${conn ? (running ? Math.round(progress) + '%' : conn ? '✓' : '') : '◌'}</b></span>`
-      + `<span class="pk-main"><b>${esc(p.name)}</b><small>${sub}</small>`
-      + `<span class="pk-ams">${sw}</span></span>`
-      + `<span class="pk-flags">`
-      + (alerts ? `<i class="fl alarm" title="Тревога сторожа печати">!</i>` : '')
-      + (problems ? `<i class="fl hms" title="HMS: ${problems} — откройте карточку">▲</i>` : '')
-      + (maint ? `<i class="fl maint" title="Нужно обслуживание">⚙</i>` : '')
-      + (lowFil ? `<i class="fl low" title="Мало пластика в AMS">◍</i>` : '')
-      + `</span></button>`;
+    const low = trays.some((x) => trayPresent(x) && x.remain != null && num(x.remain) < 15);
+    amsDot.hidden = !(unboundTrays(p).length || low);
+  }
+  const careDot = $('pr_ptab_care_dot');
+  if (careDot) {
+    const alerts = (((p.guard || {}).alerts) || []).length;
+    const problems = ((p.printer || {}).problems || []).length;
+    careDot.hidden = !(alerts || problems || num((p.maintenance || {}).due));
+  }
+}
+
+/* ================================================== N4: готовность к старту
+   Светофор preflight — до нажатия «Печать»: блоки красным,
+   предупреждения жёлтым, «можно печатать» зелёным. Серверного
+   batch-preflight нет (см. «нужно от бэкенда»), поэтому фронт ходит
+   по одному запросу на принтер с кэшем на 2 минуты и защитой от дублей. */
+const readyCache = {};    // pid -> { at, key, candidate, result }
+const readyFlight = {};   // pid -> Promise
+const READY_TTL = 120000;
+let readySig = '';
+
+function parseAmsMapping(job) {
+  try { return JSON.parse(job.ams_mapping || '[]'); } catch (e) { return []; }
+}
+/** Первое подходящее задание из очереди: своё для принтера — или общее. */
+function candidateJobFor(pid) {
+  const q = ((PF.state.jobs || {}).queue || []).filter((j) => j.state === 'queued');
+  const mine = q.filter((j) => !j.printer_id || j.printer_id === pid);
+  const pick = mine.find((j) => !num(j.no_auto)) || mine[0] || null;
+  if (pick) return { job: pick, shared: !pick.printer_id, busy: false };
+  return { job: null, shared: false, busy: q.length > 0 };
+}
+async function fetchReady(pid) {
+  const found = candidateJobFor(pid);
+  const job = found.job;
+  const key = pid + '|' + (job ? job.id + '|' + (job.file || job.name || '') + '|' + (num(job.plate, 1) || 1) : 'nojobs');
+  const cached = readyCache[pid];
+  if (cached && cached.key === key && Date.now() - cached.at < READY_TTL) return cached;
+  if (readyFlight[pid]) return readyFlight[pid];
+  if (!job) {
+    const empty = { at: Date.now(), key, candidate: null, result: null };
+    readyCache[pid] = empty;
+    return empty;
+  }
+  const run = (async () => {
+    try {
+      const check = await post('/api/printer/preflight', {
+        printer_id: pid, file: job.file || job.name || '',
+        plate: num(job.plate, 1) || 1, ams_mapping: parseAmsMapping(job),
+      });
+      const entry = { at: Date.now(), key, candidate: job, result: check || {} };
+      readyCache[pid] = entry;
+      return entry;
+    } catch (e) {
+      return { at: 0, key, candidate: job, result: null, error: e.message };
+    } finally {
+      delete readyFlight[pid];
+    }
+  })();
+  readyFlight[pid] = run;
+  return run;
+}
+/** Точки светофора на карточке: красим из кэша, свежее — подтянется само. */
+function paintCardDots(pid) {
+  const el = $('pc-dots-' + pid);
+  if (!el) return;
+  const cached = readyCache[pid];
+  if (cached && cached.key && Date.now() - cached.at < READY_TTL) {
+    el.innerHTML = readyDotsInner(pid, cached);
+    return;
+  }
+  fetchReady(pid).then((entry) => {
+    const host = $('pc-dots-' + pid);
+    if (host && entry) host.innerHTML = readyDotsInner(pid, entry);
+  });
+}
+function readyDotsInner(pid, entry) {
+  if (!entry || !entry.candidate) {
+    return '<span class="rd"></span><span class="rd"></span><span class="rd"></span><span>нет заданий в очереди</span>';
+  }
+  if (!entry.result) {
+    return '<span class="rd"></span><span class="rd"></span><span class="rd"></span><span>preflight недоступен</span>';
+  }
+  const b = (entry.result.blocks || []).length, w = (entry.result.warns || []).length;
+  const name = entry.candidate.name || entry.candidate.file || 'задание';
+  if (b) return `<span class="rd red"></span><span class="rd"></span><span class="rd"></span><span>«${esc(name)}» — блок: ${b}</span>`;
+  if (w) return `<span class="rd"></span><span class="rd amber"></span><span class="rd"></span><span>«${esc(name)}» — предупреждений: ${w}</span>`;
+  return `<span class="rd"></span><span class="rd"></span><span class="rd green"></span><span>«${esc(name)}» — можно печатать</span>`;
+}
+/** Полная панель готовности в Обзоре: кандидат + все блоки/предупреждения. */
+async function renderReady(p) {
+  const host = $('pr_ready');
+  if (!host || !p) return;
+  const cached = readyCache[p.id];
+  if (cached) paintReadyPanel(p, cached);
+  try {
+    const fresh = await fetchReady(p.id);
+    if (active() && active().id === p.id && fresh) paintReadyPanel(p, fresh);
+  } catch (e) { /* тихий preflight: кэш уже показан, сеть подождёт */ }
+}
+function paintReadyPanel(p, entry) {
+  const host = $('pr_ready');
+  if (!host) return;
+  const sig = p.id + '|' + (entry.key || '') + '|' + JSON.stringify(entry.result || null);
+  if (sig === readySig) return;
+  readySig = sig;
+  const chip = $('pr_ready_chip'), sub = $('pr_ready_sub');
+  if (!entry.candidate) {
+    if (chip) { chip.className = 'chip'; chip.textContent = '—'; }
+    if (sub) sub.textContent = 'Очередь пуста';
+    host.innerHTML = '<div class="empty compact"><span>В очереди нет заданий для этого принтера.</span></div>'
+      + `<div style="margin-top:8px"><button class="btn sm primary" type="button" data-padd="${esc(p.id)}">+ Задание</button></div>`;
+    return;
+  }
+  const r = entry.result || {};
+  const blocks = r.blocks || [], warns = r.warns || [], infos = r.infos || [];
+  const name = entry.candidate.name || entry.candidate.file || 'задание';
+  if (chip) {
+    chip.className = 'chip ' + (blocks.length ? 'bad' : warns.length ? 'warn' : 'ok');
+    chip.textContent = blocks.length ? `Блок: ${blocks.length}` : warns.length ? `Предупреждений: ${warns.length}` : 'Готов';
+  }
+  if (sub) sub.textContent = `«${name}» · preflight только что`;
+  const row = (cls, icon, x) => `<div class="ready-row ${cls}"><span class="ri">${icon}</span><span><b>${esc(x.title || '')}</b>`
+    + (x.detail ? `<small>${esc(x.detail)}</small>` : '') + '</span></div>';
+  host.innerHTML = `<div class="ready-cand"><span class="grow">Следующее: <b>${esc(name)}</b>`
+    + (entry.candidate.order && entry.candidate.order.number ? ` · заказ №${esc(entry.candidate.order.number)}` : '')
+    + `</span><button class="btn sm primary" type="button" data-ready-start="${esc(entry.candidate.id)}" data-pid="${esc(p.id)}">Запустить</button></div>`
+    + (!blocks.length && !warns.length
+      ? '<div class="ready-ok"><span>✓</span><span>Блоков и предупреждений нет — можно стартовать.</span></div>' : '')
+    + blocks.map((x) => row('block', '✕', x)).join('')
+    + warns.map((x) => row('warn', '⚠', x)).join('')
+    + infos.map((x) => row('info', 'ⓘ', x)).join('');
+}
+
+/* ================================================== N5: новая катушка в слоте
+   AMS видит пластик, а складской привязки нет — показываем баннер
+   «Привязать в 1 клик» прямо над стойкой, а не молча плодим фантомы. */
+let amsNewSig = '';
+function renderAmsNew(p) {
+  const host = $('pr_ams_new');
+  if (!host || !p) return;
+  const list = unboundTrays(p);
+  const sig = p.id + ':' + list.map((t) => traySlotNum(t) + (t.type || '')).join(',');
+  if (sig === amsNewSig) return;
+  amsNewSig = sig;
+  host.innerHTML = list.map((t) => {
+    const slot = traySlotNum(t);
+    return '<div class="ams-new-row">'
+      + `<span class="sw" style="background:${esc(t.color || '#cbd5e1')}"></span>`
+      + `<span class="grow"><b>${esc(t.label || ('Слот ' + (slot + 1)))}: ${esc(t.type || '')} ${esc(amsColorName(t.color) || '')}</b>`
+      + '<small>Катушка в AMS, но не привязана к складу — расход не спишется автоматически</small></span>'
+      + `<button class="btn sm primary" type="button" data-pslot="${esc(p.id)}:${slot}">Привязать</button></div>`;
   }).join('');
+}
+
+/* ================================================== N6: подбор задания под AMS
+   Фронт-эвристика v1: явная привязка к принтеру, материал заказа в слотах,
+   похожий цвет, приоритет, FIFO. Серверный скоринг — позже, если зайдёт. */
+let sugSig = '';
+function scoreJobsFor(pid) {
+  const live = PF.livePrinter(pid);
+  const trays = (live && live.ams && live.ams.trays) || [];
+  const types = new Set(trays.filter(trayPresent)
+    .map((t) => String(t.type || '').toUpperCase()).filter(Boolean));
+  const colorWords = trays.filter(trayPresent)
+    .map((t) => amsColorName(t.color)).filter(Boolean).join(' ').toLowerCase();
+  const q = ((PF.state.jobs || {}).queue || []).filter((j) => j.state === 'queued');
+  const orders = PF.state.orders || [];
+  const out = [];
+  q.forEach((j) => {
+    if (j.printer_id && j.printer_id !== pid) return;   // чужой принтер — не предлагаем
+    let score = 0;
+    const why = [];
+    if (j.printer_id === pid) { score += 50; why.push('привязано к этому принтеру'); }
+    else { score += 20; why.push('подходит любому принтеру'); }
+    if (num(j.no_auto)) { score -= 15; why.push('автостарт выключен'); }
+    const o = (j.order_id && orders.find((x) => x.id === j.order_id)) || j.order || null;
+    const om = String((o && o.material) || '').toUpperCase().trim();
+    if (om) {
+      if (types.has(om)) { score += 30; why.push('материал ' + om + ' уже стоит в AMS'); }
+      else { score -= 10; why.push('материала ' + om + ' нет в слотах'); }
+    }
+    const oc = String((o && o.color) || '').toLowerCase().trim();
+    if (oc && colorWords) {
+      const hit = oc.split(/[\s+,/;]+/).some((w) => w.length > 2 && colorWords.includes(w));
+      if (hit) { score += 10; why.push('похожий цвет уже заряжен'); }
+    }
+    score += clamp(num(j.priority), -5, 5);
+    out.push({ job: j, order: o, score, why });
+  });
+  out.sort((a, b) => (b.score - a.score)
+    || String(a.job.created_at || '').localeCompare(String(b.job.created_at || '')));
+  return out;
+}
+function renderSuggestAuto(p) {
+  if (!p) return;
+  const sig = p.id + '|' + (((PF.state.jobs || {}).queue || []).map((j) => j.id + ':' + j.state).join(','))
+    + '|' + (((p.ams || {}).trays || []).map((t) => (t.type || '') + (t.color || '')).join(','));
+  if (sig === sugSig) return;
+  sugSig = sig;
+  renderSuggest(p);
+}
+function renderSuggest(p) {
+  const host = $('pr_suggest');
+  if (!host || !p) return;
+  const list = scoreJobsFor(p.id);
+  if (!list.length) {
+    host.innerHTML = '<div class="empty compact"><span>В очереди нет заданий для этого принтера.</span></div>';
+    return;
+  }
+  host.innerHTML = list.slice(0, 3).map((s, i) => {
+    const j = s.job;
+    const oname = (s.order && (s.order.number || s.order.product))
+      ? ` · №${esc(s.order.number || '')} ${esc(s.order.product || '')}` : '';
+    return `<div class="sug-row${i === 0 ? ' best' : ''}"><span class="rank">${i + 1}</span>`
+      + `<span class="grow"><b>${esc(j.name || j.file || 'задание')}${oname}</b><small>${esc(s.why.join(' · '))}</small></span>`
+      + `<span class="sug-score">${s.score}</span>`
+      + `<button class="btn sm primary" type="button" data-sug-start="${esc(j.id)}" data-pid="${esc(p.id)}">Запустить</button></div>`;
+  }).join('')
+    + (list.length > 3
+      ? `<div class="muted" style="margin-top:8px;font-size:12px">Ещё ${list.length - 3} — <button class="btn sm ghost" type="button" data-sug-queue="1">открыть очередь</button></div>` : '');
+}
+/** Запуск queued-задания из карточки/готовности/подбора — тем же путём,
+   что и старт из очереди: preflight + подтверждение оператора. */
+async function startQueuedJob(pid, jobId, btn) {
+  const job = ((PF.state.jobs || {}).queue || []).find((j) => j.id === jobId);
+  if (!job) return fail(new Error('Задание не найдено в текущем списке'));
+  try {
+    await U.withBusy(btn || null, async () => {
+      if (PF.state.activePrinter !== pid) {
+        PF.state.activePrinter = pid;
+        renderTabs();
+      }
+      if (!await preflightAndConfirmJob(job, pid)) return;
+      await post('/api/jobs/start', {
+        id: job.id, printer_id: pid, confirmed: true, preflight_acknowledged: true,
+      });
+      toast('Задание запущено', job.name || job.file || 'Печать');
+      delete readyCache[pid];
+      sugSig = '';
+      await PF.refreshCore();
+      setTimeout(PF.poll, 1200);
+    });
+  } catch (e) { fail(e); }
+}
+
+/* ================================================== пикер привязки AMS (17.1)
+   Тап по слоту — выбор складской катушки: поиск, фильтр по материалу,
+   «только с остатком». Пустые/архивные выбрать нельзя. Занятый слот —
+   вытеснение с подтверждением (force). Катушка из другого слота —
+   отдельное подтверждение («так задумано»). Запись типа и цвета
+   в слот AMS — галочкой, как на QR-странице катушки. */
+const abState = { pid: '', slot: 0, choice: '', q: '', mat: '' };
+function abSlotHuman(v) {
+  const n = num(v);
+  return n > 15 ? String(v) : String(n + 1);
+}
+function openSlotPicker(pid, slot) {
+  abState.pid = pid || '';
+  abState.slot = num(slot);
+  abState.choice = '';
+  abState.q = '';
+  abState.mat = '';
+  const live = PF.livePrinter(abState.pid);
+  const tray = (((live && live.ams) || {}).trays || [])
+    .find((x) => traySlotNum(x) === abState.slot) || null;
+  const cfg = (PF.state.printers || []).find((x) => x.id === abState.pid) || {};
+  text('ab_title', 'Слот ' + abSlotHuman(abState.slot) + ' · ' + (cfg.name || (live && live.name) || 'Принтер'));
+  text('ab_sub', tray && tray.type
+    ? ('AMS: ' + tray.type + (tray.remain != null ? ' · остаток ' + Math.round(num(tray.remain)) + '%' : ''))
+    : 'Принтер не прислал данные AMS — привязка запишется только в склад');
+  const search = $('ab_search');
+  if (search) search.value = '';
+  const onlyEl = $('ab_only_stock');
+  if (onlyEl) onlyEl.checked = true;
+  renderAbCurrent();
+  renderAbFilters();
+  renderAbList();
+  openModal('ams_bind_modal');
+  setTimeout(() => { const s = $('ab_search'); if (s && s.focus) s.focus(); }, 60);
+}
+function renderAbCurrent() {
+  const host = $('ab_current');
+  if (!host) return;
+  const occ = spoolForSlot(abState.pid, abState.slot);
+  const unb = $('ab_unbind');
+  if (unb) unb.hidden = !occ;
+  if (!occ) {
+    host.innerHTML = '<div class="ab-cur"><span class="muted">Слот свободен — выберите катушку ниже.</span></div>';
+    return;
+  }
+  host.innerHTML = '<div class="ab-cur">'
+    + `<span class="sw" style="background:${esc(occ.color_hex || '#cbd5e1')}"></span>`
+    + `<span><b>Сейчас: ${esc(occ.material || '')} ${esc(occ.color_name || '')}</b><br>`
+    + `<small class="muted">${Math.round(num(occ.remaining_grams))} г · ${esc(occ.brand || 'без бренда')}</small></span></div>`;
+}
+function renderAbFilters() {
+  const host = $('ab_filters');
+  if (!host) return;
+  const mats = [...new Set((PF.state.spools || []).filter((s) => !num(s.archived))
+    .map((s) => String(s.material || '').trim()).filter(Boolean))].sort();
+  host.innerHTML = [{ v: '', l: 'Все' }]
+    .concat(mats.map((m) => ({ v: m, l: m })))
+    .map((f) => `<button class="ab-chip${abState.mat === f.v ? ' on' : ''}" type="button" data-ab-mat="${esc(f.v)}">${esc(f.l)}</button>`)
+    .join('');
+}
+function renderAbList() {
+  const host = $('ab_list');
+  if (!host) return;
+  const q = abState.q.trim().toLowerCase();
+  const onlyEl = $('ab_only_stock');
+  const onlyStock = onlyEl ? onlyEl.checked : true;
+  const occ = spoolForSlot(abState.pid, abState.slot);
+  let rows = (PF.state.spools || []).filter((s) => !num(s.archived));
+  if (abState.mat) rows = rows.filter((s) => String(s.material || '').trim() === abState.mat);
+  if (q) {
+    rows = rows.filter((s) => [s.material, s.color_name, s.brand]
+      .some((v) => String(v || '').toLowerCase().includes(q)));
+  }
+  if (onlyStock) rows = rows.filter((s) => num(s.remaining_grams) > 0 || (occ && s.id === occ.id));
+  rows = rows.slice().sort((a, b) => {
+    const ac = occ && a.id === occ.id ? 0 : 1, bc = occ && b.id === occ.id ? 0 : 1;
+    if (ac !== bc) return ac - bc;
+    return (num(b.remaining_grams) - num(a.remaining_grams))
+      || String(a.material || '').localeCompare(String(b.material || ''));
+  });
+  if (!rows.length) {
+    host.innerHTML = '<div class="empty compact"><span>Ничего не найдено. Уберите фильтр или заведите катушку на складе.</span></div>';
+  } else {
+    host.innerHTML = rows.slice(0, 60).map((s) => {
+      const isCur = occ && s.id === occ.id;
+      const empty = num(s.remaining_grams) <= 0;
+      const dup = !isCur && s.printer_id && String(s.ams_slot ?? '') !== '';
+      const sel = abState.choice === s.id;
+      const tag = isCur ? '<span class="ab-tag cur">в этом слоте</span>'
+        : empty ? '<span class="ab-tag out">пустая</span>'
+        : dup ? `<span class="ab-tag dup">слот ${esc(abSlotHuman(s.ams_slot))}${String(s.printer_id) !== String(abState.pid) ? ' · др. принтер' : ''}</span>`
+        : '';
+      const dis = (isCur || empty) ? ' disabled' : '';
+      const pct = Math.round(clamp(num(s.percent), 0, 100));
+      return `<button class="ab-row${sel ? ' sel' : ''}" type="button" data-ab-pick="${esc(s.id)}"${dis}>`
+        + `<span class="sw" style="background:${esc(s.color_hex || '#cbd5e1')}"></span>`
+        + `<span class="grow"><b>${esc(s.material || '')} ${esc(s.color_name || '')}</b>`
+        + `<small>${esc(s.brand || 'без бренда')} · ${esc(s.location === 'ams' ? 'в AMS' : (s.location_note || s.location || 'склад'))}</small></span>`
+        + tag
+        + `<span class="rest${num(s.remaining_grams) < 150 ? ' low' : ''}"><b>${Math.round(num(s.remaining_grams))} г</b><small>${pct}%</small></span></button>`;
+    }).join('');
+  }
+  const btn = $('ab_bind');
+  const sp = (PF.state.spools || []).find((s) => s.id === abState.choice);
+  if (btn) btn.disabled = !sp;
+  const choiceBox = $('ab_choice');
+  if (choiceBox) {
+    choiceBox.hidden = !sp;
+    if (sp) text('ab_choice_text', `${sp.material} ${sp.color_name} · ${Math.round(num(sp.remaining_grams))} г → слот ${abSlotHuman(abState.slot)}`);
+  }
+}
+async function doAbBind(btn) {
+  const sp = (PF.state.spools || []).find((s) => s.id === abState.choice);
+  if (!sp) return;
+  if (num(sp.archived)) return fail(new Error('Архивная катушка — выберите действующую'));
+  if (num(sp.remaining_grams) <= 0) return fail(new Error('Катушка пустая — выберите катушку с остатком'));
+  const occ = spoolForSlot(abState.pid, abState.slot);
+  let force = false;
+  // Живой occupant — только с остатком: пустые сервер в проверке занятости
+  // игнорирует, поэтому пустую тихо отвязываем сами (см. ниже), без диалога.
+  if (occ && occ.id !== sp.id && num(occ.remaining_grams) > 0) {
+    if (!confirmDanger(`Слот ${abSlotHuman(abState.slot)} уже занят: ${occ.material || ''} ${occ.color_name || ''} (${Math.round(num(occ.remaining_grams))} г).\n\nВытеснить её на склад и поставить выбранную?`)) return;
+    force = true;
+  }
+  const elsewhere = sp.printer_id && String(sp.ams_slot ?? '') !== ''
+    && !(String(sp.printer_id) === String(abState.pid) && String(sp.ams_slot) === String(abState.slot));
+  if (elsewhere) {
+    const where = String(sp.printer_id) === String(abState.pid)
+      ? 'слот ' + abSlotHuman(sp.ams_slot) + ' этого принтера' : 'другой принтер';
+    if (!confirmDanger(`«${sp.material || ''} ${sp.color_name || ''}» уже привязана: ${where}.\n\nПривязать её и сюда? Расход будет списываться с одной катушки из двух мест — убедитесь, что так задумано.`)) return;
+  }
+  const live = PF.livePrinter(abState.pid);
+  const tray = (((live && live.ams) || {}).trays || [])
+    .find((x) => traySlotNum(x) === abState.slot) || null;
+  try {
+    await U.withBusy(btn, async () => {
+      if (occ && occ.id !== sp.id && num(occ.remaining_grams) <= 0) {
+        try {
+          await post('/api/spool/bind', { id: occ.id, ams_slot: '', printer_id: abState.pid });
+        } catch (e) { /* пустая отвалится сама — не блокируем привязку */ }
+      }
+      const pushEl = $('ab_push');
+      const push = pushEl ? pushEl.checked : true;
+      const res = await post('/api/spool/bind', {
+        id: sp.id, ams_slot: String(abState.slot), printer_id: abState.pid,
+        tray_uuid: (tray && tray.uuid) || '', push_ams: !!push, confirmed: true, force,
+      });
+      closeModal('ams_bind_modal');
+      toast('Катушка привязана',
+        `${sp.material || ''} ${sp.color_name || ''} → слот ${abSlotHuman(abState.slot)}`
+        + (res && res.push_error ? ' · AMS: ' + res.push_error : ''));
+      await PF.refreshCore();
+      setTimeout(PF.poll, 800);
+    });
+  } catch (e) { fail(e); }
+}
+async function doAbUnbind(btn) {
+  const occ = spoolForSlot(abState.pid, abState.slot);
+  if (!occ) return;
+  if (!confirmDanger(`Отвязать «${occ.material || ''} ${occ.color_name || ''}» от слота ${abSlotHuman(abState.slot)}? Катушка вернётся на склад.`)) return;
+  try {
+    await U.withBusy(btn, async () => {
+      await post('/api/spool/bind', { id: occ.id, ams_slot: '', printer_id: abState.pid });
+      toast('Катушка отвязана', 'Вернулась на склад');
+      abState.choice = '';
+      await PF.refreshCore();
+      renderAbCurrent();
+      renderAbList();
+      setTimeout(PF.poll, 800);
+    });
+  } catch (e) { fail(e); }
+}
+function bindPicker() {
+  const list = $('ab_list');
+  if (list) list.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-ab-pick]');
+    if (!row || row.disabled) return;
+    abState.choice = abState.choice === row.dataset.abPick ? '' : row.dataset.abPick;
+    renderAbList();
+  });
+  const filters = $('ab_filters');
+  if (filters) filters.addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-ab-mat]');
+    if (!chip) return;
+    abState.mat = chip.dataset.abMat || '';
+    renderAbFilters();
+    renderAbList();
+  });
+  const search = $('ab_search');
+  if (search) search.addEventListener('input', U.debounce(() => { abState.q = search.value; renderAbList(); }, 150));
+  const only = $('ab_only_stock');
+  if (only) only.addEventListener('change', renderAbList);
+  const bindBtn = $('ab_bind');
+  if (bindBtn) bindBtn.addEventListener('click', () => doAbBind(bindBtn));
+  const unbindBtn = $('ab_unbind');
+  if (unbindBtn) unbindBtn.addEventListener('click', () => doAbUnbind(unbindBtn));
 }
 
 /* ======================================================== телеметрия */
@@ -293,6 +900,10 @@ function renderLive() {
     : 'Мониторинг и управление по локальной сети. Принтер сейчас недоступен.');
 
   renderAms(p);
+  renderAmsNew(p);      // N5: «новая катушка в слоте — привязать?»
+  renderReady(p);       // N4: светофор готовности (тихо, из кэша)
+  renderSuggestAuto(p); // N6: подбор задания под AMS
+  updatePtabDots(p);    // точки-тревоги на вкладках деталей
   if (!renderAms._sugLoaded || renderAms._sugPrinter !== p.id) {
     renderAms._sugLoaded = true;
     renderAms._sugPrinter = p.id;
@@ -405,8 +1016,9 @@ function renderAms(p) {
       + '</div>'
       + `<div class="tube-meta"><b>${esc(t.label || ('Слот ' + (num(t.slot) + 1)))}</b>`
       + `<small>${esc(typeLabel)}${human && !empty ? ' · ' + esc(human) : ''}</small>`
-      + `<small class="tube-tags">${generic ? 'сторонний' : (empty ? '' : 'RFID')}${spoolHint ? ' · ' + esc(spoolHint.slice(3)) : ''}</small></div>`
+      + `<small class="tube-tags">${generic ? 'сторонний' : (empty ? '' : 'RFID')}${spoolHint ? ' · ' + esc(spoolHint.slice(3)) : ''}</small>${spoolTag}</div>`
       + '<div class="acts">'
+      + `<button class="btn sm bind" type="button" data-pslot="${esc(p.id)}:${slotNum}" title="Привязать складскую катушку к этому слоту">⇄ Склад</button>`
       + (empty ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`)
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}" title="Изменить тип и цвет">Тип</button>`
       + '</div></div>';
@@ -1541,12 +2153,11 @@ function applyDensity(on) {
 function bind() {
   const park = $('pr_park') || $('pr_tabs');
   if (park) park.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-printer]');
-    if (!btn) return;
-    PF.state.activePrinter = btn.dataset.printer;
-    renderLive();
-    loadFiles();
-    loadEvents();
+    // Кнопки и ссылки внутри карточки разбирает document-обработчик ниже.
+    if (e.target.closest('button, a, input, select, textarea')) return;
+    const card = e.target.closest('[data-pcard]');
+    if (!card) return;
+    selectPrinter(card.dataset.pcard);
   });
   const dens = $('pr_density');
   if (dens) {
@@ -1997,6 +2608,20 @@ function bind() {
               : 'Safety-gate выключен: задания пока запускаются вручную')
           : 'Задания запускаются вручную');
     } catch (err) { fail(err); }
+  });
+
+  // 17.1: пикер привязки AMS, вкладки деталей, кнопка подбора заданий.
+  bindPicker();
+  selectPtab(U.store.get(PTAB_KEY, 'overview'));
+  const ptabBar = $('pr_detail_tabs');
+  if (ptabBar) ptabBar.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-ptab]');
+    if (tab) selectPtab(tab.dataset.ptab);
+  });
+  const sugBtn = $('pr_suggest_btn');
+  if (sugBtn) sugBtn.addEventListener('click', () => {
+    const pp = active();
+    if (pp) { sugSig = ''; renderSuggest(pp); }
   });
 
   bindKeyframes();
