@@ -54,6 +54,21 @@ class PanelSmokeTests(unittest.TestCase):
         self.assertIn("unattended_dangerous_actions", printer)
         self.assertIn("Safety-gate выключен: задания пока запускаются вручную", printer)
 
+    def test_printer_commands_use_busy_guards(self):
+        """Повторный клик по командам принтера не должен слать дубли."""
+        printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        for needle in ("btn.classList.contains('busy')",
+                       "return await U.withBusy(btn, async () => {",
+                       "button: cmd",
+                       "button: jog",
+                       "button: set",
+                       "button: load",
+                       "button: $('pr_speed_apply')",
+                       "button: $('pr_skip_apply')",
+                       "await U.withBusy($('pr_reconnect'), async () => {"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, printer)
+
 
 if __name__ == "__main__":
     unittest.main()

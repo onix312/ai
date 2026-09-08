@@ -492,6 +492,25 @@ class CashierShiftPageTests(unittest.TestCase):
                        'if(state.tab==="shift") loadShift();'):
             self.assertIn(needle, self.page)
 
+    def test_money_actions_have_confirm_and_busy_guards(self):
+        for needle in ('Очистить корзину? Товары из текущей продажи уберутся.',
+                       'withBusy(btn,function(){',
+                       '/api/cashier/confirm-sbp',
+                       '/api/cashier/collect',
+                       'Забрать из ящика',
+                       'Выемка запишется в учёт.',
+                       'Продажи смены недоступны',
+                       'Укажите причину отклонения'):
+            self.assertIn(needle, self.page)
+
+    def test_mobile_cart_and_theme_safe_logo_are_wired(self):
+        for needle in ('function shouldOpenCartModal()',
+                       'window.matchMedia("(max-width: 520px)")',
+                       'openCartModal();return;',
+                       '/assets/brand/nozza-mark.svg'):
+            self.assertIn(needle, self.page)
+        self.assertNotIn('/assets/brand/nozza-mark-white.svg', self.page)
+
     def test_inline_script_parses(self):
         import re
         import shutil

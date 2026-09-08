@@ -97,6 +97,8 @@
  .btn.bad{background:var(--bad)}
  .btn.warn{background:#f59e0b;color:#111}
  .btn:disabled{opacity:.42;pointer-events:none}
+ .btn.busy{pointer-events:none;opacity:.72}
+ .btn.busy:after{content:"";display:inline-block;width:12px;height:12px;margin-left:6px;vertical-align:-2px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
  .btn.sm{padding:10px 12px;font-size:12.5px;border-radius:11px}
  /* cart list */
  .cartList{max-width:720px;margin:0 auto 10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:none}
@@ -115,6 +117,7 @@
  .modal.on{display:flex}
  .sheet{width:100%;max-width:520px;margin:0 auto;background:var(--panel);border-radius:22px 22px 16px 16px;padding:18px 16px calc(18px + env(safe-area-inset-bottom));border:1px solid var(--line);box-shadow:0 20px 60px -20px rgba(0,0,0,.6);animation:up .22s ease}
  @keyframes up{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+ @keyframes spin{to{transform:rotate(360deg)}}
  .sheet h3{font-size:16px;margin-bottom:12px;letter-spacing:-.02em}
  .payrow{display:flex;align-items:center;gap:14px;width:100%;padding:16px 14px;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--text);font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;text-align:left;transition:border-color .18s,transform .12s}
  .payrow:active{transform:scale(.99)}
@@ -159,7 +162,7 @@
 
 <div class="login" id="login">
  <div class="loginCard">
-  <img src="/assets/brand/nozza-mark-white.svg" alt="NOZZA">
+  <img src="/assets/brand/nozza-mark.svg" alt="NOZZA">
   <h2>Касса NOZZA</h2>
   <p>Введите код кассы из раздела <b>Настройки → Касса и СБП</b>.<br>Работает только в одной Wi-Fi сети с PrintFlow.</p>
   <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
@@ -172,7 +175,7 @@
  <div class="wrap">
   <div class="top">
    <div class="brand">
-    <img src="/assets/brand/nozza-mark-white.svg" alt="NOZZA">
+    <img src="/assets/brand/nozza-mark.svg" alt="NOZZA">
     <div><b>Касса</b><small id="shopLabel">полка · LAN</small></div>
    </div>
    <div class="sp"></div>
@@ -301,6 +304,23 @@ function renderWho(){
 function errorCard(title, detail, wide){
   return '<div class="empty"'+(wide?' style="grid-column:1/-1"':'')+'>'+esc(title)
     +(detail?'<br><span style="font-size:12px;opacity:.72">'+esc(detail)+'</span>':'')+'</div>';
+}
+function withBusy(btn, work){
+  if(!btn) return Promise.resolve().then(work);
+  if(btn.classList.contains("busy")) return Promise.resolve();
+  btn.classList.add("busy");
+  btn.disabled=true;
+  return Promise.resolve().then(work).finally(function(){btn.disabled=false;btn.classList.remove("busy");});
+}
+function cartHasItems(){
+  return Object.keys(state.cart).some(function(id){return Number(state.cart[id])>0;});
+}
+function shouldOpenCartModal(){
+  return !!(window.matchMedia&&(window.matchMedia("(max-width: 520px)").matches||window.matchMedia("(pointer: coarse)").matches));
+}
+function openCartModal(){
+  $("cartList").classList.remove("on");
+  $("cartModal").classList.add("on");
 }
 
 function setTab(tab){
@@ -505,7 +525,11 @@ document.addEventListener("click",function(ev){
   var inc=ev.target.closest("[data-inc]"); if(inc){changeQty(inc.getAttribute("data-inc"),1);return;}
   var dec=ev.target.closest("[data-dec]"); if(dec){changeQty(dec.getAttribute("data-dec"),-1);return;}
 });
-$("bClear").addEventListener("click",function(){state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();});
+$("bClear").addEventListener("click",function(){
+  if(!cartHasItems()) return;
+  if(!confirm("Очистить корзину? Товары из текущей продажи уберутся.")) return;
+  state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();
+});
 $("search").addEventListener("input",function(){state.search=$("search").value;renderGrid();});
 $("bClearSearch").addEventListener("click",function(){$("search").value="";state.search="";renderGrid();$("search").focus();});
 
@@ -513,12 +537,14 @@ $("tabSell").addEventListener("click",function(){setTab("sell");});
 $("tabIn").addEventListener("click",function(){setTab("in");});
 
 $("bToggleCart").addEventListener("click",function(){
+  if(!cartHasItems()) return;
+  if(shouldOpenCartModal()){openCartModal();return;}
   var b=$("cartList"); b.classList.toggle("on");
 });
 $("cartList").addEventListener("click",function(ev){ if(ev.target===ev.currentTarget) ev.currentTarget.classList.remove("on"); });
 
 $("bCartClose") && $("bCartClose").addEventListener("click",function(){$("cartModal").classList.remove("on");});
-$("bToggleCart").addEventListener("dblclick",function(){$("cartModal").classList.add("on");});
+$("bToggleCart").addEventListener("dblclick",function(){if(cartHasItems())openCartModal();});
 $("bCartPay") && $("bCartPay").addEventListener("click",function(){$("cartModal").classList.remove("on");$("bPay").click();});
 
 function cartTotal(){
@@ -636,11 +662,12 @@ $("bQrLater").addEventListener("click",function(){
   setTab("in");
 });
 $("bQrPaid").addEventListener("click",function(){
-  var id=state.pendingPayment;
+  var btn=this,id=state.pendingPayment;
   if(!id){$("qrModal").classList.remove("on");return;}
-  api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
-    .then(function(){$("qrModal").classList.remove("on");state.pendingPayment="";toast("Оплата подтверждена ✓");loadCatalog();refreshShift();})
-    .catch(function(e){sessionError(e);});
+  withBusy(btn,function(){
+    return api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
+      .then(function(){$("qrModal").classList.remove("on");state.pendingPayment="";toast("Оплата подтверждена ✓");loadCatalog();refreshShift();});
+  }).catch(function(e){sessionError(e);});
 });
 $("qrModal").addEventListener("click",function(ev){if(ev.target===$("qrModal")){$("qrModal").classList.remove("on");}});
 
@@ -672,6 +699,8 @@ document.addEventListener("click",function(ev){
   }else if(act==="reject"){
     var reason=prompt("Причина отклонения:","Оплата не поступила");
     if(reason===null) return;
+    reason=String(reason||"").trim();
+    if(!reason){toast("Укажите причину отклонения");return;}
     api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason})
       .then(function(){toast("Отклонено");loadIncoming();})
       .catch(function(e){sessionError(e);});
@@ -733,14 +762,17 @@ function renderShift(box,r){
       .catch(function(e){sessionError(e);});
   });
   if(manager)$("bShiftCollect").addEventListener("click",function(){
-    api("/api/cashier/collect",{token:state.token,amount:parseNum($("shiftCollect").value),note:$("shiftCollectNote").value})
-      .then(function(){toast("Выемка записана ✓");loadShift();loadCatalog();})
-      .catch(function(e){sessionError(e);});
+    var btn=this,amount=parseNum($("shiftCollect").value),note=$("shiftCollectNote").value;
+    if(!confirm("Забрать из ящика"+(amount>0?(" "+money(amount)):" эту сумму")+"? Выемка запишется в учёт."))return;
+    withBusy(btn,function(){
+      return api("/api/cashier/collect",{token:state.token,amount:amount,note:note})
+        .then(function(){toast("Выемка записана ✓");loadShift();loadCatalog();});
+    }).catch(function(e){sessionError(e);});
   });
 }
 function loadShiftSales(){
+  var box=$("shiftSales");if(!box)return;
   api(withToken("/api/cashier/shift/sales")).then(function(r){
-    var box=$("shiftSales");if(!box)return;
     var list=r.sales||[];
     if(!list.length){box.innerHTML='<div class="hint">Продаж пока нет.</div>';return;}
     box.innerHTML=list.map(function(s){
@@ -752,7 +784,7 @@ function loadShiftSales(){
       var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>':"";
       return '<div class="row"><div class="t"><b>'+money(s.amount)+'</b><small>'+esc(t)+' · '+esc(s.cashier||"")+disc+'<br>'+(names||"—")+'</small></div>'+st+btn+'</div>';
     }).join("");
-  }).catch(function(){});
+  }).catch(function(e){box.innerHTML=errorCard("Продажи смены недоступны",e.message,false);sessionError(e);});
 }
 document.addEventListener("click",function(ev){
   var b=ev.target.closest("[data-cancel]");if(!b)return;
