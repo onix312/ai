@@ -984,9 +984,10 @@ function renderAms(p) {
     : hum <= 60 ? { label: 'влажно', color: '#f59e0b' }
     : { label: 'крит', color: '#ef4444' };
   const humBar = hum > 0 ? `<div style="display:inline-block;width:60px;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:0 6px;vertical-align:middle"><div style="width:${Math.min(100, hum)}%;height:100%;background:${humZone.color}"></div></div>` : '';
-  text('pr_ams_env', ams.temperature != null || ams.humidity != null
-    ? `Температура ${ams.temperature ?? '—'} °C · влажность ${humBar}${ams.humidity ?? '—'}% (${humZone.label})`
-    : 'Температура и влажность —');
+  const _amsEnv = $('pr_ams_env');
+  if (_amsEnv) _amsEnv.innerHTML = ams.temperature != null || ams.humidity != null
+    ? `Температура ${esc(ams.temperature ?? '—')} °C · влажность ${humBar}${esc(ams.humidity ?? '—')}% (${esc(humZone.label)})`
+    : 'Температура и влажность —';
   const pbtn = $('pr_ams_profiles');
   if (pbtn) pbtn.hidden = !trays.length;
   const host = $('pr_ams');
@@ -1002,13 +1003,14 @@ function renderAms(p) {
     const empty = !present;
     const low = remain != null && remain < 15;
     const drying = (num(ams.temperature) > 45 && num(ams.humidity) > 0) ? ` · сушка ${Math.round(num(ams.temperature))}°C` : '';
-    let spoolHint = '';
-    try {
-      const sp = (PF.state.spools || []).find((s) => String(s.ams_slot) === String(t.slot) && String(s.printer_id) === String(p.id));
-      if (sp && sp.color_name) spoolHint = ' · ' + sp.color_name;
-    } catch(e) {}
+    const slotNum = traySlotNum(t);
+    const bound = slotSpool(p.id, t);
+    const spoolHint = bound && bound.color_name ? ' · ' + bound.color_name : '';
+    const spoolTag = bound
+      ? `<span class="spool-tag"><i style="background:${esc(bound.color_hex || '#cbd5e1')}"></i>${esc((bound.material || '') + ' ' + (bound.color_name || ''))} · ${Math.round(num(bound.remaining_grams))} г</span>`
+      : (empty ? '' : '<span class="spool-tag none">не привязана</span>');
     const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
-    return `<div class="ams-tube${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}${low ? ' low' : ''}"`
+    return `<div class="ams-tube${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}${low ? ' low' : ''}${(!empty && !bound) ? ' unbound' : ''}"`
       + ` title="${esc((t.label || ('Слот ' + (num(t.slot) + 1))) + ' · ' + typeLabel + (human && !empty ? ' · ' + human : '') + spoolHint + (remain != null ? ` · ${Math.round(remain)}%` : '') + drying)}">`
       + `<div class="tube-body"><i class="tube-fill" style="--filament:${esc(t.color || '#cbd5e1')};--lvl:${empty ? 0 : (remain == null ? 100 : clamp(remain, 3, 100))}%"></i>`
       + `<span class="tube-pct">${empty ? '' : (remain != null ? Math.round(remain) + '%' : '—')}</span>`
