@@ -15,145 +15,146 @@
 <link rel="stylesheet" href="/assets/fonts.css?v=17.0.1">
 <style>
  *{box-sizing:border-box;margin:0;padding:0}
- body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent}
- .wrap{max-width:720px;margin:0 auto;padding:12px 12px 160px}
- /* top */
- .top{display:flex;align-items:center;gap:12px;padding:10px 4px 14px;position:sticky;top:0;z-index:5;background:linear-gradient(to bottom,var(--bg) 72%,transparent)}
- .brand{display:flex;align-items:center;gap:10px}
- .brand img{width:36px;height:36px;border-radius:10px;background:var(--panel);padding:6px;box-shadow:0 2px 10px -4px rgba(0,0,0,.4)}
- .brand b{font-size:17px;letter-spacing:-.02em}
- .brand small{display:block;font-size:11px;color:var(--muted);font-weight:500;margin-top:1px}
+ body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+ .wrap{max-width:720px;margin:0 auto;padding:10px 12px 170px}
+ /* top — максимально простой и липкий */
+ .top{display:flex;align-items:center;gap:10px;padding:10px 2px 12px;position:sticky;top:0;z-index:5;background:linear-gradient(to bottom,var(--bg) 78%,transparent);backdrop-filter:blur(6px)}
+ .brand{display:flex;align-items:center;gap:10px;min-width:0}
+ .brand img{width:40px;height:40px;border-radius:12px;background:var(--panel);padding:7px;box-shadow:0 2px 12px -6px rgba(0,0,0,.5);flex:0 0 40px}
+ .brand b{font-size:17px;letter-spacing:-.02em;line-height:1}
+ .brand small{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
  .sp{flex:1}
- .pill{font-size:11px;font-weight:700;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
- .pill.ok{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.22);color:#10b981}
- .iconbtn{width:36px;height:36px;border-radius:11px;border:1px solid var(--line);background:var(--panel);color:var(--text);display:grid;place-items:center;cursor:pointer}
+ .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+ .pill.ok{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.22);color:#10b981}
+ .iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:18px;flex:0 0 40px}
  .iconbtn:active{transform:scale(.96)}
- /* tabs */
- .tabs{display:flex;gap:8px;margin:2px 0 12px;background:var(--panel);padding:4px;border-radius:14px;border:1px solid var(--line)}
- .tab{flex:1;padding:10px 12px;border-radius:10px;border:0;background:transparent;color:var(--muted);font-weight:700;font-size:13.5px;cursor:pointer;transition:.18s}
- .tab.on{background:var(--text);color:var(--bg);box-shadow:0 2px 10px -6px rgba(0,0,0,.6)}
+ /* tabs — большие, для пальца */
+ .tabs{display:flex;gap:8px;margin:4px 0 14px;background:var(--panel);padding:5px;border-radius:16px;border:1px solid var(--line)}
+ .tab{flex:1;padding:12px 10px;border-radius:12px;border:0;background:transparent;color:var(--muted);font-weight:800;font-size:14px;cursor:pointer;transition:.18s;min-height:44px}
+ .tab.on{background:var(--text);color:var(--bg);box-shadow:0 2px 12px -6px rgba(0,0,0,.5)}
  [data-theme=dark] .tab.on{background:#fff;color:#111827}
- /* search */
- .searchRow{display:flex;gap:8px;margin-bottom:10px}
- .search{flex:1;padding:13px 14px 13px 40px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);font-size:15px;outline:0;transition:border-color .18s}
- .search:focus{border-color:var(--accent)}
+ /* search — крупный, для обычных людей */
+ .searchRow{display:flex;gap:8px;margin-bottom:12px}
  .searchWrap{position:relative;flex:1}
- .searchWrap:before{content:"⌕";position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:18px}
- .clearSearch{width:44px;border-radius:14px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;font-size:16px}
- /* cats */
- .cats{display:flex;gap:8px;overflow:auto;padding:2px 0 10px;scrollbar-width:none}
+ .searchWrap:before{content:"⌕";position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:20px;pointer-events:none}
+ .search{width:100%;padding:15px 14px 15px 42px;border:1px solid var(--line);border-radius:16px;background:var(--panel);color:var(--text);font-size:16px;outline:0;transition:border-color .18s;min-height:48px}
+ .search::placeholder{color:var(--muted)}
+ .search:focus{border-color:var(--accent)}
+ .clearSearch{width:48px;min-height:48px;border-radius:16px;border:1px solid var(--line);background:var(--panel);color:var(--muted);cursor:pointer;font-size:18px;flex:0 0 48px}
+ .clearSearch:active{transform:scale(.96)}
+ /* cats — простые чипсы, только с товарами в наличии */
+ .cats{display:flex;gap:8px;overflow:auto;padding:2px 0 12px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
  .cats::-webkit-scrollbar{display:none}
- .cat{white-space:nowrap;padding:8px 14px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13px;font-weight:650;cursor:pointer;transition:.18s;display:inline-flex;align-items:center;gap:6px}
- .cat.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 14px -8px var(--accent)}
+ .cat{white-space:nowrap;padding:10px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13.5px;font-weight:700;cursor:pointer;transition:.18s;display:inline-flex;align-items:center;gap:6px;min-height:38px;flex:0 0 auto}
+ .cat.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 16px -10px var(--accent)}
  .cat .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.9}
- /* grid */
- .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+ /* grid — крупные карточки, только в наличии */
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  @media(min-width:560px){.grid{grid-template-columns:1fr 1fr 1fr}}
- .tile{position:relative;border:1px solid var(--line);background:var(--panel);border-radius:18px;overflow:hidden;cursor:pointer;user-select:none;display:flex;flex-direction:column;transition:transform .12s,border-color .18s,box-shadow .18s}
- .tile:active{transform:scale(.98)}
- .tile.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(79,70,229,.18)}
- .tile.off{opacity:.6}
+ @media(min-width:840px){.grid{grid-template-columns:1fr 1fr}}
+ .tile{position:relative;border:1px solid var(--line);background:var(--panel);border-radius:20px;overflow:hidden;cursor:pointer;user-select:none;display:flex;flex-direction:column;transition:transform .12s,border-color .18s,box-shadow .18s;min-height:0}
+ .tile:active{transform:scale(.985)}
+ .tile.sel{border-color:var(--accent);box-shadow:0 0 0 2.5px rgba(79,70,229,.18)}
  .imgBox{position:relative;width:100%;aspect-ratio:4/3;background:linear-gradient(135deg,var(--bg),var(--panel));overflow:hidden}
  .imgBox img{width:100%;height:100%;object-fit:cover;display:block}
- .imgBox .ph{display:grid;place-items:center;width:100%;height:100%;font-size:28px;color:var(--muted);background:radial-gradient(120% 120% at 30% 20%,rgba(99,102,241,.18),transparent 50%),var(--bg)}
- .badgeRow{position:absolute;left:8px;top:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:78%}
- .qb{font-size:10.5px;font-weight:800;padding:4px 8px;border-radius:99px;backdrop-filter:blur(8px);line-height:1}
- .qb.qty{background:rgba(17,24,39,.78);color:#fff}
- .qb.low{background:rgba(217,119,6,.9);color:#fff}
- .qb.empty{background:rgba(239,68,68,.9);color:#fff}
- .qb.wh{background:rgba(79,70,229,.9);color:#fff}
- .qb.hold{background:rgba(139,92,246,.92);color:#fff}
- .qb.disc{background:rgba(16,185,129,.92);color:#fff}
- .shift .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px}
- .shift .card h4{font-size:13px;margin-bottom:10px;letter-spacing:-.01em}
- .shift .kv{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--line)}
- .shift .kv:last-child{border-bottom:0}
- .shift .kv b{font-variant-numeric:tabular-nums;white-space:nowrap}
- .fld{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--text);font-size:16px;outline:0;margin-bottom:8px;font-variant-numeric:tabular-nums}
- .fld:focus{border-color:var(--accent)}
- .hint{color:var(--muted);font-size:12px;line-height:1.5;margin:6px 0 10px}
- .qb.catb{background:rgba(255,255,255,.9);color:#111827;border:1px solid rgba(0,0,0,.06)}
- [data-theme=dark] .qb.catb{background:rgba(31,41,55,.9);color:#e5e7eb;border-color:rgba(255,255,255,.08)}
- .inBadge{position:absolute;right:8px;top:8px;min-width:26px;height:26px;padding:0 8px;border-radius:99px;background:var(--accent);color:#fff;font-size:13px;font-weight:800;display:none;align-items:center;justify-content:center;box-shadow:0 4px 14px -6px var(--accent)}
+ .imgBox .ph{display:grid;place-items:center;width:100%;height:100%;font-size:30px;color:var(--muted);background:radial-gradient(120% 120% at 30% 20%,rgba(99,102,241,.18),transparent 50%),var(--bg)}
+ .badge{position:absolute;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap;max-width:76%}
+ .qb{font-size:11px;font-weight:800;padding:5px 9px;border-radius:99px;backdrop-filter:blur(8px);line-height:1}
+ .qb.qty{background:rgba(17,24,39,.82);color:#fff}
+ .qb.low{background:rgba(217,119,6,.92);color:#fff}
+ .qb.catb{background:rgba(255,255,255,.94);color:#111827;border:1px solid rgba(0,0,0,.06);font-weight:700}
+ [data-theme=dark] .qb.catb{background:rgba(31,41,55,.94);color:#e5e7eb;border-color:rgba(255,255,255,.08)}
+ .inBadge{position:absolute;right:10px;top:10px;min-width:28px;height:28px;padding:0 9px;border-radius:99px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:850;display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px -8px var(--accent)}
  .tile.sel .inBadge{display:flex}
- .info{padding:11px 11px 10px;flex:1;display:flex;flex-direction:column;gap:4px}
- .n{font-size:13.5px;font-weight:650;line-height:1.28;min-height:34px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
- .metaLine{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}
- .p{font-size:16.5px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+ .info{padding:12px 12px 12px;flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+ .n{font-size:14.5px;font-weight:700;line-height:1.32;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+ .metaLine{display:flex;align-items:center;gap:6px}
+ .p{font-size:18px;font-weight:850;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
  .p.miss{font-size:12px;color:var(--warn);font-weight:700}
- .sku{font-size:10.5px;color:var(--muted);font-weight:500}
- /* empty */
- .empty{color:var(--muted);font-size:13.5px;text-align:center;padding:28px 16px;line-height:1.5;background:var(--panel);border:1px dashed var(--line);border-radius:16px}
- /* cart */
- .cart{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));z-index:20}
- .cart .inner{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px}
- .cart .sum{flex:1;min-width:0}
- .cart .sum b{font-size:20px;font-weight:850;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums}
- .cart .sum small{color:var(--muted);font-size:11.5px;display:flex;gap:6px;align-items:center}
- .btn{padding:13px 16px;border:0;border-radius:13px;font-weight:800;font-size:14px;cursor:pointer;color:#fff;transition:transform .12s,opacity .18s;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+ /* hint под поиском — по-человечески */
+ .subHint{color:var(--muted);font-size:12.5px;line-height:1.4;margin:0 0 10px;padding:0 2px}
+ /* empty — дружелюбно */
+ .empty{color:var(--muted);font-size:14px;text-align:center;padding:28px 16px;line-height:1.5;background:var(--panel);border:1px dashed var(--line);border-radius:16px}
+ .empty b{color:var(--text);font-size:15px;display:block;margin-bottom:4px}
+ /* cart — максимально удобная снизу, большие кнопки */
+ .cart{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom));z-index:20}
+ .cart .inner{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+ .cart .sum{flex:1;min-width:120px}
+ .cart .sum b{font-size:22px;font-weight:900;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums;line-height:1}
+ .cart .sum small{color:var(--muted);font-size:12px;display:flex;gap:6px;align-items:center;margin-top:2px}
+ .btn{padding:14px 16px;border:0;border-radius:14px;font-weight:850;font-size:14.5px;cursor:pointer;color:#fff;transition:transform .12s,opacity .18s;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;min-width:48px}
  .btn:active{transform:scale(.97)}
- .btn.pay{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 6px 18px -8px #10b981}
- .btn.ghost{background:var(--bg);border:1px solid var(--line);color:var(--text);font-weight:700}
- .btn.bad{background:var(--bad)}
- .btn.warn{background:#f59e0b;color:#111}
+ .btn.pay{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 8px 20px -10px #10b981}
+ .btn.ghost{background:var(--bg);border:1px solid var(--line);color:var(--text);font-weight:750}
  .btn:disabled{opacity:.42;pointer-events:none}
  .btn.busy{pointer-events:none;opacity:.72}
  .btn.busy:after{content:"";display:inline-block;width:12px;height:12px;margin-left:6px;vertical-align:-2px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
- .btn.sm{padding:10px 12px;font-size:12.5px;border-radius:11px}
- /* cart list */
+ .btn.sm{padding:11px 14px;font-size:13px;border-radius:12px;min-height:42px}
+ /* cart list — простая */
  .cartList{max-width:720px;margin:0 auto 10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:none}
  .cartList.on{display:block}
- .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:750;font-size:13px}
- .row{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+ .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px}
+ .row{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line)}
  .row:last-child{border-bottom:0}
  .row .t{flex:1;min-width:0}
- .row b{font-size:13.5px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
- .row small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
- .amt{font-weight:800;font-size:14px;white-space:nowrap;font-variant-numeric:tabular-nums}
+ .row b{font-size:14px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .row small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px;line-height:1.4}
+ .amt{font-weight:850;font-size:14.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
  .qtyCtr{display:flex;align-items:center;gap:6px}
- .qbtn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-weight:800;cursor:pointer;display:grid;place-items:center}
- /* modals */
+ .qbtn{width:36px;height:36px;border-radius:11px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-weight:850;cursor:pointer;display:grid;place-items:center;font-size:18px;flex:0 0 36px}
+ .qbtn:active{transform:scale(.94)}
+ /* shift cards — по-человечески */
+ .shift .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+ .shift .card h4{font-size:14px;margin-bottom:12px;letter-spacing:-.01em}
+ .shift .kv{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:7px 0;border-bottom:1px dashed var(--line)}
+ .shift .kv:last-child{border-bottom:0}
+ .shift .kv b{font-variant-numeric:tabular-nums;white-space:nowrap}
+ .fld{width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--text);font-size:16px;outline:0;margin-bottom:10px;font-variant-numeric:tabular-nums;min-height:48px}
+ .fld:focus{border-color:var(--accent)}
+ .hint{color:var(--muted);font-size:12.5px;line-height:1.5;margin:6px 0 12px}
+ /* modals — большие зоны нажатия */
  .modal{position:fixed;inset:0;background:rgba(0,0,0,.52);backdrop-filter:blur(6px);display:none;align-items:flex-end;z-index:50;padding:10px}
  .modal.on{display:flex}
- .sheet{width:100%;max-width:520px;margin:0 auto;background:var(--panel);border-radius:22px 22px 16px 16px;padding:18px 16px calc(18px + env(safe-area-inset-bottom));border:1px solid var(--line);box-shadow:0 20px 60px -20px rgba(0,0,0,.6);animation:up .22s ease}
+ .sheet{width:100%;max-width:520px;margin:0 auto;background:var(--panel);border-radius:22px 22px 16px 16px;padding:20px 16px calc(20px + env(safe-area-inset-bottom));border:1px solid var(--line);box-shadow:0 20px 60px -20px rgba(0,0,0,.6);animation:up .22s ease}
  @keyframes up{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
  @keyframes spin{to{transform:rotate(360deg)}}
- .sheet h3{font-size:16px;margin-bottom:12px;letter-spacing:-.02em}
- .payrow{display:flex;align-items:center;gap:14px;width:100%;padding:16px 14px;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--text);font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;text-align:left;transition:border-color .18s,transform .12s}
+ .sheet h3{font-size:17px;margin-bottom:14px;letter-spacing:-.02em}
+ .payrow{display:flex;align-items:center;gap:14px;width:100%;padding:16px 14px;border:1px solid var(--line);border-radius:16px;background:var(--bg);color:var(--text);font-size:15.5px;font-weight:800;cursor:pointer;margin-bottom:10px;text-align:left;transition:border-color .18s,transform .12s;min-height:64px}
  .payrow:active{transform:scale(.99)}
- .payrow .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:22px;background:var(--panel);border:1px solid var(--line)}
- .payrow small{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
+ .payrow .ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:var(--panel);border:1px solid var(--line);flex:0 0 48px}
+ .payrow small{display:block;font-weight:600;color:var(--muted);font-size:12.5px;margin-top:2px;line-height:1.3}
  .qrbox{display:flex;justify-content:center;margin:8px 0 12px}
- .qrbox svg{width:min(260px,68vw);height:auto;background:#fff;padding:12px;border-radius:18px;box-shadow:0 8px 30px -14px rgba(0,0,0,.5)}
- .qrbox .empty{max-width:300px}
+ .qrbox svg{width:min(280px,68vw);height:auto;background:#fff;padding:14px;border-radius:18px;box-shadow:0 8px 30px -14px rgba(0,0,0,.5)}
  .qrnote{color:var(--muted);font-size:12.5px;text-align:center;line-height:1.5;margin-bottom:14px}
- /* login */
- .login{max-width:380px;margin:0 auto;padding:42px 18px 0;text-align:center}
- .loginCard{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:22px 18px 18px;box-shadow:0 12px 40px -18px rgba(0,0,0,.5)}
+ /* login — дружелюбно */
+ .login{max-width:400px;margin:0 auto;padding:36px 16px 0;text-align:center}
+ .loginCard{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:24px 18px 18px;box-shadow:0 12px 40px -18px rgba(0,0,0,.5)}
  .login img{width:56px;height:56px;margin-bottom:12px;border-radius:14px;background:var(--bg);padding:8px}
- .login h2{font-size:20px;margin-bottom:6px;letter-spacing:-.03em}
- .login p{color:var(--muted);font-size:13px;margin-bottom:18px;line-height:1.5}
- .login input{width:100%;padding:14px;text-align:center;font-size:22px;letter-spacing:.32em;border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--text);outline:0}
+ .login h2{font-size:21px;margin-bottom:6px;letter-spacing:-.03em}
+ .login p{color:var(--muted);font-size:13.5px;margin-bottom:18px;line-height:1.5}
+ .login input{width:100%;padding:14px;text-align:center;font-size:22px;letter-spacing:.32em;border:1px solid var(--line);border-radius:14px;background:var(--bg);color:var(--text);outline:0;min-height:52px}
  .login input:focus{border-color:var(--accent)}
  .msg{position:fixed;left:50%;bottom:122px;transform:translateX(-50%);background:#111827;color:#fff;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:650;box-shadow:0 10px 30px -10px rgba(0,0,0,.7);opacity:0;pointer-events:none;transition:opacity .22s,transform .22s;max-width:92vw;z-index:60;border:1px solid rgba(255,255,255,.08)}
  .msg.on{opacity:1;transform:translateX(-50%) translateY(0)}
- .loading{color:var(--muted);text-align:center;padding:32px 16px;font-size:13px}
+ .loading{color:var(--muted);text-align:center;padding:32px 16px;font-size:13.5px}
  button:focus-visible,input:focus-visible{outline:3px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px}
  @media(max-width:520px){
-  .wrap{padding:8px 10px 152px}
-  .top{gap:7px;padding:8px 2px 12px}
-  .brand{gap:7px;min-width:0}.brand img{width:34px;height:34px}.brand small{max-width:125px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pill{padding:5px 7px}.pill.ok{display:none}.iconbtn{flex:0 0 36px}
-  .cart .inner{gap:7px;display:grid;grid-template-columns:minmax(82px,1fr) auto auto}
-  .cart .sum{grid-column:1/-1;display:flex;align-items:baseline;gap:8px}.cart .sum b{font-size:18px}.cart .sum small{margin-left:auto}
-  .cart .btn{min-height:42px}.cart #bToggleCart{grid-column:1}.cart #bClear{grid-column:2}.cart #bPay{grid-column:3}
-  .cartList{max-height:46vh;overflow:auto}.row{flex-wrap:wrap}.row .t{flex-basis:calc(100% - 8px)}
-  #incoming .row{align-items:stretch}#incoming .row .t{flex-basis:100%}#incoming .btn{flex:1}
+  .wrap{padding:8px 10px 172px}
+  .top{gap:8px;padding:8px 2px 12px}
+  .brand{gap:8px}.brand small{max-width:130px}
+  .cart .inner{gap:8px}
+  .cartList{max-height:46vh;overflow:auto}
   .sheet{max-height:calc(100dvh - 20px);overflow:auto}
  }
- @media(max-width:350px){
-  .grid{grid-template-columns:1fr}#countPill{display:none}.brand small{max-width:100px}
-  .cart .inner{grid-template-columns:1fr 1fr}.cart #bToggleCart{display:none}.cart #bClear{grid-column:1}.cart #bPay{grid-column:2}
+ @media(max-width:380px){
+  .grid{grid-template-columns:1fr 1fr}
+  .brand small{display:none}
+ }
+ @media(max-width:340px){
+  .grid{grid-template-columns:1fr}
+  #countPill{display:none}
+  .cart .inner{grid-template-columns:1fr 1fr}
+  .cart .sum{grid-column:1/-1;display:flex;align-items:baseline;gap:8px}
  }
  @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style>
@@ -164,10 +165,10 @@
  <div class="loginCard">
   <img src="/assets/brand/nozza-mark.svg" alt="NOZZA">
   <h2>Касса NOZZA</h2>
-  <p>Введите код кассы из раздела <b>Настройки → Касса и СБП</b>.<br>Работает только в одной Wi-Fi сети с PrintFlow.</p>
+  <p>Введите код кассы из <b>Настройки → Касса и СБП</b><br>Работает только в одной Wi-Fi сети с PrintFlow.</p>
   <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="••••">
   <button class="btn pay" id="bLogin" type="button" style="width:100%;margin-top:12px">Войти в кассу</button>
-  <div style="margin-top:14px;color:var(--muted);font-size:11px">QR на карточке страницы → открыть кассу на телефоне</div>
+  <div style="margin-top:14px;color:var(--muted);font-size:11.5px">QR на карточке настройки → открыть на телефоне</div>
  </div>
 </div>
 
@@ -176,7 +177,7 @@
   <div class="top">
    <div class="brand">
     <img src="/assets/brand/nozza-mark.svg" alt="NOZZA">
-    <div><b>Касса</b><small id="shopLabel">полка · LAN</small></div>
+    <div><b>Касса</b><small id="shopLabel">в наличии · LAN</small></div>
    </div>
    <div class="sp"></div>
    <div class="pill ok" id="sbpPill" hidden>СБП</div>
@@ -193,10 +194,11 @@
 
   <div id="viewSell">
    <div class="searchRow">
-    <div class="searchWrap"><input class="search" id="search" placeholder="Поиск по названию, штрихкоду, артикулу…"></div>
-    <button class="clearSearch" id="bClearSearch" type="button">✕</button>
+    <div class="searchWrap"><input class="search" id="search" placeholder="Найти товар — название или штрихкод…"></div>
+    <button class="clearSearch" id="bClearSearch" type="button" aria-label="Очистить">✕</button>
    </div>
    <div class="cats" id="cats"></div>
+   <div class="subHint" id="subHint"></div>
    <div class="grid" id="grid"></div>
   </div>
 
@@ -224,12 +226,12 @@
  <div class="sheet">
   <h3 id="modalTitle">Оплата</h3>
   <div style="display:flex;gap:8px;margin-bottom:6px">
-   <input class="fld" id="discPct" inputmode="decimal" placeholder="Скидка, %" style="margin:0">
-   <input class="fld" id="discPin" type="password" inputmode="numeric" placeholder="PIN старшего" style="margin:0">
+   <input class="fld" id="discPct" inputmode="decimal" placeholder="Скидка, %">
+   <input class="fld" id="discPin" type="password" inputmode="numeric" placeholder="PIN старшего">
   </div>
-  <div class="hint">Скидка в % на чек — подтверждает PIN старшего.</div>
-  <button class="payrow" id="payCash" type="button"><span class="ic">💵</span><span>Наличные<small>деньги в кассу магазина — сразу в учёт</small></span></button>
-  <button class="payrow" id="paySbp" type="button"><span class="ic">📱</span><span>СБП<small id="sbpHint">QR/перевод — подтверждение по поступлению</small></span></button>
+  <div class="hint">Скидка на весь чек — подтвердит старший своим PIN. Необязательно.</div>
+  <button class="payrow" id="payCash" type="button"><span class="ic">💵</span><span>Наличные<small>в кассу магазина — сразу в учёт</small></span></button>
+  <button class="payrow" id="paySbp" type="button"><span class="ic">📱</span><span>СБП<small id="sbpHint">QR на экране — подтвердите, когда деньги придут</small></span></button>
   <button class="btn ghost" id="bCancel" type="button" style="width:100%">Отмена</button>
  </div>
 </div>
@@ -245,7 +247,7 @@
    <button class="btn ghost" id="bQrShare" type="button" style="flex:1;display:none">Поделиться</button>
    <button class="btn ghost" id="bQrSave" type="button" style="flex:1;display:none">QR файлом</button>
   </div>
-  <button class="btn pay" id="bQrPaid" type="button" style="width:100%;margin-bottom:9px">✓ Оплата пришла — подтвердить</button>
+  <button class="btn pay" id="bQrPaid" type="button" style="width:100%;margin-bottom:9px">✓ Деньги пришли — подтвердить</button>
   <button class="btn ghost" id="bQrLater" type="button" style="width:100%">Позже · во «Входящие»</button>
  </div>
 </div>
@@ -254,7 +256,7 @@
  <div class="sheet">
   <h3>Корзина</h3>
   <div id="cartModalList"></div>
-  <div style="display:flex;gap:8px;margin-top:12px">
+  <div style="display:flex;gap:8px;margin-top:14px">
    <button class="btn ghost" id="bCartClose" style="flex:1">Закрыть</button>
    <button class="btn pay" id="bCartPay" style="flex:1">Оплатить</button>
   </div>
@@ -270,7 +272,7 @@ var $ = function(id){return document.getElementById(id);};
 var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""}};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
-function esc(s){return String(s==null?"":s).replace(/[&<>\"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function money(v){var n=Number(v)||0;return (Math.round(n*100)/100).toLocaleString("ru-RU")+" ₽";}
 function reqId(){return "ui-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);}
 function api(path,body){
@@ -302,8 +304,8 @@ function renderWho(){
   el.textContent=text;
 }
 function errorCard(title, detail, wide){
-  return '<div class="empty"'+(wide?' style="grid-column:1/-1"':'')+'>'+esc(title)
-    +(detail?'<br><span style="font-size:12px;opacity:.72">'+esc(detail)+'</span>':'')+'</div>';
+  return '<div class="empty"'+(wide?' style="grid-column:1/-1"':'')+'><b>'+esc(title)+'</b>'
+    +(detail?'<span style="font-size:12.5px;opacity:.72">'+esc(detail)+'</span>':'')+'</div>';
 }
 function withBusy(btn, work){
   if(!btn) return Promise.resolve().then(work);
@@ -363,19 +365,34 @@ $("bLogout").addEventListener("click",function(){
   renderWho();showApp(false);setTab("sell");$("code").value="";
 });
 
-// catalog
+// catalog — только в наличии (строго)
 function loadCatalog(){
-  $("grid").innerHTML='<div class="loading" style="grid-column:1/-1">Обновляем товары…</div>';
+  $("grid").innerHTML='<div class="loading" style="grid-column:1/-1">Загружаем товары в наличии…</div>';
   api(withToken("/api/cashier/catalog")).then(function(c){
-    state.items=c.items||[];
+    var all=c.items||[];
+    // строго: только товары с остатком >0 и ценой >0 показываем в кассе
+    // скрываем пустые, чтобы кассир не ошибся. Остальное — в панели.
+    state._allItems=all;
+    state.items=all.filter(function(it){return (Number(it.qty)||0)>0;});
+    // если всё пусто но было что-то — покажем подсказку
     state.cats=c.categories||[];
     state.sbpEnabled=!!c.sbp_enabled;
     state.sbp=c.sbp||{};
     var cash=(c.shop_cash&&c.shop_cash.in_shop)||0;
-    $("shopLabel").textContent="в кассе: "+money(cash)+" · "+state.items.length+" поз.";
-    $("countPill").textContent=state.items.length+" тов.";
+    var inStock=state.items.length;
+    var total=all.length;
+    $("shopLabel").textContent="в кассе: "+money(cash)+" · "+inStock+" в наличии";
+    $("countPill").textContent=inStock+" тов.";
     $("sbpPill").hidden=!state.sbpEnabled;
     if(state.sbpEnabled) $("sbpPill").textContent="СБП · "+(state.sbp.kind||"");
+    // подсказка: скольок скрыли
+    var hint=$("subHint");
+    if(hint){
+      if(total && !inStock) hint.textContent="Сейчас в наличии ничего нет — пополните витрину или склад.";
+      else if(total> inStock) hint.textContent="Показаны только товары в наличии ("+inStock+" из "+total+") — пустые скрыты.";
+      else if(inStock) hint.textContent=inStock+" товаров в наличии — нажмите на карточку чтобы добавить в корзину.";
+      else hint.textContent="";
+    }
     renderCats();
     renderGrid();
   }).catch(function(e){$("grid").innerHTML=errorCard("Каталог не загрузился",e.message,true);sessionError(e);});
@@ -391,10 +408,10 @@ function sessionError(e){
 
 function renderCats(){
   var box=$("cats");
-  var all=[{id:"",name:"Все",color:"#6366f1"}].concat(state.cats);
-  // считаем товары по категориям
+  // считаем только по товарам в наличии
   var counts={};
   state.items.forEach(function(it){var cid=it.category_id||"";counts[cid]=(counts[cid]||0)+1;});
+  var all=[{id:"",name:"Все",color:"#6366f1"}].concat(state.cats);
   box.innerHTML=all.map(function(c){
     var cnt=c.id? (counts[c.id]||0) : state.items.length;
     if(c.id && !cnt) return "";
@@ -412,6 +429,8 @@ $("cats").addEventListener("click",function(ev){
 function filteredItems(){
   var q=(state.search||"").trim().toLowerCase();
   return state.items.filter(function(it){
+    // строго в наличии уже отфильтровано, но на всякий случай
+    if((Number(it.qty)||0)<=0) return false;
     if(state.cat && (it.category_id||"")!==state.cat) return false;
     if(!q) return true;
     return [it.name,it.barcode,it.sku,it.category_name].some(function(v){return String(v||"").toLowerCase().indexOf(q)>=0;});
@@ -423,30 +442,30 @@ function renderGrid(){
   var box=$("grid");
   var list=filteredItems();
   if(!list.length){
-    box.innerHTML='<div class="empty" style="grid-column:1/-1">'+
-      (q||state.cat ? 'Ничего не найдено'+(q?' по «'+esc(q)+'»':"")+'<br><span style=\"font-size:12px;opacity:.7\">Попробуйте другой запрос или категорию</span>'
-       : (state.items.length?'Товаров нет':'Товаров нет: заведите позиции на витрине или оприходуйте готовую продукцию — касса покажет их сама'))+
-      '</div>';
+    var total=(state._allItems||[]).length;
+    var inStock=state.items.length;
+    if(!inStock && total){
+      box.innerHTML='<div class="empty" style="grid-column:1/-1"><b>В наличии ничего нет</b>Пополните витрину или оприходуйте товар на склад — касса показывает только то, что можно продать сейчас.</div>';
+    } else {
+      box.innerHTML='<div class="empty" style="grid-column:1/-1">'
+        +(q||state.cat ? '<b>Ничего не нашлось</b>По запросу «'+esc(q)+'» в наличии нет товаров.<br><span style="font-size:12px;opacity:.7">Попробуйте другое слово или категорию</span>'
+         : '<b>Нет товаров</b>Заведите товары и укажите остатки — появятся здесь автоматически.')+
+        '</div>';
+    }
     renderCart();return;
   }
   box.innerHTML=list.map(function(it){
-    var qty=Number(it.qty)||0;
-    var stockQty=Number(it.stock_qty)||0;
-    var shelfQty=Number(it.shelf_qty)||0;
-    var qc=it.status==="empty"||qty<=0?"empty":(it.status==="low"?"low":"");
-    var inCart=state.cart[it.id]||0;
-    var catName=it.category_name||it.group_name||it.niche_name||"";
+    var qty=Math.floor(Number(it.qty)||0);
+    var catName=it.category_name||"";
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
-    var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">📦</div>' : '<div class="ph">📦</div>';
-    var wh=stockQty>0? '<span class="qb wh" title="'+esc(it.warehouse_name||'склад')+'">склад '+stockQty+'</span>' : '';
-    var held=Number(it.held)||0;
-    var holdBadge=held>0? '<span class="qb hold">холд '+held+'</span>' : '';
+    var inCart=state.cart[it.id]||0;
     var catBadge=catName? '<span class="qb catb">'+esc(catName)+'</span>' : '';
-    var qtyBadge=qty? '<span class="qb qty '+(qc||'')+'">'+(qc==="empty"?"нет":(qty<=5? 'остаток '+qty : qty+' шт'))+'</span>' : '<span class="qb qty empty">нет</span>';
-    var sku=it.barcode||it.sku? '<span class="sku">'+esc(it.barcode||it.sku)+'</span>' : '';
-    return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'">'
-      +'<div class="imgBox">'+img+'<div class="badgeRow">'+qtyBadge+wh+holdBadge+catBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
-      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div>'+sku+'</div>'
+    // бейдж остатка — просто и по-человечески
+    var qtyBadge = qty<=5 ? '<span class="qb low">мало: '+qty+' шт</span>' : '<span class="qb qty">'+qty+' шт</span>';
+    var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">📦</div>' : '<div class="ph">📦</div>';
+    return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'" role="button" tabindex="0" aria-label="'+esc(it.name)+'">'
+      +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+catBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
+      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div></div>'
       +'</div>';
   }).join("");
   renderCart();
@@ -454,68 +473,69 @@ function renderGrid(){
 
 function renderCart(){
   var entries=Object.keys(state.cart).map(function(id){
-    var it=state.items.find(function(x){return x.id===id;})||{};
-    return {id:id,qty:state.cart[id],price:Number(it.price)||0,name:it.name||"",photo_url:it.photo_url||""};
+    var it=(state._allItems||state.items).find(function(x){return x.id===id;})||state.items.find(function(x){return x.id===id;})||{};
+    return {id:id,qty:state.cart[id],price:Number(it.price)||0,name:it.name||""};
   }).filter(function(e){return e.qty>0;});
   var total=entries.reduce(function(s,e){return s+e.price*e.qty;},0);
   var count=entries.reduce(function(s,e){return s+e.qty;},0);
   $("cartTotal").textContent=money(total);
   $("cartCount").textContent=count+" поз.";
-  $("countPill").textContent=entries.length? count+" в корзине" : state.items.length+" тов.";
+  $("countPill").textContent=entries.length? count+" в корзине" : state.items.length+" в наличии";
   $("bPay").disabled=!count;
   $("bToggleCart").hidden=!count;
   $("cartBar").hidden=$("viewSell").hidden;
-  // cart list inline
   var listBox=$("cartList");
   if(!entries.length){listBox.classList.remove("on");listBox.innerHTML="";}
   else{
     var html='<div class="head"><span>Корзина · '+count+' шт</span><span>'+esc(money(total))+'</span></div>';
     html+=entries.map(function(e){
       return '<div class="row"><div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
-        +'<div class="qtyCtr"><button class="qbtn" data-dec="'+esc(e.id)+'">−</button><span class="amt">'+e.qty+'</span><button class="qbtn" data-inc="'+esc(e.id)+'">+</button></div>'
+        +'<div class="qtyCtr"><button class="qbtn" data-dec="'+esc(e.id)+'" aria-label="Уменьшить">−</button><span class="amt">'+e.qty+'</span><button class="qbtn" data-inc="'+esc(e.id)+'" aria-label="Увеличить">+</button></div>'
         +'<div class="amt">'+esc(money(e.price*e.qty))+'</div></div>';
     }).join("");
     listBox.innerHTML=html;
   }
-  // modal list
   var mBox=$("cartModalList");
   if(mBox){
-    if(!entries.length) mBox.innerHTML='<div class="empty">Корзина пуста</div>';
+    if(!entries.length) mBox.innerHTML='<div class="empty">Корзина пуста — нажмите на товар чтобы добавить</div>';
     else mBox.innerHTML=entries.map(function(e){
       return '<div class="row"><div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
         +'<div class="qtyCtr"><button class="qbtn" data-dec="'+esc(e.id)+'">−</button><span class="amt">'+e.qty+'</span><button class="qbtn" data-inc="'+esc(e.id)+'">+</button></div>'
         +'<div class="amt">'+esc(money(e.price*e.qty))+'</div></div>';
-    }).join("")+'<div class="row" style="font-weight:800"><div class="t"><b>Итого</b></div><div class="amt">'+esc(money(total))+'</div></div>';
+    }).join("")+'<div class="row" style="font-weight:850"><div class="t"><b>Итого</b></div><div class="amt">'+esc(money(total))+'</div></div>';
   }
-  var whSum=entries.reduce(function(s,e){
-    var it=state.items.find(function(x){return x.id===e.id;})||{};
-    return s+(Number(it.stock_qty)||0>0?1:0);
-  },0);
-  $("cartWh").textContent=whSum? ' · '+whSum+' со склада' : '';
+  $("cartWh").textContent="";
 }
 
 $("grid").addEventListener("click",function(ev){
   if(ev.target.closest(".qbtn")) return;
   var t=ev.target.closest(".tile");if(!t)return;
   var id=t.getAttribute("data-id");
-  var it=state.items.find(function(x){return x.id===id;});
+  var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
   if(!it|| (Number(it.qty)||0)<=0){toast("Нет в наличии");return;}
   if(it.price_missing){toast("Цена не задана — укажите её в номенклатуре");return;}
   var cur=state.cart[id]||0;
   var max=Math.floor(Number(it.qty)||0);
-  if(cur>=max){toast("Больше нет в наличии");return;}
+  if(cur>=max){toast("Больше нет — в наличии "+max+" шт");return;}
   state.cart[id]=cur+1;
   state.saleRequest={cash:"",sbp:""};
   renderGrid();
+  // лёгкая вибрация на мобилке
+  if(navigator.vibrate) try{navigator.vibrate(18);}catch(_e){}
+});
+$("grid").addEventListener("keydown",function(ev){
+  if(ev.key==="Enter"||ev.key===" "){
+    var t=ev.target.closest(".tile"); if(t){ev.preventDefault(); t.click();}
+  }
 });
 function changeQty(id,delta){
-  var it=state.items.find(function(x){return x.id===id;});
+  var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
   var cur=state.cart[id]||0;
   var next=cur+delta;
   if(next<=0) delete state.cart[id];
   else{
     var max=it? Math.floor(Number(it.qty)||0) : next;
-    if(next>max){toast("Максимум "+max);next=max;}
+    if(next>max){toast("Максимум "+max+" шт в наличии");next=max;}
     state.cart[id]=next;
   }
   state.saleRequest={cash:"",sbp:""};
@@ -527,10 +547,22 @@ document.addEventListener("click",function(ev){
 });
 $("bClear").addEventListener("click",function(){
   if(!cartHasItems()) return;
-  if(!confirm("Очистить корзину? Товары из текущей продажи уберутся.")) return;
+  if(!confirm("Очистить корзину?")) return;
   state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();
 });
 $("search").addEventListener("input",function(){state.search=$("search").value;renderGrid();});
+// сканер штрихкода — быстрый Enter добавляет единственный найденный товар
+$("search").addEventListener("keydown",function(ev){
+  if(ev.key==="Enter"){
+    var list=filteredItems();
+    if(list.length===1){
+      var it=list[0];
+      var cur=state.cart[it.id]||0;
+      var max=Math.floor(Number(it.qty)||0);
+      if(cur<max && !it.price_missing){ state.cart[it.id]=cur+1; state.saleRequest={cash:"",sbp:""}; renderGrid(); $("search").value=""; state.search=""; renderGrid(); toast("Добавлено: "+it.name); }
+    }
+  }
+});
 $("bClearSearch").addEventListener("click",function(){$("search").value="";state.search="";renderGrid();$("search").focus();});
 
 $("tabSell").addEventListener("click",function(){setTab("sell");});
@@ -549,7 +581,7 @@ $("bCartPay") && $("bCartPay").addEventListener("click",function(){$("cartModal"
 
 function cartTotal(){
   return Object.keys(state.cart).reduce(function(s,id){
-    var it=state.items.find(function(x){return x.id===id;})||{};
+    var it=(state._allItems||state.items).find(function(x){return x.id===id;})||{};
     return s+(Number(it.price)||0)*(state.cart[id]||0);
   },0);
 }
@@ -570,7 +602,7 @@ $("bPay").addEventListener("click",function(){
   if(hint){
     var kind=(state.sbp&&state.sbp.kind)||"";
     hint.textContent=kind==="gost"?"QR с суммой — покажем на экране"
-      : (kind? "QR покажем на экране — подтвердите по поступлению" : "QR не настроен: подтверждение по поступлению");
+      : (kind? "QR покажем на экране — подтвердите когда деньги придут" : "QR не настроен: подтверждение по поступлению");
   }
   $("modal").classList.add("on");
 });
@@ -586,8 +618,6 @@ function setSaleBusy(on){
 function sellCart(method){
   if(state.loading)return;
   var items=cartRows();if(!items.length)return;
-  // Ключ сохраняется при сетевой ошибке: повтор кассира вернёт результат
-  // первой операции, а не создаст вторую продажу.
   state.saleRequest[method]=state.saleRequest[method]||reqId();
   setSaleBusy(true);
   api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method],discount_pct:discPct(),manager_pin:$("discPin").value.trim()})
@@ -622,7 +652,6 @@ function showPaymentQr(sale){
   if(qr.bank_name)lines.push("Банк: "+esc(qr.bank_name));
   lines.push("Склад спишется и выручка запишется только после подтверждения");
   $("qrNote").innerHTML=lines.join("<br>");
-  // Кнопки: «Открыть» — только для безопасной https-ссылки (сервер + проверка).
   var hasText=!!qr.text;
   var canOpen=!!(hasText&&qr.open_url&&qr.open_url.indexOf("https://")===0&&diag.can_open);
   $("qrActions").style.display=(hasText||canOpen)?"flex":"none";
@@ -658,7 +687,7 @@ $("bQrSave").addEventListener("click",function(){
 });
 $("bQrLater").addEventListener("click",function(){
   $("qrModal").classList.remove("on");
-  toast("СБП-платёж ждёт сверки во «Входящих»");
+  toast("СБП-платёж ждёт сверки во «Входящие»");
   setTab("in");
 });
 $("bQrPaid").addEventListener("click",function(){
@@ -671,13 +700,13 @@ $("bQrPaid").addEventListener("click",function(){
 });
 $("qrModal").addEventListener("click",function(ev){if(ev.target===$("qrModal")){$("qrModal").classList.remove("on");}});
 
-// входящие
+// входящие — проще, по-человечески
 function loadIncoming(){
   var box=$("incoming");
   box.innerHTML='<div class="loading">Проверяем входящие оплаты…</div>';
   api(withToken("/api/cashier/incoming")).then(function(r){
     var list=r.payments||[];
-    if(!list.length){box.innerHTML='<div class="empty">Нет СБП-продаж, ожидающих сверки<br><span style="font-size:12px;opacity:.7">Здесь появляются продажи по СБП до подтверждения</span></div>';return;}
+    if(!list.length){box.innerHTML='<div class="empty"><b>Нет платежей на проверку</b>Здесь появляются продажи по СБП до подтверждения.<br><span style="font-size:12px;opacity:.7">Пока всё чисто</span></div>';return;}
     box.innerHTML=list.map(function(p){
       var names=(p.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
       var holds=(p.holds||[]).map(function(h){return esc(h.nom_name||"товар")+" × "+h.qty;}).join(", ");
@@ -700,14 +729,14 @@ document.addEventListener("click",function(ev){
     var reason=prompt("Причина отклонения:","Оплата не поступила");
     if(reason===null) return;
     reason=String(reason||"").trim();
-    if(!reason){toast("Укажите причину отклонения");return;}
+    if(!reason){toast("Укажите причину");return;}
     api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason})
       .then(function(){toast("Отклонено");loadIncoming();})
       .catch(function(e){sessionError(e);});
   }
 });
 
-// смена
+// смена — проще
 function parseNum(v){var n=Number(String(v==null?"":v).replace(",",".").replace(/[^\d.\-]/g,""));return isFinite(n)?n:0;}
 function kv(k,v){return '<div class="kv"><span>'+k+'</span><b>'+v+'</b></div>';}
 function loadShift(){
@@ -719,8 +748,8 @@ function refreshShift(){if(!$("viewShift").hidden)loadShift();}
 function renderShift(box,r){
   if(!r.open){
     box.innerHTML='<div class="card"><h4>Смена закрыта</h4>'
-      +'<div class="hint">Пересчитайте деньги в ящике и введите сумму — с неё начнётся расчёт смены.</div>'
-      +'<input class="fld" id="shiftOpenCash" inputmode="decimal" placeholder="В ящике, ₽">'
+      +'<div class="hint">Посчитайте деньги в ящике и введите сумму — с неё начнётся смена.</div>'
+      +'<input class="fld" id="shiftOpenCash" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
       +'<button class="btn pay" id="bShiftOpen" type="button" style="width:100%">Открыть смену</button></div>';
     $("bShiftOpen").addEventListener("click",function(){
       api("/api/cashier/shift/open",{token:state.token,open_cash:parseNum($("shiftOpenCash").value)})
@@ -734,14 +763,14 @@ function renderShift(box,r){
   var manager=state.role==="manager";
   var html='<div class="card"><h4>Смена открыта · '+esc(s.cashier||"кассир")+'</h4>'
     +kv("Открыта",esc(opened||"—"))
-    +kv("В ящике на старте",money(s.open_cash))
-    +kv("Наличная выручка",money(live.income_cash))
+    +kv("На старте в ящике",money(s.open_cash))
+    +kv("Выручка наличными",money(live.income_cash))
     +kv("Выемки",money(live.collected))
     +(Number(live.income_1c)? kv("Продажи 1С (справка)",money(live.income_1c)) : '')
     +kv("Должно быть в ящике",money(live.expected))
     +'</div>'
     +'<div class="card"><h4>Закрыть смену</h4>'
-    +'<div class="hint">Пересчитайте ящик. Расхождение не блокирует закрытие — оно запишется в учёт.</div>'
+    +'<div class="hint">Пересчитайте ящик. Расхождение запишется — не блокирует закрытие.</div>'
     +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
     +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
     +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>'
@@ -752,7 +781,7 @@ function renderShift(box,r){
   html+='<div class="card"><h4>Продажи смены</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
   box.innerHTML=html;
   $("bShiftClose").addEventListener("click",function(){
-    if(!confirm("Закрыть смену? Расхождение запишется в учёт."))return;
+    if(!confirm("Закрыть смену? Расхождение запишется."))return;
     api("/api/cashier/shift/close",{token:state.token,close_cash:parseNum($("shiftCloseCash").value),note:$("shiftNote").value})
       .then(function(d){
         var diff=Number((d.shift||{}).diff)||0;
@@ -763,7 +792,7 @@ function renderShift(box,r){
   });
   if(manager)$("bShiftCollect").addEventListener("click",function(){
     var btn=this,amount=parseNum($("shiftCollect").value),note=$("shiftCollectNote").value;
-    if(!confirm("Забрать из ящика"+(amount>0?(" "+money(amount)):" эту сумму")+"? Выемка запишется в учёт."))return;
+    if(!confirm("Забрать из ящика"+(amount>0?(" "+money(amount)):" эту сумму")+"?"))return;
     withBusy(btn,function(){
       return api("/api/cashier/collect",{token:state.token,amount:amount,note:note})
         .then(function(){toast("Выемка записана ✓");loadShift();loadCatalog();});
@@ -778,9 +807,9 @@ function loadShiftSales(){
     box.innerHTML=list.map(function(s){
       var t=String(s.created_at||"").replace("T"," ").slice(11,16);
       var names=(s.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
-      var disc=Number(s.discount_pct)>0?' <span class="qb disc">−'+s.discount_pct+'%</span>':"";
-      var st=s.cancelled?'<span class="qb empty">отменена</span>'
-        :(s.method==="sbp"?'<span class="qb low">СБП · '+(s.confirmed?"✓":"⏳")+'</span>':'<span class="qb qty">нал</span>');
+      var disc=Number(s.discount_pct)>0?' <span class="qb low" style="font-size:11px;padding:3px 7px">−'+s.discount_pct+'%</span>':"";
+      var st=s.cancelled?'<span class="qb" style="background:rgba(239,68,68,.14);color:#ef4444;border:1px solid rgba(239,68,68,.2);font-size:11px;padding:4px 8px;border-radius:99px">отменена</span>'
+        :(s.method==="sbp"?'<span class="qb" style="background:rgba(217,119,6,.14);color:#d97706;border:1px solid rgba(217,119,6,.2);font-size:11px;padding:4px 8px;border-radius:99px">СБП · '+(s.confirmed?"✓":"⏳")+'</span>':'<span class="qb qty" style="font-size:11px">нал</span>');
       var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>':"";
       return '<div class="row"><div class="t"><b>'+money(s.amount)+'</b><small>'+esc(t)+' · '+esc(s.cashier||"")+disc+'<br>'+(names||"—")+'</small></div>'+st+btn+'</div>';
     }).join("");
@@ -788,7 +817,7 @@ function loadShiftSales(){
 }
 document.addEventListener("click",function(ev){
   var b=ev.target.closest("[data-cancel]");if(!b)return;
-  if(!confirm("Отменить продажу? Деньги вернутся покупателю, товар — на полку."))return;
+  if(!confirm("Отменить продажу? Деньги вернутся, товар — на полку."))return;
   api("/api/cashier/sale/cancel",{token:state.token,sale_id:b.getAttribute("data-cancel")})
     .then(function(){toast("Продажа отменена ✓");loadShift();loadCatalog();})
     .catch(function(e){sessionError(e);});
@@ -798,7 +827,7 @@ $("tabShift").addEventListener("click",function(){setTab("shift");});
 // старт
 if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();}else{renderWho();showApp(false);}
 window.addEventListener("online",function(){if(loggedIn()){loadCatalog();if(state.tab==="in")loadIncoming();if(state.tab==="shift")loadShift();}});
-window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi‑Fi рядом с PrintFlow");});
+window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){
   window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});
 }
