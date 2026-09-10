@@ -188,6 +188,8 @@ function renderPaymentQr(q) {
     q.purpose ? "Назначение: " + esc(q.purpose) : "",
     d.why ? esc(d.why) : "",
     d.can_open ? "Открывается кнопкой «Открыть оплату»" + (d.domain ? " (" + esc(d.domain) + ")" : "") : "",
+    (q.camera && q.kind === "gost")
+      ? "«QR для камеры» включён, но ссылку дать нечем: камера покажет текст. Заполните «Ссылку для оплаты» или статический QR магазина — и телефон откроет банк." : "",
     d.purpose_truncated ? "Назначение в QR сокращено — полное в платеже" : "",
     q.hint ? esc(q.hint) : "", problems].filter(Boolean).join("<br>");
 }

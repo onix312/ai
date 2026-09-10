@@ -508,6 +508,9 @@ class Cashier:
         except Exception:
             settings = {}
         qr["enabled"] = bool(settings.get("enabled", self.sbp.enabled()))
+        # Камера открывает ссылку, а не ГОСТ-текст: отдаём шаблон, чтобы касса
+        # могла предложить «отправить ссылку» с уже подставленной суммой.
+        qr["link_template"] = str(self.db.setting("pay_qr_link", "") or "").strip()[:300]
         qr["bank_name"] = str(settings.get("bank_name") or qr.get("bank_name") or "")
         qr["purpose"] = purpose or str(qr.get("purpose") or "")
         return qr
@@ -760,7 +763,13 @@ class Cashier:
         return bool(str(qr.get("text") or "").strip())
 
     def offline_qr(self) -> dict:
-        """QR для кассы без связи: текст + векторная картинка + подсказка."""
+        """Что касса хранит в телефоне для оплаты без связи.
+
+        Кроме картинки отдаём и «человеческие» выходы: обычной камере нужен URL,
+        а наш ГОСТ-код — текст. Рядом лежит шаблон ссылки банка: страница
+        подставит сумму продажи и предложит «Поделиться ссылкой» — покупатель
+        откроет банк тапом, без сканирования вообще.
+        """
         from .payment_qr import build as build_qr
         try:
             qr = build_qr(self.db, amount=0.0, purpose="", payment=None, with_svg=True)
@@ -769,11 +778,23 @@ class Cashier:
         text = str(qr.get("text") or "").strip()
         if not text:
             return {}
+        diag = qr.get("diagnostics") or {}
+        open_url = str(qr.get("open_url") or "")[:2000]
+        can_open = bool(qr.get("can_open"))
+        # Ссылка, собранная без суммы (офлайн мы её ещё не знаем), — не
+        # «открывашка»: страница построит её сама из link_template. А пустую
+        # ссылку не отдаём, чтобы кассир не отправил покупателю сумму 0 ₽.
+        if str(qr.get("kind") or "") == "link" and not qr.get("amount_in_qr"):
+            open_url, can_open = "", False
         return {"text": text[:2000], "svg": str(qr.get("svg") or "")[:80000],
                 "kind": str(qr.get("kind") or "static"),
                 "amount_in_qr": bool(qr.get("amount_in_qr")),
                 "hint": str(qr.get("hint") or "")[:300],
-                "shop": str(self.db.setting("shop_name", "") or "")[:120]}
+                "why": str(diag.get("why") or "")[:300],
+                "can_open": can_open,
+                "open_url": open_url,
+                "link_template": str(self.db.setting("pay_qr_link", "") or "").strip()[:300],
+                "shop": str(self.db.setting("company_name", "") or "")[:120]}
 
     # ------------------------------------------------------------- продажа
     def _discount_approval(self, session: dict, manager_pin: str) -> str:

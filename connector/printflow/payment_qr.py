@@ -309,11 +309,14 @@ def build(db, amount: float = 0.0, purpose: str = "", number: str = "",
     template = str(settings.get("pay_qr_link") or "").strip()
     req = requisites(db)
     problems = check(req)
+    # «Камерный» приоритет (17.0.10): ссылка вместо ГОСТ-текста, чтобы обычная
+    # камера телефона предлагала открыть банк, а не показывала строку.
+    camera = bool(db.setting("pay_qr_camera", False))
     amount = round(num(amount), 2)
     purpose = _clean(purpose)
 
     result: dict[str, Any] = {
-        "mode": mode, "kind": "", "text": "", "svg": "",
+        "mode": mode, "kind": "", "text": "", "svg": "", "camera": camera,
         "amount": amount, "amount_in_qr": False, "purpose": purpose,
         "bank_name": str(settings.get("sbp_bank_name") or ""),
         "problems": problems, "hint": "", "enabled": mode != "off",
@@ -344,8 +347,15 @@ def build(db, amount: float = 0.0, purpose: str = "", number: str = "",
         "static": (lambda: use("static", static, False),),
     }
     if mode == "auto":
-        chain = [lambda: use("dynamic", dynamic, True), gost,
-                 order["link"][0], order["static"][0]]
+        if camera:
+            # Порядок для камеры: то, что телефон открывает тапом, важнее суммы
+            # внутри кода. Ссылку без суммы банк всё равно примет — покупатель
+            # введёт её сам, и это осознанный выбор владельца.
+            chain = [lambda: use("dynamic", dynamic, True), order["link"][0],
+                     order["static"][0], gost]
+        else:
+            chain = [lambda: use("dynamic", dynamic, True), gost,
+                     order["link"][0], order["static"][0]]
     else:
         chain = [lambda: use("dynamic", dynamic, True)] + list(order[mode])
     for step in chain:
@@ -421,7 +431,9 @@ def _diagnostics(result: dict[str, Any], template: str,
         why = "Динамический QR банка: сумма внутри."
         fallback = "web" if can_open else "bank_app"
     elif kind == "static":
-        why = "QR магазина: сумму вводит покупатель."
+        why = ("QR магазина — это ссылка: камера предложит открыть банк. "
+               "Сумму покупатель вводит сам."
+               if can_open else "QR магазина: сумму вводит покупатель.")
         fallback = "web" if can_open else "bank_app"
     else:
         why = str(result.get("hint") or "QR не настроен")

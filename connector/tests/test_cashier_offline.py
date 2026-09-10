@@ -275,6 +275,18 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("СБП офлайн невозможен", self.js)
         self.assertIn("showOfflineQr(sum)", self.js)
 
+    def test_camera_link_is_offered_next_to_the_qr(self):
+        # Камера открывает ссылку, а ГОСТ-текст — нет. Касса обязана уметь и
+        # «открыть банк», и «отправить ссылку» покупателю, а не только показывать код.
+        self.assertIn("function payLink(tpl,total){", self.js)
+        self.assertIn('if(t.indexOf("{amount")<0)return "";', self.js)
+        self.assertIn('t.replace(/\{amount_kop\}/g,String(Math.round(v*100)))', self.js)
+        self.assertIn("function qrOpenUrl(url,link){", self.js)
+        self.assertIn("bOpen.textContent=\"Открыть банк\"", self.js)
+        # после офлайна подпись кнопки обязана возвращаться к онлайн-смыслу
+        self.assertIn('"Отправить ссылку";}', self.js)
+        self.assertIn("url:u", self.js)
+
     def test_pending_count_reaches_the_shell(self):
         self.assertIn("app.offline", self.js)
 
@@ -409,6 +421,21 @@ class OfflineSbpClaimTests(unittest.TestCase):
         self.assertEqual(qr.get("text"), "https://qr.nspk.ru/ASTEST123")
         self.assertEqual(qr.get("kind"), "static")
         self.assertTrue(qr.get("svg"))
+
+    def test_offline_qr_carries_camera_helpers(self):
+        """Для камеры нужна ссылка: страница строит её из шаблона, поэтому
+        шаблон и «почему текст» уезжают вместе с QR."""
+        self.db.set_settings({"pay_qr_link": "https://pay.example.ru/qr?sum={amount}"})
+        qr = self.cashier.offline_qr()
+        # Реквизитов для ГОСТ-кода в тестовой базе нет → выигрывает ссылка банка
+        self.assertEqual(qr["kind"], "link")
+        self.assertIn("{amount}", qr["link_template"])
+        # сумма продажи офлайн ещё неизвестна → пустую ссылку не отдаём,
+        # страница соберёт её из шаблона сама
+        self.assertFalse(qr["can_open"])
+        self.assertEqual(qr["open_url"], "")
+        self.assertIn("{amount}", str(qr["open_url"] + qr["link_template"]))
+        self.assertIn("камер", str(qr.get("why") or "").lower())
 
     def test_offline_qr_empty_when_not_configured(self):
         self.db.set_settings({"sbp_shop_qr": "", "pay_qr_mode": "off"})

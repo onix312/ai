@@ -165,6 +165,35 @@ class BuildModeTests(unittest.TestCase):
         self.assertTrue(built["svg"].startswith("<svg"))
         db.close()
 
+    def test_camera_mode_puts_bank_url_first(self):
+        """«QR для камеры»: обычная камера открывает ссылку, а не показывает ГОСТ-текст."""
+        db = make_db(**GOOD, sbp_shop_qr="https://qr.nspk.ru/AS1000", pay_qr_camera=True)
+        built = payment_qr.build(db, 950, "Оплата на кассе")
+        self.assertEqual(built["kind"], "static")
+        self.assertEqual(built["text"], "https://qr.nspk.ru/AS1000")
+        self.assertTrue(built["can_open"])
+        # сумму вводит покупатель — это цена «камерного» выбора
+        self.assertFalse(built["amount_in_qr"])
+        db.close()
+
+    def test_camera_mode_prefers_link_that_carries_amount(self):
+        """Ссылка с суммой лучше и камеры, и ГОСТ-кода: и открывается, и не ошибиться."""
+        db = make_db(**GOOD, pay_qr_camera=True, sbp_shop_qr="https://qr.nspk.ru/AS1000",
+                     pay_qr_link="https://pay.example.ru/qr?sum={amount}&n={number}")
+        built = payment_qr.build(db, 950.25, "Оплата", number="777")
+        self.assertEqual(built["kind"], "link")
+        self.assertIn("sum=950.25", built["text"])
+        self.assertTrue(built["amount_in_qr"])
+        db.close()
+
+    def test_default_mode_keeps_gost_first(self):
+        """По умолчанию ничего не поменялось: сумма внутри кода важнее кнопки."""
+        db = make_db(**GOOD, sbp_shop_qr="https://qr.nspk.ru/AS1000")
+        built = payment_qr.build(db, 950)
+        self.assertFalse(built["camera"])
+        self.assertEqual(built["kind"], "gost")
+        db.close()
+
     def test_auto_falls_back_to_static_qr_without_requisites(self):
         db = make_db(sbp_shop_qr="https://qr.nspk.ru/AS1000")
         built = payment_qr.build(db, 950)

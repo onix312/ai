@@ -309,7 +309,7 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},offline:!navigator.onLine};
+var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -325,6 +325,27 @@ function reqId(){return "ui-"+Date.now()+"-"+Math.random().toString(36).slice(2,
    Скидки офлайн недоступны: PIN старшего без связи не проверить. */
 var OFF_KEY="cashier_offline_q";
 var OFF_QR_KEY="cashier_sbp_qr",OFF_QR_TTL=12*3600*1000;
+function payLink(tpl,total){
+  /* Ссылка банка с подставленной суммой: обычная камера открывает по ней
+     приложение банка, тогда как ГОСТ-код она показывает текстом. Шаблон —
+     настройка магазина («Ссылка для оплаты»); пустой шаблон = ничего не предлагаем. */
+  var t=String(tpl||"");
+  if(t.indexOf("{amount")<0)return "";
+  var v=Math.round((Number(total)||0)*100)/100;
+  if(v<=0)return "";
+  var rub=v.toFixed(2).replace(/\.?0+$/,"");
+  return t.replace(/\{amount_kop\}/g,String(Math.round(v*100)))
+          .replace(/\{amount\}/g,rub)
+          .replace(/\{number\}/g,"")
+          .replace(/\{purpose\}/g,encodeURIComponent("Оплата покупки"));
+}
+function qrOpenUrl(url,link){
+  /* Открываем только https без логина в адресе — как на сервере (safe_open_url). */
+  var a=String(url||""),b=String(link||"");
+  if(a.indexOf("https://")===0)return a;
+  if(b.indexOf("https://")===0)return b;
+  return "";
+}
 function offQr(){
   try{var q=JSON.parse(localStorage.getItem(OFF_QR_KEY)||"null");return (q&&q.text)?q:null;}
   catch(e){return null;}
@@ -820,13 +841,25 @@ function showOfflineQr(total){
   var box=$("qrBox");
   box.innerHTML=q.svg||('<div class="empty"><b>Картинки нет — покажите код из настроек</b>'
     +'<span style="font-size:12px">'+esc(String(q.text||"").slice(0,80))+'…</span></div>');
-  $("qrNote").innerHTML=[
+  var lines=[
     "Покупатель сканирует этот код в приложении банка и вводит сумму "+money(total)+".",
     "Оплата идёт на счёт магазина напрямую — связь с сервером для неё не нужна.",
     "Заявка записана в очередь: проводка появится после подтверждения по выписке.",
     "Сами не подтверждайте: подтверждение = деньги в банке."
-  ].map(function(t){return esc(t);}).join("<br>");
-  $("qrActions").style.display="none";
+  ];
+  if(q.why)lines.push(q.why);
+  $("qrNote").innerHTML=lines.map(function(t){return esc(t);}).join("<br>");
+  // Камера → банк: если код — ссылка, даём «Открыть банк» и «Поделиться»
+  // (покупателю в мессенджер проще отправить ссылку, чем ловить камерой текст).
+  var open=qrOpenUrl(payLink(q.link_template,total),q.open_url);
+  state.qrText=q.text||"";state.qrSvg=q.svg||"";state.qrUrl=open;
+  var bOpen=$("bQrOpen");
+  bOpen.style.display=open?"block":"none";
+  if(open){bOpen.href=open;bOpen.textContent="Открыть банк";}
+  $("bQrCopy").style.display=(q.text||open)?"block":"none";
+  $("bQrShare").style.display=((q.text||open)&&navigator.share)?"block":"none";
+  $("bQrSave").style.display=q.svg?"block":"none";
+  $("qrActions").style.display=(open||q.text)?"flex":"none";
   $("qrModal").classList.add("on");
 }
 function sellCart(method){
@@ -896,11 +929,15 @@ function showPaymentQr(sale){
   lines.push("Склад спишется и выручка запишется только после подтверждения");
   $("qrNote").innerHTML=lines.join("<br>");
   var hasText=!!qr.text;
-  var canOpen=!!(hasText&&qr.open_url&&qr.open_url.indexOf("https://")===0&&diag.can_open);
+  var open=qrOpenUrl((diag.can_open?qr.open_url:""),payLink(qr.link_template,sale.amount));
+  var canOpen=!!open;
+  state.qrUrl=open;
   $("qrActions").style.display=(hasText||canOpen)?"flex":"none";
   var bOpen=$("bQrOpen");
   bOpen.style.display=canOpen?"block":"none";
-  if(canOpen)bOpen.href=qr.open_url;
+  if(canOpen){bOpen.href=open;
+    // своя ссылка (когда банк дал не ссылку, а текст) — это «отправить», а не «открыть»
+    bOpen.textContent=(diag.can_open&&qr.open_url)?"Открыть оплату":"Отправить ссылку";}
   $("bQrCopy").style.display=hasText?"block":"none";
   $("bQrShare").style.display=(hasText&&navigator.share)?"block":"none";
   $("bQrSave").style.display=svg?"block":"none";
@@ -918,8 +955,12 @@ $("bQrCopy").addEventListener("click",function(){
   }else qrFallbackCopy(t);
 });
 $("bQrShare").addEventListener("click",function(){
-  var t=state.qrText||"";if(!t||!navigator.share)return;
-  navigator.share({title:"Оплата NOZZA",text:t}).catch(function(){});
+  // Ссылка важнее текста: покупатель открывает банк тапом и не ищет, чем
+  // этот «ST00012|…» сканировать.
+  var t=state.qrText||"",u=state.qrUrl||"";
+  if(!t&&!u||!navigator.share)return;
+  navigator.share(u?{title:"Оплата NOZZA",text:t||"Ссылка для оплаты",url:u}
+                  :{title:"Оплата NOZZA",text:t}).catch(function(){});
 });
 $("bQrSave").addEventListener("click",function(){
   var svg=state.qrSvg||"";if(!svg)return;
