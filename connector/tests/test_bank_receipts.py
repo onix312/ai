@@ -185,6 +185,37 @@ class BankReceiptsTests(unittest.TestCase):
         self.assertIn("auto_confirm", actions)
 
 
+class AutoConfirmDefaultTests(unittest.TestCase):
+    """Авто-подтверждение по умолчанию выключено (решение заказчика 2026-09-10).
+
+    Живой смоук: приход «OZON выплата средств продавцу 1500,00» подтвердил
+    платёж клиента на 1500 — заказ стал «оплачен», товар можно выдать без
+    денег. Сопоставление смотрит только сумму и время, поэтому по умолчанию
+    банк лишь связывает поступление с платежом («matched»), а выручку пишет
+    человек. Кто хочет иначе — включает галку в «Настройки → Банк».
+    """
+
+    def test_default_is_off_and_books_nothing(self):
+        db = make_db()
+        try:
+            acc = Accounting(db)
+            sbp = Sbp(db, acc)
+            bank = BankReceipts(db, acc, sbp)
+            self.assertFalse(bool(db.setting("sbp_auto_confirm", False)))
+            order(db)
+            payment = sbp.create(amount=1000, order_id="o1")
+            result = bank.ingest([{"at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                                    "amount": 1000, "purpose": "OZON выплата средств продавцу"}])
+            self.assertEqual(result["confirmed"], 0)
+            self.assertEqual(result["matched"], 1)
+            self.assertEqual(db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+            self.assertEqual(float(db.one("SELECT paid FROM orders WHERE id='o1'")["paid"]), 0.0)
+            self.assertIsNone(db.one("SELECT * FROM transactions WHERE kind='income'"))
+        finally:
+            db.close()
+
+
 class ImportResilienceTests(unittest.TestCase):
     """Одна конфликтная строка выписки не роняет импорт целиком.
 
