@@ -54,6 +54,26 @@ class PanelSmokeTests(unittest.TestCase):
         self.assertIn("unattended_dangerous_actions", printer)
         self.assertIn("Safety-gate выключен: задания пока запускаются вручную", printer)
 
+    def test_ams_slot_picker_is_wired(self):
+        """Кнопка «⇄ Склад» и мини-слоты AMS обязаны открывать пикер привязки.
+
+        Разметка `data-pslot` рисуется в трёх местах (плитка слота на карточке
+        принтера, кнопка «⇄ Склад» во вкладке «AMS и катушки», «Привязать» в
+        баннере непривязанных слотов), а обработчик был потерян — кнопки
+        выглядели рабочими, но ничего не делали.
+        """
+        printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        self.assertIn("data-pslot=", printer, "точки входа пикера пропали из разметки")
+        self.assertIn("closest('[data-pslot]')", printer,
+                      "нет делегированного обработчика клика по слоту AMS")
+        self.assertIn("openSlotPicker(pid, slot)", printer,
+                      "обработчик не открывает пикер привязки катушки")
+        # Обработчик должен жить в bindPicker(), который вызывается при старте.
+        picker = printer.split("function bindPicker()", 1)
+        self.assertEqual(2, len(picker), "функция bindPicker() исчезла")
+        self.assertIn("closest('[data-pslot]')", picker[1][:1200])
+        self.assertIn("bindPicker();", printer)
+
     def test_printer_commands_use_busy_guards(self):
         """Повторный клик по командам принтера не должен слать дубли."""
         printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
