@@ -161,7 +161,7 @@ def register_module(module_name: str) -> None:
 def register_all() -> int:
     """Подключить все модули маршрутов. Вызывается один раз при старте API."""
     for name in ("routes_workshop", "routes_system", "routes_sbp", "routes_cashier",
-                 "routes_bank"):
+                 "routes_bank", "routes_npd"):
         try:
             register_module(name)
         except Exception as exc:  # pragma: no cover - защита от частичного релиза

@@ -3191,6 +3191,50 @@ class PrinterManager:
         except Exception as exc:
             self.db.add_event("error", "Ночной сброс не удался", str(exc), "")
 
+    def npd_reminder_if_due(self) -> None:
+        """Один раз в день — напоминание про чеки НПД и лимит режима.
+
+        Чек по расчёту обязан быть выдан в тот же день (422-ФЗ, ст. 14), а
+        штраф за работу без чека — 20% от суммы, повторно за полгода — 100%.
+        Поэтому «день с деньгами и без подтверждения чеков» — это не мелочь,
+        а потерянные деньги, о которых владелец узнает позже всех. Пишем событие
+        всегда, в Telegram — только после ``npd_alert_time`` и только один раз
+        в сутки (тот же приём, что у «Ночного сброса цеха»).
+        """
+        if not self.db.setting("npd_alerts_enabled", True):
+            return
+        today = time.strftime("%Y-%m-%d")
+        if time.strftime("%H:%M") < str(self.db.setting("npd_alert_time", "21:00") or "21:00"):
+            return
+        done = self.db.one(
+            "SELECT id FROM events WHERE kind='money' AND title='НПД: напоминание о чеках'"
+            " AND date(at)=date(?)", (today,))
+        if done:
+            return
+        try:
+            from .npd import Npd
+            npd = Npd(self.db)
+            state = npd.status()
+            pend = npd.pending()
+            if not state["limit"] and not pend["days"]:
+                return
+            lines = []
+            if pend["days"]:
+                lines.append(f"без подтверждения чеков: {pend['days']} дн. на {pend['amount']:,.0f} ₽ "
+                             f"(штраф от {pend['fine_min']:,.0f} ₽)")
+            if state["limit"]:
+                lines.append(f"лимит {state.get('mode_name') or state['mode']}: "
+                             f"осталось {state['left']:,.0f} ₽ "
+                             f"({state['used_pct']}% выбрано, можно ~{state['day_budget']:,.0f} ₽ в день)")
+            # заголовок события уже говорит «НПД» — в теле он не повторяем
+            text = "; ".join(lines)
+            self.db.add_event("money", "НПД: напоминание о чеках", text, data={
+                "pending_days": pend["days"], "pending_amount": pend["amount"],
+                "left": state["left"], "used_pct": state["used_pct"]})
+            self.send_telegram(text, critical=state["level"] == "over", event="npd")
+        except Exception as exc:
+            self.db.add_event("error", "Напоминание НПД не отправлено", str(exc), "")
+
     # ------------------------------------------------------------ фоновый цикл
     def _loop(self) -> None:
         """Раз в 30 секунд: прогресс, телеметрия, сторож и очередь."""
@@ -3244,6 +3288,7 @@ class PrinterManager:
                 try:
                     self.run_scheduled()
                     self.night_reset_if_due()
+                    self.npd_reminder_if_due()
                     self.check_filament_stock()
                     self.maybe_sync_cloud_history()
                     self.rules.check_debts()

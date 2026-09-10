@@ -60,12 +60,19 @@ def bank_link(api: Any, ctx: Ctx):
         str(ctx.arg("payment_id", "") or ctx.arg("payment_number", "") or "").strip(),
         actor=str(ctx.arg("actor", "panel") or "panel")[:120],
         confirm=str(ctx.arg("confirm", "") or "").strip().lower()
-        in ("1", "true", "yes", "да"))
+        in ("1", "true", "yes", "да"),
+        force=str(ctx.arg("force", "") or "").strip().lower()
+        in ("1", "true", "yes", "да"),
+        pin=str(ctx.arg("pin", "") or ""))
 
 
 @router.post("/api/bank/confirm", audit="Банк: поступление подтверждено",
+             idempotent=True,
              doc="Подтвердить СБП-платёж, привязанный к поступлению")
 def bank_confirm(api: Any, ctx: Ctx):
+    # idempotent=True: задвоенный клик по «Подтвердить» не гоняет проводку
+    # второй раз и не пишет второй записи в журнал (гарантия и в ядре СБП).
     return _bank(api).confirm(
         str(ctx.arg("receipt_id", "") or ctx.arg("id", "") or "").strip(),
-        actor=str(ctx.arg("actor", "panel") or "panel")[:120])
+        actor=str(ctx.arg("actor", "panel") or "panel")[:120],
+        pin=str(ctx.arg("pin", "") or ""))

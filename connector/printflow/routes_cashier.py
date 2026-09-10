@@ -86,6 +86,15 @@ def cashier_reject_sbp(api: Any, ctx: Ctx):
         reason=str(ctx.arg("reason", "") or "").strip())
 
 
+@router.post("/api/cashier/return", audit="Касса: принят возврат", idempotent=True,
+             doc="Принять возврат товара и денег (старший): полка + возвратная проводка")
+def cashier_return(api: Any, ctx: Ctx):
+    return _cashier(api).return_sale(
+        str(ctx.arg("sale_id", "") or "").strip(), _token(ctx), note=str(ctx.arg("note", "") or ""),
+        lines=ctx.arg("lines", None) or None,
+        request_id=str(ctx.arg("request_id", "") or ""))
+
+
 @router.post("/api/cashier/sale/cancel", audit="Касса: продажа отменена",
              doc="Отменить наличную продажу текущей смены (любой кассир)")
 def cashier_sale_cancel(api: Any, ctx: Ctx):
@@ -119,6 +128,17 @@ def cashier_shift_open(api: Any, ctx: Ctx):
 def cashier_shift_close(api: Any, ctx: Ctx):
     return _cashier(api).close_shift(
         _token(ctx), ctx.num("close_cash", 0),
+        note=str(ctx.arg("note", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))
+
+
+@router.post("/api/cashier/reconcile", audit="Касса: пересчёт ящика", idempotent=True,
+             doc="Пересчёт наличных: закрыть текущий отсчёт расхождением и открыть новый")
+def cashier_reconcile(api: Any, ctx: Ctx):
+    # idempotent=True: повторный тап «Записать пересчёт» не закрывает смену
+    # дважды и не открывает вторую — пересчёт сверяется с фактом один раз.
+    return _cashier(api).reconcile(
+        _token(ctx), ctx.num("counted_cash", 0),
         note=str(ctx.arg("note", "") or ""),
         box_id=str(ctx.arg("box_id", "") or ""))
 

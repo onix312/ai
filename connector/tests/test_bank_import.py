@@ -89,5 +89,59 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(again["imported"], 0)
 
 
+class SbpDoubleCountTests(unittest.TestCase):
+    """Импорт выписки не должен проводить СБП-доход второй раз.
+
+    Один и тот же приход можно занести двумя дорожками: «Поступления из банка»
+    (ведёт деньги через ядро СБП) и «Импорт выписки» (разносит строки по
+    статьям напрямую). Смоук 2026-09-10: после обеих дорожек в журнале лежало
+    3000 вместо 1500 — то есть двойная выручка и двойная налоговая база.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(pathlib.Path(self._tmp.name) / "sbp-double.sqlite3")
+
+    def tearDown(self):
+        self.db.close()
+        self._tmp.cleanup()
+
+    def _confirmed_sbp_income(self, amount: float = 1500.0) -> str:
+        from datetime import datetime
+        from connector.printflow.accounting import Accounting
+        from connector.printflow.sbp import Sbp
+        sbp = Sbp(self.db, Accounting(self.db))
+        payment = sbp.create(amount=amount, request_id="dbl")
+        sbp.confirm(payment["id"], note="СБП")
+        return datetime.now().strftime("%Y-%m-%d")
+
+    def test_income_already_booked_as_sbp_is_skipped(self):
+        date = self._confirmed_sbp_income()
+        before = self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM transactions WHERE kind='income'")["s"]
+        csv_text = (f"Дата;Сумма;Назначение\n{date};1500,00;Перевод от клиента Иван\n")
+        prev = bank_import.preview(self.db, csv_text)
+        self.assertEqual(prev["sbp_taken"], 1)
+        self.assertTrue(prev["rows"][0]["sbp_taken"])
+        applied = bank_import.apply_rows(self.db, prev["rows"])
+        self.assertEqual(applied["imported"], 0)
+        self.assertEqual(applied["sbp_skipped"], 1)
+        after = self.db.one(
+            "SELECT COALESCE(SUM(amount),0) s FROM transactions WHERE kind='income'")["s"]
+        self.assertEqual(before, after)
+
+    def test_other_rows_still_import(self):
+        date = self._confirmed_sbp_income()
+        csv_text = ("Дата;Сумма;Назначение\n"
+                    f"{date};1500,00;Перевод от клиента Иван\n"
+                    f"{date};-2000,00;Оплата пластика PETG\n")
+        prev = bank_import.preview(self.db, csv_text)
+        applied = bank_import.apply_rows(self.db, prev["rows"])
+        self.assertEqual(applied["sbp_skipped"], 1)
+        self.assertEqual(applied["imported"], 1)   # расход plastic прошёл как обычно
+        self.assertEqual(self.db.one(
+            "SELECT COUNT(*) n FROM transactions WHERE kind='expense'")["n"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

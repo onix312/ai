@@ -94,6 +94,10 @@ class CancelTests(CancelBase):
         self.assertIsNotNone(event)
 
     def test_cancel_requires_open_shift(self):
+        # «отмена только в окне смены» — про ручную смену (режим manual).
+        # В auto смена открывается сама на первой продаже, и отмена работает
+        # без участия человека: test_cashier_shift_mode.AutoShiftTests.
+        self.db.set_settings({"cashier_shift_mode": "manual"})
         r = self.cashier.sell([{"item_id": "s1", "qty": 1}], "cash",
                               self.token)
         with self.assertRaisesRegex(ValueError, "не из текущей смены"):
@@ -101,6 +105,8 @@ class CancelTests(CancelBase):
         self.assertEqual(self.qty(), 9)  # ничего не тронуто
 
     def test_cancel_old_sale_blocked(self):
+        # «не из текущей смены» — про смену, которую открывает человек
+        self.db.set_settings({"cashier_shift_mode": "manual"})
         r = self.cashier.sell([{"item_id": "s1", "qty": 1}], "cash",
                               self.token)
         self.db.execute("UPDATE cashier_sales SET created_at='2020-01-01T10:00:00'"
@@ -166,6 +172,8 @@ class CancelTests(CancelBase):
 
 class ShiftSalesTests(CancelBase):
     def test_no_shift_no_sales(self):
+        # в ручном режиме смены нет, пока кассир её не открыл (режим manual)
+        self.db.set_settings({"cashier_shift_mode": "manual"})
         self.cashier.sell([{"item_id": "s1", "qty": 1}], "cash", self.token)
         out = self.cashier.shift_sales(self.token)
         self.assertFalse(out["open"])
