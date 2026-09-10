@@ -547,7 +547,7 @@ document.addEventListener("click",function(ev){
 });
 $("bClear").addEventListener("click",function(){
   if(!cartHasItems()) return;
-  if(!confirm("Очистить корзину?")) return;
+  if(!confirm("Очистить корзину? Товары из текущей продажи уберутся.")) return;
   state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();
 });
 $("search").addEventListener("input",function(){state.search=$("search").value;renderGrid();});
@@ -710,7 +710,7 @@ function loadIncoming(){
     box.innerHTML=list.map(function(p){
       var names=(p.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
       var holds=(p.holds||[]).map(function(h){return esc(h.nom_name||"товар")+" × "+h.qty;}).join(", ");
-      var holdLine=holds? '<br>🔒 отложено: '+holds : '';
+      var holdLine=holds? '<br><span class="qb low holdBadge">🔒 отложено: '+holds+'</span>' : '';
       return '<div class="row"><div class="t"><b>'+money(p.amount)+'</b><small>'+(names||esc(p.purpose||"—"))+holdLine+'</small></div>'
         +'<button class="btn pay sm" data-act="confirm" data-id="'+esc(p.payment_id)+'">Подтвердить</button>'
         +'<button class="btn ghost sm" data-act="reject" data-id="'+esc(p.payment_id)+'">Отклонить</button></div>';
@@ -722,14 +722,15 @@ document.addEventListener("click",function(ev){
   var act=b.getAttribute("data-act"),id=b.getAttribute("data-id");
   if(act==="confirm"){
     if(!confirm("Подтвердить поступление СБП? Склад спишется и выручка запишется.")) return;
-    api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
-      .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();refreshShift();})
-      .catch(function(e){sessionError(e);});
+    withBusy(b,function(){
+      return api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
+        .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();refreshShift();});
+    }).catch(function(e){sessionError(e);});
   }else if(act==="reject"){
     var reason=prompt("Причина отклонения:","Оплата не поступила");
     if(reason===null) return;
     reason=String(reason||"").trim();
-    if(!reason){toast("Укажите причину");return;}
+    if(!reason){toast("Укажите причину отклонения");return;}
     api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason})
       .then(function(){toast("Отклонено");loadIncoming();})
       .catch(function(e){sessionError(e);});
@@ -746,7 +747,20 @@ function loadShift(){
 }
 function refreshShift(){if(!$("viewShift").hidden)loadShift();}
 function renderShift(box,r){
+  var auto=(r.mode||"manual")==="auto";
   if(!r.open){
+    if(auto){
+      // «Без смен» (решение заказчика): смены как процедуры нет — есть сверка
+      // ящика. Пересчёт заодно открывает отсчёт, отмена продажи работает.
+      box.innerHTML='<div class="card"><h4>Наличные в ящике</h4>'
+        +'<div class="hint">Считать начинаем с последней сверки. Посчитайте ящик и введите сумму — расхождение запишется, отсчёт продолжится с неё.</div>'
+        +'<input class="fld" id="shiftRecount" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
+        +'<input class="fld" id="shiftRecountNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+        +'<button class="btn pay" id="bReconcile" type="button" style="width:100%">Записать пересчёт</button></div>'
+        +'<div class="card"><h4>Продажи</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
+      bindReconcile();loadShiftSales();
+      return;
+    }
     box.innerHTML='<div class="card"><h4>Смена закрыта</h4>'
       +'<div class="hint">Посчитайте деньги в ящике и введите сумму — с неё начнётся смена.</div>'
       +'<input class="fld" id="shiftOpenCash" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
@@ -761,26 +775,36 @@ function renderShift(box,r){
   var s=r.shift||{},live=r.live||{};
   var opened=String(s.opened_at||"").replace("T"," ").slice(0,16);
   var manager=state.role==="manager";
-  var html='<div class="card"><h4>Смена открыта · '+esc(s.cashier||"кассир")+'</h4>'
-    +kv("Открыта",esc(opened||"—"))
+  var html='<div class="card"><h4>'+(auto?"Наличные в ящике":("Смена открыта · "+esc(s.cashier||"кассир")))+"</h4>"
+    +kv(auto?"Считаем с":"Открыта",esc(opened||"—"))
     +kv("На старте в ящике",money(s.open_cash))
     +kv("Выручка наличными",money(live.income_cash))
     +kv("Выемки",money(live.collected))
     +(Number(live.income_1c)? kv("Продажи 1С (справка)",money(live.income_1c)) : '')
     +kv("Должно быть в ящике",money(live.expected))
-    +'</div>'
-    +'<div class="card"><h4>Закрыть смену</h4>'
-    +'<div class="hint">Пересчитайте ящик. Расхождение запишется — не блокирует закрытие.</div>'
-    +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
-    +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
-    +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>'
-    +'<div class="card"><h4>Выемка'+(manager?"":" · только старший")+'</h4>'
+    +'</div>';
+  if(auto){
+    html+='<div class="card"><h4>Сверка ящика</h4>'
+      +'<div class="hint">Пересчитали наличные — введите факт. Расхождение попадёт в журнал, а новый отсчёт начнётся с этой суммы.</div>'
+      +'<input class="fld" id="shiftRecount" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
+      +'<input class="fld" id="shiftRecountNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+      +'<button class="btn pay" id="bReconcile" type="button" style="width:100%">Записать пересчёт</button></div>';
+  }else{
+    html+='<div class="card"><h4>Закрыть смену</h4>'
+      +'<div class="hint">Пересчитайте ящик. Расхождение запишется — не блокирует закрытие.</div>'
+      +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
+      +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+      +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>';
+  }
+  html+='<div class="card"><h4>Выемка'+(manager?"":" · только старший")+'</h4>'
+    +'<div class="hint">Выемка запишется в учёт.</div>'
     +'<input class="fld" id="shiftCollect" inputmode="decimal" placeholder="Сумма, ₽">'
     +'<input class="fld" id="shiftCollectNote" placeholder="Куда/зачем (необязательно)" style="font-size:14px">'
     +'<button class="btn warn" id="bShiftCollect" type="button" style="width:100%"'+(manager?"":" disabled")+'>Забрать из ящика</button></div>';
-  html+='<div class="card"><h4>Продажи смены</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
+  html+='<div class="card"><h4>'+(auto?"Продажи":"Продажи смены")+'</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
   box.innerHTML=html;
-  $("bShiftClose").addEventListener("click",function(){
+  if(auto)bindReconcile();
+  if(!auto)$("bShiftClose").addEventListener("click",function(){
     if(!confirm("Закрыть смену? Расхождение запишется."))return;
     api("/api/cashier/shift/close",{token:state.token,close_cash:parseNum($("shiftCloseCash").value),note:$("shiftNote").value})
       .then(function(d){
@@ -790,12 +814,29 @@ function renderShift(box,r){
       })
       .catch(function(e){sessionError(e);});
   });
-  if(manager)$("bShiftCollect").addEventListener("click",function(){
+  if($("bShiftCollect")) if(manager)$("bShiftCollect").addEventListener("click",function(){
     var btn=this,amount=parseNum($("shiftCollect").value),note=$("shiftCollectNote").value;
     if(!confirm("Забрать из ящика"+(amount>0?(" "+money(amount)):" эту сумму")+"?"))return;
     withBusy(btn,function(){
       return api("/api/cashier/collect",{token:state.token,amount:amount,note:note})
         .then(function(){toast("Выемка записана ✓");loadShift();loadCatalog();});
+    }).catch(function(e){sessionError(e);});
+  });
+}
+// Пересчёт ящика — одна кнопка вместо «закрыть смену» + «открыть смену».
+function bindReconcile(){
+  var b=$("bReconcile");if(!b)return;
+  b.addEventListener("click",function(){
+    var btn=this,counted=parseNum($("shiftRecount").value);
+    var noteField=$("shiftRecountNote"),note=noteField?noteField.value:"";
+    if(!confirm("Записать пересчёт ящика: "+money(counted)+"?"))return;
+    withBusy(btn,function(){
+      return api("/api/cashier/reconcile",{token:state.token,counted_cash:counted,note:note})
+        .then(function(d){
+          var diff=Number(d.diff)||0;
+          toast(diff===0?"Пересчёт записан · ровно ✓":("Пересчёт · расхождение "+(diff>0?"+":"")+money(diff).replace(" ₽","")+" ₽"));
+          loadShift();loadCatalog();
+        });
     }).catch(function(e){sessionError(e);});
   });
 }
@@ -807,7 +848,7 @@ function loadShiftSales(){
     box.innerHTML=list.map(function(s){
       var t=String(s.created_at||"").replace("T"," ").slice(11,16);
       var names=(s.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
-      var disc=Number(s.discount_pct)>0?' <span class="qb low" style="font-size:11px;padding:3px 7px">−'+s.discount_pct+'%</span>':"";
+      var disc=Number(s.discount_pct)>0?' <span class="qb disc low" style="font-size:11px;padding:3px 7px">−'+s.discount_pct+'%</span>':"";
       var st=s.cancelled?'<span class="qb" style="background:rgba(239,68,68,.14);color:#ef4444;border:1px solid rgba(239,68,68,.2);font-size:11px;padding:4px 8px;border-radius:99px">отменена</span>'
         :(s.method==="sbp"?'<span class="qb" style="background:rgba(217,119,6,.14);color:#d97706;border:1px solid rgba(217,119,6,.2);font-size:11px;padding:4px 8px;border-radius:99px">СБП · '+(s.confirmed?"✓":"⏳")+'</span>':'<span class="qb qty" style="font-size:11px">нал</span>');
       var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>':"";

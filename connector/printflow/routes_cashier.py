@@ -123,6 +123,17 @@ def cashier_shift_close(api: Any, ctx: Ctx):
         box_id=str(ctx.arg("box_id", "") or ""))
 
 
+@router.post("/api/cashier/reconcile", audit="Касса: пересчёт ящика", idempotent=True,
+             doc="Пересчёт наличных: закрыть текущий отсчёт расхождением и открыть новый")
+def cashier_reconcile(api: Any, ctx: Ctx):
+    # idempotent=True: повторный тап «Записать пересчёт» не закрывает смену
+    # дважды и не открывает вторую — пересчёт сверяется с фактом один раз.
+    return _cashier(api).reconcile(
+        _token(ctx), ctx.num("counted_cash", 0),
+        note=str(ctx.arg("note", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))
+
+
 @router.post("/api/cashier/collect", audit="Касса: выемка",
              doc="Выемка из ящика (только старший, в пределах остатка)")
 def cashier_collect(api: Any, ctx: Ctx):

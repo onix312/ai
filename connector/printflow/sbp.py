@@ -68,6 +68,7 @@ class Sbp:
             "shop_qr": str(self.db.setting("sbp_shop_qr", "") or "").strip(),
             "bank_name": str(self.db.setting("sbp_bank_name", "") or "").strip(),
             "payment_note": str(self.db.setting("sbp_payment_note", "") or "").strip(),
+            "pins_required": self.pins_required(),
             "accounts": [
                 {"id": r["id"], "name": r["name"]}
                 for r in self.db.query(
@@ -134,6 +135,56 @@ class Sbp:
     def _require_enabled(self) -> None:
         if not self.enabled():
             raise ValueError("СБП-оплата отключена в настройках")
+
+    def pins_required(self) -> bool:
+        """Нужен ли персональный PIN для денежных действий в панели.
+
+        Режим ролей включается сам, как только в «Команде» заведён хоть один
+        PIN (тот же приём, что и в кассе): одиночная установка владельца
+        работает как раньше, а магазину с сотрудниками панель перестаёт
+        отдавать деньги анонимному запросу из LAN.
+        """
+        try:
+            from .staff import Staff
+            return Staff(self.db).pins_count() > 0
+        except Exception:
+            return False
+
+    def authorize(self, pin: str = "", *, manager: bool = False,
+                  authorized: str = "", purpose: str = "") -> str:
+        """Проверка права на денежное действие. Возвращает имя подтвердившего.
+
+        ``authorized`` — действие уже авторизовано своим контуром (сессия кассы
+        или движок сверки банка) и передаёт имя оператора. Иначе, когда PIN-ы
+        заведены, требуется PIN сотрудника; для возврата — PIN старшего.
+        """
+        name = str(authorized or "").strip()[:120]
+        if name:
+            return name
+        if not self.pins_required():
+            return "владелец"          # одиночная установка: прав нет ни у кого, кроме владельца
+        if not str(pin or "").strip():
+            raise ValueError(f"Нужен PIN сотрудника — {purpose or 'это действие с деньгами'}")
+        from .staff import Staff
+        member = Staff(self.db).find_by_pin(str(pin).strip())
+        if not member:
+            raise ValueError("Нужен PIN сотрудника — деньги подтверждает персонально")
+        role = str(member.get("role") or "employee")
+        if manager and role != "manager":
+            raise ValueError("Нужен PIN старшего — возврат денег у руководителя")
+        return str(member.get("name") or "сотрудник")[:120]
+
+    def _actor(self, actor: str, pin: str = "", *, authorized: str = "",
+               manager: bool = False, purpose: str = "") -> str:
+        """Право + имя: авторизованный контур подписывает действие своим именем.
+
+        Вызов без PIN-режима сохраняет прежнего ``actor`` (панель одного
+        владельца работает как раньше), но проверка ``authorize`` выполняется
+        всегда — иначе анонимный запрос из LAN пишет выручку и делает возврат.
+        """
+        name = self.authorize(pin, manager=manager, authorized=authorized,
+                              purpose=purpose)
+        return name if (pin or authorized) else (actor or "panel")
 
     def _get(self, payment_id: str) -> dict:
         row = self.db.one("SELECT * FROM sbp_payments WHERE id=?", (payment_id,))
@@ -300,14 +351,21 @@ class Sbp:
 
     # --------------------------------------------------------- подтверждение
     def confirm(self, payment_id: str, *, actor: str = "panel",
-                account_id: str = "", note: str = "") -> dict:
+                account_id: str = "", note: str = "", pin: str = "",
+                authorized: str = "") -> dict:
         """Подтвердить платёж: записать деньги в журнал и закрыть долг заказа.
 
         Единственная точка, где СБП-платёж становится выручкой. Повторный вызов
         (двойное нажатие/обновление) не пишет вторую проводку: защита по статусу
         внутри транзакции и по ``request_id`` в ``add_payment``.
+
+        Деньги подтверждает человек, а не анонимный запрос: когда в «Команде»
+        заведены PIN, панель обязана передать ``pin`` сотрудника (``authorized``
+        — для кассы, где роль уже проверена сессией, и для движка сверки банка).
         """
         self._require_enabled()
+        actor = self._actor(actor, pin, authorized=authorized,
+                            purpose="подтверждение СБП-оплаты")
         row = self._get(payment_id)
         if row["status"] == STATUS_CONFIRMED:
             return {**row, "already_recorded": True}
@@ -359,8 +417,16 @@ class Sbp:
         return row
 
     # -------------------------------------------------------------- отмена
-    def reject(self, payment_id: str, *, reason: str = "", actor: str = "panel") -> dict:
-        """Отклонить неподтверждённый платёж. Денег не трогает (выручки не было)."""
+    def reject(self, payment_id: str, *, reason: str = "", actor: str = "panel",
+               pin: str = "", authorized: str = "") -> dict:
+        """Отклонить неподтверждённый платёж. Денег не трогает (выручки не было).
+
+        Отклонение — денежное действие: оно снимает холд и не даёт закрыть
+        выдачу, поэтому требует PIN сотрудника (любого: кассир сверяет
+        рутину, спорное решает старший).
+        """
+        actor = self._actor(actor, pin, authorized=authorized,
+                            purpose="отклонение платежа")
         row = self._get(payment_id)
         if row["status"] in TERMINAL:
             raise ValueError(f"Платёж уже {row['status']} — отклонить нельзя")
@@ -383,15 +449,20 @@ class Sbp:
 
     # -------------------------------------------------------------- возврат
     def refund(self, payment_id: str, *, actor: str = "panel", note: str = "",
-               bank_done: bool = False) -> dict:
+               bank_done: bool = False, pin: str = "", authorized: str = "") -> dict:
         """Вернуть подтверждённый СБП-платёж (руководитель/владелец).
 
         В v1 возврат — ручная отметка: ``bank_done=True`` значит «возврат
         выполнен в банке». Пишет обратную проводку (refund) и снимает оплату
         с заказа. Защита от двойного возврата — по статусу внутри транзакции.
+        Право — только старший: в режиме PIN анонимный запрос из LAN возврат
+        не делает (решение №9 из ТЗ «Касса 16.0», теперь оно исполняется и
+        на сервере, а не только кнопкой в интерфейсе).
         """
         if not bank_done:
             raise ValueError("Подтвердите, что возврат выполнен в банке")
+        actor = self._actor(actor, pin, authorized=authorized, manager=True,
+                            purpose="возврат денег только для старшего")
         row = self._get(payment_id)
         if row["status"] == STATUS_REFUNDED:
             return {**row, "already_recorded": True}

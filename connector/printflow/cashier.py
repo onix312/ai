@@ -385,6 +385,7 @@ class Cashier:
             "sbp_enabled": self.sbp.enabled(),
             "sbp": self.payment_qr(with_svg=False),
             "shop_cash": self.shelf.shop_cash(),
+            "shift_mode": self.shift_mode(),
         }
 
     # ------------------------------------------------------------- QR оплаты
@@ -664,6 +665,7 @@ class Cashier:
             sale_id = uid("cs")
             stamp = now_iso()
             if method == "cash":
+                self._ensure_auto_shift(box_id, cashier, stamp)
                 for row in rows:
                     # недостающее приезжает со склада движением регистра
                     row["item_id"] = self._ensure_on_shelf(row, offer)
@@ -858,7 +860,10 @@ class Cashier:
                                        keep_zero_price=num(row.get("discount_pct")) > 0)
                 row["move_id"] = str((done.get("move") or {}).get("id") or "")
             # 3) деньги на счёт СБП + статус платежа
-            payment = self.sbp.confirm(payment_id, actor=cashier, note=note or "")
+            # authorized=имя: роль уже проверена сессией кассы (login по PIN
+            # или общему коду), поэтому повторно PIN в запросе не нужен.
+            payment = self.sbp.confirm(payment_id, actor=cashier, note=note or "",
+                                       authorized=cashier)
             self.db.execute(
                 "UPDATE cashier_sales SET items=?, confirmed_at=? WHERE id=?",
                 (json.dumps(rows, ensure_ascii=False), now_iso(), sale["id"]))
@@ -888,7 +893,7 @@ class Cashier:
         with self.db.transaction():
             self._release_sale_holds(sale["id"])
             payment = self.sbp.reject(payment_id, reason=reason or "Оплата не поступила",
-                                      actor=cashier)
+                                      actor=cashier, authorized=cashier)
         self._audit(sale["id"], "reject_sbp", "СБП-продажа отклонена",
                     f"{num(sale['amount']):g} ₽", actor=cashier)
         return {**self._sale_result(sale), "payment": payment}
@@ -1022,17 +1027,112 @@ class Cashier:
                 "collected": round(num(collected.get("s")), 2),
                 "income_1c": round(num(one_c.get("s")), 2)}
 
+    def shift_mode(self) -> str:
+        """auto — смен не видно (решение №6 «без смен»), manual — кассир сам их открывает."""
+        mode = str(self.db.setting("cashier_shift_mode", "auto") or "auto").strip().lower()
+        return mode if mode in ("auto", "manual") else "auto"
+
+    def _ensure_auto_shift(self, box_id: str, cashier: str, at: str = "") -> None:
+        """Открытая смена «в фоне» — чтобы отмена продажи и выемка не осиротели.
+
+        Обе операции привязаны к смене: отмена удаляет проводку и потому обязана
+        происходить в окне смены, выемка — в пределах ящика смены. Полное же
+        «без смен» лишает кассира этих двух вещей, поэтому смена живёт, но
+        молча: открывается сама на первой наличной продаже, в журнал и события
+        не пишет (шума нет), закрытие — только по сверке ящика (reconcile).
+
+        Открытой сменой считается окно ``opened_at <= created_at продажи``,
+        поэтому смена получает ровно штамп продажи: свой ``now_iso()`` здесь
+        оказался бы на микросекунду позже и продажа «выпадала» бы из смены —
+        отмена отвечала «не из текущей смены».
+        """
+        if self.shift_mode() != "auto":
+            return
+        if self._open_shift(box_id):
+            return
+        self.db.execute(
+            "INSERT INTO cashier_shifts(id,staff_id,cashier,opened_at,open_cash,box_id)"
+            " VALUES(?,?,?,?,?,?)",
+            (uid("shf"), "", str(cashier or "кассир")[:120], at or now_iso(), 0.0, box_id))
+
     def current_shift(self, token: str, box_id: str = "") -> dict:
-        """Открытая смена с живым расчётом — для экрана «Смена»."""
+        """Открытая смена с живым расчётом — для экрана «Смена»/«Касса»."""
         self.require(token)
+        box_id = self._box(box_id)
         shift = self._open_shift(box_id)
         if not shift:
-            return {"open": False, "shift": None, "box_id": self._box(box_id)}
+            return {"open": False, "mode": self.shift_mode(), "shift": None,
+                    "box_id": box_id,
+                    "live": {"income_cash": 0.0, "collected": 0.0,
+                             "income_1c": 0.0, "expected": 0.0}}
         totals = self._shift_totals(str(shift.get("opened_at") or ""),
                                     now_iso())
         expected = round(num(shift.get("open_cash")) + totals["income_cash"]
                          - totals["collected"], 2)
-        return {"open": True, "shift": shift, "live": {**totals, "expected": expected}}
+        return {"open": True, "mode": self.shift_mode(), "shift": shift,
+                "live": {**totals, "expected": expected}}
+
+    def reconcile(self, token: str, counted_cash: float, note: str = "",
+                   box_id: str = "") -> dict:
+        """Пересчёт ящика — «сверка наличных» без кнопок «открыть/закрыть смену».
+
+        Кассир пересчитал ящик и ввёл факт. Один вызов закрывает открытую смену
+        с этим фактом (расхождение считается как обычно и уходит в аудит) и
+        сразу открывает следующую с этим же остатком — отсчёт наличных
+        продолжается от последней сверки. Открытой смены нет: просто открываем
+        с названной суммой (первый день, установка, сверка после простоя).
+
+        Чужую смену пересчитывает только старший — то же правило, что у
+        закрытия смены: пересчёт переписывает итог дня.
+        """
+        session = self.require(token)
+        box_id = self._box(box_id)
+        counted = round(num(counted_cash), 2)
+        if counted < 0:
+            raise ValueError("В ящике не может быть меньше нуля")
+        shift = self._open_shift(box_id)
+        holder = str((shift or {}).get("staff_id") or "")
+        me = str(session.get("staff_id") or "")
+        if shift and holder and me != holder \
+                and str(session.get("role") or "") != "manager":
+            raise ValueError("Это чужая смена — пересчитать может только старший")
+        note = str(note or "").strip()[:400]
+        who = self._session_name(session) or "кассир"
+        expected = diff = 0.0
+        with self.db.transaction():
+            if shift:
+                totals = self._shift_totals(str(shift.get("opened_at") or ""), now_iso())
+                expected = round(num(shift.get("open_cash")) + totals["income_cash"]
+                                 - totals["collected"], 2)
+                diff = round(counted - expected, 2)
+                self.db.execute(
+                    "UPDATE cashier_shifts SET closed_at=?, close_cash=?, income_cash=?,"
+                    " collected=?, diff=?, note=? WHERE id=?",
+                    (now_iso(), counted, totals["income_cash"], totals["collected"],
+                     diff,
+                     ("пересчёт ящика · " + who + (f" · {note}" if note else ""))[:500],
+                     shift["id"]))
+            self.db.execute(
+                "INSERT INTO cashier_shifts(id,staff_id,cashier,opened_at,open_cash,box_id)"
+                " VALUES(?,?,?,?,?,?)",
+                (uid("shf"), str(session.get("staff_id") or ""), who, now_iso(),
+                 counted, box_id))
+        self._audit(str((shift or {}).get("id") or "now"), "reconcile",
+                    "Пересчёт ящика",
+                    f"факт {counted:g} ₽ · расчёт {expected:g} ₽ · расхождение {diff:+g} ₽"
+                    + (f" · {note}" if note else "")
+                    + (f" · ящик {box_id}" if box_id else ""),
+                    entity="cashier_shift", actor=who)
+        self.db.add_event(
+            "money", "Касса: пересчёт ящика",
+            f"{who}: в ящике {counted:g} ₽, по расчёту {expected:g} ₽ "
+            f"(расхождение {diff:+g} ₽)",
+            data={"counted": counted, "expected": expected, "diff": diff,
+                  "box_id": box_id, "cashier": who})
+        out = self.current_shift(token, box_id)
+        out.update({"ok": True, "counted": counted, "expected": expected, "diff": diff,
+                    "closed_shift": str((shift or {}).get("id") or "")})
+        return out
 
     def open_shift(self, token: str, open_cash: float = 0.0,
                    box_id: str = "") -> dict:

@@ -104,6 +104,8 @@ META: dict[str, dict] = {
     "studio_gateway_enabled": ("printers", "Шлюз Bambu Studio включён", {}),
     # --- касса (Касса 16.0): вход кассира
     "cashier_code": ("cashier", "Код кассы (вход кассира)", {"max_len": 32}),
+    "cashier_shift_mode": ("cashier", "Смены на кассе",
+                           {"choices": ("auto", "manual")}),
     # --- СБП (Касса 16.0)
     "sbp_enabled": ("sbp", "Приём СБП включён", {}),
     "sbp_account_id": ("sbp", "Счёт для СБП", {"max_len": 32}),
