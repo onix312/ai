@@ -27,12 +27,23 @@
  .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
  .pill.ok{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.22);color:#10b981}
  .iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:18px;flex:0 0 40px}
+ .iconbtn.off{opacity:.4;filter:grayscale(60%)}
  .iconbtn:active{transform:scale(.96)}
  /* tabs — большие, для пальца */
  .tabs{display:flex;gap:8px;margin:4px 0 14px;background:var(--panel);padding:5px;border-radius:16px;border:1px solid var(--line)}
  .tab{flex:1;padding:12px 10px;border-radius:12px;border:0;background:transparent;color:var(--muted);font-weight:800;font-size:14px;cursor:pointer;transition:.18s;min-height:44px}
  .tab.on{background:var(--text);color:var(--bg);box-shadow:0 2px 12px -6px rgba(0,0,0,.5)}
  [data-theme=dark] .tab.on{background:#fff;color:#111827}
+  .tab.nudge{color:var(--warn);animation:pfnudge 1.1s ease-in-out infinite}
+  @keyframes pfnudge{0%,100%{opacity:1}50%{opacity:.55}}
+  .install{display:flex;gap:9px;align-items:center;margin:9px 0;padding:10px 12px;border-radius:13px;background:rgba(79,70,229,.11);border:1px solid rgba(79,70,229,.24);font-size:12.6px;line-height:1.35}
+ .install a{color:inherit;font-weight:800;text-decoration:underline;white-space:nowrap}
+ .install button{margin-left:auto;flex:0 0 auto}
+ .malert{display:block;width:100%;text-align:left;border:0;cursor:pointer;
+   background:rgba(217,119,6,.14);color:#b45309;border-bottom:1px solid rgba(217,119,6,.28);
+   padding:10px 14px;font-weight:800;font-size:14px;line-height:1.3}
+  .malert b{display:block}
+  .malert span{display:block;font-weight:600;font-size:12px;opacity:.72;margin-top:2px}
  /* search — крупный, для обычных людей */
  .searchRow{display:flex;gap:8px;margin-bottom:12px}
  .searchWrap{position:relative;flex:1}
@@ -61,7 +72,18 @@
  .badge{position:absolute;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap;max-width:76%}
  .qb{font-size:11px;font-weight:800;padding:5px 9px;border-radius:99px;backdrop-filter:blur(8px);line-height:1}
  .qb.qty{background:rgba(17,24,39,.82);color:#fff}
- .qb.low{background:rgba(217,119,6,.92);color:#fff}
+.qb.low{background:rgba(217,119,6,.92);color:#fff}
+ /* офлайн-очередь (17.0.8): плашка висит над вкладками, пока продажи ждут сети */
+ .offbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:9px 0;padding:10px 12px;
+   border-radius:13px;background:rgba(217,119,6,.13);border:1px solid rgba(217,119,6,.3);
+   font-size:12.4px;line-height:1.35}
+ .offbar b{display:block;font-size:13px}
+ .offbar>span:nth-child(2){flex:1;min-width:150px}
+ .offbar .sub{display:block;opacity:.78;margin-top:2px}
+ .offbar .dot{width:9px;height:9px;border-radius:99px;background:#d97706;flex:0 0 9px;
+   animation:pfnudge 1.4s ease-in-out infinite}
+ .offbar.dead{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)}
+ .offbar.dead .dot{background:#ef4444}
  .qb.catb{background:rgba(255,255,255,.94);color:#111827;border:1px solid rgba(0,0,0,.06);font-weight:700}
  [data-theme=dark] .qb.catb{background:rgba(31,41,55,.94);color:#e5e7eb;border-color:rgba(255,255,255,.08)}
  .inBadge{position:absolute;right:10px;top:10px;min-width:28px;height:28px;padding:0 9px;border-radius:99px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:850;display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px -8px var(--accent)}
@@ -183,9 +205,16 @@
    <div class="pill ok" id="sbpPill" hidden>СБП</div>
    <div class="pill" id="whoPill" hidden></div>
    <div class="pill" id="countPill">0 тов.</div>
+   <button class="iconbtn" id="bRing" type="button" title="Звук о платежах">🔔</button>
    <button class="iconbtn" id="bLogout" type="button" title="Выйти">⎋</button>
   </div>
 
+  <button class="malert" id="moneyAlert" type="button" hidden></button>
+  <div class="offbar" id="offBar" hidden><span class="dot"></span>
+   <span><b id="offTitle"></b><span class="sub" id="offNote"></span></span>
+   <button class="btn ghost sm" id="offRetry" type="button">Выгрузить сейчас</button>
+   <button class="btn ghost sm" id="offDrop" type="button">Снять</button></div>
+  <div class="install" id="installHint" hidden><span>📲</span><span id="installText"></span><a id="installGo" href="#" download>Скачать</a><button class="btn ghost sm" id="installOff" type="button">Не показывать</button></div>
   <div class="tabs">
    <button class="tab on" id="tabSell" type="button">🛒 Продажа</button>
    <button class="tab" id="tabIn" type="button">⏳ Входящие</button>
@@ -252,6 +281,17 @@
  </div>
 </div>
 
+<div class="modal" id="retModal">
+ <div class="sheet">
+  <h3>Принять возврат</h3>
+  <div class="hint" id="retHint"></div>
+  <div id="retLines"></div>
+  <input class="fld" id="retNote" placeholder="Причина: не подошёл размер / брак / передумал">
+  <button class="btn pay" id="retGo" type="button" style="width:100%;margin-top:10px">Вернуть товар и деньги</button>
+  <button class="btn ghost" id="retClose" type="button" style="width:100%;margin-top:8px">Отмена</button>
+ </div>
+</div>
+
 <div class="modal" id="cartModal">
  <div class="sheet">
   <h3>Корзина</h3>
@@ -269,12 +309,136 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""}};
+var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function money(v){var n=Number(v)||0;return (Math.round(n*100)/100).toLocaleString("ru-RU")+" ₽";}
 function reqId(){return "ui-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);}
+/* ---------- офлайн-контур (17.0.8 / 17.0.9) ----------
+   Обрыв сети не останавливает прилавок: корзину пишем в localStorage и
+   проводим через сервер при первой связи. Сумма и состав те же, request_id =
+   id записи очереди, поэтому повторная отправка не создаёт вторую продажу —
+   идемпотентность держит сервер. Наличные — продажа сразу; СБП — заявка:
+   покупатель платит по закешированному QR магазина (его рисует PrintFlow,
+   банку на нас выйти не нужно), а доход появится только после подтверждения.
+   Скидки офлайн недоступны: PIN старшего без связи не проверить. */
+var OFF_KEY="cashier_offline_q";
+var OFF_QR_KEY="cashier_sbp_qr",OFF_QR_TTL=12*3600*1000;
+function offQr(){
+  try{var q=JSON.parse(localStorage.getItem(OFF_QR_KEY)||"null");return (q&&q.text)?q:null;}
+  catch(e){return null;}
+}
+function offQrRefresh(force){
+  // Кассир не должен узнавать про отсутствие QR в момент, когда сеть уже легла.
+  if(!loggedIn()||!navigator.onLine)return;
+  var q=offQr();
+  var age=q?(Date.now()-(Number(q.at)||0)):Infinity;
+  if(!force&&q&&age<OFF_QR_TTL)return;
+  api(withToken("/api/cashier/offline/qr")).then(function(r){
+    if(r&&r.text){
+      try{localStorage.setItem(OFF_QR_KEY,JSON.stringify({at:Date.now(),text:r.text,
+        svg:r.svg||"",kind:r.kind||"static",hint:r.hint||"",shop:r.shop||""}));}catch(e){}
+    }else{
+      // QR убрали из настроек — офлайн-СБП честно становится недоступен.
+      try{localStorage.removeItem(OFF_QR_KEY);}catch(e){}
+    }
+  }).catch(function(){});
+}
+var offBusy=false,offQueue=[];
+try{var _oq=JSON.parse(localStorage.getItem(OFF_KEY)||"[]");if(Array.isArray(_oq))offQueue=_oq;}catch(_e){offQueue=[];}
+function offLoad(){
+  try{var q=JSON.parse(localStorage.getItem(OFF_KEY)||"[]");offQueue=Array.isArray(q)?q:[];}
+  catch(e){offQueue=[];}
+}
+function offSave(){
+  try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-200)));return true;}
+  catch(e){toast("Память телефона кончилась — в очередь не записано");return false;}
+}
+function offTotals(){
+  var n=0,sum=0,dead=0,sbp=0,sbpSum=0;
+  offQueue.forEach(function(e){n++;sum+=Number(e.total)||0;if(e.dead)dead++;
+    if(e.m==="sbp"){sbp++;sbpSum+=Number(e.total)||0;}});
+  return {n:n,sum:Math.round(sum*100)/100,dead:dead,sbp:sbp,sumSbp:Math.round(sbpSum*100)/100};
+}
+function offPush(items,total,method){
+  var entry={id:"of-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),
+    at:new Date().toISOString(),total:Math.round(total*100)/100,m:method||"cash",
+    cashier:state.name||"кассир",
+    items:items.map(function(i){return {id:i.id,qty:i.qty,name:i.name,price:i.price};})};
+  offQueue.push(entry);
+  if(!offSave()){offQueue.pop();return null;}
+  offRender();
+  return entry;
+}
+function offDrop(id){offQueue=offQueue.filter(function(e){return e.id!==id;});offSave();offRender();}
+function offMarkDead(id,msg){
+  offQueue=offQueue.map(function(e){return e.id===id?Object.assign({},e,{dead:1,error:String(msg||"").slice(0,160)}):e;});
+  offSave();offRender();
+}
+function offTellShell(n){
+  // Оболочка Android показывает «в очереди: N» в своём уведомлении — с экрана
+  // этого не видно, а деньги в ящике уже лежат. В браузере мостика нет.
+  try{var app=window.PfApp;if(app&&app.offline)app.offline(Number(n)||0);}catch(e){}
+}
+function offRender(){
+  var el=$("offBar");if(!el)return;
+  var t=offTotals();
+  offTellShell(t.n);
+  el.hidden=!t.n;
+  if(t.dead)el.classList.add("dead");else el.classList.remove("dead");
+  if(!t.n)return;
+  $("offTitle").textContent="не проведено: "+t.n+" на "+money(t.sum);
+  $("offRetry").textContent=t.dead?("Повторить всё ("+t.n+")"):"Выгрузить сейчас";
+  $("offNote").innerHTML=(t.dead?"требует разбора: "+t.dead+" · ":"")
+    +(t.sbp?("заявок СБП: "+t.sbp+" на "+money(t.sumSbp)+" — дохода ещё нет · "):"")
+    +"Наличные в ящике, в учёте их ещё нет. Появится связь — уйдут сами. "
+    +"В «должно быть в ящике» они не считаются."+
+    (t.dead?"<br>"+esc((offQueue.filter(function(e){return e.dead;})[0]||{}).error||""):"");
+}
+function offFlush(){
+  if(offBusy||!offQueue.length||!state.token)return Promise.resolve();
+  offBusy=true;var sent=0,broke=0,stopped=false,claims=0;
+  return offQueue.slice().reduce(function(chain,e){
+    return chain.then(function(){
+      if(stopped)return;
+      return api("/api/cashier/sell",{token:state.token,method:(e.m==="sbp"?"sbp":"cash"),
+        items:(e.items||[]).map(function(i){return {item_id:i.id,qty:Number(i.qty)||0};}),
+        request_id:e.id,offline_at:e.at,discount_pct:0,manager_pin:""})
+      .then(function(r){
+        sent++;offDrop(e.id);
+        if(r&&r.negative_stock&&r.negative_stock.length)
+          toast("Проведено с расхождением по остаткам: "+r.negative_stock.length+" — владелец увидит флаг");
+        // Заявка — не оплата: напоминаем, что дальше решение за банком.
+        if(r&&r.claim){claims++;toast("Заявка СБП передана "+money(e.total||0)+" — ждём поступления");}
+      })
+      .catch(function(err){
+        if(err&&err.offline){stopped=true;return;}  // сети всё ещё нет — ждём события online
+        broke++;offMarkDead(e.id,(err&&err.message)||"ошибка сервера"); // очередь не должна закисать
+      });
+    });
+  },Promise.resolve()).then(function(){
+    offBusy=false;offRender();
+    if(sent){loadCatalog();refreshShift();refreshBadge();offQrRefresh(false);}
+    if(claims&&navigator.onLine)loadIncoming();
+    if(stopped)toast("Сети нет — "+offQueue.length+" продаж(и) ждут в телефоне");
+    else if(sent)toast("Выгружено: "+sent+(broke?" · разбор: "+broke:""));
+  });
+}
+$("offRetry").addEventListener("click",function(){offFlush();});
+$("offDrop").addEventListener("click",function(){
+  if(!offQueue.length)return;
+  var why=window.prompt("Почему снимаете? Например: «дубль» или «покупатель передумал, деньги вернул»."+
+    "\nПродажи уйдут из телефона и в учёт не попадут — в журнале останется запись с причиной.");
+  if(why===null)return;
+  why=String(why).trim();
+  if(!why){toast("Причина обязательна");return;}
+  api("/api/cashier/offline/abandon",{token:state.token,request_ids:offQueue.map(function(e){return e.id;}),reason:why})
+    .then(function(){offQueue=[];offSave();offRender();toast("Снято — запись в журнале");refreshShift();})
+    .catch(function(e){if(e&&e.offline){toast("Нет связи — снять очередь нельзя");return;}toast(e.message||"Не вышло");});
+});
+window.addEventListener("offline",function(){state.offline=true;});
+window.addEventListener("online",function(){state.offline=false;if(loggedIn()){offQrRefresh(false);offFlush();}});
 function api(path,body){
   var init=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),cache:"no-store"}:{method:"GET",cache:"no-store"};
   return fetch(path,init).then(function(r){
@@ -282,7 +446,12 @@ function api(path,body){
       var j={};try{j=text?JSON.parse(text):{};}catch(_e){if(!r.ok)throw new Error("Сервер вернул ошибку "+r.status);throw new Error("Некорректный ответ сервера");}
       if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}return j;
     });
-  }).catch(function(e){if(e instanceof TypeError)throw new Error("Нет связи с PrintFlow — проверьте Wi-Fi и сервер");throw e;});
+  }).catch(function(e){
+    // TypeError = fetch упал до ответа сервера: сети нет. Отличаем от «сервер
+    // ответил ошибкой» — очередь включается только по настоящему обрыву.
+    if(e instanceof TypeError){var n=new Error("Нет связи с PrintFlow — проверьте Wi-Fi и сервер");n.offline=true;throw n;}
+    throw e;
+  });
 }
 function withToken(p){return p + (p.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(state.token);}
 function loggedIn(){return !!state.token;}
@@ -291,6 +460,7 @@ function showApp(on){
   if(!on){
     $("modal").classList.remove("on");
     $("qrModal").classList.remove("on");
+    $("retModal").classList.remove("on");
     $("cartModal").classList.remove("on");
   }
 }
@@ -353,6 +523,8 @@ function doLogin(){
     if(state.legacy) localStorage.setItem("cashier_legacy","1");
     else localStorage.removeItem("cashier_legacy");
     renderWho();showApp(true);setTab("sell");loadCatalog();
+    offRender();offQrRefresh(true);   // QR для офлайн-СБП забираем, пока связь есть
+    resetMoney();primeMoney().then(connectMoney);
   }).catch(function(e){toast(e.message);});
 }
 $("bLogin").addEventListener("click",doLogin);
@@ -362,6 +534,7 @@ $("bLogout").addEventListener("click",function(){
   state.token="";state.name="";state.role="";state.legacy=false;
   localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");localStorage.removeItem("cashier_legacy");
   state.cart={};state.pendingPayment="";state.qrText="";state.qrSvg="";state.saleRequest={cash:"",sbp:""};
+  resetMoney();
   renderWho();showApp(false);setTab("sell");$("code").value="";
 });
 
@@ -377,6 +550,8 @@ function loadCatalog(){
     // если всё пусто но было что-то — покажем подсказку
     state.cats=c.categories||[];
     state.sbpEnabled=!!c.sbp_enabled;
+    state.npd=c.npd||{};
+    state.ring=c.ring!==false;applyRingBtn();installHint();
     state.sbp=c.sbp||{};
     var cash=(c.shop_cash&&c.shop_cash.in_shop)||0;
     var inStock=state.items.length;
@@ -401,6 +576,7 @@ function sessionError(e){
   if(/сессия|код/i.test(e.message)){
     state.token="";state.name="";state.role="";state.legacy=false;
     localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");localStorage.removeItem("cashier_legacy");
+    resetMoney();
     renderWho();showApp(false);setTab("sell");toast("Сессия истекла — войдите снова");
   }
   else toast(e.message);
@@ -547,7 +723,7 @@ document.addEventListener("click",function(ev){
 });
 $("bClear").addEventListener("click",function(){
   if(!cartHasItems()) return;
-  if(!confirm("Очистить корзину?")) return;
+  if(!confirm("Очистить корзину? Товары из текущей продажи уберутся.")) return;
   state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();
 });
 $("search").addEventListener("input",function(){state.search=$("search").value;renderGrid();});
@@ -615,23 +791,90 @@ function cartRows(){
 function setSaleBusy(on){
   state.loading=on;$("payCash").disabled=on;$("paySbp").disabled=on;$("bPay").disabled=on||!cartRows().length;
 }
+function cartSnapshot(){
+  // Состав для очереди: названия и цены — те, что видит кассир на экране.
+  var all=state._allItems||state.items;
+  return cartRows().map(function(r){
+    var it=all.find(function(x){return x.id===r.item_id;})||{};
+    return {id:r.item_id,qty:r.qty,name:it.name||"",price:Number(it.price)||0};
+  });
+}
+function offAccept(method){
+  var snap=cartSnapshot();
+  if(!snap.length)return;
+  var sum=snap.reduce(function(s,i){return s+(Number(i.price)||0)*(Number(i.qty)||0);},0);
+  sum=Math.round(sum*100)/100;
+  // Сначала записываем, потом показываем QR: заявка не должна потеряться,
+  // если кассир закроет окно раньше, чем покупатель достанет телефон.
+  if(!offPush(snap,sum,method)){toast("В очередь не записано — считайте ящик вручную и проведите при связи");return;}
+  state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
+  if(method==="sbp"){showOfflineQr(sum);toast("Заявка записана: "+money(sum)+" — подтвердится по банку");return;}
+  toast("Записано в очередь: "+money(sum)+" — уйдёт при связи");
+}
+function showOfflineQr(total){
+  // QR магазина лежит в памяти телефона: покупатель сканирует его в приложении
+  // банка и вводит сумму сам. Деньги идут на счёт магазина напрямую — связь
+  // с нашим сервером для оплаты не нужна, она нужна чтобы это записать.
+  var q=offQr();if(!q)return;
+  $("qrTitle").textContent="СБП без связи · "+money(total);
+  var box=$("qrBox");
+  box.innerHTML=q.svg||('<div class="empty"><b>Картинки нет — покажите код из настроек</b>'
+    +'<span style="font-size:12px">'+esc(String(q.text||"").slice(0,80))+'…</span></div>');
+  $("qrNote").innerHTML=[
+    "Покупатель сканирует этот код в приложении банка и вводит сумму "+money(total)+".",
+    "Оплата идёт на счёт магазина напрямую — связь с сервером для неё не нужна.",
+    "Заявка записана в очередь: проводка появится после подтверждения по выписке.",
+    "Сами не подтверждайте: подтверждение = деньги в банке."
+  ].map(function(t){return esc(t);}).join("<br>");
+  $("qrActions").style.display="none";
+  $("qrModal").classList.add("on");
+}
 function sellCart(method){
   if(state.loading)return;
   var items=cartRows();if(!items.length)return;
+  if(!navigator.onLine||state.offline){
+    if(discPct()>0){toast("Скидку офлайн не проводим: PIN старшего без связи не проверить. Пробейте без скидки");return;}
+    if(method!=="cash"){
+      if(!offQr()||!state.sbpEnabled){
+        toast("СБП офлайн невозможен: нужен QR магазина (Настройки → СБП), и касса должна хоть раз открыться с сетью");
+        return;}
+      offAccept("sbp");return;
+    }
+    offAccept("cash");return;
+  }
   state.saleRequest[method]=state.saleRequest[method]||reqId();
   setSaleBusy(true);
   api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method],discount_pct:discPct(),manager_pin:$("discPin").value.trim()})
     .then(function(r){
       state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
       if(method==="cash")toast(r.already_recorded?"Продажа уже была записана":"Продано "+money(r.amount)+" наличными");
+      // Годовой лимит налога — забота владельца, но узнаёт о нём кассир в
+      // момент расчёта: «лимит выбран» означает, что дальше деньги принимать
+      // нельзя, и прятать это до декабрьского отчёта было бы нечестно.
+      if(r.npd&&r.npd.text){state.npd=r.npd;
+        if(r.npd.level==="warn"||r.npd.level==="over")toast("⚠ "+r.npd.text);}
       loadCatalog();refreshShift();if(method==="sbp")showPaymentQr(r);
     })
-    .catch(function(e){sessionError(e);})
+    .catch(function(e){
+      if(e&&e.offline){state.offline=true;offRender();
+        // Обрыв в момент расчёта: продажа может уже лежать на сервере —
+        // request_id тот же, поэтому повторная отправка безопасна.
+        if(method==="cash"&&discPct()<=0){offAccept();toast("Связь пропала при расчёте — продажа в очереди");}
+        else toast("Связь пропала при расчёте — проверьте, что продажа не прошла дважды");
+        return;}
+      sessionError(e);
+    })
     .finally(function(){setSaleBusy(false);});
 }
 $("payCash").addEventListener("click",function(){sellCart("cash");});
 $("paySbp").addEventListener("click",function(){sellCart("sbp");});
 
+function offBlock(){
+  // Возврат без связи = деньги из ящика, которых нет в учёте: проводку не на
+  // что опереть, остаётся дождаться сети.
+  if(!navigator.onLine||state.offline){toast("Нет связи — возврат офлайн не проводится");return true;}
+  return false;
+}
 function showPaymentQr(sale){
   var qr=sale.qr||{};
   var diag=qr.diagnostics||{};
@@ -706,14 +949,17 @@ function loadIncoming(){
   box.innerHTML='<div class="loading">Проверяем входящие оплаты…</div>';
   api(withToken("/api/cashier/incoming")).then(function(r){
     var list=r.payments||[];
+    $("tabIn").textContent=list.length?("⏳ Входящие · "+list.length):"⏳ Входящие";
+    $("tabIn").classList.toggle("nudge",list.length>0);
     if(!list.length){box.innerHTML='<div class="empty"><b>Нет платежей на проверку</b>Здесь появляются продажи по СБП до подтверждения.<br><span style="font-size:12px;opacity:.7">Пока всё чисто</span></div>';return;}
     box.innerHTML=list.map(function(p){
       var names=(p.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
       var holds=(p.holds||[]).map(function(h){return esc(h.nom_name||"товар")+" × "+h.qty;}).join(", ");
-      var holdLine=holds? '<br>🔒 отложено: '+holds : '';
-      return '<div class="row"><div class="t"><b>'+money(p.amount)+'</b><small>'+(names||esc(p.purpose||"—"))+holdLine+'</small></div>'
+      var holdLine=holds? '<br><span class="qb low holdBadge">🔒 отложено: '+holds+'</span>' : '';
+      var claimB=p.claim?' <span class="qb low" style="font-size:11px;padding:3px 7px">офлайн-заявка</span>':"";
+      return '<div class="row"><div class="t"><b>'+money(p.amount)+'</b><small>'+(names||esc(p.purpose||"—"))+claimB+holdLine+'</small></div>'
         +'<button class="btn pay sm" data-act="confirm" data-id="'+esc(p.payment_id)+'">Подтвердить</button>'
-        +'<button class="btn ghost sm" data-act="reject" data-id="'+esc(p.payment_id)+'">Отклонить</button></div>';
+        +'<button class="btn ghost sm" data-act="reject" data-id="'+esc(p.payment_id)+'"'+(p.claim?' data-claim="1"':"")+'>Отклонить</button></div>';
     }).join("");
   }).catch(function(e){box.innerHTML=errorCard("Входящие недоступны",e.message,false);sessionError(e);});
 }
@@ -722,15 +968,21 @@ document.addEventListener("click",function(ev){
   var act=b.getAttribute("data-act"),id=b.getAttribute("data-id");
   if(act==="confirm"){
     if(!confirm("Подтвердить поступление СБП? Склад спишется и выручка запишется.")) return;
-    api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
-      .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();refreshShift();})
-      .catch(function(e){sessionError(e);});
+    withBusy(b,function(){
+      return api("/api/cashier/confirm-sbp",{token:state.token,payment_id:id})
+        .then(function(){toast("Подтверждено ✓");loadIncoming();loadCatalog();refreshShift();});
+    }).catch(function(e){sessionError(e);});
   }else if(act==="reject"){
     var reason=prompt("Причина отклонения:","Оплата не поступила");
     if(reason===null) return;
     reason=String(reason||"").trim();
-    if(!reason){toast("Укажите причину");return;}
-    api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason})
+    if(!reason){toast("Укажите причину отклонения");return;}
+    var goods=null;
+    if(b.getAttribute("data-claim")==="1"){
+      // Офлайн-заявка: товар мог уйти с покупателем. Спрашиваем, а не угадываем.
+      goods=(window.confirm("Товар ушёл с покупателем?\n\nOK — спишем остаток в минус (дыру видно инвентаризации).\nОтмена — считаем, что товар вернулся на полку."))?"1":"0";
+    }
+    api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason,goods_taken:goods})
       .then(function(){toast("Отклонено");loadIncoming();})
       .catch(function(e){sessionError(e);});
   }
@@ -746,7 +998,20 @@ function loadShift(){
 }
 function refreshShift(){if(!$("viewShift").hidden)loadShift();}
 function renderShift(box,r){
+  var auto=(r.mode||"manual")==="auto";
   if(!r.open){
+    if(auto){
+      // «Без смен» (решение заказчика): смены как процедуры нет — есть сверка
+      // ящика. Пересчёт заодно открывает отсчёт, отмена продажи работает.
+      box.innerHTML='<div class="card"><h4>Наличные в ящике</h4>'
+        +'<div class="hint">Считать начинаем с последней сверки. Посчитайте ящик и введите сумму — расхождение запишется, отсчёт продолжится с неё.</div>'
+        +'<input class="fld" id="shiftRecount" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
+        +'<input class="fld" id="shiftRecountNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+        +'<button class="btn pay" id="bReconcile" type="button" style="width:100%">Записать пересчёт</button></div>'
+        +'<div class="card"><h4>Продажи</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
+      bindReconcile();loadShiftSales();
+      return;
+    }
     box.innerHTML='<div class="card"><h4>Смена закрыта</h4>'
       +'<div class="hint">Посчитайте деньги в ящике и введите сумму — с неё начнётся смена.</div>'
       +'<input class="fld" id="shiftOpenCash" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
@@ -761,26 +1026,42 @@ function renderShift(box,r){
   var s=r.shift||{},live=r.live||{};
   var opened=String(s.opened_at||"").replace("T"," ").slice(0,16);
   var manager=state.role==="manager";
-  var html='<div class="card"><h4>Смена открыта · '+esc(s.cashier||"кассир")+'</h4>'
-    +kv("Открыта",esc(opened||"—"))
+  var npdLine=(state.npd&&state.npd.text)
+    ? '<div class="hint"'+((state.npd.level==="warn"||state.npd.level==="over")?' style="color:var(--warn);font-weight:700"':'')
+      +'>📊 '+esc(state.npd.text)+'</div>' : '';
+  var html='<div class="card"><h4>'+(auto?"Наличные в ящике":("Смена открыта · "+esc(s.cashier||"кассир")))+"</h4>"+npdLine
+    +kv(auto?"Считаем с":"Открыта",esc(opened||"—"))
     +kv("На старте в ящике",money(s.open_cash))
-    +kv("Выручка наличными",money(live.income_cash))
+    +kv("Выручка наличными"+(Number(live.refunds)?" — за вычетом возвратов":""),money(live.income_cash))
+    +(Number(live.refunds)? kv("Возвраты из кассы","−"+money(live.refunds)) : '')
     +kv("Выемки",money(live.collected))
     +(Number(live.income_1c)? kv("Продажи 1С (справка)",money(live.income_1c)) : '')
     +kv("Должно быть в ящике",money(live.expected))
-    +'</div>'
-    +'<div class="card"><h4>Закрыть смену</h4>'
-    +'<div class="hint">Пересчитайте ящик. Расхождение запишется — не блокирует закрытие.</div>'
-    +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
-    +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
-    +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>'
-    +'<div class="card"><h4>Выемка'+(manager?"":" · только старший")+'</h4>'
+    +(offTotals().n?'<div class="hint">В телефоне ждут выгрузки '+offTotals().n+' наличных продаж на '
+      +money(offTotals().sum)+' — в ящике они есть, в учёте ещё нет, поэтому в «должно быть» не входят.</div>':'')
+    +'</div>';
+  if(auto){
+    html+='<div class="card"><h4>Сверка ящика</h4>'
+      +'<div class="hint">Пересчитали наличные — введите факт. Расхождение попадёт в журнал, а новый отсчёт начнётся с этой суммы.</div>'
+      +'<input class="fld" id="shiftRecount" inputmode="decimal" placeholder="Сколько в ящике, ₽">'
+      +'<input class="fld" id="shiftRecountNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+      +'<button class="btn pay" id="bReconcile" type="button" style="width:100%">Записать пересчёт</button></div>';
+  }else{
+    html+='<div class="card"><h4>Закрыть смену</h4>'
+      +'<div class="hint">Пересчитайте ящик. Расхождение запишется — не блокирует закрытие.</div>'
+      +'<input class="fld" id="shiftCloseCash" inputmode="decimal" placeholder="Факт в ящике, ₽">'
+      +'<input class="fld" id="shiftNote" placeholder="Комментарий (необязательно)" style="font-size:14px">'
+      +'<button class="btn pay" id="bShiftClose" type="button" style="width:100%">Закрыть смену</button></div>';
+  }
+  html+='<div class="card"><h4>Выемка'+(manager?"":" · только старший")+'</h4>'
+    +'<div class="hint">Выемка запишется в учёт.</div>'
     +'<input class="fld" id="shiftCollect" inputmode="decimal" placeholder="Сумма, ₽">'
     +'<input class="fld" id="shiftCollectNote" placeholder="Куда/зачем (необязательно)" style="font-size:14px">'
     +'<button class="btn warn" id="bShiftCollect" type="button" style="width:100%"'+(manager?"":" disabled")+'>Забрать из ящика</button></div>';
-  html+='<div class="card"><h4>Продажи смены</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
+  html+='<div class="card"><h4>'+(auto?"Продажи":"Продажи смены")+'</h4><div id="shiftSales"><div class="loading">Загружаем…</div></div></div>';
   box.innerHTML=html;
-  $("bShiftClose").addEventListener("click",function(){
+  if(auto)bindReconcile();
+  if(!auto)$("bShiftClose").addEventListener("click",function(){
     if(!confirm("Закрыть смену? Расхождение запишется."))return;
     api("/api/cashier/shift/close",{token:state.token,close_cash:parseNum($("shiftCloseCash").value),note:$("shiftNote").value})
       .then(function(d){
@@ -790,7 +1071,7 @@ function renderShift(box,r){
       })
       .catch(function(e){sessionError(e);});
   });
-  if(manager)$("bShiftCollect").addEventListener("click",function(){
+  if($("bShiftCollect")) if(manager)$("bShiftCollect").addEventListener("click",function(){
     var btn=this,amount=parseNum($("shiftCollect").value),note=$("shiftCollectNote").value;
     if(!confirm("Забрать из ящика"+(amount>0?(" "+money(amount)):" эту сумму")+"?"))return;
     withBusy(btn,function(){
@@ -799,19 +1080,44 @@ function renderShift(box,r){
     }).catch(function(e){sessionError(e);});
   });
 }
+// Пересчёт ящика — одна кнопка вместо «закрыть смену» + «открыть смену».
+function bindReconcile(){
+  var b=$("bReconcile");if(!b)return;
+  b.addEventListener("click",function(){
+    var btn=this,counted=parseNum($("shiftRecount").value);
+    var noteField=$("shiftRecountNote"),note=noteField?noteField.value:"";
+    if(!confirm("Записать пересчёт ящика: "+money(counted)+"?"))return;
+    withBusy(btn,function(){
+      return api("/api/cashier/reconcile",{token:state.token,counted_cash:counted,note:note})
+        .then(function(d){
+          var diff=Number(d.diff)||0;
+          toast(diff===0?"Пересчёт записан · ровно ✓":("Пересчёт · расхождение "+(diff>0?"+":"")+money(diff).replace(" ₽","")+" ₽"));
+          loadShift();loadCatalog();
+        });
+    }).catch(function(e){sessionError(e);});
+  });
+}
 function loadShiftSales(){
   var box=$("shiftSales");if(!box)return;
   api(withToken("/api/cashier/shift/sales")).then(function(r){
     var list=r.sales||[];
+    state.shiftSales=list;
     if(!list.length){box.innerHTML='<div class="hint">Продаж пока нет.</div>';return;}
     box.innerHTML=list.map(function(s){
       var t=String(s.created_at||"").replace("T"," ").slice(11,16);
       var names=(s.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
-      var disc=Number(s.discount_pct)>0?' <span class="qb low" style="font-size:11px;padding:3px 7px">−'+s.discount_pct+'%</span>':"";
+      var disc=Number(s.discount_pct)>0?' <span class="qb disc low" style="font-size:11px;padding:3px 7px">−'+s.discount_pct+'%</span>':"";
       var st=s.cancelled?'<span class="qb" style="background:rgba(239,68,68,.14);color:#ef4444;border:1px solid rgba(239,68,68,.2);font-size:11px;padding:4px 8px;border-radius:99px">отменена</span>'
         :(s.method==="sbp"?'<span class="qb" style="background:rgba(217,119,6,.14);color:#d97706;border:1px solid rgba(217,119,6,.2);font-size:11px;padding:4px 8px;border-radius:99px">СБП · '+(s.confirmed?"✓":"⏳")+'</span>':'<span class="qb qty" style="font-size:11px">нал</span>');
-      var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>':"";
-      return '<div class="row"><div class="t"><b>'+money(s.amount)+'</b><small>'+esc(t)+' · '+esc(s.cashier||"")+disc+'<br>'+(names||"—")+'</small></div>'+st+btn+'</div>';
+      var back="";
+      if(s.method==="cash"&&!s.cancelled&&Number(s.refund_left||0)>0&&state.role==="manager"){
+        back='<button class="btn ghost sm" data-return="'+esc(s.id)+'">Возврат</button>';
+      }
+      var btn=(s.method==="cash"&&!s.cancelled)?'<button class="btn ghost sm" data-cancel="'+esc(s.id)+'">Отменить</button>'+back:back;
+      var offB=s.offline_at?' <span class="qb low" style="font-size:11px;padding:3px 7px">офлайн</span>':"";
+      if(s.offline&&s.offline.negative_stock)offB+=' <span class="qb" style="font-size:11px;padding:3px 7px;border-radius:99px;background:rgba(239,68,68,.16);color:#ef4444;border:1px solid rgba(239,68,68,.24)">минус: '+s.offline.negative_stock.length+'</span>';
+      var part=Number(s.refunded_amount)>0?' <span class="qb" style="background:rgba(217,119,6,.14);color:#d97706;border:1px solid rgba(217,119,6,.2);font-size:11px;padding:4px 8px;border-radius:99px">возврат '+money(s.refunded_amount)+'</span>':"";
+      return '<div class="row"><div class="t"><b>'+money(s.amount)+part+'</b><small>'+esc(t)+' · '+esc(s.cashier||"")+disc+offB+'<br>'+(names||"—")+'</small></div>'+st+btn+'</div>';
     }).join("");
   }).catch(function(e){box.innerHTML=errorCard("Продажи смены недоступны",e.message,false);sessionError(e);});
 }
@@ -822,10 +1128,249 @@ document.addEventListener("click",function(ev){
     .then(function(){toast("Продажа отменена ✓");loadShift();loadCatalog();})
     .catch(function(e){sessionError(e);});
 });
+var RING_KEY="cashier_ring_muted";
+function ringMuted(){try{return localStorage.getItem(RING_KEY)==="1";}catch(e){return false;}}
+function ringOn(){return state.ring!==false&&!ringMuted();}
+function applyRingBtn(){
+  var b=$("bRing");if(!b)return;
+  b.textContent=ringOn()?"🔔":"🔕";
+  b.classList.toggle("off",!ringOn());
+  b.title=state.ring===false?"Звук выключен в настройках сервера — баннер и счётчик работают"
+    :"Звук о платежах на этом телефоне: "+(ringOn()?"включён":"выключен");
+}
+$("bRing").addEventListener("click",function(){
+  try{localStorage.setItem(RING_KEY,ringMuted()?"0":"1");}catch(e){}
+  applyRingBtn();
+  if(state.ring!==false&&!ringMuted()){ring(true,"Проверка: так звенит подтверждённая оплата");}
+  else{toast(ringOn()?"Звук включён":"Только баннер: звука и вибрации нет");}
+});
+applyRingBtn();
+
+// ------------------------------------------------------------- возврат товара
+// «Отменить» — сторно ошибки внутри смены: проводка уходит, операции как бы
+// не было. Возврат — покупатель пришёл позже: продажа остаётся в журнале и в
+// своей смене, а деньги уходят сегодняшней возвратной проводкой и уменьшают
+// ожидаемую наличность в ящике. Право — старший: сервер проверяет роль,
+// кнопка показана только когда она у сессии есть.
+var retSale=null;
+function retDone(s){
+  var out={};
+  try{(JSON.parse(s.refund_items||"[]")||[]).forEach(function(r){
+    if(r&&r.move_id)out[String(r.move_id)]=Number(r.qty)||0;});}catch(e){}
+  return out;
+}
+function openReturn(id){
+  var s=(state.shiftSales||[]).filter(function(x){return x.id===id;})[0];
+  if(!s){toast("Обновите список продаж смены");loadShiftSales();return;}
+  var done=retDone(s);
+  var rows=(s.items||[]).filter(function(i){return i.move_id;});
+  if(!rows.length){toast("По этой продаже нет строк — возврат из панели");return;}
+  retSale=s;
+  $("retHint").innerHTML="Чек на <b>"+money(s.amount)+"</b> от "+esc(String(s.created_at||"").replace("T"," ").slice(11,16))+
+    ". Сколько сдал покупатель — столько вернём на полку и выпишем из кассы.";
+  $("retLines").innerHTML=rows.map(function(i){
+    var left=Math.max(0,(Number(i.qty)||0)-(done[i.move_id]||0));
+    var sum=Math.round((Number(i.price)||0)*left*100)/100;
+    return '<div class="row" style="align-items:center"><div class="t"><b>'+esc(i.name||"")+'</b>'+
+      '<small>'+money(sum)+' · доступно '+left+' шт'+((done[i.move_id]||0)?(' · уже вернули '+done[i.move_id]):"")+'</small></div>'+
+      '<input class="fld rqty" data-move="'+esc(i.move_id)+'" data-max="'+left+'" data-price="'+(Number(i.price)||0)+'"'+
+      ' inputmode="decimal" value="'+left+'" style="width:78px;text-align:right"'+(left?"":" disabled")+'></div>';
+  }).join("");
+  $("retNote").value="";
+  $("retModal").classList.add("on");
+}
+$("retClose").addEventListener("click",function(){$("retModal").classList.remove("on");});
+$("retGo").addEventListener("click",function(){
+  if(!retSale)return;
+  if(offBlock())return;
+  var lines=[],total=0;
+  document.querySelectorAll("#retLines .rqty").forEach(function(inp){
+    var max=Number(inp.getAttribute("data-max"))||0;
+    var q=Math.min(max,Math.max(0,Number(inp.value)||0));
+    if(q>0){lines.push({move_id:inp.getAttribute("data-move"),qty:q});
+      total+=q*(Number(inp.getAttribute("data-price"))||0);}
+  });
+  if(!lines.length){toast("Укажите, сколько штук вернули");return;}
+  var btn=this;btn.disabled=true;
+  api("/api/cashier/return",{token:state.token,sale_id:retSale.id,lines:lines,note:$("retNote").value.trim(),
+      request_id:"ret-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)})
+    .then(function(r){
+      $("retModal").classList.remove("on");
+      toast("Возврат принят · "+money(r.returned||Math.round(total*100)/100)+" из кассы");
+      loadShift();loadCatalog();loadShiftSales();
+    })
+    .catch(function(e){sessionError(e);toast("Не вышло: "+(e&&e.message||e));})
+    .finally(function(){btn.disabled=false;});
+});
+document.addEventListener("click",function(ev){
+  var b=ev.target.closest("[data-return]");if(!b)return;
+  openReturn(b.getAttribute("data-return"));
+});
+
+function installHint(){
+  // Вкладка браузера Android выгружает из памяти, когда её не хватает: утром
+  // кассир снова вводит код, а «невидимая смена» прерывается. Оболочка
+  // (иконка + свой процесс) это и чинит. Показываем один раз и только если
+  // сборка реально лежит на сервере — и не показываем внутри самого приложения.
+  if(window.PfApp)return;
+  var box=$("installHint");if(!box)return;
+  try{if(localStorage.getItem("cashier_install_off")==="1"){box.hidden=true;return;}}catch(e){}
+  api("/api/app/android").then(function(r){
+    if(!r||!r.available||!r.url){box.hidden=true;return;}
+    var size=Number(r.size_mb)||0;
+    $("installText").innerHTML="Приложение кассы"+(r.version?" · "+esc(String(r.version)):"")+
+      (size?" · "+size+" МБ":"")+": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же.";
+    $("installGo").setAttribute("href",r.url);
+    box.hidden=false;
+  }).catch(function(){box.hidden=true;});
+}
+$("installOff").addEventListener("click",function(){
+  $("installHint").hidden=true;
+  try{localStorage.setItem("cashier_install_off","1");}catch(e){}
+});
+
 $("tabShift").addEventListener("click",function(){setTab("shift");});
 
+// ------------------------------------------------------- звонок о деньгах
+// Раньше кассир узнавал об оплате, только когда сам открывал вкладку
+// «Входящие». Сервер публикует каждое денежное событие в живой поток
+// (SSE /api/stream), поэтому телефон звенит сразу: «клиент нажал „я
+// оплатил“», «банк видит приход — нужна сверка», «деньги в журнале — можно
+// выдавать». Страховка для браузеров без EventSource и для прокси, режущих
+// длинные соединения: тихий опрос раз в 25 секунд, только когда вкладка видна.
+var RING_LOUD={client_claim:1,bank_matched:1};   // денег ещё нет — нужен клик кассира
+var RING_SOFT={money_in:1};                      // деньги в журнале — можно выдавать
+var moneySeen=null,moneyES=null,moneyTimer=0,soundCtx=null;
+
+function beep(){
+  // двойной сигнал без аудиофайлов (WebAudio есть и в WebView); на iOS звук
+  // разрешён только после касания — контекст поднимаем в unlockAudio ниже
+  try{
+    var Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;
+    soundCtx=soundCtx||new Ctx();
+    if(soundCtx.state==="suspended"&&soundCtx.resume){soundCtx.resume();}
+    var t=soundCtx.currentTime;
+    [[0,660],[0.18,880]].forEach(function(p){
+      var o=soundCtx.createOscillator(),g=soundCtx.createGain();
+      o.type="sine";o.frequency.value=p[1];
+      g.gain.setValueAtTime(0.0001,t+p[0]);
+      g.gain.exponentialRampToValueAtTime(0.2,t+p[0]+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+p[0]+0.15);
+      o.connect(g);g.connect(soundCtx.destination);
+      o.start(t+p[0]);o.stop(t+p[0]+0.17);
+    });
+  }catch(e){/* звук не должен ломать кассу */}
+}
+function unlockAudio(){
+  try{
+    var Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx||soundCtx)return;
+    soundCtx=new Ctx();if(soundCtx.resume){soundCtx.resume();}
+  }catch(e){}
+  document.removeEventListener("click",unlockAudio);
+}
+document.addEventListener("click",unlockAudio);
+
+function nativeRing(loud,text){
+  // Android-оболочка (site/../android) подставляет свой мостик: у неё есть
+  // право на вибрацию и уведомление, когда WebView уже не на экране. В
+  // браузере window.PfApp нет — тихо идём дальше, касса не должна падать
+  // из-за отсутствующего приложения.
+  try{
+    var app=window.PfApp;
+    if(app&&app.ring){app.ring(loud?"loud":"soft",String(text||"").slice(0,140));return true;}
+  }catch(e){}
+  return false;
+}
+function ring(loud,text){
+  nativeRing(loud,text);
+  // Настройка «Звенеть о платежах» на сервере плюс тумблер этого телефона:
+  // в тихом зале телефон не должен дребезжать на каждый чек, но баннер и
+  // счётчик на вкладке «Входящие» остаются всегда — иначе вернёмся к
+  // «сам посмотри вкладку» и потерянным платежам.
+  if(ringOn()){
+    if(navigator.vibrate){try{navigator.vibrate(loud?[170,70,170]:[90]);}catch(e){}}
+    if(loud)beep();
+  }
+  var bar=$("moneyAlert");
+  bar.innerHTML="<b>🔔 "+esc(text)+"</b><span>нажми, чтобы посмотреть</span>";
+  bar.hidden=false;
+  clearTimeout(ring._t);ring._t=setTimeout(function(){bar.hidden=true;},30000);
+}
+$("moneyAlert").addEventListener("click",function(){this.hidden=true;setTab("in");});
+
+// одно событие — один звонок: SSE умеет отдать кадр повторно при переподключении
+function noteOnce(id){
+  var k=String(id||"");if(!k)return true;
+  moneySeen=moneySeen||{};
+  if(moneySeen[k])return false;moneySeen[k]=1;return true;
+}
+function moneyEvent(row){
+  var d=(row&&row.data)||{},signal=String(d.signal||"");
+  var amount=d.amount?(" "+money(d.amount)):"";
+  var what=d.order_number?(" заказ "+d.order_number):"";
+  if(RING_SOFT[signal]){
+    if(!noteOnce("in-"+(d.payment_id||"")))return;
+    ring(false,"Деньги в журнале"+amount+what+" — можно выдавать");
+    loadCatalog();
+    if(state.tab==="in"){loadIncoming();}else{refreshBadge();}
+    return;
+  }
+  if(!RING_LOUD[signal])return;   // «счёт выставлен» — дело рук самого кассира
+  if(!noteOnce((signal==="bank_matched"?"r-":"p-")+(d.payment_id||d.receipt_id||row.at||"")))return;
+  ring(true,signal==="bank_matched"?("Банк видит приход"+amount+" — сверь и подтверди")
+      :("Клиент сообщил об оплате"+amount+what+" — проверь поступление"));
+  if(state.tab==="in"){loadIncoming();}else{refreshBadge();}
+}
+function refreshBadge(){
+  api(withToken("/api/cashier/incoming")).then(function(r){
+    var n=(r.payments||[]).length,tab=$("tabIn");
+    tab.textContent=n?("⏳ Входящие · "+n):"⏳ Входящие";
+    tab.classList.toggle("nudge",n>0);
+  }).catch(function(){});
+}
+// первый заход: уже висящие платежи отмечаем бейджем без звонка — кассир про
+// них знает, а будить его по уже известному факту нельзя
+function primeMoney(){
+  return api(withToken("/api/cashier/incoming")).then(function(r){
+    moneySeen=moneySeen||{};
+    (r.payments||[]).forEach(function(p){moneySeen["p-"+p.payment_id]=1;});
+    refreshBadge();
+  }).catch(function(){});
+}
+function startMoneyPoll(){
+  if(moneyTimer||!loggedIn())return;
+  moneyTimer=setInterval(function(){
+    if(document.visibilityState==="visible"&&loggedIn())refreshBadge();
+  },25000);
+}
+function stopMoneyPoll(){if(moneyTimer){clearInterval(moneyTimer);moneyTimer=0;}}
+function connectMoney(){
+  if(moneyES||!window.EventSource||!loggedIn())return;
+  try{moneyES=new EventSource("/api/stream");}
+  catch(e){startMoneyPoll();return;}
+  moneyES.addEventListener("event",function(msg){
+    var row;try{row=JSON.parse(msg.data);}catch(e){return;}
+    moneyEvent(row);
+  });
+  moneyES.onopen=function(){stopMoneyPoll();};
+  moneyES.onerror=function(){startMoneyPoll();};  // поток оборвался — включаем страховку
+}
+function resetMoney(){
+  moneySeen=null;
+  if(moneyES){try{moneyES.close();}catch(e){}moneyES=null;}
+  stopMoneyPoll();
+  var tab=$("tabIn");tab.textContent="⏳ Входящие";tab.classList.remove("nudge");
+  $("moneyAlert").hidden=true;
+}
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState!=="visible"||!loggedIn())return;
+  // телефон выгрузил вкладку из памяти: перечитываем входящие и поднимаем поток
+  if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
+  primeMoney();connectMoney();
+});
+
 // старт
-if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();}else{renderWho();showApp(false);}
+if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();offRender();offQrRefresh(false);offFlush();primeMoney().then(connectMoney);}else{renderWho();showApp(false);}
 window.addEventListener("online",function(){if(loggedIn()){loadCatalog();if(state.tab==="in")loadIncoming();if(state.tab==="shift")loadShift();}});
 window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){

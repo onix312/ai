@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Магазин живёт в своей подсети: туда ходим по http, наружу — только если
+     владелец сам заведёт https. Так адрес сервера можно диктовать вслух. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

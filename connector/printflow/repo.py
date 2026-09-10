@@ -31,6 +31,10 @@ ORDER_FIELDS = (
     "client_quote_accepted_at client_variant_id client_ready_at client_delivered_at"
 ).split()
 
+# С заказа 1001 — историческая база нумерации PrintFlow: новые установки
+# начинаются с 1001, а не с 1, и правка счётчика это сохраняет.
+ORDER_NUMBER_BASE = 1000
+
 
 class Repo:
     def __init__(self, db: Database):
@@ -85,9 +89,34 @@ class Repo:
             "SELECT * FROM order_photos WHERE order_id=? ORDER BY datetime(at) DESC", (order_id,))
         return row
 
+    def _order_number_taken(self, number: int) -> bool:
+        """Занят ли такой номер заказом (ручной ввод в карточке — обычное дело)."""
+        return bool(self.db.one("SELECT id FROM orders WHERE number=? LIMIT 1",
+                                (str(number),)))
+
     def next_order_number(self) -> str:
-        row = self.db.one("SELECT COUNT(*) n FROM orders") or {"n": 0}
-        return str(1000 + int(num(row["n"])) + 1)
+        """Следующий номер заказа — из сквозного счётчика, а не из числа строк.
+
+        Было ``1000 + COUNT(orders) + 1``. Нумерация от количества строк
+        означает две вещи: удаление карточки откатывает номер назад, а новый
+        заказ получает номер уже существующего. Номер — не украшение: по нему
+        клиентский бот ищет «выдать 1003» и «оплата подтвердить 1003», по нему
+        заказ открывается на трекинге и он же попадает в назначение
+        СБП-перевода; дубль уводит деньги и выдачу не на тот заказ. Поэтому
+        номер берётся из счётчика ``name_counters('order')`` и только растёт, а
+        освобождённые удалением номера не переиспользуются.
+
+        Стартуем от максимального числового номера в базе — правка догоняет
+        установки, где номера задавали вручную или задвинули вперёд. Номера
+        вида «2026-14» считаются как 2026: следующий прыгнет за них, зато без
+        коллизии.
+        """
+        top = self.db.one(
+            "SELECT COALESCE(MAX(CAST(number AS INTEGER)), 0) n FROM orders"
+            " WHERE number GLOB '[0-9]*'") or {}
+        floor = max(int(num(top.get("n"))), ORDER_NUMBER_BASE)
+        return str(self.db.next_counter("order", floor=floor,
+                                        skip=self._order_number_taken))
 
     def _save_order_items(self, order_id: str, items: list | None) -> dict:
         """Сохранить состав заказа (мультизаказ: разные товары на одной плите).
@@ -207,8 +236,22 @@ class Repo:
             if field in data:
                 payload[field] = data[field]
         if not existing:
-            payload.setdefault("number", data.get("number") or self.next_order_number())
             payload["created_at"] = now_iso()
+        number = str(payload.get("number") or "").strip()
+        if number:
+            # Номер — лицо заказа: по нему бот ищет «выдать 1003», по нему
+            # открывается трекинг и он же идёт в назначение СБП-перевода.
+            # Два заказа с одним номером = оплата и выдача не там, где надо,
+            # поэтому занятый номер не отдаём ни новому, ни переименованному.
+            taken = self.db.one(
+                "SELECT id, product FROM orders WHERE number=? AND id<>? LIMIT 1",
+                (number, order_id))
+            if taken:
+                raise ValueError(
+                    f"Номер {number} уже занят (заказ «{taken.get('product') or taken['id']}») — "
+                    "очистите поле, присвоим следующий свободный")
+        elif not existing:
+            payload["number"] = self.next_order_number()
         payload["updated_at"] = now_iso()
 
         # клиент подтягивается или создаётся автоматически

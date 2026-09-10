@@ -185,5 +185,119 @@ class BankReceiptsTests(unittest.TestCase):
         self.assertIn("auto_confirm", actions)
 
 
+class AutoConfirmDefaultTests(unittest.TestCase):
+    """Авто-подтверждение по умолчанию выключено (решение заказчика 2026-09-10).
+
+    Живой смоук: приход «OZON выплата средств продавцу 1500,00» подтвердил
+    платёж клиента на 1500 — заказ стал «оплачен», товар можно выдать без
+    денег. Сопоставление смотрит только сумму и время, поэтому по умолчанию
+    банк лишь связывает поступление с платежом («matched»), а выручку пишет
+    человек. Кто хочет иначе — включает галку в «Настройки → Банк».
+    """
+
+    def test_default_is_off_and_books_nothing(self):
+        db = make_db()
+        try:
+            acc = Accounting(db)
+            sbp = Sbp(db, acc)
+            bank = BankReceipts(db, acc, sbp)
+            self.assertFalse(bool(db.setting("sbp_auto_confirm", False)))
+            order(db)
+            payment = sbp.create(amount=1000, order_id="o1")
+            result = bank.ingest([{"at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                                    "amount": 1000, "purpose": "OZON выплата средств продавцу"}])
+            self.assertEqual(result["confirmed"], 0)
+            self.assertEqual(result["matched"], 1)
+            self.assertEqual(db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+            self.assertEqual(float(db.one("SELECT paid FROM orders WHERE id='o1'")["paid"]), 0.0)
+            self.assertIsNone(db.one("SELECT * FROM transactions WHERE kind='income'"))
+        finally:
+            db.close()
+
+
+class ImportResilienceTests(unittest.TestCase):
+    """Одна конфликтная строка выписки не роняет импорт целиком.
+
+    Живой смоук 2026-09-10: выписка из двух строк давала `400 «Платёж больше
+    остатка: осталось 0 ₽»` (долг закрыли наличными), не разносилась ни одна
+    строка, а повторный импорт падал на той же. Сверка вставала до ручной
+    правки платежа — для кассы это остановка приёма денег.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+        self.bank = BankReceipts(self.db, self.acc, self.sbp)
+        self.db.set_settings({"sbp_enabled": True, "sbp_auto_confirm": True})
+
+    def tearDown(self):
+        self.db.close()
+
+    def _now(self) -> str:
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+
+    def test_conflicting_row_goes_to_review_rest_is_booked(self):
+        order(self.db, id="o1", number="1001")
+        payment = self.sbp.create(amount=800, order_id="o1")
+        # кассир получил наличные и закрыл долг — авто-подтверждать уже нечего
+        self.acc.add_payment("o1", 800, "payment", "cash", "cash", "наличные")
+        rows = [{"at": self._now(), "amount": 800, "purpose": "СБП заказ 1001"},
+                {"at": self._now(), "amount": 450, "purpose": "СБП чек с полки"}]
+        result = self.bank.ingest(rows)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["new"], 2)          # обе строки сохранены
+        self.assertEqual(len(result["problems"]), 1)
+        self.assertIn("Платёж больше остатка", result["problems"][0]["error"])
+        bad = self.db.one("SELECT * FROM bank_receipts WHERE amount=800")
+        self.assertEqual(bad["status"], "review")
+        self.assertIn("не удалось разнести", bad["note"])
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+        # повтор той же выписки: ничего не задваивается и снова не падает
+        again = self.bank.ingest(rows)
+        self.assertEqual(again["skipped"], 2)
+        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM bank_receipts")["n"], 2)
+
+    def test_matched_receipt_signals_the_cashier(self):
+        """«Банк видит приход» — событие для звонка на кассу, после коммита строки."""
+        order(self.db, id="o1", number="1001")
+        self.sbp.create(amount=1000, order_id="o1")
+        self.db.set_settings({"sbp_auto_confirm": False})
+        self.bank.ingest([{"at": self._now(), "amount": 1000, "purpose": "СБП заказ 1001"}])
+        event = self.db.events(limit=1)[0]
+        self.assertEqual(event["title"], "Банк: поступление на сверке")
+        data = event.get("data") or {}
+        self.assertEqual(data["signal"], "bank_matched")
+        self.assertEqual(data["status"], "matched")
+        self.assertEqual(data["amount"], 1000.0)
+
+    def test_confirmed_receipt_does_not_double_signal(self):
+        """Когда авто-подтверждение сработало, звонит событие «деньги в журнале»."""
+        order(self.db, id="o1", number="1001")
+        self.sbp.create(amount=1000, order_id="o1")
+        self.bank.ingest([{"at": self._now(), "amount": 1000, "purpose": "СБП заказ 1001"}])
+        titles = [e["title"] for e in self.db.events(limit=5)]
+        self.assertNotIn("Банк: поступление на сверке", titles)
+        self.assertIn("СБП-оплата подтверждена", titles)
+
+    def test_link_checks_amount_and_forces_explicitly(self):
+        order(self.db, id="o1", number="1001")
+        payment = self.sbp.create(amount=1000, order_id="o1")
+        self.db.set_settings({"sbp_auto_confirm": False})
+        self.bank.ingest([{"at": self._now(), "amount": 600, "purpose": "частично"}])
+        receipt = self.db.one("SELECT * FROM bank_receipts")
+        with self.assertRaisesRegex(ValueError, "не равна сумме платежа"):
+            self.bank.link(receipt["id"], payment["id"])
+        out = self.bank.link(receipt["id"], payment["id"], force=True)
+        self.assertEqual(out["status"], "matched")
+        self.assertIn("суммы различаются", out["note"])
+        # деньги не тронуты: привязка — не подтверждение
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+        self.assertIsNone(self.db.one("SELECT * FROM transactions WHERE kind='income'"))
+
+
 if __name__ == "__main__":
     unittest.main()

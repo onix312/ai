@@ -399,7 +399,8 @@ class Shelf:
     def sale(self, item_id: str, qty: float, price: float = 0.0,
              channel: str = "shelf", note: str = "", *,
              record_income: bool = True, source: str = "",
-             external_id: str = "", keep_zero_price: bool = False) -> dict:
+             external_id: str = "", keep_zero_price: bool = False,
+             allow_negative: bool = False) -> dict:
         """Продажа штук со стеллажа.
 
         Обычная ручная продажа пишет доход в PrintFlow. Интеграция с 1С передаёт
@@ -416,7 +417,12 @@ class Shelf:
             raise ValueError("Количество должно быть больше нуля")
         left = self._qty(item_id)
         if left < qty:
-            raise ValueError(f"На стеллаже только {round(left)} шт — продать {round(qty)} нельзя")
+            # allow_negative — офлайн-выгрузка (17.0.8): покупатель уже ушёл с
+            # товаром и деньги уже в кассе, поэтому продажу не отменить, а
+            # вотить её в плюс нельзя — расхождение полки и склада становится
+            # видимым минусом, который разбирают инвентаризацией.
+            if not allow_negative:
+                raise ValueError(f"На стеллаже только {round(left)} шт — продать {round(qty)} нельзя")
         price = num(price)
         if price <= 0 and not keep_zero_price:
             price = num(item.get("price"))
@@ -437,6 +443,13 @@ class Shelf:
                               source=source, external_id=external_id)
             # Единый регистр: связанная позиция списывает и зону витрины.
             leg = self._register_leg(item, "sale", -qty, sale_note)
+        if allow_negative and left < qty:
+            self.db.add_event("shelf", "Остаток ушёл в минус",
+                              f"{item.get('name') or ''}: было {round(left)} шт, "
+                              f"продали {round(qty)} → {round(left - qty)} шт",
+                              data={"item_id": item_id, "move_id": move["id"],
+                                    "left": round(left, 3), "qty": qty,
+                                    "reason": "выгрузка из офлайн-очереди кассы"})
         self.db.add_event("shelf", "Продажа со стеллажа",
                           f"{item.get('name') or ''} −{round(qty)} шт"
                           + (f" на {round(price * qty)} ₽" if price else ""),
@@ -515,6 +528,76 @@ class Shelf:
                 "item": self.item(item_id)}
 
     # ------------------------------------------------------- касса и 1С
+    def return_stock(self, move_id: str, qty: float, note: str = "", *,
+                     actor: str = "", record_refund: bool = True) -> dict:
+        """Вернуть товар покупателя: штуки на полку + возвратная проводка.
+
+        Чем это отличается от ``undo_sale``. Отмена — сторно ошибки внутри
+        смены: она убирает проводку, потому что операции как бы не было.
+        Возврат — человек принёс товар позже: продажа обязана остаться в
+        журнале и в своей смене (иначе выручка и налоговая база прошлых дней
+        правились бы задним числом), а деньги уходят сегодняшней проводкой
+        ``expense/refund`` канала ``shelf`` — по ней касса смены видит, что из
+        ящика выдали N ₽, и сверка не показывает фантомную недостачу.
+
+        Возврат можно делать частями: ``returned_qty`` строки не даёт вернуть
+        больше, чем по ней продали.
+        """
+        move = self.db.one("SELECT * FROM shelf_moves WHERE id=?", (move_id,))
+        if not move:
+            raise ValueError("Продажа не найдена")
+        if move.get("kind") not in ("sale", "online"):
+            raise ValueError("Возвращать можно только продажу")
+        if str(move.get("undone") or "") == "1":
+            raise ValueError("Продажа отменена — возвращать нечего")
+        back = round(num(qty), 2)
+        if back <= 0:
+            raise ValueError("Количество возврата должно быть больше нуля")
+        sold = abs(num(move.get("qty")))
+        already = num(move.get("returned_qty"))
+        if already + back > sold + 1e-9:
+            raise ValueError(f"По строке продано {round(sold)} шт, возвращают "
+                             f"{round(already + back)} — верните не больше проданного")
+        item_id = str(move.get("item_id") or "")
+        item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
+        if not item:
+            raise ValueError("Позиция стеллажа не найдена")
+        price = num(move.get("price"))
+        amount = round(price * back, 2)
+        text = str(note or "").strip()[:300] or f"Возврат (строка {move_id})"
+        tx = None
+        with self.db.transaction():
+            # Проверку повторяем внутри транзакции: параллельный возврат той же
+            # строки не должен протащить лишние штуки.
+            fresh = self.db.one("SELECT returned_qty FROM shelf_moves WHERE id=?",
+                                (move_id,)) or {}
+            if num(fresh.get("returned_qty")) + back > sold + 1e-9:
+                raise ValueError("Эту строку уже возвращают — обновите список продаж")
+            if record_refund and amount > 0:
+                account = str(self.db.setting("default_account", "cash") or "cash")
+                tx = self.acc.add_transaction(
+                    "expense", "refund", amount,
+                    f"Возврат: {item.get('name') or ''} × {round(back)}",
+                    note=text + (f" · {actor}" if actor else ""),
+                    account_id=account, channel="shelf", payer="person")
+            # Встречное движение: qty>0 само возвращает штуки на стеллаж
+            # (`_move` обновляет остаток), поэтому второго UPDATE не нужно.
+            back_move = self._move(item_id, "return", back, price=price,
+                                   tx_id=str((tx or {}).get("id") or ""), note=text)
+            self.db.execute("UPDATE shelf_moves SET returned_qty=returned_qty+? WHERE id=?",
+                            (back, move_id))
+            leg = self._register_leg(item, "return", back, text)
+        self.db.add_event("shelf", "Возврат товара на стеллаж",
+                          f"{item.get('name') or ''} +{round(back)} шт"
+                          + (f" на {amount:g} ₽" if amount else ""),
+                          data={"item_id": item_id, "move_id": move_id, "qty": back,
+                                "price": price, "amount": amount,
+                                "tx_id": str((tx or {}).get("id") or ""),
+                                "actor": actor, "refund_recorded": bool(tx)})
+        return {"ok": True, "item_id": item_id, "qty": back, "amount": amount,
+                "move": back_move, "tx": tx, "register_move": leg,
+                "item": self.item(item_id)}
+
     def cashier_lookup(self, code: str) -> dict | None:
         """Найти позицию по коду, который прислал кассовый сканер/1С."""
         code = str(code or "").strip()
@@ -654,11 +737,16 @@ class Shelf:
         """
         day = now_iso()[:10]
         row = self.db.one(
-            "SELECT COALESCE(SUM(-qty),0) qty, COALESCE(SUM(-qty*price),0) money,"
+            "SELECT COALESCE(SUM(CASE WHEN kind IN ('sale','online') AND qty<0"
+            " THEN -qty END),0) qty,"
+            " COALESCE(SUM(CASE WHEN kind IN ('sale','online') AND qty<0"
+            " THEN -qty*price END),0) money,"
             " COALESCE(SUM(CASE WHEN kind='online' THEN -qty ELSE 0 END),0) online_qty,"
-            " COALESCE(SUM(CASE WHEN kind='online' THEN -qty*price ELSE 0 END),0) online_money"
+            " COALESCE(SUM(CASE WHEN kind='online' THEN -qty*price ELSE 0 END),0) online_money,"
+            " COALESCE(SUM(CASE WHEN kind='return' AND qty>0 THEN qty END),0) r_qty,"
+            " COALESCE(SUM(CASE WHEN kind='return' AND qty>0 THEN qty*price END),0) r_money"
             " FROM shelf_moves"
-            " WHERE kind IN ('sale','online') AND qty<0 AND COALESCE(undone,0)=0"
+            " WHERE kind IN ('sale','online','return') AND COALESCE(undone,0)=0"
             " AND substr(at,1,10)=?", (day,)) or {}
         total_qty = num(row.get("qty"))
         total_money = num(row.get("money"))
@@ -667,6 +755,12 @@ class Shelf:
         return {
             "qty": round(total_qty, 1),
             "money": round(total_money, 2),
+            # Возвраты дня — отдельной строкой: «продали» и «вернули» должны
+            # быть видны раздельно, иначе из числа «выручка упала» нельзя
+            # понять, buyers ли стало меньше или один человек сдал товар.
+            "returned_qty": round(num(row.get("r_qty")), 1),
+            "returned_money": round(num(row.get("r_money")), 2),
+            "net_money": round(total_money - num(row.get("r_money")), 2),
             "online_qty": round(online_qty, 1),
             "online_money": round(online_money, 2),
             "shop_money": round(total_money - online_money, 2),
@@ -714,9 +808,12 @@ class Shelf:
         Онлайн-продажи со стеллажа уходят каналом 'online' и в кассу магазина
         не попадают — деньги там лежат на счёте, а не в магазине.
         """
+        # Возвраты (expense/refund того же канала) вычитаются: деньги, которые
+        # отдали покупателю из кассы, лежать в магазине больше не должны.
         row = self.db.one(
-            "SELECT COALESCE(SUM(amount),0) v FROM transactions"
-            " WHERE kind='income' AND channel='shelf'") or {}
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount END),0)"
+            " - COALESCE(SUM(CASE WHEN kind='expense' AND category='refund'"
+            " THEN amount END),0) v FROM transactions WHERE channel='shelf'") or {}
         return num(row.get("v"))
 
     def collections(self, limit: int = 50) -> list[dict]:

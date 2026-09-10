@@ -5,3 +5,14 @@ __pycache__/
 /build/
 /dist/
 .venv/
+
+# Сборка Android-оболочки: артефакты и локальный ключ — не в Git (источник — android/)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+android/*.jks
+android/*.keystore
+site/app/*.apk
+site/app/version.json

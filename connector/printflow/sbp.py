@@ -68,6 +68,7 @@ class Sbp:
             "shop_qr": str(self.db.setting("sbp_shop_qr", "") or "").strip(),
             "bank_name": str(self.db.setting("sbp_bank_name", "") or "").strip(),
             "payment_note": str(self.db.setting("sbp_payment_note", "") or "").strip(),
+            "pins_required": self.pins_required(),
             "accounts": [
                 {"id": r["id"], "name": r["name"]}
                 for r in self.db.query(
@@ -135,6 +136,63 @@ class Sbp:
         if not self.enabled():
             raise ValueError("СБП-оплата отключена в настройках")
 
+    def pins_required(self) -> bool:
+        """Нужен ли персональный PIN для денежных действий в панели.
+
+        Режим ролей включается сам, как только в «Команде» заведён хоть один
+        PIN (тот же приём, что и в кассе): одиночная установка владельца
+        работает как раньше, а магазину с сотрудниками панель перестаёт
+        отдавать деньги анонимному запросу из LAN.
+        """
+        try:
+            from .staff import Staff
+            return Staff(self.db).pins_count() > 0
+        except Exception:
+            return False
+
+    def authorize(self, pin: str = "", *, manager: bool = False,
+                  authorized: str = "", purpose: str = "") -> str:
+        """Проверка права на денежное действие. Возвращает имя подтвердившего.
+
+        ``authorized`` — действие уже авторизовано своим контуром (сессия кассы
+        или движок сверки банка) и передаёт имя оператора. Иначе, когда PIN-ы
+        заведены, требуется PIN сотрудника; для возврата — PIN старшего.
+        """
+        name = str(authorized or "").strip()[:120]
+        if name:
+            return name
+        if not self.pins_required():
+            return "владелец"          # одиночная установка: прав нет ни у кого, кроме владельца
+        if not str(pin or "").strip():
+            raise ValueError(f"Нужен PIN сотрудника — {purpose or 'это действие с деньгами'}")
+        from .staff import Staff
+        member = Staff(self.db).find_by_pin(str(pin).strip())
+        if not member:
+            raise ValueError("Нужен PIN сотрудника — деньги подтверждает персонально")
+        role = str(member.get("role") or "employee")
+        if manager and role != "manager":
+            raise ValueError("Нужен PIN старшего — возврат денег у руководителя")
+        return str(member.get("name") or "сотрудник")[:120]
+
+    def _actor(self, actor: str, pin: str = "", *, authorized: str = "",
+               manager: bool = False, purpose: str = "") -> str:
+        """Право + имя: авторизованный контур подписывает действие своим именем.
+
+        Вызов без PIN-режима сохраняет прежнего ``actor`` (панель одного
+        владельца работает как раньше), но проверка ``authorize`` выполняется
+        всегда — иначе анонимный запрос из LAN пишет выручку и делает возврат.
+        """
+        name = self.authorize(pin, manager=manager, authorized=authorized,
+                              purpose=purpose)
+        return name if (pin or authorized) else (actor or "panel")
+
+    def _order_number(self, order_id: str) -> str:
+        """Номер заказа для живых уведомлений кассе (без него баннер немой)."""
+        if not order_id:
+            return ""
+        row = self.db.one("SELECT number FROM orders WHERE id=?", (order_id,))
+        return str((row or {}).get("number") or "")
+
     def _get(self, payment_id: str) -> dict:
         row = self.db.one("SELECT * FROM sbp_payments WHERE id=?", (payment_id,))
         if not row:
@@ -153,9 +211,22 @@ class Sbp:
             pass
 
     def _next_number(self) -> str:
-        row = self.db.one("SELECT COALESCE(MAX(CAST(number AS INTEGER)),0) n"
+        """Человеческий номер платежа из сквозного счётчика.
+
+        Было ``MAX(CAST(number))+1``: два параллельных создания (касса + бот +
+        вебхук) давали один номер двум платежам, а номер виден владельцу на
+        экране «Входящие», в ``/api/bank/link`` (привязка по номеру) и в
+        назначении перевода. Счётчик только растёт и не выдаёт занятый номер.
+        """
+        top = self.db.one("SELECT COALESCE(MAX(CAST(number AS INTEGER)),0) n"
                           " FROM sbp_payments WHERE number GLOB '[0-9]*'") or {}
-        return str(int(num(row.get("n"))) + 1)
+
+        def taken(number: int) -> bool:
+            return bool(self.db.one("SELECT id FROM sbp_payments WHERE number=?"
+                                    " LIMIT 1", (str(number),)))
+
+        return str(self.db.next_counter("sbp_payment",
+                                        floor=int(num(top.get("n"))), skip=taken))
 
     # ------------------------------------------------------------- создание
     def create(self, *, amount: float, order_id: str = "", sale_id: str = "",
@@ -244,10 +315,15 @@ class Sbp:
         row = self._get(pid)
         self._audit(pid, "create", "СБП-платёж создан",
                     f"{amount:g} RUB · {purpose}", actor=actor)
+        # signal — по нему касса решает, звонить ли: «клиент сказал, что
+        # заплатил» (client_claim, из бота) и «счёт выставлен» (payment_created)
+        # требуют взгляда кассира, остальные — просто информация.
         self.db.add_event("finance", "СБП-платёж создан",
                           f"{amount:g} RUB · {purpose}",
                           data={"payment_id": pid, "order_id": order_id or "",
-                                "status": STATUS_NEW, "actor": actor})
+                                "order_number": self._order_number(order_id),
+                                "amount": amount, "status": STATUS_NEW, "actor": actor,
+                                "signal": "client_claim" if chat_id else "payment_created"})
         return row
 
     # --------------------------------------------------------------- список
@@ -285,16 +361,57 @@ class Sbp:
             "settings": self.settings(),
         }
 
+    def _close_intents(self, *, sbp_id: str, order_id: str, amount: float,
+                       pay_id: str = "", confirmed: bool, note: str = "",
+                       actor: str = "") -> int:
+        """Закрыть заявку клиента, когда у платежа появился итог (R5 из бэйслайна).
+
+        Клиентский бот создаёт ``client_payment_intents`` и ждёт решения
+        кассира. Пока платёж подтверждали или отклоняли из «Входящих» (или
+        сверка банка до него дошла сама), заявка оставалась ``pending``: бот
+        продолжал отвечать покупателю «ждём оплату», счётчик ``pending_payments``
+        рос фантомами, а в очереди ручной сверки висели платежи, которых уже
+        нет. Правило: итог платежа = итог заявки. Ищем по явной связи
+        ``sbp_id``; если её нет (клиент платил по статичному QR), — по заказу и
+        сумме. Ничего не выдумываем: заявки по другому заказу или другой сумме
+        остаются висеть на кассире.
+        """
+        stamp = now_iso()
+        who = (actor or "panel")[:120]
+        link = (" WHERE status='pending' AND (sbp_id=?"
+                "   OR (COALESCE(sbp_id,'')='' AND ?<>'' AND order_id=?"
+                "      AND ABS(amount-?)<=0.005))")
+        if confirmed:
+            sql = ("UPDATE client_payment_intents SET status='confirmed',confirmed_at=?,"
+                   " confirmed_by=?,payment_id=?,updated_at=?" + link)
+            cur = self.db.execute(sql, (stamp, who, pay_id or "", stamp,
+                                        sbp_id, order_id, order_id, round(num(amount), 2)))
+        else:
+            sql = ("UPDATE client_payment_intents SET status='rejected',reject_reason=?,"
+                   " confirmed_at=?,confirmed_by=?,updated_at=?" + link)
+            cur = self.db.execute(sql, ((note or "Платёж отклонён кассой")[:500],
+                                        stamp, who, stamp,
+                                        sbp_id, order_id, order_id, round(num(amount), 2)))
+        return int(getattr(cur, "rowcount", 0) or 0)
+
+
     # --------------------------------------------------------- подтверждение
     def confirm(self, payment_id: str, *, actor: str = "panel",
-                account_id: str = "", note: str = "") -> dict:
+                account_id: str = "", note: str = "", pin: str = "",
+                authorized: str = "") -> dict:
         """Подтвердить платёж: записать деньги в журнал и закрыть долг заказа.
 
         Единственная точка, где СБП-платёж становится выручкой. Повторный вызов
         (двойное нажатие/обновление) не пишет вторую проводку: защита по статусу
         внутри транзакции и по ``request_id`` в ``add_payment``.
+
+        Деньги подтверждает человек, а не анонимный запрос: когда в «Команде»
+        заведены PIN, панель обязана передать ``pin`` сотрудника (``authorized``
+        — для кассы, где роль уже проверена сессией, и для движка сверки банка).
         """
         self._require_enabled()
+        actor = self._actor(actor, pin, authorized=authorized,
+                            purpose="подтверждение СБП-оплаты")
         row = self._get(payment_id)
         if row["status"] == STATUS_CONFIRMED:
             return {**row, "already_recorded": True}
@@ -306,6 +423,7 @@ class Sbp:
         acc = self.db.one("SELECT * FROM accounts WHERE id=?", (acc_id,))
         if not acc:
             raise ValueError("Счёт для СБП не найден")
+        closed = 0
         with self.db.transaction():
             row = self._get(payment_id)
             if row["status"] == STATUS_CONFIRMED:
@@ -336,23 +454,41 @@ class Sbp:
                 "confirmed_by=?,payment_id=?,tx_id=?,updated_at=? WHERE id=?",
                 (STATUS_CONFIRMED, acc_id, stamp, actor or "panel",
                  pay_id, tx_id, stamp, payment_id))
+            # Тот же итог получает и заявка клиента — иначе бот вечно говорит
+            # «ждём оплату» по деньгам, которые уже лежат на счёте.
+            closed = self._close_intents(sbp_id=payment_id,
+                                         order_id=str(row["order_id"] or ""),
+                                         amount=amount, pay_id=pay_id,
+                                         confirmed=True, actor=actor)
         row = self._get(payment_id)
         self._audit(payment_id, "confirm", "СБП-оплата подтверждена",
                     f"{num(row['amount']):g} RUB", {"account_id": acc_id, "tx_id": tx_id}, actor)
         self.db.add_event("finance", "СБП-оплата подтверждена",
                           f"{num(row['amount']):g} RUB · счёт {acc['name']}",
                           data={"payment_id": payment_id, "order_id": row["order_id"] or "",
-                                "tx_id": tx_id, "actor": actor})
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "amount": num(row["amount"]), "tx_id": tx_id,
+                                "intents_closed": closed,
+                                "actor": actor, "signal": "money_in"})
         return row
 
     # -------------------------------------------------------------- отмена
-    def reject(self, payment_id: str, *, reason: str = "", actor: str = "panel") -> dict:
-        """Отклонить неподтверждённый платёж. Денег не трогает (выручки не было)."""
+    def reject(self, payment_id: str, *, reason: str = "", actor: str = "panel",
+               pin: str = "", authorized: str = "") -> dict:
+        """Отклонить неподтверждённый платёж. Денег не трогает (выручки не было).
+
+        Отклонение — денежное действие: оно снимает холд и не даёт закрыть
+        выдачу, поэтому требует PIN сотрудника (любого: кассир сверяет
+        рутину, спорное решает старший).
+        """
+        actor = self._actor(actor, pin, authorized=authorized,
+                            purpose="отклонение платежа")
         row = self._get(payment_id)
         if row["status"] in TERMINAL:
             raise ValueError(f"Платёж уже {row['status']} — отклонить нельзя")
         reason = str(reason or "").strip()[:500] or "Оплата не подтверждена"
         stamp = now_iso()
+        closed = 0
         with self.db.transaction():
             row = self._get(payment_id)
             if row["status"] in TERMINAL:
@@ -361,24 +497,36 @@ class Sbp:
                 "UPDATE sbp_payments SET status=?,rejected_at=?,rejected_by=?,"
                 "reject_reason=?,updated_at=? WHERE id=?",
                 (STATUS_REJECTED, stamp, actor or "panel", reason, stamp, payment_id))
+            closed = self._close_intents(sbp_id=payment_id,
+                                         order_id=str(row["order_id"] or ""),
+                                         amount=num(row.get("amount")),
+                                         confirmed=False, note=reason, actor=actor)
         row = self._get(payment_id)
         self._audit(payment_id, "reject", "СБП-платёж отклонён", reason, actor=actor)
         self.db.add_event("finance", "СБП-платёж отклонён",
                           f"{num(row['amount']):g} RUB · {reason}",
-                          data={"payment_id": payment_id, "actor": actor})
+                          data={"payment_id": payment_id, "actor": actor,
+                                "amount": num(row["amount"]), "intents_closed": closed,
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "signal": "payment_rejected"})
         return row
 
     # -------------------------------------------------------------- возврат
     def refund(self, payment_id: str, *, actor: str = "panel", note: str = "",
-               bank_done: bool = False) -> dict:
+               bank_done: bool = False, pin: str = "", authorized: str = "") -> dict:
         """Вернуть подтверждённый СБП-платёж (руководитель/владелец).
 
         В v1 возврат — ручная отметка: ``bank_done=True`` значит «возврат
         выполнен в банке». Пишет обратную проводку (refund) и снимает оплату
         с заказа. Защита от двойного возврата — по статусу внутри транзакции.
+        Право — только старший: в режиме PIN анонимный запрос из LAN возврат
+        не делает (решение №9 из ТЗ «Касса 16.0», теперь оно исполняется и
+        на сервере, а не только кнопкой в интерфейсе).
         """
         if not bank_done:
             raise ValueError("Подтвердите, что возврат выполнен в банке")
+        actor = self._actor(actor, pin, authorized=authorized, manager=True,
+                            purpose="возврат денег только для старшего")
         row = self._get(payment_id)
         if row["status"] == STATUS_REFUNDED:
             return {**row, "already_recorded": True}
@@ -416,5 +564,8 @@ class Sbp:
                     {"account_id": acc_id, "bank_done": True}, actor)
         self.db.add_event("finance", "Возврат СБП выполнен",
                           f"{num(row['amount']):g} RUB · {note}",
-                          data={"payment_id": payment_id, "actor": actor})
+                          data={"payment_id": payment_id, "actor": actor,
+                                "amount": num(row["amount"]),
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "signal": "money_out"})
         return row

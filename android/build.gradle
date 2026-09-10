@@ -1,0 +1,6 @@
+// Версии закреплены: сборка на ПК владельца должна повторяться через год без
+// «а, у меня же новый AGP». Обновляем парой (AGP + Gradle), не по одному.
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+}

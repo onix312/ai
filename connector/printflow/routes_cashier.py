@@ -40,6 +40,17 @@ def cashier_catalog(api: Any, ctx: Ctx):
     return _cashier(api).catalog()
 
 
+@router.get("/api/cashier/offline/qr", doc="QR магазина для оплаты без связи (кэш кассы)")
+def cashier_offline_qr(api: Any, ctx: Ctx):
+    """Код, который касса держит в телефоне: статический QR магазина.
+
+    Без него офлайн-СБП невозможен, поэтому отдаваем его заранее (при входе и
+    время от времени), а не в момент, когда сеть уже легла.
+    """
+    _cashier(api).require(_token(ctx))
+    return _cashier(api).offline_qr()
+
+
 @router.get("/api/cashier/incoming", doc="СБП-продажи кассы, ожидающие сверки")
 def cashier_incoming(api: Any, ctx: Ctx):
     _cashier(api).require(_token(ctx))
@@ -65,7 +76,25 @@ def cashier_sell(api: Any, ctx: Ctx):
         cashier_name=str(ctx.arg("cashier_name", "") or "").strip(),
         discount_pct=ctx.num("discount_pct", 0),
         manager_pin=str(ctx.arg("manager_pin", "") or ""),
-        box_id=str(ctx.arg("box_id", "") or ""))
+        box_id=str(ctx.arg("box_id", "") or ""),
+        # Штамп локальной продажи из очереди (17.0.8). Пусто — обычная продажа.
+        offline_at=str(ctx.arg("offline_at", "") or "").strip())
+
+
+@router.post("/api/cashier/offline/abandon", audit="Касса: снята офлайн-очередь",
+             doc="Снять неотправленные записи офлайн-очереди с обязательной причиной")
+def cashier_offline_abandon(api: Any, ctx: Ctx):
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    ids = body.get("request_ids") or ctx.arg("request_ids", []) or []
+    if isinstance(ids, str):
+        import json as _json
+        try:
+            ids = _json.loads(ids)
+        except Exception:
+            ids = []
+    return _cashier(api).abandon_offline(
+        list(ids or []), _token(ctx),
+        str(ctx.arg("reason", "") or "").strip())
 
 
 @router.post("/api/cashier/confirm-sbp", audit="Касса: СБП подтверждена",
@@ -83,7 +112,33 @@ def cashier_reject_sbp(api: Any, ctx: Ctx):
     return _cashier(api).reject_sbp(
         str(ctx.arg("payment_id", "") or ctx.arg("id", "") or "").strip(),
         _token(ctx),
-        reason=str(ctx.arg("reason", "") or "").strip())
+        reason=str(ctx.arg("reason", "") or "").strip(),
+        # Для офлайн-заявки это обязательный вопрос: «ушёл ли товар с
+        # покупателем». Ответа нет — отклонения нет (полка не должна врать).
+        goods_taken=_tri(ctx.arg("goods_taken", None)))
+
+
+def _tri(value: Any) -> bool | None:
+    """Три состояния: не спросили / да / нет."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "да", "ушёл", "ушла", "taken"):
+        return True
+    if text in ("0", "false", "no", "нет", "вернулся", "returned"):
+        return False
+    return None
+
+
+@router.post("/api/cashier/return", audit="Касса: принят возврат", idempotent=True,
+             doc="Принять возврат товара и денег (старший): полка + возвратная проводка")
+def cashier_return(api: Any, ctx: Ctx):
+    return _cashier(api).return_sale(
+        str(ctx.arg("sale_id", "") or "").strip(), _token(ctx), note=str(ctx.arg("note", "") or ""),
+        lines=ctx.arg("lines", None) or None,
+        request_id=str(ctx.arg("request_id", "") or ""))
 
 
 @router.post("/api/cashier/sale/cancel", audit="Касса: продажа отменена",
@@ -119,6 +174,17 @@ def cashier_shift_open(api: Any, ctx: Ctx):
 def cashier_shift_close(api: Any, ctx: Ctx):
     return _cashier(api).close_shift(
         _token(ctx), ctx.num("close_cash", 0),
+        note=str(ctx.arg("note", "") or ""),
+        box_id=str(ctx.arg("box_id", "") or ""))
+
+
+@router.post("/api/cashier/reconcile", audit="Касса: пересчёт ящика", idempotent=True,
+             doc="Пересчёт наличных: закрыть текущий отсчёт расхождением и открыть новый")
+def cashier_reconcile(api: Any, ctx: Ctx):
+    # idempotent=True: повторный тап «Записать пересчёт» не закрывает смену
+    # дважды и не открывает вторую — пересчёт сверяется с фактом один раз.
+    return _cashier(api).reconcile(
+        _token(ctx), ctx.num("counted_cash", 0),
         note=str(ctx.arg("note", "") or ""),
         box_id=str(ctx.arg("box_id", "") or ""))
 

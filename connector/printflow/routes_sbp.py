@@ -82,14 +82,18 @@ def sbp_create(api: Any, ctx: Ctx):
         qr_payload=str(ctx.arg("qr_payload", "") or "").strip())
 
 
-@router.post("/api/sbp/confirm", audit="СБП: оплата подтверждена",
+@router.post("/api/sbp/confirm", audit="СБП: оплата подтверждена", idempotent=True,
              doc="Подтвердить платёж: проводка в журнал и закрытие долга заказа")
 def sbp_confirm(api: Any, ctx: Ctx):
+    # idempotent=True: повторный POST с тем же Idempotency-Key не создаёт
+    # второй попытки записи денег (сервис и так держит одну проводку по
+    # статусу, но залипший двойной тап не должен ещё и гонять транзакцию).
     return _sbp(api).confirm(
         str(ctx.arg("id", "") or ctx.arg("payment_id", "") or "").strip(),
         actor=str(ctx.arg("actor", "panel") or "panel")[:120],
         account_id=str(ctx.arg("account_id", "") or "").strip(),
-        note=str(ctx.arg("note", "") or "").strip())
+        note=str(ctx.arg("note", "") or "").strip(),
+        pin=str(ctx.arg("pin", "") or ""))
 
 
 @router.post("/api/sbp/reject", audit="СБП: платёж отклонён",
@@ -98,7 +102,8 @@ def sbp_reject(api: Any, ctx: Ctx):
     return _sbp(api).reject(
         str(ctx.arg("id", "") or ctx.arg("payment_id", "") or "").strip(),
         reason=str(ctx.arg("reason", "") or "").strip(),
-        actor=str(ctx.arg("actor", "panel") or "panel")[:120])
+        actor=str(ctx.arg("actor", "panel") or "panel")[:120],
+        pin=str(ctx.arg("pin", "") or ""))
 
 
 @router.post("/api/sbp/refund", audit="СБП: возврат выполнен",
@@ -109,4 +114,5 @@ def sbp_refund(api: Any, ctx: Ctx):
         actor=str(ctx.arg("actor", "panel") or "panel")[:120],
         note=str(ctx.arg("note", "") or "").strip(),
         bank_done=str(ctx.arg("bank_done", "") or "").strip().lower()
-        in ("1", "true", "yes", "да"))
+        in ("1", "true", "yes", "да"),
+        pin=str(ctx.arg("pin", "") or ""))

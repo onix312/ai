@@ -1,0 +1,10 @@
+<resources>
+    <!-- Без AppCompat: оболочке нужен только WebView, а каждая чужая
+         библиотека — это ещё и будущая сборка, которая «внезапно не собралась». -->
+    <style name="Theme.Kassa" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/kassa_bg</item>
+        <item name="android:statusBarColor">@color/kassa_bg</item>
+        <item name="android:navigationBarColor">@color/kassa_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

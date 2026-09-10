@@ -1832,7 +1832,7 @@ class Accounting:
         if insurance_due and not insurance_paid:
             notes.append(
                 f"Страховые взносы за год — {rub(insurance_due)}, срок уплаты 28 декабря")
-        return {
+        out = {
             "year": year,
             "mode": mode,
             "mode_name": TAX_MODES.get(mode, mode),
@@ -1852,6 +1852,15 @@ class Accounting:
             "quarters": self._tax_quarters(year, mode),
             "notes": notes,
         }
+        # НПД-контур (17.0.5): остаток лимита живьём + состояние чеков. Считает
+        # тот же сервис, что и подсказка на кассе, — две цифры не разъедутся.
+        try:
+            from .npd import Npd
+            npd = Npd(self.db)
+            out["npd"] = {"status": npd.status(), "pending": npd.pending(31)}
+        except Exception as exc:
+            out["npd"] = {"error": str(exc)}
+        return out
 
     def _tax_quarters(self, year: int, mode: str) -> list[dict]:
         out = []

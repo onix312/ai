@@ -18,6 +18,18 @@ from .accounting import uid
 from .config import BACKUP_DIR, now_iso
 from .db import Database
 
+
+def _next_order_number(db: Database) -> str:
+    """Номер демо-заказа — из общей нумерации, а не от количества строк.
+
+    Докстринг модуля обещает «номера продолжают сквозную нумерацию», и раньше
+    это было неправдой: ``COUNT(*) + 1`` в живой базе выдавал номера вразнобой
+    с настоящими заказами и мог наступить на занятый номер (а по номеру заказ
+    ищут бот, трекинг и платежи).
+    """
+    from .repo import Repo
+    return Repo(db).next_order_number()
+
 TOUR_MARK = "NOZZA tour (демо-данные)"
 
 
@@ -109,7 +121,7 @@ def _seed(db: Database) -> None:
         })
         order_id = uid("ord")
         db.upsert("orders", {
-            "id": order_id, "number": str(db.one("SELECT COUNT(*) n FROM orders")["n"] + 1),
+            "id": order_id, "number": _next_order_number(db),
             "product": product, "customer_id": cus_id, "customer_name": cus_name,
             "channel": "shelf", "status": status, "qty": 1, "material": "PLA",
             "color": "Белый", "grams": grams, "hours": round(minutes / 60, 1),
@@ -151,7 +163,7 @@ def _seed(db: Database) -> None:
     # --- активные заказы
     printing = db.upsert("orders", {
         "id": uid("ord"),
-        "number": str(db.one("SELECT COUNT(*) n FROM orders")["n"] + 1),
+        "number": _next_order_number(db),
         "product": "Адресник «Рыжик» (красный)", "customer_id": anna["id"],
         "customer_name": "Анна (демо)", "channel": "online", "status": "queue",
         "qty": 1, "material": "PLA", "color": "Красный", "grams": 30.0,
@@ -169,7 +181,7 @@ def _seed(db: Database) -> None:
     })
     db.upsert("orders", {
         "id": uid("ord"),
-        "number": str(db.one("SELECT COUNT(*) n FROM orders")["n"] + 1),
+        "number": _next_order_number(db),
         "product": "Держатель поводка ×2", "customer_id": ivan["id"],
         "customer_name": "Иван (демо)", "channel": "shelf", "status": "ready",
         "qty": 2, "material": "PLA", "color": "Чёрный", "grams": 90.0,
@@ -179,7 +191,7 @@ def _seed(db: Database) -> None:
     })
     db.upsert("orders", {
         "id": uid("ord"),
-        "number": str(db.one("SELECT COUNT(*) n FROM orders")["n"] + 1),
+        "number": _next_order_number(db),
         "product": "QR-стойка «Зерно»", "customer_id": cafe["id"],
         "customer_name": "Кофейня «Зерно» (демо)", "channel": "b2b",
         "status": "new", "qty": 2, "material": "PLA", "color": "Чёрный",

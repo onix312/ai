@@ -254,5 +254,173 @@ class SbpRouteTests(unittest.TestCase):
             db.close()
 
 
+class SbpNumberTests(unittest.TestCase):
+    """Номер СБП-платежа: только вперёд и без дублей.
+
+    Номер — не украшение: он на экране «Входящие», в привязке поступлений из
+    банка (``/api/bank/link`` ищет платёж по id ИЛИ номеру) и в назначении
+    перевода. ``MAX(CAST(number))+1`` давал один номер двум платежам на
+    параллельных созданиях и переиспользовал номер удалённого.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_numbers_grow_and_never_repeat(self):
+        made = [self.sbp.create(amount=100 + i, request_id=f"n{i}")["number"]
+                for i in range(5)]
+        self.assertEqual(made, ["1", "2", "3", "4", "5"])
+        # удаление не возвращает номер: следующий не наступит на историю
+        self.db.delete("sbp_payments", made[-1])
+        self.assertEqual(self.sbp.create(amount=900, request_id="n-after")["number"], "6")
+
+    def test_parallel_create_gives_unique_numbers(self):
+        import threading
+
+        numbers: list[str] = []
+        lock = threading.Lock()
+
+        def worker(index: int) -> None:
+            payment = self.sbp.create(amount=50 + index, request_id=f"p{index}")
+            with lock:
+                numbers.append(payment["number"])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertEqual(len(numbers), 8)
+        self.assertEqual(len(set(numbers)), 8, f"дубли номеров платежей: {sorted(numbers)}")
+
+
+class SbpRightsTests(unittest.TestCase):
+    """Деньги подтверждает человек, а не анонимный запрос из LAN.
+
+    Живой смоук 2026-09-10: `POST /api/sbp/refund` без всяких полномочий
+    проводил возврат. Решение №9 ТЗ «Касса 16.0» («возвраты — только
+    руководитель») существовало только как кнопка в интерфейсе. Теперь право
+    проверяет сервер: как только в «Команде» заведён хотя бы один PIN,
+    панели нужен PIN сотрудника, а возврату — PIN старшего.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+        from connector.printflow.staff import Staff
+        staff = Staff(self.db)
+        emp = staff.add("Ира", "employee", "")
+        staff.set_pin(emp["id"], "1111")
+        boss = staff.add("Оля", "manager", "")
+        staff.set_pin(boss["id"], "2222")
+
+    def tearDown(self):
+        self.db.close()
+
+    def _payment(self, amount: float = 500, key: str = "p") -> str:
+        return self.sbp.create(amount=amount, request_id=key)["id"]
+
+    def test_settings_advertise_pin_mode(self):
+        self.assertTrue(self.sbp.settings()["pins_required"])
+
+    def test_anonymous_confirm_is_blocked_and_writes_nothing(self):
+        pid = self._payment()
+        with self.assertRaisesRegex(ValueError, "PIN"):
+            self.sbp.confirm(pid, actor="panel")
+        self.assertIsNone(self.db.one("SELECT * FROM transactions WHERE kind='income'"))
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?", (pid,))["status"],
+                         STATUS_NEW)
+
+    def test_employee_pin_confirms_and_is_named_in_journal(self):
+        pid = self._payment()
+        out = self.sbp.confirm(pid, pin="1111")
+        self.assertEqual(out["status"], STATUS_CONFIRMED)
+        self.assertEqual(out["confirmed_by"], "Ира")
+
+    def test_refund_requires_manager_pin(self):
+        pid = self._payment()
+        self.sbp.confirm(pid, pin="2222")
+        with self.assertRaisesRegex(ValueError, "старшего"):
+            self.sbp.refund(pid, bank_done=True, note="возврат", pin="1111")
+        out = self.sbp.refund(pid, bank_done=True, note="возврат", pin="2222")
+        self.assertEqual(out["status"], "refunded")
+        self.assertEqual(out["refunded_by"], "Оля")
+
+    def test_reject_requires_pin_too(self):
+        pid = self._payment(300, key="rej")
+        with self.assertRaisesRegex(ValueError, "PIN"):
+            self.sbp.reject(pid, reason="не пришло")
+        self.assertEqual(self.sbp.reject(pid, reason="не пришло", pin="1111")["status"], "rejected")
+
+    def test_single_owner_install_still_works_without_pin(self):
+        """Пока PIN нет ни у кого (одиночная установка) — как раньше, без запроса."""
+        db = make_db()
+        try:
+            acc = Accounting(db)
+            sbp = Sbp(db, acc)
+            self.assertFalse(sbp.pins_required())
+            pid = sbp.create(amount=300, request_id="solo")["id"]
+            self.assertEqual(sbp.confirm(pid)["status"], STATUS_CONFIRMED)
+            self.assertEqual(sbp.refund(pid, bank_done=True)["status"], "refunded")
+        finally:
+            db.close()
+
+
+class MoneySignalTests(unittest.TestCase):
+    """Денежные события несут ``signal`` — по нему касса решает, звонить ли.
+
+    До этого кассир узнавал об оплате, когда сам открывал вкладку «Входящие».
+    Сигнал публикуется в живой поток (SSE), а номер заказа в данных нужен,
+    чтобы баннер был внятным («проверь 1500 ₽ по заказу 1001»), а не «что-то
+    пришло».
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+
+    def tearDown(self):
+        self.db.close()
+
+    def _last(self):
+        row = self.db.events(limit=1)[0]
+        return row, (row.get("data") or {})
+
+    def test_panel_qr_is_quiet_claim_is_loud(self):
+        self.sbp.create(amount=400, request_id="q1")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "payment_created")   # кассир сам выставил счёт
+        self.sbp.create(amount=500, request_id="q2", chat_id="555")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "client_claim")       # клиент сказал «оплатил»
+
+    def test_events_carry_amount_and_order_number(self):
+        order(self.db, id="o9", number="1009")
+        payment = self.sbp.create(amount=700, order_id="o9", request_id="q3")
+        _, data = self._last()
+        self.assertEqual(data["order_number"], "1009")
+        self.assertEqual(data["amount"], 700.0)
+        self.sbp.confirm(payment["id"])
+        _, data = self._last()
+        self.assertEqual(data["signal"], "money_in")
+        self.assertEqual(data["payment_id"], payment["id"])
+
+    def test_reject_and_refund_are_signalled(self):
+        payment = self.sbp.create(amount=300, request_id="q4")
+        self.sbp.reject(payment["id"], reason="не пришло")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "payment_rejected")
+        second = self.sbp.create(amount=200, request_id="q5")
+        self.sbp.confirm(second["id"])
+        self.sbp.refund(second["id"], bank_done=True)
+        _, data = self._last()
+        self.assertEqual(data["signal"], "money_out")
+
+
 if __name__ == "__main__":
     unittest.main()

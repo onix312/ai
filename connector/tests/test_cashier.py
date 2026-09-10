@@ -350,7 +350,7 @@ class CashierRouteTests(unittest.TestCase):
         for path in ("/api/cashier/login", "/api/cashier/logout",
                      "/api/cashier/catalog", "/api/cashier/incoming",
                      "/api/cashier/sell", "/api/cashier/confirm-sbp",
-                     "/api/cashier/reject-sbp"):
+                     "/api/cashier/reject-sbp", "/api/cashier/reconcile"):
             self.assertIn(path, paths, path)
 
 
@@ -432,6 +432,69 @@ class CashierSbpQrTests(unittest.TestCase):
         from connector.printflow.qrgen import svg
         picture = svg("https://qr.nspk.ru/AS100012345", scale=4)
         self.assertTrue(picture.startswith("<svg"))
+
+
+class PersistentSessionTests(unittest.TestCase):
+    """Сессия кассира переживает рестарт коннектора (надёжность из отчётов 16.1).
+
+    Обещание в документации было такое: «сессия живёт до перезагрузки сервера»,
+    а по факту токен держался только в памяти процесса — обновление или падение
+    коннектора выставляло кассира посреди смены с «введите код снова». Теперь
+    токен (его sha256, не сам токен) лежит в `cashier_tokens` с абсолютным
+    сроком в 12 часов.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.cashier = Cashier(self.db, self.acc)
+        self.db.set_settings({"cashier_code": "1234"})
+        add_item(self.db)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_session_survives_new_process(self):
+        token = self.cashier.login("1234")["token"]
+        # «процесс упал»: новый Cashier на той же базе
+        revived = Cashier(self.db, self.acc)
+        self.assertEqual(revived.require(token)["role"], "manager")
+
+    def test_database_holds_only_a_hash(self):
+        token = self.cashier.login("1234")["token"]
+        row = self.db.one("SELECT * FROM cashier_tokens")
+        self.assertNotIn(token, str(row["token_hash"]))
+        self.assertNotIn(token, str(dict(row)))
+
+    def test_logout_kills_the_stored_session(self):
+        token = self.cashier.login("1234")["token"]
+        self.cashier.logout(token)
+        self.assertIsNone(self.db.one("SELECT * FROM cashier_tokens"))
+        with self.assertRaisesRegex(ValueError, "истекла"):
+            Cashier(self.db, self.acc).require(token)
+
+    def test_expiry_is_absolute(self):
+        token = self.cashier.login("1234")["token"]
+        self.db.execute("UPDATE cashier_tokens SET expires_at='2020-01-01T00:00:00'")
+        revived = Cashier(self.db, self.acc)
+        revived._sessions.clear()
+        with self.assertRaisesRegex(ValueError, "истекла"):
+            revived.require(token)
+        # просроченный токен заодно вычищается из базы, реестр не растёт
+        self.assertIsNone(self.db.one("SELECT * FROM cashier_tokens"))
+
+    def test_pin_session_keeps_name_and_role(self):
+        from connector.printflow.staff import Staff
+        staff = Staff(self.db)
+        ira = staff.add("Ира", "employee", "")
+        staff.set_pin(ira["id"], "1111")
+        token = self.cashier.login("1111")["token"]
+        revived = Cashier(self.db, self.acc)
+        session = revived.require(token)
+        self.assertEqual(session["role"], "employee")
+        self.assertEqual(session["name"], "Ира")
+        with self.assertRaisesRegex(ValueError, "руководителя"):
+            revived.require_role(token, "manager")
 
 
 if __name__ == "__main__":
