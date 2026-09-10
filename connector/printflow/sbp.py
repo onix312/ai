@@ -186,6 +186,13 @@ class Sbp:
                               purpose=purpose)
         return name if (pin or authorized) else (actor or "panel")
 
+    def _order_number(self, order_id: str) -> str:
+        """Номер заказа для живых уведомлений кассе (без него баннер немой)."""
+        if not order_id:
+            return ""
+        row = self.db.one("SELECT number FROM orders WHERE id=?", (order_id,))
+        return str((row or {}).get("number") or "")
+
     def _get(self, payment_id: str) -> dict:
         row = self.db.one("SELECT * FROM sbp_payments WHERE id=?", (payment_id,))
         if not row:
@@ -308,10 +315,15 @@ class Sbp:
         row = self._get(pid)
         self._audit(pid, "create", "СБП-платёж создан",
                     f"{amount:g} RUB · {purpose}", actor=actor)
+        # signal — по нему касса решает, звонить ли: «клиент сказал, что
+        # заплатил» (client_claim, из бота) и «счёт выставлен» (payment_created)
+        # требуют взгляда кассира, остальные — просто информация.
         self.db.add_event("finance", "СБП-платёж создан",
                           f"{amount:g} RUB · {purpose}",
                           data={"payment_id": pid, "order_id": order_id or "",
-                                "status": STATUS_NEW, "actor": actor})
+                                "order_number": self._order_number(order_id),
+                                "amount": amount, "status": STATUS_NEW, "actor": actor,
+                                "signal": "client_claim" if chat_id else "payment_created"})
         return row
 
     # --------------------------------------------------------------- список
@@ -413,7 +425,9 @@ class Sbp:
         self.db.add_event("finance", "СБП-оплата подтверждена",
                           f"{num(row['amount']):g} RUB · счёт {acc['name']}",
                           data={"payment_id": payment_id, "order_id": row["order_id"] or "",
-                                "tx_id": tx_id, "actor": actor})
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "amount": num(row["amount"]), "tx_id": tx_id,
+                                "actor": actor, "signal": "money_in"})
         return row
 
     # -------------------------------------------------------------- отмена
@@ -444,7 +458,10 @@ class Sbp:
         self._audit(payment_id, "reject", "СБП-платёж отклонён", reason, actor=actor)
         self.db.add_event("finance", "СБП-платёж отклонён",
                           f"{num(row['amount']):g} RUB · {reason}",
-                          data={"payment_id": payment_id, "actor": actor})
+                          data={"payment_id": payment_id, "actor": actor,
+                                "amount": num(row["amount"]),
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "signal": "payment_rejected"})
         return row
 
     # -------------------------------------------------------------- возврат
@@ -500,5 +517,8 @@ class Sbp:
                     {"account_id": acc_id, "bank_done": True}, actor)
         self.db.add_event("finance", "Возврат СБП выполнен",
                           f"{num(row['amount']):g} RUB · {note}",
-                          data={"payment_id": payment_id, "actor": actor})
+                          data={"payment_id": payment_id, "actor": actor,
+                                "amount": num(row["amount"]),
+                                "order_number": self._order_number(row["order_id"] or ""),
+                                "signal": "money_out"})
         return row

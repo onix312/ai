@@ -370,5 +370,57 @@ class SbpRightsTests(unittest.TestCase):
             db.close()
 
 
+class MoneySignalTests(unittest.TestCase):
+    """Денежные события несут ``signal`` — по нему касса решает, звонить ли.
+
+    До этого кассир узнавал об оплате, когда сам открывал вкладку «Входящие».
+    Сигнал публикуется в живой поток (SSE), а номер заказа в данных нужен,
+    чтобы баннер был внятным («проверь 1500 ₽ по заказу 1001»), а не «что-то
+    пришло».
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+
+    def tearDown(self):
+        self.db.close()
+
+    def _last(self):
+        row = self.db.events(limit=1)[0]
+        return row, (row.get("data") or {})
+
+    def test_panel_qr_is_quiet_claim_is_loud(self):
+        self.sbp.create(amount=400, request_id="q1")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "payment_created")   # кассир сам выставил счёт
+        self.sbp.create(amount=500, request_id="q2", chat_id="555")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "client_claim")       # клиент сказал «оплатил»
+
+    def test_events_carry_amount_and_order_number(self):
+        order(self.db, id="o9", number="1009")
+        payment = self.sbp.create(amount=700, order_id="o9", request_id="q3")
+        _, data = self._last()
+        self.assertEqual(data["order_number"], "1009")
+        self.assertEqual(data["amount"], 700.0)
+        self.sbp.confirm(payment["id"])
+        _, data = self._last()
+        self.assertEqual(data["signal"], "money_in")
+        self.assertEqual(data["payment_id"], payment["id"])
+
+    def test_reject_and_refund_are_signalled(self):
+        payment = self.sbp.create(amount=300, request_id="q4")
+        self.sbp.reject(payment["id"], reason="не пришло")
+        _, data = self._last()
+        self.assertEqual(data["signal"], "payment_rejected")
+        second = self.sbp.create(amount=200, request_id="q5")
+        self.sbp.confirm(second["id"])
+        self.sbp.refund(second["id"], bank_done=True)
+        _, data = self._last()
+        self.assertEqual(data["signal"], "money_out")
+
+
 if __name__ == "__main__":
     unittest.main()

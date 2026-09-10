@@ -26,8 +26,10 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .accounting import Accounting, num, uid
@@ -64,12 +66,87 @@ class Cashier:
         self._sessions: dict[str, dict] = {}  # token -> {at, role}
 
     # ------------------------------------------------------------- сессии
+    # Прочитанные из базы сессии вычищаем не чаще, чем раз в 5 минут: require()
+    # вызывается на каждый запрос кассы, и писать в базу при каждом тапе —
+    # лишняя работа на горячем пути продажи.
+    _PRUNE_SECONDS = 300.0
+    _pruned_at = 0.0
+
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+    def _remember(self, token: str, session: dict) -> None:
+        """Записать сессию в базу — чтобы рестарт сервера не сбрасывал кассу.
+
+        Ошибку не поднимаем: память процесса держит сессию в любом случае, а
+        касса не должна терять возможность продавать из-за сбоя реестра токенов.
+        """
+        try:
+            life = datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL)
+            self.db.execute(
+                "INSERT OR REPLACE INTO cashier_tokens"
+                "(token_hash,staff_id,cashier,role,legacy,created_at,expires_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (self._token_hash(token), str(session.get("staff_id") or ""),
+                 str(session.get("name") or ""), str(session.get("role") or "employee"),
+                 1 if session.get("legacy") else 0, now_iso(),
+                 life.astimezone().isoformat(timespec="seconds")))
+        except Exception:
+            pass
+
+    def _forget(self, token: str) -> None:
+        try:
+            self.db.execute("DELETE FROM cashier_tokens WHERE token_hash=?",
+                            (self._token_hash(token),))
+        except Exception:
+            pass
+
+    def _recall(self, token: str) -> dict | None:
+        """Найти сессию в базе: процесс перезапустился, а телефон помнит токен.
+
+        Срок абсолютный (момент входа + 12 часов), как и в памяти процесса, —
+        через базу токен «вечно живым» не становится.
+        """
+        row = self.db.one("SELECT * FROM cashier_tokens WHERE token_hash=?",
+                          (self._token_hash(token),))
+        if not row:
+            return None
+        expires = str(row.get("expires_at") or "")
+        if expires:
+            try:
+                deadline = datetime.fromisoformat(expires)
+                # значение без смещения (старая база/ручная правка) сравниваем
+                # с локальным временем — иначе TypeError ронял вход на кассе
+                now = (datetime.now().astimezone() if deadline.tzinfo else datetime.now())
+                if now > deadline:
+                    self._forget(token)
+                    return None
+            except ValueError:
+                pass
+        session = {"ts": time.time(), "role": str(row.get("role") or "employee"),
+                   "staff_id": str(row.get("staff_id") or ""),
+                   "name": str(row.get("cashier") or "")}
+        if row.get("legacy"):
+            session["legacy"] = True
+        self._sessions[token] = session
+        return session
+
     def _gc(self) -> None:
         now = time.time()
         stale = [t for t, s in self._sessions.items()
                  if now - float(s.get("ts", now)) > SESSION_TTL]
         for t in stale:
             self._sessions.pop(t, None)
+        if now - Cashier._pruned_at < self._PRUNE_SECONDS:
+            return
+        Cashier._pruned_at = now
+        try:
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(days=1)).astimezone().isoformat(timespec="seconds")
+            self.db.execute("DELETE FROM cashier_tokens WHERE expires_at<?", (cutoff,))
+        except Exception:
+            pass
 
     def login(self, code: str) -> dict:
         """Вход по личному PIN сотрудника или общему коду магазина.
@@ -95,6 +172,7 @@ class Cashier:
                     "staff_id": member.get("id") or "",
                     "name": str(member.get("name") or ""),
                 }
+                self._remember(token, self._sessions[token])
                 return {"token": token, "role": role,
                         "name": str(member.get("name") or ""),
                         "expires_in": SESSION_TTL}
@@ -107,6 +185,7 @@ class Cashier:
             token = uid("ck")
             self._sessions[token] = {"ts": time.time(), "role": role,
                                      "legacy": True}
+            self._remember(token, self._sessions[token])
             return {"token": token, "role": role, "name": "",
                     "legacy": True, "expires_in": SESSION_TTL}
         if pins > 0:
@@ -114,12 +193,21 @@ class Cashier:
         raise ValueError("Неверный код кассы")
 
     def logout(self, token: str) -> dict:
-        self._sessions.pop(str(token or "").strip(), None)
+        token = str(token or "").strip()
+        self._sessions.pop(token, None)
+        self._forget(token)
         return {"ok": True}
 
     def require(self, token: str) -> dict:
+        """Сессия кассира: память процесса, затем база.
+
+        База нужна для надёжности, а не для удобства: коннектор обновляется,
+        падает и перезагружается по watchdog — и касса не должна встать с
+        «введите код снова» посреди смены (отчёты 16.1 обещали обратное).
+        """
         self._gc()
-        session = self._sessions.get(str(token or "").strip())
+        token = str(token or "").strip()
+        session = self._sessions.get(token) or self._recall(token)
         if not session:
             raise ValueError("Сессия кассы истекла — введите код снова")
         return session

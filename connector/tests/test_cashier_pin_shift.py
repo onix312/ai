@@ -476,6 +476,27 @@ class CashierShiftPageTests(unittest.TestCase):
                        "bShiftOpen", "bShiftClose", "bShiftCollect"):
             self.assertIn(needle, self.page)
 
+    def test_money_stream_is_wired(self):
+        """Касса слушает живой поток и будит кассира звуком/вибрацией.
+
+        Тест держит контракт «уведомление об оплате» (релиз 17.0.4): без него
+        страница снова скатится к «сам посмотри вкладку», а это главный
+        источник потерянного времени в очереди у прилавка.
+        """
+        page = self.page
+        for needle in ("connectMoney", "primeMoney", "resetMoney", "/api/stream",
+                       'addEventListener("event"', "navigator.vibrate", "moneyAlert",
+                       "bank_matched", "client_claim", "money_in"):
+            self.assertIn(needle, page, needle)
+        # баннер есть в разметке и скрыт до первого сигнала
+        self.assertIn('id="moneyAlert"', page)
+        self.assertIn("<button class=\"malert\" id=\"moneyAlert\" type=\"button\" hidden>", page)
+        # страховка для оборванного потока — опрос, а не тишина
+        self.assertIn("startMoneyPoll", page)
+        self.assertIn("visibilitychange", page)
+        # первичная загрузка не должна будить по уже известным платежам
+        self.assertIn('moneySeen["p-"+p.payment_id]=1', page)
+
     def test_cashier_identity_and_holds_shown(self):
         for needle in ("whoPill", "cashier_name", "cashier_role",
                        "cashier_legacy", "function renderWho", "holdBadge",

@@ -33,6 +33,13 @@
  .tab{flex:1;padding:12px 10px;border-radius:12px;border:0;background:transparent;color:var(--muted);font-weight:800;font-size:14px;cursor:pointer;transition:.18s;min-height:44px}
  .tab.on{background:var(--text);color:var(--bg);box-shadow:0 2px 12px -6px rgba(0,0,0,.5)}
  [data-theme=dark] .tab.on{background:#fff;color:#111827}
+  .tab.nudge{color:var(--warn);animation:pfnudge 1.1s ease-in-out infinite}
+  @keyframes pfnudge{0%,100%{opacity:1}50%{opacity:.55}}
+  .malert{display:block;width:100%;text-align:left;border:0;cursor:pointer;
+   background:rgba(217,119,6,.14);color:#b45309;border-bottom:1px solid rgba(217,119,6,.28);
+   padding:10px 14px;font-weight:800;font-size:14px;line-height:1.3}
+  .malert b{display:block}
+  .malert span{display:block;font-weight:600;font-size:12px;opacity:.72;margin-top:2px}
  /* search — крупный, для обычных людей */
  .searchRow{display:flex;gap:8px;margin-bottom:12px}
  .searchWrap{position:relative;flex:1}
@@ -186,6 +193,7 @@
    <button class="iconbtn" id="bLogout" type="button" title="Выйти">⎋</button>
   </div>
 
+  <button class="malert" id="moneyAlert" type="button" hidden></button>
   <div class="tabs">
    <button class="tab on" id="tabSell" type="button">🛒 Продажа</button>
    <button class="tab" id="tabIn" type="button">⏳ Входящие</button>
@@ -353,6 +361,7 @@ function doLogin(){
     if(state.legacy) localStorage.setItem("cashier_legacy","1");
     else localStorage.removeItem("cashier_legacy");
     renderWho();showApp(true);setTab("sell");loadCatalog();
+    resetMoney();primeMoney().then(connectMoney);
   }).catch(function(e){toast(e.message);});
 }
 $("bLogin").addEventListener("click",doLogin);
@@ -362,6 +371,7 @@ $("bLogout").addEventListener("click",function(){
   state.token="";state.name="";state.role="";state.legacy=false;
   localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");localStorage.removeItem("cashier_legacy");
   state.cart={};state.pendingPayment="";state.qrText="";state.qrSvg="";state.saleRequest={cash:"",sbp:""};
+  resetMoney();
   renderWho();showApp(false);setTab("sell");$("code").value="";
 });
 
@@ -401,6 +411,7 @@ function sessionError(e){
   if(/сессия|код/i.test(e.message)){
     state.token="";state.name="";state.role="";state.legacy=false;
     localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");localStorage.removeItem("cashier_legacy");
+    resetMoney();
     renderWho();showApp(false);setTab("sell");toast("Сессия истекла — войдите снова");
   }
   else toast(e.message);
@@ -706,6 +717,8 @@ function loadIncoming(){
   box.innerHTML='<div class="loading">Проверяем входящие оплаты…</div>';
   api(withToken("/api/cashier/incoming")).then(function(r){
     var list=r.payments||[];
+    $("tabIn").textContent=list.length?("⏳ Входящие · "+list.length):"⏳ Входящие";
+    $("tabIn").classList.toggle("nudge",list.length>0);
     if(!list.length){box.innerHTML='<div class="empty"><b>Нет платежей на проверку</b>Здесь появляются продажи по СБП до подтверждения.<br><span style="font-size:12px;opacity:.7">Пока всё чисто</span></div>';return;}
     box.innerHTML=list.map(function(p){
       var names=(p.items||[]).map(function(i){return esc(i.name)+" × "+i.qty;}).join(", ");
@@ -865,8 +878,128 @@ document.addEventListener("click",function(ev){
 });
 $("tabShift").addEventListener("click",function(){setTab("shift");});
 
+// ------------------------------------------------------- звонок о деньгах
+// Раньше кассир узнавал об оплате, только когда сам открывал вкладку
+// «Входящие». Сервер публикует каждое денежное событие в живой поток
+// (SSE /api/stream), поэтому телефон звенит сразу: «клиент нажал „я
+// оплатил“», «банк видит приход — нужна сверка», «деньги в журнале — можно
+// выдавать». Страховка для браузеров без EventSource и для прокси, режущих
+// длинные соединения: тихий опрос раз в 25 секунд, только когда вкладка видна.
+var RING_LOUD={client_claim:1,bank_matched:1};   // денег ещё нет — нужен клик кассира
+var RING_SOFT={money_in:1};                      // деньги в журнале — можно выдавать
+var moneySeen=null,moneyES=null,moneyTimer=0,soundCtx=null;
+
+function beep(){
+  // двойной сигнал без аудиофайлов (WebAudio есть и в WebView); на iOS звук
+  // разрешён только после касания — контекст поднимаем в unlockAudio ниже
+  try{
+    var Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx)return;
+    soundCtx=soundCtx||new Ctx();
+    if(soundCtx.state==="suspended"&&soundCtx.resume){soundCtx.resume();}
+    var t=soundCtx.currentTime;
+    [[0,660],[0.18,880]].forEach(function(p){
+      var o=soundCtx.createOscillator(),g=soundCtx.createGain();
+      o.type="sine";o.frequency.value=p[1];
+      g.gain.setValueAtTime(0.0001,t+p[0]);
+      g.gain.exponentialRampToValueAtTime(0.2,t+p[0]+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+p[0]+0.15);
+      o.connect(g);g.connect(soundCtx.destination);
+      o.start(t+p[0]);o.stop(t+p[0]+0.17);
+    });
+  }catch(e){/* звук не должен ломать кассу */}
+}
+function unlockAudio(){
+  try{
+    var Ctx=window.AudioContext||window.webkitAudioContext;if(!Ctx||soundCtx)return;
+    soundCtx=new Ctx();if(soundCtx.resume){soundCtx.resume();}
+  }catch(e){}
+  document.removeEventListener("click",unlockAudio);
+}
+document.addEventListener("click",unlockAudio);
+
+function ring(loud,text){
+  if(navigator.vibrate){try{navigator.vibrate(loud?[170,70,170]:[90]);}catch(e){}}
+  if(loud)beep();
+  var bar=$("moneyAlert");
+  bar.innerHTML="<b>🔔 "+esc(text)+"</b><span>нажми, чтобы посмотреть</span>";
+  bar.hidden=false;
+  clearTimeout(ring._t);ring._t=setTimeout(function(){bar.hidden=true;},30000);
+}
+$("moneyAlert").addEventListener("click",function(){this.hidden=true;setTab("in");});
+
+// одно событие — один звонок: SSE умеет отдать кадр повторно при переподключении
+function noteOnce(id){
+  var k=String(id||"");if(!k)return true;
+  moneySeen=moneySeen||{};
+  if(moneySeen[k])return false;moneySeen[k]=1;return true;
+}
+function moneyEvent(row){
+  var d=(row&&row.data)||{},signal=String(d.signal||"");
+  var amount=d.amount?(" "+money(d.amount)):"";
+  var what=d.order_number?(" заказ "+d.order_number):"";
+  if(RING_SOFT[signal]){
+    if(!noteOnce("in-"+(d.payment_id||"")))return;
+    ring(false,"Деньги в журнале"+amount+what+" — можно выдавать");
+    loadCatalog();
+    if(state.tab==="in"){loadIncoming();}else{refreshBadge();}
+    return;
+  }
+  if(!RING_LOUD[signal])return;   // «счёт выставлен» — дело рук самого кассира
+  if(!noteOnce((signal==="bank_matched"?"r-":"p-")+(d.payment_id||d.receipt_id||row.at||"")))return;
+  ring(true,signal==="bank_matched"?("Банк видит приход"+amount+" — сверь и подтверди")
+      :("Клиент сообщил об оплате"+amount+what+" — проверь поступление"));
+  if(state.tab==="in"){loadIncoming();}else{refreshBadge();}
+}
+function refreshBadge(){
+  api(withToken("/api/cashier/incoming")).then(function(r){
+    var n=(r.payments||[]).length,tab=$("tabIn");
+    tab.textContent=n?("⏳ Входящие · "+n):"⏳ Входящие";
+    tab.classList.toggle("nudge",n>0);
+  }).catch(function(){});
+}
+// первый заход: уже висящие платежи отмечаем бейджем без звонка — кассир про
+// них знает, а будить его по уже известному факту нельзя
+function primeMoney(){
+  return api(withToken("/api/cashier/incoming")).then(function(r){
+    moneySeen=moneySeen||{};
+    (r.payments||[]).forEach(function(p){moneySeen["p-"+p.payment_id]=1;});
+    refreshBadge();
+  }).catch(function(){});
+}
+function startMoneyPoll(){
+  if(moneyTimer||!loggedIn())return;
+  moneyTimer=setInterval(function(){
+    if(document.visibilityState==="visible"&&loggedIn())refreshBadge();
+  },25000);
+}
+function stopMoneyPoll(){if(moneyTimer){clearInterval(moneyTimer);moneyTimer=0;}}
+function connectMoney(){
+  if(moneyES||!window.EventSource||!loggedIn())return;
+  try{moneyES=new EventSource("/api/stream");}
+  catch(e){startMoneyPoll();return;}
+  moneyES.addEventListener("event",function(msg){
+    var row;try{row=JSON.parse(msg.data);}catch(e){return;}
+    moneyEvent(row);
+  });
+  moneyES.onopen=function(){stopMoneyPoll();};
+  moneyES.onerror=function(){startMoneyPoll();};  // поток оборвался — включаем страховку
+}
+function resetMoney(){
+  moneySeen=null;
+  if(moneyES){try{moneyES.close();}catch(e){}moneyES=null;}
+  stopMoneyPoll();
+  var tab=$("tabIn");tab.textContent="⏳ Входящие";tab.classList.remove("nudge");
+  $("moneyAlert").hidden=true;
+}
+document.addEventListener("visibilitychange",function(){
+  if(document.visibilityState!=="visible"||!loggedIn())return;
+  // телефон выгрузил вкладку из памяти: перечитываем входящие и поднимаем поток
+  if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
+  primeMoney();connectMoney();
+});
+
 // старт
-if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();}else{renderWho();showApp(false);}
+if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();primeMoney().then(connectMoney);}else{renderWho();showApp(false);}
 window.addEventListener("online",function(){if(loggedIn()){loadCatalog();if(state.tab==="in")loadIncoming();if(state.tab==="shift")loadShift();}});
 window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){

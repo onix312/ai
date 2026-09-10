@@ -224,6 +224,15 @@ class BankReceipts:
                 self._review_failed(receipt_id, key, source, raw, amount, reason)
                 continue
             status = str(result.get("status") or "")
+            # Живой сигнал кассе: банк видит приход, а денег в журнале ещё нет.
+            # Публикуем после коммита строки — иначе касса обновит список раньше,
+            # чем поступление станет видимым, и «звонок» собьётся вхолостую.
+            if status in (STATUS_MATCHED, STATUS_REVIEW):
+                self.db.add_event(
+                    "finance", "Банк: поступление на сверке",
+                    f"{amount:g} RUB · {str(raw.get('purpose') or '')[:120]}",
+                    data={"receipt_id": receipt_id, "amount": amount,
+                          "status": status, "signal": "bank_matched"})
             if status == STATUS_CONFIRMED:
                 confirmed += 1
             elif status in (STATUS_MATCHED, STATUS_REVIEW):

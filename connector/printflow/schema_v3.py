@@ -284,6 +284,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
     data TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
+
+-- ---------------------------------------- сессии мобильной кассы (переживают рестарт)
+-- Нужны для надёжности, которую обещали отчёты 16.1: обновление или падение
+-- коннектора не должно выставлять кассира («введите код снова» посреди смены).
+-- Храним хеш токена, а не сам токен: резервная копия базы не должна отдавать
+-- живые сессии. Срок абсолютный — 12 часов, как и в памяти процесса.
+CREATE TABLE IF NOT EXISTS cashier_tokens(
+    token_hash TEXT PRIMARY KEY,
+    staff_id TEXT DEFAULT '',
+    cashier TEXT DEFAULT '',
+    role TEXT DEFAULT 'employee',
+    legacy INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_cashier_tokens_expiry ON cashier_tokens(expires_at);
 """
 
 # Склады по умолчанию: (id, название, вид, розница, позиция)

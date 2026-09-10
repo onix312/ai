@@ -260,6 +260,28 @@ class ImportResilienceTests(unittest.TestCase):
         self.assertEqual(again["skipped"], 2)
         self.assertEqual(self.db.one("SELECT COUNT(*) n FROM bank_receipts")["n"], 2)
 
+    def test_matched_receipt_signals_the_cashier(self):
+        """«Банк видит приход» — событие для звонка на кассу, после коммита строки."""
+        order(self.db, id="o1", number="1001")
+        self.sbp.create(amount=1000, order_id="o1")
+        self.db.set_settings({"sbp_auto_confirm": False})
+        self.bank.ingest([{"at": self._now(), "amount": 1000, "purpose": "СБП заказ 1001"}])
+        event = self.db.events(limit=1)[0]
+        self.assertEqual(event["title"], "Банк: поступление на сверке")
+        data = event.get("data") or {}
+        self.assertEqual(data["signal"], "bank_matched")
+        self.assertEqual(data["status"], "matched")
+        self.assertEqual(data["amount"], 1000.0)
+
+    def test_confirmed_receipt_does_not_double_signal(self):
+        """Когда авто-подтверждение сработало, звонит событие «деньги в журнале»."""
+        order(self.db, id="o1", number="1001")
+        self.sbp.create(amount=1000, order_id="o1")
+        self.bank.ingest([{"at": self._now(), "amount": 1000, "purpose": "СБП заказ 1001"}])
+        titles = [e["title"] for e in self.db.events(limit=5)]
+        self.assertNotIn("Банк: поступление на сверке", titles)
+        self.assertIn("СБП-оплата подтверждена", titles)
+
     def test_link_checks_amount_and_forces_explicitly(self):
         order(self.db, id="o1", number="1001")
         payment = self.sbp.create(amount=1000, order_id="o1")
