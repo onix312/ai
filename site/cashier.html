@@ -277,7 +277,7 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""}};
+var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{}};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -387,6 +387,7 @@ function loadCatalog(){
     // если всё пусто но было что-то — покажем подсказку
     state.cats=c.categories||[];
     state.sbpEnabled=!!c.sbp_enabled;
+    state.npd=c.npd||{};
     state.sbp=c.sbp||{};
     var cash=(c.shop_cash&&c.shop_cash.in_shop)||0;
     var inStock=state.items.length;
@@ -635,6 +636,11 @@ function sellCart(method){
     .then(function(r){
       state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
       if(method==="cash")toast(r.already_recorded?"Продажа уже была записана":"Продано "+money(r.amount)+" наличными");
+      // Годовой лимит налога — забота владельца, но узнаёт о нём кассир в
+      // момент расчёта: «лимит выбран» означает, что дальше деньги принимать
+      // нельзя, и прятать это до декабрьского отчёта было бы нечестно.
+      if(r.npd&&r.npd.text){state.npd=r.npd;
+        if(r.npd.level==="warn"||r.npd.level==="over")toast("⚠ "+r.npd.text);}
       loadCatalog();refreshShift();if(method==="sbp")showPaymentQr(r);
     })
     .catch(function(e){sessionError(e);})
@@ -788,7 +794,10 @@ function renderShift(box,r){
   var s=r.shift||{},live=r.live||{};
   var opened=String(s.opened_at||"").replace("T"," ").slice(0,16);
   var manager=state.role==="manager";
-  var html='<div class="card"><h4>'+(auto?"Наличные в ящике":("Смена открыта · "+esc(s.cashier||"кассир")))+"</h4>"
+  var npdLine=(state.npd&&state.npd.text)
+    ? '<div class="hint"'+((state.npd.level==="warn"||state.npd.level==="over")?' style="color:var(--warn);font-weight:700"':'')
+      +'>📊 '+esc(state.npd.text)+'</div>' : '';
+  var html='<div class="card"><h4>'+(auto?"Наличные в ящике":("Смена открыта · "+esc(s.cashier||"кассир")))+"</h4>"+npdLine
     +kv(auto?"Считаем с":"Открыта",esc(opened||"—"))
     +kv("На старте в ящике",money(s.open_cash))
     +kv("Выручка наличными",money(live.income_cash))

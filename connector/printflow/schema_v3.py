@@ -300,6 +300,20 @@ CREATE TABLE IF NOT EXISTS cashier_tokens(
     expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_cashier_tokens_expiry ON cashier_tokens(expires_at);
+
+-- ----------------------------------- НПД: отметки «чеки за день выбиты»
+-- Самозанятый обязан выдать чек на каждый расчёт (422-ФЗ, ст. 14): штраф за
+-- работу без чека — 20% от суммы, повторно за полгода — 100. Суммы здесь нет:
+-- доход дня берётся из `transactions` (единственный источник правды), тут
+-- только подтверждение владельца «чеки выданы» и их количество.
+CREATE TABLE IF NOT EXISTS npd_days(
+    day TEXT PRIMARY KEY,
+    checks INTEGER DEFAULT 0,
+    amount REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    marked_at TEXT DEFAULT '',
+    marked_by TEXT DEFAULT ''
+);
 """
 
 # Склады по умолчанию: (id, название, вид, розница, позиция)

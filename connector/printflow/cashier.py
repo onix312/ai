@@ -63,6 +63,8 @@ class Cashier:
         self.acc = acc
         self.shelf = shelf or Shelf(db)
         self.sbp = sbp or Sbp(db, acc)
+        from .npd import Npd
+        self.npd = Npd(db)   # одна строка про лимит режима на экране кассы
         self._sessions: dict[str, dict] = {}  # token -> {at, role}
 
     # ------------------------------------------------------------- сессии
@@ -474,6 +476,7 @@ class Cashier:
             "sbp": self.payment_qr(with_svg=False),
             "shop_cash": self.shelf.shop_cash(),
             "shift_mode": self.shift_mode(),
+            "npd": self.npd.cashier_note(),
         }
 
     # ------------------------------------------------------------- QR оплаты
@@ -775,6 +778,10 @@ class Cashier:
                 result = self.db.one("SELECT * FROM cashier_sales WHERE id=?", (sale_id,))
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = True
+                # Годовой лимит режима — дело владельца, но узнаёт он об этом
+                # от кассира: продажа, которая выбирает лимит, должна быть
+                # видна в момент расчёта, а не в декабрьском отчёте.
+                payload_out["npd"] = self.npd.cashier_note()
             else:
                 # Товар откладываем на полку сразу (физически — кассиру в
                 # руки) и ставим в холд: деньги придут позже, а штуки уже

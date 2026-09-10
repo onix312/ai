@@ -562,6 +562,10 @@
     <div id="tax_reserve"></div>
    </div>
   </div>
+  <div class="card" style="margin-top:16px" id="npd_card" hidden>
+   <div class="card-head"><div><h2>Чеки НПД и лимит года</h2><p>Чек на каждый расчёт обязателен (422-ФЗ, ст. 14): за работу без чека — штраф 20% от суммы, повторно за полгода — 100%</p></div><button class="btn sm primary" id="npd_mark_today" type="button">Отметить чеки за сегодня</button></div>
+   <div id="npd_box"></div>
+  </div>
   <div class="card" style="margin-top:16px">
    <div class="card-head"><div><h2>По кварталам</h2><p>База авансовых платежей — до уменьшения на страховые взносы</p></div></div>
    <div class="table-wrap"><table class="data"><thead><tr><th>Квартал</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">Налог с базы</th></tr></thead><tbody id="tax_tbody"></tbody></table></div>
@@ -5163,7 +5167,7 @@
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=17.0.1"></script>
 <script src="assets/money.js?v=17.0.1"></script>
-<script src="assets/finance.js?v=17.0.1"></script>
+<script src="assets/finance.js?v=17.0.5"></script>
 <script src="assets/shelf.js?v=17.0.1"></script>
 <script src="assets/products.js?v=17.0.1"></script>
 <script src="assets/bridge.js?v=17.0.1"></script>
