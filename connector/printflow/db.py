@@ -2309,6 +2309,46 @@ class Database:
     def delete(self, table: str, ident: str, key: str = "id") -> None:
         self.execute(f"DELETE FROM {table} WHERE {key}=?", (ident,))
 
+    # ------------------------------------------------------ счётчики номеров
+    def next_counter(self, name: str, floor: int = 0, skip=None) -> int:
+        """Следующее значение сквозного счётчика: строго вперёд, под lock'ом.
+
+        Зачем. Нумерация «от количества строк» (``COUNT(*) + 1``) ломается при
+        первом же удалении: счётчик откатывается назад, а следующий документ
+        получает номер уже существующего. Нумерация «от ``MAX(...) + 1``»
+        откатывается, если строку удалили, и даёт дубли на двух параллельных
+        созданиях. Здесь значение живёт в таблице ``name_counters`` и только
+        растёт; освобождённые номера не переиспользуются.
+
+        ``floor`` — нижняя граница (например максимальный номер в таблице,
+        чтобы правка догнала базы с вручную задвинутыми номерами).
+        ``skip(number) -> bool`` — необязательный предикат «значение занято»:
+        счётчик тогда идёт дальше, пока не найдёт свободное.
+
+        Метод захватывает ``self.lock`` на всю операцию чтение→запись, поэтому
+        конкурентные потоки получают разные номера. Вызывать стоит внутри
+        транзакции создателя — тогда счётчик откатится вместе с неудачным
+        созданием документа и не оставит «сожжённого» номера на пустом месте.
+        """
+        with self.lock:
+            try:
+                low = int(floor or 0)
+            except (TypeError, ValueError):
+                low = 0
+            row = self.one("SELECT last FROM name_counters WHERE name=?", (name,)) or {}
+            try:
+                stored = int(row.get("last") or 0)
+            except (TypeError, ValueError):
+                stored = 0
+            value = max(stored, low) + 1
+            if skip is not None:
+                while skip(value):
+                    value += 1
+            self.execute(
+                "INSERT INTO name_counters(name,last) VALUES(?,?)"
+                " ON CONFLICT(name) DO UPDATE SET last=excluded.last", (name, value))
+            return value
+
     # -------------------------------------------------------------- настройки
     def settings(self, include_secrets: bool = False) -> dict[str, Any]:
         cached = self._settings_cache

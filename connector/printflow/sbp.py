@@ -153,9 +153,22 @@ class Sbp:
             pass
 
     def _next_number(self) -> str:
-        row = self.db.one("SELECT COALESCE(MAX(CAST(number AS INTEGER)),0) n"
+        """Человеческий номер платежа из сквозного счётчика.
+
+        Было ``MAX(CAST(number))+1``: два параллельных создания (касса + бот +
+        вебхук) давали один номер двум платежам, а номер виден владельцу на
+        экране «Входящие», в ``/api/bank/link`` (привязка по номеру) и в
+        назначении перевода. Счётчик только растёт и не выдаёт занятый номер.
+        """
+        top = self.db.one("SELECT COALESCE(MAX(CAST(number AS INTEGER)),0) n"
                           " FROM sbp_payments WHERE number GLOB '[0-9]*'") or {}
-        return str(int(num(row.get("n"))) + 1)
+
+        def taken(number: int) -> bool:
+            return bool(self.db.one("SELECT id FROM sbp_payments WHERE number=?"
+                                    " LIMIT 1", (str(number),)))
+
+        return str(self.db.next_counter("sbp_payment",
+                                        floor=int(num(top.get("n"))), skip=taken))
 
     # ------------------------------------------------------------- создание
     def create(self, *, amount: float, order_id: str = "", sale_id: str = "",

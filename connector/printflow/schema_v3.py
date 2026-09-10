@@ -232,6 +232,17 @@ CREATE TABLE IF NOT EXISTS doc_counters (
     PRIMARY KEY (kind, year)
 );
 
+-- ---------------------------------- сквозные счётчики нумерации (только вперёд)
+-- Отдельная строка-счётчик вместо COUNT(*) или MAX(*) по таблице: удаление
+-- карточки не должно откатывать номера назад и не должно давать новому
+-- документу номер уже существующего (по номеру заказ ищут бот, трекинг и
+-- назначение СБП-перевода).
+-- name: order — заказы, sbp_payment — номера СБП-платежей.
+CREATE TABLE IF NOT EXISTS name_counters (
+    name TEXT PRIMARY KEY,
+    last INTEGER DEFAULT 0
+);
+
 -- ------------------------------------------------- партии печати
 CREATE TABLE IF NOT EXISTS batches (
     id TEXT PRIMARY KEY,

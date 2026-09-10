@@ -254,5 +254,48 @@ class SbpRouteTests(unittest.TestCase):
             db.close()
 
 
+class SbpNumberTests(unittest.TestCase):
+    """Номер СБП-платежа: только вперёд и без дублей.
+
+    Номер — не украшение: он на экране «Входящие», в привязке поступлений из
+    банка (``/api/bank/link`` ищет платёж по id ИЛИ номеру) и в назначении
+    перевода. ``MAX(CAST(number))+1`` давал один номер двум платежам на
+    параллельных созданиях и переиспользовал номер удалённого.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_numbers_grow_and_never_repeat(self):
+        made = [self.sbp.create(amount=100 + i, request_id=f"n{i}")["number"]
+                for i in range(5)]
+        self.assertEqual(made, ["1", "2", "3", "4", "5"])
+        # удаление не возвращает номер: следующий не наступит на историю
+        self.db.delete("sbp_payments", made[-1])
+        self.assertEqual(self.sbp.create(amount=900, request_id="n-after")["number"], "6")
+
+    def test_parallel_create_gives_unique_numbers(self):
+        import threading
+
+        numbers: list[str] = []
+        lock = threading.Lock()
+
+        def worker(index: int) -> None:
+            payment = self.sbp.create(amount=50 + index, request_id=f"p{index}")
+            with lock:
+                numbers.append(payment["number"])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
+        self.assertEqual(len(numbers), 8)
+        self.assertEqual(len(set(numbers)), 8, f"дубли номеров платежей: {sorted(numbers)}")
+
+
 if __name__ == "__main__":
     unittest.main()
