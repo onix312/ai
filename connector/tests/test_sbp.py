@@ -297,5 +297,78 @@ class SbpNumberTests(unittest.TestCase):
         self.assertEqual(len(set(numbers)), 8, f"дубли номеров платежей: {sorted(numbers)}")
 
 
+class SbpRightsTests(unittest.TestCase):
+    """Деньги подтверждает человек, а не анонимный запрос из LAN.
+
+    Живой смоук 2026-09-10: `POST /api/sbp/refund` без всяких полномочий
+    проводил возврат. Решение №9 ТЗ «Касса 16.0» («возвраты — только
+    руководитель») существовало только как кнопка в интерфейсе. Теперь право
+    проверяет сервер: как только в «Команде» заведён хотя бы один PIN,
+    панели нужен PIN сотрудника, а возврату — PIN старшего.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+        from connector.printflow.staff import Staff
+        staff = Staff(self.db)
+        emp = staff.add("Ира", "employee", "")
+        staff.set_pin(emp["id"], "1111")
+        boss = staff.add("Оля", "manager", "")
+        staff.set_pin(boss["id"], "2222")
+
+    def tearDown(self):
+        self.db.close()
+
+    def _payment(self, amount: float = 500, key: str = "p") -> str:
+        return self.sbp.create(amount=amount, request_id=key)["id"]
+
+    def test_settings_advertise_pin_mode(self):
+        self.assertTrue(self.sbp.settings()["pins_required"])
+
+    def test_anonymous_confirm_is_blocked_and_writes_nothing(self):
+        pid = self._payment()
+        with self.assertRaisesRegex(ValueError, "PIN"):
+            self.sbp.confirm(pid, actor="panel")
+        self.assertIsNone(self.db.one("SELECT * FROM transactions WHERE kind='income'"))
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?", (pid,))["status"],
+                         STATUS_NEW)
+
+    def test_employee_pin_confirms_and_is_named_in_journal(self):
+        pid = self._payment()
+        out = self.sbp.confirm(pid, pin="1111")
+        self.assertEqual(out["status"], STATUS_CONFIRMED)
+        self.assertEqual(out["confirmed_by"], "Ира")
+
+    def test_refund_requires_manager_pin(self):
+        pid = self._payment()
+        self.sbp.confirm(pid, pin="2222")
+        with self.assertRaisesRegex(ValueError, "старшего"):
+            self.sbp.refund(pid, bank_done=True, note="возврат", pin="1111")
+        out = self.sbp.refund(pid, bank_done=True, note="возврат", pin="2222")
+        self.assertEqual(out["status"], "refunded")
+        self.assertEqual(out["refunded_by"], "Оля")
+
+    def test_reject_requires_pin_too(self):
+        pid = self._payment(300, key="rej")
+        with self.assertRaisesRegex(ValueError, "PIN"):
+            self.sbp.reject(pid, reason="не пришло")
+        self.assertEqual(self.sbp.reject(pid, reason="не пришло", pin="1111")["status"], "rejected")
+
+    def test_single_owner_install_still_works_without_pin(self):
+        """Пока PIN нет ни у кого (одиночная установка) — как раньше, без запроса."""
+        db = make_db()
+        try:
+            acc = Accounting(db)
+            sbp = Sbp(db, acc)
+            self.assertFalse(sbp.pins_required())
+            pid = sbp.create(amount=300, request_id="solo")["id"]
+            self.assertEqual(sbp.confirm(pid)["status"], STATUS_CONFIRMED)
+            self.assertEqual(sbp.refund(pid, bank_done=True)["status"], "refunded")
+        finally:
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

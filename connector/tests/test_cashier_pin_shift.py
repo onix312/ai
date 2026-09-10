@@ -376,6 +376,8 @@ class CollectTests(unittest.TestCase):
         self.assertEqual(live["expected"], 600)
 
     def test_collect_outside_shift(self):
+        # выемка «вне смены» возможна, когда смены ведёт человек (manual)
+        self.db.set_settings({"cashier_shift_mode": "manual"})
         self.earn()
         r = self.cashier.collect(self.mgr, 100)
         self.assertEqual(r["shift_id"], "")

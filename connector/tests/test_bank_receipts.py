@@ -185,5 +185,66 @@ class BankReceiptsTests(unittest.TestCase):
         self.assertIn("auto_confirm", actions)
 
 
+class ImportResilienceTests(unittest.TestCase):
+    """Одна конфликтная строка выписки не роняет импорт целиком.
+
+    Живой смоук 2026-09-10: выписка из двух строк давала `400 «Платёж больше
+    остатка: осталось 0 ₽»` (долг закрыли наличными), не разносилась ни одна
+    строка, а повторный импорт падал на той же. Сверка вставала до ручной
+    правки платежа — для кассы это остановка приёма денег.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.sbp = Sbp(self.db, self.acc)
+        self.bank = BankReceipts(self.db, self.acc, self.sbp)
+        self.db.set_settings({"sbp_enabled": True, "sbp_auto_confirm": True})
+
+    def tearDown(self):
+        self.db.close()
+
+    def _now(self) -> str:
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+
+    def test_conflicting_row_goes_to_review_rest_is_booked(self):
+        order(self.db, id="o1", number="1001")
+        payment = self.sbp.create(amount=800, order_id="o1")
+        # кассир получил наличные и закрыл долг — авто-подтверждать уже нечего
+        self.acc.add_payment("o1", 800, "payment", "cash", "cash", "наличные")
+        rows = [{"at": self._now(), "amount": 800, "purpose": "СБП заказ 1001"},
+                {"at": self._now(), "amount": 450, "purpose": "СБП чек с полки"}]
+        result = self.bank.ingest(rows)
+        self.assertEqual(result["errors"], 1)
+        self.assertEqual(result["new"], 2)          # обе строки сохранены
+        self.assertEqual(len(result["problems"]), 1)
+        self.assertIn("Платёж больше остатка", result["problems"][0]["error"])
+        bad = self.db.one("SELECT * FROM bank_receipts WHERE amount=800")
+        self.assertEqual(bad["status"], "review")
+        self.assertIn("не удалось разнести", bad["note"])
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+        # повтор той же выписки: ничего не задваивается и снова не падает
+        again = self.bank.ingest(rows)
+        self.assertEqual(again["skipped"], 2)
+        self.assertEqual(self.db.one("SELECT COUNT(*) n FROM bank_receipts")["n"], 2)
+
+    def test_link_checks_amount_and_forces_explicitly(self):
+        order(self.db, id="o1", number="1001")
+        payment = self.sbp.create(amount=1000, order_id="o1")
+        self.db.set_settings({"sbp_auto_confirm": False})
+        self.bank.ingest([{"at": self._now(), "amount": 600, "purpose": "частично"}])
+        receipt = self.db.one("SELECT * FROM bank_receipts")
+        with self.assertRaisesRegex(ValueError, "не равна сумме платежа"):
+            self.bank.link(receipt["id"], payment["id"])
+        out = self.bank.link(receipt["id"], payment["id"], force=True)
+        self.assertEqual(out["status"], "matched")
+        self.assertIn("суммы различаются", out["note"])
+        # деньги не тронуты: привязка — не подтверждение
+        self.assertEqual(self.db.one("SELECT status FROM sbp_payments WHERE id=?",
+                                     (payment["id"],))["status"], "new")
+        self.assertIsNone(self.db.one("SELECT * FROM transactions WHERE kind='income'"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,17 @@ class FakeManager:
         return self._snapshot
 
 
+def _day(days_ago: int, clock: str = "10:00:00") -> str:
+    """Дата «сколько-то дней назад» вместо зашитой константы.
+
+    Тесты текстов бота проверяют окно «за 30 дней». С зафиксированной датой
+    (2026-08-10) они краснели сами, без всяких изменений кода: проходило 30
+    дней, запись уезжала за окно, и падение выглядело как регрессия.
+    """
+    from datetime import date, timedelta
+    return f"{(date.today() - timedelta(days=days_ago)).isoformat()}T{clock}"
+
+
 class TelegramTextTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -53,8 +64,8 @@ class TelegramTextTests(unittest.TestCase):
         self.db.upsert("orders", {
             "id": f"o{number}", "number": number, "customer_name": "Мария",
             "phone": "+7", "product": product, "price": price, "prepaid": paid,
-            "status": status, "created_at": "2026-08-10T10:00:00",
-            "updated_at": "2026-08-10T10:00:00"})
+            "status": status, "created_at": _day(2),
+            "updated_at": _day(2)})
 
     def test_debts_lists_unpaid_orders(self):
         self._order("1001", 1000, 0)
@@ -81,8 +92,8 @@ class TelegramTextTests(unittest.TestCase):
     def test_defects_counts_failed_jobs(self):
         self.db.upsert("print_jobs", {
             "id": "j1", "name": "адресник", "state": "failed", "result": "error",
-            "grams": 100, "duration_min": 60, "finished_at": "2026-08-10T10:00:00",
-            "queued_at": "2026-08-10T09:00:00", "printer_id": ""})
+            "grams": 100, "duration_min": 60, "finished_at": _day(2),
+            "queued_at": _day(2, "09:00:00"), "printer_id": ""})
         text = self.bot.text_defects(30)
         self.assertIn("Брак за 30 дней: 1", text)
         self.assertIn("100 г", text)

@@ -350,7 +350,7 @@ class CashierRouteTests(unittest.TestCase):
         for path in ("/api/cashier/login", "/api/cashier/logout",
                      "/api/cashier/catalog", "/api/cashier/incoming",
                      "/api/cashier/sell", "/api/cashier/confirm-sbp",
-                     "/api/cashier/reject-sbp"):
+                     "/api/cashier/reject-sbp", "/api/cashier/reconcile"):
             self.assertIn(path, paths, path)
 
 
