@@ -19,4 +19,18 @@
     <string name="scanning">Ищу…</string>
     <string name="scan_found">Найдено серверов: %1$d</string>
     <string name="scan_none">Ничего не нашёл. Запустите PrintFlow и введите адрес вручную.</string>
+    <!-- 17.0.13: связь сама восстанавливается, но у владельца есть кнопки:
+         переподключиться (без повторного ввода адреса) и проверить обновление. -->
+    <string name="btn_reconnect">Переподключиться</string>
+    <string name="btn_update">Проверить обновление</string>
+    <string name="reconnecting">Проверяю адрес…</string>
+    <string name="reconnect_found">Нашёл кассу на %1$s — переключаюсь</string>
+    <string name="reconnect_none">Сервер не отвечает. Проверьте, что PrintFlow запущен на ПК, и что телефон в той же Wi-Fi сети.</string>
+    <string name="update_none">Обновлений нет — установлена v%1$s.</string>
+    <string name="update_missing">На сервере нет собранного APK: соберите его на ПК (./scripts/android-build.sh).</string>
+    <string name="update_title">Доступна касса v%1$s</string>
+    <string name="update_ready">Файл: %1$s · %2$s МБ\nСкачать и установить сейчас? Данные кассы и код кассира останутся на месте.</string>
+    <string name="update_note">Что нового:\n\n%1$s</string>
+    <string name="update_integrity">Отпечаток файла (sha256): %1$s… — по нему владелец сверяет сборку перед установкой.</string>
+    <string name="update_broken">Сборка на сервере выглядит неполной (нет имени файла или размера) — обновление не предлагаю.</string>
 </resources>

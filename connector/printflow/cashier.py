@@ -66,12 +66,19 @@ class Cashier:
         from .npd import Npd
         self.npd = Npd(db)   # одна строка про лимит режима на экране кассы
         self._sessions: dict[str, dict] = {}  # token -> {at, role}
+        self._touched: dict[str, float] = {}  # token -> когда писали last_seen
 
     # ------------------------------------------------------------- сессии
     # Прочитанные из базы сессии вычищаем не чаще, чем раз в 5 минут: require()
     # вызывается на каждый запрос кассы, и писать в базу при каждом тапе —
     # лишняя работа на горячем пути продажи.
     _PRUNE_SECONDS = 300.0
+    # «Касса на связи» пишем в базу не чаще раза в 20 секунд: панель показывает
+    # минуты молчания, поэтому чаще не нужно, а на транзакцию продажи это не
+    # влияет вовсе — отметка идёт ПОСЛЕ ответа require(), не внутри проводки.
+    _TOUCH_SECONDS = 20.0
+    # Касса считается «на связи», если откликалась за последнюю минуту.
+    ONLINE_SECONDS = 60.0
     _pruned_at = 0.0
 
     @staticmethod
@@ -88,12 +95,12 @@ class Cashier:
             life = datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL)
             self.db.execute(
                 "INSERT OR REPLACE INTO cashier_tokens"
-                "(token_hash,staff_id,cashier,role,legacy,created_at,expires_at) "
-                "VALUES(?,?,?,?,?,?,?)",
+                "(token_hash,staff_id,cashier,role,legacy,created_at,expires_at,last_seen) "
+                "VALUES(?,?,?,?,?,?,?,?)",
                 (self._token_hash(token), str(session.get("staff_id") or ""),
                  str(session.get("name") or ""), str(session.get("role") or "employee"),
                  1 if session.get("legacy") else 0, now_iso(),
-                 life.astimezone().isoformat(timespec="seconds")))
+                 life.astimezone().isoformat(timespec="seconds"), now_iso()))
         except Exception:
             pass
 
@@ -103,6 +110,74 @@ class Cashier:
                             (self._token_hash(token),))
         except Exception:
             pass
+        self._touched.pop(str(token or ""), None)
+
+    def _touch(self, token: str) -> None:
+        """Отметить «касса отвечает» для панели (17.0.13).
+
+        Пишем в ``cashier_tokens.last_seen`` не чаще раза в 20 с и никогда не
+        поднимаем ошибку наверх: не записанная отметка не должна стоить кассе
+        продажи. Ошибка базы здесь — просто «панель чуть позже узнает».
+        """
+        token = str(token or "")
+        if not token:
+            return
+        now = time.time()
+        if now - self._touched.get(token, 0.0) < Cashier._TOUCH_SECONDS:
+            return
+        self._touched[token] = now
+        try:
+            self.db.execute("UPDATE cashier_tokens SET last_seen=? WHERE token_hash=?",
+                            (now_iso(), self._token_hash(token)))
+        except Exception:
+            pass
+
+    def sessions(self, *, online_seconds: float = ONLINE_SECONDS) -> dict[str, Any]:
+        """Кассы, которые входили: кто, когда и когда последний раз отвечал.
+
+        Панель владельца по этому списку отвечает на вопрос «касса на смене или
+        ушла в офлайн». Токены наружу не отдаём — только хеш-хвост для отличия
+        одного телефона от другого.
+        """
+        self._gc()
+        now = time.time()
+        rows = self.db.query(
+            "SELECT token_hash, staff_id, cashier, role, legacy, created_at,"
+            " expires_at, COALESCE(last_seen,'') AS last_seen FROM cashier_tokens"
+            " ORDER BY COALESCE(NULLIF(last_seen,''), created_at) DESC")
+        items = []
+        for row in rows:
+            last_seen = str(row.get("last_seen") or "")
+            silent = self._seconds_since(last_seen, now)
+            items.append({
+                "id": str(row.get("token_hash") or "")[:10],
+                "name": str(row.get("cashier") or "") or "кассир",
+                "staff_id": str(row.get("staff_id") or ""),
+                "role": str(row.get("role") or "employee"),
+                "legacy": bool(row.get("legacy")),
+                "created_at": str(row.get("created_at") or ""),
+                "last_seen": last_seen,
+                "silent_seconds": round(silent, 1) if silent is not None else None,
+                "online": silent is not None and silent <= online_seconds,
+                "expires_at": str(row.get("expires_at") or ""),
+            })
+        online = sum(1 for item in items if item["online"])
+        return {"sessions": items, "online": online, "total": len(items),
+                "online_seconds": online_seconds, "at": now_iso()}
+
+    @staticmethod
+    def _seconds_since(stamp: str, now: float) -> float | None:
+        """Сколько секунд назад была отметка. Пусто/мусор — None («неизвестно»)."""
+        text = str(stamp or "").strip()
+        if not text:
+            return None
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return max(0.0, now - moment.timestamp())
 
     def _recall(self, token: str) -> dict | None:
         """Найти сессию в базе: процесс перезапустился, а телефон помнит токен.
@@ -140,6 +215,10 @@ class Cashier:
                  if now - float(s.get("ts", now)) > SESSION_TTL]
         for t in stale:
             self._sessions.pop(t, None)
+        if len(self._touched) > 64:  # отметки мёртвых сессий не храним вечно
+            fresh = {t: at for t, at in self._touched.items()
+                     if now - at <= SESSION_TTL and t in self._sessions}
+            self._touched = fresh
         if now - Cashier._pruned_at < self._PRUNE_SECONDS:
             return
         Cashier._pruned_at = now
@@ -212,6 +291,9 @@ class Cashier:
         session = self._sessions.get(token) or self._recall(token)
         if not session:
             raise ValueError("Сессия кассы истекла — введите код снова")
+        # Отметка «касса на связи» для панели. Безопасна: ошибку базы глушим,
+        # а на проводку продажи она не влияет — идёт после проверки сессии.
+        self._touch(token)
         return session
 
     def require_role(self, token: str, *roles: str) -> dict:

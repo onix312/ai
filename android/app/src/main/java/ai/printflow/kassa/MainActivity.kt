@@ -65,6 +65,12 @@ class MainActivity : Activity() {
     private var scanNote: TextView? = null
     private var failed = false
     private lateinit var ring: Ring
+    // 17.0.13: канал «касса ↔ ПК» восстанавливается сам. Сторож проверяет
+    // сохранённый адрес с нарастающей паузой (2→4→8→15→30 с), а если адрес
+    // умер вместе с DHCP — ищет коннектор в своей /24 и переключается, когда
+    // нашёлся ровно один. Кассир при этом ничего не вводит.
+    private var watch: Thread? = null
+    private val watchStop = java.util.concurrent.atomic.AtomicBoolean(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -179,6 +185,7 @@ class MainActivity : Activity() {
                     failed = true
                     runOnUiThread {
                         showPanel(R.string.panel_hint_unreachable)
+                        startWatch()      // дальше касса поднимется сама
                     }
                 }
             }
@@ -227,6 +234,25 @@ class MainActivity : Activity() {
             runOnUiThread { showPanel(R.string.panel_hint_server) }
         }
 
+        /**
+         * Копия офлайн-очереди в памяти оболочки.
+         *
+         * Адрес сервера — это origin страницы, и у каждого IP он свой. Роутер
+         * выдал ПК новый адрес, касса переподключилась на него — и localStorage
+         * старого адреса странице уже не виден: очередь наличных продаж
+         * осталась бы в никуда. Копия в prefs переживает и смену адреса, и
+         * чистку хранилища WebView. Повторная отправка безопасна: номер
+         * продажи (request_id) тот же, сервер вторую не запишет.
+         */
+        @JavascriptInterface
+        fun queueSave(json: String?) {
+            prefs.edit().putString(KEY_QUEUE, (json ?: "").take(QUEUE_LIMIT)).apply()
+        }
+
+        /** Что сохранили в прошлый раз; пусто — страница живёт своей памятью. */
+        @JavascriptInterface
+        fun queueLoad(): String = prefs.getString(KEY_QUEUE, "").orEmpty()
+
         @JavascriptInterface
         fun appInfo(): String = JSONObject()
             .put("package", BuildConfig.APPLICATION_ID)
@@ -234,6 +260,116 @@ class MainActivity : Activity() {
             .put("version_code", BuildConfig.VERSION_CODE)
             .put("platform", "android")
             .toString()
+    }
+
+    // ------------------------------------------- самовосстановление канала
+    /**
+     * Сторож связи: пока экран выбора сервера открыт (значит, касса не
+     * открылась), проверяем адрес и возвращаем кассу в строй без кассира.
+     *
+     * Порядок ровно такой, как решил раунд вопросов: сначала тот же адрес
+     * (роутер обычно не меняет его посреди смены), потом — перескан своей /24.
+     * Автопереключение делаем только если нашёлся РОВНО ОДИН коннектор: две
+     * кассы в одной сети — это уже не «угадаем», а «спросим владельца».
+     */
+    private fun startWatch() {
+        if (watch?.isAlive == true) return
+        watchStop.set(false)
+        watch = Thread {
+            var attempt = 0
+            var scanned = false
+            while (!watchStop.get() && !isFinishing) {
+                val base = prefs.getString(KEY_URL, "").orEmpty()
+                if (base.isBlank()) return@Thread
+                val version = Net.probe(base, timeoutMs = 2500)
+                if (version != null) {
+                    prefs.edit().putString(KEY_LAST_OK, base).apply()
+                    runOnUiThread { load(base) }
+                    return@Thread
+                }
+                attempt += 1
+                // Шаг 2: помним адрес, который недавно отвечал. Если роутер
+                // выдал ПК новый IP, коннектор живёт именно там — и это
+                // быстрее и точнее перескана всей /24.
+                if (attempt == 3) {
+                    val lastOk = prefs.getString(KEY_LAST_OK, "").orEmpty()
+                    if (lastOk.isNotBlank() && lastOk != base &&
+                        Net.probe(lastOk, timeoutMs = 2500) != null) {
+                        runOnUiThread {
+                            toast(getString(R.string.reconnect_found, lastOk))
+                            load(lastOk)
+                        }
+                        return@Thread
+                    }
+                }
+                // Шаг 3: ~30 с мёртвого адреса — повод поискать коннектор
+                // заново: именно так выглядит «роутер выдал другой IP»,
+                // если прошлый адрес тоже молчит.
+                if (attempt >= 6 && !scanned) {
+                    scanned = true
+                    val hits = Net.scan(timeoutMs = 700)
+                    val fresh = hits.map { it.first }.filter { it != base }
+                    if (hits.size == 1) {
+                        val only = hits[0].first
+                        prefs.edit().putString(KEY_LAST_OK, only).apply()
+                        runOnUiThread {
+                            toast(getString(R.string.reconnect_found, only))
+                            load(only)
+                        }
+                        return@Thread
+                    }
+                    if (fresh.isNotEmpty()) {
+                        runOnUiThread {
+                            foundServers = hits
+                            renderFoundServers()
+                            hintView?.text = getString(R.string.reconnect_none)
+                        }
+                    }
+                }
+                val pause = when {
+                    attempt <= 1 -> 2000L
+                    attempt <= 3 -> 4000L
+                    attempt <= 5 -> 8000L
+                    attempt <= 8 -> 15000L
+                    else -> 30000L
+                }
+                try {
+                    Thread.sleep(pause)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+            }
+        }.also { it.start() }
+    }
+
+    private fun stopWatch() {
+        watchStop.set(true)
+        watch?.interrupt()
+        watch = null
+    }
+
+    /** Кнопка «Переподключиться»: тот же адрес, потом перескан. Без ввода. */
+    private fun reconnect() {
+        val base = prefs.getString(KEY_URL, "").orEmpty()
+        if (base.isBlank()) {
+            showPanel(R.string.panel_hint_initial)
+            return
+        }
+        hintView?.text = getString(R.string.reconnecting)
+        Thread {
+            val version = if (Net.probe(base, timeoutMs = 2500) != null) base
+            else Net.scan(timeoutMs = 700).takeIf { it.size == 1 }?.get(0)?.first
+            if (version != null) {
+                prefs.edit().putString(KEY_LAST_OK, version).apply()
+                runOnUiThread { load(version) }
+            } else {
+                runOnUiThread { startWatch() }
+            }
+        }.start()
+    }
+
+    private fun toast(text: String) {
+        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     // ---------------------------------------------------------- загрузка
@@ -245,6 +381,7 @@ class MainActivity : Activity() {
 
     private fun remember(url: String) {
         val root = Net.normalize(url) ?: return
+        markAlive(root)
         val current = prefs.getString(KEY_URL, "").orEmpty()
         if (current != root) {
             prefs.edit().putString(KEY_URL, root).apply()
@@ -252,6 +389,18 @@ class MainActivity : Activity() {
             // касса «не отвечает» с вчерашнего вечера.
             syncRingService()
         }
+    }
+
+    /**
+     * Запомнить адрес как «последний живой». Проверка идёт в фоне: onPageFinished
+     * вызывается на UI-потоке, и ждать там сеть нельзя (панель/касса замерли бы).
+     */
+    private fun markAlive(root: String) {
+        Thread {
+            if (Net.probe(root, timeoutMs = 1500) != null) {
+                prefs.edit().putString(KEY_LAST_OK, root).apply()
+            }
+        }.start()
     }
 
     private fun openExternally(url: String) {
@@ -296,6 +445,8 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(KEY_RING_BG, on).apply()
             syncRingService()
         }
+        scroll.findViewById(R.id.btnReconnect).setOnClickListener { reconnect() }
+        scroll.findViewById(R.id.btnUpdate).setOnClickListener { checkForUpdate(manual = true) }
         scroll.findViewById(R.id.btnBattery).setOnClickListener { askBattery(true) }
         (scroll.findViewById(R.id.panelVersion) as? TextView)?.text =
             getString(R.string.panel_version_fmt, BuildConfig.VERSION_NAME)
@@ -367,6 +518,7 @@ class MainActivity : Activity() {
     }
 
     private fun hidePanel() {
+        stopWatch()
         panel?.let { root.removeView(it) }
         panel = null
         urlField = null
@@ -420,25 +572,72 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Обновка: APK лежит на том же сервере, что и касса, — тап и переустановка. */
-    private fun checkForUpdate() {
+    /**
+     * Обновка: APK лежит на том же сервере, что и касса, — тап и переустановка.
+     *
+     * 17.0.13: перед установкой показываем «что нового» (changelog из
+     * version.json), имя файла и размер, а не только номер версии. Сборку
+     * без имени файла или размера не предлагаем вовсе: ставить «что-то»
+     * вслепую на кассу нельзя.
+     *
+     * `manual` — нажата кнопка «Проверить обновление»: тогда честно говорим
+     * и «обновлений нет», и «сборки на сервере нет». При старте молчим.
+     */
+    private fun checkForUpdate(manual: Boolean = false) {
         val base = prefs.getString(KEY_URL, "").orEmpty()
-        if (base.isBlank()) return
+        if (base.isBlank()) {
+            if (manual) runOnUiThread { toast(getString(R.string.panel_hint_server)) }
+            return
+        }
         Thread {
-            val json = Net.json(base, "/api/app/android?installed=${BuildConfig.VERSION_CODE}") ?: return@Thread
-            if (json.optBoolean("update_available", false)) {
-                val url = json.optString("url", "")
-                val version = json.optString("version", "")
-                if (url.isNotBlank()) {
-                    runOnUiThread {
-                        AlertDialog.Builder(this)
-                            .setTitle("Доступна касса v$version")
-                            .setMessage("Скачать и установить сейчас? Данные кассы и код кассира останутся на месте.")
-                            .setPositiveButton("Скачать") { _, _ -> openExternally("$base$url") }
-                            .setNegativeButton("Позже", null)
-                            .show()
-                    }
+            val json = Net.json(base, "/api/app/android?installed=${BuildConfig.VERSION_CODE}")
+            if (json == null) {
+                if (manual) runOnUiThread { toast(getString(R.string.reconnect_none)) }
+                return@Thread
+            }
+            val available = json.optBoolean("available", false)
+            val update = json.optBoolean("update_available", false)
+            if (!available) {
+                if (manual) runOnUiThread { toast(getString(R.string.update_missing)) }
+                return@Thread
+            }
+            if (!update) {
+                if (manual) runOnUiThread {
+                    toast(getString(R.string.update_none, BuildConfig.VERSION_NAME))
                 }
+                return@Thread
+            }
+            val url = json.optString("url", "")
+            val version = json.optString("version", "")
+            val file = json.optString("file", "")
+            val sizeMb = json.optDouble("size_mb", 0.0)
+            val bytes = json.optLong("size_bytes", 0L)
+            val changes = json.optString("changelog", "")
+            val sha = json.optString("sha256", "")
+            if (url.isBlank() || file.isBlank() || (bytes <= 0L && sizeMb <= 0.0)) {
+                if (manual) runOnUiThread { toast(getString(R.string.update_broken)) }
+                return@Thread
+            }
+            val size = if (sizeMb > 0.0) String.format(java.util.Locale.ROOT, "%.1f", sizeMb)
+                       else String.format(java.util.Locale.ROOT, "%.1f", bytes / 1024.0 / 1024.0)
+            val message = buildString {
+                if (changes.isNotBlank()) {
+                    append(getString(R.string.update_note, changes.take(600)))
+                    append("\n\n")
+                }
+                append(getString(R.string.update_ready, file, size))
+                if (sha.isNotBlank()) {
+                    append("\n")
+                    append(getString(R.string.update_integrity, sha.take(16)))
+                }
+            }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.update_title, version))
+                    .setMessage(message)
+                    .setPositiveButton("Скачать") { _, _ -> openExternally("$base$url") }
+                    .setNegativeButton("Позже", null)
+                    .show()
             }
         }.start()
     }
@@ -470,15 +669,22 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopWatch()
         runCatching { web.destroy() }
         super.onDestroy()
     }
 
     companion object {
         private const val KEY_URL = "server_url"
+        // Последний адрес, который реально ответил: при смене IP роутером
+        // касса пробует его первым, а не «вспоминает» вчерашний мёртвый.
+        private const val KEY_LAST_OK = "server_url_last_ok"
         private const val KEY_AWAKE = "keep_awake"
         private const val KEY_BATTERY_ASKED = "battery_asked"
         private const val KEY_RING_BG = "ring_background"
+        // Копия очереди из страницы: страховка от смены адреса сервера.
+        private const val KEY_QUEUE = "offline_queue_backup"
+        private const val QUEUE_LIMIT = 96 * 1024
         private const val CASHIER_PATH = "/cashier.html"
     }
 }

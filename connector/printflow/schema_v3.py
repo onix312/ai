@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS spec_items (
     nom_id TEXT,                    -- из чего
     variant_id TEXT,
     qty REAL DEFAULT 1,
+    -- Откуда списывать этот расходник при производстве. Пусто — коннектор
+    -- выберет склад материалов сам (см. consumption.py) и запомнит выбор здесь.
+    warehouse_id TEXT,
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_specitems_spec ON spec_items(spec_id);
@@ -297,7 +300,10 @@ CREATE TABLE IF NOT EXISTS cashier_tokens(
     role TEXT DEFAULT 'employee',
     legacy INTEGER DEFAULT 0,
     created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    -- 17.0.13: последний отклик кассы. Панель по нему показывает «на связи»
+    -- или «молчит N мин»; пусто — старая запись, ни разу не откликалась.
+    last_seen TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS ix_cashier_tokens_expiry ON cashier_tokens(expires_at);
 

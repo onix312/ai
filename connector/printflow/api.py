@@ -23,6 +23,7 @@ from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
 from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
                      ensure_dirs, now_iso)
+from .consumption import MaterialShortage, plan as plan_consumption
 from .db import Database, friendly_sqlite_error
 from .manager import PrinterManager
 from .idempotency import IdempotencyStore, extract_key as extract_idempotency_key
@@ -148,6 +149,15 @@ class Api:
             pass
         self.live = LiveBroadcaster(self.bus, self.manager)
         self.live.start()
+        # 17.0.13: сторож касс. Молчащий телефон — единственный обрыв, о
+        # котором владелец иначе узнаёт от кассира («не видно кассу»).
+        try:
+            from .presence import CashierWatcher
+
+            self.cashier_watcher = CashierWatcher(self.cashier, self.manager, self.db)
+            self.cashier_watcher.start()
+        except Exception:
+            self.cashier_watcher = None
         # 14.0 (идея 5): повтор изменяющего запроса с тем же ключом не плодит
         # сущности — ответ первого выполнения возвращается как есть.
         self.idempotency = IdempotencyStore(self.db)
@@ -156,6 +166,20 @@ class Api:
         self.listen_host = "127.0.0.1"
         self.listen_port = 8080
         self.started_at = time.time()
+
+    # ------------------------------------------------- события каталога
+    def catalog_changed(self, reason: str = "") -> None:
+        """Сказать кассам «каталог/цены изменились» (17.0.13).
+
+        Событие **аддитивное**: старый фронтенд его не знает и просто
+        игнорирует, денежные события (`event`) и их формат не трогаются.
+        Касса по нему перечитывает каталог — кассир больше не продаёт по
+        цене, которую владелец поменял полчаса назад.
+        """
+        try:
+            self.bus.publish("catalog_changed", {"reason": reason, "at": now_iso()})
+        except Exception:
+            pass
 
     def restart_process(self) -> None:
         """Перезапустить процесс (маркер восстановления применится на старте)."""
@@ -2462,9 +2486,12 @@ class Api:
             return 200, {"ok": True, "spool": self.acc.restock_spool(
                 body.get("id", ""), num(body.get("grams")), num(body.get("price")))}
         if path == "/api/catalog/save":
-            return 200, {"ok": True, "item": self.repo.save_catalog_item(body)}
+            item = self.repo.save_catalog_item(body)
+            self.catalog_changed("catalog_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/catalog/delete":
             self.repo.delete_catalog_item(body.get("id", ""))
+            self.catalog_changed("catalog_delete")
             return 200, {"ok": True}
         if path == "/api/transaction/save":
             if body.get("id"):
@@ -2657,9 +2684,12 @@ class Api:
         # --- настройки, бэкап, уведомления
         # --- стеллаж магазина
         if path == "/api/shelf/save":
-            return 200, {"ok": True, "item": self.shelf.save_item(body)}
+            item = self.shelf.save_item(body)
+            self.catalog_changed("shelf_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/shelf/delete":
             self.shelf.delete_item(body.get("id", ""))
+            self.catalog_changed("shelf_delete")
             return 200, {"ok": True}
         if path == "/api/shelf/produce":
             return 200, self.shelf.produce(body.get("item_id", ""), num(body.get("qty")),
@@ -2714,7 +2744,9 @@ class Api:
         # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature/save":
-            return 200, {"ok": True, "item": self.nom.save(body)}
+            item = self.nom.save(body)
+            self.catalog_changed("nomenclature_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/nomenclature/delete":
             self.nom.delete(body.get("id", ""))
             return 200, {"ok": True}
@@ -2770,6 +2802,30 @@ class Api:
             self.nom.delete_spec(body.get("id", ""))
             return 200, {"ok": True}
         # ------------------------------------------------------------- склады
+        if path == "/api/production/plan":
+            # «Чем и откуда списывается изделие»: тот же расчёт, что при
+            # проведении, но без движений. Панель показывает это до подтверждения.
+            rows = body.get("items")
+            if not isinstance(rows, list) or not rows:
+                return 400, {"error": "Укажите позиции производства"}
+            warehouse_id = str(body.get("warehouse_id")
+                               or self.docs.default_warehouse())
+            needs: list[dict] = []
+            for row in rows:
+                if not isinstance(row, dict) or not row.get("nom_id"):
+                    continue
+                qty = num(row.get("qty"), 1)
+                for comp in self.docs.spec_components(row["nom_id"]):
+                    need = num(comp["qty"]) * qty
+                    if need <= 0:
+                        continue
+                    needs.append({"nom_id": comp["nom_id"], "qty": need,
+                                  "name": comp.get("name") or "",
+                                  "unit": comp.get("unit") or "",
+                                  "line_id": comp.get("id") or "",
+                                  "chosen": comp.get("warehouse_id") or ""})
+            plan = plan_consumption(self.db, self.stock, needs, warehouse_id)
+            return 200, {"ok": True, "plan": plan}
         if path == "/api/warehouse/save":
             # Фронтенд шлёт пустой id для новой записи — setdefault его не заменит.
             if not body.get("id"):
@@ -2840,7 +2896,16 @@ class Api:
         if path == "/api/document/save":
             return 200, {"ok": True, "document": self.docs.save(body)}
         if path == "/api/document/post":
-            return 200, {"ok": True, "document": self.docs.post(body.get("id", ""))}
+            # Производство списывает состав, который может лежать на своём
+            # складе (расходники). Если чего-то не хватает, панель получает
+            # ПЛАН: что, откуда и сколько — и человек решает (переложить или
+            # осознанно увести в минус), а не читает «ошибка 400».
+            try:
+                doc = self.docs.post(body.get("id", ""),
+                                     allow_shortage=bool(body.get("allow_shortage")))
+            except MaterialShortage as exc:
+                return 400, {"error": str(exc), "production_short": exc.plan}
+            return 200, {"ok": True, "document": doc}
         if path == "/api/document/unpost":
             return 200, {"ok": True, "document": self.docs.unpost(body.get("id", ""))}
         if path == "/api/document/delete":
@@ -3288,6 +3353,7 @@ class Api:
             return 200, result
         if path == "/api/catalog/recalc-apply":
             result = self.acc.recalc_catalog(True)
+            self.catalog_changed("price_recalc")
             self.bus.publish("resync", {})
             return 200, result
         if path == "/api/orders/bulk-status":

@@ -16,6 +16,7 @@ from typing import Any
 
 from .accounting import Accounting, num, uid
 from .config import now_iso
+from .consumption import MaterialShortage
 from .db import Database
 from .documents import Documents
 from .nomenclature import Nomenclature
@@ -465,7 +466,20 @@ class Batches:
                 "batch_id": batch_id, "at": now_iso(),
                 "note": note or f"Партия {batch.get('number') or batch_id}",
                 "items": lines})
-            doc = self.docs.post(doc["id"])
+            # Партия — это уже напечатанный факт: изделие снято с принтера и
+            # лежит на складе. Если расходника не хватает, не отказываемся от
+            # выпуска, а списываем в минус и говорим об этом событием — иначе
+            # учёт изделий отстанет от жизни (см. consumption.py).
+            try:
+                doc = self.docs.post(doc["id"])
+            except MaterialShortage as exc:
+                doc = self.docs.post(doc["id"], allow_shortage=True)
+                self.db.add_event(
+                    "stock", "Производство: расходников не хватило — списано в минус",
+                    exc.plan.get("message") or str(exc), "",
+                    {"batch_id": batch_id, "doc_id": doc.get("id"),
+                     "short": [{"nom_id": line["nom_id"], "missing": line["missing"]}
+                               for line in (exc.plan.get("short") or [])]})
 
         done = num(batch["qty_done"]) + qty
         scrap_total = num(batch["qty_scrap"]) + scrap
