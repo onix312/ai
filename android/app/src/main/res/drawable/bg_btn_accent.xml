@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Кнопка «Открыть кассу»: фирменный индиго + ripple-отклик на касание.
+     Раньше был системный цвет OEM (на Samsung зелёный, на Pixel синий,
+     на MIUI оранжевый) — панель выглядела «чужой». Без зависимостей. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#40ffffff">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/kassa_accent" />
+            <corners android:radius="@dimen/panel_radius" />
+        </shape>
+    </item>
+</ripple>

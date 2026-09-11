@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Размеры экрана выбора сервера.
+     Всё, что раньше жило пикселями в MainActivity (setPadding(40,56,40,40)),
+     переехало сюда в dp: на mdpi..xxhdpi и при смене системного масштаба
+     панель больше не «плывёт». Шрифты остаются в sp (не зависят от плотности,
+     но растут вместе с системным масштабом шрифта — как и положено кассе,
+     которой пользуются обычные люди). -->
+<resources>
+    <dimen name="panel_side_padding">20dp</dimen>
+    <dimen name="panel_top_padding">24dp</dimen>
+    <dimen name="panel_bottom_padding">16dp</dimen>
+    <dimen name="panel_gap">12dp</dimen>
+    <dimen name="panel_section_gap">16dp</dimen>
+    <dimen name="panel_title_bottom">12dp</dimen>
+    <dimen name="panel_hint_bottom">20dp</dimen>
+
+    <!-- Геометрия контролов (единый стиль с кассой: радиус 14, gap 12) -->
+    <dimen name="panel_radius">14dp</dimen>
+    <dimen name="panel_logo">56dp</dimen>
+
+    <!-- Шрифты: sp намеренно -->
+    <dimen name="panel_title_size">24sp</dimen>
+    <dimen name="panel_hint_size">14sp</dimen>
+    <dimen name="panel_field_size">16sp</dimen>
+    <dimen name="panel_version_size">12sp</dimen>
+
+    <!-- Зона нажатия по гайду Android: не меньше 48dp -->
+    <dimen name="panel_control_min_height">48dp</dimen>
+</resources>

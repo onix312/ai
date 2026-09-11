@@ -104,6 +104,15 @@ const ICONS = {
   tag: '<path d="M3.5 11.5v-7a1 1 0 0 1 1-1h7L21 13l-8 8z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/>',
   palette: '<path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-.8 2-1.8 0-.9-.6-1.4-.6-2.2 0-1 .8-1.8 2-1.8H17a4.5 4.5 0 0 0 4.5-4.5C21.5 6.5 17.2 3 12 3z"/><circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none"/><circle cx="10" cy="7.3" r="1.1" fill="currentColor" stroke="none"/><circle cx="14.6" cy="7.3" r="1.1" fill="currentColor" stroke="none"/>',
   offline: '<path d="M2.8 9a13 13 0 0 1 18.4 0"/><path d="M6 12.3a8.5 8.5 0 0 1 12 0"/><path d="M9.2 15.5a4 4 0 0 1 5.6 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/><path d="M3.5 3.5l17 17"/>',
+
+  /* --- 17.0.12: добор для кассы — эмодзи уходят и с кассового экрана --- */
+  cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M5.5 9.5h.01M18.5 14.5h.01"/>',
+  bell: '<path d="M12 3.5a6 6 0 0 0-6 6v3.5l-1.6 2.4h15.2L18 13v-3.5a6 6 0 0 0-6-6z"/><path d="M9.5 18.5a2.6 2.6 0 0 0 5 0"/>',
+  belloff: '<path d="M12 3.5a6 6 0 0 0-6 6v3.5l-1.6 2.4h9.6"/><path d="M9.5 18.5a2.6 2.6 0 0 0 5 0"/><path d="M3.5 3.5l17 17"/>',
+  logout: '<path d="M14 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7"/><path d="M16 8l4 4-4 4"/><path d="M20 12H10"/>',
+  incoming: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 13h5l2 3h4l2-3h5"/>',
+  receipt: '<path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5-2 1.5z"/><path d="M9 8h6M9 12h6"/>',
+  minus: '<path d="M5 12h14"/>',
 };
 
 /** SVG-строка иконки; неизвестное имя — пустая строка (глиф остаётся). */

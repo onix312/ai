@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Экран выбора сервера: раньше собирался кодом в MainActivity с отступами
+     в пикселях, теперь это обычный layout — размеры из dimens (dp), шрифты из
+     dimens (sp). Внешний ScrollView гарантирует: «Открыть кассу» не уезжает
+     под клавиатуру (adjustResize сжимает окно, ScrollView прокручивает) и
+     список найденных серверов скроллится, сколько бы их ни нашлось.
+     Визуал — в фирменном стиле кассы (17.0.12): акцентная главная кнопка,
+     ghost-второстепенные, скруглённое поле, чекбоксы в индиго. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/panelScroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/kassa_bg"
+    android:fillViewport="true"
+    android:scrollbars="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="@dimen/panel_side_padding"
+        android:paddingRight="@dimen/panel_side_padding"
+        android:paddingTop="@dimen/panel_top_padding"
+        android:paddingBottom="@dimen/panel_bottom_padding">
+
+        <ImageView
+            android:layout_width="@dimen/panel_logo"
+            android:layout_height="@dimen/panel_logo"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="@dimen/panel_gap"
+            android:contentDescription="@string/app_name"
+            android:src="@drawable/ic_launcher" />
+
+        <TextView
+            android:id="@+id/panelTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingBottom="@dimen/panel_title_bottom"
+            android:text="@string/panel_title"
+            android:textColor="@color/kassa_text"
+            android:textSize="@dimen/panel_title_size" />
+
+        <TextView
+            android:id="@+id/panelHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="@dimen/panel_hint_bottom"
+            android:textColor="@color/kassa_muted"
+            android:textSize="@dimen/panel_hint_size" />
+
+        <EditText
+            android:id="@+id/urlField"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:background="@drawable/bg_edit_url"
+            android:fontFamily="monospace"
+            android:hint="@string/url_hint"
+            android:imeOptions="actionGo"
+            android:inputType="textUri|textNoSuggestions"
+            android:maxLines="1"
+            android:paddingLeft="@dimen/panel_gap"
+            android:paddingRight="@dimen/panel_gap"
+            android:textColor="@color/kassa_text"
+            android:textColorHint="@color/kassa_hint"
+            android:textSize="@dimen/panel_field_size" />
+
+        <Button
+            android:id="@+id/btnOpen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:layout_marginTop="@dimen/panel_gap"
+            android:background="@drawable/bg_btn_accent"
+            android:text="@string/btn_open"
+            android:textColor="#ffffff" />
+
+        <Button
+            android:id="@+id/btnFind"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:layout_marginTop="@dimen/panel_gap"
+            android:background="@drawable/bg_btn_ghost"
+            android:text="@string/btn_find"
+            android:textColor="@color/kassa_text" />
+
+        <LinearLayout
+            android:id="@+id/results"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="@dimen/panel_section_gap"
+            android:paddingBottom="@dimen/panel_gap" />
+
+        <CheckBox
+            android:id="@+id/cbAwake"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:buttonTint="@color/kassa_accent"
+            android:text="@string/cb_awake"
+            android:textColor="@color/kassa_muted" />
+
+        <CheckBox
+            android:id="@+id/cbRing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:buttonTint="@color/kassa_accent"
+            android:text="@string/cb_ring"
+            android:textColor="@color/kassa_muted" />
+
+        <Button
+            android:id="@+id/btnBattery"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:layout_marginTop="@dimen/panel_gap"
+            android:background="@drawable/bg_btn_ghost"
+            android:text="@string/btn_battery"
+            android:textColor="@color/kassa_text" />
+
+        <TextView
+            android:id="@+id/panelVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingTop="@dimen/panel_section_gap"
+            android:textColor="@color/kassa_hint"
+            android:textSize="@dimen/panel_version_size" />
+    </LinearLayout>
+</ScrollView>

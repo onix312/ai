@@ -24,12 +24,18 @@
         android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.Kassa">
+        <!-- Без screenOrientation: касса на подставке часто стоит боком, ландшафт
+             должен работать так же, как портрет. configChanges (включая fontScale)
+             намеренно перехватывает поворот/плотность/масштаб шрифта, чтобы
+             WebView не пересоздавался и не терял корзину кассира посреди продажи;
+             панель выбора сервера при этом пересобирается в onConfigurationChanged.
+             adjustResize: при вводе адреса клавиатура сжимает окно, а не прячет
+             кнопку «Открыть кассу» за собой. -->
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|density"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize|density|fontScale"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Планшеты (наименьшая сторона ≥ 600dp): поле ввода и кнопки не должны
+     растягиваться на всю ширину экрана — иначе «Открыть кассу» превращается
+     в забор. Шире боковые отступы и крупнее заголовок. -->
+<resources>
+    <dimen name="panel_side_padding">48dp</dimen>
+    <dimen name="panel_top_padding">40dp</dimen>
+    <dimen name="panel_title_size">28sp</dimen>
+</resources>

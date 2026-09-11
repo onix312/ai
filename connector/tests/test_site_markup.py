@@ -1,4 +1,5 @@
 """Проверки структуры основного HTML-интерфейса."""
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 from unittest import TestCase
@@ -175,3 +176,110 @@ class SiteMarkupTests(TestCase):
         html = INDEX_HTML.read_text(encoding="utf-8")
         self.assertIn("задний-правый", html)
         self.assertNotIn("задний-правий", html)
+
+
+class CashierLayoutTests(TestCase):
+    """Адаптив кассы (17.0.11): QR от свободной области, safe-area, зоны ≥ 48px.
+
+    Сверяем не «на глаз», а по строкам CSS внутри cashier.html — иначе регрессия
+    в вёрстке приедет на телефон кассира и заказчик решит, что адаптации нет.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def _rule(self, selector):
+        m = re.search(re.escape(selector) + r"\{[^}]*\}", self.css)
+        self.assertIsNotNone(m, f"правило {selector!r} не найдено")
+        return m.group(0)
+
+    def test_qr_sizes_from_free_area_not_just_width(self):
+        # min(≈340px, 78vw, 58vh, 100%) — ширина и высота экрана, не только ширина
+        self.assertIn(".qrbox svg{width:min(360px,78vw,58vh,100%)", self.css)
+
+    def test_sheet_scrolls_on_every_screen(self):
+        rule = self._rule(".sheet")
+        self.assertIn("max-height", rule)
+        self.assertIn("overflow:auto", rule)
+        self.assertIn("100dvh", rule)
+
+    def test_safe_area_top_is_handled(self):
+        # шапка и модалка не прячутся под вырез/статусбар в PWA edge-to-edge
+        self.assertIn("env(safe-area-inset-top)", self.css)
+
+    def test_landscape_is_handled(self):
+        self.assertIn("@media(orientation:landscape)", self.css)
+
+    def test_touch_targets_are_at_least_48px(self):
+        # зоны нажатия — 48px; `.n` (min-height:38px) — это текст названия
+        # товара, а не кнопка, поэтому его в проверку не берём
+        self.assertIn(".iconbtn{width:48px;height:48px", self.css)
+        self.assertIn(".qbtn{width:48px;height:48px", self.css)
+        self.assertIn("min-height:48px", self._rule(".tab"))
+        self.assertIn("min-height:48px", self._rule(".cat"))
+        self.assertIn("min-height:48px", self._rule(".btn.sm"))
+        self.assertNotIn("min-height:42px", self.css)
+
+    def test_shell_cache_was_bumped_for_this_round(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 38,
+                                "правка cashier.html требует поднятия CACHE в sw.js")
+
+    # --- 17.0.12: визуал и «скорость продажи» -----------------------------
+
+    def test_no_tofu_symbols_on_old_android(self):
+        # ⎋ (U+238B), ⌕ (U+2315) и 🧾 (U+1F9FE) — «квадратики» на Android 7–8
+        for char in ("⎋", "⌕", "🧾"):
+            self.assertNotIn(char, self.css, f"символ {char!r} даёт tofu на minSdk 24")
+
+    def test_cart_sum_is_the_hero(self):
+        # сумма крупнее и жирнее остального в корзине
+        self.assertIn(".cart .sum b{font-size:25px;font-weight:900", self.css)
+
+    def test_cart_shadow_and_row_focus(self):
+        self.assertIn("box-shadow:0 -10px 28px -16px", self.css)
+        self.assertIn(".row:hover,.row:focus-within", self.css)
+
+    def test_skeleton_and_thin_scrollbar(self):
+        self.assertIn(".skel", self.css)
+        self.assertIn("@keyframes skelpulse", self.css)
+        self.assertIn("scrollbar-width:thin", self.css)
+
+    def test_focus_ring_covers_tiles(self):
+        self.assertIn(".tile:focus-visible", self.css)
+
+    def test_speed_of_sale_wiring(self):
+        # штрихкод добавляется без Enter, «Повторить», «F» в поиск, индикатор связи
+        self.assertIn("function autoAddExact", self.css)
+        self.assertIn("function rememberLastSale", self.css)
+        self.assertIn('id="bRepeat"', self.css)
+        self.assertIn("function netState", self.css)
+        self.assertIn('id="netDot"', self.css)
+
+    def test_shift_quality_of_life(self):
+        # живое «должно/факт», пресеты причин, фильтр журнала, замок выемки
+        self.assertIn("function bindShiftDiff", self.css)
+        self.assertIn("function notePresets", self.css)
+        self.assertIn("function shiftFilterChips", self.css)
+        self.assertIn("function applyShiftFilter", self.css)
+        self.assertIn("🔒 Забрать из ящика", self.css)
+        self.assertIn("Только старший", self.css)
+
+    def test_offline_and_qr_quality_of_life(self):
+        self.assertIn("function offAge", self.css)
+        self.assertIn("function closeQrModal", self.css)
+        self.assertIn("#bQrPaid{min-height:56px", self.css)
+
+    def test_cashier_uses_svg_icons_from_registry(self):
+        # эмодзи заменены на PFIcons: касса подключает icons.js и ссылается
+        # только на существующие имена (иначе fallback-глиф, а не SVG)
+        self.assertIn("/assets/icons.js", self.css)
+        registry = (ROOT / "site" / "assets" / "icons.js").read_text(encoding="utf-8")
+        used = sorted(set(re.findall(r'data-icon="([a-z0-9_-]+)"', self.css)))
+        self.assertTrue(used, "касса должна использовать data-icon")
+        missing = [name for name in used
+                   if not re.search(r"^\s+" + re.escape(name) + r"\s*:\s*'", registry, re.M)]
+        self.assertEqual(missing, [], f"иконки не в реестре icons.js: {missing}")
