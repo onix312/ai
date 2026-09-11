@@ -86,6 +86,26 @@
             android:text="@string/btn_find"
             android:textColor="@color/kassa_text" />
 
+        <Button
+            android:id="@+id/btnReconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:layout_marginTop="@dimen/panel_gap"
+            android:background="@drawable/bg_btn_ghost"
+            android:text="@string/btn_reconnect"
+            android:textColor="@color/kassa_text" />
+
+        <Button
+            android:id="@+id/btnUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:layout_marginTop="@dimen/panel_gap"
+            android:background="@drawable/bg_btn_ghost"
+            android:text="@string/btn_update"
+            android:textColor="@color/kassa_text" />
+
         <LinearLayout
             android:id="@+id/results"
             android:layout_width="match_parent"

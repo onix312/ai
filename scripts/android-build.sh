@@ -123,15 +123,49 @@ umask 022   # телефон читает файл по HTTP — права на
 mkdir -p "$OUT"
 NAME="NOZZA-kassa-${VERSION_NAME}.apk"
 cp "$APK" "$OUT/$NAME"
-python3 - "$OUT/version.json" "$VERSION_NAME" "$VERSION_CODE" "$NAME" <<'PY'
-import json, sys, time
-target, version, code, name = sys.argv[1:5]
+# Манифест сборки. Кроме версии и имени файла пишем размер и sha256: по ним
+# панель и оболочка проверяют, что телефон скачал именно эту сборку, а не
+# обрезанный файл. Changelog берётся из CHANGELOG.md — раздел текущей версии,
+# чтобы кассир видел «что нового» до установки (17.0.13).
+python3 - "$OUT/version.json" "$VERSION_NAME" "$VERSION_CODE" "$NAME" \
+         "$OUT/$NAME" "$ROOT/CHANGELOG.md" <<'PY'
+import hashlib, json, sys, time
+
+target, version, code, name, apk, changelog_path = sys.argv[1:7]
+
+
+def section(path: str, tag: str) -> str:
+    """Раздел changelog для этой версии — без Markdown-заголовка."""
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return ""
+    marker = f"## {tag}"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    body = text[start + len(marker):]
+    end = body.find("\n## ")
+    if end >= 0:
+        body = body[:end]
+    lines = [line.strip() for line in body.strip().splitlines() if line.strip()]
+    return "\n".join(lines)[:1200]
+
+
+digest = hashlib.sha256()
+with open(apk, "rb") as handle:
+    for chunk in iter(lambda: handle.read(1 << 20), b""):
+        digest.update(chunk)
+
 json.dump({
     "version": version,
     "version_code": int(code),
     "file": name,
     "package": "ai.printflow.kassa",
     "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    "size_bytes": __import__("os").path.getsize(apk),
+    "sha256": digest.hexdigest(),
+    "changelog": section(changelog_path, version),
 }, open(target, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 PY
 

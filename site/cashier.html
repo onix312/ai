@@ -37,6 +37,17 @@
  .iconbtn.off{opacity:.65;background:var(--bg);color:var(--muted)}
  .netdot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.16)}
  .netdot.off{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.16)}
+ .netdot.warn{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.16)}
+ /* Полоска состояния канала (17.0.13): кассир видит, что связи нет и что касса
+    переподключается сама. Технических кнопок на экране продажи нет — владелец
+    чинит с панели выбора сервера, кассир просто продолжает продавать. */
+ .linkbar{display:flex;align-items:center;gap:8px;padding:8px 11px;margin:0 0 10px;border-radius:12px;
+  background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#fca5a5;
+  font-size:12.5px;font-weight:700;line-height:1.35}
+ .linkbar.warn{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35);color:#fcd34d}
+ .linkbar .ldot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:0 0 8px}
+ .linkbar .fix{margin-left:auto;flex:0 0 auto}
+ .offbar .prog{display:block;color:var(--muted);font-size:11.5px;margin-top:3px}
  .iconbtn:active{transform:scale(.96)}
  /* tabs — большие, для пальца */
  .tabs{display:flex;gap:8px;margin:4px 0 14px;background:var(--panel);padding:5px;border-radius:16px;border:1px solid var(--line)}
@@ -49,6 +60,7 @@
   @keyframes pfnudge{0%,100%{opacity:1}50%{opacity:.55}}
   .install{display:flex;gap:9px;align-items:center;margin:9px 0;padding:10px 12px;border-radius:13px;background:rgba(79,70,229,.11);border:1px solid rgba(79,70,229,.24);font-size:12.6px;line-height:1.35}
  .install a{color:inherit;font-weight:800;text-decoration:underline;white-space:nowrap}
+ .install .upd{display:block;opacity:.76;font-size:11.6px;margin-top:3px;line-height:1.3}
  .install button{margin-left:auto;flex:0 0 auto}
  .malert{display:block;width:100%;text-align:left;border:0;cursor:pointer;
    background:rgba(217,119,6,.14);color:#b45309;border-bottom:1px solid rgba(217,119,6,.28);
@@ -240,9 +252,10 @@
    <button class="iconbtn" id="bLogout" type="button" title="Выйти" data-icon="logout">🚪</button>
   </div>
 
+  <div class="linkbar" id="linkBar" hidden><span class="ldot"></span><span id="linkText"></span></div>
   <button class="malert" id="moneyAlert" type="button" hidden></button>
   <div class="offbar" id="offBar" hidden><span class="dot"></span>
-   <span><b id="offTitle"></b><span class="sub" id="offNote"></span></span>
+   <span><b id="offTitle"></b><span class="sub" id="offNote"></span><span class="sub prog" id="offProgress" hidden></span></span>
    <button class="btn ghost sm" id="offRetry" type="button">Выгрузить сейчас</button>
    <button class="btn ghost sm" id="offDrop" type="button">Снять</button></div>
   <div class="install" id="installHint" hidden><span>📲</span><span id="installText"></span><a id="installGo" href="#" download>Скачать</a><button class="btn ghost sm" id="installOff" type="button">Не показывать</button></div>
@@ -291,6 +304,7 @@
    <input class="fld" id="discPin" type="password" inputmode="numeric" placeholder="PIN старшего">
   </div>
   <div class="hint">Скидка на весь чек — подтвердит старший своим PIN. Необязательно.</div>
+  <div class="linkbar warn" id="priceWarn" hidden style="margin:2px 0 10px"><span class="ldot"></span><span id="priceWarnText"></span><button class="btn ghost sm fix" id="priceWarnFix" type="button">Обновить</button></div>
   <button class="payrow" id="payCash" type="button"><span class="ic" data-icon="cash"></span><span>Наличные<small>в кассу магазина — сразу в учёт</small></span></button>
   <button class="payrow" id="paySbp" type="button"><span class="ic" data-icon="qr"></span><span>СБП<small id="sbpHint">QR на экране — подтвердите, когда деньги придут</small></span></button>
   <button class="btn ghost" id="bCancel" type="button" style="width:100%">Отмена</button>
@@ -341,17 +355,98 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
-var state = {token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
+var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
-// компактный индикатор связи в шапке (17.0.12)
-function netState(){
-  var el=$("netDot");if(!el)return;
-  var up=navigator.onLine&&!state.offline;
-  el.classList.toggle("off",!up);
-  el.title=up?"Связь с PrintFlow есть":"Нет связи с PrintFlow";
+/* ---------- связь с ПК: честный статус и самовосстановление (17.0.13) ----------
+   Раньше точка в шапке показывала navigator.onLine, а он в LAN врёт: роутер
+   есть — значит «онлайн», даже если ПК с коннектором выключен. Теперь канал
+   измеряется фактом: ответил ли сервер и жив ли поток событий.
+
+   Обрыв лечится сам: проверка /api/health с нарастающей паузой (1→2→4→8→15 с),
+   возврат связи — перечитать каталог и дослать очередь. Кассир технических
+   кнопок не нажимает: он продаёт, а не чинит сеть (решение раунда вопросов). */
+var LINK={ok:true,at:Date.now(),stream:0,fail:0,probeAt:0,probeBusy:false,
+  since:0,timer:0,why:""};
+var PROBE_MIN=1000,PROBE_MAX=15000,STREAM_QUIET=45000,LINK_TICK=5000;
+function netMark(ok,why){
+  var was=LINK.ok;
+  LINK.ok=!!ok;LINK.why=why||"";
+  if(ok){
+    LINK.at=Date.now();LINK.fail=0;LINK.since=0;
+    state.offline=!navigator.onLine;
+  }else if(was){LINK.since=Date.now();}
+  netState();
+  if(ok&&!was)onLinkBack();
 }
+function netStreamAlive(){return !!LINK.stream&&Date.now()-LINK.stream<STREAM_QUIET;}
+function linkSeconds(){return LINK.since?Math.round((Date.now()-LINK.since)/1000):0;}
+function netState(){
+  var dot=$("netDot"),bar=$("linkBar"),text=$("linkText");
+  var device=!navigator.onLine,dead=!LINK.ok;
+  var quiet=LINK.ok&&!device&&!netStreamAlive();
+  if(dot){
+    dot.classList.toggle("off",device||dead);
+    dot.classList.toggle("warn",!device&&!dead&&quiet);
+    dot.title=dead?("Нет связи с PrintFlow"+(linkSeconds()?" · "+linkSeconds()+" с":""))
+      :quiet?"Поток событий молчит — включена страховочная проверка раз в 25 с"
+      :"Связь с PrintFlow есть — платежи приходят сразу";
+  }
+  if(bar&&text){
+    if(dead){
+      bar.hidden=false;bar.classList.remove("warn");
+      text.textContent="Нет связи с ПК"+(linkSeconds()?" · "+linkSeconds()+" с":"")
+        +" · переподключаюсь сам"+(LINK.fail?" (попытка "+LINK.fail+")":"")
+        +". Продажи пишутся в очередь и уйдут сами.";
+    }else if(device){
+      bar.hidden=false;bar.classList.remove("warn");
+      text.textContent="Нет Wi-Fi на телефоне · продажи пишутся в очередь и уйдут сами.";
+    }else if(quiet){
+      bar.hidden=false;bar.classList.add("warn");
+      text.textContent="Поток событий молчит — звонок о платеже придёт со страховочной "
+        +"проверкой раз в 25 с.";
+    }else{bar.hidden=true;}
+  }
+}
+function onLinkBack(){
+  // Связь вернулась сама: перечитываем каталог и досылаем очередь. Кассир
+  // ничего не нажимал и ничего не потерял.
+  if(!loggedIn())return;
+  loadCatalog(true);offQrRefresh(false);
+  if(offQueue.length)offFlush(true);
+  refreshBadge();
+  if(state.tab==="in")loadIncoming();
+  if(state.tab==="shift")loadShift();
+}
+function netProbe(force){
+  if(LINK.probeBusy||!loggedIn())return;
+  var wait=LINK.fail?Math.min(PROBE_MAX,PROBE_MIN*Math.pow(2,LINK.fail-1)):PROBE_MIN;
+  if(!force&&Date.now()-(LINK.probeAt||0)<wait)return;
+  LINK.probeBusy=true;
+  api("/api/health",null,{timeout:5000,quiet:true}).then(function(){
+    LINK.probeBusy=false;LINK.probeAt=Date.now();
+    netMark(true);
+    // Поток мог умереть вместе с сетью — поднимаем заново, если закрыт.
+    if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
+    connectMoney();
+  }).catch(function(){
+    LINK.probeBusy=false;LINK.probeAt=Date.now();LINK.fail+=1;
+    netMark(false);
+  });
+}
+function netStart(){
+  // Один общий тик: индикатор, фоновый перескан и таймер выгрузки очереди.
+  // Чаще не нужно: отметки кассы пишутся раз в 20 с, а очередь досылается
+  // не чаще, чем раз в 20 с (см. OFF_GAP).
+  if(LINK.timer)return;
+  LINK.timer=setInterval(function(){
+    netState();
+    if(!LINK.ok)netProbe(false);
+    else if(!offBusy&&offQueue.length)offFlush(false);
+  },LINK_TICK);
+}
+
 function money(v){var n=Number(v)||0;return (Math.round(n*100)/100).toLocaleString("ru-RU")+" ₽";}
 function reqId(){return "ui-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);}
 /* ---------- офлайн-контур (17.0.8 / 17.0.9) ----------
@@ -412,8 +507,35 @@ function offLoad(){
   catch(e){offQueue=[];}
 }
 function offSave(){
-  try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-200)));return true;}
+  var pack=JSON.stringify(offQueue.slice(-200));
+  try{localStorage.setItem(OFF_KEY,pack);offStash(pack);return true;}
   catch(e){toast("Память телефона кончилась — в очередь не записано");return false;}
+}
+function offStash(pack){
+  /* Копия очереди в памяти оболочки (когда страница открыта в приложении).
+     Адрес сервера — это origin страницы: роутер выдал ПК новый IP, оболочка
+     открыла тот же адрес с другим хостом — и localStorage старого адреса
+     странице больше не виден. Копия в prefs оболочки переживает и смену
+     адреса, и чистку хранилища WebView, а повторная отправка тех же номеров
+     безопасна: сервер узнаёт request_id и второй продажи не делает. */
+  try{var app=window.PfApp;if(app&&app.queueSave)app.queueSave(pack);}catch(e){}
+}
+function offRestore(){
+  /* Продолжение очереди после смены адреса: складываем записи по номеру —
+     что уже в памяти страницы, то и главнее (его могли снять или отправить). */
+  try{
+    var app=window.PfApp;if(!app||!app.queueLoad)return 0;
+    var saved=JSON.parse(app.queueLoad()||"[]");
+    if(!saved||!saved.length)return 0;
+    var byId={};offQueue.forEach(function(e){if(e&&e.id)byId[e.id]=e;});
+    var added=0;
+    saved.forEach(function(e){if(e&&e.id&&!byId[e.id]){byId[e.id]=e;added++;}});
+    if(!added)return 0;
+    offQueue=Object.keys(byId).map(function(k){return byId[k];}).sort(function(a,b){
+      return String(a.at||"").localeCompare(String(b.at||""));});
+    try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-200)));}catch(e){}
+    return added;
+  }catch(e){return 0;}
 }
 function offTotals(){
   var n=0,sum=0,dead=0,sbp=0,sbpSum=0;
@@ -421,11 +543,15 @@ function offTotals(){
     if(e.m==="sbp"){sbp++;sbpSum+=Number(e.total)||0;}});
   return {n:n,sum:Math.round(sum*100)/100,dead:dead,sbp:sbp,sumSbp:Math.round(sbpSum*100)/100};
 }
-function offPush(items,total,method){
-  var entry={id:"of-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),
+function offPush(items,total,method,id,pending){
+  // id можно передать снаружи: если запрос продажи УЖЕ уходил и ответ не дошёл,
+  // очередь обязана повторить его с тем же номером, иначе сервер запишет
+  // вторую продажу (это и был риск F1 из замера 17.0.13).
+  var entry={id:id||("of-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)),
     at:new Date().toISOString(),total:Math.round(total*100)/100,m:method||"cash",
     cashier:state.name||"кассир",
     items:items.map(function(i){return {id:i.id,qty:i.qty,name:i.name,price:i.price};})};
+  if(pending)entry.pending=1;   // запрос ушёл, ответ неизвестен: «проверяю, не прошла ли»
   offQueue.push(entry);
   if(!offSave()){offQueue.pop();return null;}
   offRender();
@@ -451,51 +577,88 @@ function offTellShell(n){
   // этого не видно, а деньги в ящике уже лежат. В браузере мостика нет.
   try{var app=window.PfApp;if(app&&app.offline)app.offline(Number(n)||0);}catch(e){}
 }
+function offQrState(){
+  /* Сколько живёт закешированный QR магазина: офлайн-СБП принимает только
+     свежий код, и «узнал об этом в момент оплаты» — недопустимо. */
+  var q=offQr();if(!q||!q.at)return null;
+  var ms=Date.now()-(Number(q.at)||0);
+  if(!isFinite(ms)||ms<0)return null;
+  var left=OFF_QR_TTL-ms;
+  var hh=function(x){return Math.max(0,Math.round(x/3600000));};
+  return {left:left,age:ms,fresh:left>0,
+    text:left>0?("QR магазина обновлён "+hh(ms)+" ч назад, действует ещё "+hh(left)+" ч")
+              :("QR магазина устарел ("+hh(ms)+" ч) — офлайн-СБП может не пройти, "
+                +"обновите при связи")};
+}
 function offRender(){
   var el=$("offBar");if(!el)return;
   var t=offTotals();
   offTellShell(t.n);
   el.hidden=!t.n;
   if(t.dead)el.classList.add("dead");else el.classList.remove("dead");
+  var prog=$("offProgress");
+  if(prog){
+    if(offProg.busy&&offProg.total){
+      prog.hidden=false;
+      prog.textContent="выгружаю "+(offProg.done+1>offProg.total?offProg.total:offProg.done+1)
+        +" из "+offProg.total+(offLastTry?" · последняя попытка только что":"");
+    }else if(offProg.failed){
+      prog.hidden=false;
+      prog.textContent="не вышло: "+offProg.failed+". Повторю сам — кассиру делать ничего не надо.";
+    }else{prog.hidden=true;}
+  }
   if(!t.n)return;
+  var pending=offQueue.filter(function(e){return e.pending;}).length;
   $("offTitle").textContent="не проведено: "+t.n+" на "+money(t.sum);
   $("offRetry").textContent=t.dead?("Повторить всё ("+t.n+")"):"Выгрузить сейчас";
+  var qr=offQrState();
   $("offNote").innerHTML=(t.dead?"требует разбора: "+t.dead+" · ":"")
     +(t.sbp?("заявок СБП: "+t.sbp+" на "+money(t.sumSbp)+" — дохода ещё нет · "):"")
+    +(pending?("проверяю, не прошли ли уже: "+pending+" · "):"")
     +"Наличные в ящике, в учёте их ещё нет. Появится связь — уйдут сами. "
     +"В «должно быть в ящике» они не считаются. "+(offAge()?esc(offAge())+". ":"")
+    +(t.sbp&&qr?"<br>"+esc(qr.text):"")
     +(t.dead?"<br>"+esc((offQueue.filter(function(e){return e.dead;})[0]||{}).error||""):"");
 }
-function offFlush(){
+var OFF_GAP=20000;                 // не дёргать сервер чаще, чем раз в 20 с
+var offLastTry=0,offProg={busy:false,done:0,total:0,failed:0};
+function offFlush(force){
+  // Выгрузка очереди: по кнопке (force), по возврату связи и по таймеру —
+  // таймер и есть «уйдут сами», без ожидания события online (17.0.13).
   if(offBusy||!offQueue.length||!state.token)return Promise.resolve();
+  if(!force&&Date.now()-offLastTry<OFF_GAP)return Promise.resolve();
+  offLastTry=Date.now();
   offBusy=true;var sent=0,broke=0,stopped=false,claims=0;
+  offProg={busy:true,done:0,total:offQueue.length,failed:0};
+  offRender();
   return offQueue.slice().reduce(function(chain,e){
     return chain.then(function(){
       if(stopped)return;
       return api("/api/cashier/sell",{token:state.token,method:(e.m==="sbp"?"sbp":"cash"),
         items:(e.items||[]).map(function(i){return {item_id:i.id,qty:Number(i.qty)||0};}),
-        request_id:e.id,offline_at:e.at,discount_pct:0,manager_pin:""})
+        request_id:e.id,offline_at:e.at,discount_pct:0,manager_pin:""},{timeout:15000})
       .then(function(r){
-        sent++;offDrop(e.id);
+        sent++;offProg.done++;offDrop(e.id);offRender();
         if(r&&r.negative_stock&&r.negative_stock.length)
           toast("Проведено с расхождением по остаткам: "+r.negative_stock.length+" — владелец увидит флаг");
         // Заявка — не оплата: напоминаем, что дальше решение за банком.
         if(r&&r.claim){claims++;toast("Заявка СБП передана "+money(e.total||0)+" — ждём поступления");}
       })
       .catch(function(err){
-        if(err&&err.offline){stopped=true;return;}  // сети всё ещё нет — ждём события online
-        broke++;offMarkDead(e.id,(err&&err.message)||"ошибка сервера"); // очередь не должна закисать
+        if(err&&err.offline){stopped=true;return;}  // сети всё ещё нет — повторит таймер
+        broke++;offProg.failed++;
+        offMarkDead(e.id,(err&&err.message)||"ошибка сервера"); // очередь не должна закисать
       });
     });
   },Promise.resolve()).then(function(){
-    offBusy=false;offRender();
-    if(sent){loadCatalog();refreshShift();refreshBadge();offQrRefresh(false);}
+    offBusy=false;offProg.busy=false;offRender();
+    if(sent){loadCatalog(true);refreshShift();refreshBadge();offQrRefresh(false);}
     if(claims&&navigator.onLine)loadIncoming();
     if(stopped)toast("Сети нет — "+offQueue.length+" продаж(и) ждут в телефоне");
     else if(sent)toast("Выгружено: "+sent+(broke?" · разбор: "+broke:""));
   });
 }
-$("offRetry").addEventListener("click",function(){offFlush();});
+$("offRetry").addEventListener("click",function(){offFlush(true);});
 $("offDrop").addEventListener("click",function(){
   if(!offQueue.length)return;
   var why=window.prompt("Почему снимаете? Например: «дубль» или «покупатель передумал, деньги вернул»."+
@@ -508,19 +671,55 @@ $("offDrop").addEventListener("click",function(){
     .catch(function(e){if(e&&e.offline){toast("Нет связи — снять очередь нельзя");return;}toast(e.message||"Не вышло");});
 });
 var wasOnline=true;
-window.addEventListener("offline",function(){state.offline=true;netState();if(wasOnline&&loggedIn()){try{beep();}catch(e){}}wasOnline=false;});
-window.addEventListener("online",function(){wasOnline=true;state.offline=false;netState();if(loggedIn()){offQrRefresh(false);offFlush();}});
-function api(path,body){
+window.addEventListener("offline",function(){
+  state.offline=true;netMark(false,"нет Wi-Fi на телефоне");
+  if(wasOnline&&loggedIn()){try{beep();}catch(e){}}
+  wasOnline=false;
+});
+window.addEventListener("online",function(){
+  wasOnline=true;state.offline=false;netProbe(true);   // проверяем ПК, а не «есть Wi-Fi»
+  if(loggedIn()){offQrRefresh(false);offFlush(true);}
+});
+var API_TIMEOUT=8000;   // обычный запрос; продажа ждёт дольше (см. sellCart)
+function api(path,body,opts){
+  opts=opts||{};
+  var ms=Number(opts.timeout)||API_TIMEOUT;
   var init=body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),cache:"no-store"}:{method:"GET",cache:"no-store"};
+  var ctl=null,timer=0;
+  if(window.AbortController){
+    try{
+      ctl=new AbortController();init.signal=ctl.signal;
+      // Без таймаута «мёртвый» Wi-Fi держал кассу в «Оплачиваю…» минутами:
+      // кассир не знал ни что деньги ушли, ни что их надо принять заново.
+      timer=setTimeout(function(){try{ctl.abort();}catch(e){}},ms);
+    }catch(e){ctl=null;}
+  }
+  var stop=function(){if(timer){clearTimeout(timer);timer=0;}};
   return fetch(path,init).then(function(r){
     return r.text().then(function(text){
       var j={};try{j=text?JSON.parse(text):{};}catch(_e){if(!r.ok)throw new Error("Сервер вернул ошибку "+r.status);throw new Error("Некорректный ответ сервера");}
-      if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}return j;
+      if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}
+      stop();
+      netMark(true);       // сервер ответил — канал жив, даже если сеть «мигала»
+      return j;
     });
   }).catch(function(e){
-    // TypeError = fetch упал до ответа сервера: сети нет. Отличаем от «сервер
-    // ответил ошибкой» — очередь включается только по настоящему обрыву.
-    if(e instanceof TypeError){var n=new Error("Нет связи с PrintFlow — проверьте Wi-Fi и сервер");n.offline=true;throw n;}
+    stop();
+    // TypeError = fetch упал до ответа; AbortError = не ответил за таймаут.
+    // И то и другое — «связи с ПК нет»: включается офлайн-контур.
+    var dead=(e instanceof TypeError)||(e&&e.name==="AbortError");
+    if(dead){
+      var n=new Error(e&&e.name==="AbortError"
+        ?("PrintFlow не ответил за "+Math.round(ms/1000)+" с")
+        :"Нет связи с PrintFlow — проверьте Wi-Fi и сервер");
+      n.offline=true;n.timeout=!!(e&&e.name==="AbortError");
+      // Номер уже отправленного запроса едет вместе с ошибкой: продажа,
+      // которая могла пройти на сервере, попадёт в очередь с ТЕМ ЖЕ номером
+      // и не задвоится (17.0.13).
+      n.request_id=(body&&body.request_id)||"";
+      netMark(false,n.message);
+      throw n;
+    }
     throw e;
   });
 }
@@ -577,6 +776,7 @@ $("bRepeat").addEventListener("click",function(){
     var want=Math.min(s.qty,max-cur);
     if(want<=0){skipped++;return;}
     state.cart[s.id]=cur+want;added++;
+    state.cartSeen[s.id]=Number(it.price)||0;
   });
   state.saleRequest={cash:"",sbp:""};
   renderGrid();
@@ -628,7 +828,7 @@ $("bLogout").addEventListener("click",function(){
   api("/api/cashier/logout",{token:state.token}).catch(function(){});
   state.token="";state.name="";state.role="";state.legacy=false;
   localStorage.removeItem("cashier_token");localStorage.removeItem("cashier_name");localStorage.removeItem("cashier_role");localStorage.removeItem("cashier_legacy");
-  state.cart={};state.pendingPayment="";state.qrText="";state.qrSvg="";state.saleRequest={cash:"",sbp:""};
+  state.cart={};state.cartSeen={};state.pendingPayment="";state.qrText="";state.qrSvg="";state.saleRequest={cash:"",sbp:""};
   resetMoney();
   renderWho();showApp(false);setTab("sell");$("code").value="";
 });
@@ -645,9 +845,11 @@ function skeletonGrid(n){
 }
 
 // catalog — только в наличии (строго)
-function loadCatalog(){
-  $("grid").innerHTML=skeletonGrid(6);
-  api(withToken("/api/cashier/catalog")).then(function(c){
+function loadCatalog(quiet){
+  // quiet=true — фоновое обновление (событие каталога, возврат связи): сетку
+  // не перерисовываем скелетоном, чтобы не мигало под рукой у кассира.
+  if(!quiet)$("grid").innerHTML=skeletonGrid(6);
+  return api(withToken("/api/cashier/catalog")).then(function(c){
     var all=c.items||[];
     // строго: только товары с остатком >0 и ценой >0 показываем в кассе
     // скрываем пустые, чтобы кассир не ошибся. Остальное — в панели.
@@ -674,9 +876,12 @@ function loadCatalog(){
       else if(inStock) hint.textContent=inStock+" товаров в наличии — нажмите на карточку чтобы добавить в корзину.";
       else hint.textContent="";
     }
-    renderCats();
-    renderGrid();
-  }).catch(function(e){$("grid").innerHTML=errorCard("Каталог не загрузился",e.message,true);sessionError(e);});
+    renderCats();renderGrid();
+    refreshPriceWarn();
+  }).catch(function(e){
+    if(quiet)return;
+    $("grid").innerHTML=errorCard("Каталог не загрузился",e.message,true);sessionError(e);
+  });
 }
 function sessionError(e){
   if(/сессия|код/i.test(e.message)){
@@ -810,6 +1015,7 @@ $("grid").addEventListener("click",function(ev){
   var max=Math.floor(Number(it.qty)||0);
   if(cur>=max){toast("Больше нет — в наличии "+max+" шт");return;}
   state.cart[id]=cur+1;
+  state.cartSeen[id]=Number(it.price)||0;   // цена, которую кассир назвал покупателю
   state.saleRequest={cash:"",sbp:""};
   renderGrid();
   // лёгкая вибрация на мобилке
@@ -840,7 +1046,7 @@ document.addEventListener("click",function(ev){
 $("bClear").addEventListener("click",function(){
   if(!cartHasItems()) return;
   if(!confirm("Очистить корзину? Товары из текущей продажи уберутся.")) return;
-  state.cart={};state.saleRequest={cash:"",sbp:""};renderGrid();
+  state.cart={};state.cartSeen={};state.saleRequest={cash:"",sbp:""};renderGrid();
 });
 // штрихкод введён целиком — добавляем сразу, не дожидаясь Enter (17.0.12)
 function autoAddExact(){
@@ -926,6 +1132,7 @@ $("bPay").addEventListener("click",function(){
     hint.textContent=kind==="gost"?"QR с суммой — покажем на экране"
       : (kind? "QR покажем на экране — подтвердите когда деньги придут" : "QR не настроен: подтверждение по поступлению");
   }
+  checkPrices();          // цена в корзине могла отстать от каталога — предупредим
   $("modal").classList.add("on");
 });
 $("bCancel").addEventListener("click",function(){$("modal").classList.remove("on");});
@@ -934,6 +1141,60 @@ $("modal").addEventListener("click",function(ev){if(ev.target===$("modal"))$("mo
 function cartRows(){
   return Object.keys(state.cart).map(function(id){return {item_id:id,qty:state.cart[id]};}).filter(function(r){return r.qty>0;});
 }
+/* ---------- сверка цен перед оплатой (17.0.13) ----------
+   Сервер считает продажу по СВОЕЙ цене каталога, а на экране цена та, что
+   лежала в памяти телефона. Если владелец поменял цену в панели, кассир
+   назвал бы покупателю старую сумму, а списалось бы больше. Молча это
+   недопустимо, поэтому перед оплатой цены сверяются (один лёгкий запрос
+   каталога — единицы миллисекунд), а расхождение показывается кассиру. */
+function priceDiffs(){
+  /* «Было» — цена, которую кассир видел при добавлении (state.cartSeen), а не
+     та, что лежит в каталоге сейчас: иначе сравнивать было бы не с чем, ведь
+     корзина берёт цену из того же каталога. */
+  var all=state._allItems||state.items;
+  return cartSnapshot().map(function(row){
+    var it=all.find(function(x){return x.id===row.id;})||null;
+    if(!it)return null;
+    var now=Number(it.price)||0;
+    var seen=Number(state.cartSeen[row.id]);
+    if(!now||!seen||now===seen)return null;
+    return {id:row.id,name:row.name||it.name||"товар",qty:row.qty,was:seen,now:now};
+  }).filter(Boolean);
+}
+function refreshPriceWarn(){
+  var box=$("priceWarn"),text=$("priceWarnText");
+  if(!box||!text)return;
+  var diffs=priceDiffs();
+  if(!diffs.length){box.hidden=true;return;}
+  text.innerHTML="В каталоге новая цена: "+diffs.map(function(d){
+    return esc(d.name)+" — "+money(d.now)+" вместо "+money(d.was);
+  }).join("; ")+". Продажа спишется по цене каталога.";
+  box.hidden=false;
+}
+function checkPrices(){
+  // Вызывается при открытии окна оплаты: цена могла устареть, пока кассир
+  // собирал чек (или владелец правил каталог прямо сейчас).
+  refreshPriceWarn();
+  return api(withToken("/api/cashier/catalog"),null,{quiet:true}).then(function(c){
+    if(!c)return;
+    state._allItems=c.items||state._allItems;
+    state.items=(c.items||[]).filter(function(it){return (Number(it.qty)||0)>0;});
+    refreshPriceWarn();renderCart();refreshPayTitle();
+  }).catch(function(){});
+}
+$("priceWarnFix") && $("priceWarnFix").addEventListener("click",function(){
+  // «Обновить» перечитывает каталог и фиксирует новые цены как увиденные:
+  // кассир видит сумму, которую спишет сервер. Состав и количество не трогаем.
+  checkPrices().then(function(){
+    var all=state._allItems||state.items;
+    Object.keys(state.cart).forEach(function(id){
+      var it=all.find(function(x){return x.id===id;});
+      if(it)state.cartSeen[id]=Number(it.price)||0;
+    });
+    refreshPriceWarn();renderCart();refreshPayTitle();
+    toast("Цены обновлены по каталогу — сумма на экране как на сервере");
+  });
+});
 function setSaleBusy(on){
   state.loading=on;$("payCash").disabled=on;$("paySbp").disabled=on;$("bPay").disabled=on||!cartRows().length;
 }
@@ -945,18 +1206,22 @@ function cartSnapshot(){
     return {id:r.item_id,qty:r.qty,name:it.name||"",price:Number(it.price)||0};
   });
 }
-function offAccept(method){
+function offAccept(method,requestId,pending){
   var snap=cartSnapshot();
   if(!snap.length)return;
   var sum=snap.reduce(function(s,i){return s+(Number(i.price)||0)*(Number(i.qty)||0);},0);
   sum=Math.round(sum*100)/100;
   // Сначала записываем, потом показываем QR: заявка не должна потеряться,
   // если кассир закроет окно раньше, чем покупатель достанет телефон.
-  if(!offPush(snap,sum,method)){toast("В очередь не записано — считайте ящик вручную и проведите при связи");return;}
+  // requestId приходит, когда запрос уже уходил: очередь повторит его с тем же
+  // номером, и сервер не запишет вторую продажу.
+  if(!offPush(snap,sum,method,requestId,pending)){
+    toast("В очередь не записано — считайте ящик вручную и проведите при связи");return;}
   rememberLastSale(snap);
-  state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
+  state.cart={};state.cartSeen={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
   if(method==="sbp"){showOfflineQr(sum);toast("Заявка записана: "+money(sum)+" — подтвердится по банку");return;}
-  toast("Записано в очередь: "+money(sum)+" — уйдёт при связи");
+  toast(pending?"Связь пропала при расчёте — проверю, прошла ли продажа, и спишу один раз"
+               :("Записано в очередь: "+money(sum)+" — уйдёт при связи"));
 }
 function showOfflineQr(total){
   // QR магазина лежит в памяти телефона: покупатель сканирует его в приложении
@@ -974,6 +1239,11 @@ function showOfflineQr(total){
     "Сами не подтверждайте: подтверждение = деньги в банке."
   ];
   if(q.why)lines.push(q.why);
+  var qrState=offQrState();
+  if(qrState)lines.push(qrState.fresh
+    ?("Код магазина действует ещё "+Math.max(0,Math.round(qrState.left/3600000))+" ч — "
+      +"если время выйдет, обновите кассу при связи.")
+    :("⚠ "+qrState.text+"."));
   $("qrNote").innerHTML=lines.map(function(t){return esc(t);}).join("<br>");
   // Камера → банк: если код — ссылка, даём «Открыть банк» и «Поделиться»
   // (покупателю в мессенджер проще отправить ссылку, чем ловить камерой текст).
@@ -1003,10 +1273,12 @@ function sellCart(method){
   }
   state.saleRequest[method]=state.saleRequest[method]||reqId();
   setSaleBusy(true);
-  api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method],discount_pct:discPct(),manager_pin:$("discPin").value.trim()})
+  // timeout длиннее обычного: продажа — не «проверка связи», и обрывать её
+  // раньше, чем сервер успел записать, нельзя. При обрыве номер уедет в очередь.
+  api("/api/cashier/sell",{token:state.token,method:method,items:items,request_id:state.saleRequest[method],discount_pct:discPct(),manager_pin:$("discPin").value.trim()},{timeout:15000})
     .then(function(r){
       rememberLastSale(cartSnapshot());
-      state.cart={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
+      state.cart={};state.cartSeen={};state.saleRequest={cash:"",sbp:""};$("modal").classList.remove("on");
       if(method==="cash")toast(r.already_recorded?"Продажа уже была записана":"Продано "+money(r.amount)+" наличными");
       // Годовой лимит налога — забота владельца, но узнаёт о нём кассир в
       // момент расчёта: «лимит выбран» означает, что дальше деньги принимать
@@ -1017,9 +1289,11 @@ function sellCart(method){
     })
     .catch(function(e){
       if(e&&e.offline){state.offline=true;offRender();
-        // Обрыв в момент расчёта: продажа может уже лежать на сервере —
-        // request_id тот же, поэтому повторная отправка безопасна.
-        if(method==="cash"&&discPct()<=0){offAccept();toast("Связь пропала при расчёте — продажа в очереди");}
+        // Обрыв в момент расчёта: продажа может уже лежать на сервере. Кладём
+        // её в очередь с ТЕМ ЖЕ request_id (e.request_id) — повтор не создаст
+        // вторую продажу. Раньше очередь придумывала новый номер и задваивала
+        // деньги (находка F1 замера 17.0.13).
+        if(method==="cash"&&discPct()<=0){offAccept("cash",e.request_id,true);}
         else toast("Связь пропала при расчёте — проверьте, что продажа не прошла дважды");
         return;}
       sessionError(e);
@@ -1450,8 +1724,13 @@ function installHint(){
   api("/api/app/android").then(function(r){
     if(!r||!r.available||!r.url){box.hidden=true;return;}
     var size=Number(r.size_mb)||0;
+    var sha=String(r.sha256||"").slice(0,12);
     $("installText").innerHTML="Приложение кассы"+(r.version?" · "+esc(String(r.version)):"")+
-      (size?" · "+size+" МБ":"")+": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же.";
+      (size?" · "+size+" МБ":"")+(sha?" · sha256 "+esc(sha)+"…":"")+
+      ": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же."+
+      (r.changelog?"<br><span class=\"upd\">Что нового: "+esc(String(r.changelog).split("\n")
+        .filter(function(s){return String(s).trim().length;}).slice(0,3).join(" ").slice(0,240))+"</span>":"")+
+      (size?"<br><span class=\"upd\">Сверьте размер файла перед установкой — он указан в диалоге.</span>":"");
     $("installGo").setAttribute("href",r.url);
     box.hidden=false;
   }).catch(function(){box.hidden=true;});
@@ -1583,10 +1862,30 @@ function connectMoney(){
   catch(e){startMoneyPoll();return;}
   moneyES.addEventListener("event",function(msg){
     var row;try{row=JSON.parse(msg.data);}catch(e){return;}
+    LINK.stream=Date.now();
     moneyEvent(row);
   });
-  moneyES.onopen=function(){stopMoneyPoll();};
-  moneyES.onerror=function(){startMoneyPoll();};  // поток оборвался — включаем страховку
+  // Любой кадр потока — доказательство, что канал жив. Телеметрия идёт даже
+  // когда денег нет (раз в ~15 с) и сервер шлёт «ping» раз в 20 с, поэтому
+  // «поток молчит» видно сразу, а не по факту пропущенного платежа.
+  moneyES.addEventListener("telemetry",function(){LINK.stream=Date.now();netState();});
+  moneyES.addEventListener("ping",function(){LINK.stream=Date.now();netState();});
+  moneyES.addEventListener("catalog_changed",function(msg){
+    LINK.stream=Date.now();
+    onCatalogChanged(msg);
+  });
+  moneyES.onopen=function(){stopMoneyPoll();LINK.stream=Date.now();netMark(true);netState();};
+  moneyES.onerror=function(){startMoneyPoll();netState();};  // поток оборвался — страховка
+}
+function onCatalogChanged(){
+  /* Владелец сохранил товар или пересчитал цены в панели — касса перечитывает
+     каталог сама (17.0.13). Если корзина уже собрана, кассир получает
+     предупреждение: сумму он называет ту, которую спишет сервер. */
+  var hadCart=cartRows().length>0;
+  loadCatalog(true).then(function(){
+    if(hadCart&&priceDiffs().length)
+      toast("Цены в каталоге изменились — проверьте сумму перед оплатой");
+  });
 }
 function resetMoney(){
   moneySeen=null;
@@ -1597,16 +1896,30 @@ function resetMoney(){
 }
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible"||!loggedIn())return;
-  // телефон выгрузил вкладку из памяти: перечитываем входящие и поднимаем поток
+  // телефон выгрузил вкладку из памяти: перечитываем входящие, поднимаем поток
+  // и проверяем ПК — сеть могла отвалиться, пока экран был погашен.
   if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
-  primeMoney();connectMoney();
+  primeMoney();connectMoney();netProbe(true);
 });
 
 // старт
-if(loggedIn()){renderWho();showApp(true);setTab("sell");loadCatalog();offRender();offQrRefresh(false);offFlush();primeMoney().then(connectMoney);}else{renderWho();showApp(false);}
-netState();
+// Продолжение очереди из памяти оболочки: адрес сервера мог смениться (новый
+// IP = другой origin), и localStorage тогда пуст, а продажи ждут в prefs app.
+var offRestored=offRestore();
+if(offRestored){
+  offRender();
+  toast("В памяти приложения нашлось продаж: "+offRestored+" — отправлю, как появится связь");
+}
+if(loggedIn()){
+  renderWho();showApp(true);setTab("sell");loadCatalog();offRender();offQrRefresh(false);
+  offFlush(true);
+  primeMoney().then(connectMoney);
+  netProbe(true);      // сохранённый адрес проверяем сразу: жив ли ПК
+}
+else{renderWho();showApp(false);}
+netMark(navigator.onLine!==false);
+netStart();
 if(window.PFIcons)PFIcons.apply(document);
-window.addEventListener("online",function(){netState();if(loggedIn()){loadCatalog();if(state.tab==="in")loadIncoming();if(state.tab==="shift")loadShift();}});
 window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){
   window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){});});

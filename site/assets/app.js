@@ -1175,6 +1175,66 @@ function applyAllSettingsFilter(q0) {
   });
 }
 
+/** Кассы на связи (17.0.13): кто вошёл, когда отвечал, кто молчит.
+ *
+ * До этого владелец узнавал об обрыве у кассы только от кассира. Здесь видно
+ * и «касса на связи», и «молчит N минут» — по отметкам из cashier_tokens.
+ * Список только читается: никаких кнопок «выгнать сессию» здесь нет.
+ */
+async function renderCashierSessions() {
+  const el = $('cashier_sessions');
+  if (!el) return;
+  let data;
+  try {
+    data = await get('/api/cashier/sessions');
+  } catch (e) {
+    el.innerHTML = `<div class="notice warn"><span>⚠</span><span>Список касс не получен: ${esc(e.message || e)}</span></div>`;
+    return;
+  }
+  const rows = data.sessions || [];
+  if (!rows.length) {
+    el.innerHTML = '<div class="notice"><span>ℹ</span><span>Никто ещё не входил в кассу с телефона. Вход — «Касса» на телефоне по коду из настроек справа.</span></div>';
+    return;
+  }
+  const when = (iso) => {
+    const d = new Date(iso || '');
+    return isNaN(d) ? '—' : d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  };
+  const silent = (sec) => {
+    const s = Number(sec) || 0;
+    if (s < 90) return 'только что';
+    if (s < 3600) return `${Math.round(s / 60)} мин назад`;
+    return `${Math.round(s / 360) / 10} ч назад`;
+  };
+  const online = Number(data.online) || 0;
+  const head = `<div class="notice ${online ? 'ok' : 'warn'}"><span>${online ? '✓' : '⚠'}</span><span>`
+    + (online ? `На связи: ${online} из ${rows.length}.` : 'Ни одна касса сейчас не отвечает.')
+    + '</span></div>';
+  el.innerHTML = head + '<table class="table"><thead><tr><th>Касса</th><th>Роль</th><th>Вошёл</th>'
+    + '<th>Последний отклик</th><th></th></tr></thead><tbody>'
+    + rows.map((r) => {
+      const live = !!r.online;
+      const label = live ? 'на связи' : (r.silent_seconds == null ? 'не отвечала' : `молчит · ${silent(r.silent_seconds)}`);
+      return `<tr><td><b>${esc(r.name || 'кассир')}</b></td>`
+        + `<td>${esc(r.role === 'manager' ? 'старший' : 'кассир')}${r.legacy ? ' · код магазина' : ''}</td>`
+        + `<td>${when(r.created_at)}</td>`
+        + `<td>${r.last_seen ? when(r.last_seen) + ' · ' + silent(r.silent_seconds) : '—'}</td>`
+        + `<td><span class="pill ${live ? 'ok' : ''}">${esc(label)}</span></td></tr>`;
+    }).join('') + '</tbody></table>';
+  const reload = $('cashier_sessions_reload');
+  if (reload && !reload.dataset.wired) {
+    reload.dataset.wired = '1';
+    reload.addEventListener('click', () => renderCashierSessions());
+  }
+}
+
+// Пока вкладка «Касса» открыта, список обновляется сам: смысл блока — увидеть
+// «касса ушла в офлайн», а не вспомнить о нём через час.
+setInterval(() => {
+  const el = $('cashier_sessions');
+  if (el && el.offsetParent !== null && !document.hidden) renderCashierSessions();
+}, 30000);
+
 /** Поля для вкладок «Касса» / «СБП» / «Банк» из схемы. */
 async function renderCashierSettings() {
   const d = await loadSettingsSchema();
@@ -1186,6 +1246,7 @@ async function renderCashierSettings() {
 
   const cEl = $('set_cashier_fields');
   if (cEl) cEl.innerHTML = mk(['cashier']);
+  renderCashierSessions();
   const acc = $('set_cashier_account');
   if (acc) {
     const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));

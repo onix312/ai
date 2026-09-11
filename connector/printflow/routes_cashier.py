@@ -57,6 +57,17 @@ def cashier_incoming(api: Any, ctx: Ctx):
     return _cashier(api).incoming()
 
 
+@router.get("/api/cashier/sessions", doc="Кассы на связи: кто вошёл и когда отвечал")
+def cashier_sessions(api: Any, ctx: Ctx):
+    """Список для панели владельца: одна строка на телефон.
+
+    Токен не спрашиваем намеренно: маршрут не отдаёт ни секретов, ни денег —
+    только имена, время и «молчит N минут». Кассовые страницы защищены кодом,
+    панель работает в LAN и так же открыта (см. docs/КАССА-16.0.md).
+    """
+    return _cashier(api).sessions()
+
+
 @router.post("/api/cashier/sell", audit="Касса: продажа", idempotent=True,
              doc="Продажа с полки: наличные (сразу) или СБП (платёж до сверки)")
 def cashier_sell(api: Any, ctx: Ctx):

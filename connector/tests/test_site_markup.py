@@ -273,6 +273,82 @@ class CashierLayoutTests(TestCase):
         self.assertIn("function closeQrModal", self.css)
         self.assertIn("#bQrPaid{min-height:56px", self.css)
 
+    # --- 17.0.13: надёжность канала «касса ↔ ПК» -------------------------
+
+    def test_link_status_shows_pc_reachability_not_just_wifi(self):
+        # точка в шапке отражает ответ коннектора, а не navigator.onLine
+        self.assertIn('id="linkBar"', self.css)
+        self.assertIn('id="linkText"', self.css)
+        self.assertIn(".netdot.warn", self.css)
+        self.assertIn("function netStreamAlive", self.css)
+        self.assertIn("function netProbe", self.css)
+        self.assertIn("function netStart", self.css)
+
+    def test_requests_have_timeout_and_backoff(self):
+        # без таймаута «мёртвый» Wi-Fi держал кассу в «Оплачиваю…» минутами
+        self.assertIn("AbortController", self.css)
+        self.assertIn("var API_TIMEOUT=8000", self.css)
+        self.assertIn("PROBE_MIN=1000", self.css)
+        self.assertIn("PROBE_MAX=15000", self.css)
+
+    def test_offline_sale_keeps_the_same_request_id(self):
+        # риск F1: очередь обязана повторить уже отправленный номер, иначе
+        # сервер запишет вторую продажу (проверено на живом коннекторе)
+        self.assertIn("function offAccept(method,requestId,pending)", self.css)
+        self.assertIn('offAccept("cash",e.request_id,true)', self.css)
+        self.assertIn("n.request_id=(body&&body.request_id)", self.css)
+
+    def test_offline_queue_flushes_by_timer_with_progress(self):
+        self.assertIn("OFF_GAP=20000", self.css)
+        self.assertIn('id="offProgress"', self.css)
+        self.assertIn("offProg", self.css)
+        self.assertIn("offFlush(false)", self.css)
+        self.assertIn("offFlush(true)", self.css)
+
+    def test_prices_are_checked_before_payment(self):
+        # сервер считает по своей цене: расхождение с экраном — предупредить
+        self.assertIn("function priceDiffs", self.css)
+        self.assertIn("function checkPrices", self.css)
+        self.assertIn('id="priceWarn"', self.css)
+        self.assertIn('id="priceWarnFix"', self.css)
+
+    def test_catalog_changed_event_makes_the_cashier_reread(self):
+        self.assertIn('addEventListener("catalog_changed"', self.css)
+        self.assertIn("function onCatalogChanged", self.css)
+
+    def test_offline_qr_ttl_is_visible(self):
+        self.assertIn("function offQrState", self.css)
+        self.assertIn("OFF_QR_TTL", self.css)
+
+    def test_shell_cache_was_bumped_for_the_channel_round(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 42,
+                                "правка cashier.html требует поднятия CACHE в sw.js")
+
+    def test_update_banner_shows_size_hash_and_changelog(self):
+        # «скачать APK» без размера и отпечатка — установка вслепую: в плашке
+        # браузера видны версия, размер, sha256 и что нового (17.0.13).
+        self.assertIn("r.sha256", self.css)
+        self.assertIn("r.changelog", self.css)
+        self.assertIn("Сверьте размер файла", self.css)
+        self.assertIn(".install .upd", self.css)
+
+    def test_offline_queue_is_backed_up_into_the_shell(self):
+        # смена IP = другой origin: localStorage страницы пуст, очередь спасает
+        # копия в памяти оболочки (PfApp.queueSave/queueLoad)
+        self.assertIn("app.queueSave", self.css)
+        self.assertIn("app.queueLoad", self.css)
+        self.assertIn("function offStash", self.css)
+        self.assertIn("function offRestore", self.css)
+        self.assertIn("offRestore()", self.css)
+
+    def test_stream_ping_is_observable_for_the_cashier(self):
+        # по именованному кадру ping касса отличает «поток жив» от «молчит»
+        self.assertIn('addEventListener("ping"', self.css)
+        self.assertIn("LINK.stream", self.css)
+
     def test_cashier_uses_svg_icons_from_registry(self):
         # эмодзи заменены на PFIcons: касса подключает icons.js и ссылается
         # только на существующие имена (иначе fallback-глиф, а не SVG)

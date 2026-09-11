@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,9 @@ from .config import SITE
 APP_DIR_NAME = "app"
 APK_SUFFIX = ".apk"
 VERSION_FILE = "version.json"
+# Сколько символов changelog отдаём телефону: этого хватает на 5–8 строк
+# «что нового» в диалоге обновления, а ответ остаётся лёгким.
+CHANGELOG_LIMIT = 1200
 
 
 def app_dir() -> Path:
@@ -44,6 +48,34 @@ def _version_info(root: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+# sha256 считается по файлу: кэш по (путь, размер, mtime) — чтобы панель и
+# оболочка могли спрашивать версию сколько угодно раз, не перечитывая 5 МБ.
+_hash_cache: dict[tuple[str, int, int], str] = {}
+
+
+def file_sha256(path: Path) -> str:
+    """sha256 APK с кэшем по mtime. Сбой чтения — пустая строка («не знаем»)."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    key = (str(path), int(stat.st_size), int(stat.st_mtime))
+    cached = _hash_cache.get(key)
+    if cached is not None:
+        return cached
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    value = digest.hexdigest()
+    _hash_cache.clear()          # держим одну сборку, а не историю прогонов
+    _hash_cache[key] = value
+    return value
 
 
 def latest_apk(root: Path | None = None) -> tuple[Path | None, dict[str, Any]]:
@@ -68,17 +100,24 @@ def status(root: Path | None = None) -> dict[str, Any]:
     apk, meta = latest_apk(root)
     if apk is None:
         return {"available": False, "url": "", "file": "", "size_mb": 0.0,
+                "size_bytes": 0, "sha256": "", "changelog": "",
                 "version": "", "version_code": 0, "built_at": "",
                 "package": str(meta.get("package") or "ai.printflow.kassa"),
                 "hint": ("Сборки нет. На ПК владельца: ./scripts/android-build.sh — "
                          "APK появится здесь и его можно будет скачать телефоном "
                          "через локальную сеть.")}
     stat = apk.stat()
+    digest = str(meta.get("sha256") or "") or file_sha256(apk)
     return {
         "available": True,
         "url": f"/{APP_DIR_NAME}/{apk.name}",
         "file": apk.name,
         "size_mb": round(stat.st_size / 1024 / 1024, 2),
+        # 17.0.13: размер в байтах и контрольная сумма — телефон сверяет их ДО
+        # открытия загрузки, а не после установки битого файла.
+        "size_bytes": int(meta.get("size_bytes") or stat.st_size),
+        "sha256": digest,
+        "changelog": str(meta.get("changelog") or "")[:CHANGELOG_LIMIT],
         "version": str(meta.get("version") or ""),
         "version_code": int(meta.get("version_code") or 0),
         "built_at": str(meta.get("built_at") or ""),
@@ -103,4 +142,8 @@ def check_version(seen: Any, root: Path | None = None) -> dict[str, Any]:
     return {"available": out["available"], "update_available": update,
             "installed": installed, "url": out["url"] if update else "",
             "version": out["version"], "version_code": out["version_code"],
-            "file": out["file"]}
+            "file": out["file"],
+            # 17.0.13: «что нового» и что именно скачивать — оболочка показывает
+            # это кассиру до нажатия «Скачать», а не ставит вслепую.
+            "size_bytes": out["size_bytes"], "sha256": out["sha256"],
+            "changelog": out["changelog"]}

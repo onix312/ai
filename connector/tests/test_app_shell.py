@@ -103,6 +103,46 @@ class UpdateCheckTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_build_reports_size_and_checksum_when_manifest_has_them(self):
+        manifest = {"version": "17.0.13", "version_code": 170013, "file": "NOZZA-kassa-17.0.13.apk",
+                    "size_bytes": 1_800_000, "sha256": "a" * 64,
+                    "changelog": "Касса: связь с ПК и обновление"}
+        fake_build(self.dir, version="17.0.13", code=170013, name=manifest["file"],
+                   manifest=manifest)
+        out = app_shell.status(self.dir)
+        self.assertEqual(out["size_bytes"], 1_800_000)
+        self.assertEqual(out["sha256"], "a" * 64)
+        self.assertIn("связь с ПК", out["changelog"])
+
+    def test_checksum_is_computed_when_manifest_is_silent(self):
+        # Старый version.json (без sha256) не должен оставлять телефон без
+        # проверки: сумму считаем по файлу сами.
+        fake_build(self.dir, name="NOZZA-kassa-17.0.7.apk")
+        out = app_shell.status(self.dir)
+        self.assertEqual(len(out["sha256"]), 64)
+        self.assertGreater(out["size_bytes"], 0)
+
+    def test_update_payload_carries_changelog_and_size(self):
+        manifest = {"version": "17.0.13", "version_code": 170013,
+                    "file": "NOZZA-kassa-17.0.13.apk", "size_bytes": 900_000,
+                    "sha256": "b" * 64, "changelog": "Что нового"}
+        fake_build(self.dir, version="17.0.13", code=170013,
+                   name=manifest["file"], manifest=manifest)
+        out = app_shell.check_version(170012, self.dir)
+        self.assertTrue(out["update_available"])
+        self.assertEqual(out["changelog"], "Что нового")
+        self.assertEqual(out["size_bytes"], 900_000)
+        self.assertEqual(out["sha256"], "b" * 64)
+
+    def test_changelog_is_trimmed(self):
+        long_text = "x" * 5000
+        manifest = {"version": "17.0.13", "version_code": 170013, "file": "NOZZA-kassa-17.0.13.apk",
+                    "changelog": long_text}
+        fake_build(self.dir, version="17.0.13", code=170013, name=manifest["file"],
+                   manifest=manifest)
+        self.assertLessEqual(len(app_shell.status(self.dir)["changelog"]),
+                             app_shell.CHANGELOG_LIMIT)
+
     def test_higher_version_offers_update(self):
         fake_build(self.dir, code=170008)
         out = app_shell.check_version("170007", self.dir)
@@ -330,6 +370,71 @@ class KotlinSourceTests(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertGreaterEqual(int(m.group(1)), 170012,
                                 "визуальный раунд — своя раздача APK (17.0.12)")
+
+    # --- 17.0.13: связь с ПК и обновление с changelog ----------------------
+
+    def test_version_was_bumped_for_the_channel_round(self):
+        m = re.search(r"versionCode (\d+)", self.gradle)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 170013,
+                                "раунд «взаимодействие с ПК» — своя раздача APK (17.0.13)")
+
+    def test_shell_reconnects_with_backoff_and_remembers_last_address(self):
+        # роутер выдал другой IP — касса возвращается сама, кассир адрес не вводит
+        for marker in ("private fun startWatch", "private fun stopWatch",
+                       "private fun reconnect", "KEY_LAST_OK", "Net.scan(",
+                       "private fun markAlive"):
+            self.assertIn(marker, self.activity, f"нет самовосстановления: {marker}")
+        self.assertIn("startWatch()", self.activity, "ошибка загрузки обязана включать сторож")
+        self.assertIn("Thread.sleep(pause)", self.activity, "пауза растёт: сеть не долбим")
+
+    def test_panel_has_reconnect_and_update_buttons(self):
+        self.assertIn("@+id/btnReconnect", self.layout)
+        self.assertIn("@+id/btnUpdate", self.layout)
+        self.assertIn('name="btn_reconnect"', self.strings)
+        self.assertIn('name="btn_update"', self.strings)
+        self.assertIn("@string/btn_reconnect", self.layout)
+        self.assertIn("@string/btn_update", self.layout)
+        self.assertIn("findViewById(R.id.btnReconnect)", self.activity)
+        self.assertIn("findViewById(R.id.btnUpdate)", self.activity)
+
+    def test_update_dialog_shows_changelog_and_checks_the_file(self):
+        # «скачать и поставить вслепую» больше нет: версия, файл, размер, что нового
+        for marker in ("json.optString(\"changelog\"", "json.optLong(\"size_bytes\"",
+                       "json.optString(\"file\"", "R.string.update_note",
+                       "R.string.update_broken", "checkForUpdate(manual = true)"):
+            self.assertIn(marker, self.activity, f"нет проверки обновления: {marker}")
+        self.assertIn('name="update_none"', self.strings)
+        self.assertIn('name="update_missing"', self.strings)
+        self.assertIn("R.string.update_none", self.activity)
+        self.assertIn("R.string.update_missing", self.activity)
+
+    def test_update_dialog_shows_the_file_fingerprint(self):
+        # имя и размер файла уже проверяются; отпечаток даёт владельцу, с чем
+        # сверить сборку на ПК перед раздачей кассиру
+        self.assertIn('json.optString("sha256"', self.activity)
+        self.assertIn("R.string.update_integrity", self.activity)
+        self.assertIn('name="update_integrity"', self.strings)
+
+    def test_offline_queue_backup_lives_in_shell_prefs(self):
+        # адрес сервера — это origin страницы: новый IP = другой localStorage.
+        # Копию очереди держит оболочка, иначе очередь продаж теряется.
+        self.assertIn("@JavascriptInterface", self.activity)
+        self.assertIn("fun queueSave(json: String?)", self.activity)
+        self.assertIn("fun queueLoad(): String", self.activity)
+        self.assertIn("KEY_QUEUE", self.activity)
+        self.assertIn("QUEUE_LIMIT", self.activity)
+
+    def test_net_api_used_by_the_shell_is_the_one_net_declares(self):
+        # сторож кассы зовёт Net.probe/Net.scan/Net.json — сигнатуры обязаны
+        # совпадать, иначе оболочка не соберётся (компилятора в CI нет)
+        for marker in ("fun probe(base: String, timeoutMs: Int = 1600)",
+                       "fun json(base: String, path: String, timeoutMs: Int = 2000)",
+                       "fun scan(ports: IntArray = intArrayOf(8765, 8766, 8080), timeoutMs: Int = 700,"):
+            self.assertIn(marker, self.net, f"Net.kt разошёлся с вызовами: {marker}")
+        for call in ("Net.probe(base, timeoutMs = 2500)", "Net.scan(timeoutMs = 700)",
+                     "Net.scan(onFound = ", "Net.json(base, \"/api/app/android"):
+            self.assertIn(call, self.activity, f"вызов из оболочки не совпадает: {call}")
 
 
 if __name__ == "__main__":

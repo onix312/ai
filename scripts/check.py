@@ -108,6 +108,18 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("SKIP: node не найден — стенд панели не запущен")
 
+    # Стенд кассы (17.0.13): страница кассы — не только вёрстка, но и логика
+    # офлайн-очереди. Node --check видит синтаксис, а «очередь повторит продажу
+    # с тем же request_id» проверяется только выполнением.
+    if node:
+        checks.append(run("Headless-стенд кассы (очередь и связь)",
+                          [node, "scripts/kassa-check.js"]))
+    elif args.require_tools:
+        print("FAIL: node не найден — стенд кассы не запущен", file=sys.stderr)
+        checks.append(False)
+    else:
+        print("SKIP: node не найден — стенд кассы не запущен")
+
     if not args.quick:
         checks.append(run(
             "Unit-тесты",

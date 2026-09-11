@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import static_serve
+from .config import now_iso
 from .accounting import num
 from .config import PHOTO_DIR, SITE, ensure_dirs, now_iso
 from .db import friendly_sqlite_error
@@ -44,6 +45,10 @@ if TYPE_CHECKING:  # только для подсказок — на ранта�
     from .api import Api
 
 from . import APP_VERSION
+
+
+SSE_TICK_SECONDS = 5.0     # как часто просыпаемся, чтобы проверить пинг
+SSE_PING_SECONDS = 20.0    # касса считает поток мёртвым после 45 с тишины
 
 
 class Handler(UploadMixin, BaseHTTPRequestHandler):
@@ -170,12 +175,19 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
     def serve_sse(self):
         """Server-Sent Events: сервер сам присылает изменения.
 
-        Три вида сообщений:
+        Виды сообщений:
           * ``telemetry`` — новое состояние парка (шлётся, только когда принтер
             действительно что-то прислал);
           * ``event`` — новая запись в журнале: печать началась, заказ закрыт,
             пластик списан;
-          * ``resync`` — вкладка отстала (спящий телефон), нужно перечитать всё.
+          * ``resync`` — вкладка отстала (спящий телефон), нужно перечитать всё;
+          * ``ping`` — «поток жив», раз в ``SSE_PING_SECONDS``.
+
+        Пинг нужен кассе: по нему она отличает «канал работает, просто платежей
+        нет» от «поток оборвался, работаем на страховочном поллинге». Шлём его
+        по своему таймеру, а не «когда шина молчит»: телеметрия принтеров идёт
+        чаще пинга и заслоняла бы его — касса 45 минут считала бы связь
+        потерянной, хотя поток жив (находка замера 17.0.13).
 
         Поллинг на стороне браузера остаётся страховкой на случай прокси,
         который режет длинные соединения.
@@ -195,12 +207,18 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         try:
             self.wfile.write(b"retry: 3000\n\n")  # переподключение через 3 с
             send("telemetry", self.api.manager.snapshot())
+            last_ping = time.time()
             with self.api.bus.subscription() as subscriber:
                 while True:
-                    message = subscriber.get(timeout=20.0)
+                    message = subscriber.get(timeout=SSE_TICK_SECONDS)
+                    now = time.time()
+                    if now - last_ping >= SSE_PING_SECONDS:
+                        # Комментарий держит соединение у прокси, именованный
+                        # кадр EventSource отдаёт странице — она видит «жив».
+                        self.wfile.write(b": ping\n\n")
+                        send("ping", {"at": now_iso(), "idle": round(now - last_ping, 1)})
+                        last_ping = now
                     if message is None:
-                        self.wfile.write(b": ping\n\n")  # держим соединение живым
-                        self.wfile.flush()
                         continue
                     send(message[0], message[1])
         except CLIENT_DISCONNECT_ERRORS:

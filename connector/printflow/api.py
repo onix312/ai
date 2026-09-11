@@ -148,6 +148,15 @@ class Api:
             pass
         self.live = LiveBroadcaster(self.bus, self.manager)
         self.live.start()
+        # 17.0.13: сторож касс. Молчащий телефон — единственный обрыв, о
+        # котором владелец иначе узнаёт от кассира («не видно кассу»).
+        try:
+            from .presence import CashierWatcher
+
+            self.cashier_watcher = CashierWatcher(self.cashier, self.manager, self.db)
+            self.cashier_watcher.start()
+        except Exception:
+            self.cashier_watcher = None
         # 14.0 (идея 5): повтор изменяющего запроса с тем же ключом не плодит
         # сущности — ответ первого выполнения возвращается как есть.
         self.idempotency = IdempotencyStore(self.db)
@@ -156,6 +165,20 @@ class Api:
         self.listen_host = "127.0.0.1"
         self.listen_port = 8080
         self.started_at = time.time()
+
+    # ------------------------------------------------- события каталога
+    def catalog_changed(self, reason: str = "") -> None:
+        """Сказать кассам «каталог/цены изменились» (17.0.13).
+
+        Событие **аддитивное**: старый фронтенд его не знает и просто
+        игнорирует, денежные события (`event`) и их формат не трогаются.
+        Касса по нему перечитывает каталог — кассир больше не продаёт по
+        цене, которую владелец поменял полчаса назад.
+        """
+        try:
+            self.bus.publish("catalog_changed", {"reason": reason, "at": now_iso()})
+        except Exception:
+            pass
 
     def restart_process(self) -> None:
         """Перезапустить процесс (маркер восстановления применится на старте)."""
@@ -2462,9 +2485,12 @@ class Api:
             return 200, {"ok": True, "spool": self.acc.restock_spool(
                 body.get("id", ""), num(body.get("grams")), num(body.get("price")))}
         if path == "/api/catalog/save":
-            return 200, {"ok": True, "item": self.repo.save_catalog_item(body)}
+            item = self.repo.save_catalog_item(body)
+            self.catalog_changed("catalog_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/catalog/delete":
             self.repo.delete_catalog_item(body.get("id", ""))
+            self.catalog_changed("catalog_delete")
             return 200, {"ok": True}
         if path == "/api/transaction/save":
             if body.get("id"):
@@ -2657,9 +2683,12 @@ class Api:
         # --- настройки, бэкап, уведомления
         # --- стеллаж магазина
         if path == "/api/shelf/save":
-            return 200, {"ok": True, "item": self.shelf.save_item(body)}
+            item = self.shelf.save_item(body)
+            self.catalog_changed("shelf_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/shelf/delete":
             self.shelf.delete_item(body.get("id", ""))
+            self.catalog_changed("shelf_delete")
             return 200, {"ok": True}
         if path == "/api/shelf/produce":
             return 200, self.shelf.produce(body.get("item_id", ""), num(body.get("qty")),
@@ -2714,7 +2743,9 @@ class Api:
         # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature/save":
-            return 200, {"ok": True, "item": self.nom.save(body)}
+            item = self.nom.save(body)
+            self.catalog_changed("nomenclature_save")
+            return 200, {"ok": True, "item": item}
         if path == "/api/nomenclature/delete":
             self.nom.delete(body.get("id", ""))
             return 200, {"ok": True}
@@ -3288,6 +3319,7 @@ class Api:
             return 200, result
         if path == "/api/catalog/recalc-apply":
             result = self.acc.recalc_catalog(True)
+            self.catalog_changed("price_recalc")
             self.bus.publish("resync", {})
             return 200, result
         if path == "/api/orders/bulk-status":
