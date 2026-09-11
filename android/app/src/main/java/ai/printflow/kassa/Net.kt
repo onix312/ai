@@ -5,6 +5,7 @@ import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URL
+import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -115,11 +116,19 @@ object Net {
         val found = ConcurrentHashMap<String, String>()
         val pool = Executors.newFixedThreadPool(48)
         return try {
-            val jobs = targets.map { base ->
-                Runnable { probe(base, timeoutMs)?.let { version ->
-                    found[base] = version
-                    onFound?.invoke(found.size)
-                } }
+            // invokeAll принимает только Callable — с Runnable компилятор
+            // отказывает по типу. Оборачиваем задачу явным объектом: ни вывода
+            // типов, ни SAM-неоднозначности, поведение прежнее — ждём все
+            // адреса, но не дольше общего потолка.
+            val jobs: List<Callable<Unit>> = targets.map { base ->
+                object : Callable<Unit> {
+                    override fun call(): Unit {
+                        probe(base, timeoutMs)?.let { version ->
+                            found[base] = version
+                            onFound?.invoke(found.size)
+                        }
+                    }
+                }
             }
             runCatching { pool.invokeAll(jobs, timeoutMs * 6L, TimeUnit.MILLISECONDS) }
             found.entries.sortedWith(compareBy({ portOf(it.key) }, { netKey(it.key) }))

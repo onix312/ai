@@ -29,15 +29,18 @@ class Ring(private val context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = manager ?: return
         val sound: Uri? = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        val audio = Notification.AudioAttributes().apply {
-            setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            if (sound != null) setSound(sound)
-        }
+        // Звук канала задаётся двумя разными вещами: AudioAttributes описывает
+        // «какого рода звук» (уведомление), а сам Uri уходит вторым аргументом
+        // setSound. У AudioAttributes.Builder нет setSound — это ошибка.
+        val audio = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
         nm.createNotificationChannel(NotificationChannel(
             CHANNEL_PAY, "Платежи на кассе", NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Подтверждение оплаты и поступления из банка"
-            setSound(sound, audio)
+            if (sound != null) setSound(sound, audio)
             enableVibration(true)
         })
         nm.createNotificationChannel(NotificationChannel(

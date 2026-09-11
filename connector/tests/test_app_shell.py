@@ -425,6 +425,40 @@ class KotlinSourceTests(unittest.TestCase):
         self.assertIn("KEY_QUEUE", self.activity)
         self.assertIn("QUEUE_LIMIT", self.activity)
 
+    def test_round_170014_compile_fixes_are_pinned(self):
+        """Контракт четырёх сгоревших мест сборки 17.0.14.
+
+        Компилятора Kotlin в песочнице нет, поэтому каждое из мест, где Gradle
+        уже отказал, закреплено здесь строкой: откат правки падает тестом, а не
+        новой сборкой у владельца.
+        """
+        # 1) KDoc не должен содержать «*/» в середине комментария
+        self.assertNotIn("res/values*/dimens.xml", self.activity)
+        # 2-3) findViewById без явного типа: T не выводится, нужен каст
+        self.assertEqual(self.activity.count("as Button)"), 5)
+        for bare in (".findViewById(R.id.btnOpen).setOnClickListener",
+                     ".findViewById(R.id.btnFind).setOnClickListener",
+                     ".findViewById(R.id.btnReconnect).setOnClickListener",
+                     ".findViewById(R.id.btnUpdate).setOnClickListener",
+                     ".findViewById(R.id.btnBattery).setOnClickListener"):
+            self.assertNotIn(bare, self.activity, f"findViewById без типа: {bare}")
+        self.assertIn("import android.widget.Button", self.activity)
+        # 4) у Settings нет константы во множественном числе; но
+        #    ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS — другая, она правильная
+        self.assertIn("Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS", self.activity)
+        self.assertNotIn("ACTION_IGNORE_BATTERY_OPTIMIZATIONS_SETTINGS", self.activity)
+        self.assertIn("Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", self.activity)
+        # 5-6) invokeAll принимает Callable, а не Runnable
+        self.assertIn("import java.util.concurrent.Callable", self.net)
+        self.assertIn("val jobs: List<Callable<Unit>> = targets.map", self.net)
+        self.assertNotIn("Runnable {", self.net)
+        self.assertIn("invokeAll(jobs, timeoutMs * 6L, TimeUnit.MILLISECONDS)", self.net)
+        # 7-8) Notification.AudioAttributes не существует; Uri отдаёт канал
+        self.assertNotIn("Notification.AudioAttributes", self.ring)
+        self.assertIn("AudioAttributes.Builder()", self.ring)
+        self.assertIn("AudioAttributes.USAGE_NOTIFICATION", self.ring)
+        self.assertIn("if (sound != null) setSound(sound, audio)", self.ring)
+
     def test_net_api_used_by_the_shell_is_the_one_net_declares(self):
         # сторож кассы зовёт Net.probe/Net.scan/Net.json — сигнатуры обязаны
         # совпадать, иначе оболочка не соберётся (компилятора в CI нет)
