@@ -23,6 +23,7 @@ from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
 from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
                      ensure_dirs, now_iso)
+from .consumption import MaterialShortage, plan as plan_consumption
 from .db import Database, friendly_sqlite_error
 from .manager import PrinterManager
 from .idempotency import IdempotencyStore, extract_key as extract_idempotency_key
@@ -2801,6 +2802,30 @@ class Api:
             self.nom.delete_spec(body.get("id", ""))
             return 200, {"ok": True}
         # ------------------------------------------------------------- склады
+        if path == "/api/production/plan":
+            # «Чем и откуда списывается изделие»: тот же расчёт, что при
+            # проведении, но без движений. Панель показывает это до подтверждения.
+            rows = body.get("items")
+            if not isinstance(rows, list) or not rows:
+                return 400, {"error": "Укажите позиции производства"}
+            warehouse_id = str(body.get("warehouse_id")
+                               or self.docs.default_warehouse())
+            needs: list[dict] = []
+            for row in rows:
+                if not isinstance(row, dict) or not row.get("nom_id"):
+                    continue
+                qty = num(row.get("qty"), 1)
+                for comp in self.docs.spec_components(row["nom_id"]):
+                    need = num(comp["qty"]) * qty
+                    if need <= 0:
+                        continue
+                    needs.append({"nom_id": comp["nom_id"], "qty": need,
+                                  "name": comp.get("name") or "",
+                                  "unit": comp.get("unit") or "",
+                                  "line_id": comp.get("id") or "",
+                                  "chosen": comp.get("warehouse_id") or ""})
+            plan = plan_consumption(self.db, self.stock, needs, warehouse_id)
+            return 200, {"ok": True, "plan": plan}
         if path == "/api/warehouse/save":
             # Фронтенд шлёт пустой id для новой записи — setdefault его не заменит.
             if not body.get("id"):
@@ -2871,7 +2896,16 @@ class Api:
         if path == "/api/document/save":
             return 200, {"ok": True, "document": self.docs.save(body)}
         if path == "/api/document/post":
-            return 200, {"ok": True, "document": self.docs.post(body.get("id", ""))}
+            # Производство списывает состав, который может лежать на своём
+            # складе (расходники). Если чего-то не хватает, панель получает
+            # ПЛАН: что, откуда и сколько — и человек решает (переложить или
+            # осознанно увести в минус), а не читает «ошибка 400».
+            try:
+                doc = self.docs.post(body.get("id", ""),
+                                     allow_shortage=bool(body.get("allow_shortage")))
+            except MaterialShortage as exc:
+                return 400, {"error": str(exc), "production_short": exc.plan}
+            return 200, {"ok": True, "document": doc}
         if path == "/api/document/unpost":
             return 200, {"ok": True, "document": self.docs.unpost(body.get("id", ""))}
         if path == "/api/document/delete":

@@ -142,6 +142,9 @@ CREATE TABLE IF NOT EXISTS spec_items (
     nom_id TEXT,                    -- из чего
     variant_id TEXT,
     qty REAL DEFAULT 1,
+    -- Откуда списывать этот расходник при производстве. Пусто — коннектор
+    -- выберет склад материалов сам (см. consumption.py) и запомнит выбор здесь.
+    warehouse_id TEXT,
     note TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_specitems_spec ON spec_items(spec_id);

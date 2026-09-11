@@ -15,6 +15,7 @@ let editingNomUpdatedAt = '';
 let editingDoc = null;
 let editingWh = null;
 let specRows = [];
+let pendingShortDoc = '';   // документ производства, ждущий решения по нехватке
 let docRows = [];
 let planRows = [];
 let viewMode = 'cards';
@@ -654,7 +655,11 @@ async function openNom(id) {
 
   // состав
   specRows = ((d.spec || {}).items || []).map((s) => ({
-    nom_id: s.nom_id, qty: num(s.qty, 1), name: s.nom_name }));
+    id: s.id, nom_id: s.nom_id, qty: num(s.qty, 1), name: s.nom_name,
+    // Откуда спишется расходник при производстве: '' — коннектор выберет
+    // склад с остатком сам и запомнит выбор здесь (см. consumption.py).
+    warehouse_id: s.warehouse_id || '', warehouse_name: s.warehouse_name || '',
+    places: s.places || [] }));
   renderSpec();
 
   // остатки
@@ -753,17 +758,45 @@ function moveRow(m) {
     + revert + '</div>';
 }
 
+function specWarehouses() {
+  // Где вообще может лежать расходник: склад материалов и домашний склад.
+  // Витрина сюда не попадает — её остатки ведёт полка.
+  return (data.warehouses || []).filter((w) => ['material', 'home'].includes(w.kind)
+    && !num(w.archived));
+}
+
+function specPlaceHint(row) {
+  const places = row.places || [];
+  if (!row.nom_id) return '';
+  if (!places.length) return 'нет ни на одном складе — оприходуйте, иначе спишется в минус';
+  const text = places.map((p) => `${p.name} ${nfmt(p.free)}`).join(' · ');
+  return 'лежит: ' + text;
+}
+
 function renderSpec() {
   const opts = data.items.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
-  $('nf_spec_rows').innerHTML = specRows.length ? specRows.map((r, index) =>
-    `<div class="spec-row" data-spec-row="${index}">`
-    + `<select data-spec-nom="${index}"><option value="">— выберите —</option>${opts}</select>`
-    + `<input type="number" min="0" step="any" data-spec-qty="${index}" value="${esc(r.qty)}">`
-    + `<button class="icon-btn sm danger" type="button" data-spec-del="${index}">×</button></div>`).join('')
-    : '<div class="empty compact"><span>Состав не задан — изделие печатается целиком.</span></div>';
+  const whs = specWarehouses();
+  const whOpts = whs.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+  const emptyHint = whs.length ? '' : '<div class="notice warn" style="margin-bottom:8px">'
+    + '<span>⚠</span><span>Склада материалов нет: создайте склад с видом «Материалы» '
+    + '(раздел «Склад»), иначе расходники будут списываться со склада изделия или уйдут в минус.</span></div>';
+  $('nf_spec_rows').innerHTML = emptyHint + (specRows.length ? specRows.map((r, index) => {
+    const hint = specPlaceHint(r)
+      ? `<small class="muted spec-note">${esc(specPlaceHint(r))}</small>` : '';
+    return `<div class="spec-row" data-spec-row="${index}">`
+      + `<select data-spec-nom="${index}"><option value="">— выберите —</option>${opts}</select>`
+      + `<input type="number" min="0" step="any" data-spec-qty="${index}" value="${esc(r.qty)}">`
+      + `<select data-spec-wh="${index}" title="Откуда списывать расходник при производстве">`
+      + `<option value="">склад выберется сам</option>${whOpts}</select>`
+      + `<button class="icon-btn sm danger" type="button" data-spec-del="${index}">×</button>`
+      + (hint ? hint : '') + '</div>';
+  }).join('')
+    : '<div class="empty compact"><span>Состав не задан — изделие печатается целиком.</span></div>');
   specRows.forEach((r, index) => {
     const sel = $('nf_spec_rows').querySelector(`[data-spec-nom="${index}"]`);
     if (sel) sel.value = r.nom_id || '';
+    const wh = $('nf_spec_rows').querySelector(`[data-spec-wh="${index}"]`);
+    if (wh) wh.value = r.warehouse_id || '';
   });
 }
 
@@ -798,7 +831,9 @@ async function saveNom() {
     editingNomUpdatedAt = String(res.item.updated_at || '');
     const id = res.item.id;
     // состав
-    const rows = specRows.filter((r) => r.nom_id);
+    const rows = specRows.filter((r) => r.nom_id)
+      .map((r) => ({ id: r.id || '', nom_id: r.nom_id, qty: r.qty,
+                     warehouse_id: r.warehouse_id || '' }));
     if (rows.length) await post('/api/spec/save', { nom_id: id, items: rows });
     // фото
     const file = $('nf_photo_file').files[0];
@@ -1184,6 +1219,53 @@ function renderDocs() {
     { label: '+ Что произошло', click: 'doc_add' })}</td></tr>`;
 }
 
+async function renderConsumePlan(rows, warehouseId) {
+  // «Чем и откуда спишется» — до нажатия «Провести». Раньше это было видно
+  // только после отказа: «не хватает… есть 0», хотя расходник лежал на своём
+  // складе. Пустой состав — тоже ответ, и его нужно показать.
+  const box = $('df_consume_box');
+  if (!box) return;
+  if (!rows.length) { box.innerHTML = ''; return; }
+  let plan = null;
+  try {
+    const res = await post('/api/production/plan', { items: rows, warehouse_id: warehouseId || '' });
+    plan = res.plan;
+  } catch (e) { box.innerHTML = ''; return; }
+  if (!plan || !(plan.lines || []).length) {
+    box.innerHTML = '<div class="card-head" style="margin-top:12px"><div><h3>Списание состава</h3>'
+      + '<p>У изделий нет состава — спишется только выпуск готового</p></div></div>';
+    return;
+  }
+  const lines = plan.lines.map((l) => `<div class="tx-row">`
+    + `<span class="tx-ic ${l.missing > 0 ? 'expense' : 'income'}">${l.missing > 0 ? '!' : '↓'}</span>`
+    + `<div class="tx-body"><b>${esc(l.name)} · ${nfmt(l.need)} ${esc(l.unit)}</b>`
+    + `<small>склад «${esc(l.warehouse_name || '—')}» · ${esc(l.reason || '')}`
+    + ` · свободно ${nfmt(l.free)}</small></div>`
+    + `<span class="amt ${l.missing > 0 ? 'neg' : ''}">${l.missing > 0
+        ? 'не хватает ' + nfmt(l.missing) : '✓'}</span></div>`).join('');
+  box.innerHTML = '<div class="card-head" style="margin-top:12px"><div><h3>Списание состава</h3>'
+    + '<p>Откуда уйдут расходники при проведении</p></div></div>' + lines
+    + (plan.ok ? '' : `<div class="notice warn" style="margin-top:8px">${esc(plan.message)}</div>`);
+}
+
+function showShortage(plan, docId) {
+  pendingShortDoc = docId;
+  const lines = (plan.lines || []).map((l) => `<div class="tx-row">`
+    + `<span class="tx-ic ${l.missing > 0 ? 'expense' : 'income'}">${l.missing > 0 ? '!' : '✓'}</span>`
+    + `<div class="tx-body"><b>${esc(l.name)} · нужно ${nfmt(l.need)} ${esc(l.unit)}</b>`
+    + `<small>склад «${esc(l.warehouse_name || '—')}» · свободно ${nfmt(l.free)}`
+    + `${l.missing > 0 ? ' · не хватает ' + nfmt(l.missing) : ''}</small></div></div>`).join('');
+  $('short_body').innerHTML = lines
+    + '<div class="notice warn" style="margin-top:10px">'
+    + 'Списать в минус — значит показать, что расходник израсходован, хотя на складе его нет. '
+    + 'Остаток уйдёт в минус и будет виден в учёте; приход восстановит его при следующей закупке.</div>';
+  openModal('short_modal');
+}
+
+async function postDoc(docId, allowShortage) {
+  return post('/api/document/post', { id: docId, allow_shortage: !!allowShortage });
+}
+
 function docKindSetup(kind) {
   const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
   show('df_wh2_wrap', kind === 'move');
@@ -1256,12 +1338,23 @@ async function openDoc(id, kind, preset) {
   $$('#doc_modal input, #doc_modal select').forEach((el) => {
     if (el.id !== 'df_number') el.disabled = !!posted;
   });
+  refreshConsumePlan();
   $('df_moves_box').innerHTML = posted && (doc.moves || []).length
     ? '<div class="card-head" style="margin-top:12px"><div><h3>Движения по регистру</h3>'
       + '<p>Что документ сделал со складом</p></div></div>'
       + doc.moves.map(moveRow).join('')
     : '';
   openModal('doc_modal');
+}
+
+function refreshConsumePlan() {
+  // План нужен только производству: остальные документы двигают один склад.
+  if (($('doc_modal').dataset.kind || '') !== 'production') {
+    if ($('df_consume_box')) $('df_consume_box').innerHTML = '';
+    return;
+  }
+  const rows = docRows.filter((r) => r.nom_id).map((r) => ({ nom_id: r.nom_id, qty: num(r.qty) }));
+  renderConsumePlan(rows, ($('df_warehouse') || {}).value || '');
 }
 
 function renderDocRows() {
@@ -1322,7 +1415,17 @@ async function saveDoc(thenPost) {
     const res = await post('/api/document/save', payload);
     editingDoc = res.document.id;
     if (thenPost) {
-      await post('/api/document/post', { id: editingDoc });
+      try {
+        await postDoc(editingDoc, false);
+      } catch (e) {
+        const plan = e.payload && e.payload.production_short;
+        if (plan) {
+          // Производство: показать план и дать выбор, а не «ошибка 400».
+          showShortage(plan, editingDoc);
+          return;
+        }
+        throw e;
+      }
       toast('Документ проведён', res.document.number);
     } else {
       toast('Записано', res.document.number);
@@ -1853,6 +1956,19 @@ function bind() {
     };
     reader.readAsDataURL(file);
   });
+  if ($('short_allow')) {
+    $('short_allow').addEventListener('click', async () => {
+      if (!pendingShortDoc) return;
+      try {
+        await postDoc(pendingShortDoc, true);
+        closeModal('short_modal');
+        closeModal('doc_modal');
+        toast('Проведено в минус', 'Расходники списаны, остаток отмечен в движениях', 'warn');
+        await Promise.all([refreshDocs(), refresh()]);
+        PF.refreshFinance && PF.refreshFinance();
+      } catch (e) { fail(e); }
+    });
+  }
   $('nf_spec_add').addEventListener('click', () => {
     specRows.push({ nom_id: '', qty: 1 });
     renderSpec();
@@ -1862,6 +1978,8 @@ function bind() {
     if (nom) specRows[+nom.dataset.specNom].nom_id = nom.value;
     const qty = e.target.closest('[data-spec-qty]');
     if (qty) specRows[+qty.dataset.specQty].qty = num(qty.value);
+    const wh = e.target.closest('[data-spec-wh]');
+    if (wh) specRows[+wh.dataset.specWh].warehouse_id = wh.value;
   });
   $('nf_spec_rows').addEventListener('click', (e) => {
     const del = e.target.closest('[data-spec-del]');
@@ -2020,11 +2138,15 @@ function bind() {
       if (cell) cell.textContent = money(num(docRows[index].qty) * num(docRows[index].price));
     }
     updateDocTotal();
+    refreshConsumePlan();
   });
   $('df_tbody').addEventListener('click', (e) => {
     const del = e.target.closest('[data-row-del]');
     if (del) { docRows.splice(+del.dataset.rowDel, 1); renderDocRows(); }
   });
+  if ($('df_warehouse')) {
+    $('df_warehouse').addEventListener('change', refreshConsumePlan);
+  }
   $('doc_save').addEventListener('click', () => saveDoc(false));
   $('doc_post').addEventListener('click', () => saveDoc(true));
   $('doc_unpost').addEventListener('click', async () => {

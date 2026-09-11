@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=17.0.1">
-<link rel="stylesheet" href="assets/app.css?v=17.0.1">
+<link rel="stylesheet" href="assets/app.css?v=17.0.14">
 <link rel="stylesheet" href="assets/more.css?v=17.1.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
@@ -4644,7 +4644,7 @@
    <div id="nf_price_history"></div>
   </div>
   <div class="pane" id="nompane-spec">
-   <p class="muted" style="margin-bottom:10px">Из чего состоит изделие. При производстве комплекта составляющие спишутся со склада автоматически.</p>
+   <p class="muted" style="margin-bottom:10px">Из чего состоит изделие и откуда списывать каждый расходник. Пустое место — коннектор возьмёт склад с остатком и запомнит выбор; можно поменять в любой момент.</p>
    <div id="nf_spec_rows"></div>
    <button class="btn sm" type="button" id="nf_spec_add">+ Строка состава</button>
   </div>
@@ -4743,6 +4743,20 @@
  </div>
 </form></dialog>
 
+<!-- =============================== НЕХВАТКА МАТЕРИАЛОВ НА ПРОИЗВОДСТВО -->
+<dialog class="modal" id="short_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Производство</span>
+  <h2>Не хватает материалов</h2>
+  <p>Ничего не списано: решите, переложить расходник или списать в минус</p></div>
+  <button class="icon-btn" type="button" data-close="short_modal">×</button></div>
+ <div class="modal-body" id="short_body"></div>
+ <div class="modal-foot">
+  <button class="btn" type="button" data-close="short_modal">Отмена — переложу расходник</button>
+  <span class="spacer"></span>
+  <button class="btn danger" type="button" id="short_allow">Списать в минус и провести</button>
+ </div>
+</form></dialog>
+
 <!-- ============================================ ДОКУМЕНТ -->
 <dialog class="modal wide" id="doc_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow" id="doc_modal_kind">Документ</span><h2 id="doc_modal_title">Новый документ</h2><p id="doc_modal_sub">Черновик не меняет остатки — движения появятся при проведении</p></div>
@@ -4767,6 +4781,7 @@
    <th class="right" id="df_th_price">Цена</th><th class="right">Сумма</th><th></th></tr></thead>
    <tbody id="df_tbody"></tbody></table></div>
   <div class="doc-total" id="df_total"></div>
+  <div id="df_consume_box"></div>
   <div id="df_moves_box"></div>
  </div>
  <div class="modal-foot">
@@ -5168,7 +5183,7 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=17.0.1"></script>
+<script src="assets/core.js?v=17.0.14"></script>
 <script src="assets/icons.js?v=17.0.1"></script>
 <script src="assets/printer.js?v=17.1.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
@@ -5176,7 +5191,7 @@
 <script src="assets/money.js?v=17.0.1"></script>
 <script src="assets/finance.js?v=17.0.6"></script>
 <script src="assets/shelf.js?v=17.0.1"></script>
-<script src="assets/products.js?v=17.0.1"></script>
+<script src="assets/products.js?v=17.0.14"></script>
 <script src="assets/bridge.js?v=17.0.1"></script>
 <!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->

@@ -324,7 +324,7 @@ class CashierLayoutTests(TestCase):
         sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
         m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
         self.assertIsNotNone(m)
-        self.assertGreaterEqual(int(m.group(1)), 42,
+        self.assertGreaterEqual(int(m.group(1)), 43,
                                 "правка cashier.html требует поднятия CACHE в sw.js")
 
     def test_update_banner_shows_size_hash_and_changelog(self):
@@ -348,6 +348,29 @@ class CashierLayoutTests(TestCase):
         # по именованному кадру ping касса отличает «поток жив» от «молчит»
         self.assertIn('addEventListener("ping"', self.css)
         self.assertIn("LINK.stream", self.css)
+
+    def test_spec_row_lets_choose_where_the_component_is_written_off(self):
+        # «расходники нельзя списать с отдельного склада» — в составе появилось
+        # место расходника: пусто = коннектор выберет склад с остатком.
+        products = (ROOT / "site" / "assets" / "products.js").read_text(encoding="utf-8")
+        self.assertIn("data-spec-wh", products)
+        self.assertIn("function specWarehouses", products)
+        self.assertIn("function specPlaceHint", products)
+        self.assertIn("warehouse_id: r.warehouse_id || ''", products)
+        self.assertIn("Списание состава", products)
+
+    def test_panel_explains_a_material_shortage_instead_of_a_raw_error(self):
+        # нехватка расходников — это план для человека, а не «ошибка 400»
+        index = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="short_modal"', index)
+        self.assertIn('id="short_allow"', index)
+        self.assertIn('id="df_consume_box"', index)
+        core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+        self.assertIn("err.payload = data", core)
+        products = (ROOT / "site" / "assets" / "products.js").read_text(encoding="utf-8")
+        self.assertIn("production_short", products)
+        self.assertIn("allow_shortage", products)
+        self.assertIn("Списать в минус", products)
 
     def test_cashier_uses_svg_icons_from_registry(self):
         # эмодзи заменены на PFIcons: касса подключает icons.js и ссылается

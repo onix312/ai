@@ -292,7 +292,13 @@ async function api(path, options) {
   if (rid && data && typeof data === 'object') data.request_id = data.request_id || rid;
   if (!res.ok) {
     const message = data.error || `Ошибка ${res.status}`;
-    throw new Error(rid ? `${message} · ${rid}` : message);
+    const err = new Error(rid ? `${message} · ${rid}` : message);
+    // Подробности ответа не теряются: например, производство при нехватке
+    // расходников отдаёт план (что, откуда, сколько) — панель показывает его
+    // человеку, а не только строку «ошибка 400».
+    err.payload = data;
+    err.status = res.status;
+    throw err;
   }
   // Н2: повтор уже выполнен — говорим об этом, а не показываем тишину.
   if (data && data.replayed && !opts.silentReplay) {

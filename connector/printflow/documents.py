@@ -22,6 +22,7 @@ from typing import Any
 
 from .accounting import Accounting, num, uid
 from .config import now_iso
+from .consumption import MaterialShortage, plan as plan_consumption, remember_places
 from .db import Database
 from .schema_v3 import DOC_KINDS
 from .stock import Stock
@@ -163,8 +164,13 @@ class Documents:
                         (round(num(row.get("q")), 3), round(num(row.get("a")), 2), doc_id))
 
     # ------------------------------------------------------------ проведение
-    def post(self, doc_id: str) -> dict:
-        """Провести документ: создать движения склада и деньги."""
+    def post(self, doc_id: str, *, allow_shortage: bool = False) -> dict:
+        """Провести документ: создать движения склада и деньги.
+
+        `allow_shortage` — человек в панели увидел, чего не хватает, и разрешил
+        списать расходник в минус. Для остальных документов параметр не значит
+        ничего: нехватку разрешает только производство.
+        """
         doc = self.get(doc_id)
         if not doc:
             raise ValueError("Документ не найден")
@@ -177,7 +183,8 @@ class Documents:
         handler = {
             "receipt": self._post_receipt, "sale": self._post_sale,
             "move": self._post_move, "writeoff": self._post_writeoff,
-            "inventory": self._post_inventory, "production": self._post_production,
+            "inventory": self._post_inventory,
+            "production": lambda d, i, allow=False: self._post_production(d, i, allow),
             "return": self._post_return, "pricing": self._post_pricing,
         }.get(doc["kind"])
         if not handler:
@@ -188,7 +195,8 @@ class Documents:
         self._no_shelf_zone(doc.get("warehouse_id"), doc.get("warehouse_to_id"))
 
         with self.db.transaction():
-            cost_total = handler(doc, items)
+            cost_total = (handler(doc, items, allow_shortage)
+                          if doc["kind"] == "production" else handler(doc, items))
             self.db.execute(
                 "UPDATE documents SET state='posted', posted_at=?, cost_total=? WHERE id=?",
                 (now_iso(), round(num(cost_total), 2), doc_id))
@@ -339,30 +347,65 @@ class Documents:
             total += abs(cost)
         return total
 
-    def _post_production(self, doc: dict, items: list[dict]) -> float:
-        """Выпуск продукции: приход готового + списание по спецификации."""
+    def _post_production(self, doc: dict, items: list[dict],
+                         allow_shortage: bool = False) -> float:
+        """Выпуск продукции: приход готового + списание состава по спецификации.
+
+        Состав списывается НЕ обязательно со склада изделия: у каждой строки
+        состава может быть свой склад-источник, иначе расходники не видны
+        производству (см. `consumption`). Сначала собираем план — если чего-то
+        не хватает, ни одного движения не пишем: человек увидит план и решит.
+        """
         wh = doc.get("warehouse_id") or self._default_warehouse()
-        total = 0.0
+        needs: list[dict] = []
         for item in items:
             qty = num(item["qty"])
-            unit_cost = num(item.get("cost"))
-            components = self._spec_components(item["nom_id"])
-            comp_cost = 0.0
-            for comp in components:
+            if qty <= 0:
+                continue
+            for comp in self._spec_components(item["nom_id"]):
                 need = num(comp["qty"]) * qty
                 if need <= 0:
                     continue
-                comp_unit = self.stock.avg_cost(comp["nom_id"], wh)
-                comp_sum = comp_unit * need
-                available = self.stock.free(comp["nom_id"], wh)
-                if available < need:
-                    raise ValueError(
-                        f"Не хватает «{comp.get('name') or comp['nom_id']}»:"
-                        f" нужно {round(need, 1)}, есть {round(available, 1)}")
-                self.stock.add_move(comp["nom_id"], wh, -need, -comp_sum, doc["id"],
-                                    "production", note="списано в производство",
-                                    at=doc.get("at", ""))
-                comp_cost += comp_sum
+                needs.append({
+                    "nom_id": comp["nom_id"], "qty": need,
+                    "name": comp.get("name") or "", "unit": comp.get("unit") or "",
+                    "line_id": comp.get("id") or "",
+                    "chosen": comp.get("warehouse_id") or "",
+                })
+        share = plan_consumption(self.db, self.stock, needs, wh,
+                                 allow_shortage=allow_shortage)
+        if share["short"] and not allow_shortage:
+            raise MaterialShortage(share, share["message"])
+
+        comp_cost_by_item: dict[str, float] = {}
+        for line in share["lines"]:
+            move_qty = -round(line["take"] + line["missing"], 3)  # не хватило — в минус
+            if move_qty >= -1e-9:
+                continue
+            cost = -round(num(line["unit_cost"]) * abs(move_qty), 2)
+            note = "списано в производство"
+            if line["missing"] > 1e-9:
+                note = (f"списано в производство · {int(round(line['missing']))} "
+                        f"{line['unit']} в минус: на складе «{line['warehouse_name']}» "
+                        f"было {line['free']}")
+            self.stock.add_move(line["nom_id"], line["warehouse_id"], move_qty, cost,
+                                doc["id"], "production", note=note,
+                                at=doc.get("at", ""))
+            comp_cost_by_item[line["nom_id"]] = (comp_cost_by_item.get(line["nom_id"], 0.0)
+                                                 + abs(cost))
+
+        # Автовыбор места запоминаем в составе: в следующий раз человек его
+        # увидит и сможет поправить, а не будет искать расходник заново.
+        remember_places(self.db, share)
+
+        total = 0.0
+        for item in items:
+            qty = num(item["qty"])
+            if qty <= 0:
+                continue
+            unit_cost = num(item.get("cost"))
+            comp_cost = sum(comp_cost_by_item.get(comp["nom_id"], 0.0)
+                            for comp in self._spec_components(item["nom_id"]))
             cost = (unit_cost * qty) if unit_cost else comp_cost
             self.stock.add_move(item["nom_id"], wh, qty, cost, doc["id"], "production",
                                 item.get("variant_id") or "",
@@ -404,15 +447,24 @@ class Documents:
 
     # ------------------------------------------------------------- помощники
     def _spec_components(self, nom_id: str) -> list[dict]:
+        """Состав изделия: из чего и с какого склада (место может быть пустым)."""
         spec = self.db.one(
             "SELECT * FROM specs WHERE nom_id=? AND active=1 ORDER BY rowid LIMIT 1",
             (nom_id,))
         if not spec:
             return []
         return self.db.query(
-            "SELECT si.*, n.name FROM spec_items si"
+            "SELECT si.*, n.name, n.unit FROM spec_items si"
             " LEFT JOIN nomenclature n ON n.id=si.nom_id"
             " WHERE si.spec_id=? ORDER BY si.line", (spec["id"],))
+
+    # Публичные обёртки: панель и API строят по ним тот же план, что и проведение
+    # (иначе «до» и «после» считались бы по-разному).
+    def spec_components(self, nom_id: str) -> list[dict]:
+        return self._spec_components(nom_id)
+
+    def default_warehouse(self) -> str:
+        return self._default_warehouse()
 
     def _default_warehouse(self) -> str:
         # Витрина — последний кандидат: документы по зоне не проводятся,

@@ -493,22 +493,49 @@ class Nomenclature:
         if not spec:
             return None
         spec["items"] = self.db.query(
-            "SELECT si.*, n.name nom_name, n.unit, n.kind FROM spec_items si"
+            "SELECT si.*, n.name nom_name, n.unit, n.kind,"
+            " w.name AS warehouse_name, COALESCE(w.kind,'') AS warehouse_kind"
+            " FROM spec_items si"
             " LEFT JOIN nomenclature n ON n.id=si.nom_id"
+            " LEFT JOIN warehouses w ON w.id=si.warehouse_id"
             " WHERE si.spec_id=? ORDER BY si.line", (spec["id"],))
+        for item in spec["items"]:
+            # «Где лежит этот расходник» — панель показывает остатки по складам
+            # прямо в строке состава, чтобы место выбирали по факту, а не вслепую.
+            item["places"] = self.stock.by_warehouse(str(item.get("nom_id") or ""))
         return spec
 
     def save_spec(self, data: dict) -> dict:
+        """Сохранить состав изделия (один активный состав на изделие).
+
+        Без `id` состав не создаётся заново, а обновляется: панель шлёт только
+        `nom_id` и строки, и раньше каждое сохранение добавляло ещё одну
+        спецификацию. Производство берёт первую активную — то есть после правки
+        состава оно продолжало списывать по старой, и «поменял место расходника,
+        а ничего не изменилось» выглядело как баг списания. Заодно лишние
+        активные копии (следы прежних сохранений) гасятся, чтобы данные не
+        двоились.
+        """
         data = dict(data)
         items = data.pop("items", [])
         if not data.get("nom_id"):
             raise ValueError("Не указано изделие")
         if not data.get("id"):
-            data["id"] = uid("spc")
-            data["created_at"] = now_iso()
+            existing = self.db.one(
+                "SELECT id FROM specs WHERE nom_id=? AND active=1 ORDER BY rowid LIMIT 1",
+                (data["nom_id"],)) or {}
+            data["id"] = str(existing.get("id") or uid("spc"))
+            data["created_at"] = (self.db.one(
+                "SELECT created_at FROM specs WHERE id=?", (data["id"],)) or {}).get("created_at") \
+                or now_iso()
         data.setdefault("active", 1)
         with self.db.transaction():
             spec = self.db.upsert("specs", data)
+            # Следы прошлых сохранений (до 17.0.14 каждая правка состава плодила
+            # копию) — не удаляем, а гасим: так видно историю и нет двойных списаний.
+            self.db.execute(
+                "UPDATE specs SET active=0 WHERE nom_id=? AND id<>? AND active=1",
+                (data["nom_id"], spec["id"]))
             self.db.execute("DELETE FROM spec_items WHERE spec_id=?", (spec["id"],))
             for index, item in enumerate(items or []):
                 if not isinstance(item, dict) or not item.get("nom_id"):
@@ -518,6 +545,8 @@ class Nomenclature:
                     "line": index + 1, "nom_id": item["nom_id"],
                     "variant_id": item.get("variant_id") or None,
                     "qty": round(num(item.get("qty"), 1), 3),
+                    # место расходника: '' — выберем сами (см. consumption)
+                    "warehouse_id": item.get("warehouse_id") or None,
                     "note": item.get("note", "")})
         return self.spec_of(data["nom_id"]) or {}
 
