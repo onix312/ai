@@ -1,0 +1,18 @@
+// Единственный модуль: оболочка кассы. Внешних зависимостей нет намеренно —
+// WebView, уведомления и вибрация есть в платформе, а каждый чужой AAR это
+// ещё и риск «сборка не поднялась через год».
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "PrintFlowKassa"
+include ':app'

@@ -23,12 +23,15 @@ from .http_helpers import safe_file
 
 # mimetypes про webmanifest ещё не знает, а без правильного типа браузер
 # не зарегистрирует PWA и панель не поставится на домашний экран.
-_EXTRA_MIME = {".webmanifest": "application/manifest+json"}
+_EXTRA_MIME = {".webmanifest": "application/manifest+json",
+               ".apk": "application/vnd.android.package-archive"}
 
 # HTML и service worker всегда перечитываем: это точки входа, и залипший
 # кэш здесь ломает обновление у всех сразу.
 _NO_STORE_NAMES = {"sw.js"}
-_NO_STORE_SUFFIXES = {".html", ".htm"}
+# `.apk` — тоже no-store: установщик, скачанный из кэша, это «обновление не
+# приехало», которое выглядит как баг сборки.
+_NO_STORE_SUFFIXES = {".html", ".htm", ".apk"}
 
 _VERSIONED = re.compile(r"[?&]v=")
 

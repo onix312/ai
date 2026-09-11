@@ -112,13 +112,43 @@ def classify(description: str, rules: list[dict[str, Any]] | None = None) \
     return None
 
 
+
+def sbp_taken(db, date: str, amount: float) -> dict | None:
+    """Найден ли уже такой доход в журнале как подтверждённый СБП-платёж.
+
+    Зачем. Выписка в один и тот же период можно занести двумя дорожками:
+    «Поступления из банка» (`/api/bank/*`, money ведёт через ядро СБП) и
+    «Импорт выписки» (`/api/bank/import-*`, разносит по статьям напрямую).
+    Раньше вторая дорожка не знала о первой и писала второй доход на ту же
+    кассу: выручка и налоговая база удваивались ровно на сумму СБП-чеков.
+    Здесь импорт уступает: если такое поступление уже проведено как СБП —
+    строка пропускается с явной причиной, а не заводится повторно.
+
+    Сумма сверяется точно (копейка в копейку), дата — в окне
+    ``sbp_match_window_hours`` (тот же регулятор, что у сопоставления банка).
+    """
+    try:
+        days = max(1, int(num(db.setting("sbp_match_window_hours", 24), 24) / 24.0) + 1)
+    except Exception:
+        days = 2
+    row = db.one(
+        "SELECT p.id AS payment_id, p.number, p.status, COALESCE(t.at, p.confirmed_at) AS at"
+        " FROM sbp_payments p"
+        " LEFT JOIN transactions t ON t.id = p.tx_id"
+        " WHERE p.status IN ('confirmed','refunded')"
+        "   AND ROUND(COALESCE(t.amount, p.amount), 2) = ?"
+        "   AND ABS(julianday(substr(COALESCE(t.at, p.confirmed_at), 1, 10))"
+        "       - julianday(?)) <= ?"
+        " LIMIT 1", (round(num(amount), 2), str(date or "")[:10], days))
+    return dict(row) if row else None
+
 def preview(db, text: str) -> dict[str, Any]:
     """Предпросмотр импорта: что распозналось, что останется без правила."""
     rules = db.setting("bank_rules", DEFAULT_BANK_RULES) or DEFAULT_BANK_RULES
     if not isinstance(rules, list):
         rules = DEFAULT_BANK_RULES
     rows: list[dict[str, Any]] = []
-    matched = unmatched = duplicates = 0
+    matched = unmatched = duplicates = sbp_taken_rows = 0
     for row in parse_csv(text):
         rule = classify(row["description"], rules)
         entry = {
@@ -140,26 +170,43 @@ def preview(db, text: str) -> dict[str, Any]:
         if duplicate:
             entry["duplicate"] = True
             duplicates += 1
+        # СБП-выручка, уже проведённая через ядро СБП, — не второй доход
+        entry["sbp_taken"] = {}
+        if entry["matched"] and row["amount"] > 0:
+            taken = sbp_taken(db, row["date"], row["amount"])
+            if taken:
+                entry["sbp_taken"] = taken
+                entry["duplicate"] = True
+                entry["note"] = f"уже проведено как СБП-платёж №{taken.get('number') or taken.get('payment_id')}"
+                duplicates += 1
+                sbp_taken_rows += 1
         if entry["matched"]:
             matched += 1
         else:
             unmatched += 1
         rows.append(entry)
     return {"rows": rows, "matched": matched, "unmatched": unmatched,
-            "duplicates": duplicates,
+            "duplicates": duplicates, "sbp_taken": sbp_taken_rows,
             "rules": [dict(r) for r in rules]}
 
 
 def apply_rows(db, rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Провести распознанные строки как транзакции (дубли пропускаются).
 
-    Дублик проверяется повторно по базе — на случай, если предпросмотр
-    делался до предыдущего импорта.
+    Дубликаты проверяются повторно по базе — на случай, если предпросмотр
+    делался до предыдущего импорта. Отдельно проверяется СБП: доход, уже
+    записанный ядром СБП при подтверждении платежа, здесь не повторяется —
+    иначе одна и та же оплата попадает в выручку (и в налоговую базу) дважды.
     """
-    imported = skipped = 0
+    imported = skipped = sbp_skipped = 0
     for row in rows:
         if not row.get("matched"):
             skipped += 1
+            continue
+        if row.get("sbp_taken") or (num(row.get("amount")) > 0 and sbp_taken(
+                db, str(row.get("date") or "")[:10], num(row.get("amount")))):
+            skipped += 1
+            sbp_skipped += 1
             continue
         amount = abs(num(row.get("amount")))
         if amount <= 0:
@@ -184,6 +231,8 @@ def apply_rows(db, rows: list[dict[str, Any]]) -> dict[str, Any]:
             imported += 1
         except Exception:
             skipped += 1
-    db.add_event("finance", "Импорт банковской выписки",
-                 f"проведено проводок: {imported}, пропущено: {skipped}", "", {})
-    return {"imported": imported, "skipped": skipped}
+    detail = f"проведено проводок: {imported}, пропущено: {skipped}"
+    if sbp_skipped:
+        detail += f" (из них уже проведено как СБП: {sbp_skipped})"
+    db.add_event("finance", "Импорт банковской выписки", detail, "", {})
+    return {"imported": imported, "skipped": skipped, "sbp_skipped": sbp_skipped}

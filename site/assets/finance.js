@@ -201,6 +201,8 @@ function renderTax() {
           ? 'Основная часть суммы — фиксированные страховые взносы: они не зависят от дохода, поэтому при небольшой выручке доля выглядит большой. Откладывайте равными частями до конца года.'
           : `Откладывайте ${pct(rate)} с каждого поступления на отдельный счёт — тогда налог не станет сюрпризом.`}</span></div>`);
 
+  renderNpd(t);
+
   const qs = t.quarters || [];
   const qSum = (key) => qs.reduce((a, q) => a + (Number(q[key]) || 0), 0);
   $('tax_tbody').innerHTML = qs.map((q) => `<tr>`
@@ -215,6 +217,136 @@ function renderTax() {
         + `<td class="right tnum strong">${money(qSum('tax'))}</td></tr>`
       : '')
     || '<tr><td colspan="4"><div class="empty compact"><span>Нет данных за год.</span></div></td></tr>';
+}
+
+/* --------------------------------------------------- НПД: чеки и лимит года */
+/* Карточка собрана вокруг двух вещей, которые иначе теряются: чек по каждому
+расчёту (422-ФЗ — штраф 20% суммы, повторно 100%) и годовой лимит 2,4 млн ₽,
+пересечение которого стоит режима. Суммы не дублируем: их считает сервер по
+проводкам, здесь только остаток лимита, темп, прогноз и отметка владельца. */
+let npdDaysCache = null, npdDaysBusy = false;
+
+async function npdDays(force) {
+  if (npdDaysBusy) return npdDaysCache;
+  npdDaysBusy = true;
+  try {
+    if (force) npdDaysCache = null;
+    if (!npdDaysCache) npdDaysCache = await get('/api/npd/days?back=14');
+  } catch (e) { npdDaysCache = { days: [], pending: {} }; }
+  npdDaysBusy = false;
+  return npdDaysCache;
+}
+
+function npdDaysHtml(res) {
+  const days = (res && res.days) || [];
+  const rows = days.filter((d) => num(d.income) || d.marked).slice(0, 10);
+  if (!rows.length) return '<div class="muted" style="padding:8px 0">За две недели расчётов не было.</div>';
+  return '<div class="table-wrap"><table class="data"><thead><tr><th>День</th>'
+    + '<th class="right">Взято</th><th class="right">Чеками подтверждено</th><th></th></tr></thead><tbody>'
+    + rows.map((d) => {
+      const mark = d.marked
+        ? `<span class="state-badge ok">${nfmt(d.checks, 0)} чек(ов) · ${money(d.marked_amount)}</span>`
+        : (num(d.income)
+          ? (d.overdue ? '<span class="state-badge bad">чеки не подтверждены</span>'
+                       : '<span class="muted">сегодня — ждём отметку</span>')
+          : '<span class="muted">—</span>');
+      const btn = num(d.income)
+        ? `<button class="btn sm" type="button" data-npd-day="${esc(d.day)}" data-npd-act="${d.marked ? 'unmark' : 'mark'}">${d.marked ? 'Снять' : 'Чеки выбиты'}</button>`
+        : '';
+      const back = num(d.refunds)
+        ? ` <span class="state-badge bad">возврат ${money(d.refunds)}</span>` : '';
+      return `<tr><td class="strong">${esc(dateText(d.day))}${back}</td>`
+        + `<td class="right tnum">${money(d.income)}</td><td>${mark}</td>`
+        + `<td class="right">${btn}</td></tr>`;
+    }).join('') + '</tbody></table></div>';
+}
+
+function npdBoxHtml(st, pend, res) {
+  const used = clamp(num(st.used_pct), 0, 100);
+  const alert = st.level === 'over' || num(pend.days) > 0;
+  const head = st.limit
+    ? `<div class="res-list">`
+      + row('Доход года (по проводкам)', money(st.income))
+      + row('Лимит режима', money(st.limit))
+      + row('Осталось', money(st.left), 'total')
+      + row('Можно в день до конца года', money(st.day_budget))
+      + (st.exhausted_on ? row('При текущем темпе лимит —', esc(dateText(st.exhausted_on))) : '')
+      + row('Дней в году осталось', nfmt(st.days_left, 0))
+      + '</div><div style="margin-top:10px"><div class="bar ' + (used > num(st.warn_at) ? 'warn' : 'ok')
+      + `"><i style="width:${used}%"></i></div><small class="muted">выбрано ${pct(used)}${st.level_name ? ' · ' + esc(st.level_name) : ''}</small></div>`
+    : '';
+  const notice = alert || num(pend.days)
+    ? `<div class="notice" style="margin-top:12px"><span>!</span><span>${nfmt(pend.days, 0)} дн. с деньгами без подтверждения чеков на ${money(pend.amount)} — по закону чек выдаётся в момент расчёта, а штраф за работу без чека начинается с 20% суммы (${money(pend.fine_min)}). Отметьте выбитые чеки в таблице ниже.</span></div>`
+    : (st.npd ? '<div class="notice" style="margin-top:12px"><span>✓</span><span>Все дни с деньгами подтверждены чеками — риск штрафа закрыт отметками.</span></div>' : '');
+  return head + notice + '<div id="npd_days" style="margin-top:12px">' + npdDaysHtml(res) + '</div>';
+}
+
+async function renderNpd(t) {
+  const card = $('npd_card');
+  if (!card) return;
+  const npd = t.npd || {};
+  const st = npd.status || {}, pend = npd.pending || {};
+  const show = Boolean(st.limit) || Boolean(st.npd) || num(pend.days) > 0;
+  card.hidden = !show;
+  if (!show) return;
+  $('npd_box').innerHTML = npdBoxHtml(st, pend, npdDaysCache);
+  const res = await npdDays();
+  const box = $('npd_days');
+  if (box) box.innerHTML = npdDaysHtml(res);
+}
+
+async function npdMarkDay(day, checks) {
+  try {
+    await post('/api/npd/day/mark', { day, checks });
+    toast('Отмечено', `чеки за ${day} подтверждены`);
+    npdDaysCache = null;
+    await refreshMoney();
+    PF.refreshFinance();
+  } catch (e) { fail(e); }
+}
+
+function wireNpd() {
+  const markBtn = $('npd_mark_today');
+  if (markBtn && !markBtn.dataset.wired) {
+    markBtn.dataset.wired = '1';
+    markBtn.addEventListener('click', async () => {
+    const value = await ask({
+      title: 'Чеки за сегодня выбиты',
+      sub: 'Сумма берётся из проводок дня — отдельно вводить её не нужно. Укажите только число чеков.',
+      fields: [{ name: 'checks', label: 'Сколько чеков выбито', type: 'number', value: '1', min: 0, step: '1' }],
+      ok: 'Подтвердить',
+    });
+      if (value == null) return;
+      await npdMarkDay(new Date().toISOString().slice(0, 10), num(value));
+    });
+  }
+  const box = $('npd_box');
+  if (box && !box.dataset.wired) {
+    box.dataset.wired = '1';
+    box.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-npd-day]');
+      if (!b) return;
+      const day = b.dataset.npdDay;
+      if (b.dataset.npdAct === 'unmark') {
+        if (!confirmDanger(`Снять отметку о чеках за ${day}? Дни снова встанут в очередь на подтверждение.`)) return;
+        try {
+          await post('/api/npd/day/unmark', { day });
+          npdDaysCache = null;
+          await refreshMoney();
+          PF.refreshFinance();
+        } catch (err) { fail(err); }
+        return;
+      }
+      const value = await ask({
+        title: 'Чеки за ' + day,
+        sub: 'Сумма — по проводкам этого дня.',
+        fields: [{ name: 'checks', label: 'Сколько чеков выбито', type: 'number', value: '1', min: 0, step: '1' }],
+        ok: 'Подтвердить',
+      });
+      if (value == null) return;
+      await npdMarkDay(day, num(value));
+    });
+  }
 }
 
 /* ======================================================= кассы и долги */
@@ -612,6 +744,7 @@ function bind() {
       refreshReport();
     });
   }
+  wireNpd();
   btn('tax_go_settings', () => {
     PF.go('settings');
     const tab = document.querySelector('#set_tabs [data-pane="tax"]');

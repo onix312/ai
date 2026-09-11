@@ -129,6 +129,8 @@ class Api:
         self.cashier = Cashier(self.db, self.acc, self.shelf, self.sbp)
         from .bank_receipts import BankReceipts
         self.bank = BankReceipts(self.db, self.acc, self.sbp)
+        from .npd import Npd
+        self.npd = Npd(self.db)
         from .defect_recovery import DefectRecovery
         self.defect_recovery = DefectRecovery(self.db, self.manager)
         from .aftercare import CustomerAftercare

@@ -79,7 +79,7 @@
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
-var state = { review: [], recent: [], auto: true };
+var state = { review: [], recent: [], auto: true, pins: false };
 
 function toast(t) { var m = $("msg"); m.textContent = t; m.classList.add("on");
   clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove("on"); }, 3000); }
@@ -119,15 +119,32 @@ function render() {
 function load() {
   api("/api/bank/state").then(function (s) {
     state.review = s.pending_review || []; state.recent = s.recent || []; state.auto = !!s.auto_confirm;
+    state.pins = !!s.pins_required;
     render();
   }).catch(function (e) { toast("Ошибка: " + e.message); });
+}
+// Право на деньги: когда в «Команде» заведены PIN, панель обязана спросить его.
+function askPin(what) {
+  if (!state.pins) return "";
+  var pin = prompt(what + " — введите PIN сотрудника");
+  if (pin === null) return null;
+  pin = String(pin).trim();
+  if (!pin) { toast("Нужен PIN"); return null; }
+  return pin;
 }
 $("bImport").addEventListener("click", function () {
   var csv = $("csv").value;
   if (!csv.trim()) { toast("Вставьте выписку"); return; }
   api("/api/bank/import", { csv: csv, actor: "panel" }).then(function (r) {
-    $("importResult").textContent = "новых: " + r.new + " · подтверждено: " + r.confirmed +
+    var line = "новых: " + r.new + " · подтверждено: " + r.confirmed +
       " · на сверку: " + r.matched + " · не сопоставлено: " + r.unmatched + " · пропущено: " + r.skipped;
+    if (r.errors) {
+      line += " · сбоев: " + r.errors + " — они в очереди «на сверку», остальная выписка разнесена";
+      (r.problems || []).slice(0, 3).forEach(function (pb) {
+        line += "\n" + (pb.at || "") + " · " + money(pb.amount) + " · " + (pb.error || "");
+      });
+    }
+    $("importResult").textContent = line;
     $("csv").value = ""; load();
   }).catch(function (e) { toast("Ошибка: " + e.message); });
 });
@@ -139,10 +156,20 @@ document.addEventListener("click", function (ev) {
     if (ident === null) return;
     api("/api/bank/link", { receipt_id: id, payment_id: ident, actor: "panel" })
       .then(function () { toast("Связано ✓"); load(); })
-      .catch(function (e) { toast("Ошибка: " + e.message); });
+      .catch(function (e) {
+        // Разные суммы — не случайность, а частичная оплата или переплата:
+        // просим явное подтверждение и только тогда привязываем.
+        if (e.message.indexOf("не равна сумме платежа") < 0) { toast("Ошибка: " + e.message); return; }
+        if (!confirm(e.message + ". Привязать всё равно?")) return;
+        api("/api/bank/link", { receipt_id: id, payment_id: ident, actor: "panel", force: 1 })
+          .then(function () { toast("Связано с пометкой о разнице ✓"); load(); })
+          .catch(function (e2) { toast("Ошибка: " + e2.message); });
+      });
   } else if (act === "confirm") {
-    if (!confirm("Подтвердить платёж по этому поступлению?")) return;
-    api("/api/bank/confirm", { receipt_id: id, actor: "panel" })
+    if (!confirm("Подтвердить платёж по этому поступлению? Деньги пойдут в журнал.")) return;
+    var pin = askPin("Подтверждение СБП по поступлению");
+    if (pin === null) return;
+    api("/api/bank/confirm", { receipt_id: id, actor: "panel", pin: pin })
       .then(function () { toast("Подтверждено ✓"); load(); })
       .catch(function (e) { toast("Ошибка: " + e.message); });
   }

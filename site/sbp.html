@@ -94,7 +94,27 @@
 <script>
 "use strict";
 var $ = function (id) { return document.getElementById(id); };
-var state = { orderId: "", debt: 0, pending: [], recent: [] };
+var state = { orderId: "", debt: 0, pending: [], recent: [], pins: false };
+
+// Право на деньги: когда в «Команде» заведены PIN, панель спрашивает его —
+// иначе любой запрос из LAN записал бы выручку или возврат (Касса 16.0,
+// решение №9 «возвраты — только руководитель», теперь оно на сервере).
+function askPin(what) {
+  if (!state.pins) return "";
+  var pin = prompt(what + " — введите PIN сотрудника");
+  if (pin === null) return null;
+  pin = String(pin).trim();
+  if (!pin) { toast("Нужен PIN"); return null; }
+  return pin;
+}
+// Одна кнопка — один запрос: двойной тап и повтор после обрыва не должны
+// гонять денежную операцию второй раз (на сервере это тоже защищено).
+function guard(btn, run) {
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  Promise.resolve().then(run).catch(function (e) { toast("Ошибка: " + e.message); })
+    .then(function () { btn.disabled = false; });
+}
 
 function toast(text) {
   var m = $("msg"); m.textContent = text; m.classList.add("on");
@@ -168,6 +188,8 @@ function renderPaymentQr(q) {
     q.purpose ? "Назначение: " + esc(q.purpose) : "",
     d.why ? esc(d.why) : "",
     d.can_open ? "Открывается кнопкой «Открыть оплату»" + (d.domain ? " (" + esc(d.domain) + ")" : "") : "",
+    (q.camera && q.kind === "gost")
+      ? "«QR для камеры» включён, но ссылку дать нечем: камера покажет текст. Заполните «Ссылку для оплаты» или статический QR магазина — и телефон откроет банк." : "",
     d.purpose_truncated ? "Назначение в QR сокращено — полное в платеже" : "",
     q.hint ? esc(q.hint) : "", problems].filter(Boolean).join("<br>");
 }
@@ -198,6 +220,7 @@ function load() {
   api("/api/sbp/state").then(function (s) {
     state.pending = s.pending || [];
     state.recent = s.recent || [];
+    state.pins = !!((s.settings || {}).pins_required);
     renderPending();
     renderRecent();
     renderSettings(s.settings || {});
@@ -242,20 +265,30 @@ document.addEventListener("click", function (ev) {
   var act = b.getAttribute("data-act"), id = b.getAttribute("data-id");
   if (act === "confirm") {
     if (!confirm("Подтвердить поступление? Деньги будут записаны в журнал и закроют долг заказа.")) return;
-    api("/api/sbp/confirm", { id: id, actor: "panel" })
-      .then(function () { toast("Оплата подтверждена ✓"); load(); })
-      .catch(function (e) { toast("Ошибка: " + e.message); });
+    var pin = askPin("Подтверждение СБП-оплаты");
+    if (pin === null) return;
+    guard(b, function () {
+      return api("/api/sbp/confirm", { id: id, actor: "panel", pin: pin, request_id: "confirm-" + id })
+        .then(function () { toast("Оплата подтверждена ✓"); load(); });
+    });
   } else if (act === "reject") {
     var reason = prompt("Причина отклонения:", "Оплата не поступила");
     if (reason === null) return;
-    api("/api/sbp/reject", { id: id, reason: reason, actor: "panel" })
-      .then(function () { toast("Платёж отклонён"); load(); })
-      .catch(function (e) { toast("Ошибка: " + e.message); });
+    var rpin = askPin("Отклонение платежа");
+    if (rpin === null) return;
+    guard(b, function () {
+      return api("/api/sbp/reject", { id: id, reason: reason, actor: "panel", pin: rpin })
+        .then(function () { toast("Платёж отклонён"); load(); });
+    });
   } else if (act === "refund") {
     if (!confirm("Возврат СБП. Подтверждаю: возврат выполнен в банке.")) return;
-    api("/api/sbp/refund", { id: id, bank_done: "1", note: "возврат клиенту", actor: "owner" })
-      .then(function () { toast("Возврат проведён ✓"); load(); })
-      .catch(function (e) { toast("Ошибка: " + e.message); });
+    var fpin = askPin("Возврат денег — только старший");
+    if (fpin === null) return;
+    guard(b, function () {
+      return api("/api/sbp/refund", { id: id, bank_done: "1", note: "возврат клиенту",
+                                     actor: "owner", pin: fpin })
+        .then(function () { toast("Возврат проведён ✓"); load(); });
+    });
   }
 });
 

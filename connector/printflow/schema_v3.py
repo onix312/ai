@@ -232,6 +232,17 @@ CREATE TABLE IF NOT EXISTS doc_counters (
     PRIMARY KEY (kind, year)
 );
 
+-- ---------------------------------- сквозные счётчики нумерации (только вперёд)
+-- Отдельная строка-счётчик вместо COUNT(*) или MAX(*) по таблице: удаление
+-- карточки не должно откатывать номера назад и не должно давать новому
+-- документу номер уже существующего (по номеру заказ ищут бот, трекинг и
+-- назначение СБП-перевода).
+-- name: order — заказы, sbp_payment — номера СБП-платежей.
+CREATE TABLE IF NOT EXISTS name_counters (
+    name TEXT PRIMARY KEY,
+    last INTEGER DEFAULT 0
+);
+
 -- ------------------------------------------------- партии печати
 CREATE TABLE IF NOT EXISTS batches (
     id TEXT PRIMARY KEY,
@@ -273,6 +284,36 @@ CREATE TABLE IF NOT EXISTS audit_log (
     data TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
+
+-- ---------------------------------------- сессии мобильной кассы (переживают рестарт)
+-- Нужны для надёжности, которую обещали отчёты 16.1: обновление или падение
+-- коннектора не должно выставлять кассира («введите код снова» посреди смены).
+-- Храним хеш токена, а не сам токен: резервная копия базы не должна отдавать
+-- живые сессии. Срок абсолютный — 12 часов, как и в памяти процесса.
+CREATE TABLE IF NOT EXISTS cashier_tokens(
+    token_hash TEXT PRIMARY KEY,
+    staff_id TEXT DEFAULT '',
+    cashier TEXT DEFAULT '',
+    role TEXT DEFAULT 'employee',
+    legacy INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_cashier_tokens_expiry ON cashier_tokens(expires_at);
+
+-- ----------------------------------- НПД: отметки «чеки за день выбиты»
+-- Самозанятый обязан выдать чек на каждый расчёт (422-ФЗ, ст. 14): штраф за
+-- работу без чека — 20% от суммы, повторно за полгода — 100. Суммы здесь нет:
+-- доход дня берётся из `transactions` (единственный источник правды), тут
+-- только подтверждение владельца «чеки выданы» и их количество.
+CREATE TABLE IF NOT EXISTS npd_days(
+    day TEXT PRIMARY KEY,
+    checks INTEGER DEFAULT 0,
+    amount REAL DEFAULT 0,
+    note TEXT DEFAULT '',
+    marked_at TEXT DEFAULT '',
+    marked_by TEXT DEFAULT ''
+);
 """
 
 # Склады по умолчанию: (id, название, вид, розница, позиция)

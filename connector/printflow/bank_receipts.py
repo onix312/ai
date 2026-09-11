@@ -182,10 +182,19 @@ class BankReceipts:
 
     def ingest(self, rows: list[dict], source: str = SOURCE_TBANK_CSV,
                actor: str = "panel") -> dict:
-        """Занести поступления и сопоставить со СБП-платежами. Идемпотентно."""
+        """Занести поступления и сопоставить со СБП-платежами. Идемпотентно.
+
+        Одна конфликтная строка не роняет весь импорт. Раньше исключение из
+        ``sbp.confirm`` (например долг уже закрыли наличными: «Платёж больше
+        остатка») прерывало цикл: выписка не разносилась целиком, а повторный
+        импорт падал на той же строке — сверка вставала до ручной отмены
+        платежа. Теперь сбойная строка сохраняется как есть и уходит
+        «на сверку» с причиной, остальные обрабатываются как обычно.
+        """
         if not isinstance(rows, list):
             raise ValueError("Ожидается список поступлений")
-        new, skipped, matched, unmatched, confirmed = 0, 0, 0, 0, 0
+        new, skipped, matched, unmatched, confirmed, errors = 0, 0, 0, 0, 0, 0
+        problems: list[dict] = []
         for raw in rows:
             if not isinstance(raw, dict):
                 continue
@@ -199,26 +208,66 @@ class BankReceipts:
                 skipped += 1
                 continue
             receipt_id = uid("br")
-            with self.db.transaction():
-                self.db.execute(
-                    "INSERT INTO bank_receipts"
-                    "(id,external_key,source,at,amount,currency,counterparty,purpose,"
-                    " status,created_at)"
-                    " VALUES(?,?,?,?,?,?,?,?,'new',?)",
-                    (receipt_id, key, source, str(raw.get("at") or ""), amount,
-                     str(raw.get("currency") or "RUB"),
-                     str(raw.get("counterparty") or "")[:200],
-                     str(raw.get("purpose") or "")[:500], now_iso()))
-                result = self._match(receipt_id, actor=actor)
-            if result["status"] == STATUS_CONFIRMED:
+            try:
+                with self.db.transaction():
+                    self._insert(receipt_id, key, source, raw, amount, STATUS_NEW, "")
+                    result = self._match(receipt_id, actor=actor)
+            except Exception as exc:
+                reason = str(exc)[:300] or "ошибка разноса строки"
+                errors += 1
+                new += 1          # строка в журнале поступлений всё-таки появилась
+                problems.append({"at": str(raw.get("at") or ""), "amount": amount,
+                                 "purpose": str(raw.get("purpose") or "")[:120],
+                                 "error": reason})
+                # строку всё равно сохраняем: деньги в банке уже есть, и
+                # «потерянная» запись выписки хуже, чем запись «на сверку»
+                self._review_failed(receipt_id, key, source, raw, amount, reason)
+                continue
+            status = str(result.get("status") or "")
+            # Живой сигнал кассе: банк видит приход, а денег в журнале ещё нет.
+            # Публикуем после коммита строки — иначе касса обновит список раньше,
+            # чем поступление станет видимым, и «звонок» собьётся вхолостую.
+            if status in (STATUS_MATCHED, STATUS_REVIEW):
+                self.db.add_event(
+                    "finance", "Банк: поступление на сверке",
+                    f"{amount:g} RUB · {str(raw.get('purpose') or '')[:120]}",
+                    data={"receipt_id": receipt_id, "amount": amount,
+                          "status": status, "signal": "bank_matched"})
+            if status == STATUS_CONFIRMED:
                 confirmed += 1
-            elif result["status"] in (STATUS_MATCHED, STATUS_REVIEW):
+            elif status in (STATUS_MATCHED, STATUS_REVIEW):
                 matched += 1
             else:
                 unmatched += 1
             new += 1
         return {"new": new, "skipped": skipped, "matched": matched,
-                "unmatched": unmatched, "confirmed": confirmed}
+                "unmatched": unmatched, "confirmed": confirmed,
+                "errors": errors, "problems": problems}
+
+    def _insert(self, receipt_id: str, key: str, source: str, raw: dict,
+                amount: float, status: str, note: str = "") -> None:
+        """Строка поступления как есть. OR IGNORE — на случай гонки двух импортов."""
+        self.db.execute(
+            "INSERT OR IGNORE INTO bank_receipts"
+            "(id,external_key,source,at,amount,currency,counterparty,purpose,"
+            " status,note,created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (receipt_id, key, source, str(raw.get("at") or ""), amount,
+             str(raw.get("currency") or "RUB"),
+             str(raw.get("counterparty") or "")[:200],
+             str(raw.get("purpose") or "")[:500], status, note[:500], now_iso()))
+
+    def _review_failed(self, receipt_id: str, key: str, source: str, raw: dict,
+                       amount: float, reason: str) -> None:
+        """Сохранить сбойную строку в статусе «на сверку» — молча терять её нельзя."""
+        try:
+            with self.db.transaction():
+                self._insert(receipt_id, key, source, raw, amount,
+                             STATUS_REVIEW, f"не удалось разнести: {reason}")
+                self._audit(receipt_id, "import_error",
+                            "Поступление требует ручной сверки", reason, actor="импорт")
+        except Exception:
+            pass  # повторный импорт той же строки её всё равно подхватит по external_key
 
     # ------------------------------------------------------------ сопоставл.
     def _within_window(self, receipt_at: str, payment_at: str, hours: float) -> bool:
@@ -257,7 +306,8 @@ class BankReceipts:
             auto = bool(self.db.setting("sbp_auto_confirm", True))
             if auto:
                 result = self.sbp.confirm(payment["id"], actor=actor,
-                                          note="Авто-подтверждение по поступлению из банка")
+                                          note="Авто-подтверждение по поступлению из банка",
+                                          authorized="сверка банка")
                 self.db.execute(
                     "UPDATE bank_receipts SET status=?,sbp_id=?,matched_at=?,matched_by=?,"
                     "note=? WHERE id=?",
@@ -331,12 +381,19 @@ class BankReceipts:
             + self.list(status="unmatched", limit=50),
             "recent": self.list(status="", limit=30),
             "auto_confirm": bool(self.db.setting("sbp_auto_confirm", True)),
+            "pins_required": self.sbp.pins_required(),
             "window_hours": int(num(self.db.setting("sbp_match_window_hours", 24), 24)),
         }
 
     def link(self, receipt_id: str, payment_ident: str, actor: str = "panel",
-             confirm: bool = False) -> dict:
-        """Вручную связать поступление с СБП-платежом (по id или номеру)."""
+             confirm: bool = False, force: bool = False, pin: str = "") -> dict:
+        """Вручную связать поступление с СБП-платежом (по id или номеру).
+
+        Сверка сумм — не формальность: привязка прихода в 500 ₽ к платежу
+        в 1500 ₽ закрыла бы долг, которого покупатель не гасил. Разные суммы
+        связать можно, но только явно (``force``) — частичная оплата или
+        переплата; причина остаётся в заметке поступления и в аудите.
+        """
         receipt = self.db.one("SELECT * FROM bank_receipts WHERE id=?", (receipt_id,))
         if not receipt:
             raise ValueError("Поступление не найдено")
@@ -346,31 +403,54 @@ class BankReceipts:
             (ident, ident))
         if not payment:
             raise ValueError("СБП-платёж не найден (укажите id или номер)")
+        got = round(num(receipt.get("amount")), 2)
+        want = round(num(payment.get("amount")), 2)
+        mismatch = abs(got - want) > 0.005
+        if mismatch and not force:
+            raise ValueError(f"Сумма поступления {got:g} ₽ не равна сумме платежа {want:g} ₽ — "
+                             "подтвердите привязку явно (частичная оплата или переплата)")
+        already = str(payment.get("status") or "") == "confirmed"
+        if confirm and not already and str(payment.get("status") or "") not in ("new", "pending"):
+            # повторное нажатие «Подтвердить» на уже проведённом платеже — no-op
+            # (идемпотентность UI); rejected/refunded подтверждать нельзя
+            raise ValueError(f"Платёж уже {payment.get('status')} — подтверждать нечего")
+        note = "связано вручную" + (
+            f" · суммы различаются: {got:g} против {want:g} ₽" if mismatch else "")
         stamp = now_iso()
         with self.db.transaction():
             self.db.execute(
                 "UPDATE bank_receipts SET sbp_id=?,status=?,matched_at=?,matched_by=?,"
                 "note=? WHERE id=?",
                 (payment["id"], STATUS_MATCHED, stamp, actor or "panel",
-                 "связано вручную", receipt_id))
+                 note, receipt_id))
             self._audit(receipt_id, "link", "Поступление связано с платежом вручную",
-                        f"{num(receipt['amount']):g} RUB → {payment['id']}", actor=actor)
+                        f"{num(receipt['amount']):g} RUB → {payment['id']}"
+                        + (" · суммы различаются" if mismatch else ""), actor=actor)
             if confirm:
-                self.sbp.confirm(payment["id"], actor=actor,
-                                 note="Подтверждено вручную по поступлению из банка")
-                self.db.execute(
-                    "UPDATE bank_receipts SET status=? WHERE id=?",
-                    (STATUS_CONFIRMED, receipt_id))
+                if already:
+                    # платёж уже проведён (например авто-подтверждением банка):
+                    # отмечаем это и на поступлении, новую проводку не пишем
+                    self.db.execute(
+                        "UPDATE bank_receipts SET status=? WHERE id=?",
+                        (STATUS_CONFIRMED, receipt_id))
+                else:
+                    # право на «деньги в журнал» проверяет ядро СБП: в режиме
+                    # PIN панель обязана прислать pin сотрудника
+                    self.sbp.confirm(payment["id"], actor=actor, pin=pin,
+                                     note="Подтверждено вручную по поступлению из банка")
+                    self.db.execute(
+                        "UPDATE bank_receipts SET status=? WHERE id=?",
+                        (STATUS_CONFIRMED, receipt_id))
         return self.get(receipt_id)
 
-    def confirm(self, receipt_id: str, actor: str = "panel") -> dict:
+    def confirm(self, receipt_id: str, actor: str = "panel", pin: str = "") -> dict:
         """Подтвердить СБП-платёж, к которому привязано поступление."""
         receipt = self.db.one("SELECT * FROM bank_receipts WHERE id=?", (receipt_id,))
         if not receipt:
             raise ValueError("Поступление не найдено")
         if not receipt.get("sbp_id"):
             raise ValueError("Сначала свяжите поступление с СБП-платежом")
-        self.sbp.confirm(receipt["sbp_id"], actor=actor,
+        self.sbp.confirm(receipt["sbp_id"], actor=actor, pin=pin,
                          note="Подтверждено вручную по поступлению из банка")
         self.db.execute("UPDATE bank_receipts SET status=?,matched_at=?,matched_by=?,"
                         "note=? WHERE id=?",
