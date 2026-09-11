@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.net.http.SslError
@@ -13,7 +14,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.Gravity
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -53,9 +56,13 @@ class MainActivity : Activity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var root: FrameLayout
     private lateinit var web: WebView
-    private var panel: LinearLayout? = null
+    private var panel: ScrollView? = null
     private var urlField: EditText? = null
     private var results: LinearLayout? = null
+    private var hintView: TextView? = null
+    private var panelHintRes: Int = R.string.panel_hint_server
+    private var foundServers: List<Pair<String, String>> = emptyList()
+    private var scanNote: TextView? = null
     private var failed = false
     private lateinit var ring: Ring
 
@@ -78,7 +85,7 @@ class MainActivity : Activity() {
         applyKeepAwake()
         val saved = prefs.getString(KEY_URL, "").orEmpty()
         if (saved.isBlank()) {
-            showPanel("Куда ходить за кассой? Обычно http://192.168.1.x:8765")
+            showPanel(R.string.panel_hint_initial)
         } else {
             load(saved)
             checkForUpdate()
@@ -101,6 +108,29 @@ class MainActivity : Activity() {
     override fun onPause() {
         RingService.foreground = false
         super.onPause()
+    }
+
+    /**
+     * Поворот/плотность/масштаб шрифта: activity не пересоздаётся (см. configChanges
+     * в манифесте), чтобы WebView не перезагружал страницу и не терял корзину
+     * кассира посреди продажи. WebView при этом сам перекладывает страницу под
+     * новый размер окна (onSizeChanged → CSS reflow, состояние в localStorage
+     * цело). А вот панель выбора сервера собрана из ресурсов — её пересобираем
+     * вручную, иначе dimens из values-land/values-sw600dp не применились бы.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (panel != null) rebuildPanel()
+    }
+
+    /** Пересборка панели без потери введённого адреса и найденных серверов. */
+    private fun rebuildPanel() {
+        val hint = panelHintRes
+        val url = urlField?.text?.toString().orEmpty()
+        hidePanel()
+        showPanel(hint)
+        urlField?.setText(url)
+        renderFoundServers()
     }
 
     private fun syncRingService() {
@@ -148,7 +178,7 @@ class MainActivity : Activity() {
                 if (request?.isForMainFrame == true) {
                     failed = true
                     runOnUiThread {
-                        showPanel("Сервер не отвечает. Проверьте Wi-Fi и что PrintFlow запущен — или выберите другой адрес.")
+                        showPanel(R.string.panel_hint_unreachable)
                     }
                 }
             }
@@ -194,7 +224,7 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun openSettings() {
-            runOnUiThread { showPanel("Адрес сервера в локальной сети") }
+            runOnUiThread { showPanel(R.string.panel_hint_server) }
         }
 
         @JavascriptInterface
@@ -229,117 +259,111 @@ class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------- экран выбора
-    private fun showPanel(hint: String) {
+    /**
+     * Панель выбора сервера. Разметка — `res/layout/panel_server.xml`, размеры —
+     * `res/values*/dimens.xml` (dp), шрифты — sp. В коде остались только те
+     * размеры, которых нет в разметке (кнопки найденных серверов создаются
+     * динамически) — их берём через getDimensionPixelSize, а не пикселями.
+     */
+    private fun showPanel(hintRes: Int) {
+        panelHintRes = hintRes
         if (panel != null) {
-            results?.removeAllViews()
             urlField?.setText(prefs.getString(KEY_URL, "").orEmpty())
+            hintView?.setText(hintRes)
+            renderFoundServers()
             return
         }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(40, 56, 40, 40)
-            setBackgroundColor(Color.parseColor("#0f1117"))
-        }
-        box.addView(TextView(this).apply {
-            text = "Касса PrintFlow"
-            setTextColor(Color.parseColor("#e5e7eb"))
-            textSize = 24f
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, 12)
-        })
-        box.addView(TextView(this).apply {
-            text = hint
-            setTextColor(Color.parseColor("#9ca3af"))
-            textSize = 14f
-            setPadding(0, 0, 0, 20)
-        })
-        val field = EditText(this).apply {
-            hint = "http://192.168.1.20:8765"
-            setText(prefs.getString(KEY_URL, "").orEmpty())
-            setSingleLine()
-            inputType = InputTypeHelper.uri()
-            setTextColor(Color.parseColor("#e5e7eb"))
-            setHintTextColor(Color.parseColor("#6b7280"))
-        }
+        val scroll = layoutInflater.inflate(R.layout.panel_server, root, false) as ScrollView
+        val hintView = scroll.findViewById(R.id.panelHint) as TextView
+        hintView.text = getString(hintRes)
+        this.hintView = hintView
+        val field = scroll.findViewById(R.id.urlField) as EditText
+        field.setText(prefs.getString(KEY_URL, "").orEmpty())
         urlField = field
-        box.addView(field)
-        box.addView(Button(this).apply {
-            text = "Открыть кассу"
-            setOnClickListener {
-                val value = field.text.toString()
-                if (Net.normalize(value) == null) {
-                    field.error = "Нужен адрес вида http://192.168.1.20:8765"
-                } else {
-                    load(value)
-                }
-            }
-        })
-        val found = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        box.addView(Button(this).apply {
-            text = "Найти сервер в сети"
-            setOnClickListener {
-                field.error = null
-                results?.removeAllViews()
-                note(found, "Ищу…")
-                Thread {
-                    val hits = Net.scan()
-                    runOnUiThread {
-                        found.removeAllViews()
-                        if (hits.isEmpty()) {
-                            note(found, "Ничего не нашёл. Запустите PrintFlow и введите адрес вручную.")
-                        } else {
-                            hits.forEach { (base, version) ->
-                                found.addView(Button(this@MainActivity).apply {
-                                    text = "$base   (v$version)"
-                                    setOnClickListener {
-                                        field.setText(base)
-                                        load(base)
-                                    }
-                                })
-                            }
-                        }
-                    }
-                }.start()
-            }
-        })
-        box.addView(ScrollView(this).apply {
-            addView(found)
-            setPadding(0, 16, 0, 8)
-        })
+        val found = scroll.findViewById(R.id.results) as LinearLayout
         results = found
-        box.addView(CheckBox(this).apply {
-            isChecked = prefs.getBoolean(KEY_AWAKE, true)
-            text = "Не гасить экран, пока открыта касса"
-            setTextColor(Color.parseColor("#9ca3af"))
-            setOnCheckedChangeListener { _, on ->
-                prefs.edit().putBoolean(KEY_AWAKE, on).apply()
-                applyKeepAwake()
-            }
-        })
-        box.addView(CheckBox(this).apply {
-            isChecked = prefs.getBoolean(KEY_RING_BG, true)
-            text = "Звенеть о платежах, даже когда экран погашен"
-            setTextColor(Color.parseColor("#9ca3af"))
-            setOnCheckedChangeListener { _, on ->
-                prefs.edit().putBoolean(KEY_RING_BG, on).apply()
-                syncRingService()
-            }
-        })
-        box.addView(Button(this).apply {
-            text = "Экономия батареи: не ограничивать"
-            setOnClickListener { askBattery(true) }
-        })
-        panel = box
-        root.addView(box, FrameLayout.LayoutParams(
+        scroll.findViewById(R.id.btnOpen).setOnClickListener { openFromField() }
+        scroll.findViewById(R.id.btnFind).setOnClickListener { scanServers() }
+        val cbAwake = scroll.findViewById(R.id.cbAwake) as CheckBox
+        cbAwake.isChecked = prefs.getBoolean(KEY_AWAKE, true)
+        cbAwake.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean(KEY_AWAKE, on).apply()
+            applyKeepAwake()
+        }
+        val cbRing = scroll.findViewById(R.id.cbRing) as CheckBox
+        cbRing.isChecked = prefs.getBoolean(KEY_RING_BG, true)
+        cbRing.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean(KEY_RING_BG, on).apply()
+            syncRingService()
+        }
+        scroll.findViewById(R.id.btnBattery).setOnClickListener { askBattery(true) }
+        (scroll.findViewById(R.id.panelVersion) as? TextView)?.text =
+            getString(R.string.panel_version_fmt, BuildConfig.VERSION_NAME)
+        panel = scroll
+        root.addView(scroll, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
-    private fun note(host: LinearLayout, value: String) {
-        host.addView(TextView(this).apply {
+    private fun openFromField() {
+        val field = urlField ?: return
+        val value = field.text.toString()
+        if (Net.normalize(value) == null) {
+            field.error = getString(R.string.err_bad_url)
+        } else {
+            load(value)
+        }
+    }
+
+    private fun scanServers() {
+        urlField?.error = null
+        val host = results ?: return
+        host.removeAllViews()
+        scanNote = note(host, getString(R.string.scanning))
+        Thread {
+            val hits = Net.scan(onFound = { n -> runOnUiThread { updateScanNote(n) } })
+            runOnUiThread {
+                foundServers = hits
+                renderFoundServers()
+            }
+        }.start()
+    }
+
+    private fun updateScanNote(n: Int) {
+        scanNote?.text = getString(R.string.scan_found, n)
+    }
+
+    private fun renderFoundServers() {
+        val host = results ?: return
+        host.removeAllViews()
+        scanNote = null
+        if (foundServers.isEmpty()) {
+            note(host, getString(R.string.scan_none))
+            return
+        }
+        foundServers.forEach { (base, version) ->
+            host.addView(Button(this).apply {
+                val label = SpannableString("●  $base   (v$version)")
+                label.setSpan(ForegroundColorSpan(Color.parseColor("#10b981")), 0, 1,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text = label
+                setTextColor(Color.parseColor("#9ca3af"))
+                minHeight = resources.getDimensionPixelSize(R.dimen.panel_control_min_height)
+                setOnClickListener {
+                    urlField?.setText(base)
+                    load(base)
+                }
+            })
+        }
+    }
+
+    private fun note(host: LinearLayout, value: String): TextView {
+        val tv = TextView(this).apply {
             text = value
             setTextColor(Color.parseColor("#9ca3af"))
             textSize = 14f
-        })
+        }
+        host.addView(tv)
+        return tv
     }
 
     private fun hidePanel() {
@@ -347,6 +371,8 @@ class MainActivity : Activity() {
         panel = null
         urlField = null
         results = null
+        hintView = null
+        scanNote = null
     }
 
     // --------------------------------------------------- мелкая полезность
@@ -435,7 +461,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setItems(arrayOf("Сменить сервер…", "Свернуть", "Выйти")) { _, which ->
                 when (which) {
-                    0 -> showPanel("Адрес сервера в локальной сети")
+                    0 -> showPanel(R.string.panel_hint_server)
                     1 -> moveTaskToBack(true)
                     else -> finish()
                 }
@@ -455,11 +481,4 @@ class MainActivity : Activity() {
         private const val KEY_RING_BG = "ring_background"
         private const val CASHIER_PATH = "/cashier.html"
     }
-}
-
-/** inputType для адреса: без автозамены и подсказок, с «/» и «:». */
-object InputTypeHelper {
-    fun uri(): Int = android.text.InputType.TYPE_CLASS_TEXT or
-        android.text.InputType.TYPE_TEXT_VARIATION_URI or
-        android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ландшафт: касса на подставке часто стоит боком. Высоты меньше, поэтому
+     отступы сверху/снизу компактнее, чтобы кнопки и чекбоксы не уезжали за
+     экран без прокрутки. -->
+<resources>
+    <dimen name="panel_side_padding">16dp</dimen>
+    <dimen name="panel_top_padding">16dp</dimen>
+    <dimen name="panel_bottom_padding">12dp</dimen>
+    <dimen name="panel_section_gap">12dp</dimen>
+    <dimen name="panel_title_bottom">8dp</dimen>
+    <dimen name="panel_hint_bottom">12dp</dimen>
+</resources>

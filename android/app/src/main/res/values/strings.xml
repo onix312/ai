@@ -1,3 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Касса NOZZA</string>
+
+    <!-- Экран выбора сервера. Тексты вынесены из MainActivity: они же понадобятся
+         для скринридера и не должны дублироваться в коде. -->
+    <string name="panel_title">Касса NOZZA</string>
+    <string name="panel_version_fmt">NOZZA · Касса v%1$s</string>
+    <string name="panel_hint_initial">Куда ходить за кассой? Обычно http://192.168.1.x:8765</string>
+    <string name="panel_hint_server">Адрес сервера в локальной сети</string>
+    <string name="panel_hint_unreachable">Сервер не отвечает. Проверьте Wi-Fi и что PrintFlow запущен — или выберите другой адрес.</string>
+    <string name="url_hint">http://192.168.1.20:8765</string>
+    <string name="btn_open">Открыть кассу</string>
+    <string name="btn_find">Найти сервер в сети</string>
+    <string name="err_bad_url">Нужен адрес вида http://192.168.1.20:8765</string>
+    <string name="cb_awake">Не гасить экран, пока открыта касса</string>
+    <string name="cb_ring">Звенеть о платежах, даже когда экран погашен</string>
+    <string name="btn_battery">Экономия батареи: не ограничивать</string>
+    <string name="scanning">Ищу…</string>
+    <string name="scan_found">Найдено серверов: %1$d</string>
+    <string name="scan_none">Ничего не нашёл. Запустите PrintFlow и введите адрес вручную.</string>
 </resources>

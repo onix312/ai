@@ -24,8 +24,8 @@ android {
         applicationId 'ai.printflow.kassa'
         minSdk 24
         targetSdk 34
-        versionCode 170008
-        versionName '17.0.8'
+        versionCode 170012
+        versionName '17.0.12'
     }
 
     signingConfigs {

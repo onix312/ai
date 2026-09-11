@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import time
 import unittest
 
@@ -249,6 +250,86 @@ class ShellProjectTests(unittest.TestCase):
         for line in ("android/app/build/", "site/app/*.apk", "android/keystore.properties"):
             self.assertIn(line, ignore, line)
         self.assertTrue((ROOT / "site" / "app" / "README.md").is_file())
+
+
+class KotlinSourceTests(unittest.TestCase):
+    """Статический контракт правок оболочки «адаптация под экраны» (без SDK).
+
+    Первая `:app:assembleDebug` на ПК владельца — приёмка, поэтому здесь ловим
+    только то, что можно увидеть без компилятора: панель переехала из пикселей
+    в dimens/XML, ротация не пересоздаёт WebView (и не теряет корзину), отладка
+    WebView доступна только в DEBUG, versionCode поднят под раздачу.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = ROOT / "android"
+        cls.manifest = (cls.base / "app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+        cls.activity = (cls.base / "app/src/main/java/ai/printflow/kassa/MainActivity.kt"
+                        ).read_text(encoding="utf-8")
+        cls.gradle = (cls.base / "app/build.gradle").read_text(encoding="utf-8")
+        cls.layout = (cls.base / "app/src/main/res/layout/panel_server.xml").read_text(encoding="utf-8")
+        cls.strings = (cls.base / "app/src/main/res/values/strings.xml").read_text(encoding="utf-8")
+        cls.net = (cls.base / "app/src/main/java/ai/printflow/kassa/Net.kt").read_text(encoding="utf-8")
+        cls.ring = (cls.base / "app/src/main/java/ai/printflow/kassa/Ring.kt").read_text(encoding="utf-8")
+
+    def test_panel_layout_is_xml_not_pixels(self):
+        # пиксельных setPadding в коде больше нет — отступы живут в dimens (dp)
+        self.assertNotIn("setPadding(", self.activity)
+        self.assertIn("R.layout.panel_server", self.activity)
+
+    def test_dimens_directories_exist(self):
+        for rel in ("values/dimens.xml", "values-land/dimens.xml", "values-sw600dp/dimens.xml"):
+            self.assertTrue((self.base / "app/src/main/res" / rel).is_file(), rel)
+
+    def test_control_min_height_is_48dp(self):
+        dims = (self.base / "app/src/main/res/values/dimens.xml").read_text(encoding="utf-8")
+        self.assertIn('name="panel_control_min_height">48dp', dims)
+        layout = (self.base / "app/src/main/res/layout/panel_server.xml").read_text(encoding="utf-8")
+        self.assertIn("@dimen/panel_control_min_height", layout)
+        self.assertIn("ScrollView", layout)
+
+    def test_webview_debugging_is_debug_only(self):
+        self.assertIn("if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)", self.activity)
+
+    def test_portrait_lock_is_removed(self):
+        self.assertNotIn('android:screenOrientation="portrait"', self.manifest)
+
+    def test_rotation_rebuilds_panel_without_recreating_webview(self):
+        # configChanges остаётся (WebView не пересоздаётся), панель пересобирается вручную
+        self.assertIn('android:configChanges="orientation|screenSize', self.manifest)
+        self.assertIn("onConfigurationChanged", self.activity)
+
+    def test_version_was_bumped_for_this_distribution(self):
+        m = re.search(r"versionCode (\d+)", self.gradle)
+        self.assertIsNotNone(m, "versionCode не найден")
+        self.assertGreaterEqual(int(m.group(1)), 170011,
+                                "versionCode должен расти при каждой раздаче APK")
+
+    # --- 17.0.12: визуал панели выбора сервера -----------------------------
+
+    def test_accent_button_and_mono_field(self):
+        self.assertIn("@drawable/bg_btn_accent", self.layout)
+        self.assertIn('android:fontFamily="monospace"', self.layout)
+
+    def test_panel_shows_version_for_support(self):
+        self.assertIn("panel_version_fmt", self.strings)
+        self.assertIn("BuildConfig.VERSION_NAME", self.activity)
+
+    def test_scan_progress_is_live(self):
+        self.assertIn("scan_found", self.strings)
+        self.assertIn("onFound", self.net)
+        self.assertIn("scanNote", self.activity)
+
+    def test_notification_icon_is_branded(self):
+        self.assertTrue((self.base / "app/src/main/res/drawable/ic_notify.xml").is_file())
+        self.assertIn("R.drawable.ic_notify", self.ring)
+
+    def test_version_was_bumped_again_for_visual_round(self):
+        m = re.search(r"versionCode (\d+)", self.gradle)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 170012,
+                                "визуальный раунд — своя раздача APK (17.0.12)")
 
 
 if __name__ == "__main__":

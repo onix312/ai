@@ -103,7 +103,8 @@ object Net {
      * Обход своей /24: «base → version» для всех, где откликнулся PrintFlow.
      * Порты — типичные для коннектора: находят и установку с другим портом.
      */
-    fun scan(ports: IntArray = intArrayOf(8765, 8766, 8080), timeoutMs: Int = 700): List<Pair<String, String>> {
+    fun scan(ports: IntArray = intArrayOf(8765, 8766, 8080), timeoutMs: Int = 700,
+             onFound: ((Int) -> Unit)? = null): List<Pair<String, String>> {
         val local = localV4() ?: return emptyList()
         val head = local.substringBeforeLast(".", "")
         if (head.isEmpty()) return emptyList()
@@ -115,7 +116,10 @@ object Net {
         val pool = Executors.newFixedThreadPool(48)
         return try {
             val jobs = targets.map { base ->
-                Runnable { probe(base, timeoutMs)?.let { version -> found[base] = version } }
+                Runnable { probe(base, timeoutMs)?.let { version ->
+                    found[base] = version
+                    onFound?.invoke(found.size)
+                } }
             }
             runCatching { pool.invokeAll(jobs, timeoutMs * 6L, TimeUnit.MILLISECONDS) }
             found.entries.sortedWith(compareBy({ portOf(it.key) }, { netKey(it.key) }))
