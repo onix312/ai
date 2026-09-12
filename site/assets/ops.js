@@ -179,6 +179,11 @@ function orderCard(o) {
     qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
   }
 
+  /* Стрелка «→» (17.0.16): куда можно шагнуть, говорит сервер (order.next из
+     карты переходов repo.ORDER_TRANSITIONS). Фронт не хранит свою карту и не
+     придумывает порядок — имена берёт из тех же /api/statuses. */
+  const nextId = (Array.isArray(o.next) ? o.next : []).find((x) => x && x !== o.status) || '';
+
   // ЗА1 + 13.1 (39): инициалы, а у безымянных — детерминированный эмодзи-аватар
   const who = o.customer_name || '';
   const avGlyph = who ? esc(initials(who)) : esc(U.avatarEmoji('', o.id) || '👤');
@@ -215,6 +220,7 @@ function orderCard(o) {
     + profitChip
     + `</div>`
     + `<div class="ocard-actions">`
+    + (nextId ? `<button class="btn xs ghost" type="button" data-order-action="advance" data-order="${esc(o.id)}" title="Перевести в «${esc(PF.status(nextId).name)}» без перетаскивания">→ ${esc(PF.status(nextId).name)}</button>` : '')
     + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа"><i data-icon="pen">✎</i> Открыть</button>`
     + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати"><i data-icon="queue">⎙</i> В очередь</button>` : '')
     + `</div>`
@@ -288,6 +294,7 @@ function renderKanban(list) {
     kanSums.set(key, el.textContent);
   });
   bindDrag();
+  bindTouchDrag();
 }
 
 let bulkSelected = new Set();
@@ -352,6 +359,49 @@ function text(id, v) { const el = $(id); if (el) el.textContent = v; }
 
 /* =============================================================== drag */
 let dragId = null;
+
+/* Смена статуса одна на все входы (17.0.16): перетаскивание мышью,
+   перетаскивание пальцем и кнопка «→» делают ровно одно и то же —
+   оптимистично переставляют карточку, спрашивают сервер и откатываются
+   с подсветкой колонки, если переход запрещён. */
+async function applyOrderStatus(orderId, status) {
+  const order = PF.state.orders.find((o) => o.id === orderId);
+  if (!order || order.status === status) return;
+  const prev = order.status;
+  order.status = status;
+  renderOrders();
+  try {
+    const res = await post('/api/order/status', { id: order.id, status });
+    Object.assign(order, res.order);
+    toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
+    PF.refreshCore();
+    PF.refreshFinance();
+  } catch (err) {
+    order.status = prev;
+    renderOrders();
+    // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
+    const host = $('orders_kanban');
+    const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
+    if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
+    fail(err);
+  }
+}
+
+/* Кнопка «→» на карточке: тот же переход, что и перетаскивание в соседнюю
+   колонку, но одним касанием — на телефоне тащить карточку через весь экран
+   неудобно, а следующий этап в 9 случаях из 10 один. */
+async function advanceOrder(orderId) {
+  const order = PF.state.orders.find((o) => o.id === orderId);
+  if (!order) return;
+  const next = (Array.isArray(order.next) ? order.next : []).find((x) => x && x !== order.status);
+  if (!next) {
+    toast('Дальше некуда', 'Из статуса «' + PF.status(order.status).name
+      + '» переход не разрешён — откройте карточку', 'bad');
+    return;
+  }
+  await applyOrderStatus(orderId, next);
+}
+
 function bindDrag() {
   const board = $('orders_kanban');
   $$('.ocard').forEach((card) => {
@@ -374,26 +424,70 @@ function bindDrag() {
       col.classList.remove('over');
       if (!dragId) return;
       const status = col.dataset.status;
-      const order = PF.state.orders.find((o) => o.id === dragId);
-      if (!order || order.status === status) return;
-      const prev = order.status;
-      order.status = status;
-      renderOrders();
-      try {
-        const res = await post('/api/order/status', { id: order.id, status });
-        Object.assign(order, res.order);
-        toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
-        PF.refreshCore();
-        PF.refreshFinance();
-      } catch (err) {
-        order.status = prev;
-        renderOrders();
-        // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
-        const host = $('orders_kanban');
-        const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
-        if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
-        fail(err);
-      }
+      const moved = dragId;
+      dragId = null;
+      await applyOrderStatus(moved, status);
+    });
+  });
+}
+
+/* Перетаскивание пальцем (17.0.16). HTML5 drag-and-drop на телефоне не
+   работает: карточку канбана нельзя было перенести в другую колонку, оставался
+   только выпадающий список. Здесь pointer-события — тянем вбок (touch-action
+   pan-y в CSS оставляет вертикальную прокрутку страницы), колонка под пальцем
+   подсвечивается, отпускание меняет статус. Мышь не трогаем: для неё прежний
+   HTML5-путь. */
+function bindTouchDrag() {
+  const colAt = (x, y) => {
+    const el = typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(x, y) : null;
+    return el && el.closest ? el.closest('.kan-col') : null;
+  };
+  $$('.ocard').forEach((card) => {
+    card.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' || e.pointerType === '') return;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const board = $('orders_kanban');
+      let active = false;
+      let overCol = null;
+      const clearOver = () => {
+        if (overCol) { overCol.classList.remove('over'); overCol = null; }
+      };
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!active) {
+          // Порог 12 px и преобладание горизонтали: вертикальный жест — это
+          // прокрутка страницы, её не отнимаем.
+          if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy)) return;
+          active = true;
+          dragId = card.dataset.order;
+          card.classList.add('dragging');
+          if (board) board.classList.add('dragging-any');
+          try { card.setPointerCapture(ev.pointerId); } catch (err) { /* не везде есть */ }
+        }
+        ev.preventDefault();
+        clearOver();
+        overCol = colAt(ev.clientX, ev.clientY);
+        if (overCol) overCol.classList.add('over');
+      };
+      const up = async (ev) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        if (!active) return;
+        const col = overCol || colAt(ev.clientX, ev.clientY);
+        clearOver();
+        card.classList.remove('dragging');
+        if (board) board.classList.remove('dragging-any');
+        dragId = null;
+        const status = col && col.dataset.status;
+        if (status) await applyOrderStatus(card.dataset.order, status);
+      };
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     });
   });
 }
@@ -2875,6 +2969,7 @@ function bind() {
       const orderId = actionBtn.dataset.order;
       if (act === 'open') openOrder(orderId);
       else if (act === 'queue') quickQueueOrder(orderId);
+      else if (act === 'advance') advanceOrder(orderId);
       return;
     }
     const card = e.target.closest('[data-order]');

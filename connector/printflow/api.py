@@ -1078,7 +1078,11 @@ class Api:
             from .routes_workshop import _files_payload
             return 200, _files_payload(printer, one("path", "/"))
         if path == "/api/orders":
-            return 200, {"orders": self.repo.orders(one("status"), one("q"), one("niche_id"))}
+            # limit/offset (17.0.16): без них список заказов рос вместе с
+            # историей. Не переданы — прежнее поведение, весь список.
+            return 200, {"orders": self.repo.orders(
+                one("status"), one("q"), one("niche_id"),
+                int(num(one("limit", "0"), 0)), int(num(one("offset", "0"), 0)))}
         if path == "/api/order":
             order = self.repo.order(one("id"))
             return (200, order) if order else (404, {"error": "Заказ не найден"})
@@ -3359,16 +3363,37 @@ class Api:
         if path == "/api/orders/bulk-status":
             ids = [str(x) for x in (body.get("ids") or [])]
             status = str(body.get("status") or "")
+            if not self.db.one("SELECT id FROM statuses WHERE id=?", (status,)):
+                return 400, {"error": "Неизвестный статус заказа"}
+            # Одна транзакция на пакет (17.0.16): раньше на середине обрыва
+            # часть заказов уже сменила статус, а часть нет, и панель этого не
+            # знала. Теперь либо весь пакет, либо ничего, и ошибки переходов
+            # перечислены по номерам — «почему не применилось» видно сразу.
             updated = 0
-            for oid in ids:
-                if not self.db.one("SELECT id FROM orders WHERE id=?", (oid,)):
-                    continue
-                self.repo.set_order_status(oid, status)
-                updated += 1
+            skipped: list[dict] = []
+            try:
+                with self.db.transaction():
+                    for oid in ids:
+                        order = self.db.one("SELECT id, number FROM orders WHERE id=?", (oid,))
+                        if not order:
+                            skipped.append({"id": oid, "error": "Заказ не найден"})
+                            continue
+                        try:
+                            self.repo.set_order_status(oid, status)
+                        except ValueError as exc:
+                            skipped.append({"id": oid, "number": order.get("number"),
+                                            "error": str(exc)})
+                            continue
+                        updated += 1
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
             self.db.add_event("order", "Пакетная смена статуса",
                               f"{updated} заказов → {status}", "", {})
             self.bus.publish("resync", {})
-            return 200, {"ok": True, "updated": updated}
+            payload: dict = {"ok": True, "updated": updated}
+            if skipped:
+                payload["skipped"] = skipped
+            return 200, payload
         if path == "/api/debt/remind":
             # Предпросмотр ничего не отмечает отправленным: копирование текста
             # ещё не доказывает внешнюю отправку клиенту.

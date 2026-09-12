@@ -347,6 +347,10 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
   padding: 12px 13px 10px;
   border-radius: var(--r);
   cursor: grab;
+  /* Перетаскивание пальцем (17.0.16): горизонтальный жест отдаём скрипту
+     (bindTouchDrag), вертикальный оставляем странице — иначе канбан нельзя
+     было бы прокрутить, начав жест на карточке. */
+  touch-action: pan-y;
   background: var(--panel);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-1);

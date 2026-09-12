@@ -35,6 +35,21 @@ ORDER_FIELDS = (
 # начинаются с 1001, а не с 1, и правка счётчика это сохраняет.
 ORDER_NUMBER_BASE = 1000
 
+# Допустимые переходы статуса заказа. Единственное место, где они заданы:
+# раньше карта жила внутри set_order_status(), и фронт не мог спросить
+# «куда можно шагнуть из этого статуса» иначе как перебором с ошибкой 400.
+# done — финальный: в него ведут выдача и подтверждение оплаты, а не стрелка.
+ORDER_TRANSITIONS: dict[str, set[str]] = {
+    "new": {"estimate", "prepay", "queue"},
+    "estimate": {"new", "prepay", "queue"},
+    "prepay": {"new", "queue"},
+    "queue": {"new", "printing"},
+    "printing": {"queue", "post"},
+    "post": {"printing", "ready"},
+    "ready": {"post"},
+    "done": set(),
+}
+
 
 class Repo:
     def __init__(self, db: Database):
@@ -42,7 +57,8 @@ class Repo:
         self.acc = Accounting(db)
 
     # ------------------------------------------------------------------ заказы
-    def orders(self, status: str = "", search: str = "", niche_id: str = "") -> list[dict]:
+    def orders(self, status: str = "", search: str = "", niche_id: str = "",
+               limit: int = 0, offset: int = 0) -> list[dict]:
         sql, params = "SELECT * FROM orders WHERE 1=1", []
         if status:
             sql += " AND status=?"
@@ -56,6 +72,15 @@ class Repo:
                     " OR pylower(customer_name) LIKE ? OR pylower(phone) LIKE ?)")
             params += [like, like, like, like]
         sql += " ORDER BY datetime(created_at) DESC"
+        # Страницы списка (17.0.16): без limit сервер отдавал все заказы сразу —
+        # на базе в несколько тысяч строк ответ рос вместе с историей, а канбану
+        # всё равно нужны первые экраны. limit<=0 — прежнее поведение «всё».
+        if limit and limit > 0:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+            if offset and offset > 0:
+                sql += " OFFSET ?"
+                params.append(int(offset))
         rows = self.db.query(sql, params)
         # Сначала счётчики позиций: экономика заказа использует items_count
         # и не делает пробный запрос в order_items для каждой строки списка.
@@ -67,6 +92,15 @@ class Repo:
                 [r["id"] for r in rows])}
             for row in rows:
                 row["items_count"] = counts.get(row["id"], 0)
+            # Куда из статуса можно шагнуть: канбан рисует «→» только там, где
+            # переход разрешён сервером. Карта читается один раз на статус,
+            # а не на каждый заказ.
+            nxt: dict[str, list[str]] = {}
+            for row in rows:
+                cur = str(row.get("status") or "new")
+                if cur not in nxt:
+                    nxt[cur] = self.next_statuses(cur)
+                row["next"] = nxt[cur]
         for row in rows:
             row["economics"] = self.acc.order_economics(row)
         return rows
@@ -75,6 +109,7 @@ class Repo:
         row = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not row:
             return None
+        row["next"] = self.next_statuses(row.get("status") or "new")
         row["economics"] = self.acc.order_economics(row)
         row["items"] = self.db.query(
             "SELECT * FROM order_items WHERE order_id=? ORDER BY position", (order_id,))
@@ -419,16 +454,7 @@ class Repo:
         current = str(order.get("status") or "new")
         if current == target:
             return order
-        allowed = {
-            "new": {"estimate", "prepay", "queue"},
-            "estimate": {"new", "prepay", "queue"},
-            "prepay": {"new", "queue"},
-            "queue": {"new", "printing"},
-            "printing": {"queue", "post"},
-            "post": {"printing", "ready"},
-            "ready": {"post"},
-            "done": set(),
-        }
+        allowed = ORDER_TRANSITIONS
         if target not in allowed.get(current, set()):
             raise ValueError(f"Переход «{current}» → «{target}» запрещён; используйте допустимый следующий этап")
         # done — финальный статус: сохранить его можно только через выдачу с
@@ -467,6 +493,18 @@ class Repo:
         return self.db.upsert("customers", data)
 
     # ------------------------------------------------------- статусы и ниши
+    def next_statuses(self, status: str) -> list[str]:
+        """Куда из этого статуса можно шагнуть — ids в порядке колонок канбана.
+
+        Фронт не хранит свою карту переходов (статусы живые, /api/statuses),
+        поэтому допустимый следующий шаг говорит сервер.
+        """
+        allowed = ORDER_TRANSITIONS.get(str(status or "new"), set())
+        if not allowed:
+            return []
+        rows = self.db.query("SELECT id FROM statuses ORDER BY position, name")
+        return [r["id"] for r in rows if r["id"] in allowed]
+
     def statuses(self) -> list[dict]:
         rows = self.db.query("SELECT * FROM statuses ORDER BY position, name")
         for row in rows:

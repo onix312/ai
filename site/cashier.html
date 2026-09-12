@@ -397,6 +397,12 @@ function netMark(ok,why){
   if(ok&&!was)onLinkBack();
 }
 function netStreamAlive(){return !!LINK.stream&&Date.now()-LINK.stream<STREAM_QUIET;}
+/* Отметка «сервер ответил» (17.0.16). Раньше её ставил один refreshBadge(),
+   то есть только вкладка «Входящие»: на «Продаже» без платежей касса держала
+   плашку «Поток событий молчит», хотя запросы к ПК проходили исправно.
+   Теперь любое доказательство связи — ответ api(), проба /api/health или
+   опрос входящих — обновляет одну и ту же отметку. */
+function netSawResponse(){LINK.poll=Date.now();}
 /* Канал жив, если жив ЛИБО поток событий, ЛИБО страховочный опрос.
    Раньше считался только поток: в оболочке-приложении EventSource поднимается
    не всегда, касса честно переходила на опрос раз в 25 с — деньги приходили,
@@ -450,7 +456,7 @@ function netProbe(force){
   LINK.probeBusy=true;
   api("/api/health",null,{timeout:5000,quiet:true}).then(function(){
     LINK.probeBusy=false;LINK.probeAt=Date.now();
-    netMark(true);
+    netSawResponse();netMark(true);
     // Поток мог умереть вместе с сетью — поднимаем заново, если закрыт.
     if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
     connectMoney();
@@ -530,9 +536,21 @@ function offLoad(){
   try{var q=JSON.parse(localStorage.getItem(OFF_KEY)||"[]");offQueue=Array.isArray(q)?q:[];}
   catch(e){offQueue=[];}
 }
+/* Хранилище телефона не резиновое: в localStorage и в память оболочки пишется
+   последние OFF_MAX записей. В памяти страницы очередь остаётся целиком и
+   уходит на сервер полностью — но если кассир закроет кассу при обрыве и
+   записей было больше, старые в файле не сохранятся. Раньше это происходило
+   молча; теперь кассир слышит, что надо дослать очередь (17.0.16). */
+var OFF_MAX=200;
 function offSave(){
-  var pack=JSON.stringify(offQueue.slice(-200));
-  try{localStorage.setItem(OFF_KEY,pack);offStash(pack);return true;}
+  var over=offQueue.length-OFF_MAX;
+  var pack=JSON.stringify(offQueue.slice(-OFF_MAX));
+  try{
+    localStorage.setItem(OFF_KEY,pack);offStash(pack);
+    if(over>0)toast("В очереди "+offQueue.length+" продаж — в память телефона записаны "
+      +"последние "+OFF_MAX+". Не закрывайте кассу, пока связь не вернётся.");
+    return true;
+  }
   catch(e){toast("Память телефона кончилась — в очередь не записано");return false;}
 }
 function offStash(pack){
@@ -557,7 +575,7 @@ function offRestore(){
     if(!added)return 0;
     offQueue=Object.keys(byId).map(function(k){return byId[k];}).sort(function(a,b){
       return String(a.at||"").localeCompare(String(b.at||""));});
-    try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-200)));}catch(e){}
+    try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-OFF_MAX)));}catch(e){}
     return added;
   }catch(e){return 0;}
 }
@@ -724,6 +742,7 @@ function api(path,body,opts){
       var j={};try{j=text?JSON.parse(text):{};}catch(_e){if(!r.ok)throw new Error("Сервер вернул ошибку "+r.status);throw new Error("Некорректный ответ сервера");}
       if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}
       stop();
+      netSawResponse();
       netMark(true);       // сервер ответил — канал жив, даже если сеть «мигала»
       return j;
     });
@@ -937,14 +956,21 @@ $("cats").addEventListener("click",function(ev){
   renderCats();renderGrid();
 });
 
+/* Поиск кассы (17.0.16). Кассир вводит с экранной клавиатуры быстро и без «ё»:
+   «пленка» вместо «плёнка» не находило товар, хотя он лежит на витрине.
+   Сравниваем приведённые строки: «ё»→«е», регистр вниз, лишние пробелы сжаты.
+   Баркод и артикул тоже проходят через то же приведение — цифры не меняются. */
+function searchKey(v){
+  return String(v==null?"":v).toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ").trim();
+}
 function filteredItems(){
-  var q=(state.search||"").trim().toLowerCase();
+  var q=searchKey(state.search);
   return state.items.filter(function(it){
     // строго в наличии уже отфильтровано, но на всякий случай
     if((Number(it.qty)||0)<=0) return false;
     if(state.cat && (it.category_id||"")!==state.cat) return false;
     if(!q) return true;
-    return [it.name,it.barcode,it.sku,it.category_name].some(function(v){return String(v||"").toLowerCase().indexOf(q)>=0;});
+    return [it.name,it.barcode,it.sku,it.category_name].some(function(v){return searchKey(v).indexOf(q)>=0;});
   });
 }
 
@@ -996,7 +1022,10 @@ function renderCart(){
   $("bPay").textContent=count?("Оплатить · "+count+" поз. →"):"Оплатить →";
   $("bToggleCart").hidden=!count;
   var rb=$("bRepeat");if(rb)rb.hidden=!(lastSale().length&&!count);
-  netState();
+  /* Состояние канала здесь не перерисовываем: renderCart вызывается на каждое
+     касание «+»/«−», а netState() пишет в DOM и читает Date.now() — лишняя
+     работа на каждом клике. Живость канала показывает свой тик netStart()
+     (LINK_TICK) и обработчики потока (17.0.16). */
   $("cartBar").hidden=$("viewSell").hidden;
   var listBox=$("cartList");
   if(!entries.length){listBox.classList.remove("on");listBox.innerHTML="";}
@@ -1740,12 +1769,25 @@ function installHint(){
     if(!r||!r.available||!r.url){box.hidden=true;return;}
     var size=Number(r.size_mb)||0;
     var sha=String(r.sha256||"").slice(0,12);
-    $("installText").innerHTML="Приложение кассы"+(r.version?" · "+esc(String(r.version)):"")+
-      (size?" · "+size+" МБ":"")+(sha?" · sha256 "+esc(sha)+"…":"")+
-      ": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же."+
-      (r.changelog?"<br><span class=\"upd\">Что нового: "+esc(String(r.changelog).split("\n")
-        .filter(function(s){return String(s).trim().length;}).slice(0,3).join(" ").slice(0,240))+"</span>":"")+
-      (size?"<br><span class=\"upd\">Сверьте размер файла перед установкой — он указан в диалоге.</span>":"");
+    /* Баннер собираем узлами, а не строкой HTML (17.0.16). Версия, sha256 и
+       changelog приходят с сервера из полей сборки: esc() там стоял, но
+       innerHTML в кассе — всегда риск, что один символ из описания сборки
+       развалит разметку баннера вместе с кнопкой «Скачать». У textContent
+       экранировать нечего: что пришло, то и видно. */
+    var head=$("installText");
+    if(head){
+      while(head.firstChild)head.removeChild(head.firstChild);
+      head.textContent="Приложение кассы"+(r.version?" · "+String(r.version):"")
+        +(size?" · "+size+" МБ":"")+(sha?" · sha256 "+sha+"…":"")
+        +": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же.";
+      var addUpd=function(t){
+        var span=document.createElement("span");span.className="upd";span.textContent=t;
+        head.appendChild(document.createElement("br"));head.appendChild(span);
+      };
+      if(r.changelog)addUpd("Что нового: "+String(r.changelog).split("\n")
+        .filter(function(s){return String(s).trim().length;}).slice(0,3).join(" ").slice(0,240));
+      if(size)addUpd("Сверьте размер файла перед установкой — он указан в диалоге.");
+    }
     $("installGo").setAttribute("href",r.url);
     box.hidden=false;
   }).catch(function(){box.hidden=true;});
@@ -1853,7 +1895,7 @@ function refreshBadge(){
     // Сервер ответил — значит канал жив, каким бы путём ни пришли деньги.
     // Без этой отметки касса на страховочном опросе вечно показывала
     // «Поток событий молчит» (дефект оболочки 17.0.14).
-    LINK.poll=Date.now();netState();
+    netSawResponse();netState();
     var n=(r.payments||[]).length,tab=$("tabIn");
     $("tabInLbl").textContent=n?("Входящие · "+n):"Входящие";
     tab.classList.toggle("nudge",n>0);
@@ -1871,7 +1913,12 @@ function primeMoney(){
 function startMoneyPoll(){
   if(moneyTimer||!loggedIn())return;
   moneyTimer=setInterval(function(){
-    if(document.visibilityState==="visible"&&loggedIn())refreshBadge();
+    if(document.visibilityState!=="visible"||!loggedIn())return;
+    // Поток живой (сервер шлёт ping раз в 20 с) — деньги и так придут
+    // кадром, а лишний запрос раз в 25 с только грузит ПК и роутер.
+    // Опрашиваем ровно тогда, когда потока нет (17.0.16).
+    if(netStreamAlive())return;
+    refreshBadge();
   },25000);
 }
 function stopMoneyPoll(){if(moneyTimer){clearInterval(moneyTimer);moneyTimer=0;}}

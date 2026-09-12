@@ -12,6 +12,7 @@
 const { createKassa } = require('./kassa-harness');
 
 const problems = [];
+const pending = [];
 function check(name, fn) {
   try {
     const result = fn();
@@ -22,6 +23,16 @@ function check(name, fn) {
     console.error(`  FAIL ${name}: ${e.stack || e.message}`);
   }
 }
+function checkAsync(name, fn) {
+  pending.push(Promise.resolve().then(fn).then(
+    () => console.log(`  ok  ${name}`),
+    (e) => {
+      problems.push(`${name}: ${e.message}`);
+      console.error(`  FAIL ${name}: ${e.stack || e.message}`);
+    },
+  ));
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
 
 console.log('Стенд кассы: запуск скрипта на заглушке DOM');
 const k = createKassa({ origin: 'http://127.0.0.1:8766', transport: 'stub' });
@@ -186,10 +197,125 @@ if (problems.length === 0) {
       throw new Error('после отказа касса всё равно спрашивает сборку');
     }
   });
+
+  console.log('\nСценарии 17.0.16');
+
+  // 11. Кассир печатает без «ё»: «пленка» обязана находить «Плёнка матовая».
+  //     Раньше сравнение шло по toLowerCase() и товар не находился, хотя лежал
+  //     на витрине — продавец уходил искать его глазами.
+  check('поиск не требует «ё» и лишних пробелов', () => {
+    k.ev('state.items=[{id:"s1",name:"Плёнка матовая",qty:5,price:300,barcode:"4600001"},'
+      + '{id:"s2",name:"PLA  серый",qty:5,price:900,barcode:"4600002"}];state.cat="";');
+    k.ev('state.search="пленка";');
+    let ids = k.ev('filteredItems().map(function(x){return x.id;})');
+    if (ids.length !== 1 || ids[0] !== 's1') {
+      throw new Error(`«пленка» нашла ${JSON.stringify(ids)} вместо [s1]`);
+    }
+    k.ev('state.search="  PLA   СЕр  ";');
+    ids = k.ev('filteredItems().map(function(x){return x.id;})');
+    if (ids.length !== 1 || ids[0] !== 's2') {
+      throw new Error(`«  PLA   СЕр  » нашла ${JSON.stringify(ids)} вместо [s2]`);
+    }
+    k.ev('state.search="4600001";');
+    ids = k.ev('filteredItems().map(function(x){return x.id;})');
+    if (ids.length !== 1 || ids[0] !== 's1') throw new Error('поиск по баркоду сломался');
+  });
+
+  // 12. Баннер «Скачать приложение» больше не собирают строкой HTML: версия,
+  //     sha256 и changelog приходят из полей сборки, и innerHTML в кассе — это
+  //     риск развалить разметку вместе с кнопкой «Скачать».
+  checkAsync('баннер приложения собирается узлами, а не innerHTML', async () => {
+    const fresh = createKassa({ transport: 'stub' });
+    fresh.run();
+    const before = fresh.ev('$("installText")');
+    before.innerHTML = 'МЁРТВАЯ РАЗМЕТКА';
+    fresh.ev('api=function(){return Promise.resolve({available:true,'
+      + 'url:"/app/NOZZA.apk",version:"17.0.15",size_mb:4,sha256:"abcdef123456789",'
+      + 'changelog:"строка <img src=x onerror=alert(1)>"});};'
+      + 'installHint();');
+    await settle();
+    {
+      const box = fresh.ev('$("installText")');
+      if (box.innerHTML !== 'МЁРТВАЯ РАЗМЕТКА') {
+        throw new Error('баннер снова пишут через innerHTML');
+      }
+      if (!/Приложение кассы · 17.0.15/.test(box.textContent)) {
+        throw new Error(`в тексте нет версии: ${box.textContent}`);
+      }
+      // Отпечаток показывается сокращённо — первые 12 символов.
+      if (!/sha256 abcdef123456…/.test(box.textContent)) {
+        throw new Error(`нет сокращённого sha256: ${box.textContent}`);
+      }
+      const ups = box.children.filter((c) => c.className === 'upd');
+      if (ups.length !== 2) throw new Error(`строк «что нового» ${ups.length}, ждали 2`);
+      if (!/<img src=x onerror=alert\(1\)>/.test(ups[0].textContent)) {
+        throw new Error('changelog не остался обычным текстом');
+      }
+    }
+  });
+
+  // 13. Страховочный опрос раз в 25 с нужен ровно тогда, когда потока нет:
+  //     при живом SSE (ping раз в 20 с) он только грузил ПК и роутер.
+  check('опрос раз в 25 с молчит, пока поток живой', () => {
+    const timers = [];
+    const timed = createKassa({
+      transport: 'stub',
+      setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+    });
+    timed.run();
+    timed.ev('loggedIn=function(){return true;};var _rb=0;'
+      + 'refreshBadge=function(){_rb++;};startMoneyPoll();');
+    const tick = timers.find((t) => t.ms === 25000);
+    if (!tick) throw new Error('страховочный интервал не заведён');
+    timed.ev('LINK.stream=Date.now();');
+    tick.fn();
+    if (timed.ev('_rb') !== 0) throw new Error('при живом потоке опрос всё равно пошёл');
+    timed.ev('LINK.stream=Date.now()-STREAM_QUIET-1000;');
+    tick.fn();
+    if (timed.ev('_rb') !== 1) throw new Error('без потока страховочный опрос не сработал');
+  });
+
+  // 14. Корзина не трогает индикатор связи: netState() на каждое «+»/«−» —
+  //     лишняя запись в DOM и лишний Date.now() на каждом касании.
+  check('renderCart не перерисовывает индикатор связи', () => {
+    const quiet = createKassa({ transport: 'stub' });
+    quiet.run();
+    quiet.ev('var _ns=0;var _realNetState=netState;'
+      + 'netState=function(){_ns++;return _realNetState();};'
+      + 'state.cart={"s1":1};state._allItems=[{id:"s1",name:"Адресник",price:500}];'
+      + 'state.items=state._allItems;renderCart();');
+    if (quiet.ev('_ns') !== 0) throw new Error(`renderCart вызвал netState ${quiet.ev('_ns')} раз`);
+  });
+
+  // 15. Очередь больше 200 записей: в память телефона пишутся последние 200,
+  //     и кассир обязан об этом услышать, а не узнать утром по потерянным продажам.
+  check('очередь больше лимита предупреждает кассира', () => {
+    const full = createKassa({ transport: 'stub' });
+    full.run();
+    full.ev('var _toasts=[];toast=function(t){_toasts.push(t);};'
+      + 'offQueue=[];for(var i=0;i<OFF_MAX+3;i++)offQueue.push({id:"of-"+i,at:"2026-09-13T10:00:00"});'
+      + 'offSave();');
+    if (full.ev('_toasts').length !== 1) {
+      throw new Error(`предупреждений ${full.ev('_toasts').length}, ждали 1`);
+    }
+    if (!/203/.test(full.ev('_toasts')[0])) {
+      throw new Error(`в предупреждении нет числа продаж: ${full.ev('_toasts')[0]}`);
+    }
+    if (JSON.parse(full.storage.getItem('cashier_offline_q') || '[]').length !== 200) {
+      throw new Error('в память телефона записано не 200 записей');
+    }
+    // В памяти страницы очередь осталась целиком — на сервер уйдут все 203.
+    if (full.ev('offQueue.length') !== 203) throw new Error('из памяти страницы записи пропали');
+  });
 }
 
-if (problems.length) {
-  console.error(`\nFAIL: стенд кассы — ${problems.length} ошибок`);
-  process.exit(1);
+function report() {
+  if (problems.length) {
+    console.error(`\nFAIL: стенд кассы — ${problems.length} ошибок`);
+    process.exit(1);
+  }
+  console.log('\nOK: стенд кассы пройден');
 }
-console.log('\nOK: стенд кассы пройден');
+/* Асинхронные сценарии ждут своего исхода до отчёта: проверка, вернувшая
+   promise, раньше считалась пройденной сразу, а её ошибка терялась. */
+Promise.all(pending).then(report, report);
