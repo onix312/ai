@@ -145,6 +145,21 @@ if (problems.length === 0) {
     k.ev('LINK.poll=Date.now()-POLL_QUIET-1000;netState();');
     if (bar.hidden) throw new Error('устаревший опрос не должен считаться живым каналом');
   });
+
+  // 9. Полоса «не проведено» обязана скрываться, как только очередь пуста.
+  //    Претензия владельца была «не скрывается»: если записи ушли, а полоса
+  //    осталась, кассир вечно видит несуществующий долг перед учётом.
+  check('полоса офлайн-очереди скрывается при пустой очереди', () => {
+    k.ev('offQueue=[];offProg={busy:false,done:0,total:0,failed:0};'
+      + 'state.cart={"s1":1};state._allItems=[{id:"s1",name:"Адресник",price:500}];'
+      + 'offAccept("cash");offRender();');
+    const bar = k.ev('$("offBar")');
+    if (bar.hidden) throw new Error('в очереди запись, а полоса скрыта');
+    if (k.ev('offTotals().n') !== 1) throw new Error('в очереди не одна запись');
+    // Записи ушли — полоса обязана исчезнуть, а не остаться висеть.
+    k.ev('offQueue=[];offRender();');
+    if (!bar.hidden) throw new Error('очередь пуста, а полоса не скрылась');
+  });
 }
 
 if (problems.length) {
