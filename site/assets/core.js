@@ -1178,24 +1178,52 @@ function runSel() {
   closeModal('palette');
   setTimeout(() => { try { it.run(); } catch (e) { fail(e); } }, 40);
 }
+/* Единый поиск из палитры (17.0.16). Живой маршрут /api/search объявлен
+   декоратором в routes_system.py и отдаёт сгруппированный ответ
+   { query, groups: [{ kind, items: [{ kind, id, title, sub, route }] }], total }.
+   Палитра читала старый плоский { results: [{ type, title, subtitle }] } из
+   недосягаемой ветки api.py, поэтому удалённый поиск всегда возвращал ноль
+   строк и в списке оставались только команды. */
+const SEARCH_GROUPS = {
+  orders: { title: 'Заказы', icon: '▦' },
+  products: { title: 'Товары', icon: '▩' },
+  customers: { title: 'Клиенты', icon: '◎' },
+  spools: { title: 'Катушки', icon: '◍' },
+  jobs: { title: 'Печать', icon: '⎙' },
+  documents: { title: 'Документы', icon: '📄' },
+  shelf: { title: 'Полка', icon: '▤' },
+};
+function openSearchHit(hit) {
+  if (hit.kind === 'orders') {
+    PF.go('orders');
+    if (PF.modules.ops) PF.modules.ops.openOrder(hit.id);
+  } else if (hit.kind === 'customers') PF.go('customers');
+  else if (hit.kind === 'spools') {
+    PF.go('inventory');
+    if (PF.modules.money) PF.modules.money.openSpool(hit.id);
+  } else if (hit.kind === 'products') {
+    PF.go('products');
+    if (PF.modules.products) PF.modules.products.openNom(hit.id);
+  } else if (hit.kind === 'documents') {
+    PF.go('documents');
+    if (PF.modules.products) PF.modules.products.openDoc(hit.id);
+  } else if (hit.kind === 'jobs') PF.go('queue');
+  else if (hit.kind === 'shelf') PF.go('shelf');
+}
 const searchRemote = debounce(async (q) => {
   if (!q || q.length < 2) return;
   try {
     const data = await get('/api/search', { q });
-    const found = (data.results || []).map((r) => ({
-      group: 'Найдено',
-      icon: { order: '▦', customer: '◎', spool: '◍', printer: '◉', product: '▩', document: '📄' }[r.type] || '•',
-      title: r.title, sub: r.subtitle,
-      run: () => {
-        if (r.type === 'order') { PF.go('orders'); PF.modules.ops && PF.modules.ops.openOrder(r.id); }
-        else if (r.type === 'customer') PF.go('customers');
-        else if (r.type === 'spool') { PF.go('inventory'); PF.modules.money && PF.modules.money.openSpool(r.id); }
-        else if (r.type === 'printer') { PF.state.activePrinter = r.id; PF.go('printers'); }
-        // 13.1 (12): товары и документы — единый поиск из палитры
-        else if (r.type === 'product') { PF.go('products'); PF.modules.products && PF.modules.products.openNom(r.id); }
-        else if (r.type === 'document') { PF.go('documents'); PF.modules.products && PF.modules.products.openDoc(r.id); }
-      },
-    }));
+    const found = (data.groups || []).reduce((acc, g) => {
+      const meta = SEARCH_GROUPS[g.kind] || { title: 'Найдено', icon: '•' };
+      (g.items || []).forEach((r) => acc.push({
+        group: meta.title,
+        icon: meta.icon,
+        title: r.title, sub: r.sub,
+        run: () => openSearchHit(r),
+      }));
+      return acc;
+    }, []);
     const local = filterCommands($('palette_input').value);
     renderPalette(found.concat(local));
   } catch (e) { /* поиск не критичен */ }

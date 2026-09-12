@@ -1712,8 +1712,6 @@ class Api:
                     " AND COALESCE(state,'new') NOT IN ('answered','closed','skipped')"
                     " LIMIT 1", (order_id,))
             return 200, payload
-        if path == "/api/search":
-            return 200, {"results": self.repo.search(one("q"))}
         if path == "/api/backup":
             return 200, self.repo.export_all()
         # 8.0: Watch Folder
