@@ -160,6 +160,32 @@ if (problems.length === 0) {
     k.ev('offQueue=[];offRender();');
     if (!bar.hidden) throw new Error('очередь пуста, а полоса не скрылась');
   });
+
+  // 10. «Не показывать» рядом со «Скачать». Претензия владельца 12.09.2026 —
+  //     «не работает кнопка»: обработчик был на месте, баннер не исчезал,
+  //     потому что `hidden` перебивался CSS страницы (контракт на CSS живёт в
+  //     test_site_markup.test_hidden_attribute_actually_hides_bars — у этой
+  //     заглушки DOM свойства hidden есть, а стилей нет). Здесь своя половина:
+  //     клик прячет баннер, а отказ переживает перезапуск страницы.
+  check('«Не показывать» прячет баннер и запоминает отказ', () => {
+    const box = k.ev('$("installHint")');
+    k.ev('var b=$("installOff");'
+      + 'if(!b._h||!b._h.click)throw new Error("обработчик не повешен");'
+      + 'b._h.click.call(b);');
+    if (!box.hidden) throw new Error('баннер не скрылся после «Не показывать»');
+    if (k.storage.getItem('cashier_install_off') !== '1') {
+      throw new Error('отказ не запомнен в localStorage');
+    }
+    // Перезапуск с той же «памятью телефона»: баннер не показывается и сборку
+    // больше не спрашивает.
+    const again = createKassa({ transport: 'stub', storage: k.storage });
+    again.run();
+    again.ev('installHint();');
+    if (!again.ev('$("installHint")').hidden) throw new Error('баннер снова показан после отказа');
+    if (again.callsFor('/api/app/android').length) {
+      throw new Error('после отказа касса всё равно спрашивает сборку');
+    }
+  });
 }
 
 if (problems.length) {

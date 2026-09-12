@@ -16,21 +16,34 @@
 <script src="/assets/icons.js?v=17.0.2"></script>
 <style>
  *{box-sizing:border-box;margin:0;padding:0}
+ /* `hidden` обязан прятать. Без этого правила авторские display
+    (.linkbar, .offbar, .malert, .install, .offbar .prog, .btn) перебивают
+    браузерное [hidden]{display:none}, и все плашки кассы рисовались сразу и
+    не исчезали никогда: «Не показывать» не скрывал баннер загрузки,
+    оранжевые полосы висели пустыми, «Поток событий молчит» оставалась
+    навсегда, «Повторить» торчал в корзине без прошлой продажи. Приём тот же,
+    что в assets/theme.css:361 — касса этот файл не подключает. */
+ [hidden]{display:none!important}
  *{scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.35) transparent}
  ::-webkit-scrollbar{width:6px;height:6px}
  ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.35);border-radius:99px}
  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
  .wrap{max-width:720px;margin:0 auto;padding:10px 12px 170px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
  /* top — максимально простой и липкий; сверху отступ на вырез/статусбар,
-    чтобы в PWA с edge-to-edge шапка не уезжала под «чёлку» */
- .top{display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 2px 12px;position:sticky;top:0;z-index:5;background:linear-gradient(to bottom,var(--bg) 78%,transparent);backdrop-filter:blur(6px)}
+    чтобы в PWA с edge-to-edge шапка не уезжала под «чёлку».
+    Фон непрозрачный, строка умеет переноситься: раньше шапка была градиентом
+    в transparent — при прокрутке товары просвечивали сквозь неё («верхняя
+    панель наплывает друг на друга»), а бренд, точка связи, три плашки и две
+    кнопки по 48 px в одну строку на телефоне не помещались и сжимались в
+    нечитаемые огрызки. */
+ .top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:calc(10px + env(safe-area-inset-top)) 2px 12px;position:sticky;top:0;z-index:5;background:var(--bg)}
  .brand{display:flex;align-items:center;gap:10px;min-width:0}
  .brand>div{min-width:0}
  .brand img{width:40px;height:40px;border-radius:12px;background:var(--panel);padding:7px;box-shadow:0 2px 12px -6px rgba(0,0,0,.5);flex:0 0 40px}
  .brand b{font-size:17px;letter-spacing:-.02em;line-height:1}
  .brand small{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
  .sp{flex:1}
- .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:34vw;overflow:hidden;text-overflow:ellipsis}
+ .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:34vw;min-width:0;overflow:hidden;text-overflow:ellipsis}
  #countPill{font-variant-numeric:tabular-nums}
  .pill.ok{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.22);color:#10b981}
  .iconbtn{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:18px;flex:0 0 48px}
@@ -197,17 +210,21 @@
  @media(max-width:520px){
   .wrap{padding-top:8px;padding-bottom:172px;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right))}
   .top{gap:8px;padding:calc(8px + env(safe-area-inset-top)) 2px 12px}
-  .brand{gap:8px}.brand small{max-width:130px}
+  .brand{gap:8px}
+  /* Шапка телефона — бренд, точка связи, звонок и выход: 336 px на экране
+     360 px. Дубли убраны, а не сжаты: «СБП» виден в окне оплаты, счётчик —
+     в корзине («N поз.»), имя кассира — в смене («Смена открыта · имя»).
+     Подпись «в кассе: N ₽ · M в наличии» оставлена: это деньги и остаток. */
+  #sbpPill,#countPill,#whoPill{display:none}
+  .brand small{max-width:130px}
   .cart .inner{gap:8px}
  }
  @media(max-width:380px){
   .grid{grid-template-columns:1fr 1fr}
-  .brand small{display:none}
-  .whoPill{display:none}
+  .brand small{max-width:96px}
  }
  @media(max-width:340px){
   .grid{grid-template-columns:1fr}
-  #countPill{display:none}
   .cart .sum{flex-basis:100%;display:flex;align-items:baseline;gap:8px}
  }
  /* Низкий/ландшафтный экран: компактнее шапка и корзина, чтобы сетка товаров

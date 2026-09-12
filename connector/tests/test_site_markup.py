@@ -382,3 +382,64 @@ class CashierLayoutTests(TestCase):
         missing = [name for name in used
                    if not re.search(r"^\s+" + re.escape(name) + r"\s*:\s*'", registry, re.M)]
         self.assertEqual(missing, [], f"иконки не в реестре icons.js: {missing}")
+
+    # --- 17.0.15: `hidden` и шапка телефона --------------------------------
+
+    def _media(self, query):
+        """Тело блока @media: вложенные скобки, простым regex не берётся."""
+        start = self.css.index("@media(" + query + ")")
+        i = self.css.index("{", start)
+        depth = 0
+        for j in range(i, len(self.css)):
+            if self.css[j] == "{":
+                depth += 1
+            elif self.css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.css[i:j + 1]
+        self.fail(f"блок @media({query}) не закрыт")
+
+    def test_hidden_attribute_actually_hides_bars(self):
+        """`hidden` обязан прятать элемент — иначе плашки висят вечно.
+
+        Претензии владельца 12.09.2026: «не работает кнопка „Не показывать“»,
+        «оранжевые панели сверху убрать целиком», «„Поток событий молчит“
+        отображается всегда». Причина одна и не в логике: у кассы авторские
+        display (.linkbar/.offbar/.malert/.install/.offbar .prog/.btn) стоят
+        выше браузерного [hidden]{display:none}, поэтому `hidden=true` не
+        менял ничего на экране. Стенд node (scripts/kassa-check.js) это не
+        ловил: у его заглушки DOM свойства hidden есть, а CSS нет.
+        """
+        self.assertRegex(self.css, r"\[hidden\]\{display:none!important\}")
+        for element in ('id="linkBar"', 'id="moneyAlert"', 'id="offBar"',
+                        'id="installHint"', 'id="offProgress"', 'id="priceWarn"',
+                        'id="bRepeat"'):
+            with self.subTest(element=element):
+                self.assertRegex(
+                    self.css, re.escape(element) + r"[^>]*\bhidden\b",
+                    "плашку прячет JS — в разметке она обязана стоять с hidden")
+
+    def test_top_bar_does_not_overlap_on_a_phone(self):
+        """Шапка на 360 px: бренд, точка связи, две кнопки — и ничего сверху.
+
+        До правки в одну строку вставали бренд, точка, три плашки и две
+        кнопки по 48 px (~500 px при 336 px доступных): плашки сжимались в
+        огрызки, а градиент шапки в transparent пропускал товары при
+        прокрутке — владелец видел «верхняя панель наплывает друг на друга».
+        """
+        top = self._rule(".top")
+        self.assertIn("flex-wrap:wrap", top)          # не влезло — перенос, не нахлёст
+        self.assertIn("background:var(--bg)", top)    # непрозрачная: контент не просвечивает
+        self.assertNotIn("linear-gradient", top)
+        self.assertIn("min-width:0", self._rule(".pill"))
+        # дубли на телефоне сняты, а не сжаты: СБП — в окне оплаты, счётчик —
+        # в корзине, имя кассира — в смене
+        self.assertIn("#sbpPill,#countPill,#whoPill{display:none}",
+                      self._media("max-width:520px"))
+
+    def test_shell_cache_was_bumped_for_the_hidden_attr_round(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 45,
+                                "правка cashier.html требует поднятия CACHE в sw.js")
