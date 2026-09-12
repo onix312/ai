@@ -607,6 +607,14 @@ class MainActivity : Activity() {
                 }
                 return@Thread
             }
+            // Отказ от этой сборки запоминаем: при следующем запуске молчим.
+            // Кнопка «Проверить обновление» показывает диалог всегда — иначе
+            // кассир, однажды нажавший «Позже», не смог бы обновиться сам.
+            val offeredCode = json.optInt("version_code", 0)
+            if (!manual && offeredCode > 0
+                && offeredCode <= prefs.getInt(KEY_UPDATE_SKIPPED, 0)) {
+                return@Thread
+            }
             val url = json.optString("url", "")
             val version = json.optString("version", "")
             val file = json.optString("file", "")
@@ -636,7 +644,11 @@ class MainActivity : Activity() {
                     .setTitle(getString(R.string.update_title, version))
                     .setMessage(message)
                     .setPositiveButton("Скачать") { _, _ -> openExternally("$base$url") }
-                    .setNegativeButton("Позже", null)
+                    .setNegativeButton("Позже") { _, _ ->
+                        if (offeredCode > 0) {
+                            prefs.edit().putInt(KEY_UPDATE_SKIPPED, offeredCode).apply()
+                        }
+                    }
                     .show()
             }
         }.start()
@@ -681,6 +693,10 @@ class MainActivity : Activity() {
         private const val KEY_LAST_OK = "server_url_last_ok"
         private const val KEY_AWAKE = "keep_awake"
         private const val KEY_BATTERY_ASKED = "battery_asked"
+        // Версия, от которой кассир уже отказался кнопкой «Позже»: при старте
+        // больше не спрашиваем, иначе диалог «Скачать» всплывал на каждом
+        // запуске, пока на сервере лежит сборка новее установленной.
+        private const val KEY_UPDATE_SKIPPED = "update_skipped_code"
         private const val KEY_RING_BG = "ring_background"
         // Копия очереди из страницы: страховка от смены адреса сервера.
         private const val KEY_QUEUE = "offline_queue_backup"
