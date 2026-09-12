@@ -410,9 +410,9 @@ class MainActivity : Activity() {
     // ------------------------------------------------------- экран выбора
     /**
      * Панель выбора сервера. Разметка — `res/layout/panel_server.xml`, размеры —
-     * `res/values*/dimens.xml` (dp), шрифты — sp. В коде остались только те
-     * размеры, которых нет в разметке (кнопки найденных серверов создаются
-     * динамически) — их берём через getDimensionPixelSize, а не пикселями.
+     * `dimens.xml` во всех папках `res/values…` (dp), шрифты — sp. В коде остались
+     * только те размеры, которых нет в разметке (кнопки найденных серверов
+     * создаются динамически) — их берём через getDimensionPixelSize, а не пикселями.
      */
     private fun showPanel(hintRes: Int) {
         panelHintRes = hintRes
@@ -431,8 +431,8 @@ class MainActivity : Activity() {
         urlField = field
         val found = scroll.findViewById(R.id.results) as LinearLayout
         results = found
-        scroll.findViewById(R.id.btnOpen).setOnClickListener { openFromField() }
-        scroll.findViewById(R.id.btnFind).setOnClickListener { scanServers() }
+        (scroll.findViewById(R.id.btnOpen) as Button).setOnClickListener { openFromField() }
+        (scroll.findViewById(R.id.btnFind) as Button).setOnClickListener { scanServers() }
         val cbAwake = scroll.findViewById(R.id.cbAwake) as CheckBox
         cbAwake.isChecked = prefs.getBoolean(KEY_AWAKE, true)
         cbAwake.setOnCheckedChangeListener { _, on ->
@@ -445,9 +445,9 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(KEY_RING_BG, on).apply()
             syncRingService()
         }
-        scroll.findViewById(R.id.btnReconnect).setOnClickListener { reconnect() }
-        scroll.findViewById(R.id.btnUpdate).setOnClickListener { checkForUpdate(manual = true) }
-        scroll.findViewById(R.id.btnBattery).setOnClickListener { askBattery(true) }
+        (scroll.findViewById(R.id.btnReconnect) as Button).setOnClickListener { reconnect() }
+        (scroll.findViewById(R.id.btnUpdate) as Button).setOnClickListener { checkForUpdate(manual = true) }
+        (scroll.findViewById(R.id.btnBattery) as Button).setOnClickListener { askBattery(true) }
         (scroll.findViewById(R.id.panelVersion) as? TextView)?.text =
             getString(R.string.panel_version_fmt, BuildConfig.VERSION_NAME)
         panel = scroll
@@ -568,7 +568,7 @@ class MainActivity : Activity() {
         val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
             Uri.parse("package:$packageName"))
         if (!runCatching { startActivity(intent) }.isSuccess && showToast) {
-            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATIONS_SETTINGS)) }
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
         }
     }
 
@@ -607,6 +607,14 @@ class MainActivity : Activity() {
                 }
                 return@Thread
             }
+            // Отказ от этой сборки запоминаем: при следующем запуске молчим.
+            // Кнопка «Проверить обновление» показывает диалог всегда — иначе
+            // кассир, однажды нажавший «Позже», не смог бы обновиться сам.
+            val offeredCode = json.optInt("version_code", 0)
+            if (!manual && offeredCode > 0
+                && offeredCode <= prefs.getInt(KEY_UPDATE_SKIPPED, 0)) {
+                return@Thread
+            }
             val url = json.optString("url", "")
             val version = json.optString("version", "")
             val file = json.optString("file", "")
@@ -636,7 +644,11 @@ class MainActivity : Activity() {
                     .setTitle(getString(R.string.update_title, version))
                     .setMessage(message)
                     .setPositiveButton("Скачать") { _, _ -> openExternally("$base$url") }
-                    .setNegativeButton("Позже", null)
+                    .setNegativeButton("Позже") { _, _ ->
+                        if (offeredCode > 0) {
+                            prefs.edit().putInt(KEY_UPDATE_SKIPPED, offeredCode).apply()
+                        }
+                    }
                     .show()
             }
         }.start()
@@ -681,6 +693,10 @@ class MainActivity : Activity() {
         private const val KEY_LAST_OK = "server_url_last_ok"
         private const val KEY_AWAKE = "keep_awake"
         private const val KEY_BATTERY_ASKED = "battery_asked"
+        // Версия, от которой кассир уже отказался кнопкой «Позже»: при старте
+        // больше не спрашиваем, иначе диалог «Скачать» всплывал на каждом
+        // запуске, пока на сервере лежит сборка новее установленной.
+        private const val KEY_UPDATE_SKIPPED = "update_skipped_code"
         private const val KEY_RING_BG = "ring_background"
         // Копия очереди из страницы: страховка от смены адреса сервера.
         private const val KEY_QUEUE = "offline_queue_backup"
