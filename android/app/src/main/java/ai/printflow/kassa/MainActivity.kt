@@ -89,6 +89,7 @@ class MainActivity : Activity() {
         setContentView(root)
 
         applyKeepAwake()
+        applySecure()
         val saved = prefs.getString(KEY_URL, "").orEmpty()
         if (saved.isBlank()) {
             showPanel(R.string.panel_hint_initial)
@@ -445,6 +446,17 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(KEY_RING_BG, on).apply()
             syncRingService()
         }
+        val cbSecure = scroll.findViewById(R.id.cbSecure) as CheckBox
+        cbSecure.isChecked = prefs.getBoolean(KEY_SECURE, false)
+        cbSecure.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean(KEY_SECURE, on).apply()
+            applySecure()
+        }
+        val cbBoot = scroll.findViewById(R.id.cbBoot) as CheckBox
+        cbBoot.isChecked = prefs.getBoolean(KEY_BOOT, true)
+        cbBoot.setOnCheckedChangeListener { _, on ->
+            prefs.edit().putBoolean(KEY_BOOT, on).apply()
+        }
         (scroll.findViewById(R.id.btnReconnect) as Button).setOnClickListener { reconnect() }
         (scroll.findViewById(R.id.btnUpdate) as Button).setOnClickListener { checkForUpdate(manual = true) }
         (scroll.findViewById(R.id.btnBattery) as Button).setOnClickListener { askBattery(true) }
@@ -533,6 +545,21 @@ class MainActivity : Activity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** Снимки экрана и миниатюра в списке задач (17.0.16).
+
+     *  Флаг работает на живом окне: после переключения система перерисовывает
+     *  его уже с защитой. На некоторых прошивках miniature в «недавних»
+     *  обновляется только после возврата к приложению — это ограничение
+     *  системы, а не ошибки здесь. */
+    private fun applySecure() {
+        if (prefs.getBoolean(KEY_SECURE, false)) {
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
     }
 
@@ -692,6 +719,12 @@ class MainActivity : Activity() {
         // касса пробует его первым, а не «вспоминает» вчерашний мёртвый.
         private const val KEY_LAST_OK = "server_url_last_ok"
         private const val KEY_AWAKE = "keep_awake"
+        // Экран кассы не должен утекать в снимки и в миниатюру списка задач:
+        // на прилавке телефон лежит экраном вверх, а в корзине — суммы и
+        // телефоны покупателей. По умолчанию выключено: кассир решает сам.
+        private const val KEY_SECURE = "flag_secure"
+        // Поднимать кассу после перезагрузки телефона (см. BootReceiver).
+        private const val KEY_BOOT = "boot_start"
         private const val KEY_BATTERY_ASKED = "battery_asked"
         // Версия, от которой кассир уже отказался кнопкой «Позже»: при старте
         // больше не спрашиваем, иначе диалог «Скачать» всплывал на каждом

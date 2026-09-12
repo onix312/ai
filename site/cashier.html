@@ -125,6 +125,16 @@
  .offbar.dead .dot{background:#ef4444}
  .inBadge{position:absolute;right:10px;top:10px;min-width:28px;height:28px;padding:0 9px;border-radius:99px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:850;display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px -8px var(--accent)}
  .tile.sel .inBadge{display:flex}
+ /* Превью долгим тапом (17.0.16): карточка товара поверх кассы */
+ .pv{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(9,12,20,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:pvIn .16s ease-out}
+ .pvCard{width:min(340px,100%);max-height:86vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 18px 48px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:9px}
+ .pvImg{width:100%;height:150px;object-fit:contain;border-radius:14px;background:rgba(255,255,255,.04)}
+ .pvName{font-size:17px;font-weight:700;line-height:1.25}
+ .pvRow{display:flex;justify-content:space-between;gap:12px;font-size:14px;border-top:1px solid var(--line);padding-top:8px}
+ .pvK{opacity:.68}
+ .pvV{font-weight:600;text-align:right;word-break:break-word}
+ .pvHint{font-size:12px;opacity:.6;line-height:1.35;margin-top:2px}
+ @keyframes pvIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
  .info{padding:12px 12px 12px;flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
  .n{font-size:14px;font-weight:700;line-height:1.32;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
  .metaLine{display:flex;align-items:center;gap:6px}
@@ -1058,6 +1068,8 @@ function renderCart(){
 
 $("grid").addEventListener("click",function(ev){
   if(ev.target.closest(".qbtn")) return;
+  // Открыто превью — этот тап закрывает карточку, а не кладёт товар в корзину.
+  if(previewBox){previewClose();return;}
   var t=ev.target.closest(".tile");if(!t)return;
   var id=t.getAttribute("data-id");
   var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
@@ -1078,6 +1090,81 @@ $("grid").addEventListener("keydown",function(ev){
     var t=ev.target.closest(".tile"); if(t){ev.preventDefault(); t.click();}
   }
 });
+
+/* ---------- превью долгим тапом (17.0.16) ----------
+   Кассир держит в руках товар без этикетки и не может прочитать ни цену, ни
+   остаток, ни артикул: плитка показывает название и цену, а всё остальное —
+   только в номенклатуре, до которой в разгар продажи не дойти. Долгое
+   нажатие (450 мс) открывает карточку товара поверх кассы; короткий тап
+   по-прежнему кладёт товар в корзину. Жест отменяется, если палец уехал
+   дальше 10 px — это прокрутка витрины, а не просьба показать карточку. */
+var PREVIEW_MS=450,previewTimer=0,previewBox=null;
+function previewClose(){
+  if(previewTimer){clearTimeout(previewTimer);previewTimer=0;}
+  if(previewBox){try{document.body.removeChild(previewBox);}catch(_e){}previewBox=null;}
+}
+function previewOpen(it){
+  previewClose();
+  var box=document.createElement("div");
+  box.className="pv";
+  var card=document.createElement("div");card.className="pvCard";
+  var add=function(tag,cls,text){
+    var el=document.createElement(tag);if(cls)el.className=cls;
+    if(text!=null)el.textContent=text;card.appendChild(el);return el;
+  };
+  if(it.photo_url){
+    var img=document.createElement("img");
+    img.className="pvImg";img.src=it.photo_url;img.alt="";
+    card.appendChild(img);
+  }
+  add("div","pvName",it.name||"Без названия");
+  var rows=[
+    ["Цена",it.price_missing?"не задана":money(it.price)],
+    ["В наличии",Math.floor(Number(it.qty)||0)+" шт"],
+    ["Артикул",it.sku||"—"],
+    ["Штрихкод",it.barcode||"—"],
+    ["Категория",it.category_name||"—"]
+  ];
+  rows.forEach(function(r){
+    var row=add("div","pvRow");
+    var k=add("span","pvK",r[0]);row.appendChild(k);
+    var v=add("span","pvV",String(r[1]));row.appendChild(v);
+  });
+  add("div","pvHint","Отпустите — карточка закроется. Короткий тап кладёт товар в корзину.");
+  box.appendChild(card);
+  box.addEventListener("pointerdown",function(ev){ev.stopPropagation();previewClose();});
+  document.body.appendChild(box);
+  previewBox=box;
+  if(navigator.vibrate)try{navigator.vibrate(12);}catch(_e){}
+}
+(function bindTilePreview(){
+  var grid=$("grid");if(!grid)return;
+  var startX=0,startY=0,tile=null;
+  function cancel(){
+    if(previewTimer){clearTimeout(previewTimer);previewTimer=0;}
+    tile=null;
+  }
+  grid.addEventListener("pointerdown",function(ev){
+    if(previewBox)return;
+    var t=ev.target&&ev.target.closest?ev.target.closest(".tile"):null;
+    if(!t){cancel();return;}
+    tile=t;startX=ev.clientX||0;startY=ev.clientY||0;
+    if(previewTimer)clearTimeout(previewTimer);
+    previewTimer=setTimeout(function(){
+      previewTimer=0;
+      var id=tile&&tile.getAttribute?tile.getAttribute("data-id"):"";
+      var it=id&&((state.items||[]).find(function(x){return x.id===id;})
+        ||(state._allItems||[]).find(function(x){return x.id===id;}));
+      if(it)previewOpen(it);
+    },PREVIEW_MS);
+  });
+  grid.addEventListener("pointermove",function(ev){
+    if(!previewTimer)return;
+    if(Math.abs((ev.clientX||0)-startX)>10||Math.abs((ev.clientY||0)-startY)>10)cancel();
+  });
+  grid.addEventListener("pointerup",cancel);
+  grid.addEventListener("pointercancel",cancel);
+})();
 function changeQty(id,delta){
   var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
   var cur=state.cart[id]||0;

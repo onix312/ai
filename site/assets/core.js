@@ -704,6 +704,65 @@ const LAZY_MODULES = {
 };
 const lazyLoaded = new Set();
 const lazyPending = new Map();
+
+/* Состояние ленивого раздела видно на экране (17.0.16). Раньше раздел
+   грузился молча: при медленном Wi-Fi оператор смотрел на пустую вкладку и
+   не понимал, идёт загрузка или всё сломалось, а при ошибке loadModule
+   уходил в console.error — вкладка оставалась пустой навсегда, без способа
+   повторить. Теперь в разделе живёт одна плашка: «загружаем», «не
+   загрузилось» с кнопкой «Повторить», или ничего. */
+function lazyNote(name) {
+  const host = document.getElementById('view-' + name);
+  if (!host) return null;
+  let box = host.querySelector(':scope > .lazy-note');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'lazy-note';
+    host.insertBefore(box, host.firstChild);
+  }
+  return box;
+}
+function clearLazyNote(name) {
+  const host = document.getElementById('view-' + name);
+  const box = host && host.querySelector(':scope > .lazy-note');
+  if (box) box.remove();
+}
+function showLazyLoading(name) {
+  const box = lazyNote(name);
+  if (!box) return;
+  box.dataset.state = 'loading';
+  box.textContent = 'Загружаем раздел…';
+  const btn = box.querySelector('button');
+  if (btn) btn.remove();
+}
+function showLazyError(name, message) {
+  const box = lazyNote(name);
+  if (!box) return;
+  box.dataset.state = 'error';
+  box.textContent = '';
+  const text = document.createElement('span');
+  text.textContent = 'Раздел не загрузился' + (message ? ': ' + message : '')
+    + '. Проверьте связь с ПК — данные на месте, не подтянулся только экран.';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn sm';
+  btn.textContent = 'Повторить';
+  btn.addEventListener('click', () => {
+    lazyPending.delete(name);
+    const stale = document.querySelector(`script[data-lazy]`);
+    if (stale && stale.dataset.failed === name) stale.remove();
+    showLazyLoading(name);
+    PF.loadModule(name);
+  });
+  box.append(text, btn);
+  toast('Раздел не загрузился', 'Нажмите «Повторить» в самом разделе', 'bad',
+    { label: 'Повторить', run: () => btn.click() });
+}
+PF.lazyState = (name) => {
+  const host = document.getElementById('view-' + name);
+  const box = host && host.querySelector(':scope > .lazy-note');
+  return box ? box.dataset.state : 'ready';
+};
 PF.module = (name, init) => {
   lazyLoaded.add(name);
   // Ошибку инициализации не прячем: иначе раздел выглядит живым, но не
@@ -728,8 +787,19 @@ PF.loadModule = (name) => {
     // Модуль может зарегистрироваться позже (скрипт исполняется синхронно,
     // но страховка дешёвая): если регистрации нет — считаем загруженным.
     lazyLoaded.add(name);
+    clearLazyNote(name);
     return true;
-  }).catch((e) => { console.error(e); return false; });
+  }).catch((e) => {
+    console.error(e);
+    // Файл, который не доехал, надо снять: иначе повтор повесит тот же
+    // data-lazy и браузер решит, что скрипт уже есть.
+    files.forEach((file) => {
+      const tag = document.querySelector(`script[data-lazy="${file}"]`);
+      if (tag) { tag.dataset.failed = name; tag.remove(); }
+    });
+    showLazyError(name, e && e.message);
+    return false;
+  });
   lazyPending.set(name, job);
   return job;
 };
@@ -971,6 +1041,7 @@ function showView(name, sub) {
   // Идея 47: раздел может жить в отдельном файле, который грузится при
   // первом входе. После загрузки повторяем событие — модуль отрисуется.
   if (LAZY_MODULES[name] && !lazyLoaded.has(name)) {
+    showLazyLoading(name);
     PF.loadModule(name).then((ok) => {
       if (ok && currentView === name) PF.emit('view', { view: name, sub, lazy: true });
     });

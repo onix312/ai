@@ -124,6 +124,24 @@
             android:textColor="@color/kassa_muted" />
 
         <CheckBox
+            android:id="@+id/cbSecure"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:buttonTint="@color/kassa_accent"
+            android:text="@string/cb_secure"
+            android:textColor="@color/kassa_muted" />
+
+        <CheckBox
+            android:id="@+id/cbBoot"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="@dimen/panel_control_min_height"
+            android:buttonTint="@color/kassa_accent"
+            android:text="@string/cb_boot"
+            android:textColor="@color/kassa_muted" />
+
+        <CheckBox
             android:id="@+id/cbRing"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

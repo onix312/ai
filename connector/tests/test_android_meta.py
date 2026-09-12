@@ -120,5 +120,63 @@ class AndroidResourceTests(unittest.TestCase):
                          f"иконки уведомлений разошлись: {sorted(icons)}")
 
 
+class AndroidShellBehaviourTests(unittest.TestCase):
+    """Оболочка: настройки, которые живут в двух файлах сразу.
+
+    Приёмник автозапуска читает тот же файл настроек, что и MainActivity.
+    Опечатка в имени prefs или ключа компилятору не видна, а на телефоне
+    галочка «Открывать кассу при включении» просто перестанет работать.
+    """
+
+    @staticmethod
+    def literal(source: str, name: str) -> str:
+        match = re.search(rf'const val {name} = "([^"]+)"', source)
+        if not match:
+            raise AssertionError(f"в Kotlin нет константы {name}")
+        return match.group(1)
+
+    def test_boot_receiver_reads_the_same_prefs(self):
+        activity = (KOTLIN / "MainActivity.kt").read_text(encoding="utf-8")
+        receiver = (KOTLIN / "BootReceiver.kt").read_text(encoding="utf-8")
+        self.assertIn('getSharedPreferences("kassa_shell"', activity)
+        self.assertEqual("kassa_shell", self.literal(receiver, "PREFS"),
+                         "приёмник автозапуска читает другой файл настроек")
+        self.assertEqual(self.literal(activity, "KEY_BOOT"),
+                         self.literal(receiver, "KEY_BOOT"),
+                         "ключ настройки автозапуска разошёлся")
+
+    def test_boot_receiver_is_declared_in_manifest(self):
+        text = MANIFEST.read_text(encoding="utf-8")
+        self.assertIn('android:name=".BootReceiver"', text)
+        self.assertIn("android.permission.RECEIVE_BOOT_COMPLETED", text)
+        self.assertIn("android.intent.action.BOOT_COMPLETED", text)
+        block = text.split(".BootReceiver", 1)[1].split("</receiver>", 1)[0]
+        self.assertIn('android:exported="true"', text.split(".BootReceiver", 1)[0].rsplit("<receiver", 1)[-1] + block,
+                      "приёмник системного сообщения обязан быть exported")
+
+    def test_screen_flags_are_applied_at_startup(self):
+        activity = (KOTLIN / "MainActivity.kt").read_text(encoding="utf-8")
+        startup = activity.split("setContentView(root)", 1)[1][:400]
+        self.assertIn("applyKeepAwake()", startup)
+        self.assertIn("applySecure()", startup,
+                      "защиту экрана надо включать при старте, а не только по галочке")
+
+    def test_every_checkbox_has_a_string_and_a_key(self):
+        activity = (KOTLIN / "MainActivity.kt").read_text(encoding="utf-8")
+        for cb in ("cbAwake", "cbRing", "cbSecure", "cbBoot"):
+            self.assertIn(f"R.id.{cb}", activity, f"{cb} не привязан в коде")
+            self.assertIn(f'@+id/{cb}"', (RES / "layout" / "panel_server.xml").read_text(encoding="utf-8"))
+        # У каждой галочки — свой ключ настроек, иначе две настройки пишут в
+        # одно место и выключают друг друга.
+        keys = {}
+        for cb in ("cbAwake", "cbRing", "cbSecure", "cbBoot"):
+            tail = activity.split(f"R.id.{cb}", 1)[1]
+            match = re.search(r"prefs\.getBoolean\((KEY_[A-Z_]+)", tail)
+            self.assertIsNotNone(match, f"у {cb} нет чтения настройки")
+            keys[cb] = match.group(1)
+        self.assertEqual(len(set(keys.values())), 4,
+                         f"ключи галочек пересекаются: {keys}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,19 @@ def front_paths() -> dict[str, set[str]]:
     return found
 
 
+def _all_paths_in(dirs) -> set[str]:
+    """Все `/api/…`, которые встречаются в перечисленных каталогах."""
+    pattern = re.compile(r"/api/[A-Za-z0-9_\-/.]+")
+    found: set[str] = set()
+    for folder in dirs:
+        for file in (ROOT / folder).rglob("*"):
+            if file.suffix not in (".js", ".html", ".py", ".kt") or not file.is_file():
+                continue
+            for match in pattern.findall(file.read_text(encoding="utf-8", errors="ignore")):
+                found.add(match.rstrip("."))
+    return found
+
+
 class RoutesInventoryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -111,6 +124,27 @@ class RoutesInventoryTests(unittest.TestCase):
         self.assertEqual([], shadowed,
                          "эти пути объявлены и декоратором, и if-цепочкой: ветка в "
                          "цепочке недостижима, перенесите её в реестр или удалите")
+
+    def test_unrequested_route_counts_are_current(self):
+        """Числа из приложения «непрошеные маршруты» сверяются с кодом."""
+        registered = {(r["method"], r["path"]) for r in router.reference()}
+        known = {path for _, path in registered}
+        for found in self.chain.values():
+            known |= {path for _, path in found}
+        # Здесь — тот же широкий поиск, что в скрипте из приложения: путь
+        # считается упомянутым, если встречается в файле хоть в кавычках,
+        # хоть внутри шаблонной строки. Узкий front_paths() (только literals)
+        # нужен для другого контракта и дал бы другие числа.
+        front = _all_paths_in(("site",))
+        callers = front | _all_paths_in(("connector/tests", "scripts", "android"))
+        text = REGISTRY_DOC.read_text(encoding="utf-8")
+        listed = {int(n) for n in re.findall(r"\*\*(\d+)\*\*", text)}
+        for label, value in (("всего путей", len(known)),
+                             ("не зовёт site/", len([p for p in known if p not in front])),
+                             ("не упоминаются нигде", len([p for p in known if p not in callers]))):
+            self.assertIn(value, listed,
+                          f"в docs/МАРШРУТЫ.md нет числа {value} ({label}) — "
+                          "пересчитайте приложение и обновите его")
 
     def test_frontend_only_calls_existing_routes(self):
         registered = {(r["method"], r["path"]) for r in router.reference()}

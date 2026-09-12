@@ -287,6 +287,52 @@ if (problems.length === 0) {
     if (quiet.ev('_ns') !== 0) throw new Error(`renderCart вызвал netState ${quiet.ev('_ns')} раз`);
   });
 
+  // 16. Превью долгим тапом: кассир держит товар без этикетки и не видит ни
+  //     цену, ни остаток, ни артикул. Долгое нажатие открывает карточку, а
+  //     следующий за ним тап закрывает её и НЕ кладёт товар в корзину.
+  checkAsync('долгое нажатие показывает карточку и не кладёт товар в корзину', async () => {
+    const pv = createKassa({ transport: 'stub' });
+    pv.run();
+    pv.ev('state.items=[{id:"s1",name:"Плёнка матовая",qty:7,price:350,sku:"PL-01",'
+      + 'barcode:"4600001",category_name:"Плёнки",photo_url:""}];state.cart={};');
+    const tile = { getAttribute: (k) => (k === 'data-id' ? 's1' : null) };
+    const down = { target: { closest: (sel) => (sel === '.tile' ? tile : null) }, clientX: 5, clientY: 5 };
+    pv.ev('$("grid")._h.pointerdown')
+      .call(null, down);
+    await new Promise((r) => setTimeout(r, 700));
+    if (!pv.ev('!!previewBox')) throw new Error('долгое нажатие не открыло карточку');
+    const card = pv.ev('document.body.children').slice(-1)[0];
+    const text = JSON.stringify(card);
+    if (!/Плёнка матовая/.test(text)) throw new Error('в карточке нет названия');
+    // Тап при открытом превью — закрыть, а не продать. closest() отвечает
+    // только на .tile: на .qbtn обработчик выходит раньше, и сценарий
+    // проверял бы не тот путь.
+    const tapOn = { target: { closest: (sel) => (sel === '.tile' ? tile : null) } };
+    pv.ev('$("grid")._h.click').call(null, tapOn);
+    if (pv.ev('!!previewBox')) throw new Error('тап не закрыл карточку');
+    if (pv.ev('Object.keys(state.cart).length') !== 0) {
+      throw new Error('тап по открытому превью положил товар в корзину');
+    }
+    // Короткий тап по-прежнему продаёт.
+    pv.ev('$("grid")._h.click').call(null, tapOn);
+    if (pv.ev('state.cart["s1"]') !== 1) throw new Error('короткий тап перестал продавать');
+  });
+
+  // 17. Жест отменяется, если палец уехал: это прокрутка витрины, а не просьба
+  //     показать карточку.
+  checkAsync('прокрутка витрины не открывает карточку', async () => {
+    const pv = createKassa({ transport: 'stub' });
+    pv.run();
+    pv.ev('state.items=[{id:"s1",name:"Плёнка",qty:7,price:350}];');
+    const tile = { getAttribute: () => 's1' };
+    pv.ev('$("grid")._h.pointerdown').call(null, {
+      target: { closest: () => tile }, clientX: 5, clientY: 5,
+    });
+    pv.ev('$("grid")._h.pointermove').call(null, { clientX: 5, clientY: 90 });
+    await new Promise((r) => setTimeout(r, 700));
+    if (pv.ev('!!previewBox')) throw new Error('прокрутка открыла карточку товара');
+  });
+
   // 15. Очередь больше 200 записей: в память телефона пишутся последние 200,
   //     и кассир обязан об этом услышать, а не узнать утром по потерянным продажам.
   check('очередь больше лимита предупреждает кассира', () => {
