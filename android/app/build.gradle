@@ -24,8 +24,11 @@ android {
         applicationId 'ai.printflow.kassa'
         minSdk 24
         targetSdk 34
-        versionCode 170014
-        versionName '17.0.14'
+        // versionCode = major*10000 + minor*100 + patch: 17.0.16 -> 170016.
+        // Оболочка сравнивает его с `version_code` из site/app/version.json
+        // и сама предлагает обновиться — расхождение с APP_VERSION ломает это.
+        versionCode 170016
+        versionName '17.0.16'
     }
 
     signingConfigs {

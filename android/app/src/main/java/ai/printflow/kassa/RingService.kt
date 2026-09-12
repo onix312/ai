@@ -223,7 +223,10 @@ class RingService : Service() {
         return builder
             .setContentTitle("Касса слушает платежи")
             .setContentText(body)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+            // Та же иконка, что у звонка о платеже (Ring.kt): постоянное
+            // уведомление «касса слушает» и звонок должны выглядеть одним
+            // приложением, а не системным напоминанием.
+            .setSmallIcon(R.drawable.ic_notify)
             .setOngoing(true)
             .setContentIntent(content)
             .build()
