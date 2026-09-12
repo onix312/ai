@@ -156,5 +156,88 @@ class BulkStatusRouteTests(unittest.TestCase):
                          "первый заказ должен откатиться вместе с пакетом")
 
 
+class OrderArchiveTests(unittest.TestCase):
+    """Архив вместо удаления (17.0.16).
+
+    Удаление заказа обрывает историю: `delete_order` отвязывает платежи и
+    стирает состав. Архив убирает заказ только из списка — строка, состав и
+    деньги остаются, поэтому учёт его по-прежнему видит.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Database(pathlib.Path(self.tmp.name) / "archive.sqlite3")
+        self.addCleanup(self.db.close)
+        self.repo = Repo(self.db)
+        self.db.upsert("customers", {"id": "c1", "name": "Анна"})
+        self.order("o1", "1001", price=1000, paid=1000)
+        self.db.upsert("order_items", {"id": "i1", "order_id": "o1", "name": "Деталь",
+                                       "qty": 2, "price": 500, "position": 0})
+        self.api = Api.__new__(Api)
+        self.api.db = self.db
+        self.api.repo = self.repo
+        self.api.bus = types.SimpleNamespace(publish=lambda *a, **k: None)
+
+    def order(self, order_id: str, number: str, **fields) -> None:
+        self.db.upsert("orders", {"id": order_id, "number": number, "product": "Деталь",
+                                  "customer_id": "c1", "customer_name": "Анна",
+                                  "status": "queue", "created_at": now_iso(),
+                                  "updated_at": now_iso(), **fields})
+
+    def test_archived_order_leaves_the_board(self):
+        self.assertEqual([r["id"] for r in self.repo.orders()], ["o1"])
+        self.repo.archive_order("o1")
+        self.assertEqual([], self.repo.orders(), "архивный заказ остался на доске")
+        self.assertEqual([r["id"] for r in self.repo.orders(only_archived=True)], ["o1"])
+        self.assertEqual([r["id"] for r in self.repo.orders(include_archived=True)], ["o1"])
+
+    def test_archiving_keeps_rows_items_and_money(self):
+        self.repo.archive_order("o1")
+        row = self.repo.order("o1")
+        self.assertIsNotNone(row, "строка заказа пропала")
+        self.assertEqual(1000, row["price"])
+        self.assertEqual(1000, row["paid"])
+        self.assertEqual(1, len(row["items"]), "состав заказа стёрт")
+        self.assertTrue(str(row["archived_at"]).strip(), "не отмечено, когда сняли с доски")
+        # Учёт читает таблицу своим запросом и архив не замечает.
+        customer = [c for c in self.repo.customers() if c["id"] == "c1"][0]
+        self.assertEqual(1, customer["orders"])
+        self.assertEqual(1000, customer["revenue"],
+                         "архив изменил деньги клиента — так нельзя")
+
+    def test_restore_puts_the_order_back(self):
+        self.repo.archive_order("o1")
+        self.repo.archive_order("o1", archived=False)
+        self.assertEqual([r["id"] for r in self.repo.orders()], ["o1"])
+        self.assertEqual("", self.repo.order("o1")["archived_at"])
+
+    def test_archive_route(self):
+        code, payload = self.api.post("/api/order/archive", {"id": "o1"}, {})
+        self.assertEqual(200, code)
+        self.assertEqual(1, payload["order"]["archived"])
+        code, payload = self.api.post("/api/order/archive",
+                                      {"id": "o1", "archived": False}, {})
+        self.assertEqual(200, code)
+        self.assertEqual(0, payload["order"]["archived"])
+
+    def test_archive_route_rejects_unknown_order(self):
+        code, payload = self.api.post("/api/order/archive", {"id": "нет"}, {})
+        self.assertEqual(400, code)
+        self.assertIn("не найден", payload["error"].lower())
+        code, _ = self.api.post("/api/order/archive", {}, {})
+        self.assertEqual(400, code)
+
+    def test_orders_route_filters_archive(self):
+        self.repo.archive_order("o1")
+        self.order("o2", "1002", price=200)
+        _, live = self.api.get("/api/orders", {})
+        self.assertEqual(["o2"], [r["id"] for r in live["orders"]])
+        _, archived = self.api.get("/api/orders", {"archived": ["1"]})
+        self.assertEqual(["o1"], [r["id"] for r in archived["orders"]])
+        _, everything = self.api.get("/api/orders", {"archived": ["all"]})
+        self.assertEqual({"o1", "o2"}, {r["id"] for r in everything["orders"]})
+
+
 if __name__ == "__main__":
     unittest.main()

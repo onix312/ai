@@ -58,8 +58,16 @@ class Repo:
 
     # ------------------------------------------------------------------ заказы
     def orders(self, status: str = "", search: str = "", niche_id: str = "",
-               limit: int = 0, offset: int = 0) -> list[dict]:
+               limit: int = 0, offset: int = 0, include_archived: bool = False,
+               only_archived: bool = False) -> list[dict]:
         sql, params = "SELECT * FROM orders WHERE 1=1", []
+        # Архив (17.0.16): доска показывает живые заказы, а снятые с доски
+        # достаются отдельно. На деньги это не влияет — учёт и отчёты читают
+        # таблицу своими запросами и видят архивные заказы как прежде.
+        if only_archived:
+            sql += " AND COALESCE(archived,0)=1"
+        elif not include_archived:
+            sql += " AND COALESCE(archived,0)=0"
         if status:
             sql += " AND status=?"
             params.append(status)
@@ -460,6 +468,23 @@ class Repo:
         # done — финальный статус: сохранить его можно только через выдачу с
         # подтверждением передачи/оплаты, а не перетаскиванием карточки.
         return self.save_order({"id": order_id, "status": target})
+
+    def archive_order(self, order_id: str, archived: bool = True) -> dict:
+        """Снять заказ с доски без потери данных (17.0.16).
+
+        Удаление обрывает историю: платежи отвязываются, состав стирается.
+        Архив оставляет всё на месте и убирает заказ только из списка;
+        возврат — тот же вызов с archived=False.
+        """
+        if not order_id:
+            raise ValueError("Не указан заказ")
+        order = self.db.one("SELECT id FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        self.db.execute(
+            "UPDATE orders SET archived=?, archived_at=?, updated_at=? WHERE id=?",
+            (1 if archived else 0, now_iso() if archived else "", now_iso(), order_id))
+        return self.order(order_id) or {"id": order_id}
 
     def delete_order(self, order_id: str) -> None:
         if not order_id:

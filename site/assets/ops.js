@@ -1316,6 +1316,7 @@ async function openOrder(id, intakeDraft, intakeMeta) {
       + '<br><small>Проверьте поля и нажмите «Сохранить» — до этого база не меняется.</small>';
   }
   $('order_delete').hidden = !id;
+  $('order_archive').hidden = !id;
   const paymentBtn = $('order_payment');
   if (paymentBtn) paymentBtn.hidden = !id;
   $('order_queue').hidden = !id;
@@ -3288,8 +3289,34 @@ function bind() {
   $('hf_payment_action').addEventListener('change', updateFulfillmentPaymentFields);
   $('fulfillment_confirm').addEventListener('click', confirmOrderFulfillment);
   $('stock_confirm').addEventListener('click', confirmOrderStock);
+  /* Архив вместо удаления (17.0.16). Удаление обрывает историю: платежи
+     отвязываются от заказа, состав стирается. Архив убирает заказ только с
+     доски — данные, платежи и отчёты остаются, а вернуть можно одной кнопкой
+     «Отменить» в тосте. Удаление оставлено рядом: иногда заказ действительно
+     создан по ошибке, и решать это владельцу, а не интерфейсу. */
+  $('order_archive').addEventListener('click', async () => {
+    if (!editingOrder) return;
+    const id = editingOrder;
+    const order = PF.state.orders.find((o) => o.id === id) || {};
+    try {
+      await post('/api/order/archive', { id });
+      closeModal('order_modal');
+      await PF.refreshCore();
+      PF.refreshFinance();
+      toastUndo('Заказ в архиве',
+        `№${order.number || ''} убран с доски — данные и платежи на месте`,
+        async () => {
+          try {
+            await post('/api/order/archive', { id, archived: false });
+            await PF.refreshCore();
+            PF.refreshFinance();
+            toast('Заказ возвращён на доску');
+          } catch (e) { fail(e); }
+        });
+    } catch (e) { fail(e); }
+  });
   $('order_delete').addEventListener('click', async () => {
-    if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо.')) return;
+    if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо — для этого есть «В архив».')) return;
     try {
       await post('/api/order/delete', { id: editingOrder });
       closeModal('order_modal');

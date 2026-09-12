@@ -241,6 +241,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("client_variant_id", "TEXT DEFAULT ''"),
         ("client_ready_at", "TEXT DEFAULT ''"),
         ("client_delivered_at", "TEXT DEFAULT ''"),
+        # 17.0.16: архив вместо удаления. Заказ, который не нужен на доске,
+        # исчезает из списка, но остаётся в базе: история, платежи и отчёты
+        # его не теряют. Деньги не пересчитываются — архив влияет только на
+        # список заказов (см. repo.orders).
+        ("archived", "INTEGER DEFAULT 0"),
+        ("archived_at", "TEXT DEFAULT ''"),
     ],
     "print_jobs": [
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)

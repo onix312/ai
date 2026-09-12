@@ -23,7 +23,7 @@
 > Авито и Telegram — идёт NOZZA; PrintFlow остаётся названием внутренней системы учёта.
 > Логотип и знак: `site/assets/brand/`, печатные материалы: `site/materials/`.
 
-## Текущая версия: 17.0.16
+## Текущая версия: 17.0.17
 
 Версия берётся из `connector/printflow/__init__.py` (`APP_VERSION`); контракт
 `connector/tests/test_docs_versions.py` не даёт этому заголовку разъехаться

@@ -1080,9 +1080,13 @@ class Api:
         if path == "/api/orders":
             # limit/offset (17.0.16): без них список заказов рос вместе с
             # историей. Не переданы — прежнее поведение, весь список.
+            # archived=1 — только снятые с доски, archived=all — и те и другие.
+            archived = one("archived")
             return 200, {"orders": self.repo.orders(
                 one("status"), one("q"), one("niche_id"),
-                int(num(one("limit", "0"), 0)), int(num(one("offset", "0"), 0)))}
+                int(num(one("limit", "0"), 0)), int(num(one("offset", "0"), 0)),
+                include_archived=archived in ("1", "all"),
+                only_archived=archived == "1")}
         if path == "/api/order":
             order = self.repo.order(one("id"))
             return (200, order) if order else (404, {"error": "Заказ не найден"})
@@ -2337,6 +2341,18 @@ class Api:
                     pass
             self._audit("order", body.get("id", ""), "status", "Статус заказа изменён",
                         str(body.get("status") or ""), actor=str(body.get("actor") or "panel"))
+            return 200, {"ok": True, "order": order}
+        if path == "/api/order/archive":
+            # Архив вместо удаления: данные, платежи и история остаются.
+            try:
+                order = self.repo.archive_order(
+                    str(body.get("id") or ""), body.get("archived") is not False)
+            except ValueError as exc:
+                return 400, {"error": str(exc)}
+            self.db.add_event("order", "Заказ в архиве" if order.get("archived")
+                              else "Заказ возвращён из архива",
+                              f"№{order.get('number')}", "", {})
+            self.bus.publish("resync", {})
             return 200, {"ok": True, "order": order}
         if path == "/api/order/delete":
             self.stock.release(order_id=body.get("id", ""))
