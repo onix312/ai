@@ -110,8 +110,6 @@
    animation:pfnudge 1.4s ease-in-out infinite}
  .offbar.dead{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3)}
  .offbar.dead .dot{background:#ef4444}
- .qb.catb{background:rgba(255,255,255,.94);color:#111827;border:1px solid rgba(0,0,0,.06);font-weight:700}
- [data-theme=dark] .qb.catb{background:rgba(31,41,55,.94);color:#e5e7eb;border-color:rgba(255,255,255,.08)}
  .inBadge{position:absolute;right:10px;top:10px;min-width:28px;height:28px;padding:0 9px;border-radius:99px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:850;display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px -8px var(--accent)}
  .tile.sel .inBadge{display:flex}
  .info{padding:12px 12px 12px;flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -182,6 +180,7 @@
  .qrbox{display:flex;justify-content:center;margin:8px 0 12px}
  .qrbox svg{width:min(360px,78vw,58vh,100%);height:auto;background:#fff;padding:14px;border-radius:18px;box-shadow:0 8px 30px -14px rgba(0,0,0,.5)}
  .qrnote{color:var(--muted);font-size:12.5px;text-align:center;line-height:1.5;margin-bottom:14px}
+ .qrbig{display:block;color:var(--text);font-size:19px;line-height:1.35;font-weight:850;letter-spacing:.01em;text-transform:uppercase;text-align:center}
  #bQrPaid{min-height:56px;font-size:15.5px}
  /* login — дружелюбно */
  .login{max-width:400px;margin:0 auto;padding:36px 16px 0;text-align:center}
@@ -367,9 +366,9 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){retur
    Обрыв лечится сам: проверка /api/health с нарастающей паузой (1→2→4→8→15 с),
    возврат связи — перечитать каталог и дослать очередь. Кассир технических
    кнопок не нажимает: он продаёт, а не чинит сеть (решение раунда вопросов). */
-var LINK={ok:true,at:Date.now(),stream:0,fail:0,probeAt:0,probeBusy:false,
+var LINK={ok:true,at:Date.now(),stream:0,poll:0,fail:0,probeAt:0,probeBusy:false,
   since:0,timer:0,why:""};
-var PROBE_MIN=1000,PROBE_MAX=15000,STREAM_QUIET=45000,LINK_TICK=5000;
+var PROBE_MIN=1000,PROBE_MAX=15000,STREAM_QUIET=45000,POLL_QUIET=75000,LINK_TICK=5000;
 function netMark(ok,why){
   var was=LINK.ok;
   LINK.ok=!!ok;LINK.why=why||"";
@@ -381,11 +380,19 @@ function netMark(ok,why){
   if(ok&&!was)onLinkBack();
 }
 function netStreamAlive(){return !!LINK.stream&&Date.now()-LINK.stream<STREAM_QUIET;}
+/* Канал жив, если жив ЛИБО поток событий, ЛИБО страховочный опрос.
+   Раньше считался только поток: в оболочке-приложении EventSource поднимается
+   не всегда, касса честно переходила на опрос раз в 25 с — деньги приходили,
+   а плашка «Поток событий молчит» оставалась навсегда, потому что опрос
+   «живость» не отмечал. Три интервала опроса (75 с) — запас на один пропуск. */
+function netChannelAlive(){
+  return netStreamAlive()||(!!LINK.poll&&Date.now()-LINK.poll<POLL_QUIET);
+}
 function linkSeconds(){return LINK.since?Math.round((Date.now()-LINK.since)/1000):0;}
 function netState(){
   var dot=$("netDot"),bar=$("linkBar"),text=$("linkText");
   var device=!navigator.onLine,dead=!LINK.ok;
-  var quiet=LINK.ok&&!device&&!netStreamAlive();
+  var quiet=LINK.ok&&!device&&!netChannelAlive();
   if(dot){
     dot.classList.toggle("off",device||dead);
     dot.classList.toggle("warn",!device&&!dead&&quiet);
@@ -406,7 +413,7 @@ function netState(){
       bar.hidden=false;bar.classList.add("warn");
       text.textContent="Поток событий молчит — звонок о платеже придёт со страховочной "
         +"проверкой раз в 25 с.";
-    }else{bar.hidden=true;}
+    }else{bar.hidden=true;bar.classList.remove("warn");}
   }
 }
 function onLinkBack(){
@@ -943,16 +950,15 @@ function renderGrid(){
   }
   box.innerHTML=list.map(function(it){
     var qty=Math.floor(Number(it.qty)||0);
-    var catName=it.category_name||"";
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
     var inCart=state.cart[it.id]||0;
-    var catBadge=catName? '<span class="qb catb">'+esc(catName)+'</span>' : '';
-    // бейдж остатка — просто и по-человечески
+    // Категории на картинке больше нет: бейдж перекрывал фото и дублировал
+    // фильтр по категории сверху. Остаток — остался, он важнее.
     var qtyBadge = qty<=5 ? '<span class="qb low">мало: '+qty+' шт</span>' : '<span class="qb qty">'+qty+' шт</span>';
     var phIcon=window.PFIcons?PFIcons.svg("box",30):"📦";
     var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">'+phIcon+'</div>' : '<div class="ph">'+phIcon+'</div>';
     return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'" role="button" tabindex="0" aria-label="'+esc(it.name)+'">'
-      +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+catBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
+      +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
       +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div></div>'
       +'</div>';
   }).join("");
@@ -1232,19 +1238,16 @@ function showOfflineQr(total){
   var box=$("qrBox");
   box.innerHTML=q.svg||('<div class="empty"><b>Картинки нет — покажите код из настроек</b>'
     +'<span style="font-size:12px">'+esc(String(q.text||"").slice(0,80))+'…</span></div>');
-  var lines=[
-    "Покупатель сканирует этот код в приложении банка и вводит сумму "+money(total)+".",
-    "Оплата идёт на счёт магазина напрямую — связь с сервером для неё не нужна.",
-    "Заявка записана в очередь: проводка появится после подтверждения по выписке.",
-    "Сами не подтверждайте: подтверждение = деньги в банке."
-  ];
-  if(q.why)lines.push(q.why);
+  // Крупно — инструкция покупателю, как и в обычном QR. Две строки ниже
+  // оставлены намеренно: это не оформление, а страховка денег. «Сами не
+  // подтверждайте» запрещает кассиру провести офлайн-СБП без выписки, а
+  // протухший код магазина — это заявка, которая не доедет до учёта.
+  var lines=['<span class="qrbig">Откройте приложение банка'
+    +'<br>и отсканируйте внутри него</span>',
+    "Сами не подтверждайте: подтверждение = деньги в банке."];
   var qrState=offQrState();
-  if(qrState)lines.push(qrState.fresh
-    ?("Код магазина действует ещё "+Math.max(0,Math.round(qrState.left/3600000))+" ч — "
-      +"если время выйдет, обновите кассу при связи.")
-    :("⚠ "+qrState.text+"."));
-  $("qrNote").innerHTML=lines.map(function(t){return esc(t);}).join("<br>");
+  if(qrState&&!qrState.fresh)lines.push("⚠ "+esc(qrState.text)+".");
+  $("qrNote").innerHTML=lines.join("<br>");
   // Камера → банк: если код — ссылка, даём «Открыть банк» и «Поделиться»
   // (покупателю в мессенджер проще отправить ссылку, чем ловить камерой текст).
   var open=qrOpenUrl(payLink(q.link_template,total),q.open_url);
@@ -1319,16 +1322,11 @@ function showPaymentQr(sale){
   var svg=qr.svg||(qr.text&&window.QR?window.QR.svg(qr.text,{size:240,margin:2}):"");
   state.qrSvg=svg||"";
   box.innerHTML=svg||('<div class="empty">'+esc(qr.hint||"QR не настроен")+'</div>');
-  var lines=[];
-  if(qr.purpose)lines.push("Назначение: "+esc(qr.purpose));
-  if(diag.why)lines.push(esc(diag.why));
-  else{
-    var kind={gost:"Оплата по QR: сумма и назначение уже внутри",link:"Ссылка банка с суммой "+money(sale.amount),dynamic:"Динамический QR банка · "+money(sale.amount),static:"QR магазина · покупатель вводит сумму "+money(sale.amount)}[qr.kind]||"";
-    if(kind)lines.push(kind);
-  }
-  if(qr.bank_name)lines.push("Банк: "+esc(qr.bank_name));
-  lines.push("Склад спишется и выручка запишется только после подтверждения");
-  $("qrNote").innerHTML=lines.join("<br>");
+  // Покупателю нужна одна инструкция, а не простыня служебных деталей:
+  // назначение, банк и тип кода он всё равно не читает, а мелкий серый текст
+  // под кодом теряется на телефоне. Крупно — только что сделать.
+  $("qrNote").innerHTML='<span class="qrbig">Откройте приложение банка'
+    +'<br>и отсканируйте внутри него</span>';
   var hasText=!!qr.text;
   var open=qrOpenUrl((diag.can_open?qr.open_url:""),payLink(qr.link_template,sale.amount));
   var canOpen=!!open;
@@ -1835,6 +1833,10 @@ function moneyEvent(row){
 }
 function refreshBadge(){
   api(withToken("/api/cashier/incoming")).then(function(r){
+    // Сервер ответил — значит канал жив, каким бы путём ни пришли деньги.
+    // Без этой отметки касса на страховочном опросе вечно показывала
+    // «Поток событий молчит» (дефект оболочки 17.0.14).
+    LINK.poll=Date.now();netState();
     var n=(r.payments||[]).length,tab=$("tabIn");
     $("tabInLbl").textContent=n?("Входящие · "+n):"Входящие";
     tab.classList.toggle("nudge",n>0);

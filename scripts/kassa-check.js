@@ -127,6 +127,24 @@ if (problems.length === 0) {
     k.ev('netMark(true);');
     if (dot._classes.has('off')) throw new Error('точка не позеленела после возврата связи');
   });
+
+  // 8. Дефект оболочки 17.0.14: «Поток событий молчит» висел вечно.
+  //    В приложении EventSource поднимается не всегда, касса честно уходила на
+  //    страховочный опрос раз в 25 с — деньги приходили, но опрос «живость»
+  //    канала не отмечал, и плашка не скрывалась до перезапуска кассы.
+  check('опрос снимает «поток событий молчит»', () => {
+    k.ev('LINK.ok=true;LINK.stream=0;LINK.poll=0;state.offline=false;netState();');
+    const bar = k.ev('$("linkBar")');
+    if (bar.hidden) throw new Error('ни потока, ни опроса — плашка обязана предупреждать');
+    if (!bar._classes.has('warn')) throw new Error('плашка не помечена как «молчит»');
+    // Сервер ответил на опрос — канал жив, предупреждению не место.
+    k.ev('LINK.poll=Date.now();netState();');
+    if (!bar.hidden) throw new Error('после успешного опроса плашка не скрылась');
+    if (bar._classes.has('warn')) throw new Error('класс «молчит» остался после опроса');
+    // И обратно: опрос устарел вместе с потоком — предупреждение возвращается.
+    k.ev('LINK.poll=Date.now()-POLL_QUIET-1000;netState();');
+    if (bar.hidden) throw new Error('устаревший опрос не должен считаться живым каналом');
+  });
 }
 
 if (problems.length) {
