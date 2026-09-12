@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import tempfile
 import types
 import unittest
@@ -183,6 +184,38 @@ class ShelfPriceTagFrontendTests(unittest.TestCase):
         self.assertIn('width: 67mm; height: 32mm', legacy_page)
         self.assertIn('width: 67mm; height: 57mm', legacy_page)
         self.assertIn('PER_PAGE={standard:27,promo:15}', legacy_page)
+
+
+class PriceTagDesignerMarkupTests(unittest.TestCase):
+    """Контракт конструктора ценников (`site/price-tags.html`).
+
+    Это строки, а не поведение: страницу нечем исполнить без браузера.
+    Проверяем то, что уже ломалось, — опция должна существовать во всех
+    местах сразу (чекбокс, `DEFAULTS`, `FIELDS`), иначе конструктор молча
+    её не читает, и настройка «есть в списке, но не работает».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (ROOT / "site" / "price-tags.html").read_text(encoding="utf-8")
+
+    def test_date_option_is_wired_everywhere(self):
+        self.assertIn('id="showDate" type="checkbox"', self.html, "нет чекбокса «Дата ценника»")
+        self.assertIn("showDate: false", self.html, "опции нет в DEFAULTS")
+        self.assertRegex(self.html, r"key: 'showDate',\s+kind: 'check'")
+        self.assertIn("opts.showDate ? 'ценник от ' + todayRu()", self.html,
+                      "дата не попадает в строку мета-данных ценника")
+        self.assertRegex(self.html, r"function todayRu\(\)")
+
+    def test_every_field_has_its_control(self):
+        """Поле без элемента на странице — настройка, которая не работает."""
+        declared = re.findall(
+            r"\{ key: '([A-Za-z]+)',\s+kind: '\w+',\s+(?:id|name): '([^']+)'", self.html)
+        self.assertGreater(len(declared), 10, "список FIELDS не разобрался")
+        missing = [f"{key} → {ident}" for key, ident in declared
+                   if f'id="{ident}"' not in self.html
+                   and f'name="{ident}"' not in self.html]
+        self.assertEqual([], missing, "у этих полей нет элемента на странице")
 
 
 if __name__ == "__main__":
