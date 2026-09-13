@@ -18,7 +18,7 @@ API_SOURCE = (ROOT / "connector" / "printflow" / "api.py").read_text(encoding="u
 
 # Сколько маршрутов перенесено. Число фиксируется намеренно: следующая порция
 # должна изменить его явно, а не «само получилось».
-PORTED_COUNT = 93
+PORTED_COUNT = 166
 
 
 def ported_routes() -> list[dict]:
@@ -61,7 +61,10 @@ class PortedGetRoutesTests(unittest.TestCase):
         """Тело должно читать `api.` и `ctx.one(` — иначе NameError в рантайме."""
         source = (ROOT / "connector" / "printflow" / "routes_get.py").read_text(encoding="utf-8")
         bodies = source.split("@router.get(", 1)[1]
-        self.assertNotRegex(bodies, r"\bself\.", "осталось обращение к self")
+        # Именно `\bself\b`, а не `self.`: `getattr(self, "…")` точкой не
+        # выдаёт себя, и первая версия контракта такое пропустила — два
+        # маршрута упали в 500 уже на живом стенде.
+        self.assertNotRegex(bodies, r"\bself\b", "осталось обращение к self")
         self.assertNotRegex(bodies, r"(?<![.\w])one\(",
                             "остался legacy-замыкатель one() — нужен ctx.one()")
 
@@ -80,7 +83,7 @@ class DispatcherShrinksTests(unittest.TestCase):
         for line in API_SOURCE.splitlines():
             if re.search(r"if path (==|in )", line):
                 count += len(re.findall(r'"(/api/[^"]+)"', line))
-        self.assertLessEqual(count, 317,
+        self.assertLessEqual(count, 244,
                              "if-цепочек в api.py больше, чем записано в справке")
 
 

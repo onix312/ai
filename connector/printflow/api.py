@@ -1006,24 +1006,9 @@ class Api:
         if routed is not None:
             return routed
 
-        if path == "/api/job/passport":
-            from .passport import job_passport
-            return 200, job_passport(self.db, one("id"))
-        if path == "/api/camera/diagnose":
-            from .camera import diagnose
-            return 200, diagnose(self.printer_or_fail(one("printer_id")))
-        if path == "/api/printer/rtsp-link":
-            # Ссылка содержит Access Code — отдаём только по явному запросу.
-            from .camera import rtsp_link
-            printer = self.printer_or_fail(one("printer_id"))
-            link = rtsp_link(printer)
-            if not link:
-                return 200, {"link": "", "error":
-                             "Нужны IP и Access Code в карточке принтера"}
-            self.db.add_event("printer", "Запрошена RTSP-ссылка",
-                              printer.record.get("name") or "Принтер",
-                              printer.id, {})
-            return 200, {"link": link}
+                # /api/system/backups намеренно остался в if-цепочке: обработчику
+        # нужны `list_backups`/`pending_restore` из `.db`, а контракт
+        # test_router не пускает импорт db в модули маршрутов.
         if path == "/api/system/backups":
             from .db import list_backups, pending_restore
             db_stat = None
@@ -1036,103 +1021,7 @@ class Api:
             return 200, {"backups": list_backups(),
                          "db": db_stat,
                          "pending": pending_restore()}
-        if path == "/api/printer/discover":
-            # SSDP в локальной сети + принтеры аккаунта Bambu Cloud.
-            # Access Code облачных устройств в браузер не отдаётся: при
-            # добавлении из облака сервер подставляет его сам.
-            return 200, {"found": BambuPrinter.discover(),
-                         "cloud": self.cloud_devices()}
-        if path == "/api/printer/files":
-            printer = self.printer_or_fail(one("printer_id"))
-            # Файлы SD — это FTPS по локальной сети. У облачного принтера
-            # IP/Access Code могли не заполниться при добавлении: пробуем
-            # дозаполнить (облачный список устройств + SSDP) прямо сейчас.
-            if not (printer.record.get("host") and printer.record.get("access_code")):
-                if not self._ensure_lan_access(printer):
-                    return 200, {"path": one("path", "/"), "files": [],
-                                 "error": ("Файлы SD-карты доступны только по локальной "
-                                           "сети: укажите IP принтера (экран → Настройки → "
-                                           "WLAN) и Access Code в карточке принтера.")}
-                printer = self.printer_or_fail(one("printer_id"))
-            from .routes_workshop import _files_payload
-            return 200, _files_payload(printer, one("path", "/"))
-        if path == "/api/orders":
-            # limit/offset (17.0.16): без них список заказов рос вместе с
-            # историей. Не переданы — прежнее поведение, весь список.
-            # archived=1 — только снятые с доски, archived=all — и те и другие.
-            archived = one("archived")
-            return 200, {"orders": self.repo.orders(
-                one("status"), one("q"), one("niche_id"),
-                int(num(one("limit", "0"), 0)), int(num(one("offset", "0"), 0)),
-                include_archived=archived in ("1", "all"),
-                only_archived=archived == "1")}
-        if path == "/api/order":
-            order = self.repo.order(one("id"))
-            return (200, order) if order else (404, {"error": "Заказ не найден"})
-        if path == "/api/spool":
-            spool = self.repo.spool(one("id"))
-            if not spool:
-                return 404, {"error": "Катушка не найдена"}
-            suggest = self.suggest_spool_slot(spool)
-            return 200, {"spool": spool, "printers": self.repo.printers(),
-                         "suggest": suggest}
-        if path == "/api/spool/qr-link":
-            spool = self.repo.spool(one("id"))
-            if not spool:
-                return 404, {"error": "Катушка не найдена"}
-            from urllib.parse import quote
-            info = self.qr_target("/spool.html", f"id={quote(spool['id'], safe='')}")
-            return 200, {**info, "spool": {
-                "id": spool["id"], "material": spool.get("material"),
-                "color_name": spool.get("color_name"),
-                "brand": spool.get("brand") or "",
-            }}
-        if path == "/api/finance":
-            days = int(num(one("days", "30"), 30))
-            self.acc.run_fixed_costs()
-            return 200, {"summary": self.acc.summary(days),
-                         "hour_cost": self.acc.actual_hour_cost(max(days, 30)),
-                         "series": self.acc.daily_series(days),
-                         "transactions": self.repo.transactions(50),
-                         "niches": self.acc.niche_report(),
-                         "accounts": self.acc.accounts_state(),
-                         "debts": self.acc.debts(),
-                         "break_even": self.acc.break_even()}
-        if path == "/api/shelf/item":
-            item = self.shelf.item(one("id"))
-            return (200, item) if item else (404, {"error": "Позиция не найдена"})
-        if path == "/api/shelf/cash":
-            # Касса магазина: сколько от стеллажа лежит в магазине и сколько забрали.
-            return 200, self.shelf.shop_cash()
-        if path == "/api/shelf/stock-available":
-            # Товары учётных складов с остатком ≥ 1 шт — их можно
-            # переместить на стеллаж (0 и «хвосты» меньше штуки не показываем).
-            goods_only = str(one("goods", "")).lower() in ("1", "true", "yes")
-            return 200, {"items": self.shelf.stock_available(goods_only=goods_only)}
-        if path == "/api/shelf/qr-link":
-            item = self.shelf.item(one("id"))
-            if not item:
-                return 404, {"error": "Позиция не найдена"}
-            info = self.shelf.qr_link(
-                one("id"), getattr(self, "last_host", ""),
-                str(self.db.setting("public_url", "") or ""),
-                int(getattr(self, "listen_port", 8080) or 8080))
-            return 200, info
-        if path == "/api/shelf/1c/lookup":
-            try:
-                item = self.shelf.cashier_lookup(one("barcode") or one("code"))
-            except ValueError as exc:
-                return 400, {"error": str(exc)}
-            return (200, {"item": item}) if item else (
-                404, {"error": "Код не привязан к позиции стеллажа"})
-        if path == "/api/shelf/1c/export":
-            items = self.shelf.items()
-            return 200, {
-                "filename": "printflow-1c-nomenclature.csv",
-                "csv": self.shelf.one_c_export_csv(),
-                "items": len(items),
-                "linked": sum(1 for item in items if item.get("barcode")),
-            }
+
         # ------------------------------------------------ учёт 3.0: номенклатура
         if path == "/api/nomenclature":
             items = self.nom.items(one("group_id"), one("kind"), one("search"),
@@ -1190,50 +1079,10 @@ class Api:
                 "price_types": self.db.query(
                     "SELECT * FROM price_types WHERE archived=0 ORDER BY position"),
             }
-        if path == "/api/nomenclature/item":
-            item = self.nom.item(one("id"))
-            return (200, item) if item else (404, {"error": "Позиция не найдена"})
         # --------------------------------------------------------- 5.0: сеть
-        if path == "/api/network/ips":
-            from .config import get_local_ips
-            info = self.qr_target("/")
-            return 200, {"ips": get_local_ips(), "base": info["base"],
-                         "reachable": info["reachable"], "source": info["source"]}
-        if path == "/api/network/scan":
-            from . import network
-            ranges = [r for r in one("ranges").split(",") if r.strip()]
-            return 200, {"found": network.scan_ranges(ranges)}
-        if path == "/api/network/mdns":
-            from . import network
-            return 200, {"found": network.mdns_discover()}
         # ------------------------------------------------------- 5.0: конверты
         # -------------------------------------------------------- 5.0: клиенты
         # ------------------------------------------------------------- склады
-        if path == "/api/warehouses":
-            # И3: просроченные холды снимаются лениво — список всегда свежий.
-            try:
-                self.stock.release_expired_holds(
-                    num(self.db.setting("sbp_hold_hours", 24), 24))
-            except Exception:
-                pass
-            return 200, {"warehouses": self.stock.warehouse_totals(),
-                         "reserves": self.stock.reserves(),
-                         "reserved": round(sum(num(r.get("qty"))
-                                               for r in self.stock.reserves()), 1)}
-        if path == "/api/order/filament-fact":
-            # План пластика заказа (катушки, граммы) против факта списаний
-            # с принтера (идеи 60, 68).
-            oid = one("id")
-            if not oid:
-                return 400, {"error": "Укажите заказ"}
-            return 200, self.acc.filament_plan_vs_actual(oid)
-        if path == "/api/reserves":
-            try:
-                self.stock.release_expired_holds(
-                    num(self.db.setting("sbp_hold_hours", 24), 24))
-            except Exception:
-                pass
-            return 200, {"reserves": self.stock.reserves()}
         if path == "/api/warehouse/positions":
             wid = one("id")
             wh = self.db.one(
@@ -1242,42 +1091,9 @@ class Api:
                 return 404, {"error": "Склад не найден"}
             return 200, {"warehouse": wh,
                          "positions": self.stock.warehouse_positions(wid)}
-        if path == "/api/stock/writeoffs":
-            # Сводка ручных списаний для блока «куда девается» (идея 6)
-            days = int(num(one("days", "30"), 30))
-            stats = self.stock.manual_stats(days=days)
-            recent = self.stock.manual_recent(days=days)
-            return 200, {"stats": stats, "recent": recent}
         # ---------------------------------------------------------- документы
-        if path == "/api/order/documents":
-            order_id = one("id") or one("order_id")
-            if not order_id:
-                raise ValueError("Не указан заказ")
-            return 200, self.docs.for_order(order_id)
-        if path == "/api/document":
-            doc = self.docs.get(one("id"))
-            return (200, doc) if doc else (404, {"error": "Документ не найден"})
         # ------------------------------------------------------------- партии
-        if path == "/api/batch":
-            batch = self.batches.get(one("id"))
-            return (200, batch) if batch else (404, {"error": "Партия не найдена"})
         # --------------------------------------------------------------- цены
-        if path == "/api/staff":
-            from .staff import ROLE_RIGHTS, ROLE_NAMES, Staff
-            staff = Staff(self.db)
-            return 200, {"staff": staff.all(), "invites": staff.invites(),
-                         "roles": {r: {"name": ROLE_NAMES[r],
-                                       "rights": sorted(rights)}
-                                  for r, rights in ROLE_RIGHTS.items()},
-                         "owner_chat": str(self.db.setting("telegram_chat_id",
-                                                           "") or "")}
-        if path == "/api/staff/subscriptions":
-            # Н54: реестр событий и выбор сотрудника.
-            from . import subscriptions
-            staff_id = one("staff_id") or one("id")
-            return 200, {"ok": True, "events": subscriptions.catalog(),
-                         "staff_id": staff_id,
-                         "current": subscriptions.get(self.db, staff_id) if staff_id else {}}
         if path == "/api/client-bot":
             bot = getattr(self.manager, "client_bot", None)
             from .client_bot import DEFAULT_TEMPLATES
@@ -1343,27 +1159,6 @@ class Api:
                     " ORDER BY datetime(l.created_at) DESC LIMIT 50"),
             }
             return 200, data
-        if path == "/api/conversations":
-            # Н55: одна лента вместо трёх вкладок.
-            from .conversations import Conversations
-            service = getattr(self, "conversations", None)
-            if service is None:
-                service = self.conversations = Conversations(self.db)
-            rows = service.threads(
-                int(num(one("limit"), 50)),
-                channel=one("channel"), q=one("q"),
-                unread_only=one("unread") in ("1", "true", "yes"),
-                needs_answer=one("needs_answer") in ("1", "true", "yes"))
-            return 200, {"ok": True, "threads": rows, "summary": service.summary()}
-        if path == "/api/conversations/thread":
-            from .conversations import Conversations
-            service = getattr(self, "conversations", None)
-            if service is None:
-                service = self.conversations = Conversations(self.db)
-            key = one("id") or one("key")
-            if not key:
-                raise ValueError("Не указан диалог")
-            return 200, {"ok": True, **service.thread(key, int(num(one("limit"), 100)))}
         if path == "/api/client-bot/outbox":
             # Н52: что не доставлено покупателям и почему.
             bot = getattr(self.manager, "client_bot", None)
@@ -1377,9 +1172,6 @@ class Api:
                 " ORDER BY datetime(replace(created_at,'T',' ')) DESC LIMIT 50")
             return 200, {"ok": True, "bot": True, "rows": rows, "staff_rows": staff,
                          "client_pending": len(rows), "staff_pending": len(staff)}
-        if path == "/api/client-bot/analytics":
-            bot = getattr(self.manager, "client_bot", None)
-            return 200, bot.analytics(int(num(one("days", "30"), 30))) if bot else {}
         if path == "/api/ops10/production":
             queue = self.manager.queue()
             history = self.manager.history(200)
@@ -1406,50 +1198,7 @@ class Api:
                          "rule_runs": self.manager.rules.recent_runs(30),
                          # Только телеметрия и AMS, секреты принтеров сюда не попадают.
                          "printers": self.manager.snapshot().get("printers", [])}
-        if path == "/api/rules":
-            from .rules import ACTIONS, TRIGGERS
-            return 200, {"rules": self.manager.rules.rules(),
-                         "triggers": TRIGGERS, "actions": ACTIONS}
-        if path == "/api/calc/plate-layout":
-            from .model_registry import ModelRegistry
-            mr = ModelRegistry(self.db)
-            return 200, mr.plate_layout(
-                num(one("dim_x")), num(one("dim_y")),
-                num(one("gap")), num(one("plate_w")), num(one("plate_h")))
-        if path == "/api/models":
-            from .model_registry import ModelRegistry
-            mr = ModelRegistry(self.db)
-            return 200, {"models": mr.list(one("search"), one("nom_id")),
-                         "stats": mr.stats()}
-        if path == "/api/model":
-            from .model_registry import ModelRegistry
-            mr = ModelRegistry(self.db)
-            model = mr.get(one("id"))
-            return (200, model) if model else (404, {"error": "Модель не найдена"})
         # ------------------------------------------------ 6.0: аналитика
-        if path == "/api/analytics/oee":
-            from .analytics import Analytics
-            return 200, Analytics(self.db).oee(
-                int(num(one("days", "30"), 30)), one("printer_id"))
-        if path == "/api/analytics/correction":
-            from .analytics import Analytics
-            return 200, Analytics(self.db).correction_factors(
-                int(num(one("days", "60"), 60)), one("material"))
-        if path == "/api/analytics/pnl-products":
-            from .analytics import Analytics
-            return 200, Analytics(self.db).pnl_by_product(
-                int(num(one("days", "30"), 30)))
-        if path == "/api/analytics/anomalies":
-            from .analytics import Analytics
-            return 200, {"anomalies": Analytics(self.db).detect_anomalies(
-                int(num(one("days", "30"), 30)))}
-        if path == "/api/analytics/defects":
-            from .analytics import Analytics
-            return 200, Analytics(self.db).defect_analysis(
-                int(num(one("days", "30"), 30)))
-        if path == "/api/analytics/smart-queue":
-            from .analytics import Analytics
-            return 200, Analytics(self.db).smart_queue()
         # 12.2 (ЗА3–ЗА5): нить покупателя у карточке заказа — чат, диалог,
         # ожидающая оплата, неотвеченный отзыв и шаблоны ответов одним запросом.
         if path == "/api/client-bot/order-thread":
@@ -1495,288 +1244,15 @@ class Api:
                     " LIMIT 1", (order_id,))
             return 200, payload
         # 8.0: Watch Folder
-        if path == "/api/watch/pending":
-            watch = getattr(self.manager, "watch", None)
-            return 200, {"items": watch.list_pending(int(num(one("limit","20"),20))) if watch else []}
-        if path == "/api/watch/status":
-            watch = getattr(self.manager, "watch", None)
-            return 200, {"enabled": bool(self.db.setting("watch_folder_enabled", False)), "path": str(self.db.setting("watch_folder_path","")), "pending": len(watch._pending) if watch else 0}
-        if path == "/api/studio/status":
-            studio = getattr(self.manager, "studio", None) if self.manager else None
-            if studio:
-                payload = studio.status()
-                payload.pop("access_code", None)
-                return 200, payload
-            return 200, {
-                "enabled": bool(self.db.setting("studio_gateway_enabled", False)),
-                "running": False,
-                "has_access_code": bool(self.db.setting("studio_gateway_access_code", "")),
-            }
-        if path == "/api/library":
-            from .library import FileLibrary
-            limit = int(num(one("limit", "80"), 80) or 80)
-            return 200, {"files": FileLibrary(self.db).list(
-                kind=one("kind"), q=one("q"), limit=max(1, min(limit, 500)))}
-        if path == "/api/slicer/status":
-            from .slicer import status as slicer_status
-            return 200, slicer_status(str(self.db.setting("slicer_bin", "") or ""))
-        if path == "/api/slicer/thumbnail":
-            fid = one("fid")
-            name = one("name")
-            watch = getattr(self.manager, "watch", None)
-            if watch and fid:
-                info = watch.get_pending(fid) or {}
-                thumbs = info.get("thumbnails_full", {}) or info.get("thumbnails", {})
-                # name may be exact key or suffix
-                for k,v in thumbs.items():
-                    if k==name or k.endswith(name):
-                        import base64
-                        try:
-                            base64.b64decode(v, validate=True)
-                            return 200, {"ok": True, "b64": v}
-                        except Exception:
-                            pass
-                return 404, {"error": "Превью не найдено"}
-            return 404, {"error": "Нет данных"}
-        if path == "/api/printer/preflight":
-            printer = self.printer_or_fail(one("printer_id"))
-            return 200, self.manager.preflight(printer.id, one("file"), int(num(one("plate"),1)), json.loads(one("mapping","[]") or "[]"))
-        if path == "/api/printer/files/tree":
-            printer = self.printer_or_fail(one("printer_id"))
-            if not (printer.record.get("host") and printer.record.get("access_code")):
-                self._ensure_lan_access(printer)
-                printer = self.printer_or_fail(one("printer_id"))
-            depth = int(num(one("depth"), 1))
-            try:
-                files = printer.files.list_tree(one("path","/"), depth)
-            except Exception as exc:
-                # Канал FTPS помечаем по факту (17.0.19): дерево не получилось —
-                # пробуем плоский список. Если и он упадёт, исключение уйдёт
-                # наружу, как и раньше, но причина уже записана в состояние.
-                self.mark_link(printer.id, "ftps", False,
-                               str(exc) or type(exc).__name__)
-                files = printer.files.list_files(one("path","/"))
-            self.mark_link(printer.id, "ftps", True)
-            return 200, {"path": one("path","/"), "files": files}
-        if path == "/api/printer/files/usage":
-            printer = self.printer_or_fail(one("printer_id"))
-            return 200, printer.files.disk_usage(one("path","/"))
-        if path == "/api/estimate":
-            fname = one("file").strip()
-            if not fname:
-                return 400, {"error": "Не указано имя файла"}
-            from .config import UPLOAD_DIR
-            from .estimate import estimate_file, parse_3mf_complete
-            safe_name = Path(fname).name
-            local = safe_file(UPLOAD_DIR, safe_name) or (UPLOAD_DIR / safe_name)
-            if not local.exists():
-                try:
-                    low = safe_name.lower()
-                    for pat in ("*.3mf", "*.gcode", "*.gcode.3mf"):
-                        for pp in UPLOAD_DIR.glob(pat):
-                            nlow = pp.name.lower()
-                            if nlow == low or low in nlow or nlow in low or pp.stem.lower() in low:
-                                local = pp
-                                break
-                        if local.exists():
-                            break
-                except Exception:
-                    pass
-            if not local.exists():
-                try:
-                    watch_root = str(self.db.setting("watch_folder_path", "") or "").strip()
-                    if watch_root:
-                        wp = Path(watch_root).expanduser() / safe_name
-                        if wp.exists():
-                            local = wp
-                        else:
-                            for pp in Path(watch_root).expanduser().glob("*.3mf"):
-                                if pp.name.lower() == safe_name.lower():
-                                    local = pp
-                                    break
-                except Exception:
-                    pass
-            if local.exists():
-                is_3mf = local.name.lower().endswith(".3mf")
-                if is_3mf:
-                    try:
-                        est = estimate_file(local)
-                        try:
-                            detail = parse_3mf_complete(local)
-                        except Exception:
-                            detail = {}
-                        if (not est.get("grams") and not est.get("total_grams")) and detail.get("plates"):
-                            total_g = round(sum(float(p.get("grams") or 0) for p in detail["plates"]), 1)
-                            total_m = round(sum(float(p.get("minutes") or 0) for p in detail["plates"]), 1)
-                            if detail["plates"]:
-                                est = dict(detail["plates"][0])
-                                est["total_grams"] = total_g
-                                est["total_minutes"] = total_m
-                                est["plates"] = detail["plates"]
-                                est["plate_count"] = len(detail["plates"])
-                        return 200, {"estimate": est, "detail": detail if 'detail' in locals() else {}}
-                    except Exception:
-                        return 200, {"estimate": estimate_file(local)}
-                else:
-                    return 200, {"estimate": estimate_file(local)}
-            base = Path(fname).name.lower()
-            base_variants = {base}
-            if base.endswith(".gcode.3mf"):
-                base_variants.add(base[:-10] + ".3mf")
-                base_variants.add(base[:-10])
-            if base.endswith(".3mf"):
-                base_variants.add(base[:-4])
-            known = None
-            try:
-                for job in self.manager.history(500) + self.manager.queue():
-                    job_name = Path(str(job.get("file") or job.get("name") or "")).name.lower()
-                    if job_name in base_variants or base in job_name or any(v in job_name for v in base_variants):
-                        if num(job.get("grams")) or num(job.get("est_grams")):
-                            known = job
-                            break
-                        if known is None:
-                            known = job
-                if known:
-                    grams = num(known.get("grams")) or num(known.get("est_grams"))
-                    minutes = num(known.get("duration_min")) or num(known.get("est_minutes"))
-                    if grams or minutes:
-                        return 200, {"estimate": {"grams": grams, "minutes": minutes,
-                                                   "total_grams": grams, "total_minutes": minutes,
-                                                   "source": "history"}}
-            except Exception:
-                pass
-            try:
-                for printer in self.manager.printers.values():
-                    est = self.manager._slicer_estimate(printer, fname)
-                    if num(est.get("grams")) or num(est.get("minutes")) or est.get("material") or est.get("color"):
-                        if est.get("grams") and not est.get("total_grams"):
-                            est["total_grams"] = est["grams"]
-                        if est.get("minutes") and not est.get("total_minutes"):
-                            est["total_minutes"] = est["minutes"]
-                        return 200, {"estimate": est}
-            except Exception:
-                pass
-            return 404, {"error": f"Файл не найден: {safe_name}"}
 
         # --- 8.5: Фаза 11 --------------------------------------------------
-        if path == "/api/content/week":
-            from .content import week_post
-            try:
-                days = max(1, min(int(one("days", "7") or 7), 92))
-            except ValueError:
-                days = 7
-            return 200, week_post(self.db, days)
-        if path == "/api/content/social":
-            from .content import social_pack
-            try:
-                days = max(7, min(int(one("days", "30") or 30), 366))
-            except ValueError:
-                days = 30
-            return 200, social_pack(self.db, days)
-        if path == "/api/content/avito":
-            from .content import avito_card
-            try:
-                return 200, avito_card(self.db, one("item_id"))
-            except ValueError as exc:
-                return 400, {"error": str(exc)}
-        if path == "/api/content/holiday":
-            from .content import holiday_cards
-            return 200, holiday_cards()
-        if path == "/api/content/season":
-            from .content import seasonality
-            return 200, seasonality(self.db)
-        if path == "/api/content/report":
-            from .content import workshop_report
-            try:
-                days = max(7, min(int(one("days", "30") or 30), 366))
-            except ValueError:
-                days = 30
-            return 200, workshop_report(self.db, days)
-        if path == "/api/shelf/forecast":
-            try:
-                days = max(1, min(int(one("days", "7") or 7), 30))
-            except ValueError:
-                days = 7
-            return 200, {"days": days, "items": self.shelf.forecast(days)}
-        if path == "/api/achievements":
-            from .achievements import achievements
-            return 200, {"badges": achievements(self.db)}
-        if path == "/api/job/keyframes":
-            from .config import PHOTO_DIR
-            job_id = one("id")
-            d = (PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
-            if not d or not d.is_dir():
-                return 200, {"frames": []}
-            return 200, {"frames": [f.name for f in sorted(d.iterdir())
-                                     if f.suffix == ".jpg"]}
-        if path == "/api/photos/similar":
-            from .photos import similar
-            try:
-                return 200, similar(self.db, one("photo_id"), limit=12)
-            except ValueError as exc:
-                return 400, {"error": str(exc)}
         if path == "/api/wish/list":
             customer_id = str(one("customer_id") or "")
             rows = self.db.query(
                 "SELECT * FROM wishes WHERE customer_id=? ORDER BY created_at DESC",
                 (customer_id,)) if customer_id else []
             return 200, {"wishes": rows}
-        if path == "/api/bed/reference":
-            from .config import PHOTO_DIR
-            return 200, {"has": (PHOTO_DIR / "bed_reference.jpg").is_file()}
         # ------------------------------------------------- 8.5: генераторы
-        if path == "/api/content/shelf-header":
-            from .content import shelf_header
-            try:
-                days = max(1, min(int(one("days", "7") or 7), 30))
-            except ValueError:
-                days = 7
-            return 200, shelf_header(self.db, days)
-        if path == "/api/content/promo":
-            from .content import promo_pack
-            return 200, promo_pack(self.db)
-        if path == "/api/content/week-video":
-            from .content import week_video
-            try:
-                days = max(1, min(int(one("days", "7") or 7), 30))
-            except ValueError:
-                days = 7
-            return 200, week_video(self.db, days)
-        if path == "/api/content/print-map":
-            from .content import print_map
-            return 200, print_map(self.db)
-        if path == "/api/order/thread":
-            from .content import order_thread
-            try:
-                return 200, order_thread(self.db, one("id"))
-            except ValueError as exc:
-                return 404, {"error": str(exc)}
-        if path == "/api/content/report/print":
-            from .content import workshop_report_html
-            try:
-                days = max(7, min(int(one("days", "30") or 30), 366))
-            except ValueError:
-                days = 30
-            return 200, {"html": workshop_report_html(self.db, days)}
-        if path == "/api/content/stickers":
-            from .content import stickers
-            return 200, {"html": stickers(one("kind", "all"))}
-        if path == "/api/content/business-card":
-            from .content import business_card_html
-            return 200, {"html": business_card_html(self.db, one("customer_id"))}
-        if path == "/api/tour/state":
-            backup = str(self.db.setting("tour_backup_file", "") or "")
-            return 200, {"active": bool(backup), "backup": backup}
-        if path == "/api/labels/code128":
-            from .barcode import svg, validate
-            text = str(one("text") or "").strip()
-            if not text:
-                return 400, {"error": "Нет текста для штрихкода"}
-            try:
-                info = validate(text)
-            except ValueError as exc:
-                return 400, {"error": str(exc)}
-            return 200, {"svg": svg(text), **info}
         return 404, {"error": "Неизвестный маршрут"}
 
     # ------------------------------------------------------------------ POST
