@@ -1006,16 +1006,9 @@ class Api:
         if routed is not None:
             return routed
 
-        if path == "/api/health":
-            return 200, {"ok": True, "version": APP_VERSION,
-                         "uptime": round(time.time() - self.started_at)}
-        if path == "/api/month-close":
-            return 200, self.month_close.state(one("key"))
         if path == "/api/job/passport":
             from .passport import job_passport
             return 200, job_passport(self.db, one("id"))
-        if path == "/api/catalog/recalc":
-            return 200, self.acc.recalc_catalog(False)
         if path == "/api/camera/diagnose":
             from .camera import diagnose
             return 200, diagnose(self.printer_or_fail(one("printer_id")))
@@ -1043,30 +1036,12 @@ class Api:
             return 200, {"backups": list_backups(),
                          "db": db_stat,
                          "pending": pending_restore()}
-        if path == "/api/bootstrap":
-            return 200, {
-                "version": APP_VERSION,
-                "settings": self.db.settings(),
-                "printers": self.repo.printers(),
-                "statuses": self.repo.statuses(),
-                "niches": self.repo.niches(),
-                "summary": self.acc.summary(30),
-                "state": self.manager.snapshot(),
-            }
-        if path == "/api/state":
-            return 200, self.manager.snapshot(one("printer_id"))
         if path == "/api/printer/discover":
             # SSDP в локальной сети + принтеры аккаунта Bambu Cloud.
             # Access Code облачных устройств в браузер не отдаётся: при
             # добавлении из облака сервер подставляет его сам.
             return 200, {"found": BambuPrinter.discover(),
                          "cloud": self.cloud_devices()}
-        if path == "/api/cloud/status":
-            return 200, self.cloud_status()
-        if path == "/api/printer/cloud-files":
-            return 200, {"tasks": self.cloud_tasks(one("printer_id"))}
-        if path == "/api/wall":
-            return 200, self.manager.wall()
         if path == "/api/printer/files":
             printer = self.printer_or_fail(one("printer_id"))
             # Файлы SD — это FTPS по локальной сети. У облачного принтера
@@ -1094,29 +1069,6 @@ class Api:
         if path == "/api/order":
             order = self.repo.order(one("id"))
             return (200, order) if order else (404, {"error": "Заказ не найден"})
-        if path == "/api/order/readiness":
-            return 200, self.production.readiness(
-                one("id"), one("printer_id"), one("spool_id"))
-        if path == "/api/order/completion":
-            return 200, self.completion.summary(one("id"))
-        if path == "/api/order/fulfillment":
-            return 200, self.fulfillment.summary(one("id"))
-        if path == "/api/order/stock":
-            return 200, self.stocker.summary(one("id"))
-        if path == "/api/debt/summary":
-            return 200, self.receivables.summary(one("id"))
-        if path == "/api/aftercare/queue":
-            return 200, self.aftercare.queue(int(num(one("limit", "80"), 80)))
-        if path == "/api/aftercare/summary":
-            return 200, self.aftercare.summary(one("id"))
-        if path == "/api/customers":
-            return 200, {"customers": self.repo.customers()}
-        if path == "/api/statuses":
-            return 200, {"statuses": self.repo.statuses()}
-        if path == "/api/niches":
-            return 200, {"niches": self.repo.niches()}
-        if path == "/api/spools":
-            return 200, {"spools": self.repo.spools(one("all") == "1")}
         if path == "/api/spool":
             spool = self.repo.spool(one("id"))
             if not spool:
@@ -1135,10 +1087,6 @@ class Api:
                 "color_name": spool.get("color_name"),
                 "brand": spool.get("brand") or "",
             }}
-        if path == "/api/catalog":
-            return 200, {"catalog": self.repo.catalog()}
-        if path == "/api/transactions":
-            return 200, {"transactions": self.repo.transactions(int(num(one("limit", "200"), 200)))}
         if path == "/api/finance":
             days = int(num(one("days", "30"), 30))
             self.acc.run_fixed_costs()
@@ -1150,54 +1098,6 @@ class Api:
                          "accounts": self.acc.accounts_state(),
                          "debts": self.acc.debts(),
                          "break_even": self.acc.break_even()}
-        if path == "/api/money":
-            return 200, self.acc.money_state(int(num(one("months", "6"), 6)))
-        if path == "/api/pnl":
-            return 200, self.acc.pnl(int(num(one("months", "6"), 6)))
-        if path == "/api/tax":
-            return 200, self.acc.tax_report(int(num(one("year", "0"), 0)))
-        if path == "/api/break-even":
-            return 200, self.acc.break_even()
-        if path == "/api/report":
-            return 200, self.acc.report(one("period", "month"),
-                                        int(num(one("offset", "0"), 0)))
-        if path == "/api/report/sales":
-            return 200, self.acc.sales_details(
-                one("period", "month"), int(num(one("offset", "0"), 0)),
-                int(num(one("limit", "500"), 500)))
-        if path == "/api/debts":
-            return 200, self.acc.debts()
-        if path == "/api/accounts":
-            return 200, {"accounts": self.repo.accounts(),
-                         "state": self.acc.accounts_state()}
-        if path == "/api/channels":
-            return 200, {"channels": self.repo.channels()}
-        if path == "/api/expense-categories":
-            return 200, {"categories": self.repo.expense_categories()}
-        if path == "/api/fixed-costs":
-            return 200, {"fixed_costs": self.repo.fixed_costs(),
-                         "monthly": self.acc.fixed_costs_monthly()}
-        if path == "/api/payments":
-            return 200, {"payments": self.repo.payments(one("order_id"))}
-        if path == "/api/export/report":
-            return 200, {"filename": f"printflow-{one('period', 'month')}.csv",
-                         "csv": self.acc.report_csv(one("period", "month"),
-                                                    int(num(one("offset", "0"), 0)))}
-        if path == "/api/export/sales":
-            return 200, {"filename": f"printflow-продажи-{one('period', 'month')}.csv",
-                         "csv": self.acc.sales_details_csv(one("period", "month"),
-                                                           int(num(one("offset", "0"), 0)))}
-        if path == "/api/export/transactions":
-            return 200, {"filename": "printflow-проводки.csv",
-                         "csv": self.acc.transactions_csv(int(num(one("days", "365"), 365)))}
-        if path == "/api/jobs":
-            return 200, {"queue": self.manager.queue(),
-                         "history": self.manager.history(int(num(one("limit", "100"), 100)))}
-        if path == "/api/timeline":
-            return 200, {"day": one("day", now_iso()[:10]),
-                         "jobs": self.repo.timeline(one("day", now_iso()[:10]))}
-        if path == "/api/shelf":
-            return 200, {"items": self.shelf.items(), "summary": self.shelf.summary()}
         if path == "/api/shelf/item":
             item = self.shelf.item(one("id"))
             return (200, item) if item else (404, {"error": "Позиция не найдена"})
@@ -1209,9 +1109,6 @@ class Api:
             # переместить на стеллаж (0 и «хвосты» меньше штуки не показываем).
             goods_only = str(one("goods", "")).lower() in ("1", "true", "yes")
             return 200, {"items": self.shelf.stock_available(goods_only=goods_only)}
-        if path == "/api/shelf/moves":
-            return 200, {"moves": self.shelf.moves(one("item_id"),
-                                                   int(num(one("limit", "100"), 100)))}
         if path == "/api/shelf/qr-link":
             item = self.shelf.item(one("id"))
             if not item:
@@ -1296,38 +1193,12 @@ class Api:
         if path == "/api/nomenclature/item":
             item = self.nom.item(one("id"))
             return (200, item) if item else (404, {"error": "Позиция не найдена"})
-        if path == "/api/nomenclature/groups":
-            return 200, {"groups": self.nom.groups()}
-        if path == "/api/replenishment":
-            return 200, {"rows": self.batches.plan_replenishment(one("warehouse_id"))}
-        if path == "/api/nomenclature/frozen-capital":
-            return 200, self.nom.frozen_capital(one("warehouse_id"))
-        if path == "/api/nomenclature/filament-forecast":
-            return 200, self.nom.filament_forecast(int(num(one("days", "30"), 30)))
-        if path == "/api/plan/day":
-            return 200, self.planner.day_plan()
-        if path == "/api/insights":
-            return 200, self.insights.all()
-        if path == "/api/payback":
-            return 200, self.insights.payback()
-        if path == "/api/tax-compare":
-            return 200, self.insights.tax_compare()
-        if path == "/api/cash-daily":
-            return 200, self.insights.cash_forecast_daily(int(num(one("days", "90"), 90)))
-        if path == "/api/public/catalog":
-            return 200, self.public_catalog()
         # --------------------------------------------------------- 5.0: сеть
-        if path == "/api/network/diagnose":
-            return 200, self.network_diagnose(one("host"))
         if path == "/api/network/ips":
             from .config import get_local_ips
             info = self.qr_target("/")
             return 200, {"ips": get_local_ips(), "base": info["base"],
                          "reachable": info["reachable"], "source": info["source"]}
-        if path == "/api/labels":
-            return 200, self.labels(one("kind", "all"))
-        if path == "/api/ops/today":
-            return 200, self.ops_today()
         if path == "/api/network/scan":
             from . import network
             ranges = [r for r in one("ranges").split(",") if r.strip()]
@@ -1336,21 +1207,7 @@ class Api:
             from . import network
             return 200, {"found": network.mdns_discover()}
         # ------------------------------------------------------- 5.0: конверты
-        if path == "/api/envelopes":
-            return 200, {"envelopes": self.envelopes.list(),
-                         "total": self.envelopes.total(),
-                         "auto": self.db.setting("envelope_auto", False)}
         # -------------------------------------------------------- 5.0: клиенты
-        if path == "/api/clients/rfm":
-            return 200, {"rows": self.clients.rfm(int(num(one("days", "90"), 90)))}
-        if path == "/api/clients/duplicates":
-            return 200, {"groups": self.clients.duplicates()}
-        if path == "/api/data-check":
-            return 200, self.repo.data_check()
-        if path == "/api/order/history":
-            return 200, {"history": self.repo.order_history(one("id"))}
-        if path == "/api/track/order":
-            return 200, self.track_order(one("number"), one("phone"), one("token"))
         # ------------------------------------------------------------- склады
         if path == "/api/warehouses":
             # И3: просроченные холды снимаются лениво — список всегда свежий.
@@ -1363,10 +1220,6 @@ class Api:
                          "reserves": self.stock.reserves(),
                          "reserved": round(sum(num(r.get("qty"))
                                                for r in self.stock.reserves()), 1)}
-        if path == "/api/stock":
-            return 200, {"balances": self.stock.balances(one("warehouse_id")),
-                         "moves": self.stock.moves(one("nom_id"), one("warehouse_id"),
-                                                   int(num(one("limit", "80"), 80)))}
         if path == "/api/order/filament-fact":
             # План пластика заказа (катушки, граммы) против факта списаний
             # с принтера (идеи 60, 68).
@@ -1374,9 +1227,6 @@ class Api:
             if not oid:
                 return 400, {"error": "Укажите заказ"}
             return 200, self.acc.filament_plan_vs_actual(oid)
-        if path == "/api/stock/turnover":
-            return 200, {"rows": self.stock.turnover(one("from"), one("to"),
-                                                     one("warehouse_id"))}
         if path == "/api/reserves":
             try:
                 self.stock.release_expired_holds(
@@ -1399,10 +1249,6 @@ class Api:
             recent = self.stock.manual_recent(days=days)
             return 200, {"stats": stats, "recent": recent}
         # ---------------------------------------------------------- документы
-        if path == "/api/documents":
-            return 200, {"documents": self.docs.list(
-                one("kind"), one("state"), one("warehouse_id"), one("search"),
-                int(num(one("limit", "200"), 200)), one("order_id"))}
         if path == "/api/order/documents":
             order_id = one("id") or one("order_id")
             if not order_id:
@@ -1412,25 +1258,10 @@ class Api:
             doc = self.docs.get(one("id"))
             return (200, doc) if doc else (404, {"error": "Документ не найден"})
         # ------------------------------------------------------------- партии
-        if path == "/api/batches":
-            return 200, {"batches": self.batches.list(
-                one("state"), int(num(one("limit", "100"), 100)))}
         if path == "/api/batch":
             batch = self.batches.get(one("id"))
             return (200, batch) if batch else (404, {"error": "Партия не найдена"})
         # --------------------------------------------------------------- цены
-        if path == "/api/price-types":
-            return 200, {"price_types": self.db.query(
-                "SELECT * FROM price_types WHERE archived=0 ORDER BY position")}
-        if path == "/api/audit":
-            return 200, {"rows": self.db.query(
-                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?",
-                (int(num(one("limit", "100"), 100)),))}
-        if path == "/api/events":
-            return 200, {"events": self.db.events(int(num(one("limit", "80"), 80)),
-                                                  one("printer_id"), one("kind"))}
-        if path == "/api/settings":
-            return 200, {"settings": self.db.settings()}
         if path == "/api/staff":
             from .staff import ROLE_RIGHTS, ROLE_NAMES, Staff
             staff = Staff(self.db)
@@ -1546,21 +1377,9 @@ class Api:
                 " ORDER BY datetime(replace(created_at,'T',' ')) DESC LIMIT 50")
             return 200, {"ok": True, "bot": True, "rows": rows, "staff_rows": staff,
                          "client_pending": len(rows), "staff_pending": len(staff)}
-        if path == "/api/client-bot/inbox":
-            return 200, {"items": self.db.query(
-                "SELECT l.*,c.username,c.inbox_status,c.assigned_to FROM client_bot_log l"
-                " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
-                " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT ?",
-                (max(1, min(200, int(num(one("limit", "60"), 60)))),))}
         if path == "/api/client-bot/analytics":
             bot = getattr(self.manager, "client_bot", None)
             return 200, bot.analytics(int(num(one("days", "30"), 30))) if bot else {}
-        if path == "/api/client-bot/payments":
-            return 200, {"payments": self.db.query(
-                "SELECT p.*,o.number,o.product,c.name FROM client_payment_intents p"
-                " LEFT JOIN orders o ON o.id=p.order_id LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
-                " ORDER BY datetime(p.created_at) DESC LIMIT ?",
-                (max(1, min(200, int(num(one("limit", "60"), 60)))),))}
         if path == "/api/ops10/production":
             queue = self.manager.queue()
             history = self.manager.history(200)
@@ -1587,31 +1406,10 @@ class Api:
                          "rule_runs": self.manager.rules.recent_runs(30),
                          # Только телеметрия и AMS, секреты принтеров сюда не попадают.
                          "printers": self.manager.snapshot().get("printers", [])}
-        if path == "/api/rules/runs":
-            return 200, {"runs": self.manager.rules.recent_runs(
-                max(1, min(200, int(num(one("limit", "50"), 50)))))}
         if path == "/api/rules":
             from .rules import ACTIONS, TRIGGERS
             return 200, {"rules": self.manager.rules.rules(),
                          "triggers": TRIGGERS, "actions": ACTIONS}
-        if path == "/api/shopping":
-            return 200, {"items": self.shopping.items(one("all") == "1"),
-                         "summary": self.shopping.summary(),
-                         "filament_stats": self.acc.filament_stats(int(num(one("days", "30"), 30)))}
-        if path == "/api/purchase-hint":
-            return 200, {"hint": self.acc.purchase_hint()}
-        if path == "/api/update-check":
-            return 200, self.updater.report()
-        if path == "/api/abc":
-            return 200, self.acc.abc_report(int(num(one("days", "30"), 30)))
-        if path == "/api/calc/materials":
-            return 200, self.acc.material_options()
-        if path == "/api/materials":
-            return 200, self.acc.material_options()
-        if path == "/api/calc/real-stats":
-            return 200, self.acc.real_stats(
-                one("product"), one("material"),
-                int(num(one("days", "60"), 60)))
         if path == "/api/calc/plate-layout":
             from .model_registry import ModelRegistry
             mr = ModelRegistry(self.db)
@@ -1652,30 +1450,6 @@ class Api:
         if path == "/api/analytics/smart-queue":
             from .analytics import Analytics
             return 200, Analytics(self.db).smart_queue()
-        if path == "/api/filament-stats":
-            return 200, self.acc.filament_stats(int(num(one("days", "30"), 30)))
-        if path == "/api/price-history":
-            return 200, {"history": self.acc.price_history(one("product"),
-                                                           int(num(one("limit", "30"), 30)))}
-        if path == "/api/defects":
-            return 200, {"defects": self.db.query(
-                "SELECT d.*, j.name job_name FROM defects d"
-                " LEFT JOIN print_jobs j ON j.id=d.job_id"
-                " ORDER BY datetime(d.at) DESC LIMIT ?", (int(num(one("limit", "100"), 100)),))}
-        if path == "/api/defect/recovery":
-            return 200, self.defect_recovery.summary(
-                one("id") or one("job_id"), num(one("grams")), one("reason")
-            )
-        if path == "/api/schedule":
-            return 200, {"commands": self.db.query(
-                "SELECT * FROM scheduled_commands ORDER BY done, datetime(at) LIMIT ?",
-                (int(num(one("limit", "50"), 50)),))}
-        if path == "/api/ams-profiles":
-            return 200, {"profiles": self.db.query("SELECT * FROM ams_profiles ORDER BY name")}
-        if path == "/api/templates":
-            return 200, {"templates": self._templates()}
-        if path == "/api/order/photos":
-            return 200, {"photos": self._order_photos(one("order_id"))}
         # 12.2 (ЗА3–ЗА5): нить покупателя у карточке заказа — чат, диалог,
         # ожидающая оплата, неотвеченный отзыв и шаблоны ответов одним запросом.
         if path == "/api/client-bot/order-thread":
@@ -1720,8 +1494,6 @@ class Api:
                     " AND COALESCE(state,'new') NOT IN ('answered','closed','skipped')"
                     " LIMIT 1", (order_id,))
             return 200, payload
-        if path == "/api/backup":
-            return 200, self.repo.export_all()
         # 8.0: Watch Folder
         if path == "/api/watch/pending":
             watch = getattr(self.manager, "watch", None)
@@ -1886,10 +1658,6 @@ class Api:
                 pass
             return 404, {"error": f"Файл не найден: {safe_name}"}
 
-        if path == "/api/settings/profiles":
-            return 200, {"profiles": self.db.setting("settings_profiles", [])}
-        if path == "/api/slicer/materials":
-            return 200, self.acc.material_options()
         # --- 8.5: Фаза 11 --------------------------------------------------
         if path == "/api/content/week":
             from .content import week_post
@@ -1930,15 +1698,9 @@ class Api:
             except ValueError:
                 days = 7
             return 200, {"days": days, "items": self.shelf.forecast(days)}
-        if path == "/api/shelf/tags":
-            return 200, self.shelf.live_tags()
         if path == "/api/achievements":
             from .achievements import achievements
             return 200, {"badges": achievements(self.db)}
-        if path == "/api/system/heartbeat":
-            return 200, self._heartbeat()
-        if path == "/api/ams/suggestion":
-            return 200, {"suggestion": self._ams_suggestion()}
         if path == "/api/job/keyframes":
             from .config import PHOTO_DIR
             job_id = one("id")
@@ -1947,16 +1709,12 @@ class Api:
                 return 200, {"frames": []}
             return 200, {"frames": [f.name for f in sorted(d.iterdir())
                                      if f.suffix == ".jpg"]}
-        if path == "/api/order/pack-data":
-            return 200, self._pack_data(one("id"))
         if path == "/api/photos/similar":
             from .photos import similar
             try:
                 return 200, similar(self.db, one("photo_id"), limit=12)
             except ValueError as exc:
                 return 400, {"error": str(exc)}
-        if path == "/api/public/my":
-            return 200, self._my_nozza(one("code"))
         if path == "/api/wish/list":
             customer_id = str(one("customer_id") or "")
             rows = self.db.query(

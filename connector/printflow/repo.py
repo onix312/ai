@@ -1248,6 +1248,52 @@ class Repo:
                 self.db.delete("transactions", row["tx_id"])
 
     # --------------------------------------------------------------- принтеры
+    # --------------------------------------------------- списки для чтения
+    # Запросы, которые в 17.0.21 переехали из диспетчера вместе с маршрутами.
+    # SQL живёт здесь, а не в транспортном слое: контракт
+    # `test_router.RoutesHaveNoSqlTests` не пускает запросы в модули маршрутов.
+
+    def price_types(self) -> list[dict]:
+        return self.db.query("SELECT * FROM price_types WHERE archived=0"
+                             " ORDER BY position")
+
+    def audit_rows(self, limit: int = 100) -> list[dict]:
+        # Предел передаётся как есть: раньше его не ограничивали, и limit=0
+        # означал «ничего не отдавать». Менять это молча нельзя.
+        return self.db.query("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?",
+                             (int(limit),))
+
+    def client_inbox(self, limit: int = 60) -> list[dict]:
+        """Непрочитанные входящие клиентского бота вместе с состоянием чата."""
+        return self.db.query(
+            "SELECT l.*,c.username,c.inbox_status,c.assigned_to FROM client_bot_log l"
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+            " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT ?",
+            (max(1, min(200, int(limit))),))
+
+    def client_payments(self, limit: int = 60) -> list[dict]:
+        """Намерения оплат из клиентского бота с номером заказа и именем клиента."""
+        return self.db.query(
+            "SELECT p.*,o.number,o.product,c.name FROM client_payment_intents p"
+            " LEFT JOIN orders o ON o.id=p.order_id"
+            " LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
+            " ORDER BY datetime(p.created_at) DESC LIMIT ?",
+            (max(1, min(200, int(limit))),))
+
+    def defect_rows(self, limit: int = 100) -> list[dict]:
+        return self.db.query(
+            "SELECT d.*, j.name job_name FROM defects d"
+            " LEFT JOIN print_jobs j ON j.id=d.job_id"
+            " ORDER BY datetime(d.at) DESC LIMIT ?", (int(limit),))
+
+    def scheduled_commands(self, limit: int = 50) -> list[dict]:
+        return self.db.query("SELECT * FROM scheduled_commands"
+                             " ORDER BY done, datetime(at) LIMIT ?",
+                             (int(limit),))
+
+    def ams_profiles(self) -> list[dict]:
+        return self.db.query("SELECT * FROM ams_profiles ORDER BY name")
+
     def printers(self, include_secrets: bool = False) -> list[dict]:
         rows = self.db.query("SELECT * FROM printers ORDER BY position, name")
         from .crypto import decrypt, is_encrypted

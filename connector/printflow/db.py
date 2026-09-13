@@ -2403,11 +2403,15 @@ class Database:
         if include_secrets:
             # Расшифровываем секреты только явно запрошенным читателям.
             from .crypto import decrypt
-            for key in SECRET_SETTINGS:
+            for key in sorted(SECRET_SETTINGS):
                 if key in data and isinstance(data[key], str):
                     data[key] = decrypt(data[key])
         else:
-            for key in SECRET_SETTINGS:
+            # Порядок обхода фиксирован (17.0.21): SECRET_SETTINGS — множество,
+            # а порядок его обхода меняется от процесса к процессу. Без sort()
+            # ключи `has_*` в /api/settings каждый раз шли в своём порядке, и
+            # одинаковый ответ нельзя было сравнить побайтово.
+            for key in sorted(SECRET_SETTINGS):
                 data[f"has_{key}"] = bool(data.get(key))
                 data[key] = "••••••••" if data.get(key) else ""
         return data
