@@ -657,7 +657,14 @@ const PF = {
     orders: [], spools: [], catalog: [], nomenclature: [], warehouses: [],
     jobs: { queue: [], history: [] }, finance: null, live: null, activePrinter: '',
     events: [], financeDays: 30, dashDays: 7,
+    // Архив заказов (17.0.17) живёт отдельно от `orders`, чтобы снятые с доски
+    // не считались живыми в канбане, счётчиках и отчётах.
+    archivedOrders: [],
+    // Состояние каналов связи: printer_id -> снимок из /api/printer/links.
+    links: {},
   },
+  // Что показывает список заказов: '' — доска, 'archived' — снятые с доски.
+  orderBox: '',
   api: { get, post, api },
   ui: {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,
@@ -704,6 +711,65 @@ const LAZY_MODULES = {
 };
 const lazyLoaded = new Set();
 const lazyPending = new Map();
+
+/* Состояние ленивого раздела видно на экране (17.0.16). Раньше раздел
+   грузился молча: при медленном Wi-Fi оператор смотрел на пустую вкладку и
+   не понимал, идёт загрузка или всё сломалось, а при ошибке loadModule
+   уходил в console.error — вкладка оставалась пустой навсегда, без способа
+   повторить. Теперь в разделе живёт одна плашка: «загружаем», «не
+   загрузилось» с кнопкой «Повторить», или ничего. */
+function lazyNote(name) {
+  const host = document.getElementById('view-' + name);
+  if (!host) return null;
+  let box = host.querySelector(':scope > .lazy-note');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'lazy-note';
+    host.insertBefore(box, host.firstChild);
+  }
+  return box;
+}
+function clearLazyNote(name) {
+  const host = document.getElementById('view-' + name);
+  const box = host && host.querySelector(':scope > .lazy-note');
+  if (box) box.remove();
+}
+function showLazyLoading(name) {
+  const box = lazyNote(name);
+  if (!box) return;
+  box.dataset.state = 'loading';
+  box.textContent = 'Загружаем раздел…';
+  const btn = box.querySelector('button');
+  if (btn) btn.remove();
+}
+function showLazyError(name, message) {
+  const box = lazyNote(name);
+  if (!box) return;
+  box.dataset.state = 'error';
+  box.textContent = '';
+  const text = document.createElement('span');
+  text.textContent = 'Раздел не загрузился' + (message ? ': ' + message : '')
+    + '. Проверьте связь с ПК — данные на месте, не подтянулся только экран.';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn sm';
+  btn.textContent = 'Повторить';
+  btn.addEventListener('click', () => {
+    lazyPending.delete(name);
+    const stale = document.querySelector(`script[data-lazy]`);
+    if (stale && stale.dataset.failed === name) stale.remove();
+    showLazyLoading(name);
+    PF.loadModule(name);
+  });
+  box.append(text, btn);
+  toast('Раздел не загрузился', 'Нажмите «Повторить» в самом разделе', 'bad',
+    { label: 'Повторить', run: () => btn.click() });
+}
+PF.lazyState = (name) => {
+  const host = document.getElementById('view-' + name);
+  const box = host && host.querySelector(':scope > .lazy-note');
+  return box ? box.dataset.state : 'ready';
+};
 PF.module = (name, init) => {
   lazyLoaded.add(name);
   // Ошибку инициализации не прячем: иначе раздел выглядит живым, но не
@@ -728,8 +794,19 @@ PF.loadModule = (name) => {
     // Модуль может зарегистрироваться позже (скрипт исполняется синхронно,
     // но страховка дешёвая): если регистрации нет — считаем загруженным.
     lazyLoaded.add(name);
+    clearLazyNote(name);
     return true;
-  }).catch((e) => { console.error(e); return false; });
+  }).catch((e) => {
+    console.error(e);
+    // Файл, который не доехал, надо снять: иначе повтор повесит тот же
+    // data-lazy и браузер решит, что скрипт уже есть.
+    files.forEach((file) => {
+      const tag = document.querySelector(`script[data-lazy="${file}"]`);
+      if (tag) { tag.dataset.failed = name; tag.remove(); }
+    });
+    showLazyError(name, e && e.message);
+    return false;
+  });
   lazyPending.set(name, job);
   return job;
 };
@@ -971,6 +1048,7 @@ function showView(name, sub) {
   // Идея 47: раздел может жить в отдельном файле, который грузится при
   // первом входе. После загрузки повторяем событие — модуль отрисуется.
   if (LAZY_MODULES[name] && !lazyLoaded.has(name)) {
+    showLazyLoading(name);
     PF.loadModule(name).then((ok) => {
       if (ok && currentView === name) PF.emit('view', { view: name, sub, lazy: true });
     });
@@ -1178,24 +1256,52 @@ function runSel() {
   closeModal('palette');
   setTimeout(() => { try { it.run(); } catch (e) { fail(e); } }, 40);
 }
+/* Единый поиск из палитры (17.0.16). Живой маршрут /api/search объявлен
+   декоратором в routes_system.py и отдаёт сгруппированный ответ
+   { query, groups: [{ kind, items: [{ kind, id, title, sub, route }] }], total }.
+   Палитра читала старый плоский { results: [{ type, title, subtitle }] } из
+   недосягаемой ветки api.py, поэтому удалённый поиск всегда возвращал ноль
+   строк и в списке оставались только команды. */
+const SEARCH_GROUPS = {
+  orders: { title: 'Заказы', icon: '▦' },
+  products: { title: 'Товары', icon: '▩' },
+  customers: { title: 'Клиенты', icon: '◎' },
+  spools: { title: 'Катушки', icon: '◍' },
+  jobs: { title: 'Печать', icon: '⎙' },
+  documents: { title: 'Документы', icon: '📄' },
+  shelf: { title: 'Полка', icon: '▤' },
+};
+function openSearchHit(hit) {
+  if (hit.kind === 'orders') {
+    PF.go('orders');
+    if (PF.modules.ops) PF.modules.ops.openOrder(hit.id);
+  } else if (hit.kind === 'customers') PF.go('customers');
+  else if (hit.kind === 'spools') {
+    PF.go('inventory');
+    if (PF.modules.money) PF.modules.money.openSpool(hit.id);
+  } else if (hit.kind === 'products') {
+    PF.go('products');
+    if (PF.modules.products) PF.modules.products.openNom(hit.id);
+  } else if (hit.kind === 'documents') {
+    PF.go('documents');
+    if (PF.modules.products) PF.modules.products.openDoc(hit.id);
+  } else if (hit.kind === 'jobs') PF.go('queue');
+  else if (hit.kind === 'shelf') PF.go('shelf');
+}
 const searchRemote = debounce(async (q) => {
   if (!q || q.length < 2) return;
   try {
     const data = await get('/api/search', { q });
-    const found = (data.results || []).map((r) => ({
-      group: 'Найдено',
-      icon: { order: '▦', customer: '◎', spool: '◍', printer: '◉', product: '▩', document: '📄' }[r.type] || '•',
-      title: r.title, sub: r.subtitle,
-      run: () => {
-        if (r.type === 'order') { PF.go('orders'); PF.modules.ops && PF.modules.ops.openOrder(r.id); }
-        else if (r.type === 'customer') PF.go('customers');
-        else if (r.type === 'spool') { PF.go('inventory'); PF.modules.money && PF.modules.money.openSpool(r.id); }
-        else if (r.type === 'printer') { PF.state.activePrinter = r.id; PF.go('printers'); }
-        // 13.1 (12): товары и документы — единый поиск из палитры
-        else if (r.type === 'product') { PF.go('products'); PF.modules.products && PF.modules.products.openNom(r.id); }
-        else if (r.type === 'document') { PF.go('documents'); PF.modules.products && PF.modules.products.openDoc(r.id); }
-      },
-    }));
+    const found = (data.groups || []).reduce((acc, g) => {
+      const meta = SEARCH_GROUPS[g.kind] || { title: 'Найдено', icon: '•' };
+      (g.items || []).forEach((r) => acc.push({
+        group: meta.title,
+        icon: meta.icon,
+        title: r.title, sub: r.sub,
+        run: () => openSearchHit(r),
+      }));
+      return acc;
+    }, []);
     const local = filterCommands($('palette_input').value);
     renderPalette(found.concat(local));
   } catch (e) { /* поиск не критичен */ }
@@ -1376,6 +1482,24 @@ async function refreshLists() {
   PF.state.niches = niches.niches || [];
 }
 PF.refreshLists = refreshLists;
+
+/** Каналы связи с принтерами (17.0.19).
+
+    Отдельный вызов, а не часть `refreshCore`: наблюдение за связью не должно
+    ронять загрузку заказов. `PF.state.links` всегда становится объектом — даже
+    при ошибке, иначе карточки принтера запрашивали бы его снова и снова. */
+async function refreshLinks() {
+  try {
+    const data = await get('/api/printer/links');
+    const map = {};
+    (data.printers || []).forEach((item) => { map[item.printer_id] = item; });
+    PF.state.links = map;
+  } catch (e) {
+    PF.state.links = PF.state.links || {};
+  }
+  return PF.state.links;
+}
+PF.refreshLinks = refreshLinks;
 
 async function refreshFinance(days) {
   PF.state.financeDays = days || PF.state.financeDays;

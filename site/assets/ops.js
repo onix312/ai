@@ -41,9 +41,16 @@ function tickLiveDues() {
 }
 setInterval(tickLiveDues, 60000);
 
+/* Источник строк списка (17.0.17): по умолчанию доска, в режиме «В архиве» —
+   снятые с доски заказы. Архив грузится отдельно и намеренно НЕ попадает в
+   `PF.state.orders`: иначе канбан, счётчик в навигации и всё, что считает
+   заказы, начнут принимать снятые с доски за живые. */
+function ordersSource() {
+  return PF.orderBox === 'archived' ? (PF.state.archivedOrders || []) : PF.state.orders;
+}
 function filtered() {
   const q = filters.q.trim().toLowerCase();
-  return PF.state.orders.filter((o) => {
+  return ordersSource().filter((o) => {
     if (filters.status && o.status !== filters.status) return false;
     if (filters.niche && o.niche_id !== filters.niche) return false;
     if (filters.chan === 'telegram' && !isTgOrder(o)) return false;
@@ -179,6 +186,11 @@ function orderCard(o) {
     qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
   }
 
+  /* Стрелка «→» (17.0.16): куда можно шагнуть, говорит сервер (order.next из
+     карты переходов repo.ORDER_TRANSITIONS). Фронт не хранит свою карту и не
+     придумывает порядок — имена берёт из тех же /api/statuses. */
+  const nextId = (Array.isArray(o.next) ? o.next : []).find((x) => x && x !== o.status) || '';
+
   // ЗА1 + 13.1 (39): инициалы, а у безымянных — детерминированный эмодзи-аватар
   const who = o.customer_name || '';
   const avGlyph = who ? esc(initials(who)) : esc(U.avatarEmoji('', o.id) || '👤');
@@ -215,6 +227,7 @@ function orderCard(o) {
     + profitChip
     + `</div>`
     + `<div class="ocard-actions">`
+    + (nextId ? `<button class="btn xs ghost" type="button" data-order-action="advance" data-order="${esc(o.id)}" title="Перевести в «${esc(PF.status(nextId).name)}» без перетаскивания">→ ${esc(PF.status(nextId).name)}</button>` : '')
     + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа"><i data-icon="pen">✎</i> Открыть</button>`
     + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати"><i data-icon="queue">⎙</i> В очередь</button>` : '')
     + `</div>`
@@ -288,12 +301,13 @@ function renderKanban(list) {
     kanSums.set(key, el.textContent);
   });
   bindDrag();
+  bindTouchDrag();
 }
 
 let bulkSelected = new Set();
 function updateBulkBar() {
   const bar = $('bulk_bar');
-  bar.hidden = orderView !== 'table' || !bulkSelected.size;
+  bar.hidden = (orderView !== 'table' && PF.orderBox !== 'archived') || !bulkSelected.size;
   $('bulk_count').textContent = `Выбрано ${bulkSelected.size}`;
   if (!bulkSelected.size) $('orders_tbody').querySelectorAll('[data-bulk]').forEach((c) => { c.checked = false; });
 }
@@ -315,15 +329,19 @@ function renderTable(list) {
       + `<td class="right tnum">${money(o.price)}</td>`
       + `<td class="right tnum ${num(econ.profit) >= 0 ? 'pos' : 'neg'}">${money(econ.profit)}</td>`
       + `<td class="${overdue(o) ? 'neg' : ''}">${o.due ? esc(dateText(o.due)) : '—'}</td></tr>`;
-  }).join('') : `<tr><td colspan="10">${!PF.state.orders.length
+  }).join('') : `<tr><td colspan="10">${!ordersSource().length
     ? '<div class="empty"><span class="big">▦</span><b>Заказов нет</b><span>Нет заказов — создайте из сообщения или с нуля.</span>'
       + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'
     : '<div class="empty compact"><span>Заказов не найдено.</span></div>'}</td></tr>`;
 }
 
 function renderOrders() {
+  const archived = PF.orderBox === 'archived';
+  const source = ordersSource();
   const list = filtered();
-  text('orders_sub', `${list.length} из ${PF.state.orders.length} заказов · перетаскивайте карточки между статусами`);
+  text('orders_sub', archived
+    ? `${list.length} из ${source.length} заказов в архиве · «Вернуть на доску» — в карточке заказа`
+    : `${list.length} из ${PF.state.orders.length} заказов · перетаскивайте карточки между статусами`);
   const tag = $('nav_orders_tag');
   const activeCount = PF.state.orders.filter((o) => !PF.isFinal(o)).length;
   tag.hidden = !activeCount;
@@ -337,12 +355,14 @@ function renderOrders() {
       .map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   }
 
-  $('orders_kanban').hidden = orderView !== 'kanban';
+  /* В архиве канбана нет: по статусам раскладывать снятые с доски заказы
+     смысла нет, а доска должна показывать только то, что в работе. */
+  $('orders_kanban').hidden = archived || orderView !== 'kanban';
   $('orders_kanban').classList.toggle('compact', orderDensity);
   const odens = $('orders_density');
   if (odens) odens.classList.toggle('on', orderDensity);
-  $('orders_table').hidden = orderView !== 'table';
-  if (orderView === 'kanban') renderKanban(list); else {
+  $('orders_table').hidden = !archived && orderView !== 'table';
+  if (!archived && orderView === 'kanban') renderKanban(list); else {
     renderTable(list);
     if (window.PFIcons) window.PFIcons.apply($('orders_tbody'));
   }
@@ -350,8 +370,75 @@ function renderOrders() {
 }
 function text(id, v) { const el = $(id); if (el) el.textContent = v; }
 
+/* ================================================ доска / архив (17.0.17) */
+/* Архив — это список, а не отдельный раздел: тот же поиск, те же фильтры, та
+   же карточка заказа. Разница одна — строки приходят с `?archived=1` и не
+   смешиваются с живыми заказами. */
+async function reloadOrderBox() {
+  if (PF.orderBox === 'archived') {
+    try {
+      const res = await get('/api/orders', { archived: 1 });
+      PF.state.archivedOrders = res.orders || [];
+    } catch (e) { fail(e); }
+  }
+  await PF.refreshCore();
+  renderOrders();
+}
+async function setOrderBox(box) {
+  PF.orderBox = box === 'archived' ? 'archived' : '';
+  const seg = $('orders_box');
+  if (seg) seg.querySelectorAll('button[data-box]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.box === PF.orderBox);
+  });
+  bulkSelected = new Set();
+  await reloadOrderBox();
+}
+
 /* =============================================================== drag */
 let dragId = null;
+
+/* Смена статуса одна на все входы (17.0.16): перетаскивание мышью,
+   перетаскивание пальцем и кнопка «→» делают ровно одно и то же —
+   оптимистично переставляют карточку, спрашивают сервер и откатываются
+   с подсветкой колонки, если переход запрещён. */
+async function applyOrderStatus(orderId, status) {
+  const order = PF.state.orders.find((o) => o.id === orderId);
+  if (!order || order.status === status) return;
+  const prev = order.status;
+  order.status = status;
+  renderOrders();
+  try {
+    const res = await post('/api/order/status', { id: order.id, status });
+    Object.assign(order, res.order);
+    toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
+    PF.refreshCore();
+    PF.refreshFinance();
+  } catch (err) {
+    order.status = prev;
+    renderOrders();
+    // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
+    const host = $('orders_kanban');
+    const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
+    if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
+    fail(err);
+  }
+}
+
+/* Кнопка «→» на карточке: тот же переход, что и перетаскивание в соседнюю
+   колонку, но одним касанием — на телефоне тащить карточку через весь экран
+   неудобно, а следующий этап в 9 случаях из 10 один. */
+async function advanceOrder(orderId) {
+  const order = PF.state.orders.find((o) => o.id === orderId);
+  if (!order) return;
+  const next = (Array.isArray(order.next) ? order.next : []).find((x) => x && x !== order.status);
+  if (!next) {
+    toast('Дальше некуда', 'Из статуса «' + PF.status(order.status).name
+      + '» переход не разрешён — откройте карточку', 'bad');
+    return;
+  }
+  await applyOrderStatus(orderId, next);
+}
+
 function bindDrag() {
   const board = $('orders_kanban');
   $$('.ocard').forEach((card) => {
@@ -374,26 +461,70 @@ function bindDrag() {
       col.classList.remove('over');
       if (!dragId) return;
       const status = col.dataset.status;
-      const order = PF.state.orders.find((o) => o.id === dragId);
-      if (!order || order.status === status) return;
-      const prev = order.status;
-      order.status = status;
-      renderOrders();
-      try {
-        const res = await post('/api/order/status', { id: order.id, status });
-        Object.assign(order, res.order);
-        toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
-        PF.refreshCore();
-        PF.refreshFinance();
-      } catch (err) {
-        order.status = prev;
-        renderOrders();
-        // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
-        const host = $('orders_kanban');
-        const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
-        if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
-        fail(err);
-      }
+      const moved = dragId;
+      dragId = null;
+      await applyOrderStatus(moved, status);
+    });
+  });
+}
+
+/* Перетаскивание пальцем (17.0.16). HTML5 drag-and-drop на телефоне не
+   работает: карточку канбана нельзя было перенести в другую колонку, оставался
+   только выпадающий список. Здесь pointer-события — тянем вбок (touch-action
+   pan-y в CSS оставляет вертикальную прокрутку страницы), колонка под пальцем
+   подсвечивается, отпускание меняет статус. Мышь не трогаем: для неё прежний
+   HTML5-путь. */
+function bindTouchDrag() {
+  const colAt = (x, y) => {
+    const el = typeof document.elementFromPoint === 'function'
+      ? document.elementFromPoint(x, y) : null;
+    return el && el.closest ? el.closest('.kan-col') : null;
+  };
+  $$('.ocard').forEach((card) => {
+    card.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' || e.pointerType === '') return;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const board = $('orders_kanban');
+      let active = false;
+      let overCol = null;
+      const clearOver = () => {
+        if (overCol) { overCol.classList.remove('over'); overCol = null; }
+      };
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!active) {
+          // Порог 12 px и преобладание горизонтали: вертикальный жест — это
+          // прокрутка страницы, её не отнимаем.
+          if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy)) return;
+          active = true;
+          dragId = card.dataset.order;
+          card.classList.add('dragging');
+          if (board) board.classList.add('dragging-any');
+          try { card.setPointerCapture(ev.pointerId); } catch (err) { /* не везде есть */ }
+        }
+        ev.preventDefault();
+        clearOver();
+        overCol = colAt(ev.clientX, ev.clientY);
+        if (overCol) overCol.classList.add('over');
+      };
+      const up = async (ev) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        if (!active) return;
+        const col = overCol || colAt(ev.clientX, ev.clientY);
+        clearOver();
+        card.classList.remove('dragging');
+        if (board) board.classList.remove('dragging-any');
+        dragId = null;
+        const status = col && col.dataset.status;
+        if (status) await applyOrderStatus(card.dataset.order, status);
+      };
+      window.addEventListener('pointermove', move, { passive: false });
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     });
   });
 }
@@ -1222,6 +1353,15 @@ async function openOrder(id, intakeDraft, intakeMeta) {
       + '<br><small>Проверьте поля и нажмите «Сохранить» — до этого база не меняется.</small>';
   }
   $('order_delete').hidden = !id;
+  $('order_archive').hidden = !id;
+  /* Одна кнопка на два действия: снять с доски или вернуть обратно. Состояние
+     берём из ответа сервера, а не из локального списка — архивные заказы в
+     `PF.state.orders` не живут. */
+  const inArchive = !!num(data.archived);
+  $('order_archive').textContent = inArchive ? '↩ Вернуть на доску' : '⌸ В архив';
+  $('order_archive').title = inArchive
+    ? 'Вернуть заказ на доску: он снова попадёт в список и в работу'
+    : 'Убрать с доски: данные, платежи и история остаются в базе';
   const paymentBtn = $('order_payment');
   if (paymentBtn) paymentBtn.hidden = !id;
   $('order_queue').hidden = !id;
@@ -2793,7 +2933,7 @@ function bind() {
     tbody.addEventListener('mouseover', (e) => {
       const row = e.target.closest('tr[data-order]');
       if (!row) { hoverCard.hidden = true; return; }
-      const order = PF.state.orders.find((x) => x.id === row.dataset.order);
+      const order = ordersSource().find((x) => x.id === row.dataset.order);
       if (!order) { hoverCard.hidden = true; return; }
       const st = PF.status(order.status), econ = order.economics || {};
       hoverCard.innerHTML = `<b>№${esc(order.number)} · ${esc(order.product || 'Без названия')}</b>`
@@ -2810,6 +2950,14 @@ function bind() {
     });
   }
   $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; renderOrders(); });
+  const boxSeg = $('orders_box');
+  if (boxSeg) {
+    boxSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-box]');
+      if (!btn || btn.dataset.box === PF.orderBox) return;
+      setOrderBox(btn.dataset.box);
+    });
+  }
   $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; renderOrders(); });
   $('orders_view').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-mode]');
@@ -2875,6 +3023,7 @@ function bind() {
       const orderId = actionBtn.dataset.order;
       if (act === 'open') openOrder(orderId);
       else if (act === 'queue') quickQueueOrder(orderId);
+      else if (act === 'advance') advanceOrder(orderId);
       return;
     }
     const card = e.target.closest('[data-order]');
@@ -3193,8 +3342,40 @@ function bind() {
   $('hf_payment_action').addEventListener('change', updateFulfillmentPaymentFields);
   $('fulfillment_confirm').addEventListener('click', confirmOrderFulfillment);
   $('stock_confirm').addEventListener('click', confirmOrderStock);
+  /* Архив вместо удаления (17.0.16). Удаление обрывает историю: платежи
+     отвязываются от заказа, состав стирается. Архив убирает заказ только с
+     доски — данные, платежи и отчёты остаются, а вернуть можно одной кнопкой
+     «Отменить» в тосте. Удаление оставлено рядом: иногда заказ действительно
+     создан по ошибке, и решать это владельцу, а не интерфейсу. */
+  $('order_archive').addEventListener('click', async () => {
+    if (!editingOrder) return;
+    const id = editingOrder;
+    const order = PF.state.orders.find((o) => o.id === id)
+      || (PF.state.archivedOrders || []).find((o) => o.id === id) || {};
+    const leaving = !num(order.archived);
+    try {
+      await post('/api/order/archive', { id, archived: leaving });
+      closeModal('order_modal');
+      await reloadOrderBox();
+      PF.refreshFinance();
+      if (leaving) {
+        toastUndo('Заказ в архиве',
+          `№${order.number || ''} убран с доски — данные и платежи на месте`,
+          async () => {
+            try {
+              await post('/api/order/archive', { id, archived: false });
+              await reloadOrderBox();
+              PF.refreshFinance();
+              toast('Заказ возвращён на доску');
+            } catch (e) { fail(e); }
+          });
+      } else {
+        toast('Заказ возвращён на доску');
+      }
+    } catch (e) { fail(e); }
+  });
   $('order_delete').addEventListener('click', async () => {
-    if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо.')) return;
+    if (!editingOrder || !confirmDanger('Удалить заказ? Действие необратимо — для этого есть «В архив».')) return;
     try {
       await post('/api/order/delete', { id: editingOrder });
       closeModal('order_modal');

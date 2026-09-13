@@ -218,8 +218,26 @@ class PrinterManager:
                 self.db.add_event("error", "Ошибка обработки события", str(exc), printer_id)
         return handler
 
+    def _mark_link(self, printer_id: str, kind: str, title: str) -> None:
+        """Состояние канала MQTT (17.0.19).
+
+        Любой кадр от принтера — включая сообщение об ошибке печати — означает,
+        что канал жив: кадр дошёл. Мёртвым канал становится на `offline` и на
+        сбоях подключения, и там же появляется причина.
+        """
+        try:
+            from .connection_state import ConnectionState
+            links = ConnectionState(self.db)
+            if kind in ("offline", "connect_error", "connect_failed", "disconnect"):
+                links.mark_fail(printer_id, "mqtt", title or kind)
+            else:
+                links.mark_ok(printer_id, "mqtt")
+        except Exception:
+            pass
+
     def _handle_event(self, printer_id: str, kind: str, title: str, detail: str, data: dict) -> None:
         self.db.add_event(kind, title, detail, printer_id, data)
+        self._mark_link(printer_id, kind, title)
         if kind == "start":
             self._auto_resume_attempts.pop(printer_id, None)
             self._on_print_start(printer_id, detail, data)

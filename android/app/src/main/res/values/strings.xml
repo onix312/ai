@@ -14,6 +14,8 @@
     <string name="btn_find">Найти сервер в сети</string>
     <string name="err_bad_url">Нужен адрес вида http://192.168.1.20:8765</string>
     <string name="cb_awake">Не гасить экран, пока открыта касса</string>
+    <string name="cb_secure">Запретить снимки экрана кассы</string>
+    <string name="cb_boot">Открывать кассу при включении телефона</string>
     <string name="cb_ring">Звенеть о платежах, даже когда экран погашен</string>
     <string name="btn_battery">Экономия батареи: не ограничивать</string>
     <string name="scanning">Ищу…</string>

@@ -236,8 +236,11 @@ class CashierLayoutTests(TestCase):
             self.assertNotIn(char, self.css, f"символ {char!r} даёт tofu на minSdk 24")
 
     def test_cart_sum_is_the_hero(self):
-        # сумма крупнее и жирнее остального в корзине
-        self.assertIn(".cart .sum b{font-size:25px;font-weight:900", self.css)
+        # Сумма крупнее и жирнее остального в корзине. Размер сверяем как
+        # «не меньше», а не точным числом: в 17.0.23 сумму подняли с 25 до
+        # 28 px, и контракт на точное значение ловил собственное улучшение.
+        size = int(re.search(r"\.cart \.sum b\{font-size:(\d+)px;font-weight:900", self.css).group(1))
+        self.assertGreaterEqual(size, 28)
 
     def test_cart_shadow_and_row_focus(self):
         self.assertIn("box-shadow:0 -10px 28px -16px", self.css)
@@ -382,3 +385,375 @@ class CashierLayoutTests(TestCase):
         missing = [name for name in used
                    if not re.search(r"^\s+" + re.escape(name) + r"\s*:\s*'", registry, re.M)]
         self.assertEqual(missing, [], f"иконки не в реестре icons.js: {missing}")
+
+    # --- 17.0.15: `hidden` и шапка телефона --------------------------------
+
+    def _media(self, query):
+        """Тело блока @media: вложенные скобки, простым regex не берётся."""
+        start = self.css.index("@media(" + query + ")")
+        i = self.css.index("{", start)
+        depth = 0
+        for j in range(i, len(self.css)):
+            if self.css[j] == "{":
+                depth += 1
+            elif self.css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return self.css[i:j + 1]
+        self.fail(f"блок @media({query}) не закрыт")
+
+    def test_hidden_attribute_actually_hides_bars(self):
+        """`hidden` обязан прятать элемент — иначе плашки висят вечно.
+
+        Претензии владельца 12.09.2026: «не работает кнопка „Не показывать“»,
+        «оранжевые панели сверху убрать целиком», «„Поток событий молчит“
+        отображается всегда». Причина одна и не в логике: у кассы авторские
+        display (.linkbar/.offbar/.malert/.install/.offbar .prog/.btn) стоят
+        выше браузерного [hidden]{display:none}, поэтому `hidden=true` не
+        менял ничего на экране. Стенд node (scripts/kassa-check.js) это не
+        ловил: у его заглушки DOM свойства hidden есть, а CSS нет.
+        """
+        self.assertRegex(self.css, r"\[hidden\]\{display:none!important\}")
+        for element in ('id="linkBar"', 'id="moneyAlert"', 'id="offBar"',
+                        'id="installHint"', 'id="offProgress"', 'id="priceWarn"',
+                        'id="bRepeat"'):
+            with self.subTest(element=element):
+                self.assertRegex(
+                    self.css, re.escape(element) + r"[^>]*\bhidden\b",
+                    "плашку прячет JS — в разметке она обязана стоять с hidden")
+
+    def test_top_bar_does_not_overlap_on_a_phone(self):
+        """Шапка на 360 px: бренд, точка связи, две кнопки — и ничего сверху.
+
+        До правки в одну строку вставали бренд, точка, три плашки и две
+        кнопки по 48 px (~500 px при 336 px доступных): плашки сжимались в
+        огрызки, а градиент шапки в transparent пропускал товары при
+        прокрутке — владелец видел «верхняя панель наплывает друг на друга».
+        """
+        top = self._rule(".top")
+        self.assertIn("flex-wrap:wrap", top)          # не влезло — перенос, не нахлёст
+        self.assertIn("background:var(--bg)", top)    # непрозрачная: контент не просвечивает
+        self.assertNotIn("linear-gradient", top)
+        self.assertIn("min-width:0", self._rule(".pill"))
+        # дубли на телефоне сняты, а не сжаты: СБП — в окне оплаты, счётчик —
+        # в корзине, имя кассира — в смене
+        self.assertIn("#sbpPill,#countPill,#whoPill{display:none}",
+                      self._media("max-width:520px"))
+
+    def test_shell_cache_was_bumped_for_the_hidden_attr_round(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 45,
+                                "правка cashier.html требует поднятия CACHE в sw.js")
+
+
+class OrderArchivePanelTests(TestCase):
+    """Архив заказов в панели (17.0.17).
+
+    Без браузера поведение не прогнать, поэтому здесь строковые контракты на
+    то, что легко потерять при правке: переключатель в тулбаре, одна кнопка на
+    два действия и главное — архивные строки не смешиваются с живыми.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.index = INDEX_HTML.read_text(encoding="utf-8")
+        cls.ops = (ROOT / "site" / "assets" / "ops.js").read_text(encoding="utf-8")
+        cls.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+
+    def test_toolbar_has_board_and_archive_switch(self):
+        seg = re.search(r'<div class="seg" id="orders_box".*?</div>', self.index, re.S)
+        self.assertIsNotNone(seg, "в тулбаре заказов нет переключателя «На доске / В архиве»")
+        block = seg.group(0)
+        self.assertIn('data-box=""', block)
+        self.assertIn('data-box="archived"', block)
+        self.assertRegex(block, r'data-box=""[^>]*class="on"',
+                         "по умолчанию должен быть выбран режим доски")
+
+    def test_archive_button_sits_before_delete(self):
+        self.assertLess(self.index.index('id="order_archive"'),
+                        self.index.index('id="order_delete"'),
+                        "«В архив» должен стоять раньше «Удалить»")
+
+    def test_archived_rows_do_not_join_the_board(self):
+        """Снятые с доски заказы не должны попадать в `PF.state.orders`."""
+        self.assertIn("function ordersSource()", self.ops)
+        self.assertIn("return ordersSource().filter", self.ops,
+                      "фильтры списка читают не тот источник")
+        self.assertIn("PF.state.archivedOrders = res.orders || []", self.ops)
+        self.assertNotIn("PF.state.orders = PF.state.archivedOrders", self.ops)
+        self.assertIn("archivedOrders: []", self.core)
+        self.assertIn("orderBox: ''", self.core)
+
+    def test_archive_is_fetched_with_the_flag(self):
+        self.assertIn("get('/api/orders', { archived: 1 })", self.ops,
+                      "архив грузится без ?archived=1 — сервер отдаст живые")
+
+    def test_one_button_two_actions(self):
+        self.assertIn("↩ Вернуть на доску", self.ops)
+        self.assertIn("⌸ В архив", self.ops)
+        self.assertIn("const leaving = !num(order.archived)", self.ops)
+        self.assertIn("post('/api/order/archive', { id, archived: leaving })", self.ops)
+
+    def test_kanban_is_hidden_in_archive_mode(self):
+        self.assertIn("archived || orderView !== 'kanban'", self.ops,
+                      "в режиме архива канбан остаётся видимым")
+        self.assertIn("if (!archived && orderView === 'kanban') renderKanban(list)", self.ops)
+
+    def test_restore_offers_undo_only_when_leaving_the_board(self):
+        self.assertIn("if (leaving) {", self.ops)
+        self.assertIn("toast('Заказ возвращён на доску')", self.ops)
+
+
+class PrinterLinkPanelTests(TestCase):
+    """Каналы связи в карточке принтера (17.0.19).
+
+    Поведение прогнано отдельным прогоном node по исходному тексту `printer.js`;
+    здесь — то, что теряется при правке: карточка берёт данные из
+    `/api/printer/links`, показывает только плохие каналы и не запрашивает их
+    повторно, когда ответа не было.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        cls.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+
+    def test_core_exposes_links_loader(self):
+        self.assertIn("async function refreshLinks()", self.core)
+        self.assertIn("get('/api/printer/links')", self.core)
+        self.assertIn("links: {}", self.core)
+        self.assertIn("PF.refreshLinks = refreshLinks;", self.core)
+
+    def test_failed_loader_does_not_loop(self):
+        """Ошибка не должна оставлять `links` пустым: иначе запрос каждый кадр."""
+        self.assertIn("PF.state.links = PF.state.links || {};", self.core)
+        self.assertIn("if (!PF.state.links && PF.refreshLinks)", self.printer)
+
+    def test_card_shows_only_bad_channels(self):
+        self.assertIn("const badLinks = link", self.printer)
+        self.assertIn("c.state === 'down' || c.state === 'stale'", self.printer)
+        self.assertIn("▤ ${esc(c.title)}: ${esc(c.label)}", self.printer)
+
+    def test_reason_and_advice_are_escaped(self):
+        self.assertIn("esc(c.last_error || c.breaks || '')", self.printer)
+        self.assertIn("esc(link.action)", self.printer)
+
+
+class CashierDensityTests(TestCase):
+    """Плотность витрины кассы (17.0.23): три режима и память выбора.
+
+    Без браузера глазами не посмотреть, поэтому здесь закреплено то, что
+    ломается при правке: переключатель на месте, все три режима описаны в CSS,
+    неизвестное значение из памяти не ломает витрину.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_switch_has_three_modes_with_normal_on_by_default(self):
+        seg = re.search(r'<div class="dens" id="dens".*?</div>', self.html, re.S)
+        self.assertIsNotNone(seg, "в кассе нет переключателя плотности витрины")
+        block = seg.group(0)
+        for mode in ("large", "normal", "list"):
+            self.assertIn(f'data-dens="{mode}"', block)
+        self.assertRegex(block, r'data-dens="normal"[^>]*class="on"',
+                         "по умолчанию должен быть режим «Обычно»")
+
+    def test_every_mode_has_its_own_css(self):
+        for mode in ("large", "list"):
+            with self.subTest(mode=mode):
+                self.assertIn(f".grid.d-{mode}{{", self.html,
+                              f"режим «{mode}» объявлен в разметке, но не в CSS")
+        self.assertIn(".grid.d-list .tile{flex-direction:row", self.html,
+                      "список должен быть строкой, а не плиткой")
+
+    def test_choice_is_remembered_and_sanitised(self):
+        self.assertIn('var DENS_KEY="cashier_dens"', self.html)
+        self.assertIn('localStorage.setItem(DENS_KEY,v)', self.html)
+        self.assertIn('return (v==="large"||v==="list")?v:"normal"', self.html,
+                      "испорченный ключ памяти обязан сводиться к «Обычно»")
+
+    def test_wired_at_startup(self):
+        self.assertIn("bindDens();", self.html)
+        self.assertIn("applyDens(densValue());", self.html)
+
+    def test_shell_cache_was_bumped(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        self.assertGreaterEqual(int(re.search(r"printflow-shell-v(\d+)", sw).group(1)), 53,
+                                "правка cashier.html требует поднятия CACHE")
+
+
+class CashierStockBarTests(TestCase):
+    """Полоса остатка на плитке (17.0.23).
+
+    Число на бейдже кассир читает по одному товару; полоса позволяет сравнить
+    несколько плиток сразу. Считается относительно самого полного товара на
+    витрине — никакого выдуманного «максимума склада».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_bar_is_relative_to_the_fullest_item(self):
+        self.assertIn("var maxQty=1;", self.html)
+        self.assertIn("if(n>maxQty)maxQty=n;", self.html)
+        self.assertIn("Math.round(qty/maxQty*100)", self.html)
+
+    def test_bar_width_is_clamped(self):
+        self.assertIn("Math.max(4,Math.min(100,", self.html,
+                      "ширина полосы обязана быть в пределах 4..100%")
+
+    def test_low_stock_is_marked(self):
+        self.assertIn("(qty<=5?' low':'')", self.html,
+                      "малый остаток обязан помечать полосу классом low")
+        self.assertIn(".stk.low i{background:var(--warn)}", self.html)
+
+    def test_colors_come_from_theme_tokens(self):
+        self.assertIn(".stk i{display:block;height:100%;border-radius:99px;background:var(--ok)", self.html)
+        self.assertIn("background:var(--panel-3);overflow:hidden", self.html,
+                      "подложка полосы обязана брать токен темы, а не жёсткий цвет")
+
+    def test_bar_has_text_alternative(self):
+        self.assertIn('''aria-label="Остаток '+qty+' шт"''', self.html)
+
+
+class CashierPriceScaleTests(TestCase):
+    """Цена читается первой: шкала размеров по режимам витрины (17.0.23)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_price_is_bigger_than_the_name(self):
+        # Ищем правило с начала строки: `.grid.d-large .n{…}` тоже содержит
+        # `.n{font-size:`, и без якоря тест берёт размер из другого режима.
+        # Размер берём из var(--fs-*,Npx): с 17.0.23 значение по умолчанию
+        # живёт в переменной, а уровни крупного текста переопределяют её на html.
+        name = float(re.search(r"\n \.n\{font-size:var\(--fs-n,([\d.]+)px\)", self.html).group(1))
+        price = float(re.search(r"\n \.p\{font-size:var\(--fs-p,([\d.]+)px\)", self.html).group(1))
+        self.assertGreater(price, name + 4,
+                           f"цена {price} px должна заметно превышать название {name} px")
+
+    def test_every_density_has_its_own_price_size(self):
+        base = re.search(r"\n \.p\{font-size:var\(--fs-p,(\d+)px\)", self.html).group(1)
+        large = re.search(r"\.grid\.d-large \.p\{font-size:(\d+)px", self.html).group(1)
+        listed = re.search(r"\.grid\.d-list \.p\{font-size:(\d+)px", self.html).group(1)
+        self.assertEqual(3, len({base, large, listed}),
+                         "в трёх режимах цена не должна быть одного размера")
+        self.assertLess(int(listed), int(base))
+        self.assertLess(int(base), int(large))
+
+    def test_digits_are_tabular(self):
+        self.assertIn("font-variant-numeric:tabular-nums", self.html)
+
+
+class CashierCartThumbTests(TestCase):
+    """Миниатюра в строке корзины (17.0.23).
+
+    Корзина рисуется в двух местах — в полосе снизу и в модалке. Если картинку
+    вставлять вручную, она появится только в одном: контракт требует общего
+    хелпера и двух вызовов.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_thumbnail_has_one_builder_and_two_callers(self):
+        self.assertIn("function cartThumb(e){", self.html)
+        self.assertEqual(2, self.html.count("'+cartThumb(e)+'"),
+                         "корзина рисуется в двух местах — хелпер нужен в обоих")
+
+    def test_entry_carries_the_photo(self):
+        self.assertIn('photo:it.photo_url||""', self.html,
+                      "без фото в записи корзины миниатюра всегда будет заглушкой")
+
+    def test_missing_photo_falls_back_to_placeholder(self):
+        self.assertIn('''? '<img class="cth"''', self.html)
+        self.assertIn('<span class="cth ph">', self.html)
+
+    def test_thumbnail_is_decorative_for_screen_readers(self):
+        self.assertIn('alt=""', self.html)
+
+    def test_size_and_background_come_from_theme(self):
+        self.assertIn(".cth{width:42px;height:42px;border-radius:10px;"
+                      "object-fit:cover;background:var(--panel-3);flex:0 0 42px}", self.html)
+
+
+class CashierCartBarTests(TestCase):
+    """Полоса корзины: сумма видна всегда и главное действие не теряется."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_list_header_sticks_while_scrolling(self):
+        head = re.search(r"\.cartList \.head\{[^}]*\}", self.html).group(0)
+        self.assertIn("position:sticky", head)
+        self.assertIn("background:var(--panel)", head,
+                      "без фона сквозь липкую шапку просвечивают строки")
+        self.assertIn("z-index:2", head)
+
+    def test_total_is_the_biggest_number_on_screen(self):
+        total = int(re.search(r"\.cart \.sum b\{font-size:(\d+)px", self.html).group(1))
+        row_amount = float(re.search(r"\.amt\{font-weight:850;font-size:([\d.]+)px", self.html).group(1))
+        self.assertGreater(total, row_amount + 10,
+                           f"сумма {total} px должна заметно превышать позицию {row_amount} px")
+
+    def test_pay_button_takes_full_row_on_narrow_phones(self):
+        rule = re.search(r"@media\(max-width:430px\)\{\.cart \.inner \.btn\.pay\{([^}]*)\}\}", self.html)
+        self.assertIsNotNone(rule, "на узком экране «Оплатить» не выделена")
+        self.assertIn("flex:1 1 100%", rule.group(1))
+
+
+class CashierFontScaleTests(TestCase):
+    """Крупный текст (17.0.23): касса размечена в px, поэтому масштаб делается
+    двумя наборами значений, а не размером корня."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_sizes_come_from_variables_with_defaults(self):
+        self.assertIn(".n{font-size:var(--fs-n,14px)", self.html)
+        self.assertIn(".p{font-size:var(--fs-p,21px)", self.html)
+
+    def test_two_levels_are_declared(self):
+        large = re.search(r"html\.fs-lg\{--fs-n:(\d+)px;--fs-p:(\d+)px\}", self.html)
+        extra = re.search(r"html\.fs-xl\{--fs-n:(\d+)px;--fs-p:(\d+)px\}", self.html)
+        self.assertIsNotNone(large, "нет уровня «крупнее»")
+        self.assertIsNotNone(extra, "нет уровня «ещё крупнее»")
+        self.assertLess(int(large.group(1)), int(extra.group(1)))
+
+    def test_choice_is_remembered_and_sanitised(self):
+        self.assertIn('var FS_KEY="cashier_fs"', self.html)
+        self.assertIn("FS_LEVELS.indexOf(v)>=0?v:""", self.html,
+                      "чужое значение из памяти обязано сводиться к обычному размеру")
+
+    def test_wired_at_startup(self):
+        self.assertIn("applyFs(fsValue());", self.html)
+        self.assertIn('_fsb.addEventListener("click",nextFs)', self.html)
+
+
+class CashierAddFeedbackTests(TestCase):
+    """Отклик на добавление товара (17.0.23)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_pulse_is_applied_after_rerender(self):
+        order = self.html.index("renderGrid();")
+        pulse = self.html.index('querySelector(\'.tile[data-id="\'+id+\'"]\')')
+        self.assertLess(order, pulse,
+                        "класс надо вешать после renderGrid(), иначе узел уже заменён")
+
+    def test_pulse_uses_theme_token(self):
+        self.assertIn("@keyframes tileHit{from{box-shadow:0 0 0 0 var(--accent-glow)}", self.html)
+
+    def test_pulse_is_cleaned_up(self):
+        self.assertIn('fresh.classList.remove("hit")', self.html)

@@ -184,10 +184,33 @@ def collect(api=None, *, hours: int = 24) -> dict:
             report["queue"] = len(manager.queue()) if manager else 0
         except Exception as exc:
             report["farm"] = {"error": str(exc)}
+        # Каналы связи по принтерам (17.0.19). «Парк: N онлайн» выше считает
+        # подключение одним числом и не говорит, что именно молчит; здесь —
+        # по каналам, с причиной и советом. Секретов в снимке нет.
+        try:
+            from .connection_state import ConnectionState
+            report["links"] = [_link_summary(snap)
+                               for snap in ConnectionState(api.db).all_printers()]
+        except Exception as exc:
+            report["links"] = {"error": str(exc)}
         report["router"] = _router_stats()
         report["outbox"] = _outbox_stats(api.db)
     report["ok"] = not report["threads"]["missing"] and report["schema"]["matches"]
     return report
+
+
+def _link_summary(snap: dict) -> dict:
+    """Снимок каналов принтера для диагностики: только то, что нужно оператору."""
+    return {
+        "printer_id": snap["printer_id"],
+        "verdict": snap["verdict"],
+        "summary": snap["summary"],
+        "action": snap["action"],
+        "bad": [{"channel": c["channel"], "title": c["title"], "state": c["state"],
+                 "label": c["label"], "last_error": c["last_error"],
+                 "next_retry_at": c["next_retry_at"]}
+                for c in snap["channels"] if c["state"] in ("down", "stale")],
+    }
 
 
 def _rule_count(api) -> int:
@@ -270,4 +293,13 @@ def human_report(report: dict) -> str:
     if farm:
         lines.append(f"Парк: {farm.get('online', 0)}/{farm.get('printers', 0)} онлайн, "
                      f"печатают {farm.get('printing', 0)}, в очереди {report.get('queue', 0)}")
+    links = report.get("links")
+    if isinstance(links, list) and links:
+        for item in links:
+            bad = item.get("bad") or []
+            if bad:
+                lines.append(f"Связь: {item['summary']}"
+                             + (f" → {item['action']}" if item.get("action") else ""))
+            else:
+                lines.append(f"Связь: {item['summary']}")
     return "\n".join(lines)

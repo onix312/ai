@@ -112,6 +112,11 @@ function renderTabs() {
   }
   host.innerHTML = list.map(pcardHtml).join('');
   list.forEach((p) => paintCardDots(p.id));
+  /* Состояние каналов догружаем один раз: без него карточка рисуется как
+     раньше, а когда ответ придёт — перерисуется с каналами (17.0.19). */
+  if (!PF.state.links && PF.refreshLinks) {
+    PF.refreshLinks().then(() => { if (PF.state.links) renderTabs(); });
+  }
 }
 
 /** Одна карточка принтера: всё для решения «что с ним делать» — в одном месте. */
@@ -150,11 +155,21 @@ function pcardHtml(p) {
     taskLine = esc(String(connObj.last_error || 'Нет связи').slice(0, 80));
   }
 
+  /* Каналы связи (17.0.19): зелёный «подключён» выше — это один канал. Если
+     FTPS или облако молчат, печатать можно, а файлы и камера — нет, и
+     оператору это надо видеть до того, как он нажмёт «Скачать файл». */
+  const link = (PF.state.links || {})[p.id] || null;
+  const badLinks = link
+    ? (link.channels || []).filter((c) => c.state === 'down' || c.state === 'stale')
+    : [];
   const flags = (alerts ? `<span class="fl alarm">! ${alerts}</span>` : '')
     + (problems ? `<span class="fl hms">▲ ${problems}</span>` : '')
     + (maintDue ? `<span class="fl maint">⚙ ${maintDue}</span>` : '')
     + (lowFil ? '<span class="fl low">◍ мало пластика</span>' : '')
-    + (unbound ? `<span class="fl low">▦ ${unbound} без привязки</span>` : '');
+    + (unbound ? `<span class="fl low">▦ ${unbound} без привязки</span>` : '')
+    + badLinks.map((c) => `<span class="fl low" title="${esc(c.last_error || c.breaks || '')}`
+        + `${link.action ? ' · ' + esc(link.action) : ''}">▤ ${esc(c.title)}: ${esc(c.label)}</span>`)
+        .join('');
 
   const slots = trays.length
     ? `<div class="pc-slots">${trays.map((x) => pslotHtml(p, x)).join('')}</div>`

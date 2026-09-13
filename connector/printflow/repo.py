@@ -35,6 +35,21 @@ ORDER_FIELDS = (
 # начинаются с 1001, а не с 1, и правка счётчика это сохраняет.
 ORDER_NUMBER_BASE = 1000
 
+# Допустимые переходы статуса заказа. Единственное место, где они заданы:
+# раньше карта жила внутри set_order_status(), и фронт не мог спросить
+# «куда можно шагнуть из этого статуса» иначе как перебором с ошибкой 400.
+# done — финальный: в него ведут выдача и подтверждение оплаты, а не стрелка.
+ORDER_TRANSITIONS: dict[str, set[str]] = {
+    "new": {"estimate", "prepay", "queue"},
+    "estimate": {"new", "prepay", "queue"},
+    "prepay": {"new", "queue"},
+    "queue": {"new", "printing"},
+    "printing": {"queue", "post"},
+    "post": {"printing", "ready"},
+    "ready": {"post"},
+    "done": set(),
+}
+
 
 class Repo:
     def __init__(self, db: Database):
@@ -42,8 +57,17 @@ class Repo:
         self.acc = Accounting(db)
 
     # ------------------------------------------------------------------ заказы
-    def orders(self, status: str = "", search: str = "", niche_id: str = "") -> list[dict]:
+    def orders(self, status: str = "", search: str = "", niche_id: str = "",
+               limit: int = 0, offset: int = 0, include_archived: bool = False,
+               only_archived: bool = False) -> list[dict]:
         sql, params = "SELECT * FROM orders WHERE 1=1", []
+        # Архив (17.0.16): доска показывает живые заказы, а снятые с доски
+        # достаются отдельно. На деньги это не влияет — учёт и отчёты читают
+        # таблицу своими запросами и видят архивные заказы как прежде.
+        if only_archived:
+            sql += " AND COALESCE(archived,0)=1"
+        elif not include_archived:
+            sql += " AND COALESCE(archived,0)=0"
         if status:
             sql += " AND status=?"
             params.append(status)
@@ -56,6 +80,15 @@ class Repo:
                     " OR pylower(customer_name) LIKE ? OR pylower(phone) LIKE ?)")
             params += [like, like, like, like]
         sql += " ORDER BY datetime(created_at) DESC"
+        # Страницы списка (17.0.16): без limit сервер отдавал все заказы сразу —
+        # на базе в несколько тысяч строк ответ рос вместе с историей, а канбану
+        # всё равно нужны первые экраны. limit<=0 — прежнее поведение «всё».
+        if limit and limit > 0:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+            if offset and offset > 0:
+                sql += " OFFSET ?"
+                params.append(int(offset))
         rows = self.db.query(sql, params)
         # Сначала счётчики позиций: экономика заказа использует items_count
         # и не делает пробный запрос в order_items для каждой строки списка.
@@ -67,6 +100,15 @@ class Repo:
                 [r["id"] for r in rows])}
             for row in rows:
                 row["items_count"] = counts.get(row["id"], 0)
+            # Куда из статуса можно шагнуть: канбан рисует «→» только там, где
+            # переход разрешён сервером. Карта читается один раз на статус,
+            # а не на каждый заказ.
+            nxt: dict[str, list[str]] = {}
+            for row in rows:
+                cur = str(row.get("status") or "new")
+                if cur not in nxt:
+                    nxt[cur] = self.next_statuses(cur)
+                row["next"] = nxt[cur]
         for row in rows:
             row["economics"] = self.acc.order_economics(row)
         return rows
@@ -75,6 +117,7 @@ class Repo:
         row = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not row:
             return None
+        row["next"] = self.next_statuses(row.get("status") or "new")
         row["economics"] = self.acc.order_economics(row)
         row["items"] = self.db.query(
             "SELECT * FROM order_items WHERE order_id=? ORDER BY position", (order_id,))
@@ -419,21 +462,29 @@ class Repo:
         current = str(order.get("status") or "new")
         if current == target:
             return order
-        allowed = {
-            "new": {"estimate", "prepay", "queue"},
-            "estimate": {"new", "prepay", "queue"},
-            "prepay": {"new", "queue"},
-            "queue": {"new", "printing"},
-            "printing": {"queue", "post"},
-            "post": {"printing", "ready"},
-            "ready": {"post"},
-            "done": set(),
-        }
+        allowed = ORDER_TRANSITIONS
         if target not in allowed.get(current, set()):
             raise ValueError(f"Переход «{current}» → «{target}» запрещён; используйте допустимый следующий этап")
         # done — финальный статус: сохранить его можно только через выдачу с
         # подтверждением передачи/оплаты, а не перетаскиванием карточки.
         return self.save_order({"id": order_id, "status": target})
+
+    def archive_order(self, order_id: str, archived: bool = True) -> dict:
+        """Снять заказ с доски без потери данных (17.0.16).
+
+        Удаление обрывает историю: платежи отвязываются, состав стирается.
+        Архив оставляет всё на месте и убирает заказ только из списка;
+        возврат — тот же вызов с archived=False.
+        """
+        if not order_id:
+            raise ValueError("Не указан заказ")
+        order = self.db.one("SELECT id FROM orders WHERE id=?", (order_id,))
+        if not order:
+            raise ValueError("Заказ не найден")
+        self.db.execute(
+            "UPDATE orders SET archived=?, archived_at=?, updated_at=? WHERE id=?",
+            (1 if archived else 0, now_iso() if archived else "", now_iso(), order_id))
+        return self.order(order_id) or {"id": order_id}
 
     def delete_order(self, order_id: str) -> None:
         if not order_id:
@@ -467,6 +518,18 @@ class Repo:
         return self.db.upsert("customers", data)
 
     # ------------------------------------------------------- статусы и ниши
+    def next_statuses(self, status: str) -> list[str]:
+        """Куда из этого статуса можно шагнуть — ids в порядке колонок канбана.
+
+        Фронт не хранит свою карту переходов (статусы живые, /api/statuses),
+        поэтому допустимый следующий шаг говорит сервер.
+        """
+        allowed = ORDER_TRANSITIONS.get(str(status or "new"), set())
+        if not allowed:
+            return []
+        rows = self.db.query("SELECT id FROM statuses ORDER BY position, name")
+        return [r["id"] for r in rows if r["id"] in allowed]
+
     def statuses(self) -> list[dict]:
         rows = self.db.query("SELECT * FROM statuses ORDER BY position, name")
         for row in rows:
@@ -1185,6 +1248,52 @@ class Repo:
                 self.db.delete("transactions", row["tx_id"])
 
     # --------------------------------------------------------------- принтеры
+    # --------------------------------------------------- списки для чтения
+    # Запросы, которые в 17.0.21 переехали из диспетчера вместе с маршрутами.
+    # SQL живёт здесь, а не в транспортном слое: контракт
+    # `test_router.RoutesHaveNoSqlTests` не пускает запросы в модули маршрутов.
+
+    def price_types(self) -> list[dict]:
+        return self.db.query("SELECT * FROM price_types WHERE archived=0"
+                             " ORDER BY position")
+
+    def audit_rows(self, limit: int = 100) -> list[dict]:
+        # Предел передаётся как есть: раньше его не ограничивали, и limit=0
+        # означал «ничего не отдавать». Менять это молча нельзя.
+        return self.db.query("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?",
+                             (int(limit),))
+
+    def client_inbox(self, limit: int = 60) -> list[dict]:
+        """Непрочитанные входящие клиентского бота вместе с состоянием чата."""
+        return self.db.query(
+            "SELECT l.*,c.username,c.inbox_status,c.assigned_to FROM client_bot_log l"
+            " LEFT JOIN client_chats c ON c.chat_id=l.chat_id"
+            " WHERE l.direction='in' AND l.unread=1 ORDER BY l.id DESC LIMIT ?",
+            (max(1, min(200, int(limit))),))
+
+    def client_payments(self, limit: int = 60) -> list[dict]:
+        """Намерения оплат из клиентского бота с номером заказа и именем клиента."""
+        return self.db.query(
+            "SELECT p.*,o.number,o.product,c.name FROM client_payment_intents p"
+            " LEFT JOIN orders o ON o.id=p.order_id"
+            " LEFT JOIN client_chats c ON c.chat_id=p.chat_id"
+            " ORDER BY datetime(p.created_at) DESC LIMIT ?",
+            (max(1, min(200, int(limit))),))
+
+    def defect_rows(self, limit: int = 100) -> list[dict]:
+        return self.db.query(
+            "SELECT d.*, j.name job_name FROM defects d"
+            " LEFT JOIN print_jobs j ON j.id=d.job_id"
+            " ORDER BY datetime(d.at) DESC LIMIT ?", (int(limit),))
+
+    def scheduled_commands(self, limit: int = 50) -> list[dict]:
+        return self.db.query("SELECT * FROM scheduled_commands"
+                             " ORDER BY done, datetime(at) LIMIT ?",
+                             (int(limit),))
+
+    def ams_profiles(self) -> list[dict]:
+        return self.db.query("SELECT * FROM ams_profiles ORDER BY name")
+
     def printers(self, include_secrets: bool = False) -> list[dict]:
         rows = self.db.query("SELECT * FROM printers ORDER BY position, name")
         from .crypto import decrypt, is_encrypted
@@ -1439,56 +1548,3 @@ class Repo:
                 if order:
                     row["order"] = order
         return rows
-
-    # ------------------------------------------------------------------ поиск
-    def search(self, text: str, limit: int = 20) -> list[dict]:
-        """Глобальный поиск по заказам, клиентам, катушкам и принтерам."""
-        text = (text or "").strip().lower()
-        if not text:
-            return []
-        like = f"%{text}%"
-        results: list[dict] = []
-        for row in self.db.query(
-                "SELECT id, number, product, customer_name, status FROM orders"
-                " WHERE pylower(number) LIKE ? OR pylower(product) LIKE ?"
-                " OR pylower(customer_name) LIKE ? LIMIT ?", (like, like, like, limit)):
-            results.append({"type": "order", "id": row["id"],
-                            "title": f"№{row['number']} · {row['product']}",
-                            "subtitle": row["customer_name"] or "", "status": row["status"]})
-        for row in self.db.query(
-                "SELECT id, name, phone FROM customers"
-                " WHERE pylower(name) LIKE ? OR phone LIKE ? LIMIT ?",
-                (like, like, limit)):
-            results.append({"type": "customer", "id": row["id"], "title": row["name"],
-                            "subtitle": row["phone"] or ""})
-        for row in self.db.query(
-                "SELECT id, material, color_name, remaining_grams FROM spools"
-                " WHERE pylower(material) LIKE ? OR pylower(color_name) LIKE ? LIMIT ?",
-                (like, like, limit)):
-            results.append({"type": "spool", "id": row["id"],
-                            "title": f"{row['material']} {row['color_name']}",
-                            "subtitle": f"{round(num(row['remaining_grams']))} г"})
-        for row in self.db.query(
-                "SELECT id, name, model, host FROM printers"
-                " WHERE pylower(name) LIKE ? OR pylower(model) LIKE ? OR host LIKE ? LIMIT ?",
-                (like, like, like, limit)):
-            results.append({"type": "printer", "id": row["id"], "title": row["name"],
-                            "subtitle": f"{row['model'] or ''} {row['host'] or ''}".strip()})
-        # 13.1 (12): товары номенклатуры и документы — единый поиск по панели
-        for row in self.db.query(
-                "SELECT id, name, code, sku, unit, archived FROM nomenclature"
-                " WHERE archived=0 AND (pylower(name) LIKE ? OR pylower(code) LIKE ?"
-                " OR pylower(sku) LIKE ?) LIMIT ?",
-                (like, like, like, limit)):
-            results.append({"type": "product", "id": row["id"],
-                            "title": row["name"] or row["code"] or "",
-                            "subtitle": " · ".join(x for x in
-                                                    [row["code"], row["sku"], row["unit"] or "шт"] if x)})
-        for row in self.db.query(
-                "SELECT id, number, kind, note FROM documents"
-                " WHERE pylower(number) LIKE ? OR pylower(note) LIKE ? LIMIT ?",
-                (like, like, limit)):
-            results.append({"type": "document", "id": row["id"],
-                            "title": f"Документ {row['number'] or row['id']} · {row['kind']}",
-                            "subtitle": (row["note"] or "")[:60]})
-        return results[:limit]

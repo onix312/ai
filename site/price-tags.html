@@ -444,6 +444,7 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
         <label><input id="showSku" type="checkbox" checked> Артикул</label>
         <label><input id="showDesc" type="checkbox" checked> Описание</label>
         <label><input id="showStock" type="checkbox"> Остаток</label>
+        <label><input id="showDate" type="checkbox"> Дата ценника</label>
         <label><input id="showCut" type="checkbox"> Тонкие линии реза</label>
       </div>
       <div class="preset-row" aria-label="Быстрые стили">
@@ -547,7 +548,7 @@ const DEFAULTS = {
   template: 'card', variant: 'card', colorMode: 'card', accent: '#4f46e5', fontScale: 100, copies: 1,
   fontFamily: 'modern', borderMode: 'soft', brandName: '', priceLead: '', priceNote: '',
   badge: '', footer: '', showLogo: true, showQr: true, showBarcode: true, showSku: true,
-  showDesc: true, showStock: false, showCut: false,
+  showDesc: true, showStock: false, showDate: false, showCut: false,
 };
 const PRESETS = {
   retail: { variant: 'accent', colorMode: 'custom', accent: '#4f46e5', fontFamily: 'modern', borderMode: 'accent', fontScale: 100, badge: '', footer: '' },
@@ -589,6 +590,7 @@ const FIELDS = [
   { key: 'showSku',     kind: 'check',  id: 'showSku',     default: true },
   { key: 'showDesc',    kind: 'check',  id: 'showDesc',    default: true },
   { key: 'showStock',   kind: 'check',  id: 'showStock',   default: false },
+  { key: 'showDate',    kind: 'check',  id: 'showDate',    default: false },
   { key: 'showCut',     kind: 'check',  id: 'showCut',     default: false },
 ];
 const nodeOf = (field) => (field.id ? $(field.id) : null);
@@ -696,14 +698,23 @@ function promoPhoto(item, type, variant) {
     ? `<img src="/api/shelf/photo.jpg?id=${encodeURIComponent(String(item.id))}" alt="">` : '';
   return `<div class="promo-photo">${img}<span class="photo-fallback">${img ? '' : 'ВАШ<br>ТОВАР'}</span></div>`;
 }
+function todayRu() {
+  const now = new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  return two(now.getDate()) + '.' + two(now.getMonth() + 1) + '.' + now.getFullYear();
+}
 function tagHtml(item, type, opts) {
   const variant = variantOf(item, type, opts);
   const color = variant === 'mono' ? '#172033' : colorOf(item, opts);
   const badge = opts.badge || item.tag_badge || '';
   const note = item.tag_note || item.note || '';
+  /* Дата ценника (17.0.16): «цена действительна на…». Витрина живёт неделями,
+     а пересчёт цен идёт из панели — без даты невозможно понять, свежая ли
+     бумага на полке. Печатаем датой печати, а не «сегодня» в момент чтения. */
   const meta = [item.material || '',
     item.grams ? Math.round(item.grams) + ' г' : '',
-    opts.showStock ? (item.qty + ' шт в наличии') : ''].filter(Boolean).join(' · ');
+    opts.showStock ? (item.qty + ' шт в наличии') : '',
+    opts.showDate ? 'ценник от ' + todayRu() : ''].filter(Boolean).join(' · ');
   const logo = opts.showLogo
     ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(opts.brandName || 'NOZZA')}</span></span>`
     : '<span></span>';

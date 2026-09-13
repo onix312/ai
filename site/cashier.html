@@ -16,21 +16,34 @@
 <script src="/assets/icons.js?v=17.0.2"></script>
 <style>
  *{box-sizing:border-box;margin:0;padding:0}
+ /* `hidden` обязан прятать. Без этого правила авторские display
+    (.linkbar, .offbar, .malert, .install, .offbar .prog, .btn) перебивают
+    браузерное [hidden]{display:none}, и все плашки кассы рисовались сразу и
+    не исчезали никогда: «Не показывать» не скрывал баннер загрузки,
+    оранжевые полосы висели пустыми, «Поток событий молчит» оставалась
+    навсегда, «Повторить» торчал в корзине без прошлой продажи. Приём тот же,
+    что в assets/theme.css:361 — касса этот файл не подключает. */
+ [hidden]{display:none!important}
  *{scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.35) transparent}
  ::-webkit-scrollbar{width:6px;height:6px}
  ::-webkit-scrollbar-thumb{background:rgba(148,163,184,.35);border-radius:99px}
  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-tap-highlight-color:transparent;touch-action:manipulation}
  .wrap{max-width:720px;margin:0 auto;padding:10px 12px 170px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
  /* top — максимально простой и липкий; сверху отступ на вырез/статусбар,
-    чтобы в PWA с edge-to-edge шапка не уезжала под «чёлку» */
- .top{display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) 2px 12px;position:sticky;top:0;z-index:5;background:linear-gradient(to bottom,var(--bg) 78%,transparent);backdrop-filter:blur(6px)}
+    чтобы в PWA с edge-to-edge шапка не уезжала под «чёлку».
+    Фон непрозрачный, строка умеет переноситься: раньше шапка была градиентом
+    в transparent — при прокрутке товары просвечивали сквозь неё («верхняя
+    панель наплывает друг на друга»), а бренд, точка связи, три плашки и две
+    кнопки по 48 px в одну строку на телефоне не помещались и сжимались в
+    нечитаемые огрызки. */
+ .top{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:calc(10px + env(safe-area-inset-top)) 2px 12px;position:sticky;top:0;z-index:5;background:var(--bg)}
  .brand{display:flex;align-items:center;gap:10px;min-width:0}
  .brand>div{min-width:0}
  .brand img{width:40px;height:40px;border-radius:12px;background:var(--panel);padding:7px;box-shadow:0 2px 12px -6px rgba(0,0,0,.5);flex:0 0 40px}
  .brand b{font-size:17px;letter-spacing:-.02em;line-height:1}
  .brand small{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
  .sp{flex:1}
- .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:34vw;overflow:hidden;text-overflow:ellipsis}
+ .pill{font-size:11px;font-weight:750;padding:6px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--muted);white-space:nowrap;max-width:34vw;min-width:0;overflow:hidden;text-overflow:ellipsis}
  #countPill{font-variant-numeric:tabular-nums}
  .pill.ok{background:rgba(16,185,129,.14);border-color:rgba(16,185,129,.22);color:#10b981}
  .iconbtn{width:48px;height:48px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:18px;flex:0 0 48px}
@@ -83,13 +96,60 @@
  .cat{white-space:nowrap;padding:10px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13.5px;font-weight:700;cursor:pointer;transition:.18s;display:inline-flex;align-items:center;gap:6px;min-height:48px;flex:0 0 auto}
  .cat.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 16px -10px var(--accent)}
  .cat .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.9}
+ /* Плотность витрины (17.0.23). Кассир сам решает, что важнее: крупное фото
+    или больше позиций на экране. Выбор живёт в localStorage, поэтому
+    настройка не сбрасывается при перезапуске кассы. */
+ .densRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}
+ .densRow .lbl{color:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+ .dens{display:inline-flex;border:1px solid var(--line);background:var(--panel);border-radius:12px;overflow:hidden}
+ .dens button{border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:750;
+   padding:0 11px;min-height:38px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:.16s}
+ .dens button+button{border-left:1px solid var(--line)}
+ .dens button.on{background:var(--accent);color:#fff}
+ .dens button:active{transform:scale(.96)}
+ .dens button svg{width:15px;height:15px}
+ /* Крупный текст (17.0.23): два уровня поверх обычных размеров. Название и
+    цена — то, что кассир читает на расстоянии вытянутой руки и на ярком свету. */
+ html.fs-lg{--fs-n:16px;--fs-p:24px}
+ html.fs-xl{--fs-n:18px;--fs-p:27px}
+ .fsbtn{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:12px;
+   min-width:44px;min-height:38px;padding:0 10px;font-weight:800;font-size:13px;cursor:pointer}
+ .fsbtn.on{background:var(--accent);color:#fff;border-color:var(--accent)}
  /* grid — крупные карточки, только в наличии */
  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  @media(min-width:560px){.grid{grid-template-columns:1fr 1fr 1fr}}
+ /* Крупно: две колонки на любой ширине, название в три строки, цена заметнее. */
+ .grid.d-large{grid-template-columns:1fr 1fr}
+ .grid.d-large .n{font-size:15.5px;-webkit-line-clamp:3;min-height:52px}
+ .grid.d-large .p{font-size:22px}
+ /* Список: строки с мелким фото — так видно максимум позиций за экран. */
+ .grid.d-list{grid-template-columns:1fr;gap:8px}
+ .grid.d-list .tile{flex-direction:row;align-items:stretch;border-radius:16px}
+ .grid.d-list .imgBox{width:78px;flex:0 0 78px;aspect-ratio:1/1}
+ .grid.d-list .imgBox .ph{font-size:22px}
+ .grid.d-list .imgBox .ph svg{width:22px;height:22px}
+ .grid.d-list .badge{left:6px;top:6px;max-width:88%}
+ .grid.d-list .qb{font-size:10px;padding:4px 7px}
+ .grid.d-list .inBadge{min-width:24px;height:24px;font-size:12px;right:6px;top:6px}
+ .grid.d-list .info{padding:9px 11px;justify-content:center;gap:3px}
+ .grid.d-list .n{font-size:13.5px;-webkit-line-clamp:1;min-height:0}
+ .grid.d-list .metaLine{justify-content:space-between}
+ .grid.d-list .p{font-size:17px}
+ .grid.d-list .stk{height:4px;margin-top:1px}
+ /* Полоса остатка: тонкая, из токенов темы, чтобы в светлой теме не поплыла. */
+ .stk{height:5px;border-radius:99px;background:var(--panel-3);overflow:hidden;margin-top:3px}
+ .stk i{display:block;height:100%;border-radius:99px;background:var(--ok);transition:width .2s}
+ .stk.low i{background:var(--warn)}
  @keyframes skelpulse{0%,100%{opacity:1}50%{opacity:.5}}
  .skel{pointer-events:none}
  .tile{position:relative;border:1px solid var(--line);background:var(--panel);border-radius:20px;overflow:hidden;cursor:pointer;user-select:none;display:flex;flex-direction:column;transition:transform .12s,border-color .18s,box-shadow .18s;min-height:0}
  .tile:active{transform:scale(.985)}
+ /* Отклик на добавление (17.0.23): рамка расходится волной. Без этого тап
+    выглядел так, будто ничего не случилось, — кассир жал ещё раз и получал
+    два товара в чеке. При prefers-reduced-motion анимация гасится общим
+    правилом в конце стилей. */
+ @keyframes tileHit{from{box-shadow:0 0 0 0 var(--accent-glow)}to{box-shadow:0 0 0 14px transparent}}
+ .tile.hit{animation:tileHit .32s ease-out}
  .tile.sel{border-color:var(--accent);box-shadow:0 0 0 2.5px rgba(79,70,229,.18)}
  .imgBox{position:relative;width:100%;aspect-ratio:4/3;background:linear-gradient(135deg,var(--bg),var(--panel));overflow:hidden}
  .imgBox img{width:100%;height:100%;object-fit:cover;display:block}
@@ -112,10 +172,27 @@
  .offbar.dead .dot{background:#ef4444}
  .inBadge{position:absolute;right:10px;top:10px;min-width:28px;height:28px;padding:0 9px;border-radius:99px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:850;display:none;align-items:center;justify-content:center;box-shadow:0 6px 18px -8px var(--accent)}
  .tile.sel .inBadge{display:flex}
+ /* Превью долгим тапом (17.0.16): карточка товара поверх кассы */
+ .pv{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(9,12,20,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:pvIn .16s ease-out}
+ .pvCard{width:min(340px,100%);max-height:86vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:16px;box-shadow:0 18px 48px rgba(0,0,0,.4);display:flex;flex-direction:column;gap:9px}
+ .pvImg{width:100%;height:150px;object-fit:contain;border-radius:14px;background:rgba(255,255,255,.04)}
+ .pvName{font-size:17px;font-weight:700;line-height:1.25}
+ .pvRow{display:flex;justify-content:space-between;gap:12px;font-size:14px;border-top:1px solid var(--line);padding-top:8px}
+ .pvK{opacity:.68}
+ .pvV{font-weight:600;text-align:right;word-break:break-word}
+ .pvHint{font-size:12px;opacity:.6;line-height:1.35;margin-top:2px}
+ @keyframes pvIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
  .info{padding:12px 12px 12px;flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
- .n{font-size:14px;font-weight:700;line-height:1.32;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+ /* Размеры названия и цены вынесены в переменные (17.0.23): касса размечена
+    в px, поэтому «крупный шрифт» делается не масштабом корня, а двумя
+    наборами значений. Переменные заданы на html — так уровень applies ко всей
+    витрине сразу, без обхода элементов. */
+ .n{font-size:var(--fs-n,14px);font-weight:700;line-height:1.32;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
  .metaLine{display:flex;align-items:center;gap:6px}
- .p{font-size:19px;font-weight:850;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
+ /* Цена — то, что кассир читает чаще всего, поэтому она крупнее названия
+    (17.0.23): 21 px против 14 px. Цифры табличные, чтобы сумма в столбце
+    не «прыгала» при смене товара. */
+ .p{font-size:var(--fs-p,21px);font-weight:850;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1}
  .p.miss{font-size:12px;color:var(--warn);font-weight:700}
  /* hint под поиском — по-человечески */
  .subHint{color:var(--muted);font-size:12.5px;line-height:1.4;margin:0 0 10px;padding:0 2px}
@@ -126,11 +203,16 @@
  .cart{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);box-shadow:0 -10px 28px -16px rgba(0,0,0,.6);padding:10px 12px calc(10px + env(safe-area-inset-bottom));padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));z-index:20}
  .cart .inner{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
  .cart .sum{flex:1;min-width:120px}
- .cart .sum b{font-size:25px;font-weight:900;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums;line-height:1}
+ /* Сумма к оплате — главное число на экране (17.0.23): 28 px вместо 25. */
+ .cart .sum b{font-size:28px;font-weight:900;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums;line-height:1}
  .cart .sum small{color:var(--muted);font-size:12px;display:flex;gap:6px;align-items:center;margin-top:2px;font-variant-numeric:tabular-nums}
  .btn{padding:14px 16px;border:0;border-radius:14px;font-weight:850;font-size:14.5px;cursor:pointer;color:#fff;transition:transform .12s,opacity .18s;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;min-width:48px}
  .btn:active{transform:scale(.97)}
  .btn.pay{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 8px 20px -10px #10b981}
+ /* На узком телефоне сумма и три служебные кнопки выталкивают «Оплатить»
+    на вторую строку впритык к правому краю. Главное действие занимает всю
+    строку — так его невозможно не увидеть и трудно промахнуться. */
+ @media(max-width:430px){.cart .inner .btn.pay{flex:1 1 100%;order:9}}
  .btn.ghost{background:var(--bg);border:1px solid var(--line);color:var(--text);font-weight:750}
  .btn:disabled{opacity:.42;pointer-events:none}
  .btn.busy{pointer-events:none;opacity:.72}
@@ -139,11 +221,18 @@
  /* cart list — простая */
  .cartList{max-width:720px;margin:0 auto 10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:auto;max-height:46vh;display:none}
  .cartList.on{display:block}
- .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px}
+ /* Шапка корзины липкая (17.0.23): список крутится внутри .cartList
+   (max-height 46vh), и без этого «Корзина · 12 шт» и сумма уезжали вверх —
+   кассир листал позиции, не видя, на какую сумму набирает. */
+ .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px;position:sticky;top:0;z-index:2;background:var(--panel)}
  .row{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line)}
  .row:last-child{border-bottom:0}
  .row:hover,.row:focus-within{background:rgba(99,102,241,.07)}
  .row .t{flex:1;min-width:0}
+ /* Миниатюра позиции: 42 px, подложка из токена темы, без жёсткого цвета. */
+ .cth{width:42px;height:42px;border-radius:10px;object-fit:cover;background:var(--panel-3);flex:0 0 42px}
+ .cth.ph{display:grid;place-items:center;color:var(--muted)}
+ .cth.ph svg{width:20px;height:20px}
  .row b{font-size:14px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .row small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px;line-height:1.4}
  .amt{font-weight:850;font-size:14.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -197,17 +286,21 @@
  @media(max-width:520px){
   .wrap{padding-top:8px;padding-bottom:172px;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right))}
   .top{gap:8px;padding:calc(8px + env(safe-area-inset-top)) 2px 12px}
-  .brand{gap:8px}.brand small{max-width:130px}
+  .brand{gap:8px}
+  /* Шапка телефона — бренд, точка связи, звонок и выход: 336 px на экране
+     360 px. Дубли убраны, а не сжаты: «СБП» виден в окне оплаты, счётчик —
+     в корзине («N поз.»), имя кассира — в смене («Смена открыта · имя»).
+     Подпись «в кассе: N ₽ · M в наличии» оставлена: это деньги и остаток. */
+  #sbpPill,#countPill,#whoPill{display:none}
+  .brand small{max-width:130px}
   .cart .inner{gap:8px}
  }
  @media(max-width:380px){
   .grid{grid-template-columns:1fr 1fr}
-  .brand small{display:none}
-  .whoPill{display:none}
+  .brand small{max-width:96px}
  }
  @media(max-width:340px){
   .grid{grid-template-columns:1fr}
-  #countPill{display:none}
   .cart .sum{flex-basis:100%;display:flex;align-items:baseline;gap:8px}
  }
  /* Низкий/ландшафтный экран: компактнее шапка и корзина, чтобы сетка товаров
@@ -268,6 +361,15 @@
    <div class="searchRow">
     <div class="searchWrap"><span class="searchic" data-icon="search"></span><input class="search" id="search" placeholder="Найти товар — название или штрихкод…"></div>
     <button class="clearSearch" id="bClearSearch" type="button" aria-label="Очистить">✕</button>
+   </div>
+   <div class="densRow">
+    <span class="lbl">Витрина</span>
+    <button type="button" class="fsbtn" id="bFont" title="Крупный текст: название и цена">Aa</button>
+    <div class="dens" id="dens" role="group" aria-label="Плотность витрины">
+     <button type="button" data-dens="large" title="Крупно: большое фото и название в три строки">Крупно</button>
+     <button type="button" data-dens="normal" class="on" title="Обычно: как было">Обычно</button>
+     <button type="button" data-dens="list" title="Список: максимум позиций на экране">Список</button>
+    </div>
    </div>
    <div class="cats" id="cats"></div>
    <div class="subHint" id="subHint"></div>
@@ -354,6 +456,38 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
+/* Плотность витрины: large | normal | list. Значение из памяти телефона,
+   неизвестное сводим к «Обычно», чтобы испорченный ключ не сломал витрину. */
+var DENS_KEY="cashier_dens";
+function densValue(){
+  try{var v=localStorage.getItem(DENS_KEY);return (v==="large"||v==="list")?v:"normal";}catch(e){return "normal";}
+}
+function applyDens(v){
+  var grid=$("grid");if(grid)grid.className="grid"+(v==="normal"?"":" d-"+v);
+  var seg=$("dens");
+  if(seg)Array.prototype.forEach.call(seg.querySelectorAll("button[data-dens]"),function(b){
+    b.classList.toggle("on",b.getAttribute("data-dens")===v);
+  });
+}
+/* Крупный текст: "" | fs-lg | fs-xl. Три состояния по кругу — кнопка одна,
+   место в шапке ограничено, а показывать текущий уровень помогает подсветка. */
+var FS_KEY="cashier_fs",FS_LEVELS=["","fs-lg","fs-xl"];
+function fsValue(){
+  try{var v=localStorage.getItem(FS_KEY)||"";return FS_LEVELS.indexOf(v)>=0?v:"";}catch(e){return "";}
+}
+function applyFs(v){
+  var root=document.documentElement;
+  FS_LEVELS.forEach(function(c){if(c)root.classList.remove(c);});
+  if(v)root.classList.add(v);
+  var b=$("bFont");
+  if(b){b.classList.toggle("on",!!v);b.textContent=v==="fs-xl"?"AA":"Aa";}
+}
+function nextFs(){
+  var cur=fsValue(),i=FS_LEVELS.indexOf(cur);
+  var v=FS_LEVELS[(i+1)%FS_LEVELS.length];
+  try{localStorage.setItem(FS_KEY,v);}catch(_e){}
+  applyFs(v);
+}
 var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
@@ -380,6 +514,12 @@ function netMark(ok,why){
   if(ok&&!was)onLinkBack();
 }
 function netStreamAlive(){return !!LINK.stream&&Date.now()-LINK.stream<STREAM_QUIET;}
+/* Отметка «сервер ответил» (17.0.16). Раньше её ставил один refreshBadge(),
+   то есть только вкладка «Входящие»: на «Продаже» без платежей касса держала
+   плашку «Поток событий молчит», хотя запросы к ПК проходили исправно.
+   Теперь любое доказательство связи — ответ api(), проба /api/health или
+   опрос входящих — обновляет одну и ту же отметку. */
+function netSawResponse(){LINK.poll=Date.now();}
 /* Канал жив, если жив ЛИБО поток событий, ЛИБО страховочный опрос.
    Раньше считался только поток: в оболочке-приложении EventSource поднимается
    не всегда, касса честно переходила на опрос раз в 25 с — деньги приходили,
@@ -433,7 +573,7 @@ function netProbe(force){
   LINK.probeBusy=true;
   api("/api/health",null,{timeout:5000,quiet:true}).then(function(){
     LINK.probeBusy=false;LINK.probeAt=Date.now();
-    netMark(true);
+    netSawResponse();netMark(true);
     // Поток мог умереть вместе с сетью — поднимаем заново, если закрыт.
     if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
     connectMoney();
@@ -513,9 +653,21 @@ function offLoad(){
   try{var q=JSON.parse(localStorage.getItem(OFF_KEY)||"[]");offQueue=Array.isArray(q)?q:[];}
   catch(e){offQueue=[];}
 }
+/* Хранилище телефона не резиновое: в localStorage и в память оболочки пишется
+   последние OFF_MAX записей. В памяти страницы очередь остаётся целиком и
+   уходит на сервер полностью — но если кассир закроет кассу при обрыве и
+   записей было больше, старые в файле не сохранятся. Раньше это происходило
+   молча; теперь кассир слышит, что надо дослать очередь (17.0.16). */
+var OFF_MAX=200;
 function offSave(){
-  var pack=JSON.stringify(offQueue.slice(-200));
-  try{localStorage.setItem(OFF_KEY,pack);offStash(pack);return true;}
+  var over=offQueue.length-OFF_MAX;
+  var pack=JSON.stringify(offQueue.slice(-OFF_MAX));
+  try{
+    localStorage.setItem(OFF_KEY,pack);offStash(pack);
+    if(over>0)toast("В очереди "+offQueue.length+" продаж — в память телефона записаны "
+      +"последние "+OFF_MAX+". Не закрывайте кассу, пока связь не вернётся.");
+    return true;
+  }
   catch(e){toast("Память телефона кончилась — в очередь не записано");return false;}
 }
 function offStash(pack){
@@ -540,7 +692,7 @@ function offRestore(){
     if(!added)return 0;
     offQueue=Object.keys(byId).map(function(k){return byId[k];}).sort(function(a,b){
       return String(a.at||"").localeCompare(String(b.at||""));});
-    try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-200)));}catch(e){}
+    try{localStorage.setItem(OFF_KEY,JSON.stringify(offQueue.slice(-OFF_MAX)));}catch(e){}
     return added;
   }catch(e){return 0;}
 }
@@ -707,6 +859,7 @@ function api(path,body,opts){
       var j={};try{j=text?JSON.parse(text):{};}catch(_e){if(!r.ok)throw new Error("Сервер вернул ошибку "+r.status);throw new Error("Некорректный ответ сервера");}
       if(!r.ok){var e=new Error(j&&j.error?j.error:("HTTP "+r.status));e.raw=j;throw e;}
       stop();
+      netSawResponse();
       netMark(true);       // сервер ответил — канал жив, даже если сеть «мигала»
       return j;
     });
@@ -920,14 +1073,21 @@ $("cats").addEventListener("click",function(ev){
   renderCats();renderGrid();
 });
 
+/* Поиск кассы (17.0.16). Кассир вводит с экранной клавиатуры быстро и без «ё»:
+   «пленка» вместо «плёнка» не находило товар, хотя он лежит на витрине.
+   Сравниваем приведённые строки: «ё»→«е», регистр вниз, лишние пробелы сжаты.
+   Баркод и артикул тоже проходят через то же приведение — цифры не меняются. */
+function searchKey(v){
+  return String(v==null?"":v).toLowerCase().replace(/ё/g,"е").replace(/\s+/g," ").trim();
+}
 function filteredItems(){
-  var q=(state.search||"").trim().toLowerCase();
+  var q=searchKey(state.search);
   return state.items.filter(function(it){
     // строго в наличии уже отфильтровано, но на всякий случай
     if((Number(it.qty)||0)<=0) return false;
     if(state.cat && (it.category_id||"")!==state.cat) return false;
     if(!q) return true;
-    return [it.name,it.barcode,it.sku,it.category_name].some(function(v){return String(v||"").toLowerCase().indexOf(q)>=0;});
+    return [it.name,it.barcode,it.sku,it.category_name].some(function(v){return searchKey(v).indexOf(q)>=0;});
   });
 }
 
@@ -948,6 +1108,11 @@ function renderGrid(){
     }
     renderCart();return;
   }
+  /* Полоса остатка (17.0.23) считается относительно самого полного товара на
+     витрине, а не по выдуманному «максимуму»: так кассир за секунду видит,
+     где товар заканчивается, не читая числа на каждом бейдже. */
+  var maxQty=1;
+  list.forEach(function(it){var n=Math.floor(Number(it.qty)||0);if(n>maxQty)maxQty=n;});
   box.innerHTML=list.map(function(it){
     var qty=Math.floor(Number(it.qty)||0);
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
@@ -955,20 +1120,45 @@ function renderGrid(){
     // Категории на картинке больше нет: бейдж перекрывал фото и дублировал
     // фильтр по категории сверху. Остаток — остался, он важнее.
     var qtyBadge = qty<=5 ? '<span class="qb low">мало: '+qty+' шт</span>' : '<span class="qb qty">'+qty+' шт</span>';
+    var pct=Math.max(4,Math.min(100,Math.round(qty/maxQty*100)));
+    var stock='<div class="stk'+(qty<=5?' low':'')+'" role="img" aria-label="Остаток '+qty+' шт">'
+      +'<i style="width:'+pct+'%"></i></div>';
     var phIcon=window.PFIcons?PFIcons.svg("box",30):"📦";
     var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">'+phIcon+'</div>' : '<div class="ph">'+phIcon+'</div>';
     return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'" role="button" tabindex="0" aria-label="'+esc(it.name)+'">'
       +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
-      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div></div>'
+      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div>'+stock+'</div>'
       +'</div>';
   }).join("");
   renderCart();
 }
 
+/* Класс плотности вешаем на саму сетку, а не перерисовываем плитки: разметка
+   карточки одна на все три режима, меняется только CSS. */
+function bindDens(){
+  var seg=$("dens");if(!seg||seg.dataset.bound)return;
+  seg.dataset.bound="1";
+  seg.addEventListener("click",function(e){
+    var b=e.target.closest("button[data-dens]");if(!b)return;
+    var v=b.getAttribute("data-dens");
+    try{localStorage.setItem(DENS_KEY,v);}catch(_e){}
+    applyDens(v);
+  });
+}
+
+/* Миниатюра в строке корзины (17.0.23). Корзина рисуется в двух местах —
+   в полосе снизу и в модалке «Корзина», поэтому картинка собирается одной
+   функцией: иначе в одном месте фото есть, а в другом нет. */
+function cartThumb(e){
+  return e.photo
+    ? '<img class="cth" src="'+esc(e.photo)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+    : '<span class="cth ph">'+(window.PFIcons?window.PFIcons.svg("box",20):"📦")+'</span>';
+}
+
 function renderCart(){
   var entries=Object.keys(state.cart).map(function(id){
     var it=(state._allItems||state.items).find(function(x){return x.id===id;})||state.items.find(function(x){return x.id===id;})||{};
-    return {id:id,qty:state.cart[id],price:Number(it.price)||0,name:it.name||""};
+    return {id:id,qty:state.cart[id],price:Number(it.price)||0,name:it.name||"",photo:it.photo_url||""};
   }).filter(function(e){return e.qty>0;});
   var total=entries.reduce(function(s,e){return s+e.price*e.qty;},0);
   var count=entries.reduce(function(s,e){return s+e.qty;},0);
@@ -979,7 +1169,10 @@ function renderCart(){
   $("bPay").textContent=count?("Оплатить · "+count+" поз. →"):"Оплатить →";
   $("bToggleCart").hidden=!count;
   var rb=$("bRepeat");if(rb)rb.hidden=!(lastSale().length&&!count);
-  netState();
+  /* Состояние канала здесь не перерисовываем: renderCart вызывается на каждое
+     касание «+»/«−», а netState() пишет в DOM и читает Date.now() — лишняя
+     работа на каждом клике. Живость канала показывает свой тик netStart()
+     (LINK_TICK) и обработчики потока (17.0.16). */
   $("cartBar").hidden=$("viewSell").hidden;
   var listBox=$("cartList");
   if(!entries.length){listBox.classList.remove("on");listBox.innerHTML="";}
@@ -988,7 +1181,7 @@ function renderCart(){
     var qPlus=window.PFIcons?PFIcons.svg("plus"):"+";
     var html='<div class="head"><span>Корзина · '+count+' шт</span><span>'+esc(money(total))+'</span></div>';
     html+=entries.map(function(e){
-      return '<div class="row"><div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
+      return '<div class="row">'+cartThumb(e)+'<div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
         +'<div class="qtyCtr"><button class="qbtn" data-dec="'+esc(e.id)+'" aria-label="Уменьшить">'+qMinus+'</button><span class="amt">'+e.qty+'</span><button class="qbtn" data-inc="'+esc(e.id)+'" aria-label="Увеличить">'+qPlus+'</button></div>'
         +'<div class="amt">'+esc(money(e.price*e.qty))+'</div></div>';
     }).join("");
@@ -1001,7 +1194,7 @@ function renderCart(){
       var qMinus=window.PFIcons?PFIcons.svg("minus"):"−";
       var qPlus=window.PFIcons?PFIcons.svg("plus"):"+";
       mBox.innerHTML=entries.map(function(e){
-        return '<div class="row"><div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
+        return '<div class="row">'+cartThumb(e)+'<div class="t"><b>'+esc(e.name)+'</b><small>'+money(e.price)+' × '+e.qty+'</small></div>'
           +'<div class="qtyCtr"><button class="qbtn" data-dec="'+esc(e.id)+'">'+qMinus+'</button><span class="amt">'+e.qty+'</span><button class="qbtn" data-inc="'+esc(e.id)+'">'+qPlus+'</button></div>'
           +'<div class="amt">'+esc(money(e.price*e.qty))+'</div></div>';
       }).join("")+'<div class="row" style="font-weight:850"><div class="t"><b>Итого</b></div><div class="amt">'+esc(money(total))+'</div></div>';
@@ -1012,6 +1205,8 @@ function renderCart(){
 
 $("grid").addEventListener("click",function(ev){
   if(ev.target.closest(".qbtn")) return;
+  // Открыто превью — этот тап закрывает карточку, а не кладёт товар в корзину.
+  if(previewBox){previewClose();return;}
   var t=ev.target.closest(".tile");if(!t)return;
   var id=t.getAttribute("data-id");
   var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
@@ -1024,6 +1219,10 @@ $("grid").addEventListener("click",function(ev){
   state.cartSeen[id]=Number(it.price)||0;   // цена, которую кассир назвал покупателю
   state.saleRequest={cash:"",sbp:""};
   renderGrid();
+  /* Класс вешаем после перерисовки: renderGrid() заменяет узлы, и анимация,
+     поставленная на старую плитку, пропала бы вместе с ней. */
+  var fresh=$("grid").querySelector('.tile[data-id="'+id+'"]');
+  if(fresh){fresh.classList.add("hit");setTimeout(function(){fresh.classList.remove("hit");},340);}
   // лёгкая вибрация на мобилке
   if(navigator.vibrate) try{navigator.vibrate(18);}catch(_e){}
 });
@@ -1032,6 +1231,81 @@ $("grid").addEventListener("keydown",function(ev){
     var t=ev.target.closest(".tile"); if(t){ev.preventDefault(); t.click();}
   }
 });
+
+/* ---------- превью долгим тапом (17.0.16) ----------
+   Кассир держит в руках товар без этикетки и не может прочитать ни цену, ни
+   остаток, ни артикул: плитка показывает название и цену, а всё остальное —
+   только в номенклатуре, до которой в разгар продажи не дойти. Долгое
+   нажатие (450 мс) открывает карточку товара поверх кассы; короткий тап
+   по-прежнему кладёт товар в корзину. Жест отменяется, если палец уехал
+   дальше 10 px — это прокрутка витрины, а не просьба показать карточку. */
+var PREVIEW_MS=450,previewTimer=0,previewBox=null;
+function previewClose(){
+  if(previewTimer){clearTimeout(previewTimer);previewTimer=0;}
+  if(previewBox){try{document.body.removeChild(previewBox);}catch(_e){}previewBox=null;}
+}
+function previewOpen(it){
+  previewClose();
+  var box=document.createElement("div");
+  box.className="pv";
+  var card=document.createElement("div");card.className="pvCard";
+  var add=function(tag,cls,text){
+    var el=document.createElement(tag);if(cls)el.className=cls;
+    if(text!=null)el.textContent=text;card.appendChild(el);return el;
+  };
+  if(it.photo_url){
+    var img=document.createElement("img");
+    img.className="pvImg";img.src=it.photo_url;img.alt="";
+    card.appendChild(img);
+  }
+  add("div","pvName",it.name||"Без названия");
+  var rows=[
+    ["Цена",it.price_missing?"не задана":money(it.price)],
+    ["В наличии",Math.floor(Number(it.qty)||0)+" шт"],
+    ["Артикул",it.sku||"—"],
+    ["Штрихкод",it.barcode||"—"],
+    ["Категория",it.category_name||"—"]
+  ];
+  rows.forEach(function(r){
+    var row=add("div","pvRow");
+    var k=add("span","pvK",r[0]);row.appendChild(k);
+    var v=add("span","pvV",String(r[1]));row.appendChild(v);
+  });
+  add("div","pvHint","Отпустите — карточка закроется. Короткий тап кладёт товар в корзину.");
+  box.appendChild(card);
+  box.addEventListener("pointerdown",function(ev){ev.stopPropagation();previewClose();});
+  document.body.appendChild(box);
+  previewBox=box;
+  if(navigator.vibrate)try{navigator.vibrate(12);}catch(_e){}
+}
+(function bindTilePreview(){
+  var grid=$("grid");if(!grid)return;
+  var startX=0,startY=0,tile=null;
+  function cancel(){
+    if(previewTimer){clearTimeout(previewTimer);previewTimer=0;}
+    tile=null;
+  }
+  grid.addEventListener("pointerdown",function(ev){
+    if(previewBox)return;
+    var t=ev.target&&ev.target.closest?ev.target.closest(".tile"):null;
+    if(!t){cancel();return;}
+    tile=t;startX=ev.clientX||0;startY=ev.clientY||0;
+    if(previewTimer)clearTimeout(previewTimer);
+    previewTimer=setTimeout(function(){
+      previewTimer=0;
+      var id=tile&&tile.getAttribute?tile.getAttribute("data-id"):"";
+      var it=id&&((state.items||[]).find(function(x){return x.id===id;})
+        ||(state._allItems||[]).find(function(x){return x.id===id;}));
+      if(it)previewOpen(it);
+    },PREVIEW_MS);
+  });
+  grid.addEventListener("pointermove",function(ev){
+    if(!previewTimer)return;
+    if(Math.abs((ev.clientX||0)-startX)>10||Math.abs((ev.clientY||0)-startY)>10)cancel();
+  });
+  grid.addEventListener("pointerup",cancel);
+  grid.addEventListener("pointercancel",cancel);
+})();
 function changeQty(id,delta){
   var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
   var cur=state.cart[id]||0;
@@ -1723,12 +1997,25 @@ function installHint(){
     if(!r||!r.available||!r.url){box.hidden=true;return;}
     var size=Number(r.size_mb)||0;
     var sha=String(r.sha256||"").slice(0,12);
-    $("installText").innerHTML="Приложение кассы"+(r.version?" · "+esc(String(r.version)):"")+
-      (size?" · "+size+" МБ":"")+(sha?" · sha256 "+esc(sha)+"…":"")+
-      ": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же."+
-      (r.changelog?"<br><span class=\"upd\">Что нового: "+esc(String(r.changelog).split("\n")
-        .filter(function(s){return String(s).trim().length;}).slice(0,3).join(" ").slice(0,240))+"</span>":"")+
-      (size?"<br><span class=\"upd\">Сверьте размер файла перед установкой — он указан в диалоге.</span>":"");
+    /* Баннер собираем узлами, а не строкой HTML (17.0.16). Версия, sha256 и
+       changelog приходят с сервера из полей сборки: esc() там стоял, но
+       innerHTML в кассе — всегда риск, что один символ из описания сборки
+       развалит разметку баннера вместе с кнопкой «Скачать». У textContent
+       экранировать нечего: что пришло, то и видно. */
+    var head=$("installText");
+    if(head){
+      while(head.firstChild)head.removeChild(head.firstChild);
+      head.textContent="Приложение кассы"+(r.version?" · "+String(r.version):"")
+        +(size?" · "+size+" МБ":"")+(sha?" · sha256 "+sha+"…":"")
+        +": вкладку браузер выгружает из памяти, приложение — нет. Ставится один раз, обновления — отсюда же.";
+      var addUpd=function(t){
+        var span=document.createElement("span");span.className="upd";span.textContent=t;
+        head.appendChild(document.createElement("br"));head.appendChild(span);
+      };
+      if(r.changelog)addUpd("Что нового: "+String(r.changelog).split("\n")
+        .filter(function(s){return String(s).trim().length;}).slice(0,3).join(" ").slice(0,240));
+      if(size)addUpd("Сверьте размер файла перед установкой — он указан в диалоге.");
+    }
     $("installGo").setAttribute("href",r.url);
     box.hidden=false;
   }).catch(function(){box.hidden=true;});
@@ -1836,7 +2123,7 @@ function refreshBadge(){
     // Сервер ответил — значит канал жив, каким бы путём ни пришли деньги.
     // Без этой отметки касса на страховочном опросе вечно показывала
     // «Поток событий молчит» (дефект оболочки 17.0.14).
-    LINK.poll=Date.now();netState();
+    netSawResponse();netState();
     var n=(r.payments||[]).length,tab=$("tabIn");
     $("tabInLbl").textContent=n?("Входящие · "+n):"Входящие";
     tab.classList.toggle("nudge",n>0);
@@ -1854,7 +2141,12 @@ function primeMoney(){
 function startMoneyPoll(){
   if(moneyTimer||!loggedIn())return;
   moneyTimer=setInterval(function(){
-    if(document.visibilityState==="visible"&&loggedIn())refreshBadge();
+    if(document.visibilityState!=="visible"||!loggedIn())return;
+    // Поток живой (сервер шлёт ping раз в 20 с) — деньги и так придут
+    // кадром, а лишний запрос раз в 25 с только грузит ПК и роутер.
+    // Опрашиваем ровно тогда, когда потока нет (17.0.16).
+    if(netStreamAlive())return;
+    refreshBadge();
   },25000);
 }
 function stopMoneyPoll(){if(moneyTimer){clearInterval(moneyTimer);moneyTimer=0;}}
@@ -1921,6 +2213,10 @@ if(loggedIn()){
 else{renderWho();showApp(false);}
 netMark(navigator.onLine!==false);
 netStart();
+bindDens();
+applyDens(densValue());
+applyFs(fsValue());
+var _fsb=$("bFont");if(_fsb)_fsb.addEventListener("click",nextFs);
 if(window.PFIcons)PFIcons.apply(document);
 window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){

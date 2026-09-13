@@ -320,6 +320,26 @@ CREATE TABLE IF NOT EXISTS npd_days(
     marked_at TEXT DEFAULT '',
     marked_by TEXT DEFAULT ''
 );
+
+-- ----------------------------------- Состояние каналов связи с принтером
+-- 17.0.19. Раньше «принтер на связи» собирался из последнего MQTT-кадра: FTPS
+-- мог лежать, а панель показывала «online», и оператор жал «Скачать файл»
+-- в пустоту. Здесь каждый канал (mqtt, ftps, http, camera) отдельно: последний
+-- успех, последняя причина сбоя, сколько раз подряд не получилось и когда
+-- следующая попытка. Денег и заданий таблица не касается — только наблюдение.
+CREATE TABLE IF NOT EXISTS printer_links(
+    link_id TEXT PRIMARY KEY,
+    printer_id TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    state TEXT DEFAULT 'never',
+    last_ok_at TEXT DEFAULT '',
+    last_fail_at TEXT DEFAULT '',
+    last_error TEXT DEFAULT '',
+    attempts INTEGER DEFAULT 0,
+    next_retry_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_printer_links_printer ON printer_links(printer_id);
 """
 
 # Склады по умолчанию: (id, название, вид, розница, позиция)
