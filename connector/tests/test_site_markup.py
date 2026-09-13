@@ -631,13 +631,15 @@ class CashierPriceScaleTests(TestCase):
     def test_price_is_bigger_than_the_name(self):
         # Ищем правило с начала строки: `.grid.d-large .n{…}` тоже содержит
         # `.n{font-size:`, и без якоря тест берёт размер из другого режима.
-        name = float(re.search(r"\n \.n\{font-size:(\d+(?:\.\d+)?)px", self.html).group(1))
-        price = float(re.search(r"\n \.p\{font-size:(\d+(?:\.\d+)?)px", self.html).group(1))
+        # Размер берём из var(--fs-*,Npx): с 17.0.23 значение по умолчанию
+        # живёт в переменной, а уровни крупного текста переопределяют её на html.
+        name = float(re.search(r"\n \.n\{font-size:var\(--fs-n,([\d.]+)px\)", self.html).group(1))
+        price = float(re.search(r"\n \.p\{font-size:var\(--fs-p,([\d.]+)px\)", self.html).group(1))
         self.assertGreater(price, name + 4,
                            f"цена {price} px должна заметно превышать название {name} px")
 
     def test_every_density_has_its_own_price_size(self):
-        base = re.search(r"\n \.p\{font-size:(\d+)px", self.html).group(1)
+        base = re.search(r"\n \.p\{font-size:var\(--fs-p,(\d+)px\)", self.html).group(1)
         large = re.search(r"\.grid\.d-large \.p\{font-size:(\d+)px", self.html).group(1)
         listed = re.search(r"\.grid\.d-list \.p\{font-size:(\d+)px", self.html).group(1)
         self.assertEqual(3, len({base, large, listed}),
@@ -706,3 +708,52 @@ class CashierCartBarTests(TestCase):
         rule = re.search(r"@media\(max-width:430px\)\{\.cart \.inner \.btn\.pay\{([^}]*)\}\}", self.html)
         self.assertIsNotNone(rule, "на узком экране «Оплатить» не выделена")
         self.assertIn("flex:1 1 100%", rule.group(1))
+
+
+class CashierFontScaleTests(TestCase):
+    """Крупный текст (17.0.23): касса размечена в px, поэтому масштаб делается
+    двумя наборами значений, а не размером корня."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_sizes_come_from_variables_with_defaults(self):
+        self.assertIn(".n{font-size:var(--fs-n,14px)", self.html)
+        self.assertIn(".p{font-size:var(--fs-p,21px)", self.html)
+
+    def test_two_levels_are_declared(self):
+        large = re.search(r"html\.fs-lg\{--fs-n:(\d+)px;--fs-p:(\d+)px\}", self.html)
+        extra = re.search(r"html\.fs-xl\{--fs-n:(\d+)px;--fs-p:(\d+)px\}", self.html)
+        self.assertIsNotNone(large, "нет уровня «крупнее»")
+        self.assertIsNotNone(extra, "нет уровня «ещё крупнее»")
+        self.assertLess(int(large.group(1)), int(extra.group(1)))
+
+    def test_choice_is_remembered_and_sanitised(self):
+        self.assertIn('var FS_KEY="cashier_fs"', self.html)
+        self.assertIn("FS_LEVELS.indexOf(v)>=0?v:""", self.html,
+                      "чужое значение из памяти обязано сводиться к обычному размеру")
+
+    def test_wired_at_startup(self):
+        self.assertIn("applyFs(fsValue());", self.html)
+        self.assertIn('_fsb.addEventListener("click",nextFs)', self.html)
+
+
+class CashierAddFeedbackTests(TestCase):
+    """Отклик на добавление товара (17.0.23)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_pulse_is_applied_after_rerender(self):
+        order = self.html.index("renderGrid();")
+        pulse = self.html.index('querySelector(\'.tile[data-id="\'+id+\'"]\')')
+        self.assertLess(order, pulse,
+                        "класс надо вешать после renderGrid(), иначе узел уже заменён")
+
+    def test_pulse_uses_theme_token(self):
+        self.assertIn("@keyframes tileHit{from{box-shadow:0 0 0 0 var(--accent-glow)}", self.html)
+
+    def test_pulse_is_cleaned_up(self):
+        self.assertIn('fresh.classList.remove("hit")', self.html)
