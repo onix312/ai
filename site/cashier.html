@@ -1028,12 +1028,21 @@ function loadCatalog(quiet){
     $("countPill").textContent=inStock+" тов.";
     $("sbpPill").hidden=!state.sbpEnabled;
     if(state.sbpEnabled) $("sbpPill").textContent="СБП · "+(state.sbp.kind||"");
+    // 17.0.26: витрина = стеллаж. Режим включён по умолчанию, и кассир должен
+    // видеть это словами: иначе он ищет товар, который лежит на складе, и
+    // решает, что касса сломалась.
+    state.shelfOnly=!!c.shelf_only;
+    state.stockPositions=Number(c.stock_positions)||0;
+    var shelfNote=state.shelfOnly
+      ? " Витрина: только стеллаж — товары со склада в кассе не показываются"
+        +(state.stockPositions?(" (на складах ещё "+state.stockPositions+" поз.)"):"")+"."
+      : "";
     // подсказка: скольок скрыли
     var hint=$("subHint");
     if(hint){
-      if(total && !inStock) hint.textContent="Сейчас в наличии ничего нет — пополните витрину или склад.";
-      else if(total> inStock) hint.textContent="Показаны только товары в наличии ("+inStock+" из "+total+") — пустые скрыты.";
-      else if(inStock) hint.textContent=inStock+" товаров в наличии — нажмите на карточку чтобы добавить в корзину.";
+      if(total && !inStock) hint.textContent="Сейчас в наличии ничего нет — пополните стеллаж."+shelfNote;
+      else if(total> inStock) hint.textContent="Показаны только товары в наличии ("+inStock+" из "+total+") — пустые скрыты."+shelfNote;
+      else if(inStock) hint.textContent=inStock+" товаров в наличии — нажмите на карточку чтобы добавить в корзину."+shelfNote;
       else hint.textContent="";
     }
     renderCats();renderGrid();

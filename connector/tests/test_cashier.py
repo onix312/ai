@@ -200,14 +200,22 @@ class CashierTests(unittest.TestCase):
 
 
 class CashierStockCatalogTests(unittest.TestCase):
-    """Единый каталог: товар со склада виден кассе без дублей на витрине."""
+    """Единый каталог И2: товар со склада виден кассе без дублей на витрине.
+
+    В 17.0.26 витрина кассы по умолчанию показывает только стеллаж
+    (`cashier_shelf_only` включена), поэтому весь этот класс явно включает
+    прежний режим единого каталога: здесь проверяется именно он — склад виден
+    кассиру и доезжает на полку при продаже. Новый режим «только стеллаж»
+    проверяется в `CashierShelfOnlyTests` ниже.
+    """
 
     def setUp(self):
         from connector.printflow.stock import Stock
         self.db = make_db()
         self.acc = Accounting(self.db)
         self.cashier = Cashier(self.db, self.acc)
-        self.db.set_settings({"cashier_code": "1234"})
+        self.db.set_settings({"cashier_code": "1234",
+                              "cashier_shelf_only": False})
         self.stock = Stock(self.db)
         self.db.upsert("nomenclature", {
             "id": "nom1", "name": "Органайзер", "kind": "product",
@@ -337,6 +345,77 @@ class CashierStockCatalogTests(unittest.TestCase):
             "unit": "шт", "archived": 1})
         self.stock.add_move("nom3", "home", 3, 300, doc_kind="receipt")
         self.assertEqual([i["nom_id"] for i in self.cashier.catalog()["items"]], ["nom1"])
+
+
+class CashierShelfOnlyTests(unittest.TestCase):
+    """Витрина = стеллаж (17.0.26): касса видит только то, что стоит на полке.
+
+    Решение владельца: «надо сделать, чтобы касса видела не все товары на
+    складах, а только товары на стеллаже». Склад в каталоге не подмешивается
+    ни количеством, ни виртуальной позицией; сколько позиций осталось на
+    складах, касса сообщает числом `stock_positions`.
+    """
+
+    def setUp(self):
+        from connector.printflow.shelf import Shelf
+        from connector.printflow.stock import Stock
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.cashier = Cashier(self.db, self.acc)
+        self.db.set_settings({"cashier_code": "1234"})
+        self.stock = Stock(self.db)
+        self.shelf = Shelf(self.db)
+        self.db.upsert("nomenclature", {
+            "id": "nom1", "name": "Органайзер", "kind": "product",
+            "unit": "шт", "archived": 0})
+        self.db.upsert("prices", {
+            "id": "pr1", "nom_id": "nom1", "price_type_id": "retail",
+            "price": 700, "at": "2026-01-01T00:00:00"})
+        self.stock.add_move("nom1", "home", 5, 500, doc_kind="receipt")
+        self.token = self.cashier.login("1234")["token"]
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_default_is_shelf_only(self):
+        data = self.cashier.catalog()
+        self.assertTrue(data["shelf_only"], "по умолчанию витрина — только стеллаж")
+        self.assertEqual(data["items"], [],
+                         "товар со склада попал на витрину кассы")
+        self.assertEqual(data["stock_positions"], 1,
+                         "касса не сообщила, что товар есть на складе")
+
+    def test_warehouse_does_not_inflate_shelf_quantity(self):
+        """На полке 2 штуки, на складе 5 — касса продаёт 2, а не 7."""
+        self.db.upsert("shelf_items", {
+            "id": "s1", "name": "Органайзер", "price": 700, "qty": 0,
+            "nom_id": "nom1", "active": 1, "unit": "шт"})
+        self.shelf.produce("s1", 2, cost_per_unit=100)
+        item = self.cashier.catalog()["items"][0]
+        self.assertEqual(item["shelf_qty"], 2)
+        self.assertEqual(item["stock_qty"], 0, "склад подмешался к остатку полки")
+        self.assertEqual(item["qty"], 2, "касса продаёт больше, чем лежит на полке")
+
+    def test_sale_from_warehouse_position_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "не найдена"):
+            self.cashier.sell([{"item_id": "stock:nom1", "qty": 1}], "cash", self.token)
+        self.assertEqual(self.stock.qty("nom1", "home"), 5,
+                         "склад тронули, хотя продажи быть не должно")
+
+    def test_turning_the_setting_off_returns_the_old_catalog(self):
+        self.db.set_settings({"cashier_shelf_only": False})
+        data = self.cashier.catalog()
+        self.assertFalse(data["shelf_only"])
+        self.assertEqual([i["id"] for i in data["items"]], ["stock:nom1"])
+        self.assertEqual(data["items"][0]["qty"], 5)
+
+    def test_shelf_only_is_in_the_settings_schema(self):
+        from connector.printflow.settings_schema import META
+        self.assertIn("cashier_shelf_only", META)
+        group, title, options = META["cashier_shelf_only"]
+        self.assertEqual("cashier", group)
+        self.assertIn("стеллаж", title.lower())
+        self.assertIn("hint", options)
 
 
 class CashierRouteTests(unittest.TestCase):

@@ -420,11 +420,18 @@ class Cashier:
         return cats
 
     def catalog(self, *, _offer: dict[str, dict] | None = None) -> dict[str, Any]:
-        """Единый каталог кассы: витрина + свободные остатки складов.
+        """Витрина кассы: по умолчанию только то, что лежит на стеллаже.
 
-        Позиция полки, связанная с номенклатурой, показывает суммарную
-        доступность ``shelf_qty + stock_qty`` — кассир не упирается в «нет в
-        наличии», когда товар лежит на складе в соседней комнате. Товары,
+        17.0.26: режим задаёт настройка ``cashier_shelf_only`` (по умолчанию
+        включена — решение владельца «касса видит только товары со стеллажа»).
+        В этом режиме позиции приходят из активных строк полки, ``qty`` — это
+        свободный остаток стеллажа (минус удержания зоны под заказы и холды
+        СБП), склад в каталог не подмешивается. Поле ``stock_positions``
+        говорит, сколько позиций осталось на складах: кассир видит, что товар
+        есть, но в кассу он не попадает.
+
+        Если настройку выключить, включается прежний единый каталог И2:
+        связанная позиция показывает ``shelf_qty + stock_qty``, а товары,
         которых на витрине нет вовсе, приходят виртуальными позициями
         ``stock:<nom_id>`` и материализуются на полке при продаже.
 
@@ -434,6 +441,11 @@ class Cashier:
         # перемещения на полку. Переиспользуем его вместо второго тяжёлого
         # запроса по регистру остатков и резервам.
         offer = _offer if _offer is not None else self.stock_offer()
+        # 17.0.26: касса по умолчанию видит только стеллаж — витрина это то,
+        # что физически лежит на полке. Единый каталог И2 (товар со склада
+        # виден и доезжает на полку при продаже) включается настройкой
+        # `cashier_shelf_only = false`, и тогда ниже работает прежняя ветка.
+        shelf_only = bool(self.db.setting("cashier_shelf_only", True))
         # Удержания витрины-зоны (резервы под заказы, холды СБП): связанные
         # позиции показывают доступность сверх физического остатка полки.
         _zone, zone_held = self._zone_held()
@@ -487,53 +499,57 @@ class Cashier:
             if name_key:
                 by_name.setdefault(name_key, row)
 
-        # Склад → витрина
-        for nom_id, entry in offer.items():
-            target = by_nom.get(nom_id)
-            if target is None:
-                nom = self.db.one(
-                    "SELECT legacy_shelf_id FROM nomenclature WHERE id=?", (nom_id,)) or {}
-                legacy_id = str(nom.get("legacy_shelf_id") or "").strip()
-                if legacy_id:
-                    target = by_id.get(legacy_id)
-            if target is None:
-                target = by_name.get(str(entry.get("name") or "").strip().lower())
-            stock_qty = round(num(entry.get("qty")), 3)
-            source_name = (entry["sources"][0]["warehouse_name"]
-                           if entry.get("sources") else "Склад")
-            if target is not None:
-                target["nom_id"] = target["nom_id"] or nom_id
-                target["stock_qty"] = round(num(target["stock_qty"]) + stock_qty, 3)
-                target["qty"] = round(num(target["qty"]) + stock_qty, 3)
-                target["price"] = target["price"] or round(num(entry.get("price")), 2)
-                target["warehouse_name"] = target["warehouse_name"] or source_name
-                # дополнить фото если у shelf не было, а у nom есть
-                if not target.get("photo_url") and (entry.get("photo") or nom_map.get(nom_id, {}).get("photo_file")):
-                    target["photo_url"] = f"/api/nomenclature/photo.jpg?id={nom_id}"
-                    target["photo"] = True
-                by_nom.setdefault(nom_id, target)
-                continue
-            nm = nom_map.get(nom_id) or {}
-            has_photo = bool(entry.get("photo")) or bool(nm.get("photo_file"))
-            photo_url = f"/api/nomenclature/photo.jpg?id={nom_id}" if has_photo else ""
-            items.append({
-                "id": f"{STOCK_PREFIX}{nom_id}", "name": entry.get("name") or "",
-                "price": round(num(entry.get("price")), 2), "qty": stock_qty,
-                "shelf_qty": 0.0, "stock_qty": stock_qty,
-                "status": "ok", "source": "stock",
-                "photo": has_photo,
-                "photo_url": photo_url,
-                "barcode": "", "sku": "",
-                "nom_id": nom_id, "unit": str(entry.get("unit") or "шт"),
-                "warehouse_name": source_name,
-                "group_id": nm.get("group_id") or "",
-                "group_name": nm.get("group_name") or "",
-                "group_color": nm.get("group_color") or "",
-                "niche_id": nm.get("niche_id") or "",
-                "niche_name": nm.get("niche_name") or "",
-                "niche_color": nm.get("niche_color") or "",
-                "niche_icon": nm.get("niche_icon") or "",
-            })
+        # Склад → витрина: работает только в режиме единого каталога
+        # (настройка `cashier_shelf_only` выключена).
+        if not shelf_only:
+            # Склад → витрина
+            for nom_id, entry in offer.items():
+                target = by_nom.get(nom_id)
+                if target is None:
+                    nom = self.db.one(
+                        "SELECT legacy_shelf_id FROM nomenclature WHERE id=?", (nom_id,)) or {}
+                    legacy_id = str(nom.get("legacy_shelf_id") or "").strip()
+                    if legacy_id:
+                        target = by_id.get(legacy_id)
+                if target is None:
+                    target = by_name.get(str(entry.get("name") or "").strip().lower())
+                stock_qty = round(num(entry.get("qty")), 3)
+                source_name = (entry["sources"][0]["warehouse_name"]
+                               if entry.get("sources") else "Склад")
+                if target is not None:
+                    target["nom_id"] = target["nom_id"] or nom_id
+                    target["stock_qty"] = round(num(target["stock_qty"]) + stock_qty, 3)
+                    target["qty"] = round(num(target["qty"]) + stock_qty, 3)
+                    target["price"] = target["price"] or round(num(entry.get("price")), 2)
+                    target["warehouse_name"] = target["warehouse_name"] or source_name
+                    # дополнить фото если у shelf не было, а у nom есть
+                    if not target.get("photo_url") and (entry.get("photo") or nom_map.get(nom_id, {}).get("photo_file")):
+                        target["photo_url"] = f"/api/nomenclature/photo.jpg?id={nom_id}"
+                        target["photo"] = True
+                    by_nom.setdefault(nom_id, target)
+                    continue
+                nm = nom_map.get(nom_id) or {}
+                has_photo = bool(entry.get("photo")) or bool(nm.get("photo_file"))
+                photo_url = f"/api/nomenclature/photo.jpg?id={nom_id}" if has_photo else ""
+                items.append({
+                    "id": f"{STOCK_PREFIX}{nom_id}", "name": entry.get("name") or "",
+                    "price": round(num(entry.get("price")), 2), "qty": stock_qty,
+                    "shelf_qty": 0.0, "stock_qty": stock_qty,
+                    "status": "ok", "source": "stock",
+                    "photo": has_photo,
+                    "photo_url": photo_url,
+                    "barcode": "", "sku": "",
+                    "nom_id": nom_id, "unit": str(entry.get("unit") or "шт"),
+                    "warehouse_name": source_name,
+                    "group_id": nm.get("group_id") or "",
+                    "group_name": nm.get("group_name") or "",
+                    "group_color": nm.get("group_color") or "",
+                    "niche_id": nm.get("niche_id") or "",
+                    "niche_name": nm.get("niche_name") or "",
+                    "niche_color": nm.get("niche_color") or "",
+                    "niche_icon": nm.get("niche_icon") or "",
+                })
+
         for row in items:
             if num(row["qty"]) <= 0:
                 row["status"] = "empty"
@@ -553,6 +569,10 @@ class Cashier:
         items.sort(key=lambda x: (str(x.get("name") or "").lower(), x["id"]))
         return {
             "items": items,
+            # 17.0.26: кассиру видно, в каком режиме витрина и сколько товаров
+            # осталось на складах — без этого «почему нет товара» непонятно.
+            "shelf_only": shelf_only,
+            "stock_positions": len(offer) if shelf_only else 0,
             "categories": self._categories(),
             "sbp_enabled": self.sbp.enabled(),
             "sbp": self.payment_qr(with_svg=False),

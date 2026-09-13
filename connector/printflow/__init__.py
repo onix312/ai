@@ -15,4 +15,4 @@
     staff       — команда и приглашения PrintFlow.
 """
 
-APP_VERSION = "17.0.25"
+APP_VERSION = "17.0.26"

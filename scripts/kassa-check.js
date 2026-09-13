@@ -353,6 +353,58 @@ if (problems.length === 0) {
     // В памяти страницы очередь осталась целиком — на сервер уйдут все 203.
     if (full.ev('offQueue.length') !== 203) throw new Error('из памяти страницы записи пропали');
   });
+
+  // 17.0.26: витрина кассы — только стеллаж. Проверяем не сервер (он покрыт
+  // юнит-тестами), а то, что кассир об этом узнаёт словами: без подсказки
+  // человек ищет товар со склада и решает, что касса сломалась.
+  checkAsync('витрина = стеллаж: касса говорит про склад и не показывает лишнее', async () => {
+    const shelf = createKassa({
+      transport: 'stub',
+      respond: (url) => {
+        if (String(url).indexOf('/api/cashier/catalog') < 0) return {};
+        return { body: {
+          items: [{ id: 's1', name: 'Адресник', price: 500, qty: 2, shelf_qty: 2,
+                    stock_qty: 0, status: 'ok', unit: 'шт' }],
+          categories: [], shelf_only: true, stock_positions: 3,
+          sbp_enabled: false, sbp: {}, shop_cash: { in_shop: 1000 },
+          shift_mode: 'auto', npd: {}, ring: false,
+        } };
+      },
+    });
+    shelf.run();
+    await shelf.ev('loadCatalog()');
+    const hint = String(shelf.ev('document.getElementById("subHint").textContent') || '');
+    if (hint.indexOf('только стеллаж') < 0) {
+      throw new Error('в подсказке нет режима «только стеллаж»: ' + hint);
+    }
+    if (hint.indexOf('3') < 0) {
+      throw new Error('касса не сказала, сколько товаров осталось на складах: ' + hint);
+    }
+    if (shelf.ev('state.items.length') !== 1) {
+      throw new Error('витрина показала не один товар со стеллажа');
+    }
+
+    // Режим выключен — подсказка про склад не появляется вовсе.
+    const wide = createKassa({
+      transport: 'stub',
+      respond: (url) => {
+        if (String(url).indexOf('/api/cashier/catalog') < 0) return {};
+        return { body: {
+          items: [{ id: 'stock:nom1', name: 'Органайзер', price: 700, qty: 5,
+                    shelf_qty: 0, stock_qty: 5, status: 'ok', unit: 'шт' }],
+          categories: [], shelf_only: false, stock_positions: 0,
+          sbp_enabled: false, sbp: {}, shop_cash: { in_shop: 0 },
+          shift_mode: 'auto', npd: {}, ring: false,
+        } };
+      },
+    });
+    wide.run();
+    await wide.ev('loadCatalog()');
+    const plain = String(wide.ev('document.getElementById("subHint").textContent') || '');
+    if (plain.indexOf('только стеллаж') >= 0) {
+      throw new Error('подсказка про стеллаж осталась при выключенном режиме');
+    }
+  });
 }
 
 function report() {
