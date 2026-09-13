@@ -347,6 +347,23 @@ class Api:
             raise ValueError("Принтер не настроен. Добавьте его в разделе «Принтеры».")
         return printer
 
+    def mark_link(self, printer_id: str, channel: str, ok: bool,
+                  reason: str = "") -> None:
+        """Отметить состояние канала связи с принтером (17.0.19).
+
+        Наблюдение не должно ронять запрос: если запись не удалась, запрос
+        продолжается как раньше.
+        """
+        try:
+            from .connection_state import ConnectionState
+            links = ConnectionState(self.db)
+            if ok:
+                links.mark_ok(printer_id, channel)
+            else:
+                links.mark_fail(printer_id, channel, reason)
+        except Exception:
+            pass
+
     # ---------------------------------------------------------- Bambu Cloud
     def _cloud_session(self) -> tuple[str, str, str]:
         """(token, uid, region) из настроек. Пустые строки, если входа не было."""
@@ -1776,8 +1793,14 @@ class Api:
             depth = int(num(one("depth"), 1))
             try:
                 files = printer.files.list_tree(one("path","/"), depth)
-            except Exception:
+            except Exception as exc:
+                # Канал FTPS помечаем по факту (17.0.19): дерево не получилось —
+                # пробуем плоский список. Если и он упадёт, исключение уйдёт
+                # наружу, как и раньше, но причина уже записана в состояние.
+                self.mark_link(printer.id, "ftps", False,
+                               str(exc) or type(exc).__name__)
                 files = printer.files.list_files(one("path","/"))
+            self.mark_link(printer.id, "ftps", True)
             return 200, {"path": one("path","/"), "files": files}
         if path == "/api/printer/files/usage":
             printer = self.printer_or_fail(one("printer_id"))

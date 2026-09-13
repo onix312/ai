@@ -660,6 +660,8 @@ const PF = {
     // Архив заказов (17.0.17) живёт отдельно от `orders`, чтобы снятые с доски
     // не считались живыми в канбане, счётчиках и отчётах.
     archivedOrders: [],
+    // Состояние каналов связи: printer_id -> снимок из /api/printer/links.
+    links: {},
   },
   // Что показывает список заказов: '' — доска, 'archived' — снятые с доски.
   orderBox: '',
@@ -1480,6 +1482,24 @@ async function refreshLists() {
   PF.state.niches = niches.niches || [];
 }
 PF.refreshLists = refreshLists;
+
+/** Каналы связи с принтерами (17.0.19).
+
+    Отдельный вызов, а не часть `refreshCore`: наблюдение за связью не должно
+    ронять загрузку заказов. `PF.state.links` всегда становится объектом — даже
+    при ошибке, иначе карточки принтера запрашивали бы его снова и снова. */
+async function refreshLinks() {
+  try {
+    const data = await get('/api/printer/links');
+    const map = {};
+    (data.printers || []).forEach((item) => { map[item.printer_id] = item; });
+    PF.state.links = map;
+  } catch (e) {
+    PF.state.links = PF.state.links || {};
+  }
+  return PF.state.links;
+}
+PF.refreshLinks = refreshLinks;
 
 async function refreshFinance(days) {
   PF.state.financeDays = days || PF.state.financeDays;

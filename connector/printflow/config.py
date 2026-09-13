@@ -305,6 +305,14 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "theme": "dark",
     "accent": "indigo",
     # --- 8.0: Мост Bambu Studio ------------------------------------------
+    # --- 17.0.19: состояние каналов связи с принтером ---------------------
+    # Через сколько секунд тишины канал считается «давно не было вестей».
+    # Значения совпадают с CHANNELS в connection_state.py — расхождение ловит
+    # test_connection_state.
+    "link_stale_mqtt": 60,
+    "link_stale_http": 300,
+    "link_stale_ftps": 900,
+    "link_stale_camera": 900,
     "watch_folder_enabled": False,
     "watch_folder_path": str(Path.home() / "PrintFlow-Inbox"),
     "watch_auto_action": "notify",  # notify | queue | print

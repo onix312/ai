@@ -501,3 +501,38 @@ class OrderArchivePanelTests(TestCase):
     def test_restore_offers_undo_only_when_leaving_the_board(self):
         self.assertIn("if (leaving) {", self.ops)
         self.assertIn("toast('Заказ возвращён на доску')", self.ops)
+
+
+class PrinterLinkPanelTests(TestCase):
+    """Каналы связи в карточке принтера (17.0.19).
+
+    Поведение прогнано отдельным прогоном node по исходному тексту `printer.js`;
+    здесь — то, что теряется при правке: карточка берёт данные из
+    `/api/printer/links`, показывает только плохие каналы и не запрашивает их
+    повторно, когда ответа не было.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.printer = (ROOT / "site" / "assets" / "printer.js").read_text(encoding="utf-8")
+        cls.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+
+    def test_core_exposes_links_loader(self):
+        self.assertIn("async function refreshLinks()", self.core)
+        self.assertIn("get('/api/printer/links')", self.core)
+        self.assertIn("links: {}", self.core)
+        self.assertIn("PF.refreshLinks = refreshLinks;", self.core)
+
+    def test_failed_loader_does_not_loop(self):
+        """Ошибка не должна оставлять `links` пустым: иначе запрос каждый кадр."""
+        self.assertIn("PF.state.links = PF.state.links || {};", self.core)
+        self.assertIn("if (!PF.state.links && PF.refreshLinks)", self.printer)
+
+    def test_card_shows_only_bad_channels(self):
+        self.assertIn("const badLinks = link", self.printer)
+        self.assertIn("c.state === 'down' || c.state === 'stale'", self.printer)
+        self.assertIn("▤ ${esc(c.title)}: ${esc(c.label)}", self.printer)
+
+    def test_reason_and_advice_are_escaped(self):
+        self.assertIn("esc(c.last_error || c.breaks || '')", self.printer)
+        self.assertIn("esc(link.action)", self.printer)
