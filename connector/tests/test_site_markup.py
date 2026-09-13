@@ -616,3 +616,31 @@ class CashierStockBarTests(TestCase):
 
     def test_bar_has_text_alternative(self):
         self.assertIn('''aria-label="Остаток '+qty+' шт"''', self.html)
+
+
+class CashierPriceScaleTests(TestCase):
+    """Цена читается первой: шкала размеров по режимам витрины (17.0.23)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_price_is_bigger_than_the_name(self):
+        # Ищем правило с начала строки: `.grid.d-large .n{…}` тоже содержит
+        # `.n{font-size:`, и без якоря тест берёт размер из другого режима.
+        name = float(re.search(r"\n \.n\{font-size:(\d+(?:\.\d+)?)px", self.html).group(1))
+        price = float(re.search(r"\n \.p\{font-size:(\d+(?:\.\d+)?)px", self.html).group(1))
+        self.assertGreater(price, name + 4,
+                           f"цена {price} px должна заметно превышать название {name} px")
+
+    def test_every_density_has_its_own_price_size(self):
+        base = re.search(r"\n \.p\{font-size:(\d+)px", self.html).group(1)
+        large = re.search(r"\.grid\.d-large \.p\{font-size:(\d+)px", self.html).group(1)
+        listed = re.search(r"\.grid\.d-list \.p\{font-size:(\d+)px", self.html).group(1)
+        self.assertEqual(3, len({base, large, listed}),
+                         "в трёх режимах цена не должна быть одного размера")
+        self.assertLess(int(listed), int(base))
+        self.assertLess(int(base), int(large))
+
+    def test_digits_are_tabular(self):
+        self.assertIn("font-variant-numeric:tabular-nums", self.html)
