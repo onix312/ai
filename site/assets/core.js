@@ -695,7 +695,7 @@ PF.onReady = (fn) => {
 };
 
 /* ============================================ ленивая загрузка модулей
-   Идея 47: тяжёлые разделы (контент-студия, клиент-бот, центр смены)
+   Идея 47: тяжёлые разделы (печать, клиент-бот, центр смены)
    грузятся при первом входе, а не вместе со стартом панели. Скрипт
    регистрирует инициализацию через PF.module(name, init); загрузчик
    поднимает файл с тем же пином версии, что и остальные ассеты. */
@@ -705,7 +705,7 @@ const ASSET_VERSION = (() => {
   return match ? match[1] : '';
 })();
 const LAZY_MODULES = {
-  marketing: ['marketing.js'],
+  print: ['print.js'],
   clientbot: ['clientbot.js'],
   ops10: ['ops10.js'],
 };
@@ -976,7 +976,7 @@ const VIEWS = {
   inventory: { title: 'Склад пластика', sub: 'Остатки катушек и база изделий' },
   niches: { title: 'Ниши', sub: 'Проверка гипотез по фактическим заказам' },
   calc: { title: 'Калькулятор', sub: 'Себестоимость, цена и прибыль за час' },
-  marketing: { title: 'Контент', sub: 'Посты, карточки, отчёты и таблички — генераторы 8.5' },
+  print: { title: 'Печать', sub: 'Формы цеха: ценники, стикеры, наклейки, визитки, талоны' },
   clientbot: { title: 'Клиент-бот', sub: 'Telegram-бот для покупателей: витрина, заказы, статусы' },
   library: { title: 'Библиотека', sub: 'Инструкции, скрипты и материалы' },
   pages: { title: 'Страницы', sub: 'Хаб LAN-страниц: касса, СБП, банк, витрины, ТВ' },
@@ -993,7 +993,7 @@ const VIEW_ALIASES = {
   warehouse: 'warehouses', sklad: 'warehouses', wh: 'warehouses',
   money: 'finance', finances: 'finance', accounting: 'finance',
   home: 'dashboard', main: 'dashboard', overview: 'dashboard',
-  jobs: 'queue', print: 'queue', clients: 'customers',
+  jobs: 'queue', clients: 'customers',
   calculator: 'calc', docs: 'library', settings2: 'settings',
   client: 'clientbot', clientsbot: 'clientbot', buyer: 'clientbot',
   покупатель: 'clientbot',

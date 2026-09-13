@@ -62,65 +62,6 @@ def seed_basic(db: Database) -> None:
                                "at": now_iso(), "note": "тест"})
 
 
-class ContentTests(unittest.TestCase):
-    def setUp(self):
-        self.db = make_db()
-        seed_basic(self.db)
-
-    def tearDown(self):
-        self.db.close()
-
-    def test_week_post(self):
-        from connector.printflow.content import week_post
-        out = week_post(self.db, 7)
-        self.assertIn("цих NOZZA" if "цих NOZZA" in out["text"] else "NOZZA",
-                      out["text"])
-        self.assertGreaterEqual(out["numbers"]["income"], 500)
-        self.assertEqual(out["top"], "Адресник")
-
-    def test_holiday_nearest_is_future(self):
-        from connector.printflow.content import holiday_cards
-        out = holiday_cards(date(2026, 8, 22))
-        self.assertIsNotNone(out["nearest"])
-        self.assertGreaterEqual(out["nearest"]["days_left"], 0)
-        self.assertEqual(len(out["all"]), 7)
-
-    def test_holiday_rollover_year(self):
-        from connector.printflow.content import holiday_cards
-        out = holiday_cards(date(2026, 12, 28))
-        # ближайший — Новый год 2027-го
-        self.assertEqual(out["nearest"]["name"], "Новый год")
-        self.assertEqual(out["nearest"]["date"], "2027-01-01")
-
-    def test_avito_card(self):
-        from connector.printflow.content import avito_card
-        from connector.printflow.config import now_iso
-        db = self.db
-        db.upsert("shelf_items", {"id": "s1", "name": "Адресник «Пёс»",
-                                  "qty": 0.0, "price": 450.0,
-                                  "created_at": now_iso()})
-        card = avito_card(db, "s1")
-        self.assertIn("3D", card["title"].upper() + "3D".upper())
-        self.assertIn("закончилось", card["description"].lower())
-        with self.assertRaises(ValueError):
-            avito_card(db, "nope")
-
-    def test_seasonality_and_report(self):
-        from connector.printflow.content import seasonality, workshop_report
-        season = seasonality(self.db)
-        self.assertEqual(len(season["months"]), 12)
-        report = workshop_report(self.db, 30)
-        self.assertGreaterEqual(report["income"], 500)
-        self.assertEqual(report["jobs_done"], 1)
-        self.assertEqual(report["top"][0]["product"], "Адресник")
-
-    def test_social_pack(self):
-        from connector.printflow.content import social_pack
-        pack = social_pack(self.db, 30)
-        self.assertIn("NOZZA", pack["header"])
-        self.assertIn("30 дней", pack["period"])
-
-
 class AchievementTests(unittest.TestCase):
     def setUp(self):
         self.db = make_db()
@@ -405,12 +346,48 @@ class ApiPhase11Tests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_content_routes(self):
-        for path in ("/api/content/week", "/api/content/social",
-                     "/api/content/holiday", "/api/content/season",
-                     "/api/content/report"):
+    def test_print_routes(self):
+        for path in ("/api/print/forms", "/api/print/stickers",
+                     "/api/print/signs", "/api/print/business-card",
+                     "/api/print/report"):
             code, _ = self.api.get(path, {})
             self.assertEqual(code, 200, path)
+
+    def test_print_routes_reject_bad_parameters(self):
+        """Опечатка в параметре — понятная ошибка, а не пустой лист.
+
+        До разделения кода `?kind=nope` отдавал 200 и печатал пустую сетку:
+        оператор видел «готово» и чистый лист бумаги.
+        """
+        cases = (
+            ("/api/print/forms", {"group": "нет такой"}, 400),
+            ("/api/print/stickers", {"kind": "нет такого"}, 400),
+            ("/api/print/stickers", {"size": "нет такого"}, 400),
+            ("/api/print/stickers", {"sheet": "нет такого"}, 400),
+            ("/api/print/stickers", {"copies": "abc"}, 400),
+            ("/api/print/signs", {"kind": "нет такого"}, 400),
+            ("/api/print/report", {"days": "abc"}, 400),
+            ("/api/print/warranty", {"order_id": "нет такого"}, 404),
+            ("/api/print/business-card", {"customer_id": "нет такого"}, 404),
+        )
+        for path, query, expected in cases:
+            with self.subTest(path=path, query=query):
+                code, payload = self.api.get(path, query)
+                self.assertEqual(expected, code)
+                self.assertTrue(payload.get("error"), "ошибка без объяснения")
+
+    def test_print_warranty_needs_an_order(self):
+        code, payload = self.api.get("/api/print/warranty", {})
+        self.assertEqual(400, code)
+        self.assertIn("order_id", payload["error"])
+
+    def test_shelf_header_is_served_from_the_shelf_route(self):
+        """Шапка полки переехала из студии в свой раздел: адрес не должен
+        остаться в `/api/content/*`, которого больше нет."""
+        code, payload = self.api.get("/api/shelf/header", {"days": "7"})
+        self.assertEqual(200, code)
+        self.assertIn("text", payload)
+        self.assertNotEqual(200, self.api.get("/api/content/shelf-header", {})[0])
 
     def test_queue_add_route_maps_order_fast_add(self):
         """«В очередь» с карточки заказа не должно уходить в несуществующий URL.
@@ -561,7 +538,15 @@ class BarcodeTests(unittest.TestCase):
         self.assertIn("<svg", svg("199.90"))
 
 
-class ContentGenTests(unittest.TestCase):
+class PrintTests(unittest.TestCase):
+    """Печатные формы и нити заказа — после сноса контент-студии (17.1).
+
+    Студийные генераторы (посты, авито, сезонность, соцпакет, видеоряд,
+    карта печати) удалены вместе с `content.py`: их тексты уходили в соцсети
+    вручную и в цехе не использовались. Печать осталась и переехала в
+    `printing.py`; шапка полки — в `shelf.py`; нить заказа — в `order_thread.py`.
+    """
+
     def setUp(self):
         self.db = make_db()
         seed_basic(self.db)
@@ -569,9 +554,9 @@ class ContentGenTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_shelf_header_and_promo(self):
-        from connector.printflow.content import promo_pack, shelf_header
+    def test_shelf_header(self):
         from connector.printflow.config import now_iso
+        from connector.printflow.shelf import shelf_header
         self.db.upsert("shelf_items", {"id": "s1", "name": "Адресник", "qty": 3.0,
                                        "price": 400.0, "created_at": now_iso()})
         self.db.upsert("shelf_moves", {"id": "m1", "item_id": "s1", "kind": "sale",
@@ -579,19 +564,9 @@ class ContentGenTests(unittest.TestCase):
         head = shelf_header(self.db, 7)
         self.assertIn("Адресник", head["text"])
         self.assertEqual(head["sold_total"], 2)
-        promo = promo_pack(self.db)
-        self.assertTrue(promo["nearest"])
-        self.assertGreaterEqual(len(promo["cards"]), 1)
-
-    def test_print_map_grid(self):
-        from connector.printflow.content import print_map
-        out = print_map(self.db)
-        self.assertEqual(out["total"], 1)
-        self.assertEqual(out["max_day"], 1)
-        self.assertEqual(len(out["cells"]), 1)
 
     def test_order_thread(self):
-        from connector.printflow.content import order_thread
+        from connector.printflow.order_thread import order_thread
         out = order_thread(self.db, "o1")
         self.assertEqual(out["order"]["product"], "Адресник")
         self.assertEqual(out["print"][0]["state"], "done")
@@ -600,21 +575,52 @@ class ContentGenTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             order_thread(self.db, "nope")
 
-    def test_week_video_without_frames(self):
-        from connector.printflow.content import week_video
-        out = week_video(self.db, 7)
-        self.assertEqual(out["jobs"], 1)
-        self.assertEqual(out["jobs_with_frames"], 0)
-        self.assertEqual(out["frames"], [])
-
     def test_stickers_and_business_card(self):
-        from connector.printflow.content import business_card_html, stickers
+        from connector.printflow.printing import business_card_html, stickers
         html = stickers("pla")
-        self.assertIn("100% PLA", html)
+        self.assertIn("<b>PLA</b>", html)
         self.assertIn("@page", html)
         card = business_card_html(self.db, "c1")
         self.assertIn("NOZZA", card)
         self.assertIn("Мой NOZZA", card)
+
+    def test_sticker_sheet_is_filled_to_the_end(self):
+        """copies=0 — заполнить лист целиком, а не один экземпляр шаблона.
+
+        Первая версия печатала по одной ячейке: на A4 оставалось пустое поле,
+        а «тираж» никто не указывал. Теперь 0 значит «весь лист», и число
+        ячеек берётся из сетки листа, а не из константы в браузере.
+        """
+        from connector.printflow import printforms as pf
+        from connector.printflow.printing import stickers
+        html = stickers("all", "50x25", "A4", 0)
+        layout = pf.layout_for("50x25", "A4")
+        self.assertEqual(html.count('class="pf-cell'), layout["total"])
+        self.assertEqual((3, 9), (layout["cols"], layout["rows"]),
+                         "на A4 должно влезать 3 × 9 наклеек 50 × 25 мм")
+        self.assertEqual(27, layout["total"])
+
+    def test_warranty_keeps_the_term_unknown_until_it_is_set(self):
+        """Срок гарантии не выдумывается: нет настройки — на талоне прочерк."""
+        from connector.printflow.printing import warranty_html
+        html = warranty_html(self.db, "o1")
+        self.assertIn("______", html)
+        with self.assertRaises(ValueError):
+            warranty_html(self.db, "nope")
+
+    def test_print_forms_catalog_has_parameters(self):
+        """Каталог форм — источник правды для панели: у каждой формы с
+        параметрами они описаны данными, иначе раздел «Печать» придётся
+        дописывать в JavaScript под каждый новый шаблон."""
+        from connector.printflow.printing import forms_catalog, groups
+        catalog = {item["id"]: item for item in forms_catalog()}
+        self.assertEqual(len(catalog), len(forms_catalog()))
+        self.assertEqual(6, len(groups()))
+        self.assertEqual({"kind", "size", "copies"}, set(catalog["stickers"]["options"]))
+        self.assertGreater(len(catalog["stickers"]["options"]["size"]["choices"]), 2)
+        self.assertEqual("orders", catalog["warranty"]["options"]["order_id"]["source"])
+        self.assertEqual("customers",
+                         catalog["business-card"]["options"]["customer_id"]["source"])
 
 
 class TourApiTests(unittest.TestCase):

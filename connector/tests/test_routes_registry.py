@@ -157,6 +157,49 @@ class RoutesInventoryTests(unittest.TestCase):
                          "фронт зовёт маршруты, которых нет в сервере")
 
 
+class PrintFormsContractTests(unittest.TestCase):
+    """Каталог печати не обещает того, чего нет.
+
+    Раздел «Печать» рисуется из реестра форм на сервере: если адрес формы
+    удалили или переименовали, панель узнает об этом только по кнопке,
+    которая молча ничего не напечатает. Контракт держит адреса и страницы
+    каталога равными коду.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from connector.printflow.printing import FORMS
+        cls.forms = FORMS
+        known = {r["path"] for r in router.reference()}
+        for found in chain_routes().values():
+            known |= {path for _, path in found}
+        cls.known = known
+
+    def test_every_api_address_exists(self):
+        from connector.printflow.printing import FORMS
+        missing = sorted({str(f["api"]) for f in FORMS if f.get("api")} - self.known)
+        self.assertEqual([], missing, "форма печати ссылается на несуществующий маршрут")
+
+    def test_every_page_address_exists_on_disk(self):
+        site = ROOT / "site"
+        missing = []
+        for form in self.forms:
+            page = form.get("page")
+            if not page:
+                continue
+            target = site / str(page).lstrip("/")
+            if not target.is_file():
+                missing.append(str(page))
+        self.assertEqual([], missing, "форма печати ссылается на несуществующую страницу")
+
+    def test_forms_have_one_address_each(self):
+        """У формы либо серверный лист, либо страница — не оба и не ни одного."""
+        broken = [str(f["id"]) for f in self.forms
+                  if bool(f.get("api")) == bool(f.get("page"))]
+        self.assertEqual([], broken,
+                         "у формы должно быть ровно одно: api (лист с сервера) или page")
+
+
 class SearchRouteContractTests(unittest.TestCase):
     """/api/search и палитра команд обязаны говорить на одном языке.
 

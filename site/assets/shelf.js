@@ -54,7 +54,7 @@ async function refreshShelf() {
       get('/api/shelf'), get('/api/shelf/moves', { limit: 60 }),
       get('/api/shelf/tags').catch(() => ({ hit: [], new: [], last: [] })),
       get('/api/shelf/forecast', { days: 7 }).catch(() => ({ days: 7, items: [] })),
-      get('/api/content/shelf-header', { days: 7 }).catch(() => null),
+      get('/api/shelf/header', { days: 7 }).catch(() => null),
       get('/api/shelf/cash').catch(() => null),
     ]);
     shelfData = {

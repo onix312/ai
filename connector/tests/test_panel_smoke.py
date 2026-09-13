@@ -2,7 +2,7 @@
 
 `node --check` проверяет синтаксис, поэтому файл с вызовом несуществующего
 хелпера проходит проверку и падает уже в браузере. Так в панель уехали
-`debounce is not defined` (marketing.js) и `fail is not defined`
+`debounce is not defined` (было в контент-студии, снята в 17.0.24) и `fail is not defined`
 (ops10.js): разделы выглядели целыми, но не работали.
 
 Здесь запускается `scripts/panel-check.js` — он грузит все скрипты панели

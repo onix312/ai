@@ -1130,3 +1130,37 @@ class Shelf:
         return public_page_url(
             "/shelf.html", f"id={quote(str(item_id), safe='')}",
             host_header=host, public_url=public_url, listen_port=listen_port)
+
+
+# ------------------------------------------------------------ шапка полки
+def shelf_header(db: Database, days: int = 7) -> dict[str, Any]:
+    """Еженедельная шапка полки «Эта неделя: …» (идея 105)."""
+    since = (datetime.now() - timedelta(days=max(1, int(days or 7)))).isoformat()
+    rows = db.query(
+        "SELECT i.name, COALESCE(SUM(-m.qty), 0) sold, COALESCE(SUM(m.price * -m.qty), 0) money"
+        " FROM shelf_moves m JOIN shelf_items i ON i.id=m.item_id"
+        " WHERE m.kind IN ('sale','online') AND m.at>=? GROUP BY i.id"
+        " ORDER BY sold DESC", (since,))
+    top = [{ "name": r["name"], "sold": int(num(r["sold"])) } for r in rows
+           if num(r["sold"]) > 0][:3]
+    sold_total = sum(t["sold"] for t in top)
+    money = db.one("SELECT COALESCE(SUM(-qty * price),0) v FROM shelf_moves"
+                   " WHERE kind IN ('sale','online') AND at>=?", (since,)) or {}
+    new_items = db.query("SELECT name FROM shelf_items WHERE active=1"
+                         " AND (created_at>=? OR updated_at>=?) ORDER BY updated_at DESC",
+                         (since, since))
+    if top:
+        text = "Эта неделя: " + ", ".join(f"«{t['name']}» ×{t['sold']}" for t in top) + "."
+        if sold_total:
+            text += f" Всего с полки: {sold_total} шт."
+    else:
+        text = "Эта неделя: полка прогревается — загляните."
+    return {
+        "days": max(1, int(days or 7)),
+        "text": text,
+        "top": top,
+        "sold_total": sold_total,
+        "money": round(num(money.get("v")), 2),
+        "new_items": [r["name"] for r in new_items][:5],
+        "updated_at": now_iso(),
+    }

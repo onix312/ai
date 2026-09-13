@@ -4,7 +4,7 @@
    Зачем. `node --check` проверяет только синтаксис: файл с вызовом
    необъявленной переменной проходит его на «отлично», а в браузере падает
    в первом же обработчике. Так в панель уехали `debounce is not defined`
-   (marketing.js) и `fail is not defined` (ops10.js) — разделы при этом
+   (print.js) и `fail is not defined` (ops10.js) — разделы при этом
    выглядели целыми, но не работали.
 
    Что делает стенд. Грузит все скрипты `site/assets/*.js` в порядке
@@ -233,7 +233,7 @@ lazy.forEach((name) => { const err = loadFile(name); if (err) loadErrors.push(er
 
 /* ====================================================== фазы исполнения */
 const VIEWS = ['dashboard', 'printers', 'queue', 'orders', 'customers', 'products', 'batches',
-  'documents', 'warehouses', 'shelf', 'finance', 'inventory', 'niches', 'calc', 'marketing',
+  'documents', 'warehouses', 'shelf', 'finance', 'inventory', 'niches', 'calc', 'print',
   'clientbot', 'library', 'settings', 'ops10'];
 
 function phaseViews() {

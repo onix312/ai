@@ -21,7 +21,6 @@ from .http_helpers import safe_file
 from .router import Ctx, router
 
 
-
 @router.get("/api/health", doc="GET /api/health")
 def get_health(api: Any, ctx: Ctx):
     return 200, {"ok": True, "version": APP_VERSION,
@@ -530,10 +529,9 @@ def get_public_my(api: Any, ctx: Ctx):
     return 200, api._my_nozza(ctx.one("code"))
 
 
-# --------------------------------------------- блоки с несколькими строками
+# --- блоки с несколькими строками
 # Те же ветки, что были в `Api.get()`, только с несколькими операторами:
 # присваивания, try/except, ранние return. Тело перенесено дословно.
-
 
 
 @router.get("/api/job/passport", doc="GET /api/job/passport")
@@ -1109,57 +1107,6 @@ def get_estimate(api: Any, ctx: Ctx):
     return 404, {"error": f"Файл не найден: {safe_name}"}
 
 
-@router.get("/api/content/week", doc="GET /api/content/week")
-def get_content_week(api: Any, ctx: Ctx):
-    from .content import week_post
-    try:
-        days = max(1, min(int(ctx.one("days", "7") or 7), 92))
-    except ValueError:
-        days = 7
-    return 200, week_post(api.db, days)
-
-
-@router.get("/api/content/social", doc="GET /api/content/social")
-def get_content_social(api: Any, ctx: Ctx):
-    from .content import social_pack
-    try:
-        days = max(7, min(int(ctx.one("days", "30") or 30), 366))
-    except ValueError:
-        days = 30
-    return 200, social_pack(api.db, days)
-
-
-@router.get("/api/content/avito", doc="GET /api/content/avito")
-def get_content_avito(api: Any, ctx: Ctx):
-    from .content import avito_card
-    try:
-        return 200, avito_card(api.db, ctx.one("item_id"))
-    except ValueError as exc:
-        return 400, {"error": str(exc)}
-
-
-@router.get("/api/content/holiday", doc="GET /api/content/holiday")
-def get_content_holiday(api: Any, ctx: Ctx):
-    from .content import holiday_cards
-    return 200, holiday_cards()
-
-
-@router.get("/api/content/season", doc="GET /api/content/season")
-def get_content_season(api: Any, ctx: Ctx):
-    from .content import seasonality
-    return 200, seasonality(api.db)
-
-
-@router.get("/api/content/report", doc="GET /api/content/report")
-def get_content_report(api: Any, ctx: Ctx):
-    from .content import workshop_report
-    try:
-        days = max(7, min(int(ctx.one("days", "30") or 30), 366))
-    except ValueError:
-        days = 30
-    return 200, workshop_report(api.db, days)
-
-
 @router.get("/api/shelf/forecast", doc="GET /api/shelf/forecast")
 def get_shelf_forecast(api: Any, ctx: Ctx):
     try:
@@ -1201,9 +1148,9 @@ def get_bed_reference(api: Any, ctx: Ctx):
     return 200, {"has": (PHOTO_DIR / "bed_reference.jpg").is_file()}
 
 
-@router.get("/api/content/shelf-header", doc="GET /api/content/shelf-header")
+@router.get("/api/shelf/header", doc="Шапка полки: что продано за неделю")
 def get_content_shelf_header(api: Any, ctx: Ctx):
-    from .content import shelf_header
+    from .shelf import shelf_header
     try:
         days = max(1, min(int(ctx.one("days", "7") or 7), 30))
     except ValueError:
@@ -1211,57 +1158,13 @@ def get_content_shelf_header(api: Any, ctx: Ctx):
     return 200, shelf_header(api.db, days)
 
 
-@router.get("/api/content/promo", doc="GET /api/content/promo")
-def get_content_promo(api: Any, ctx: Ctx):
-    from .content import promo_pack
-    return 200, promo_pack(api.db)
-
-
-@router.get("/api/content/week-video", doc="GET /api/content/week-video")
-def get_content_week_video(api: Any, ctx: Ctx):
-    from .content import week_video
-    try:
-        days = max(1, min(int(ctx.one("days", "7") or 7), 30))
-    except ValueError:
-        days = 7
-    return 200, week_video(api.db, days)
-
-
-@router.get("/api/content/print-map", doc="GET /api/content/print-map")
-def get_content_print_map(api: Any, ctx: Ctx):
-    from .content import print_map
-    return 200, print_map(api.db)
-
-
 @router.get("/api/order/thread", doc="GET /api/order/thread")
 def get_order_thread(api: Any, ctx: Ctx):
-    from .content import order_thread
+    from .order_thread import order_thread
     try:
         return 200, order_thread(api.db, ctx.one("id"))
     except ValueError as exc:
         return 404, {"error": str(exc)}
-
-
-@router.get("/api/content/report/print", doc="GET /api/content/report/print")
-def get_content_report_print(api: Any, ctx: Ctx):
-    from .content import workshop_report_html
-    try:
-        days = max(7, min(int(ctx.one("days", "30") or 30), 366))
-    except ValueError:
-        days = 30
-    return 200, {"html": workshop_report_html(api.db, days)}
-
-
-@router.get("/api/content/stickers", doc="GET /api/content/stickers")
-def get_content_stickers(api: Any, ctx: Ctx):
-    from .content import stickers
-    return 200, {"html": stickers(ctx.one("kind", "all"))}
-
-
-@router.get("/api/content/business-card", doc="GET /api/content/business-card")
-def get_content_business_card(api: Any, ctx: Ctx):
-    from .content import business_card_html
-    return 200, {"html": business_card_html(api.db, ctx.one("customer_id"))}
 
 
 @router.get("/api/tour/state", doc="GET /api/tour/state")
