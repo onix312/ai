@@ -96,9 +96,38 @@
  .cat{white-space:nowrap;padding:10px 16px;border-radius:99px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:13.5px;font-weight:700;cursor:pointer;transition:.18s;display:inline-flex;align-items:center;gap:6px;min-height:48px;flex:0 0 auto}
  .cat.on{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 16px -10px var(--accent)}
  .cat .dot{width:8px;height:8px;border-radius:50%;background:currentColor;opacity:.9}
+ /* Плотность витрины (17.0.23). Кассир сам решает, что важнее: крупное фото
+    или больше позиций на экране. Выбор живёт в localStorage, поэтому
+    настройка не сбрасывается при перезапуске кассы. */
+ .densRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}
+ .densRow .lbl{color:var(--muted);font-size:11.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+ .dens{display:inline-flex;border:1px solid var(--line);background:var(--panel);border-radius:12px;overflow:hidden}
+ .dens button{border:0;background:transparent;color:var(--muted);font-size:12.5px;font-weight:750;
+   padding:0 11px;min-height:38px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:.16s}
+ .dens button+button{border-left:1px solid var(--line)}
+ .dens button.on{background:var(--accent);color:#fff}
+ .dens button:active{transform:scale(.96)}
+ .dens button svg{width:15px;height:15px}
  /* grid — крупные карточки, только в наличии */
  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
  @media(min-width:560px){.grid{grid-template-columns:1fr 1fr 1fr}}
+ /* Крупно: две колонки на любой ширине, название в три строки, цена заметнее. */
+ .grid.d-large{grid-template-columns:1fr 1fr}
+ .grid.d-large .n{font-size:15.5px;-webkit-line-clamp:3;min-height:52px}
+ .grid.d-large .p{font-size:22px}
+ /* Список: строки с мелким фото — так видно максимум позиций за экран. */
+ .grid.d-list{grid-template-columns:1fr;gap:8px}
+ .grid.d-list .tile{flex-direction:row;align-items:stretch;border-radius:16px}
+ .grid.d-list .imgBox{width:78px;flex:0 0 78px;aspect-ratio:1/1}
+ .grid.d-list .imgBox .ph{font-size:22px}
+ .grid.d-list .imgBox .ph svg{width:22px;height:22px}
+ .grid.d-list .badge{left:6px;top:6px;max-width:88%}
+ .grid.d-list .qb{font-size:10px;padding:4px 7px}
+ .grid.d-list .inBadge{min-width:24px;height:24px;font-size:12px;right:6px;top:6px}
+ .grid.d-list .info{padding:9px 11px;justify-content:center;gap:3px}
+ .grid.d-list .n{font-size:13.5px;-webkit-line-clamp:1;min-height:0}
+ .grid.d-list .metaLine{justify-content:space-between}
+ .grid.d-list .p{font-size:17px}
  @keyframes skelpulse{0%,100%{opacity:1}50%{opacity:.5}}
  .skel{pointer-events:none}
  .tile{position:relative;border:1px solid var(--line);background:var(--panel);border-radius:20px;overflow:hidden;cursor:pointer;user-select:none;display:flex;flex-direction:column;transition:transform .12s,border-color .18s,box-shadow .18s;min-height:0}
@@ -296,6 +325,14 @@
     <div class="searchWrap"><span class="searchic" data-icon="search"></span><input class="search" id="search" placeholder="Найти товар — название или штрихкод…"></div>
     <button class="clearSearch" id="bClearSearch" type="button" aria-label="Очистить">✕</button>
    </div>
+   <div class="densRow">
+    <span class="lbl">Витрина</span>
+    <div class="dens" id="dens" role="group" aria-label="Плотность витрины">
+     <button type="button" data-dens="large" title="Крупно: большое фото и название в три строки">Крупно</button>
+     <button type="button" data-dens="normal" class="on" title="Обычно: как было">Обычно</button>
+     <button type="button" data-dens="list" title="Список: максимум позиций на экране">Список</button>
+    </div>
+   </div>
    <div class="cats" id="cats"></div>
    <div class="subHint" id="subHint"></div>
    <div class="grid" id="grid"></div>
@@ -381,6 +418,19 @@
 <script>
 "use strict";
 var $ = function(id){return document.getElementById(id);};
+/* Плотность витрины: large | normal | list. Значение из памяти телефона,
+   неизвестное сводим к «Обычно», чтобы испорченный ключ не сломал витрину. */
+var DENS_KEY="cashier_dens";
+function densValue(){
+  try{var v=localStorage.getItem(DENS_KEY);return (v==="large"||v==="list")?v:"normal";}catch(e){return "normal";}
+}
+function applyDens(v){
+  var grid=$("grid");if(grid)grid.className="grid"+(v==="normal"?"":" d-"+v);
+  var seg=$("dens");
+  if(seg)Array.prototype.forEach.call(seg.querySelectorAll("button[data-dens]"),function(b){
+    b.classList.toggle("on",b.getAttribute("data-dens")===v);
+  });
+}
 var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
@@ -1016,6 +1066,19 @@ function renderGrid(){
       +'</div>';
   }).join("");
   renderCart();
+}
+
+/* Класс плотности вешаем на саму сетку, а не перерисовываем плитки: разметка
+   карточки одна на все три режима, меняется только CSS. */
+function bindDens(){
+  var seg=$("dens");if(!seg||seg.dataset.bound)return;
+  seg.dataset.bound="1";
+  seg.addEventListener("click",function(e){
+    var b=e.target.closest("button[data-dens]");if(!b)return;
+    var v=b.getAttribute("data-dens");
+    try{localStorage.setItem(DENS_KEY,v);}catch(_e){}
+    applyDens(v);
+  });
 }
 
 function renderCart(){
@@ -2072,6 +2135,8 @@ if(loggedIn()){
 else{renderWho();showApp(false);}
 netMark(navigator.onLine!==false);
 netStart();
+bindDens();
+applyDens(densValue());
 if(window.PFIcons)PFIcons.apply(document);
 window.addEventListener("offline",function(){toast("Связь пропала — проверьте Wi-Fi рядом с PrintFlow");});
 if("serviceWorker" in navigator&&window.isSecureContext){

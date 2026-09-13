@@ -536,3 +536,48 @@ class PrinterLinkPanelTests(TestCase):
     def test_reason_and_advice_are_escaped(self):
         self.assertIn("esc(c.last_error || c.breaks || '')", self.printer)
         self.assertIn("esc(link.action)", self.printer)
+
+
+class CashierDensityTests(TestCase):
+    """Плотность витрины кассы (17.0.23): три режима и память выбора.
+
+    Без браузера глазами не посмотреть, поэтому здесь закреплено то, что
+    ломается при правке: переключатель на месте, все три режима описаны в CSS,
+    неизвестное значение из памяти не ломает витрину.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_switch_has_three_modes_with_normal_on_by_default(self):
+        seg = re.search(r'<div class="dens" id="dens".*?</div>', self.html, re.S)
+        self.assertIsNotNone(seg, "в кассе нет переключателя плотности витрины")
+        block = seg.group(0)
+        for mode in ("large", "normal", "list"):
+            self.assertIn(f'data-dens="{mode}"', block)
+        self.assertRegex(block, r'data-dens="normal"[^>]*class="on"',
+                         "по умолчанию должен быть режим «Обычно»")
+
+    def test_every_mode_has_its_own_css(self):
+        for mode in ("large", "list"):
+            with self.subTest(mode=mode):
+                self.assertIn(f".grid.d-{mode}{{", self.html,
+                              f"режим «{mode}» объявлен в разметке, но не в CSS")
+        self.assertIn(".grid.d-list .tile{flex-direction:row", self.html,
+                      "список должен быть строкой, а не плиткой")
+
+    def test_choice_is_remembered_and_sanitised(self):
+        self.assertIn('var DENS_KEY="cashier_dens"', self.html)
+        self.assertIn('localStorage.setItem(DENS_KEY,v)', self.html)
+        self.assertIn('return (v==="large"||v==="list")?v:"normal"', self.html,
+                      "испорченный ключ памяти обязан сводиться к «Обычно»")
+
+    def test_wired_at_startup(self):
+        self.assertIn("bindDens();", self.html)
+        self.assertIn("applyDens(densValue());", self.html)
+
+    def test_shell_cache_was_bumped(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        self.assertGreaterEqual(int(re.search(r"printflow-shell-v(\d+)", sw).group(1)), 53,
+                                "правка cashier.html требует поднятия CACHE")
