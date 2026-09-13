@@ -120,6 +120,20 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("SKIP: node не найден — стенд кассы не запущен")
 
+    # Стенд пульта (18.0): страница команд — не только вёрстка. Стенд проверяет,
+    # что пульт отправляет серверу ровно те тела, которые тот принимает
+    # (confirmed, preflight, start_request_id), и что обрыв связи виден
+    # оператору. Первый же прогон нашёл пропущенный resolve: все GET висели до
+    # таймаута, а страница показывала «связи нет» при живом коннекторе.
+    if node:
+        checks.append(run("Headless-стенд пульта (парк, очередь, команды)",
+                          [node, "scripts/pult-check.js"]))
+    elif args.require_tools:
+        print("FAIL: node не найден — стенд пульта не запущен", file=sys.stderr)
+        checks.append(False)
+    else:
+        print("SKIP: node не найден — стенд пульта не запущен")
+
     if not args.quick:
         checks.append(run(
             "Unit-тесты",

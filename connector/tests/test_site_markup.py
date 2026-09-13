@@ -850,13 +850,52 @@ class PultControlPageTests(TestCase):
         self.assertIn("p.name || 'Принтер'", self.html)
 
     def test_queue_badge_counts_waiting_not_running(self):
-        self.assertIn("['running', 'starting', 'uploading'].indexOf", self.html)
+        self.assertIn("var FLYING_STATES = ['running', 'starting', 'uploading'];", self.html)
+        self.assertIn("FLYING_STATES.indexOf(String(j.state || '')) >= 0", self.html)
         self.assertIn("String(j.state || '') === 'queued'", self.html)
         self.assertIn("badge.hidden = !waiting.length;", self.html)
 
+    def test_park_commands_ask_confirmation_the_server_way(self):
+        # pause/resume/stop — физические команды: сервер принимает их только с
+        # confirmed: true (DANGEROUS_AUTOMATION_COMMANDS). Нажатие кнопки на
+        # пульте и есть подтверждение, для паузы и стопа спрашиваем ещё раз.
+        self.assertIn("command: cmd, printer_id: p.id, confirmed: true", self.html)
+        self.assertIn("pause: 'Пауза? Печать встанет до продолжения.'", self.html)
+        self.assertIn("stop: 'Остановить печать? Деталь придётся печатать заново.'", self.html)
+        self.assertIn("if (ask && !confirm(ask)) return Promise.resolve();", self.html)
+
+    def test_commands_are_disabled_when_they_make_no_sense(self):
+        self.assertIn("function canPause(p)", self.html)
+        self.assertIn("function canResume(p)", self.html)
+        self.assertIn("function canStop(p)", self.html)
+        self.assertIn("(p.connection || {}).connected", self.html)
+        self.assertIn("var RUNNING_STATES = ['RUNNING', 'PREPARE'];", self.html)
+        self.assertIn("el.disabled = !buttons[cmd] || st.busy;", self.html)
+
+    def test_queue_actions_use_existing_routes(self):
+        self.assertIn("post('/api/jobs/start'", self.html)
+        self.assertIn("post('/api/jobs/cancel', { id: jobId })", self.html)
+        self.assertIn("post('/api/jobs/reorder', { id: jobId, direction: direction })", self.html)
+
+    def test_start_runs_preflight_first_and_is_idempotent(self):
+        # Preflight блокирует старт: блокировки — отказ словами, предупреждения —
+        # вопрос оператору. Повторное нажатие сервер отсечёт по start_request_id.
+        self.assertIn("get('/api/printer/preflight?printer_id='", self.html)
+        self.assertIn("if (blocks.length)", self.html)
+        self.assertIn("preflight_acknowledged: warns.length > 0", self.html)
+        self.assertIn("start_request_id: reqId(job.id)", self.html)
+        self.assertIn("function reqId(jobId){ return 'pult-' + jobId + '-' + Date.now(); }", self.html)
+        self.assertIn("busy(true);", self.html)
+
+    def test_waiting_job_buttons_are_start_move_cancel(self):
+        for action in ("start", "up", "down", "cancel"):
+            self.assertIn(f'data-job-act="{action}"', self.html)
+        self.assertIn("function moveJob(jobId, direction)", self.html)
+
     def test_ams_and_camera_use_snapshot_fields(self):
         self.assertIn("(p.ams || {}).trays", self.html)
-        self.assertIn("(first.camera || {}).available", self.html)
+        self.assertIn("(p.camera || {}).available", self.html)
+        self.assertIn("cam.src = '/api/printer/camera.jpg?printer_id='", self.html)
         self.assertIn("/api/printer/camera.jpg?printer_id=", self.html)
 
     def test_page_is_in_the_offline_shell(self):

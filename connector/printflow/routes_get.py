@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -978,8 +979,19 @@ def get_slicer_thumbnail(api: Any, ctx: Ctx):
 
 @router.get("/api/printer/preflight", doc="GET /api/printer/preflight")
 def get_printer_preflight(api: Any, ctx: Ctx):
+    """Проверка перед стартом: плита, пластик, состояние принтера.
+
+    `mapping` приходит строкой JSON (в адресе список не передать), поэтому
+    разбор терпимый: мусор в параметре — пустая карта AMS, а не отказ 500.
+    """
     printer = api.printer_or_fail(ctx.one("printer_id"))
-    return 200, api.manager.preflight(printer.id, ctx.one("file"), int(num(ctx.one("plate"),1)), json.loads(ctx.one("mapping","[]") or "[]"))
+    mapping_raw = ctx.one("mapping", "[]") or "[]"
+    try:
+        mapping = json.loads(mapping_raw)
+    except (TypeError, ValueError):
+        mapping = []
+    return 200, api.manager.preflight(printer.id, ctx.one("file"),
+                                      int(num(ctx.one("plate"), 1)), mapping)
 
 
 @router.get("/api/printer/files/tree", doc="GET /api/printer/files/tree")
