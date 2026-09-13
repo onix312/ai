@@ -747,6 +747,28 @@ details.nav-more > summary.nav-group-title::after {
 .ams-tube .acts { grid-column: 2; display: flex; gap: 5px; margin-top: 7px; }
 .ams-tube .acts .btn { flex: 1; height: 26px; font-size: 11.4px; padding: 0 6px; }
 
+/* Память слотов AMS из базы (17.0.25): показывается, когда принтер молчит */
+.ams-mem-head {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 12px 0 8px; font-size: 12.4px; font-weight: 640;
+}
+.ams-mem-head small { font-weight: 500; color: var(--muted); font-size: 11.2px; }
+.ams-mem-head .btn { margin-left: auto; height: 26px; font-size: 11.4px; }
+.ams-mem {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 9px 11px; margin-bottom: 6px; border-radius: var(--r);
+  border: 1px solid var(--line); background: var(--panel-2);
+}
+.ams-mem .sw { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.ams-mem .grow { min-width: 0; }
+.ams-mem b { display: block; font-size: 12.4px; font-weight: 640; }
+.ams-mem small { display: block; color: var(--muted); font-size: 11.2px; }
+.ams-mem .when { text-align: right; color: var(--muted); font-size: 11.2px; white-space: nowrap; }
+.ams-mem.when small { color: var(--warn); }
+.ams-mem.empty { opacity: .72; border-style: dashed; }
+.ams-mem.stale { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.ams-mem-note { margin: -2px 0 8px 24px; color: var(--muted); font-size: 11.2px; }
+
 /*здоровье и связь (ПР6)*/
 .health-card.has-alarm { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad-soft), var(--shadow-1); }
 #pr_health .ic svg, #pr_health svg { width: 12px; height: 12px; vertical-align: -1.5px; margin-right: 2px; }

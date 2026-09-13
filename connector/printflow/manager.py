@@ -52,6 +52,8 @@ class PrinterManager:
         self._cost_limit_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync: dict[str, float] = {}
+        # Память слотов AMS: дозаполнение старых привязок — один раз за запуск.
+        self._ams_backfilled: set[str] = set()
         self._last_cloud_sync: dict[str, float] = {}
         self._last_backup = 0.0
         self._last_backup_attempt = 0.0
@@ -2890,11 +2892,17 @@ class PrinterManager:
             self._last_ams_sync[printer.id] = now
         else:
             self._last_ams_sync = now
-        # Автосбор: карточка принтера и катушки AMS → база (можно править руками)
+        # Автосбор: карточка принтера, катушки AMS и память слотов → база.
+        # Снимок пришёл, значит принтер на связи: это лучший момент записать
+        # раскладку слотов, чтобы она пережила и выключение, и перезапуск.
         try:
-            from .ams_sync import sync_ams_spools, sync_printer_info
-            sync_printer_info(self.db, printer.id, snap)
-            sync_ams_spools(self.db, printer.id, snap)
+            from .ams_sync import backfill_slots, sync_one_printer
+            sync_one_printer(self.db, printer.id, snap)
+            if printer.id not in self._ams_backfilled:
+                self._ams_backfilled.add(printer.id)
+                # Привязки, сделанные до 17.0.25, в память слотов не попадали —
+                # дописываем их один раз за запуск, дальше память ведёт синк.
+                backfill_slots(self.db, printer.id)
         except Exception as exc:
             self.db.add_event("error", "Сбой автосинка AMS", str(exc), printer.id)
         trays = snap["ams"].get("trays", []) or []

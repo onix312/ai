@@ -1301,6 +1301,31 @@ CREATE TABLE IF NOT EXISTS ams_slot_history (
 );
 CREATE INDEX IF NOT EXISTS idx_ams_slot_hist ON ams_slot_history(printer_id, at);
 
+/* Память слотов AMS (17.0.25): что в каждом слоте лежало по последним данным.
+   Таблица отвечает на вопрос «какой пластик стоит в принтере», когда принтер
+   выключен или не прислал телеметрию: раньше это помнил только процесс в
+   памяти, и после перезапуска панель показывала «AMS: нет данных», а снятая
+   катушка исчезала из памяти навсегда. Заполняется автосинком, чистится
+   вручную в панели (не удаляем строки: слот помечается empty). */
+CREATE TABLE IF NOT EXISTS ams_slots (
+    id TEXT PRIMARY KEY,
+    printer_id TEXT DEFAULT '',
+    slot TEXT DEFAULT '',
+    spool_id TEXT DEFAULT '',
+    tray_uuid TEXT DEFAULT '',
+    material TEXT DEFAULT '',
+    color_name TEXT DEFAULT '',
+    color_hex TEXT DEFAULT '',
+    label TEXT DEFAULT '',
+    remain_pct REAL DEFAULT -1,
+    grams_left REAL DEFAULT 0,
+    state TEXT DEFAULT 'live',
+    seen_at TEXT,
+    emptied_at TEXT,
+    updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ams_slots_slot ON ams_slots(printer_id, slot);
+
 CREATE TABLE IF NOT EXISTS filament_scrap (
     id TEXT PRIMARY KEY,
     at TEXT,

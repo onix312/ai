@@ -81,7 +81,14 @@ class AmsSyncTests(unittest.TestCase):
     def test_empty_slot_ignored(self):
         empty = {"slot": 1, "uuid": "0" * 32, "type": "", "remain": None, "color": ""}
         result = sync_ams_spools(self.db, "prn1", snap([empty]))
-        self.assertEqual(result, {"created": 0, "updated": 0, "unbound": 0})
+        # 17.0.25 добавила счётчики памяти слотов (remembered/events): пустой
+        # слот, о котором база ничего не знает, не создаёт ни катушки, ни
+        # записи в памяти — проверяем и старые счётчики, и новые.
+        self.assertEqual({"created": 0, "updated": 0, "unbound": 0},
+                         {k: result[k] for k in ("created", "updated", "unbound")})
+        self.assertEqual(0, result.get("remembered", 0))
+        self.assertEqual(0, result.get("events", 0))
+        self.assertIsNone(self.db.one("SELECT * FROM ams_slots WHERE slot='1'"))
 
     # ------------------------------------------------- обновление известных
     def test_known_spool_updates_remaining_only(self):
