@@ -236,8 +236,11 @@ class CashierLayoutTests(TestCase):
             self.assertNotIn(char, self.css, f"символ {char!r} даёт tofu на minSdk 24")
 
     def test_cart_sum_is_the_hero(self):
-        # сумма крупнее и жирнее остального в корзине
-        self.assertIn(".cart .sum b{font-size:25px;font-weight:900", self.css)
+        # Сумма крупнее и жирнее остального в корзине. Размер сверяем как
+        # «не меньше», а не точным числом: в 17.0.23 сумму подняли с 25 до
+        # 28 px, и контракт на точное значение ловил собственное улучшение.
+        size = int(re.search(r"\.cart \.sum b\{font-size:(\d+)px;font-weight:900", self.css).group(1))
+        self.assertGreaterEqual(size, 28)
 
     def test_cart_shadow_and_row_focus(self):
         self.assertIn("box-shadow:0 -10px 28px -16px", self.css)
@@ -677,3 +680,29 @@ class CashierCartThumbTests(TestCase):
     def test_size_and_background_come_from_theme(self):
         self.assertIn(".cth{width:42px;height:42px;border-radius:10px;"
                       "object-fit:cover;background:var(--panel-3);flex:0 0 42px}", self.html)
+
+
+class CashierCartBarTests(TestCase):
+    """Полоса корзины: сумма видна всегда и главное действие не теряется."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_list_header_sticks_while_scrolling(self):
+        head = re.search(r"\.cartList \.head\{[^}]*\}", self.html).group(0)
+        self.assertIn("position:sticky", head)
+        self.assertIn("background:var(--panel)", head,
+                      "без фона сквозь липкую шапку просвечивают строки")
+        self.assertIn("z-index:2", head)
+
+    def test_total_is_the_biggest_number_on_screen(self):
+        total = int(re.search(r"\.cart \.sum b\{font-size:(\d+)px", self.html).group(1))
+        row_amount = float(re.search(r"\.amt\{font-weight:850;font-size:([\d.]+)px", self.html).group(1))
+        self.assertGreater(total, row_amount + 10,
+                           f"сумма {total} px должна заметно превышать позицию {row_amount} px")
+
+    def test_pay_button_takes_full_row_on_narrow_phones(self):
+        rule = re.search(r"@media\(max-width:430px\)\{\.cart \.inner \.btn\.pay\{([^}]*)\}\}", self.html)
+        self.assertIsNotNone(rule, "на узком экране «Оплатить» не выделена")
+        self.assertIn("flex:1 1 100%", rule.group(1))

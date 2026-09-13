@@ -186,11 +186,16 @@
  .cart{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);box-shadow:0 -10px 28px -16px rgba(0,0,0,.6);padding:10px 12px calc(10px + env(safe-area-inset-bottom));padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));z-index:20}
  .cart .inner{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
  .cart .sum{flex:1;min-width:120px}
- .cart .sum b{font-size:25px;font-weight:900;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums;line-height:1}
+ /* Сумма к оплате — главное число на экране (17.0.23): 28 px вместо 25. */
+ .cart .sum b{font-size:28px;font-weight:900;letter-spacing:-.03em;display:block;font-variant-numeric:tabular-nums;line-height:1}
  .cart .sum small{color:var(--muted);font-size:12px;display:flex;gap:6px;align-items:center;margin-top:2px;font-variant-numeric:tabular-nums}
  .btn{padding:14px 16px;border:0;border-radius:14px;font-weight:850;font-size:14.5px;cursor:pointer;color:#fff;transition:transform .12s,opacity .18s;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;min-width:48px}
  .btn:active{transform:scale(.97)}
  .btn.pay{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 8px 20px -10px #10b981}
+ /* На узком телефоне сумма и три служебные кнопки выталкивают «Оплатить»
+    на вторую строку впритык к правому краю. Главное действие занимает всю
+    строку — так его невозможно не увидеть и трудно промахнуться. */
+ @media(max-width:430px){.cart .inner .btn.pay{flex:1 1 100%;order:9}}
  .btn.ghost{background:var(--bg);border:1px solid var(--line);color:var(--text);font-weight:750}
  .btn:disabled{opacity:.42;pointer-events:none}
  .btn.busy{pointer-events:none;opacity:.72}
@@ -199,7 +204,10 @@
  /* cart list — простая */
  .cartList{max-width:720px;margin:0 auto 10px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:auto;max-height:46vh;display:none}
  .cartList.on{display:block}
- .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px}
+ /* Шапка корзины липкая (17.0.23): список крутится внутри .cartList
+   (max-height 46vh), и без этого «Корзина · 12 шт» и сумма уезжали вверх —
+   кассир листал позиции, не видя, на какую сумму набирает. */
+ .cartList .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:800;font-size:13px;position:sticky;top:0;z-index:2;background:var(--panel)}
  .row{display:flex;align-items:center;gap:10px;padding:13px 14px;border-bottom:1px solid var(--line)}
  .row:last-child{border-bottom:0}
  .row:hover,.row:focus-within{background:rgba(99,102,241,.07)}
