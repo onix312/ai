@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<script src="/assets/theme-init.js?v=17.0.1"></script>
+<link rel="manifest" href="/pult.webmanifest">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Пульт цеха">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA · пульт цеха</title>
+<link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
+<style>
+ /* Пульт цеха (18.0.1) — отдельное приложение, а не панель: один экран на
+    задачу, крупные кнопки под палец, работа с телефона и планшета.
+    Никаких внешних библиотек и шрифтов: только общие токены темы. */
+ * { box-sizing:border-box; margin:0; padding:0; }
+ html, body { height:100%; }
+ body {
+   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   background:var(--bg); color:var(--text);
+   -webkit-tap-highlight-color:transparent;
+ }
+ .pk-wrap { max-width:1100px; margin:0 auto; padding:calc(10px + env(safe-area-inset-top)) 12px 92px; }
+
+ /* --- шапка: бренд, сеть, свежесть данных --- */
+ .pk-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+ .pk-brand { display:flex; align-items:center; gap:9px; background:none; border:0; color:inherit;
+   font:inherit; text-align:left; padding:0; cursor:pointer; }
+ .pk-brand img { width:32px; height:32px; }
+ .pk-brand b { font-size:16px; display:block; }
+ .pk-brand small { display:block; color:var(--muted); font-size:11px; }
+ .pk-top-right { margin-left:auto; text-align:right; }
+ .pk-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:700;
+   background:var(--panel); border:1px solid var(--line); }
+ .pk-pill.ok { color:var(--ok); border-color:var(--ok); }
+ .pk-pill.warn { color:var(--warn); border-color:var(--warn); }
+ .pk-pill.bad { color:var(--bad); border-color:var(--bad); }
+ .pk-at { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
+
+ /* --- офлайн-плашка: связь пропала, цифры с задержкой --- */
+ .pk-offline { display:flex; align-items:center; gap:8px; margin-bottom:10px; padding:10px 12px;
+   border-radius:14px; font-size:13px; font-weight:650;
+   background:rgba(245,158,11,.14); border:1px solid var(--warn); color:var(--warn); }
+ .pk-offline[hidden] { display:none; }
+
+ /* --- экраны --- */
+ .pk-screen[hidden] { display:none; }
+ .pk-h { display:flex; align-items:baseline; gap:8px; margin:2px 0 10px; }
+ .pk-h h2 { font-size:17px; font-weight:750; }
+ .pk-h p { color:var(--muted); font-size:12px; }
+ .pk-hit { min-height:56px; }
+
+ /* --- парк принтеров --- */
+ .pk-tiles { display:grid; gap:12px; grid-template-columns:1fr; }
+ @media (min-width:780px) { .pk-tiles { grid-template-columns:1fr 1fr; } }
+ .pk-tile { background:var(--panel); border:1px solid var(--line); border-radius:18px;
+   padding:14px; cursor:pointer; }
+ .pk-tile.on { border-color:var(--accent); box-shadow:0 0 0 2px rgba(79,70,229,.35) inset; }
+ .pk-tile.dead { opacity:.72; }
+ .pk-row { display:flex; align-items:center; gap:9px; }
+ .pk-name { font-size:17px; font-weight:750; }
+ .pk-dot { width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none; }
+ .pk-dot.ok { background:var(--ok); } .pk-dot.warn { background:var(--warn); } .pk-dot.bad { background:var(--bad); }
+ .pk-state { margin-top:8px; font-size:19px; font-weight:750; }
+ .pk-sub { margin-top:2px; color:var(--muted); font-size:12.5px; }
+ .pk-bar { margin:10px 0 6px; height:12px; border-radius:999px; background:rgba(148,163,184,.22); overflow:hidden; }
+ .pk-bar i { display:block; height:100%; width:0; border-radius:999px; background:var(--accent); transition:width .3s; }
+ .pk-meta { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; color:var(--muted); }
+ .pk-meta b { color:var(--text); font-weight:650; }
+ .pk-alert { margin-top:9px; font-size:13px; font-weight:650; color:var(--warn); }
+ .pk-alert.bad { color:var(--bad); }
+ .pk-empty { padding:22px 14px; text-align:center; color:var(--muted); font-size:14px;
+   background:var(--panel); border:1px dashed var(--line); border-radius:18px; }
+ .pk-empty b { display:block; color:var(--text); font-size:16px; margin-bottom:6px; }
+
+ /* --- заготовки разделов: экран есть, наполняется следующим шагом --- */
+ .pk-soon { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:16px; }
+ .pk-soon b { display:block; font-size:16px; margin-bottom:6px; }
+ .pk-soon p { color:var(--muted); font-size:13.5px; line-height:1.5; }
+ .pk-soon .pk-hit { display:inline-flex; align-items:center; margin-top:12px; padding:0 16px;
+   border-radius:12px; border:1px solid var(--line); background:transparent; color:var(--text);
+   font:inherit; font-weight:700; text-decoration:none; }
+
+ /* --- ссылки на панель и мини-панель --- */
+ .pk-links { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+ .pk-links a { display:inline-flex; align-items:center; min-height:48px; padding:0 14px;
+   border-radius:12px; border:1px solid var(--line); color:var(--text); text-decoration:none;
+   font-size:13.5px; font-weight:650; }
+
+ /* --- нижнее меню: четыре экрана --- */
+ .pk-tabs { position:fixed; left:0; right:0; bottom:0; z-index:20;
+   display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+   padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+   background:color-mix(in srgb, var(--bg) 92%, #000); border-top:1px solid var(--line);
+   backdrop-filter:blur(10px); }
+ .pk-tab { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center;
+   min-height:56px; gap:2px; border:1px solid transparent; border-radius:14px; background:transparent;
+   color:var(--muted); font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; }
+ .pk-tab.on { color:var(--text); background:var(--panel); border-color:var(--line); }
+ .pk-tab .pk-badge { position:absolute; top:6px; right:calc(50% - 30px); min-width:20px; padding:0 5px;
+   border-radius:999px; background:var(--accent); color:#fff; font-size:11px; line-height:18px; }
+ .pk-tab .pk-badge[hidden] { display:none; }
+
+ /* --- сообщения --- */
+ .pk-msg { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom));
+   transform:translateX(-50%); max-width:92vw; background:#fff; color:#12203c; padding:10px 16px;
+   border-radius:10px; font-size:13.5px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
+   opacity:0; pointer-events:none; transition:opacity .2s; }
+ .pk-msg.on { opacity:1; }
+
+ /* --- киоск: экран у станка, без подсказок и ссылок --- */
+ body.kiosk .pk-hint,
+ body.kiosk .pk-links,
+ body.kiosk .pk-brand small { display:none; }
+ body.kiosk .pk-state { font-size:23px; }
+ body.kiosk .pk-name { font-size:19px; }
+ body.kiosk .pk-at { font-size:12px; }
+</style>
+</head>
+<body>
+<div class="pk-wrap">
+ <div class="pk-top">
+  <button class="pk-brand" id="pk_brand" type="button" title="Долгое нажатие — киоск">
+   <img src="assets/brand/nozza-mark-white.svg" alt="">
+   <span><b>Пульт цеха</b><small>держи палец — киоск</small></span>
+  </button>
+  <div class="pk-top-right">
+   <span class="pk-pill" id="pk_net">подключаюсь…</span>
+   <span class="pk-at" id="pk_at">—</span>
+  </div>
+ </div>
+
+ <div class="pk-offline" id="pk_offline" hidden>
+  <span aria-hidden="true">!</span><span id="pk_offline_text">Связи нет</span>
+ </div>
+
+ <main>
+  <section class="pk-screen" id="pk_screen_park">
+   <div class="pk-h"><h2>Парк принтеров</h2><p class="pk-hint" id="pk_farm">—</p></div>
+   <div class="pk-tiles" id="pk_tiles"></div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_queue" hidden>
+   <div class="pk-h"><h2>Очередь</h2><p class="pk-hint">что печатается и что дальше</p></div>
+   <div class="pk-soon">
+    <b id="pk_queue_now">Заданий нет</b>
+    <p class="pk-hint">Запуск, перенос и отмена заданий приедут следующим шагом —
+       управление очередью уже работает в панели и мини-панели.</p>
+    <div class="pk-links">
+     <a href="/index.html#queue">Очередь в панели →</a>
+     <a href="/m.html">Мини-панель /m →</a>
+    </div>
+   </div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_ams" hidden>
+   <div class="pk-h"><h2>AMS</h2><p class="pk-hint">слоты, пластик, память из базы</p></div>
+   <div class="pk-soon">
+    <b id="pk_ams_now">Слотов нет</b>
+    <p class="pk-hint">Привязка катушки к слоту, «как в прошлый раз» и память
+       выключенного принтера приедут следующим шагом; сейчас слоты видно
+       в панели на вкладке «Принтеры».</p>
+    <div class="pk-links">
+     <a href="/index.html#printers">Принтеры в панели →</a>
+    </div>
+   </div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_cam" hidden>
+   <div class="pk-h"><h2>Камера</h2><p class="pk-hint">что происходит на плитах</p></div>
+   <img class="pk-cam" id="pk_cam" alt="Камера принтера"
+        style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:18px;background:#0a0f1e;border:1px solid var(--line)">
+   <div class="pk-soon" style="margin-top:12px">
+    <b id="pk_cam_now">Кадр недоступен</b>
+    <p class="pk-hint">Снимок в журнал и лампа камеры приедут следующим шагом.</p>
+    <div class="pk-links">
+     <a href="/tv.html">ТВ-режим цеха →</a>
+     <a href="/m.html">Кадр в мини-панели →</a>
+    </div>
+   </div>
+  </section>
+ </main>
+</div>
+
+<div class="pk-msg" id="pk_msg"></div>
+
+<nav class="pk-tabs" aria-label="Экраны пульта">
+ <button class="pk-tab on" type="button" data-screen="park">Парк</button>
+ <button class="pk-tab" type="button" data-screen="queue">Очередь<span class="pk-badge" id="pk_badge_queue" hidden>0</span></button>
+ <button class="pk-tab" type="button" data-screen="ams">AMS</button>
+ <button class="pk-tab" type="button" data-screen="cam">Камера</button>
+</nav>
+
+<script>
+/* Пульт цеха (18.0.1): каркас. Читает /api/state — тот же источник, что панель
+   и ТВ-режим, поэтому цифры не расходятся. Никаких обращений наружу: только
+   свой коннектор в локальной сети. */
+(function(){
+  'use strict';
+  var POLL_MS = 5000;       // как часто обновляем парк
+  var TIMEOUT_MS = 4000;    // дольше ждать ответ коннектора смысла нет
+  var STALE_MS = 15000;     // после этого данные считаем «с задержкой»
+  var KIOSK_HOLD_MS = 1200; // долгое нажатие по логотипу — киоск
+  var KIOSK_KEY = 'pult_kiosk';
+
+  var st = { at:0, printers:[], queue:[], farm:{}, active:'', screen:'park', kiosk:false, timer:null };
+
+  function $(s){ return document.querySelector(s); }
+  function esc(t){ return String(t == null ? '' : t).replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function num(v, d){ var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : (d || 0); }
+  function toast(t){
+    var m = $('#pk_msg');
+    if (!m) return;
+    m.textContent = t; m.classList.add('on');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove('on'); }, 2600);
+  }
+  /* Время сервера приходит строкой ISO («2026-09-14T09:10:00+00:00»), а не
+     секундами: parseFloat от такой строки вернул бы год. Считаем честно. */
+  function stamp(v){
+    if (typeof v === 'number') return v;
+    var t = Date.parse(String(v == null ? '' : v));
+    return isFinite(t) ? t / 1000 : (Date.now() / 1000);
+  }
+  function clock(ts){
+    if (!ts) return '';
+    var d = new Date(num(ts) * 1000);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function humanMin(m){
+    m = Math.max(0, Math.round(num(m)));
+    if (m < 60) return m + ' мин';
+    return Math.floor(m / 60) + ' ч ' + (m % 60) + ' мин';
+  }
+
+  /* Запрос с таймаутом: пропала сеть — не ждём вечно и показываем плашку. */
+  function get(path){
+    return new Promise(function(resolve, reject){
+      var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var t = setTimeout(function(){ if (ctl) ctl.abort(); reject(new Error('timeout')); }, TIMEOUT_MS);
+      var opts = { headers:{ 'Accept':'application/json' }, cache:'no-store' };
+      if (ctl) opts.signal = ctl.signal;
+      fetch(path, opts).then(function(r){
+        clearTimeout(t);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }).then(resolve).catch(function(e){ clearTimeout(t); reject(e); });
+    });
+  }
+
+  /* ---------------------------------------------------------------- сеть */
+  function setOnline(ok, why){
+    var net = $('#pk_net'), off = $('#pk_offline');
+    if (net) {
+      net.textContent = ok ? 'связь есть' : 'связи нет';
+      net.className = 'pk-pill ' + (ok ? 'ok' : 'bad');
+    }
+    if (off) {
+      off.hidden = ok;
+      if (!ok) {
+        var txt = $('#pk_offline_text');
+        if (txt) {
+          txt.textContent = 'Коннектор не отвечает — показываю последние данные'
+            + (st.at ? ' от ' + clock(st.at) : '') + (why ? ' (' + why + ')' : '') + '.';
+        }
+      }
+    }
+  }
+  function setFreshness(){
+    var at = $('#pk_at');
+    if (!at) return;
+    if (!st.at) { at.textContent = 'данных ещё нет'; return; }
+    var age = (Date.now() / 1000) - num(st.at);
+    var stale = age > (STALE_MS / 1000);
+    at.textContent = (stale ? 'обновлено ' : 'обновлено в ') + clock(st.at)
+      + (stale ? ' · данные с задержкой' : '');
+  }
+
+  /* --------------------------------------------------------------- парк */
+  function stateTone(p){
+    var s = ((p.printer || {}).state || '').toUpperCase();
+    var conn = (p.connection || {}).connected;
+    if (!conn) return 'bad';
+    if (s === 'RUNNING' || s === 'PREPARE') return 'ok';
+    if (s === 'PAUSE' || s === 'FAILED') return 'warn';
+    return '';
+  }
+  function alertsHtml(p){
+    var alerts = ((p.guard || {}).alerts) || [];
+    if (!alerts.length) return '';
+    var worst = 'warn';
+    var texts = alerts.slice(0, 2).map(function(a){
+      if (a.severity === 'error') worst = 'bad';
+      return esc(a.title || a.reason || 'тревога');
+    });
+    return '<div class="pk-alert ' + (worst === 'bad' ? 'bad' : '') + '">▲ ' + texts.join(' · ')
+      + (alerts.length > texts.length ? ' · ещё ' + (alerts.length - texts.length) : '') + '</div>';
+  }
+  function tileHtml(p){
+    var info = p.printer || {}, temp = p.temperature || {}, conn = p.connection || {};
+    var tone = stateTone(p);
+    var progress = Math.max(0, Math.min(100, num(info.progress)));
+    var running = ['RUNNING', 'PREPARE', 'PAUSE'].indexOf(String(info.state || '').toUpperCase()) >= 0;
+    var job = p.job || {};
+    var order = job.order || {};
+    var tr = (p.ams || {}).trays || [];
+    var filled = tr.filter(function(t){ return t.present || t.type || t.uuid; }).length;
+    var meta = [];
+    meta.push('<span>сопло <b>' + Math.round(num(temp.nozzle)) + '°</b> / стол <b>'
+      + Math.round(num(temp.bed)) + '°</b></span>');
+    if (tr.length) meta.push('<span>AMS <b>' + filled + '/' + tr.length + '</b></span>');
+    if (!conn.connected) meta.push('<span>' + esc(conn.last_error || (conn.configured ? 'нет связи' : 'не настроен')) + '</span>');
+    else if (conn.mode === 'cloud') meta.push('<span>облако</span>');
+    var title = info.task || order.product || '';
+    return '<div class="pk-tile pk-hit' + (tone === 'bad' ? ' dead' : '')
+      + (p.id === st.active ? ' on' : '') + '" data-printer="' + esc(p.id) + '">'
+      + '<div class="pk-row"><span class="pk-dot ' + tone + '"></span>'
+      + '<span class="pk-name">' + esc(p.name || 'Принтер') + '</span>'
+      + (p.id === st.active ? '<span class="pk-pill">выбран</span>' : '') + '</div>'
+      + '<div class="pk-state">' + esc(info.state_label || info.state || 'нет связи')
+      + (running ? ' · ' + Math.round(progress) + '%' : '') + '</div>'
+      + (running ? '<div class="pk-bar"><i style="width:' + progress + '%"></i></div>' : '')
+      + (title ? '<div class="pk-sub">' + esc(title) + (order.number ? ' · заказ №' + esc(order.number) : '') + '</div>' : '')
+      + (running && num(info.remaining_min) ? '<div class="pk-sub">осталось '
+        + esc(humanMin(info.remaining_min)) + (info.eta ? ' · к ' + clock(info.eta) : '') + '</div>' : '')
+      + '<div class="pk-meta">' + meta.join('') + '</div>'
+      + alertsHtml(p) + '</div>';
+  }
+  function renderPark(){
+    var box = $('#pk_tiles');
+    if (!box) return;
+    var farm = st.farm || {};
+    var head = $('#pk_farm');
+    if (head) {
+      head.textContent = st.printers.length
+        ? 'в сети ' + num(farm.online) + ' из ' + num(farm.total)
+          + ' · печатает ' + num(farm.printing) + ' · в очереди ' + num(farm.queued)
+        : '';
+    }
+    if (!st.printers.length) {
+      box.innerHTML = '<div class="pk-empty"><b>Принтеров нет</b>'
+        + 'Добавьте принтер в панели — тогда пульт покажет его здесь. '
+        + 'Открыть «Принтеры» в панели: <a href="/index.html#printers">панель →</a></div>';
+      return;
+    }
+    box.innerHTML = st.printers.map(tileHtml).join('');
+    // В queue приходят и текущие печати: считаем отдельно ожидающие задания,
+    // иначе «дальше» показывало бы то, что уже печатается.
+    var flying = st.queue.filter(function(j){
+      return ['running', 'starting', 'uploading'].indexOf(String(j.state || '')) >= 0; });
+    var waiting = st.queue.filter(function(j){ return String(j.state || '') === 'queued'; });
+    var badge = $('#pk_badge_queue');
+    if (badge) {
+      badge.hidden = !waiting.length;
+      badge.textContent = String(waiting.length);
+    }
+    var qnow = $('#pk_queue_now');
+    if (qnow) {
+      qnow.textContent = waiting.length
+        ? 'Дальше: ' + (waiting[0].name || waiting[0].file || 'задание')
+          + (waiting.length > 1 ? ' · ещё ' + (waiting.length - 1) : '')
+        : (flying.length ? 'Печатается ' + flying.length + ' — новых заданий нет'
+          : 'Очередь пуста — принтеры свободны');
+    }
+    var ams = st.printers.reduce(function(acc, p){
+      return acc + (((p.ams || {}).trays) || []).length; }, 0);
+    var amsNow = $('#pk_ams_now');
+    if (amsNow) amsNow.textContent = ams ? ('Слотов AMS: ' + ams) : 'Слотов нет';
+    var cam = $('#pk_cam'), camNow = $('#pk_cam_now');
+    var first = (st.printers.filter(function(p){ return p.id === st.active; })[0]) || st.printers[0];
+    if (cam && camNow) {
+      var ok = !!(first && (first.camera || {}).available);
+      camNow.textContent = ok ? ('Кадр с «' + (first.name || 'принтера') + '»') : 'Кадр недоступен';
+      if (ok) cam.src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(first.id) + '&t=' + Date.now();
+    }
+  }
+
+  /* ------------------------------------------------------------ экраны */
+  function showScreen(name){
+    st.screen = name;
+    ['park', 'queue', 'ams', 'cam'].forEach(function(s){
+      var el = $('#pk_screen_' + s);
+      if (el) el.hidden = (s !== name);
+    });
+    document.querySelectorAll('.pk-tab').forEach(function(b){
+      b.classList.toggle('on', b.dataset.screen === name);
+    });
+    if (name !== 'cam') {
+      var cam = $('#pk_cam');
+      if (cam) cam.removeAttribute('src');
+    } else {
+      renderPark();
+    }
+    try { localStorage.setItem('pult_screen', name); } catch (e) {}
+  }
+
+  /* ------------------------------------------------------------- киоск */
+  function applyKiosk(){
+    document.body.classList.toggle('kiosk', st.kiosk);
+    /* На http в локальной сети Wake Lock браузер не даёт (нужен защищённый
+       контекст) — просим молча: получится, экран у станка не погаснет. */
+    if (st.kiosk && 'wakeLock' in navigator) {
+      try { navigator.wakeLock.request('screen').catch(function(){}); } catch (e) {}
+    }
+  }
+  function bindBrand(){
+    var b = $('#pk_brand'), hold = null;
+    if (!b) return;
+    function start(){ clearTimeout(hold); hold = setTimeout(function(){
+      st.kiosk = !st.kiosk;
+      applyKiosk();
+      try { localStorage.setItem(KIOSK_KEY, st.kiosk ? '1' : '0'); } catch (e) {}
+      toast(st.kiosk ? 'Киоск включён — долгое нажатие выключит' : 'Киоск выключен');
+    }, KIOSK_HOLD_MS); }
+    function stop(){ clearTimeout(hold); }
+    b.addEventListener('pointerdown', start);
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev){
+      b.addEventListener(ev, stop);
+    });
+  }
+
+  /* ---------------------------------------------------------- опрос API */
+  function tick(){
+    if (document.hidden) return;
+    get('/api/state').then(function(d){
+      st.at = stamp(d.at);
+      st.printers = d.printers || [];
+      st.queue = d.queue || [];
+      st.farm = d.farm || {};
+      if (!st.active && st.printers.length) st.active = st.printers[0].id;
+      setOnline(true);
+      setFreshness();
+      renderPark();
+    }).catch(function(e){
+      setOnline(false, e && e.message === 'timeout' ? 'нет ответа' : '');
+      setFreshness();
+    });
+  }
+  function schedule(){
+    clearInterval(st.timer);
+    st.timer = setInterval(tick, POLL_MS);
+  }
+
+  /* -------------------------------------------------------------- старт */
+  document.addEventListener('click', function(e){
+    var tab = e.target.closest ? e.target.closest('.pk-tab') : null;
+    if (tab) { showScreen(tab.dataset.screen); return; }
+    var tile = e.target.closest ? e.target.closest('[data-printer]') : null;
+    if (tile) {
+      st.active = tile.dataset.printer;
+      var found = null;
+      st.printers.forEach(function(p){ if (p.id === st.active) found = p; });
+      renderPark();
+      toast('Выбран ' + ((found && found.name) || 'принтер'));
+    }
+  });
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) tick();
+  });
+
+  try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
+  try { var s = localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
+  bindBrand();
+  applyKiosk();
+  setFreshness();
+  showScreen(st.screen || 'park');
+  tick();
+  schedule();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+</script>
+<script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
+</body>
+</html>

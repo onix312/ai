@@ -1,4 +1,5 @@
 """Проверки структуры основного HTML-интерфейса."""
+import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -8,6 +9,8 @@ from unittest import TestCase
 ROOT = Path(__file__).resolve().parents[2]
 INDEX_HTML = ROOT / "site" / "index.html"
 CASHIER_HTML = ROOT / "site" / "cashier.html"
+CONTROL_HTML = ROOT / "site" / "control.html"
+PULT_MANIFEST = ROOT / "site" / "pult.webmanifest"
 VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
@@ -757,3 +760,133 @@ class CashierAddFeedbackTests(TestCase):
 
     def test_pulse_is_cleaned_up(self):
         self.assertIn('fresh.classList.remove("hit")', self.html)
+
+
+class PultControlPageTests(TestCase):
+    """Пульт цеха (18.0.1) — отдельное приложение для телефона и планшета.
+
+    Страница живёт своей жизнью: без модулей панели, без внешних библиотек.
+    Поэтому контракты держим на то, что легко потерять при правке — четыре
+    экрана, крупные кнопки, честный офлайн-баннер и киоск.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_control_page_has_balanced_markup(self):
+        parser = _StructureParser()
+        parser.feed(self.html)
+        errors = list(parser.errors)
+        if parser.stack:
+            errors.append(f"не закрыты теги: {parser.stack[-5:]}")
+        self.assertEqual(errors, [])
+
+    def test_four_screens_and_tab_bar(self):
+        for screen in ("park", "queue", "ams", "cam"):
+            self.assertIn(f'id="pk_screen_{screen}"', self.html)
+        tabs = re.findall(r'class="pk-tab[^"]*"[^>]*data-screen="([a-z]+)"', self.html)
+        self.assertEqual(["park", "queue", "ams", "cam"], tabs,
+                         "нижнее меню обязано вести на все четыре экрана")
+        self.assertIn("function showScreen(name)", self.html)
+        # Переключение экранов — через hidden, а не display:none в разметке:
+        # так экран не теряет прокрутку и не перерисовывается целиком.
+        self.assertIn(".pk-screen[hidden] { display:none; }", self.html)
+
+    def test_touch_targets_and_safe_area(self):
+        self.assertIn(".pk-hit { min-height:56px; }", self.html)
+        self.assertIn("min-height:56px", self.html)
+        self.assertIn("min-height:56px;", re.search(r"\.pk-tab \{.*?\}", self.html, re.S).group(0))
+        # Меню внизу — над жестовой полосой телефона и «бровью» сверху.
+        self.assertIn("env(safe-area-inset-bottom)", self.html)
+        self.assertIn("env(safe-area-inset-top)", self.html)
+
+    def test_tablet_gets_two_columns(self):
+        self.assertIn("@media (min-width:780px) { .pk-tiles { grid-template-columns:1fr 1fr; } }",
+                      self.html)
+
+    def test_offline_banner_speaks_plainly(self):
+        self.assertIn('id="pk_offline" hidden', self.html)
+        self.assertIn("function setOnline(ok, why)", self.html)
+        self.assertIn("function setFreshness()", self.html)
+        self.assertIn("данные с задержкой", self.html,
+                      "возраст данных обязан быть виден словами, а не только цветом")
+        self.assertIn("Коннектор не отвечает — показываю последние данные", self.html)
+        self.assertIn("cache:'no-store'", self.html,
+                      "цифры цеха нельзя брать из кэша браузера")
+        self.assertIn("AbortController", self.html)
+        self.assertIn("TIMEOUT_MS", self.html)
+
+    def test_server_time_is_parsed_as_iso(self):
+        # `at` в снимке — строка ISO. parseFloat («2026-09-14T…» → 2026) сделал
+        # бы данные вечно устаревшими, поэтому время разбирает stamp().
+        self.assertIn("function stamp(v)", self.html)
+        self.assertIn("Date.parse(String(v == null ? '' : v))", self.html)
+        self.assertIn("st.at = stamp(d.at);", self.html)
+
+    def test_polling_stops_in_background(self):
+        self.assertIn("if (document.hidden) return;", self.html)
+        self.assertIn("document.addEventListener('visibilitychange'", self.html)
+
+    def test_only_local_requests(self):
+        self.assertNotIn("http://", self.html)
+        self.assertNotIn("https://", self.html)
+        self.assertNotIn("cdn", self.html.lower())
+        for path in re.findall(r"get\('(/[^']+)'\)", self.html):
+            self.assertTrue(path.startswith("/api/"),
+                            f"пульт ходит только в свой коннектор, а не в {path}")
+
+    def test_kiosk_mode_by_long_press(self):
+        self.assertIn("KIOSK_HOLD_MS", self.html)
+        self.assertIn("'pult_kiosk'", self.html)
+        self.assertIn("b.addEventListener('pointerdown', start);", self.html)
+        self.assertIn("body.kiosk .pk-hint", self.html)
+        self.assertIn("body.kiosk .pk-links", self.html,
+                      "в киоске ссылки на панель не нужны — экран у станка")
+
+    def test_state_texts_come_from_the_server(self):
+        self.assertIn("info.state_label || info.state", self.html,
+                      "названия состояний принтера берём с сервера, а не переводим сами")
+        self.assertIn("p.name || 'Принтер'", self.html)
+
+    def test_queue_badge_counts_waiting_not_running(self):
+        self.assertIn("['running', 'starting', 'uploading'].indexOf", self.html)
+        self.assertIn("String(j.state || '') === 'queued'", self.html)
+        self.assertIn("badge.hidden = !waiting.length;", self.html)
+
+    def test_ams_and_camera_use_snapshot_fields(self):
+        self.assertIn("(p.ams || {}).trays", self.html)
+        self.assertIn("(first.camera || {}).available", self.html)
+        self.assertIn("/api/printer/camera.jpg?printer_id=", self.html)
+
+    def test_page_is_in_the_offline_shell(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        shell = sw.split("const SHELL = [", 1)[1].split("];", 1)[0]
+        self.assertIn("'/control.html'", shell,
+                      "без оболочки пульт не откроется при мигании сети")
+        self.assertIn("'/pult.webmanifest'", shell)
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 58,
+                                "правка оболочки требует поднятия CACHE в sw.js")
+
+    def test_manifest_installs_the_pult(self):
+        manifest = json.loads(PULT_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual("/control.html", manifest["start_url"])
+        self.assertEqual("/control.html", manifest["id"])
+        self.assertEqual("standalone", manifest["display"])
+        self.assertEqual("ru", manifest["lang"])
+        for icon in manifest["icons"]:
+            self.assertTrue((ROOT / "site" / icon["src"].lstrip("/")).is_file(),
+                            f"иконки манифеста должны лежать рядом: {icon['src']}")
+
+    def test_no_tofu_symbols(self):
+        for char in ("⎋", "⌕", "🧾", "⚠"):
+            self.assertNotIn(char, self.html, f"символ {char!r} даёт квадрат на старом Android")
+
+    def test_theme_and_assets_are_local(self):
+        # Как у остальных страниц: ассеты относительные, токены темы — с пином.
+        self.assertIn('href="assets/tokens.css?v=17.0.1"', self.html)
+        self.assertIn('src="/assets/theme-init.js?v=17.0.1"', self.html)
+        self.assertIn('src="assets/brand/nozza-mark-white.svg"', self.html)
+        self.assertIn("navigator.serviceWorker.register('/sw.js')", self.html)
