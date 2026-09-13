@@ -1055,8 +1055,6 @@ class Api:
             }
         if path == "/api/state":
             return 200, self.manager.snapshot(one("printer_id"))
-        if path == "/api/printers":
-            return 200, {"printers": self.repo.printers()}
         if path == "/api/printer/discover":
             # SSDP в локальной сети + принтеры аккаунта Bambu Cloud.
             # Access Code облачных устройств в браузер не отдаётся: при
@@ -1067,17 +1065,6 @@ class Api:
             return 200, self.cloud_status()
         if path == "/api/printer/cloud-files":
             return 200, {"tasks": self.cloud_tasks(one("printer_id"))}
-        if path == "/api/printer/telemetry":
-            return 200, {"points": self.manager.guard.telemetry(
-                one("printer_id"), int(num(one("minutes", "180"), 180)))}
-        if path == "/api/printer/maintenance":
-            return 200, {"tasks": self.manager.guard.maintenance(one("printer_id")),
-                         "hours": self.manager.guard.runtime_hours(one("printer_id"))}
-        if path == "/api/printer/alerts":
-            return 200, {"alerts": self.manager.guard.alerts(one("printer_id"))}
-        if path == "/api/printer/shots":
-            printer = self.printer_or_fail(one("printer_id"))
-            return 200, {"shots": printer.camera.snapshot_list()}
         if path == "/api/wall":
             return 200, self.manager.wall()
         if path == "/api/printer/files":
@@ -1779,9 +1766,6 @@ class Api:
                             pass
                 return 404, {"error": "Превью не найдено"}
             return 404, {"error": "Нет данных"}
-        if path == "/api/printer/health":
-            printer = self.printer_or_fail(one("printer_id"))
-            return 200, printer.health() if hasattr(printer, "health") else {"ok": False}
         if path == "/api/printer/preflight":
             printer = self.printer_or_fail(one("printer_id"))
             return 200, self.manager.preflight(printer.id, one("file"), int(num(one("plate"),1)), json.loads(one("mapping","[]") or "[]"))
