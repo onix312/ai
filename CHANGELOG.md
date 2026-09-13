@@ -81,7 +81,7 @@
 
 **Проверено**
 
-- `python3 -m unittest discover -s connector/tests` — 1935 тестов, OK (3 skipped).
+- `python3 -m unittest discover -s connector/tests` — 1934 теста, OK (3 skipped).
 - `node scripts/kassa-check.js` — новый сценарий «витрина = стеллаж»: подсказка
   про режим и число позиций на складах, прежний режим без подсказки.
 - `python3 scripts/check.py --quick` — 27/27; `scripts/acceptance.py` — 12/12;
