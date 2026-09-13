@@ -128,6 +128,11 @@
  .grid.d-list .n{font-size:13.5px;-webkit-line-clamp:1;min-height:0}
  .grid.d-list .metaLine{justify-content:space-between}
  .grid.d-list .p{font-size:17px}
+ .grid.d-list .stk{height:4px;margin-top:1px}
+ /* Полоса остатка: тонкая, из токенов темы, чтобы в светлой теме не поплыла. */
+ .stk{height:5px;border-radius:99px;background:var(--panel-3);overflow:hidden;margin-top:3px}
+ .stk i{display:block;height:100%;border-radius:99px;background:var(--ok);transition:width .2s}
+ .stk.low i{background:var(--warn)}
  @keyframes skelpulse{0%,100%{opacity:1}50%{opacity:.5}}
  .skel{pointer-events:none}
  .tile{position:relative;border:1px solid var(--line);background:var(--panel);border-radius:20px;overflow:hidden;cursor:pointer;user-select:none;display:flex;flex-direction:column;transition:transform .12s,border-color .18s,box-shadow .18s;min-height:0}
@@ -1051,6 +1056,11 @@ function renderGrid(){
     }
     renderCart();return;
   }
+  /* Полоса остатка (17.0.23) считается относительно самого полного товара на
+     витрине, а не по выдуманному «максимуму»: так кассир за секунду видит,
+     где товар заканчивается, не читая числа на каждом бейдже. */
+  var maxQty=1;
+  list.forEach(function(it){var n=Math.floor(Number(it.qty)||0);if(n>maxQty)maxQty=n;});
   box.innerHTML=list.map(function(it){
     var qty=Math.floor(Number(it.qty)||0);
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
@@ -1058,11 +1068,14 @@ function renderGrid(){
     // Категории на картинке больше нет: бейдж перекрывал фото и дублировал
     // фильтр по категории сверху. Остаток — остался, он важнее.
     var qtyBadge = qty<=5 ? '<span class="qb low">мало: '+qty+' шт</span>' : '<span class="qb qty">'+qty+' шт</span>';
+    var pct=Math.max(4,Math.min(100,Math.round(qty/maxQty*100)));
+    var stock='<div class="stk'+(qty<=5?' low':'')+'" role="img" aria-label="Остаток '+qty+' шт">'
+      +'<i style="width:'+pct+'%"></i></div>';
     var phIcon=window.PFIcons?PFIcons.svg("box",30):"📦";
     var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">'+phIcon+'</div>' : '<div class="ph">'+phIcon+'</div>';
     return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'" role="button" tabindex="0" aria-label="'+esc(it.name)+'">'
       +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
-      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div></div>'
+      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div>'+stock+'</div>'
       +'</div>';
   }).join("");
   renderCart();

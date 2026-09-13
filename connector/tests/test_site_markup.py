@@ -581,3 +581,38 @@ class CashierDensityTests(TestCase):
         sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
         self.assertGreaterEqual(int(re.search(r"printflow-shell-v(\d+)", sw).group(1)), 53,
                                 "правка cashier.html требует поднятия CACHE")
+
+
+class CashierStockBarTests(TestCase):
+    """Полоса остатка на плитке (17.0.23).
+
+    Число на бейдже кассир читает по одному товару; полоса позволяет сравнить
+    несколько плиток сразу. Считается относительно самого полного товара на
+    витрине — никакого выдуманного «максимума склада».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_bar_is_relative_to_the_fullest_item(self):
+        self.assertIn("var maxQty=1;", self.html)
+        self.assertIn("if(n>maxQty)maxQty=n;", self.html)
+        self.assertIn("Math.round(qty/maxQty*100)", self.html)
+
+    def test_bar_width_is_clamped(self):
+        self.assertIn("Math.max(4,Math.min(100,", self.html,
+                      "ширина полосы обязана быть в пределах 4..100%")
+
+    def test_low_stock_is_marked(self):
+        self.assertIn("(qty<=5?' low':'')", self.html,
+                      "малый остаток обязан помечать полосу классом low")
+        self.assertIn(".stk.low i{background:var(--warn)}", self.html)
+
+    def test_colors_come_from_theme_tokens(self):
+        self.assertIn(".stk i{display:block;height:100%;border-radius:99px;background:var(--ok)", self.html)
+        self.assertIn("background:var(--panel-3);overflow:hidden", self.html,
+                      "подложка полосы обязана брать токен темы, а не жёсткий цвет")
+
+    def test_bar_has_text_alternative(self):
+        self.assertIn('''aria-label="Остаток '+qty+' шт"''', self.html)
