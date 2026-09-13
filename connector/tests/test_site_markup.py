@@ -644,3 +644,36 @@ class CashierPriceScaleTests(TestCase):
 
     def test_digits_are_tabular(self):
         self.assertIn("font-variant-numeric:tabular-nums", self.html)
+
+
+class CashierCartThumbTests(TestCase):
+    """Миниатюра в строке корзины (17.0.23).
+
+    Корзина рисуется в двух местах — в полосе снизу и в модалке. Если картинку
+    вставлять вручную, она появится только в одном: контракт требует общего
+    хелпера и двух вызовов.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_thumbnail_has_one_builder_and_two_callers(self):
+        self.assertIn("function cartThumb(e){", self.html)
+        self.assertEqual(2, self.html.count("'+cartThumb(e)+'"),
+                         "корзина рисуется в двух местах — хелпер нужен в обоих")
+
+    def test_entry_carries_the_photo(self):
+        self.assertIn('photo:it.photo_url||""', self.html,
+                      "без фото в записи корзины миниатюра всегда будет заглушкой")
+
+    def test_missing_photo_falls_back_to_placeholder(self):
+        self.assertIn('''? '<img class="cth"''', self.html)
+        self.assertIn('<span class="cth ph">', self.html)
+
+    def test_thumbnail_is_decorative_for_screen_readers(self):
+        self.assertIn('alt=""', self.html)
+
+    def test_size_and_background_come_from_theme(self):
+        self.assertIn(".cth{width:42px;height:42px;border-radius:10px;"
+                      "object-fit:cover;background:var(--panel-3);flex:0 0 42px}", self.html)
