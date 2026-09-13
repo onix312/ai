@@ -657,7 +657,12 @@ const PF = {
     orders: [], spools: [], catalog: [], nomenclature: [], warehouses: [],
     jobs: { queue: [], history: [] }, finance: null, live: null, activePrinter: '',
     events: [], financeDays: 30, dashDays: 7,
+    // Архив заказов (17.0.17) живёт отдельно от `orders`, чтобы снятые с доски
+    // не считались живыми в канбане, счётчиках и отчётах.
+    archivedOrders: [],
   },
+  // Что показывает список заказов: '' — доска, 'archived' — снятые с доски.
+  orderBox: '',
   api: { get, post, api },
   ui: {
     $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesText,

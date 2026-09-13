@@ -199,10 +199,21 @@ class WatchFolder:
                 pass
 
         if action == "queue":
-            try:
-                self._enqueue(path.name, info, order_id)
-            except Exception:
-                pass
+            # Молчать здесь нельзя: событие с action=queue уже ушло в ленту, и
+            # без причины оператор видит «файл принят», хотя печать не началась.
+            ok, reason = self._enqueue(path.name, info, order_id)
+            info["queue_ok"] = ok
+            if not ok:
+                info["queue_error"] = reason
+                self.db.add_event("watch", "Файл не попал в очередь",
+                                  f"{path.name} · {reason}", "",
+                                  {"file": path.name, "order_id": order_id, "fid": fid})
+                if self.bus:
+                    try:
+                        self.bus.publish("watch", {"file": path.name, "order_id": order_id,
+                                                   "fid": fid, "error": reason})
+                    except Exception:
+                        pass
 
         # оригинал можно переместить в архив Watch Folder/processed
         try:
@@ -264,9 +275,15 @@ class WatchFolder:
             "channel": "shop",
         })
 
-    def _enqueue(self, filename: str, info: dict, order_id: str):
+    def _enqueue(self, filename: str, info: dict, order_id: str) -> tuple[bool, str]:
+        """Поставить файл в очередь печати, вернув (получилось, причина).
+
+        `manager.enqueue` бросает ValueError на файлах, которые печатать нельзя
+        (логи, таймлапс, ipcam), и раньше вызывающий код глотал это в
+        `except Exception: pass` — файл исчезал из виду без следа.
+        """
         if not self.manager:
-            return
+            return False, "нет подключения к менеджеру печати"
         payload = {
             "file": filename,
             "name": Path(filename).stem,
@@ -274,7 +291,13 @@ class WatchFolder:
             "plate": 1,
             "use_ams": True,
         }
-        self.manager.enqueue(payload)
+        try:
+            result = self.manager.enqueue(payload)
+        except Exception as exc:  # noqa: BLE001 - причину надо показать оператору
+            return False, str(exc) or type(exc).__name__
+        if isinstance(result, dict) and (result.get("error") or result.get("ok") is False):
+            return False, str(result.get("error") or "менеджер отклонил файл")
+        return True, ""
 
     def list_pending(self, limit: int = 20) -> list[dict]:
         # последние файлы из watch — сортируем по fid

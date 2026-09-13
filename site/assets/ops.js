@@ -41,9 +41,16 @@ function tickLiveDues() {
 }
 setInterval(tickLiveDues, 60000);
 
+/* Источник строк списка (17.0.17): по умолчанию доска, в режиме «В архиве» —
+   снятые с доски заказы. Архив грузится отдельно и намеренно НЕ попадает в
+   `PF.state.orders`: иначе канбан, счётчик в навигации и всё, что считает
+   заказы, начнут принимать снятые с доски за живые. */
+function ordersSource() {
+  return PF.orderBox === 'archived' ? (PF.state.archivedOrders || []) : PF.state.orders;
+}
 function filtered() {
   const q = filters.q.trim().toLowerCase();
-  return PF.state.orders.filter((o) => {
+  return ordersSource().filter((o) => {
     if (filters.status && o.status !== filters.status) return false;
     if (filters.niche && o.niche_id !== filters.niche) return false;
     if (filters.chan === 'telegram' && !isTgOrder(o)) return false;
@@ -300,7 +307,7 @@ function renderKanban(list) {
 let bulkSelected = new Set();
 function updateBulkBar() {
   const bar = $('bulk_bar');
-  bar.hidden = orderView !== 'table' || !bulkSelected.size;
+  bar.hidden = (orderView !== 'table' && PF.orderBox !== 'archived') || !bulkSelected.size;
   $('bulk_count').textContent = `Выбрано ${bulkSelected.size}`;
   if (!bulkSelected.size) $('orders_tbody').querySelectorAll('[data-bulk]').forEach((c) => { c.checked = false; });
 }
@@ -322,15 +329,19 @@ function renderTable(list) {
       + `<td class="right tnum">${money(o.price)}</td>`
       + `<td class="right tnum ${num(econ.profit) >= 0 ? 'pos' : 'neg'}">${money(econ.profit)}</td>`
       + `<td class="${overdue(o) ? 'neg' : ''}">${o.due ? esc(dateText(o.due)) : '—'}</td></tr>`;
-  }).join('') : `<tr><td colspan="10">${!PF.state.orders.length
+  }).join('') : `<tr><td colspan="10">${!ordersSource().length
     ? '<div class="empty"><span class="big">▦</span><b>Заказов нет</b><span>Нет заказов — создайте из сообщения или с нуля.</span>'
       + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'
     : '<div class="empty compact"><span>Заказов не найдено.</span></div>'}</td></tr>`;
 }
 
 function renderOrders() {
+  const archived = PF.orderBox === 'archived';
+  const source = ordersSource();
   const list = filtered();
-  text('orders_sub', `${list.length} из ${PF.state.orders.length} заказов · перетаскивайте карточки между статусами`);
+  text('orders_sub', archived
+    ? `${list.length} из ${source.length} заказов в архиве · «Вернуть на доску» — в карточке заказа`
+    : `${list.length} из ${PF.state.orders.length} заказов · перетаскивайте карточки между статусами`);
   const tag = $('nav_orders_tag');
   const activeCount = PF.state.orders.filter((o) => !PF.isFinal(o)).length;
   tag.hidden = !activeCount;
@@ -344,18 +355,44 @@ function renderOrders() {
       .map((s) => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
   }
 
-  $('orders_kanban').hidden = orderView !== 'kanban';
+  /* В архиве канбана нет: по статусам раскладывать снятые с доски заказы
+     смысла нет, а доска должна показывать только то, что в работе. */
+  $('orders_kanban').hidden = archived || orderView !== 'kanban';
   $('orders_kanban').classList.toggle('compact', orderDensity);
   const odens = $('orders_density');
   if (odens) odens.classList.toggle('on', orderDensity);
-  $('orders_table').hidden = orderView !== 'table';
-  if (orderView === 'kanban') renderKanban(list); else {
+  $('orders_table').hidden = !archived && orderView !== 'table';
+  if (!archived && orderView === 'kanban') renderKanban(list); else {
     renderTable(list);
     if (window.PFIcons) window.PFIcons.apply($('orders_tbody'));
   }
   updateBulkBar();
 }
 function text(id, v) { const el = $(id); if (el) el.textContent = v; }
+
+/* ================================================ доска / архив (17.0.17) */
+/* Архив — это список, а не отдельный раздел: тот же поиск, те же фильтры, та
+   же карточка заказа. Разница одна — строки приходят с `?archived=1` и не
+   смешиваются с живыми заказами. */
+async function reloadOrderBox() {
+  if (PF.orderBox === 'archived') {
+    try {
+      const res = await get('/api/orders', { archived: 1 });
+      PF.state.archivedOrders = res.orders || [];
+    } catch (e) { fail(e); }
+  }
+  await PF.refreshCore();
+  renderOrders();
+}
+async function setOrderBox(box) {
+  PF.orderBox = box === 'archived' ? 'archived' : '';
+  const seg = $('orders_box');
+  if (seg) seg.querySelectorAll('button[data-box]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.box === PF.orderBox);
+  });
+  bulkSelected = new Set();
+  await reloadOrderBox();
+}
 
 /* =============================================================== drag */
 let dragId = null;
@@ -1317,6 +1354,14 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   }
   $('order_delete').hidden = !id;
   $('order_archive').hidden = !id;
+  /* Одна кнопка на два действия: снять с доски или вернуть обратно. Состояние
+     берём из ответа сервера, а не из локального списка — архивные заказы в
+     `PF.state.orders` не живут. */
+  const inArchive = !!num(data.archived);
+  $('order_archive').textContent = inArchive ? '↩ Вернуть на доску' : '⌸ В архив';
+  $('order_archive').title = inArchive
+    ? 'Вернуть заказ на доску: он снова попадёт в список и в работу'
+    : 'Убрать с доски: данные, платежи и история остаются в базе';
   const paymentBtn = $('order_payment');
   if (paymentBtn) paymentBtn.hidden = !id;
   $('order_queue').hidden = !id;
@@ -2888,7 +2933,7 @@ function bind() {
     tbody.addEventListener('mouseover', (e) => {
       const row = e.target.closest('tr[data-order]');
       if (!row) { hoverCard.hidden = true; return; }
-      const order = PF.state.orders.find((x) => x.id === row.dataset.order);
+      const order = ordersSource().find((x) => x.id === row.dataset.order);
       if (!order) { hoverCard.hidden = true; return; }
       const st = PF.status(order.status), econ = order.economics || {};
       hoverCard.innerHTML = `<b>№${esc(order.number)} · ${esc(order.product || 'Без названия')}</b>`
@@ -2905,6 +2950,14 @@ function bind() {
     });
   }
   $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; renderOrders(); });
+  const boxSeg = $('orders_box');
+  if (boxSeg) {
+    boxSeg.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-box]');
+      if (!btn || btn.dataset.box === PF.orderBox) return;
+      setOrderBox(btn.dataset.box);
+    });
+  }
   $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; renderOrders(); });
   $('orders_view').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-mode]');
@@ -3297,22 +3350,28 @@ function bind() {
   $('order_archive').addEventListener('click', async () => {
     if (!editingOrder) return;
     const id = editingOrder;
-    const order = PF.state.orders.find((o) => o.id === id) || {};
+    const order = PF.state.orders.find((o) => o.id === id)
+      || (PF.state.archivedOrders || []).find((o) => o.id === id) || {};
+    const leaving = !num(order.archived);
     try {
-      await post('/api/order/archive', { id });
+      await post('/api/order/archive', { id, archived: leaving });
       closeModal('order_modal');
-      await PF.refreshCore();
+      await reloadOrderBox();
       PF.refreshFinance();
-      toastUndo('Заказ в архиве',
-        `№${order.number || ''} убран с доски — данные и платежи на месте`,
-        async () => {
-          try {
-            await post('/api/order/archive', { id, archived: false });
-            await PF.refreshCore();
-            PF.refreshFinance();
-            toast('Заказ возвращён на доску');
-          } catch (e) { fail(e); }
-        });
+      if (leaving) {
+        toastUndo('Заказ в архиве',
+          `№${order.number || ''} убран с доски — данные и платежи на месте`,
+          async () => {
+            try {
+              await post('/api/order/archive', { id, archived: false });
+              await reloadOrderBox();
+              PF.refreshFinance();
+              toast('Заказ возвращён на доску');
+            } catch (e) { fail(e); }
+          });
+      } else {
+        toast('Заказ возвращён на доску');
+      }
     } catch (e) { fail(e); }
   });
   $('order_delete').addEventListener('click', async () => {

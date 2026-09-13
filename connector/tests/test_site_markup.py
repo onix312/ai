@@ -443,3 +443,61 @@ class CashierLayoutTests(TestCase):
         self.assertIsNotNone(m)
         self.assertGreaterEqual(int(m.group(1)), 45,
                                 "правка cashier.html требует поднятия CACHE в sw.js")
+
+
+class OrderArchivePanelTests(TestCase):
+    """Архив заказов в панели (17.0.17).
+
+    Без браузера поведение не прогнать, поэтому здесь строковые контракты на
+    то, что легко потерять при правке: переключатель в тулбаре, одна кнопка на
+    два действия и главное — архивные строки не смешиваются с живыми.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.index = INDEX_HTML.read_text(encoding="utf-8")
+        cls.ops = (ROOT / "site" / "assets" / "ops.js").read_text(encoding="utf-8")
+        cls.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+
+    def test_toolbar_has_board_and_archive_switch(self):
+        seg = re.search(r'<div class="seg" id="orders_box".*?</div>', self.index, re.S)
+        self.assertIsNotNone(seg, "в тулбаре заказов нет переключателя «На доске / В архиве»")
+        block = seg.group(0)
+        self.assertIn('data-box=""', block)
+        self.assertIn('data-box="archived"', block)
+        self.assertRegex(block, r'data-box=""[^>]*class="on"',
+                         "по умолчанию должен быть выбран режим доски")
+
+    def test_archive_button_sits_before_delete(self):
+        self.assertLess(self.index.index('id="order_archive"'),
+                        self.index.index('id="order_delete"'),
+                        "«В архив» должен стоять раньше «Удалить»")
+
+    def test_archived_rows_do_not_join_the_board(self):
+        """Снятые с доски заказы не должны попадать в `PF.state.orders`."""
+        self.assertIn("function ordersSource()", self.ops)
+        self.assertIn("return ordersSource().filter", self.ops,
+                      "фильтры списка читают не тот источник")
+        self.assertIn("PF.state.archivedOrders = res.orders || []", self.ops)
+        self.assertNotIn("PF.state.orders = PF.state.archivedOrders", self.ops)
+        self.assertIn("archivedOrders: []", self.core)
+        self.assertIn("orderBox: ''", self.core)
+
+    def test_archive_is_fetched_with_the_flag(self):
+        self.assertIn("get('/api/orders', { archived: 1 })", self.ops,
+                      "архив грузится без ?archived=1 — сервер отдаст живые")
+
+    def test_one_button_two_actions(self):
+        self.assertIn("↩ Вернуть на доску", self.ops)
+        self.assertIn("⌸ В архив", self.ops)
+        self.assertIn("const leaving = !num(order.archived)", self.ops)
+        self.assertIn("post('/api/order/archive', { id, archived: leaving })", self.ops)
+
+    def test_kanban_is_hidden_in_archive_mode(self):
+        self.assertIn("archived || orderView !== 'kanban'", self.ops,
+                      "в режиме архива канбан остаётся видимым")
+        self.assertIn("if (!archived && orderView === 'kanban') renderKanban(list)", self.ops)
+
+    def test_restore_offers_undo_only_when_leaving_the_board(self):
+        self.assertIn("if (leaving) {", self.ops)
+        self.assertIn("toast('Заказ возвращён на доску')", self.ops)
