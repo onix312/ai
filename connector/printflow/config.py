@@ -108,6 +108,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "sbp_shop_qr": "",            # статический QR магазина (строка/ссылка из банка)
     "sbp_bank_name": "",          # подпись банка для клиента («СБП — Т-Банк»)
     "sbp_payment_note": "",       # шаблон назначения перевода; {number} — номер заказа
+    "sbp_phone": "",              # телефон для перевода по СБП (показываем под QR)
+    "sbp_recipient": "",          # как получателя видит покупатель (пусто — pay_payee_name/legal_name)
     "sbp_purpose_limit": 140,     # макс. длина назначения платежа из товаров (18.0)
     "sbp_hold_hours": 24,         # холд СБП-продажи: часов до автоснятия (И2 единый регистр)
     # Авто-подтверждение СБП по поступлениям из банка (раунд «авто-СБП»):
@@ -341,9 +343,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # --- 8.0: 3MF парсер --------------------------------------------------
     "slicer_auto_create_order": False,
     "slicer_filename_template": "{product}_№{number}_{material}",
-    # --- Native/adapter slicer and FarmLoop commissioning ------------------
+    # --- Свой слайсер PrintFlow (Stage 1) и FarmLoop -----------------------
     "slicer_provider": "external",       # external | printflow
-    "slicer_profile": "bambu-p1s",       # printer profile id
+    "slicer_profile": "bambu-p1s-printflow-stage1",  # профиль нарезки
     "slicer_layer_height": 0.2,
     "slicer_first_layer_height": 0.2,
     "slicer_walls": 3,
@@ -361,6 +363,26 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "slicer_auto_postprocess_farmloop": False,
     "slicer_watch_auto_slice": False,
     "slicer_watch_auto_queue": False,
+    # --- Свой слайсер PrintFlow Stage 1: параметры и гейты -----------------
+    "slicer_mode": "manual",             # manual | auto
+    "slicer_engine_available": True,
+    "slicer_first_print_verified": False,
+    "slicer_auto_enqueue": False,
+    "slicer_auto_print": False,
+    "slicer_max_cycles": 1,
+    "slicer_extrusion_width_mm": 0.0,    # 0 = авто: nozzle × 1.125
+    "slicer_top_solid_layers": 4,
+    "slicer_bottom_solid_layers": 4,
+    "slicer_seam": "nearest",            # nearest | aligned
+    "slicer_retract_mm": 0.8,
+    "slicer_retract_speed_mm_s": 35,
+    "slicer_retract_min_travel_mm": 1.5,
+    "slicer_zhop_mm": 0.0,
+    "slicer_fan_percent": 0,             # 0 = авто по материалу
+    "slicer_support_spacing_mm": 2.0,
+    "slicer_travel_speed_mm_s": 200,
+    "slicer_flow": 1.0,
+    "slicer_center_model": True,
     "farmloop_profile": "bambu-p1s-farmloop-stage1",
     "farmloop_mechanics_verified": False,
     "farmloop_template_verified": False,

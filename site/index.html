@@ -1028,6 +1028,11 @@
   <div class="pr-farmloop-main"><div class="card-kicker">PrintFlow Farm · P1S</div><h2>FarmLoop Stage 1</h2><p id="pr_farmloop_text">Проверяем профиль и шаблон автоматического снятия…</p><small id="pr_farmloop_meta" class="muted"></small></div>
   <span id="pr_farmloop_tag" class="tag">Проверяем</span>
  </section>
+ <section class="card pr-slicer-card" id="pr_slicer" aria-live="polite">
+  <div class="pr-slicer-mark" aria-hidden="true">◺</div>
+  <div class="pr-slicer-main"><div class="card-kicker">PrintFlow Slicer · P1S</div><h2>Свой слайсер Stage 1</h2><p id="pr_slicer_text">Проверяем движок нарезки…</p><small id="pr_slicer_meta" class="muted"></small></div>
+  <span id="pr_slicer_tag" class="tag">Проверяем</span>
+ </section>
  <div class="pr-grid">
   <section class="card pr-barcode-card">
    <div class="card-head"><div><span class="card-kicker">Ценники и касса</span><h2>Штрихкод Code 128</h2><p>Проверить артикул до тиража: режим, число символов и контрольная сумма.</p></div></div>
@@ -4495,6 +4500,7 @@
   <button type="button" data-pane="price">Цены</button>
   <button type="button" data-pane="spec">Состав</button>
   <button type="button" data-pane="stock">Остатки</button>
+  <button type="button" data-pane="variants">Вариации</button>
  </div>
  <div class="modal-body">
   <div class="pane on" id="nompane-main">
@@ -4553,6 +4559,17 @@
    <p class="muted" style="margin-bottom:10px">Из чего состоит изделие и откуда списывать каждый расходник. Пустое место — коннектор возьмёт склад с остатком и запомнит выбор; можно поменять в любой момент.</p>
    <div id="nf_spec_rows"></div>
    <button class="btn sm" type="button" id="nf_spec_add">+ Строка состава</button>
+  </div>
+  <div class="pane" id="nompane-variants">
+   <p class="muted" style="margin-bottom:10px">Вариация — сочетание признаков одного товара: цвет, размер, пластик. У каждой своя катушка, себестоимость и цена: грамм считается по цене той катушки, которой вариант реально печатают.</p>
+   <div class="card-head"><div><h3>Собрать вариации</h3><p>Оси перемножаются: 12 цветов × 5 размеров = 60 вариаций</p></div></div>
+   <div id="nf_var_axes"></div>
+   <button class="btn sm ghost" type="button" id="nf_var_axis_add">+ Ось вариаций</button>
+   <div class="notice info" id="nf_var_preview" style="margin-top:10px"><span>ⓘ</span><span>Добавьте ось со значениями — здесь появится число вариаций.</span></div>
+   <button class="btn primary" type="button" id="nf_var_make" disabled style="margin-top:8px">Создать вариации</button>
+   <div class="card-head" style="margin-top:16px"><div><h3>Вариации товара</h3><p id="nf_var_count"></p></div>
+    <button class="btn sm" type="button" id="nf_var_recalc">↻ Посчитать цены</button></div>
+   <div id="nf_variants"></div>
   </div>
   <div class="pane" id="nompane-stock">
    <div id="nf_stock_box"></div>

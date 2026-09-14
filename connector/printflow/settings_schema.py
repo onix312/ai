@@ -60,6 +60,7 @@ TECHNICAL_KEYS = frozenset({
     "settings_profiles", "month_close", "bank_rules", "shelf_low_last",
     "printer_invested_at", "ui_density", "ui_start_view", "debug_verbose",
     "watch_folder_path", "slicer_bin", "slicer_filename_template",
+    "slicer_engine_available", "slicer_first_print_verified",
     "studio_gateway_serial", "studio_gateway_printer_id",
     "reply_templates", "client_bot_templates",
 })
@@ -144,6 +145,8 @@ META: dict[str, dict] = {
     "sbp_account_id": ("sbp", "Счёт для СБП", {"max_len": 32}),
     "sbp_shop_qr": ("sbp", "Статический QR магазина (СБП)", {"max_len": 300}),
     "sbp_bank_name": ("sbp", "Название банка СБП", {"max_len": 80}),
+    "sbp_phone": ("sbp", "СБП: телефон для перевода", {"max_len": 32}),
+    "sbp_recipient": ("sbp", "СБП: имя получателя", {"max_len": 160}),
     "sbp_payment_note": ("sbp", "Назначение перевода СБП", {"max_len": 200}),
     "sbp_purpose_limit": ("sbp", "Длина назначения из товаров", {"min": 20, "max": 210}),
     "sbp_hold_hours": ("sbp", "Холд СБП: часов до автоснятия", {"min": 1, "max": 168}),
@@ -306,8 +309,9 @@ META.update({
     "studio_gateway_printer_id": ("printers", "Шлюз Studio: привязанный принтер", {"advanced": True, "max_len": 64}),
     "slicer_bin": ("printers", "Путь к слайсеру", {"advanced": True, "max_len": 400}),
     "slicer_profile_path": ("printers", "Путь к профилю CuraEngine", {"advanced": True, "max_len": 400}),
-    "slicer_provider": ("printers", "Движок слайсинга", {"choices": ("external", "printflow")}),
-    "slicer_profile": ("printers", "Профиль принтера", {"max_len": 80}),
+    "slicer_provider": ("printers", "Движок слайсинга",
+                        {"choices": ("external", "printflow")}),
+    "slicer_profile": ("printers", "Профиль нарезки", {"max_len": 100}),
     "slicer_layer_height": ("printers", "Высота слоя, мм", {"min": 0.04, "max": 1.0}),
     "slicer_first_layer_height": ("printers", "Высота первого слоя, мм", {"min": 0.04, "max": 1.0}),
     "slicer_walls": ("printers", "Количество стенок", {"min": 1, "max": 20}),
@@ -325,6 +329,25 @@ META.update({
     "slicer_auto_postprocess_farmloop": ("printers", "Слайсер: постобработка FarmLoop", {}),
     "slicer_watch_auto_slice": ("printers", "Watch Folder: автоматически слайсить", {}),
     "slicer_watch_auto_queue": ("printers", "Watch Folder: ставить в очередь", {}),
+    "slicer_mode": ("printers", "Слайсер: режим", {"choices": ("manual", "auto")}),
+    "slicer_engine_available": ("printers", "Слайсер: движок доступен", {}),
+    "slicer_first_print_verified": ("printers", "Слайсер: первый прогон принят", {}),
+    "slicer_auto_enqueue": ("printers", "Слайсер: ставить в очередь автоматически", {}),
+    "slicer_auto_print": ("printers", "Слайсер: печать без оператора", {}),
+    "slicer_max_cycles": ("printers", "Слайсер: максимум повторов", {"min": 1, "max": 100}),
+    "slicer_extrusion_width_mm": ("printers", "Ширина экструзии, мм", {"min": 0, "max": 2}),
+    "slicer_top_solid_layers": ("printers", "Сплошных слоёв сверху", {"min": 0, "max": 20}),
+    "slicer_bottom_solid_layers": ("printers", "Сплошных слоёв снизу", {"min": 0, "max": 20}),
+    "slicer_seam": ("printers", "Положение шва", {"choices": ("nearest", "aligned")}),
+    "slicer_retract_mm": ("printers", "Ретракт, мм", {"min": 0, "max": 5}),
+    "slicer_retract_speed_mm_s": ("printers", "Скорость ретракта, мм/с", {"min": 1, "max": 200}),
+    "slicer_retract_min_travel_mm": ("printers", "Ретракт от переезда, мм", {"min": 0, "max": 50}),
+    "slicer_zhop_mm": ("printers", "Подъём по Z, мм", {"min": 0, "max": 5}),
+    "slicer_fan_percent": ("printers", "Обдув, %", {"min": 0, "max": 100}),
+    "slicer_support_spacing_mm": ("printers", "Шаг поддержек, мм", {"min": 0.5, "max": 10}),
+    "slicer_travel_speed_mm_s": ("printers", "Скорость переездов, мм/с", {"min": 10, "max": 500}),
+    "slicer_flow": ("printers", "Поток, коэффициент", {"min": 0.5, "max": 1.5}),
+    "slicer_center_model": ("printers", "Слайсер: центрировать модель", {}),
     "farmloop_profile": ("printers", "FarmLoop: профиль", {"max_len": 100}),
     "farmloop_mechanics_verified": ("printers", "FarmLoop: механика проверена", {}),
     "farmloop_template_verified": ("printers", "FarmLoop: шаблон проверен", {}),
@@ -560,9 +583,22 @@ def validate(patch: dict) -> tuple[dict, list[str], list[str]]:
     # the conservative defaults in config.py.
     effective = dict(DEFAULT_SETTINGS)
     effective.update(clean)
-    if effective.get("slicer_provider") == "printflow":
-        warnings.append("slicer_provider=printflow пока недоступен: используется внешний CLI-слайсер")
+    if effective.get("slicer_provider") not in ("external", "printflow"):
+        warnings.append("slicer_provider: неизвестный движок — оставлен external")
         clean["slicer_provider"] = "external"
+    # Свой движок нарезает сам, но без оператора не печатает: авто-очередь и
+    # авто-печать разрешены только после принятого первого прогона.
+    slicer_auto = (effective.get("slicer_mode") == "auto"
+                   and effective.get("slicer_first_print_verified"))
+    if effective.get("slicer_auto_enqueue") and not slicer_auto:
+        warnings.append("Слайсер: авто-очередь выключена — сначала ручной режим "
+                        "и принятый первый прогон")
+        clean["slicer_auto_enqueue"] = False
+    if effective.get("slicer_auto_print") and not (
+            slicer_auto and effective.get("slicer_auto_enqueue")):
+        warnings.append("Слайсер: печать без оператора выключена — нужны режим "
+                        "auto и разрешённая авто-очередь")
+        clean["slicer_auto_print"] = False
     if effective.get("farmloop_auto_next") and not (
         effective.get("farmloop_mechanics_verified")
         and effective.get("farmloop_template_verified")

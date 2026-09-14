@@ -39,6 +39,8 @@ TAG_TITLES = {
     "routes_get": "GET-маршруты, перенесённые из общего диспетчера",
     "routes_app": "Приложение: APK-оболочка кассы на Android",
     "routes_farmloop": "FarmLoop: профиль подготовки G-code для P1S",
+    "routes_slicer": "Слайсер: свой движок нарезки STL для P1S",
+    "routes_nomenclature": "Номенклатура: вариации товара и цена из себестоимости",
 }
 
 

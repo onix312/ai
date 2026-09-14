@@ -21,6 +21,61 @@ from .stock import Stock
 # это витрина, а не товар для печати.
 GOOD_KINDS = {"product", "kit", "semi"}
 
+# Вариации: предел на один товар и предел осей. Ограничения нужны не ради
+# экономии места, а чтобы ошибка ввода («случайно перемножили три оси по
+# сорок значений») не превратилась в пять тысяч строк, которые потом не
+# удалить из интерфейса.
+MAX_VARIANTS_TOTAL = 2000
+MAX_AXES = 6
+
+_SLUG_MAP = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "c", "ч": "ch", "ш": "sh", "щ": "sch", "ъ": "",
+    "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+_AXIS_KINDS = (
+    ("color", ("цвет", "color", "колер", "расцветка")),
+    ("size", ("размер", "size", "габарит", "объём", "объем")),
+    ("material", ("пластик", "материал", "material", "филамент")),
+)
+
+
+def variant_slug(value: str) -> str:
+    """Артикул из человеческого названия: «Чёрный матовый» → «chernyi-matovyi»."""
+    out = []
+    for ch in str(value or "").casefold():
+        if ch in _SLUG_MAP:
+            out.append(_SLUG_MAP[ch])
+        elif ch.isalnum() and ch.isascii():
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    slug = "".join(out).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug
+
+
+def axis_kind(name: str) -> str:
+    """Что за ось: цвет, размер, пластик или просто признак."""
+    low = str(name or "").casefold()
+    for kind, words in _AXIS_KINDS:
+        if any(word in low for word in words):
+            return kind
+    return ""
+
+
+def _axis_value(axes: list[dict], combo: list[dict], kind: str,
+                field: str) -> str:
+    """Значение оси нужного типа из конкретного сочетания."""
+    for axis, part in zip(axes, combo):
+        if axis_kind(axis.get("name")) == kind:
+            return str(part.get(field) or "")
+    return ""
+
+
 
 class Nomenclature:
     """Справочник номенклатуры: карточки, группы, цены, спецификации."""
@@ -566,6 +621,258 @@ class Nomenclature:
 
     def delete_variant(self, variant_id: str) -> None:
         self.db.delete("nom_variants", variant_id)
+
+    # --------------------------------------------------- вариации массово
+    def generate_variants(self, nom_id: str, axes: list | None = None,
+                          sku_prefix: str = "", preview: bool = False) -> dict[str, Any]:
+        """Создать вариации по осям: цвет × размер × пластик → все сочетания.
+
+        Один товар легко живёт в сотнях вариаций (адресник: 12 цветов ×
+        5 размеров × 3 пластика = 180). Вводить их руками невозможно, поэтому
+        карточка собирает их декартовым произведением осей: каждая ось — это
+        список значений, на выходе — все сочетания.
+
+        Повторные вызовы не плодят дубли: сочетание, которое уже есть (по
+        имени или артикулу), пропускается. Свои цены и привязанные катушки
+        существующих вариаций не трогаются.
+
+        ``preview=True`` — только подсчёт: сколько вариаций получится и
+        сколько из них уже есть. Касса не должна узнавать о 500 строках
+        постфактум.
+        """
+        nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
+        if not nom:
+            raise ValueError("Товар не найден")
+        clean: list[dict] = []
+        for axis in (axes or []):
+            if not isinstance(axis, dict):
+                continue
+            values: list[dict] = []
+            for raw in (axis.get("values") or []):
+                item = raw if isinstance(raw, dict) else {"name": str(raw)}
+                name = str(item.get("name") or item.get("value") or "").strip()
+                if name:
+                    values.append({
+                        "name": name,
+                        "hex": str(item.get("hex") or item.get("color_hex") or ""),
+                        "material": str(item.get("material") or ""),
+                        "grams": num(item.get("grams")),
+                        "hours": num(item.get("hours")),
+                    })
+            if values:
+                clean.append({"name": str(axis.get("name") or "").strip(),
+                              "values": values})
+        if not clean:
+            raise ValueError("Добавьте хотя бы одну ось со значениями")
+        if len(clean) > MAX_AXES:
+            raise ValueError(f"Осей больше {MAX_AXES} — такой товар проще "
+                             "разделить на два")
+
+        combos: list[list[dict]] = [[]]
+        for axis in clean:
+            combos = [combo + [value] for combo in combos for value in axis["values"]]
+            if len(combos) > MAX_VARIANTS_TOTAL:
+                raise ValueError(
+                    f"Получается больше {MAX_VARIANTS_TOTAL} вариаций "
+                    f"({len(combos)}) — разбейте товар на части или уберите "
+                    "лишние значения")
+
+        existing_names = {str(r["name"] or "").casefold()
+                          for r in self.db.query(
+                              "SELECT name FROM nom_variants WHERE nom_id=?",
+                              (nom_id,))}
+        existing_skus = {str(r["sku"] or "").casefold()
+                         for r in self.db.query(
+                             "SELECT sku FROM nom_variants WHERE nom_id=? AND "
+                             "COALESCE(sku,'')<>''", (nom_id,))}
+        base = str(sku_prefix or nom.get("sku") or nom.get("code") or "").strip()
+        total_now = int((self.db.one(
+            "SELECT COUNT(*) n FROM nom_variants WHERE nom_id=? AND archived=0",
+            (nom_id,)) or {}).get("n") or 0)
+
+        created: list[dict] = []
+        skipped = 0
+        for combo in combos:
+            name = " / ".join(part["name"] for part in combo)
+            slug = "-".join(variant_slug(part["name"]) for part in combo)
+            sku = f"{base}-{slug}" if base else slug
+            row = {
+                "name": name,
+                "color_name": _axis_value(clean, combo, "color", "name"),
+                "color_hex": _axis_value(clean, combo, "color", "hex"),
+                "size": _axis_value(clean, combo, "size", "name"),
+                "material": _axis_value(clean, combo, "material", "name"),
+                "sku": sku,
+            }
+            if row["name"].casefold() in existing_names or \
+                    (sku and sku.casefold() in existing_skus):
+                skipped += 1
+                continue
+            existing_names.add(row["name"].casefold())
+            if sku:
+                existing_skus.add(sku.casefold())
+            if len(created) + skipped + total_now >= MAX_VARIANTS_TOTAL:
+                skipped += 1
+                continue
+            row["id"] = uid("var")
+            row["nom_id"] = nom_id
+            row["position"] = total_now + len(created)
+            for part in combo:
+                if part.get("grams") and not num(row.get("grams")):
+                    row["grams"] = part["grams"]
+                if part.get("hours") and not num(row.get("hours")):
+                    row["hours"] = part["hours"]
+            if not preview:
+                self.db.upsert("nom_variants", row)
+            created.append(row)
+        if not preview and created:
+            # Карточка изменилась: у товара появились новые строки.
+            self.db.upsert("nomenclature", {"id": nom_id, "updated_at": now_iso()})
+        return {
+            "nom_id": nom_id,
+            "created": 0 if preview else len(created),
+            "would_create": len(created),
+            "skipped": skipped,
+            "total": total_now + (0 if preview else len(created)),
+            "axes": [{"name": a["name"], "values": len(a["values"])} for a in clean],
+            "limit": MAX_VARIANTS_TOTAL,
+            "preview": bool(preview),
+            "items": created[:50],
+        }
+
+    def variant_economics(self, variant_id: str) -> dict[str, Any]:
+        """Себестоимость и цена одной вариации с ценой её катушки.
+
+        Пластик — главная статья расхода, и цена грамма берётся из той
+        катушки, которой вариацию реально печатают: у магазина PLA за 1600 и
+        PETG за 3200 за килограмм, и «средняя по справочнику» здесь врёт.
+        Если катушка не привязана, берём подходящую по пластику и цвету и
+        честно говорим, откуда цифра.
+        """
+        row = self.db.one("SELECT * FROM nom_variants WHERE id=?", (variant_id,))
+        if not row:
+            raise ValueError("Вариация не найдена")
+        nom = self.db.one("SELECT * FROM nomenclature WHERE id=?",
+                          (row.get("nom_id"),)) or {}
+        spool, spool_source = self._variant_spool(row, nom)
+        grams = num(row.get("grams")) or num(nom.get("grams"))
+        hours = num(row.get("hours")) or num(nom.get("hours"))
+        material = (str(row.get("material") or "").strip()
+                    or str(spool.get("material") or "").strip()
+                    or str(nom.get("material") or "").strip())
+        fit = max(1, int(num(nom.get("fit_per_plate"), 1) or 1))
+        kwargs = {
+            "manual_minutes": num(row.get("post_minutes"))
+                              or num(nom.get("post_minutes")),
+            "material": material,
+            "qty": float(fit),
+            "fit_per_plate": fit,
+        }
+        if spool:
+            kwargs["spool_price"] = num(spool.get("price"))
+            kwargs["spool_weight"] = num(spool.get("total_grams"))
+        if grams > 0 and hours > 0:
+            kwargs["plate_grams"] = grams * fit
+            kwargs["plate_hours"] = hours * fit
+            kwargs["warmup_minutes"] = 0.0
+        breakdown = self.acc.cost_breakdown(grams, hours, **kwargs)
+        cost = round(num(breakdown.get("per_unit") or breakdown.get("total")), 2)
+        suggested = self.acc.suggest_price(cost)
+        own_price = num(row.get("price"))
+        return {
+            "variant_id": variant_id,
+            "name": str(row.get("name") or ""),
+            "grams": round(grams, 2),
+            "hours": round(hours, 2),
+            "material": material,
+            "cost": cost,
+            "price": round(own_price, 2) if own_price > 0
+                     else round(num(suggested.get("price")), 2),
+            "auto_price": own_price <= 0,
+            "markup": num(suggested.get("markup")),
+            "spool": spool or {},
+            "spool_source": spool_source,
+            "breakdown": breakdown,
+        }
+
+    def recalc_variant_prices(self, nom_id: str, only_auto: bool = True) -> dict[str, Any]:
+        """Пересчитать себестоимость и цены всех вариаций товара.
+
+        Цена переписывается только там, где её не задали руками: своя цена —
+        решение владельца, машина его не отменяет. Себестоимость обновляется
+        всегда: она расчётная.
+        """
+        rows = self.db.query(
+            "SELECT * FROM nom_variants WHERE nom_id=? AND archived=0"
+            " ORDER BY position, name", (nom_id,))
+        updated: list[dict] = []
+        skipped_price = 0
+        for row in rows:
+            try:
+                eco = self.variant_economics(row["id"])
+            except Exception:
+                continue
+            data = {"id": row["id"], "cost": eco["cost"],
+                    "updated_at": now_iso()}
+            if not (only_auto and not eco["auto_price"]):
+                data["price"] = eco["price"]
+            else:
+                skipped_price += 1
+            self.db.upsert("nom_variants", data)
+            updated.append({"id": row["id"], "name": eco["name"],
+                            "cost": eco["cost"], "price": eco["price"],
+                            "auto_price": eco["auto_price"],
+                            "spool_id": eco["spool"].get("id", ""),
+                            "spool_source": eco["spool_source"]})
+        return {"nom_id": nom_id, "updated": len(updated),
+                "kept_manual_price": skipped_price, "items": updated}
+
+    def _variant_spool(self, row: dict, nom: dict) -> tuple[dict, str]:
+        """Катушка вариации: привязанная вручную или подходящая по складу."""
+        spool_id = str(row.get("spool_id") or "").strip()
+        if spool_id:
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+            if spool:
+                return spool, "variant"
+        material = (str(row.get("material") or "").strip()
+                    or str(nom.get("material") or "").strip())
+        color = str(row.get("color_name") or "").strip()
+        if color:
+            spool = self.db.one(
+                "SELECT * FROM spools WHERE archived=0 AND material=? AND "
+                "pylower(color_name)=? ORDER BY remaining_grams DESC LIMIT 1",
+                (material, color.casefold())) if material else None
+            if spool:
+                return spool, "auto"
+        if material:
+            spool = self.db.one(
+                "SELECT * FROM spools WHERE archived=0 AND material=? "
+                "ORDER BY remaining_grams DESC LIMIT 1", (material,))
+            if spool:
+                return spool, "auto"
+        return {}, "none"
+
+    def spool_options(self) -> list[dict]:
+        """Катушки склада для выбора в карточке: цена за грамм видна сразу."""
+        rows = self.db.query(
+            "SELECT id, material, brand, color_name, color_hex, price,"
+            " total_grams, remaining_grams FROM spools WHERE archived=0"
+            " ORDER BY material, color_name")
+        out = []
+        for r in rows:
+            weight = max(1.0, num(r.get("total_grams"), 1000) or 1000.0)
+            out.append({
+                "id": r["id"],
+                "material": r.get("material") or "",
+                "brand": r.get("brand") or "",
+                "color_name": r.get("color_name") or "",
+                "color_hex": r.get("color_hex") or "#4b5563",
+                "price": round(num(r.get("price")), 2),
+                "per_gram": round(num(r.get("price")) / weight, 4),
+                "remaining_grams": round(num(r.get("remaining_grams")), 1),
+                "total_grams": round(weight, 1),
+            })
+        return out
 
     # ----------------------------------------------------------- сводка
     def summary(self, warehouse_id: str = "", items: list[dict] | None = None) -> dict[str, Any]:

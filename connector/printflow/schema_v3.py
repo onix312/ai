@@ -86,9 +86,16 @@ CREATE TABLE IF NOT EXISTS nom_variants (
     hours REAL DEFAULT 0,
     file TEXT DEFAULT '',
     position INTEGER DEFAULT 0,
-    archived INTEGER DEFAULT 0
+    archived INTEGER DEFAULT 0,
+    material TEXT DEFAULT '',       -- переопределение пластика («PETG»)
+    spool_id TEXT DEFAULT '',       -- катушка, которой печатаем вариант:
+                                    -- цена грамма берётся именно из неё
+    price REAL DEFAULT 0,           -- своя цена продажи (0 = из себестоимости)
+    cost REAL DEFAULT 0,            -- рассчитанная себестоимость (кэш)
+    updated_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);
+CREATE INDEX IF NOT EXISTS idx_variant_spool ON nom_variants(spool_id);
 
 CREATE TABLE IF NOT EXISTS warehouses (
     id TEXT PRIMARY KEY,

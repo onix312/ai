@@ -270,6 +270,10 @@
  .qrbox svg{width:min(360px,78vw,58vh,100%);height:auto;background:#fff;padding:14px;border-radius:18px;box-shadow:0 8px 30px -14px rgba(0,0,0,.5)}
  .qrnote{color:var(--muted);font-size:12.5px;text-align:center;line-height:1.5;margin-bottom:14px}
  .qrbig{display:block;color:var(--text);font-size:19px;line-height:1.35;font-weight:850;letter-spacing:.01em;text-transform:uppercase;text-align:center}
+.qrtransfer{margin:0 0 12px;padding:12px 14px;border:1px solid var(--line);border-radius:16px;background:var(--panel);text-align:center}
+.qrtransfer .qrcard-kicker{display:block;font-size:11.5px;font-weight:750;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.qrphone{font-size:23px;font-weight:900;letter-spacing:.01em;font-variant-numeric:tabular-nums;line-height:1.2}
+.qrpayee{color:var(--text-2);font-size:13px;margin:3px 0 9px;line-height:1.35}
  #bQrPaid{min-height:56px;font-size:15.5px}
  /* login — дружелюбно */
  .login{max-width:400px;margin:0 auto;padding:36px 16px 0;text-align:center}
@@ -417,6 +421,12 @@
   <h3 id="qrTitle">СБП · оплата</h3>
   <div class="qrbox" id="qrBox"></div>
   <div class="qrnote" id="qrNote"></div>
+  <div class="qrtransfer" id="qrTransfer" hidden>
+   <div class="qrcard-kicker">Камера не читает? Перевод по СБП</div>
+   <div class="qrphone" id="qrPhone"></div>
+   <div class="qrpayee" id="qrPayee"></div>
+   <button class="btn ghost sm" id="bQrCopyPhone" type="button">Скопировать номер</button>
+  </div>
   <div id="qrActions" style="display:none;gap:8px;margin-bottom:12px;flex-wrap:wrap">
    <a class="btn pay" id="bQrOpen" style="flex:1;text-align:center;text-decoration:none;display:none" target="_blank" rel="noopener">Открыть оплату</a>
    <button class="btn ghost" id="bQrCopy" type="button" style="flex:1;display:none">Скопировать</button>
@@ -488,7 +498,7 @@ function nextFs(){
   try{localStorage.setItem(FS_KEY,v);}catch(_e){}
   applyFs(v);
 }
-var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
+var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", qrPhone:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -591,6 +601,12 @@ function netStart(){
     netState();
     if(!LINK.ok)netProbe(false);
     else if(!offBusy&&offQueue.length)offFlush(false);
+    /* Живая метка для оболочки кассы (18.0): Android может выгрузить
+       рендерер, и тогда WebView остаётся пустым — кассир видит чёрный экран
+       и не понимает, что случилось. Оболочка ждёт этот сигнал, и если его
+       нет несколько минут, пересоздаёт окно сама. В браузере моста нет —
+       тогда просто ничего не делаем. */
+    try{if(window.PfApp&&window.PfApp.alive)window.PfApp.alive();}catch(e){}
   },LINK_TICK);
 }
 
@@ -640,7 +656,8 @@ function offQrRefresh(force){
   api(withToken("/api/cashier/offline/qr")).then(function(r){
     if(r&&r.text){
       try{localStorage.setItem(OFF_QR_KEY,JSON.stringify({at:Date.now(),text:r.text,
-        svg:r.svg||"",kind:r.kind||"static",hint:r.hint||"",shop:r.shop||""}));}catch(e){}
+        svg:r.svg||"",kind:r.kind||"static",hint:r.hint||"",shop:r.shop||"",
+        transfer:r.transfer||{}}));}catch(e){}
     }else{
       // QR убрали из настроек — офлайн-СБП честно становится недоступен.
       try{localStorage.removeItem(OFF_QR_KEY);}catch(e){}
@@ -1531,6 +1548,7 @@ function showOfflineQr(total){
   var qrState=offQrState();
   if(qrState&&!qrState.fresh)lines.push("⚠ "+esc(qrState.text)+".");
   $("qrNote").innerHTML=lines.join("<br>");
+  renderTransfer(q.transfer);
   // Камера → банк: если код — ссылка, даём «Открыть банк» и «Поделиться»
   // (покупателю в мессенджер проще отправить ссылку, чем ловить камерой текст).
   var open=qrOpenUrl(payLink(q.link_template,total),q.open_url);
@@ -1610,6 +1628,7 @@ function showPaymentQr(sale){
   // под кодом теряется на телефоне. Крупно — только что сделать.
   $("qrNote").innerHTML='<span class="qrbig">Откройте приложение банка'
     +'<br>и отсканируйте внутри него</span>';
+  renderTransfer(qr.transfer);
   var hasText=!!qr.text;
   var open=qrOpenUrl((diag.can_open?qr.open_url:""),payLink(qr.link_template,sale.amount));
   var canOpen=!!open;
@@ -1625,6 +1644,21 @@ function showPaymentQr(sale){
   $("bQrSave").style.display=svg?"block":"none";
   $("qrModal").classList.add("on");
 }
+/* Перевод руками — под кодом. Камера покупателя не всегда читает QR: блик,
+   тёмный экран, чужое приложение, разряженный телефон. Тогда деньги переводят
+   по номеру — и номер с именем получателя должны быть на экране кассы, а не
+   в голове у кассира. Пустые реквизиты — блок не показываем: выдумывать номер
+   нельзя, это прямой путь к переводу не туда. */
+function renderTransfer(t){
+  var box=$("qrTransfer");if(!box)return;
+  t=t||{};
+  var phone=String(t.phone||""),who=String(t.recipient||""),bank=String(t.bank||"");
+  if(!phone||!who){box.hidden=true;state.qrPhone="";return;}
+  box.hidden=false;
+  $("qrPhone").textContent=phone;
+  $("qrPayee").textContent=who+(bank?" \u00b7 "+bank:"");
+  state.qrPhone=String(t.phone_digits||phone);
+}
 function qrFallbackCopy(t){
   var ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();
   try{document.execCommand("copy");toast("Скопировано ✓");}catch(e){toast("Не скопировалось");}
@@ -1634,6 +1668,12 @@ $("bQrCopy").addEventListener("click",function(){
   var t=state.qrText||"";if(!t)return;
   if(navigator.clipboard&&navigator.clipboard.writeText){
     navigator.clipboard.writeText(t).then(function(){toast("Скопировано ✓");},function(){qrFallbackCopy(t);});
+  }else qrFallbackCopy(t);
+});
+$("bQrCopyPhone").addEventListener("click",function(){
+  var t=state.qrPhone||"";if(!t)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){toast("Номер скопирован \u2713");},function(){qrFallbackCopy(t);});
   }else qrFallbackCopy(t);
 });
 $("bQrShare").addEventListener("click",function(){
@@ -2197,12 +2237,21 @@ function resetMoney(){
   var tab=$("tabIn");$("tabInLbl").textContent="Входящие";tab.classList.remove("nudge");
   $("moneyAlert").hidden=true;
 }
+var hiddenAt=0;
 document.addEventListener("visibilitychange",function(){
+  /* Экран погашен или вкладка выгружена: браузер урезает таймеры, и касса
+     может вернуться к прилавку с ценами и остатками, которые уже не актуальны.
+     Отдельно от «просто сеть»: долгое отсутствие перечитывает каталог и смену,
+     а не только входящие платежи. */
+  if(document.visibilityState==="hidden"){hiddenAt=Date.now();return;}
   if(document.visibilityState!=="visible"||!loggedIn())return;
-  // телефон выгрузил вкладку из памяти: перечитываем входящие, поднимаем поток
-  // и проверяем ПК — сеть могла отвалиться, пока экран был погашен.
+  try{if(window.PfApp&&window.PfApp.alive)window.PfApp.alive();}catch(e){}
   if(moneyES&&moneyES.readyState===2){try{moneyES.close();}catch(e){}moneyES=null;}
   primeMoney();connectMoney();netProbe(true);
+  if(hiddenAt&&Date.now()-hiddenAt>120000){
+    hiddenAt=0;loadCatalog(true);refreshShift();refreshBadge();offRender();
+  }
+  hiddenAt=0;
 });
 
 // старт

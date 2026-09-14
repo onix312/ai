@@ -3090,6 +3090,15 @@ class Api:
             return 200, {"ok": True, "imported": self.repo.import_local_storage(body)}
         # 8.0: Watch / slicer
         if path == "/api/slicer/run":
+            # Свой движок PrintFlow (Stage 1) — отдельная ветка: он нарезает
+            # сам, а не зовёт внешний CLI. Внешний путь ниже не менялся.
+            provider = str(body.get("provider")
+                           or self.db.setting("slicer_provider", "external")
+                           or "external")
+            if provider == "printflow":
+                from .router import Ctx
+                from .routes_slicer import slicer_slice
+                return slicer_slice(self, Ctx(body=body))
             from .config import DATA_DIR, UPLOAD_DIR as upload_dir
             from .farmloop import FarmLoopError, prepare_file
             from .library import FileLibrary
