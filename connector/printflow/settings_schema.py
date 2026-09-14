@@ -305,6 +305,39 @@ META.update({
     "studio_gateway_serial": ("printers", "Шлюз Studio: серийный номер", {"advanced": True, "max_len": 64}),
     "studio_gateway_printer_id": ("printers", "Шлюз Studio: привязанный принтер", {"advanced": True, "max_len": 64}),
     "slicer_bin": ("printers", "Путь к слайсеру", {"advanced": True, "max_len": 400}),
+    "slicer_profile_path": ("printers", "Путь к профилю CuraEngine", {"advanced": True, "max_len": 400}),
+    "slicer_provider": ("printers", "Движок слайсинга", {"choices": ("external", "printflow")}),
+    "slicer_profile": ("printers", "Профиль принтера", {"max_len": 80}),
+    "slicer_layer_height": ("printers", "Высота слоя, мм", {"min": 0.04, "max": 1.0}),
+    "slicer_first_layer_height": ("printers", "Высота первого слоя, мм", {"min": 0.04, "max": 1.0}),
+    "slicer_walls": ("printers", "Количество стенок", {"min": 1, "max": 20}),
+    "slicer_infill_percent": ("printers", "Заполнение, %", {"min": 0, "max": 100}),
+    "slicer_infill_pattern": ("printers", "Тип заполнения", {"choices": ("grid", "lines", "triangles", "gyroid")}),
+    "slicer_supports": ("printers", "Поддержки", {}),
+    "slicer_brim": ("printers", "Brim", {}),
+    "slicer_brim_width": ("printers", "Ширина brim, мм", {"min": 0, "max": 30}),
+    "slicer_nozzle_mm": ("printers", "Диаметр сопла, мм", {"min": 0.2, "max": 1.2}),
+    "slicer_nozzle_temp": ("printers", "Температура сопла, °C", {"min": 0, "max": 350}),
+    "slicer_bed_temp": ("printers", "Температура стола, °C", {"min": 0, "max": 130}),
+    "slicer_speed_mm_s": ("printers", "Скорость печати, мм/с", {"min": 1, "max": 500}),
+    "slicer_material": ("printers", "Материал слайсера", {"max_len": 40}),
+    "slicer_ams_slot": ("printers", "AMS: слот слайсера", {"max_len": 20}),
+    "slicer_auto_postprocess_farmloop": ("printers", "Слайсер: постобработка FarmLoop", {}),
+    "slicer_watch_auto_slice": ("printers", "Watch Folder: автоматически слайсить", {}),
+    "slicer_watch_auto_queue": ("printers", "Watch Folder: ставить в очередь", {}),
+    "farmloop_profile": ("printers", "FarmLoop: профиль", {"max_len": 100}),
+    "farmloop_mechanics_verified": ("printers", "FarmLoop: механика проверена", {}),
+    "farmloop_template_verified": ("printers", "FarmLoop: шаблон проверен", {}),
+    "farmloop_sensor_mode": ("printers", "FarmLoop: подтверждение пустой платформы", {"choices": ("manual", "sensor", "camera", "both")}),
+    "farmloop_sensor_timeout_s": ("printers", "FarmLoop: таймаут подтверждения, с", {"min": 1, "max": 600}),
+    "farmloop_camera_threshold_pct": ("printers", "FarmLoop: порог камеры, %", {"min": 0.1, "max": 100}),
+    "farmloop_cooldown_s": ("printers", "FarmLoop: охлаждение, с", {"min": 0, "max": 3600}),
+    "farmloop_pusher_enabled": ("printers", "FarmLoop: толкатель установлен", {}),
+    "farmloop_bender_enabled": ("printers", "FarmLoop: изгибатель установлен", {}),
+    "farmloop_auto_next": ("printers", "FarmLoop: следующий цикл автоматически", {}),
+    "farmloop_unattended_series": ("printers", "FarmLoop: бесконтрольная серия", {}),
+    "farmloop_max_cycles": ("printers", "FarmLoop: максимум циклов", {"min": 1, "max": 1000}),
+    "farmloop_max_detach_attempts": ("printers", "FarmLoop: попытки снятия", {"min": 1, "max": 5}),
     "slicer_auto_create_order": ("printers", "Слайсер: создавать заказ из файла", {}),
     "slicer_filename_template": ("printers", "Слайсер: шаблон имени файла", {"advanced": True, "max_len": 200}),
     "preflight_enabled": ("printers", "Префлайт включён", {}),
@@ -522,6 +555,32 @@ def validate(patch: dict) -> tuple[dict, list[str], list[str]]:
         if error:
             warnings.append(error)
         clean[key] = coerced
+    # Cross-setting safety gates. They are validated on the complete patch only
+    # when the related values are explicitly changed; the server still keeps
+    # the conservative defaults in config.py.
+    effective = dict(DEFAULT_SETTINGS)
+    effective.update(clean)
+    if effective.get("slicer_provider") == "printflow":
+        warnings.append("slicer_provider=printflow пока недоступен: используется внешний CLI-слайсер")
+        clean["slicer_provider"] = "external"
+    if effective.get("farmloop_auto_next") and not (
+        effective.get("farmloop_mechanics_verified")
+        and effective.get("farmloop_template_verified")
+        and effective.get("farmloop_pusher_enabled")
+        and effective.get("farmloop_bender_enabled")
+        and effective.get("farmloop_sensor_mode") in {"sensor", "camera", "both"}
+    ):
+        warnings.append("FarmLoop auto-next заблокирован: нужны проверенные механика, шаблон, толкатель, изгибатель и датчик/камера")
+        clean["farmloop_auto_next"] = False
+    if effective.get("farmloop_unattended_series") and not (
+        effective.get("farmloop_auto_next")
+        and int(effective.get("farmloop_max_cycles") or 0) > 1
+    ):
+        warnings.append("Бесконтрольная серия заблокирована: сначала нужен разрешённый auto-next и лимит больше одного цикла")
+        clean["farmloop_unattended_series"] = False
+    if effective.get("slicer_auto_postprocess_farmloop") and not effective.get("farmloop_template_verified"):
+        warnings.append("Автопостобработка FarmLoop выключена: шаблон не подтверждён")
+        clean["slicer_auto_postprocess_farmloop"] = False
     return clean, warnings, unknown
 
 

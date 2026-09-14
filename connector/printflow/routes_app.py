@@ -21,8 +21,21 @@ def app_android(api: Any, ctx: Ctx):
     тап — иначе «переустановить APK на каждый телефон» было бы ручным
     обходом магазинов.
     """
-    out = dict(app_shell.status())
-    raw = str(ctx.arg("installed", "") or "").strip()
+    raw_target = ctx.body.get("app", "") if isinstance(ctx.body, dict) else ""
+    if not raw_target:
+        raw_target = ctx.query.get("app", "kassa")
+    if isinstance(raw_target, (list, tuple)):
+        raw_target = raw_target[0] if raw_target else "kassa"
+    target = str(raw_target or "kassa").strip().lower()
+    if target not in {"kassa", "pult"}:
+        target = "kassa"
+    out = dict(app_shell.status(target=target))
+    raw = ctx.body.get("installed", "") if isinstance(ctx.body, dict) else ""
+    if not raw:
+        raw = ctx.query.get("installed", "")
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else ""
+    raw = str(raw or "").strip()
     if raw:
-        out.update(app_shell.check_version(raw))
+        out.update(app_shell.check_version(raw, target=target))
     return out

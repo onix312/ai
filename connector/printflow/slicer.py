@@ -24,6 +24,9 @@ CANDIDATE_BINS = (
     "prusa-slicer",
     "prusa-slicer-console",
     "PrusaSlicer",
+    "CuraEngine",
+    "cura_engine",
+    "curaengine",
 )
 
 _WIN_DIRS = (
@@ -54,7 +57,7 @@ class SlicerError(ValueError):
 def _looks_like_bin(path: Path) -> bool:
     name = path.name.lower()
     return any(token in name for token in (
-        "orca", "bambu", "prusa", "slicer",
+        "orca", "bambu", "prusa", "cura", "slicer",
     )) and path.is_file()
 
 
@@ -107,6 +110,8 @@ def slicer_name(bin_path: str) -> str:
         return "Bambu Studio"
     if "prusa" in lower:
         return "PrusaSlicer"
+    if "cura" in lower:
+        return "CuraEngine"
     return Path(bin_path).stem or "slicer"
 
 
@@ -153,7 +158,8 @@ def _collect_output(folder: Path) -> Path | None:
 
 
 def slice_file(input_path: str | Path, output_dir: str | Path | None = None,
-               explicit_bin: str = "", timeout: int = 600) -> dict:
+               explicit_bin: str = "", timeout: int = 600,
+               profile_path: str = "") -> dict:
     """Нарезать STL/3MF через CLI. Без бинаря — SlicerError, без фейкового G-code."""
     src = Path(input_path).expanduser()
     if not src.is_file():
@@ -169,7 +175,16 @@ def slice_file(input_path: str | Path, output_dir: str | Path | None = None,
     out_root = Path(output_dir) if output_dir else (DATA_DIR / "slicer-out")
     out_root.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="pf-slice-", dir=str(out_root)))
-    cmd = [info["bin"], "--slice", "--output", str(work), str(src)]
+    if info["name"] == "CuraEngine":
+        if not profile_path:
+            raise SlicerError("Для CuraEngine укажите JSON-профиль CuraEngine в настройках")
+        profile = Path(profile_path).expanduser()
+        if not profile.is_file():
+            raise SlicerError(f"Профиль CuraEngine не найден: {profile}")
+        output = work / (src.stem + ".gcode")
+        cmd = [info["bin"], "slice", "-j", str(profile), "-l", str(src), "-o", str(output)]
+    else:
+        cmd = [info["bin"], "--slice", "--output", str(work), str(src)]
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,

@@ -71,6 +71,22 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(out["version_code"], 170007)
         self.assertGreater(out["size_mb"], 1.0)
 
+    def test_pult_update_uses_its_own_manifest_and_file(self):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        pult = self.dir / "NOZZA-pult-17.0.8.apk"
+        pult.write_bytes(b"PK\\x03\\x04" + b"\\0" * 32)
+        os.truncate(pult, 2048)
+        (self.dir / "pult.json").write_text(json.dumps({
+            "version": "17.0.8", "version_code": 170008,
+            "file": pult.name, "package": "ai.printflow.pult",
+        }), encoding="utf-8")
+        # Одновременно лежащая касса не должна попасть в ответ пульта.
+        fake_build(self.dir, version="17.0.9", code=170009)
+        out = app_shell.check_version(170007, self.dir, target="pult")
+        self.assertTrue(out["update_available"])
+        self.assertEqual(out["file"], pult.name)
+        self.assertEqual(out["version"], "17.0.8")
+
     def test_newest_apk_wins(self):
         fake_build(self.dir, name="NOZZA-kassa-17.0.6.apk")
         old = self.dir / "NOZZA-kassa-17.0.6.apk"
@@ -203,6 +219,14 @@ class RouteTests(unittest.TestCase):
                                         query={"installed": "1"}) or (None, None)
         self.assertEqual(code, 200)
         self.assertIn("update_available", payload)
+
+    def test_pult_target_is_explicit(self):
+        from connector.printflow.router import router
+        code, payload = router.dispatch(None, "GET", "/api/app/android",
+                                        query={"app": "pult", "installed": "1"}) or (None, None)
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["target"], "pult")
+        self.assertEqual(payload["package"], "ai.printflow.pult")
 
 
 class ShellProjectTests(unittest.TestCase):

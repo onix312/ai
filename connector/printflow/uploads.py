@@ -16,7 +16,7 @@ import urllib.parse
 from pathlib import Path
 
 from .accounting import num, uid
-from .config import UPLOAD_DIR, now_iso
+from .config import DATA_DIR, UPLOAD_DIR, now_iso
 from .http_helpers import (MAX_UPLOAD, _form_bool, _upload_filename,
                            parse_multipart, request_length, safe_file,
                            save_upload)
@@ -49,6 +49,24 @@ def _form_ams_mapping(raw: str) -> list[int]:
         if -1 <= slot <= 15:
             out.append(slot)
     return out
+
+
+def _farmloop_template(profile: str) -> Path:
+    """Проверенный шаблон ищется только в data/farmloop-templates.
+
+    Никогда не принимаем произвольный путь из multipart: шаблон управляет
+    физическим движением P1S и должен быть установлен владельцем отдельно.
+    """
+    safe = "".join(ch for ch in str(profile or "") if ch.isalnum() or ch in "-_" )
+    if safe != str(profile or "") or not safe:
+        raise ValueError("Некорректный профиль FarmLoop")
+    path = DATA_DIR / "farmloop-templates" / f"{safe}.gcode"
+    if not path.is_file():
+        raise ValueError(
+            f"Профиль FarmLoop «{safe}» ещё не установлен. "
+            "Сначала проверьте механику и положите подтверждённый шаблон в "
+            "data/farmloop-templates.")
+    return path
 
 
 class UploadMixin:
@@ -96,6 +114,39 @@ class UploadMixin:
         if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, created = save_upload(requested_name, upload[1])
+        farmloop_profile = str(fields.get("farmloop_profile") or "").strip()
+        farmloop_report = None
+        if farmloop_profile:
+            if not name.lower().endswith(".gcode"):
+                if created:
+                    local.unlink(missing_ok=True)
+                return self.send_json(400, {
+                    "error": "FarmLoop Stage 1 принимает экспортированный .gcode из Bambu Studio; "
+                             ".3mf пока нужно экспортировать в G-code",
+                })
+            try:
+                from .farmloop import prepare_file
+                template = _farmloop_template(farmloop_profile)
+                prepared_name = f"{Path(name).stem}.farmloop.gcode"
+                prepared = UPLOAD_DIR / prepared_name
+                farmloop_report = prepare_file(
+                    local, prepared, template.read_text(encoding="utf-8", errors="replace"),
+                    metadata={
+                        "job_id": fields.get("job_id") or "",
+                        "cycle": fields.get("cycle") or "",
+                        "cycles": fields.get("cycles") or "",
+                        "ams": fields.get("ams") or fields.get("ams_mapping") or "",
+                        "material": fields.get("material") or "",
+                        "color": fields.get("color") or "",
+                    },
+                )
+                if created:
+                    local.unlink(missing_ok=True)
+                name, local = prepared_name, prepared
+            except (ValueError, OSError) as exc:
+                if created:
+                    local.unlink(missing_ok=True)
+                return self.send_json(409, {"error": str(exc)})
         # Раскладка AMS: пульт отдаёт файл и раскладку одним запросом, как
         # слайсер. Пустое поле — «пусть решит принтер»: поведение прежнее.
         mapping = _form_ams_mapping(fields.get("ams_mapping"))
@@ -112,6 +163,8 @@ class UploadMixin:
             "timelapse": _form_bool(fields.get("timelapse"), False),
             "source": "local-upload",
             "allow_auto_start": _form_bool(fields.get("allow_auto_start"), True),
+            "farmloop_profile": farmloop_profile,
+            "farmloop_report": farmloop_report or {},
         }
         if mapping:
             payload["ams_mapping"] = mapping
@@ -126,7 +179,8 @@ class UploadMixin:
                     pass
             raise
         return self.send_json(200, {"ok": True, "file": name, "saved": name,
-                                    "job": job, "source": "upload"})
+                                    "job": job, "source": "upload",
+                                    "farmloop": farmloop_report or None})
 
     def handle_estimate_upload(self):
         """Сохранить выбранный 3MF/G-code в uploads и вернуть вес плиты."""

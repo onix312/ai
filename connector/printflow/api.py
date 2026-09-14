@@ -3090,12 +3090,14 @@ class Api:
             return 200, {"ok": True, "imported": self.repo.import_local_storage(body)}
         # 8.0: Watch / slicer
         if path == "/api/slicer/run":
-            from .config import UPLOAD_DIR as upload_dir
+            from .config import DATA_DIR, UPLOAD_DIR as upload_dir
+            from .farmloop import FarmLoopError, prepare_file
             from .library import FileLibrary
             from .slicer import SlicerError, slice_file
             name = str(body.get("file") or body.get("name") or "").strip()
             fid = str(body.get("id") or "").strip()
             explicit = str(self.db.setting("slicer_bin", "") or "")
+            profile_path = str(self.db.setting("slicer_profile_path", "") or "")
             try:
                 if fid:
                     src = FileLibrary(self.db).resolve(fid)
@@ -3103,8 +3105,27 @@ class Api:
                     src = upload_dir / Path(name).name
                 else:
                     raise ValueError("Укажите файл для нарезки")
-                result = slice_file(src, explicit_bin=explicit)
-            except (SlicerError, FileNotFoundError, KeyError, ValueError) as exc:
+                result = slice_file(src, explicit_bin=explicit, profile_path=profile_path)
+                farm_profile = str(body.get("farmloop_profile") or "").strip()
+                if farm_profile:
+                    if not result["path"].lower().endswith(".gcode"):
+                        raise FarmLoopError("FarmLoop принимает результат слайсера только как .gcode")
+                    template_path = DATA_DIR / "farmloop-templates" / f"{farm_profile}.gcode"
+                    if not template_path.is_file():
+                        raise FarmLoopError(
+                            f"Для профиля {farm_profile} не установлен проверенный FarmLoop-шаблон")
+                    source_path = Path(result["path"])
+                    farm_output = source_path.with_name(source_path.stem + ".farmloop.gcode")
+                    report = prepare_file(
+                        source_path, farm_output, template_path.read_text(encoding="utf-8", errors="replace"),
+                        metadata={
+                            "job_id": body.get("job_id", ""), "cycle": body.get("cycle", 1),
+                            "cycles": body.get("cycles", 1), "ams": body.get("ams", ""),
+                            "material": body.get("material", ""), "color": body.get("color", ""),
+                        })
+                    result.update({"output": farm_output.name, "path": str(farm_output),
+                                  "size": farm_output.stat().st_size, "farmloop": report})
+            except (SlicerError, FarmLoopError, FileNotFoundError, KeyError, ValueError) as exc:
                 return 400, {"error": str(exc)}
             data = Path(result["path"]).read_bytes()
             rec = FileLibrary(self.db).put(result["output"], data, source="slicer")

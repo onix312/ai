@@ -164,6 +164,14 @@ class PultResourceTests(unittest.TestCase):
 
 
 class PultWindowTests(unittest.TestCase):
+    def test_pult_checks_its_own_apk_update(self):
+        text = kotlin_text()
+        self.assertIn('/api/app/android?app=pult&installed=${BuildConfig.VERSION_CODE}', text)
+        self.assertIn('Net.json(base, "/api/app/android?app=pult', text)
+        self.assertIn('UPDATE_INTERVAL_MS', text)
+        self.assertIn('Доступен пульт', text)
+        self.assertIn('openExternally("$base$url")', text)
+
     def test_window_opens_the_pult_page_only(self):
         """Окно пульта не должно уметь открывать кассу: там деньги и смены."""
         text = kotlin_text()
