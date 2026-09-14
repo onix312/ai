@@ -369,6 +369,10 @@ def run_checks(probe: Probe, client: Client, copied: bool) -> None:
                     "printers", "next", "rules"):
             assert key in auto, f"в отчёте нет ключа {key}"
         assert auto["rules"], "правила очереди не пришли — оператор не поймёт, кто решает"
+        assert any("сорванных печатей подряд" in str(r) for r in auto["rules"]), \
+            "правило предохранителя (18.0.9) не попало в отчёт"
+        for item in auto["printers"]:
+            assert "failed_streak" in item, f"нет счётчика сбоев у {item.get('id')}"
         armed = bool(auto["auto_queue"] and auto["safety_gate"] and not auto["quiet"])
         assert auto["armed"] == armed, f"armed не сходится с флагами: {auto}"
         if not auto["armed"]:

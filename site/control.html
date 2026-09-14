@@ -487,6 +487,15 @@
     return '<div class="pk-alert ' + (worst === 'bad' ? 'bad' : '') + '">▲ ' + texts.join(' · ')
       + (alerts.length > texts.length ? ' · ещё ' + (alerts.length - texts.length) : '') + '</div>';
   }
+  /* 18.0.9: очередь могла встать на предохранителе (сбои подряд). Об этом
+     оператор узнаёт там, куда смотрит первым — на плитке парка. */
+  function autoStopFor(printerId){
+    var found = null;
+    ((st.auto || {}).printers || []).forEach(function(p){
+      if (String(p.id) === String(printerId)) found = p;
+    });
+    return (found && num(found.failed_streak) >= 2) ? found : null;
+  }
   function tileHtml(p){
     var info = p.printer || {}, temp = p.temperature || {}, conn = p.connection || {};
     var tone = stateTone(p);
@@ -515,6 +524,11 @@
       + (running && num(info.remaining_min) ? '<div class="pk-sub">осталось '
         + esc(humanMin(info.remaining_min)) + (info.eta ? ' · к ' + clock(info.eta) : '') + '</div>' : '')
       + '<div class="pk-meta">' + meta.join('') + '</div>'
+      + (autoStopFor(p.id)
+        ? '<div class="pk-alert bad">Автозапуск встал: '
+          + num(autoStopFor(p.id).failed_streak) + ' сорванные печати подряд'
+          + ' — запустите задание вручную</div>'
+        : '')
       + alertsHtml(p) + '</div>';
   }
   function renderCmdBar(){
@@ -1667,6 +1681,7 @@
         + '<span class="pk-dot ' + (p.ready ? 'ok' : 'warn') + '"></span>'
         + '<span class="pk-map-what">' + esc(p.name || p.id) + '</span></div>'
         + '<div class="pk-sub">' + esc(p.ready ? 'может начать сейчас' : (p.reason || 'ждёт'))
+        + (num(p.failed_streak) ? ' · сорванных печатей подряд: ' + num(p.failed_streak) : '')
         + '</div></div>';
     }).join('');
     if (!rows) return '';

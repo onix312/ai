@@ -24,6 +24,14 @@ from .repo import Repo
 from .telegram_bot import TelegramBot
 from .watchdog import Watchdog
 
+# Сколько сорванных печатей подряд останавливает автозапуск (18.0.9).
+# Авто-перепечатки в PrintFlow нет и не будет: после двух сбоев очередь встаёт
+# и ждёт человека — ручной запуск снимает предохранитель, когда печать пройдёт.
+# Счёт ведётся по фактам из журнала (`print_jobs`), отдельного состояния нет:
+# его нельзя забыть сбросить или потерять при перезапуске.
+FAILED_STREAK_LIMIT = 2
+STREAK_EVENT = "Автозапуск остановлен: сбои подряд"
+
 
 class PrinterManager:
     def __init__(self, db: Database, repo: Repo):
@@ -492,6 +500,12 @@ class PrinterManager:
                     )
             if state == "failed":
                 self._register_failure(printer_id, job, duration, grams)
+                # Горькая правда для автоматики: серия сбоев — стоп до человека.
+                try:
+                    self._note_streak_stop(printer_id, job)
+                except Exception as exc:  # noqa: BLE001 — журнал важнее, но не вместо
+                    self.db.add_event("error", "Не удалось оценить серию сбоев",
+                                      str(exc), printer_id, {"job_id": job.get("id")})
             if job.get("order_id"):
                 if state == "done":
                     self.db.execute(
@@ -1443,6 +1457,51 @@ class PrinterManager:
                 or self._job_material(j) in loaded]
         return same[0] if same else jobs[0]
 
+    def failed_streak(self, printer_id: str) -> int:
+        """Сколько сорванных печатей подряд на принтере (по фактам журнала).
+
+        Считаем с конца: идём по завершённым заданиям принтера от свежего к
+        старому и останавливаемся на первой удачной печати или отмене. Ничего
+        не помним в памяти процесса — перезапуск коннектора счёт не сбрасывает.
+        """
+        if not printer_id:
+            return 0
+        rows = self.db.query(
+            "SELECT state FROM print_jobs WHERE printer_id=? AND finished_at IS NOT NULL"
+            " AND state IN ('done','failed','cancelled')"
+            " ORDER BY datetime(finished_at) DESC LIMIT 10", (printer_id,))
+        streak = 0
+        for row in rows:
+            if str(row.get("state") or "") != "failed":
+                break
+            streak += 1
+        return streak
+
+    def auto_start_blocked(self, printer_id: str) -> str:
+        """Почему автозапуск на этом принтере стоит (пусто — не стоит)."""
+        streak = self.failed_streak(printer_id)
+        if streak >= FAILED_STREAK_LIMIT:
+            return (f"{streak} сорванные печати подряд — автозапуск встал и ждёт "
+                    "ручного запуска")
+        return ""
+
+    def _note_streak_stop(self, printer_id: str, job: dict) -> None:
+        """Записать в журнал сам момент остановки автозапуска.
+
+        Ровно один раз на серию сбоев: печатать это на каждой сорванной печати
+        значило бы утопить журнал в одинаковых записях.
+        """
+        streak = self.failed_streak(printer_id)
+        if streak != FAILED_STREAK_LIMIT:
+            return
+        printer = self.get(printer_id)
+        name = printer.record.get("name", "Принтер") if printer else "Принтер"
+        self.db.add_event(
+            "queue", STREAK_EVENT,
+            f"{name}: {streak} сорванные печати подряд — очередь ждёт ручного "
+            f"запуска. Проверьте принтер, затем запустите задание вручную.",
+            printer_id, {"job_id": job.get("id"), "streak": streak})
+
     def _start_gate(self, job: dict | None, snap: dict, printer) -> tuple[bool, str]:
         """Те же гейты, что у автозапуска, но словами и без запуска (18.0.8).
 
@@ -1519,6 +1578,8 @@ class PrinterManager:
             rules.append("Перед стартом очередь сверяет " + " и ".join(checks) + ".")
         if self.db.setting("bed_watch_enabled", False):
             rules.append("После печати проверяется, снята ли деталь со стола.")
+        rules.append(f"После {FAILED_STREAK_LIMIT} сорванных печатей подряд "
+                     "автозапуск встаёт и ждёт ручного запуска — авто-перепечатки нет.")
         return rules
 
     def autonomy_report(self, printer_id: str = "", snaps: dict | None = None) -> dict:
@@ -1568,8 +1629,14 @@ class PrinterManager:
             except Exception:  # noqa: BLE001 — справка не имеет права падать
                 job = None
             ready, reason = self._start_gate(job, snap, printer)
+            streak = self.failed_streak(pid)
+            blocked = self.auto_start_blocked(pid)
+            if blocked:
+                ready, reason = False, blocked
+                reasons.append(f"{name}: {blocked}.")
             printers.append({"id": pid, "name": name, "ready": ready,
-                             "job_id": (job or {}).get("id") or "", "reason": reason})
+                             "job_id": (job or {}).get("id") or "", "reason": reason,
+                             "failed_streak": streak})
             # «Следующее» — первый принтер с заданием; если дальше найдётся
             # принтер, который может начать прямо сейчас, показываем его:
             # оператору важно знать, что действительно стартует.
@@ -1621,6 +1688,10 @@ class PrinterManager:
     def _maybe_start_next(self, printer_id: str) -> None:
         if (not self.db.setting("auto_queue", False)
                 or not self.db.setting("unattended_dangerous_actions", False)):
+            return
+        # 18.0.9: сбои подряд останавливают автоматику до человека. Это не
+        # блокировка запуска вообще — оператор по-прежнему жмёт «Запустить».
+        if self.auto_start_blocked(printer_id):
             return
         printer = self.get(printer_id)
         if not printer or not printer.connected:

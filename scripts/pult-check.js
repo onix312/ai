@@ -125,7 +125,7 @@ function makeState(printerState, connected) {
       auto_queue: false, safety_gate: false, armed: false, quiet: false,
       reasons: ['Автозапуск выключен (auto_queue): задания запускает оператор.'],
       printers: [{ id: 'prn1', name: 'Цех-1', ready: false, job_id: 'job1',
-                   reason: 'принтер занят: печатает' }],
+                   reason: 'принтер занят: печатает', failed_streak: 0 }],
       next: { job: { id: 'job1', name: 'Подставка', plate: 2, est_minutes: 90,
                      est_grams: 40, priority: 5, due: '2026-09-20',
                      order: { number: '1042', product: 'Подставка' } },
@@ -1232,6 +1232,29 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('авто: включённый автозапуск не превращается в кнопку на странице',
       on.posts().length === 0 && on.store['pk_auto_body'].innerHTML.indexOf('data-cmd') < 0,
       JSON.stringify(on.posts().map((r) => r.url)));
+
+    // Предохранитель 18.0.9: два сбоя подряд встали поперёк автозапуска.
+    const streaked = makeState('IDLE', true);
+    streaked.autonomy.printers[0] = {
+      id: 'prn1', name: 'Цех-1', ready: false, job_id: 'job1', failed_streak: 2,
+      reason: '2 сорванные печати подряд — автозапуск встал и ждёт ручного запуска' };
+    streaked.autonomy.next.ready = false;
+    streaked.autonomy.next.reason = '2 сорванные печати подряд — автозапуск встал и ждёт ручного запуска';
+    const streakedPage = runPage({ state: streaked });
+    await wait(60);
+    streakedPage.clickTab('auto');
+    await wait(80);
+    const streakedBody = text(streakedPage.store['pk_auto_body'].innerHTML);
+    check('предохранитель: причина остановки автозапуска видна на экране «Авто»',
+      streakedBody.indexOf('сорванные печати подряд') >= 0
+      && streakedBody.indexOf('сорванных печатей подряд: 2') >= 0, streakedBody.slice(0, 240));
+    check('предохранитель: на плитке парка сказано, что автозапуск встал',
+      text(streakedPage.store['pk_tiles'].innerHTML).indexOf('Автозапуск встал') >= 0
+      && text(streakedPage.store['pk_tiles'].innerHTML).indexOf('вручную') >= 0,
+      text(streakedPage.store['pk_tiles'].innerHTML).slice(0, 200));
+    check('предохранитель: страница и здесь ничего не запускает сама',
+      streakedPage.posts().length === 0,
+      JSON.stringify(streakedPage.posts().map((r) => r.url)));
 
     // Парка нет, а очередь не пуста: не «заданий нет», а «печатать не на чем».
     const noPark = makeState('IDLE', true);
