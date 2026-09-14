@@ -1240,6 +1240,12 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .pr-card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 2px; }
 .pr-card-foot .btn { min-height: 42px; }
 .pr-card-path { overflow: hidden; color: var(--muted); font-family: var(--mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pr-farmloop-card { display: flex; align-items: center; gap: 14px; margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.pr-farmloop-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 24px; font-weight: 800; }
+.pr-farmloop-main { min-width: 0; flex: 1; }
+.pr-farmloop-main h2 { margin: 3px 0 4px; font-size: 17px; }
+.pr-farmloop-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+.pr-farmloop-main small { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 .pr-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .pr-error > span:nth-child(2) { flex: 1 1 240px; }
 .pr-error-mark { display: grid; width: 24px; height: 24px; flex: none; place-items: center; border-radius: 8px; background: var(--bad); color: #fff; font-weight: 800; }
@@ -1267,6 +1273,8 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 }
 @media (max-width: 380px) {
   .pr-card { padding: 14px; }
+  .pr-farmloop-card { align-items: flex-start; flex-wrap: wrap; }
+  .pr-farmloop-card .tag { margin-left: 58px; }
   .pr-card-facts { gap: 6px; }
   .pr-card-facts > div { padding: 8px; }
 }

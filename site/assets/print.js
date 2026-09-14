@@ -16,6 +16,7 @@ let forms = [];
 let groups = [];
 let loaded = false;
 let loading = false;
+let farmloopLoaded = false;
 
 /* ============================================================ окно печати */
 /* Печать серверного листа. Своё окно, а не iframe: браузер печатает его
@@ -120,6 +121,30 @@ function showError(message) {
 function clearError() {
   const box = $('pr_error');
   if (box) box.hidden = true;
+}
+
+async function loadFarmLoopStatus() {
+  if (farmloopLoaded) return;
+  const text = $('pr_farmloop_text');
+  const meta = $('pr_farmloop_meta');
+  const tag = $('pr_farmloop_tag');
+  try {
+    const data = await get('/api/farmloop/profile');
+    farmloopLoaded = true;
+    if (data.template_installed) {
+      if (tag) { tag.textContent = 'Профиль готов'; tag.className = 'tag ok'; }
+      if (text) text.textContent = 'G-code из Bambu Studio можно подготовить отдельным FarmLoop-файлом.';
+      if (meta) meta.textContent = `${data.template_name} · вход: ${data.input_format} · профиль ${data.id}`;
+    } else {
+      if (tag) { tag.textContent = 'Ждёт шаблон'; tag.className = 'tag warn'; }
+      if (text) text.textContent = data.blocked_reason || 'Сначала установите и проверьте механику FarmLoop Stage 1 на P1S.';
+      if (meta) meta.textContent = `Профиль ${data.id} · вход: ${data.input_format}`;
+    }
+  } catch (error) {
+    if (tag) { tag.textContent = 'Нет связи'; tag.className = 'tag bad'; }
+    if (text) text.textContent = 'Не удалось проверить профиль FarmLoop. Повторите после восстановления связи.';
+    if (meta) meta.textContent = '';
+  }
 }
 
 /* =============================================================== каталог */
@@ -341,6 +366,7 @@ function bind() {
 PF.module('print', () => {
   bind();
   loadCatalog({ quiet: true }).catch(fail);
+  loadFarmLoopStatus();
 });
 
 PF.on('data', () => {
@@ -351,5 +377,6 @@ PF.on('view', (detail) => {
   if (detail.view !== 'print') return;
   bind();
   if (!loaded) loadCatalog({ quiet: true }).catch(fail);
+  loadFarmLoopStatus();
 });
 })();
