@@ -3096,6 +3096,7 @@ class Api:
             name = str(body.get("file") or body.get("name") or "").strip()
             fid = str(body.get("id") or "").strip()
             explicit = str(self.db.setting("slicer_bin", "") or "")
+            profile_path = str(self.db.setting("slicer_profile_path", "") or "")
             try:
                 if fid:
                     src = FileLibrary(self.db).resolve(fid)
@@ -3103,7 +3104,7 @@ class Api:
                     src = upload_dir / Path(name).name
                 else:
                     raise ValueError("Укажите файл для нарезки")
-                result = slice_file(src, explicit_bin=explicit)
+                result = slice_file(src, explicit_bin=explicit, profile_path=profile_path)
             except (SlicerError, FileNotFoundError, KeyError, ValueError) as exc:
                 return 400, {"error": str(exc)}
             data = Path(result["path"]).read_bytes()

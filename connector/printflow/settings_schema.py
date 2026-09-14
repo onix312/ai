@@ -305,6 +305,7 @@ META.update({
     "studio_gateway_serial": ("printers", "Шлюз Studio: серийный номер", {"advanced": True, "max_len": 64}),
     "studio_gateway_printer_id": ("printers", "Шлюз Studio: привязанный принтер", {"advanced": True, "max_len": 64}),
     "slicer_bin": ("printers", "Путь к слайсеру", {"advanced": True, "max_len": 400}),
+    "slicer_profile_path": ("printers", "Путь к профилю CuraEngine", {"advanced": True, "max_len": 400}),
     "slicer_provider": ("printers", "Движок слайсинга", {"choices": ("external", "printflow")}),
     "slicer_profile": ("printers", "Профиль принтера", {"max_len": 80}),
     "slicer_layer_height": ("printers", "Высота слоя, мм", {"min": 0.04, "max": 1.0}),

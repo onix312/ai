@@ -1002,6 +1002,7 @@ const STUDIO = [
   ['studio_gateway_serial', 'Серийный номер', 'Пусто — сгенерируется. Studio идентифицирует устройство по нему.', 'text'],
   ['studio_gateway_printer_id', 'Принтер (id)', 'На какой физический принтер уходит очередь. Пусто — первый доступный.', 'text'],
   ['slicer_bin', 'Путь к CLI слайсера', 'Bambu Studio / OrcaSlicer / Cura / PrusaSlicer. Пусто — поиск в PATH.', 'text'],
+  ['slicer_profile_path', 'Профиль CuraEngine', 'JSON-профиль для CuraEngine; для Bambu/Orca не нужен', 'text'],
   ['slicer_provider', 'Движок слайсинга', 'external — установленный слайсер. printflow — будущий собственный движок без копирования закрытого кода.', 'text'],
   ['slicer_profile', 'Профиль принтера', 'Например bambu-p1s', 'text'],
   ['slicer_layer_height', 'Высота слоя, мм', 'Обычно 0.08–0.28 для сопла 0.4 мм', 'num'],

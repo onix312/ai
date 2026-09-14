@@ -337,6 +337,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "studio_gateway_access_code": "",
     "studio_gateway_printer_id": "",
     "slicer_bin": "",
+    "slicer_profile_path": "",
     # --- 8.0: 3MF парсер --------------------------------------------------
     "slicer_auto_create_order": False,
     "slicer_filename_template": "{product}_№{number}_{material}",
