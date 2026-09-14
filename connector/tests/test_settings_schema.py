@@ -100,6 +100,21 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual((clean, unknown), ({}, []))
         self.assertTrue(warnings)
 
+    def test_farmloop_auto_next_requires_physical_gates(self):
+        clean, warnings, _ = validate({"farmloop_auto_next": True})
+        self.assertFalse(clean["farmloop_auto_next"])
+        self.assertTrue(any("auto-next" in item for item in warnings))
+
+    def test_farmloop_unattended_requires_auto_next_and_multiple_cycles(self):
+        clean, warnings, _ = validate({"farmloop_unattended_series": True})
+        self.assertFalse(clean["farmloop_unattended_series"])
+        self.assertTrue(any("Бесконтрольная серия" in item for item in warnings))
+
+    def test_native_provider_is_not_falsely_advertised(self):
+        clean, warnings, _ = validate({"slicer_provider": "printflow"})
+        self.assertEqual(clean["slicer_provider"], "external")
+        self.assertTrue(any("printflow" in item for item in warnings))
+
     def test_empty_patch_is_clean(self):
         self.assertEqual(validate({}), ({}, [], []))
 

@@ -554,6 +554,32 @@ def validate(patch: dict) -> tuple[dict, list[str], list[str]]:
         if error:
             warnings.append(error)
         clean[key] = coerced
+    # Cross-setting safety gates. They are validated on the complete patch only
+    # when the related values are explicitly changed; the server still keeps
+    # the conservative defaults in config.py.
+    effective = dict(DEFAULT_SETTINGS)
+    effective.update(clean)
+    if effective.get("slicer_provider") == "printflow":
+        warnings.append("slicer_provider=printflow пока недоступен: используется внешний CLI-слайсер")
+        clean["slicer_provider"] = "external"
+    if effective.get("farmloop_auto_next") and not (
+        effective.get("farmloop_mechanics_verified")
+        and effective.get("farmloop_template_verified")
+        and effective.get("farmloop_pusher_enabled")
+        and effective.get("farmloop_bender_enabled")
+        and effective.get("farmloop_sensor_mode") in {"sensor", "camera", "both"}
+    ):
+        warnings.append("FarmLoop auto-next заблокирован: нужны проверенные механика, шаблон, толкатель, изгибатель и датчик/камера")
+        clean["farmloop_auto_next"] = False
+    if effective.get("farmloop_unattended_series") and not (
+        effective.get("farmloop_auto_next")
+        and int(effective.get("farmloop_max_cycles") or 0) > 1
+    ):
+        warnings.append("Бесконтрольная серия заблокирована: сначала нужен разрешённый auto-next и лимит больше одного цикла")
+        clean["farmloop_unattended_series"] = False
+    if effective.get("slicer_auto_postprocess_farmloop") and not effective.get("farmloop_template_verified"):
+        warnings.append("Автопостобработка FarmLoop выключена: шаблон не подтверждён")
+        clean["slicer_auto_postprocess_farmloop"] = False
     return clean, warnings, unknown
 
 
