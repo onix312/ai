@@ -33,6 +33,21 @@ G1 Y250 F6000
 {END}"""
 
 
+class FarmLoopRouteTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import connector.printflow.routes_farmloop  # noqa: F401
+
+    def test_profile_reports_uninstalled_template_without_claiming_ready(self):
+        from connector.printflow.router import router
+        code, payload = router.dispatch(None, "GET", "/api/farmloop/profile", query={})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["id"], "bambu-p1s-farmloop-stage1")
+        self.assertFalse(payload["template_installed"])
+        self.assertFalse(payload["can_prepare"])
+        self.assertIn("шаблон", payload["blocked_reason"])
+
+
 class FarmLoopTemplateTests(unittest.TestCase):
     def test_valid_template_is_described(self):
         out = validate_template(TEMPLATE)
