@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" width="1000" height="250" role="img" aria-label="PrintFlow — локальная система 3D-производства">
+ <title>PrintFlow — локальная система 3D-производства</title>
+ <desc>Баннер репозитория: знак NOZZA (сопло, сложенное из слоёв печати) и название системы.</desc>
+ <defs>
+  <linearGradient id="pfBg" x1="0" y1="0" x2="1" y2="1">
+   <stop offset="0%" stop-color="#0b1020"/>
+   <stop offset="55%" stop-color="#131a2b"/>
+   <stop offset="100%" stop-color="#1c1637"/>
+  </linearGradient>
+  <linearGradient id="pfMark" x1="0" y1="0" x2="1" y2="1">
+   <stop offset="0%" stop-color="#4f46e5"/>
+   <stop offset="100%" stop-color="#7c3aed"/>
+  </linearGradient>
+  <linearGradient id="pfLine" x1="0" y1="0" x2="1" y2="0">
+   <stop offset="0%" stop-color="#4f46e5"/>
+   <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+  </linearGradient>
+ </defs>
+
+ <rect width="1000" height="250" rx="20" fill="url(#pfBg)"/>
+
+ <!-- слои печати уходят вправо, как след сопла -->
+ <g transform="translate(770,18) scale(3.2)" fill="#ffffff" opacity="0.05">
+  <rect x="0" y="0" width="62" height="8" rx="4"/>
+  <rect x="4" y="14" width="54" height="8" rx="4"/>
+  <rect x="9" y="28" width="44" height="8" rx="4"/>
+  <rect x="15" y="42" width="32" height="8" rx="4"/>
+  <circle cx="31" cy="58" r="5"/>
+ </g>
+
+ <!-- знак: сопло, сложенное из слоёв -->
+ <g transform="translate(56,58)">
+  <rect width="134" height="134" rx="32" fill="url(#pfMark)"/>
+  <g fill="#ffffff">
+   <rect x="31" y="30" width="72" height="10" rx="5" opacity="0.95"/>
+   <rect x="37" y="49" width="60" height="10" rx="5" opacity="0.85"/>
+   <rect x="44" y="68" width="46" height="10" rx="5" opacity="0.72"/>
+   <rect x="52" y="87" width="30" height="10" rx="5" opacity="0.58"/>
+  </g>
+  <circle cx="67" cy="112" r="7" fill="#ffffff" opacity="0.95"/>
+ </g>
+
+ <text x="228" y="102" font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif"
+       font-size="56" font-weight="800" letter-spacing="0.5" fill="#f8fafc">PrintFlow</text>
+ <text x="232" y="141" font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif"
+       font-size="22" font-weight="600" fill="#a5b4fc">Локальная система 3D-производства</text>
+ <text x="232" y="174" font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif"
+       font-size="16" fill="#94a3b8">Заказы · склад · учёт по факту печати · Bambu Lab + AMS · пульт цеха в телефоне</text>
+ <rect x="230" y="196" width="430" height="3" rx="1.5" fill="url(#pfLine)"/>
+
+ <text x="944" y="228" text-anchor="end" font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif"
+       font-size="14" fill="#64748b">NOZZA · витрина для покупателей</text>
+</svg>

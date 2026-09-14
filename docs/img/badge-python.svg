@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="156" height="28" viewBox="0 0 156 28" role="img" aria-label="python: 3.10+">
+ <title>python: 3.10+</title>
+ <defs><clipPath id="pfBadgepython"><rect width="156" height="28" rx="6"/></clipPath></defs>
+ <g clip-path="url(#pfBadgepython)">
+  <rect width="156" height="28" fill="#161c2c"/>
+  <rect width="86" height="28" fill="#4f46e5"/>
+  <rect x="86" width="1" height="28" fill="#0b1020" opacity="0.45"/>
+ </g>
+ <g font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif" font-size="12.5" text-anchor="middle">
+  <text x="43.0" y="18.2" font-weight="750" fill="#ffffff">python</text>
+  <text x="121.0" y="18.2" font-weight="650" fill="#dbe3f4">3.10+</text>
+ </g>
+</svg>

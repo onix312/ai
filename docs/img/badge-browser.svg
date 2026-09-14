@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="284" height="28" viewBox="0 0 284 28" role="img" aria-label="доступ: браузер и телефон">
+ <title>доступ: браузер и телефон</title>
+ <defs><clipPath id="pfBadgebrowser"><rect width="284" height="28" rx="6"/></clipPath></defs>
+ <g clip-path="url(#pfBadgebrowser)">
+  <rect width="284" height="28" fill="#161c2c"/>
+  <rect width="140" height="28" fill="#4f46e5"/>
+  <rect x="140" width="1" height="28" fill="#0b1020" opacity="0.45"/>
+ </g>
+ <g font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif" font-size="12.5" text-anchor="middle">
+  <text x="70.0" y="18.2" font-weight="750" fill="#ffffff">доступ</text>
+  <text x="212.0" y="18.2" font-weight="650" fill="#dbe3f4">браузер и телефон</text>
+ </g>
+</svg>

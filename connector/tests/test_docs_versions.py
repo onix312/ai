@@ -1,13 +1,17 @@
-"""Документы не должны врать про версию и про команды запуска (волна 5).
+"""Документы не должны врать про версию, команды и картинки (волна 5, 18.0.11).
 
 README открывают первым, а версия в его заголовке отставала от кода на пять
 мажорных релизов: «PrintFlow 11.1 … Текущая версия: 12.1.0» при `APP_VERSION`
-17.0.16. Здесь три дешёвых контракта:
+17.0.16. Здесь дешёвые контракты, которые держат первую страницу репозитория
+честной:
 
 * заголовок версии в README и первая запись CHANGELOG совпадают с
   `APP_VERSION`;
 * три шага запуска на месте и ведут на файлы, которые существуют;
-* внутренние ссылки `docs/…` из README не битые.
+* внутренние ссылки `docs/…` из README не битые;
+* картинки README лежат в репозитории (внешних бейджей с чужих CDN нет) и
+  рисуются своим SVG;
+* содержание README ведёт на существующие разделы, а разделы не теряются.
 """
 from __future__ import annotations
 
@@ -67,6 +71,72 @@ class InternalLinksTests(unittest.TestCase):
         self.assertIn("CHANGELOG.md", links)
         broken = [link for link in sorted(links) if not (ROOT / link).exists()]
         self.assertEqual([], broken, "эти ссылки из README никуда не ведут")
+
+
+class ReadmeStructureTests(unittest.TestCase):
+    """README — лицо репозитория: картинки свои, содержание не врёт.
+
+    README открывают первым, поэтому у него два собственных контракта: все
+    изображения лежат в репозитории (внешние бейджи — это чужой CDN на странице
+    проекта, а система принципиально работает без внешних сервисов) и список
+    «Содержание» ведёт на реально существующие разделы. Полноту списка держим
+    от обратного: каждый `##`-раздел обязан быть в содержании.
+    """
+
+    def images(self) -> list[str]:
+        found = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", README)
+        found += re.findall(r'<img[^>]+src="([^"]+)"', README)
+        return found
+
+    def test_images_are_local_and_exist(self):
+        images = self.images()
+        self.assertGreaterEqual(len(images), 3, "в README нет картинок")
+        for src in images:
+            with self.subTest(src=src):
+                self.assertFalse(src.startswith(("http://", "https://", "//")),
+                                 f"картинка тянется из интернета: {src}")
+                self.assertTrue((ROOT / src).is_file(), f"нет файла картинки: {src}")
+
+    def test_svg_is_self_contained(self):
+        """Схему и бейджи рисуем своим SVG: без <script>, <image> и внешних ссылок."""
+        import xml.etree.ElementTree as ElementTree
+
+        svgs = sorted((ROOT / name) for name in self.images() if name.endswith(".svg"))
+        self.assertTrue(svgs, "нет ни одного SVG — проверять нечего")
+        for path in svgs:
+            with self.subTest(file=path.name):
+                text = path.read_text(encoding="utf-8")
+                ElementTree.fromstring(text)          # файл обязан быть корректным XML
+                self.assertIn("viewBox=", text, "SVG без viewBox не масштабируется")
+                for forbidden in ("<script", "<image", "xlink:href"):
+                    self.assertNotIn(forbidden, text,
+                                     f"{path.name}: {forbidden} — внешняя зависимость")
+
+    def test_contents_matches_headings(self):
+        """Содержание — карта README: ничего не пропущено и ничего не бито."""
+        headings = re.findall(r"^## (.+?)\s*$", README, re.M)
+        anchors = set(re.findall(r'<a id="([^"]+)">', README))
+        contents = re.findall(r"^\s*[-*] \[[^\]]+\]\(#([^)]+)\)", README, re.M)
+        self.assertGreaterEqual(len(contents), 8, "содержание подозрительно короткое")
+        broken = [item for item in contents
+                  if item not in anchors and item not in self.slugs(headings)]
+        self.assertEqual([], broken, "эти ссылки содержания никуда не ведут")
+        # Заголовок версии меняется вместе с номером, его якорь задан руками.
+        skip = {"Содержание"}
+        missed = [h for h in headings
+                  if h not in skip and not h.lower().startswith("текущая версия")
+                  and self.slug(h) not in contents]
+        self.assertEqual([], missed, "разделы не попали в содержание")
+
+    @staticmethod
+    def slug(title: str) -> str:
+        """Якорь GitHub: строчные буквы, пунктуация прочь, пробелы в дефисы."""
+        kept = [ch for ch in title.strip().lower() if ch.isalnum() or ch in "-_ "]
+        return "".join(kept).replace(" ", "-")
+
+    @classmethod
+    def slugs(cls, headings) -> set:
+        return {cls.slug(h) for h in headings}
 
 
 if __name__ == "__main__":
