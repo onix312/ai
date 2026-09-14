@@ -8,6 +8,8 @@
     <string name="panel_version_fmt">NOZZA · Касса v%1$s</string>
     <string name="panel_hint_initial">Куда ходить за кассой? Обычно http://192.168.1.x:8765</string>
     <string name="panel_hint_server">Адрес сервера в локальной сети</string>
+    <string name="panel_hint_http">Сервер ответил ошибкой %1$d — касса не загрузилась. Проверьте, что PrintFlow запущен, или выберите другой адрес.</string>
+    <string name="toast_revived">Страница кассы перезапущена — код кассира и корзина на месте</string>
     <string name="panel_hint_unreachable">Сервер не отвечает. Проверьте Wi-Fi и что PrintFlow запущен — или выберите другой адрес.</string>
     <string name="url_hint">http://192.168.1.20:8765</string>
     <string name="btn_open">Открыть кассу</string>

@@ -704,6 +704,25 @@ def get_nomenclature_item(api: Any, ctx: Ctx):
     return (200, item) if item else (404, {"error": "Позиция не найдена"})
 
 
+@router.get("/api/nomenclature/variant/economics",
+            doc="GET /api/nomenclature/variant/economics")
+def get_variant_economics(api: Any, ctx: Ctx):
+    """Себестоимость и цена вариации с ценой её катушки."""
+    variant_id = str(ctx.one("id") or ctx.one("variant_id") or "").strip()
+    if not variant_id:
+        return 400, {"error": "Не указана вариация"}
+    try:
+        return 200, api.nom.variant_economics(variant_id)
+    except ValueError as exc:
+        return 404, {"error": str(exc)}
+
+
+@router.get("/api/nomenclature/spools", doc="GET /api/nomenclature/spools")
+def get_nomenclature_spools(api: Any, ctx: Ctx):
+    """Катушки склада для выбора в карточке: цена за грамм видна сразу."""
+    return 200, {"spools": api.nom.spool_options()}
+
+
 @router.get("/api/network/ips", doc="GET /api/network/ips")
 def get_network_ips(api: Any, ctx: Ctx):
     from .config import get_local_ips

@@ -17,6 +17,7 @@ let groups = [];
 let loaded = false;
 let loading = false;
 let farmloopLoaded = false;
+let slicerLoaded = false;
 
 /* ============================================================ окно печати */
 /* Печать серверного листа. Своё окно, а не iframe: браузер печатает его
@@ -143,6 +144,43 @@ async function loadFarmLoopStatus() {
   } catch (error) {
     if (tag) { tag.textContent = 'Нет связи'; tag.className = 'tag bad'; }
     if (text) text.textContent = 'Не удалось проверить профиль FarmLoop. Повторите после восстановления связи.';
+    if (meta) meta.textContent = '';
+  }
+}
+
+/* Свой движок нарезки PrintFlow. Карточка честно говорит, чем сейчас
+   режем: своим движком или внешним CLI, и почему. Обещаний «всё готово»
+   здесь нет — причина блокировки приходит с сервера. */
+async function loadSlicerStatus() {
+  const text = $('pr_slicer_text');
+  const meta = $('pr_slicer_meta');
+  const tag = $('pr_slicer_tag');
+  if (!text) return;
+  try {
+    const engine = await get('/api/slicer/engine');
+    const profile = await get('/api/slicer/profile');
+    slicerLoaded = true;
+    const settings = profile.settings || {};
+    if (meta) {
+      meta.textContent = `printflow v${engine.version} · STL до ${engine.limits.model_mb} МБ · `
+        + `слой ${settings.layer_height} мм · стенок ${settings.walls}`;
+    }
+    if (profile.can_slice) {
+      if (tag) { tag.textContent = 'Движок готов'; tag.className = 'tag ok'; }
+      if (text) {
+        text.textContent = 'Нарезает STL сам: файл появится в библиотеке, '
+          + 'а в очередь его ставит оператор после отчёта.';
+      }
+    } else {
+      if (tag) { tag.textContent = 'Внешний CLI'; tag.className = 'tag warn'; }
+      if (text) {
+        text.textContent = profile.blocked_reason
+          || 'Свой движок не выбран: нарезка идёт внешним CLI-слайсером.';
+      }
+    }
+  } catch (error) {
+    if (tag) { tag.textContent = 'Нет связи'; tag.className = 'tag bad'; }
+    if (text) text.textContent = 'Не удалось проверить движок нарезки. Повторите после восстановления связи.';
     if (meta) meta.textContent = '';
   }
 }
@@ -367,6 +405,7 @@ PF.module('print', () => {
   bind();
   loadCatalog({ quiet: true }).catch(fail);
   loadFarmLoopStatus();
+  loadSlicerStatus();
 });
 
 PF.on('data', () => {
@@ -378,5 +417,6 @@ PF.on('view', (detail) => {
   bind();
   if (!loaded) loadCatalog({ quiet: true }).catch(fail);
   loadFarmLoopStatus();
+  loadSlicerStatus();
 });
 })();

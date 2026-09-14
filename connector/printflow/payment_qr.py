@@ -139,6 +139,47 @@ def requisites(db) -> dict[str, str]:
     }
 
 
+def format_phone(value: str) -> str:
+    """Российский номер в вид ``+7 999 123-45-67``.
+
+    Пустая строка — честный ответ на всё, что не похоже на номер: показывать
+    покупателю мусор вместо телефона нельзя, это прямой путь к переводу не туда.
+    """
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) == 11 and digits[0] in "78":
+        digits = "7" + digits[1:]
+    elif len(digits) == 10:
+        digits = "7" + digits
+    else:
+        return ""
+    return f"+7 {digits[1:4]} {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+
+
+def transfer_details(db) -> dict:
+    """Реквизиты перевода «по номеру телефона» для показа под QR.
+
+    Камера покупателя может не читать код: блик, тёмный экран, чужое
+    приложение. Тогда перевод делается руками — и под кодом должны быть ровно
+    те два поля, которые вводят в банке: номер и имя получателя.
+    """
+    s = db.settings() if hasattr(db, "settings") else {}
+    phone = format_phone(s.get("sbp_phone") or "")
+    # Бренд (company_name) сознательно не участвует: деньги уходят человеку
+    # или юрлицу, а в приложении банка покупатель увидит имя владельца номера.
+    # Написать там «NOZZA», когда банк показывает «ИП Иванов», — верный способ
+    # заставить покупателя усомниться и уйти. Нет явного имени — не показываем
+    # строку вовсе: владелец заполнит «СБП: имя получателя» один раз.
+    recipient = _clean(s.get("sbp_recipient") or s.get("pay_payee_name")
+                       or s.get("legal_name"), 160)
+    return {
+        "phone": phone,
+        "phone_digits": re.sub(r"\D", "", phone),
+        "recipient": recipient,
+        "bank": _clean(s.get("sbp_bank_name") or s.get("pay_bank_name"), 45),
+        "ready": bool(phone and recipient),
+    }
+
+
 def check(req: dict[str, str]) -> list[dict[str, str]]:
     """Что мешает собрать ГОСТ-код: пустые и некорректные реквизиты.
 
@@ -320,6 +361,9 @@ def build(db, amount: float = 0.0, purpose: str = "", number: str = "",
         "amount": amount, "amount_in_qr": False, "purpose": purpose,
         "bank_name": str(settings.get("sbp_bank_name") or ""),
         "problems": problems, "hint": "", "enabled": mode != "off",
+        # Перевод руками — тот же запасной выход, что и «Поделиться ссылкой»:
+        # под кодом печатаем номер телефона и имя получателя.
+        "transfer": transfer_details(db),
     }
     if mode == "off":
         result["hint"] = "Показ QR отключён настройкой «Режим платёжного QR»"

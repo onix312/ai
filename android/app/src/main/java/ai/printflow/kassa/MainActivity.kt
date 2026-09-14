@@ -12,6 +12,8 @@ import android.net.Uri
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.Spannable
@@ -21,10 +23,12 @@ import android.view.KeyEvent
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -61,6 +65,7 @@ class MainActivity : Activity() {
     private var results: LinearLayout? = null
     private var hintView: TextView? = null
     private var panelHintRes: Int = R.string.panel_hint_server
+    private var panelHintArgs: Array<out Any> = emptyArray()
     private var foundServers: List<Pair<String, String>> = emptyList()
     private var scanNote: TextView? = null
     private var failed = false
@@ -71,6 +76,31 @@ class MainActivity : Activity() {
     // нашёлся ровно один. Кассир при этом ничего не вводит.
     private var watch: Thread? = null
     private val watchStop = java.util.concurrent.atomic.AtomicBoolean(false)
+    // 18.0: сторож «живой страницы». Касса провела на прилавке час без
+    // продаж, система выгрузила рендерер или сам WebView — и кассир видит
+    // просто чёрный экран: страницы нет, ошибки нет, панели нет. Страница
+    // каждую свою «сетевую» секунду стучит в мост alive(); молчит дольше
+    // ALIVE_TIMEOUT_MS — значит её нет, и окно надо поднять заново, а не
+    // ждать, что кассир догадается закрыть приложение.
+    private var lastAliveAt = 0L
+    private val aliveHandler = Handler(Looper.getMainLooper())
+    private val aliveCheck = object : Runnable {
+        override fun run() {
+            aliveHandler.removeCallbacks(this)
+            if (isFinishing) return
+            val idle = System.currentTimeMillis() - lastAliveAt
+            if (lastAliveAt > 0L && idle > ALIVE_TIMEOUT_MS && panel == null) {
+                val url = web.url
+                runOnUiThread {
+                    toast(getString(R.string.toast_revived))
+                    web.reload()
+                }
+                if (url.isNullOrBlank()) startWatch()
+                lastAliveAt = System.currentTimeMillis()
+            }
+            aliveHandler.postDelayed(this, ALIVE_TICK_MS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -111,10 +141,15 @@ class MainActivity : Activity() {
         RingService.foreground = true
         syncRingService()
         checkForUpdate()
+        // Вернулись на прилавок: если страница умерла в фоне, проверка
+        // поднимет её за пару секунд, а не при следующем чеке.
+        aliveHandler.removeCallbacks(aliveCheck)
+        aliveHandler.postDelayed(aliveCheck, ALIVE_TICK_MS)
     }
 
     override fun onPause() {
         RingService.foreground = false
+        aliveHandler.removeCallbacks(aliveCheck)
         super.onPause()
     }
 
@@ -177,6 +212,7 @@ class MainActivity : Activity() {
                 // иначе «сервер не отвечает» сменится чёрным экраном без подсказки.
                 if (failed) return
                 if (url != null && view?.canGoBack() != true) remember(url)
+                lastAliveAt = System.currentTimeMillis()
                 hidePanel()
             }
 
@@ -189,6 +225,44 @@ class MainActivity : Activity() {
                         showPanel(R.string.panel_hint_unreachable)
                         startWatch()      // дальше касса поднимется сама
                     }
+                }
+            }
+
+            /**
+             * Рендерер убит системой: нехватка памяти, обновление WebView,
+             * долгий фон. По умолчанию WebView остаётся пустым и кассир
+             * смотрит в чёрный экран, не понимая, что случилось. Окно
+             * пересоздаём сразу: код кассира, корзина и офлайн-очередь
+             * живут в localStorage и на сервере.
+             */
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                if (view !== web) return false
+                val url = web.url
+                runOnUiThread {
+                    toast(getString(R.string.toast_revived))
+                    recreateWebView(url)
+                }
+                return true
+            }
+
+            /**
+             * Ошибка уровня HTTP (404/500/502): WebView её не считает
+             * «ошибкой загрузки» и молча показывает пустую страницу — тот же
+             * чёрный экран. Для главного кадра показываем панель с кодом и
+             * запускаем сторож, чтобы касса поднялась сама.
+             */
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame != true) return
+                val code = errorResponse?.statusCode ?: 0
+                if (code < 400) return
+                failed = true
+                runOnUiThread {
+                    showPanel(R.string.panel_hint_http, code)
+                    startWatch()
                 }
             }
 
@@ -210,6 +284,35 @@ class MainActivity : Activity() {
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
     }
 
+    /**
+     * Новое окно вместо мёртвого: старый WebView после гибели рендерера
+     * больше не показывает ничего, поэтому его надо выбросить и создать
+     * новый. Добавляем в начало `root`, чтобы панель выбора сервера
+     * осталась поверх, если она открыта.
+     */
+    private fun recreateWebView(url: String?) {
+        val target = if (url.isNullOrBlank()) {
+            val base = prefs.getString(KEY_URL, "").orEmpty()
+            if (base.isBlank()) {
+                runOnUiThread { showPanel(R.string.panel_hint_server) }
+                return
+            }
+            "${Net.normalize(base)}$CASHIER_PATH"
+        } else url
+        root.removeView(web)
+        runCatching { web.destroy() }
+        web = WebView(this).apply {
+            setBackgroundColor(Color.parseColor("#0f1117"))
+            isVerticalScrollBarEnabled = false
+        }
+        configureWebView()
+        root.addView(web, 0, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        failed = false
+        lastAliveAt = System.currentTimeMillis()
+        web.loadUrl(target)
+    }
+
     // --------------------------------------------------------- мостик JS
     inner class Bridge {
         /** kind: "loud" | "soft" — страница знает, нужен ли взгляд кассира. */
@@ -229,6 +332,16 @@ class MainActivity : Activity() {
         fun offline(count: Int) {
             RingService.offline(count)
             runOnUiThread { syncRingService() }
+        }
+
+        /**
+         * Страница жива: касса зовёт это из своего сетевого тика. Молчание
+         * дольше ALIVE_TIMEOUT_MS — признак мёртвого окна, а не отсутствия
+         * связи: про связь касса рассказывает сама, своим индикатором.
+         */
+        @JavascriptInterface
+        fun alive() {
+            lastAliveAt = System.currentTimeMillis()
         }
 
         @JavascriptInterface
@@ -416,6 +529,19 @@ class MainActivity : Activity() {
      * только те размеры, которых нет в разметке (кнопки найденных серверов
      * создаются динамически) — их берём через getDimensionPixelSize, а не пикселями.
      */
+    /** Та же панель, но с подставленным значением (например, кодом ответа). */
+    private fun showPanel(hintRes: Int, vararg args: Any) {
+        panelHintRes = hintRes
+        panelHintArgs = args
+        if (panel != null) {
+            urlField?.setText(prefs.getString(KEY_URL, "").orEmpty())
+            hintView?.text = if (args.isEmpty()) getString(hintRes) else getString(hintRes, *args)
+            renderFoundServers()
+            return
+        }
+        showPanelText(hintRes, *args)
+    }
+
     private fun showPanel(hintRes: Int) {
         panelHintRes = hintRes
         if (panel != null) {
@@ -426,7 +552,8 @@ class MainActivity : Activity() {
         }
         val scroll = layoutInflater.inflate(R.layout.panel_server, root, false) as ScrollView
         val hintView = scroll.findViewById(R.id.panelHint) as TextView
-        hintView.text = getString(hintRes)
+        hintView.text = if (panelHintArgs.isEmpty()) getString(hintRes)
+                        else getString(hintRes, *panelHintArgs)
         this.hintView = hintView
         val field = scroll.findViewById(R.id.urlField) as EditText
         field.setText(prefs.getString(KEY_URL, "").orEmpty())
@@ -741,5 +868,10 @@ class MainActivity : Activity() {
         private const val KEY_QUEUE = "offline_queue_backup"
         private const val QUEUE_LIMIT = 96 * 1024
         private const val CASHIER_PATH = "/cashier.html"
+        // Как часто сторож проверяет, что страница жива, и сколько молчания
+        // считаем смертью: три минуты — это заметно дольше сетевого тика
+        // кассы (20 с) и короче, чем успевает надоесть чёрный экран.
+        private const val ALIVE_TICK_MS = 30_000L
+        private const val ALIVE_TIMEOUT_MS = 180_000L
     }
 }

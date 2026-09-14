@@ -110,10 +110,28 @@ class ValidateTests(unittest.TestCase):
         self.assertFalse(clean["farmloop_unattended_series"])
         self.assertTrue(any("Бесконтрольная серия" in item for item in warnings))
 
-    def test_native_provider_is_not_falsely_advertised(self):
+    def test_native_provider_is_available_and_gated(self):
+        # Свой движок нарезки существует: провайдер printflow больше не
+        # подменяется молча. Но без человека он не печатает — это гейт.
         clean, warnings, _ = validate({"slicer_provider": "printflow"})
-        self.assertEqual(clean["slicer_provider"], "external")
-        self.assertTrue(any("printflow" in item for item in warnings))
+        self.assertEqual(clean["slicer_provider"], "printflow")
+        self.assertEqual(warnings, [])
+        clean, warnings, _ = validate({"slicer_provider": "printflow",
+                                       "slicer_auto_enqueue": True})
+        self.assertFalse(clean["slicer_auto_enqueue"])
+        self.assertTrue(any("авто-очередь" in item for item in warnings))
+
+    def test_unattended_print_needs_verified_first_run(self):
+        clean, warnings, _ = validate({
+            "slicer_mode": "auto", "slicer_first_print_verified": True,
+            "slicer_auto_enqueue": True, "slicer_auto_print": True})
+        self.assertTrue(clean["slicer_auto_enqueue"])
+        self.assertTrue(clean["slicer_auto_print"])
+        clean, warnings, _ = validate({
+            "slicer_mode": "auto", "slicer_first_print_verified": False,
+            "slicer_auto_enqueue": True, "slicer_auto_print": True})
+        self.assertFalse(clean["slicer_auto_print"])
+        self.assertTrue(any("без оператора" in item for item in warnings))
 
     def test_empty_patch_is_clean(self):
         self.assertEqual(validate({}), ({}, [], []))

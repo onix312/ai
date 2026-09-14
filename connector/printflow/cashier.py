@@ -907,8 +907,16 @@ class Cashier:
         # ссылку не отдаём, чтобы кассир не отправил покупателю сумму 0 ₽.
         if str(qr.get("kind") or "") == "link" and not qr.get("amount_in_qr"):
             open_url, can_open = "", False
+        transfer = qr.get("transfer") or {}
+        if not transfer:
+            try:
+                from .payment_qr import transfer_details
+                transfer = transfer_details(self.db)
+            except Exception:
+                transfer = {}
         return {"text": text[:2000], "svg": str(qr.get("svg") or "")[:80000],
                 "kind": str(qr.get("kind") or "static"),
+                "transfer": transfer,
                 "amount_in_qr": bool(qr.get("amount_in_qr")),
                 "hint": str(qr.get("hint") or "")[:300],
                 "why": str(diag.get("why") or "")[:300],

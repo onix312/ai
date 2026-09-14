@@ -178,5 +178,75 @@ class AndroidShellBehaviourTests(unittest.TestCase):
                          f"ключи галочек пересекаются: {keys}")
 
 
+class BlackScreenGuardTests(unittest.TestCase):
+    """Чёрный экран кассы (18.0).
+
+    Kotlin не компилируется в репозитории, поэтому проверяется сам контракт
+    оболочки строкой. Сценарий, который поймали на прилавке: касса висит без
+    продаж, система выгружает рендерер WebView — и кассир видит пустое тёмное
+    окно без ошибки и без подсказки, потому что фон WebView задан кодом, а
+    обработчика гибели рендерера не было.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.activity = (KOTLIN / "MainActivity.kt").read_text(encoding="utf-8")
+        cls.page = (ROOT / "site" / "cashier.html").read_text(encoding="utf-8")
+
+    def test_dead_renderer_is_recreated_not_left_blank(self):
+        self.assertIn("onRenderProcessGone", self.activity,
+                      "гибель рендерера не обработана — это и есть чёрный экран")
+        block = self.activity.split("onRenderProcessGone", 1)[1][:1200]
+        self.assertIn("return true", block,
+                      "обработчик должен вернуть true: иначе система считает, "
+                      "что авария не обработана, и убивает приложение")
+        self.assertIn("recreateWebView", block)
+        self.assertIn("toast_revived", block,
+                      "кассир должен понимать, что окно перезапустили")
+
+    def test_http_error_opens_the_panel_instead_of_a_blank_page(self):
+        self.assertIn("onReceivedHttpError", self.activity,
+                      "404/500 от коннектора WebView ошибкой не считает и "
+                      "показывает пустую страницу")
+        block = self.activity.split("onReceivedHttpError", 1)[1][:900]
+        self.assertIn("isForMainFrame", block)
+        self.assertIn("statusCode", block)
+        self.assertIn("startWatch()", block,
+                      "после ошибки касса должна подняться сама")
+
+    def test_page_reports_aliveness_to_the_shell(self):
+        self.assertIn("fun alive()", self.activity,
+                      "у оболочки нет отметки живой страницы")
+        self.assertIn("PfApp.alive", self.page,
+                      "страница кассы не стучит в мост — оболочка не отличит "
+                      "мёртвое окно от тихой смены")
+
+    def test_recreated_window_loads_the_cashier(self):
+        block = self.activity.split("private fun recreateWebView", 1)[1][:1600]
+        self.assertIn("web.loadUrl", block,
+                      "новое окно обязано сразу грузить кассу, а не стоять пустым")
+        self.assertIn("setBackgroundColor", block,
+                      "фон нового окна задаётся явно")
+        self.assertIn("showPanel(R.string.panel_hint_server)", block,
+                      "без сохранённого адреса надо показать панель, а не пустоту")
+
+    def test_alive_watchdog_is_generated_than_the_page_tick(self):
+        # В Kotlin разряды разделены подчёркиванием: 180_000L → 180000.
+        tick = int(re.search(r"ALIVE_TICK_MS = ([\d_]+)L", self.activity).group(1)
+                   .replace("_", ""))
+        timeout = int(re.search(r"ALIVE_TIMEOUT_MS = ([\d_]+)L", self.activity).group(1)
+                      .replace("_", ""))
+        page_tick = int(re.search(r"LINK_TICK=(\d+)", self.page).group(1))
+        self.assertGreater(timeout, tick)
+        self.assertGreater(timeout, page_tick * 10,
+                           "молчание страницы короче десяти её тиков — норма, "
+                           "а не смерть: браузер урезает таймеры в фоне")
+
+    def test_shell_stop_the_watchdog_on_pause(self):
+        self.assertIn("aliveHandler.removeCallbacks(aliveCheck)",
+                      self.activity.split("override fun onPause", 1)[1][:400],
+                      "в фоне сторож не нужен: он поднял бы кассу в кармане")
+
+
 if __name__ == "__main__":
     unittest.main()

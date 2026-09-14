@@ -662,6 +662,9 @@ async function openNom(id) {
     places: s.places || [] }));
   renderSpec();
 
+  // вариации: оси, катушки, себестоимость и цены
+  loadVariantData(d);
+
   // остатки
   const wh = d.warehouses || [];
   $('nf_stock_box').innerHTML = (id ? (wh.length
@@ -741,6 +744,154 @@ const updateNomCost = debounce(async () => {
     }
   } catch (e) { /* офлайн — подсказку не ломаем */ }
 }, 300);
+
+/* ================================================= вариации товара (18.0)
+   Один товар легко живёт в сотнях сочетаний: адресник — 12 цветов × 5
+   размеров × 3 пластика. Вводить их руками нельзя, поэтому вариации
+   собираются перемножением осей, а цена каждой считается из её катушки:
+   грамм стоит по-разному у PLA за 1600 и PETG за 3200. */
+let variantRows = [];
+let variantAxes = [{ name: 'Цвет', values: '' }];
+
+function collectVariantAxes() {
+  return variantAxes
+    .map((axis) => ({
+      name: String(axis.name || '').trim(),
+      values: String(axis.values || '').split(',').map((v) => v.trim()).filter(Boolean),
+    }))
+    .filter((axis) => axis.name && axis.values.length);
+}
+
+function renderVariantAxes() {
+  const box = $('nf_var_axes');
+  if (!box) return;
+  box.innerHTML = variantAxes.map((axis, i) => '<div class="var-axis">'
+    + '<label class="field"><span>Ось</span><input type="text" data-axis-name="' + i
+    + '" value="' + esc(axis.name) + '" placeholder="Цвет, размер, пластик"></label>'
+    + '<label class="field"><span>Значения через запятую</span><input type="text" data-axis-values="'
+    + i + '" value="' + esc(axis.values) + '" placeholder="Чёрный, Белый, Красный"></label>'
+    + '<button class="btn sm danger" type="button" data-axis-del="' + i
+    + '" title="Убрать ось">×</button></div>').join('');
+  variantPreview();
+}
+
+const variantPreview = debounce(async () => {
+  const hint = $('nf_var_preview');
+  const btn = $('nf_var_make');
+  if (!hint) return;
+  const axes = collectVariantAxes();
+  if (!editingNom || !axes.length) {
+    hint.innerHTML = '<span>ⓘ</span><span>' + (editingNom
+      ? 'Добавьте ось со значениями — здесь появится число вариаций.'
+      : 'Сохраните карточку: вариации создаются у уже сохранённого товара.')
+      + '</span>';
+    if (btn) { btn.disabled = true; btn.textContent = 'Создать вариации'; }
+    return;
+  }
+  try {
+    const r = await post('/api/nomenclature/variants/generate',
+      { nom_id: editingNom, axes, preview: true });
+    const parts = [(r.would_create || 0) + ' вариаций'];
+    if (num(r.skipped)) parts.push(num(r.skipped) + ' уже есть');
+    parts.push('предел ' + num(r.limit));
+    hint.innerHTML = '<span>ⓘ</span><span>Получится ' + esc(parts.join(' · '))
+      + (num(r.total) ? '. Сейчас у товара: ' + num(r.total) + ' шт.' : '') + '</span>';
+    if (btn) {
+      btn.disabled = !num(r.would_create);
+      btn.textContent = num(r.would_create)
+        ? 'Создать ' + num(r.would_create) + ' вариаций' : 'Создать вариации';
+    }
+  } catch (e) {
+    hint.innerHTML = '<span>!</span><span>' + esc(e.message || 'Не удалось посчитать') + '</span>';
+    if (btn) { btn.disabled = true; btn.textContent = 'Создать вариации'; }
+  }
+}, 400);
+
+async function makeVariants() {
+  if (!editingNom) return;
+  try {
+    const r = await post('/api/nomenclature/variants/generate',
+      { nom_id: editingNom, axes: collectVariantAxes() });
+    toast('Вариации созданы', (num(r.created) + ' шт')
+      + (num(r.skipped) ? ' · ' + num(r.skipped) + ' уже были' : ''));
+    await reloadVariants();
+    variantAxes = [{ name: '', values: '' }];
+    renderVariantAxes();
+  } catch (e) { fail(e); }
+}
+
+async function reloadVariants() {
+  if (!editingNom) return;
+  try {
+    const item = await get('/api/nomenclature/item', { id: editingNom });
+    variantRows = item.variants || [];
+    renderVariants();
+  } catch (e) { /* карточка offline — таблица остаётся прежней */ }
+}
+
+function spoolLabel(s) {
+  const name = [s.material, s.color_name].filter(Boolean).join(' · ') || s.brand || 'катушка';
+  return name + ' · ' + money(s.price) + '/' + nfmt(s.total_grams) + ' г'
+    + ' · ' + nfmt(num(s.per_gram) * 100, 2) + ' ₽/100 г';
+}
+
+function varRow(v) {
+  const spools = data.spools || [];
+  const opts = ['<option value="">— как у товара —</option>'].concat(spools.map((s) =>
+    '<option value="' + esc(s.id) + '"' + (s.id === (v.spool_id || '') ? ' selected' : '')
+    + '>' + esc(spoolLabel(s)) + '</option>')).join('');
+  const sub = [v.sku, v.material, v.size].filter(Boolean).join(' · ');
+  return '<div class="var-row">'
+    + '<span class="var-swatch" style="background:' + esc(v.color_hex || '#8a94a6') + '"></span>'
+    + '<div class="var-body"><b>' + esc(v.name || '—') + '</b>'
+    + (sub ? '<small class="muted">' + esc(sub) + '</small>' : '') + '</div>'
+    + '<select data-var-spool="' + esc(v.id) + '" title="Катушка: цена грамма берётся из неё">'
+    + opts + '</select>'
+    + '<span class="var-cost">' + (num(v.cost) ? money(v.cost) : '—') + '</span>'
+    + '<input type="number" min="0" step="any" data-var-price="' + esc(v.id) + '" value="'
+    + (num(v.price) ? esc(v.price) : '') + '" placeholder="авто" title="Пусто — цена из себестоимости">'
+    + '<button class="btn sm danger" type="button" data-var-del="' + esc(v.id) + '" title="Удалить вариацию">×</button>'
+    + '</div>';
+}
+
+function renderVariants() {
+  const box = $('nf_variants');
+  if (!box) return;
+  const count = $('nf_var_count');
+  if (count) {
+    count.textContent = variantRows.length
+      ? variantRows.length + ' шт · себестоимость и цена — по катушке варианта'
+      : 'Нет ни одной вариации';
+  }
+  box.innerHTML = variantRows.length
+    ? '<div class="var-table"><div class="var-row var-head"><span></span>'
+      + '<div class="var-body">Вариант</div><span>Катушка</span>'
+      + '<span>Себестоимость</span><span>Цена</span><span></span></div>'
+      + variantRows.map(varRow).join('') + '</div>'
+    : '<div class="empty compact"><span>Вариаций пока нет — соберите их по осям выше.</span></div>';
+}
+
+async function recalcVariantPrices() {
+  if (!editingNom) return;
+  try {
+    const r = await post('/api/nomenclature/variants/recalc', { nom_id: editingNom });
+    toast('Цены пересчитаны', num(r.updated) + ' вариаций'
+      + (num(r.kept_manual_price) ? ' · ' + num(r.kept_manual_price) + ' со своей ценой не тронуты' : ''));
+    await reloadVariants();
+  } catch (e) { fail(e); }
+}
+
+async function loadVariantData(d) {
+  variantRows = d.variants || [];
+  if (!variantRows.length) variantAxes = [{ name: 'Цвет', values: '' }];
+  renderVariants();
+  renderVariantAxes();
+  if (!data.spools) {
+    try { data.spools = ((await get('/api/nomenclature/spools')) || {}).spools || []; }
+    catch (e) { data.spools = []; }
+    renderVariants();
+  }
+}
 
 function moveRow(m) {
   const positive = num(m.qty) > 0;
@@ -1774,6 +1925,62 @@ function switchPane(tabsId, prefix, pane) {
 function bind() {
   // --- товары
   $('prod_add').addEventListener('click', () => openNom());
+  // --- вариации товара
+  $('nf_var_axis_add').addEventListener('click', () => {
+    variantAxes.push({ name: '', values: '' });
+    renderVariantAxes();
+  });
+  $('nf_var_make').addEventListener('click', makeVariants);
+  $('nf_var_recalc').addEventListener('click', recalcVariantPrices);
+  $('nf_var_axes').addEventListener('input', (e) => {
+    const t = e.target;
+    const i = num(t.dataset.axisName != null ? t.dataset.axisName : t.dataset.axisValues);
+    if (t.dataset.axisName != null) variantAxes[i].name = t.value;
+    else variantAxes[i].values = t.value;
+    variantPreview();
+  });
+  $('nf_var_axes').addEventListener('click', (e) => {
+    const del = e.target.closest('[data-axis-del]');
+    if (!del) return;
+    variantAxes.splice(num(del.dataset.axisDel), 1);
+    if (!variantAxes.length) variantAxes = [{ name: '', values: '' }];
+    renderVariantAxes();
+  });
+  $('nf_variants').addEventListener('change', async (e) => {
+    const t = e.target;
+    const spool = t.dataset.varSpool;
+    const price = t.dataset.varPrice;
+    if (!editingNom) return;
+    if (spool != null) {
+      try {
+        await post('/api/nomenclature/variant/spool',
+          { id: spool, nom_id: editingNom, spool_id: t.value });
+        const r = await post('/api/nomenclature/variants/recalc', { nom_id: editingNom });
+        const row = (r.items || []).find((x) => x.id === spool);
+        if (row) {
+          const v = variantRows.find((x) => x.id === spool);
+          if (v) { v.cost = row.cost; v.price = row.price; v.spool_id = t.value; }
+          renderVariants();
+        }
+      } catch (err) { fail(err); }
+    } else if (price != null) {
+      try {
+        await post('/api/nomenclature/variant/save',
+          { id: price, nom_id: editingNom, price: num(t.value) });
+        const v = variantRows.find((x) => x.id === price);
+        if (v) v.price = num(t.value);
+      } catch (err) { fail(err); }
+    }
+  });
+  $('nf_variants').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-var-del]');
+    if (!del) return;
+    try {
+      await post('/api/nomenclature/variant/delete', { id: del.dataset.varDel });
+      variantRows = variantRows.filter((v) => v.id !== del.dataset.varDel);
+      renderVariants();
+    } catch (err) { fail(err); }
+  });
   $('prod_search').addEventListener('input', debounce(render, 200));
   ['prod_group', 'prod_kind', 'prod_status', 'prod_sort'].forEach((id) =>
     $(id).addEventListener('change', render));

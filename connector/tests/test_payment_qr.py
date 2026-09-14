@@ -283,5 +283,90 @@ class CashierIntegrationTests(unittest.TestCase):
         self.assertEqual(qr["kind"], "gost")
 
 
+class TransferDetailsTests(unittest.TestCase):
+    """Реквизиты перевода «по номеру» под QR (18.0).
+
+    Покупатель не всегда может отсканировать код: блик, тёмный экран, чужое
+    приложение. Тогда деньги переводят по номеру телефона — и касса обязана
+    показать номер и имя получателя, а не держать их в голове кассира.
+    """
+
+    def test_phone_is_formatted_the_way_banks_show_it(self):
+        self.assertEqual(payment_qr.format_phone("89991234567"),
+                         "+7 999 123-45-67")
+        self.assertEqual(payment_qr.format_phone("+7 (999) 123-45-67"),
+                         "+7 999 123-45-67")
+        self.assertEqual(payment_qr.format_phone("9991234567"),
+                         "+7 999 123-45-67")
+
+    def test_garbage_is_never_shown_as_a_phone(self):
+        for value in ("", "123", "позвоните мне", "+7 999 12", "8800"):
+            self.assertEqual(payment_qr.format_phone(value), "",
+                             f"«{value}» не номер: показывать его нельзя")
+
+    def test_recipient_falls_back_to_the_payee_name(self):
+        db = make_db(sbp_phone="89991234567", pay_payee_name="ИП Иванов И. И.")
+        self.assertEqual(payment_qr.transfer_details(db)["recipient"],
+                         "ИП Иванов И. И.")
+        db = make_db(sbp_phone="89991234567", legal_name="ИП Петров",
+                     sbp_recipient="NOZZA")
+        self.assertEqual(payment_qr.transfer_details(db)["recipient"], "NOZZA")
+
+    def test_transfer_is_ready_only_with_both_fields(self):
+        self.assertFalse(payment_qr.transfer_details(make_db())["ready"])
+        self.assertFalse(payment_qr.transfer_details(
+            make_db(sbp_phone="89991234567"))["ready"],
+            "номер без имени — покупатель не поймёт, кому платит")
+        self.assertTrue(payment_qr.transfer_details(
+            make_db(sbp_phone="89991234567", sbp_recipient="NOZZA"))["ready"])
+
+    def test_build_carries_transfer(self):
+        db = make_db(sbp_phone="89991234567", sbp_recipient="NOZZA",
+                     sbp_shop_qr="https://qr.nspk.ru/AS100000000000000")
+        result = payment_qr.build(db, amount=500.0)
+        self.assertEqual(result["transfer"]["phone"], "+7 999 123-45-67")
+        self.assertEqual(result["transfer"]["recipient"], "NOZZA")
+        # Реквизиты нужны и когда сам код собрать нельзя: ручной перевод
+        # остаётся рабочим выходом в любом режиме.
+        empty = payment_qr.build(make_db(sbp_phone="89991234567",
+                                         sbp_recipient="NOZZA"))
+        self.assertEqual(empty["transfer"]["phone"], "+7 999 123-45-67")
+
+
+class TransferInCashierTests(unittest.TestCase):
+    """Реквизиты едут вместе с кодом и без связи."""
+
+    def test_offline_qr_carries_transfer(self):
+        from connector.printflow.accounting import Accounting
+        from connector.printflow.cashier import Cashier
+        db = make_db(sbp_phone="89991234567", sbp_recipient="NOZZA",
+                     sbp_shop_qr="https://qr.nspk.ru/AS100000000000000")
+        cashier = Cashier(db, Accounting(db))
+        cached = cashier.offline_qr()
+        self.assertTrue(cached.get("text"), "без кода офлайн-СБП невозможен")
+        self.assertEqual(cached.get("transfer", {}).get("phone"),
+                         "+7 999 123-45-67")
+        self.assertEqual(cached.get("transfer", {}).get("recipient"), "NOZZA")
+
+class TransferInCashierMarkupTests(unittest.TestCase):
+    """Разметка кассы: браузера нет, поэтому проверяется сам текст страницы."""
+
+    def test_qr_modal_shows_transfer_under_the_code(self):
+        page = (ROOT / "site" / "cashier.html").read_text(encoding="utf-8")
+        modal = page.split('id="qrModal"', 1)[1].split("</div>\n</div>", 1)[0]
+        self.assertIn('id="qrNote"', modal)
+        self.assertIn('id="qrTransfer"', modal)
+        self.assertLess(modal.index('id="qrNote"'),
+                        modal.index('id="qrTransfer"'),
+                        "реквизиты печатаются под кодом, а не над ним")
+        self.assertIn('id="qrPhone"', modal)
+        self.assertIn('id="bQrCopyPhone"', modal)
+        # Оба пути показа QR — и онлайн, и офлайн — обязаны их печатать.
+        self.assertEqual(2, page.count("renderTransfer(") - 1,
+                         "реквизиты показаны не во всех режимах QR")
+        self.assertIn("transfer:r.transfer", page,
+                      "без кэша реквизитов офлайн-перевод нечем показать")
+
+
 if __name__ == "__main__":
     unittest.main()
