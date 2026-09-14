@@ -30,6 +30,12 @@
   ],
   "shortcuts": [
     {
+      "name": "Файл на печать",
+      "short_name": "Файл",
+      "url": "/pult?screen=file",
+      "description": "Загрузить 3MF и поставить в очередь"
+    },
+    {
       "name": "Очередь",
       "short_name": "Очередь",
       "url": "/pult?screen=queue",

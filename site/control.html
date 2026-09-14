@@ -114,6 +114,44 @@
  .pk-cam-act { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
  .pk-cam-act .pk-btn { min-height:56px; font-size:14px; }
 
+ /* --- экран «Файл»: загрузка как в слайсере (18.0.6) --- */
+ .pk-drop { display:flex; flex-direction:column; gap:10px; align-items:stretch; }
+ .pk-drop.pk-over { outline:2px dashed var(--accent); outline-offset:6px; border-radius:20px; }
+ .pk-progress { position:relative; height:34px; margin-top:12px; border:1px solid var(--line);
+   border-radius:12px; background:var(--panel); overflow:hidden; }
+ .pk-progress[hidden] { display:none; }
+ .pk-progress-bar { position:absolute; inset:0 auto 0 0; width:2%; background:var(--accent-soft);
+   border-right:2px solid var(--accent); transition:width .2s; }
+ .pk-progress span { position:relative; display:flex; align-items:center; justify-content:center;
+   height:100%; font-size:12.5px; font-weight:700; color:var(--text); }
+ .pk-card { margin-top:12px; background:var(--panel); border:1px solid var(--line);
+   border-radius:18px; padding:14px; }
+ .pk-file-head { display:flex; align-items:baseline; gap:8px; margin-bottom:10px; }
+ .pk-file-head b { font-size:15px; word-break:break-all; }
+ .pk-file-head span { margin-left:auto; color:var(--muted); font-size:12px; white-space:nowrap; }
+ .pk-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+ .pk-chip { display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:0 12px;
+   border:1px solid var(--line); border-radius:999px; background:transparent; color:var(--muted);
+   font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
+ .pk-chip.on { color:var(--text); border-color:var(--accent); background:var(--accent-soft); }
+ .pk-chip i { width:12px; height:12px; border-radius:50%; border:1px solid var(--line); }
+ .pk-frame.pk-plate { height:150px; aspect-ratio:auto; margin-bottom:10px; background:#0a0f1e; }
+ .pk-facts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+ .pk-facts > div { background:var(--panel-2, rgba(255,255,255,.03)); border:1px solid var(--line);
+   border-radius:14px; padding:10px 12px; }
+ .pk-facts span { display:block; color:var(--muted); font-size:12px; }
+ .pk-facts b { font-size:19px; }
+ .pk-fields { display:grid; gap:8px; margin-bottom:12px; }
+ .pk-fields label { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+ .pk-fields select { flex:1; min-height:48px; padding:0 12px; border:1px solid var(--line);
+   border-radius:12px; background:var(--panel-2, transparent); color:var(--text);
+   font:inherit; font-size:14px; }
+ .pk-fields .pk-check { min-height:44px; }
+ .pk-fields .pk-check input { width:22px; height:22px; }
+ .pk-file-act { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+ .pk-file-act .pk-btn { min-height:56px; font-size:14px; }
+ .pk-file-act.one { grid-template-columns:1fr; }
+
  /* --- шторка снизу: выбор катушки для слота --- */
  .pk-sheet-wrap { position:fixed; inset:0; z-index:30; background:rgba(3,6,15,.62);
    display:flex; align-items:flex-end; }
@@ -141,9 +179,9 @@
    border-radius:12px; border:1px solid var(--line); color:var(--text); text-decoration:none;
    font-size:13.5px; font-weight:650; }
 
- /* --- нижнее меню: четыре экрана --- */
+ /* --- нижнее меню: пять экранов --- */
  .pk-tabs { position:fixed; left:0; right:0; bottom:0; z-index:20;
-   display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+   display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
    background:color-mix(in srgb, var(--bg) 92%, #000); border-top:1px solid var(--line);
    backdrop-filter:blur(10px); }
@@ -208,6 +246,22 @@
    <div class="pk-jobs" id="pk_jobs"></div>
   </section>
 
+  <section class="pk-screen" id="pk_screen_file" hidden>
+   <div class="pk-h"><h2>Файл на печать</h2><p class="pk-hint" id="pk_file_now">—</p></div>
+   <div class="pk-drop" id="pk_drop">
+    <button class="pk-btn pk-hit go" type="button" id="pk_b_pick">Выбрать файл</button>
+    <div class="pk-sub">3MF и G-code, до 400 МБ. На компьютере файл можно перетащить
+     в это окно. Файл сохранится на компьютере с PrintFlow и встанет в очередь —
+     загружать его в принтер заранее не нужно.</div>
+    <input type="file" id="pk_file_input" accept=".3mf,.gcode" hidden>
+   </div>
+   <div class="pk-progress" id="pk_progress" hidden>
+    <div class="pk-progress-bar" id="pk_progress_bar"></div>
+    <span id="pk_progress_text"></span>
+   </div>
+   <div id="pk_est"></div>
+  </section>
+
   <section class="pk-screen" id="pk_screen_ams" hidden>
    <div class="pk-h"><h2>AMS</h2><p class="pk-hint" id="pk_ams_now">—</p></div>
    <div class="pk-slot-act" style="margin-top:0;margin-bottom:12px;grid-template-columns:1fr">
@@ -248,6 +302,7 @@
 <nav class="pk-tabs" aria-label="Экраны пульта">
  <button class="pk-tab on" type="button" data-screen="park">Парк</button>
  <button class="pk-tab" type="button" data-screen="queue">Очередь<span class="pk-badge" id="pk_badge_queue" hidden>0</span></button>
+ <button class="pk-tab" type="button" data-screen="file">Файл</button>
  <button class="pk-tab" type="button" data-screen="ams">AMS</button>
  <button class="pk-tab" type="button" data-screen="cam">Камера</button>
 </nav>
@@ -866,10 +921,393 @@
     box.innerHTML = st.queue.map(jobHtml).join('');
   }
 
+  /* --------------------------------------------------- экран «Файл» (18.0.6)
+     Загрузка как в слайсере: перетащил 3MF → увидел оценку → отправил.
+     Работают только существующие маршруты коннектора:
+       POST /api/estimate/upload — файл в uploads + оценка (минуты, граммы, материал, цвет)
+       POST /api/jobs/upload     — файл в uploads + задание в очереди
+       GET  /api/jobs/plate      — превью плиты из самого 3MF (как в панели)
+     Оба POST сохраняют один и тот же файл, поэтому оценка и очередь не
+     расходятся. Файл отправляем через XMLHttpRequest: только он умеет
+     показывать, сколько уже ушло. Перетаскивание работает, где браузер
+     разбирает список файлов (панель на компьютере); на телефоне остаётся
+     кнопка выбора — она делает то же самое. */
+  var MAX_MB = 400;
+  var ALLOWED_EXT = /\.(3mf|gcode)$/i;
+  var loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+
+  /* Файл на сервер с отчётом о ходе: onTick(percent|null). */
+  function sendFile(path, file, fields, onTick){
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      var form = new FormData();
+      form.append('file', file, file.name);
+      Object.keys(fields || {}).forEach(function(k){
+        form.append(k, String(fields[k] == null ? '' : fields[k]));
+      });
+      xhr.open('POST', path, true);
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.timeout = 300000;          // крупный 3MF по локальной сети — не мгновенно
+      if (xhr.upload && xhr.upload.addEventListener) {
+        xhr.upload.addEventListener('progress', function(e){
+          if (!onTick) return;
+          onTick(e.lengthComputable && e.total ? Math.round(e.loaded * 100 / e.total) : null);
+        });
+      }
+      xhr.onload = function(){
+        var d = {};
+        try { d = JSON.parse(xhr.responseText || '{}'); } catch (e) { d = {}; }
+        if (xhr.status >= 200 && xhr.status < 300) return resolve(d);
+        var err = new Error(d.error || ('ошибка ' + xhr.status));
+        err.status = xhr.status;
+        reject(err);
+      };
+      xhr.onerror = function(){ reject(new Error('сеть недоступна')); };
+      xhr.ontimeout = function(){ reject(new Error('коннектор не ответил за 5 минут')); };
+      xhr.onabort = function(){ reject(new Error('загрузка отменена')); };
+      xhr.send(form);
+    });
+  }
+
+  /* --- что показываем в цифрах -----------------------------------------
+     У 3MF из Bambu Studio каждая плита считается отдельно. Оператору нужно
+     то, что он печатает: выбрал плиту — показываем её. Если по плите цифр
+     нет, честно отступаем на сводку по файлу и подписываем это. */
+  function plateList(){
+    return ((loaded.meta || {}).plates) || [];
+  }
+  function plateNo(pl, i){
+    return num(pl.plate_index, 0) || num(pl.index, 0) || (i + 1);
+  }
+  function platePick(){
+    var list = plateList();
+    for (var i = 0; i < list.length; i++) {
+      if (plateNo(list[i], i) === num(loaded.plate, 1)) return list[i];
+    }
+    return null;
+  }
+  function which(){
+    var meta = loaded.meta || {};
+    var one = plateList().length > 1 ? platePick() : null;
+    if (one && (num(one.grams) || num(one.minutes))) {
+      return { scope:'plate', label:'плита ' + num(loaded.plate, 1),
+               grams:num(one.grams), minutes:num(one.minutes) };
+    }
+    // Сводка: сумма по всем плитам, а если её нет — данные первой плиты.
+    var grams = num(meta.total_grams) || num(meta.total) || num(meta.weight) || num(meta.grams);
+    var minutes = num(meta.total_minutes) || num(meta.time) || num(meta.minutes);
+    if (!grams && one) grams = num(one.grams);
+    if (!minutes && one) minutes = num(one.minutes);
+    return { scope:'file', label: plateList().length > 1 ? 'весь файл' : '',
+             grams:grams, minutes:minutes };
+  }
+  function scopeNote(){
+    var w = which();
+    var n = plateList().length;
+    if (n < 2) return '';
+    if (w.scope === 'plate') {
+      return 'Показано: ' + w.label + ' из ' + n + ' — плиту выбирают чипсами выше, '
+           + 'она же уйдёт в очередь.';
+    }
+    return 'По выбранной плите цифр в файле нет — ниже сводка по всем плитам: '
+         + 'в очередь уйдёт плита ' + num(loaded.plate, 1) + '.';
+  }
+  function plTime(){
+    var w = which();
+    return w.minutes ? humanMin(w.minutes) : '—';
+  }
+  function plGrams(){
+    var w = which();
+    return w.grams ? (round1(w.grams) + ' г') : '—';
+  }
+  function round1(v){ return (Math.round(num(v) * 10) / 10).toFixed(1).replace('.', ','); }
+  function plMaterial(){
+    var one = platePick();
+    var mat = matOf(one) || (loaded.meta || {}).material || '';
+    return mat ? String(mat).toUpperCase() : '—';
+  }
+  function plColor(){
+    var one = platePick();
+    var f = (one && one.filaments && one.filaments[0]) || null;
+    return (f && f.color) || (loaded.meta || {}).color || '—';
+  }
+  function matOf(plate){
+    var f = (plate && plate.filaments && plate.filaments[0]) || null;
+    return (f && f.type) || '';
+  }
+
+  /* Честные слова вместо выдуманных цифр. */
+  function estWarn(){
+    if (!loaded.file) return '';
+    var w = which();
+    var out = [];
+    if (!w.grams && !w.minutes) {
+      out.push('В файле нет данных слайсера: ни веса, ни времени. Так бывает, если 3MF '
+        + 'не слайсили в Bambu Studio или Orca — оценку взять неоткуда. Принтер возьмёт '
+        + 'файл как есть, а граммы и часы можно вписать в панели.');
+    } else if (!w.grams) {
+      out.push('В файле нет веса — время есть, граммов нет.');
+    } else if (!w.minutes) {
+      out.push('В файле нет времени — вес есть, минут нет.');
+    }
+    var without = (st.printers || []).filter(function(pr){
+      return !((pr.ams || {}).trays || []).length;
+    });
+    if (st.printers && st.printers.length && without.length === st.printers.length) {
+      out.push('AMS ни на одном принтере не видно — печать одним цветом пойдёт '
+        + 'с внешней катушки.');
+    }
+    return out.join(' ');
+  }
+
+  /* --- разметка карточки --- */
+  function estimateHtml(){
+    var meta = loaded.meta || {};
+    var list = plateList();
+    var parts = [];
+    if (list.length > 1) {
+      parts.push('<div class="pk-chips" id="pk_plates">');
+      list.forEach(function(pl, i){
+        var n = plateNo(pl, i);
+        parts.push('<button class="pk-chip' + (n === num(loaded.plate, 1) ? ' on' : '')
+          + '" type="button" data-plate="' + esc(n) + '">плита ' + esc(n) + '</button>');
+      });
+      parts.push('</div>');
+    }
+    if (loaded.preview) {
+      parts.push('<img class="pk-frame pk-plate" alt="Превью плиты" src="data:image/png;base64,'
+        + esc(loaded.preview) + '">');
+    }
+    var note = scopeNote();
+    if (note) parts.push('<div class="pk-sub">' + esc(note) + '</div>');
+    parts.push('<div class="pk-facts">'
+      + '<div><span>Время печати</span><b>' + esc(plTime()) + '</b></div>'
+      + '<div><span>Пластик</span><b>' + esc(plGrams()) + '</b></div>'
+      + '<div><span>Материал</span><b>' + esc(plMaterial()) + '</b></div>'
+      + '<div><span>Цвет</span><b>' + esc(plColor()) + '</b></div></div>');
+    parts.push('<div class="pk-sub">Печатать на: '
+      + esc(curPrinter() ? printerName(curPrinter()) : 'любом свободном — решит очередь') + '</div>');
+    parts.push('<div class="pk-chips" id="pk_est_printers">'
+      + '<button class="pk-chip' + (curPrinter() ? '' : ' on')
+      + '" type="button" data-printer="">любой принтер</button>'
+      + (st.printers || []).map(function(pr){
+          return '<button class="pk-chip' + (String(curPrinter()) === String(pr.id) ? ' on' : '')
+               + '" type="button" data-printer="' + esc(pr.id) + '">'
+               + esc(pr.name || pr.id) + (pr.id === st.active ? ' · выбран' : '') + '</button>';
+        }).join('')
+      + '</div>');
+    if (!(st.printers || []).length) {
+      parts.push('<div class="pk-sub">Принтеры не настроены: задание встанет в очередь '
+        + 'и будет ждать принтер — настроить можно в панели, раздел «Принтеры».</div>');
+    }
+    var warn = estWarn();
+    if (warn) parts.push('<div class="pk-note">' + esc(warn) + '</div>');
+    parts.push('<div class="pk-file-act">'
+      + '<button class="pk-btn pk-hit" type="button" id="pk_b_change">Сменить файл</button>'
+      + '<button class="pk-btn pk-hit go" type="button" id="pk_b_queue">'
+      + esc(queueTitle()) + '</button></div>');
+    return '<div class="pk-card"><div class="pk-file-head"><b>' + esc(loaded.file.name) + '</b>'
+      + '<span>' + esc(sizeText(loaded.file.size)) + '</span></div>'
+      + parts.join('') + '</div></div>';
+  }
+  /* Принтер задания. Пока оператор не тронул чипсы, это принтер, выбранный на
+     пульте (он стоит у станка и видит его выбранным). «Любой принтер» — чипс
+     с пустым значением: тогда выбор оставляем очереди. */
+  function curPrinter(){
+    return loaded.printer == null ? String(st.active || '') : String(loaded.printer);
+  }
+  function printerName(id){
+    var found = null;
+    (st.printers || []).forEach(function(pr){ if (String(pr.id) === String(id)) found = pr; });
+    return found ? (found.name || found.id) : String(id || '');
+  }
+  function queueTitle(){
+    var w = which();
+    var bits = [];
+    if (w.grams) bits.push(round1(w.grams) + ' г');
+    if (w.minutes) bits.push(humanMin(w.minutes));
+    return 'В очередь' + (bits.length ? ' · ' + bits.join(' · ') : ' на печать');
+  }
+  function sizeText(bytes){
+    var b = num(bytes);
+    if (b < 1024) return b + ' Б';
+    if (b < 1024 * 1024) return Math.round(b / 1024) + ' КБ';
+    return (b / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ';
+  }
+
+  function renderEstimate(){
+    var box = $('#pk_est');
+    if (!box) return;
+    box.innerHTML = loaded.file ? estimateHtml() : '';
+    var chips = $('#pk_plates');
+    if (chips) chips.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('[data-plate]') : null;
+      if (!b) return;
+      loaded.plate = num(b.dataset.plate, 1) || 1;
+      renderEstimate();
+    });
+  }
+
+  /* --- ход загрузки --- */
+  function showProgress(percent, label){
+    var box = $('#pk_progress'), bar = $('#pk_progress_bar'), text = $('#pk_progress_text');
+    if (!box) return;
+    box.hidden = false;
+    if (bar) bar.style.width = (percent == null ? 8 : Math.max(3, Math.min(100, percent))) + '%';
+    if (text) text.textContent = label + (percent == null ? '…' : ' · ' + percent + '%');
+  }
+  function hideProgress(){
+    var box = $('#pk_progress');
+    if (box) box.hidden = true;
+  }
+
+  /* --- оценка и отправка --- */
+  function pickFile(file){
+    if (!file) return;
+    if (!ALLOWED_EXT.test(String(file.name || ''))) {
+      toast('Поддерживаются только 3MF и G-code');
+      return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      toast('Файл больше ' + MAX_MB + ' МБ — коннектор такой не примет');
+      return;
+    }
+    loaded = { file:file, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+    renderEstimate();
+    estimateFile();
+  }
+
+  /* Оценка тем же маршрутом, что у панели: файл ложится в uploads и сразу
+     возвращает минуты, граммы, материал и цвет. */
+  function estimateFile(){
+    if (!loaded.file) return Promise.resolve(null);
+    var file = loaded.file;
+    showProgress(null, 'Считаем «' + file.name + '»');
+    return sendFile('/api/estimate/upload', file, {}, function(pct){
+      showProgress(pct, 'Отправляем файл');
+    }).then(function(res){
+      if (loaded.file !== file) return null;      // оператор уже выбрал другой файл
+      hideProgress();
+      loaded.meta = (res && res.estimate) || res || {};
+      loaded.uploaded = (res && res.file) || file.name;
+      renderEstimate();
+      var grams = num(which().grams);
+      toast(grams ? ('Оценка: ' + round1(grams) + ' г · ' + humanMin(which().minutes))
+                  : 'Файл сохранён, но оценки из него нет');
+      loadPlate(res && res.file);
+      return res;
+    }).catch(function(err){
+      hideProgress();
+      toast('Оценка не получилась: ' + err.message);
+      return null;
+    });
+  }
+
+  /* Превью плиты из самого 3MF — тот же маршрут, что у строки очереди в панели. */
+  function loadPlate(name){
+    if (!name) return;
+    get('/api/jobs/plate?name=' + encodeURIComponent(name)).then(function(d){
+      loaded.preview = (d && d.b64) || '';
+      if (loaded.file && loaded.uploaded === name) renderEstimate();
+    }).catch(function(){ /* нет превью — не беда: цифры важнее картинки */ });
+  }
+
+  /* Отправка: задание в очереди. Плиту и принтер маршрут принимает сразу,
+     поэтому второй раз файл никуда не льётся и ничего не расходится. */
+  function queueFile(){
+    if (!loaded.file) return;
+    if (st.busy) return;
+    var file = loaded.file;
+    var fields = { plate: loaded.plate || 1 };
+    var pid = curPrinter();
+    if (pid) fields.printer_id = pid;
+    var where = pid ? ('на «' + printerName(pid) + '»') : 'на любой свободный принтер';
+    var title = queueTitle().replace('В очередь', '');
+    var ask = (loaded.plate > 1)
+      ? ('Отправить плиту ' + loaded.plate + ' ' + where + title + '?')
+      : ('Отправить в очередь ' + where + title + '?');
+    if (!confirm(ask)) return;
+    var btn = $('#pk_b_queue');
+    if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+    showProgress(null, 'Отправляем в очередь');
+    sendFile('/api/jobs/upload', file, fields, function(pct){
+      showProgress(pct, 'Отправляем в очередь');
+    }).then(function(res){
+      hideProgress();
+      if (loaded.file !== file) return;
+      var job = (res && res.job) || {};
+      loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+      renderEstimate();
+      var grams = num(job.est_grams);
+      toast('В очереди: ' + (job.name || (res && res.file) || file.name)
+        + (grams ? ' · ' + round1(grams) + ' г' : ''));
+      tick();
+    }).catch(function(err){
+      hideProgress();
+      toast('Не отправлено: ' + err.message);
+      renderEstimate();
+    });
+  }
+
+  function bindFile(){
+    var input = $('#pk_file_input'), pick = $('#pk_b_pick'), drop = $('#pk_drop');
+    if (pick && input) pick.addEventListener('click', function(){ input.click(); });
+    if (input) input.addEventListener('change', function(){
+      if (input.files && input.files[0]) pickFile(input.files[0]);
+      input.value = '';
+    });
+    if (drop) {
+      ['dragover', 'dragenter'].forEach(function(ev){
+        drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('pk-over'); });
+      });
+      ['dragleave', 'dragend'].forEach(function(ev){
+        drop.addEventListener(ev, function(){ drop.classList.remove('pk-over'); });
+      });
+      drop.addEventListener('drop', function(e){
+        e.preventDefault();
+        drop.classList.remove('pk-over');
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) pickFile(f);
+        else toast('Файл из этого перетаскивания не разобрался — выберите кнопкой');
+      });
+    }
+    var box = $('#pk_est');
+    if (box) box.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('button') : null;
+      if (!b) return;
+      if (b.dataset && b.dataset.printer !== undefined && b.dataset.printer !== null
+          && b.className && b.className.indexOf('pk-chip') >= 0) {
+        loaded.printer = String(b.dataset.printer);
+        renderEstimate();
+        return;
+      }
+      if (b.id === 'pk_b_change') {
+        loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+        renderEstimate();
+        if (input) input.click();
+      } else if (b.id === 'pk_b_queue') {
+        queueFile();
+      }
+    });
+  }
+
+  /* Файл, брошенный в любое место окна, тоже принимаем: палец мог уйти мимо
+     разметки, а терять работу из-за этого нельзя. */
+  function bindDropWindow(){
+    window.addEventListener('dragover', function(e){ e.preventDefault(); });
+    window.addEventListener('drop', function(e){
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      e.preventDefault();
+      if (st.screen !== 'file') showScreen('file');
+      pickFile(files[0]);
+    });
+  }
+
   /* ------------------------------------------------------------- экраны */
   function showScreen(name){
     st.screen = name;
-    ['park', 'queue', 'ams', 'cam'].forEach(function(s){
+    ['park', 'queue', 'file', 'ams', 'cam'].forEach(function(s){
       var el = $('#pk_screen_' + s);
       if (el) el.hidden = (s !== name);
     });
@@ -885,6 +1323,7 @@
       if (cam) cam.removeAttribute('src');
     }
     if (name === 'ams') { loadAms(); } else { closeSheet(); }
+    if (name === 'file') { var inp = $('#pk_file_input'); if (inp) inp.value = ''; }
     if (name === 'ams' || name === 'cam') tick();
     if (name === 'queue' || name === 'park') renderQueue();
     try { localStorage.setItem('pult_screen', name); } catch (e) {}
@@ -1126,7 +1565,7 @@
   var screenFromLink = '';
   try {
     var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));
-    if (want && ['park', 'queue', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
+    if (want && ['park', 'queue', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
   } catch (e) {}
   /* Пока идёт первый запрос, показываем последнюю известную картину: иначе
      на медленной сети оператор видит «данных ещё нет» и решает, что пульт сломан. */
@@ -1140,6 +1579,8 @@
   try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
   try { var s = screenFromLink || localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
   bindBrand();
+  bindFile();
+  bindDropWindow();
   applyKiosk();
   setFreshness();
   showScreen(st.screen || 'park');

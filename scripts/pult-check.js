@@ -41,22 +41,35 @@ function check(label, condition, detail) {
 
 /* ------------------------------------------------------------- заглушка DOM */
 function mkEl(id) {
-  return {
+  const el = {
     id, hidden: false, textContent: '', innerHTML: '', src: '', className: '', disabled: false,
-    dataset: {}, style: {}, attrs: {},
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    value: '', files: [], dataset: {}, style: {}, attrs: {}, handlers: {}, clicks: 0,
+    classList: (() => {
+      const set = new Set();
+      return {
+        add(...names) { names.forEach((n) => set.add(n)); },
+        remove(...names) { names.forEach((n) => set.delete(n)); },
+        toggle(name, on) { if (on === undefined) { set.has(name) ? set.delete(name) : set.add(name); }
+                           else if (on) { set.add(name); } else { set.delete(name); } },
+        contains(name) { return set.has(name); },
+      };
+    })(),
     removeAttribute(name) { delete this.attrs[name]; },
     setAttribute(name, value) { this.attrs[name] = value; },
-    addEventListener() {},
+    addEventListener(type, fn) { (el.handlers[type] = el.handlers[type] || []).push(fn); },
+    // Кнопка выбора файла зовёт input.click() — считаем нажатия, чтобы проверка
+    // «смена файла действительно открывает выбор» была не на словах.
+    click() { el.clicks += 1; el.handlers.click && el.handlers.click.forEach((fn) => fn({})); },
     closest() { return null; },
   };
+  return el;
 }
 
 function buildPage() {
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
   const store = {};
   ids.forEach((id) => { store[id] = mkEl(id); });
-  const tabs = ['park', 'queue', 'ams', 'cam'].map((name) => {
+  const tabs = ['park', 'queue', 'file', 'ams', 'cam'].map((name) => {
     const el = mkEl('tab_' + name);
     el.dataset.screen = name;
     return el;
@@ -74,7 +87,8 @@ function buildPage() {
     getElementById(id) { return store[id] || null; },
     createElement() { return mkEl('new'); },
   };
-  return { store, document, tabs, click: (event) => clickHandler(event) };
+  return { store, document, tabs, click: (event) => clickHandler(event),
+           windowHandlers: {} };
 }
 
 /* --------------------------------------------------------------- фикстуры */
@@ -109,6 +123,19 @@ function makeState(printerState, connected) {
   };
 }
 
+/* Форма из браузера: страница кладёт в неё файл и поля. Запоминаем имена
+   полей — по ним видно, что уходило на сервер, а что нет. */
+class FakeFormData {
+  constructor() { this.entries = []; }
+  append(name, value, filename) {
+    this.entries.push({ name, value, filename });
+  }
+}
+
+function fakeFile(name, size) {
+  return { name, size: size == null ? 2048 : size };
+}
+
 function runPage(options) {
   const opts = options || {};
   const page = buildPage();
@@ -123,11 +150,62 @@ function runPage(options) {
     answers: opts.answers || {},
     storage: opts.storage || {},
     failFetch: !!opts.failFetch,
+    estimate: opts.estimate || {
+      ok: true, file: 'stand.3mf', grams: 41.2, minutes: 96, hours: 1.6,
+      material: 'PETG', color: '#1F2937',
+      estimate: { minutes: 96, grams: 41.2, total_grams: 41.2, total_minutes: 96,
+                  material: 'PETG', color: '#1F2937', plate_count: 1, plates: [] },
+    },
+    job: opts.job || { ok: true, file: 'stand.3mf', job: { id: 'job9', name: 'stand', est_grams: 41.2 } },
+    plate: opts.plate || { ok: true, b64: 'iVBORw0KGgo=' },
+    uploadStatus: opts.uploadStatus || 200,
+    uploadError: opts.uploadError || '',
+    uploadNetworkFail: !!opts.uploadNetworkFail,
+    uploads: [],
   };
   const sandbox = {
     console,
     document: page.document,
     navigator: {},
+    FormData: FakeFormData,
+    XMLHttpRequest: class {
+      constructor() {
+        const self = this;
+        this.upload = { addEventListener(type, fn) { if (type === 'progress') self._progress = fn; } };
+        this.status = 0;
+        this.responseText = '';
+      }
+      open(method, url) { this.method = method; this.url = url; }
+      setRequestHeader() {}
+      send(form) {
+        const body = {};
+        (form.entries || []).forEach((item) => { body[item.name] = item.value; });
+        this._body = body;
+        env.uploads.push({ method: this.method, url: this.url, body, form: form.entries || [] });
+        if (this.upload && this._progress) {
+          this._progress({ lengthComputable: true, loaded: 512, total: 2048 });
+        }
+        if (env.uploadNetworkFail) { this.onerror && this.onerror(); return; }
+        if (env.uploadStatus >= 400) {
+          this.status = env.uploadStatus;
+          this.responseText = JSON.stringify({ error: env.uploadError || 'Проверка не прошла' });
+          this.onload && this.onload();
+          return;
+        }
+        this.status = 200;
+        let answer = env.estimate;
+        if (String(this.url || '').indexOf('/api/jobs/upload') >= 0) {
+          answer = Object.assign({}, env.job);
+          const job = Object.assign({}, env.job.job);
+          if (body.plate) job.plate = Number(body.plate);
+          if (body.printer_id) job.printer_id = body.printer_id;
+          answer.job = job;
+        }
+        this.responseText = JSON.stringify(answer);
+        this.onload && this.onload();
+      }
+      abort() { this.onabort && this.onabort(); }
+    },
     location: { origin: 'http://127.0.0.1:8790', search: opts.search || '' },
     localStorage: {
       getItem(key) { return Object.prototype.hasOwnProperty.call(env.storage, key) ? env.storage[key] : null; },
@@ -184,6 +262,10 @@ function runPage(options) {
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
+  // Страница вешает обработчики и на окно (перетаскивание файла в любое место).
+  sandbox.addEventListener = (type, fn) => {
+    page.windowHandlers[type] = (page.windowHandlers[type] || []).concat(fn);
+  };
   vm.createContext(sandbox);
   vm.runInContext(pageScript, sandbox, { filename: 'control.html:inline' });
 
@@ -193,6 +275,17 @@ function runPage(options) {
     requests,
     storage: env.storage,
     prompts,
+    uploads: env.uploads,
+    env,
+    // Нажать кнопку и бросить файл — так же, как это делает браузер.
+    fire(id, type, event) {
+      const el = page.store[id];
+      const fns = (el && el.handlers[type]) || [];
+      fns.forEach((fn) => fn(event || {}));
+    },
+    fireWindow(type, event) {
+      (page.windowHandlers[type] || []).forEach((fn) => fn(event || {}));
+    },
     posts: () => requests.filter((r) => r.method === 'POST'),
     clickParkCmd(cmd) {
       page.click({ target: target({ '[data-cmd]': { dataset: { cmd, on: 'prn1' }, disabled: false } }) });
@@ -665,6 +758,243 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('парк: счётчик AMS в карточке живой',
       text(page.store['pk_tiles'].innerHTML).indexOf('1/2') >= 0,
       text(page.store['pk_tiles'].innerHTML).slice(0, 120));
+  }
+
+  /* 8. Экран «Файл»: загрузка как в слайсере (18.0.6) */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.clickTab('file');
+    check('файл: вкладка открывает свой экран, а не остаётся на парке',
+      page.store['pk_screen_file'].hidden === false
+      && page.store['pk_screen_park'].hidden === true,
+      JSON.stringify({ file: page.store['pk_screen_file'].hidden,
+                       park: page.store['pk_screen_park'].hidden }));
+
+    page.fire('pk_b_pick', 'click');
+    check('файл: «Выбрать файл» открывает выбор файла (input.click)',
+      page.store['pk_file_input'].clicks === 1, String(page.store['pk_file_input'].clicks));
+
+    page.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(60);
+    const up = page.uploads[0];
+    check('файл: выбранный 3MF уходит на оценку в /api/estimate/upload',
+      !!up && up.method === 'POST' && up.url === '/api/estimate/upload'
+      && up.body.file && up.body.file.name === 'stand.3mf',
+      JSON.stringify(up && up.url));
+    const card = text(page.store['pk_est'].innerHTML);
+    check('файл: оценка показана как в панели — минуты, граммы, материал, цвет',
+      card.indexOf('1 ч 36 мин') >= 0 && card.indexOf('41,2 г') >= 0
+      && card.indexOf('PETG') >= 0 && card.indexOf('#1F2937') >= 0, card.slice(0, 200));
+    check('файл: превью плиты спрошено у коннектора по имени файла',
+      page.requests.some((r) => r.url.indexOf('/api/jobs/plate?name=stand.3mf') === 0),
+      JSON.stringify(page.requests.map((r) => r.url)));
+    check('файл: кнопка отправки называет то, что уйдёт в очередь',
+      text(page.store['pk_est'].innerHTML).indexOf('В очередь · 41,2 г · 1 ч 36 мин') >= 0,
+      text(page.store['pk_est'].innerHTML).slice(-120));
+    check('файл: видно, на какой принтер встанет задание (выбранный на пульте)',
+      text(page.store['pk_est'].innerHTML).indexOf('Печатать на: Цех-1') >= 0
+      && page.store['pk_est'].innerHTML.indexOf('data-printer=""') >= 0,
+      text(page.store['pk_est'].innerHTML).slice(0, 220));
+
+    page.requests.length = 0;
+    page.prompts.length = 0;
+    page.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_queue' }) } });
+    await wait(60);
+    const send = page.uploads[1];
+    check('файл: отправка идёт в /api/jobs/upload с плитой и выбранным принтером',
+      !!send && send.url === '/api/jobs/upload' && Number(send.body.plate) === 1
+      && send.body.printer_id === 'prn1',
+      JSON.stringify(send && send.body));
+    check('файл: плита и принтер уходят одним запросом — файл не льётся дважды',
+      page.uploads.length === 2, String(page.uploads.length));
+
+    // Оператору нужен и обратный случай: оставить выбор очереди.
+    const any = runPage({});
+    await wait(60);
+    any.clickTab('file');
+    any.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    any.fire('pk_file_input', 'change');
+    await wait(60);
+    any.fire('pk_est', 'click', { target: { closest: () => ({ dataset: { printer: '' },
+      className: 'pk-chip', id: '' }) } });
+    await wait(20);
+    const anyCard = text(any.store['pk_est'].innerHTML);
+    check('файл: чипс «любой принтер» подписывает карточку честно',
+      anyCard.indexOf('решит очередь') >= 0, anyCard.slice(0, 200));
+    any.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_queue' }) } });
+    await wait(60);
+    const free = any.uploads[1];
+    check('файл: «любой принтер» оставляет выбор очереди (принтер не пришпилен)',
+      !!free && free.body.printer_id === undefined,
+      JSON.stringify(free && free.body));
+    check('файл: после отправки карточка очищена и сказано про очередь',
+      text(page.store['pk_est'].innerHTML) === ''
+      && String(page.store['pk_msg'].textContent).indexOf('В очереди') >= 0,
+      JSON.stringify({ card: text(page.store['pk_est'].innerHTML),
+                       msg: page.store['pk_msg'].textContent }));
+  }
+
+  /* 8.1 Плиты: оператор печатает ту, что выбрал */
+  {
+    const plates = {
+      ok: true, file: 'box.3mf', saved: 'box.3mf',
+      estimate: {
+        total_grams: 100, total_minutes: 200, material: 'PLA', color: '#111111',
+        plate_count: 2,
+        plates: [
+          { plate_index: 1, grams: 40, minutes: 80, filaments: [{ type: 'PLA', color: '#111111' }] },
+          { plate_index: 2, grams: 60, minutes: 120, filaments: [{ type: 'PETG', color: '#00A0FF' }] },
+        ],
+      },
+    };
+    const page = runPage({ estimate: plates });
+    await wait(60);
+    page.clickTab('file');
+    page.store['pk_file_input'].files = [fakeFile('box.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(60);
+    check('плиты: чипсы нарисованы по числу плит в файле',
+      (page.store['pk_est'].innerHTML.match(/data-plate=/g) || []).length === 2,
+      page.store['pk_est'].innerHTML.slice(0, 160));
+    check('плиты: по умолчанию показана первая плита, а не сумма',
+      text(page.store['pk_est'].innerHTML).indexOf('40,0 г') >= 0
+      && text(page.store['pk_est'].innerHTML).indexOf('100,0 г') < 0,
+      text(page.store['pk_est'].innerHTML).slice(0, 200));
+    page.fire('pk_plates', 'click', { target: { closest: () => ({ dataset: { plate: '2' } }) } });
+    await wait(20);
+    const card = text(page.store['pk_est'].innerHTML);
+    check('плиты: выбор второй плиты меняет цифры на её собственные',
+      card.indexOf('60,0 г') >= 0 && card.indexOf('2 ч') >= 0 && card.indexOf('PETG') >= 0, card.slice(0, 220));
+    page.prompts.length = 0;
+    page.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_queue' }) } });
+    await wait(60);
+    const send = page.uploads[1];
+    check('плиты: в очередь уходит выбранная плита и оператора спрашивают',
+      !!send && Number(send.body.plate) === 2
+      && (page.prompts[0] || '').indexOf('плиту 2') >= 0,
+      JSON.stringify({ plate: send && send.body.plate, ask: page.prompts[0] }));
+  }
+
+  /* 8.1.1 Материал и цвет: у реального 3MF их даёт плита, а не сводка.
+     Живая проба показала: у slice_info верхнего уровня material/color пустые,
+     а в плитах — заполнены. Оператор обязан увидеть PETG и цвет, а не «—». */
+  {
+    const fromPlates = {
+      ok: true, file: 'box.3mf', saved: 'box.3mf',
+      estimate: {
+        total_grams: 64.6, total_minutes: 176.4, plate_count: 2, material: '', color: '',
+        plates: [
+          { plate_index: 1, grams: 23.4, minutes: 80.4,
+            filaments: [{ type: 'PETG', color: '#1F2937' }] },
+          { plate_index: 2, grams: 41.2, minutes: 96,
+            filaments: [{ type: 'PETG', color: '#1F2937' }] },
+        ],
+      },
+    };
+    const page = runPage({ estimate: fromPlates });
+    await wait(60);
+    page.clickTab('file');
+    page.store['pk_file_input'].files = [fakeFile('box.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(60);
+    const card = text(page.store['pk_est'].innerHTML);
+    check('материал и цвет: берутся из плиты, если в сводке файла их нет',
+      card.indexOf('PETG') >= 0 && card.indexOf('#1F2937') >= 0, card.slice(0, 220));
+  }
+
+  /* 8.2 Честность: нет данных слайсера — говорим словами, цифр не выдумываем */
+  {
+    const empty = { ok: true, file: 'raw.3mf', saved: 'raw.3mf', estimate: {} };
+    const page = runPage({ estimate: empty });
+    await wait(60);
+    page.clickTab('file');
+    page.store['pk_file_input'].files = [fakeFile('raw.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(60);
+    const card = text(page.store['pk_est'].innerHTML);
+    check('честность: пустая оценка — прочерки, а не нули',
+      card.indexOf('—') >= 0 && card.indexOf('0,0 г') < 0, card.slice(0, 200));
+    check('честность: сказано, почему оценки нет и что делать',
+      card.indexOf('нет данных слайсера') >= 0 && card.indexOf('впишите') < 0
+      && card.indexOf('вписать') >= 0, card.slice(-260));
+    check('честность: в очередь всё равно можно — кнопка без выдуманных граммов',
+      text(page.store['pk_est'].innerHTML).indexOf('В очередь на печать') >= 0,
+      text(page.store['pk_est'].innerHTML).slice(-120));
+  }
+
+  /* 8.3 Отказы: чужой файл, слишком большой, ошибка сервера, обрыв сети */
+  {
+    const bad = runPage({});
+    await wait(60);
+    bad.clickTab('file');
+    bad.store['pk_file_input'].files = [fakeFile('model.stl')];
+    bad.fire('pk_file_input', 'change');
+    await wait(60);
+    check('отказы: .stl отклоняем сами — в сеть ничего не уходит',
+      bad.uploads.length === 0 && String(bad.store['pk_msg'].textContent).indexOf('3MF') >= 0,
+      JSON.stringify({ up: bad.uploads.length, msg: bad.store['pk_msg'].textContent }));
+
+    const big = runPage({});
+    await wait(60);
+    big.clickTab('file');
+    big.store['pk_file_input'].files = [fakeFile('huge.3mf', 401 * 1024 * 1024)];
+    big.fire('pk_file_input', 'change');
+    await wait(60);
+    check('отказы: файл больше 400 МБ не отправляем и говорим почему',
+      big.uploads.length === 0 && String(big.store['pk_msg'].textContent).indexOf('400 МБ') >= 0,
+      String(big.store['pk_msg'].textContent));
+
+    const refused = runPage({ uploadStatus: 400, uploadError: 'Поддерживаются только 3MF и G-code' });
+    await wait(60);
+    refused.clickTab('file');
+    refused.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    refused.fire('pk_file_input', 'change');
+    await wait(60);
+    check('отказы: отказ сервера показан его же словами',
+      String(refused.store['pk_msg'].textContent).indexOf('Поддерживаются только 3MF') >= 0,
+      String(refused.store['pk_msg'].textContent));
+
+    const dead = runPage({ uploadNetworkFail: true });
+    await wait(60);
+    dead.clickTab('file');
+    dead.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    dead.fire('pk_file_input', 'change');
+    await wait(60);
+    check('отказы: обрыв сети — «сеть недоступна», страница не падает',
+      String(dead.store['pk_msg'].textContent).indexOf('сеть недоступна') >= 0,
+      String(dead.store['pk_msg'].textContent));
+  }
+
+  /* 8.4 Перетаскивание: файл в любое место окна и в зону загрузки */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.fireWindow('drop', { preventDefault() {},
+      dataTransfer: { files: [fakeFile('dropped.3mf')] } });
+    await wait(60);
+    check('перетаскивание: файл в окно открывает экран «Файл» и считается',
+      page.store['pk_screen_file'].hidden === false && page.uploads.length === 1
+      && page.uploads[0].body.file.name === 'dropped.3mf',
+      JSON.stringify({ screen: page.store['pk_screen_file'].hidden, up: page.uploads.length }));
+
+    const zone = runPage({});
+    await wait(60);
+    zone.clickTab('file');
+    zone.fire('pk_drop', 'dragover', { preventDefault() {} });
+    check('перетаскивание: над зоной загрузки загорается подсветка',
+      zone.store['pk_drop'].classList.contains('pk-over') === true,
+      String(zone.store['pk_drop'].classList.contains('pk-over')));
+    zone.fire('pk_drop', 'drop', { preventDefault() {},
+      dataTransfer: { files: [fakeFile('zone.3mf')] } });
+    await wait(60);
+    check('перетаскивание: файл, брошенный в зону, тоже уходит на оценку',
+      zone.uploads.length === 1 && zone.uploads[0].body.file.name === 'zone.3mf',
+      JSON.stringify(zone.uploads.map((u) => u.body.file && u.body.file.name)));
+    check('перетаскивание: после броска подсветка гаснет',
+      zone.store['pk_drop'].classList.contains('pk-over') === false,
+      String(zone.store['pk_drop'].classList.contains('pk-over')));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

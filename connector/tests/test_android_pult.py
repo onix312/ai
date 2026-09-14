@@ -237,12 +237,20 @@ class PultDocsTests(unittest.TestCase):
                        "ai.printflow.pult", "Приёмка", "офлайн"):
             self.assertIn(phrase, text, f"в инструкции нет «{phrase}»")
 
-    def test_acceptance_has_seven_scenarios(self):
+    def test_acceptance_has_stage_one_scenarios_and_the_file_screen(self):
+        """Семь сценариев ТЗ этапа 1 и восьмой — «Файл на печать» (этап 2).
+
+        Порядок важен: сценарии этапа 1 не переписываются, новый добавляется
+        в конец — владелец проходит список сверху вниз и видит, что добавилось.
+        """
         text = self.DOC.read_text(encoding="utf-8")
         section = text.split("## Приёмка", 1)[1].split("\n## ", 1)[0]
         numbers = re.findall(r"^(\d)\.\s", section, re.M)
-        self.assertEqual(["1", "2", "3", "4", "5", "6", "7"], numbers,
-                         "в приёмке должно быть семь сценариев — по ТЗ этапа 1")
+        self.assertEqual(["1", "2", "3", "4", "5", "6", "7", "8"], numbers,
+                         "семь сценариев этапа 1 плюс «Файл на печать» (18.0.6)")
+        self.assertIn("**Файл на печать", section)
+        self.assertIn("девять проверок", section,
+                      "скрипт приёмки вырос до девяти сцен — это должно быть видно")
 
 
 if __name__ == "__main__":

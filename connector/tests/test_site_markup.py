@@ -766,8 +766,8 @@ class PultControlPageTests(TestCase):
     """Пульт цеха (18.0.1) — отдельное приложение для телефона и планшета.
 
     Страница живёт своей жизнью: без модулей панели, без внешних библиотек.
-    Поэтому контракты держим на то, что легко потерять при правке — четыре
-    экрана, крупные кнопки, честный офлайн-баннер и киоск.
+    Поэтому контракты держим на то, что легко потерять при правке — пять
+    экранов, крупные кнопки, честный офлайн-баннер и киоск.
     """
 
     @classmethod
@@ -782,12 +782,12 @@ class PultControlPageTests(TestCase):
             errors.append(f"не закрыты теги: {parser.stack[-5:]}")
         self.assertEqual(errors, [])
 
-    def test_four_screens_and_tab_bar(self):
-        for screen in ("park", "queue", "ams", "cam"):
+    def test_five_screens_and_tab_bar(self):
+        for screen in ("park", "queue", "file", "ams", "cam"):
             self.assertIn(f'id="pk_screen_{screen}"', self.html)
         tabs = re.findall(r'class="pk-tab[^"]*"[^>]*data-screen="([a-z]+)"', self.html)
-        self.assertEqual(["park", "queue", "ams", "cam"], tabs,
-                         "нижнее меню обязано вести на все четыре экрана")
+        self.assertEqual(["park", "queue", "file", "ams", "cam"], tabs,
+                         "нижнее меню обязано вести на все пять экранов")
         self.assertIn("function showScreen(name)", self.html)
         # Переключение экранов — через hidden, а не display:none в разметке:
         # так экран не теряет прокрутку и не перерисовывается целиком.
@@ -963,11 +963,11 @@ class PultControlPageTests(TestCase):
         for item in shortcuts:
             self.assertTrue(item["url"].startswith("/pult?screen="),
                             f"ярлык ведёт не на экран пульта: {item['url']}")
-            self.assertIn(item["url"].split("=")[1], ("park", "queue", "ams", "cam"))
+            self.assertIn(item["url"].split("=")[1], ("park", "queue", "file", "ams", "cam"))
         self.assertIn("display_override", manifest)
         self.assertIn("var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));",
                       self.html)
-        self.assertIn("['park', 'queue', 'ams', 'cam'].indexOf(want[1]) >= 0", self.html,
+        self.assertIn("['park', 'queue', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0", self.html,
                       "чужой ?screen= не должен открывать посторонний экран")
 
     def test_page_is_in_the_offline_shell(self):
@@ -994,6 +994,79 @@ class PultControlPageTests(TestCase):
     def test_no_tofu_symbols(self):
         for char in ("⎋", "⌕", "🧾", "⚠"):
             self.assertNotIn(char, self.html, f"символ {char!r} даёт квадрат на старом Android")
+
+class PultFileScreenTests(TestCase):
+    """Экран «Файл» (18.0.6) — загрузка как в слайсере.
+
+    Владелец просил: перетащил .3mf → увидел оценку → отправил. Своего слайсера
+    не пишем, поэтому цифры берутся там же, где их берёт панель, а если в файле
+    данных слайсера нет — так и говорится словами.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_screen_markup_and_tab(self):
+        self.assertIn('id="pk_screen_file"', self.html)
+        self.assertIn('id="pk_file_input"', self.html)
+        self.assertIn('accept=".3mf,.gcode"', self.html)
+        self.assertIn('data-screen="file"', self.html)
+        self.assertIn("$('#pk_screen_' + s)", self.html)
+        self.assertIn(".pk-drop.pk-over { outline:2px dashed var(--accent);", self.html)
+
+    def test_upload_uses_existing_routes_only(self):
+        # Никаких новых маршрутов: оценка — как в панели, очередь — тоже.
+        self.assertIn("sendFile('/api/estimate/upload', file", self.html)
+        self.assertIn("sendFile('/api/jobs/upload', file, fields", self.html)
+        self.assertIn("get('/api/jobs/plate?name=' + encodeURIComponent(name))", self.html)
+        self.assertNotIn("/api/slice", self.html)
+        self.assertNotIn("/api/print/upload", self.html)
+
+    def test_file_goes_to_server_once(self):
+        """Файл льётся через XMLHttpRequest ради полоски хода — и один раз."""
+        self.assertIn("new XMLHttpRequest()", self.html)
+        self.assertIn("xhr.upload.addEventListener('progress'", self.html)
+        self.assertIn("form.append('file', file, file.name)", self.html)
+        self.assertIn("xhr.timeout = 300000;", self.html)
+        self.assertIn("var MAX_MB = 400;", self.html,
+                      "предел обязан совпадать с MAX_UPLOAD коннектора")
+
+    def test_estimate_speaks_the_panel_language(self):
+        self.assertIn("<span>Время печати</span>", self.html)
+        self.assertIn("<span>Пластик</span>", self.html)
+        self.assertIn("<span>Материал</span>", self.html)
+        self.assertIn("<span>Цвет</span>", self.html)
+        self.assertIn("function humanMin(m)", self.html)
+        self.assertIn("toFixed(1).replace('.', ',')", self.html,
+                      "русская запятая в граммах — как в панели")
+
+    def test_plates_are_chosen_like_in_the_slicer(self):
+        self.assertIn('data-plate="', self.html)
+        self.assertIn("loaded.plate = num(b.dataset.plate, 1) || 1;", self.html)
+        self.assertIn("plate_index", self.html,
+                      "у плиты из slice_info номер лежит в plate_index")
+        self.assertIn("Показано: ", self.html,
+                      "если показана не выбранная плита, это должно быть сказано")
+
+    def test_printer_and_plate_travel_with_the_job(self):
+        self.assertIn("fields.printer_id = pid;", self.html)
+        self.assertIn("var fields = { plate: loaded.plate || 1 };", self.html)
+        self.assertIn('data-printer=""', self.html,
+                      "«любой принтер» обязан остаться выбором оператора, а не умолчанием")
+
+    def test_no_slicer_invented(self):
+        """Своего слайсера нет: файл без данных слайсера — честный отказ."""
+        self.assertIn("В файле нет данных слайсера: ни веса, ни времени.", self.html)
+        self.assertIn("оценку взять неоткуда", self.html)
+        self.assertNotIn("slicer.js", self.html)
+        self.assertNotIn("wasm", self.html.lower())
+
+    def test_nothing_leaves_the_local_network(self):
+        # Ровно как весь остальной PrintFlow: страница и её ассеты — только свои.
+        for host in ("http://", "https://", "cdn.", "googleapis", "unpkg"):
+            self.assertNotIn(host, self.html, f"пульт не должен ходить наружу: {host}")
+        self.assertIn("src=\"assets/brand/nozza-mark-white.svg\"", self.html)
 
     def test_theme_and_assets_are_local(self):
         # Как у остальных страниц: ассеты относительные, токены темы — с пином.
