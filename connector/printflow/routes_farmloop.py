@@ -31,3 +31,36 @@ def farmloop_profile(api: Any, ctx: Ctx):
             "механику FarmLoop Stage 1 на P1S."),
     })
     return payload
+
+
+@router.get("/api/farmloop/settings", doc="Настройки и safety-gate FarmLoop")
+def farmloop_settings(api: Any, ctx: Ctx):
+    """Возвращает только не секретные настройки FarmLoop и вычисленные гейты."""
+    keys = (
+        "farmloop_profile", "farmloop_mechanics_verified",
+        "farmloop_template_verified", "farmloop_sensor_mode",
+        "farmloop_sensor_timeout_s", "farmloop_camera_threshold_pct",
+        "farmloop_cooldown_s", "farmloop_pusher_enabled",
+        "farmloop_bender_enabled", "farmloop_auto_next",
+        "farmloop_unattended_series", "farmloop_max_cycles",
+        "farmloop_max_detach_attempts", "slicer_provider",
+        "slicer_auto_postprocess_farmloop",
+    )
+    settings = {key: api.db.setting(key, "") for key in keys}
+    profile = str(settings.get("farmloop_profile") or P1S_STAGE1.id)
+    template = DATA_DIR / "farmloop-templates" / f"{profile}.gcode"
+    settings["template_installed"] = template.is_file()
+    settings["can_prepare"] = bool(template.is_file())
+    physical = all(bool(settings.get(key)) for key in (
+        "farmloop_mechanics_verified", "farmloop_template_verified",
+        "farmloop_pusher_enabled", "farmloop_bender_enabled"))
+    sensing = settings.get("farmloop_sensor_mode") in {"sensor", "camera", "both"}
+    settings["can_auto_next"] = bool(physical and sensing and template.is_file())
+    settings["can_unattended_series"] = bool(
+        settings["can_auto_next"] and int(settings.get("farmloop_max_cycles") or 0) > 1)
+    settings["blocked_reason"] = ""
+    if not settings["can_prepare"]:
+        settings["blocked_reason"] = "Нет установленного шаблона FarmLoop"
+    elif not settings["can_auto_next"]:
+        settings["blocked_reason"] = "Не подтверждены механика и пустая платформа"
+    return {"profile": profile, "settings": settings}
