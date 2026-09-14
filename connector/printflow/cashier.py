@@ -1,10 +1,16 @@
 """Мобильная касса в LAN (Касса 16.0, итерация 3 — единый каталог склада).
 
-Кассир на телефоне/планшете в локальной сети магазина продаёт за наличные или
-по СБП. Деньги не дублируются и не расходятся с учётом:
+Кассир на телефоне/планшете в локальной сети магазина продаёт за наличные,
+картой через терминал или по СБП. Деньги не дублируются и не расходятся с
+учётом:
 
 * наличные — продажа сразу через ``shelf.sale`` (канал in_shop, как в панели
   и боте — один учёт);
+* карта (18.0) — принимает банковский терминал (свой слип, своя связь), а
+  продажа тем же путём, что наличные, только проводка ложится на счёт карты
+  каналом ``card``: сверка ящика эту выручку не считает наличными, а смену
+  владелец видит двумя строками. Карту PrintFlow не читает и обещать этого
+  нельзя: терминал — отдельное устройство банка;
 * СБП (И2) — товар сразу откладывается на полку и встаёт в холд (резерв
   продажи): вторая продажа тех же штук не пройдёт. Выручка НЕ пишется до
   подтверждения; при подтверждении в одной транзакции холд снимается,
@@ -39,7 +45,20 @@ from .sbp import Sbp, STATUS_PENDING
 from .shelf import Shelf
 
 SESSION_TTL = 12 * 3600  # смена 12 часов, затем код вводится заново
+# Способы оплаты, которые касса ПРИНИМАЕТ. ``card`` (оплата картой через
+# банковский терминал) написан целиком, но выключен: страница кассы ещё не
+# показывает кнопку «Карта», поэтому сервер такую продажу не принимает.
+# Включить — добавить "card" в METHODS и доделать интерфейс кассира (кнопка,
+# фильтр журнала, строка карты в смене): всё остальное уже на месте ниже.
+PARKED_METHODS = ("card",)
 METHODS = ("cash", "sbp")
+# Способы, при которых деньги уже у нас к моменту нажатия: наличные в ящике,
+# карта — на терминале (продажа идёт сразу в журнал). СБП отличается: там
+# сначала заявка, деньги приходят из банка и только потом дохода.
+PAID_METHODS = ("cash", "card")
+# Канал проводки для карточных денег. По нему сверка смены отличает наличные
+# в ящике от выручки по терминалу: суммы разные и сверяются с разными отчётами.
+CARD_CHANNEL = "card"
 # Виртуальный идентификатор товара, который есть на складе, но ещё не заведён
 # на витрине: ``stock:<nom_id>``. Позиция полки создаётся в момент продажи.
 STOCK_PREFIX = "stock:"
@@ -1046,19 +1065,34 @@ class Cashier:
             # offline_flags считается внутри ветки: часть расхождений
             # (no-stock) рождается только при выгрузке строк на полку.
             offline_flags = ""
-            if method == "cash":
+            if method in PAID_METHODS:
+                # Наличные и карта — деньги уже получены, продажа идёт в журнал
+                # сразу. Разница только в том, куда они легли: ящик или счёт
+                # карты (терминал). СБП идёт ниже веткой заявки.
+                # Карта сейчас выключена (см. PARKED_METHODS выше): ветка живёт
+                # для наличных, а карточный путь включается одной строкой.
                 self._ensure_auto_shift(box_id, cashier, stamp)
                 # недостающее приезжает со склада движением регистра
                 self._rows_to_shelf(rows, offer, allow_negative, conflicts)
                 offline_flags = self._offline_flags(conflicts, allow_negative, stamp,
                                                     claim)
+                tender = ("Касса: картой (терминал)" if method == "card"
+                          else "Касса: наличные")
+                # Куда физически попали деньги: пусто — счёт по умолчанию и
+                # канал «ящик» (как было), для карты — счёт карты и канал card.
+                # Сверка смены считает наличными только канал shelf, поэтому
+                # карточная выручка не «раздувает» ящик.
+                cash_account = self._card_account() if method == "card" else ""
+                cash_channel = CARD_CHANNEL if method == "card" else ""
                 for row in rows:
                     # Цены со скидкой — финальные: нулевую не возвращаем
                     # к каталожной (дарение), иначе подарили бы за деньги.
                     done = self.shelf.sale(row["item_id"], row["qty"], row["price"],
-                                           channel="shelf", note="Касса: наличные",
+                                           channel="shelf", note=tender,
                                            keep_zero_price=pct > 0,
-                                           allow_negative=allow_negative)
+                                           allow_negative=allow_negative,
+                                           account_id=cash_account,
+                                           tx_channel=cash_channel)
                     # Связка для отмены: движение полки за строкой продажи.
                     row["move_id"] = str((done.get("move") or {}).get("id") or "")
                 self.db.execute(
@@ -1066,12 +1100,20 @@ class Cashier:
                     "(id,payment_id,method,amount,items,cashier,request_id,created_at,"
                     " discount_pct,discount_amount,box_id,offline_at,offline_flags)"
                     " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (sale_id, "", "cash", total, json.dumps(rows, ensure_ascii=False),
+                    (sale_id, "", method, total, json.dumps(rows, ensure_ascii=False),
                      cashier, request_id, stamp, pct, discount_amount, box_id,
                      moment, offline_flags))
                 result = self.db.one("SELECT * FROM cashier_sales WHERE id=?", (sale_id,))
                 payload_out = self._sale_result(result)
                 payload_out["paid"] = True
+                if method == "card":
+                    # Кассир должен видеть, куда ушли деньги: слип остался у
+                    # покупателя, а в учёте проводка легла на счёт карты.
+                    payload_out["tender"] = {
+                        "method": "card", "account_id": cash_account or "card",
+                        "note": "Оплата принята терминалом банка — слип у покупателя"}
+
+
                 if moment:
                     payload_out["offline_at"] = moment
                     if conflicts:
@@ -1495,18 +1537,24 @@ class Cashier:
         return {"ok": True, "removed": len(ids), "found": found}
 
     def cancel_sale(self, sale_id: str, token: str) -> dict:
-        """Отменить наличную продажу текущей открытой смены.
+        """Отменить продажу текущей открытой смены (наличные и карту).
 
-        Любой кассир (решение И4), но только наличные и только в окне смены:
-        отмена удаляет проводку, поэтому переписывать прошлое нельзя.
-        СБП-продажи — из панели (там же возврат денег из банка).
+        Любой кассир (решение И4), но только деньги прилавка — наличные или
+        карта — и только в окне смены: отмена удаляет проводку, поэтому
+        переписывать прошлое нельзя. СБП-продажи — из панели (там же возврат
+        денег из банка).
+
+        Карточную продажу кассир отменяет вместе с операцией возврата на
+        терминале: терминал — отдельное устройство, и «отменил в PrintFlow»
+        само по себе деньги покупателю не вернёт. В подсказке ответа это
+        сказано словами, чтобы кассир не искал кнопку у нас.
         """
         session = self.require(token)
         sale = self.db.one("SELECT * FROM cashier_sales WHERE id=?",
                            (str(sale_id or "").strip(),))
         if not sale:
             raise ValueError("Продажа не найдена")
-        if str(sale.get("method") or "") != "cash":
+        if str(sale.get("method") or "") not in PAID_METHODS:
             raise ValueError("СБП-возврат — из панели")
         if str(sale.get("cancelled_at") or ""):
             return {**self._sale_result(sale), "already": True}
@@ -1573,8 +1621,10 @@ class Cashier:
         сданная сверка смены.
 
         Право — только старший (решение №9 ТЗ «Касса 16.0»: возвраты у
-        руководителя). Только наличные: СБП возвращается из «Входящих» через
-        ``sbp.refund``, потому что там решение принимает банк, а не касса.
+        руководителя). Прилавок: наличные и карта (карточные деньги возвращаются
+        со счёта карты — проводкой, а сам возврат на терминале делает кассир).
+        СБП возвращается из «Входящих» через ``sbp.refund``, потому что там
+        решение принимает банк, а не касса.
         Возврат может быть частичным — по строкам и по штукам; сумма возврата
         не может превысить уплаченное по продаже.
         """
@@ -1583,7 +1633,8 @@ class Cashier:
                            (str(sale_id or "").strip(),))
         if not sale:
             raise ValueError("Продажа не найдена")
-        if str(sale.get("method") or "") != "cash":
+        by_card = str(sale.get("method") or "") == "card"
+        if str(sale.get("method") or "") not in PAID_METHODS:
             raise ValueError("Возврат СБП — из «Входящих»: деньги возвращает банк")
         if str(sale.get("cancelled_at") or ""):
             raise ValueError("Продажа отменена — возвращать нечего")
@@ -1647,7 +1698,9 @@ class Cashier:
                     raise ValueError(f"«{row.get('name') or move_id}»: строка уже возвращена")
                 res = self.shelf.return_stock(
                     move_id, qty, f"{note_text} · продажа {sale['id']}",
-                    actor=author)
+                    actor=author,
+                    account_id=self.card_account() if by_card else "",
+                    tx_channel=CARD_CHANNEL if by_card else "shelf")
                 tx = res.get("tx") or {}
                 if tx.get("id"):
                     tx_ids.append(str(tx["id"]))
@@ -1707,14 +1760,31 @@ class Cashier:
             " AND opened_at<=? ORDER BY datetime(opened_at) DESC LIMIT 1",
             (str(created_at or ""),))
 
+    def card_account(self) -> str:
+        """Счёт, на который ложатся деньги по терминалу (по умолчанию «Карта»).
+
+        Счёт из справочника счетов (``accounts``), поэтому владелец может
+        завести свой — например, отдельный счёт эквайринга — и указать его в
+        настройке «Касса: счёт для оплаты картой». Терминал деньги удерживает
+        сам: комиссию эквайринга владелец видит в банковском отчёте, PrintFlow
+        пишет ровно ту сумму, что пробита на кассе.
+        """
+        acc = str(self.db.setting("cashier_card_account_id", "card") or "card").strip()
+        return acc or "card"
+
     def _shift_totals(self, opened_at: str, end: str) -> dict[str, float]:
-        """Расчёт смены за окно [opened_at, end): наличные и выемки.
+        """Расчёт смены за окно [opened_at, end): наличные, карта и выемки.
 
         Наличными считаем доходы канала ``shelf`` — туда падают наличные
         продажи кассы и панели (один физический ящик). СБП и «онлайн» в ящик
         не попадают. Деньги фискальных продаж 1С показываем отдельной строкой
         ``income_1c``: по ленте неизвестно, нал это или карта, — в расчёт
         ожидаемого остатка их не включаем, владелец сверяет глазами.
+
+        Оплата картой (18.0) идёт отдельным каналом ``card``: деньги лежат на
+        счёте карты, а не в ящике, поэтому в ``income_card`` они попадают, а в
+        ``income_cash`` — нет. Иначе кассир при сверке искал бы в ящике деньги,
+        которых там физически не было.
         """
         opened_at = str(opened_at or "")
         end = str(end or "")
@@ -1729,6 +1799,15 @@ class Cashier:
             " WHERE channel='shelf' AND at>=? AND at<?",
             (opened_at, end)) or {}
         refunds = round(num(income.get("r")), 2)
+        # Карта считается по своему каналу и из ящика не вычитается: возврат по
+        # карте кассир проводит на терминале, наличные на него не уходят.
+        card = self.db.one(
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount END),0) s,"
+            " COALESCE(SUM(CASE WHEN kind='expense' AND category='refund'"
+            " THEN amount END),0) r FROM transactions"
+            " WHERE channel=? AND at>=? AND at<?",
+            (CARD_CHANNEL, opened_at, end)) or {}
+        card_refunds = round(num(card.get("r")), 2)
         collected = self.db.one(
             "SELECT COALESCE(SUM(amount),0) s FROM shelf_collections"
             " WHERE at>=? AND at<?", (opened_at, end)) or {}
@@ -1738,6 +1817,9 @@ class Cashier:
             " AND COALESCE(undone,0)=0 AND at>=? AND at<?",
             (opened_at, end)) or {}
         return {"income_cash": round(num(income.get("s")) - refunds, 2),
+                "income_card": round(num(card.get("s")) - card_refunds, 2),
+                "card_account": self.card_account(),
+                "card_refunds": card_refunds,
                 "collected": round(num(collected.get("s")), 2),
                 "income_1c": round(num(one_c.get("s")), 2),
                 "refunds": refunds}
