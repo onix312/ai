@@ -1,5 +1,11 @@
 # Приложение кассы на Android (оболочка, вариант «C»)
 
+> Второе приложение проекта — **пульт цеха** (`ai.printflow.pult`, модуль
+> `android/pult`): окно к странице `/pult`, киоск и поиск сервера в сети.
+> Инструкция для владельца — `docs/ПУЛЬТ-НА-ТЕЛЕФОНЕ.md`; всё, что ниже про
+> подпись, SDK и раздачу APK, относится к обоим приложениям. Манифесты сборки
+> разные (`site/app/version.json` — касса, `site/app/pult.json` — пульт).
+
 Выбор заказчика от 2026-09-10: Android, сканер/принтер из приложения не нужен,
 домена нет. Значит ни Web Bluetooth, ни публичного HTTPS, ни Google Play не
 потребуется — приложение является окном к той же кассе, что открывается в браузере.
@@ -140,10 +146,12 @@ ripple), вторичные — ghost (`bg_btn_ghost.xml`), поле адрес�
 ## Сборка и установка
 
 ```bash
-./scripts/android-build.sh                # debug-APK → site/app/NOZZA-kassa-<версия>.apk
+./scripts/android-build.sh                # debug-APK кассы → site/app/NOZZA-kassa-<версия>.apk
 ./scripts/android-build.sh --quiet-check  # только проверка JDK/SDK/Gradle
 ./scripts/android-build.sh --install      # собрать и поставить на телефон по USB
 ./scripts/android-build.sh --release      # релизная сборка (нужен свой ключ, ниже)
+./scripts/android-build.sh --pult         # debug-APK пульта цеха → site/app/NOZZA-pult-<версия>.apk
+./scripts/android-build.sh --pult --release --install
 ```
 
 Скрипт кладёт рядом `version.json` (версия, versionCode, имя файла, время) — по

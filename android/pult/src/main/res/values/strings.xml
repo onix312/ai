@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Пульт цеха</string>
+
+    <!-- Экран выбора сервера: те же тексты нужны скринридеру, поэтому они не
+         дублируются в коде. -->
+    <string name="panel_title">Пульт цеха</string>
+    <string name="panel_version_fmt">NOZZA · Пульт v%1$s</string>
+    <string name="panel_hint_initial">Куда ходить за пультом? Обычно http://192.168.1.x:8790</string>
+    <string name="panel_hint_server">Адрес сервера в локальной сети</string>
+    <string name="panel_hint_unreachable">Сервер не отвечает. Проверьте Wi-Fi и что PrintFlow запущен — или выберите другой адрес.</string>
+    <string name="url_hint">http://192.168.1.20:8790</string>
+    <string name="btn_open">Открыть пульт</string>
+    <string name="btn_find">Найти сервер в сети</string>
+    <string name="err_bad_url">Нужен адрес вида http://192.168.1.20:8790</string>
+    <string name="cb_awake">Не гасить экран, пока открыт пульт</string>
+    <string name="cb_kiosk">Полный экран (без системных панелей)</string>
+    <string name="scanning">Ищу…</string>
+    <string name="scan_found">Найдено серверов: %1$d</string>
+    <string name="scan_none">Ничего не нашёл. Запустите PrintFlow и введите адрес вручную.</string>
+    <string name="btn_reconnect">Переподключиться</string>
+    <string name="btn_change_server">Адрес сервера</string>
+    <string name="reconnecting">Проверяю адрес…</string>
+    <string name="reconnect_found">Нашёл пульт на %1$s — открываю</string>
+    <string name="reconnect_none">Сервер не отвечает. Проверьте, что PrintFlow запущен на ПК, и что телефон в той же Wi-Fi сети.</string>
+    <string name="conn_lost">Связи с сервером нет</string>
+    <string name="btn_retry">Повторить</string>
+    <string name="page_missing">Страница пульта не открылась: сервер отвечает, но /pult не отдал страницу. Обновите PrintFlow на ПК.</string>
+    <string name="exit_hint">Ещё раз «назад» — выход из пульта</string>
+    <string name="kiosk_on">Киоск: экран не гаснет, системные панели скрыты. Выход — долгое нажатие «назад».</string>
+</resources>

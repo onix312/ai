@@ -362,8 +362,11 @@
       if (!ok) {
         var txt = $('#pk_offline_text');
         if (txt) {
+          // Причина в скобках — для диагностики; но «нет ответа» уже сказано
+          // словами «не отвечает», второй раз это только мешает читать.
+          var tail = why && why !== 'нет ответа' ? ' (' + why + ')' : '';
           txt.textContent = 'Коннектор не отвечает — показываю последние данные'
-            + (st.at ? ' от ' + clock(st.at) : '') + (why ? ' (' + why + ')' : '') + '.';
+            + (st.at ? ' от ' + clock(st.at) : '') + tail + '.';
         }
       }
     }
@@ -982,6 +985,25 @@
      приходят из /api/pult/summary (18.0.4). На слабой сети и на телефоне у
      станка это заметно дешевле, чем четыре запроса на каждое обновление.
      Если коннектор старее 18.0.4 и сводки нет — откатываемся на /api/state. */
+  /* Последняя удачная сводка — в память телефона (18.0.5). Смысл: у станка
+     связь пропадает чаще, чем хотелось бы, а оператору нужно увидеть, что
+     было, а не пустой экран. Данные показываются с честной пометкой времени
+     и словом «связи нет» — это не «живые цифры». */
+  var LAST_KEY = 'pult_last';
+  function remember(d){
+    try {
+      localStorage.setItem(LAST_KEY, JSON.stringify({ saved: Date.now() / 1000, data: d }));
+    } catch (e) {}
+  }
+  function recall(){
+    try {
+      var raw = localStorage.getItem(LAST_KEY);
+      if (!raw) return null;
+      var box = JSON.parse(raw);
+      if (!box || !box.data || !box.data.printers) return null;
+      return box;
+    } catch (e) { return null; }
+  }
   function apply(d){
     st.at = stamp(d.at);
     st.printers = d.printers || [];
@@ -995,6 +1017,7 @@
     if (!st.active && st.printers.length) st.active = st.printers[0].id;
     if (st.active && !printerById(st.active) && st.printers.length) st.active = st.printers[0].id;
     setOnline(true);
+    remember(d);
     setFreshness();
     renderPark();
     renderQueue();
@@ -1105,6 +1128,15 @@
     var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));
     if (want && ['park', 'queue', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
   } catch (e) {}
+  /* Пока идёт первый запрос, показываем последнюю известную картину: иначе
+     на медленной сети оператор видит «данных ещё нет» и решает, что пульт сломан. */
+  var remembered = recall();
+  if (remembered) {
+    apply(remembered.data);
+    st.at = remembered.saved;      // время именно того снимка, а не «сейчас»
+    setFreshness();
+    setOnline(false, 'пока нет ответа');
+  }
   try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
   try { var s = screenFromLink || localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
   bindBrand();

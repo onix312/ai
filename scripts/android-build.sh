@@ -7,10 +7,12 @@
 # нужно поставить, и спрашивает разрешение (установка ~2-3 ГБ — решение
 # владельца, а не наше).
 #
-#   ./scripts/android-build.sh              # debug-сборка → site/app/*.apk
+#   ./scripts/android-build.sh              # debug-сборка кассы → site/app/*.apk
 #   ./scripts/android-build.sh --release    # релизная (нужен android/keystore.properties)
 #   ./scripts/android-build.sh --install     # собрать и поставить на подключённый телефон
 #   ./scripts/android-build.sh --quiet-check # только проверить окружение, ничего не собирать
+#   ./scripts/android-build.sh --pult        # то же для пульта цеха (ai.printflow.pult)
+#   ./scripts/android-build.sh --pult --release --install
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,13 +21,15 @@ OUT="$ROOT/site/app"
 MODE="debug"
 DO_INSTALL=0
 CHECK_ONLY=0
+TARGET="app"      # app — касса, pult — пульт цеха
 
 for arg in "$@"; do
   case "$arg" in
     --release) MODE="release" ;;
     --install) DO_INSTALL=1 ;;
     --quiet-check) CHECK_ONLY=1 ;;
-    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --pult) TARGET="pult" ;;
+    -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "Не знаю аргумент: $arg" >&2; exit 2 ;;
   esac
 done
@@ -39,18 +43,23 @@ need_gradle() {
 }
 
 check_env() {
-  local ok=1
+  # 0 — окружение готово, 1 — чего-то не хватает. Раньше здесь было наоборот
+  # (`ok=1`, сбрасывался в 0 при проблеме), и при отсутствии JDK/SDK функция
+  # возвращала успех: скрипт бодро печатал «Окружение готово» и падал позже,
+  # на пустом GRADLE — вместо списка того, что надо поставить. Найдено при
+  # разборе 18.0.5 живой проверкой `--quiet-check` без JDK.
+  local ok=0
   if ! command -v java >/dev/null 2>&1; then
     echo "✗ Не найден JDK 17 (java: command not found)."
     echo "  Ubuntu/Debian: sudo apt install openjdk-17-jdk"
     echo "  Windows/macOS: поставьте Android Studio — JDK прилагается."
-    ok=0
+    ok=1
   else
     local major
     major="$(java -version 2>&1 | head -1 | sed -E 's/.*version "([0-9]+).*/\1/')"
     if [[ -z "$major" || "$major" -lt 17 ]]; then
       echo "✗ Нужен JDK 17+, найден: ${major:-не разобрался} (AGP 8 его требует)."
-      ok=0
+      ok=1
     fi
   fi
 
@@ -60,7 +69,7 @@ check_env() {
     echo "  Проще всего: установить Android Studio (в нём SDK уже есть) или"
     echo "  command-line tools: https://developer.android.com/studio#command-line-tools-only"
     echo "  затем: sdkmanager \"platforms;android-34\" \"build-tools;34.0.0\" \"platform-tools\""
-    ok=0
+    ok=1
   else
     say "SDK: $sdk"
     for part in "platforms;android-34" "build-tools;34.0.0"; do
@@ -72,7 +81,7 @@ check_env() {
       if [[ ! -d "$dir" ]]; then
         echo "! нет компонента: $part"
         echo "  sdkmanager \"$part\"  (и согласие на лицензии: yes | sdkmanager --licenses)"
-        ok=0
+        ok=1
       fi
     done
   fi
@@ -81,11 +90,11 @@ check_env() {
     echo "✗ Нет ни gradle в PATH, ни обёртки android/gradlew."
     echo "  Один раз сгенерируйте обёртку: (cd android && gradle wrapper --gradle-version 8.7)"
     echo "  (jar обёртки в репозиторий не кладём — он бинарный и меняется вместе с Gradle)"
-    ok=0
+    ok=1
   fi
   if [[ "$MODE" == "release" && ! -f "$APP/keystore.properties" ]]; then
     echo "✗ --release требует android/keystore.properties (ключ подписи, см. docs/ANDROID.md)."
-    ok=0
+    ok=1
   fi
   return "$ok"
 }
@@ -100,19 +109,32 @@ fi
 if [[ "$CHECK_ONLY" == "1" ]]; then echo "✓ Окружение готово (проверка, сборка не запускалась)"; exit 0; fi
 
 GRADLE="$(need_gradle)"
-VERSION_NAME="$(sed -nE "s/^[[:space:]]*versionName '([^']+)'.*/\1/p" "$APP/app/build.gradle" | head -1)"
-VERSION_CODE="$(sed -nE "s/^[[:space:]]*versionCode ([0-9]+).*/\1/p" "$APP/app/build.gradle" | head -1)"
-[[ -n "$VERSION_NAME" ]] || die "не удалось прочитать versionName в android/app/build.gradle"
+# Две оболочки в одном Gradle-проекте: касса (app) и пульт цеха (pult).
+# Разные applicationId — разные иконки на телефоне, и обновление одной не
+# трогает другую. Имена манифестов тоже разные: панель читает version.json
+# (касса), пульт — pult.json, чтобы телефон пульта не предлагал «обновить
+# кассу» и наоборот.
+if [[ "$TARGET" == "pult" ]]; then
+  MODULE="pult"; LABEL="пульт цеха"; PKG="ai.printflow.pult"
+  ARTIFACT="pult"; MANIFEST="$OUT/pult.json"; FILE_PREFIX="NOZZA-pult"
+else
+  MODULE="app"; LABEL="касса"; PKG="ai.printflow.kassa"
+  ARTIFACT="app"; MANIFEST="$OUT/version.json"; FILE_PREFIX="NOZZA-kassa"
+fi
+GRADLE_FILE="$APP/$MODULE/build.gradle"
+VERSION_NAME="$(sed -nE "s/^[[:space:]]*versionName '([^']+)'.*/\1/p" "$GRADLE_FILE" | head -1)"
+VERSION_CODE="$(sed -nE "s/^[[:space:]]*versionCode ([0-9]+).*/\1/p" "$GRADLE_FILE" | head -1)"
+[[ -n "$VERSION_NAME" ]] || die "не удалось прочитать versionName в android/$MODULE/build.gradle"
 
-echo "— Сборка ($MODE) · NOZZA касса $VERSION_NAME ($VERSION_CODE)"
+echo "— Сборка ($MODE) · NOZZA $LABEL $VERSION_NAME ($VERSION_CODE)"
 MODE_CAP="$(tr '[:lower:]' '[:upper:]' <<<"${MODE:0:1}")${MODE:1}"
-( cd "$APP" && "$GRADLE" --console=plain ":app:assemble${MODE_CAP}" )
+( cd "$APP" && "$GRADLE" --console=plain ":$MODULE:assemble${MODE_CAP}" )
 
-APK="$APP/app/build/outputs/apk/$MODE/app-$MODE.apk"
+APK="$APP/$MODULE/build/outputs/apk/$MODE/$ARTIFACT-$MODE.apk"
 if [[ ! -f "$APK" ]]; then
   # неподписанная release-сборка называется иначе: это не успех, а повод
   # завести ключ — телефон такой APK не примет
-  ALT="$APP/app/build/outputs/apk/$MODE/app-$MODE-unsigned.apk"
+  ALT="$APP/$MODULE/build/outputs/apk/$MODE/$ARTIFACT-$MODE-unsigned.apk"
   if [[ -f "$ALT" ]]; then
     die "APK собран без подписи ($ALT). Для релиза нужен android/keystore.properties — см. docs/ANDROID.md"
   fi
@@ -121,17 +143,17 @@ fi
 
 umask 022   # телефон читает файл по HTTP — права на каталог данных не должны мешать
 mkdir -p "$OUT"
-NAME="NOZZA-kassa-${VERSION_NAME}.apk"
+NAME="${FILE_PREFIX}-${VERSION_NAME}.apk"
 cp "$APK" "$OUT/$NAME"
 # Манифест сборки. Кроме версии и имени файла пишем размер и sha256: по ним
 # панель и оболочка проверяют, что телефон скачал именно эту сборку, а не
 # обрезанный файл. Changelog берётся из CHANGELOG.md — раздел текущей версии,
 # чтобы кассир видел «что нового» до установки (17.0.13).
-python3 - "$OUT/version.json" "$VERSION_NAME" "$VERSION_CODE" "$NAME" \
-         "$OUT/$NAME" "$ROOT/CHANGELOG.md" <<'PY'
-import hashlib, json, sys, time
+python3 - "$MANIFEST" "$VERSION_NAME" "$VERSION_CODE" "$NAME" \
+         "$OUT/$NAME" "$ROOT/CHANGELOG.md" "$PKG" <<'PY'
+import hashlib, json, os, sys, time
 
-target, version, code, name, apk, changelog_path = sys.argv[1:7]
+target, version, code, name, apk, changelog_path, package = sys.argv[1:8]
 
 
 def section(path: str, tag: str) -> str:
@@ -161,9 +183,9 @@ json.dump({
     "version": version,
     "version_code": int(code),
     "file": name,
-    "package": "ai.printflow.kassa",
+    "package": package,
     "built_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-    "size_bytes": __import__("os").path.getsize(apk),
+    "size_bytes": os.path.getsize(apk),
     "sha256": digest.hexdigest(),
     "changelog": section(changelog_path, version),
 }, open(target, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
@@ -172,7 +194,7 @@ PY
 SIZE="$(du -h "$OUT/$NAME" | cut -f1)"
 echo
 echo "✓ Готово: site/app/$NAME ($SIZE)"
-echo "  На телефоне откройте кассу — появится плашка «Скачать», или напрямую:"
+echo "  На телефоне откройте ${TARGET/app/кассу} — появится плашка «Скачать», или напрямую:"
 IP="$(python3 - <<'PY' 2>/dev/null || true
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

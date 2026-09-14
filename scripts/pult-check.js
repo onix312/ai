@@ -121,6 +121,7 @@ function runPage(options) {
     spools: opts.spools || { spools: [] },
     shot: opts.shot || { ok: true, shot: { id: 'shot1', at: Date.now() / 1000, note: 'Снимок с пульта цеха' } },
     answers: opts.answers || {},
+    storage: opts.storage || {},
     failFetch: !!opts.failFetch,
   };
   const sandbox = {
@@ -128,7 +129,10 @@ function runPage(options) {
     document: page.document,
     navigator: {},
     location: { origin: 'http://127.0.0.1:8790', search: opts.search || '' },
-    localStorage: { getItem() { return null; }, setItem() {} },
+    localStorage: {
+      getItem(key) { return Object.prototype.hasOwnProperty.call(env.storage, key) ? env.storage[key] : null; },
+      setItem(key, value) { env.storage[key] = String(value); },
+    },
     setTimeout, clearTimeout, setInterval, clearInterval,
     AbortController, Promise, Date, JSON, Math, String, Number, Object, Array, Boolean,
     isFinite, parseFloat, parseInt, encodeURIComponent,
@@ -187,6 +191,7 @@ function runPage(options) {
   return {
     store: page.store,
     requests,
+    storage: env.storage,
     prompts,
     posts: () => requests.filter((r) => r.method === 'POST'),
     clickParkCmd(cmd) {
@@ -613,6 +618,39 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
       junk.store['pk_screen_park'].hidden === false
       && junk.store['pk_screen_queue'].hidden === true,
       JSON.stringify({ park: junk.store['pk_screen_park'].hidden }));
+  }
+
+  /* 6.3 Офлайн-память (18.0.5): последняя удачная сводка переживает перезагрузку */
+  {
+    // Успешный такт кладёт сводку в память телефона…
+    const live = runPage({});
+    await wait(60);
+    const saved = live.storage['pult_last'];
+    check('офлайн: удачная сводка запомнена в телефоне', !!saved,
+      JSON.stringify(Object.keys(live.storage)));
+    let parsed = null;
+    try { parsed = JSON.parse(saved); } catch (e) {}
+    check('офлайн: в памяти лежит время снимка и сам снимок',
+      !!parsed && typeof parsed.saved === 'number' && Array.isArray(parsed.data.printers),
+      String(saved).slice(0, 80));
+
+    // …а следующий запуск без связи показывает её, а не пустоту
+    const offline = runPage({ failFetch: true, storage: { pult_last: saved } });
+    await wait(80);
+    const park = offline.store['pk_tiles'].innerHTML || '';
+    check('офлайн: без сети плитки рисуются из памяти', park.indexOf('data-printer=') >= 0,
+      park.slice(0, 90));
+    check('офлайн: на плашке честное «связи нет» и адрес без ответа',
+      offline.store['pk_net'].textContent === 'связи нет'
+      && offline.store['pk_offline'].hidden === false,
+      JSON.stringify({ net: offline.store['pk_net'].textContent,
+                       off: offline.store['pk_offline'].hidden }));
+    check('офлайн: в тексте плашки видно, что это последние данные',
+      String(offline.store['pk_offline_text'].textContent).indexOf('последние данные') >= 0,
+      String(offline.store['pk_offline_text'].textContent));
+    check('офлайн: возраст снимка — из памяти, а не «данных ещё нет»',
+      String(offline.store['pk_at'].textContent).indexOf('обновлено') >= 0,
+      String(offline.store['pk_at'].textContent));
   }
 
   /* 7. Экраны и выбор принтера */

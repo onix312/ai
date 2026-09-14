@@ -1,0 +1,74 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// Второе приложение проекта: окно к пульту цеха (/pult). Отдельный модуль, а не
+// второй флейвор кассы, потому что это разные приложения для разных людей:
+// касса стоит у прилавка и звенит о платежах, пульт лежит в цеху у станка.
+// Разные applicationId — значит разные иконки, свои разрешения, и обновление
+// пульта не трогает кассу (у неё свои настройки в WebView localStorage).
+//
+// Ключ подписи тот же, что у кассы: android/keystore.properties вне Git. Без
+// файла release-сборка выходит неподписанной и скрипт сборки об этом скажет.
+def keystoreProps = new Properties()
+def keystoreFile = rootProject.file('keystore.properties')
+def hasKeystore = keystoreFile.exists()
+if (hasKeystore) {
+    keystoreFile.withInputStream { keystoreProps.load(it) }
+}
+
+android {
+    namespace 'ai.printflow.pult'
+    compileSdk 34
+
+    defaultConfig {
+        // Имя пакета — часть контракта: по нему APK ставится поверх себя, а
+        // localStorage WebView (выбранный экран, режим киоска) сохраняется
+        // между обновлениями. Менять нельзя без потери настроек.
+        applicationId 'ai.printflow.pult'
+        minSdk 24
+        targetSdk 34
+        // versionCode = major*10000 + minor*100 + patch: 17.0.26 -> 170026.
+        // Считается от APP_VERSION — расхождение проверяет
+        // connector/tests/test_android_pult.py, потому что «обновись» на
+        // телефоне сравнивает именно это число.
+        versionCode 170026
+        versionName '17.0.26'
+    }
+
+    signingConfigs {
+        if (hasKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProps.getProperty('storeFile'))
+                storePassword keystoreProps.getProperty('storePassword')
+                keyAlias keystoreProps.getProperty('keyAlias')
+                keyPassword keystoreProps.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        debug { }
+        release {
+            minifyEnabled false
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    buildFeatures {
+        // versionName читает панель сервера («NOZZA · Пульт v17.0.26») —
+        // одно место, где живёт версия, а не два.
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}

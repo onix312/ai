@@ -1,0 +1,15 @@
+<resources>
+    <!-- Без AppCompat: оболочке нужен только WebView, а каждая чужая
+         библиотека — это ещё и будущая сборка, которая «внезапно не собралась».
+
+         statusBarColor/navigationBarColor непрозрачные (= фон страницы), поэтому
+         шапка пульта никогда не окажется под вырезом камеры: система сама
+         расширяет статусбар до его высоты. Совпадает с решением кассы
+         (docs/ANDROID.md) и работает на minSdk 24 без androidx. -->
+    <style name="Theme.Pult" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/pult_bg</item>
+        <item name="android:statusBarColor">@color/pult_bg</item>
+        <item name="android:navigationBarColor">@color/pult_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
