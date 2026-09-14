@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import pathlib
 import sys
 import tempfile
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.api import Handler, _upload_filename, save_upload  # noqa: E402
+from connector.printflow.uploads import _form_ams_mapping  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.manager import PrinterManager  # noqa: E402
 from connector.printflow.repo import Repo  # noqa: E402
@@ -157,6 +159,47 @@ class LocalQueueTests(unittest.TestCase):
         self.assertEqual(sent["payload"]["job"]["priority"], 7)
         self.assertEqual(sent["payload"]["job"]["printer_id"], None)
         self.assertTrue((self.root / "uploads" / "model.gcode").exists())
+
+    def test_multipart_upload_carries_ams_mapping(self):
+        """Раскладка AMS уходит вместе с файлом (18.0.7).
+
+        Пульт отдаёт и файл, и раскладку одним запросом, как слайсер. Позиция в
+        списке — материал файла, значение — слот AMS; -1 значит «не назначено»
+        (так его отдаёт auto_ams_map), поэтому в списке он остаётся.
+        """
+        for field, expected in (("0,1", [0, 1]), ("[0, 1]", [0, 1]), ("0;2", [0, 2])):
+            with self.subTest(field=field):
+                boundary = "----printflow-map"
+                body = (
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="ams_mapping"\r\n\r\n'
+                    f"{field}\r\n"
+                    f"--{boundary}\r\n"
+                    'Content-Disposition: form-data; name="file"; filename="multi.3mf"\r\n'
+                    "Content-Type: application/octet-stream\r\n\r\n"
+                    "3MF\r\n"
+                    f"--{boundary}--\r\n"
+                ).encode("utf-8")
+                handler = Handler.__new__(Handler)
+                handler.headers = {"Content-Length": str(len(body)),
+                                   "Content-Type": f"multipart/form-data; boundary={boundary}"}
+                handler.rfile = io.BytesIO(body)
+                handler.api = SimpleNamespace(manager=self.manager)
+                sent = {}
+                handler.send_json = lambda code, payload: sent.update(code=code, payload=payload)
+                with patch("connector.printflow.config.UPLOAD_DIR", self.root / "uploads"):
+                    handler.handle_job_upload()
+                self.assertEqual(sent["code"], 200)
+                self.assertEqual(sent["payload"]["job"]["ams_mapping"], json.dumps(expected))
+
+    def test_multipart_upload_without_mapping_keeps_printer_choice(self):
+        """Пустое поле или мусор — раскладку выбирает принтер, поведение прежнее."""
+        self.assertEqual(_form_ams_mapping(""), [])
+        self.assertEqual(_form_ams_mapping("   "), [])
+        self.assertEqual(_form_ams_mapping("мусор"), [])
+        self.assertEqual(_form_ams_mapping("99"), [])
+        self.assertEqual(_form_ams_mapping("-2"), [])
+        self.assertEqual(_form_ams_mapping("-1, 3"), [-1, 3])
 
     def test_filename_normalizes_windows_path_and_rejects_null(self):
         self.assertEqual(_upload_filename(r"C:\\temp\\model.3mf"), "model.3mf")

@@ -237,20 +237,22 @@ class PultDocsTests(unittest.TestCase):
                        "ai.printflow.pult", "Приёмка", "офлайн"):
             self.assertIn(phrase, text, f"в инструкции нет «{phrase}»")
 
-    def test_acceptance_has_stage_one_scenarios_and_the_file_screen(self):
-        """Семь сценариев ТЗ этапа 1 и восьмой — «Файл на печать» (этап 2).
+    def test_acceptance_has_stage_one_scenarios_and_stage_two(self):
+        """Семь сценариев ТЗ этапа 1 и два новых — этап 2 (файл и слоты AMS).
 
-        Порядок важен: сценарии этапа 1 не переписываются, новый добавляется
+        Порядок важен: сценарии этапа 1 не переписываются, новые добавляются
         в конец — владелец проходит список сверху вниз и видит, что добавилось.
         """
         text = self.DOC.read_text(encoding="utf-8")
         section = text.split("## Приёмка", 1)[1].split("\n## ", 1)[0]
         numbers = re.findall(r"^(\d)\.\s", section, re.M)
-        self.assertEqual(["1", "2", "3", "4", "5", "6", "7", "8"], numbers,
-                         "семь сценариев этапа 1 плюс «Файл на печать» (18.0.6)")
+        self.assertEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"], numbers,
+                         "семь сценариев этапа 1 плюс «Файл на печать» (18.0.6) "
+                         "и «Слоты AMS и запуск» (18.0.7)")
         self.assertIn("**Файл на печать", section)
+        self.assertIn("**Слоты AMS и запуск с пульта", section)
         self.assertIn("девять проверок", section,
-                      "скрипт приёмки вырос до девяти сцен — это должно быть видно")
+                      "скрипт приёмки идёт по девяти сценам — это должно быть видно")
 
 
 if __name__ == "__main__":

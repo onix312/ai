@@ -162,6 +162,7 @@ function runPage(options) {
     uploadError: opts.uploadError || '',
     uploadNetworkFail: !!opts.uploadNetworkFail,
     uploads: [],
+    autoMap: opts.autoMap || null,
   };
   const sandbox = {
     console,
@@ -243,6 +244,16 @@ function runPage(options) {
       }
       if (url.indexOf('/api/printer/preflight') === 0) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.preflight) });
+      }
+      if (url === '/api/printer/ams/auto-map') {
+        // Как отвечает сервер (`auto_ams_map`): слот на материал и живые треи.
+        // По умолчанию считаем по фикстуре парка — PETG в слоте 1.
+        const trays = ((env.state.printers[0] || {}).ams || {}).trays || [];
+        const answer = env.autoMap || {
+          mapping: trays.length ? [Number(trays[0].slot || 0)] : [-1],
+          trays, required: (payload && payload.required) || [],
+        };
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) });
       }
       if (url.indexOf('/api/ams/memory') === 0) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.ams) });
@@ -995,6 +1006,157 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('перетаскивание: после броска подсветка гаснет',
       zone.store['pk_drop'].classList.contains('pk-over') === false,
       String(zone.store['pk_drop'].classList.contains('pk-over')));
+  }
+
+  /* 9. Раскладка AMS и запуск (18.0.7) */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.clickTab('file');
+    page.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(80);
+    const auto = page.posts().filter((r) => r.url === '/api/printer/ams/auto-map')[0];
+    check('раскладка: материалы файла уходят на авто-мап сервера',
+      !!auto && auto.payload.printer_id === 'prn1'
+      && (auto.payload.required || [])[0]
+      && String(auto.payload.required[0].type).toUpperCase() === 'PETG',
+      JSON.stringify(auto && auto.payload));
+    const card = text(page.store['pk_est'].innerHTML);
+    check('раскладка: на карточке видно «материал → слот» и выбранный слот',
+      card.indexOf('Материалы файла → слоты AMS') >= 0
+      && page.store['pk_est'].innerHTML.indexOf('data-slot=\"0\"') >= 0
+      && /слот 1 · PETG/.test(page.store['pk_est'].innerHTML), card.slice(0, 260));
+    check('раскладка: назван итог раскладки словами',
+      String(page.store['pk_msg'].textContent).indexOf('AMS: слоты 1') >= 0,
+      String(page.store['pk_msg'].textContent));
+
+    // Отправка: раскладка обязана уехать вместе с заданием.
+    page.requests.length = 0;
+    page.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_queue' }) } });
+    await wait(80);
+    const send = page.uploads[1];
+    check('раскладка: с заданием уходит ams_mapping «0»',
+      !!send && send.body.ams_mapping === '0', JSON.stringify(send && send.body));
+
+    // Оператор против раскладки: «не из AMS» — поле не отправляем вовсе.
+    const free = runPage({});
+    await wait(60);
+    free.clickTab('file');
+    free.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    free.fire('pk_file_input', 'change');
+    await wait(80);
+    free.fire('pk_est', 'click', { target: { closest: () => ({ dataset: { fil: '0', slot: '-1' },
+      className: 'pk-chip' }) } });
+    await wait(20);
+    check('раскладка: «не из AMS» видно словами, слот не выдуман',
+      text(free.store['pk_est'].innerHTML).indexOf('ни один слот не назначен') >= 0,
+      text(free.store['pk_est'].innerHTML).slice(0, 200));
+    free.requests.length = 0;
+    free.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_queue' }) } });
+    await wait(80);
+    const noMap = free.uploads[1];
+    check('раскладка: без назначенных слотов поле не отправляем — решает принтер',
+      !!noMap && noMap.body.ams_mapping === undefined, JSON.stringify(noMap && noMap.body));
+
+    // AMS не видно: честная надпись вместо пустых чипсов.
+    const noAms = runPage({ autoMap: { mapping: [-1], trays: [], required: [] } });
+    await wait(60);
+    noAms.clickTab('file');
+    noAms.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    noAms.fire('pk_file_input', 'change');
+    await wait(80);
+    check('раскладка: без AMS сказано, что слоты выберет принтер, и чипсов нет',
+      text(noAms.store['pk_est'].innerHTML).indexOf('AMS на этом принтере не видно') >= 0
+      && noAms.store['pk_est'].innerHTML.indexOf('data-slot=') < 0,
+      text(noAms.store['pk_est'].innerHTML).slice(0, 200));
+  }
+
+  /* 9.1 «Отправить и запустить»: Preflight с раскладкой, подтверждение, старт */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.clickTab('file');
+    page.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    page.fire('pk_file_input', 'change');
+    await wait(80);
+    check('запуск: на выбранном принтере кнопка есть',
+      page.store['pk_est'].innerHTML.indexOf('id=\"pk_b_start\"') >= 0,
+      page.store['pk_est'].innerHTML.slice(-200));
+
+    page.requests.length = 0;
+    page.prompts.length = 0;
+    page.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_start' }) } });
+    await wait(120);
+    const pre = page.requests.filter((r) => r.url.indexOf('/api/printer/preflight') === 0)[0];
+    check('запуск: Preflight получает раскладку AMS из карточки',
+      !!pre && pre.url.indexOf('printer_id=prn1') > 0 && pre.url.indexOf('plate=1') > 0
+      && decodeURIComponent(pre.url).indexOf('mapping=[0]') > 0, pre && pre.url);
+    const start = page.posts().filter((r) => r.url === '/api/jobs/start')[0];
+    check('запуск: старт с подтверждением и идемпотентным ключом',
+      !!start && start.payload.confirmed === true
+      && /^pult-job9-\d+$/.test(String(start.payload.start_request_id || '')),
+      JSON.stringify(start && start.payload));
+    check('запуск: файл ушёл вместе с плитой, принтером и раскладкой',
+      page.uploads.length === 2 && page.uploads[1].body.ams_mapping === '0'
+      && Number(page.uploads[1].body.plate) === 1
+      && page.uploads[1].body.printer_id === 'prn1',
+      JSON.stringify(page.uploads.map((u) => u.body)));
+
+    // Отказ оператора: старта нет.
+    const refuse = runPage({ answers: { 'Запустить': false } });
+    await wait(60);
+    refuse.clickTab('file');
+    refuse.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    refuse.fire('pk_file_input', 'change');
+    await wait(80);
+    refuse.requests.length = 0;
+    refuse.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_start' }) } });
+    await wait(120);
+    check('запуск: отказ оператора — принтер не тревожим',
+      refuse.posts().filter((r) => r.url === '/api/jobs/start').length === 0,
+      JSON.stringify(refuse.posts().map((r) => r.url)));
+
+    // Блокировка Preflight: стоп и объяснение.
+    const blocked = runPage({ preflight: { blocks: [{ title: 'Пластик не тот' }], warns: [] } });
+    await wait(60);
+    blocked.clickTab('file');
+    blocked.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    blocked.fire('pk_file_input', 'change');
+    await wait(80);
+    blocked.requests.length = 0;
+    blocked.fire('pk_est', 'click', { target: { closest: () => ({ id: 'pk_b_start' }) } });
+    await wait(120);
+    check('запуск: блокировка Preflight — стоп и причина словами',
+      blocked.posts().filter((r) => r.url === '/api/jobs/start').length === 0
+      && String(blocked.store['pk_msg'].textContent).indexOf('Пластик не тот') >= 0,
+      String(blocked.store['pk_msg'].textContent));
+
+    // «Любой принтер»: запускать не на чем — кнопки нет.
+    const any = runPage({});
+    await wait(60);
+    any.clickTab('file');
+    any.store['pk_file_input'].files = [fakeFile('stand.3mf')];
+    any.fire('pk_file_input', 'change');
+    await wait(80);
+    any.fire('pk_est', 'click', { target: { closest: () => ({ dataset: { printer: '' },
+      className: 'pk-chip', id: '' }) } });
+    await wait(40);
+    check('запуск: на «любом принтере» кнопки запуска нет (печатать не на чем)',
+      any.store['pk_est'].innerHTML.indexOf('id=\"pk_b_start\"') < 0,
+      any.store['pk_est'].innerHTML.slice(-160));
+  }
+
+  /* 9.2 Запуск из очереди знает раскладку задания */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.requests.length = 0;
+    page.clickJobAct('start', 'job1');
+    await wait(100);
+    const pre = page.requests.filter((r) => r.url.indexOf('/api/printer/preflight') === 0)[0];
+    check('очередь: Preflight получает раскладку из задания (не теряет её)',
+      !!pre && pre.url.indexOf('mapping=') > 0, pre && pre.url);
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

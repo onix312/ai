@@ -1051,7 +1051,7 @@ class PultFileScreenTests(TestCase):
 
     def test_printer_and_plate_travel_with_the_job(self):
         self.assertIn("fields.printer_id = pid;", self.html)
-        self.assertIn("var fields = { plate: loaded.plate || 1 };", self.html)
+        self.assertIn("var fields = { plate: plate };", self.html)
         self.assertIn('data-printer=""', self.html,
                       "«любой принтер» обязан остаться выбором оператора, а не умолчанием")
 
@@ -1061,6 +1061,42 @@ class PultFileScreenTests(TestCase):
         self.assertIn("оценку взять неоткуда", self.html)
         self.assertNotIn("slicer.js", self.html)
         self.assertNotIn("wasm", self.html.lower())
+
+    def test_ams_mapping_is_chosen_like_in_the_slicer(self):
+        """18.0.7: материалы файла раскладываются по слотам AMS.
+
+        Раскладку считает сервер тем же `auto_ams_map`, что у панели, а оператор
+        её только подтверждает или переставляет пальцем — своего матчинга в
+        странице нет.
+        """
+        self.assertIn("post('/api/printer/ams/auto-map'", self.html)
+        self.assertIn("Материалы файла → слоты AMS", self.html)
+        self.assertIn("data-fil=", self.html)
+        self.assertIn('data-slot="-1"', self.html,
+                      "«не из AMS» — это -1 из auto_ams_map, а не выдуманный слот")
+        self.assertIn("function filamentsOf()", self.html)
+        self.assertIn("AMS на этом принтере не видно", self.html,
+                      "без AMS честная надпись вместо пустых чипсов")
+
+    def test_mapping_travels_with_the_job(self):
+        self.assertIn("fields.ams_mapping = mapField;", self.html)
+        self.assertIn("if (!real.length) return '';", self.html,
+                      "раскладка из одних «не назначено» не отправляется — решает принтер")
+        self.assertIn("loaded.map[idx] = num(b.dataset.slot, -1);", self.html)
+
+    def test_send_and_start_uses_preflight_with_mapping(self):
+        """«Отправить и запустить» — тот же путь, что у панели, без своих правил."""
+        self.assertIn("'/api/printer/preflight?printer_id=' + encodeURIComponent(pid)", self.html)
+        self.assertIn("'&mapping=' + encodeURIComponent(JSON.stringify(mapping || []))", self.html)
+        self.assertIn("post('/api/jobs/start', {", self.html)
+        self.assertIn("preflight_acknowledged: warns.length > 0,", self.html)
+        self.assertIn("if (blocks.length) {", self.html)
+        self.assertIn("Запуск — только на конкретном принтере", self.html,
+                      "на «любом принтере» запускать нечего — кнопки быть не должно")
+        # Запуск из очереди тоже обязан вспомнить раскладку задания, иначе
+        # Preflight сверит материал с активным слотом и заблокирует верный старт.
+        self.assertIn("try { map = JSON.parse(job.ams_mapping || '[]') || []; } catch (e) { map = []; }",
+                      self.html)
 
     def test_nothing_leaves_the_local_network(self):
         # Ровно как весь остальной PrintFlow: страница и её ассеты — только свои.

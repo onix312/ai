@@ -22,6 +22,35 @@ from .http_helpers import (MAX_UPLOAD, _form_bool, _upload_filename,
                            save_upload)
 
 
+def _form_ams_mapping(raw: str) -> list[int]:
+    """Раскладка AMS из поля формы: «0,1», «[0, 1]» или мусор → пусто.
+
+    Позиция в списке — материал файла, значение — номер слота AMS (с нуля).
+    -1 в PrintFlow значит «слот не назначен» — так его отдаёт `auto_ams_map`,
+    поэтому -1 остаётся в списке: по нему видно, какому материалу слота не
+    нашлось. Разбор терпимый: поле необязательное, мусор не должен ломать
+    загрузку файла.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        parsed = [part for part in text.replace(";", ",").split(",")]
+    if not isinstance(parsed, list):
+        parsed = [parsed]
+    out: list[int] = []
+    for value in parsed:
+        try:
+            slot = int(str(value).strip())
+        except (TypeError, ValueError):
+            continue
+        if -1 <= slot <= 15:
+            out.append(slot)
+    return out
+
+
 class UploadMixin:
     """Методы приёма файлов. Подмешивается в HTTP-обработчик."""
 
@@ -67,6 +96,9 @@ class UploadMixin:
         if not requested_name.lower().endswith((".3mf", ".gcode", ".gcode.3mf")):
             return self.send_json(400, {"error": "Поддерживаются только 3MF и G-code"})
         name, local, created = save_upload(requested_name, upload[1])
+        # Раскладка AMS: пульт отдаёт файл и раскладку одним запросом, как
+        # слайсер. Пустое поле — «пусть решит принтер»: поведение прежнее.
+        mapping = _form_ams_mapping(fields.get("ams_mapping"))
         payload = {
             "name": str(fields.get("name") or Path(name).stem).strip() or Path(name).stem,
             "file": name,
@@ -81,6 +113,8 @@ class UploadMixin:
             "source": "local-upload",
             "allow_auto_start": _form_bool(fields.get("allow_auto_start"), True),
         }
+        if mapping:
+            payload["ams_mapping"] = mapping
         try:
             job = self.api.manager.enqueue(payload)
         except Exception:

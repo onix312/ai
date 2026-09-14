@@ -5,8 +5,8 @@
 проверить без пальца и без принтера — поднимает коннектор на **копии** данных и
 проходит те же сценарии по серверной части: страница и сводка, команды с
 подтверждением, очередь, AMS, камера и свет, «сводка ничего не пишет»,
-оценка из файла и отправка выбранной плиты, файл без данных слайсера,
-неприкосновенность рабочей базы.
+оценка из файла, раскладка AMS и отправка выбранной плиты, файл без данных
+слайсера, неприкосновенность рабочей базы.
 
 Копия обязательна: приёмка не имеет права трогать рабочую базу. Если рабочих
 данных на компьютере нет, скрипт работает на пустой базе и честно помечает те
@@ -332,13 +332,17 @@ def run_checks(probe: Probe, client: Client, copied: bool) -> None:
             assert abs(float(reply.get("grams") or 0) - 64.6) < 0.3, reply.get("grams")
             assert abs(float(reply.get("minutes") or 0) - 176.4) < 0.5, reply.get("minutes")
             status, queued = client.upload("/api/jobs/upload", path.name, payload,
-                                           {"plate": 2, "allow_auto_start": "false"})
+                                           {"plate": 2, "allow_auto_start": "false",
+                                            "ams_mapping": "0,1"})
             assert status == 200, queued
             job = queued.get("job") or {}
             assert int(job.get("plate") or 0) == 2, f"у задания плита {job.get('plate')}"
             assert float(job.get("est_grams") or 0) > 0, "очередь не увидела вес файла"
+            assert job.get("ams_mapping") == "[0, 1]", \
+                f"раскладка AMS не доехала: {job.get('ams_mapping')!r}"
             return (f"оценка: плит {len(plates)}, {reply['grams']} г · {reply['minutes']} мин; "
-                    f"в очереди задание «{job.get('name')}» плита {job.get('plate')}")
+                    f"в очереди задание «{job.get('name')}» плита {job.get('plate')}, "
+                    f"раскладка {job.get('ams_mapping')}")
 
     def scene8_empty_estimate():
         """Файл без данных слайсера не выдумывает цифры, но и не теряется."""

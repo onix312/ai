@@ -136,6 +136,10 @@
  .pk-chip.on { color:var(--text); border-color:var(--accent); background:var(--accent-soft); }
  .pk-chip i { width:12px; height:12px; border-radius:50%; border:1px solid var(--line); }
  .pk-frame.pk-plate { height:150px; aspect-ratio:auto; margin-bottom:10px; background:#0a0f1e; }
+ .pk-map { margin-top:6px; }
+ .pk-map-row { display:grid; gap:6px; padding:10px 0; border-top:1px solid var(--line); }
+ .pk-map-row:first-child { border-top:0; }
+ .pk-map-what { font-size:13px; font-weight:650; }
  .pk-facts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
  .pk-facts > div { background:var(--panel-2, rgba(255,255,255,.03)); border:1px solid var(--line);
    border-radius:14px; padding:10px 12px; }
@@ -934,7 +938,8 @@
      кнопка выбора — она делает то же самое. */
   var MAX_MB = 400;
   var ALLOWED_EXT = /\.(3mf|gcode)$/i;
-  var loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+  var loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                 filaments:[], trays:[], map:[], req:0 };
 
   /* Файл на сервер с отчётом о ходе: onTick(percent|null). */
   function sendFile(path, file, fields, onTick){
@@ -1100,12 +1105,21 @@
       parts.push('<div class="pk-sub">Принтеры не настроены: задание встанет в очередь '
         + 'и будет ждать принтер — настроить можно в панели, раздел «Принтеры».</div>');
     }
+    parts.push(mappingHtml());
     var warn = estWarn();
     if (warn) parts.push('<div class="pk-note">' + esc(warn) + '</div>');
     parts.push('<div class="pk-file-act">'
       + '<button class="pk-btn pk-hit" type="button" id="pk_b_change">Сменить файл</button>'
       + '<button class="pk-btn pk-hit go" type="button" id="pk_b_queue">'
       + esc(queueTitle()) + '</button></div>');
+    // Запуск — только на конкретном принтере: печатать на «любом» нельзя.
+    if (curPrinter()) {
+      parts.push('<div class="pk-file-act one" style="margin-top:8px">'
+        + '<button class="pk-btn pk-hit" type="button" id="pk_b_start">Отправить и запустить'
+        + '</button></div>');
+      parts.push('<div class="pk-sub">Запуск начнёт прогрев и движение — пульт спросит '
+        + 'подтверждение и покажет предупреждения Preflight.</div>');
+    }
     return '<div class="pk-card"><div class="pk-file-head"><b>' + esc(loaded.file.name) + '</b>'
       + '<span>' + esc(sizeText(loaded.file.size)) + '</span></div>'
       + parts.join('') + '</div></div>';
@@ -1116,6 +1130,102 @@
   function curPrinter(){
     return loaded.printer == null ? String(st.active || '') : String(loaded.printer);
   }
+  /* Материалы файла в порядке, в котором их ждёт принтер: позиция в списке —
+     это материал, значение в раскладке — слот AMS. Плита важнее файла: у
+     многоплитного проекта у каждой плиты свои материалы. */
+  function filamentsOf(){
+    var one = platePick();
+    var meta = loaded.meta || {};
+    var list = (one && one.filaments) || meta.filaments || [];
+    list = (list || []).filter(function(f){ return f && (f.type || f.color); });
+    if (!list.length && meta.material) {
+      list = [{ type: meta.material, color: meta.color || '' }];
+    }
+    return list;
+  }
+  function mmap(){ return loaded.map || []; }
+  function mappingText(){
+    var map = mmap();
+    if (!map.length) return '';
+    var real = map.filter(function(x){ return num(x, -1) >= 0; });
+    if (!real.length) return 'AMS: ни один слот не назначен';
+    return 'AMS: слоты ' + map.map(function(x){
+      return num(x, -1) >= 0 ? String(num(x, -1) + 1) : '—'; }).join(' · ');
+  }
+  /* Раскладку считает сервер (тот же auto_ams_map, что у панели): по материалу
+     и цвету, ближайший слот. Оператор потом может переставить пальцем. */
+  function autoMap(force){
+    var pid = curPrinter();
+    var fil = filamentsOf();
+    loaded.filaments = fil;
+    if (!pid || !fil.length) {
+      loaded.trays = [];
+      if (!force) loaded.map = [];
+      renderEstimate();
+      return Promise.resolve(null);
+    }
+    var token = (loaded.req = (loaded.req || 0) + 1);
+    return post('/api/printer/ams/auto-map', {
+      printer_id: pid,
+      required: fil.map(function(f){ return { type: f.type || '', color: f.color || '' }; }),
+    }).then(function(res){
+      if (token !== loaded.req) return null;      // оператор уже выбрал другое
+      loaded.trays = (res && res.trays) || [];
+      loaded.map = ((res && res.mapping) || []).slice(0, fil.length);
+      while (loaded.map.length < fil.length) loaded.map.push(-1);
+      loaded.filaments = fil;
+      renderEstimate();
+      var text = mappingText();
+      if (text) toast(text);
+      return res;
+    }).catch(function(err){
+      if (token !== loaded.req) return null;
+      loaded.trays = [];
+      loaded.map = [];
+      renderEstimate();
+      toast('Раскладку AMS не посчитать: ' + err.message);
+      return null;
+    });
+  }
+  function slotLabel(tray){
+    var bits = ['слот ' + (num(tray.slot, 0) + 1)];
+    var type = String(tray.type || '').toUpperCase();
+    if (type) bits.push(type);
+    return bits.join(' · ');
+  }
+  function mappingHtml(){
+    var fil = filamentsOf();
+    if (!fil.length) return '';
+    var out = ['<div class="pk-sub">Материалы файла → слоты AMS</div>'];
+    if (!curPrinter()) {
+      out.push('<div class="pk-note">Выберите принтер — тогда разложим материалы по слотам.</div>');
+      return out.join('');
+    }
+    if (!loaded.trays.length) {
+      out.push('<div class="pk-note">AMS на этом принтере не видно — раскладку выберет сам '
+             + 'принтер. Проверьте слоты на экране AMS.</div>');
+      return out.join('');
+    }
+    out.push('<div class="pk-map">');
+    fil.forEach(function(f, i){
+      var slot = num(mmap()[i], -1);
+      var head = (i + 1) + ' · ' + String(f.type || 'материал').toUpperCase()
+               + (f.color ? ' ' + f.color : '') + (num(f.grams) ? ' · ' + round1(f.grams) + ' г' : '');
+      out.push('<div class="pk-map-row"><div class="pk-map-what">' + esc(head) + '</div><div class="pk-chips">');
+      loaded.trays.forEach(function(tray){
+        var n = num(tray.slot, 0);
+        out.push('<button class="pk-chip' + (n === slot ? ' on' : '') + '" type="button"'
+          + ' data-fil="' + i + '" data-slot="' + n + '">' + esc(slotLabel(tray)) + '</button>');
+      });
+      out.push('<button class="pk-chip' + (slot < 0 ? ' on' : '') + '" type="button"'
+        + ' data-fil="' + i + '" data-slot="-1">не из AMS</button>');
+      out.push('</div></div>');
+    });
+    out.push('</div>');
+    out.push('<div class="pk-sub" id="pk_map_sum">' + esc(mappingText()) + '</div>');
+    return out.join('');
+  }
+
   function printerName(id){
     var found = null;
     (st.printers || []).forEach(function(pr){ if (String(pr.id) === String(id)) found = pr; });
@@ -1145,6 +1255,7 @@
       if (!b) return;
       loaded.plate = num(b.dataset.plate, 1) || 1;
       renderEstimate();
+      autoMap();          // у другой плиты могут быть другие материалы
     });
   }
 
@@ -1172,7 +1283,8 @@
       toast('Файл больше ' + MAX_MB + ' МБ — коннектор такой не примет');
       return;
     }
-    loaded = { file:file, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+    loaded = { file:file, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+               filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
     renderEstimate();
     estimateFile();
   }
@@ -1190,12 +1302,13 @@
       hideProgress();
       loaded.meta = (res && res.estimate) || res || {};
       loaded.uploaded = (res && res.file) || file.name;
+      loaded.filaments = filamentsOf();
       renderEstimate();
       var grams = num(which().grams);
       toast(grams ? ('Оценка: ' + round1(grams) + ' г · ' + humanMin(which().minutes))
                   : 'Файл сохранён, но оценки из него нет');
       loadPlate(res && res.file);
-      return res;
+      return autoMap().then(function(){ return res; });
     }).catch(function(err){
       hideProgress();
       toast('Оценка не получилась: ' + err.message);
@@ -1214,18 +1327,34 @@
 
   /* Отправка: задание в очереди. Плиту и принтер маршрут принимает сразу,
      поэтому второй раз файл никуда не льётся и ничего не расходится. */
-  function queueFile(){
+  /* Раскладка AMS уходит вместе с заданием: позиция в списке — материал файла,
+     значение — номер слота. Пусто или одни «не назначено» — поле не отправляем,
+     и тогда раскладку выбирает принтер (поведение как у панели). */
+  function mappingField(){
+    var map = mmap().slice(0, filamentsOf().length);
+    if (!map.length) return '';
+    var real = map.filter(function(x){ return num(x, -1) >= 0; });
+    if (!real.length) return '';
+    return map.join(',');
+  }
+
+  function queueFile(andStart){
     if (!loaded.file) return;
     if (st.busy) return;
     var file = loaded.file;
-    var fields = { plate: loaded.plate || 1 };
+    var plate = loaded.plate || 1;
     var pid = curPrinter();
+    if (andStart && !pid) { toast('Для запуска выберите принтер'); return; }
+    var fields = { plate: plate };
     if (pid) fields.printer_id = pid;
+    var mapField = mappingField();
+    if (mapField) fields.ams_mapping = mapField;
     var where = pid ? ('на «' + printerName(pid) + '»') : 'на любой свободный принтер';
     var title = queueTitle().replace('В очередь', '');
-    var ask = (loaded.plate > 1)
-      ? ('Отправить плиту ' + loaded.plate + ' ' + where + title + '?')
+    var ask = (plate > 1)
+      ? ('Отправить плиту ' + plate + ' ' + where + title + '?')
       : ('Отправить в очередь ' + where + title + '?');
+    if (andStart) ask = ask.replace('Отправить', 'Отправить и запустить') + ' Печать начнётся сразу.';
     if (!confirm(ask)) return;
     var btn = $('#pk_b_queue');
     if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
@@ -1236,17 +1365,58 @@
       hideProgress();
       if (loaded.file !== file) return;
       var job = (res && res.job) || {};
-      loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+      var mapping = mapField ? mapField.split(',').map(function(x){ return num(x, -1); }) : [];
+      loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                 filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
       renderEstimate();
       var grams = num(job.est_grams);
+      var where = pid ? ('на «' + printerName(pid) + '»') : '';
       toast('В очереди: ' + (job.name || (res && res.file) || file.name)
-        + (grams ? ' · ' + round1(grams) + ' г' : ''));
+        + (grams ? ' · ' + round1(grams) + ' г' : '') + (where ? ' ' + where : ''));
       tick();
+      if (andStart && job.id) return startUploaded(job, mapping, plate);
     }).catch(function(err){
       hideProgress();
       toast('Не отправлено: ' + err.message);
       renderEstimate();
     });
+  }
+
+  /* «Отправить и запустить»: задание уже в очереди, поэтому дальше — тот же
+     путь, что у панели: Preflight (с раскладкой AMS!) → вопрос оператору →
+     /api/jobs/start с ключом идемпотентности. Блокировки Preflight — стоп. */
+  function startUploaded(job, mapping, plate){
+    var pid = job.printer_id || curPrinter();
+    if (!pid) { toast('Для запуска выберите принтер'); return Promise.resolve(); }
+    var file = String(job.file || job.name || '');
+    var query = '/api/printer/preflight?printer_id=' + encodeURIComponent(pid)
+      + '&file=' + encodeURIComponent(file)
+      + '&plate=' + encodeURIComponent(String(num(plate, 1) || 1))
+      + '&mapping=' + encodeURIComponent(JSON.stringify(mapping || []));
+    return get(query).then(function(check){
+      var blocks = (check && check.blocks) || [];
+      if (blocks.length) {
+        toast('Нельзя запустить: ' + (blocks[0].title || blocks[0].detail || 'preflight'));
+        return;
+      }
+      var warns = ((check && check.warns) || []).map(function(w){
+        return w.title || w.detail || 'предупреждение'; });
+      var lines = [];
+      if (warns.length) lines.push('Предупреждения:', warns.join('; '), '');
+      lines.push('Запустить «' + (job.name || file) + '» на «' + printerName(pid) + '»?');
+      if (!confirm(lines.join(String.fromCharCode(10)))) return;
+      busy(true);
+      return post('/api/jobs/start', {
+        id: job.id, printer_id: pid, confirmed: true,
+        start_request_id: reqId(job.id),
+        preflight_acknowledged: warns.length > 0,
+      }).then(function(){
+        toast('Запущено: ' + (job.name || file));
+        showScreen('queue');
+        tick();
+      }).catch(function(e){ toast(e.message || 'Запуск не прошёл'); })
+        .then(function(){ busy(false); });
+    }).catch(function(e){ toast('Preflight не ответил: ' + (e.message || '')); });
   }
 
   function bindFile(){
@@ -1279,14 +1449,27 @@
           && b.className && b.className.indexOf('pk-chip') >= 0) {
         loaded.printer = String(b.dataset.printer);
         renderEstimate();
+        autoMap();        // другой принтер — другие слоты AMS
+        return;
+      }
+      if (b.dataset && b.dataset.fil !== undefined && b.dataset.fil !== null
+          && b.dataset.slot !== undefined) {
+        var idx = num(b.dataset.fil, -1);
+        if (idx >= 0) {
+          loaded.map[idx] = num(b.dataset.slot, -1);
+          renderEstimate();
+        }
         return;
       }
       if (b.id === 'pk_b_change') {
-        loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'' };
+        loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                   filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
         renderEstimate();
         if (input) input.click();
       } else if (b.id === 'pk_b_queue') {
         queueFile();
+      } else if (b.id === 'pk_b_start') {
+        queueFile(true);
       }
     });
   }
@@ -1381,8 +1564,13 @@
     if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
     var plate = Math.round(num(job.plate, 1)) || 1;
     var file = encodeURIComponent(String(job.file || job.name || ''));
+    // Раскладка AMS из задания обязана попасть в Preflight: иначе он сверит
+    // материал с активным слотом и заблокирует верно разложенное многоцветье.
+    var map = [];
+    try { map = JSON.parse(job.ams_mapping || '[]') || []; } catch (e) { map = []; }
     return get('/api/printer/preflight?printer_id=' + encodeURIComponent(p.id)
-      + '&file=' + file + '&plate=' + plate).then(function(check){
+      + '&file=' + file + '&plate=' + plate
+      + '&mapping=' + encodeURIComponent(JSON.stringify(map))).then(function(check){
       var blocks = (check && check.blocks) || [];
       if (blocks.length) {
         toast('Нельзя запустить: ' + (blocks[0].title || blocks[0].detail || 'preflight'));
