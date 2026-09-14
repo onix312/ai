@@ -893,10 +893,58 @@ class PultControlPageTests(TestCase):
         self.assertIn("function moveJob(jobId, direction)", self.html)
 
     def test_ams_and_camera_use_snapshot_fields(self):
-        self.assertIn("(p.ams || {}).trays", self.html)
-        self.assertIn("(p.camera || {}).available", self.html)
-        self.assertIn("cam.src = '/api/printer/camera.jpg?printer_id='", self.html)
+        """Поля берём из снимка парка, а не из своих догадок."""
+        self.assertIn("((p && (p.ams || {}).trays) || [])", self.html)
+        self.assertIn("var info = (p && p.camera) || {};", self.html)
+        self.assertIn("if (p && info.available) {", self.html)
         self.assertIn("/api/printer/camera.jpg?printer_id=", self.html)
+
+    def test_ams_merges_live_slots_with_database_memory(self):
+        """Слоты AMS: живая телеметрия принтера + память базы (17.0.25)."""
+        self.assertIn("function slotsMap()", self.html)
+        self.assertIn("((p && (p.ams || {}).trays) || [])", self.html)
+        self.assertIn("(st.ams.slots || []).forEach", self.html)
+        self.assertIn("get('/api/ams/memory?printer_id='", self.html)
+        self.assertIn("st.ams.at ? ' · память обновлена в '", self.html)
+        # Память бывает старее получаса — это обязано быть видно словами.
+        self.assertIn("if (mem && mem.stale) source.push('память несвежая');", self.html)
+
+    def test_ams_actions_use_existing_routes(self):
+        self.assertIn("post('/api/spool/bind', body)", self.html)
+        self.assertIn("push_ams: true", self.html)
+        self.assertIn("confirmed: true", self.html,
+                      "отправка материала в AMS — физическое действие, сервер требует подтверждения")
+        self.assertIn("post('/api/ams/memory/clear', { printer_id: p.id, slot: String(slot) })", self.html)
+        self.assertIn("post('/api/printer/ams/sync', { printer_id: p.id })", self.html)
+        self.assertIn("data-ams=\"pick\"", self.html)
+        self.assertIn("data-ams=\"again\"", self.html)
+        self.assertIn("data-ams=\"unbind\"", self.html)
+        self.assertIn("data-ams=\"forget\"", self.html)
+
+    def test_ams_forget_warns_that_bindings_stay(self):
+        # «Забыть» чистит раскладку, но не учёт пластика: оператор должен это
+        # прочитать до нажатия, а не узнать из отчёта о расходе.
+        self.assertIn("Забыть память слота? Привязки катушек на складе не тронутся.", self.html)
+        self.assertIn("Привязано, но в принтер не ушло: ", self.html)
+
+    def test_ams_slot_conflict_offers_replacement(self):
+        # Сервер отвечает «Слот N уже занят катушкой …» — пульт предлагает замену
+        # и повторяет привязку с force, а не падает с сырой ошибкой.
+        self.assertIn("msg.indexOf('уже занят') >= 0 && !force", self.html)
+        self.assertIn("body.force = true", self.html)
+        self.assertIn("Заменить катушку в этом слоте?", self.html)
+
+    def test_camera_uses_snapshot_and_light_routes(self):
+        self.assertIn("cam.src = '/api/printer/camera.jpg?printer_id='", self.html)
+        self.assertIn("post('/api/printer/snapshot', { printer_id: p.id, note: 'Снимок с пульта цеха' })", self.html)
+        self.assertIn("post('/api/printer/command', { command:'light', value: !on, printer_id: p.id })", self.html)
+        self.assertIn("var CAM_MS = 3000;", self.html)
+        self.assertIn("camTimer(true);", self.html)
+
+    def test_camera_says_when_the_frame_is_demo_or_stale(self):
+        self.assertIn("'демо-режим: показывается учебный кадр, а не цех'", self.html)
+        self.assertIn("'кадр ' + Math.round(num(info.age)) + ' с назад'", self.html)
+        self.assertIn("shotBtn.disabled = !(p && info.available);", self.html)
 
     def test_page_is_in_the_offline_shell(self):
         sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")

@@ -193,6 +193,60 @@ class ApiQrRoutesTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertFalse(payload["spool"].get("ams_slot"))
 
+    def test_bind_without_confirmation_does_not_touch_the_database(self):
+        """Отказ подтвердить отправку материала не должен менять базу.
+
+        Нашлось живой пробой пульта цеха (18.0.3): маршрут писал катушку в
+        слот, и только потом проверял ``confirmed`` — ответ был «Подтвердите
+        отправку материала в AMS», а катушка уже стояла в слоте. Теперь
+        проверка идёт до записи, и это видно по базе, а не по обещанию.
+        """
+        api = self._api()
+
+        class FakePrinter:
+            def command(self, name, value=None):
+                return {"ok": True}
+
+        class FakeManager:
+            def get(self, printer_id):
+                return FakePrinter()
+
+        api.manager = FakeManager()
+        with self.assertRaises(ValueError):
+            api.post("/api/spool/bind", {
+                "id": "sp_testqr", "ams_slot": "2", "printer_id": "prn-1",
+                "push_ams": True,
+            }, {})
+        self.assertEqual("", str(self.repo.spool("sp_testqr").get("ams_slot") or ""),
+                         "катушка не должна оказаться в слоте при отказе подтверждения")
+        storage = self.db.query("SELECT * FROM ams_slots WHERE printer_id='prn-1'")
+        self.assertEqual([], storage, "память слотов тоже не должна заполниться")
+
+    def test_bind_with_confirmation_writes_and_reaches_the_printer(self):
+        api = self._api()
+        seen = {}
+
+        class FakePrinter:
+            def command(self, name, value=None):
+                seen["name"] = name
+                seen["value"] = value
+                return {"ok": True}
+
+        class FakeManager:
+            def get(self, printer_id):
+                return FakePrinter()
+
+        api.manager = FakeManager()
+        code, payload = api.post("/api/spool/bind", {
+            "id": "sp_testqr", "ams_slot": "2", "printer_id": "prn-1",
+            "push_ams": True, "confirmed": True,
+        }, {})
+        self.assertEqual(code, 200)
+        self.assertTrue(payload["pushed"])
+        self.assertEqual("ams_filament", seen["name"])
+        self.assertEqual(2, seen["value"]["tray_id"])
+        self.assertEqual(str(self.repo.spool("sp_testqr")["ams_slot"]), "2")
+
     def test_bind_rejects_bad_slot(self):
         with self.assertRaises(ValueError):
             self._api().post("/api/spool/bind",

@@ -87,8 +87,15 @@ function makeState(printerState, connected) {
       printer: { state: printerState, state_label: 'Печатает', progress: 42, remaining_min: 65,
                  task: 'Подставка', speed_level: 2, eta: Math.floor(Date.now() / 1000) + 3900 },
       temperature: { nozzle: 215, bed: 60 },
-      ams: { trays: [{ id: '00', present: true, type: 'PLA' }, { id: '01', present: false }] },
-      camera: { available: true },
+      // Как отдаёт parse_ams_trays: слот, человеческая подпись, цвет, остаток.
+      ams: { trays: [
+        { id: '00', unit: 0, slot: 0, label: 'Слот 1', type: 'PETG', color: '#1F2937',
+          remain: 64, uuid: 'ABC123', active: true, present: true },
+        { id: '01', unit: 0, slot: 1, label: 'Слот 2', type: '', color: '#CBD5E1',
+          remain: null, uuid: '', active: false, present: false },
+      ] },
+      camera: { available: true, age: 0.8, fps: 2, demo: false, shots: 4, error: '' },
+      light: 'off',
       guard: { alerts: [] },
       job: { order: { number: '1042', product: 'Подставка' } },
       maintenance: {},
@@ -110,6 +117,9 @@ function runPage(options) {
   const env = {
     state: opts.state || makeState('RUNNING', true),
     preflight: opts.preflight || { blocks: [], warns: [] },
+    ams: opts.ams || { printer_id: 'prn1', printers: ['prn1'], stale_min: 30, slots: [] },
+    spools: opts.spools || { spools: [] },
+    shot: opts.shot || { ok: true, shot: { id: 'shot1', at: Date.now() / 1000, note: 'Снимок с пульта цеха' } },
     answers: opts.answers || {},
     failFetch: !!opts.failFetch,
   };
@@ -140,6 +150,15 @@ function runPage(options) {
       }
       if (url.indexOf('/api/printer/preflight') === 0) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.preflight) });
+      }
+      if (url.indexOf('/api/ams/memory') === 0) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.ams) });
+      }
+      if (url === '/api/spools') {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.spools) });
+      }
+      if (url === '/api/printer/snapshot') {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.shot) });
       }
       if (opts.failUrl && url.indexOf(opts.failUrl) === 0) {
         return Promise.resolve({ ok: false, status: 400,
@@ -175,6 +194,13 @@ function runPage(options) {
     clickTab(screen) {
       page.click({ target: { closest: (sel) => (sel === '.pk-tab'
         ? { dataset: { screen }, classList: { toggle() {} } } : null) } });
+    },
+    clickAms(action, slot, spool) {
+      page.click({ target: { closest: (sel) => (sel === '[data-ams]'
+        ? { dataset: { ams: action, slot, spool }, disabled: false } : null) } });
+    },
+    clickId(id) {
+      page.click({ target: { closest: (sel) => (sel === '#' + id ? { id } : null) } });
     },
   };
 }
@@ -330,7 +356,188 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
       page.store['pk_msg'].textContent.indexOf('Проверка не прошла') >= 0, page.store['pk_msg'].textContent);
   }
 
-  /* 4. Обрыв связи: плашка и свежесть */
+  /* 4. AMS: слоты из двух источников, привязка, «как в прошлый раз», забыть */
+  const AMS_FIXTURE = {
+    printer_id: 'prn1', stale_min: 30,
+    slots: [
+      { slot: '0', spool_id: 'spool-1', material: 'PETG', color_name: 'Чёрный',
+        color_hex: '1F2937', grams_left: 640.0, remain_pct: 64.0, state: 'live',
+        seen_at: new Date().toISOString(), stale: false, label: 'Слот 1' },
+      { slot: '3', spool_id: '', material: 'PLA', color_name: 'Белый',
+        color_hex: 'F8FAFC', grams_left: 0.0, remain_pct: 0.0, state: 'empty',
+        seen_at: '2026-09-01T10:00:00+00:00', stale: true, label: 'Слот 4' },
+    ],
+  };
+  {
+    const page = runPage({ ams: AMS_FIXTURE });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    const slots = text(page.store['pk_slots'].innerHTML);
+    check('AMS: слоты собраны и подписаны словами',
+      slots.indexOf('Слот 1') >= 0 && slots.indexOf('PETG Чёрный') >= 0
+      && slots.indexOf('64%') >= 0 && slots.indexOf('640 г') >= 0, slots.slice(0, 160));
+    check('AMS: у пустого слота видно память и её возраст',
+      slots.indexOf('Слот 4') >= 0 && slots.indexOf('память несвежая') >= 0, slots);
+    check('AMS: у привязанного слота есть «Отвязать» и «Другая катушка»',
+      page.store['pk_slots'].innerHTML.indexOf('data-ams="unbind"') >= 0
+      && page.store['pk_slots'].innerHTML.indexOf('data-ams="pick"') >= 0);
+    check('AMS: живой слот принтера и память сведены в одну карточку',
+      page.store['pk_slots'].innerHTML.indexOf('живой слот') >= 0,
+      page.store['pk_slots'].innerHTML.slice(0, 200));
+  }
+  {
+    const page = runPage({ ams: AMS_FIXTURE, spools: { spools: [
+      { id: 'spool-1', material: 'PETG', color_name: 'Чёрный', color_hex: '1F2937',
+        remaining_grams: 640, archived: 0, printer_id: 'prn1', ams_slot: '0' },
+      { id: 'spool-9', material: 'PLA', color_name: 'Синий', color_hex: '1D4ED8',
+        remaining_grams: 320, archived: 0, printer_id: '', ams_slot: '' },
+    ] } });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    page.clickAms('pick', '3');
+    await wait(80);
+    const sheet = text(page.store['pk_sheet_list'].innerHTML);
+    check('AMS: шторка предлагает свободные катушки со склада',
+      sheet.indexOf('PLA Синий') >= 0 && sheet.indexOf('320 г') >= 0
+      && sheet.indexOf('на складе') >= 0, sheet.slice(0, 140));
+    check('AMS: у слота с памятью-пластиком шторка предлагает привязку',
+      page.store['pk_sheet_act'].innerHTML.indexOf('data-ams="unbind"') >= 0
+      || page.store['pk_sheet_list'].innerHTML.indexOf('data-ams="bind"') >= 0,
+      page.store['pk_sheet_act'].innerHTML.slice(0, 160));
+    page.requests.length = 0;
+    page.clickAms('bind', '3', 'spool-9');
+    await wait(80);
+    const body = page.posts()[0] && page.posts()[0].payload;
+    check('AMS: привязка уходит с push_ams и подтверждением оператора',
+      !!body && body.url === undefined && body.id === 'spool-9' && body.ams_slot === '3'
+      && body.push_ams === true && body.confirmed === true && body.printer_id === 'prn1',
+      JSON.stringify(body));
+  }
+  {
+    // Принтер молчит, а память знает: слот пуст в телеметрии, катушка в базе —
+    // вот тогда и нужна кнопка «как в прошлый раз».
+    const silent = makeState('OFFLINE', false);
+    silent.printers[0].ams = { trays: [] };
+    const page = runPage({ state: silent, ams: AMS_FIXTURE, spools: { spools: [] } });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    const card = page.store['pk_slots'].innerHTML;
+    check('AMS: у выключенного принтера видна память базы и «как в прошлый раз»',
+      card.indexOf('data-ams="again"') >= 0 && card.indexOf('PETG Чёрный') >= 0,
+      text(card).slice(0, 140));
+    page.requests.length = 0;
+    page.clickAms('again', '0');
+    await wait(80);
+    const body = page.posts()[0] && page.posts()[0].payload;
+    check('AMS: «как в прошлый раз» привязывает ту же катушку',
+      !!body && body.id === 'spool-1' && body.ams_slot === '0', JSON.stringify(body));
+  }
+  {
+    const page = runPage({ ams: AMS_FIXTURE });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    page.requests.length = 0;
+    page.prompts.length = 0;
+    page.clickAms('forget', '0');
+    await wait(80);
+    const body = page.posts()[0] && page.posts()[0].payload;
+    check('AMS: «Забыть» чистит только память слота и предупреждает об этом',
+      !!body && body.slot === '0' && body.printer_id === 'prn1'
+      && (page.prompts[0] || '').indexOf('Привязки катушек') > 0, JSON.stringify(body));
+    page.requests.length = 0;
+    page.clickAms('unbind', '0');
+    await wait(80);
+    const unbind = page.posts()[0] && page.posts()[0].payload;
+    check('AMS: отвязка отправляет пустой слот (катушка на склад)',
+      !!unbind && unbind.id === 'spool-1' && unbind.ams_slot === '', JSON.stringify(unbind));
+  }
+  {
+    const page = runPage({ ams: AMS_FIXTURE });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    page.requests.length = 0;
+    page.clickId('pk_ams_sync');
+    await wait(80);
+    check('AMS: «Синхронизировать» просит принтер сверить катушки',
+      page.posts()[0] && page.posts()[0].url === '/api/printer/ams/sync'
+      && page.posts()[0].payload.printer_id === 'prn1', JSON.stringify(page.posts()[0]));
+  }
+  {
+    // Спор о слоте: сервер отвечает «уже занят» → пульт предлагает замену
+    const page = runPage({ ams: AMS_FIXTURE, spools: { spools: [] },
+      failUrl: '__none__' });
+    await wait(60);
+    page.clickTab('ams');
+    await wait(80);
+    page.clickAms('pick', '3');
+    await wait(80);
+    page.clickAms('bind', '3', 'spool-9');
+    await wait(80);
+    check('AMS: без свободных катушек шторка говорит, где взять пластик',
+      text(page.store['pk_sheet_list'].innerHTML).indexOf('Свободных катушек') >= 0,
+      text(page.store['pk_sheet_list'].innerHTML));
+  }
+
+  /* 5. Камера: кадр, снимок в журнал, свет */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.clickTab('cam');
+    await wait(80);
+    check('камера: кадр запрошен у выбранного принтера',
+      page.store['pk_cam'].src.indexOf('/api/printer/camera.jpg?printer_id=prn1') === 0,
+      page.store['pk_cam'].src);
+    check('камера: подпись честная (возраст кадра и число снимков)',
+      String(page.store['pk_cam_sub'].textContent).indexOf('кадр с «Цех-1»') >= 0
+      && String(page.store['pk_cam_note'].textContent).indexOf('снимков в журнале') >= 0,
+      page.store['pk_cam_sub'].textContent + ' / ' + page.store['pk_cam_note'].textContent);
+    page.requests.length = 0;
+    page.clickId('pk_b_shot');
+    await wait(80);
+    const shot = page.posts()[0];
+    check('камера: снимок уходит в журнал с пометкой',
+      !!shot && shot.url === '/api/printer/snapshot'
+      && shot.payload.printer_id === 'prn1' && shot.payload.note.indexOf('пульт') > 0,
+      JSON.stringify(shot && shot.payload));
+    page.requests.length = 0;
+    page.clickId('pk_b_light');
+    await wait(80);
+    const light = page.posts()[0];
+    check('камера: свет включается одной кнопкой (значение — от текущего состояния)',
+      !!light && light.url === '/api/printer/command'
+      && light.payload.command === 'light' && light.payload.value === true,
+      JSON.stringify(light && light.payload));
+  }
+  {
+    const offCam = makeState('IDLE', true);
+    offCam.printers[0].camera = { available: false, error: 'Камера не отвечает', shots: 0, demo: false };
+    const page = runPage({ state: offCam });
+    await wait(60);
+    page.clickTab('cam');
+    await wait(80);
+    check('камера: недоступный кадр объясняется словами, кнопка снимка выключена',
+      page.store['pk_cam'].src === '' && page.store['pk_b_shot'].disabled === true
+      && String(page.store['pk_cam_note'].textContent).indexOf('Камера не отвечает') >= 0,
+      page.store['pk_cam_note'].textContent);
+  }
+  {
+    const demoCam = makeState('RUNNING', true);
+    demoCam.printers[0].camera = { available: true, demo: true, age: 1.2, shots: 3 };
+    const page = runPage({ state: demoCam });
+    await wait(60);
+    page.clickTab('cam');
+    await wait(80);
+    check('камера: демо-режим помечен, а не выдаётся за цех',
+      String(page.store['pk_cam_note'].textContent).indexOf('демо-режим') >= 0,
+      page.store['pk_cam_note'].textContent);
+  }
+
+  /* 6. Обрыв связи: плашка и свежесть */
   {
     const page = runPage({ failFetch: true });
     await wait(60);
@@ -342,7 +549,7 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
       page.store['pk_offline_text'].textContent);
   }
 
-  /* 5. Экраны и выбор принтера */
+  /* 7. Экраны и выбор принтера */
   {
     const page = runPage({});
     await wait(60);
@@ -351,10 +558,9 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('экраны: выбор принтера и переключение вкладки не падают',
       page.store['pk_cmd_name'].textContent === 'Цех-1' && page.store['pk_screen_queue'].hidden === false,
       page.store['pk_cmd_name'].textContent);
-    check('камера и AMS: кадр и счётчик слотов живые',
-      page.store['pk_cam'].src.indexOf('/api/printer/camera.jpg?printer_id=prn1') === 0
-      && page.store['pk_ams_now'].textContent.indexOf('1 из 2') > 0,
-      page.store['pk_cam'].src + ' / ' + page.store['pk_ams_now'].textContent);
+    check('парк: счётчик AMS в карточке живой',
+      text(page.store['pk_tiles'].innerHTML).indexOf('1/2') >= 0,
+      text(page.store['pk_tiles'].innerHTML).slice(0, 120));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

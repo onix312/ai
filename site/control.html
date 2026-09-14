@@ -96,6 +96,40 @@
  .pk-job-act { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
  @media (min-width:640px) { .pk-job-act { grid-template-columns:repeat(4,1fr); } }
 
+ /* --- слоты AMS: живой слот + память базы --- */
+ .pk-slots { display:grid; gap:10px; }
+ @media (min-width:780px) { .pk-slots { grid-template-columns:1fr 1fr; } }
+ .pk-slot { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; }
+ .pk-slot.active { border-color:var(--accent); }
+ .pk-chip { display:inline-block; width:22px; height:22px; border-radius:8px; flex:none;
+   border:1px solid var(--line); background:#CBD5E1; }
+ .pk-slot-act { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
+ .pk-slot-act .pk-btn { min-height:48px; font-size:14px; }
+ .pk-note { margin-top:6px; font-size:12px; color:var(--muted); }
+ .pk-note.warn { color:var(--warn); }
+
+ /* --- камера: кадр и кнопки --- */
+ .pk-frame { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:18px;
+   background:#0a0f1e; border:1px solid var(--line); }
+ .pk-cam-act { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+ .pk-cam-act .pk-btn { min-height:56px; font-size:14px; }
+
+ /* --- шторка снизу: выбор катушки для слота --- */
+ .pk-sheet-wrap { position:fixed; inset:0; z-index:30; background:rgba(3,6,15,.62);
+   display:flex; align-items:flex-end; }
+ .pk-sheet-wrap[hidden] { display:none; }
+ .pk-sheet { width:100%; max-width:640px; margin:0 auto; overflow:auto; max-height:82vh;
+   background:var(--panel); border:1px solid var(--line); border-radius:20px 20px 0 0;
+   padding:16px 14px calc(16px + env(safe-area-inset-bottom)); }
+ .pk-sheet h3 { font-size:16px; margin-bottom:4px; }
+ .pk-sheet .pk-sub { margin-bottom:12px; }
+ .pk-sheet-act { display:grid; gap:8px; margin-bottom:12px; }
+ .pk-pick { display:flex; align-items:center; gap:10px; width:100%; min-height:56px; padding:12px;
+   margin-bottom:8px; border:1px solid var(--line); border-radius:14px; background:transparent;
+   color:var(--text); font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+ .pk-pick b { display:block; font-weight:700; }
+ .pk-pick small { display:block; color:var(--muted); font-size:12px; }
+
  /* --- заготовки разделов: экран есть, наполняется следующим шагом --- */
  .pk-soon { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:16px; }
  .pk-soon b { display:block; font-size:16px; margin-bottom:6px; }
@@ -175,32 +209,38 @@
   </section>
 
   <section class="pk-screen" id="pk_screen_ams" hidden>
-   <div class="pk-h"><h2>AMS</h2><p class="pk-hint">слоты, пластик, память из базы</p></div>
-   <div class="pk-soon">
-    <b id="pk_ams_now">Слотов нет</b>
-    <p class="pk-hint">Привязка катушки к слоту, «как в прошлый раз» и память
-       выключенного принтера приедут следующим шагом; сейчас слоты видно
-       в панели на вкладке «Принтеры».</p>
-    <div class="pk-links">
-     <a href="/index.html#printers">Принтеры в панели →</a>
-    </div>
+   <div class="pk-h"><h2>AMS</h2><p class="pk-hint" id="pk_ams_now">—</p></div>
+   <div class="pk-slot-act" style="margin-top:0;margin-bottom:12px;grid-template-columns:1fr">
+    <button class="pk-btn pk-hit" id="pk_ams_sync" type="button">Синхронизировать с принтером</button>
    </div>
+   <div class="pk-slots" id="pk_slots"></div>
   </section>
 
   <section class="pk-screen" id="pk_screen_cam" hidden>
-   <div class="pk-h"><h2>Камера</h2><p class="pk-hint">что происходит на плитах</p></div>
-   <img class="pk-cam" id="pk_cam" alt="Камера принтера"
-        style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:18px;background:#0a0f1e;border:1px solid var(--line)">
-   <div class="pk-soon" style="margin-top:12px">
-    <b id="pk_cam_now">Кадр недоступен</b>
-    <p class="pk-hint">Снимок в журнал и лампа камеры приедут следующим шагом.</p>
-    <div class="pk-links">
-     <a href="/tv.html">ТВ-режим цеха →</a>
-     <a href="/m.html">Кадр в мини-панели →</a>
-    </div>
+   <div class="pk-h"><h2>Камера</h2><p class="pk-hint" id="pk_cam_sub">—</p></div>
+   <img class="pk-frame" id="pk_cam" alt="Камера принтера">
+   <div class="pk-note" id="pk_cam_note"></div>
+   <div class="pk-cam-act">
+    <button class="pk-btn pk-hit" id="pk_b_shot" type="button">Снимок в журнал</button>
+    <button class="pk-btn pk-hit" id="pk_b_light" type="button">Свет</button>
+    <button class="pk-btn pk-hit" id="pk_b_refresh" type="button">Обновить кадр</button>
+   </div>
+   <div class="pk-links">
+    <a href="/tv.html">ТВ-режим цеха →</a>
+    <a href="/m.html">Мини-панель →</a>
    </div>
   </section>
  </main>
+</div>
+
+<div class="pk-sheet-wrap" id="pk_sheet_wrap" hidden>
+ <div class="pk-sheet" role="dialog" aria-modal="true" aria-labelledby="pk_sheet_title">
+  <h3 id="pk_sheet_title">Слот</h3>
+  <div class="pk-sub" id="pk_sheet_sub"></div>
+  <div class="pk-sheet-act" id="pk_sheet_act"></div>
+  <div id="pk_sheet_list"></div>
+  <button class="pk-btn pk-hit" type="button" id="pk_sheet_close" style="width:100%">Закрыть</button>
+ </div>
 </div>
 
 <div class="pk-msg" id="pk_msg"></div>
@@ -236,8 +276,10 @@
   var BUSY_STATES = ['RUNNING', 'PREPARE', 'PAUSE'];
   var FLYING_STATES = ['running', 'starting', 'uploading'];
 
+  var CAM_MS = 3000;        // кадр обновляем чаще, чем цифры парка
   var st = { at:0, printers:[], queue:[], farm:{}, active:'', screen:'park',
-             kiosk:false, timer:null, busy:false };
+             kiosk:false, timer:null, camTimer:null, busy:false,
+             ams:{ slots:[], printer:'', at:0 }, spools:null, sheetSlot:'' };
 
   function $(s){ return document.querySelector(s); }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"']/g, function(c){
@@ -433,30 +475,310 @@
     renderCmdBar();
   }
 
-  /* ------------------------------------------- камера и сводка AMS */
-  /* Экраны AMS и Камеры наполнятся в 18.0.3, но числа и кадр уже живые:
-     показывать пустоту, когда данные есть, — хуже, чем показать кадр. */
-  function renderSide(){
+  /* ------------------------------------------------------------- AMS */
+  /* Слоты показываем из двух источников сразу: живая телеметрия принтера
+     (trays в снимке) и память базы (ams_slots, 17.0.25) — она переживает
+     выключение принтера. Где сходятся — пишем оба факта, где нет — честно
+     помечаем, откуда данные и насколько они свежие. */
+  function slotsMap(){
     var p = selected();
-    var cam = $('#pk_cam'), camNow = $('#pk_cam_now');
-    if (cam && camNow) {
-      var ok = !!(p && (p.camera || {}).available);
-      camNow.textContent = ok ? ('Кадр с «' + (p.name || 'принтера') + '»') : 'Кадр недоступен';
-      if (ok) {
-        cam.src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id)
-          + '&t=' + Date.now();
-      }
+    var live = {};
+    ((p && (p.ams || {}).trays) || []).forEach(function(t){
+      if (t && t.slot !== undefined && t.slot !== null) live[String(t.slot)] = t;
+    });
+    var mem = {};
+    (st.ams.slots || []).forEach(function(m){ mem[String(m.slot)] = m; });
+    var keys = {};
+    Object.keys(live).forEach(function(k){ keys[k] = 1; });
+    Object.keys(mem).forEach(function(k){ keys[k] = 1; });
+    return Object.keys(keys).map(function(k){
+      return { slot: k, live: live[k] || null, mem: mem[k] || null };
+    }).sort(function(a, b){ return num(a.slot) - num(b.slot); });
+  }
+  function hex(v, fallback){
+    var t = String(v == null ? '' : v).trim();
+    if (!t) return fallback || '#CBD5E1';
+    return t.charAt(0) === '#' ? t : '#' + t;
+  }
+  function slotName(item){
+    var live = item.live, mem = item.mem;
+    if (live && live.label) return live.label;
+    if (mem && mem.label) return mem.label;
+    return 'Слот ' + (num(item.slot) + 1);
+  }
+  function slotState(item){
+    var live = item.live, mem = item.mem;
+    var livePresent = !!(live && (live.present || live.type || live.uuid));
+    var material = (live && live.type) || (mem && mem.material) || '';
+    var colorName = (live && live.color_name) || (mem && mem.color_name) || '';
+    var color = hex((live && live.color) || (mem && mem.color_hex));
+    var pct = live && live.remain !== null && live.remain !== undefined
+      ? num(live.remain, -1) : num(mem && mem.remain_pct, -1);
+    var grams = num(mem && mem.grams_left);
+    var spoolId = (mem && mem.spool_id) || '';
+    return { livePresent: livePresent, material: material, colorName: colorName,
+             color: color, pct: pct, grams: grams, spoolId: spoolId,
+             empty: !livePresent && !material && !spoolId };
+  }
+  function slotHtml(item){
+    var stx = slotState(item);
+    var live = item.live, mem = item.mem;
+    var bits = [];
+    if (stx.material) bits.push(esc(stx.material) + (stx.colorName ? ' ' + esc(stx.colorName) : ''));
+    if (stx.pct >= 0) bits.push(Math.round(stx.pct) + '%');
+    if (stx.grams > 0) bits.push(Math.round(stx.grams) + ' г');
+    var source = [];
+    if (stx.livePresent) source.push('живой слот');
+    if (mem && mem.spool_id) source.push('привязана катушка');
+    if (mem && mem.seen_at) source.push('видели ' + clock(stamp(mem.seen_at)));
+    if (mem && mem.stale) source.push('память несвежая');
+    var actions = [];
+    if (mem && mem.spool_id) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="pick" data-slot="'
+        + esc(item.slot) + '">Другая катушка</button>');
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="unbind" data-slot="'
+        + esc(item.slot) + '">Отвязать</button>');
+    } else {
+      actions.push('<button class="pk-btn pk-hit' + (mem && mem.spool_id ? '' : ' go')
+        + '" type="button" data-ams="pick" data-slot="' + esc(item.slot) + '">Привязать</button>');
     }
-    var amsNow = $('#pk_ams_now');
-    if (amsNow) {
-      var slots = 0, filled = 0;
-      st.printers.forEach(function(pr){
-        var trays = (pr.ams || {}).trays || [];
-        slots += trays.length;
-        filled += trays.filter(function(t){ return t.present || t.type || t.uuid; }).length;
+    if (mem && mem.spool_id && !stx.livePresent) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="again" data-slot="'
+        + esc(item.slot) + '">Как в прошлый раз</button>');
+    }
+    if (mem) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="forget" data-slot="'
+        + esc(item.slot) + '">Забыть</button>');
+    }
+    return '<div class="pk-slot' + ((live && live.active) ? ' active' : '') + '" data-slot-card="'
+      + esc(item.slot) + '">'
+      + '<div class="pk-row"><span class="pk-chip" style="background:' + esc(stx.color) + '"></span>'
+      + '<span class="pk-name" style="font-size:15.5px">' + esc(slotName(item)) + '</span>'
+      + ((live && live.active) ? '<span class="pk-pill">печатает</span>' : '')
+      + (stx.empty ? '<span class="pk-pill">пусто</span>' : '') + '</div>'
+      + '<div class="pk-sub">' + (bits.length ? bits.join(' · ') : 'пластик неизвестен') + '</div>'
+      + (source.length ? '<div class="pk-note">' + esc(source.join(' · ')) + '</div>' : '')
+      + '<div class="pk-slot-act">' + actions.join('') + '</div></div>';
+  }
+  function renderAms(){
+    var box = $('#pk_slots');
+    if (!box) return;
+    var p = selected();
+    var items = slotsMap();
+    var filled = items.filter(function(it){ return !slotState(it).empty; }).length;
+    var head = $('#pk_ams_now');
+    if (head) {
+      head.textContent = !p ? 'принтеров нет'
+        : (!items.length ? 'принтер ещё не сообщал слоты — нажмите «Синхронизировать»'
+          : 'занято ' + filled + ' из ' + items.length
+            + (st.ams.at ? ' · память обновлена в ' + clock(st.ams.at) : ''));
+    }
+    if (!items.length) {
+      box.innerHTML = '<div class="pk-empty"><b>Слотов не видно</b>'
+        + (p && (p.connection || {}).connected
+          ? 'Принтер на связи, но раскладку AMS ещё не прислал. Нажмите «Синхронизировать с принтером».'
+          : 'Принтер не на связи. Раскладка подтянется из памяти базы, как только появятся привязки катушек.')
+        + '</div>';
+      return;
+    }
+    box.innerHTML = items.map(slotHtml).join('');
+  }
+  function loadAms(){
+    var p = selected();
+    if (!p) { st.ams = { slots:[], printer:'', at:0 }; renderAms(); return Promise.resolve(); }
+    st.ams.printer = p.id;
+    return get('/api/ams/memory?printer_id=' + encodeURIComponent(p.id)).then(function(d){
+      st.ams.slots = (d && d.slots) || [];
+      st.ams.at = Date.now() / 1000;
+      renderAms();
+    }).catch(function(e){
+      renderAms();
+      if (st.screen === 'ams') toast(e.message || 'Память AMS не ответила');
+    });
+  }
+  function syncAms(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    return post('/api/printer/ams/sync', { printer_id: p.id }).then(function(d){
+      toast('Синхронизировано: слотов ' + ((d && d.spools) ? d.spools.length : 0));
+      return loadAms().then(tick);
+    }).catch(function(e){ toast(e.message || 'Синхронизация не прошла'); });
+  }
+
+  /* ------------------------------------------------- шторка выбора катушки */
+  function closeSheet(){
+    st.sheetSlot = '';
+    var wrap = $('#pk_sheet_wrap');
+    if (wrap) wrap.hidden = true;
+  }
+  function spoolTitle(sp){
+    var parts = [sp.material || 'пластик'];
+    if (sp.color_name) parts.push(sp.color_name);
+    return parts.join(' ');
+  }
+  function renderSheet(){
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === st.sheetSlot) item = it; });
+    if (!item) { closeSheet(); return; }
+    var stx = slotState(item);
+    var title = $('#pk_sheet_title'), sub = $('#pk_sheet_sub');
+    var act = $('#pk_sheet_act'), list = $('#pk_sheet_list');
+    if (title) title.textContent = slotName(item);
+    if (sub) {
+      sub.textContent = (stx.material ? spoolTitle({ material: stx.material, color_name: stx.colorName })
+        : 'пусто') + (stx.pct >= 0 ? ' · ' + Math.round(stx.pct) + '%' : '')
+        + (stx.spoolId ? ' · катушка привязана' : '');
+    }
+    var buttons = [];
+    if (stx.spoolId && !stx.livePresent) {
+      buttons.push('<button class="pk-btn pk-hit go" type="button" data-ams="again" data-slot="'
+        + esc(item.slot) + '">Как в прошлый раз: '
+        + esc(spoolTitle({ material: stx.material, color_name: stx.colorName })) + '</button>');
+    }
+    if (stx.spoolId) {
+      buttons.push('<button class="pk-btn pk-hit" type="button" data-ams="forget" data-slot="'
+        + esc(item.slot) + '">Забыть память слота</button>');
+      buttons.push('<button class="pk-btn pk-hit" type="button" data-ams="unbind" data-slot="'
+        + esc(item.slot) + '">Отвязать катушку (слот свободен)</button>');
+    }
+    if (act) act.innerHTML = buttons.join('');
+    if (!list) return;
+    if (st.spools === null) {
+      list.innerHTML = '<div class="pk-note">Читаю склад…</div>';
+      get('/api/spools').then(function(d){
+        st.spools = (d && d.spools) || [];
+        if (st.sheetSlot) renderSheet();
+      }).catch(function(e){
+        list.innerHTML = '<div class="pk-note warn">' + esc(e.message || 'Склад не ответил') + '</div>';
       });
-      amsNow.textContent = slots ? ('Слотов AMS: ' + filled + ' из ' + slots) : 'Слотов нет';
+      return;
     }
+    // Свободные катушки: не в AMS, с остатком. Привязанные к другому слоту
+    // этого же принтера показываем тоже — оператор мог переставить её руками.
+    var free = st.spools.filter(function(sp){
+      return num(sp.remaining_grams) > 0 && !sp.archived;
+    });
+    var here = free.filter(function(sp){ return String(sp.printer_id || '') === (selected() || {}).id; });
+    var other = free.filter(function(sp){ return here.indexOf(sp) < 0; });
+    var rows = here.concat(other).slice(0, 40).map(function(sp){
+      var where = String(sp.printer_id || '') === (selected() || {}).id
+        ? ('слот ' + (num(sp.ams_slot, -1) + 1)) : 'на складе';
+      return '<button class="pk-pick" type="button" data-ams="bind" data-slot="'
+        + esc(item.slot) + '" data-spool="' + esc(sp.id) + '">'
+        + '<span class="pk-chip" style="background:' + esc(hex(sp.color_hex)) + '"></span>'
+        + '<span><b>' + esc(spoolTitle(sp)) + '</b><small>'
+        + Math.round(num(sp.remaining_grams)) + ' г · ' + esc(where) + '</small></span></button>';
+    });
+    list.innerHTML = (rows.length ? rows.join('')
+      : '<div class="pk-note">Свободных катушек с остатком нет — приход пластика в панели, раздел «Склад».</div>');
+  }
+  function openSheet(slot){
+    st.sheetSlot = String(slot);
+    var wrap = $('#pk_sheet_wrap');
+    if (wrap) wrap.hidden = false;
+    renderSheet();
+  }
+  function bindSpool(slot, spoolId, force){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === String(slot)) item = it; });
+    var live = item && item.live;
+    var body = {
+      id: spoolId, printer_id: p.id, ams_slot: String(slot),
+      tray_uuid: (live && live.uuid) || '',
+      push_ams: true,      // материал уезжает в принтер — это и есть смысл привязки
+      confirmed: true      // отправка в AMS — физическое действие, подтверждение оператора
+    };
+    if (force) body.force = true;
+    return post('/api/spool/bind', body).then(function(d){
+      if (d && d.push_error) toast('Привязано, но в принтер не ушло: ' + d.push_error);
+      else toast('Катушка в слоте — материал отправлен в принтер');
+      closeSheet();
+      return loadAms().then(tick);
+    }).catch(function(e){
+      var msg = e.message || 'Не вышло';
+      if (msg.indexOf('уже занят') >= 0 && !force) {
+        if (confirm(msg + String.fromCharCode(10) + 'Заменить катушку в этом слоте?')) {
+          return bindSpool(slot, spoolId, true);
+        }
+        return;
+      }
+      toast(msg);
+    });
+  }
+  function unbindSlot(slot){
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === String(slot)) item = it; });
+    var spoolId = item && item.mem && item.mem.spool_id;
+    var p = selected();
+    if (!spoolId || !p) { toast('В этом слоте нет привязанной катушки'); return Promise.resolve(); }
+    if (!confirm('Отвязать катушку от слота? Катушка вернётся на склад.')) return Promise.resolve();
+    return post('/api/spool/bind', { id: spoolId, printer_id: p.id, ams_slot: '' })
+      .then(function(){ toast('Катушка отвязана'); closeSheet(); return loadAms().then(tick); })
+      .catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+  function forgetSlot(slot){
+    var p = selected();
+    if (!p) return Promise.resolve();
+    if (!confirm('Забыть память слота? Привязки катушек на складе не тронутся.')) return Promise.resolve();
+    return post('/api/ams/memory/clear', { printer_id: p.id, slot: String(slot) })
+      .then(function(d){ toast('Память слота очищена (забыто: ' + num(d && d.removed) + ')');
+        closeSheet(); return loadAms(); })
+      .catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
+  /* ----------------------------------------------------------- камера */
+  function camFrame(){
+    var p = selected();
+    var cam = $('#pk_cam'), sub = $('#pk_cam_sub'), note = $('#pk_cam_note');
+    if (!cam) return;
+    var info = (p && p.camera) || {};
+    if (sub) {
+      sub.textContent = !p ? 'принтеров нет'
+        : (!info.available ? 'кадр недоступен' : 'кадр с «' + (p.name || 'принтера') + '»');
+    }
+    if (note) {
+      var bits = [];
+      if (info.demo) bits.push('демо-режим: показывается учебный кадр, а не цех');
+      if (info.error) bits.push(info.error);
+      if (info.age !== null && info.age !== undefined) bits.push('кадр ' + Math.round(num(info.age)) + ' с назад');
+      if (num(info.shots)) bits.push('снимков в журнале: ' + num(info.shots));
+      note.textContent = bits.join(' · ');
+      note.className = 'pk-note' + ((info.demo || info.error) ? ' warn' : '');
+    }
+    if (p && info.available) {
+      cam.src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
+    } else {
+      cam.removeAttribute('src');
+    }
+    var lightBtn = $('#pk_b_light');
+    if (lightBtn) lightBtn.textContent = String((p && p.light) || '') === 'on' ? 'Свет: вкл' : 'Свет: выкл';
+    var shotBtn = $('#pk_b_shot');
+    if (shotBtn) shotBtn.disabled = !(p && info.available);
+  }
+  function takeShot(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    return post('/api/printer/snapshot', { printer_id: p.id, note: 'Снимок с пульта цеха' })
+      .then(function(){ toast('Снимок в журнале'); tick(); })
+      .catch(function(e){ toast(e.message || 'Кадр не сохранился'); });
+  }
+  function toggleLight(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    var on = String(p.light || '') === 'on';
+    return post('/api/printer/command', { command:'light', value: !on, printer_id: p.id })
+      .then(function(){ toast(on ? 'Свет выключен' : 'Свет включён'); tick(); })
+      .catch(function(e){ toast(e.message || 'Свет не переключился'); });
+  }
+  function camTimer(on){
+    clearInterval(st.camTimer);
+    st.camTimer = null;
+    if (on) st.camTimer = setInterval(function(){
+      if (document.hidden || st.screen !== 'cam') return;
+      camFrame();
+    }, CAM_MS);
   }
 
   /* ------------------------------------------------------------ очередь */
@@ -542,12 +864,16 @@
     document.querySelectorAll('.pk-tab').forEach(function(b){
       b.classList.toggle('on', b.dataset.screen === name);
     });
-    if (name !== 'cam') {
+    if (name === 'cam') {
+      camFrame();
+      camTimer(true);
+    } else {
+      camTimer(false);
       var cam = $('#pk_cam');
       if (cam) cam.removeAttribute('src');
-    } else {
-      renderPark();
     }
+    if (name === 'ams') { loadAms(); } else { closeSheet(); }
+    if (name === 'queue' || name === 'park') renderQueue();
     try { localStorage.setItem('pult_screen', name); } catch (e) {}
   }
 
@@ -655,7 +981,8 @@
       setFreshness();
       renderPark();
       renderQueue();
-      renderSide();
+      if (st.screen === 'ams') { renderAms(); loadAms(); }
+      if (st.screen === 'cam') camFrame();
     }).catch(function(e){
       setOnline(false, e && e.message ? e.message : '');
       setFreshness();
@@ -672,6 +999,28 @@
     if (!hit || !hit.closest) return;
     var tab = hit.closest('.pk-tab');
     if (tab) { showScreen(tab.dataset.screen); return; }
+    var amsBtn = hit.closest('[data-ams]');
+    if (amsBtn) {
+      var act = amsBtn.dataset.ams;
+      var slot = amsBtn.dataset.slot;
+      if (act === 'pick') openSheet(slot);
+      else if (act === 'bind') bindSpool(slot, amsBtn.dataset.spool, false);
+      else if (act === 'again') {
+        var target = null;
+        slotsMap().forEach(function(it){ if (it.slot === String(slot)) target = it; });
+        var spoolId = target && target.mem && target.mem.spool_id;
+        if (!spoolId) { toast('Прошлая катушка неизвестна'); return; }
+        bindSpool(slot, spoolId, false);
+      } else if (act === 'unbind') unbindSlot(slot);
+      else if (act === 'forget') forgetSlot(slot);
+      return;
+    }
+    if (hit.closest('#pk_ams_sync')) { syncAms(); return; }
+    if (hit.closest('#pk_b_shot')) { takeShot(); return; }
+    if (hit.closest('#pk_b_light')) { toggleLight(); return; }
+    if (hit.closest('#pk_b_refresh')) { camFrame(); toast('Кадр обновлён'); return; }
+    if (hit.closest('#pk_sheet_close')) { closeSheet(); return; }
+    if (hit.closest('#pk_sheet_wrap') && !hit.closest('.pk-sheet')) { closeSheet(); return; }
     var cmdBtn = hit.closest('[data-cmd]');
     if (cmdBtn) {
       if (cmdBtn.disabled) return;
@@ -696,12 +1045,17 @@
       var found = printerById(st.active);
       renderPark();
       renderQueue();
-      renderSide();
+      st.ams = { slots:[], printer:'', at:0 };
+      if (st.screen === 'ams') loadAms(); else renderAms();
+      if (st.screen === 'cam') camFrame();
       toast('Выбран ' + ((found && found.name) || 'принтер'));
     }
   });
   document.addEventListener('visibilitychange', function(){
-    if (!document.hidden) tick();
+    if (!document.hidden) { tick(); if (st.screen === 'cam') camFrame(); }
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closeSheet();
   });
 
   try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
