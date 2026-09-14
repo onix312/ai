@@ -24,7 +24,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
-from connector.printflow.api import router  # noqa: E402
+from connector.printflow import openapi  # noqa: E402
+from connector.printflow.api import register_routes, router  # noqa: E402
 
 REGISTRY_DOC = ROOT / "docs" / "МАРШРУТЫ.md"
 CHAIN_FILES = ("api.py", "http_handler.py")
@@ -228,6 +229,77 @@ class SearchRouteContractTests(unittest.TestCase):
         self.assertIn("data.groups", block)
         self.assertNotIn("data.results", block,
                          "палитра снова читает плоский ответ, которого нет")
+
+
+def _flatten(text: str) -> str:
+    """Справка сверяется одной строкой: перенос ломает шаблон фразы."""
+    return re.sub(r"\s+", " ", text)
+
+
+class RegistryProseTests(unittest.TestCase):
+    """Числа в тексте справки — не только в таблице.
+
+    Таблицу по файлам контракт выше держит, а разделение «if-цепочки /
+    декораторы», число путей спецификации и группы живут в абзацах. Правятся
+    они руками, и справка на них уже расходилась: обновлённая таблица при
+    старом абзаце выглядит как верная. Поэтому абзацы сверяются с живым
+    реестром так же, как строки таблицы.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = _flatten(REGISTRY_DOC.read_text(encoding="utf-8"))
+        cls.chain = chain_routes()
+        cls.decorators = decorator_routes()
+        cls.known = {r["path"] for r in router.reference()}
+        for found in cls.chain.values():
+            cls.known |= {path for _, path in found}
+
+    def test_prose_split_matches_code(self):
+        """«523: 263 объявлены … 260 — декоратором» — всё из реестра."""
+        chain_total = sum(len(v) for v in self.chain.values())
+        decorators = sum(len(v) for v in self.decorators.values())
+        found = re.search(
+            r"Маршрутов в сервере \*\*(\d+)\*\*: (\d+) объявлены.*?"
+            r"\((\d+) в `api\.py`, (\d+) в `http_handler\.py`\), "
+            r"(\d+) — декоратором", self.text)
+        self.assertIsNotNone(found, "в справке нет абзаца о разделении маршрутов")
+        actual = (chain_total + decorators, chain_total, len(self.chain["api.py"]),
+                  len(self.chain["http_handler.py"]), decorators)
+        self.assertEqual(actual, tuple(int(n) for n in found.groups()),
+                         "числа в абзаце разошлись с реестром: пересчитайте справку")
+
+    def test_prose_spec_path_count_matches_code(self):
+        """Неполнота спецификации — измеренное число, а не оценка."""
+        register_routes()
+        paths = len(openapi.build()["paths"])
+        total = sum(len(v) for v in self.chain.values()) \
+            + sum(len(v) for v in self.decorators.values())
+        found = re.search(r"отдаёт \*\*(\d+)\*\* путей при \*\*(\d+)\*\* в реестре",
+                          self.text)
+        self.assertIsNotNone(found, "в справке нет абзаца о неполноте спецификации")
+        self.assertEqual((paths, total), tuple(int(n) for n in found.groups()),
+                         "число путей спецификации в справке устарело")
+
+    def test_prose_group_counts_match_code(self):
+        """Крупнейшие группы перечислены числами — они тоже сверяются."""
+        groups: dict[str, int] = {}
+        for path in self.known:
+            parts = [part for part in path.split("/") if part]
+            name = "/" + "/".join(parts[:2])
+            groups[name] = groups.get(name, 0) + 1
+        section = self.text.split("## Группы по первым двум сегментам", 1)[1] \
+            .split("Полный список", 1)[0]
+        listed = {name: int(number)
+                  for name, number in re.findall(r"`(/api/[a-z0-9_-]+)` (\d+)", section)}
+        self.assertTrue(listed, "в справке нет списка групп")
+        stale = {name: (number, groups.get(name, 0))
+                 for name, number in listed.items() if groups.get(name) != number}
+        self.assertEqual({}, stale, "числа групп в справке разошлись с реестром")
+        total = re.search(r"Всего групп — (\d+)", section)
+        self.assertIsNotNone(total, "в справке нет числа групп")
+        self.assertEqual(len(groups), int(total.group(1)),
+                         "всего групп в справке устарело")
 
 
 if __name__ == "__main__":
