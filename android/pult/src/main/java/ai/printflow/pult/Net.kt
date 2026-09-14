@@ -72,6 +72,13 @@ object Net {
         }
     }
 
+    /** JSON-ответ локального API; null означает таймаут, ошибку HTTP или JSON. */
+    fun json(base: String, path: String, timeoutMs: Int = 2500): JSONObject? {
+        val root = normalize(base) ?: return null
+        val body = get("$root$path", timeoutMs) ?: return null
+        return runCatching { JSONObject(body) }.getOrNull()
+    }
+
     /** IPv4 активного интерфейса (обычно wlan0) — от него считаем /24. */
     fun localV4(): String? {
         return try {

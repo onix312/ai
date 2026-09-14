@@ -28,7 +28,14 @@ from .config import SITE
 # имя файла в URL остаётся человекочитаемым («NOZZA-kassa-17.0.7.apk»).
 APP_DIR_NAME = "app"
 APK_SUFFIX = ".apk"
-VERSION_FILE = "version.json"
+VERSION_FILES = {
+    "kassa": "version.json",
+    "pult": "pult.json",
+}
+TARGET_PREFIXES = {
+    "kassa": "NOZZA-kassa-",
+    "pult": "NOZZA-pult-",
+}
 # Сколько символов changelog отдаём телефону: этого хватает на 5–8 строк
 # «что нового» в диалоге обновления, а ответ остаётся лёгким.
 CHANGELOG_LIMIT = 1200
@@ -38,9 +45,13 @@ def app_dir() -> Path:
     return Path(SITE) / APP_DIR_NAME
 
 
-def _version_info(root: Path) -> dict[str, Any]:
-    """Манифест сборки, который пишет `android-build.sh` рядом с APK."""
-    raw = root / VERSION_FILE
+def _target_name(target: str | None) -> str:
+    return target if target in VERSION_FILES else "kassa"
+
+
+def _version_info(root: Path, target: str = "kassa") -> dict[str, Any]:
+    """Манифест сборки нужной оболочки, который пишет build-скрипт."""
+    raw = root / VERSION_FILES[_target_name(target)]
     if not raw.is_file():
         return {}
     try:
@@ -78,31 +89,39 @@ def file_sha256(path: Path) -> str:
     return value
 
 
-def latest_apk(root: Path | None = None) -> tuple[Path | None, dict[str, Any]]:
-    """Свежий APK в каталоге сборки (если их несколько — берём новый по mtime)."""
+def latest_apk(root: Path | None = None, target: str = "kassa") -> tuple[Path | None, dict[str, Any]]:
+    """Свежий APK выбранной оболочки, не смешивая кассу и пульт."""
+    target = _target_name(target)
     base = root or app_dir()
     if not base.is_dir():
         return None, {}
+    prefix = TARGET_PREFIXES[target]
     files = sorted((p for p in base.iterdir()
-                    if p.is_file() and p.suffix.lower() == APK_SUFFIX),
+                    if p.is_file() and p.suffix.lower() == APK_SUFFIX
+                    and p.name.startswith(prefix)),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     if not files:
         return None, {}
-    return files[0], _version_info(base)
+    return files[0], _version_info(base, target)
 
 
-def status(root: Path | None = None) -> dict[str, Any]:
-    """Что отдать оболочке и панели: есть ли сборка, какая версия, где скачать.
+def status(root: Path | None = None, target: str = "kassa") -> dict[str, Any]:
+    """Что отдать выбранной оболочке: есть ли сборка, версия и URL.
+
+    По умолчанию остаётся касса для обратной совместимости со старым API.
+
 
     `root` — каталог сборки; по умолчанию `site/app`. Параметр нужен тестам и
     «пересборке в обход репозитория», а не для того, чтобы уводить раздачу.
     """
-    apk, meta = latest_apk(root)
+    target = _target_name(target)
+    apk, meta = latest_apk(root, target)
     if apk is None:
         return {"available": False, "url": "", "file": "", "size_mb": 0.0,
                 "size_bytes": 0, "sha256": "", "changelog": "",
                 "version": "", "version_code": 0, "built_at": "",
-                "package": str(meta.get("package") or "ai.printflow.kassa"),
+                "package": str(meta.get("package") or ("ai.printflow.pult" if target == "pult" else "ai.printflow.kassa")),
+                "target": target,
                 "hint": ("Сборки нет. На ПК владельца: ./scripts/android-build.sh — "
                          "APK появится здесь и его можно будет скачать телефоном "
                          "через локальную сеть.")}
@@ -121,19 +140,21 @@ def status(root: Path | None = None) -> dict[str, Any]:
         "version": str(meta.get("version") or ""),
         "version_code": int(meta.get("version_code") or 0),
         "built_at": str(meta.get("built_at") or ""),
-        "package": str(meta.get("package") or "ai.printflow.kassa"),
-        "hint": "Ставится поверх себя: данные кассы в WebView, не в приложении.",
+        "package": str(meta.get("package") or ("ai.printflow.pult" if target == "pult" else "ai.printflow.kassa")),
+        "target": target,
+        "hint": "Ставится поверх себя: данные WebView и настройки оболочки сохраняются.",
     }
 
 
-def check_version(seen: Any, root: Path | None = None) -> dict[str, Any]:
+def check_version(seen: Any, root: Path | None = None, target: str = "kassa") -> dict[str, Any]:
     """Ответ оболочке «нужно ли обновиться».
 
     `seen` — versionCode установленного APK (целое или строка). Сравниваем
     только вверх: понижение версии — всегда отказ, иначе авто-обновление
     устроило бы маятник между двумя сборками.
     """
-    out = status(root)
+    target = _target_name(target)
+    out = status(root, target)
     try:
         installed = int(seen or 0)
     except (TypeError, ValueError):

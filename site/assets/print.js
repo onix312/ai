@@ -149,8 +149,9 @@ function renderCatalog() {
   }
   renderKpis();
   if (!forms.length) {
-    render(host, '<div class="empty"><span class="big">▤</span><b>Каталог пуст</b>'
-      + '<span>Сервер не отдал ни одной формы — смотрите журнал коннектора.</span></div>');
+    render(host, '<div class="empty pr-empty"><span class="big">▤</span><b>Каталог пока пуст</b>'
+      + '<span>Сервер не отдал ни одной формы. Проверьте журнал коннектора и попробуйте ещё раз.</span>'
+      + '<button class="btn sm" type="button" data-print-retry>Повторить загрузку</button></div>');
     return;
   }
   // Группы идут в том порядке, в каком их отдал реестр: это порядок работы цеха.
@@ -187,6 +188,15 @@ async function loadCatalog(options = {}) {
   if (loading) return;
   loading = true;
   clearError();
+  const refresh = $('pr_refresh');
+  const host = $('pr_forms');
+  if (refresh) {
+    refresh.disabled = true;
+    refresh.setAttribute('aria-busy', 'true');
+  }
+  if (host && !loaded) {
+    host.innerHTML = '<div class="pr-loading"><div class="skeleton" style="height:190px"></div><span>Загружаем каталог форм…</span></div>';
+  }
   try {
     const data = await get('/api/print/forms');
     forms = Array.isArray(data.forms) ? data.forms : [];
@@ -200,6 +210,10 @@ async function loadCatalog(options = {}) {
     }
   } finally {
     loading = false;
+    if (refresh) {
+      refresh.disabled = false;
+      refresh.removeAttribute('aria-busy');
+    }
   }
 }
 
@@ -253,12 +267,23 @@ async function printForm(formId, button) {
   }
   try {
     if (button) button.disabled = true;
+    if (button) {
+      button.classList.add('is-busy');
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Готовим лист…';
+    }
     const markup = await fetchSheet(form.api, params);
     printWindow(markup, form.title);
+    toast('Лист подготовлен', 'Проверьте масштаб 100% в окне печати');
   } catch (error) {
     fail(error);
   } finally {
-    if (button) button.disabled = false;
+    if (button) {
+      button.disabled = false;
+      button.classList.remove('is-busy');
+      button.removeAttribute('aria-busy');
+      button.textContent = 'Печать листа';
+    }
   }
 }
 
@@ -286,13 +311,18 @@ function bind() {
   bound = true;
 
   const refresh = $('pr_refresh');
-  if (refresh) refresh.addEventListener('click', () => loadCatalog().then(() => toast('Каталог обновлён', 'Формы взяты из реестра сервера')));
+  const reload = () => loadCatalog().then(() => toast('Каталог обновлён', 'Формы взяты из реестра сервера'));
+  if (refresh) refresh.addEventListener('click', reload);
+  const retry = $('pr_error_retry');
+  if (retry) retry.addEventListener('click', reload);
 
   const formsHost = $('pr_forms');
   if (formsHost) {
     formsHost.addEventListener('click', (event) => {
       const target = event.target;
       if (!target || !target.closest) return;
+      const retryButton = target.closest('[data-print-retry]');
+      if (retryButton) reload();
       const button = target.closest('[data-print]');
       if (button) printForm(button.dataset.print, button);
     });

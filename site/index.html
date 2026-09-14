@@ -1020,9 +1020,9 @@
   <div><span class="eyebrow">Цех · бумага, наклейки и бланки</span><h1>Печать</h1><p>Что печатаем, на какой бумаге и каким размером. Лист собирает сервер — на бумаге форма одинаковая с любого устройства в цехе.</p></div>
   <div class="head-actions"><span id="pr_tag" class="tag" hidden></span><button class="btn" id="pr_refresh" type="button">↻ Обновить каталог</button></div>
  </div>
- <div class="notice error" id="pr_error" role="alert" hidden><span>!</span><span id="pr_error_text">Не удалось загрузить каталог форм.</span></div>
+ <div class="notice error pr-error" id="pr_error" role="alert" hidden><span class="pr-error-mark" aria-hidden="true">!</span><span id="pr_error_text">Не удалось загрузить каталог форм.</span><button class="btn sm" id="pr_error_retry" type="button">Повторить</button></div>
  <div class="kpi-grid print-kpis" id="pr_kpis" aria-live="polite"></div>
- <div class="pr-forms" id="pr_forms"><div class="skeleton" style="height:190px"></div></div>
+ <div class="pr-forms" id="pr_forms" aria-live="polite"><div class="pr-loading"><div class="skeleton" style="height:190px"></div><span>Загружаем каталог форм…</span></div></div>
  <div class="pr-grid">
   <section class="card pr-barcode-card">
    <div class="card-head"><div><span class="card-kicker">Ценники и касса</span><h2>Штрихкод Code 128</h2><p>Проверить артикул до тиража: режим, число символов и контрольная сумма.</p></div></div>

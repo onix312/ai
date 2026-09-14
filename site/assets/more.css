@@ -1211,6 +1211,69 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
   .pc-flags .alarm { animation: none !important; }
 }
 
+/* ---------- Раздел «Печать»: спокойный каталог форм и предпечатная проверка ---------- */
+.print-workspace { --print-gap: clamp(12px, 1.5vw, 20px); }
+.print-head { align-items: flex-start; }
+.print-head h1 { margin-bottom: 6px; letter-spacing: -.035em; }
+.print-head > div:first-child { max-width: 780px; }
+.print-head .head-actions { flex: 0 0 auto; }
+.print-kpis { margin-top: 2px; }
+.pr-forms { display: grid; gap: var(--print-gap); }
+.pr-loading { display: grid; gap: 10px; color: var(--muted); font-size: 12px; }
+.pr-loading .skeleton { min-height: 150px; }
+.pr-group { display: grid; gap: 10px; }
+.pr-group-title { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.pr-group-title::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.pr-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--print-gap); }
+.pr-card { display: flex; min-width: 0; flex-direction: column; gap: 14px; padding: clamp(15px, 2vw, 22px); border: 1px solid var(--line); border-radius: calc(var(--r) + 2px); background: linear-gradient(145deg, var(--panel), var(--panel-2)); box-shadow: var(--shadow-sm); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.pr-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow); transform: translateY(-2px); }
+.pr-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.pr-card-head h2 { margin: 3px 0 0; font-size: clamp(16px, 1.5vw, 19px); letter-spacing: -.02em; }
+.pr-card-note { min-height: 2.7em; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.pr-card-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: auto 0 0; }
+.pr-card-facts > div { min-width: 0; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: color-mix(in srgb, var(--panel-3) 60%, transparent); }
+.pr-card-facts dt { color: var(--muted); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.pr-card-facts dd { overflow: hidden; margin: 4px 0 0; color: var(--text); font-size: 12px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pr-card-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; padding-top: 2px; }
+.pr-field { display: grid; gap: 5px; min-width: 0; }
+.pr-field > span { color: var(--text-2); font-size: 11px; font-weight: 650; }
+.pr-card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 2px; }
+.pr-card-foot .btn { min-height: 42px; }
+.pr-card-path { overflow: hidden; color: var(--muted); font-family: var(--mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pr-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.pr-error > span:nth-child(2) { flex: 1 1 240px; }
+.pr-error-mark { display: grid; width: 24px; height: 24px; flex: none; place-items: center; border-radius: 8px; background: var(--bad); color: #fff; font-weight: 800; }
+.pr-empty { display: grid; justify-items: center; gap: 9px; min-height: 220px; padding: 32px 20px; text-align: center; }
+.pr-empty .btn { margin-top: 6px; }
+.pr-barcode-card, .pr-hint-card { min-width: 0; }
+.pr-row { display: flex; align-items: stretch; gap: 10px; }
+.pr-row .field { min-width: 0; flex: 1; }
+.pr-barcode-out { display: grid; min-height: 100px; place-items: center; gap: 7px; margin-top: 14px; padding: 14px; overflow: auto; border: 1px dashed var(--line); border-radius: var(--r-sm); background: var(--panel-2); text-align: center; }
+.pr-barcode-out svg { max-width: 100%; height: auto; }
+.pr-barcode-out small { color: var(--muted); }
+.pr-checklist { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.pr-checklist li { position: relative; padding: 10px 12px 10px 34px; border-radius: var(--r-sm); background: var(--panel-2); color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+.pr-checklist li::before { position: absolute; top: 10px; left: 12px; color: var(--ok); content: "✓"; font-weight: 800; }
+.pr-card .btn.is-busy { cursor: wait; opacity: .75; }
+@media (max-width: 720px) {
+  .print-head { gap: 12px; }
+  .print-head .head-actions { width: 100%; }
+  .print-head .head-actions .btn { width: 100%; min-height: 44px; }
+  .pr-card-facts { grid-template-columns: 1fr 1fr; }
+  .pr-card-facts > div:last-child { grid-column: 1 / -1; }
+  .pr-row { flex-direction: column; }
+  .pr-row .btn { min-height: 44px; }
+  .pr-card-foot .btn { flex: 1 1 180px; }
+}
+@media (max-width: 380px) {
+  .pr-card { padding: 14px; }
+  .pr-card-facts { gap: 6px; }
+  .pr-card-facts > div { padding: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pr-card { transition: none; }
+}
+
 /* 17.1b: привязка AMS в стойке + светофор-кнопка на карточке. */
 button.pc-dots { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; width: 100%; }
 button.pc-dots:hover { text-decoration: underline; text-underline-offset: 3px; }

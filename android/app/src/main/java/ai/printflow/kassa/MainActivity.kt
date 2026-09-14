@@ -110,6 +110,7 @@ class MainActivity : Activity() {
         super.onResume()
         RingService.foreground = true
         syncRingService()
+        checkForUpdate()
     }
 
     override fun onPause() {
@@ -611,6 +612,9 @@ class MainActivity : Activity() {
      * и «обновлений нет», и «сборки на сервере нет». При старте молчим.
      */
     private fun checkForUpdate(manual: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!manual && now - prefs.getLong(KEY_UPDATE_CHECK, 0L) < UPDATE_INTERVAL_MS) return
+        if (!manual) prefs.edit().putLong(KEY_UPDATE_CHECK, now).apply()
         val base = prefs.getString(KEY_URL, "").orEmpty()
         if (base.isBlank()) {
             if (manual) runOnUiThread { toast(getString(R.string.panel_hint_server)) }
@@ -730,6 +734,8 @@ class MainActivity : Activity() {
         // больше не спрашиваем, иначе диалог «Скачать» всплывал на каждом
         // запуске, пока на сервере лежит сборка новее установленной.
         private const val KEY_UPDATE_SKIPPED = "update_skipped_code"
+        private const val KEY_UPDATE_CHECK = "update_check_at"
+        private const val UPDATE_INTERVAL_MS = 6L * 60L * 60L * 1000L
         private const val KEY_RING_BG = "ring_background"
         // Копия очереди из страницы: страховка от смены адреса сервера.
         private const val KEY_QUEUE = "offline_queue_backup"

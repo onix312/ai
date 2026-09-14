@@ -31,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 
 /**
  * Оболочка пульта цеха: окно к странице `/pult` на сервере PrintFlow в LAN.
@@ -174,6 +175,7 @@ class MainActivity : Activity() {
         view.loadUrl("$base$PULT_PATH")
         applyKeepAwake()
         applyKiosk()
+        checkForUpdate()
     }
 
     private fun hidePanelIfVisible() {
@@ -351,6 +353,48 @@ class MainActivity : Activity() {
         super.onResume()
         applyKeepAwake()
         applyKiosk()
+        checkForUpdate()
+    }
+
+    /**
+     * Проверяем именно APK пульта, а не кассы: сервер хранит два манифеста и
+     * два префикса файлов. Проверка ограничена разом в шесть часов, чтобы
+     * возвращение из системного диалога не создавало очередь одинаковых окон.
+     * Установка остаётся подтверждаемой системным Android-установщиком.
+     */
+    private fun checkForUpdate() {
+        val base = prefs.getString(KEY_SERVER, "").orEmpty()
+        if (base.isBlank()) return
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(KEY_UPDATE_CHECK, 0L) < UPDATE_INTERVAL_MS) return
+        prefs.edit().putLong(KEY_UPDATE_CHECK, now).apply()
+        Thread {
+            val json = Net.json(base, "/api/app/android?app=pult&installed=${BuildConfig.VERSION_CODE}")
+                ?: return@Thread
+            if (!json.optBoolean("available", false)
+                || !json.optBoolean("update_available", false)) return@Thread
+            val url = json.optString("url", "")
+            val file = json.optString("file", "")
+            val bytes = json.optLong("size_bytes", 0L)
+            val version = json.optString("version", "")
+            val sha = json.optString("sha256", "")
+            if (url.isBlank() || file.isBlank() || bytes <= 0L || sha.isBlank()) return@Thread
+            val changes = json.optString("changelog", "")
+            val size = String.format(Locale.ROOT, "%.1f", bytes / 1024.0 / 1024.0)
+            val message = buildString {
+                if (changes.isNotBlank()) append("Что нового:\n\n${changes.take(600)}\n\n")
+                append("Файл: $file · $size МБ\n")
+                append("SHA-256: ${sha.take(16)}…\n\nСкачать и установить сейчас?")
+            }
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("Доступен пульт v$version")
+                    .setMessage(message)
+                    .setPositiveButton("Скачать") { _, _ -> openExternally("$base$url") }
+                    .setNegativeButton("Позже", null)
+                    .show()
+            }
+        }.start()
     }
 
     // ----------------------------------------------------------- клавиатура
@@ -427,6 +471,8 @@ class MainActivity : Activity() {
         const val KEY_SERVER = "server"
         const val KEY_AWAKE = "awake"
         const val KEY_KIOSK = "kiosk"
+        const val KEY_UPDATE_CHECK = "update_check_at"
+        const val UPDATE_INTERVAL_MS = 6L * 60L * 60L * 1000L
         const val PULT_PATH = "/pult"
         // Цвета тёмной темы страницы пульта — из site/assets/tokens.css
         // (html[data-theme="dark"]). Держим их здесь, чтобы на стыке «экран
