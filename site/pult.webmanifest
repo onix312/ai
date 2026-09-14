@@ -1,0 +1,63 @@
+{
+  "name": "NOZZA · Пульт цеха",
+  "short_name": "Пульт",
+  "description": "Парк принтеров, очередь, AMS и камера в локальной сети PrintFlow",
+  "lang": "ru",
+  "id": "/control.html",
+  "start_url": "/control.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1117",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/assets/brand/nozza-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/brand/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "shortcuts": [
+    {
+      "name": "Файл на печать",
+      "short_name": "Файл",
+      "url": "/pult?screen=file",
+      "description": "Загрузить 3MF и поставить в очередь"
+    },
+    {
+      "name": "Автономность",
+      "short_name": "Авто",
+      "url": "/pult?screen=auto",
+      "description": "Что очередь сделает сама и почему стоит"
+    },
+    {
+      "name": "Очередь",
+      "short_name": "Очередь",
+      "url": "/pult?screen=queue",
+      "description": "Что печатается и что ждёт"
+    },
+    {
+      "name": "Парк принтеров",
+      "short_name": "Парк",
+      "url": "/pult?screen=park",
+      "description": "Состояние принтеров цеха"
+    },
+    {
+      "name": "Камера",
+      "short_name": "Камера",
+      "url": "/pult?screen=cam",
+      "description": "Кадр с плиты и лампа"
+    }
+  ]
+}

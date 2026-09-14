@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-label="Схема PrintFlow: устройства, коннектор, принтеры и Telegram">
+ <title>Как устроен PrintFlow</title>
+ <desc>Браузер в локальной сети общается с коннектором на компьютере владельца, коннектор — с принтерами Bambu Lab и, по желанию, с Telegram; данные лежат только в SQLite на этом компьютере.</desc>
+ <defs>
+  <linearGradient id="schCore" x1="0" y1="0" x2="1" y2="1">
+   <stop offset="0%" stop-color="#1b2440"/>
+   <stop offset="100%" stop-color="#161c2c"/>
+  </linearGradient>
+  <linearGradient id="schAccent" x1="0" y1="0" x2="1" y2="0">
+   <stop offset="0%" stop-color="#4f46e5"/>
+   <stop offset="100%" stop-color="#7c3aed"/>
+  </linearGradient>
+ </defs>
+
+ <rect width="1000" height="420" rx="20" fill="#0f1117"/>
+
+ <g font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif">
+  <text x="30" y="52" font-size="20" font-weight="750" fill="#f1f5f9">Как это устроено</text>
+  <text x="30" y="76" font-size="13.5" fill="#94a3b8">Всё в локальной сети: браузер и телефон — только окно, данные лежат на компьютере владельца</text>
+
+  <!-- 1. устройства -->
+  <rect x="30" y="104" width="250" height="176" rx="16" fill="#131a2b" stroke="#26304a"/>
+  <text x="50" y="136" font-size="16.5" font-weight="750" fill="#f1f5f9">Устройства в сети</text>
+  <g font-size="13" fill="#94a3b8">
+   <text x="50" y="164">Панель, касса и витрина</text>
+   <text x="50" y="186">в браузере</text>
+   <text x="50" y="214">Пульт цеха на телефоне</text>
+   <text x="50" y="236">(PWA или APK)</text>
+   <text x="50" y="264">ТВ-режим и мини-панель</text>
+  </g>
+
+  <!-- 2. коннектор -->
+  <rect x="368" y="88" width="264" height="208" rx="18" fill="url(#schCore)" stroke="#4f46e5"/>
+  <text x="390" y="122" font-size="18" font-weight="800" fill="#f8fafc">PrintFlow Connector</text>
+  <g font-size="12.5" fill="#a5b4fc">
+   <text x="390" y="150">Python 3.10+ · локальный сервер</text>
+   <text x="390" y="172">JSON-API с проверкой Origin</text>
+  </g>
+  <rect x="390" y="188" width="220" height="1" fill="#26304a"/>
+  <g font-size="13" fill="#94a3b8">
+   <text x="390" y="214">SQLite — источник правды:</text>
+   <text x="390" y="236">заказы, склад, деньги, журнал</text>
+   <text x="390" y="264">работает на этом компьютере</text>
+  </g>
+  <rect x="390" y="276" width="140" height="3" rx="1.5" fill="url(#schAccent)"/>
+
+  <!-- 3. принтеры -->
+  <rect x="720" y="104" width="250" height="112" rx="16" fill="#131a2b" stroke="#26304a"/>
+  <text x="740" y="136" font-size="16.5" font-weight="750" fill="#f1f5f9">Принтеры Bambu Lab</text>
+  <g font-size="13" fill="#94a3b8">
+   <text x="740" y="164">P1S · X1C · A1 + AMS</text>
+   <text x="740" y="186">MQTT · FTPS · камера</text>
+   <text x="740" y="206">локальная сеть или облако</text>
+  </g>
+
+  <!-- 4. telegram -->
+  <rect x="720" y="238" width="250" height="90" rx="16" fill="#131a2b" stroke="#26304a"/>
+  <text x="740" y="270" font-size="16.5" font-weight="750" fill="#f1f5f9">Telegram — по желанию</text>
+  <g font-size="13" fill="#94a3b8">
+   <text x="740" y="294">панель мастера и отчёты</text>
+   <text x="740" y="314">внешний сервис системы</text>
+  </g>
+
+  <!-- стрелки -->
+  <g stroke="#4f46e5" stroke-width="2" fill="none">
+   <path d="M280 192 H344"/>
+   <path d="M632 140 H696"/>
+   <path d="M632 276 H696"/>
+  </g>
+  <g fill="#4f46e5">
+   <path d="M356 192 l-12 -6 v12 z"/>
+   <path d="M708 140 l-12 -6 v12 z"/>
+   <path d="M708 276 l-12 -6 v12 z"/>
+  </g>
+  <g font-size="12" fill="#7c8aa5" text-anchor="middle">
+   <text x="324" y="182">HTTP · JSON</text>
+   <text x="670" y="130">MQTT · FTPS</text>
+   <text x="670" y="266">Bot API</text>
+  </g>
+
+  <!-- подпись -->
+  <rect x="30" y="322" width="940" height="66" rx="14" fill="#131a2b" stroke="#26304a"/>
+  <g font-size="13.5" fill="#cbd5e1">
+   <text x="52" y="350">Наружу уходят только сообщения Telegram — и только если бот включён. Ни облачных баз, ни CDN:</text>
+   <text x="52" y="372">страницы, стили, шрифты и генератор QR-кодов лежат внутри репозитория и работают без интернета.</text>
+  </g>
+ </g>
+</svg>

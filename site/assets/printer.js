@@ -267,7 +267,7 @@ function selectPrinter(pid, opts) {
   const changed = PF.state.activePrinter !== pid;
   PF.state.activePrinter = pid;
   renderLive();
-  if (changed) { loadFiles(); loadEvents(); }
+  if (changed) { amsMemoryFor = ''; loadAmsMemory(pid); loadFiles(); loadEvents(); }
   if (opts.tab) selectPtab(opts.tab);
   if (opts.scroll) {
     const el = $(opts.scroll);
@@ -1002,9 +1002,75 @@ function amsColorName(hex) {
   if (g >= r && g >= b) return 'Зелёный';
   return 'Синий';
 }
+/* =============================================== память слотов AMS (17.0.25)
+   Живая телеметрия живёт только пока принтер на связи. Раскладку слотов
+   (какая катушка, материал, остаток, когда видели) помнит сервер —
+   `/api/ams/memory`; здесь показываем её, когда принтер молчит, и помечаем
+   привязки, которых нет в живых данных. */
+let amsMemory = { printer_id: '', slots: [], stale_min: 0 };
+let amsMemoryFor = '';
+
+async function loadAmsMemory(printerId) {
+  const pid = String(printerId || '');
+  if (!pid || amsMemoryFor === pid) return;
+  amsMemoryFor = pid;
+  try {
+    const data = await get('/api/ams/memory', { printer_id: pid });
+    if (PF.state.activePrinter !== pid) return;   // принтер успели сменить
+    amsMemory = { printer_id: pid, slots: data.slots || [], stale_min: num(data.stale_min) };
+    const p = active();
+    if (p && p.id === pid && PF.viewOn('printers')) renderAms(p);
+  } catch (e) { amsMemoryFor = ''; }
+}
+
+function amsMemorySlots(p) {
+  const pid = String((p && p.id) || '');
+  return (amsMemory.slots || []).filter((s) => String(s.printer_id || '') === pid);
+}
+
+/** Карточка слота по базе: цвет, материал, остаток и когда это видели. */
+function amsMemoryCard(slot, note) {
+  const empty = slot.state === 'empty';
+  const grams = num(slot.grams_left);
+  const pct = num(slot.remain_pct, -1);
+  const color = slot.color_hex || '#cbd5e1';
+  const title = slot.label || ('Слот ' + (num(slot.slot_num) + 1));
+  const bits = [slot.material || '', slot.color_name || ''].filter(Boolean).join(' ');
+  return '<div class="ams-mem' + (empty ? ' empty' : '') + (slot.stale ? ' stale' : '') + '">'
+    + `<i class="sw" style="background:${esc(empty ? '#e2e8f0' : color)}"></i>`
+    + `<span class="grow"><b>${esc(title)}</b>`
+    + `<small>${empty ? 'пусто · '
+        + (bits ? 'стояло: ' + esc(bits) : 'катушки не было')
+        : esc(bits || 'без типа') + (grams ? ` · ${nfmt(grams)} г` : '')}</small></span>`
+    + `<span class="when">${esc(agoText(slot.seen_at))}`
+    + (slot.stale ? '<small>данные устарели</small>' : '') + '</span>'
+    + '</div>'
+    + (note ? `<div class="ams-mem-note">${esc(note)}</div>` : '');
+}
+
+/** Раскладка по базе: показываем, когда AMS не прислал живых данных. */
+function amsMemoryHtml(p) {
+  const slots = amsMemorySlots(p);
+  if (!slots.length) return '';
+  const live = new Set((((p.ams || {}).trays) || []).map((t) => String(traySlotNum(t))));
+  const dead = slots.filter((s) => !live.has(String(s.slot)));
+  if (!dead.length) return '';
+  const known = dead.filter((s) => s.state !== 'empty').length;
+  return '<div class="ams-mem-head">Память базы: '
+    + `${known ? known + ' слотов с пластиком' : 'все слоты пусты'}`
+    + `<small>${esc(dead.map((s) => 'слот ' + (num(s.slot_num) + 1)).join(', '))}`
+    + ' · PrintFlow запомнил последнюю загрузку AMS</small>'
+    + `<button class="btn ghost sm" data-ams-forget="${esc(String(p.id))}">Забыть</button>`
+    + '</div>'
+    + dead.map((s) => amsMemoryCard(s)).join('');
+}
+
 function renderAms(p) {
   const ams = p.ams || { trays: [] };
   const trays = ams.trays || [];
+  // Память тянем всегда: она дополняет живые слоты теми, о которых принтер
+  // сейчас молчит (второй AMS отключён, слот не прислали, принтер перезапущен).
+  loadAmsMemory(p.id);
   const occupied = trays.filter((t) => t.present !== false && (t.present || t.generic || t.type || t.uuid));
   text('pr_ams_count', trays.length
     ? `${occupied.length} из ${trays.length} занято`
@@ -1023,7 +1089,16 @@ function renderAms(p) {
   if (pbtn) pbtn.hidden = !trays.length;
   const host = $('pr_ams');
   if (!trays.length) {
+    const mem = amsMemoryHtml(p);
+    if (mem) {
+      host.innerHTML = '<div class="notice"><span>⟲</span><span><b>Живых данных AMS нет</b>'
+        + '<small class="muted">Ниже — последняя загрузка слотов из базы. '
+        + 'Как только принтер выйдет на связь, цифры обновятся.</small></span></div>' + mem;
+      loadAmsMemory(p.id);
+      return;
+    }
     host.innerHTML = '<div class="empty compact"><span>AMS не обнаружен или ещё не прислал данные.</span></div>';
+    loadAmsMemory(p.id);
     return;
   }
   host.innerHTML = trays.map((t) => {
@@ -1055,7 +1130,7 @@ function renderAms(p) {
       + (empty ? '' : `<button class="btn sm" type="button" data-ams-load="${esc(String(t.slot))}">Подать</button>`)
       + `<button class="btn sm" type="button" data-ams-edit="${esc(String(t.unit))}:${esc(String(t.slot))}" data-type="${esc(t.type || '')}" data-color="${esc(t.color || '#cccccc')}" title="Изменить тип и цвет">Тип</button>`
       + '</div></div>';
-  }).join('') + renderAmsSuggestion(p);
+  }).join('') + amsMemoryHtml(p) + renderAmsSuggestion(p);
 }
 
 /* Память AMS (идея 41): «как в прошлый раз» */
@@ -2183,6 +2258,28 @@ function applyDensity(on) {
   U.store.set(DENSITY_KEY, on ? '1' : '0');
 }
 
+/** Кнопка «Забыть» в памяти слотов: чистит память, привязки катушек не трогает. */
+function bindAmsMemory() {
+  const host = $('pr_ams');
+  if (!host || host.dataset.amsForgetBound) return;
+  host.dataset.amsForgetBound = '1';
+  host.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-ams-forget]');
+    if (!btn) return;
+    const pid = btn.dataset.amsForget || PF.state.activePrinter;
+    if (!pid) return;
+    if (!confirmDanger('Забыть раскладку слотов этого принтера? Катушки на складе останутся на месте.')) return;
+    try {
+      const res = await post('/api/ams/memory/clear', { printer_id: pid });
+      amsMemoryFor = '';
+      amsMemory = { printer_id: pid, slots: res.slots || [], stale_min: num(res.stale_min) };
+      toast('Память слотов очищена', res.removed ? `Забыто слотов: ${res.removed}` : 'Записей не было');
+      const p = active();
+      if (p) renderAms(p);
+    } catch (err) { fail(err); }
+  });
+}
+
 function bind() {
   const park = $('pr_park') || $('pr_tabs');
   if (park) park.addEventListener('click', (e) => {
@@ -2855,7 +2952,7 @@ function bindLinkOrder() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
+PF.on('ready', () => { bindAmsProfiles(); bindSchedule(); bindAmsMemory();
   bind();
   bindLinkOrder();
   renderTabs();
@@ -2869,7 +2966,7 @@ PF.on('ready', () => { bindAmsProfiles(); bindSchedule();
 PF.on('live', PF.whenView('printers', () => { renderLive(); }));
 PF.on('printers', PF.whenView('printers', () => { renderTabs(); }));
 PF.on('view', (d) => {
-  if (d.view === 'printers') { loadFiles(); loadEvents(); }
+  if (d.view === 'printers') { loadFiles(); loadEvents(); loadAmsMemory(PF.state.activePrinter); }
 });
 
 PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, convertActiveToOrder, convertJobToOrder };

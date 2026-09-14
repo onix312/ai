@@ -874,31 +874,6 @@ html[data-density="shop"] .kpi .value { font-size: 28px; }
 
 /* ==================================================== 13.1: доска контента
    План недели пн–вс (60) и превью поста как в Telegram (61). */
-.mk-board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; min-width: 0; }
-.mk-board-col {
-  border: 1px dashed var(--line); border-radius: 12px; padding: 8px;
-  min-height: 132px; display: flex; flex-direction: column; gap: 6px;
-  background: var(--panel-2);
-}
-.mk-board-col.drag-over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel-2)); }
-.mk-board-day { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; font-size: 12.5px; color: var(--text); }
-.mk-board-day small { font-weight: 500; color: var(--muted); font-size: 10.5px; }
-.mk-board-add {
-  flex: 1; border: 1px dashed var(--line); border-radius: 10px; background: transparent;
-  color: var(--muted); font-size: 20px; cursor: pointer; min-height: 84px; transition: all .15s var(--ease);
-}
-.mk-board-add:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
-.mk-board-card {
-  position: relative; border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
-  padding: 8px 26px 8px 10px; cursor: grab; font-size: 11.8px; line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
-  box-shadow: var(--shadow-1); transition: box-shadow .15s var(--ease), transform .15s var(--ease);
-}
-.mk-board-card:hover { box-shadow: var(--shadow-2); }
-.mk-board-card.dragging { opacity: .55; transform: rotate(2deg); }
-.mk-board-card [data-board-del] { position: absolute; top: 3px; right: 3px; }
-.mk-board-card .mk-board-text { white-space: pre-line; }
-.mk-board-card:active { cursor: grabbing; }
 
 .tg-preview-card {
   max-width: 460px; border-radius: 14px; border: 1px solid var(--line);
@@ -918,9 +893,6 @@ html[data-density="shop"] .kpi .value { font-size: 28px; }
   display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--line);
   color: var(--muted); font-size: 11.5px;
 }
-#mk_board_count.ok { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); color: var(--ok); }
-@media (max-width: 1100px) { .mk-board { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 720px) { .mk-board { grid-template-columns: repeat(2, 1fr); } }
 
 /* ==================================================== 13.1: библиотека
    Поиск с подсветкой (64) и бейдж «прочитано» (65). */

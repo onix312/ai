@@ -1929,27 +1929,9 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 
 /* ============ 8.5: Контент (генераторы) ============ */
 .grid2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); align-items: start; }
-.mk-pre {
-  white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 12.5px;
-  background: var(--card-2, rgba(148, 163, 184, .08)); border: 1px solid var(--line-soft);
-  border-radius: 10px; padding: 10px 12px; margin: 0; max-height: 260px; overflow: auto;
-}
-.mk-season-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12.5px; }
-.mk-season-row .n { width: 86px; flex: none; color: var(--muted); }
-.mk-season-row .bar { flex: 1; height: 10px; border-radius: 6px; background: var(--line-soft); overflow: hidden; }
-.mk-season-row .bar i { display: block; height: 100%; background: linear-gradient(90deg, #f59e0b, #f97316); }
-.mk-season-row b { width: 30px; text-align: right; font-weight: 600; }
-.mk-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--card-2, rgba(148,163,184,.08)); font-size: 12.5px; margin: 3px 4px 3px 0; }
-.mk-badge.on { border-color: #f97316; background: rgba(249, 115, 22, .1); font-weight: 600; }
-.mk-grid53 { display: grid; grid-template-columns: repeat(53, 8px); gap: 2px; overflow-x: auto; padding-bottom: 4px; }
-.mk-grid53 i { width: 8px; height: 8px; border-radius: 2px; background: var(--line-soft); }
-.mk-grid53 i.l1 { background: #bbf7d0; } .mk-grid53 i.l2 { background: #4ade80; }
-.mk-grid53 i.l3 { background: #16a34a; } .mk-grid53 i.l4 { background: #15803d; }
-[data-theme="dark"] .mk-grid53 i.l1 { background: #14532d; }
-[data-theme="dark"] .mk-grid53 i.l2 { background: #166534; }
-[data-theme="dark"] .mk-grid53 i.l3 { background: #22c55e; }
-[data-theme="dark"] .mk-grid53 i.l4 { background: #4ade80; }
+
+
+
 
 /* ============ 8.5: Статус-бар цеха (#75) ============ */
 #cycobar {

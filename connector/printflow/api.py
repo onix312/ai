@@ -2395,14 +2395,18 @@ class Api:
                     self.db.execute(
                         "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
                         (now_iso(), other["id"]))
-            self.db.execute(
-                "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, location='ams', updated_at=? WHERE id=?",
-                (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
             pushed, push_error = False, ""
             manager = getattr(self, "manager", None)
             printer = manager.get(printer_id) if manager and printer_id else None
+            # Подтверждение проверяем ДО записи в базу: иначе отказ оператора
+            # («Подтвердите отправку материала в AMS») оставлял бы катушку уже
+            # привязанной к слоту — ответ об ошибке, а состояние изменилось.
+            # Нашлось живой пробой пульта цеха 18.0.3.
             if push_ams and printer and body.get("confirmed") is not True:
                 raise ValueError("Подтвердите отправку материала в AMS")
+            self.db.execute(
+                "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, location='ams', updated_at=? WHERE id=?",
+                (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
             if push_ams and printer:
                 try:
                     printer.command("ams_filament", {

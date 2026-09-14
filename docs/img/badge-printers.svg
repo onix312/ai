@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="254" height="28" viewBox="0 0 254 28" role="img" aria-label="принтеры: Bambu Lab + AMS">
+ <title>принтеры: Bambu Lab + AMS</title>
+ <defs><clipPath id="pfBadgeprinters"><rect width="254" height="28" rx="6"/></clipPath></defs>
+ <g clip-path="url(#pfBadgeprinters)">
+  <rect width="254" height="28" fill="#161c2c"/>
+  <rect width="125" height="28" fill="#7c3aed"/>
+  <rect x="125" width="1" height="28" fill="#0b1020" opacity="0.45"/>
+ </g>
+ <g font-family="Inter, 'Segoe UI', system-ui, Arial, sans-serif" font-size="12.5" text-anchor="middle">
+  <text x="62.5" y="18.2" font-weight="750" fill="#ffffff">принтеры</text>
+  <text x="189.5" y="18.2" font-weight="650" fill="#dbe3f4">Bambu Lab + AMS</text>
+ </g>
+</svg>

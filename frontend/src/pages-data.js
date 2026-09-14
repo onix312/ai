@@ -9,6 +9,7 @@ export const PAGES = [
   { href: '/sbp', file: 'sbp.html', icon: 'qr', cat: 'tool', lock: true, title: 'СБП · входящие', sub: 'Платежи по QR, авто-подтверждение' },
   { href: '/bank', file: 'bank.html', icon: 'bank', cat: 'tool', lock: true, title: 'Поступления из банка', sub: 'Выписка и сопоставление с заказами' },
   { href: '/m', file: 'm.html', icon: 'printer', cat: 'tool', title: 'Станок (мобильная)', sub: 'Пульты у принтера: старт, пауза, съём' },
+  { href: '/pult', file: 'control.html', icon: 'layout', cat: 'tool', title: 'Пульт цеха', sub: 'Парк, очередь, AMS и камера с телефона' },
   { href: '/shelf', file: 'shelf.html', icon: 'shelf', cat: 'tv', title: 'Экран стеллажа', sub: 'Витрина полки для покупателей' },
   { href: '/tv', file: 'tv.html', icon: 'tv', cat: 'tv', title: 'ТВ-дашборд', sub: 'Очередь и статусы на большой экран' },
   { href: '/order', file: 'order.html', icon: 'cart', cat: 'shop', title: 'Витрина и заказ', sub: 'Каталог, корзина, заявка с телефона' },

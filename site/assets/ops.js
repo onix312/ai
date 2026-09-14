@@ -2662,7 +2662,7 @@ function renderNiches() {
       + '<div class="res-row"><span class="lbl">Часы печати</span><span class="val">' + hoursText(niche.hours) + '</span></div>'
       + '<div class="res-row"><span class="lbl">Прибыль за час</span><span class="val">' + (num(niche.hours) ? money(niche.profit_per_hour) : '—') + '</span></div>'
       + `<div class="verdict ${kind}" style="margin-top:11px">${esc(verdict)}</div>`
-      + `<div class="niche-card-foot"><span class="niche-state">${num(niche.active, 1) ? 'Гипотеза активна' : 'На паузе'}</span><a href="#marketing" data-view="marketing">Сделать контент →</a></div>`
+      + `<div class="niche-card-foot"><span class="niche-state">${num(niche.active, 1) ? 'Гипотеза активна' : 'На паузе'}</span><a href="#print" data-view="print">Формы и ценники →</a></div>`
       + '</article>';
   }).join('') : '<div class="empty"><span class="big">◫</span><b>Ниш пока нет</b><span>Добавьте гипотезу, чтобы сравнивать направления по фактической прибыли.</span>'
     + '<button class="btn sm primary" type="button" data-empty-click="niche_add">+ Ниша</button></div>';

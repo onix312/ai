@@ -1,6 +1,6 @@
 """Ленивые разделы панели: загрузка и ошибка должны быть видны (17.0.16).
 
-Тяжёлые разделы (`marketing`, `clientbot`, `ops10`) грузятся при первом входе.
+Тяжёлые разделы (`print`, `clientbot`, `ops10`) грузятся при первом входе.
 До этой правки загрузка была молчаливой: при медленном Wi-Fi оператор смотрел
 на пустую вкладку и не понимал, идёт загрузка или всё сломалось, а при ошибке
 `PF.loadModule` уходил в `console.error` — вкладка оставалась пустой навсегда,
@@ -67,7 +67,7 @@ class LazyModuleFeedbackTests(unittest.TestCase):
         """Список ленивых модулей — часть кэш-контракта: имя раздела в
         `VIEWS`/`LAZY_MODULES` и имя файла в `site/assets/`."""
         registry = block("const LAZY_MODULES = {", "};")
-        for name, file in (("marketing", "marketing.js"),
+        for name, file in (("print", "print.js"),
                            ("clientbot", "clientbot.js"),
                            ("ops10", "ops10.js")):
             self.assertIn(f"{name}: ['{file}']", registry)

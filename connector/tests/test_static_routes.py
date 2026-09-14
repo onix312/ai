@@ -79,6 +79,19 @@ class TestShortUrls(unittest.TestCase):
     def test_short_and_long_url_are_the_same_page(self):
         self.assertEqual(serve("/m")[2], serve("/m.html")[2])
 
+    def test_pult_short_url_points_to_the_control_page(self):
+        """`/pult` — короткий адрес пульта цеха (файл называется control.html)."""
+        code, _, body = serve("/pult")
+        self.assertEqual(code, 200)
+        self.assertEqual(body, serve("/control.html")[2])
+        self.assertIn("Пульт цеха".encode("utf-8"), body)
+
+    def test_short_aliases_are_not_a_wildcard(self):
+        """Алиас — ровно один адрес: похожие пути по-прежнему 404."""
+        for path in ("/pult2", "/pult.html", "/пульт", "/pult/extra"):
+            with self.subTest(path=path):
+                self.assertEqual(serve(path)[0], 404)
+
     def test_legacy_htm_price_tags_url_is_supported(self):
         code, _, body = serve("/price-tags.htm")
         self.assertEqual(code, 200)

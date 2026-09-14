@@ -24,6 +24,14 @@ from .repo import Repo
 from .telegram_bot import TelegramBot
 from .watchdog import Watchdog
 
+# Сколько сорванных печатей подряд останавливает автозапуск (18.0.9).
+# Авто-перепечатки в PrintFlow нет и не будет: после двух сбоев очередь встаёт
+# и ждёт человека — ручной запуск снимает предохранитель, когда печать пройдёт.
+# Счёт ведётся по фактам из журнала (`print_jobs`), отдельного состояния нет:
+# его нельзя забыть сбросить или потерять при перезапуске.
+FAILED_STREAK_LIMIT = 2
+STREAK_EVENT = "Автозапуск остановлен: сбои подряд"
+
 
 class PrinterManager:
     def __init__(self, db: Database, repo: Repo):
@@ -52,6 +60,8 @@ class PrinterManager:
         self._cost_limit_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync: dict[str, float] = {}
+        # Память слотов AMS: дозаполнение старых привязок — один раз за запуск.
+        self._ams_backfilled: set[str] = set()
         self._last_cloud_sync: dict[str, float] = {}
         self._last_backup = 0.0
         self._last_backup_attempt = 0.0
@@ -490,6 +500,12 @@ class PrinterManager:
                     )
             if state == "failed":
                 self._register_failure(printer_id, job, duration, grams)
+                # Горькая правда для автоматики: серия сбоев — стоп до человека.
+                try:
+                    self._note_streak_stop(printer_id, job)
+                except Exception as exc:  # noqa: BLE001 — журнал важнее, но не вместо
+                    self.db.add_event("error", "Не удалось оценить серию сбоев",
+                                      str(exc), printer_id, {"job_id": job.get("id")})
             if job.get("order_id"):
                 if state == "done":
                     self.db.execute(
@@ -1441,9 +1457,241 @@ class PrinterManager:
                 or self._job_material(j) in loaded]
         return same[0] if same else jobs[0]
 
+    def failed_streak(self, printer_id: str) -> int:
+        """Сколько сорванных печатей подряд на принтере (по фактам журнала).
+
+        Считаем с конца: идём по завершённым заданиям принтера от свежего к
+        старому и останавливаемся на первой удачной печати или отмене. Ничего
+        не помним в памяти процесса — перезапуск коннектора счёт не сбрасывает.
+        """
+        if not printer_id:
+            return 0
+        rows = self.db.query(
+            "SELECT state FROM print_jobs WHERE printer_id=? AND finished_at IS NOT NULL"
+            " AND state IN ('done','failed','cancelled')"
+            " ORDER BY datetime(finished_at) DESC LIMIT 10", (printer_id,))
+        streak = 0
+        for row in rows:
+            if str(row.get("state") or "") != "failed":
+                break
+            streak += 1
+        return streak
+
+    def auto_start_blocked(self, printer_id: str) -> str:
+        """Почему автозапуск на этом принтере стоит (пусто — не стоит)."""
+        streak = self.failed_streak(printer_id)
+        if streak >= FAILED_STREAK_LIMIT:
+            return (f"{streak} сорванные печати подряд — автозапуск встал и ждёт "
+                    "ручного запуска")
+        return ""
+
+    def _note_streak_stop(self, printer_id: str, job: dict) -> None:
+        """Записать в журнал сам момент остановки автозапуска.
+
+        Ровно один раз на серию сбоев: печатать это на каждой сорванной печати
+        значило бы утопить журнал в одинаковых записях.
+        """
+        streak = self.failed_streak(printer_id)
+        if streak != FAILED_STREAK_LIMIT:
+            return
+        printer = self.get(printer_id)
+        name = printer.record.get("name", "Принтер") if printer else "Принтер"
+        self.db.add_event(
+            "queue", STREAK_EVENT,
+            f"{name}: {streak} сорванные печати подряд — очередь ждёт ручного "
+            f"запуска. Проверьте принтер, затем запустите задание вручную.",
+            printer_id, {"job_id": job.get("id"), "streak": streak})
+
+    def _start_gate(self, job: dict | None, snap: dict, printer) -> tuple[bool, str]:
+        """Те же гейты, что у автозапуска, но словами и без запуска (18.0.8).
+
+        Порядок проверок повторяет `_maybe_start_next`: связь, состояние
+        принтера, ошибки, выбор задания, материал, остаток пластика. Ничего не
+        пишем и не запускаем — это ответ для пульта «почему стоит».
+        """
+        if not printer.connected:
+            return False, "принтер не на связи"
+        info = snap.get("printer") or {}
+        state = str(info.get("state") or "")
+        label = str(info.get("state_label") or state or "нет данных")
+        if state not in ("IDLE", "FINISH"):
+            return False, f"принтер занят: {label.lower()}"
+        if info.get("problems"):
+            return False, "принтер сообщает об ошибке — сначала разберитесь с ней"
+        if not job:
+            return False, "нет подходящих заданий в очереди"
+        ok, why = self._material_matches(job, snap)
+        if not ok:
+            return False, why
+        ok, why = self._enough_filament(job, snap)
+        if not ok:
+            return False, why
+        return True, "готов к запуску"
+
+    def _plan_why(self, job: dict, snap: dict, quiet: bool) -> list[str]:
+        """Почему именно это задание следующее — те же ключи, что у `next_job`."""
+        why: list[str] = []
+        priority = int(num(job.get("priority")))
+        if priority:
+            why.append(f"приоритет {priority} — выше остальных")
+        due = str(job.get("due") or "")
+        if due:
+            why.append(f"срок {due}")
+        need = self._job_material(job)
+        if need and self.db.setting("queue_group_material", True):
+            loaded = {str(t.get("type") or "").upper()
+                      for t in (snap.get("ams") or {}).get("trays", []) if t.get("type")}
+            if need in loaded:
+                why.append(f"материал {need} уже заправлен — без смены катушки")
+        if quiet and self.db.setting("night_shift_enabled", True):
+            # Тихие часы меняют порядок только внутри ручного приоритета.
+            why.append("тихие часы: вперёд поставлено задание подлиннее")
+        if not why:
+            why.append("поставлено раньше остальных")
+        return why
+
+    def _auto_rules(self) -> list[str]:
+        """Правила, по которым очередь выбирает следующее задание.
+
+        Строки собираются из настроек: пульт показывает их оператору, чтобы
+        автоматика не была чёрным ящиком. Ничего не выдумываем — только то,
+        что действительно включено.
+        """
+        rules = ["Порядок: ручной приоритет → срок → кто раньше встал в очередь."]
+        if self.db.setting("quiet_hours_enabled", False):
+            start = str(self.db.setting("quiet_from", "23:00"))
+            end = str(self.db.setting("quiet_to", "08:00"))
+            rules.append(f"Тихие часы {start}–{end}: автозапуск молчит, уведомления "
+                         "не уходят.")
+            if self.db.setting("night_shift_enabled", True):
+                rules.append("В тихие часы внутри одного приоритета вперёд идут "
+                             "задания подлиннее — принтер работает до утра.")
+        if self.db.setting("queue_group_material", True):
+            rules.append("Сначала задания, материал которых уже заправлен в AMS — "
+                         "меньше смен катушки.")
+        checks = []
+        if self.db.setting("queue_check_material", True):
+            checks.append("тип материала")
+        if self.db.setting("queue_check_filament", True):
+            checks.append("остаток пластика")
+        if checks:
+            rules.append("Перед стартом очередь сверяет " + " и ".join(checks) + ".")
+        if self.db.setting("bed_watch_enabled", False):
+            rules.append("После печати проверяется, снята ли деталь со стола.")
+        rules.append(f"После {FAILED_STREAK_LIMIT} сорванных печатей подряд "
+                     "автозапуск встаёт и ждёт ручного запуска — авто-перепечатки нет.")
+        return rules
+
+    def autonomy_report(self, printer_id: str = "", snaps: dict | None = None) -> dict:
+        """Почему очередь идёт сама или стоит, и что будет следующим (18.0.8).
+
+        Пульт у станка обязан объяснять словами, а не показывать «ничего не
+        происходит». Ничего не запускаем и не меняем: повторяем порядок
+        `next_job` и гейты `_maybe_start_next`.
+        """
+        auto = bool(self.db.setting("auto_queue", False))
+        gate = bool(self.db.setting("unattended_dangerous_actions", False))
+        quiet = bool(self.quiet_now())
+        reasons: list[str] = []
+        if not auto:
+            reasons.append("Автозапуск выключен (auto_queue): задания запускает "
+                           "оператор.")
+        elif not gate:
+            reasons.append("Запуск без оператора выключен "
+                           "(unattended_dangerous_actions): очередь ждёт нажатия "
+                           "«Запустить».")
+        if quiet:
+            reasons.append("Сейчас тихие часы: автозапуск молчит.")
+
+        printers: list[dict] = []
+        best: dict | None = None
+        order = list(self.printers.keys())
+        if printer_id and printer_id in order:      # выбранный принтер — первым
+            order.remove(printer_id)
+            order.insert(0, printer_id)
+        for pid in order:
+            printer = self.printers.get(pid)
+            if not printer:
+                continue
+            snap = (snaps or {}).get(pid)
+            if snap is None:
+                try:
+                    snap = printer.snapshot() or {}
+                except Exception as exc:  # noqa: BLE001 — молчащий принтер не должен
+                    printers.append({"id": pid, "name": str(pid), "ready": False,
+                                     "job_id": "",
+                                     "reason": f"принтер не отвечает: {exc}"})
+                    continue
+            name = str(((snap.get("printer") or {}).get("name"))
+                       or printer.record.get("name") or pid)
+            try:
+                job = self.next_job(pid, snap)
+            except Exception:  # noqa: BLE001 — справка не имеет права падать
+                job = None
+            ready, reason = self._start_gate(job, snap, printer)
+            streak = self.failed_streak(pid)
+            blocked = self.auto_start_blocked(pid)
+            if blocked:
+                ready, reason = False, blocked
+                reasons.append(f"{name}: {blocked}.")
+            printers.append({"id": pid, "name": name, "ready": ready,
+                             "job_id": (job or {}).get("id") or "", "reason": reason,
+                             "failed_streak": streak})
+            # «Следующее» — первый принтер с заданием; если дальше найдётся
+            # принтер, который может начать прямо сейчас, показываем его:
+            # оператору важно знать, что действительно стартует.
+            if job and (best is None or (ready and not best["ready"])):
+                best = {"printer": {"id": pid, "name": name}, "job": job,
+                        "ready": ready, "reason": reason, "snap": snap}
+
+        plan: dict = {}
+        if best:
+            job = best["job"]
+            order_row = {}
+            if job.get("order_id"):
+                row = self.db.one("SELECT number, product FROM orders WHERE id=?",
+                                  (job["order_id"],))
+                if row:
+                    order_row = {"number": row.get("number"),
+                                 "product": row.get("product")}
+            plan = {
+                "job": {
+                    "id": job.get("id"), "name": job.get("name") or "",
+                    "plate": int(num(job.get("plate"), 1) or 1),
+                    "est_minutes": num(job.get("est_minutes")),
+                    "est_grams": num(job.get("est_grams")),
+                    "priority": int(num(job.get("priority"))),
+                    "due": str(job.get("due") or ""),
+                    "order": order_row or None,
+                },
+                "printer": best["printer"],
+                "why": self._plan_why(job, best.get("snap") or {}, quiet),
+                "ready": bool(best["ready"]),
+                "reason": "" if best["ready"] else best["reason"],
+            }
+        waiting = int(num((self.db.one(
+            "SELECT COUNT(*) n FROM print_jobs WHERE state='queued'") or {}).get("n")))
+        return {
+            "auto_queue": auto,
+            "safety_gate": gate,
+            "armed": bool(auto and gate and not quiet),
+            "quiet": quiet,
+            "reasons": reasons,
+            "printers": printers,
+            "next": plan,
+            # Сколько заданий ждёт: пульт должен честно сказать «печатать не на
+            # чем», а не «заданий нет», когда очередь не пуста, а парка нет.
+            "queue_waiting": waiting,
+            "rules": self._auto_rules(),
+        }
+
     def _maybe_start_next(self, printer_id: str) -> None:
         if (not self.db.setting("auto_queue", False)
                 or not self.db.setting("unattended_dangerous_actions", False)):
+            return
+        # 18.0.9: сбои подряд останавливают автоматику до человека. Это не
+        # блокировка запуска вообще — оператор по-прежнему жмёт «Запустить».
+        if self.auto_start_blocked(printer_id):
             return
         printer = self.get(printer_id)
         if not printer or not printer.connected:
@@ -2890,11 +3138,17 @@ class PrinterManager:
             self._last_ams_sync[printer.id] = now
         else:
             self._last_ams_sync = now
-        # Автосбор: карточка принтера и катушки AMS → база (можно править руками)
+        # Автосбор: карточка принтера, катушки AMS и память слотов → база.
+        # Снимок пришёл, значит принтер на связи: это лучший момент записать
+        # раскладку слотов, чтобы она пережила и выключение, и перезапуск.
         try:
-            from .ams_sync import sync_ams_spools, sync_printer_info
-            sync_printer_info(self.db, printer.id, snap)
-            sync_ams_spools(self.db, printer.id, snap)
+            from .ams_sync import backfill_slots, sync_one_printer
+            sync_one_printer(self.db, printer.id, snap)
+            if printer.id not in self._ams_backfilled:
+                self._ams_backfilled.add(printer.id)
+                # Привязки, сделанные до 17.0.25, в память слотов не попадали —
+                # дописываем их один раз за запуск, дальше память ведёт синк.
+                backfill_slots(self.db, printer.id)
         except Exception as exc:
             self.db.add_event("error", "Сбой автосинка AMS", str(exc), printer.id)
         trays = snap["ams"].get("trays", []) or []

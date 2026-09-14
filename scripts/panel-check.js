@@ -4,7 +4,7 @@
    Зачем. `node --check` проверяет только синтаксис: файл с вызовом
    необъявленной переменной проходит его на «отлично», а в браузере падает
    в первом же обработчике. Так в панель уехали `debounce is not defined`
-   (marketing.js) и `fail is not defined` (ops10.js) — разделы при этом
+   (print.js) и `fail is not defined` (ops10.js) — разделы при этом
    выглядели целыми, но не работали.
 
    Что делает стенд. Грузит все скрипты `site/assets/*.js` в порядке
@@ -38,6 +38,18 @@ const VERBOSE = process.argv.includes('--verbose');
    отработали свои bind()/render() до конца. Любой неизвестный метод
    возвращает цепочку, любой неизвестный элемент — новый стаб. */
 const ELEMENTS = new Map();
+/* Ответы сервера для стенда: пустышка по умолчанию и память слотов AMS. */
+const AMS_MEMORY = {
+  printer_id: 'p1',
+  stale_min: 30,
+  slots: [
+    { printer_id: 'p1', slot: '5', slot_num: 5, spool_id: 'spool-9', material: 'PLA',
+      color_name: 'Черный', color_hex: '#111111', label: 'AMS 2 · слот 6',
+      remain_pct: 55, grams_left: 550, state: 'live', seen_at: '2020-01-01T10:00:00+00:00',
+      stale: true, emptied_at: '' }
+  ],
+};
+
 const CHAIN = { _c: {} };
 CHAIN.get = (prop) => {
   if (!(prop in CHAIN._c)) CHAIN._c[prop] = () => CHAIN._c;
@@ -49,7 +61,9 @@ function makeElement(key) {
     id: key || '', tagName: 'DIV', nodeName: 'DIV', nodeType: 1,
     style: { setProperty(){}, getPropertyValue(){return ''}, removeProperty(){}, getPropertyPriority(){return ''} }, dataset: {}, value: '', textContent: '', innerHTML: '',
     hidden: false, checked: false, open: false, disabled: false, href: '', src: '',
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    // Считаем раздел видимым (в браузере у открытой вкладки стоит класс on):
+    // иначе PF.viewOn всегда false и половина обработчиков не выполняется вовсе.
+    classList: { add() {}, remove() {}, toggle() {}, contains(name) { return name === 'on'; } },
     children: [], childNodes: [], files: [], options: [], length: 0,
     parentNode: null, parentElement: null, firstChild: null, lastChild: null,
     nextSibling: null, previousSibling: null,
@@ -121,8 +135,17 @@ const win = {
     }, 0);
   },
   cancelAnimationFrame: clearTimeout,
-  fetch: () => Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
-    json: () => Promise.resolve({}), text: () => Promise.resolve('') }),
+  __urls: [],
+  fetch: (url) => {
+    const path = String(url || '');
+    win.__urls.push(path);
+    if (path.indexOf('/api/ams/memory') === 0) {
+      return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
+        json: () => Promise.resolve(AMS_MEMORY), text: () => Promise.resolve(JSON.stringify(AMS_MEMORY)) });
+    }
+    return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
+      json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+  },
   URL, URLSearchParams, TextEncoder, TextDecoder,
   Blob: class {}, File: class {}, FormData: class { append() {} },
   FileReader: class { readAsDataURL() {} readAsText() {} readAsArrayBuffer() {} },
@@ -233,7 +256,7 @@ lazy.forEach((name) => { const err = loadFile(name); if (err) loadErrors.push(er
 
 /* ====================================================== фазы исполнения */
 const VIEWS = ['dashboard', 'printers', 'queue', 'orders', 'customers', 'products', 'batches',
-  'documents', 'warehouses', 'shelf', 'finance', 'inventory', 'niches', 'calc', 'marketing',
+  'documents', 'warehouses', 'shelf', 'finance', 'inventory', 'niches', 'calc', 'print',
   'clientbot', 'library', 'settings', 'ops10'];
 
 function phaseViews() {
@@ -268,31 +291,35 @@ phaseViews();
 phaseEvents();
 phaseClicks();
 
+/* Живой принтер для сценариев стенда: одна и та же картина используется
+   и в отрисовке раздела, и в проверке памяти слотов AMS (17.0.25). */
+const REALISTIC_PRINTER = {
+    id: 'p1',
+    name: 'P1S Test',
+    connection: { connected: true, mode: 'lan', host: '192.168.1.100', last_error: '', last_message: new Date().toISOString() },
+    printer: { state: 'IDLE', state_label: 'Готов', progress: 0, task: '', layer: 0, total_layers: 0, remaining_min: 0, eta: null, speed_level: 2, wifi: '-65 dBm', firmware: '01.08.00.00', problems: [], severity: '' },
+    temperature: { nozzle: 205, nozzle_target: 210, bed: 60, bed_target: 60, chamber: 32 },
+    fans: { part: 30, aux: 0, chamber: 0 },
+    ams: {
+      temperature: 38.6,
+      humidity: 42,
+      trays: [
+        { id: '00', unit: 0, slot: 0, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 1', type: 'PLA', color: '#ff0000', remain: 80, uuid: 'uuid-pla-red', active: false, present: true, bambulab: true, generic: false },
+        { id: '01', unit: 0, slot: 1, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 2', type: 'PETG', color: '#00ff00', remain: 5, uuid: '', active: true, present: true, bambulab: false, generic: true },
+        { id: '02', unit: 0, slot: 2, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 3', type: '', color: '#cbd5e1', remain: null, uuid: '', active: false, present: false, bambulab: false, generic: false },
+        { id: '03', unit: 0, slot: 3, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 4', type: 'ABS', color: '#0000ff', remain: 50, uuid: 'uuid-abs-blue', active: false, present: true, bambulab: true, generic: false }
+      ]
+    },
+    camera: { available: true, demo: false, age: 1, shots: 3, fps: 15, error: '' },
+    guard: { alerts: [{ title: '\u0422\u0435\u0441\u0442 \u0442\u0440\u0435\u0432\u043e\u0433\u0438', severity: 'warn', reason: '\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u0442\u0435\u043d\u0434\u0430', advice: '', at: new Date().toISOString(), actions: [] }] },
+    maintenance: { hours: 123, due: 1, soon: 1, tasks: [{ id: 't1', task: '\u0421\u043c\u0430\u0437\u043a\u0430', percent: 90, due: true, soon: false, left_hours: -2, every_hours: 100, last_at: new Date().toISOString() }] },
+    job: null
+  };
+
 function phaseLiveRealistic() {
   if (!ctx.PF || !ctx.PF.modules || !ctx.PF.modules.printer || typeof ctx.PF.modules.printer.renderLive !== 'function') return;
   try {
-    const livePrinter = {
-      id: 'p1',
-      name: 'P1S Test',
-      connection: { connected: true, mode: 'lan', host: '192.168.1.100', last_error: '', last_message: new Date().toISOString() },
-      printer: { state: 'IDLE', state_label: 'Готов', progress: 0, task: '', layer: 0, total_layers: 0, remaining_min: 0, eta: null, speed_level: 2, wifi: '-65 dBm', firmware: '01.08.00.00', problems: [], severity: '' },
-      temperature: { nozzle: 205, nozzle_target: 210, bed: 60, bed_target: 60, chamber: 32 },
-      fans: { part: 30, aux: 0, chamber: 0 },
-      ams: {
-        temperature: 38.6,
-        humidity: 42,
-        trays: [
-          { id: '00', unit: 0, slot: 0, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 1', type: 'PLA', color: '#ff0000', remain: 80, uuid: 'uuid-pla-red', active: false, present: true, bambulab: true, generic: false },
-          { id: '01', unit: 0, slot: 1, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 2', type: 'PETG', color: '#00ff00', remain: 5, uuid: '', active: true, present: true, bambulab: false, generic: true },
-          { id: '02', unit: 0, slot: 2, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 3', type: '', color: '#cbd5e1', remain: null, uuid: '', active: false, present: false, bambulab: false, generic: false },
-          { id: '03', unit: 0, slot: 3, label: 'AMS 1 \u00b7 \u0441\u043b\u043e\u0442 4', type: 'ABS', color: '#0000ff', remain: 50, uuid: 'uuid-abs-blue', active: false, present: true, bambulab: true, generic: false }
-        ]
-      },
-      camera: { available: true, demo: false, age: 1, shots: 3, fps: 15, error: '' },
-      guard: { alerts: [{ title: '\u0422\u0435\u0441\u0442 \u0442\u0440\u0435\u0432\u043e\u0433\u0438', severity: 'warn', reason: '\u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u0442\u0435\u043d\u0434\u0430', advice: '', at: new Date().toISOString(), actions: [] }] },
-      maintenance: { hours: 123, due: 1, soon: 1, tasks: [{ id: 't1', task: '\u0421\u043c\u0430\u0437\u043a\u0430', percent: 90, due: true, soon: false, left_hours: -2, every_hours: 100, last_at: new Date().toISOString() }] },
-      job: null
-    };
+    const livePrinter = REALISTIC_PRINTER;
     ctx.PF.state.spools = [
       { id: 'spool-1', material: 'PLA', color_name: '\u041a\u0440\u0430\u0441\u043d\u044b\u0439', color_hex: '#ff0000', remaining_grams: 850, brand: 'Bambu', archived: 0, printer_id: 'p1', ams_slot: '0', tray_uuid: 'uuid-pla-red', percent: 85, location: 'ams' },
       { id: 'spool-2', material: 'ABS', color_name: '\u0421\u0438\u043d\u0438\u0439', color_hex: '#0000ff', remaining_grams: 400, brand: 'Generic', archived: 0, printer_id: 'p1', ams_slot: '3', tray_uuid: 'uuid-abs-blue', percent: 40, location: 'ams' },
@@ -330,8 +357,77 @@ function phaseLiveRealistic() {
 }
 phaseLiveRealistic();
 
+/* ================================================= сценарий памяти слотов AMS
+   Стенд проверяет не только «нет ReferenceError», но и настоящий сценарий
+   пункта 17.0.25. Смысл: живая телеметрия приходит не всегда, а раскладку
+   слотов PrintFlow помнит в базе. Панель обязана её показать и пометить,
+   что цифры не свежие, — иначе оператор примет вчерашнюю загрузку за текущую.
+
+   Два случая: (1) принтер на связи, но в живых данных нет слота, о котором
+   знает база; (2) принтер молчит совсем — тогда разговор только про память. */
+function realisticLive(over) {
+  const live = Object.assign(JSON.parse(JSON.stringify(REALISTIC_PRINTER)), over || {});
+  ctx.PF.state.live = { printers: [live], active: live, farm: { printing: 0, load: 0, queued: 2 } };
+  ctx.PF.state.activePrinter = 'p1';
+  return live;
+}
+
+function renderAmsForTest() {
+  ELEMENTS.get('pr_ams').innerHTML = '';   // как пустая вкладка после перезагрузки панели
+  try { ctx.PF.modules.printer.renderLive(); return ''; }
+  catch (e) { return e && e.message ? e.message : String(e); }
+}
+
+async function checkAmsMemory() {
+  const failures = [];
+  if (!ctx.PF || !ctx.PF.modules || !ctx.PF.modules.printer
+      || typeof ctx.PF.modules.printer.renderLive !== 'function') {
+    return ['AMS: раздел «Принтеры» не загрузился — сценарий не проверить'];
+  }
+  const asks = () => (win.__urls || []).filter((u) => u.indexOf('/api/ams/memory') === 0).length;
+
+  // (1) Прогрев: панель обязана спросить память слотов у сервера сама.
+  realisticLive();
+  let error = renderAmsForTest();
+  if (error) return ['AMS: отрисовка раздела упала — ' + error];
+  if (!asks()) failures.push('AMS: панель не спросила у сервера память слотов (/api/ams/memory)');
+  // Ждём ответа сервера. За это время живое состояние стенда успевает
+  // поменяться (другие фазы пишут в PF.state) — поэтому дальше состояние
+  // выставляем заново и читаем вёрстку сразу после отрисовки.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  // (2) Живая телеметрия: в ней слоты 1–4, а база помнит ещё и слот 6.
+  realisticLive();
+  error = renderAmsForTest();
+  if (error) return failures.concat(['AMS: повторная отрисовка упала — ' + error]);
+  let html = String(ELEMENTS.get('pr_ams').innerHTML || '');
+  if (html.indexOf('ams-mem') < 0) {
+    failures.push('AMS: слот из базы не показан рядом с живыми данными');
+  } else {
+    if (html.indexOf('AMS 2') < 0) failures.push('AMS: подпись слота из базы потерялась');
+    if (html.indexOf('PLA') < 0) failures.push('AMS: материал из памяти не показан');
+    if (html.indexOf('данные устарели') < 0) failures.push('AMS: устаревшие данные не помечены');
+    if (html.indexOf('data-ams-forget') < 0) {
+      failures.push('AMS: нет кнопки «Забыть» — память нечем почистить вручную');
+    }
+  }
+
+  // (3) Принтер выключен: живых слотов нет — показываем только память базы.
+  realisticLive({ ams: { trays: [] }, connection: { connected: false, host: '', last_message: '' } });
+  error = renderAmsForTest();
+  if (error) return failures.concat(['AMS: отрисовка без связи упала — ' + error]);
+  html = String(ELEMENTS.get('pr_ams').innerHTML || '');
+  if (html.indexOf('ams-mem') < 0) {
+    failures.push('AMS: без связи принтера память слотов не показана');
+  }
+  if (html.indexOf('Живых данных AMS нет') < 0) {
+    failures.push('AMS: не сказано, что живых данных AMS нет');
+  }
+  return failures;
+}
+
 /* ================================================================ отчёт */
-setTimeout(() => {
+function finishReport(standFailures) {
   const isReference = (entry) => {
     const err = entry.error || entry[1];
     return err && err.name === 'ReferenceError';
@@ -360,12 +456,17 @@ setTimeout(() => {
     noise.forEach((entry) => {
       const where = entry[0] || entry.where;
       const error = entry.error || entry[1];
-      const line = where + ': ' + error.name + ': ' + error.message;
+      const line = where + ': ' + error.name + ': ' + error.message + '\n      ' + String(error.stack || '').split('\n').slice(1, 4).join('\n      ');
       if (!seen.has(line)) { seen.add(line); console.log('  [справочно] ' + line); }
     });
     loadErrors.filter((entry) => entry.error.name !== 'ReferenceError').forEach((entry) => {
       console.log('  [справочно] загрузка ' + entry.file + ': ' + entry.error.message);
     });
+  }
+  if (standFailures.length) {
+    console.log('\nСЦЕНАРИИ СТЕНДА (' + standFailures.length + '):');
+    standFailures.forEach((line) => console.log('  ' + line));
+    process.exit(2);
   }
   if (unique.length) {
     console.log('\nНЕ ОБЪЯВЛЕНЫ ПЕРЕМЕННЫЕ (' + unique.length + '):');
@@ -373,5 +474,16 @@ setTimeout(() => {
     process.exit(2);
   }
   console.log('Необъявленных переменных нет.');
+  if (!standFailures.length) console.log('Сценарии стенда: память слотов AMS — ok.');
   process.exit(0);
+}
+
+/* Сценарии асинхронные (ждут ответа сервера), поэтому отчёт идёт после них. */
+setTimeout(() => {
+  Promise.resolve()
+    .then(checkAmsMemory)
+    .then((failures) => finishReport(failures || []))
+    .catch((e) => finishReport([
+      'Стенд: сценарий не выполнился — ' + ((e && e.message) || String(e)),
+    ]));
 }, 400);

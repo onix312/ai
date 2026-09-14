@@ -400,7 +400,8 @@ class Shelf:
              channel: str = "shelf", note: str = "", *,
              record_income: bool = True, source: str = "",
              external_id: str = "", keep_zero_price: bool = False,
-             allow_negative: bool = False) -> dict:
+             allow_negative: bool = False, account_id: str = "",
+             tx_channel: str = "") -> dict:
         """Продажа штук со стеллажа.
 
         Обычная ручная продажа пишет доход в PrintFlow. Интеграция с 1С передаёт
@@ -408,6 +409,10 @@ class Shelf:
         уменьшает физический остаток. ``source + external_id`` защищают от
         повторной отправки одной строки чека. ``keep_zero_price`` (скидка 100%
         в кассе): нулевая цена — осознанная, к каталожной не возвращаемся.
+        ``account_id`` и ``tx_channel`` — куда физически попали деньги. По умолчанию
+        всё как было: счёт по умолчанию и канал ``shelf`` (наличные в ящике). Карточная
+        продажа называет счёт карты и канал ``card``, чтобы сверка ящика не сочла эти
+        деньги наличными.
         """
         item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
         if not item:
@@ -435,7 +440,8 @@ class Shelf:
                     "income", "sale", price * qty,
                     f"Стеллаж: {item.get('name') or ''} × {round(qty)}",
                     note=f"{note} · {channel}" .strip(), auto=False,
-                    channel="online" if channel == "online" else "shelf",
+                    account_id=account_id,
+                    channel=tx_channel or ("online" if channel == "online" else "shelf"),
                     payer="person")
             move = self._move(item_id, kind, -qty, price=price,
                               tx_id=tx.get("id") if tx else "",
@@ -529,7 +535,8 @@ class Shelf:
 
     # ------------------------------------------------------- касса и 1С
     def return_stock(self, move_id: str, qty: float, note: str = "", *,
-                     actor: str = "", record_refund: bool = True) -> dict:
+                     actor: str = "", record_refund: bool = True,
+                     account_id: str = "", tx_channel: str = "shelf") -> dict:
         """Вернуть товар покупателя: штуки на полку + возвратная проводка.
 
         Чем это отличается от ``undo_sale``. Отмена — сторно ошибки внутри
@@ -542,6 +549,9 @@ class Shelf:
 
         Возврат можно делать частями: ``returned_qty`` строки не даёт вернуть
         больше, чем по ней продали.
+        ``account_id`` / ``tx_channel`` — откуда вернули деньги. Карточная продажа
+        возвращается со счёта карты каналом ``card``: из ящика этих денег не выдавали,
+        и сверка наличных не должна их ждать.
         """
         move = self.db.one("SELECT * FROM shelf_moves WHERE id=?", (move_id,))
         if not move:
@@ -574,12 +584,12 @@ class Shelf:
             if num(fresh.get("returned_qty")) + back > sold + 1e-9:
                 raise ValueError("Эту строку уже возвращают — обновите список продаж")
             if record_refund and amount > 0:
-                account = str(self.db.setting("default_account", "cash") or "cash")
+                account = account_id or str(self.db.setting("default_account", "cash") or "cash")
                 tx = self.acc.add_transaction(
                     "expense", "refund", amount,
                     f"Возврат: {item.get('name') or ''} × {round(back)}",
                     note=text + (f" · {actor}" if actor else ""),
-                    account_id=account, channel="shelf", payer="person")
+                    account_id=account, channel=tx_channel, payer="person")
             # Встречное движение: qty>0 само возвращает штуки на стеллаж
             # (`_move` обновляет остаток), поэтому второго UPDATE не нужно.
             back_move = self._move(item_id, "return", back, price=price,
@@ -1130,3 +1140,37 @@ class Shelf:
         return public_page_url(
             "/shelf.html", f"id={quote(str(item_id), safe='')}",
             host_header=host, public_url=public_url, listen_port=listen_port)
+
+
+# ------------------------------------------------------------ шапка полки
+def shelf_header(db: Database, days: int = 7) -> dict[str, Any]:
+    """Еженедельная шапка полки «Эта неделя: …» (идея 105)."""
+    since = (datetime.now() - timedelta(days=max(1, int(days or 7)))).isoformat()
+    rows = db.query(
+        "SELECT i.name, COALESCE(SUM(-m.qty), 0) sold, COALESCE(SUM(m.price * -m.qty), 0) money"
+        " FROM shelf_moves m JOIN shelf_items i ON i.id=m.item_id"
+        " WHERE m.kind IN ('sale','online') AND m.at>=? GROUP BY i.id"
+        " ORDER BY sold DESC", (since,))
+    top = [{ "name": r["name"], "sold": int(num(r["sold"])) } for r in rows
+           if num(r["sold"]) > 0][:3]
+    sold_total = sum(t["sold"] for t in top)
+    money = db.one("SELECT COALESCE(SUM(-qty * price),0) v FROM shelf_moves"
+                   " WHERE kind IN ('sale','online') AND at>=?", (since,)) or {}
+    new_items = db.query("SELECT name FROM shelf_items WHERE active=1"
+                         " AND (created_at>=? OR updated_at>=?) ORDER BY updated_at DESC",
+                         (since, since))
+    if top:
+        text = "Эта неделя: " + ", ".join(f"«{t['name']}» ×{t['sold']}" for t in top) + "."
+        if sold_total:
+            text += f" Всего с полки: {sold_total} шт."
+    else:
+        text = "Эта неделя: полка прогревается — загляните."
+    return {
+        "days": max(1, int(days or 7)),
+        "text": text,
+        "top": top,
+        "sold_total": sold_total,
+        "money": round(num(money.get("v")), 2),
+        "new_items": [r["name"] for r in new_items][:5],
+        "updated_at": now_iso(),
+    }

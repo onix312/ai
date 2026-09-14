@@ -14,9 +14,9 @@
 <script src="assets/theme-init.js?v=17.0.1"></script>
 <link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
-<link rel="stylesheet" href="assets/theme.css?v=17.0.1">
-<link rel="stylesheet" href="assets/app.css?v=17.0.23">
-<link rel="stylesheet" href="assets/more.css?v=17.1.0">
+<link rel="stylesheet" href="assets/theme.css?v=17.0.2">
+<link rel="stylesheet" href="assets/app.css?v=17.0.24">
+<link rel="stylesheet" href="assets/more.css?v=17.1.3">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -41,6 +41,7 @@
   <div class="nav-group-title">Цех</div>
   <a class="nav-link" href="#dashboard" data-view="dashboard" data-find="обзор сегодня панель дашборд"><span class="ic" data-icon="dashboard">◈</span>Обзор</a>
   <a class="nav-link" href="#printers" data-view="printers" data-find="принтер камера ams пауза стоп bambu"><span class="ic" data-icon="printer">◉</span>Принтеры<span class="tag" id="nav_printers_tag" hidden></span></a>
+  <a class="nav-link nav-link-ext" href="/control.html" data-find="пульт цеха телефон планшет парк принтеров очередь ams камера киоск"><span class="ic" data-icon="layout">▤</span><span>Пульт цеха</span><small>телефон →</small></a>
   <a class="nav-link" href="#queue" data-view="queue" data-find="очередь печать задание журнал старт"><span class="ic" data-icon="queue">≡</span>Очередь<span class="tag" id="nav_queue_tag" hidden></span></a>
   <a class="nav-link" href="#orders" data-view="orders" data-find="заказ канбан выдать срок клиент"><span class="ic" data-icon="kanban">▦</span>Заказы<span class="tag" id="nav_orders_tag" hidden></span></a>
   <a class="nav-link" href="#ops10" data-view="ops10" data-find="центр 10.0 смена inbox воронка автоматизация правила dry run производство"><span class="ic" data-icon="hexagon">◆</span><span>Центр 10.0</span><small>Смена</small></a>
@@ -51,7 +52,7 @@
   <a class="nav-link" href="#calc" data-view="calc" data-find="калькулятор цена себестоимость наценка"><span class="ic" data-icon="calculator">⌁</span>Калькулятор</a>
   <a class="nav-link" href="#customers" data-view="customers" data-find="клиент crm телефон повторный отзыв пожелание"><span class="ic" data-icon="users">◎</span><span>Клиенты</span><small>CRM</small></a>
   <a class="nav-link" href="#niches" data-view="niches" data-find="ниша гипотеза спрос конверсия прибыль тест"><span class="ic" data-icon="target">◫</span><span>Ниши</span><small>Тесты</small></a>
-  <a class="nav-link nav-link-featured" href="#marketing" data-view="marketing" data-find="контент пост авито telegram реклама сторис табличка видео"><span class="ic" data-icon="pen">✎</span><span>Контент</span><small>Студия</small></a>
+  <a class="nav-link nav-link-featured" href="#print" data-view="print" data-find="печать формы ценники стикеры наклейки таблички визитки гарантия отчёт бланк штрихкод бумага"><span class="ic" data-icon="page">▤</span><span>Печать</span><small>Формы</small></a>
   </div>
   <div class="nav-group">
   <div class="nav-group-title">Касса</div>
@@ -170,7 +171,7 @@
  </div>
  <div class="grid2" style="margin-top:16px">
   <div class="card" data-widget="achievements">
-   <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div><a href="#marketing" data-view="marketing">Контент →</a></div>
+   <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div></div>
    <div class="dash-records" id="dash_records" hidden></div>
    <div id="dash_achievements" class="muted">Загружаем…</div>
   </div>
@@ -436,7 +437,7 @@
 <section class="view more-workspace customers-workspace" id="view-customers">
  <div class="view-head">
   <div><span class="eyebrow">CRM · отношения, а не таблица</span><h1>Клиенты</h1><p>Все покупки, обратная связь и поводы вернуться — в одном спокойном рабочем месте.</p></div>
-  <div class="head-actions"><a class="btn" href="#marketing" data-view="marketing">✎ Подготовить контент</a><div id="customers_kpi" class="more-head-kpi"></div></div>
+  <div class="head-actions"><div id="customers_kpi" class="more-head-kpi"></div></div>
  </div>
  <div class="more-brief crm-brief">
   <div class="more-brief-mark" aria-hidden="true">◎</div>
@@ -855,7 +856,7 @@
 <section class="view more-workspace niches-workspace" id="view-niches">
  <div class="view-head">
   <div><span class="eyebrow">Проверка гипотез · без догадок</span><h1>Ниши</h1><p>Показы и обращения вводите вручную; заказы, часы и прибыль PrintFlow считает из факта.</p></div>
-  <div class="head-actions"><a class="btn" href="#marketing" data-view="marketing">✎ Сделать контент</a><button class="btn primary" id="niche_add" type="button">+ Ниша</button></div>
+  <div class="head-actions"><button class="btn primary" id="niche_add" type="button">+ Ниша</button></div>
  </div>
  <div class="more-brief niche-brief">
   <div class="more-brief-mark" aria-hidden="true">◫</div>
@@ -1013,132 +1014,30 @@
  </div>
 </section>
 
-<!-- ================================================== КОНТЕНТ -->
-<section class="view content-workspace" id="view-marketing">
- <div class="content-hero">
-  <div class="content-hero-copy">
-   <span class="eyebrow">Контент-студия · данные цеха</span>
-   <h1>Показывайте работу, а не выдумывайте посты</h1>
-   <p id="mk_hero_note">Соберём историю, продажный текст и материалы из реальных фактов цеха.</p>
-   <div class="content-hero-actions">
-    <div class="seg content-period" id="mk_period" role="group" aria-label="Период контента"><button type="button" data-days="7" class="on">7 дней</button><button type="button" data-days="30">30 дней</button><button type="button" data-days="90">90 дней</button></div>
-    <button class="btn light" id="mk_refresh" type="button">↻ Обновить</button>
-    <a class="btn light ghost-on-hero" href="#library/mats" data-view="library" data-article="mats">Материалы A4 <span>→</span></a>
-   </div>
-  </div>
-  <div class="content-hero-stats" aria-live="polite">
-   <div class="content-stat"><span>Завершено</span><b id="mk_stat_jobs">—</b><small id="mk_stat_jobs_note">заданий</small></div>
-   <div class="content-stat"><span>Часов печати</span><b id="mk_stat_hours">—</b><small id="mk_stat_hours_note">за период</small></div>
-   <div class="content-stat"><span>Выручка</span><b id="mk_stat_income">—</b><small id="mk_stat_income_note">реальный итог</small></div>
-   <div class="content-stat content-stat-accent"><span>Следующий повод</span><b id="mk_stat_event">—</b><small id="mk_stat_event_note">проверяем календарь</small></div>
-  </div>
+<!-- ================================================== ПЕЧАТЬ -->
+<section class="view print-workspace" id="view-print">
+ <div class="view-head print-head">
+  <div><span class="eyebrow">Цех · бумага, наклейки и бланки</span><h1>Печать</h1><p>Что печатаем, на какой бумаге и каким размером. Лист собирает сервер — на бумаге форма одинаковая с любого устройства в цехе.</p></div>
+  <div class="head-actions"><span id="pr_tag" class="tag" hidden></span><button class="btn" id="pr_refresh" type="button">↻ Обновить каталог</button></div>
  </div>
-
- <div class="content-tabs" id="mk_tabs" role="tablist" aria-label="Разделы контент-студии">
-  <button type="button" class="on" data-mk-pane="today" role="tab" aria-selected="true"><span>✦</span> Сегодня</button>
-  <button type="button" data-mk-pane="sales" role="tab" aria-selected="false"><span>↗</span> Продажи</button>
-  <button type="button" data-mk-pane="proof" role="tab" aria-selected="false"><span>◌</span> Доверие</button>
-  <button type="button" data-mk-pane="print" role="tab" aria-selected="false"><span>▦</span> В печать</button>
- </div>
-
- <div class="mk-pane on" id="mkpane-today" role="tabpanel">
-  <div class="mk-today-grid">
-   <section class="card mk-feature-card">
-    <div class="card-head"><div><span class="card-kicker">Пост из фактов</span><h2>История цеха</h2><p id="mk_week_sub">Собираем живые цифры и ритм работы.</p></div><div class="mk-card-actions"><button class="btn sm ghost" type="button" id="mk_week_reset" title="Вернуть текст генератора">↺</button><button class="btn sm" type="button" id="mk_week_copy">Копировать</button><button class="icon-btn sm" type="button" id="mk_week_download" title="Скачать текст">↓</button></div></div>
-    <textarea id="mk_week" class="mk-editor mk-editor-feature" rows="7" spellcheck="true" aria-label="История цеха">Загружаем…</textarea>
-    <div class="mk-editor-foot"><span>Можно отредактировать перед публикацией</span><span id="mk_week_meta">Данные только из вашего цеха</span></div>
-   </section>
-   <aside class="mk-today-side">
-    <section class="card mk-action-card">
-     <div class="card-head"><div><span class="card-kicker">Ритм недели</span><h2>Что опубликовать дальше</h2></div></div>
-     <div id="mk_action_plan" class="mk-action-plan"><div class="skeleton" style="height:96px"></div></div>
-    </section>
-    <section class="card mk-shelf-card">
-     <div class="card-head"><div><span class="card-kicker">Для витрины</span><h2>Шапка полки</h2><p id="mk_shelfhead_sub">За период</p></div><button class="btn sm ghost" type="button" id="mk_shelfhead_copy">Копировать</button></div>
-     <textarea id="mk_shelfhead" class="mk-editor mk-editor-small" rows="3" spellcheck="true" aria-label="Шапка полки">Загружаем…</textarea>
-    </section>
-   </aside>
-  </div>
-  <section class="card mk-social-card">
-   <div class="card-head"><div><span class="card-kicker">Один факт — три формата</span><h2>Соцсетевой пакет</h2><p id="mk_social_sub">Шапка, квадрат и сторис для публикации.</p></div><div class="mk-card-actions"><button class="btn sm ghost" type="button" id="mk_social_reset" title="Вернуть текст генератора">↺</button><button class="btn sm" type="button" id="mk_social_copy">Копировать всё</button><button class="icon-btn sm" type="button" id="mk_social_download" title="Скачать текст">↓</button></div></div>
-   <textarea id="mk_social" class="mk-editor" rows="9" spellcheck="true" aria-label="Соцсетевой пакет">Загружаем…</textarea>
-   <div class="mk-editor-foot"><span>Разделители подскажут, что отправить в шапку, пост и сторис</span><a href="#library/tg" data-view="library" data-article="tg">Как публиковать в Telegram →</a></div>
+ <div class="notice error" id="pr_error" role="alert" hidden><span>!</span><span id="pr_error_text">Не удалось загрузить каталог форм.</span></div>
+ <div class="kpi-grid print-kpis" id="pr_kpis" aria-live="polite"></div>
+ <div class="pr-forms" id="pr_forms"><div class="skeleton" style="height:190px"></div></div>
+ <div class="pr-grid">
+  <section class="card pr-barcode-card">
+   <div class="card-head"><div><span class="card-kicker">Ценники и касса</span><h2>Штрихкод Code 128</h2><p>Проверить артикул до тиража: режим, число символов и контрольная сумма.</p></div></div>
+   <div class="pr-row"><label class="sr-only" for="pr_bc_text">Текст штрихкода</label><input id="pr_bc_text" class="field" placeholder="Артикул, код или цена — например 199.90" aria-label="Текст штрихкода"><button class="btn primary" id="pr_bc_gen" type="button">Построить</button></div>
+   <div id="pr_bc_out" class="pr-barcode-out" aria-live="polite">Введите текст — построим штрихкод и покажем его размеры.</div>
   </section>
-  <section class="card mk-board-card">
-   <div class="card-head"><div><span class="card-kicker">План недели</span><h2>Доска контента</h2><p>Разложите заготовки по дням — перетаскивайте карточки между колонками.</p></div><div class="mk-card-actions"><span class="chip outline" id="mk_board_count">0 из 7 дней</span><button class="btn sm ghost" type="button" id="mk_board_reset" title="Очистить доску">↺ Сброс</button></div></div>
-   <div class="mk-board" id="mk_board"></div>
+  <section class="card pr-hint-card">
+   <div class="card-head"><div><span class="card-kicker">Чтобы миллиметры совпали</span><h2>Перед тиражом</h2></div></div>
+   <ul class="pr-checklist">
+    <li>Масштаб печати — <b>100 %</b>. «Вписать в страницу» ужимает лист, и размеры на бумаге перестают совпадать с подписями.</li>
+    <li>На каждом листе снизу есть <b>линейка 100 мм</b>: приложите к первому листу обычную линейку и проверьте.</li>
+    <li>Отсканируйте QR с бумаги телефоном: читается — можно печатать тираж.</li>
+    <li>Самоклеящаяся бумага и плёнка сохнут 10–15 минут после печати.</li>
+   </ul>
   </section>
-  <section class="card mk-preview-card">
-   <div class="card-head"><div><span class="card-kicker">Глазами подписчика</span><h2>Превью поста в Telegram</h2><p id="mk_preview_sub">Живой макет «Истории цеха» — как увидит канал.</p></div></div>
-   <div class="mk-tg-preview" id="mk_tg_preview"><div class="empty compact"><span>Текст «Истории цеха» появится здесь по мере набора.</span></div></div>
-  </section>
- </div>
-
- <div class="mk-pane" id="mkpane-sales" role="tabpanel" hidden>
-  <div class="mk-sales-grid">
-   <section class="card mk-avito-card">
-    <div class="card-head"><div><span class="card-kicker">Карточка товара</span><h2>Авито без пустого листа</h2><p>Выберите позицию с полки — добавим материал, наличие и понятный оффер.</p></div><span class="mk-source-chip">из стеллажа</span></div>
-    <div class="mk-select-row"><label class="sr-only" for="mk_avito_item">Позиция стеллажа</label><select id="mk_avito_item" class="field" aria-label="Позиция стеллажа"></select><button class="btn primary" type="button" id="mk_avito_gen">Собрать карточку</button></div>
-    <textarea id="mk_avito" class="mk-editor" rows="12" spellcheck="true" aria-label="Карточка Авито">Выберите позицию и нажмите «Собрать карточку».</textarea>
-    <div class="mk-editor-foot"><span id="mk_avito_meta">Заголовок, описание, ключевые слова и цена</span><div><button class="btn sm ghost" type="button" id="mk_avito_reset" hidden>↺ Сбросить</button><button class="btn sm" type="button" id="mk_avito_copy" hidden>Копировать</button><button class="icon-btn sm" type="button" id="mk_avito_download" title="Скачать карточку" hidden>↓</button></div></div>
-   </section>
-   <section class="card mk-promo-card">
-    <div class="card-head"><div><span class="card-kicker">Календарь спроса</span><h2>Промо к ближайшему поводу</h2><p>Не забывайте про время на печать и выдачу.</p></div></div>
-    <div id="mk_promo" class="mk-promo-list"><div class="skeleton" style="height:120px"></div></div>
-   </section>
-   <section class="card mk-season-card">
-    <div class="card-head"><div><span class="card-kicker">Не на ощущениях</span><h2>Сезонность и праздники</h2><p>Календарный повод + ваш фактический спрос.</p></div></div>
-    <div id="mk_holiday" class="mk-holiday-list">Загружаем…</div>
-    <div id="mk_season" class="mk-season-chart"></div>
-   </section>
-  </div>
- </div>
-
- <div class="mk-pane" id="mkpane-proof" role="tabpanel" hidden>
-  <div class="mk-proof-grid">
-   <section class="card mk-report-card">
-    <div class="card-head"><div><span class="card-kicker">Цифры, которые можно показать</span><h2>Цеховой отчёт</h2><p id="mk_report_sub">Отчёт за выбранный период.</p></div><div class="mk-card-actions"><button class="btn sm" type="button" id="mk_report_open">Открыть для PDF</button><button class="icon-btn sm" type="button" id="mk_report_download" title="Скачать текст">↓</button></div></div>
-    <textarea id="mk_report" class="mk-editor mk-report-editor" rows="7" readonly aria-label="Цеховой отчёт">Сформируем отчёт: выручка, прибыль, топ изделий.</textarea>
-    <div class="mk-report-note"><span>ℹ</span><span>Используйте отчёт как внутренний итог или приложите к коммерческому предложению — без редактирования цифр.</span></div>
-   </section>
-   <section class="card mk-video-card">
-    <div class="card-head"><div><span class="card-kicker">В процессе</span><h2>Видео недели</h2><p>Монтаж из ваших кейфреймов камеры.</p></div><div class="mk-card-actions"><button class="btn sm ghost" type="button" id="mk_video_play" hidden>▶ Пуск</button><button class="btn sm ghost" type="button" id="mk_video_stop" hidden>■ Стоп</button></div></div>
-    <div id="mk_video_empty" class="empty compact"><span>Загрузим кадры…</span></div>
-    <div id="mk_video" hidden class="mk-video-frame"><img id="mk_video_img" alt="Кейфрейм печати"><div id="mk_video_cap" class="muted"></div></div>
-   </section>
-   <section class="card mk-map-card">
-    <div class="card-head"><div><span class="card-kicker">Ритм производства</span><h2>Карта печатей</h2><p id="mk_map_sub">Точка = завершённая печать за год.</p></div></div>
-    <div id="mk_map" class="muted">Загружаем…</div>
-   </section>
-  </div>
- </div>
-
- <div class="mk-pane" id="mkpane-print" role="tabpanel" hidden>
-  <div class="mk-print-grid">
-   <section class="card mk-print-card">
-    <div class="card-head"><div><span class="card-kicker">Упаковка и полка</span><h2>Печать в один клик</h2><p>Листы A4 с фирменным оформлением: открывается диалог печати браузера.</p></div></div>
-    <div class="mk-print-actions">
-     <button class="btn primary" type="button" id="mk_print_stickers">▧ Стикеры в упаковку</button>
-     <button class="btn" type="button" id="mk_print_business">✉ Визитки</button>
-     <button class="btn" type="button" id="mk_print_labels">▦ Таблички цеха</button>
-    </div>
-    <div class="mk-print-hint"><span>✓</span><span>Печатается только после вашего клика. В браузере выберите масштаб 100%.</span></div>
-   </section>
-   <section class="card mk-barcode-card">
-    <div class="card-head"><div><span class="card-kicker">Для кассы</span><h2>Штрихкод на ценник</h2><p>Code 128 для артикула, кода или цены.</p></div></div>
-    <div class="mk-select-row"><label class="sr-only" for="mk_bc_text">Текст штрихкода</label><input id="mk_bc_text" class="field" placeholder="Артикул или цена, например 199.90" aria-label="Текст штрихкода"><button class="btn primary" type="button" id="mk_bc_gen">Построить</button></div>
-    <div id="mk_bc_out" class="mk-barcode-out">Введите текст — построим штрихкод.</div>
-   </section>
-   <section class="card mk-label-card">
-    <div class="card-head"><div><span class="card-kicker">Навигация в цехе</span><h2>Одна табличка</h2><p>Выберите ситуацию, добавьте строку и сразу распечатайте четыре экземпляра.</p></div></div>
-    <div class="mk-label-form"><label class="sr-only" for="mk_labels_kind">Тип таблички</label><select id="mk_labels_kind" class="field" aria-label="Тип таблички">
-     <option value="danger">Осторожно — 3D-печать рядом</option>
-     <option value="wash">Мойте руки после работы с пластиком</option>
-     <option value="delivery">Заказы печатаем за 1–3 дня</option>
-     <option value="gift">Подарки печатаем к любому празднику</option>
-    </select><label class="sr-only" for="mk_labels_note">Дополнительная строка</label><input id="mk_labels_note" class="field" placeholder="Дополнительная строка (необязательно)"><button class="btn primary" type="button" id="mk_label_one">Печать</button></div>
-   </section>
-  </div>
  </div>
 </section>
 
@@ -1277,6 +1176,7 @@
   <a class="lib-card" href="#library/faq" data-article="faq"><span class="ic" data-icon="help">❓</span><b>FAQ — частые ошибки</b><small>HMS-коды, налипание, паутинки, коробление</small></a>
   <a class="lib-card" href="#library/camera-cloud" data-article="camera-cloud"><span class="ic" data-icon="camera">📷</span><b>Камера в облаке</b><small>Почему нет картинки и как починить</small></a>
   <a class="lib-card" data-library-category="tools" href="/design.html" target="_blank" rel="noopener"><span class="ic" data-icon="shapes">🧩</span><b>Конструктор изделий</b><small>STL без CAD: номерки, диски, стойки</small></a>
+  <a class="lib-card" data-library-category="tools" href="/control.html" target="_blank" rel="noopener"><span class="ic" data-icon="layout">▤</span><b>Пульт цеха</b><small>Парк, очередь, AMS и камера с телефона</small></a>
   <a class="lib-card" data-library-category="tools" href="/m.html" target="_blank" rel="noopener"><span class="ic" data-icon="phone">📱</span><b>Мини-панель /m</b><small>Выдать · кадр · снял — с телефона</small></a>
   <a class="lib-card" data-library-category="tools" href="/track.html" target="_blank" rel="noopener"><span class="ic" data-icon="search">🔍</span><b>Статус заказа</b><small>Страница-трекер для клиента</small></a>
   <a class="lib-card" data-library-category="tools" href="/materials/промостенды-67x57.html" target="_blank" rel="noopener"><span class="ic" data-icon="sign">🪧</span><b>Промостенды 67×57</b><small>Генератор: 100 идей, свой текст, QR и печать на A4</small></a>
@@ -5184,17 +5084,17 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=17.0.23"></script>
+<script src="assets/core.js?v=17.0.24"></script>
 <script src="assets/icons.js?v=17.0.1"></script>
-<script src="assets/printer.js?v=17.1.0"></script>
+<script src="assets/printer.js?v=17.1.2"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
-<script src="assets/ops.js?v=17.0.23"></script>
+<script src="assets/ops.js?v=17.0.24"></script>
 <script src="assets/money.js?v=17.0.1"></script>
 <script src="assets/finance.js?v=17.0.6"></script>
-<script src="assets/shelf.js?v=17.0.1"></script>
+<script src="assets/shelf.js?v=17.0.2"></script>
 <script src="assets/products.js?v=17.0.14"></script>
 <script src="assets/bridge.js?v=17.0.1"></script>
-<!-- 14.0 (47): marketing.js грузится лениво при первом входе в раздел -->
+<!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
 <script src="assets/workshop.js?v=17.0.1"></script>
 <script src="assets/app.js?v=17.0.13"></script>

@@ -1,4 +1,5 @@
 """Проверки структуры основного HTML-интерфейса."""
+import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
@@ -8,6 +9,8 @@ from unittest import TestCase
 ROOT = Path(__file__).resolve().parents[2]
 INDEX_HTML = ROOT / "site" / "index.html"
 CASHIER_HTML = ROOT / "site" / "cashier.html"
+CONTROL_HTML = ROOT / "site" / "control.html"
+PULT_MANIFEST = ROOT / "site" / "pult.webmanifest"
 VOID_TAGS = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
@@ -757,3 +760,435 @@ class CashierAddFeedbackTests(TestCase):
 
     def test_pulse_is_cleaned_up(self):
         self.assertIn('fresh.classList.remove("hit")', self.html)
+
+
+class PultControlPageTests(TestCase):
+    """Пульт цеха (18.0.1) — отдельное приложение для телефона и планшета.
+
+    Страница живёт своей жизнью: без модулей панели, без внешних библиотек.
+    Поэтому контракты держим на то, что легко потерять при правке — пять
+    экранов, крупные кнопки, честный офлайн-баннер и киоск.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_control_page_has_balanced_markup(self):
+        parser = _StructureParser()
+        parser.feed(self.html)
+        errors = list(parser.errors)
+        if parser.stack:
+            errors.append(f"не закрыты теги: {parser.stack[-5:]}")
+        self.assertEqual(errors, [])
+
+    def test_six_screens_and_tab_bar(self):
+        for screen in ("park", "queue", "auto", "file", "ams", "cam"):
+            self.assertIn(f'id="pk_screen_{screen}"', self.html)
+        tabs = re.findall(r'class="pk-tab[^"]*"[^>]*data-screen="([a-z]+)"', self.html)
+        self.assertEqual(["park", "queue", "auto", "file", "ams", "cam"], tabs,
+                         "нижнее меню обязано вести на все шесть экранов")
+        self.assertIn("grid-template-columns:repeat(6,1fr)", self.html,
+                      "шесть вкладок должны уместиться в нижнее меню")
+        self.assertIn("function showScreen(name)", self.html)
+        # Переключение экранов — через hidden, а не display:none в разметке:
+        # так экран не теряет прокрутку и не перерисовывается целиком.
+        self.assertIn(".pk-screen[hidden] { display:none; }", self.html)
+
+    def test_touch_targets_and_safe_area(self):
+        self.assertIn(".pk-hit { min-height:56px; }", self.html)
+        self.assertIn("min-height:56px", self.html)
+        self.assertIn("min-height:56px;", re.search(r"\.pk-tab \{.*?\}", self.html, re.S).group(0))
+        # Меню внизу — над жестовой полосой телефона и «бровью» сверху.
+        self.assertIn("env(safe-area-inset-bottom)", self.html)
+        self.assertIn("env(safe-area-inset-top)", self.html)
+
+    def test_tablet_gets_two_columns(self):
+        self.assertIn("@media (min-width:780px) { .pk-tiles { grid-template-columns:1fr 1fr; } }",
+                      self.html)
+
+    def test_offline_banner_speaks_plainly(self):
+        self.assertIn('id="pk_offline" hidden', self.html)
+        self.assertIn("function setOnline(ok, why)", self.html)
+        self.assertIn("function setFreshness()", self.html)
+        self.assertIn("данные с задержкой", self.html,
+                      "возраст данных обязан быть виден словами, а не только цветом")
+        self.assertIn("Коннектор не отвечает — показываю последние данные", self.html)
+        self.assertIn("cache:'no-store'", self.html,
+                      "цифры цеха нельзя брать из кэша браузера")
+        self.assertIn("AbortController", self.html)
+        self.assertIn("TIMEOUT_MS", self.html)
+
+    def test_server_time_is_parsed_as_iso(self):
+        # `at` в снимке — строка ISO. parseFloat («2026-09-14T…» → 2026) сделал
+        # бы данные вечно устаревшими, поэтому время разбирает stamp().
+        self.assertIn("function stamp(v)", self.html)
+        self.assertIn("Date.parse(String(v == null ? '' : v))", self.html)
+        self.assertIn("st.at = stamp(d.at);", self.html)
+
+    def test_polling_stops_in_background(self):
+        self.assertIn("if (document.hidden) return;", self.html)
+        self.assertIn("document.addEventListener('visibilitychange'", self.html)
+
+    def test_only_local_requests(self):
+        self.assertNotIn("http://", self.html)
+        self.assertNotIn("https://", self.html)
+        self.assertNotIn("cdn", self.html.lower())
+        for path in re.findall(r"get\('(/[^']+)'\)", self.html):
+            self.assertTrue(path.startswith("/api/"),
+                            f"пульт ходит только в свой коннектор, а не в {path}")
+
+    def test_kiosk_mode_by_long_press(self):
+        self.assertIn("KIOSK_HOLD_MS", self.html)
+        self.assertIn("'pult_kiosk'", self.html)
+        self.assertIn("b.addEventListener('pointerdown', start);", self.html)
+        self.assertIn("body.kiosk .pk-hint", self.html)
+        self.assertIn("body.kiosk .pk-links", self.html,
+                      "в киоске ссылки на панель не нужны — экран у станка")
+
+    def test_state_texts_come_from_the_server(self):
+        self.assertIn("info.state_label || info.state", self.html,
+                      "названия состояний принтера берём с сервера, а не переводим сами")
+        self.assertIn("p.name || 'Принтер'", self.html)
+
+    def test_queue_badge_counts_waiting_not_running(self):
+        self.assertIn("var FLYING_STATES = ['running', 'starting', 'uploading'];", self.html)
+        self.assertIn("FLYING_STATES.indexOf(String(j.state || '')) >= 0", self.html)
+        self.assertIn("String(j.state || '') === 'queued'", self.html)
+        self.assertIn("badge.hidden = !waiting.length;", self.html)
+
+    def test_park_commands_ask_confirmation_the_server_way(self):
+        # pause/resume/stop — физические команды: сервер принимает их только с
+        # confirmed: true (DANGEROUS_AUTOMATION_COMMANDS). Нажатие кнопки на
+        # пульте и есть подтверждение, для паузы и стопа спрашиваем ещё раз.
+        self.assertIn("command: cmd, printer_id: p.id, confirmed: true", self.html)
+        self.assertIn("pause: 'Пауза? Печать встанет до продолжения.'", self.html)
+        self.assertIn("stop: 'Остановить печать? Деталь придётся печатать заново.'", self.html)
+        self.assertIn("if (ask && !confirm(ask)) return Promise.resolve();", self.html)
+
+    def test_commands_are_disabled_when_they_make_no_sense(self):
+        self.assertIn("function canPause(p)", self.html)
+        self.assertIn("function canResume(p)", self.html)
+        self.assertIn("function canStop(p)", self.html)
+        self.assertIn("(p.connection || {}).connected", self.html)
+        self.assertIn("var RUNNING_STATES = ['RUNNING', 'PREPARE'];", self.html)
+        self.assertIn("el.disabled = !buttons[cmd] || st.busy;", self.html)
+
+    def test_queue_actions_use_existing_routes(self):
+        self.assertIn("post('/api/jobs/start'", self.html)
+        self.assertIn("post('/api/jobs/cancel', { id: jobId })", self.html)
+        self.assertIn("post('/api/jobs/reorder', { id: jobId, direction: direction })", self.html)
+
+    def test_start_runs_preflight_first_and_is_idempotent(self):
+        # Preflight блокирует старт: блокировки — отказ словами, предупреждения —
+        # вопрос оператору. Повторное нажатие сервер отсечёт по start_request_id.
+        self.assertIn("get('/api/printer/preflight?printer_id='", self.html)
+        self.assertIn("if (blocks.length)", self.html)
+        self.assertIn("preflight_acknowledged: warns.length > 0", self.html)
+        self.assertIn("start_request_id: reqId(job.id)", self.html)
+        self.assertIn("function reqId(jobId){ return 'pult-' + jobId + '-' + Date.now(); }", self.html)
+        self.assertIn("busy(true);", self.html)
+
+    def test_waiting_job_buttons_are_start_move_cancel(self):
+        for action in ("start", "up", "down", "cancel"):
+            self.assertIn(f'data-job-act="{action}"', self.html)
+        self.assertIn("function moveJob(jobId, direction)", self.html)
+
+    def test_ams_and_camera_use_snapshot_fields(self):
+        """Поля берём из снимка парка, а не из своих догадок."""
+        self.assertIn("((p && (p.ams || {}).trays) || [])", self.html)
+        self.assertIn("var info = (p && p.camera) || {};", self.html)
+        self.assertIn("if (p && info.available) {", self.html)
+        self.assertIn("/api/printer/camera.jpg?printer_id=", self.html)
+
+    def test_ams_merges_live_slots_with_database_memory(self):
+        """Слоты AMS: живая телеметрия принтера + память базы (17.0.25)."""
+        self.assertIn("function slotsMap()", self.html)
+        self.assertIn("((p && (p.ams || {}).trays) || [])", self.html)
+        self.assertIn("(st.ams.slots || []).forEach", self.html)
+        self.assertIn("get('/api/ams/memory?printer_id='", self.html)
+        self.assertIn("' · принтер молчит, раскладка из памяти базы'", self.html)
+        # Память бывает старее получаса — это обязано быть видно словами.
+        self.assertIn("if (mem && mem.stale) source.push('память несвежая');", self.html)
+
+    def test_ams_actions_use_existing_routes(self):
+        self.assertIn("post('/api/spool/bind', body)", self.html)
+        self.assertIn("push_ams: true", self.html)
+        self.assertIn("confirmed: true", self.html,
+                      "отправка материала в AMS — физическое действие, сервер требует подтверждения")
+        self.assertIn("post('/api/ams/memory/clear', { printer_id: p.id, slot: String(slot) })", self.html)
+        self.assertIn("post('/api/printer/ams/sync', { printer_id: p.id })", self.html)
+        self.assertIn("data-ams=\"pick\"", self.html)
+        self.assertIn("data-ams=\"again\"", self.html)
+        self.assertIn("data-ams=\"unbind\"", self.html)
+        self.assertIn("data-ams=\"forget\"", self.html)
+
+    def test_ams_forget_warns_that_bindings_stay(self):
+        # «Забыть» чистит раскладку, но не учёт пластика: оператор должен это
+        # прочитать до нажатия, а не узнать из отчёта о расходе.
+        self.assertIn("Забыть память слота? Привязки катушек на складе не тронутся.", self.html)
+        self.assertIn("Привязано, но в принтер не ушло: ", self.html)
+
+    def test_ams_slot_conflict_offers_replacement(self):
+        # Сервер отвечает «Слот N уже занят катушкой …» — пульт предлагает замену
+        # и повторяет привязку с force, а не падает с сырой ошибкой.
+        self.assertIn("msg.indexOf('уже занят') >= 0 && !force", self.html)
+        self.assertIn("body.force = true", self.html)
+        self.assertIn("Заменить катушку в этом слоте?", self.html)
+
+    def test_camera_uses_snapshot_and_light_routes(self):
+        self.assertIn("cam.src = '/api/printer/camera.jpg?printer_id='", self.html)
+        self.assertIn("post('/api/printer/snapshot', { printer_id: p.id, note: 'Снимок с пульта цеха' })", self.html)
+        self.assertIn("post('/api/printer/command', { command:'light', value: !on, printer_id: p.id })", self.html)
+        self.assertIn("var CAM_MS = 3000;", self.html)
+        self.assertIn("camTimer(true);", self.html)
+
+    def test_camera_says_when_the_frame_is_demo_or_stale(self):
+        self.assertIn("'демо-режим: показывается учебный кадр, а не цех'", self.html)
+        self.assertIn("'кадр ' + Math.round(num(info.age)) + ' с назад'", self.html)
+        self.assertIn("shotBtn.disabled = !(p && info.available);", self.html)
+
+    def test_summary_is_one_request_with_graceful_fallback(self):
+        """Сводка 18.0.4: один запрос; старый коннектор — откат на /api/state."""
+        self.assertIn("get('/api/pult/summary' + q)", self.html)
+        self.assertIn("var missing = !!(e && e.status === 404);", self.html)
+        self.assertIn("st.fallback = true;", self.html)
+        self.assertIn("err.status = r.status;", self.html,
+                      "код ответа — единственный надёжный признак «маршрута ещё нет»")
+        self.assertIn("if (!st.fallback) { renderAms(); return Promise.resolve(); }", self.html)
+        self.assertIn("if (d.spools) st.spools = d.spools;", self.html)
+
+    def test_manifest_shortcuts_open_pult_screens(self):
+        manifest = json.loads(PULT_MANIFEST.read_text(encoding="utf-8"))
+        shortcuts = manifest.get("shortcuts") or []
+        self.assertTrue(shortcuts, "в манифесте нет ярлыков приложения")
+        for item in shortcuts:
+            self.assertTrue(item["url"].startswith("/pult?screen="),
+                            f"ярлык ведёт не на экран пульта: {item['url']}")
+            self.assertIn(item["url"].split("=")[1],
+                          ("park", "queue", "auto", "file", "ams", "cam"))
+        self.assertIn("display_override", manifest)
+        self.assertIn("var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));",
+                      self.html)
+        self.assertIn("['park', 'queue', 'auto', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0",
+                      self.html,
+                      "чужой ?screen= не должен открывать посторонний экран")
+
+    def test_page_is_in_the_offline_shell(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        shell = sw.split("const SHELL = [", 1)[1].split("];", 1)[0]
+        self.assertIn("'/control.html'", shell,
+                      "без оболочки пульт не откроется при мигании сети")
+        self.assertIn("'/pult.webmanifest'", shell)
+        m = re.search(r"const CACHE = 'printflow-shell-v(\d+)';", sw)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)), 58,
+                                "правка оболочки требует поднятия CACHE в sw.js")
+
+    def test_manifest_installs_the_pult(self):
+        manifest = json.loads(PULT_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual("/control.html", manifest["start_url"])
+        self.assertEqual("/control.html", manifest["id"])
+        self.assertEqual("standalone", manifest["display"])
+        self.assertEqual("ru", manifest["lang"])
+        for icon in manifest["icons"]:
+            self.assertTrue((ROOT / "site" / icon["src"].lstrip("/")).is_file(),
+                            f"иконки манифеста должны лежать рядом: {icon['src']}")
+
+    def test_no_tofu_symbols(self):
+        for char in ("⎋", "⌕", "🧾", "⚠"):
+            self.assertNotIn(char, self.html, f"символ {char!r} даёт квадрат на старом Android")
+
+class PultAutoScreenTests(TestCase):
+    """Экран «Авто» (18.0.8) — почему очередь идёт сама или стоит.
+
+    Тут проверяется договор: страница показывает то, что посчитал сервер
+    (`manager.autonomy_report`), и не отращивает собственных правил. Если
+    страница начнёт придумывать причины простоя сама — оператор у станка
+    будет читать не то, что решила очередь.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_screen_shows_the_server_report_only(self):
+        self.assertIn('id="pk_screen_auto"', self.html)
+        self.assertIn('data-screen="auto"', self.html)
+        # Отчёт приезжает тем же запросом сводки — своего опроса у экрана нет.
+        self.assertIn("if (d.autonomy) st.auto = d.autonomy;", self.html)
+        self.assertIn("if (name === 'auto') renderAuto();", self.html)
+        self.assertIn("if (st.screen === 'auto') renderAuto();", self.html)
+
+    def test_page_does_not_invent_rules(self):
+        """Правила и причины — слова сервера: своих формулировок в странице нет."""
+        for phrase in ("ручной приоритет", "меньше смен катушки",
+                       "Автозапуск выключен", "тихие часы:"):
+            self.assertNotIn(phrase, self.html,
+                             f"правило «{phrase}» должно приходить из отчёта сервера")
+        self.assertIn("(a.reasons || [])", self.html)
+        self.assertIn("(a.rules || [])", self.html)
+        self.assertIn("(next.why || [])", self.html)
+
+    def test_screen_only_reads(self):
+        """Экран автономности ничего не запускает: только рассказывает."""
+        start = self.html.index("function renderAuto(){")
+        end = self.html.index("/* ---------------------------------------------------------- опрос API */")
+        body = self.html[start:end]
+        for forbidden in ("post(", "/api/", "data-cmd", "data-job-act"):
+            self.assertNotIn(forbidden, body,
+                             f"экран «Авто» не должен содержать {forbidden!r}")
+
+    def test_absent_report_is_honest(self):
+        self.assertIn("Сводка про автозапуск не пришла", self.html)
+        self.assertIn("Данных нет", self.html)
+
+
+class PultFinishedCardTests(TestCase):
+    """Карточка «факт против плана» после финиша (18.0.10).
+
+    Оператору у станка нужно не «готово», а цифры: сколько обещал слайсер и
+    сколько вышло, и сколько принтер уже стоит. Считает всё сервер — странице
+    запрещено выдумывать и досчитывать: единственное её действие тут — «Снял
+    детали» в существующий маршрут мини-панели.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_card_shows_plan_and_fact(self):
+        self.assertIn('id="pk_fact"', self.html)
+        self.assertIn("function factHtml()", self.html)
+        self.assertIn("if (!d.id) return '';", self.html,
+                      "без завершённой печати карточки быть не должно")
+        for field in ("d.plan_minutes", "d.minutes", "d.plan_grams", "d.grams",
+                      "d.idle_min"):
+            self.assertIn(field, self.html, f"карточка обязана показывать {field}")
+
+    def test_removing_the_part_goes_to_the_existing_route(self):
+        self.assertIn('id="pk_b_removed"', self.html)
+        self.assertIn("post('/api/printer/part-removed', { printer_id: p.id })", self.html,
+                      "«Снял детали» идёт тем же маршрутом, что мини-панель")
+        start = self.html.index("function factHtml(){")
+        body = self.html[start:self.html.index("function renderFact(){")]
+        for forbidden in ("/api/jobs/", "/api/defect/", "/api/order/"):
+            self.assertNotIn(forbidden, body,
+                             f"карточка факта не имеет права трогать {forbidden!r}")
+
+
+class PultFileScreenTests(TestCase):
+    """Экран «Файл» (18.0.6) — загрузка как в слайсере.
+
+    Владелец просил: перетащил .3mf → увидел оценку → отправил. Своего слайсера
+    не пишем, поэтому цифры берутся там же, где их берёт панель, а если в файле
+    данных слайсера нет — так и говорится словами.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_screen_markup_and_tab(self):
+        self.assertIn('id="pk_screen_file"', self.html)
+        self.assertIn('id="pk_file_input"', self.html)
+        self.assertIn('accept=".3mf,.gcode"', self.html)
+        self.assertIn('data-screen="file"', self.html)
+        self.assertIn("$('#pk_screen_' + s)", self.html)
+        self.assertIn(".pk-drop.pk-over { outline:2px dashed var(--accent);", self.html)
+
+    def test_upload_uses_existing_routes_only(self):
+        # Никаких новых маршрутов: оценка — как в панели, очередь — тоже.
+        self.assertIn("sendFile('/api/estimate/upload', file", self.html)
+        self.assertIn("sendFile('/api/jobs/upload', file, fields", self.html)
+        self.assertIn("get('/api/jobs/plate?name=' + encodeURIComponent(name))", self.html)
+        self.assertNotIn("/api/slice", self.html)
+        self.assertNotIn("/api/print/upload", self.html)
+
+    def test_file_goes_to_server_once(self):
+        """Файл льётся через XMLHttpRequest ради полоски хода — и один раз."""
+        self.assertIn("new XMLHttpRequest()", self.html)
+        self.assertIn("xhr.upload.addEventListener('progress'", self.html)
+        self.assertIn("form.append('file', file, file.name)", self.html)
+        self.assertIn("xhr.timeout = 300000;", self.html)
+        self.assertIn("var MAX_MB = 400;", self.html,
+                      "предел обязан совпадать с MAX_UPLOAD коннектора")
+
+    def test_estimate_speaks_the_panel_language(self):
+        self.assertIn("<span>Время печати</span>", self.html)
+        self.assertIn("<span>Пластик</span>", self.html)
+        self.assertIn("<span>Материал</span>", self.html)
+        self.assertIn("<span>Цвет</span>", self.html)
+        self.assertIn("function humanMin(m)", self.html)
+        self.assertIn("toFixed(1).replace('.', ',')", self.html,
+                      "русская запятая в граммах — как в панели")
+
+    def test_plates_are_chosen_like_in_the_slicer(self):
+        self.assertIn('data-plate="', self.html)
+        self.assertIn("loaded.plate = num(b.dataset.plate, 1) || 1;", self.html)
+        self.assertIn("plate_index", self.html,
+                      "у плиты из slice_info номер лежит в plate_index")
+        self.assertIn("Показано: ", self.html,
+                      "если показана не выбранная плита, это должно быть сказано")
+
+    def test_printer_and_plate_travel_with_the_job(self):
+        self.assertIn("fields.printer_id = pid;", self.html)
+        self.assertIn("var fields = { plate: plate };", self.html)
+        self.assertIn('data-printer=""', self.html,
+                      "«любой принтер» обязан остаться выбором оператора, а не умолчанием")
+
+    def test_no_slicer_invented(self):
+        """Своего слайсера нет: файл без данных слайсера — честный отказ."""
+        self.assertIn("В файле нет данных слайсера: ни веса, ни времени.", self.html)
+        self.assertIn("оценку взять неоткуда", self.html)
+        self.assertNotIn("slicer.js", self.html)
+        self.assertNotIn("wasm", self.html.lower())
+
+    def test_ams_mapping_is_chosen_like_in_the_slicer(self):
+        """18.0.7: материалы файла раскладываются по слотам AMS.
+
+        Раскладку считает сервер тем же `auto_ams_map`, что у панели, а оператор
+        её только подтверждает или переставляет пальцем — своего матчинга в
+        странице нет.
+        """
+        self.assertIn("post('/api/printer/ams/auto-map'", self.html)
+        self.assertIn("Материалы файла → слоты AMS", self.html)
+        self.assertIn("data-fil=", self.html)
+        self.assertIn('data-slot="-1"', self.html,
+                      "«не из AMS» — это -1 из auto_ams_map, а не выдуманный слот")
+        self.assertIn("function filamentsOf()", self.html)
+        self.assertIn("AMS на этом принтере не видно", self.html,
+                      "без AMS честная надпись вместо пустых чипсов")
+
+    def test_mapping_travels_with_the_job(self):
+        self.assertIn("fields.ams_mapping = mapField;", self.html)
+        self.assertIn("if (!real.length) return '';", self.html,
+                      "раскладка из одних «не назначено» не отправляется — решает принтер")
+        self.assertIn("loaded.map[idx] = num(b.dataset.slot, -1);", self.html)
+
+    def test_send_and_start_uses_preflight_with_mapping(self):
+        """«Отправить и запустить» — тот же путь, что у панели, без своих правил."""
+        self.assertIn("'/api/printer/preflight?printer_id=' + encodeURIComponent(pid)", self.html)
+        self.assertIn("'&mapping=' + encodeURIComponent(JSON.stringify(mapping || []))", self.html)
+        self.assertIn("post('/api/jobs/start', {", self.html)
+        self.assertIn("preflight_acknowledged: warns.length > 0,", self.html)
+        self.assertIn("if (blocks.length) {", self.html)
+        self.assertIn("Запуск — только на конкретном принтере", self.html,
+                      "на «любом принтере» запускать нечего — кнопки быть не должно")
+        # Запуск из очереди тоже обязан вспомнить раскладку задания, иначе
+        # Preflight сверит материал с активным слотом и заблокирует верный старт.
+        self.assertIn("try { map = JSON.parse(job.ams_mapping || '[]') || []; } catch (e) { map = []; }",
+                      self.html)
+
+    def test_nothing_leaves_the_local_network(self):
+        # Ровно как весь остальной PrintFlow: страница и её ассеты — только свои.
+        for host in ("http://", "https://", "cdn.", "googleapis", "unpkg"):
+            self.assertNotIn(host, self.html, f"пульт не должен ходить наружу: {host}")
+        self.assertIn("src=\"assets/brand/nozza-mark-white.svg\"", self.html)
+
+    def test_theme_and_assets_are_local(self):
+        # Как у остальных страниц: ассеты относительные, токены темы — с пином.
+        self.assertIn('href="assets/tokens.css?v=17.0.1"', self.html)
+        self.assertIn('src="/assets/theme-init.js?v=17.0.1"', self.html)
+        self.assertIn('src="assets/brand/nozza-mark-white.svg"', self.html)
+        self.assertIn("navigator.serviceWorker.register('/sw.js')", self.html)

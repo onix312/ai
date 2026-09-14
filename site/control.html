@@ -1,0 +1,1969 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<script src="/assets/theme-init.js?v=17.0.1"></script>
+<link rel="manifest" href="/pult.webmanifest">
+<meta name="theme-color" content="#4f46e5">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Пульт цеха">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA · пульт цеха</title>
+<link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
+<style>
+ /* Пульт цеха (18.0) — отдельное приложение, а не панель: один экран на
+    задачу, крупные кнопки под палец, работа с телефона и планшета.
+    Никаких внешних библиотек и шрифтов: только общие токены темы. */
+ * { box-sizing:border-box; margin:0; padding:0; }
+ html, body { height:100%; }
+ body {
+   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   background:var(--bg); color:var(--text);
+   -webkit-tap-highlight-color:transparent;
+ }
+ .pk-wrap { max-width:1100px; margin:0 auto; padding:calc(10px + env(safe-area-inset-top)) 12px 92px; }
+
+ /* --- шапка: бренд, сеть, свежесть данных --- */
+ .pk-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+ .pk-brand { display:flex; align-items:center; gap:9px; background:none; border:0; color:inherit;
+   font:inherit; text-align:left; padding:0; cursor:pointer; }
+ .pk-brand img { width:32px; height:32px; }
+ .pk-brand b { font-size:16px; display:block; }
+ .pk-brand small { display:block; color:var(--muted); font-size:11px; }
+ .pk-top-right { margin-left:auto; text-align:right; }
+ .pk-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:700;
+   background:var(--panel); border:1px solid var(--line); }
+ .pk-pill.ok { color:var(--ok); border-color:var(--ok); }
+ .pk-pill.warn { color:var(--warn); border-color:var(--warn); }
+ .pk-pill.bad { color:var(--bad); border-color:var(--bad); }
+ .pk-at { display:block; color:var(--muted); font-size:11px; margin-top:4px; }
+
+ /* --- офлайн-плашка: связь пропала, цифры с задержкой --- */
+ .pk-offline { display:flex; align-items:center; gap:8px; margin-bottom:10px; padding:10px 12px;
+   border-radius:14px; font-size:13px; font-weight:650;
+   background:rgba(245,158,11,.14); border:1px solid var(--warn); color:var(--warn); }
+ .pk-offline[hidden] { display:none; }
+
+ /* --- экраны --- */
+ .pk-screen[hidden] { display:none; }
+ .pk-h { display:flex; align-items:baseline; gap:8px; margin:2px 0 10px; }
+ .pk-h h2 { font-size:17px; font-weight:750; }
+ .pk-h p { color:var(--muted); font-size:12px; }
+ .pk-hit { min-height:56px; }
+
+ /* --- парк принтеров --- */
+ .pk-tiles { display:grid; gap:12px; grid-template-columns:1fr; }
+ @media (min-width:780px) { .pk-tiles { grid-template-columns:1fr 1fr; } }
+ .pk-tile { background:var(--panel); border:1px solid var(--line); border-radius:18px;
+   padding:14px; cursor:pointer; }
+ .pk-tile.on { border-color:var(--accent); box-shadow:0 0 0 2px rgba(79,70,229,.35) inset; }
+ .pk-tile.dead { opacity:.72; }
+ .pk-row { display:flex; align-items:center; gap:9px; }
+ .pk-name { font-size:17px; font-weight:750; }
+ .pk-dot { width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none; }
+ .pk-dot.ok { background:var(--ok); } .pk-dot.warn { background:var(--warn); } .pk-dot.bad { background:var(--bad); }
+ .pk-state { margin-top:8px; font-size:19px; font-weight:750; }
+ .pk-sub { margin-top:2px; color:var(--muted); font-size:12.5px; }
+ .pk-bar { margin:10px 0 6px; height:12px; border-radius:999px; background:rgba(148,163,184,.22); overflow:hidden; }
+ .pk-bar i { display:block; height:100%; width:0; border-radius:999px; background:var(--accent); transition:width .3s; }
+ .pk-meta { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; color:var(--muted); }
+ .pk-meta b { color:var(--text); font-weight:650; }
+ .pk-alert { margin-top:9px; font-size:13px; font-weight:650; color:var(--warn); }
+ .pk-alert.bad { color:var(--bad); }
+ .pk-empty { padding:22px 14px; text-align:center; color:var(--muted); font-size:14px;
+   background:var(--panel); border:1px dashed var(--line); border-radius:18px; }
+ .pk-empty b { display:block; color:var(--text); font-size:16px; margin-bottom:6px; }
+
+ /* --- панель команд выбранного принтера --- */
+ .pk-cmd { position:sticky; bottom:calc(76px + env(safe-area-inset-bottom)); margin-top:12px;
+   background:color-mix(in srgb, var(--panel) 94%, #000); border:1px solid var(--line);
+   border-radius:18px; padding:12px; }
+ .pk-cmd-who { display:flex; align-items:baseline; gap:8px; font-size:13px; margin-bottom:10px; }
+ .pk-cmd-who span { color:var(--muted); }
+ .pk-cmd-row { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+ .pk-btn { display:flex; align-items:center; justify-content:center; padding:0 8px; cursor:pointer;
+   border:1px solid var(--line); border-radius:14px; background:transparent; color:var(--text);
+   font:inherit; font-size:15px; font-weight:750; }
+ .pk-btn:active { transform:scale(.98); }
+ .pk-btn.danger { background:var(--bad); border-color:transparent; color:#fff; }
+ .pk-btn.go { background:var(--ok); border-color:transparent; color:#fff; }
+ .pk-btn[disabled] { opacity:.4; }
+ .pk-jobs { display:grid; gap:10px; }
+ .pk-job { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; }
+ .pk-job.flying { border-color:var(--accent); }
+ .pk-job-act { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
+ @media (min-width:640px) { .pk-job-act { grid-template-columns:repeat(4,1fr); } }
+
+ /* --- слоты AMS: живой слот + память базы --- */
+ .pk-slots { display:grid; gap:10px; }
+ @media (min-width:780px) { .pk-slots { grid-template-columns:1fr 1fr; } }
+ .pk-slot { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; }
+ .pk-slot.active { border-color:var(--accent); }
+ .pk-chip { display:inline-block; width:22px; height:22px; border-radius:8px; flex:none;
+   border:1px solid var(--line); background:#CBD5E1; }
+ .pk-slot-act { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
+ .pk-slot-act .pk-btn { min-height:48px; font-size:14px; }
+ .pk-note { margin-top:6px; font-size:12px; color:var(--muted); }
+ .pk-note.warn { color:var(--warn); }
+
+ /* --- камера: кадр и кнопки --- */
+ .pk-frame { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:18px;
+   background:#0a0f1e; border:1px solid var(--line); }
+ .pk-cam-act { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+ .pk-cam-act .pk-btn { min-height:56px; font-size:14px; }
+
+ /* --- экран «Файл»: загрузка как в слайсере (18.0.6) --- */
+ .pk-drop { display:flex; flex-direction:column; gap:10px; align-items:stretch; }
+ .pk-drop.pk-over { outline:2px dashed var(--accent); outline-offset:6px; border-radius:20px; }
+ .pk-progress { position:relative; height:34px; margin-top:12px; border:1px solid var(--line);
+   border-radius:12px; background:var(--panel); overflow:hidden; }
+ .pk-progress[hidden] { display:none; }
+ .pk-progress-bar { position:absolute; inset:0 auto 0 0; width:2%; background:var(--accent-soft);
+   border-right:2px solid var(--accent); transition:width .2s; }
+ .pk-progress span { position:relative; display:flex; align-items:center; justify-content:center;
+   height:100%; font-size:12.5px; font-weight:700; color:var(--text); }
+ .pk-card { margin-top:12px; background:var(--panel); border:1px solid var(--line);
+   border-radius:18px; padding:14px; }
+ .pk-file-head { display:flex; align-items:baseline; gap:8px; margin-bottom:10px; }
+ .pk-file-head b { font-size:15px; word-break:break-all; }
+ .pk-file-head span { margin-left:auto; color:var(--muted); font-size:12px; white-space:nowrap; }
+ .pk-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+ .pk-chip { display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:0 12px;
+   border:1px solid var(--line); border-radius:999px; background:transparent; color:var(--muted);
+   font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
+ .pk-chip.on { color:var(--text); border-color:var(--accent); background:var(--accent-soft); }
+ .pk-chip i { width:12px; height:12px; border-radius:50%; border:1px solid var(--line); }
+ .pk-frame.pk-plate { height:150px; aspect-ratio:auto; margin-bottom:10px; background:#0a0f1e; }
+ .pk-map { margin-top:6px; }
+ .pk-why { margin:6px 0 0; padding-left:18px; }
+ .pk-why li { margin-bottom:4px; }
+ .pk-map-row { display:grid; gap:6px; padding:10px 0; border-top:1px solid var(--line); }
+ .pk-map-row:first-child { border-top:0; }
+ .pk-map-what { font-size:13px; font-weight:650; }
+ .pk-facts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+ .pk-facts > div { background:var(--panel-2, rgba(255,255,255,.03)); border:1px solid var(--line);
+   border-radius:14px; padding:10px 12px; }
+ .pk-facts span { display:block; color:var(--muted); font-size:12px; }
+ .pk-facts b { font-size:19px; }
+ .pk-fields { display:grid; gap:8px; margin-bottom:12px; }
+ .pk-fields label { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+ .pk-fields select { flex:1; min-height:48px; padding:0 12px; border:1px solid var(--line);
+   border-radius:12px; background:var(--panel-2, transparent); color:var(--text);
+   font:inherit; font-size:14px; }
+ .pk-fields .pk-check { min-height:44px; }
+ .pk-fields .pk-check input { width:22px; height:22px; }
+ .pk-file-act { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+ .pk-file-act .pk-btn { min-height:56px; font-size:14px; }
+ .pk-file-act.one { grid-template-columns:1fr; }
+
+ /* --- шторка снизу: выбор катушки для слота --- */
+ .pk-sheet-wrap { position:fixed; inset:0; z-index:30; background:rgba(3,6,15,.62);
+   display:flex; align-items:flex-end; }
+ .pk-sheet-wrap[hidden] { display:none; }
+ .pk-sheet { width:100%; max-width:640px; margin:0 auto; overflow:auto; max-height:82vh;
+   background:var(--panel); border:1px solid var(--line); border-radius:20px 20px 0 0;
+   padding:16px 14px calc(16px + env(safe-area-inset-bottom)); }
+ .pk-sheet h3 { font-size:16px; margin-bottom:4px; }
+ .pk-sheet .pk-sub { margin-bottom:12px; }
+ .pk-sheet-act { display:grid; gap:8px; margin-bottom:12px; }
+ .pk-pick { display:flex; align-items:center; gap:10px; width:100%; min-height:56px; padding:12px;
+   margin-bottom:8px; border:1px solid var(--line); border-radius:14px; background:transparent;
+   color:var(--text); font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+ .pk-pick b { display:block; font-weight:700; }
+ .pk-pick small { display:block; color:var(--muted); font-size:12px; }
+
+ /* --- заготовки разделов: экран есть, наполняется следующим шагом --- */
+ .pk-soon { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:16px; }
+ .pk-soon b { display:block; font-size:16px; margin-bottom:6px; }
+ .pk-soon p { color:var(--muted); font-size:13.5px; line-height:1.5; }
+
+ /* --- ссылки на панель и мини-панель --- */
+ .pk-links { display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; }
+ .pk-links a { display:inline-flex; align-items:center; min-height:48px; padding:0 14px;
+   border-radius:12px; border:1px solid var(--line); color:var(--text); text-decoration:none;
+   font-size:13.5px; font-weight:650; }
+
+ /* --- нижнее меню: пять экранов --- */
+ .pk-tabs { position:fixed; left:0; right:0; bottom:0; z-index:20;
+   display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
+   padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+   background:color-mix(in srgb, var(--bg) 92%, #000); border-top:1px solid var(--line);
+   backdrop-filter:blur(10px); }
+ .pk-tab { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center;
+   min-height:56px; gap:2px; border:1px solid transparent; border-radius:14px; background:transparent;
+   color:var(--muted); font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; }
+ .pk-tab.on { color:var(--text); background:var(--panel); border-color:var(--line); }
+ .pk-tab .pk-badge { position:absolute; top:6px; right:calc(50% - 30px); min-width:20px; padding:0 5px;
+   border-radius:999px; background:var(--accent); color:#fff; font-size:11px; line-height:18px; }
+ .pk-tab .pk-badge[hidden] { display:none; }
+
+ /* --- сообщения --- */
+ .pk-msg { position:fixed; left:50%; bottom:calc(84px + env(safe-area-inset-bottom));
+   transform:translateX(-50%); max-width:92vw; background:#fff; color:#12203c; padding:10px 16px;
+   border-radius:10px; font-size:13.5px; font-weight:650; box-shadow:0 8px 30px -10px rgba(0,0,0,.6);
+   opacity:0; pointer-events:none; transition:opacity .2s; }
+ .pk-msg.on { opacity:1; }
+
+ /* --- киоск: экран у станка, без подсказок и ссылок --- */
+ body.kiosk .pk-hint,
+ body.kiosk .pk-links,
+ body.kiosk .pk-brand small { display:none; }
+ body.kiosk .pk-state { font-size:23px; }
+ body.kiosk .pk-name { font-size:19px; }
+ body.kiosk .pk-at { font-size:12px; }
+</style>
+</head>
+<body>
+<div class="pk-wrap">
+ <div class="pk-top">
+  <button class="pk-brand" id="pk_brand" type="button" title="Долгое нажатие — киоск">
+   <img src="assets/brand/nozza-mark-white.svg" alt="">
+   <span><b>Пульт цеха</b><small>держи палец — киоск</small></span>
+  </button>
+  <div class="pk-top-right">
+   <span class="pk-pill" id="pk_net">подключаюсь…</span>
+   <span class="pk-at" id="pk_at">—</span>
+  </div>
+ </div>
+
+ <div class="pk-offline" id="pk_offline" hidden>
+  <span aria-hidden="true">!</span><span id="pk_offline_text">Связи нет</span>
+ </div>
+
+ <main>
+  <section class="pk-screen" id="pk_screen_park">
+   <div class="pk-h"><h2>Парк принтеров</h2><p class="pk-hint" id="pk_farm">—</p></div>
+   <div class="pk-tiles" id="pk_tiles"></div>
+   <div id="pk_fact"></div>
+
+   <div class="pk-cmd" id="pk_cmd">
+    <div class="pk-cmd-who">Выбран: <b id="pk_cmd_name">—</b><span id="pk_cmd_hint"></span></div>
+    <div class="pk-cmd-row">
+     <button class="pk-btn pk-hit" id="pk_b_pause" type="button" data-cmd="pause" disabled>Пауза</button>
+     <button class="pk-btn pk-hit" id="pk_b_resume" type="button" data-cmd="resume" disabled>Продолжить</button>
+     <button class="pk-btn pk-hit danger" id="pk_b_stop" type="button" data-cmd="stop" disabled>Стоп</button>
+    </div>
+   </div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_queue" hidden>
+   <div class="pk-h"><h2>Очередь</h2><p class="pk-hint" id="pk_queue_sub">—</p></div>
+   <div class="pk-jobs" id="pk_jobs"></div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_file" hidden>
+   <div class="pk-h"><h2>Файл на печать</h2><p class="pk-hint" id="pk_file_now">—</p></div>
+   <div class="pk-drop" id="pk_drop">
+    <button class="pk-btn pk-hit go" type="button" id="pk_b_pick">Выбрать файл</button>
+    <div class="pk-sub">3MF и G-code, до 400 МБ. На компьютере файл можно перетащить
+     в это окно. Файл сохранится на компьютере с PrintFlow и встанет в очередь —
+     загружать его в принтер заранее не нужно.</div>
+    <input type="file" id="pk_file_input" accept=".3mf,.gcode" hidden>
+   </div>
+   <div class="pk-progress" id="pk_progress" hidden>
+    <div class="pk-progress-bar" id="pk_progress_bar"></div>
+    <span id="pk_progress_text"></span>
+   </div>
+   <div id="pk_est"></div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_auto" hidden>
+   <div class="pk-h"><h2>Автономность</h2><p class="pk-hint" id="pk_auto_now">—</p></div>
+   <div class="pk-chips" id="pk_auto_state"></div>
+   <div id="pk_auto_body"></div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_ams" hidden>
+   <div class="pk-h"><h2>AMS</h2><p class="pk-hint" id="pk_ams_now">—</p></div>
+   <div class="pk-slot-act" style="margin-top:0;margin-bottom:12px;grid-template-columns:1fr">
+    <button class="pk-btn pk-hit" id="pk_ams_sync" type="button">Синхронизировать с принтером</button>
+   </div>
+   <div class="pk-slots" id="pk_slots"></div>
+  </section>
+
+  <section class="pk-screen" id="pk_screen_cam" hidden>
+   <div class="pk-h"><h2>Камера</h2><p class="pk-hint" id="pk_cam_sub">—</p></div>
+   <img class="pk-frame" id="pk_cam" alt="Камера принтера">
+   <div class="pk-note" id="pk_cam_note"></div>
+   <div class="pk-cam-act">
+    <button class="pk-btn pk-hit" id="pk_b_shot" type="button">Снимок в журнал</button>
+    <button class="pk-btn pk-hit" id="pk_b_light" type="button">Свет</button>
+    <button class="pk-btn pk-hit" id="pk_b_refresh" type="button">Обновить кадр</button>
+   </div>
+   <div class="pk-links">
+    <a href="/tv.html">ТВ-режим цеха →</a>
+    <a href="/m.html">Мини-панель →</a>
+   </div>
+  </section>
+ </main>
+</div>
+
+<div class="pk-sheet-wrap" id="pk_sheet_wrap" hidden>
+ <div class="pk-sheet" role="dialog" aria-modal="true" aria-labelledby="pk_sheet_title">
+  <h3 id="pk_sheet_title">Слот</h3>
+  <div class="pk-sub" id="pk_sheet_sub"></div>
+  <div class="pk-sheet-act" id="pk_sheet_act"></div>
+  <div id="pk_sheet_list"></div>
+  <button class="pk-btn pk-hit" type="button" id="pk_sheet_close" style="width:100%">Закрыть</button>
+ </div>
+</div>
+
+<div class="pk-msg" id="pk_msg"></div>
+
+<nav class="pk-tabs" aria-label="Экраны пульта">
+ <button class="pk-tab on" type="button" data-screen="park">Парк</button>
+ <button class="pk-tab" type="button" data-screen="queue">Очередь<span class="pk-badge" id="pk_badge_queue" hidden>0</span></button>
+ <button class="pk-tab" type="button" data-screen="auto">Авто</button>
+ <button class="pk-tab" type="button" data-screen="file">Файл</button>
+ <button class="pk-tab" type="button" data-screen="ams">AMS</button>
+ <button class="pk-tab" type="button" data-screen="cam">Камера</button>
+</nav>
+
+<script>
+/* Пульт цеха (18.0.2): парк и очередь с командами. Читает /api/state — тот же
+   источник, что панель и ТВ-режим, поэтому цифры не расходятся. Команды идут
+   в те же маршруты, что у панели: /api/printer/command, /api/jobs/start,
+   /api/jobs/cancel, /api/jobs/reorder. Наружу (в интернет) страница не ходит. */
+(function(){
+  'use strict';
+  var POLL_MS = 5000;       // как часто обновляем парк
+  var TIMEOUT_MS = 4000;    // дольше ждать ответ коннектора смысла нет
+  var STALE_MS = 15000;     // после этого данные считаем «с задержкой»
+  var KIOSK_HOLD_MS = 1200; // долгое нажатие по логотипу — киоск
+  var KIOSK_KEY = 'pult_kiosk';
+  /* Команды движения и нагрева сервер принимает только с явным
+     подтверждением оператора (DANGEROUS_AUTOMATION_COMMANDS). Нажатие кнопки
+     на пульте и есть это подтверждение; для паузы и стопа спрашиваем ещё раз. */
+  var CMD_ASK = {
+    pause: 'Пауза? Печать встанет до продолжения.',
+    resume: '',
+    stop: 'Остановить печать? Деталь придётся печатать заново.'
+  };
+  var RUNNING_STATES = ['RUNNING', 'PREPARE'];
+  var BUSY_STATES = ['RUNNING', 'PREPARE', 'PAUSE'];
+  var FLYING_STATES = ['running', 'starting', 'uploading'];
+
+  var CAM_MS = 3000;        // кадр обновляем чаще, чем цифры парка
+  var st = { at:0, printers:[], queue:[], farm:{}, active:'', screen:'park',
+             kiosk:false, timer:null, camTimer:null, busy:false, fallback:false,
+             ams:{ slots:[], printer:'', at:0 }, spools:null, sheetSlot:'',
+             auto:null, done:null };
+
+  function $(s){ return document.querySelector(s); }
+  function esc(t){ return String(t == null ? '' : t).replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+  function num(v, d){ var n = parseFloat(String(v == null ? '' : v).replace(',', '.')); return isFinite(n) ? n : (d || 0); }
+  function toast(t){
+    var m = $('#pk_msg');
+    if (!m) return;
+    m.textContent = t; m.classList.add('on');
+    clearTimeout(toast._t); toast._t = setTimeout(function(){ m.classList.remove('on'); }, 2600);
+  }
+  /* Время сервера приходит строкой ISO («2026-09-14T09:10:00+00:00»), а не
+     секундами: parseFloat от такой строки вернул бы год. Считаем честно. */
+  function stamp(v){
+    if (typeof v === 'number') return v;
+    var t = Date.parse(String(v == null ? '' : v));
+    return isFinite(t) ? t / 1000 : (Date.now() / 1000);
+  }
+  function clock(ts){
+    if (!ts) return '';
+    var d = new Date(num(ts) * 1000);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function humanMin(m){
+    m = Math.max(0, Math.round(num(m)));
+    if (m < 60) return m + ' мин';
+    return Math.floor(m / 60) + ' ч ' + (m % 60) + ' мин';
+  }
+  function plural(n, one, few, many){
+    n = Math.abs(num(n)) % 100;
+    var n1 = n % 10;
+    if (n > 10 && n < 20) return many;
+    if (n1 === 1) return one;
+    if (n1 >= 2 && n1 <= 4) return few;
+    return many;
+  }
+
+  /* Запрос с таймаутом: пропала сеть — не ждём вечно и показываем плашку. */
+  function call(method, path, body){
+    return new Promise(function(resolve, reject){
+      var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      var t = setTimeout(function(){ if (ctl) ctl.abort(); reject(new Error('нет ответа')); }, TIMEOUT_MS);
+      var opts = { method: method, headers:{ 'Accept':'application/json' }, cache:'no-store' };
+      if (ctl) opts.signal = ctl.signal;
+      if (body) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      fetch(path, opts).then(function(r){
+        return r.json().catch(function(){ return {}; }).then(function(d){
+          clearTimeout(t);
+          if (!r.ok) {
+            // Код ответа вешаем на ошибку: по нему пульт отличает «маршрута
+            // ещё нет» (старый коннектор, 404) от настоящего сбоя. Текст
+            // ошибки для этого не годится — сервер вправе его изменить.
+            var err = new Error(d.error || ('ошибка ' + r.status));
+            err.status = r.status;
+            throw err;
+          }
+          return d;
+        });
+      }).then(resolve).catch(function(e){ clearTimeout(t); reject(e); });
+    });
+  }
+  function get(path){ return call('GET', path); }
+  function post(path, body){ return call('POST', path, body || {}); }
+  /* Идентификатор попытки: защищает от двойного нажатия — сервер отсечёт
+     повтор по тому же start_request_id (идемпотентность запуска). */
+  function reqId(jobId){ return 'pult-' + jobId + '-' + Date.now(); }
+
+  /* ---------------------------------------------------------------- сеть */
+  function setOnline(ok, why){
+    var net = $('#pk_net'), off = $('#pk_offline');
+    if (net) {
+      net.textContent = ok ? 'связь есть' : 'связи нет';
+      net.className = 'pk-pill ' + (ok ? 'ok' : 'bad');
+    }
+    if (off) {
+      off.hidden = ok;
+      if (!ok) {
+        var txt = $('#pk_offline_text');
+        if (txt) {
+          // Причина в скобках — для диагностики; но «нет ответа» уже сказано
+          // словами «не отвечает», второй раз это только мешает читать.
+          var tail = why && why !== 'нет ответа' ? ' (' + why + ')' : '';
+          txt.textContent = 'Коннектор не отвечает — показываю последние данные'
+            + (st.at ? ' от ' + clock(st.at) : '') + tail + '.';
+        }
+      }
+    }
+  }
+  function setFreshness(){
+    var at = $('#pk_at');
+    if (!at) return;
+    if (!st.at) { at.textContent = 'данных ещё нет'; return; }
+    var age = (Date.now() / 1000) - num(st.at);
+    var stale = age > (STALE_MS / 1000);
+    at.textContent = (stale ? 'обновлено ' : 'обновлено в ') + clock(st.at)
+      + (stale ? ' · данные с задержкой' : '');
+  }
+
+  /* -------------------------------------------------------- состояние */
+  function printerById(id){
+    var found = null;
+    st.printers.forEach(function(p){ if (p.id === id) found = p; });
+    return found;
+  }
+  function selected(){ return printerById(st.active) || st.printers[0] || null; }
+  function jobById(id){
+    var found = null;
+    st.queue.forEach(function(j){ if (j.id === id) found = j; });
+    return found;
+  }
+  function stateOf(p){ return String((p && (p.printer || {}).state) || '').toUpperCase(); }
+  function canPause(p){ return !!p && (p.connection || {}).connected && RUNNING_STATES.indexOf(stateOf(p)) >= 0; }
+  function canResume(p){ return !!p && (p.connection || {}).connected && stateOf(p) === 'PAUSE'; }
+  function canStop(p){ return !!p && (p.connection || {}).connected && BUSY_STATES.indexOf(stateOf(p)) >= 0; }
+
+  /* --------------------------------------------------------------- парк */
+  function stateTone(p){
+    var s = stateOf(p);
+    var conn = (p.connection || {}).connected;
+    if (!conn) return 'bad';
+    if (s === 'RUNNING' || s === 'PREPARE') return 'ok';
+    if (s === 'PAUSE' || s === 'FAILED') return 'warn';
+    return '';
+  }
+  function alertsHtml(p){
+    var alerts = ((p.guard || {}).alerts) || [];
+    if (!alerts.length) return '';
+    var worst = 'warn';
+    var texts = alerts.slice(0, 2).map(function(a){
+      if (a.severity === 'error') worst = 'bad';
+      return esc(a.title || a.reason || 'тревога');
+    });
+    return '<div class="pk-alert ' + (worst === 'bad' ? 'bad' : '') + '">▲ ' + texts.join(' · ')
+      + (alerts.length > texts.length ? ' · ещё ' + (alerts.length - texts.length) : '') + '</div>';
+  }
+  /* 18.0.9: очередь могла встать на предохранителе (сбои подряд). Об этом
+     оператор узнаёт там, куда смотрит первым — на плитке парка. */
+  function autoStopFor(printerId){
+    var found = null;
+    ((st.auto || {}).printers || []).forEach(function(p){
+      if (String(p.id) === String(printerId)) found = p;
+    });
+    return (found && num(found.failed_streak) >= 2) ? found : null;
+  }
+  function tileHtml(p){
+    var info = p.printer || {}, temp = p.temperature || {}, conn = p.connection || {};
+    var tone = stateTone(p);
+    var progress = Math.max(0, Math.min(100, num(info.progress)));
+    var running = BUSY_STATES.indexOf(stateOf(p)) >= 0;
+    var job = p.job || {};
+    var order = job.order || {};
+    var tr = (p.ams || {}).trays || [];
+    var filled = tr.filter(function(t){ return t.present || t.type || t.uuid; }).length;
+    var meta = [];
+    meta.push('<span>сопло <b>' + Math.round(num(temp.nozzle)) + '°</b> / стол <b>'
+      + Math.round(num(temp.bed)) + '°</b></span>');
+    if (tr.length) meta.push('<span>AMS <b>' + filled + '/' + tr.length + '</b></span>');
+    if (!conn.connected) meta.push('<span>' + esc(conn.last_error || (conn.configured ? 'нет связи' : 'не настроен')) + '</span>');
+    else if (conn.mode === 'cloud') meta.push('<span>облако</span>');
+    var title = info.task || order.product || '';
+    return '<div class="pk-tile pk-hit' + (tone === 'bad' ? ' dead' : '')
+      + (p.id === st.active ? ' on' : '') + '" data-printer="' + esc(p.id) + '">'
+      + '<div class="pk-row"><span class="pk-dot ' + tone + '"></span>'
+      + '<span class="pk-name">' + esc(p.name || 'Принтер') + '</span>'
+      + (p.id === st.active ? '<span class="pk-pill">выбран</span>' : '') + '</div>'
+      + '<div class="pk-state">' + esc(info.state_label || info.state || 'нет связи')
+      + (running ? ' · ' + Math.round(progress) + '%' : '') + '</div>'
+      + (running ? '<div class="pk-bar"><i style="width:' + progress + '%"></i></div>' : '')
+      + (title ? '<div class="pk-sub">' + esc(title) + (order.number ? ' · заказ №' + esc(order.number) : '') + '</div>' : '')
+      + (running && num(info.remaining_min) ? '<div class="pk-sub">осталось '
+        + esc(humanMin(info.remaining_min)) + (info.eta ? ' · к ' + clock(info.eta) : '') + '</div>' : '')
+      + '<div class="pk-meta">' + meta.join('') + '</div>'
+      + (autoStopFor(p.id)
+        ? '<div class="pk-alert bad">Автозапуск встал: '
+          + num(autoStopFor(p.id).failed_streak) + ' сорванные печати подряд'
+          + ' — запустите задание вручную</div>'
+        : '')
+      + alertsHtml(p) + '</div>';
+  }
+  /* -------------------------------------- «факт против плана» (18.0.10)
+     После финиша оператор должен видеть не «готово», а цифры: сколько обещал
+     слайсер и сколько вышло на самом деле, и сколько принтер уже стоит.
+     Данные приходят в сводке (`last_done`) — считает их сервер, включая простой:
+     часы телефона у станка могут врать. Кнопка «Снял детали» идёт в тот же
+     маршрут, что у мини-панели (`POST /api/printer/part-removed`): он пишет
+     факт простоя в журнал и ничего больше не трогает. */
+  function factBit(value, label){
+    return '<div><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
+  }
+  function factHtml(){
+    var d = st.done || {};
+    if (!d.id) return '';
+    var p = selected();
+    if (d.printer_id && p && String(d.printer_id) !== String(p.id)) return '';
+    var same = num(d.plan_grams) > 0 && Math.abs(num(d.grams) - num(d.plan_grams)) >= 0.05;
+    var idle = num(d.idle_min);
+    return '<div class="pk-card"><div class="pk-file-head"><b>Печать закончена</b>'
+      + '<span>' + esc(String(d.name || '') + (d.plate > 1 ? ' · плита ' + num(d.plate) : ''))
+      + '</span></div>'
+      + '<div class="pk-facts">'
+      + factBit(d.plan_minutes ? humanMin(d.plan_minutes) : '—', 'обещал слайсер')
+      + factBit(d.minutes ? humanMin(d.minutes) : '—', 'печатал по факту')
+      + factBit(d.plan_grams ? round1(d.plan_grams) + ' г' : '—', 'план по пластику')
+      + factBit(d.grams ? round1(d.grams) + ' г' : '—', 'ушло по факту')
+      + '</div>'
+      + '<div class="pk-note' + (same ? ' warn' : '') + '">'
+      + (same
+        ? 'Факт отличается от плана на ' + round1(Math.abs(num(d.grams) - num(d.plan_grams)))
+          + ' г — сверьте деталь и катушку.'
+        : 'Расход совпал с планом слайсера.')
+      + (idle ? ' Принтер стоит ' + humanMin(idle) + ' с момента финиша.' : '')
+      + '</div>'
+      + '<div class="pk-slot-act" style="grid-template-columns:1fr">'
+      + '<button class="pk-btn pk-hit go" type="button" id="pk_b_removed">Снял детали</button>'
+      + '</div></div>';
+  }
+  function renderFact(){
+    var box = $('#pk_fact');
+    if (box) box.innerHTML = factHtml();
+  }
+  function partRemoved(){
+    var p = selected();
+    if (!p) { toast('Принтера нет'); return; }
+    post('/api/printer/part-removed', { printer_id: p.id }).then(function(d){
+      toast('Записали: деталь снята' + (num(d.idle_min) ? ', простой ' + humanMin(d.idle_min) : ''));
+      tick();
+    }).catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
+  function renderCmdBar(){
+    var p = selected();
+    var who = $('#pk_cmd_name'), hint = $('#pk_cmd_hint');
+    if (who) who.textContent = p ? (p.name || 'Принтер') : '—';
+    if (hint) {
+      hint.textContent = !p ? 'принтеров нет'
+        : (!(p.connection || {}).connected ? 'нет связи с принтером'
+          : (BUSY_STATES.indexOf(stateOf(p)) >= 0 ? '' : 'принтер свободен'));
+    }
+    var buttons = { pause: canPause(p), resume: canResume(p), stop: canStop(p) };
+    Object.keys(buttons).forEach(function(cmd){
+      var el = $('#pk_b_' + cmd);
+      if (el) el.disabled = !buttons[cmd] || st.busy;
+    });
+  }
+  function renderPark(){
+    var box = $('#pk_tiles');
+    if (!box) return;
+    var farm = st.farm || {};
+    var head = $('#pk_farm');
+    if (head) {
+      head.textContent = st.printers.length
+        ? 'в сети ' + num(farm.online) + ' из ' + num(farm.total)
+          + ' · печатает ' + num(farm.printing) + ' · в очереди ' + num(farm.queued)
+        : '';
+    }
+    if (!st.printers.length) {
+      box.innerHTML = '<div class="pk-empty"><b>Принтеров нет</b>'
+        + 'Добавьте принтер в панели — тогда пульт покажет его здесь. '
+        + 'Открыть «Принтеры» в панели: <a href="/index.html#printers">панель →</a></div>';
+      renderFact();
+      renderCmdBar();
+      return;
+    }
+    box.innerHTML = st.printers.map(tileHtml).join('');
+    renderFact();
+    renderCmdBar();
+  }
+
+  /* ------------------------------------------------------------- AMS */
+  /* Слоты показываем из двух источников сразу: живая телеметрия принтера
+     (trays в снимке) и память базы (ams_slots, 17.0.25) — она переживает
+     выключение принтера. Где сходятся — пишем оба факта, где нет — честно
+     помечаем, откуда данные и насколько они свежие. */
+  function slotsMap(){
+    var p = selected();
+    var live = {};
+    ((p && (p.ams || {}).trays) || []).forEach(function(t){
+      if (t && t.slot !== undefined && t.slot !== null) live[String(t.slot)] = t;
+    });
+    var mem = {};
+    (st.ams.slots || []).forEach(function(m){ mem[String(m.slot)] = m; });
+    var keys = {};
+    Object.keys(live).forEach(function(k){ keys[k] = 1; });
+    Object.keys(mem).forEach(function(k){ keys[k] = 1; });
+    return Object.keys(keys).map(function(k){
+      return { slot: k, live: live[k] || null, mem: mem[k] || null };
+    }).sort(function(a, b){ return num(a.slot) - num(b.slot); });
+  }
+  function hex(v, fallback){
+    var t = String(v == null ? '' : v).trim();
+    if (!t) return fallback || '#CBD5E1';
+    return t.charAt(0) === '#' ? t : '#' + t;
+  }
+  function slotName(item){
+    var live = item.live, mem = item.mem;
+    if (live && live.label) return live.label;
+    if (mem && mem.label) return mem.label;
+    return 'Слот ' + (num(item.slot) + 1);
+  }
+  function slotState(item){
+    var live = item.live, mem = item.mem;
+    var livePresent = !!(live && (live.present || live.type || live.uuid));
+    var material = (live && live.type) || (mem && mem.material) || '';
+    var colorName = (live && live.color_name) || (mem && mem.color_name) || '';
+    var color = hex((live && live.color) || (mem && mem.color_hex));
+    var pct = live && live.remain !== null && live.remain !== undefined
+      ? num(live.remain, -1) : num(mem && mem.remain_pct, -1);
+    var grams = num(mem && mem.grams_left);
+    var spoolId = (mem && mem.spool_id) || '';
+    return { livePresent: livePresent, material: material, colorName: colorName,
+             color: color, pct: pct, grams: grams, spoolId: spoolId,
+             empty: !livePresent && !material && !spoolId };
+  }
+  function slotHtml(item){
+    var stx = slotState(item);
+    var live = item.live, mem = item.mem;
+    var bits = [];
+    if (stx.material) bits.push(esc(stx.material) + (stx.colorName ? ' ' + esc(stx.colorName) : ''));
+    if (stx.pct >= 0) bits.push(Math.round(stx.pct) + '%');
+    if (stx.grams > 0) bits.push(Math.round(stx.grams) + ' г');
+    var source = [];
+    if (stx.livePresent) source.push('живой слот');
+    if (mem && mem.spool_id) source.push('привязана катушка');
+    if (mem && mem.seen_at) source.push('видели ' + clock(stamp(mem.seen_at)));
+    if (mem && mem.stale) source.push('память несвежая');
+    var actions = [];
+    if (mem && mem.spool_id) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="pick" data-slot="'
+        + esc(item.slot) + '">Другая катушка</button>');
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="unbind" data-slot="'
+        + esc(item.slot) + '">Отвязать</button>');
+    } else {
+      actions.push('<button class="pk-btn pk-hit' + (mem && mem.spool_id ? '' : ' go')
+        + '" type="button" data-ams="pick" data-slot="' + esc(item.slot) + '">Привязать</button>');
+    }
+    if (mem && mem.spool_id && !stx.livePresent) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="again" data-slot="'
+        + esc(item.slot) + '">Как в прошлый раз</button>');
+    }
+    if (mem) {
+      actions.push('<button class="pk-btn pk-hit" type="button" data-ams="forget" data-slot="'
+        + esc(item.slot) + '">Забыть</button>');
+    }
+    return '<div class="pk-slot' + ((live && live.active) ? ' active' : '') + '" data-slot-card="'
+      + esc(item.slot) + '">'
+      + '<div class="pk-row"><span class="pk-chip" style="background:' + esc(stx.color) + '"></span>'
+      + '<span class="pk-name" style="font-size:15.5px">' + esc(slotName(item)) + '</span>'
+      + ((live && live.active) ? '<span class="pk-pill">печатает</span>' : '')
+      + (stx.empty ? '<span class="pk-pill">пусто</span>' : '') + '</div>'
+      + '<div class="pk-sub">' + (bits.length ? bits.join(' · ') : 'пластик неизвестен') + '</div>'
+      + (source.length ? '<div class="pk-note">' + esc(source.join(' · ')) + '</div>' : '')
+      + '<div class="pk-slot-act">' + actions.join('') + '</div></div>';
+  }
+  function renderAms(){
+    var box = $('#pk_slots');
+    if (!box) return;
+    var p = selected();
+    var items = slotsMap();
+    var filled = items.filter(function(it){ return !slotState(it).empty; }).length;
+    var head = $('#pk_ams_now');
+    if (head) {
+      head.textContent = !p ? 'принтеров нет'
+        : (!items.length ? 'принтер ещё не сообщал слоты — нажмите «Синхронизировать»'
+          : 'занято ' + filled + ' из ' + items.length
+            + (p.connection && !p.connection.connected ? ' · принтер молчит, раскладка из памяти базы' : ''));
+    }
+    if (!items.length) {
+      box.innerHTML = '<div class="pk-empty"><b>Слотов не видно</b>'
+        + (p && (p.connection || {}).connected
+          ? 'Принтер на связи, но раскладку AMS ещё не прислал. Нажмите «Синхронизировать с принтером».'
+          : 'Принтер не на связи. Раскладка подтянется из памяти базы, как только появятся привязки катушек.')
+        + '</div>';
+      return;
+    }
+    box.innerHTML = items.map(slotHtml).join('');
+  }
+  function loadAms(){
+    var p = selected();
+    if (!p) { st.ams = { slots:[], printer:'', at:0 }; renderAms(); return Promise.resolve(); }
+    st.ams.printer = p.id;
+    // Сводка 18.0.4 уже принесла память слотов — второй запрос не нужен.
+    if (!st.fallback) { renderAms(); return Promise.resolve(); }
+    return get('/api/ams/memory?printer_id=' + encodeURIComponent(p.id)).then(function(d){
+      st.ams.slots = (d && d.slots) || [];
+      st.ams.at = Date.now() / 1000;
+      renderAms();
+    }).catch(function(e){
+      renderAms();
+      if (st.screen === 'ams') toast(e.message || 'Память AMS не ответила');
+    });
+  }
+  function syncAms(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    return post('/api/printer/ams/sync', { printer_id: p.id }).then(function(d){
+      toast('Синхронизировано: катушек ' + ((d && d.spools) ? d.spools.length : 0));
+      return tick();
+    }).catch(function(e){ toast(e.message || 'Синхронизация не прошла'); });
+  }
+
+  /* ------------------------------------------------- шторка выбора катушки */
+  function closeSheet(){
+    st.sheetSlot = '';
+    var wrap = $('#pk_sheet_wrap');
+    if (wrap) wrap.hidden = true;
+  }
+  function spoolTitle(sp){
+    var parts = [sp.material || 'пластик'];
+    if (sp.color_name) parts.push(sp.color_name);
+    return parts.join(' ');
+  }
+  function renderSheet(){
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === st.sheetSlot) item = it; });
+    if (!item) { closeSheet(); return; }
+    var stx = slotState(item);
+    var title = $('#pk_sheet_title'), sub = $('#pk_sheet_sub');
+    var act = $('#pk_sheet_act'), list = $('#pk_sheet_list');
+    if (title) title.textContent = slotName(item);
+    if (sub) {
+      sub.textContent = (stx.material ? spoolTitle({ material: stx.material, color_name: stx.colorName })
+        : 'пусто') + (stx.pct >= 0 ? ' · ' + Math.round(stx.pct) + '%' : '')
+        + (stx.spoolId ? ' · катушка привязана' : '');
+    }
+    var buttons = [];
+    if (stx.spoolId && !stx.livePresent) {
+      buttons.push('<button class="pk-btn pk-hit go" type="button" data-ams="again" data-slot="'
+        + esc(item.slot) + '">Как в прошлый раз: '
+        + esc(spoolTitle({ material: stx.material, color_name: stx.colorName })) + '</button>');
+    }
+    if (stx.spoolId) {
+      buttons.push('<button class="pk-btn pk-hit" type="button" data-ams="forget" data-slot="'
+        + esc(item.slot) + '">Забыть память слота</button>');
+      buttons.push('<button class="pk-btn pk-hit" type="button" data-ams="unbind" data-slot="'
+        + esc(item.slot) + '">Отвязать катушку (слот свободен)</button>');
+    }
+    if (act) act.innerHTML = buttons.join('');
+    if (!list) return;
+    if (st.spools === null) {
+      list.innerHTML = '<div class="pk-note">Читаю склад…</div>';
+      get('/api/spools').then(function(d){
+        st.spools = (d && d.spools) || [];
+        if (st.sheetSlot) renderSheet();
+      }).catch(function(e){
+        list.innerHTML = '<div class="pk-note warn">' + esc(e.message || 'Склад не ответил') + '</div>';
+      });
+      return;
+    }
+    // Свободные катушки: не в AMS, с остатком. Привязанные к другому слоту
+    // этого же принтера показываем тоже — оператор мог переставить её руками.
+    var free = st.spools.filter(function(sp){
+      return num(sp.remaining_grams) > 0 && !sp.archived;
+    });
+    var here = free.filter(function(sp){ return String(sp.printer_id || '') === (selected() || {}).id; });
+    var other = free.filter(function(sp){ return here.indexOf(sp) < 0; });
+    var rows = here.concat(other).slice(0, 40).map(function(sp){
+      var where = String(sp.printer_id || '') === (selected() || {}).id
+        ? ('слот ' + (num(sp.ams_slot, -1) + 1)) : 'на складе';
+      return '<button class="pk-pick" type="button" data-ams="bind" data-slot="'
+        + esc(item.slot) + '" data-spool="' + esc(sp.id) + '">'
+        + '<span class="pk-chip" style="background:' + esc(hex(sp.color_hex)) + '"></span>'
+        + '<span><b>' + esc(spoolTitle(sp)) + '</b><small>'
+        + Math.round(num(sp.remaining_grams)) + ' г · ' + esc(where) + '</small></span></button>';
+    });
+    list.innerHTML = (rows.length ? rows.join('')
+      : '<div class="pk-note">Свободных катушек с остатком нет — приход пластика в панели, раздел «Склад».</div>');
+  }
+  function openSheet(slot){
+    st.sheetSlot = String(slot);
+    var wrap = $('#pk_sheet_wrap');
+    if (wrap) wrap.hidden = false;
+    renderSheet();
+  }
+  function bindSpool(slot, spoolId, force){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === String(slot)) item = it; });
+    var live = item && item.live;
+    var body = {
+      id: spoolId, printer_id: p.id, ams_slot: String(slot),
+      tray_uuid: (live && live.uuid) || '',
+      push_ams: true,      // материал уезжает в принтер — это и есть смысл привязки
+      confirmed: true      // отправка в AMS — физическое действие, подтверждение оператора
+    };
+    if (force) body.force = true;
+    return post('/api/spool/bind', body).then(function(d){
+      if (d && d.push_error) toast('Привязано, но в принтер не ушло: ' + d.push_error);
+      else toast('Катушка в слоте — материал отправлен в принтер');
+      closeSheet();
+      return tick();
+    }).catch(function(e){
+      var msg = e.message || 'Не вышло';
+      if (msg.indexOf('уже занят') >= 0 && !force) {
+        if (confirm(msg + String.fromCharCode(10) + 'Заменить катушку в этом слоте?')) {
+          return bindSpool(slot, spoolId, true);
+        }
+        return;
+      }
+      toast(msg);
+    });
+  }
+  function unbindSlot(slot){
+    var item = null;
+    slotsMap().forEach(function(it){ if (it.slot === String(slot)) item = it; });
+    var spoolId = item && item.mem && item.mem.spool_id;
+    var p = selected();
+    if (!spoolId || !p) { toast('В этом слоте нет привязанной катушки'); return Promise.resolve(); }
+    if (!confirm('Отвязать катушку от слота? Катушка вернётся на склад.')) return Promise.resolve();
+    return post('/api/spool/bind', { id: spoolId, printer_id: p.id, ams_slot: '' })
+      .then(function(){ toast('Катушка отвязана'); closeSheet(); return tick(); })
+      .catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+  function forgetSlot(slot){
+    var p = selected();
+    if (!p) return Promise.resolve();
+    if (!confirm('Забыть память слота? Привязки катушек на складе не тронутся.')) return Promise.resolve();
+    return post('/api/ams/memory/clear', { printer_id: p.id, slot: String(slot) })
+      .then(function(d){ toast('Память слота очищена (забыто: ' + num(d && d.removed) + ')');
+        closeSheet(); return tick(); })
+      .catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
+  /* ----------------------------------------------------------- камера */
+  function camFrame(){
+    var p = selected();
+    var cam = $('#pk_cam'), sub = $('#pk_cam_sub'), note = $('#pk_cam_note');
+    if (!cam) return;
+    var info = (p && p.camera) || {};
+    if (sub) {
+      sub.textContent = !p ? 'принтеров нет'
+        : (!info.available ? 'кадр недоступен' : 'кадр с «' + (p.name || 'принтера') + '»');
+    }
+    if (note) {
+      var bits = [];
+      if (info.demo) bits.push('демо-режим: показывается учебный кадр, а не цех');
+      if (info.error) bits.push(info.error);
+      if (info.age !== null && info.age !== undefined) bits.push('кадр ' + Math.round(num(info.age)) + ' с назад');
+      if (num(info.shots)) bits.push('снимков в журнале: ' + num(info.shots));
+      note.textContent = bits.join(' · ');
+      note.className = 'pk-note' + ((info.demo || info.error) ? ' warn' : '');
+    }
+    if (p && info.available) {
+      cam.src = '/api/printer/camera.jpg?printer_id=' + encodeURIComponent(p.id) + '&t=' + Date.now();
+    } else {
+      cam.removeAttribute('src');
+    }
+    var lightBtn = $('#pk_b_light');
+    if (lightBtn) lightBtn.textContent = String((p && p.light) || '') === 'on' ? 'Свет: вкл' : 'Свет: выкл';
+    var shotBtn = $('#pk_b_shot');
+    if (shotBtn) shotBtn.disabled = !(p && info.available);
+  }
+  function takeShot(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    return post('/api/printer/snapshot', { printer_id: p.id, note: 'Снимок с пульта цеха' })
+      .then(function(){ toast('Снимок в журнале'); tick(); })
+      .catch(function(e){ toast(e.message || 'Кадр не сохранился'); });
+  }
+  function toggleLight(){
+    var p = selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    var on = String(p.light || '') === 'on';
+    return post('/api/printer/command', { command:'light', value: !on, printer_id: p.id })
+      .then(function(){ toast(on ? 'Свет выключен' : 'Свет включён'); tick(); })
+      .catch(function(e){ toast(e.message || 'Свет не переключился'); });
+  }
+  function camTimer(on){
+    clearInterval(st.camTimer);
+    st.camTimer = null;
+    if (on) st.camTimer = setInterval(function(){
+      if (document.hidden || st.screen !== 'cam') return;
+      camFrame();
+    }, CAM_MS);
+  }
+
+  /* ------------------------------------------------------------ очередь */
+  function jobTitle(j){ return j.name || j.file || 'задание'; }
+  function jobMeta(j){
+    var out = [];
+    if (j.order && j.order.number) out.push('заказ №' + j.order.number);
+    if (num(j.plate, 1)) out.push('плита ' + Math.round(num(j.plate, 1)));
+    if (num(j.est_minutes)) out.push('~' + humanMin(j.est_minutes));
+    if (num(j.est_grams)) out.push(Math.round(num(j.est_grams)) + ' г');
+    if (num(j.priority)) out.push('приоритет ' + Math.round(num(j.priority)));
+    return out.join(' · ');
+  }
+  function jobButtons(j){
+    var flying = FLYING_STATES.indexOf(String(j.state || '')) >= 0;
+    var printer = printerById(j.printer_id);
+    if (flying) {
+      var canRes = canResume(printer), canPau = canPause(printer);
+      return '<button class="pk-btn pk-hit" type="button" data-cmd="pause" data-on="' + esc(j.printer_id || '') + '"'
+        + (canPau ? '' : ' disabled') + '>Пауза</button>'
+        + '<button class="pk-btn pk-hit" type="button" data-cmd="resume" data-on="' + esc(j.printer_id || '') + '"'
+        + (canRes ? '' : ' disabled') + '>Продолжить</button>'
+        + '<button class="pk-btn pk-hit danger" type="button" data-cmd="stop" data-on="' + esc(j.printer_id || '') + '"'
+        + (canStop(printer) ? '' : ' disabled') + '>Стоп</button>';
+    }
+    return '<button class="pk-btn pk-hit go" type="button" data-job-act="start">Запустить</button>'
+      + '<button class="pk-btn pk-hit" type="button" data-job-act="up">Выше</button>'
+      + '<button class="pk-btn pk-hit" type="button" data-job-act="down">Ниже</button>'
+      + '<button class="pk-btn pk-hit danger" type="button" data-job-act="cancel">Отменить</button>';
+  }
+  function jobHtml(j){
+    var flying = FLYING_STATES.indexOf(String(j.state || '')) >= 0;
+    var printer = printerById(j.printer_id);
+    var tone = flying ? 'ok' : '';
+    var progress = Math.max(0, Math.min(100, num((printer || {}).printer ? printer.printer.progress : 0)));
+    var stateText = flying
+      ? ('печатается' + (printer ? ' на «' + (printer.name || '') + '»' : '')
+        + (progress ? ' · ' + Math.round(progress) + '%' : ''))
+      : 'ждёт принтер';
+    return '<div class="pk-job' + (flying ? ' flying' : '') + '" data-job="' + esc(j.id) + '">'
+      + '<div class="pk-row"><span class="pk-dot ' + tone + '"></span>'
+      + '<span class="pk-name">' + esc(jobTitle(j)) + '</span></div>'
+      + '<div class="pk-state" style="font-size:15px">' + esc(stateText) + '</div>'
+      + (flying ? '<div class="pk-bar"><i style="width:' + progress + '%"></i></div>' : '')
+      + (jobMeta(j) ? '<div class="pk-meta"><span>' + esc(jobMeta(j)) + '</span></div>' : '')
+      + '<div class="pk-job-act">' + jobButtons(j) + '</div></div>';
+  }
+  function renderQueue(){
+    var box = $('#pk_jobs');
+    if (!box) return;
+    // В queue приходят и текущие печати: считаем отдельно ожидающие задания,
+    // иначе «дальше» показывало бы то, что уже печатается.
+    var flying = st.queue.filter(function(j){
+      return FLYING_STATES.indexOf(String(j.state || '')) >= 0; });
+    var waiting = st.queue.filter(function(j){ return String(j.state || '') === 'queued'; });
+    var badge = $('#pk_badge_queue');
+    if (badge) {
+      badge.hidden = !waiting.length;
+      badge.textContent = String(waiting.length);
+    }
+    var sub = $('#pk_queue_sub');
+    if (sub) {
+      sub.textContent = st.queue.length
+        ? 'печатается ' + flying.length + ' · ждёт ' + waiting.length
+        : '';
+    }
+    if (!st.queue.length) {
+      box.innerHTML = '<div class="pk-empty"><b>Очередь пуста</b>'
+        + 'Принтеры свободны. Добавить задание можно из заказа в панели — '
+        + 'или файлом: <a href="/index.html#queue">очередь в панели →</a></div>';
+      return;
+    }
+    box.innerHTML = st.queue.map(jobHtml).join('');
+  }
+
+  /* --------------------------------------------------- экран «Файл» (18.0.6)
+     Загрузка как в слайсере: перетащил 3MF → увидел оценку → отправил.
+     Работают только существующие маршруты коннектора:
+       POST /api/estimate/upload — файл в uploads + оценка (минуты, граммы, материал, цвет)
+       POST /api/jobs/upload     — файл в uploads + задание в очереди
+       GET  /api/jobs/plate      — превью плиты из самого 3MF (как в панели)
+     Оба POST сохраняют один и тот же файл, поэтому оценка и очередь не
+     расходятся. Файл отправляем через XMLHttpRequest: только он умеет
+     показывать, сколько уже ушло. Перетаскивание работает, где браузер
+     разбирает список файлов (панель на компьютере); на телефоне остаётся
+     кнопка выбора — она делает то же самое. */
+  var MAX_MB = 400;
+  var ALLOWED_EXT = /\.(3mf|gcode)$/i;
+  var loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                 filaments:[], trays:[], map:[], req:0 };
+
+  /* Файл на сервер с отчётом о ходе: onTick(percent|null). */
+  function sendFile(path, file, fields, onTick){
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      var form = new FormData();
+      form.append('file', file, file.name);
+      Object.keys(fields || {}).forEach(function(k){
+        form.append(k, String(fields[k] == null ? '' : fields[k]));
+      });
+      xhr.open('POST', path, true);
+      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.timeout = 300000;          // крупный 3MF по локальной сети — не мгновенно
+      if (xhr.upload && xhr.upload.addEventListener) {
+        xhr.upload.addEventListener('progress', function(e){
+          if (!onTick) return;
+          onTick(e.lengthComputable && e.total ? Math.round(e.loaded * 100 / e.total) : null);
+        });
+      }
+      xhr.onload = function(){
+        var d = {};
+        try { d = JSON.parse(xhr.responseText || '{}'); } catch (e) { d = {}; }
+        if (xhr.status >= 200 && xhr.status < 300) return resolve(d);
+        var err = new Error(d.error || ('ошибка ' + xhr.status));
+        err.status = xhr.status;
+        reject(err);
+      };
+      xhr.onerror = function(){ reject(new Error('сеть недоступна')); };
+      xhr.ontimeout = function(){ reject(new Error('коннектор не ответил за 5 минут')); };
+      xhr.onabort = function(){ reject(new Error('загрузка отменена')); };
+      xhr.send(form);
+    });
+  }
+
+  /* --- что показываем в цифрах -----------------------------------------
+     У 3MF из Bambu Studio каждая плита считается отдельно. Оператору нужно
+     то, что он печатает: выбрал плиту — показываем её. Если по плите цифр
+     нет, честно отступаем на сводку по файлу и подписываем это. */
+  function plateList(){
+    return ((loaded.meta || {}).plates) || [];
+  }
+  function plateNo(pl, i){
+    return num(pl.plate_index, 0) || num(pl.index, 0) || (i + 1);
+  }
+  function platePick(){
+    var list = plateList();
+    for (var i = 0; i < list.length; i++) {
+      if (plateNo(list[i], i) === num(loaded.plate, 1)) return list[i];
+    }
+    return null;
+  }
+  function which(){
+    var meta = loaded.meta || {};
+    var one = plateList().length > 1 ? platePick() : null;
+    if (one && (num(one.grams) || num(one.minutes))) {
+      return { scope:'plate', label:'плита ' + num(loaded.plate, 1),
+               grams:num(one.grams), minutes:num(one.minutes) };
+    }
+    // Сводка: сумма по всем плитам, а если её нет — данные первой плиты.
+    var grams = num(meta.total_grams) || num(meta.total) || num(meta.weight) || num(meta.grams);
+    var minutes = num(meta.total_minutes) || num(meta.time) || num(meta.minutes);
+    if (!grams && one) grams = num(one.grams);
+    if (!minutes && one) minutes = num(one.minutes);
+    return { scope:'file', label: plateList().length > 1 ? 'весь файл' : '',
+             grams:grams, minutes:minutes };
+  }
+  function scopeNote(){
+    var w = which();
+    var n = plateList().length;
+    if (n < 2) return '';
+    if (w.scope === 'plate') {
+      return 'Показано: ' + w.label + ' из ' + n + ' — плиту выбирают чипсами выше, '
+           + 'она же уйдёт в очередь.';
+    }
+    return 'По выбранной плите цифр в файле нет — ниже сводка по всем плитам: '
+         + 'в очередь уйдёт плита ' + num(loaded.plate, 1) + '.';
+  }
+  function plTime(){
+    var w = which();
+    return w.minutes ? humanMin(w.minutes) : '—';
+  }
+  function plGrams(){
+    var w = which();
+    return w.grams ? (round1(w.grams) + ' г') : '—';
+  }
+  function round1(v){ return (Math.round(num(v) * 10) / 10).toFixed(1).replace('.', ','); }
+  function plMaterial(){
+    var one = platePick();
+    var mat = matOf(one) || (loaded.meta || {}).material || '';
+    return mat ? String(mat).toUpperCase() : '—';
+  }
+  function plColor(){
+    var one = platePick();
+    var f = (one && one.filaments && one.filaments[0]) || null;
+    return (f && f.color) || (loaded.meta || {}).color || '—';
+  }
+  function matOf(plate){
+    var f = (plate && plate.filaments && plate.filaments[0]) || null;
+    return (f && f.type) || '';
+  }
+
+  /* Честные слова вместо выдуманных цифр. */
+  function estWarn(){
+    if (!loaded.file) return '';
+    var w = which();
+    var out = [];
+    if (!w.grams && !w.minutes) {
+      out.push('В файле нет данных слайсера: ни веса, ни времени. Так бывает, если 3MF '
+        + 'не слайсили в Bambu Studio или Orca — оценку взять неоткуда. Принтер возьмёт '
+        + 'файл как есть, а граммы и часы можно вписать в панели.');
+    } else if (!w.grams) {
+      out.push('В файле нет веса — время есть, граммов нет.');
+    } else if (!w.minutes) {
+      out.push('В файле нет времени — вес есть, минут нет.');
+    }
+    var without = (st.printers || []).filter(function(pr){
+      return !((pr.ams || {}).trays || []).length;
+    });
+    if (st.printers && st.printers.length && without.length === st.printers.length) {
+      out.push('AMS ни на одном принтере не видно — печать одним цветом пойдёт '
+        + 'с внешней катушки.');
+    }
+    return out.join(' ');
+  }
+
+  /* --- разметка карточки --- */
+  function estimateHtml(){
+    var meta = loaded.meta || {};
+    var list = plateList();
+    var parts = [];
+    if (list.length > 1) {
+      parts.push('<div class="pk-chips" id="pk_plates">');
+      list.forEach(function(pl, i){
+        var n = plateNo(pl, i);
+        parts.push('<button class="pk-chip' + (n === num(loaded.plate, 1) ? ' on' : '')
+          + '" type="button" data-plate="' + esc(n) + '">плита ' + esc(n) + '</button>');
+      });
+      parts.push('</div>');
+    }
+    if (loaded.preview) {
+      parts.push('<img class="pk-frame pk-plate" alt="Превью плиты" src="data:image/png;base64,'
+        + esc(loaded.preview) + '">');
+    }
+    var note = scopeNote();
+    if (note) parts.push('<div class="pk-sub">' + esc(note) + '</div>');
+    parts.push('<div class="pk-facts">'
+      + '<div><span>Время печати</span><b>' + esc(plTime()) + '</b></div>'
+      + '<div><span>Пластик</span><b>' + esc(plGrams()) + '</b></div>'
+      + '<div><span>Материал</span><b>' + esc(plMaterial()) + '</b></div>'
+      + '<div><span>Цвет</span><b>' + esc(plColor()) + '</b></div></div>');
+    parts.push('<div class="pk-sub">Печатать на: '
+      + esc(curPrinter() ? printerName(curPrinter()) : 'любом свободном — решит очередь') + '</div>');
+    parts.push('<div class="pk-chips" id="pk_est_printers">'
+      + '<button class="pk-chip' + (curPrinter() ? '' : ' on')
+      + '" type="button" data-printer="">любой принтер</button>'
+      + (st.printers || []).map(function(pr){
+          return '<button class="pk-chip' + (String(curPrinter()) === String(pr.id) ? ' on' : '')
+               + '" type="button" data-printer="' + esc(pr.id) + '">'
+               + esc(pr.name || pr.id) + (pr.id === st.active ? ' · выбран' : '') + '</button>';
+        }).join('')
+      + '</div>');
+    if (!(st.printers || []).length) {
+      parts.push('<div class="pk-sub">Принтеры не настроены: задание встанет в очередь '
+        + 'и будет ждать принтер — настроить можно в панели, раздел «Принтеры».</div>');
+    }
+    parts.push(mappingHtml());
+    var warn = estWarn();
+    if (warn) parts.push('<div class="pk-note">' + esc(warn) + '</div>');
+    parts.push('<div class="pk-file-act">'
+      + '<button class="pk-btn pk-hit" type="button" id="pk_b_change">Сменить файл</button>'
+      + '<button class="pk-btn pk-hit go" type="button" id="pk_b_queue">'
+      + esc(queueTitle()) + '</button></div>');
+    // Запуск — только на конкретном принтере: печатать на «любом» нельзя.
+    if (curPrinter()) {
+      parts.push('<div class="pk-file-act one" style="margin-top:8px">'
+        + '<button class="pk-btn pk-hit" type="button" id="pk_b_start">Отправить и запустить'
+        + '</button></div>');
+      parts.push('<div class="pk-sub">Запуск начнёт прогрев и движение — пульт спросит '
+        + 'подтверждение и покажет предупреждения Preflight.</div>');
+    }
+    return '<div class="pk-card"><div class="pk-file-head"><b>' + esc(loaded.file.name) + '</b>'
+      + '<span>' + esc(sizeText(loaded.file.size)) + '</span></div>'
+      + parts.join('') + '</div></div>';
+  }
+  /* Принтер задания. Пока оператор не тронул чипсы, это принтер, выбранный на
+     пульте (он стоит у станка и видит его выбранным). «Любой принтер» — чипс
+     с пустым значением: тогда выбор оставляем очереди. */
+  function curPrinter(){
+    return loaded.printer == null ? String(st.active || '') : String(loaded.printer);
+  }
+  /* Материалы файла в порядке, в котором их ждёт принтер: позиция в списке —
+     это материал, значение в раскладке — слот AMS. Плита важнее файла: у
+     многоплитного проекта у каждой плиты свои материалы. */
+  function filamentsOf(){
+    var one = platePick();
+    var meta = loaded.meta || {};
+    var list = (one && one.filaments) || meta.filaments || [];
+    list = (list || []).filter(function(f){ return f && (f.type || f.color); });
+    if (!list.length && meta.material) {
+      list = [{ type: meta.material, color: meta.color || '' }];
+    }
+    return list;
+  }
+  function mmap(){ return loaded.map || []; }
+  function mappingText(){
+    var map = mmap();
+    if (!map.length) return '';
+    var real = map.filter(function(x){ return num(x, -1) >= 0; });
+    if (!real.length) return 'AMS: ни один слот не назначен';
+    return 'AMS: слоты ' + map.map(function(x){
+      return num(x, -1) >= 0 ? String(num(x, -1) + 1) : '—'; }).join(' · ');
+  }
+  /* Раскладку считает сервер (тот же auto_ams_map, что у панели): по материалу
+     и цвету, ближайший слот. Оператор потом может переставить пальцем. */
+  function autoMap(force){
+    var pid = curPrinter();
+    var fil = filamentsOf();
+    loaded.filaments = fil;
+    if (!pid || !fil.length) {
+      loaded.trays = [];
+      if (!force) loaded.map = [];
+      renderEstimate();
+      return Promise.resolve(null);
+    }
+    var token = (loaded.req = (loaded.req || 0) + 1);
+    return post('/api/printer/ams/auto-map', {
+      printer_id: pid,
+      required: fil.map(function(f){ return { type: f.type || '', color: f.color || '' }; }),
+    }).then(function(res){
+      if (token !== loaded.req) return null;      // оператор уже выбрал другое
+      loaded.trays = (res && res.trays) || [];
+      loaded.map = ((res && res.mapping) || []).slice(0, fil.length);
+      while (loaded.map.length < fil.length) loaded.map.push(-1);
+      loaded.filaments = fil;
+      renderEstimate();
+      var text = mappingText();
+      if (text) toast(text);
+      return res;
+    }).catch(function(err){
+      if (token !== loaded.req) return null;
+      loaded.trays = [];
+      loaded.map = [];
+      renderEstimate();
+      toast('Раскладку AMS не посчитать: ' + err.message);
+      return null;
+    });
+  }
+  function slotLabel(tray){
+    var bits = ['слот ' + (num(tray.slot, 0) + 1)];
+    var type = String(tray.type || '').toUpperCase();
+    if (type) bits.push(type);
+    return bits.join(' · ');
+  }
+  function mappingHtml(){
+    var fil = filamentsOf();
+    if (!fil.length) return '';
+    var out = ['<div class="pk-sub">Материалы файла → слоты AMS</div>'];
+    if (!curPrinter()) {
+      out.push('<div class="pk-note">Выберите принтер — тогда разложим материалы по слотам.</div>');
+      return out.join('');
+    }
+    if (!loaded.trays.length) {
+      out.push('<div class="pk-note">AMS на этом принтере не видно — раскладку выберет сам '
+             + 'принтер. Проверьте слоты на экране AMS.</div>');
+      return out.join('');
+    }
+    out.push('<div class="pk-map">');
+    fil.forEach(function(f, i){
+      var slot = num(mmap()[i], -1);
+      var head = (i + 1) + ' · ' + String(f.type || 'материал').toUpperCase()
+               + (f.color ? ' ' + f.color : '') + (num(f.grams) ? ' · ' + round1(f.grams) + ' г' : '');
+      out.push('<div class="pk-map-row"><div class="pk-map-what">' + esc(head) + '</div><div class="pk-chips">');
+      loaded.trays.forEach(function(tray){
+        var n = num(tray.slot, 0);
+        out.push('<button class="pk-chip' + (n === slot ? ' on' : '') + '" type="button"'
+          + ' data-fil="' + i + '" data-slot="' + n + '">' + esc(slotLabel(tray)) + '</button>');
+      });
+      out.push('<button class="pk-chip' + (slot < 0 ? ' on' : '') + '" type="button"'
+        + ' data-fil="' + i + '" data-slot="-1">не из AMS</button>');
+      out.push('</div></div>');
+    });
+    out.push('</div>');
+    out.push('<div class="pk-sub" id="pk_map_sum">' + esc(mappingText()) + '</div>');
+    return out.join('');
+  }
+
+  function printerName(id){
+    var found = null;
+    (st.printers || []).forEach(function(pr){ if (String(pr.id) === String(id)) found = pr; });
+    return found ? (found.name || found.id) : String(id || '');
+  }
+  function queueTitle(){
+    var w = which();
+    var bits = [];
+    if (w.grams) bits.push(round1(w.grams) + ' г');
+    if (w.minutes) bits.push(humanMin(w.minutes));
+    return 'В очередь' + (bits.length ? ' · ' + bits.join(' · ') : ' на печать');
+  }
+  function sizeText(bytes){
+    var b = num(bytes);
+    if (b < 1024) return b + ' Б';
+    if (b < 1024 * 1024) return Math.round(b / 1024) + ' КБ';
+    return (b / 1024 / 1024).toFixed(1).replace('.', ',') + ' МБ';
+  }
+
+  function renderEstimate(){
+    var box = $('#pk_est');
+    if (!box) return;
+    box.innerHTML = loaded.file ? estimateHtml() : '';
+    var chips = $('#pk_plates');
+    if (chips) chips.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('[data-plate]') : null;
+      if (!b) return;
+      loaded.plate = num(b.dataset.plate, 1) || 1;
+      renderEstimate();
+      autoMap();          // у другой плиты могут быть другие материалы
+    });
+  }
+
+  /* --- ход загрузки --- */
+  function showProgress(percent, label){
+    var box = $('#pk_progress'), bar = $('#pk_progress_bar'), text = $('#pk_progress_text');
+    if (!box) return;
+    box.hidden = false;
+    if (bar) bar.style.width = (percent == null ? 8 : Math.max(3, Math.min(100, percent))) + '%';
+    if (text) text.textContent = label + (percent == null ? '…' : ' · ' + percent + '%');
+  }
+  function hideProgress(){
+    var box = $('#pk_progress');
+    if (box) box.hidden = true;
+  }
+
+  /* --- оценка и отправка --- */
+  function pickFile(file){
+    if (!file) return;
+    if (!ALLOWED_EXT.test(String(file.name || ''))) {
+      toast('Поддерживаются только 3MF и G-code');
+      return;
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      toast('Файл больше ' + MAX_MB + ' МБ — коннектор такой не примет');
+      return;
+    }
+    loaded = { file:file, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+               filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
+    renderEstimate();
+    estimateFile();
+  }
+
+  /* Оценка тем же маршрутом, что у панели: файл ложится в uploads и сразу
+     возвращает минуты, граммы, материал и цвет. */
+  function estimateFile(){
+    if (!loaded.file) return Promise.resolve(null);
+    var file = loaded.file;
+    showProgress(null, 'Считаем «' + file.name + '»');
+    return sendFile('/api/estimate/upload', file, {}, function(pct){
+      showProgress(pct, 'Отправляем файл');
+    }).then(function(res){
+      if (loaded.file !== file) return null;      // оператор уже выбрал другой файл
+      hideProgress();
+      loaded.meta = (res && res.estimate) || res || {};
+      loaded.uploaded = (res && res.file) || file.name;
+      loaded.filaments = filamentsOf();
+      renderEstimate();
+      var grams = num(which().grams);
+      toast(grams ? ('Оценка: ' + round1(grams) + ' г · ' + humanMin(which().minutes))
+                  : 'Файл сохранён, но оценки из него нет');
+      loadPlate(res && res.file);
+      return autoMap().then(function(){ return res; });
+    }).catch(function(err){
+      hideProgress();
+      toast('Оценка не получилась: ' + err.message);
+      return null;
+    });
+  }
+
+  /* Превью плиты из самого 3MF — тот же маршрут, что у строки очереди в панели. */
+  function loadPlate(name){
+    if (!name) return;
+    get('/api/jobs/plate?name=' + encodeURIComponent(name)).then(function(d){
+      loaded.preview = (d && d.b64) || '';
+      if (loaded.file && loaded.uploaded === name) renderEstimate();
+    }).catch(function(){ /* нет превью — не беда: цифры важнее картинки */ });
+  }
+
+  /* Отправка: задание в очереди. Плиту и принтер маршрут принимает сразу,
+     поэтому второй раз файл никуда не льётся и ничего не расходится. */
+  /* Раскладка AMS уходит вместе с заданием: позиция в списке — материал файла,
+     значение — номер слота. Пусто или одни «не назначено» — поле не отправляем,
+     и тогда раскладку выбирает принтер (поведение как у панели). */
+  function mappingField(){
+    var map = mmap().slice(0, filamentsOf().length);
+    if (!map.length) return '';
+    var real = map.filter(function(x){ return num(x, -1) >= 0; });
+    if (!real.length) return '';
+    return map.join(',');
+  }
+
+  function queueFile(andStart){
+    if (!loaded.file) return;
+    if (st.busy) return;
+    var file = loaded.file;
+    var plate = loaded.plate || 1;
+    var pid = curPrinter();
+    if (andStart && !pid) { toast('Для запуска выберите принтер'); return; }
+    var fields = { plate: plate };
+    if (pid) fields.printer_id = pid;
+    var mapField = mappingField();
+    if (mapField) fields.ams_mapping = mapField;
+    var where = pid ? ('на «' + printerName(pid) + '»') : 'на любой свободный принтер';
+    var title = queueTitle().replace('В очередь', '');
+    var ask = (plate > 1)
+      ? ('Отправить плиту ' + plate + ' ' + where + title + '?')
+      : ('Отправить в очередь ' + where + title + '?');
+    if (andStart) ask = ask.replace('Отправить', 'Отправить и запустить') + ' Печать начнётся сразу.';
+    if (!confirm(ask)) return;
+    var btn = $('#pk_b_queue');
+    if (btn) { btn.disabled = true; btn.textContent = 'Отправляем…'; }
+    showProgress(null, 'Отправляем в очередь');
+    sendFile('/api/jobs/upload', file, fields, function(pct){
+      showProgress(pct, 'Отправляем в очередь');
+    }).then(function(res){
+      hideProgress();
+      if (loaded.file !== file) return;
+      var job = (res && res.job) || {};
+      var mapping = mapField ? mapField.split(',').map(function(x){ return num(x, -1); }) : [];
+      loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                 filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
+      renderEstimate();
+      var grams = num(job.est_grams);
+      var where = pid ? ('на «' + printerName(pid) + '»') : '';
+      toast('В очереди: ' + (job.name || (res && res.file) || file.name)
+        + (grams ? ' · ' + round1(grams) + ' г' : '') + (where ? ' ' + where : ''));
+      tick();
+      if (andStart && job.id) return startUploaded(job, mapping, plate);
+    }).catch(function(err){
+      hideProgress();
+      toast('Не отправлено: ' + err.message);
+      renderEstimate();
+    });
+  }
+
+  /* «Отправить и запустить»: задание уже в очереди, поэтому дальше — тот же
+     путь, что у панели: Preflight (с раскладкой AMS!) → вопрос оператору →
+     /api/jobs/start с ключом идемпотентности. Блокировки Preflight — стоп. */
+  function startUploaded(job, mapping, plate){
+    var pid = job.printer_id || curPrinter();
+    if (!pid) { toast('Для запуска выберите принтер'); return Promise.resolve(); }
+    var file = String(job.file || job.name || '');
+    var query = '/api/printer/preflight?printer_id=' + encodeURIComponent(pid)
+      + '&file=' + encodeURIComponent(file)
+      + '&plate=' + encodeURIComponent(String(num(plate, 1) || 1))
+      + '&mapping=' + encodeURIComponent(JSON.stringify(mapping || []));
+    return get(query).then(function(check){
+      var blocks = (check && check.blocks) || [];
+      if (blocks.length) {
+        toast('Нельзя запустить: ' + (blocks[0].title || blocks[0].detail || 'preflight'));
+        return;
+      }
+      var warns = ((check && check.warns) || []).map(function(w){
+        return w.title || w.detail || 'предупреждение'; });
+      var lines = [];
+      if (warns.length) lines.push('Предупреждения:', warns.join('; '), '');
+      lines.push('Запустить «' + (job.name || file) + '» на «' + printerName(pid) + '»?');
+      if (!confirm(lines.join(String.fromCharCode(10)))) return;
+      busy(true);
+      return post('/api/jobs/start', {
+        id: job.id, printer_id: pid, confirmed: true,
+        start_request_id: reqId(job.id),
+        preflight_acknowledged: warns.length > 0,
+      }).then(function(){
+        toast('Запущено: ' + (job.name || file));
+        showScreen('queue');
+        tick();
+      }).catch(function(e){ toast(e.message || 'Запуск не прошёл'); })
+        .then(function(){ busy(false); });
+    }).catch(function(e){ toast('Preflight не ответил: ' + (e.message || '')); });
+  }
+
+  function bindFile(){
+    var input = $('#pk_file_input'), pick = $('#pk_b_pick'), drop = $('#pk_drop');
+    if (pick && input) pick.addEventListener('click', function(){ input.click(); });
+    if (input) input.addEventListener('change', function(){
+      if (input.files && input.files[0]) pickFile(input.files[0]);
+      input.value = '';
+    });
+    if (drop) {
+      ['dragover', 'dragenter'].forEach(function(ev){
+        drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('pk-over'); });
+      });
+      ['dragleave', 'dragend'].forEach(function(ev){
+        drop.addEventListener(ev, function(){ drop.classList.remove('pk-over'); });
+      });
+      drop.addEventListener('drop', function(e){
+        e.preventDefault();
+        drop.classList.remove('pk-over');
+        var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) pickFile(f);
+        else toast('Файл из этого перетаскивания не разобрался — выберите кнопкой');
+      });
+    }
+    var box = $('#pk_est');
+    if (box) box.addEventListener('click', function(e){
+      var b = e.target.closest ? e.target.closest('button') : null;
+      if (!b) return;
+      if (b.dataset && b.dataset.printer !== undefined && b.dataset.printer !== null
+          && b.className && b.className.indexOf('pk-chip') >= 0) {
+        loaded.printer = String(b.dataset.printer);
+        renderEstimate();
+        autoMap();        // другой принтер — другие слоты AMS
+        return;
+      }
+      if (b.dataset && b.dataset.fil !== undefined && b.dataset.fil !== null
+          && b.dataset.slot !== undefined) {
+        var idx = num(b.dataset.fil, -1);
+        if (idx >= 0) {
+          loaded.map[idx] = num(b.dataset.slot, -1);
+          renderEstimate();
+        }
+        return;
+      }
+      if (b.id === 'pk_b_change') {
+        loaded = { file:null, meta:null, plate:1, printer:null, uploaded:'', preview:'',
+                   filaments:[], trays:[], map:[], req:(loaded.req || 0) + 1 };
+        renderEstimate();
+        if (input) input.click();
+      } else if (b.id === 'pk_b_queue') {
+        queueFile();
+      } else if (b.id === 'pk_b_start') {
+        queueFile(true);
+      }
+    });
+  }
+
+  /* Файл, брошенный в любое место окна, тоже принимаем: палец мог уйти мимо
+     разметки, а терять работу из-за этого нельзя. */
+  function bindDropWindow(){
+    window.addEventListener('dragover', function(e){ e.preventDefault(); });
+    window.addEventListener('drop', function(e){
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      e.preventDefault();
+      if (st.screen !== 'file') showScreen('file');
+      pickFile(files[0]);
+    });
+  }
+
+  /* ------------------------------------------------------------- экраны */
+  function showScreen(name){
+    st.screen = name;
+    ['park', 'queue', 'auto', 'file', 'ams', 'cam'].forEach(function(s){
+      var el = $('#pk_screen_' + s);
+      if (el) el.hidden = (s !== name);
+    });
+    document.querySelectorAll('.pk-tab').forEach(function(b){
+      b.classList.toggle('on', b.dataset.screen === name);
+    });
+    if (name === 'cam') {
+      camFrame();
+      camTimer(true);
+    } else {
+      camTimer(false);
+      var cam = $('#pk_cam');
+      if (cam) cam.removeAttribute('src');
+    }
+    if (name === 'ams') { loadAms(); } else { closeSheet(); }
+    if (name === 'file') { var inp = $('#pk_file_input'); if (inp) inp.value = ''; }
+    if (name === 'ams' || name === 'cam') tick();
+    if (name === 'queue' || name === 'park') renderQueue();
+    if (name === 'auto') renderAuto();
+    try { localStorage.setItem('pult_screen', name); } catch (e) {}
+  }
+
+  /* ------------------------------------------------------------- киоск */
+  function applyKiosk(){
+    document.body.classList.toggle('kiosk', st.kiosk);
+    /* На http в локальной сети Wake Lock браузер не даёт (нужен защищённый
+       контекст) — просим молча: получится, экран у станка не погаснет. */
+    if (st.kiosk && 'wakeLock' in navigator) {
+      try { navigator.wakeLock.request('screen').catch(function(){}); } catch (e) {}
+    }
+  }
+  function bindBrand(){
+    var b = $('#pk_brand'), hold = null;
+    if (!b) return;
+    function start(){ clearTimeout(hold); hold = setTimeout(function(){
+      st.kiosk = !st.kiosk;
+      applyKiosk();
+      try { localStorage.setItem(KIOSK_KEY, st.kiosk ? '1' : '0'); } catch (e) {}
+      toast(st.kiosk ? 'Киоск включён — долгое нажатие выключит' : 'Киоск выключен');
+    }, KIOSK_HOLD_MS); }
+    function stop(){ clearTimeout(hold); }
+    b.addEventListener('pointerdown', start);
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function(ev){
+      b.addEventListener(ev, stop);
+    });
+  }
+
+  /* ----------------------------------------------------------- команды */
+  function busy(on){
+    st.busy = on;
+    renderCmdBar();
+    renderQueue();
+  }
+  function runCmd(cmd, printerId){
+    var p = printerById(printerId);
+    if (!p) { toast('Принтер не найден'); return Promise.resolve(); }
+    var ask = CMD_ASK[cmd];
+    if (ask && !confirm(ask)) return Promise.resolve();
+    return post('/api/printer/command', {
+      command: cmd, printer_id: p.id, confirmed: true
+    }).then(function(){
+      toast(cmd === 'pause' ? 'Пауза' : (cmd === 'resume' ? 'Продолжили' : 'Остановили'));
+      tick();
+    }).catch(function(e){ toast(e.message || 'Команда не прошла'); });
+  }
+  /* Запуск задания: сначала preflight (плита, пластик, стол), потом старт.
+     Список блокировок — стоп, предупреждения — вопрос оператору. */
+  function startJob(jobId){
+    var job = jobById(jobId);
+    if (!job) { toast('Задание не найдено'); return Promise.resolve(); }
+    var p = printerById(st.active) || printerById(job.printer_id) || selected();
+    if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
+    var plate = Math.round(num(job.plate, 1)) || 1;
+    var file = encodeURIComponent(String(job.file || job.name || ''));
+    // Раскладка AMS из задания обязана попасть в Preflight: иначе он сверит
+    // материал с активным слотом и заблокирует верно разложенное многоцветье.
+    var map = [];
+    try { map = JSON.parse(job.ams_mapping || '[]') || []; } catch (e) { map = []; }
+    return get('/api/printer/preflight?printer_id=' + encodeURIComponent(p.id)
+      + '&file=' + file + '&plate=' + plate
+      + '&mapping=' + encodeURIComponent(JSON.stringify(map))).then(function(check){
+      var blocks = (check && check.blocks) || [];
+      if (blocks.length) {
+        toast('Нельзя запустить: ' + (blocks[0].title || blocks[0].detail || 'preflight'));
+        return;
+      }
+      var warns = ((check && check.warns) || []).map(function(w){
+        return w.title || w.detail || 'предупреждение'; });
+      var lines = [];
+      if (warns.length) lines.push('Предупреждения:', warns.join('; '), '');
+      lines.push('Запустить «' + jobTitle(job) + '» на «' + (p.name || 'принтере') + '»?');
+      if (!confirm(lines.join('\n'))) return;
+      busy(true);
+      return post('/api/jobs/start', {
+        id: job.id, printer_id: p.id, confirmed: true,
+        start_request_id: reqId(job.id),
+        preflight_acknowledged: warns.length > 0
+      }).then(function(){
+        toast('Запущено: ' + jobTitle(job));
+        tick();
+      }).catch(function(e){ toast(e.message || 'Запуск не прошёл'); })
+        .then(function(){ busy(false); });
+    }).catch(function(e){ toast(e.message || 'Preflight не ответил'); });
+  }
+  function cancelJob(jobId){
+    var job = jobById(jobId);
+    if (!confirm('Убрать «' + jobTitle(job || {}) + '» из очереди?')) return Promise.resolve();
+    return post('/api/jobs/cancel', { id: jobId }).then(function(){
+      toast('Убрали из очереди'); tick();
+    }).catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+  function moveJob(jobId, direction){
+    return post('/api/jobs/reorder', { id: jobId, direction: direction }).then(function(){
+      toast(direction === 'up' ? 'Выше' : 'Ниже'); tick();
+    }).catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
+  /* ------------------------------------------------ экран «Авто» (18.0.8)
+     Автономность без чёрного ящика: оператор видит, что очередь сделает
+     сама, что будет следующим и почему именно оно — или почему стоит.
+     Всё это уже посчитал сервер (`manager.autonomy_report`) и отдал тем же
+     запросом сводки; страница ничего не решает, не запускает и не выдумывает:
+     нет блока в ответе — честно говорим, что данных нет. */
+  function autoChip(text, tone, on){
+    return '<span class="pk-chip' + (on ? ' on' : '') + '"><i style="background:var('
+      + esc(tone || '--muted') + ')"></i>' + esc(text) + '</span>';
+  }
+  function autoPlan(job){
+    var bits = [];
+    if (num(job.plate, 1) > 1) bits.push('плита ' + num(job.plate, 1));
+    if (num(job.est_minutes)) bits.push(humanMin(job.est_minutes));
+    if (num(job.est_grams)) bits.push(round1(job.est_grams) + ' г');
+    return bits.join(' · ');
+  }
+  function autoNextHtml(a){
+    var next = a.next || {};
+    var job = next.job || {};
+    if (!job.id && !job.name) {
+      var waiting = num(a.queue_waiting);
+      var note = waiting
+        ? 'В очереди ' + waiting + ' ' + plural(waiting, 'задание', 'задания', 'заданий')
+          + ', но печатать не на чем: подходящего принтера нет.'
+        : 'Подходящих заданий в очереди нет.';
+      return '<div class="pk-card"><div class="pk-file-head"><b>Следующее</b></div>'
+        + '<div class="pk-note">' + note + '</div></div>';
+    }
+    var where = (next.printer || {}).name || printerName((next.printer || {}).id);
+    var why = (next.why || []).map(function(w){ return '<li>' + esc(w) + '</li>'; }).join('');
+    var ready = next.ready
+      ? '<div class="pk-note">Готово к запуску' + (a.armed ? ' — очередь запустит сама.'
+          : ' — ждёт нажатия «Запустить».') + '</div>'
+      : '<div class="pk-note warn">Ждёт: ' + esc(next.reason || 'причина не сообщена') + '</div>';
+    return '<div class="pk-card"><div class="pk-file-head"><b>Следующее</b>'
+      + (autoPlan(job) ? '<span>' + esc(autoPlan(job)) + '</span>' : '') + '</div>'
+      + '<div class="pk-map-what">' + esc(job.name || 'задание') + '</div>'
+      + '<div class="pk-sub">' + (where ? 'принтер ' + esc(where) : 'принтер выберет очередь')
+      + (job.order && job.order.number ? ' · заказ ' + esc(job.order.number) : '') + '</div>'
+      + (why ? '<div class="pk-sub">Почему оно: <ul class="pk-why">' + why + '</ul></div>' : '')
+      + ready + '</div>';
+  }
+  function autoPrintersHtml(a){
+    var rows = (a.printers || []).map(function(p){
+      return '<div class="pk-map-row"><div class="pk-row">'
+        + '<span class="pk-dot ' + (p.ready ? 'ok' : 'warn') + '"></span>'
+        + '<span class="pk-map-what">' + esc(p.name || p.id) + '</span></div>'
+        + '<div class="pk-sub">' + esc(p.ready ? 'может начать сейчас' : (p.reason || 'ждёт'))
+        + (num(p.failed_streak) ? ' · сорванных печатей подряд: ' + num(p.failed_streak) : '')
+        + '</div></div>';
+    }).join('');
+    if (!rows) return '';
+    return '<div class="pk-card"><div class="pk-file-head"><b>Принтеры</b></div>'
+      + '<div class="pk-map">' + rows + '</div></div>';
+  }
+  function renderAuto(){
+    var box = $('#pk_auto_body');
+    if (!box) return;
+    var a = st.auto;
+    var sub = $('#pk_auto_now');
+    var chips = $('#pk_auto_state');
+    if (!a) {
+      if (sub) sub.textContent = '';
+      if (chips) chips.innerHTML = '';
+      box.innerHTML = '<div class="pk-empty"><b>Данных нет</b>'
+        + 'Сводка про автозапуск не пришла — обновите страницу.</div>';
+      return;
+    }
+    if (sub) {
+      sub.textContent = a.armed ? 'очередь идёт сама'
+        : (a.auto_queue && a.safety_gate ? 'ждёт тихих часов' : 'задания запускает оператор');
+    }
+    if (chips) {
+      chips.innerHTML = [
+        autoChip('Автозапуск: ' + (a.auto_queue ? 'включён' : 'выключен'),
+                 a.auto_queue ? '--ok' : '--muted', !!a.auto_queue),
+        autoChip('Без присмотра: ' + (a.safety_gate ? 'разрешён' : 'запрещён'),
+                 a.safety_gate ? '--ok' : '--bad', !!a.safety_gate),
+        autoChip('Тихие часы: ' + (a.quiet ? 'идут' : 'нет'),
+                 a.quiet ? '--warn' : '--ok', !a.quiet),
+      ].join('');
+    }
+    var reasons = (a.reasons || []).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('');
+    var rules = (a.rules || []).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('');
+    box.innerHTML = (reasons
+        ? '<div class="pk-card"><div class="pk-file-head"><b>Почему стоит</b></div>'
+          + '<div class="pk-sub"><ul class="pk-why">' + reasons + '</ul></div></div>'
+        : '')
+      + autoNextHtml(a)
+      + autoPrintersHtml(a)
+      + (rules
+        ? '<div class="pk-card"><div class="pk-file-head"><b>Правила очереди</b></div>'
+          + '<div class="pk-sub"><ul class="pk-why">' + rules + '</ul></div></div>'
+        : '');
+  }
+
+  /* ---------------------------------------------------------- опрос API */
+  /* Один запрос на всё: парк, очередь, память слотов AMS и катушки склада
+     приходят из /api/pult/summary (18.0.4). На слабой сети и на телефоне у
+     станка это заметно дешевле, чем четыре запроса на каждое обновление.
+     Если коннектор старее 18.0.4 и сводки нет — откатываемся на /api/state. */
+  /* Последняя удачная сводка — в память телефона (18.0.5). Смысл: у станка
+     связь пропадает чаще, чем хотелось бы, а оператору нужно увидеть, что
+     было, а не пустой экран. Данные показываются с честной пометкой времени
+     и словом «связи нет» — это не «живые цифры». */
+  var LAST_KEY = 'pult_last';
+  function remember(d){
+    try {
+      localStorage.setItem(LAST_KEY, JSON.stringify({ saved: Date.now() / 1000, data: d }));
+    } catch (e) {}
+  }
+  function recall(){
+    try {
+      var raw = localStorage.getItem(LAST_KEY);
+      if (!raw) return null;
+      var box = JSON.parse(raw);
+      if (!box || !box.data || !box.data.printers) return null;
+      return box;
+    } catch (e) { return null; }
+  }
+  function apply(d){
+    st.at = stamp(d.at);
+    st.printers = d.printers || [];
+    st.queue = d.queue || [];
+    st.farm = d.farm || {};
+    // Отчёт автономности и факт последней печати — из той же сводки
+    // (18.0.8/18.0.10). У старого коннектора их нет: оставляем как было.
+    if (d.autonomy) st.auto = d.autonomy;
+    if (d.last_done) st.done = d.last_done;
+    if (d.ams) {
+      st.ams = { slots: d.ams.slots || [], printer: st.active,
+                 at: Date.now() / 1000 };
+    }
+    if (d.spools) st.spools = d.spools;
+    if (!st.active && st.printers.length) st.active = st.printers[0].id;
+    if (st.active && !printerById(st.active) && st.printers.length) st.active = st.printers[0].id;
+    setOnline(true);
+    remember(d);
+    setFreshness();
+    renderPark();
+    renderQueue();
+    if (st.screen === 'ams') renderAms();
+    if (st.screen === 'cam') camFrame();
+    if (st.screen === 'auto') renderAuto();
+  }
+  function tick(){
+    if (document.hidden) return;
+    var p = selected();
+    var q = p ? ('?printer_id=' + encodeURIComponent(p.id)) : '';
+    get('/api/pult/summary' + q).then(function(d){
+      st.fallback = false;
+      apply(d);
+    }).catch(function(e){
+      var missing = !!(e && e.status === 404);
+      if (!missing) {
+        setOnline(false, e && e.message ? e.message : '');
+        setFreshness();
+        return;
+      }
+      // Старый коннектор: сводки ещё нет. Парк и очередь читаем как раньше,
+      // а память слотов просим отдельным адресом.
+      st.fallback = true;
+      get('/api/state').then(function(d){
+        apply(d);
+        return loadAms();
+      }).catch(function(err){
+        setOnline(false, err && err.message ? err.message : '');
+        setFreshness();
+      });
+    });
+  }
+  function schedule(){
+    clearInterval(st.timer);
+    st.timer = setInterval(tick, POLL_MS);
+  }
+
+  /* -------------------------------------------------------------- старт */
+  document.addEventListener('click', function(e){
+    var hit = e.target.closest ? e.target : null;
+    if (!hit || !hit.closest) return;
+    var tab = hit.closest('.pk-tab');
+    if (tab) { showScreen(tab.dataset.screen); return; }
+    var amsBtn = hit.closest('[data-ams]');
+    if (amsBtn) {
+      var act = amsBtn.dataset.ams;
+      var slot = amsBtn.dataset.slot;
+      if (act === 'pick') openSheet(slot);
+      else if (act === 'bind') bindSpool(slot, amsBtn.dataset.spool, false);
+      else if (act === 'again') {
+        var target = null;
+        slotsMap().forEach(function(it){ if (it.slot === String(slot)) target = it; });
+        var spoolId = target && target.mem && target.mem.spool_id;
+        if (!spoolId) { toast('Прошлая катушка неизвестна'); return; }
+        bindSpool(slot, spoolId, false);
+      } else if (act === 'unbind') unbindSlot(slot);
+      else if (act === 'forget') forgetSlot(slot);
+      return;
+    }
+    if (hit.closest('#pk_b_removed')) { partRemoved(); return; }
+    if (hit.closest('#pk_ams_sync')) { syncAms(); return; }
+    if (hit.closest('#pk_b_shot')) { takeShot(); return; }
+    if (hit.closest('#pk_b_light')) { toggleLight(); return; }
+    if (hit.closest('#pk_b_refresh')) { camFrame(); toast('Кадр обновлён'); return; }
+    if (hit.closest('#pk_sheet_close')) { closeSheet(); return; }
+    if (hit.closest('#pk_sheet_wrap') && !hit.closest('.pk-sheet')) { closeSheet(); return; }
+    var cmdBtn = hit.closest('[data-cmd]');
+    if (cmdBtn) {
+      if (cmdBtn.disabled) return;
+      var target = cmdBtn.dataset.on || (selected() || {}).id || '';
+      runCmd(cmdBtn.dataset.cmd, target);
+      return;
+    }
+    var actBtn = hit.closest('[data-job-act]');
+    if (actBtn) {
+      if (actBtn.disabled) return;
+      var jobEl = actBtn.closest('[data-job]');
+      var jobId = jobEl ? jobEl.dataset.job : '';
+      var act = actBtn.dataset.jobAct;
+      if (act === 'start') startJob(jobId);
+      else if (act === 'cancel') cancelJob(jobId);
+      else if (act === 'up' || act === 'down') moveJob(jobId, act);
+      return;
+    }
+    var tile = hit.closest('[data-printer]');
+    if (tile) {
+      st.active = tile.dataset.printer;
+      var found = printerById(st.active);
+      renderPark();
+      renderQueue();
+      st.ams = { slots:[], printer:'', at:0 };
+      st.spools = null;
+      if (st.screen === 'ams') loadAms(); else renderAms();
+      if (st.screen === 'cam') camFrame();
+      toast('Выбран ' + ((found && found.name) || 'принтер'));
+    }
+  });
+  document.addEventListener('visibilitychange', function(){
+    if (!document.hidden) { tick(); if (st.screen === 'cam') camFrame(); }
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') closeSheet();
+  });
+
+  /* Ярлык приложения (манифест) открывает нужный экран ссылкой
+     «/pult?screen=queue». Чужое значение игнорируем — экран только свой. */
+  var screenFromLink = '';
+  try {
+    var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));
+    if (want && ['park', 'queue', 'auto', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
+  } catch (e) {}
+  /* Пока идёт первый запрос, показываем последнюю известную картину: иначе
+     на медленной сети оператор видит «данных ещё нет» и решает, что пульт сломан. */
+  var remembered = recall();
+  if (remembered) {
+    apply(remembered.data);
+    st.at = remembered.saved;      // время именно того снимка, а не «сейчас»
+    setFreshness();
+    setOnline(false, 'пока нет ответа');
+  }
+  try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
+  try { var s = screenFromLink || localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
+  bindBrand();
+  bindFile();
+  bindDropWindow();
+  applyKiosk();
+  setFreshness();
+  showScreen(st.screen || 'park');
+  tick();
+  schedule();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+</script>
+<script src="/assets/theme-toggle.js?v=17.0.1" defer></script>
+</body>
+</html>

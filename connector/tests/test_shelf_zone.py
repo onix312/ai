@@ -349,7 +349,13 @@ class DocumentsBoundaryTests(unittest.TestCase):
 
 
 class HoldTests(unittest.TestCase):
-    """Холды СБП-продаж кассы."""
+    """Холды СБП-продаж кассы.
+
+    Сценарии написаны для единого каталога И2 (полка + домашний склад), где
+    касса видит и продаёт товар со склада: в 17.0.26 этот режим выключается
+    настройкой, поэтому класс включает его явно. Режим «только стеллаж» по
+    умолчанию проверяется в `test_cashier.CashierShelfOnlyTests`.
+    """
 
     def setUp(self):
         self.db = make_db()
@@ -357,7 +363,7 @@ class HoldTests(unittest.TestCase):
         self.cashier = Cashier(self.db, self.acc)
         self.stock = Stock(self.db)
         self.shelf = Shelf(self.db)
-        self.db.set_settings({"cashier_code": "1234"})
+        self.db.set_settings({"cashier_code": "1234", "cashier_shelf_only": False})
         add_nom(self.db)
         self.stock.add_move("nom1", "home", 10, 1000, doc_kind="receipt")
         moved = self.shelf.transfer_from_stock("nom1", "home", 5)

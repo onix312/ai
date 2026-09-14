@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Цвета тёмной темы страницы пульта (site/assets/tokens.css): приложение и
+         страница должны выглядеть одним целым, иначе на стыке видна «другая
+         программа». Совпадение проверяет connector/tests/test_android_pult.py. -->
+    <color name="pult_bg">#0b0f19</color>
+    <color name="pult_panel">#111827</color>
+    <color name="pult_line">#1e293b</color>
+    <color name="pult_accent">#6366f1</color>
+    <color name="pult_text">#f8fafc</color>
+    <color name="pult_muted">#8191aa</color>
+    <color name="pult_hint">#8191aa</color>
+    <color name="pult_ok">#10b981</color>
+</resources>

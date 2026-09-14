@@ -15,4 +15,7 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "PrintFlowKassa"
+// Два приложения: касса (app) и пульт цеха (pult). Разные applicationId —
+// значит обновление одного не трогает другое, и на телефоне это две иконки.
 include ':app'
+include ':pult'

@@ -61,6 +61,14 @@ def cache_policy(target: Path, raw_path: str = "") -> str:
     return "public, max-age=3600"
 
 
+# Короткие адреса, у которых имя файла не совпадает с адресом. Их диктуют
+# вслух, печатают на ценнике и кладут в QR, поэтому закреплены явно, а не
+# выводятся из имени файла (18.0.1: пульт цеха → control.html).
+SHORT_ALIASES = {
+    "/pult": "control.html",
+}
+
+
 def resolve_target(path: str) -> Path | None:
     """Найти файл внутри `site/`, понимая короткие адреса и старый .htm.
 
@@ -69,6 +77,11 @@ def resolve_target(path: str) -> Path | None:
     превращаться в 404 — иначе внешние закладки ломаются после переименования.
     """
     rel = urllib.parse.unquote(path.lstrip("/")) or "index.html"
+    alias_name = SHORT_ALIASES.get("/" + rel.strip("/"))
+    if alias_name:
+        short = safe_file(SITE, alias_name)
+        if short is not None and short.exists():
+            return short
     target = safe_file(SITE, rel)
     if target is None:
         return None

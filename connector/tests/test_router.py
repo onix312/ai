@@ -88,6 +88,53 @@ class RouterRegistryTests(unittest.TestCase):
         self.assertEqual(ctx.arg("q"), "текст")   # тело пусто → берём query
 
 
+class PreflightRouteTests(unittest.TestCase):
+    """GET /api/printer/preflight: маршрут живой, а не «падает на json» (18.0.2).
+
+    Пульт цеха перед стартом спрашивает предупреждения и блокировки именно
+    этим адресом. Ошибка была незаметной: панель ходит POST-веткой, а GET
+    падал с «name 'json' is not defined», потому что модуль маршрутов не
+    импортировал json.
+    """
+
+    class FakeApi:
+        class FakeManager:
+            def __init__(self):
+                self.seen = None
+
+            def preflight(self, printer_id, filename, plate, mapping):
+                self.seen = (printer_id, filename, plate, mapping)
+                return {"ok": True, "blocks": [], "warns": [{"title": "проба"}], "infos": []}
+
+        def __init__(self):
+            self.manager = self.FakeManager()
+
+        def printer_or_fail(self, printer_id):
+            if not printer_id:
+                raise ValueError("Укажите принтер")
+            return type("P", (), {"id": printer_id})()
+
+    def setUp(self):
+        register_routes()
+
+    def test_route_returns_preflight_without_mapping(self):
+        api = self.FakeApi()
+        status, body = router.dispatch(api, "GET", "/api/printer/preflight",
+                                       query={"printer_id": ["prn-1"], "file": ["a.3mf"], "plate": ["2"]})
+        self.assertEqual(200, status)
+        self.assertEqual(["проба"], [w["title"] for w in body["warns"]])
+        self.assertEqual(("prn-1", "a.3mf", 2, []), api.manager.seen)
+
+    def test_route_parses_mapping_and_survives_garbage(self):
+        api = self.FakeApi()
+        router.dispatch(api, "GET", "/api/printer/preflight",
+                        query={"printer_id": ["prn-1"], "file": ["a.3mf"], "mapping": ["[1, 2]"]})
+        self.assertEqual([1, 2], api.manager.seen[3])
+        router.dispatch(api, "GET", "/api/printer/preflight",
+                        query={"printer_id": ["prn-1"], "file": ["a.3mf"], "mapping": ["{не json"]})
+        self.assertEqual([], api.manager.seen[3])
+
+
 class RoutesHaveNoSqlTests(unittest.TestCase):
     """Идея 2: модули маршрутов не содержат SQL — только вызовы сервисов."""
 
