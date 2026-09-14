@@ -23,5 +23,29 @@
       "type": "image/svg+xml",
       "purpose": "maskable"
     }
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "shortcuts": [
+    {
+      "name": "Очередь",
+      "short_name": "Очередь",
+      "url": "/pult?screen=queue",
+      "description": "Что печатается и что ждёт"
+    },
+    {
+      "name": "Парк принтеров",
+      "short_name": "Парк",
+      "url": "/pult?screen=park",
+      "description": "Состояние принтеров цеха"
+    },
+    {
+      "name": "Камера",
+      "short_name": "Камера",
+      "url": "/pult?screen=cam",
+      "description": "Кадр с плиты и лампа"
+    }
   ]
 }

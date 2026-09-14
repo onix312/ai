@@ -44,6 +44,21 @@ def printers(api: Any, ctx: Ctx):
     return {"printers": api.repo.printers()}
 
 
+@router.get("/api/pult/summary", doc="Сводка для пульта цеха: парк, очередь, AMS, катушки")
+def pult_summary(api: Any, ctx: Ctx):
+    """Один ответ вместо четырёх — телефону у станка так дешевле.
+
+    Пульт цеха (18.0.4) каждый раз спрашивал парк, память слотов AMS и склад
+    отдельными запросами. Здесь то же самое одним ответом, а форма снимка
+    парка совпадает с `/api/state`, чтобы страница отрисовывала оба ответа
+    одним кодом. Только чтение: изменения — отдельными маршрутами.
+    """
+    from .pult import summary
+
+    printer_id = str(ctx.one("printer_id") or "").strip()
+    return summary(api.db, api.manager, printer_id)
+
+
 @router.get("/api/ams/memory", doc="Память слотов AMS: что в них стоит по базе")
 def ams_memory(api: Any, ctx: Ctx):
     """Раскладка AMS из базы — работает и когда принтер молчит.

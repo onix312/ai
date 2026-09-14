@@ -127,7 +127,7 @@ function runPage(options) {
     console,
     document: page.document,
     navigator: {},
-    location: { origin: 'http://127.0.0.1:8790' },
+    location: { origin: 'http://127.0.0.1:8790', search: opts.search || '' },
     localStorage: { getItem() { return null; }, setItem() {} },
     setTimeout, clearTimeout, setInterval, clearInterval,
     AbortController, Promise, Date, JSON, Math, String, Number, Object, Array, Boolean,
@@ -145,6 +145,17 @@ function runPage(options) {
       const payload = request && request.body ? JSON.parse(request.body) : null;
       requests.push({ method, url, payload });
       if (env.failFetch) return Promise.reject(new Error('нет ответа'));
+      if (url.indexOf('/api/pult/summary') === 0) {
+        if (opts.noSummary) {
+          return Promise.resolve({ ok: false, status: 404,
+            json: () => Promise.resolve({ error: 'Неизвестный маршрут' }) });
+        }
+        // Сводка 18.0.4 = снимок парка + память слотов + катушки склада.
+        const summary = Object.assign({}, env.state, {
+          ams: env.ams, spools: env.spools.spools,
+        });
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(summary) });
+      }
       if (url === '/api/state') {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.state) });
       }
@@ -240,8 +251,9 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('очередь: у ожидающего задания запуск/выше/ниже/отмена',
       page.store['pk_jobs'].innerHTML.indexOf('data-job-act="start"') >= 0
       && page.store['pk_jobs'].innerHTML.indexOf('data-job-act="cancel"') >= 0);
-    check('пульт ходит только в свой коннектор',
-      page.requests.every((r) => r.url.indexOf('/api/') === 0), JSON.stringify(page.requests.map((r) => r.url)));
+    check('пульт ходит только в свой коннектор и одним запросом',
+      page.requests.length === 1 && page.requests[0].url.indexOf('/api/pult/summary') === 0,
+      JSON.stringify(page.requests.map((r) => r.url)));
   }
 
   /* 2. Команды печати: подтверждение и confirmed:true */
@@ -547,6 +559,60 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('обрыв: текст плашки объясняет, что данные старые',
       page.store['pk_offline_text'].textContent.indexOf('Коннектор не отвечает') === 0,
       page.store['pk_offline_text'].textContent);
+  }
+
+  /* 6.1 Сводка одним запросом (18.0.4) */
+  {
+    const page = runPage({ ams: AMS_FIXTURE, spools: { spools: [] } });
+    await wait(60);
+    check('сводка: обновление парка — один запрос вместо четырёх',
+      page.requests.length === 1 && page.requests[0].url.indexOf('/api/pult/summary') === 0,
+      JSON.stringify(page.requests.map((r) => r.url)));
+
+    page.requests.length = 0;
+    page.clickTab('ams');
+    await wait(80);
+    check('сводка: экран AMS не ходит за памятью и складом отдельно',
+      page.requests.every((r) => r.url.indexOf('/api/pult/summary') === 0),
+      JSON.stringify(page.requests.map((r) => r.url)));
+    check('сводка: катушки склада приехали вместе со сводкой (шторка без запроса)',
+      page.store['pk_slots'].innerHTML.indexOf('data-ams=') > 0,
+      text(page.store['pk_slots'].innerHTML).slice(0, 120));
+
+    page.requests.length = 0;
+    page.clickAms('pick', '0');
+    await wait(80);
+    check('сводка: шторка выбора катушки открылась без запроса к складу',
+      page.requests.length === 0, JSON.stringify(page.requests.map((r) => r.url)));
+  }
+  {
+    // Старый коннектор (сводки нет): пульт обязан работать, а не показывать пустоту
+    const page = runPage({ noSummary: true, ams: AMS_FIXTURE, spools: { spools: [] } });
+    await wait(80);
+    const urls = page.requests.map((r) => r.url);
+    const park = text(page.store['pk_tiles'].innerHTML);
+    check('откат: при 404 сводки пульт читает /api/state и рисует парк',
+      urls.indexOf('/api/state') >= 0 && park.indexOf('Цех-1') >= 0, JSON.stringify(urls));
+    check('откат: память слотов берётся отдельным адресом',
+      urls.some((u) => u.indexOf('/api/ams/memory') === 0), JSON.stringify(urls));
+  }
+
+  /* 6.2 Ярлык приложения открывает нужный экран (манифест, 18.0.4) */
+  {
+    const page = runPage({ search: '?screen=queue' });
+    await wait(60);
+    check('ярлык: ?screen=queue открывает очередь сразу',
+      page.store['pk_screen_queue'].hidden === false
+      && page.store['pk_screen_park'].hidden === true,
+      JSON.stringify({ queue: page.store['pk_screen_queue'].hidden,
+                       park: page.store['pk_screen_park'].hidden }));
+
+    const junk = runPage({ search: '?screen=admin' });
+    await wait(60);
+    check('ярлык: чужой ?screen= игнорируется — открывается парк',
+      junk.store['pk_screen_park'].hidden === false
+      && junk.store['pk_screen_queue'].hidden === true,
+      JSON.stringify({ park: junk.store['pk_screen_park'].hidden }));
   }
 
   /* 7. Экраны и выбор принтера */

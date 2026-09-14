@@ -278,7 +278,7 @@
 
   var CAM_MS = 3000;        // кадр обновляем чаще, чем цифры парка
   var st = { at:0, printers:[], queue:[], farm:{}, active:'', screen:'park',
-             kiosk:false, timer:null, camTimer:null, busy:false,
+             kiosk:false, timer:null, camTimer:null, busy:false, fallback:false,
              ams:{ slots:[], printer:'', at:0 }, spools:null, sheetSlot:'' };
 
   function $(s){ return document.querySelector(s); }
@@ -331,7 +331,14 @@
       fetch(path, opts).then(function(r){
         return r.json().catch(function(){ return {}; }).then(function(d){
           clearTimeout(t);
-          if (!r.ok) throw new Error(d.error || ('ошибка ' + r.status));
+          if (!r.ok) {
+            // Код ответа вешаем на ошибку: по нему пульт отличает «маршрута
+            // ещё нет» (старый коннектор, 404) от настоящего сбоя. Текст
+            // ошибки для этого не годится — сервер вправе его изменить.
+            var err = new Error(d.error || ('ошибка ' + r.status));
+            err.status = r.status;
+            throw err;
+          }
           return d;
         });
       }).then(resolve).catch(function(e){ clearTimeout(t); reject(e); });
@@ -571,7 +578,7 @@
       head.textContent = !p ? 'принтеров нет'
         : (!items.length ? 'принтер ещё не сообщал слоты — нажмите «Синхронизировать»'
           : 'занято ' + filled + ' из ' + items.length
-            + (st.ams.at ? ' · память обновлена в ' + clock(st.ams.at) : ''));
+            + (p.connection && !p.connection.connected ? ' · принтер молчит, раскладка из памяти базы' : ''));
     }
     if (!items.length) {
       box.innerHTML = '<div class="pk-empty"><b>Слотов не видно</b>'
@@ -587,6 +594,8 @@
     var p = selected();
     if (!p) { st.ams = { slots:[], printer:'', at:0 }; renderAms(); return Promise.resolve(); }
     st.ams.printer = p.id;
+    // Сводка 18.0.4 уже принесла память слотов — второй запрос не нужен.
+    if (!st.fallback) { renderAms(); return Promise.resolve(); }
     return get('/api/ams/memory?printer_id=' + encodeURIComponent(p.id)).then(function(d){
       st.ams.slots = (d && d.slots) || [];
       st.ams.at = Date.now() / 1000;
@@ -600,8 +609,8 @@
     var p = selected();
     if (!p) { toast('Сначала выберите принтер'); return Promise.resolve(); }
     return post('/api/printer/ams/sync', { printer_id: p.id }).then(function(d){
-      toast('Синхронизировано: слотов ' + ((d && d.spools) ? d.spools.length : 0));
-      return loadAms().then(tick);
+      toast('Синхронизировано: катушек ' + ((d && d.spools) ? d.spools.length : 0));
+      return tick();
     }).catch(function(e){ toast(e.message || 'Синхронизация не прошла'); });
   }
 
@@ -695,7 +704,7 @@
       if (d && d.push_error) toast('Привязано, но в принтер не ушло: ' + d.push_error);
       else toast('Катушка в слоте — материал отправлен в принтер');
       closeSheet();
-      return loadAms().then(tick);
+      return tick();
     }).catch(function(e){
       var msg = e.message || 'Не вышло';
       if (msg.indexOf('уже занят') >= 0 && !force) {
@@ -715,7 +724,7 @@
     if (!spoolId || !p) { toast('В этом слоте нет привязанной катушки'); return Promise.resolve(); }
     if (!confirm('Отвязать катушку от слота? Катушка вернётся на склад.')) return Promise.resolve();
     return post('/api/spool/bind', { id: spoolId, printer_id: p.id, ams_slot: '' })
-      .then(function(){ toast('Катушка отвязана'); closeSheet(); return loadAms().then(tick); })
+      .then(function(){ toast('Катушка отвязана'); closeSheet(); return tick(); })
       .catch(function(e){ toast(e.message || 'Не вышло'); });
   }
   function forgetSlot(slot){
@@ -724,7 +733,7 @@
     if (!confirm('Забыть память слота? Привязки катушек на складе не тронутся.')) return Promise.resolve();
     return post('/api/ams/memory/clear', { printer_id: p.id, slot: String(slot) })
       .then(function(d){ toast('Память слота очищена (забыто: ' + num(d && d.removed) + ')');
-        closeSheet(); return loadAms(); })
+        closeSheet(); return tick(); })
       .catch(function(e){ toast(e.message || 'Не вышло'); });
   }
 
@@ -873,6 +882,7 @@
       if (cam) cam.removeAttribute('src');
     }
     if (name === 'ams') { loadAms(); } else { closeSheet(); }
+    if (name === 'ams' || name === 'cam') tick();
     if (name === 'queue' || name === 'park') renderQueue();
     try { localStorage.setItem('pult_screen', name); } catch (e) {}
   }
@@ -968,24 +978,53 @@
   }
 
   /* ---------------------------------------------------------- опрос API */
+  /* Один запрос на всё: парк, очередь, память слотов AMS и катушки склада
+     приходят из /api/pult/summary (18.0.4). На слабой сети и на телефоне у
+     станка это заметно дешевле, чем четыре запроса на каждое обновление.
+     Если коннектор старее 18.0.4 и сводки нет — откатываемся на /api/state. */
+  function apply(d){
+    st.at = stamp(d.at);
+    st.printers = d.printers || [];
+    st.queue = d.queue || [];
+    st.farm = d.farm || {};
+    if (d.ams) {
+      st.ams = { slots: d.ams.slots || [], printer: st.active,
+                 at: Date.now() / 1000 };
+    }
+    if (d.spools) st.spools = d.spools;
+    if (!st.active && st.printers.length) st.active = st.printers[0].id;
+    if (st.active && !printerById(st.active) && st.printers.length) st.active = st.printers[0].id;
+    setOnline(true);
+    setFreshness();
+    renderPark();
+    renderQueue();
+    if (st.screen === 'ams') renderAms();
+    if (st.screen === 'cam') camFrame();
+  }
   function tick(){
     if (document.hidden) return;
-    get('/api/state').then(function(d){
-      st.at = stamp(d.at);
-      st.printers = d.printers || [];
-      st.queue = d.queue || [];
-      st.farm = d.farm || {};
-      if (!st.active && st.printers.length) st.active = st.printers[0].id;
-      if (st.active && !printerById(st.active) && st.printers.length) st.active = st.printers[0].id;
-      setOnline(true);
-      setFreshness();
-      renderPark();
-      renderQueue();
-      if (st.screen === 'ams') { renderAms(); loadAms(); }
-      if (st.screen === 'cam') camFrame();
+    var p = selected();
+    var q = p ? ('?printer_id=' + encodeURIComponent(p.id)) : '';
+    get('/api/pult/summary' + q).then(function(d){
+      st.fallback = false;
+      apply(d);
     }).catch(function(e){
-      setOnline(false, e && e.message ? e.message : '');
-      setFreshness();
+      var missing = !!(e && e.status === 404);
+      if (!missing) {
+        setOnline(false, e && e.message ? e.message : '');
+        setFreshness();
+        return;
+      }
+      // Старый коннектор: сводки ещё нет. Парк и очередь читаем как раньше,
+      // а память слотов просим отдельным адресом.
+      st.fallback = true;
+      get('/api/state').then(function(d){
+        apply(d);
+        return loadAms();
+      }).catch(function(err){
+        setOnline(false, err && err.message ? err.message : '');
+        setFreshness();
+      });
     });
   }
   function schedule(){
@@ -1046,6 +1085,7 @@
       renderPark();
       renderQueue();
       st.ams = { slots:[], printer:'', at:0 };
+      st.spools = null;
       if (st.screen === 'ams') loadAms(); else renderAms();
       if (st.screen === 'cam') camFrame();
       toast('Выбран ' + ((found && found.name) || 'принтер'));
@@ -1058,8 +1098,15 @@
     if (e.key === 'Escape') closeSheet();
   });
 
+  /* Ярлык приложения (манифест) открывает нужный экран ссылкой
+     «/pult?screen=queue». Чужое значение игнорируем — экран только свой. */
+  var screenFromLink = '';
+  try {
+    var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));
+    if (want && ['park', 'queue', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
+  } catch (e) {}
   try { st.kiosk = localStorage.getItem(KIOSK_KEY) === '1'; } catch (e) {}
-  try { var s = localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
+  try { var s = screenFromLink || localStorage.getItem('pult_screen'); if (s) st.screen = s; } catch (e) {}
   bindBrand();
   applyKiosk();
   setFreshness();

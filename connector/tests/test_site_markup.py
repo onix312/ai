@@ -905,7 +905,7 @@ class PultControlPageTests(TestCase):
         self.assertIn("((p && (p.ams || {}).trays) || [])", self.html)
         self.assertIn("(st.ams.slots || []).forEach", self.html)
         self.assertIn("get('/api/ams/memory?printer_id='", self.html)
-        self.assertIn("st.ams.at ? ' · память обновлена в '", self.html)
+        self.assertIn("' · принтер молчит, раскладка из памяти базы'", self.html)
         # Память бывает старее получаса — это обязано быть видно словами.
         self.assertIn("if (mem && mem.stale) source.push('память несвежая');", self.html)
 
@@ -945,6 +945,30 @@ class PultControlPageTests(TestCase):
         self.assertIn("'демо-режим: показывается учебный кадр, а не цех'", self.html)
         self.assertIn("'кадр ' + Math.round(num(info.age)) + ' с назад'", self.html)
         self.assertIn("shotBtn.disabled = !(p && info.available);", self.html)
+
+    def test_summary_is_one_request_with_graceful_fallback(self):
+        """Сводка 18.0.4: один запрос; старый коннектор — откат на /api/state."""
+        self.assertIn("get('/api/pult/summary' + q)", self.html)
+        self.assertIn("var missing = !!(e && e.status === 404);", self.html)
+        self.assertIn("st.fallback = true;", self.html)
+        self.assertIn("err.status = r.status;", self.html,
+                      "код ответа — единственный надёжный признак «маршрута ещё нет»")
+        self.assertIn("if (!st.fallback) { renderAms(); return Promise.resolve(); }", self.html)
+        self.assertIn("if (d.spools) st.spools = d.spools;", self.html)
+
+    def test_manifest_shortcuts_open_pult_screens(self):
+        manifest = json.loads(PULT_MANIFEST.read_text(encoding="utf-8"))
+        shortcuts = manifest.get("shortcuts") or []
+        self.assertTrue(shortcuts, "в манифесте нет ярлыков приложения")
+        for item in shortcuts:
+            self.assertTrue(item["url"].startswith("/pult?screen="),
+                            f"ярлык ведёт не на экран пульта: {item['url']}")
+            self.assertIn(item["url"].split("=")[1], ("park", "queue", "ams", "cam"))
+        self.assertIn("display_override", manifest)
+        self.assertIn("var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));",
+                      self.html)
+        self.assertIn("['park', 'queue', 'ams', 'cam'].indexOf(want[1]) >= 0", self.html,
+                      "чужой ?screen= не должен открывать посторонний экран")
 
     def test_page_is_in_the_offline_shell(self):
         sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
