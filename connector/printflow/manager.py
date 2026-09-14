@@ -1443,6 +1443,181 @@ class PrinterManager:
                 or self._job_material(j) in loaded]
         return same[0] if same else jobs[0]
 
+    def _start_gate(self, job: dict | None, snap: dict, printer) -> tuple[bool, str]:
+        """Те же гейты, что у автозапуска, но словами и без запуска (18.0.8).
+
+        Порядок проверок повторяет `_maybe_start_next`: связь, состояние
+        принтера, ошибки, выбор задания, материал, остаток пластика. Ничего не
+        пишем и не запускаем — это ответ для пульта «почему стоит».
+        """
+        if not printer.connected:
+            return False, "принтер не на связи"
+        info = snap.get("printer") or {}
+        state = str(info.get("state") or "")
+        label = str(info.get("state_label") or state or "нет данных")
+        if state not in ("IDLE", "FINISH"):
+            return False, f"принтер занят: {label.lower()}"
+        if info.get("problems"):
+            return False, "принтер сообщает об ошибке — сначала разберитесь с ней"
+        if not job:
+            return False, "нет подходящих заданий в очереди"
+        ok, why = self._material_matches(job, snap)
+        if not ok:
+            return False, why
+        ok, why = self._enough_filament(job, snap)
+        if not ok:
+            return False, why
+        return True, "готов к запуску"
+
+    def _plan_why(self, job: dict, snap: dict, quiet: bool) -> list[str]:
+        """Почему именно это задание следующее — те же ключи, что у `next_job`."""
+        why: list[str] = []
+        priority = int(num(job.get("priority")))
+        if priority:
+            why.append(f"приоритет {priority} — выше остальных")
+        due = str(job.get("due") or "")
+        if due:
+            why.append(f"срок {due}")
+        need = self._job_material(job)
+        if need and self.db.setting("queue_group_material", True):
+            loaded = {str(t.get("type") or "").upper()
+                      for t in (snap.get("ams") or {}).get("trays", []) if t.get("type")}
+            if need in loaded:
+                why.append(f"материал {need} уже заправлен — без смены катушки")
+        if quiet and self.db.setting("night_shift_enabled", True):
+            # Тихие часы меняют порядок только внутри ручного приоритета.
+            why.append("тихие часы: вперёд поставлено задание подлиннее")
+        if not why:
+            why.append("поставлено раньше остальных")
+        return why
+
+    def _auto_rules(self) -> list[str]:
+        """Правила, по которым очередь выбирает следующее задание.
+
+        Строки собираются из настроек: пульт показывает их оператору, чтобы
+        автоматика не была чёрным ящиком. Ничего не выдумываем — только то,
+        что действительно включено.
+        """
+        rules = ["Порядок: ручной приоритет → срок → кто раньше встал в очередь."]
+        if self.db.setting("quiet_hours_enabled", False):
+            start = str(self.db.setting("quiet_from", "23:00"))
+            end = str(self.db.setting("quiet_to", "08:00"))
+            rules.append(f"Тихие часы {start}–{end}: автозапуск молчит, уведомления "
+                         "не уходят.")
+            if self.db.setting("night_shift_enabled", True):
+                rules.append("В тихие часы внутри одного приоритета вперёд идут "
+                             "задания подлиннее — принтер работает до утра.")
+        if self.db.setting("queue_group_material", True):
+            rules.append("Сначала задания, материал которых уже заправлен в AMS — "
+                         "меньше смен катушки.")
+        checks = []
+        if self.db.setting("queue_check_material", True):
+            checks.append("тип материала")
+        if self.db.setting("queue_check_filament", True):
+            checks.append("остаток пластика")
+        if checks:
+            rules.append("Перед стартом очередь сверяет " + " и ".join(checks) + ".")
+        if self.db.setting("bed_watch_enabled", False):
+            rules.append("После печати проверяется, снята ли деталь со стола.")
+        return rules
+
+    def autonomy_report(self, printer_id: str = "", snaps: dict | None = None) -> dict:
+        """Почему очередь идёт сама или стоит, и что будет следующим (18.0.8).
+
+        Пульт у станка обязан объяснять словами, а не показывать «ничего не
+        происходит». Ничего не запускаем и не меняем: повторяем порядок
+        `next_job` и гейты `_maybe_start_next`.
+        """
+        auto = bool(self.db.setting("auto_queue", False))
+        gate = bool(self.db.setting("unattended_dangerous_actions", False))
+        quiet = bool(self.quiet_now())
+        reasons: list[str] = []
+        if not auto:
+            reasons.append("Автозапуск выключен (auto_queue): задания запускает "
+                           "оператор.")
+        elif not gate:
+            reasons.append("Запуск без оператора выключен "
+                           "(unattended_dangerous_actions): очередь ждёт нажатия "
+                           "«Запустить».")
+        if quiet:
+            reasons.append("Сейчас тихие часы: автозапуск молчит.")
+
+        printers: list[dict] = []
+        best: dict | None = None
+        order = list(self.printers.keys())
+        if printer_id and printer_id in order:      # выбранный принтер — первым
+            order.remove(printer_id)
+            order.insert(0, printer_id)
+        for pid in order:
+            printer = self.printers.get(pid)
+            if not printer:
+                continue
+            snap = (snaps or {}).get(pid)
+            if snap is None:
+                try:
+                    snap = printer.snapshot() or {}
+                except Exception as exc:  # noqa: BLE001 — молчащий принтер не должен
+                    printers.append({"id": pid, "name": str(pid), "ready": False,
+                                     "job_id": "",
+                                     "reason": f"принтер не отвечает: {exc}"})
+                    continue
+            name = str(((snap.get("printer") or {}).get("name"))
+                       or printer.record.get("name") or pid)
+            try:
+                job = self.next_job(pid, snap)
+            except Exception:  # noqa: BLE001 — справка не имеет права падать
+                job = None
+            ready, reason = self._start_gate(job, snap, printer)
+            printers.append({"id": pid, "name": name, "ready": ready,
+                             "job_id": (job or {}).get("id") or "", "reason": reason})
+            # «Следующее» — первый принтер с заданием; если дальше найдётся
+            # принтер, который может начать прямо сейчас, показываем его:
+            # оператору важно знать, что действительно стартует.
+            if job and (best is None or (ready and not best["ready"])):
+                best = {"printer": {"id": pid, "name": name}, "job": job,
+                        "ready": ready, "reason": reason, "snap": snap}
+
+        plan: dict = {}
+        if best:
+            job = best["job"]
+            order_row = {}
+            if job.get("order_id"):
+                row = self.db.one("SELECT number, product FROM orders WHERE id=?",
+                                  (job["order_id"],))
+                if row:
+                    order_row = {"number": row.get("number"),
+                                 "product": row.get("product")}
+            plan = {
+                "job": {
+                    "id": job.get("id"), "name": job.get("name") or "",
+                    "plate": int(num(job.get("plate"), 1) or 1),
+                    "est_minutes": num(job.get("est_minutes")),
+                    "est_grams": num(job.get("est_grams")),
+                    "priority": int(num(job.get("priority"))),
+                    "due": str(job.get("due") or ""),
+                    "order": order_row or None,
+                },
+                "printer": best["printer"],
+                "why": self._plan_why(job, best.get("snap") or {}, quiet),
+                "ready": bool(best["ready"]),
+                "reason": "" if best["ready"] else best["reason"],
+            }
+        waiting = int(num((self.db.one(
+            "SELECT COUNT(*) n FROM print_jobs WHERE state='queued'") or {}).get("n")))
+        return {
+            "auto_queue": auto,
+            "safety_gate": gate,
+            "armed": bool(auto and gate and not quiet),
+            "quiet": quiet,
+            "reasons": reasons,
+            "printers": printers,
+            "next": plan,
+            # Сколько заданий ждёт: пульт должен честно сказать «печатать не на
+            # чем», а не «заданий нет», когда очередь не пуста, а парка нет.
+            "queue_waiting": waiting,
+            "rules": self._auto_rules(),
+        }
+
     def _maybe_start_next(self, printer_id: str) -> None:
         if (not self.db.setting("auto_queue", False)
                 or not self.db.setting("unattended_dangerous_actions", False)):

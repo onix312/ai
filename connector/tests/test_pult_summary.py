@@ -60,6 +60,24 @@ class FakeManager:
             "created_at": "2026-09-14T09:00:00+00:00", "order": {"number": "1042"},
         }]
         self.seen_printer_id = None
+        self.autonomy_calls: list[tuple[str, dict]] = []
+        self.autonomy: dict = {
+            "auto_queue": False, "safety_gate": False, "armed": False, "quiet": False,
+            "reasons": ["Автозапуск выключен (auto_queue): задания запускает оператор."],
+            "printers": [{"id": "prn1", "name": "Цех-1", "ready": False,
+                          "job_id": "job1", "reason": "принтер занят: печатает"}],
+            "next": {"job": {"id": "job1", "name": "Подставка", "plate": 1,
+                             "est_minutes": 90.0, "est_grams": 40.0, "priority": 5,
+                             "due": "", "order": {"number": "1042"}},
+                     "printer": {"id": "prn1", "name": "Цех-1"}, "why": ["срок 2026-09-20"],
+                     "ready": False, "reason": "принтер занят: печатает"},
+            "rules": ["Порядок: ручной приоритет → срок → кто раньше встал в очередь."],
+        }
+
+    def autonomy_report(self, printer_id: str = "", snaps: dict | None = None) -> dict:
+        """Настоящий manager отдаёт отчёт автономности; фейк повторяет вызов."""
+        self.autonomy_calls.append((printer_id, snaps or {}))
+        return self.autonomy
 
     def snapshot(self, printer_id: str = "") -> dict:
         self.seen_printer_id = printer_id
@@ -136,6 +154,35 @@ class PultSummaryTests(unittest.TestCase):
         self.assertEqual("sp_1", slots[0]["spool_id"])
         self.assertIn("stale_min", data["ams"])
         self.assertEqual([], data["printers"])
+
+    def test_summary_carries_autonomy_and_the_last_finished_print(self):
+        """Пульт получает «почему стоит» и факт последней печати тем же запросом."""
+        self.db.upsert("print_jobs", {
+            "id": "job_done", "name": "Готовое", "printer_id": "prn1", "state": "done",
+            "plate": 2, "est_minutes": 96.0, "est_grams": 41.2, "duration_min": 97.0,
+            "grams": 40.8, "progress": 100.0, "result": "ok",
+            "finished_at": "2026-09-14T07:10:00+00:00",
+            "created_at": "2026-09-14T05:00:00+00:00"})
+        data = summary(self.db, self.manager, "prn1")
+        self.assertEqual("prn1", self.manager.autonomy_calls[0][0])
+        self.assertEqual({"prn1"}, set(self.manager.autonomy_calls[0][1]),
+                         "отчёт считается по уже снятым снимкам парка, без второго опроса")
+        self.assertFalse(data["autonomy"]["armed"])
+        self.assertIn("Автозапуск выключен", data["autonomy"]["reasons"][0])
+        self.assertEqual("Подставка", data["autonomy"]["next"]["job"]["name"])
+        self.assertTrue(data["autonomy"]["rules"])
+        done = data["last_done"]
+        self.assertEqual("Готовое", done["name"])
+        self.assertEqual(2, done["plate"])
+        self.assertEqual(96.0, done["plan_minutes"])
+        self.assertEqual(97.0, done["minutes"])
+        self.assertEqual(40.8, done["grams"])
+        self.assertEqual("2026-09-14T07:10:00+00:00", done["finished_at"])
+
+    def test_last_print_is_empty_when_nothing_was_printed(self):
+        """Нечего показывать — пусто, а не выдуманная нулевая печать."""
+        data = summary(self.db, self.manager, "prn1")
+        self.assertEqual({}, data["last_done"])
 
     def test_spools_for_binding_is_short_and_free(self):
         for i in range(5):

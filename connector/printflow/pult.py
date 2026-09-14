@@ -160,6 +160,43 @@ def spools_for_binding(db, limit: int = SPOOL_LIMIT) -> list[dict]:
     } for row in rows]
 
 
+def _last_done(db, printer_id: str = "") -> dict:
+    """Последняя законченная печать: план против факта (18.0.10).
+
+    Пульт у станка показывает эту карточку после финиша, чтобы оператор сразу
+    видел, что получилось, и снимал деталь не наугад. Только чтение.
+    """
+    if printer_id:
+        job = db.one("SELECT * FROM print_jobs WHERE state='done' AND printer_id=?"
+                     " ORDER BY datetime(COALESCE(finished_at, created_at)) DESC LIMIT 1",
+                     (printer_id,))
+    else:
+        job = db.one("SELECT * FROM print_jobs WHERE state='done'"
+                     " ORDER BY datetime(COALESCE(finished_at, created_at)) DESC LIMIT 1")
+    if not job:
+        return {}
+    order = {}
+    if job.get("order_id"):
+        row = db.one("SELECT number, product FROM orders WHERE id=?", (job["order_id"],))
+        if row:
+            order = {"number": row.get("number"), "product": row.get("product")}
+    return {
+        "id": job.get("id"),
+        "name": job.get("name") or "",
+        "printer_id": job.get("printer_id") or "",
+        "plate": job.get("plate"),
+        "state": job.get("state") or "",
+        "finished_at": job.get("finished_at") or "",
+        "plan_minutes": num(job.get("est_minutes")),
+        "plan_grams": num(job.get("est_grams")),
+        "minutes": num(job.get("duration_min")),
+        "grams": num(job.get("grams")),
+        "progress": num(job.get("progress")),
+        "result": str(job.get("result") or ""),
+        "order": order or None,
+    }
+
+
 def summary(db, manager, printer_id: str = "", spool_limit: int = SPOOL_LIMIT) -> dict:
     """Один ответ для пульта: парк, очередь, память AMS, свободные катушки.
 
@@ -168,7 +205,13 @@ def summary(db, manager, printer_id: str = "", spool_limit: int = SPOOL_LIMIT) -
     пульт показывает все принтеры, а не только выбранный.
     """
     snap = manager.snapshot(printer_id)
-    printers = [_printer(p) for p in snap.get("printers", [])]
+    raw_printers = snap.get("printers", []) or []
+    printers = [_printer(p) for p in raw_printers]
+    done = _last_done(db, printer_id)
+    # Отчёт автономности считаем по уже готовым снимкам: парк опрошен один раз,
+    # а пульт получает ответ на вопрос «почему стоит» тем же запросом (18.0.8).
+    autonomy = manager.autonomy_report(
+        printer_id, snaps={str(p.get("id")): p for p in raw_printers})
     # Память слотов: привязки, которые уже есть в базе, дописываем сразу —
     # принтер может быть выключен, а раскладка всё равно известна (17.0.25).
     backfill_slots(db, printer_id)
@@ -177,6 +220,8 @@ def summary(db, manager, printer_id: str = "", spool_limit: int = SPOOL_LIMIT) -
     return {
         "at": now_iso(),
         "active_id": printer_id or (printers[0]["id"] if printers else ""),
+        "autonomy": autonomy,
+        "last_done": done,
         "printers": printers,
         "queue": [_queue(j) for j in snap.get("queue", [])],
         "farm": snap.get("farm") or {},

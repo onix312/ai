@@ -36,6 +36,12 @@
       "description": "Загрузить 3MF и поставить в очередь"
     },
     {
+      "name": "Автономность",
+      "short_name": "Авто",
+      "url": "/pult?screen=auto",
+      "description": "Что очередь сделает сама и почему стоит"
+    },
+    {
       "name": "Очередь",
       "short_name": "Очередь",
       "url": "/pult?screen=queue",

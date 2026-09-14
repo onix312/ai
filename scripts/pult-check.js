@@ -69,7 +69,7 @@ function buildPage() {
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
   const store = {};
   ids.forEach((id) => { store[id] = mkEl(id); });
-  const tabs = ['park', 'queue', 'file', 'ams', 'cam'].map((name) => {
+  const tabs = ['park', 'queue', 'auto', 'file', 'ams', 'cam'].map((name) => {
     const el = mkEl('tab_' + name);
     el.dataset.screen = name;
     return el;
@@ -120,6 +120,27 @@ function makeState(printerState, connected) {
       { id: 'job2', name: 'Номерок', state: 'running', plate: 2, printer_id: 'prn1', file: 'tag.3mf' },
     ],
     farm: { total: 1, online: connected ? 1 : 0, printing: printerState === 'RUNNING' ? 1 : 0, queued: 1 },
+    // 18.0.8/18.0.10: сводка несёт отчёт автономности и факт последней печати.
+    autonomy: {
+      auto_queue: false, safety_gate: false, armed: false, quiet: false,
+      reasons: ['Автозапуск выключен (auto_queue): задания запускает оператор.'],
+      printers: [{ id: 'prn1', name: 'Цех-1', ready: false, job_id: 'job1',
+                   reason: 'принтер занят: печатает' }],
+      next: { job: { id: 'job1', name: 'Подставка', plate: 2, est_minutes: 90,
+                     est_grams: 40, priority: 5, due: '2026-09-20',
+                     order: { number: '1042', product: 'Подставка' } },
+              printer: { id: 'prn1', name: 'Цех-1' },
+              why: ['приоритет 5 — выше остальных', 'срок 2026-09-20',
+                    'материал PETG уже заправлен — без смены катушки'],
+              ready: false, reason: 'принтер занят: печатает' },
+      rules: ['Порядок: ручной приоритет → срок → кто раньше встал в очередь.',
+              'Сначала задания, материал которых уже заправлен в AMS — меньше смен катушки.'],
+      queue_waiting: 2,
+    },
+    last_done: { id: 'job7', name: 'Готовое', printer_id: 'prn1', plate: 2, state: 'done',
+                 finished_at: '2026-09-14T07:10:00+00:00', plan_minutes: 96, plan_grams: 41.2,
+                 minutes: 97, grams: 40.8, progress: 100, result: 'ok',
+                 order: { number: '1042', product: 'Подставка' } },
   };
 }
 
@@ -1157,6 +1178,84 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     const pre = page.requests.filter((r) => r.url.indexOf('/api/printer/preflight') === 0)[0];
     check('очередь: Preflight получает раскладку из задания (не теряет её)',
       !!pre && pre.url.indexOf('mapping=') > 0, pre && pre.url);
+  }
+
+  /* 10. Экран «Авто»: почему очередь идёт сама или стоит (18.0.8) */
+  {
+    const page = runPage({});
+    await wait(60);
+    page.clickTab('auto');
+    await wait(80);
+    const chips = text(page.store['pk_auto_state'].innerHTML);
+    const body = text(page.store['pk_auto_body'].innerHTML);
+    check('авто: состояние автозапуска, допуска и тихих часов — чипсами',
+      chips.indexOf('Автозапуск: выключен') >= 0 && chips.indexOf('Без присмотра: запрещён') >= 0
+      && chips.indexOf('Тихие часы: нет') >= 0, chips);
+    check('авто: «почему стоит» — словами сервера, а не догадкой страницы',
+      body.indexOf('Автозапуск выключен (auto_queue)') >= 0, body.slice(0, 160));
+    check('авто: следующее задание с планом и принтером',
+      body.indexOf('Следующее') >= 0 && body.indexOf('Подставка') >= 0
+      && body.indexOf('плита 2') >= 0 && body.indexOf('Цех-1') >= 0, body.slice(0, 200));
+    check('авто: объяснение выбора — теми же словами, что у сервера',
+      body.indexOf('приоритет 5') >= 0 && body.indexOf('материал PETG уже заправлен') >= 0,
+      body.slice(0, 260));
+    check('авто: причина ожидания видна («принтер занят»)',
+      body.indexOf('принтер занят: печатает') >= 0, body.slice(0, 260));
+    check('авто: правила очереди показаны оператору',
+      body.indexOf('Правила очереди') >= 0 && body.indexOf('ручной приоритет') >= 0,
+      body.slice(-220));
+    check('авто: экран ничего не запускает и не пишет',
+      page.posts().length === 0, JSON.stringify(page.posts().map((r) => r.url)));
+
+    // Включённый автозапуск: пилюля «идёт сама», запуска по-прежнему нет.
+    const armed = makeState('IDLE', true);
+    armed.autonomy.auto_queue = true;
+    armed.autonomy.safety_gate = true;
+    armed.autonomy.armed = true;
+    armed.autonomy.reasons = [];
+    armed.autonomy.next.ready = true;
+    armed.autonomy.next.reason = '';
+    armed.autonomy.printers[0].ready = true;
+    armed.autonomy.printers[0].reason = 'готов к запуску';
+    const on = runPage({ state: armed });
+    await wait(60);
+    on.clickTab('auto');
+    await wait(80);
+    const onBody = text(on.store['pk_auto_body'].innerHTML);
+    check('авто: включённые флаги читаются как «очередь идёт сама»',
+      on.store['pk_auto_now'].textContent === 'очередь идёт сама'
+      && text(on.store['pk_auto_state'].innerHTML).indexOf('Автозапуск: включён') >= 0,
+      on.store['pk_auto_now'].textContent);
+    check('авто: готовое задание показано как «очередь запустит сама»',
+      onBody.indexOf('Готово к запуску') >= 0 && onBody.indexOf('очередь запустит сама') >= 0,
+      onBody.slice(0, 200));
+    check('авто: включённый автозапуск не превращается в кнопку на странице',
+      on.posts().length === 0 && on.store['pk_auto_body'].innerHTML.indexOf('data-cmd') < 0,
+      JSON.stringify(on.posts().map((r) => r.url)));
+
+    // Парка нет, а очередь не пуста: не «заданий нет», а «печатать не на чем».
+    const noPark = makeState('IDLE', true);
+    noPark.autonomy.printers = [];
+    noPark.autonomy.next = {};
+    const parkless = runPage({ state: noPark });
+    await wait(60);
+    parkless.clickTab('auto');
+    await wait(80);
+    const parklessBody = text(parkless.store['pk_auto_body'].innerHTML);
+    check('авто: пустой парк и полная очередь — «печатать не на чем», а не «заданий нет»',
+      parklessBody.indexOf('печатать не на чем') >= 0
+      && parklessBody.indexOf('2 задания') >= 0, parklessBody.slice(0, 200));
+
+    // Старый коннектор: блока нет — честное «данных нет», без выдумок.
+    const legacy = makeState('IDLE', true);
+    delete legacy.autonomy;
+    const oldPage = runPage({ state: legacy });
+    await wait(60);
+    oldPage.clickTab('auto');
+    await wait(80);
+    check('авто: без отчёта в сводке экран говорит «данных нет», а не рисует нули',
+      text(oldPage.store['pk_auto_body'].innerHTML).indexOf('Данных нет') >= 0,
+      text(oldPage.store['pk_auto_body'].innerHTML).slice(0, 120));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

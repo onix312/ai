@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Живая приёмка пульта цеха (18.0.6): девять сценариев ТЗ на копии базы.
+"""Живая приёмка пульта цеха (18.0.8): десять сценариев ТЗ на копии базы.
 
 Владелец проверяет пульт на телефоне; этот скрипт делает то, что можно
 проверить без пальца и без принтера — поднимает коннектор на **копии** данных и
 проходит те же сценарии по серверной части: страница и сводка, команды с
 подтверждением, очередь, AMS, камера и свет, «сводка ничего не пишет»,
 оценка из файла, раскладка AMS и отправка выбранной плиты, файл без данных
-слайсера, неприкосновенность рабочей базы.
+слайсера, автономность словами сервера, неприкосновенность рабочей базы.
 
 Копия обязательна: приёмка не имеет права трогать рабочую базу. Если рабочих
 данных на компьютере нет, скрипт работает на пустой базе и честно помечает те
@@ -202,7 +202,7 @@ def untouched(probe: Probe, source: Path, stamps: dict[str, float]) -> None:
                    if (source / name).exists() and (source / name).stat().st_mtime != stamp]
         assert not changed, f"изменились файлы рабочей базы: {changed}"
         return f"{len(stamps)} файлов рабочей базы не тронуты"
-    probe.check("9. рабочая база не тронута", check)
+    probe.check("10. рабочая база не тронута", check)
 
 
 def run_checks(probe: Probe, client: Client, copied: bool) -> None:
@@ -359,6 +359,27 @@ def run_checks(probe: Probe, client: Client, copied: bool) -> None:
             return (f"без данных слайсера: {reply['grams']} г, {reply['minutes']} мин, "
                     f"файл сохранён как «{reply['file']}»")
 
+    def scene9_autonomy():
+        """Почему очередь идёт сама или стоит — словами сервера (18.0.8)."""
+        status, summary = client.call("/api/pult/summary")
+        assert status == 200, summary
+        auto = summary.get("autonomy") or {}
+        assert auto, "в сводке нет отчёта автономности"
+        for key in ("auto_queue", "safety_gate", "armed", "quiet", "reasons",
+                    "printers", "next", "rules"):
+            assert key in auto, f"в отчёте нет ключа {key}"
+        assert auto["rules"], "правила очереди не пришли — оператор не поймёт, кто решает"
+        armed = bool(auto["auto_queue"] and auto["safety_gate"] and not auto["quiet"])
+        assert auto["armed"] == armed, f"armed не сходится с флагами: {auto}"
+        if not auto["armed"]:
+            assert auto["reasons"], "автозапуск не действует, а причины не сказаны"
+        nxt = (auto.get("next") or {}).get("job") or {}
+        return (f"автозапуск {'включён' if auto['auto_queue'] else 'выключен'}, "
+                f"без присмотра {'разрешён' if auto['safety_gate'] else 'запрещён'}, "
+                f"правил {len(auto['rules'])}, принтеров {len(auto['printers'])}, "
+                f"следующее «{nxt.get('name') or '—'}»"
+                + (f", причина: «{auto['reasons'][0][:60]}»" if auto["reasons"] else ""))
+
     probe.check("1. парк и сводка одним запросом", scene1_park)
     probe.check("2. команды требуют подтверждения", scene2_commands)
     probe.check("3. очередь: порядок, отмена, гейт старта", scene3_queue)
@@ -367,8 +388,9 @@ def run_checks(probe: Probe, client: Client, copied: bool) -> None:
     probe.check("6. сводка ничего не пишет", scene6_readonly)
     probe.check("7. оценка из файла и отправка плиты", scene7_file_estimate)
     probe.check("8. файл без данных слайсера", scene8_empty_estimate)
+    probe.check("9. почему очередь идёт сама или стоит", scene9_autonomy)
     if not copied:
-        probe.check("9. рабочая база не тронута",
+        probe.check("10. рабочая база не тронута",
                     lambda: "рабочих данных нет — приёмка шла на пустой базе")
 
 

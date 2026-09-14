@@ -137,6 +137,8 @@
  .pk-chip i { width:12px; height:12px; border-radius:50%; border:1px solid var(--line); }
  .pk-frame.pk-plate { height:150px; aspect-ratio:auto; margin-bottom:10px; background:#0a0f1e; }
  .pk-map { margin-top:6px; }
+ .pk-why { margin:6px 0 0; padding-left:18px; }
+ .pk-why li { margin-bottom:4px; }
  .pk-map-row { display:grid; gap:6px; padding:10px 0; border-top:1px solid var(--line); }
  .pk-map-row:first-child { border-top:0; }
  .pk-map-what { font-size:13px; font-weight:650; }
@@ -185,7 +187,7 @@
 
  /* --- нижнее меню: пять экранов --- */
  .pk-tabs { position:fixed; left:0; right:0; bottom:0; z-index:20;
-   display:grid; grid-template-columns:repeat(5,1fr); gap:6px;
+   display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
    background:color-mix(in srgb, var(--bg) 92%, #000); border-top:1px solid var(--line);
    backdrop-filter:blur(10px); }
@@ -266,6 +268,12 @@
    <div id="pk_est"></div>
   </section>
 
+  <section class="pk-screen" id="pk_screen_auto" hidden>
+   <div class="pk-h"><h2>Автономность</h2><p class="pk-hint" id="pk_auto_now">—</p></div>
+   <div class="pk-chips" id="pk_auto_state"></div>
+   <div id="pk_auto_body"></div>
+  </section>
+
   <section class="pk-screen" id="pk_screen_ams" hidden>
    <div class="pk-h"><h2>AMS</h2><p class="pk-hint" id="pk_ams_now">—</p></div>
    <div class="pk-slot-act" style="margin-top:0;margin-bottom:12px;grid-template-columns:1fr">
@@ -306,6 +314,7 @@
 <nav class="pk-tabs" aria-label="Экраны пульта">
  <button class="pk-tab on" type="button" data-screen="park">Парк</button>
  <button class="pk-tab" type="button" data-screen="queue">Очередь<span class="pk-badge" id="pk_badge_queue" hidden>0</span></button>
+ <button class="pk-tab" type="button" data-screen="auto">Авто</button>
  <button class="pk-tab" type="button" data-screen="file">Файл</button>
  <button class="pk-tab" type="button" data-screen="ams">AMS</button>
  <button class="pk-tab" type="button" data-screen="cam">Камера</button>
@@ -338,7 +347,8 @@
   var CAM_MS = 3000;        // кадр обновляем чаще, чем цифры парка
   var st = { at:0, printers:[], queue:[], farm:{}, active:'', screen:'park',
              kiosk:false, timer:null, camTimer:null, busy:false, fallback:false,
-             ams:{ slots:[], printer:'', at:0 }, spools:null, sheetSlot:'' };
+             ams:{ slots:[], printer:'', at:0 }, spools:null, sheetSlot:'',
+             auto:null, done:null };
 
   function $(s){ return document.querySelector(s); }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"']/g, function(c){
@@ -1490,7 +1500,7 @@
   /* ------------------------------------------------------------- экраны */
   function showScreen(name){
     st.screen = name;
-    ['park', 'queue', 'file', 'ams', 'cam'].forEach(function(s){
+    ['park', 'queue', 'auto', 'file', 'ams', 'cam'].forEach(function(s){
       var el = $('#pk_screen_' + s);
       if (el) el.hidden = (s !== name);
     });
@@ -1509,6 +1519,7 @@
     if (name === 'file') { var inp = $('#pk_file_input'); if (inp) inp.value = ''; }
     if (name === 'ams' || name === 'cam') tick();
     if (name === 'queue' || name === 'park') renderQueue();
+    if (name === 'auto') renderAuto();
     try { localStorage.setItem('pult_screen', name); } catch (e) {}
   }
 
@@ -1607,6 +1618,102 @@
     }).catch(function(e){ toast(e.message || 'Не вышло'); });
   }
 
+  /* ------------------------------------------------ экран «Авто» (18.0.8)
+     Автономность без чёрного ящика: оператор видит, что очередь сделает
+     сама, что будет следующим и почему именно оно — или почему стоит.
+     Всё это уже посчитал сервер (`manager.autonomy_report`) и отдал тем же
+     запросом сводки; страница ничего не решает, не запускает и не выдумывает:
+     нет блока в ответе — честно говорим, что данных нет. */
+  function autoChip(text, tone, on){
+    return '<span class="pk-chip' + (on ? ' on' : '') + '"><i style="background:var('
+      + esc(tone || '--muted') + ')"></i>' + esc(text) + '</span>';
+  }
+  function autoPlan(job){
+    var bits = [];
+    if (num(job.plate, 1) > 1) bits.push('плита ' + num(job.plate, 1));
+    if (num(job.est_minutes)) bits.push(humanMin(job.est_minutes));
+    if (num(job.est_grams)) bits.push(round1(job.est_grams) + ' г');
+    return bits.join(' · ');
+  }
+  function autoNextHtml(a){
+    var next = a.next || {};
+    var job = next.job || {};
+    if (!job.id && !job.name) {
+      var waiting = num(a.queue_waiting);
+      var note = waiting
+        ? 'В очереди ' + waiting + ' ' + plural(waiting, 'задание', 'задания', 'заданий')
+          + ', но печатать не на чем: подходящего принтера нет.'
+        : 'Подходящих заданий в очереди нет.';
+      return '<div class="pk-card"><div class="pk-file-head"><b>Следующее</b></div>'
+        + '<div class="pk-note">' + note + '</div></div>';
+    }
+    var where = (next.printer || {}).name || printerName((next.printer || {}).id);
+    var why = (next.why || []).map(function(w){ return '<li>' + esc(w) + '</li>'; }).join('');
+    var ready = next.ready
+      ? '<div class="pk-note">Готово к запуску' + (a.armed ? ' — очередь запустит сама.'
+          : ' — ждёт нажатия «Запустить».') + '</div>'
+      : '<div class="pk-note warn">Ждёт: ' + esc(next.reason || 'причина не сообщена') + '</div>';
+    return '<div class="pk-card"><div class="pk-file-head"><b>Следующее</b>'
+      + (autoPlan(job) ? '<span>' + esc(autoPlan(job)) + '</span>' : '') + '</div>'
+      + '<div class="pk-map-what">' + esc(job.name || 'задание') + '</div>'
+      + '<div class="pk-sub">' + (where ? 'принтер ' + esc(where) : 'принтер выберет очередь')
+      + (job.order && job.order.number ? ' · заказ ' + esc(job.order.number) : '') + '</div>'
+      + (why ? '<div class="pk-sub">Почему оно: <ul class="pk-why">' + why + '</ul></div>' : '')
+      + ready + '</div>';
+  }
+  function autoPrintersHtml(a){
+    var rows = (a.printers || []).map(function(p){
+      return '<div class="pk-map-row"><div class="pk-row">'
+        + '<span class="pk-dot ' + (p.ready ? 'ok' : 'warn') + '"></span>'
+        + '<span class="pk-map-what">' + esc(p.name || p.id) + '</span></div>'
+        + '<div class="pk-sub">' + esc(p.ready ? 'может начать сейчас' : (p.reason || 'ждёт'))
+        + '</div></div>';
+    }).join('');
+    if (!rows) return '';
+    return '<div class="pk-card"><div class="pk-file-head"><b>Принтеры</b></div>'
+      + '<div class="pk-map">' + rows + '</div></div>';
+  }
+  function renderAuto(){
+    var box = $('#pk_auto_body');
+    if (!box) return;
+    var a = st.auto;
+    var sub = $('#pk_auto_now');
+    var chips = $('#pk_auto_state');
+    if (!a) {
+      if (sub) sub.textContent = '';
+      if (chips) chips.innerHTML = '';
+      box.innerHTML = '<div class="pk-empty"><b>Данных нет</b>'
+        + 'Сводка про автозапуск не пришла — обновите страницу.</div>';
+      return;
+    }
+    if (sub) {
+      sub.textContent = a.armed ? 'очередь идёт сама'
+        : (a.auto_queue && a.safety_gate ? 'ждёт тихих часов' : 'задания запускает оператор');
+    }
+    if (chips) {
+      chips.innerHTML = [
+        autoChip('Автозапуск: ' + (a.auto_queue ? 'включён' : 'выключен'),
+                 a.auto_queue ? '--ok' : '--muted', !!a.auto_queue),
+        autoChip('Без присмотра: ' + (a.safety_gate ? 'разрешён' : 'запрещён'),
+                 a.safety_gate ? '--ok' : '--bad', !!a.safety_gate),
+        autoChip('Тихие часы: ' + (a.quiet ? 'идут' : 'нет'),
+                 a.quiet ? '--warn' : '--ok', !a.quiet),
+      ].join('');
+    }
+    var reasons = (a.reasons || []).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('');
+    var rules = (a.rules || []).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('');
+    box.innerHTML = (reasons
+        ? '<div class="pk-card"><div class="pk-file-head"><b>Почему стоит</b></div>'
+          + '<div class="pk-sub"><ul class="pk-why">' + reasons + '</ul></div></div>'
+        : '')
+      + autoNextHtml(a)
+      + autoPrintersHtml(a)
+      + (rules
+        ? '<div class="pk-card"><div class="pk-file-head"><b>Правила очереди</b></div>'
+          + '<div class="pk-sub"><ul class="pk-why">' + rules + '</ul></div></div>'
+        : '');
+  }
+
   /* ---------------------------------------------------------- опрос API */
   /* Один запрос на всё: парк, очередь, память слотов AMS и катушки склада
      приходят из /api/pult/summary (18.0.4). На слабой сети и на телефоне у
@@ -1636,6 +1743,10 @@
     st.printers = d.printers || [];
     st.queue = d.queue || [];
     st.farm = d.farm || {};
+    // Отчёт автономности и факт последней печати — из той же сводки
+    // (18.0.8/18.0.10). У старого коннектора их нет: оставляем как было.
+    if (d.autonomy) st.auto = d.autonomy;
+    if (d.last_done) st.done = d.last_done;
     if (d.ams) {
       st.ams = { slots: d.ams.slots || [], printer: st.active,
                  at: Date.now() / 1000 };
@@ -1650,6 +1761,7 @@
     renderQueue();
     if (st.screen === 'ams') renderAms();
     if (st.screen === 'cam') camFrame();
+    if (st.screen === 'auto') renderAuto();
   }
   function tick(){
     if (document.hidden) return;
@@ -1753,7 +1865,7 @@
   var screenFromLink = '';
   try {
     var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));
-    if (want && ['park', 'queue', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
+    if (want && ['park', 'queue', 'auto', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0) screenFromLink = want[1];
   } catch (e) {}
   /* Пока идёт первый запрос, показываем последнюю известную картину: иначе
      на медленной сети оператор видит «данных ещё нет» и решает, что пульт сломан. */

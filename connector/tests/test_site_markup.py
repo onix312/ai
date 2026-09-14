@@ -782,12 +782,14 @@ class PultControlPageTests(TestCase):
             errors.append(f"не закрыты теги: {parser.stack[-5:]}")
         self.assertEqual(errors, [])
 
-    def test_five_screens_and_tab_bar(self):
-        for screen in ("park", "queue", "file", "ams", "cam"):
+    def test_six_screens_and_tab_bar(self):
+        for screen in ("park", "queue", "auto", "file", "ams", "cam"):
             self.assertIn(f'id="pk_screen_{screen}"', self.html)
         tabs = re.findall(r'class="pk-tab[^"]*"[^>]*data-screen="([a-z]+)"', self.html)
-        self.assertEqual(["park", "queue", "file", "ams", "cam"], tabs,
-                         "нижнее меню обязано вести на все пять экранов")
+        self.assertEqual(["park", "queue", "auto", "file", "ams", "cam"], tabs,
+                         "нижнее меню обязано вести на все шесть экранов")
+        self.assertIn("grid-template-columns:repeat(6,1fr)", self.html,
+                      "шесть вкладок должны уместиться в нижнее меню")
         self.assertIn("function showScreen(name)", self.html)
         # Переключение экранов — через hidden, а не display:none в разметке:
         # так экран не теряет прокрутку и не перерисовывается целиком.
@@ -963,11 +965,13 @@ class PultControlPageTests(TestCase):
         for item in shortcuts:
             self.assertTrue(item["url"].startswith("/pult?screen="),
                             f"ярлык ведёт не на экран пульта: {item['url']}")
-            self.assertIn(item["url"].split("=")[1], ("park", "queue", "file", "ams", "cam"))
+            self.assertIn(item["url"].split("=")[1],
+                          ("park", "queue", "auto", "file", "ams", "cam"))
         self.assertIn("display_override", manifest)
         self.assertIn("var want = /[?&]screen=([a-z]+)/.exec(String(location.search || ''));",
                       self.html)
-        self.assertIn("['park', 'queue', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0", self.html,
+        self.assertIn("['park', 'queue', 'auto', 'file', 'ams', 'cam'].indexOf(want[1]) >= 0",
+                      self.html,
                       "чужой ?screen= не должен открывать посторонний экран")
 
     def test_page_is_in_the_offline_shell(self):
@@ -994,6 +998,51 @@ class PultControlPageTests(TestCase):
     def test_no_tofu_symbols(self):
         for char in ("⎋", "⌕", "🧾", "⚠"):
             self.assertNotIn(char, self.html, f"символ {char!r} даёт квадрат на старом Android")
+
+class PultAutoScreenTests(TestCase):
+    """Экран «Авто» (18.0.8) — почему очередь идёт сама или стоит.
+
+    Тут проверяется договор: страница показывает то, что посчитал сервер
+    (`manager.autonomy_report`), и не отращивает собственных правил. Если
+    страница начнёт придумывать причины простоя сама — оператор у станка
+    будет читать не то, что решила очередь.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_screen_shows_the_server_report_only(self):
+        self.assertIn('id="pk_screen_auto"', self.html)
+        self.assertIn('data-screen="auto"', self.html)
+        # Отчёт приезжает тем же запросом сводки — своего опроса у экрана нет.
+        self.assertIn("if (d.autonomy) st.auto = d.autonomy;", self.html)
+        self.assertIn("if (name === 'auto') renderAuto();", self.html)
+        self.assertIn("if (st.screen === 'auto') renderAuto();", self.html)
+
+    def test_page_does_not_invent_rules(self):
+        """Правила и причины — слова сервера: своих формулировок в странице нет."""
+        for phrase in ("ручной приоритет", "меньше смен катушки",
+                       "Автозапуск выключен", "тихие часы:"):
+            self.assertNotIn(phrase, self.html,
+                             f"правило «{phrase}» должно приходить из отчёта сервера")
+        self.assertIn("(a.reasons || [])", self.html)
+        self.assertIn("(a.rules || [])", self.html)
+        self.assertIn("(next.why || [])", self.html)
+
+    def test_screen_only_reads(self):
+        """Экран автономности ничего не запускает: только рассказывает."""
+        start = self.html.index("function renderAuto(){")
+        end = self.html.index("/* ---------------------------------------------------------- опрос API */")
+        body = self.html[start:end]
+        for forbidden in ("post(", "/api/", "data-cmd", "data-job-act"):
+            self.assertNotIn(forbidden, body,
+                             f"экран «Авто» не должен содержать {forbidden!r}")
+
+    def test_absent_report_is_honest(self):
+        self.assertIn("Сводка про автозапуск не пришла", self.html)
+        self.assertIn("Данных нет", self.html)
+
 
 class PultFileScreenTests(TestCase):
     """Экран «Файл» (18.0.6) — загрузка как в слайсере.
