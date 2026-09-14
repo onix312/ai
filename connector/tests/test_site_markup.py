@@ -1044,6 +1044,39 @@ class PultAutoScreenTests(TestCase):
         self.assertIn("Данных нет", self.html)
 
 
+class PultFinishedCardTests(TestCase):
+    """Карточка «факт против плана» после финиша (18.0.10).
+
+    Оператору у станка нужно не «готово», а цифры: сколько обещал слайсер и
+    сколько вышло, и сколько принтер уже стоит. Считает всё сервер — странице
+    запрещено выдумывать и досчитывать: единственное её действие тут — «Снял
+    детали» в существующий маршрут мини-панели.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CONTROL_HTML.read_text(encoding="utf-8")
+
+    def test_card_shows_plan_and_fact(self):
+        self.assertIn('id="pk_fact"', self.html)
+        self.assertIn("function factHtml()", self.html)
+        self.assertIn("if (!d.id) return '';", self.html,
+                      "без завершённой печати карточки быть не должно")
+        for field in ("d.plan_minutes", "d.minutes", "d.plan_grams", "d.grams",
+                      "d.idle_min"):
+            self.assertIn(field, self.html, f"карточка обязана показывать {field}")
+
+    def test_removing_the_part_goes_to_the_existing_route(self):
+        self.assertIn('id="pk_b_removed"', self.html)
+        self.assertIn("post('/api/printer/part-removed', { printer_id: p.id })", self.html,
+                      "«Снял детали» идёт тем же маршрутом, что мини-панель")
+        start = self.html.index("function factHtml(){")
+        body = self.html[start:self.html.index("function renderFact(){")]
+        for forbidden in ("/api/jobs/", "/api/defect/", "/api/order/"):
+            self.assertNotIn(forbidden, body,
+                             f"карточка факта не имеет права трогать {forbidden!r}")
+
+
 class PultFileScreenTests(TestCase):
     """Экран «Файл» (18.0.6) — загрузка как в слайсере.
 

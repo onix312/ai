@@ -64,6 +64,15 @@ class Probe:
         return 1 if failed else 0
 
 
+def num_ok(value) -> bool:
+    """Число ли это (JSON не знает NaN, но строки приходят всякие)."""
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -373,6 +382,13 @@ def run_checks(probe: Probe, client: Client, copied: bool) -> None:
             "правило предохранителя (18.0.9) не попало в отчёт"
         for item in auto["printers"]:
             assert "failed_streak" in item, f"нет счётчика сбоев у {item.get('id')}"
+        # Факт последней печати (18.0.10): если печати были — план и факт на месте.
+        done = summary.get("last_done") or {}
+        if done:
+            for key in ("plan_minutes", "plan_grams", "minutes", "grams", "idle_min",
+                        "finished_at"):
+                assert key in done, f"в карточке факта нет ключа {key}"
+            assert num_ok(done["idle_min"]), f"простой не число: {done['idle_min']}"
         armed = bool(auto["auto_queue"] and auto["safety_gate"] and not auto["quiet"])
         assert auto["armed"] == armed, f"armed не сходится с флагами: {auto}"
         if not auto["armed"]:

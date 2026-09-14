@@ -139,7 +139,7 @@ function makeState(printerState, connected) {
     },
     last_done: { id: 'job7', name: 'Готовое', printer_id: 'prn1', plate: 2, state: 'done',
                  finished_at: '2026-09-14T07:10:00+00:00', plan_minutes: 96, plan_grams: 41.2,
-                 minutes: 97, grams: 40.8, progress: 100, result: 'ok',
+                 minutes: 97, grams: 40.8, progress: 100, result: 'ok', idle_min: 35,
                  order: { number: '1042', product: 'Подставка' } },
   };
 }
@@ -1279,6 +1279,55 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('авто: без отчёта в сводке экран говорит «данных нет», а не рисует нули',
       text(oldPage.store['pk_auto_body'].innerHTML).indexOf('Данных нет') >= 0,
       text(oldPage.store['pk_auto_body'].innerHTML).slice(0, 120));
+  }
+
+  /* 11. «Факт против плана» после финиша (18.0.10) */
+  {
+    const page = runPage({});
+    await wait(60);
+    const fact = text(page.store['pk_fact'].innerHTML);
+    check('факт: план и факт рядом — время и пластик из сводки, без выдумок',
+      fact.indexOf('обещал слайсер') >= 0 && fact.indexOf('1 ч 36 мин') >= 0
+      && fact.indexOf('печатал по факту') >= 0 && fact.indexOf('1 ч 37 мин') >= 0
+      && fact.indexOf('41,2 г') >= 0 && fact.indexOf('40,8 г') >= 0, fact.slice(0, 240));
+    check('факт: расхождение с планом названо словами и не спрятано',
+      fact.indexOf('Факт отличается от плана на 0,4 г') >= 0, fact.slice(0, 260));
+    check('факт: простой с момента финиша посчитан сервером',
+      fact.indexOf('Принтер стоит 35 мин') >= 0, fact.slice(0, 300));
+    check('факт: кнопка «Снял детали» есть и ведёт в проверенный маршрут',
+      page.store['pk_fact'].innerHTML.indexOf('id="pk_b_removed"') >= 0,
+      page.store['pk_fact'].innerHTML.slice(-160));
+
+    page.requests.length = 0;
+    page.clickId('pk_b_removed');
+    await wait(100);
+    const posts = page.posts();
+    check('факт: «Снял детали» — POST с этим принтером и подтверждением в тосте',
+      posts.length === 1 && posts[0].url === '/api/printer/part-removed'
+      && posts[0].payload.printer_id === 'prn1'
+      && String(page.store['pk_msg'].textContent).indexOf('деталь снята') >= 0,
+      JSON.stringify(posts.map((r) => [r.url, r.payload])));
+
+    // Печатей не было: карточки нет, а не нули «0 г / 0 мин».
+    const empty = makeState('IDLE', true);
+    empty.last_done = {};
+    const clean = runPage({ state: empty });
+    await wait(60);
+    check('факт: без завершённых печатей карточка не показывается',
+      text(clean.store['pk_fact'].innerHTML) === '', text(clean.store['pk_fact'].innerHTML));
+
+    // Выбран другой принтер: чужой финиш на его экране не висит.
+    const other = makeState('IDLE', true);
+    const secondTile = JSON.parse(JSON.stringify(other.printers[0]));
+    secondTile.id = 'prn2';
+    secondTile.name = 'Цех-2';
+    other.printers = [secondTile, other.printers[0]];   // prn2 выбирается первым
+    other.farm.total = 2;
+    const second = runPage({ state: other });
+    await wait(60);
+    check('факт: карточка показывается только для выбранного принтера',
+      text(second.store['pk_fact'].innerHTML) === '',
+      text(second.store['pk_fact'].innerHTML).slice(0, 120));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

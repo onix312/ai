@@ -180,6 +180,17 @@ def _last_done(db, printer_id: str = "") -> dict:
         row = db.one("SELECT number, product FROM orders WHERE id=?", (job["order_id"],))
         if row:
             order = {"number": row.get("number"), "product": row.get("product")}
+    # Сколько принтер стоит с момента финиша. Считаем на сервере: часы телефона
+    # у станка могут врать, а «простой 0 минут» после ночной печати — обидно.
+    idle_min = 0.0
+    if job.get("finished_at"):
+        try:
+            from datetime import datetime
+            done_at = datetime.fromisoformat(str(job["finished_at"]))
+            idle_min = round(max(0.0, (datetime.now().astimezone() - done_at)
+                                .total_seconds() / 60.0), 1)
+        except Exception:  # noqa: BLE001 — кривая дата не должна ломать сводку
+            idle_min = 0.0
     return {
         "id": job.get("id"),
         "name": job.get("name") or "",
@@ -193,6 +204,7 @@ def _last_done(db, printer_id: str = "") -> dict:
         "grams": num(job.get("grams")),
         "progress": num(job.get("progress")),
         "result": str(job.get("result") or ""),
+        "idle_min": idle_min,
         "order": order or None,
     }
 

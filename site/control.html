@@ -236,6 +236,7 @@
   <section class="pk-screen" id="pk_screen_park">
    <div class="pk-h"><h2>Парк принтеров</h2><p class="pk-hint" id="pk_farm">—</p></div>
    <div class="pk-tiles" id="pk_tiles"></div>
+   <div id="pk_fact"></div>
 
    <div class="pk-cmd" id="pk_cmd">
     <div class="pk-cmd-who">Выбран: <b id="pk_cmd_name">—</b><span id="pk_cmd_hint"></span></div>
@@ -531,6 +532,56 @@
         : '')
       + alertsHtml(p) + '</div>';
   }
+  /* -------------------------------------- «факт против плана» (18.0.10)
+     После финиша оператор должен видеть не «готово», а цифры: сколько обещал
+     слайсер и сколько вышло на самом деле, и сколько принтер уже стоит.
+     Данные приходят в сводке (`last_done`) — считает их сервер, включая простой:
+     часы телефона у станка могут врать. Кнопка «Снял детали» идёт в тот же
+     маршрут, что у мини-панели (`POST /api/printer/part-removed`): он пишет
+     факт простоя в журнал и ничего больше не трогает. */
+  function factBit(value, label){
+    return '<div><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
+  }
+  function factHtml(){
+    var d = st.done || {};
+    if (!d.id) return '';
+    var p = selected();
+    if (d.printer_id && p && String(d.printer_id) !== String(p.id)) return '';
+    var same = num(d.plan_grams) > 0 && Math.abs(num(d.grams) - num(d.plan_grams)) >= 0.05;
+    var idle = num(d.idle_min);
+    return '<div class="pk-card"><div class="pk-file-head"><b>Печать закончена</b>'
+      + '<span>' + esc(String(d.name || '') + (d.plate > 1 ? ' · плита ' + num(d.plate) : ''))
+      + '</span></div>'
+      + '<div class="pk-facts">'
+      + factBit(d.plan_minutes ? humanMin(d.plan_minutes) : '—', 'обещал слайсер')
+      + factBit(d.minutes ? humanMin(d.minutes) : '—', 'печатал по факту')
+      + factBit(d.plan_grams ? round1(d.plan_grams) + ' г' : '—', 'план по пластику')
+      + factBit(d.grams ? round1(d.grams) + ' г' : '—', 'ушло по факту')
+      + '</div>'
+      + '<div class="pk-note' + (same ? ' warn' : '') + '">'
+      + (same
+        ? 'Факт отличается от плана на ' + round1(Math.abs(num(d.grams) - num(d.plan_grams)))
+          + ' г — сверьте деталь и катушку.'
+        : 'Расход совпал с планом слайсера.')
+      + (idle ? ' Принтер стоит ' + humanMin(idle) + ' с момента финиша.' : '')
+      + '</div>'
+      + '<div class="pk-slot-act" style="grid-template-columns:1fr">'
+      + '<button class="pk-btn pk-hit go" type="button" id="pk_b_removed">Снял детали</button>'
+      + '</div></div>';
+  }
+  function renderFact(){
+    var box = $('#pk_fact');
+    if (box) box.innerHTML = factHtml();
+  }
+  function partRemoved(){
+    var p = selected();
+    if (!p) { toast('Принтера нет'); return; }
+    post('/api/printer/part-removed', { printer_id: p.id }).then(function(d){
+      toast('Записали: деталь снята' + (num(d.idle_min) ? ', простой ' + humanMin(d.idle_min) : ''));
+      tick();
+    }).catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
   function renderCmdBar(){
     var p = selected();
     var who = $('#pk_cmd_name'), hint = $('#pk_cmd_hint');
@@ -561,10 +612,12 @@
       box.innerHTML = '<div class="pk-empty"><b>Принтеров нет</b>'
         + 'Добавьте принтер в панели — тогда пульт покажет его здесь. '
         + 'Открыть «Принтеры» в панели: <a href="/index.html#printers">панель →</a></div>';
+      renderFact();
       renderCmdBar();
       return;
     }
     box.innerHTML = st.printers.map(tileHtml).join('');
+    renderFact();
     renderCmdBar();
   }
 
@@ -1831,6 +1884,7 @@
       else if (act === 'forget') forgetSlot(slot);
       return;
     }
+    if (hit.closest('#pk_b_removed')) { partRemoved(); return; }
     if (hit.closest('#pk_ams_sync')) { syncAms(); return; }
     if (hit.closest('#pk_b_shot')) { takeShot(); return; }
     if (hit.closest('#pk_b_light')) { toggleLight(); return; }

@@ -157,12 +157,15 @@ class PultSummaryTests(unittest.TestCase):
 
     def test_summary_carries_autonomy_and_the_last_finished_print(self):
         """Пульт получает «почему стоит» и факт последней печати тем же запросом."""
+        from datetime import datetime, timedelta, timezone
+
+        finished = (datetime.now(timezone.utc) - timedelta(minutes=90)).isoformat()
         self.db.upsert("print_jobs", {
             "id": "job_done", "name": "Готовое", "printer_id": "prn1", "state": "done",
             "plate": 2, "est_minutes": 96.0, "est_grams": 41.2, "duration_min": 97.0,
             "grams": 40.8, "progress": 100.0, "result": "ok",
-            "finished_at": "2026-09-14T07:10:00+00:00",
-            "created_at": "2026-09-14T05:00:00+00:00"})
+            "finished_at": finished,
+            "created_at": finished})
         data = summary(self.db, self.manager, "prn1")
         self.assertEqual("prn1", self.manager.autonomy_calls[0][0])
         self.assertEqual({"prn1"}, set(self.manager.autonomy_calls[0][1]),
@@ -177,12 +180,24 @@ class PultSummaryTests(unittest.TestCase):
         self.assertEqual(96.0, done["plan_minutes"])
         self.assertEqual(97.0, done["minutes"])
         self.assertEqual(40.8, done["grams"])
-        self.assertEqual("2026-09-14T07:10:00+00:00", done["finished_at"])
+        self.assertEqual(finished, done["finished_at"])
+        # Простой считает сервер: часы телефона у станка могут врать.
+        self.assertAlmostEqual(90.0, done["idle_min"], delta=2.0)
 
     def test_last_print_is_empty_when_nothing_was_printed(self):
         """Нечего показывать — пусто, а не выдуманная нулевая печать."""
         data = summary(self.db, self.manager, "prn1")
         self.assertEqual({}, data["last_done"])
+
+    def test_last_print_survives_a_broken_date(self):
+        """Кривая дата финиша не должна ломать карточку: простой 0, цифры на месте."""
+        self.db.upsert("print_jobs", {
+            "id": "job_bad", "name": "Странная дата", "printer_id": "prn1",
+            "state": "done", "est_grams": 10.0, "grams": 9.8,
+            "finished_at": "вчера вечером", "created_at": "2026-09-14T05:00:00+00:00"})
+        data = summary(self.db, self.manager, "prn1")
+        self.assertEqual(0.0, data["last_done"]["idle_min"])
+        self.assertEqual(9.8, data["last_done"]["grams"])
 
     def test_spools_for_binding_is_short_and_free(self):
         for i in range(5):

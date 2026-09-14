@@ -238,7 +238,7 @@ class PultDocsTests(unittest.TestCase):
             self.assertIn(phrase, text, f"в инструкции нет «{phrase}»")
 
     def test_acceptance_covers_every_stage(self):
-        """Сценарии всех этапов: семь этапа 1, два этапа 2 и автономность.
+        """Сценарии всех этапов: семь этапа 1, два этапа 2 и два этапа 3.
 
         Порядок важен: сценарии этапа 1 не переписываются, новые добавляются
         в конец — владелец проходит список сверху вниз и видит, что добавилось.
@@ -248,12 +248,14 @@ class PultDocsTests(unittest.TestCase):
         text = self.DOC.read_text(encoding="utf-8")
         section = text.split("## Приёмка", 1)[1].split("\n## ", 1)[0]
         numbers = re.findall(r"^(\d{1,2})\.\s", section, re.M)
-        self.assertEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"], numbers,
+        self.assertEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"], numbers,
                          "семь сценариев этапа 1, «Файл на печать» (18.0.6), "
-                         "«Слоты AMS и запуск» (18.0.7) и «Автономность» (18.0.8)")
+                         "«Слоты AMS и запуск» (18.0.7), «Автономность» (18.0.8) "
+                         "и «Факт против плана» (18.0.10)")
         self.assertIn("**Файл на печать", section)
         self.assertIn("**Слоты AMS и запуск с пульта", section)
         self.assertIn("**Автономность", section)
+        self.assertIn("**Факт против плана", section)
         self.assertIn("десять проверок", section,
                       "скрипт приёмки идёт по десяти сценам — это должно быть видно")
 
