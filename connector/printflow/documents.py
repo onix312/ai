@@ -94,10 +94,16 @@ class Documents:
             "SELECT i.*, n.name nom_name, n.code nom_code, n.unit"
             " FROM doc_items i LEFT JOIN nomenclature n ON n.id=i.nom_id"
             " WHERE i.doc_id=? ORDER BY i.line, i.rowid", (doc_id,))
+        for row in doc["items"]:
+            variant = self._variant_row(str(row.get("variant_id") or ""))
+            row["variant_label"] = variant.get("variant_label", "")
         doc["moves"] = self.db.query(
             "SELECT m.*, n.name nom_name FROM stock_moves m"
             " LEFT JOIN nomenclature n ON n.id=m.nom_id"
             " WHERE m.doc_id=? ORDER BY m.rowid", (doc_id,))
+        for row in doc["moves"]:
+            variant = self._variant_row(str(row.get("variant_id") or ""))
+            row["variant_label"] = variant.get("variant_label", "")
         return doc
 
     # --------------------------------------------------------------- запись
@@ -253,13 +259,17 @@ class Documents:
             qty = num(item["qty"])
             # Свободный остаток + собственный резерв заказа: чужой резерв
             # сломать нельзя, а свой — можно (накладная его же и снимает).
-            available = (self.stock.free(item["nom_id"], wh)
+            variant_id = str(item.get("variant_id") or "")
+            available = (self.stock.free(item["nom_id"], wh, variant_id)
                          + self._order_reserved(item["nom_id"], wh,
-                                                str(doc.get("order_id") or "")))
+                                                str(doc.get("order_id") or ""), variant_id))
             if available < qty:
                 name = item.get("nom_name") or "позиция"
-                raise ValueError(f"«{name}»: на складе {round(available, 1)} шт, продаём {round(qty, 1)}")
-            unit_cost = num(item.get("cost")) or self.stock.avg_cost(item["nom_id"], wh)
+                raise ValueError(f"«{name}»{self._variant_suffix(variant_id)}:"
+                                 f" на складе {round(available, 1)} шт,"
+                                 f" продаём {round(qty, 1)}")
+            unit_cost = num(item.get("cost")) or self.stock.avg_cost(
+                item["nom_id"], wh, variant_id)
             cost = unit_cost * qty
             self.stock.add_move(item["nom_id"], wh, -qty, -cost, doc["id"], "sale",
                                 item.get("variant_id") or "", note=doc.get("note", ""),
@@ -289,14 +299,17 @@ class Documents:
         total = 0.0
         for item in items:
             qty = num(item["qty"])
-            available = self.stock.free(item["nom_id"], src)
+            variant_id = str(item.get("variant_id") or "")
+            available = self.stock.free(item["nom_id"], src, variant_id)
             if available < qty:
                 name = item.get("nom_name") or "позиция"
-                raise ValueError(f"«{name}»: на складе-источнике {round(available, 1)} шт")
+                raise ValueError(f"«{name}»{self._variant_suffix(variant_id)}:"
+                                 f" на складе-источнике {round(available, 1)} шт")
             nom = self.db.one("SELECT kind FROM nomenclature WHERE id=?",
                               (item.get("nom_id") or "",))
             display_only = (nom or {}).get("kind") == "showcase"
-            unit_cost = 0.0 if display_only else self.stock.avg_cost(item["nom_id"], src)
+            unit_cost = 0.0 if display_only else self.stock.avg_cost(
+                item["nom_id"], src, variant_id)
             cost = unit_cost * qty
             self.stock.add_move(item["nom_id"], src, -qty, -cost, doc["id"], "move",
                                 item.get("variant_id") or "", note="перемещение",
@@ -312,11 +325,13 @@ class Documents:
         total = 0.0
         for item in items:
             qty = num(item["qty"])
-            available = self.stock.free(item["nom_id"], wh)
+            variant_id = str(item.get("variant_id") or "")
+            available = self.stock.free(item["nom_id"], wh, variant_id)
             if available < qty:
                 name = item.get("nom_name") or "позиция"
-                raise ValueError(f"«{name}»: списываем {round(qty, 1)}, а есть {round(available, 1)}")
-            unit_cost = self.stock.avg_cost(item["nom_id"], wh)
+                raise ValueError(f"«{name}»{self._variant_suffix(variant_id)}:"
+                                 f" списываем {round(qty, 1)}, а есть {round(available, 1)}")
+            unit_cost = self.stock.avg_cost(item["nom_id"], wh, variant_id)
             cost = unit_cost * qty
             self.stock.add_move(item["nom_id"], wh, -qty, -cost, doc["id"], "writeoff",
                                 item.get("variant_id") or "",
@@ -334,11 +349,12 @@ class Documents:
         total = 0.0
         for item in items:
             fact = num(item.get("qty_fact"))
-            expected = self.stock.qty(item["nom_id"], wh)
+            variant_id = str(item.get("variant_id") or "")
+            expected = self.stock.qty(item["nom_id"], wh, variant_id)
             diff = round(fact - expected, 3)
             if not diff:
                 continue
-            unit_cost = self.stock.avg_cost(item["nom_id"], wh)
+            unit_cost = self.stock.avg_cost(item["nom_id"], wh, variant_id)
             cost = unit_cost * diff
             self.stock.add_move(item["nom_id"], wh, diff, cost, doc["id"], "inventory",
                                 item.get("variant_id") or "",
@@ -420,7 +436,8 @@ class Documents:
         refund = 0.0
         for item in items:
             qty = num(item["qty"])
-            unit_cost = num(item.get("cost")) or self.stock.avg_cost(item["nom_id"], wh)
+            unit_cost = num(item.get("cost")) or self.stock.avg_cost(
+                item["nom_id"], wh, str(item.get("variant_id") or ""))
             cost = unit_cost * qty
             self.stock.add_move(item["nom_id"], wh, qty, cost, doc["id"], "return",
                                 item.get("variant_id") or "", note="возврат от покупателя",
@@ -486,16 +503,43 @@ class Documents:
                     f"Склад «{wh.get('name') or warehouse_id}» — витрина: "
                     "остатки ведёт полка, документы здесь не проводятся")
 
-    def _order_reserved(self, nom_id: str, warehouse_id: str,
-                        order_id: str) -> float:
-        """Активный резерв заказа — кредит при продаже по этому заказу."""
+    def _order_reserved(self, nom_id: str, warehouse_id: str, order_id: str,
+                        variant_id: str = "") -> float:
+        """Активный резерв заказа — кредит при продаже по этому заказу.
+
+        Считается по вариации: заказ на красный L не даёт права продать синий M
+        «в счёт своего резерва».
+        """
         if not order_id:
             return 0.0
         row = self.db.one(
             "SELECT COALESCE(SUM(qty),0) v FROM reserves"
-            " WHERE nom_id=? AND warehouse_id=? AND order_id=? AND state='active'",
-            (nom_id, warehouse_id, order_id)) or {}
+            " WHERE nom_id=? AND warehouse_id=? AND order_id=? AND state='active'"
+            " AND COALESCE(variant_id,'')=?",
+            (nom_id, warehouse_id, order_id, str(variant_id or ""))) or {}
         return round(num(row.get("v")), 3)
+
+    def _variant_row(self, variant_id: str) -> dict:
+        """Вариация строки с подписью — или пусто, если строка не про вариацию.
+
+        Удалённую вариацию называем отдельно: строка документа живёт дольше
+        справочника, и молчаливая пустота читалась бы как «обычный товар».
+        """
+        variant_id = str(variant_id or "").strip()
+        if not variant_id:
+            return {}
+        row = self.db.one("SELECT * FROM nom_variants WHERE id=?", (variant_id,))
+        if not row:
+            return {"variant_id": variant_id, "variant_label": "вариация удалена"}
+        from .nomenclature import variant_label
+        row = dict(row)
+        row["variant_label"] = variant_label(row)
+        return row
+
+    def _variant_suffix(self, variant_id: str) -> str:
+        """« · Красный · L» для сообщений — или пусто."""
+        label = self._variant_row(variant_id).get("variant_label") or ""
+        return f" · {label}" if label else ""
 
     def _audit(self, entity_id: str, action: str, title: str) -> None:
         self.db.execute(
@@ -544,6 +588,7 @@ class Documents:
         if rows:
             return [{
                 "nom_id": r.get("nom_id") or "",
+                "variant_id": r.get("variant_id") or "",
                 "name": r.get("name") or "",
                 "qty": max(0.0, num(r.get("qty"))),
                 "price": num(r.get("price")),
@@ -557,6 +602,8 @@ class Documents:
         unit = round(total / qty, 2) if qty else total
         return [{
             "nom_id": nom_id,
+            # Вариацию клиент выбрал ещё в заказе: в накладной она та же.
+            "variant_id": str(order.get("client_variant_id") or ""),
             "name": nom.get("name") or str(order.get("product") or ""),
             "qty": qty,
             "price": unit,
@@ -640,6 +687,7 @@ class Documents:
         for line in lines:
             items.append({
                 "nom_id": line["nom_id"],
+                "variant_id": line.get("variant_id") or "",
                 "qty": num(line["qty"]),
                 "price": num(line["price"]) or self.price_of(line["nom_id"]),
             })

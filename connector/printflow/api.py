@@ -1034,13 +1034,16 @@ class Api:
             try:
                 variants: dict[str, list[dict]] = {}
                 for v in self.db.query(
-                        "SELECT nom_id, name, color_name, color_hex"
+                        "SELECT id, nom_id, name, sku, barcode, color_name, color_hex"
                         " FROM nom_variants WHERE archived=0 ORDER BY position"):
                     nom_id = str(v.get("nom_id") or "")
                     if not nom_id:
                         continue
                     variants.setdefault(nom_id, []).append({
+                        "id": v.get("id") or "",
                         "name": v.get("name") or "",
+                        "sku": v.get("sku") or "",
+                        "barcode": v.get("barcode") or "",
                         "color_name": v.get("color_name") or "",
                         "color_hex": v.get("color_hex") or "",
                     })

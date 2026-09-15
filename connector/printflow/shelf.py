@@ -169,16 +169,11 @@ class Shelf:
     def variant_label(variant: dict | None) -> str:
         """Подпись вариации для карточки и кассы: «Красный · L».
 
-        Собирается из признаков, а не из имени: владелец может переименовать
-        вариацию, а цвет с размером остаются тем, чем товар отличается на полке.
+        Одна на весь проект: тем же текстом вариацию зовут документы склада,
+        иначе «Адресник · L» на полке и «Адресник» в накладной — разные вещи.
         """
-        if not variant:
-            return ""
-        bits = [str(variant.get("color_name") or "").strip(),
-                str(variant.get("size") or "").strip(),
-                str(variant.get("material") or "").strip()]
-        label = " · ".join(bit for bit in bits if bit)
-        return label or str(variant.get("name") or "").strip()
+        from .nomenclature import variant_label as shared
+        return shared(variant)
 
     def _with_cashier_data(self, row: dict) -> dict:
         """Добавить эффективные артикул/штрихкод и данные печатного ценника."""
