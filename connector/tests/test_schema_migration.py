@@ -218,6 +218,43 @@ class LegacyVariantsDatabaseTests(unittest.TestCase):
         self.assertIn("idx_variant_spool", indexes,
                       "индекс по spool_id не создан после ALTER TABLE")
 
+    def test_interrupted_schema_run_is_finished_on_next_open(self):
+        """База, на которой схема оборвалась, доводится до конца миграцией.
+
+        У владельца `executescript(SCHEMA_V3)` остановился на `no such column:
+        spool_id`: часть объектов схемы уже создана, часть — нет, а касса не
+        открывается вовсе. Повторный запуск обязан довести дело до конца, а не
+        добить базу: объекты схемы создаются через `IF NOT EXISTS`, колонки
+        добавляет миграция.
+        """
+        from connector.printflow.schema_v3 import SCHEMA_V3
+        # Возвращаем ту самую строку: без неё обрыв не воспроизводится, и
+        # проверка выродилась бы в «всё и так хорошо».
+        crash = SCHEMA_V3.replace(
+            "CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);",
+            "CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);\n"
+            "CREATE INDEX IF NOT EXISTS idx_variant_spool ON nom_variants(spool_id);", 1)
+        raw = sqlite3.connect(self.path)
+        with self.assertRaises(sqlite3.OperationalError) as caught:
+            raw.executescript(crash)
+        raw.commit()
+        raw.close()
+        self.assertIn("spool_id", str(caught.exception),
+                      "причина падения владельца больше не воспроизводится")
+
+        db = Database(self.path)
+        self.addCleanup(db.close)
+        tables = {row["name"] for row in db.query(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        need = {"staff", "orders", "warehouses", "documents", "nom_variants"}
+        self.assertTrue(need <= tables, f"схема не догналась: {sorted(need - tables)}")
+        self.assertEqual("Красный / L",
+                         db.one("SELECT name FROM nom_variants WHERE id='v1'")["name"],
+                         "строка вариации потерялась при доведении схемы")
+        indexes = {row["name"] for row in db.query(
+            "SELECT name FROM sqlite_master WHERE type='index'")}
+        self.assertIn("idx_variant_spool", indexes)
+
     def test_legacy_rows_survive_with_defaults(self):
         db = Database(self.path)
         self.addCleanup(db.close)
