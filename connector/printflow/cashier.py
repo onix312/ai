@@ -468,6 +468,9 @@ class Cashier:
         # Удержания витрины-зоны (резервы под заказы, холды СБП): связанные
         # позиции показывают доступность сверх физического остатка полки.
         _zone, zone_held = self._zone_held()
+        # Удержания по вариациям: заказ на красный L не должен уменьшать
+        # доступность синего M — на витрине это разные остатки.
+        variant_held = self._zone_held_variants()
         items: list[dict] = []
         by_nom: dict[str, dict] = {}
         by_name: dict[str, dict] = {}
@@ -479,8 +482,12 @@ class Cashier:
 
         for it in shelf_raw:
             nom_id = str(it.get("nom_id") or "").strip()
+            variant_id = str(it.get("variant_id") or "").strip()
             shelf_qty = round(num(it.get("qty")), 3)
-            held = round(num(zone_held.get(nom_id)), 3) if nom_id else 0.0
+            if variant_id:
+                held = round(num(variant_held.get(f"{nom_id}|{variant_id}")), 3)
+            else:
+                held = round(num(zone_held.get(nom_id)), 3) if nom_id else 0.0
             free_qty = round(max(0.0, shelf_qty - held), 3)
             nm = nom_map.get(nom_id) or {}
             has_photo = bool(it.get("photo")) or bool(nm.get("photo_file"))
@@ -501,6 +508,8 @@ class Cashier:
                 "photo_url": photo_url,
                 "barcode": it.get("barcode") or "",
                 "sku": it.get("sku") or "", "nom_id": nom_id,
+                "variant_id": variant_id,
+                "variant_label": str(it.get("variant_label") or ""),
                 "unit": str(it.get("unit") or "шт"), "warehouse_name": "",
                 "group_id": nm.get("group_id") or "",
                 "group_name": nm.get("group_name") or "",
@@ -699,6 +708,27 @@ class Cashier:
             return "", {}
 
     # -------------------------------------------- авто-пополнение витрины
+    def _zone_held_variants(self) -> dict[str, float]:
+        """Удержания витрины по вариациям, ключ «nom_id|variant_id».
+
+        Только вариационные резервы: позиции без вариаций живут на прежней
+        карте по товару, и их поведение здесь не меняется.
+        """
+        try:
+            from .stock import Stock
+            zone = Stock(self.db).shelf_warehouse()
+            if not zone:
+                return {}
+            rows = self.db.query(
+                "SELECT nom_id, COALESCE(variant_id,'') variant_id,"
+                " COALESCE(SUM(qty),0) v FROM reserves"
+                " WHERE state='active' AND warehouse_id=?"
+                " AND COALESCE(variant_id,'')<>''"
+                " GROUP BY nom_id, COALESCE(variant_id,'')", (zone,))
+            return {f"{r['nom_id']}|{r['variant_id']}": num(r["v"]) for r in rows}
+        except Exception:
+            return {}
+
     def _shelf_qty(self, item_id: str) -> float:
         row = self.db.one("SELECT qty FROM shelf_items WHERE id=?", (item_id,)) or {}
         return num(row.get("qty"))

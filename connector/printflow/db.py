@@ -341,6 +341,11 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("tag_old_price", "REAL DEFAULT 0"),
         # 13.1 (58): ячейка на схеме полки («A1», «B3»…) — карта вместо списка
         ("cell", "TEXT DEFAULT ''"),
+        # Вариация товара (nom_variants.id): одна карточка номенклатуры может
+        # стоять на полке несколькими цветами и размерами. Это разные ценники
+        # и разные штрихкоды, но по-прежнему один товар в учёте — ровно затем,
+        # чтобы адресник в двенадцати цветах не превращался в двенадцать товаров.
+        ("variant_id", "TEXT DEFAULT ''"),
     ],
     "shelf_moves": [
         # Внешний ключ строки чека делает повторную отправку из 1С безопасной.
@@ -1145,6 +1150,7 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     name TEXT DEFAULT '',
     catalog_id TEXT,
     nom_id TEXT DEFAULT '',         -- canonical номенклатура PrintFlow / 1С
+    variant_id TEXT DEFAULT '',     -- вариация товара (цвет/размер) — своя карточка и ценник
     qty REAL DEFAULT 0,             -- штук на стеллаже
     price REAL DEFAULT 0,           -- цена ценника, ₽
     cost_per_unit REAL DEFAULT 0,   -- себестоимость штуки, ₽

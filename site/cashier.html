@@ -187,6 +187,7 @@
     в px, поэтому «крупный шрифт» делается не масштабом корня, а двумя
     наборами значений. Переменные заданы на html — так уровень applies ко всей
     витрине сразу, без обхода элементов. */
+ .vari{font-size:11.5px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .n{font-size:var(--fs-n,14px);font-weight:700;line-height:1.32;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
  .metaLine{display:flex;align-items:center;gap:6px}
  /* Цена — то, что кассир читает чаще всего, поэтому она крупнее названия
@@ -1153,7 +1154,9 @@ function renderGrid(){
     var img=it.photo_url? '<img src="'+esc(it.photo_url)+'" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">'+phIcon+'</div>' : '<div class="ph">'+phIcon+'</div>';
     return '<div class="tile'+(inCart?' sel':'')+(it.price_missing?' off':'')+'" data-id="'+esc(it.id)+'" role="button" tabindex="0" aria-label="'+esc(it.name)+'">'
       +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
-      +'<div class="info"><div class="n">'+esc(it.name)+'</div><div class="metaLine">'+price+'</div>'+stock+'</div>'
+      +'<div class="info"><div class="n">'+esc(it.name)+'</div>'
+      +(it.variant_label?'<div class="vari">'+esc(it.variant_label)+'</div>':'')
+      +'<div class="metaLine">'+price+'</div>'+stock+'</div>'
       +'</div>';
   }).join("");
   renderCart();

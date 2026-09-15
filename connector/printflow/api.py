@@ -1960,13 +1960,13 @@ class Api:
             return 200, self.shelf.transfer_from_stock(
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
                 num(body.get("qty")), body.get("item_id", ""),
-                body.get("note", ""))
+                body.get("note", ""), body.get("variant_id", ""))
         if path == "/api/shelf/save-from-stock":
             # Новая позиция стеллажа сразу с готовым товаром со склада:
             # создание позиции и перенос штук — одной операцией.
             return 200, self.shelf.create_item_from_stock(
                 body, body.get("nom_id", ""), body.get("warehouse_id", ""),
-                num(body.get("qty")))
+                num(body.get("qty")), body.get("variant_id", ""))
         if path == "/api/shelf/sale":
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),
