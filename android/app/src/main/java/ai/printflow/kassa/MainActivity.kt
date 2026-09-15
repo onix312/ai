@@ -542,18 +542,34 @@ class MainActivity : Activity() {
         showPanelText(hintRes, *args)
     }
 
+    /**
+     * Панель уже есть — обновляем текст. Аргументы берём из прошлого вызова:
+     * поворот экрана пересобирает панель и должен сохранить «код 401», а не
+     * показать шаблон с подстановкой.
+     */
     private fun showPanel(hintRes: Int) {
         panelHintRes = hintRes
         if (panel != null) {
             urlField?.setText(prefs.getString(KEY_URL, "").orEmpty())
-            hintView?.setText(hintRes)
+            hintView?.text = if (panelHintArgs.isEmpty()) getString(hintRes)
+                             else getString(hintRes, *panelHintArgs)
             renderFoundServers()
             return
         }
+        showPanelText(hintRes, *panelHintArgs)
+    }
+
+    /**
+     * Собрать панель выбора сервера из разметки и показать её.
+     *
+     * Отдельным методом, потому что входов два: [showPanel] (с новым текстом)
+     * и пересборка после поворота экрана — там аргументы прошлого сообщения
+     * лежат в panelHintArgs.
+     */
+    private fun showPanelText(hintRes: Int, vararg args: Any) {
         val scroll = layoutInflater.inflate(R.layout.panel_server, root, false) as ScrollView
         val hintView = scroll.findViewById(R.id.panelHint) as TextView
-        hintView.text = if (panelHintArgs.isEmpty()) getString(hintRes)
-                        else getString(hintRes, *panelHintArgs)
+        hintView.text = if (args.isEmpty()) getString(hintRes) else getString(hintRes, *args)
         this.hintView = hintView
         val field = scroll.findViewById(R.id.urlField) as EditText
         field.setText(prefs.getString(KEY_URL, "").orEmpty())

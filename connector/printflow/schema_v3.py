@@ -95,7 +95,9 @@ CREATE TABLE IF NOT EXISTS nom_variants (
     updated_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);
-CREATE INDEX IF NOT EXISTS idx_variant_spool ON nom_variants(spool_id);
+-- Индекс по spool_id создаётся в миграции (db.py), а не здесь: у старых баз
+-- колонки ещё нет, а ALTER TABLE выполняется после этого скрипта.
+
 
 CREATE TABLE IF NOT EXISTS warehouses (
     id TEXT PRIMARY KEY,
