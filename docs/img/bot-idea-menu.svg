@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="589" viewBox="0 0 560 589">
+<rect x="0.0" y="0.0" width="560.0" height="589.0" rx="18" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="1.2"/>
+<rect x="0.0" y="0.0" width="560.0" height="66.0" rx="18" fill="#0B1020" stroke="none"/><rect x="0.0" y="48.0" width="560.0" height="18.0" rx="0" fill="#0B1020" stroke="none"/>
+<rect x="0.0" y="0.0" width="6.0" height="66.0" rx="3" fill="#7C3AED" stroke="none"/>
+<text x="22.0" y="29.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF" text-anchor="start">Б1 · Меню = дашборд</text>
+<text x="22.0" y="50.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#94A3B8" text-anchor="start">«старт» отвечает состоянием цеха, а не текстом-справкой</text>
+<line x1="0" y1="66.0" x2="560.0" y2="66.0" stroke="#DCE4EB" stroke-width="1"/>
+<line x1="0" y1="122.0" x2="560.0" y2="122.0" stroke="#DCE4EB" stroke-width="1"/>
+<text x="14.0" y="101.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="400" fill="#64748B" text-anchor="start">‹</text>
+<circle cx="44" cy="94.0" r="17" fill="#4F46E5"/>
+<text x="44.0" y="99.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">PF</text>
+<text x="70.0" y="90.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="14.5" font-weight="700" fill="#17212B" text-anchor="start">PrintFlow · цех</text>
+<text x="70.0" y="108.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#64748B" text-anchor="start">бот</text>
+<rect x="450.0" y="132.0" width="96.0" height="43.0" rx="14" fill="#E2F8D2" stroke="none"/>
+<text x="464.0" y="156.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start">меню</text>
+<text x="536.0" y="167.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" font-weight="400" fill="#93A1B0" text-anchor="end">17:41</text>
+<rect x="14.0" y="187.0" width="420.0" height="270.0" rx="14" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.8"/>
+<text x="28.0" y="211.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="700" fill="#17212B" text-anchor="start">🖨 P1S — печатает · 63%</text>
+<text x="28.0" y="230.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start">Осталось 1 ч 20 мин · финиш в 17:44</text>
+<text x="28.0" y="249.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start"></text>
+<text x="28.0" y="268.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="700" fill="#17212B" text-anchor="start">₽ 30 дней: доход 84 500 ₽ · прибыль 31 200 ₽</text>
+<text x="28.0" y="287.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start">💰 Ждут оплаты: 4 300 ₽ по 2 заказам</text>
+<text x="28.0" y="306.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start">⚑ Следующее: Адресник «Костица» ×4 · 46 мин</text>
+<text x="424.0" y="449.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" font-weight="400" fill="#93A1B0" text-anchor="end">12:04</text>
+<rect x="16.0" y="327.0" width="90.9" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="61.4" y="350.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">🛒 Продать</text>
+<rect x="112.9" y="327.0" width="74.7" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="150.2" y="350.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">📦 Полка</text>
+<rect x="16.0" y="371.0" width="74.7" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="53.3" y="394.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">💰 Касса</text>
+<rect x="96.7" y="371.0" width="66.6" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="130.0" y="394.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">📷 Кадр</text>
+<rect x="16.0" y="415.0" width="74.7" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="53.3" y="438.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">📊 Итоги</text>
+<rect x="96.7" y="415.0" width="66.6" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="130.0" y="438.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">⚙ Ещё</text>
+<rect x="8.0" y="481.0" width="544.0" height="104.0" rx="10" fill="#F2F6F9" stroke="none"/>
+<rect x="16.0" y="487.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="101.3" y="513.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">🛒 Продать</text>
+<rect x="194.7" y="487.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="280.0" y="513.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">📦 Полка</text>
+<rect x="373.3" y="487.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="458.7" y="513.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">💰 Касса</text>
+<rect x="16.0" y="535.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="101.3" y="561.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">📷 Кадр</text>
+<rect x="194.7" y="535.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="280.0" y="561.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">📊 Итоги</text>
+<rect x="373.3" y="535.0" width="170.7" height="40.0" rx="8" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.9"/>
+<text x="458.7" y="561.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="400" fill="#17212B" text-anchor="middle">⚙ Ещё</text>
+</svg>
