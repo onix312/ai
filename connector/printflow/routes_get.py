@@ -594,11 +594,14 @@ def get_orders(api: Any, ctx: Ctx):
     # историей. Не переданы — прежнее поведение, весь список.
     # archived=1 — только снятые с доски, archived=all — и те и другие.
     archived = ctx.one("archived")
+    # view=board (18.3) — лёгкая строка доски вместо SELECT *; sort — порядок
+    # считает сервер (due|debt|stale); channel — фильтр каналов с алиасами.
     return 200, {"orders": api.repo.orders(
         ctx.one("status"), ctx.one("q"), ctx.one("niche_id"),
         int(num(ctx.one("limit", "0"), 0)), int(num(ctx.one("offset", "0"), 0)),
         include_archived=archived in ("1", "all"),
-        only_archived=archived == "1")}
+        only_archived=archived == "1", channel=ctx.one("channel"),
+        sort=ctx.one("sort"), view=ctx.one("view"))}
 
 
 @router.get("/api/order", doc="GET /api/order")

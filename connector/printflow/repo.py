@@ -35,10 +35,10 @@ ORDER_FIELDS = (
 # начинаются с 1001, а не с 1, и правка счётчика это сохраняет.
 ORDER_NUMBER_BASE = 1000
 
-# Допустимые переходы статуса заказа. Единственное место, где они заданы:
-# раньше карта жила внутри set_order_status(), и фронт не мог спросить
-# «куда можно шагнуть из этого статуса» иначе как перебором с ошибкой 400.
-# done — финальный: в него ведут выдача и подтверждение оплаты, а не стрелка.
+# Допустимые переходы статуса заказа. Жёсткая карта — значение по умолчанию:
+# свой список шагов из колонки statuses.next_ids перекрывает её для статуса,
+# а пустое поле означает «как здесь». done — финальный: в него ведут выдача
+# и подтверждение оплаты, а не стрелка.
 ORDER_TRANSITIONS: dict[str, set[str]] = {
     "new": {"estimate", "prepay", "queue"},
     "estimate": {"new", "prepay", "queue"},
@@ -46,9 +46,27 @@ ORDER_TRANSITIONS: dict[str, set[str]] = {
     "queue": {"new", "printing"},
     "printing": {"queue", "post"},
     "post": {"printing", "ready"},
-    "ready": {"post"},
+    # 18.3: «перепечатать» — брак после приёмки уходит обратно в печать одним
+    # шагом, а не задним ходом через постобработку.
+    "ready": {"post", "printing"},
     "done": set(),
 }
+
+# Telegram-источники клиентского бота: для фильтра каналов это тот же
+# «Telegram», что и прямые заявки из чата (см. isTgOrder на фронте).
+TG_CLIENT_SOURCES = ("telegram", "catalog", "custom", "individual")
+
+# Лёгкая строка доски (18.3): канбан и таблица рисуют карточку, оплату,
+# производство и срок — карточка заказа догружается полным GET /api/order.
+# Список закрытый: экономика обязан совпадать с полным видом, поэтому здесь
+# все входы order_economics (цена, скидка, комиссия, катушки, факты).
+BOARD_COLUMNS = (
+    "id number product customer_name phone status priority niche_id channel "
+    "client_source due paid prepaid price discount fee payer delivery material "
+    "color grams hours actual_grams actual_hours actual_cost cost "
+    "manual_minutes design_minutes qty spools file quality "
+    "cancel_requested_at archived created_at updated_at"
+).split()
 
 
 class Repo:
@@ -59,8 +77,13 @@ class Repo:
     # ------------------------------------------------------------------ заказы
     def orders(self, status: str = "", search: str = "", niche_id: str = "",
                limit: int = 0, offset: int = 0, include_archived: bool = False,
-               only_archived: bool = False) -> list[dict]:
-        sql, params = "SELECT * FROM orders WHERE 1=1", []
+               only_archived: bool = False, channel: str = "",
+               sort: str = "", view: str = "") -> list[dict]:
+        # Лёгкий вид доски (18.3): SELECT * тащил 60+ полей на каждую строку
+        # списка, а канбану нужна половина. Неизвестный вид — полный список,
+        # как раньше: терпимость вместо 400 за опечатку в параметре.
+        cols = ", ".join(BOARD_COLUMNS) if view == "board" else "*"
+        sql, params = f"SELECT {cols} FROM orders WHERE 1=1", []
         # Архив (17.0.16): доска показывает живые заказы, а снятые с доски
         # достаются отдельно. На деньги это не влияет — учёт и отчёты читают
         # таблицу своими запросами и видят архивные заказы как прежде.
@@ -74,12 +97,41 @@ class Repo:
         if niche_id:
             sql += " AND niche_id=?"
             params.append(niche_id)
+        if channel:
+            # Канал считает сервер, а не браузер: иначе фильтр по каналу
+            # видел бы только загруженную страницу списка, а не всю базу.
+            if channel == "telegram":
+                marks = ",".join("?" for _ in TG_CLIENT_SOURCES)
+                sql += (f" AND (channel='telegram' OR client_source IN ({marks}))")
+                params += list(TG_CLIENT_SOURCES)
+            elif channel == "no-tg":
+                marks = ",".join("?" for _ in TG_CLIENT_SOURCES)
+                sql += (f" AND NOT (channel='telegram' OR client_source IN ({marks}))")
+                params += list(TG_CLIENT_SOURCES)
+            else:
+                sql += " AND channel=?"
+                params.append(channel)
         if search:
             like = f"%{search.lower()}%"
             sql += (" AND (pylower(number) LIKE ? OR pylower(product) LIKE ?"
-                    " OR pylower(customer_name) LIKE ? OR pylower(phone) LIKE ?)")
-            params += [like, like, like, like]
-        sql += " ORDER BY datetime(created_at) DESC"
+                    " OR pylower(customer_name) LIKE ? OR pylower(phone) LIKE ?"
+                    " OR pylower(file) LIKE ? OR pylower(notes) LIKE ?)")
+            params += [like] * 6
+        if sort == "due":
+            # Срок: dated вперёд по возрастанию, без срока — вниз, внутри
+            # группы без срока свежие сверху, как в списке по умолчанию.
+            sql += (" ORDER BY CASE WHEN due IS NULL OR due='' THEN 1 ELSE 0 END,"
+                    " due ASC, datetime(created_at) DESC")
+        elif sort == "debt":
+            # Долг: остаток цены после оплаты, крупные должники сверху.
+            sql += (" ORDER BY (COALESCE(price,0)"
+                    " - max(COALESCE(paid,0),COALESCE(prepaid,0))) DESC,"
+                    " datetime(created_at) DESC")
+        elif sort == "stale":
+            # Забытые: давно не двигались — сверху.
+            sql += " ORDER BY datetime(updated_at) ASC"
+        else:
+            sql += " ORDER BY datetime(created_at) DESC"
         # Страницы списка (17.0.16): без limit сервер отдавал все заказы сразу —
         # на базе в несколько тысяч строк ответ рос вместе с историей, а канбану
         # всё равно нужны первые экраны. limit<=0 — прежнее поведение «всё».
@@ -452,21 +504,46 @@ class Repo:
                                  "detail": j.get("name") or j.get("file") or ""})
         return {"count": len(problems), "problems": problems[:50]}
 
-    def set_order_status(self, order_id: str, status: str) -> dict:
+    def transition_error(self, order_id: str, status: str) -> str:
+        """Почему заказ нельзя перевести в статус — пусто, если можно.
+
+        Проверка без записи: сухая примерка пакета и единый текст отказа
+        для одиночного и пакетного перевода.
+        """
+        order = self.db.one("SELECT id, status FROM orders WHERE id=?", (order_id,))
+        if not order:
+            return "Заказ не найден"
+        target = str(status or "").strip()
+        if not self.db.one("SELECT id FROM statuses WHERE id=?", (target,)):
+            return "Неизвестный статус заказа"
+        current = str(order.get("status") or "new")
+        if current == target:
+            return ""
+        if target not in self.allowed_next(current):
+            return (f"Переход «{current}» → «{target}» запрещён;"
+                    " используйте допустимый следующий этап")
+        return ""
+
+    def set_order_status(self, order_id: str, status: str,
+                         expected_updated_at: str = "") -> dict:
         order = self.db.one("SELECT * FROM orders WHERE id=?", (order_id,))
         if not order:
             raise ValueError("Заказ не найден")
+        err = self.transition_error(order_id, status)
+        if err:
+            raise ValueError(err)
         target = str(status or "").strip()
-        if not self.db.one("SELECT id FROM statuses WHERE id=?", (target,)):
-            raise ValueError("Неизвестный статус заказа")
-        current = str(order.get("status") or "new")
-        if current == target:
+        if str(order.get("status") or "new") == target:
             return order
-        allowed = ORDER_TRANSITIONS
-        if target not in allowed.get(current, set()):
-            raise ValueError(f"Переход «{current}» → «{target}» запрещён; используйте допустимый следующий этап")
+        # Оптимистичная блокировка и для статуса (18.3): два окна тянут одну
+        # карточку — побеждает первое, второе узнаёт об этом словами, а не
+        # молча перезаписывает. Тот же текст, что в save_order.
+        want = str(expected_updated_at or "").strip()
+        if want and want != str(order.get("updated_at") or ""):
+            raise ValueError("Заказ уже изменён — обновите карточку перед сохранением")
         # done — финальный статус: сохранить его можно только через выдачу с
-        # подтверждением передачи/оплаты, а не перетаскиванием карточки.
+        # подтверждением передачи/оплаты, а не перетаскиванием карточки
+        # (сторожит save_order через флаг финальности).
         return self.save_order({"id": order_id, "status": target})
 
     def archive_order(self, order_id: str, archived: bool = True) -> dict:
@@ -495,6 +572,16 @@ class Repo:
             self.db.execute("UPDATE print_jobs SET order_id=NULL WHERE order_id=?", (order_id,))
             self.db.execute("UPDATE payments SET order_id=NULL WHERE order_id=?", (order_id,))
             self.db.execute("UPDATE transactions SET order_id=NULL WHERE order_id=?", (order_id,))
+            # Факты производства и склада переживают заказ, но отвязываются:
+            # брак, накладные и отзывы — свершившееся, а не черновик карточки.
+            self.db.execute("UPDATE defects SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.execute("UPDATE documents SET order_id=NULL WHERE order_id=?", (order_id,))
+            self.db.execute("UPDATE customer_feedback SET order_id=NULL WHERE order_id=?",
+                            (order_id,))
+            # А журнал самого заказа — его тень: без строки заказа записи
+            # истории и фото повисали сиротами ни на чём.
+            self.db.execute("DELETE FROM order_history WHERE order_id=?", (order_id,))
+            self.db.execute("DELETE FROM order_photos WHERE order_id=?", (order_id,))
             self.db.execute("DELETE FROM order_items WHERE order_id=?", (order_id,))
             self.db.delete("orders", order_id)
 
@@ -518,13 +605,49 @@ class Repo:
         return self.db.upsert("customers", data)
 
     # ------------------------------------------------------- статусы и ниши
+    @staticmethod
+    def _parse_next_ids(raw: Any) -> list[str] | None:
+        """Список шагов из колонки next_ids: None — «не задано, взять карту».
+
+        Пустая строка и NULL означают значение по умолчанию из
+        ORDER_TRANSITIONS, а не «никуда нельзя»: иначе старая база, где
+        колонки только что не было, получила бы восемь тупиков. Явный пустой
+        список ('[]') — осознанный тупик.
+        """
+        if raw is None:
+            return None
+        text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+        if not text.strip():
+            return None
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            parsed = [p.strip() for p in text.split(",")]
+        if not isinstance(parsed, list):
+            return None
+        return [str(x).strip() for x in parsed if str(x).strip()]
+
+    def allowed_next(self, status: str) -> set[str]:
+        """Куда из статуса можно шагнуть: свой список или жёсткая карта.
+
+        Карта ORDER_TRANSITIONS читается вживую при каждом вызове — тесты
+        прошлого раунда подпирают её подменой, и поведение обязано следовать
+        за подменой, а не за снятой копией.
+        """
+        row = self.db.one("SELECT next_ids FROM statuses WHERE id=?",
+                          (str(status or "new"),))
+        custom = self._parse_next_ids((row or {}).get("next_ids")) if row else None
+        if custom is not None:
+            return set(custom)
+        return set(ORDER_TRANSITIONS.get(str(status or "new"), set()))
+
     def next_statuses(self, status: str) -> list[str]:
         """Куда из этого статуса можно шагнуть — ids в порядке колонок канбана.
 
         Фронт не хранит свою карту переходов (статусы живые, /api/statuses),
         поэтому допустимый следующий шаг говорит сервер.
         """
-        allowed = ORDER_TRANSITIONS.get(str(status or "new"), set())
+        allowed = self.allowed_next(status)
         if not allowed:
             return []
         rows = self.db.query("SELECT id FROM statuses ORDER BY position, name")
@@ -532,15 +655,49 @@ class Repo:
 
     def statuses(self) -> list[dict]:
         rows = self.db.query("SELECT * FROM statuses ORDER BY position, name")
+        order = [r["id"] for r in rows]
         for row in rows:
             count = self.db.one("SELECT COUNT(*) n FROM orders WHERE status=?", (row["id"],))
             row["orders"] = int(num((count or {}).get("n")))
+            # Действующие шаги — для редактора переходов и подсветки колонок:
+            # фронт показывает, куда карточку примут, до перетаскивания.
+            allowed = self.allowed_next(row["id"])
+            row["next"] = [sid for sid in order if sid in allowed]
         return rows
 
     def save_status(self, data: dict) -> dict:
         data = dict(data)
         if not data.get("id"):
             data["id"] = uid("st")
+        else:
+            # Частичное обновление (только переходы из редактора): SQLite
+            # проверяет NOT NULL до ON CONFLICT, поэтому голый upsert
+            # {id, next_ids} уронил бы вставку. Сливаем поверх строки.
+            existing = self.db.one("SELECT * FROM statuses WHERE id=?",
+                                   (data["id"],))
+            if existing:
+                data = {**existing, **data}
+        if "next_ids" in data:
+            raw = data["next_ids"]
+            ids = self._parse_next_ids(raw)
+            if raw in (None, "") or (isinstance(raw, str) and not raw.strip()):
+                # Сброс к карте по умолчанию, а не тупик.
+                data["next_ids"] = ""
+            else:
+                ids = ids or []
+                known = {r["id"] for r in self.db.query("SELECT id FROM statuses")}
+                known.add(str(data["id"]))
+                for sid in ids:
+                    if sid not in known:
+                        raise ValueError(f"Неизвестный статус в переходах: «{sid}»")
+                finals = {r["id"] for r in self.db.query(
+                    "SELECT id FROM statuses WHERE is_final=1")}
+                bad = [sid for sid in ids if sid in finals]
+                if bad:
+                    raise ValueError(
+                        "В финальный статус переводят выдача и склад, а не стрелка: "
+                        + ", ".join(sorted(bad)))
+                data["next_ids"] = json.dumps(ids, ensure_ascii=False)
         return self.db.upsert("statuses", data)
 
     def delete_status(self, status_id: str) -> None:

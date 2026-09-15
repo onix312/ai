@@ -1577,7 +1577,9 @@ class Api:
         if path == "/api/order/save":
             return 200, self.save_order(body)
         if path == "/api/order/status":
-            order = self.repo.set_order_status(body.get("id", ""), body.get("status", ""))
+            order = self.repo.set_order_status(
+                body.get("id", ""), body.get("status", ""),
+                expected_updated_at=str(body.get("expected_updated_at") or ""))
             client = getattr(self.manager, "client_bot", None)
             if client:
                 try:
@@ -2632,8 +2634,26 @@ class Api:
             # часть заказов уже сменила статус, а часть нет, и панель этого не
             # знала. Теперь либо весь пакет, либо ничего, и ошибки переходов
             # перечислены по номерам — «почему не применилось» видно сразу.
+            if body.get("check_only") is True:
+                # Сухая примерка (18.3): «17 из 20 можно, 3 нельзя» — до
+                # нажатия, без записи, без события в журнале и без resync.
+                allowed: list[dict] = []
+                skipped: list[dict] = []
+                for oid in ids:
+                    order = self.db.one("SELECT id, number FROM orders WHERE id=?", (oid,))
+                    if not order:
+                        skipped.append({"id": oid, "error": "Заказ не найден"})
+                        continue
+                    err = self.repo.transition_error(oid, status)
+                    if err:
+                        skipped.append({"id": oid, "number": order.get("number"),
+                                        "error": err})
+                    else:
+                        allowed.append({"id": oid, "number": order.get("number")})
+                return 200, {"ok": True, "check_only": True, "updated": 0,
+                             "allowed": allowed, "skipped": skipped}
             updated = 0
-            skipped: list[dict] = []
+            skipped = []
             try:
                 with self.db.transaction():
                     for oid in ids:
