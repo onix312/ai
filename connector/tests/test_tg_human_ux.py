@@ -477,9 +477,9 @@ class SellFlowButtonTests(unittest.TestCase):
 
     def test_confirm_sells_with_channel(self):
         item = self._shelf_item()
-        self.bot._sell_flow["111"] = {"item": item["id"], "qty": 2,
-                                      "price": 500, "channel": "online",
-                                      "await": "confirm"}
+        self.bot.scenes.set("111", "sell", {"item": item["id"], "qty": 2,
+                                            "price": 500, "channel": "online",
+                                            "await": "confirm"})
         result = self.bot.sell_flow_do("111")
         self.assertIn("на счёт", result)
         cash = Shelf(self.db).shop_cash()
@@ -488,18 +488,18 @@ class SellFlowButtonTests(unittest.TestCase):
 
     def test_confirm_sells_to_shop_cash(self):
         item = self._shelf_item()
-        self.bot._sell_flow["111"] = {"item": item["id"], "qty": 2,
-                                      "price": 500, "channel": "shelf",
-                                      "await": "confirm"}
+        self.bot.scenes.set("111", "sell", {"item": item["id"], "qty": 2,
+                                            "price": 500, "channel": "shelf",
+                                            "await": "confirm"})
         result = self.bot.sell_flow_do("111")
         self.assertIn("в кассу магазина", result)
         self.assertEqual(Shelf(self.db).shop_cash()["in_shop"], 1000)
 
     def test_custom_price_text(self):
         item = self._shelf_item()
-        self.bot._sell_flow["111"] = {"item": item["id"], "qty": 1,
-                                      "price": 500, "channel": "",
-                                      "await": "price"}
+        self.bot.scenes.set("111", "sell", {"item": item["id"], "qty": 1,
+                                            "price": 500, "channel": "",
+                                            "await": "price"})
         calls = []
         self.bot._call = lambda method, params, timeout=35: \
             calls.append((method, params)) or {"ok": True}
@@ -515,8 +515,8 @@ class SellFlowButtonTests(unittest.TestCase):
 
     def test_cancel_keeps_stock(self):
         item = self._shelf_item()
-        self.bot._sell_flow["111"] = {"item": item["id"], "qty": 5,
-                                      "price": 500, "channel": "shelf"}
+        self.bot.scenes.set("111", "sell", {"item": item["id"], "qty": 5,
+                                            "price": 500, "channel": "shelf"})
         result = self.bot.sell_flow_cancel("111")
         self.assertIn("отменена", result)
         self.assertEqual(Shelf(self.db).shop_cash()["in_shop"], 0)

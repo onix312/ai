@@ -42,7 +42,10 @@ connector/printflow/       ядро Python:
   accounting.py автоматический учёт денег, uid/num
   manager.py   парк принтеров, очередь, уведомления, запуск ботов
   api.py       HTTP: JSON-API + раздача site/ (все POST под Origin-проверкой)
-  telegram_bot.py  бот сотрудников (роли: владелец/руководитель/сотрудник)
+  staffbot/       бот сотрудников (роли: владелец/руководитель/сотрудник):
+                  core (цикл), router (таблицы команд), scenes (диалоги в
+                  SQLite), views/printers/sales/catalog/orders/team/inbox;
+                  telegram_bot.py — совместимый мост-реэкспорт
   staff.py     роли и приглашения команды (PF-коды)
   client_bot.py клиентский бот для покупателей (свой токен)
   bambu*.py    MQTT/TLS, облако, HMS, автопродолжение, safety-gate

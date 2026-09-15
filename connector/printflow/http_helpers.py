@@ -47,6 +47,12 @@ CLIENT_DISCONNECT_ERRORS = (
     ConnectionAbortedError,
 )
 
+# Плоский кортеж для except в долгих стримах (камера/SSE). Python 3.14 запретил
+# вложенные кортежи в except («catching classes that do not inherit from
+# BaseException»), поэтому кортежи соединяем заранее, а не на месте:
+# ошибка 17.0.27 на Windows — именно вложенный (CLIENT_DISCONNECT_ERRORS, ...).
+STREAM_DISCONNECT_ERRORS = CLIENT_DISCONNECT_ERRORS + (TimeoutError, OSError)
+
 
 def safe_file(root: Path, name: str) -> Path | None:
     """Вернуть путь только если он действительно находится внутри root."""

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="520" viewBox="0 0 560 520">
+<rect x="0.0" y="0.0" width="560.0" height="520.0" rx="18" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="1.2"/>
+<rect x="0.0" y="0.0" width="560.0" height="66.0" rx="18" fill="#0B1020" stroke="none"/><rect x="0.0" y="48.0" width="560.0" height="18.0" rx="0" fill="#0B1020" stroke="none"/>
+<rect x="0.0" y="0.0" width="6.0" height="66.0" rx="3" fill="#7C3AED" stroke="none"/>
+<text x="22.0" y="29.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF" text-anchor="start">Б5 · Карточка полки с фото</text>
+<text x="22.0" y="50.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12.5" font-weight="400" fill="#94A3B8" text-anchor="start">фото позиции уже лежит в базе — shelf_items.photo</text>
+<line x1="0" y1="66.0" x2="560.0" y2="66.0" stroke="#DCE4EB" stroke-width="1"/>
+<line x1="0" y1="122.0" x2="560.0" y2="122.0" stroke="#DCE4EB" stroke-width="1"/>
+<text x="14.0" y="101.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="400" fill="#64748B" text-anchor="start">‹</text>
+<circle cx="44" cy="94.0" r="17" fill="#4F46E5"/>
+<text x="44.0" y="99.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">PF</text>
+<text x="70.0" y="90.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="14.5" font-weight="700" fill="#17212B" text-anchor="start">PrintFlow · цех</text>
+<text x="70.0" y="108.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="12" font-weight="400" fill="#64748B" text-anchor="start">бот</text>
+<rect x="14.0" y="132.0" width="424.0" height="360.0" rx="14" fill="#FFFFFF" stroke="#DCE4EB" stroke-width="0.8"/>
+<rect x="26.0" y="142.0" width="400.0" height="172.0" rx="10" fill="#F8FAFC" stroke="#DCE4EB" stroke-width="0.8"/>
+<ellipse cx="226.0" cy="286.0" rx="96" ry="10" fill="#0B1020" opacity="0.07"/>
+<g transform="rotate(7 226.0 234.0)"><rect x="164.0" y="200.0" width="124.0" height="72.0" rx="10" fill="#4F46E5" stroke="none"/><circle cx="182.0" cy="220.0" r="7" fill="#F8FAFC"/></g>
+<g transform="rotate(-6 226.0 234.0)"><rect x="156.0" y="194.0" width="140.0" height="82.0" rx="12" fill="#7C3AED" stroke="none"/><circle cx="176.0" cy="216.0" r="8" fill="none" stroke="#F8FAFC" stroke-width="3"/><text x="196.0" y="228.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF" text-anchor="start">КОСТИЦА</text><text x="196.0" y="248.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" font-weight="400" fill="#EDE9FE" text-anchor="start">адресник · PLA</text><rect x="196.0" y="256.0" width="52" height="3" rx="1.5" fill="#C4B5FD"/></g>
+<text x="30.0" y="333.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="700" fill="#17212B" text-anchor="start">🗂 Адресник «Костица» · 500 ₽</text>
+<text x="30.0" y="351.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13.5" font-weight="400" fill="#17212B" text-anchor="start">на полке 10 шт · маржа 260 ₽ (52%)</text>
+<rect x="16.0" y="362.0" width="90.9" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="61.4" y="385.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">🛒 Продать</text>
+<rect x="112.9" y="362.0" width="107.1" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="166.4" y="385.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">📥 Приход +1</text>
+<rect x="16.0" y="406.0" width="131.4" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="81.7" y="429.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">👁 Витрина: вкл</text>
+<rect x="153.4" y="406.0" width="90.9" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="198.8" y="429.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">🗄 В архив</text>
+<rect x="16.0" y="450.0" width="99.0" height="36.0" rx="8" fill="#FFFFFF" stroke="#DAE3EA" stroke-width="0.9"/>
+<text x="65.5" y="473.0" font-family="Segoe UI, Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="700" fill="#1C93E3" text-anchor="middle">⬅ К списку</text>
+</svg>

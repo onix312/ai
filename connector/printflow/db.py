@@ -617,6 +617,17 @@ CREATE TABLE IF NOT EXISTS telegram_outbox (
 CREATE INDEX IF NOT EXISTS idx_telegram_outbox_due
     ON telegram_outbox(state, available_at, id);
 
+-- 18.1: диалоги бота сотрудников (флоу продажи, сверка кассы, ответ клиенту).
+-- Состояние живёт в базе, а не в памяти процесса: перезапуск коннектора
+-- посреди продажи не теряет начатое. TTL защищает от «зависших» ожиданий.
+CREATE TABLE IF NOT EXISTS bot_scenes (
+    chat_id TEXT PRIMARY KEY,       -- один активный диалог на чат
+    scene TEXT DEFAULT '',          -- sell | cash_reconcile | client_reply
+    data TEXT DEFAULT '{}',         -- параметры сцены (JSON)
+    updated_at TEXT,
+    expires_at TEXT                 -- ISO; просроченное молча игнорируется
+);
+
 -- Подтверждение ручной оплаты: заявка клиента отдельно от кассового платежа.
 CREATE TABLE IF NOT EXISTS client_payment_intents (
     id TEXT PRIMARY KEY,

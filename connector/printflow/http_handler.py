@@ -33,7 +33,8 @@ from .config import now_iso
 from .accounting import num
 from .config import PHOTO_DIR, SITE, ensure_dirs, now_iso
 from .db import friendly_sqlite_error
-from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON, begin_request,
+from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
+                           STREAM_DISCONNECT_ERRORS, begin_request,
                            rate_bucket, request_length,
                            request_origin_allowed, safe_file)
 from .idempotency import extract_key as extract_idempotency_key
@@ -423,7 +424,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                                  + f"Content-Length: {len(frame)}\r\n\r\n".encode())
                 self.wfile.write(frame)
                 self.wfile.write(b"\r\n")
-        except (CLIENT_DISCONNECT_ERRORS, TimeoutError, OSError):
+        except STREAM_DISCONNECT_ERRORS:
             pass
         finally:
             printer.camera.unsubscribe(event)

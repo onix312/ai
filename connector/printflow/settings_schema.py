@@ -391,6 +391,7 @@ META.update({
     "quiet_from": ("telegram", "Тихие часы: начало", {"max_len": 8}),
     "quiet_to": ("telegram", "Тихие часы: конец", {"max_len": 8}),
     "digest_time": ("telegram", "Время дневного дайджеста", {"max_len": 8}),
+    "evening_chart_time": ("telegram", "Вечерний отчёт-картинка: время", {"max_len": 8}),
     "weekly_report_day": ("telegram", "Еженедельный отчёт: день недели", {"min": 0, "max": 6}),
     "weekly_report_time": ("telegram", "Еженедельный отчёт: время", {"max_len": 8}),
     "notify_complete": ("telegram", "Уведомлять о завершении печати", {}),
