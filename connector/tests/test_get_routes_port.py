@@ -83,7 +83,8 @@ class DispatcherShrinksTests(unittest.TestCase):
         for line in API_SOURCE.splitlines():
             if re.search(r"if path (==|in )", line):
                 count += len(re.findall(r'"(/api/[^"]+)"', line))
-        self.assertLessEqual(count, 244,
+        # 18.4: +1 за очередь хотелок GET /api/wish/queue (в справке 245).
+        self.assertLessEqual(count, 245,
                              "if-цепочек в api.py больше, чем записано в справке")
 
 

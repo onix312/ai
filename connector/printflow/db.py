@@ -408,6 +408,19 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # Цветной маркер склада на карточках (идея 20); пусто — цвет по виду.
         ("color", "TEXT DEFAULT ''"),
     ],
+    "statuses": [
+        # 18.3: переходы как данные. Пусто — штатные 8 живут по жёсткой карте
+        # ORDER_TRANSITIONS в repo.py; заполнено — JSON-список id, куда из
+        # статуса можно шагнуть. Свой статус без списка — тупик, пока мастер
+        # не свяжет этап с соседями в редакторе.
+        ("next_ids", "TEXT DEFAULT ''"),
+    ],
+    "wishes": [
+        # 18.4: очередь хотелок. source — где поймали (лично/чат), link —
+        # найденная модель (URL или файл), чтобы «нашёл» не жил в голове.
+        ("link", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT ''"),
+    ],
 }
 
 SCHEMA = """
@@ -781,6 +794,7 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_number ON orders(number);
+CREATE INDEX IF NOT EXISTS idx_orders_due ON orders(due);
 
 CREATE TABLE IF NOT EXISTS order_items (
     id TEXT PRIMARY KEY,
