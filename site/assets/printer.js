@@ -1992,6 +1992,58 @@ function fillPrintModal(path) {
   }
   openModal('print_modal');
 }
+/* Катушка задания (17.0.26): выбор хранится на самом задании, а не только
+   в модалке запуска. Пустой выбор — «определить по AMS», как раньше. */
+let jobSpoolTarget = '';
+function spoolOptionLabel(s) {
+  const grams = Math.round(num(s.remaining_grams));
+  const where = s.printer_id ? (s.ams_slot !== '' && s.ams_slot != null ? ` · AMS ${num(s.ams_slot) + 1}` : ' · на принтере') : '';
+  return `${s.material || 'пластик'} ${s.color_name || ''} · ${grams} г${where}`.trim();
+}
+function openJobSpool(jobId) {
+  const job = (PF.state.jobs.queue || []).find((x) => x.id === jobId)
+    || (PF.state.jobs.history || []).find((x) => x.id === jobId);
+  if (!job) return fail(new Error('Задание не найдено в текущем списке'));
+  jobSpoolTarget = job.id;
+  $('job_spool_sub').textContent = (job.name || job.file || 'Задание')
+    + (num(job.est_grams) ? ` · на плиту нужно ~${nfmt(job.est_grams)} г` : '');
+  const options = (PF.state.spools || []).filter((s) => !num(s.archived));
+  $('jsj_spool').innerHTML = '<option value="">Определить по AMS при завершении</option>'
+    + options.map((s) => `<option value="${esc(s.id)}">${esc(spoolOptionLabel(s))}</option>`).join('');
+  $('jsj_spool').value = job.spool_id || '';
+  jobSpoolInfo();
+  openModal('job_spool_modal');
+}
+function jobSpoolInfo() {
+  const id = $('jsj_spool').value;
+  const spool = id ? (PF.state.spools || []).find((s) => s.id === id) : null;
+  const job = (PF.state.jobs.queue || []).find((x) => x.id === jobSpoolTarget);
+  const need = num(job && job.est_grams);
+  const info = $('jsj_info');
+  if (!spool) {
+    info.hidden = true;
+    return;
+  }
+  const have = num(spool.remaining_grams);
+  const short = need > 0 && have + 5 < need;
+  $('jsj_info_text').textContent = short
+    ? `На катушке ${nfmt(have)} г, а на задание нужно ~${nfmt(need)} г — не хватает ${nfmt(need - have)} г`
+    : `Хватит: на катушке ${nfmt(have)} г${need > 0 ? `, на задание нужно ~${nfmt(need)} г` : ''}`;
+  info.hidden = false;
+  info.classList.toggle('warn', short);
+}
+async function saveJobSpool() {
+  if (!jobSpoolTarget) return;
+  try {
+    const res = await post('/api/jobs/spool',
+      { id: jobSpoolTarget, spool_id: $('jsj_spool').value || '' });
+    closeModal('job_spool_modal');
+    if (res && res.warning) toast('Катушка выбрана', res.warning, 'warn');
+    else toast('Катушка задания сохранена');
+    PF.refreshCore();
+  } catch (e) { fail(e); }
+}
+
 function printPayload() {
   const mapping = $('pj_ams_mapping').value.split(',').map((x) => parseInt(x, 10)).filter((x) => Number.isFinite(x));
   return {
@@ -2406,6 +2458,8 @@ function bind() {
         .then(() => { toast('Копия в очереди'); PF.refreshCore(); }).catch(fail);
       return;
     }
+    const jsp = e.target.closest('[data-job-spool]');
+    if (jsp) { openJobSpool(jsp.dataset.jobSpool); return; }
     const noauto = e.target.closest('[data-job-noauto]');
     if (noauto) {
       const job = (PF.state.jobs.queue || []).find((x) => x.id === noauto.dataset.jobNoauto);
@@ -2681,6 +2735,8 @@ function bind() {
     } catch (e) { fail(e); }
   });
 
+  $('job_spool_save').addEventListener('click', saveJobSpool);
+  $('jsj_spool').addEventListener('change', jobSpoolInfo);
   $('queue_add').addEventListener('click', openJob);
   $('queue_next').addEventListener('click', startNextJob);
   $('jf_local_file').addEventListener('change', (e) => {

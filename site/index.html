@@ -4200,6 +4200,16 @@
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" id="pj_queue">В очередь</button><button class="btn" type="button" data-close="print_modal">Отмена</button><button class="btn primary" type="button" id="pj_start">Печатать сейчас</button></div>
 </form></dialog>
 
+<dialog class="modal narrow" id="job_spool_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Пластик задания</span><h2>Катушка для этой плиты</h2><p id="job_spool_sub">Видно до старта: чем печатается задание и хватит ли граммов.</p></div><button class="icon-btn" type="button" data-close="job_spool_modal">×</button></div>
+ <div class="modal-body">
+  <label class="field"><span>Катушка со склада</span><select id="jsj_spool"><option value="">Определить по AMS при завершении</option></select></label>
+  <div class="notice" id="jsj_info" hidden><span>ℹ</span><span id="jsj_info_text"></span></div>
+  <p class="hint">Выбор хранится на задании: пластик спишется с этой катушки, даже если в AMS к финишу стоит другая. Пустой выбор — прежнее поведение, катушка берётся из активного слота AMS.</p>
+ </div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="job_spool_modal">Отмена</button><button class="btn primary" type="button" id="job_spool_save">Сохранить</button></div>
+</form></dialog>
+
 <dialog class="modal narrow" id="link_order_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Печать и заказ</span><h2 id="link_order_title">Привязать печать к заказу</h2><p id="link_order_sub" class="muted"></p></div><button class="icon-btn" type="button" data-close="link_order_modal">×</button></div>
  <div class="modal-body">
