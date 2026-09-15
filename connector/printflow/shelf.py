@@ -24,6 +24,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from . import DEFAULT_PORT
 from .accounting import Accounting, num, uid
 from .config import now_iso
 from .db import Database
@@ -1258,7 +1259,7 @@ class Shelf:
 
     # ------------------------------------------------------------- QR-ценник
     def qr_link(self, item_id: str, host: str = "", public_url: str = "",
-                listen_port: int = 8080) -> dict:
+                listen_port: int = DEFAULT_PORT) -> dict:
         """URL страницы позиции для QR-ценника (телефон в той же сети).
 
         Раньше подставлялся Host текущего запроса — если панель открыта как

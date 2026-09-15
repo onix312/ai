@@ -191,9 +191,15 @@ class LauncherWindow:
         for child in self.links.winfo_children():
             child.destroy()
         port = self.current_port()
+        # Код ведёт на кассу, а не на панель: QR показывают, чтобы поднять кассу
+        # на телефоне, — панель и так открыта на этом компьютере.
         urls = [f"http://localhost:{port}/"]
+        cashier = f"http://localhost:{port}/cashier.html"
         if self.lan_var.get():
-            urls += [f"http://{ip}:{port}/" for ip in pf.local_ips()]
+            ips = pf.local_ips()
+            urls += [f"http://{ip}:{port}/" for ip in ips]
+            if ips:
+                cashier = f"http://{ips[0]}:{port}/cashier.html"
         for url in urls:
             link = ttk.Label(self.links, text=url, style="Link.TLabel", cursor="hand2")
             link.pack(anchor="w")
@@ -202,12 +208,14 @@ class LauncherWindow:
             self.hint.configure(text="Сетевой адрес не определился: проверьте Wi-Fi. "
                                      "Панель на этом компьютере всё равно работает.")
         elif self.lan_var.get():
-            self.hint.configure(text="Наведите камеру телефона на код справа. "
-                                     "Телефон должен быть в той же Wi-Fi сети.")
+            self.hint.configure(text="Касса на телефоне: код справа или адрес "
+                                     + cashier + " — в приложении хватит кнопки "
+                                     "«Найти сервер в сети». Телефон должен быть в той "
+                                     "же Wi-Fi сети.")
         else:
             self.hint.configure(text="Режим «только этот компьютер»: "
                                      "с телефона зайти нельзя.")
-        self.draw_qr(urls[-1] if len(urls) > 1 else urls[0])
+        self.draw_qr(cashier)
 
     def draw_qr(self, url: str) -> None:
         if url == self.qr_url:
@@ -298,7 +306,7 @@ class LauncherWindow:
         argv = [sys.executable, str(pf.ROOT / "pf.py"), command]
         if command == "install":
             # Автозапуск должен повторять выбранные в окне порт и режим сети,
-            # а не молча возвращаться к 8080/доступу по LAN.
+            # а не молча возвращаться к порту по умолчанию и доступу по LAN.
             argv += ["--port", str(self.current_port())]
             if not self.lan_var.get():
                 argv.append("--local")

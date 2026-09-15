@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import plistlib
+import re
 import shutil
 import socket
 import subprocess
@@ -39,7 +40,21 @@ ENTRYPOINT = CONNECTOR / "printflow_connector.py"
 SPEC_FILE = CONNECTOR / "pyinstaller.spec"
 
 MIN_PYTHON = (3, 10)
-DEFAULT_PORT = 8080
+# Порт по умолчанию — 8765. Это тот же номер, что написан в подсказке экрана
+# выбора сервера в мобильной кассе и в приложении пульта, и он же занят UDP-маяком
+# автопоиска (`connector/printflow/discovery.py`). Пока лаунчер слушал 8080, а
+# касса показывала 8765, «касса не подключается» была не ошибкой кассира, а
+# расхождением двух чисел в одной системе.
+DEFAULT_PORT = 8765
+# Порты, на которых лаунчер узнаёт «свой» сервер: текущий, старый (8080 —
+# установки до 17.0.27) и те, что встречаются в подсказках двух приложений.
+PORT_CANDIDATES = (8765, 8080, 8766, 8790, 8000, 9000)
+# UDP-порт маяка автопоиска: по нему телефон находит сервер, не зная адреса.
+DISCOVERY_PORT = 8765
+# Что открывать с телефона: путь → как это называется владельцу.
+PHONE_PAGES = (("/", "панель владельца"),
+               ("/cashier.html", "касса на телефоне"),
+               ("/pult", "пульт цеха"))
 APP_NAME = "PrintFlow"
 
 IS_WINDOWS = os.name == "nt"
@@ -337,11 +352,222 @@ def clear_pid() -> None:
 
 
 def running_port() -> int | None:
-    """Найти порт работающего PrintFlow: сначала обычный, потом соседние."""
-    for port in [DEFAULT_PORT, *range(DEFAULT_PORT + 1, DEFAULT_PORT + 11), 8000, 9000]:
+    """Найти порт работающего PrintFlow: сначала «свой», потом соседние.
+
+    Порядок важен для владельца: если сервер поднят на порту из автозапуска,
+    показывать надо его, а не первый свободный. 8080 в списке остаётся столько
+    же, сколько живут установки, сделанные до 17.0.27: обновление лаунчера не
+    должно «терять» работающую кассу.
+    """
+    for port in port_candidates():
         if port_busy(port) and health(port):
             return port
     return None
+
+
+def port_candidates() -> list[int]:
+    """Порты для поиска своего сервера — без повторов, в осмысленном порядке."""
+    ordered: list[int] = []
+    for port in (saved_port(), DEFAULT_PORT, *range(DEFAULT_PORT + 1, DEFAULT_PORT + 5),
+                 *PORT_CANDIDATES):
+        if port and 0 < port < 65536 and port not in ordered:
+            ordered.append(port)
+    return ordered
+
+
+def saved_port() -> int | None:
+    """Порт, записанный в конфигурации автозапуска (`pf.py install --port N`)."""
+    try:
+        port = int(load_autostart_config().get("port") or 0)
+    except Exception:
+        return None
+    return port if 0 < port < 65536 else None
+
+
+def resolve_port(requested: int | None = None) -> int:
+    """Какой порт брать при запуске: явный → из автозапуска → обычный.
+
+    Без этого `pf.py install --port 9000` и следующий `pf.py` поднимали сервер
+    на разных портах: ярлык вёл на 9000, а консоль — на 8080. Теперь порт
+    установки считается «своим», пока владелец не скажет иначе.
+    """
+    if requested:
+        return int(requested)
+    return saved_port() or DEFAULT_PORT
+
+
+def port_owner(port: int) -> str:
+    """«Кто занял порт» одной строкой: имя процесса и его номер.
+
+    Нужно ровно в тот момент, когда владелец видит «порт занят другой
+    программой» и не знает, что закрывать. Пустая строка — определить не удалось
+    (нет прав, нет утилиты): тогда честно скажем «не удалось определить».
+    """
+    if IS_WINDOWS:
+        try:
+            listing = subprocess.run(["netstat", "-ano", "-p", "tcp"], capture_output=True,
+                                     text=True, encoding="cp866", errors="replace",
+                                     timeout=8).stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        pids = _pids_from_netstat(listing or "", port)
+        for pid in pids:
+            try:
+                tasks = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                       capture_output=True, text=True, encoding="cp866",
+                                       errors="replace", timeout=8).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            name = _name_from_tasklist(tasks or "")
+            if name:
+                return f"{name} (pid {pid})"
+        return ""
+    for command in (["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                    ["ss", "-ltnp", f"sport = :{port}"]):
+        try:
+            listing = subprocess.run(command, capture_output=True, text=True,
+                                     errors="replace", timeout=8).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        owner = _owner_from_listing(listing or "")
+        if owner:
+            return owner
+    return ""
+
+
+def _pids_from_netstat(text: str, port: int) -> list[int]:
+    """PID слушающих процессов по выводу `netstat -ano`. Разбор — отдельно от сети."""
+    pids: list[int] = []
+    marker = f":{port}"
+    for line in text.splitlines():
+        parts = line.split()
+        # «TCP  0.0.0.0:8765  0.0.0.0:0  LISTENING  12345»
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        if "LISTEN" not in parts[3].upper():
+            continue
+        local = parts[1]
+        if not (local.endswith(marker) or f"{marker}]" in local):
+            continue
+        pid = parts[-1]
+        if pid.isdigit() and int(pid) not in pids:
+            pids.append(int(pid))
+    unique: list[int] = []
+    for pid in pids:
+        if pid and pid not in unique:
+            unique.append(pid)
+    return unique
+
+
+def _name_from_tasklist(text: str) -> str:
+    """Имя процесса из вывода `tasklist /NH`: первая колонка строки."""
+    for line in text.splitlines():
+        fields = line.strip().split()
+        if fields and fields[0].lower().endswith(".exe"):
+            return fields[0]
+    return ""
+
+
+def _owner_from_listing(text: str) -> str:
+    """«имя (pid N)» из вывода lsof или ss — для Linux и macOS.
+
+    У lsof имя и pid стоят первыми колонками, у ss — в хвосте строки
+    (`users:(("python3",pid=4321,fd=3))`), а первая колонка занята состоянием
+    сокета. Общий разбор здесь не годится: «LISTEN (pid 4321)» бесполезнее, чем
+    пустая строка, поэтому имя берём из кавычек, если они есть.
+    """
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        quoted = re.search(r'"([^"]{1,64})"', line)
+        pid = re.search(r"pid=(\d+)", line)
+        if quoted is not None:
+            name = quoted.group(1)
+            if pid is not None:
+                return f"{name} (pid {pid.group(1)})"
+            continue
+        fields = line.split()
+        if len(fields) >= 2 and fields[1].isdigit() and not fields[0].isdigit():
+            return f"{fields[0]} (pid {fields[1]})"
+    return ""
+
+
+def firewall_state(port: int) -> dict:
+    """Разрешён ли порт во входящих правилах брандмауэра.
+
+    Именно это правило (а не «Wi-Fi не тот») чаще всего объясняет «телефон не
+    видит сервер». Проверка необязательная: если система не дала посмотреть
+    правила, возвращаем ``known=False`` и молчим — пугать владельца нечем.
+    """
+    if IS_WINDOWS:
+        fix = (f'netsh advfirewall firewall add rule name="PrintFlow {port}" '
+               f'dir=in action=allow protocol=TCP localport={port}')
+    elif IS_MACOS:
+        fix = ("Системные настройки → Сеть → Брандмауэр → Параметры: "
+               "разрешить входящие для Python")
+    else:
+        fix = (f"sudo ufw allow {port}/tcp   (или: "
+               f"sudo firewall-cmd --add-port={port}/tcp --permanent)")
+    if not IS_WINDOWS:
+        return {"known": False, "allowed": None, "fix": fix}
+    try:
+        result = subprocess.run(["netsh", "advfirewall", "firewall", "show", "rule",
+                                 "dir=in", "status=enabled"],
+                                capture_output=True, text=True, encoding="cp866",
+                                errors="replace", timeout=8)
+    except (OSError, subprocess.SubprocessError):
+        return {"known": False, "allowed": None, "fix": fix}
+    allowed = firewall_allows(result.stdout or "", port)
+    return {"known": allowed is not None, "allowed": allowed, "fix": fix}
+
+
+def firewall_allows(text: str, port: int) -> bool | None:
+    """Разбор вывода `netsh advfirewall firewall show rule`: есть ли разрешение.
+
+    None — ни одного разбираемого правила (чужая локаль, другой файрвол):
+    «неизвестно» честнее, чем «запрещено».
+    """
+    if not text.strip():
+        return None
+    seen = False
+    allowed = False
+    for block in re.split(r"\n\s*\n", text):
+        fields: dict[str, str] = {}
+        for line in block.splitlines():
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            fields[key.strip().lower()] = value.strip().lower()
+        port_field = fields.get("localport") or fields.get("локальный порт")
+        if port_field is None:
+            continue
+        seen = True
+        enabled = fields.get("enabled") or fields.get("включено") or ""
+        action = fields.get("action") or fields.get("действие") or ""
+        protocol = fields.get("protocol") or fields.get("протокол") or ""
+        if not enabled.startswith(("yes", "да", "true", "включ")):
+            continue
+        if not action.startswith(("allow", "разреш")):
+            continue
+        if protocol and not protocol.startswith(("tcp", "any", "любой")):
+            continue
+        if _port_field_matches(port_field, port):
+            allowed = True
+    return allowed if seen else None
+
+
+def _port_field_matches(value: str, port: int) -> bool:
+    """`Локальный порт: 8765`, `8000-9000, 8765` → попадает ли в них порт."""
+    for chunk in value.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if chunk.isdigit() and int(chunk) == port:
+            return True
+        if "-" in chunk:
+            start, _, end = chunk.partition("-")
+            if start.isdigit() and end.isdigit() and int(start) <= port <= int(end):
+                return True
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────── баннер
@@ -356,8 +582,18 @@ def qr_lines(url: str) -> list[str]:
         return []
 
 
-def banner(host: str, port: int, ips: list[str], show_qr: bool = True) -> None:
+def banner(host: str, port: int, ips: list[str], show_qr: bool = True,
+           *, report: dict | None = None) -> None:
+    """Что видит владелец при запуске: адреса, телефон, куда смотреть дальше.
+
+    Баннер — единственное место, где владелец узнаёт адрес для телефона, поэтому
+    здесь три вещи, а не одна: панель на этом компьютере, страницы для телефона
+    (касса и пульт) и напоминание, что приложение находит сервер само. Строки
+    «данные», «журнал» и «остановить» стоят слева от QR-кода — так они не
+    разъезжаются по экрану и не мешают коду.
+    """
     version = app_version()
+    report = report or {}
     say()
     say("  " + rule("━"), Style.MAGENTA)
     say(f"  NOZZA · PrintFlow {version}", Style.BOLD, Style.MAGENTA)
@@ -365,37 +601,60 @@ def banner(host: str, port: int, ips: list[str], show_qr: bool = True) -> None:
     say("  " + rule("━"), Style.MAGENTA)
     say()
 
-    phone_url = f"http://{ips[0]}:{port}/" if ips else f"http://localhost:{port}/"
-    lines = [
-        (Style.paint("  Этот компьютер", Style.BOLD)),
-        f"    {Style.paint(f'http://localhost:{port}/', Style.CYAN)}",
-    ]
-    if host in ("0.0.0.0", "::"):
+    local_url = f"http://localhost:{port}/"
+    lan = host in ("0.0.0.0", "::")
+    urls = report.get("urls") or phone_urls(port, ips)
+    phone_url = urls.get("kassa") or f"http://localhost:{port}/"
+
+    lines = [f"  {Style.paint('Панель на этом компьютере', Style.BOLD)}",
+             f"    {Style.paint(local_url, Style.CYAN)}"]
+    if lan and ips:
         lines.append("")
-        lines.append(Style.paint("  Телефон и планшет в той же Wi-Fi сети", Style.BOLD))
-        if ips:
-            for ip in ips:
-                lines.append(f"    {Style.paint(f'http://{ip}:{port}/', Style.CYAN)}")
+        lines.append(f"  {Style.paint('Телефон и планшет в той же Wi-Fi сети', Style.BOLD)}")
+        lines.append(f"    касса  {Style.paint(urls['kassa'], Style.CYAN)}")
+        lines.append(f"    пульт  {Style.paint(urls['pult'], Style.CYAN)}")
+        if len(ips) > 1:
+            extra = ", ".join(ips[1:])
+            lines.append(f"    {Style.paint(f'другие адреса: {extra}', Style.DIM)}")
+        lines.append("")
+        lines.append(f"    {Style.paint('Адрес вводить не нужно:', Style.DIM)} в приложении "
+                     f"кассы есть «Найти сервер в сети»")
+        lines.append(f"    {Style.paint(f'Сервер объявляет себя по UDP {DISCOVERY_PORT}', Style.DIM)}")
+        apk = report.get("apk") or {}
+        if apk.get("available"):
+            apk_url = f"http://{ips[0]}{apk['url']}"
+            apk_note = f"v{apk.get('version') or '?'} · {apk.get('size_mb', 0)} МБ"
+            lines.append(f"    приложение: {Style.paint(apk_url, Style.CYAN)}"
+                         f"  {Style.paint(apk_note, Style.DIM)}")
         else:
-            lines.append(Style.paint("    сеть не определилась — проверьте Wi-Fi", Style.YELLOW))
+            lines.append("    " + Style.paint(
+                "приложения кассы на сервере нет — собрать: ./scripts/android-build.sh",
+                Style.DIM))
+    elif lan:
+        lines.append("")
+        lines.append(f"  {Style.paint('Сеть не определилась — телефон не подключится', Style.YELLOW)}")
+        lines.append(f"    {Style.paint('подключите Wi-Fi или кабель и запустите снова', Style.DIM)}")
     else:
         lines.append("")
-        lines.append(Style.paint("  Режим «только этот компьютер»", Style.YELLOW))
-        lines.append(Style.paint("    по сети зайти нельзя — запустите без --local", Style.DIM))
+        lines.append(f"  {Style.paint('Режим «только этот компьютер»', Style.YELLOW)}")
+        lines.append(f"    {Style.paint('по сети зайти нельзя — запустите без --local', Style.DIM)}")
     lines.append("")
-    lines.append(f"  {Style.paint('Данные:', Style.DIM)} {DATA_DIR}")
-    lines.append(f"  {Style.paint('Остановить:', Style.DIM)} Ctrl+C")
+    lines.append(f"  {Style.paint('Данные:', Style.DIM)}     {DATA_DIR}")
+    lines.append(f"  {Style.paint('Журнал:', Style.DIM)}     {LOG_FILE}")
+    lines.append(f"  {Style.paint('Остановить:', Style.DIM)} Ctrl+C"
+                 f"   {Style.paint('(или закрыть окно)', Style.DIM)}")
+    lines.append(f"  {Style.paint('Адрес ещё раз:', Style.DIM)} python pf.py net")
 
-    art = qr_lines(phone_url) if (show_qr and ips and host in ("0.0.0.0", "::")) else []
+    art = qr_lines(phone_url) if (show_qr and ips and lan) else []
     if art:
-        pad = max(len(line) for line in lines) if lines else 0
+        pad = max(len(strip_ansi(line)) for line in lines)
         for index in range(max(len(art), len(lines))):
             left = lines[index] if index < len(lines) else ""
             visible = len(strip_ansi(left))
             right = art[index] if index < len(art) else ""
             print(left + " " * max(2, pad - visible + 2) + right, flush=True)
         say()
-        say(f"  Наведите камеру телефона на код → {phone_url}", Style.DIM)
+        say(f"  Камера телефона → касса: {Style.paint(phone_url, Style.CYAN)}", Style.DIM)
     else:
         for line in lines:
             print(line, flush=True)
@@ -415,29 +674,291 @@ def strip_ansi(text: str) -> str:
     return "".join(out)
 
 
+# ─────────────────────────────────────────── телефон: адреса, поиск, файрвол
+def phone_urls(port: int, ips: list[str] | None = None) -> dict:
+    """Адреса для телефона: панель, касса, пульт — по каждому сетевому IP."""
+    addresses = list(ips if ips is not None else local_ips())
+    return {
+        "ips": addresses,
+        "primary": addresses[0] if addresses else "",
+        "manual": f"{addresses[0]}:{port}" if addresses else "",
+        "panel": f"http://{addresses[0]}:{port}/" if addresses else "",
+        "kassa": f"http://{addresses[0]}:{port}/cashier.html" if addresses else "",
+        "pult": f"http://{addresses[0]}:{port}/pult" if addresses else "",
+        "by_ip": {ip: {path: f"http://{ip}:{port}{path}" for path, _ in PHONE_PAGES}
+                  for ip in addresses},
+    }
+
+
+def apk_info(target: str = "kassa") -> dict:
+    """Что лежит на раздачу телефону: APK кассы из `site/app` (или пусто).
+
+    Импорт пакета коннектора — как в `qr_lines`: только когда он реально нужен,
+    чтобы лаунчер оставался работоспособен и без окружения.
+    """
+    empty = {"available": False, "url": "", "file": "", "size_mb": 0.0,
+             "size_bytes": 0, "version": ""}
+    try:
+        sys.path.insert(0, str(CONNECTOR))
+        from printflow import app_shell
+
+        return dict(empty, **app_shell.status(target=target))
+    except Exception:
+        return empty
+
+
+def auto_discovery(timeout: float = 0.9) -> list[dict]:
+    """Проверка автопоиска вживую: спросить «кто здесь?» и посмотреть ответы.
+
+    Так владелец видит на ПК ровно то, что увидит телефон нажатием кнопки
+    «Найти сервер в сети», — вместо надежды «должно работать».
+    """
+    try:
+        sys.path.insert(0, str(CONNECTOR))
+        from printflow import discovery
+
+        return discovery.probe(port=DISCOVERY_PORT, timeout=timeout)
+    except Exception:
+        return []
+
+
+def json_requested(args: argparse.Namespace) -> bool:
+    """Просили ли `--json`. Одна проверка на все команды: имя атрибута argparse
+    зависит от того, как объявлен флаг, и `getattr` здесь дешевле, чем шишка."""
+    return bool(getattr(args, "json", None))
+
+
+def discovery_bases(hits: list[dict]) -> list[str]:
+    """Адреса из ответов маяка — по одному на порт, без «проверочных» адресов.
+
+    Когда `pf.py` сам спрашивает «кто здесь?», он отправляет запрос и на
+    127.0.0.1, и в сеть: без фильтра в ответе оказывались оба адреса, и владелец
+    видел «найдено: 127.0.0.1, 169.254.0.21» вместо своего 192.168.x.x. Телефону
+    нужен адрес в локальной сети, поэтому loopback и APIPA отбрасываем, если
+    есть что-то лучше.
+    """
+    usable = [hit for hit in hits
+              if hit.get("base") and not hit["base"].startswith("http://127.")
+              and not hit["base"].startswith("http://169.254.")]
+    chosen = usable or list(hits)
+    seen: dict[int, str] = {}
+    for hit in chosen:
+        port = int(hit.get("port") or 0)
+        seen.setdefault(port, str(hit.get("base") or ""))
+    return [base for base in seen.values() if base]
+
+
+def net_report(port: int | None = None, *, deep: bool = True) -> dict:
+    """Всё, что нужно, чтобы телефон нашёл этот сервер. Готово и к `--json`.
+
+    Один сборщик данных на баннер запуска, команду `net`, `status` и `doctor`:
+    иначе они начинают расходиться в мелочах («в баннере адрес один, в
+    диагностике другой»), а именно по этому выводу владелец и настраивает кассу.
+    """
+    running = running_port()
+    port = int(port or running or resolve_port(None))
+    ips = local_ips()
+    urls = phone_urls(port, ips)
+    active = health(port) if port else None
+    # Достижимость по сетевому адресу проверяем сразу: /api/health отвечает и
+    # тогда, когда сервер слушает только 127.0.0.1, а телефон в этом случае не
+    # подключится никогда. Свой же LAN-IP — честная проверка «как у телефона».
+    lan_reachable = bool(ips and active and any(
+        probe_tcp(ip, port, timeout=1.2) for ip in ips))
+    report = {
+        "port": port,
+        "running": bool(active),
+        "version": str((active or {}).get("version") or ""),
+        "lan_reachable": lan_reachable,
+        "local_only": bool(active and ips and not lan_reachable),
+        "urls": urls,
+        "apk": apk_info("kassa"),
+        "apk_pult": apk_info("pult"),
+        "discovery": [],
+        "checks": [],
+    }
+    checks = report["checks"]
+
+    def add(state: str, text: str, hint: str = "") -> None:
+        checks.append({"state": state, "text": text, "hint": hint})
+
+    if not ips:
+        add("bad", "У компьютера нет сетевого адреса",
+            "Подключите Wi-Fi или кабель: телефон входит по локальной сети.")
+    else:
+        add("ok", f"Адреса компьютера: {', '.join(ips)}")
+    if active:
+        add("ok", f"Сервер отвечает на порту {port} (версия {report['version']})")
+        if report["local_only"]:
+            add("bad", "Сервер слушает только этот компьютер — телефон не подключится",
+                "Запустите без --local: python pf.py")
+    elif port_busy(port):
+        owner = port_owner(port)
+        add("bad", f"Порт {port} занят чужой программой" + (f": {owner}" if owner else ""),
+            f"Возьмите свободный: python pf.py --port {free_port(port + 1)}")
+    else:
+        add("warn", f"Сервер не запущен (порт {port} свободен)",
+            "Запуск: python pf.py")
+
+    # Достижимость по сетевому адресу: проверяем свой же LAN-IP, а не localhost.
+    # Если тут не отвечает — привязка к localhost или режет файрвол, и никакие
+    # адреса в приложении уже не помогут.
+    if ips and active:
+        add("ok" if lan_reachable else "bad",
+            f"Порт {port} отвечает по сетевому адресу {urls['primary']}"
+            if lan_reachable else
+            f"Порт {port} не отвечает по сетевому адресу {urls['primary']}",
+            "" if lan_reachable else
+            "Запустите без --local и разрешите порт в брандмауэре")
+
+    if deep and active:
+        report["discovery"] = auto_discovery()
+        if report["discovery"]:
+            found = ", ".join(discovery_bases(report["discovery"]))
+            add("ok", f"Автопоиск работает (UDP {DISCOVERY_PORT}): {found}",
+                "В приложении кассы достаточно «Найти сервер в сети».")
+        else:
+            add("warn", f"Автопоиск (UDP {DISCOVERY_PORT}) не ответил",
+                "Приложению придётся перебирать адреса или вводить их вручную; "
+                f"разрешите UDP {DISCOVERY_PORT} в брандмауэре.")
+        report["firewall"] = firewall_state(port)
+        if report["firewall"].get("allowed") is True:
+            add("ok", f"В брандмауэре есть разрешение для порта {port}")
+        elif report["firewall"].get("allowed") is False:
+            add("bad", f"В брандмауэре нет разрешения для порта {port}",
+                str(report["firewall"].get("fix") or ""))
+    elif deep:
+        # Сервер не отвечает — правила брандмауэра всё равно показываем: именно
+        # с них начинается «телефон не видит ПК», когда сервер ещё не поднят.
+        report["firewall"] = {"known": False, "allowed": None,
+                              "fix": str(firewall_state(port).get("fix") or "")}
+    return report
+
+
+def print_net_report(report: dict, show_qr: bool = True) -> None:
+    """Человеческий вывод отчёта: «что нажать на телефоне» и что проверить."""
+    port = report["port"]
+    urls = report["urls"]
+    running = report["running"]
+    say()
+    if running:
+        ok(f"Сервер работает: порт {port}"
+           + (f", версия {report['version']}" if report["version"] else ""))
+    else:
+        warn(f"Сервер сейчас не запущен (порт {port} закреплён за PrintFlow)")
+    say()
+
+    if urls["primary"]:
+        say("  Что открыть с телефона в той же Wi-Fi сети", Style.BOLD)
+        for ip in urls["ips"]:
+            say(f"    {Style.paint(ip, Style.BOLD)}")
+            for path, title in PHONE_PAGES:
+                url = urls["by_ip"][ip][path]
+                say(f"      {title:<18} {Style.paint(url, Style.CYAN)}")
+        say()
+        say("  Адрес для приложения кассы", Style.BOLD)
+        say(f"    {Style.paint(urls['manual'], Style.CYAN)}"
+            f"   {Style.paint('(или нажать «Найти сервер в сети»)', Style.DIM)}")
+        say()
+        apk = report["apk"]
+        if apk.get("available"):
+            version = str(apk.get("version") or "?")
+            apk_url = f"http://{urls['primary']}{apk['url']}"
+            size = f"({apk.get('size_mb', 0)} МБ)"
+            say(f"  Приложение кассы v{version}: {Style.paint(apk_url, Style.CYAN)}"
+                f"  {Style.paint(size, Style.DIM)}")
+        else:
+            say("  Приложения кассы на сервере нет — собрать на ПК: "
+                "./scripts/android-build.sh", Style.DIM)
+        say()
+    else:
+        warn("Сетевого адреса нет: телефон подключить не к чему")
+        say("    Подключите компьютер к Wi-Fi или кабелю и повторите.")
+        say()
+
+    say("  Проверки", Style.BOLD)
+    marks = {"ok": ("✓", Style.GREEN), "warn": ("⚠", Style.YELLOW),
+             "bad": ("✗", Style.RED)}
+    for check in report.get("checks", []):
+        mark, color = marks.get(check["state"], ("•", Style.DIM))
+        say(f"   {Style.paint(mark, color)} {check['text']}")
+        if check.get("hint"):
+            say(f"     {Style.paint(check['hint'], Style.DIM)}")
+    say()
+
+    if show_qr and urls["primary"] and running:
+        target = urls["kassa"] if report["discovery"] or not report["local_only"] else urls["panel"]
+        art = qr_lines(target)
+        if art:
+            say(f"  Наведите камеру телефона: {Style.paint(target, Style.CYAN)}")
+            for line in art:
+                print(line, flush=True)
+            say()
+    say(f"  {Style.paint('Адрес ещё раз:', Style.DIM)} python pf.py net")
+    if running and report.get("firewall", {}).get("allowed") is False:
+        say(f"  {Style.paint('Разрешить порт:', Style.DIM)} "
+            f"{report['firewall']['fix']}")
+    say()
+
+
+
 # ──────────────────────────────────────────────────────────────── команды
 def cmd_start(args: argparse.Namespace) -> int:
+    """Запустить сервер и показать владельцу, что с этим делать.
+
+    Три вещи, ради которых команда переписана: порт берётся из установки
+    (``resolve_port``), а не из «привычного» числа; при занятом порту сразу
+    видно, кто его занял («порт занят» без имени процесса бесполезно); живой
+    PrintFlow на другом порту — это тот же сервер, а не повод поднять второй
+    экземпляр в ту же базу (``--force`` отключает проверку осознанно).
+    """
     check_python_version()
     host = "127.0.0.1" if args.local else "0.0.0.0"
-    port = args.port
+    port = resolve_port(args.port)
+
+    # Живой PrintFlow ищем ДО занятия порта: если сервер уже работает на другом
+    # порту (старая установка на 8080, запуск из ярлыка с --port), второй
+    # экземпляр писал бы в ту же базу — это удвоенные задания и порча учёта.
+    already = running_port()
+    if already is not None and already != port and not getattr(args, "force", False):
+        version = str((health(already) or {}).get("version") or "").strip()
+        title = f"PrintFlow {version}" if version else "PrintFlow"
+        say()
+        ok(f"{title} уже работает на порту {already}")
+        say("    Второй сервер в ту же базу запускать нельзя.", Style.DIM)
+        say("    Остановить: python pf.py stop   ·   Другой порт: python pf.py --port N",
+            Style.DIM)
+        say_phone_hint(already, host)
+        if not args.no_browser:
+            webbrowser.open(f"http://localhost:{already}/")
+        return 0
 
     if port_busy(port):
         alive = health(port)
         if alive:
+            running = running_port() or port
             say()
-            ok(f"PrintFlow {alive.get('version', '')} уже работает на порту {port}")
-            say(f"    Открываю http://localhost:{port}/", Style.DIM)
+            ok(f"PrintFlow {alive.get('version', '')} уже работает на порту {running}")
+            say_phone_hint(running, host)
             if not args.no_browser:
-                webbrowser.open(f"http://localhost:{port}/")
+                webbrowser.open(f"http://localhost:{running}/")
             return 0
+        owner = port_owner(port)
         if args.auto_port:
             port = free_port(port + 1)
-            warn(f"Порт {args.port} занят другой программой — беру {port}")
+            warn(f"Порт {args.port} занят" + (f" ({owner})" if owner else "")
+                 + f" другой программой — беру {port}")
         else:
-            fail(f"Порт {port} занят другой программой")
-            say("    Свободный порт:  python pf.py start --auto-port")
-            say(f"    Или вручную:      python pf.py start --port {free_port(port + 1)}")
+            fail(f"Порт {port} занят" + (f": {owner}" if owner else " другой программой"))
+            if not owner:
+                say("    Определить занявший процесс не удалось (нет прав?)", Style.DIM)
+            say(f"    Свободный порт:  python pf.py --auto-port")
+            say(f"    Или вручную:     python pf.py --port {free_port(port + 1)}")
+            say(f"    Другой PrintFlow ищется сам: python pf.py status", Style.DIM)
             return 1
+
+    if port < 1024 and not IS_WINDOWS:
+        warn(f"Порт {port} меньше 1024 — на Linux/macOS нужны права администратора")
 
     python = interpreter(args.system)
     command = [str(python), str(ENTRYPOINT), "--host", host, "--port", str(port),
@@ -449,7 +970,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         return start_background(command, host, port, args)
 
     ips = local_ips() if host == "0.0.0.0" else []
-    banner(host, port, ips, show_qr=not args.no_qr)
+    # Баннер показывает то же, что и `pf.py net`: адреса для телефона и наличие
+    # APK. Собираем отчёт без глубоких проверок (они ждут файрвола и UDP), а
+    # файрвол спрашиваем один раз — он и есть причина «телефон не видит ПК».
+    report = {"urls": phone_urls(port, ips), "apk": apk_info("kassa"),
+              "firewall": firewall_state(port)}
+    banner(host, port, ips, show_qr=not args.no_qr, report=report)
+    if ips and report["firewall"].get("allowed") is False:
+        hint = report["firewall"]["fix"]
+        say(f"  {Style.paint('Брандмауэр:', Style.YELLOW)} порт {port} не разрешён — "
+            f"телефон может не подключиться")
+        say(f"    {hint}", Style.DIM)
+        say()
 
     process = subprocess.Popen(command, cwd=str(ROOT))
     write_pid(process.pid)
@@ -469,6 +1001,37 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 0
     finally:
         clear_pid()
+
+
+def say_phone_hint(port: int, host: str = "0.0.0.0") -> None:
+    """Короткая шпаргалка после старта: панель, касса и адрес для телефона."""
+    say(f"    Панель:     http://localhost:{port}/")
+    if host in ("0.0.0.0", "::"):
+        for ip in local_ips():
+            say(f"    Касса:      http://{ip}:{port}/cashier.html")
+            say(f"    Пульт:      http://{ip}:{port}/pult")
+            manual = f"{ip}:{port}"
+            note = f"Адрес для приложения: {manual} (или «Найти сервер в сети»)"
+            say(f"    {Style.paint(note, Style.DIM)}")
+    say(f"    {Style.paint('Подробнее о телефоне: python pf.py net', Style.DIM)}")
+
+
+def cmd_net(args: argparse.Namespace) -> int:
+    """«Как подключить телефон» — адреса, автопоиск, файрвол, APK.
+
+    Отдельная команда нужна потому, что адрес сервера требуется не один раз:
+    телефон купили позже, роутер выдал новый IP, кассир переустановил приложение.
+    Печатать для этого окно запуска заново — плохой совет (на нём висит сервер).
+    """
+    report = net_report(resolve_port(args.port))
+    if json_requested(args):
+        # Только JSON и ничего больше: вывод читают скрипты и панель, а
+        # заголовок с рамкой ломает разбор.
+        print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+        return 0 if (report["running"] and report["urls"]["primary"]) else 1
+    header("Телефон и планшет", "адреса, автопоиск, брандмауэр")
+    print_net_report(report, show_qr=not args.no_qr)
+    return 0 if (report["running"] and report["urls"]["primary"]) else 1
 
 
 def start_background(command: list[str], host: str, port: int, args: argparse.Namespace) -> int:
@@ -555,23 +1118,65 @@ def cmd_stop(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
+    """Что происходит сейчас: версия, порт, адреса, данные, автопоиск.
+
+    Раньше команда отвечала «работает / не работает». Этого мало: владелец
+    приходит сюда, когда «телефон не видит кассу», — значит в ответе должны быть
+    адреса для телефона и результат автопоиска, а не только номер порта.
+    """
+    if json_requested(args):
+        report = net_report(resolve_port(args.port))
+        pid = read_pid()
+        if pid:
+            report["pid"] = pid
+        print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+        return 0 if report["running"] else 1
+
     header("Состояние PrintFlow")
     port = running_port()
     if port is None:
         warn("Сервер не запущен")
-        say("    Запуск: python pf.py")
+        say("    Запуск:            python pf.py")
+        say("    Порт из установки: " + str(resolve_port(args.port)), Style.DIM)
+        say("    Автозапуск:        python pf.py install", Style.DIM)
         say()
         return 1
     info = health(port) or {}
     uptime = int(info.get("uptime") or 0)
     ok(f"Работает: версия {info.get('version', '?')}, порт {port}")
-    say(f"    Аптайм:     {uptime // 3600} ч {uptime % 3600 // 60} мин")
+    days, rest = divmod(uptime, 86400)
+    hours, rest = divmod(rest, 3600)
+    parts = []
+    if days:
+        parts.append(f"{days} дн")
+    if hours or days:
+        parts.append(f"{hours} ч")
+    parts.append(f"{rest // 60} мин")
+    say(f"    Аптайм:     {' '.join(parts)}")
     say(f"    Панель:     http://localhost:{port}/")
     for ip in local_ips():
-        say(f"    С телефона: http://{ip}:{port}/")
+        say(f"    Касса:      http://{ip}:{port}/cashier.html")
+        say(f"    Пульт:      http://{ip}:{port}/pult")
     pid = read_pid()
     if pid:
         say(f"    Процесс:    pid {pid}")
+    else:
+        say("    Процесс:    запущен не через pf.py (остановить — закрыть его окно)",
+            Style.DIM)
+    if DB_FILE.exists():
+        say(f"    База:       {DB_FILE.stat().st_size / 1048576:.1f} МБ — {DB_FILE}")
+    say(f"    Данные:     {DATA_DIR}")
+    saved = saved_port()
+    if saved and saved != port:
+        say(f"    Автозапуск настроен на порт {saved} — не совпадает с текущим",
+            Style.YELLOW)
+    found = auto_discovery(timeout=0.6)
+    if found:
+        bases = ", ".join(discovery_bases(found)) or found[0]["base"]
+        say(f"    Автопоиск:  работает — телефон найдёт сервер сам ({bases})")
+    else:
+        say("    Автопоиск:  не ответил (UDP " + str(DISCOVERY_PORT)
+            + ") — телефону придётся ввести адрес вручную", Style.YELLOW)
     say()
     return 0
 
@@ -671,23 +1276,34 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         pass
 
     say()
-    say("  Сеть", Style.BOLD)
-    ips = local_ips()
-    if ips:
-        for ip in ips:
-            ok(f"Адрес в сети: {ip}")
-    else:
-        warn("Локальный IP не определился — телефон не подключится")
-    port = args.port
-    active = health(port)
-    if active:
-        ok(f"PrintFlow отвечает на порту {port} (версия {active.get('version')})")
-    elif port_busy(port):
-        fail(f"Порт {port} занят другой программой")
-        say(f"      Свободный: {free_port(port + 1)}")
+    say("  Сеть и мобильная касса", Style.BOLD)
+    report = net_report(resolve_port(args.port))
+    for check in report["checks"]:
+        state = check["state"]
+        (ok if state == "ok" else warn if state == "warn" else fail)(check["text"])
+        if check.get("hint"):
+            say(f"      {check['hint']}", Style.DIM)
+        if state == "bad":
+            problems += 1
+    firewall = report.get("firewall") or {}
+    if firewall.get("allowed") is False:
+        fail(f"Брандмауэр не разрешает порт {report['port']} на вход")
+        say(f"      {firewall['fix']}")
         problems += 1
+    elif firewall.get("allowed") is True:
+        ok(f"Брандмауэр: порт {report['port']} разрешён")
+    apk = report.get("apk") or {}
+    if apk.get("available"):
+        version = apk.get("version") or "?"
+        ok(f"Приложение кассы на раздачу: v{version} · {apk.get('size_mb')} МБ")
     else:
-        ok(f"Порт {port} свободен")
+        warn("Сборки APK нет — телефону ставить нечего "
+             "(./scripts/android-build.sh на ПК)")
+    if report["urls"]["primary"]:
+        say(f"      Адрес для приложения: {report['urls']['manual']}", Style.DIM)
+        say(f"      Страница кассы:       {report['urls']['kassa']}", Style.DIM)
+        say("      Если касса не находит сервер: телефон и ПК должны быть в одной "
+            "сети, а гостевая Wi-Fi-сеть (изоляция клиентов) — не подходит.", Style.DIM)
 
     printers = read_printers()
     if printers:
@@ -1763,7 +2379,7 @@ def cmd_autostart(args: argparse.Namespace) -> int:
     action = args.autostart_action
     if action == "status":
         status = autostart_status()
-        if getattr(args, "json", False):
+        if json_requested(args):
             print(json.dumps(status, ensure_ascii=False, indent=2))
             return 0 if status["enabled"] and status["root_matches"] else 1
         header("Системный автозапуск PrintFlow")
@@ -2053,19 +2669,29 @@ def cmd_menu(args: argparse.Namespace) -> int:
 HELP = """
   ЗАПУСК
     python pf.py                    запустить панель (видна в локальной сети)
-    python pf.py app                нативное окно как у 1С/Photoshop (если установлен pywebview)
+    python pf.py app                нативное окно как у 1С/Photoshop (нужен pywebview)
+    python pf.py gui                окно управления вместо консоли (tkinter)
     python pf.py --local            только этот компьютер, без доступа по сети
     python pf.py --port 9000        другой порт
     python pf.py --background       запустить в фоне, консоль можно закрыть
-    python pf.py gui                окно управления вместо консоли (tkinter)
+
+  ТЕЛЕФОН И ПЛАНШЕТ
+    python pf.py net                адреса для кассы и пульта, QR, проверки
+    python pf.py status             что запущено: версия, порт, адреса, автопоиск
+    python pf.py status --json      то же машинночитаемо (для скриптов)
+    python pf.py --no-qr            запустить без QR-кода в консоли
+
+    Порт по умолчанию — 8765: он же в подсказке приложения кассы, и по нему
+    сервер находят кнопкой «Найти сервер в сети» (UDP-маяк, ничего вводить не
+    надо). После `pf.py install --port N` обычный запуск берёт порт установки.
 
   УПРАВЛЕНИЕ
-    python pf.py status             работает ли сервер, на каком порту
     python pf.py stop               остановить фоновый сервер
     python pf.py logs               последние строки журнала
+    python pf.py logs --lines 100   больше строк
 
   ОБСЛУЖИВАНИЕ
-    python pf.py doctor             диагностика: Python, база, сеть, принтеры
+    python pf.py doctor             диагностика: Python, база, сеть, касса, принтеры
     python pf.py backup             резервная копия базы
     python pf.py restore            восстановить базу из копии
     python pf.py update             обновиться из репозитория (с копией базы)
@@ -2080,14 +2706,26 @@ HELP = """
     python pf.py autostart repair   пересоздать конфигурацию после переноса папки
     python pf.py uninstall          убрать ярлыки и автозапуск (данные не трогаются)
     python pf.py build              автономная программа без Python (PyInstaller)
+
+  Если касса не находит сервер — начните с `python pf.py net`: там адрес для
+  телефона, проверка автопоиска и готовое правило для брандмауэра.
 """
 
 
 def cmd_help(args: argparse.Namespace) -> int:
     header(f"NOZZA · PrintFlow {app_version()}", "локальная система 3D-производства")
+    port = running_port()
+    if port:
+        ok(f"Сервер уже запущен: http://localhost:{port}/")
+        for ip in local_ips():
+            say(f"    Касса на телефоне: http://{ip}:{port}/cashier.html")
+    else:
+        say("  Сервер не запущен: python pf.py", Style.DIM)
     print(HELP)
     say(f"  Данные:     {DATA_DIR}", Style.DIM)
     say(f"  Окружение:  {VENV_DIR}", Style.DIM)
+    say(f"  Порт:       {resolve_port(getattr(args, 'port', None))}"
+        f"   {Style.paint('(python pf.py net — адреса для телефона)', Style.DIM)}")
     say()
     return 0
 
@@ -2106,14 +2744,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pf", add_help=False,
         description="PrintFlow — запуск и обслуживание локальной системы 3D-производства")
+    # choices здесь намеренно не заданы: argparse на незнакомую команду печатает
+    # английское «invalid choice» и стену вариантов. Проверяем сами — с
+    # подсказкой «похоже на status» (см. main).
     parser.add_argument("command", nargs="?", default="start",
-                        choices=["start", "service", "gui", "app", "menu", "stop", "status",
-                                 "doctor", "backup", "restore", "update", "deps", "build",
-                                 "install", "uninstall", "autostart", "logs", "help"])
+                        metavar="КОМАНДА",
+                        help="что сделать (python pf.py help — весь список)")
     parser.add_argument("autostart_action", nargs="?", default="status",
                         choices=["status", "enable", "disable", "repair", "verify"],
                         help="действие для команды autostart")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="порт панели")
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"порт панели (по умолчанию {DEFAULT_PORT}, "
+                             "а при установленном автозапуске — порт установки)")
     parser.add_argument("--local", action="store_true",
                         help="слушать только 127.0.0.1 (без доступа с телефона)")
     parser.add_argument("--background", action="store_true", help="запуск в фоне")
@@ -2121,9 +2763,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="сервисный режим: перезапускать коннектор при падении "
                              "(для XDG Autostart и папки Startup)")
     parser.add_argument("--json", action="store_true",
-                        help="статус автозапуска в JSON (для скриптов)")
+                        help="машиночитаемый вывод: status, net, autostart (для скриптов)")
     parser.add_argument("--auto-port", action="store_true",
                         help="занять следующий свободный порт, если основной занят")
+    parser.add_argument("--force", action="store_true",
+                        help="запустить второй сервер, даже если PrintFlow уже работает")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")
     parser.add_argument("--no-qr", action="store_true", help="не рисовать QR-код")
     parser.add_argument("--no-autostart", action="store_true",
@@ -2141,6 +2785,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {
     "start": cmd_start,
+    "net": cmd_net,
+    "phone": cmd_net,
     "service": cmd_service,
     "gui": cmd_gui,
     "app": cmd_app,
@@ -2161,16 +2807,46 @@ COMMANDS = {
 }
 
 
+def suggest_command(typed: str) -> str:
+    """Ближайшая команда к тому, что набрали: «statsu» → «status»."""
+    import difflib
+
+    matches = difflib.get_close_matches(str(typed), sorted(COMMANDS), n=1, cutoff=0.5)
+    return matches[0] if matches else ""
+
+
 def main(argv: list[str] | None = None) -> int:
     Style.setup()
     parser = build_parser()
-    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    raw = list(argv if argv is not None else sys.argv[1:])
+    try:
+        args = parser.parse_args(raw)
+    except SystemExit as exc:
+        # Ошибки значений (например, --startup-delay 301) argparse печатает сам;
+        # добавляем только человеческую строку «что дальше».
+        if exc.code == 2:
+            say()
+            say("  Проверьте команду и параметры: python pf.py help", Style.YELLOW)
+            say()
+        return 2
+    if args.command not in COMMANDS:
+        say()
+        fail(f"Не знаю команду «{args.command}»")
+        guess = suggest_command(args.command)
+        if guess:
+            say(f"    Похоже на «{guess}» — попробуйте: python pf.py {guess}", Style.DIM)
+        say("    Все команды: python pf.py help", Style.DIM)
+        say()
+        return 2
     if getattr(args, "want_help", False):
         return cmd_help(args)
     if not ENTRYPOINT.exists():
         fail(f"Не найден {ENTRYPOINT}")
         say("    Запускайте pf.py из папки репозитория PrintFlow.")
         return 1
+    # Порт решаем один раз для всех команд: явный --port → порт установки →
+    # обычный. Дальше по коду args.port читается как «тот самый порт».
+    args.port = resolve_port(getattr(args, "port", None))
     try:
         return COMMANDS[args.command](args)
     except KeyboardInterrupt:

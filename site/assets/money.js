@@ -361,7 +361,7 @@ async function openSpoolQr(spoolId) {
     ? '<div class="notice warn" style="margin-top:10px"><span>⚠</span><span>'
       + 'Ссылка для телефона не собралась: нет LAN-адреса. '
       + 'Запустите PrintFlow с доступом по сети (python pf.py) и укажите IP в '
-      + 'Настройки → Система → Адрес для QR, например http://192.168.1.50:8080</span></div>'
+      + 'Настройки → Система → Адрес для QR, например http://192.168.1.50:8765</span></div>'
     : (source === 'lan'
       ? '<small class="muted" style="display:block;margin-top:6px">Телефон должен быть в той же Wi-Fi сети.</small>'
       : '');

@@ -61,7 +61,7 @@
   function initContact(){
     var cfg=c();
     if(!el('city').value) el('city').value = cfg.city || 'Симферополь';
-    if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8080/order.html';
+    if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8765/order.html';
     var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
     var mark=el('mark'); if(mark) mark.src='../assets/brand/nozza-mark-'+id+'-white.svg';
   }
@@ -73,7 +73,7 @@
     }).join('');
   }
   function qr(){
-    var link = el('link').value || 'http://127.0.0.1:8080/order.html';
+    var link = el('link').value || 'http://127.0.0.1:8765/order.html';
     var box = el('qr');
     if (window.QR) box.innerHTML = QR.svg(link, { ecl: 'M', margin: 1 });
     else box.textContent = 'QR: ' + link;

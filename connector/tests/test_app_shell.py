@@ -478,7 +478,13 @@ class KotlinSourceTests(unittest.TestCase):
         self.assertIn("import java.util.concurrent.Callable", self.net)
         self.assertIn("val jobs: List<Callable<Unit>> = targets.map", self.net)
         self.assertNotIn("Runnable {", self.net)
-        self.assertIn("invokeAll(jobs, timeoutMs * 6L, TimeUnit.MILLISECONDS)", self.net)
+        # 17.0.27: потолок перебора больше не «шесть таймаутов на всё». Он был
+        # 4,2 с при 762 адресах и успевал проверить лишь треть одного порта —
+        # порты 8080 и 8790 не проверялись никогда. Теперь бюджет считается от
+        # числа адресов (см. ScannerCoverageTests ниже).
+        self.assertNotIn("timeoutMs * 6L", self.net)
+        self.assertIn("invokeAll(jobs, budgetMs(targets.size), TimeUnit.MILLISECONDS)",
+                      self.net)
         # 7-8) Notification.AudioAttributes не существует; Uri отдаёт канал
         self.assertNotIn("Notification.AudioAttributes", self.ring)
         self.assertIn("AudioAttributes.Builder()", self.ring)
@@ -508,10 +514,13 @@ class KotlinSourceTests(unittest.TestCase):
         # совпадать, иначе оболочка не соберётся (компилятора в CI нет)
         for marker in ("fun probe(base: String, timeoutMs: Int = 1600)",
                        "fun json(base: String, path: String, timeoutMs: Int = 2000)",
-                       "fun scan(ports: IntArray = intArrayOf(8765, 8766, 8080), timeoutMs: Int = 700,"):
+                       "fun scan(ports: IntArray = PORTS, timeoutMs: Int = 700,",
+                       "fun discover(timeoutMs: Int = 1200)",
+                       "fun discoverServers(timeoutMs: Int = 1200, confirmMs: Int = 1500)"):
             self.assertIn(marker, self.net, f"Net.kt разошёлся с вызовами: {marker}")
         for call in ("Net.probe(base, timeoutMs = 2500)", "Net.scan(timeoutMs = 700)",
-                     "Net.scan(onFound = ", "Net.json(base, \"/api/app/android"):
+                     "Net.scan(onFound = ", "Net.discoverServers()",
+                     "Net.json(base, \"/api/app/android"):
             self.assertIn(call, self.activity, f"вызов из оболочки не совпадает: {call}")
 
 
@@ -563,6 +572,88 @@ def _undeclared_kotlin_calls(folder: pathlib.Path) -> list[str]:
     return sorted(f"{name} (в {where})" for name, where in called.items()
                   if name not in declared and name not in KOTLIN_KEYWORDS
                   and name not in KOTLIN_PLATFORM_CALLS)
+
+
+class ScannerCoverageTests(unittest.TestCase):
+    """Перебор адресов обязан дойти до всех портов и до всех интерфейсов (17.0.27).
+
+    Жалоба владельца звучала как «касса не подключается и не может найти сервер».
+    Причина в коде: `invokeAll(jobs, timeoutMs * 6L, …)` давал перебору 4,2 с при
+    762 адресах (3 порта × 254 хоста) — успевали провериться только первые ~288,
+    то есть порт 8765 и кусок 8766. Порт 8080, на котором сервер и работал, не
+    проверялся ни разу; в кассе же оставалось «ничего не нашёл».
+
+    Компилятора Kotlin в песочнице нет, поэтому контракт — строковый и числовой:
+    бюджет считается от числа адресов, порты перебираются для каждого адреса,
+    мобильные интерфейсы (сеть оператора) из перебора исключены, а автопоиск по
+    UDP (порт 8765) идёт первым — он и есть «касса находит сервер сама».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.base = ROOT / "android"
+        cls.kassa = (cls.base / "app/src/main/java/ai/printflow/kassa/Net.kt"
+                     ).read_text(encoding="utf-8")
+        cls.pult = (cls.base / "pult/src/main/java/ai/printflow/pult/Net.kt"
+                    ).read_text(encoding="utf-8")
+        cls.kassa_activity = (cls.base / "app/src/main/java/ai/printflow/kassa/MainActivity.kt"
+                              ).read_text(encoding="utf-8")
+        cls.pult_activity = (cls.base / "pult/src/main/java/ai/printflow/pult/MainActivity.kt"
+                             ).read_text(encoding="utf-8")
+
+    def test_both_shells_use_the_same_ports(self):
+        """Порт по умолчанию один: 8765. Остальные — установки, где порт меняли."""
+        for name, source in (("касса", self.kassa), ("пульт", self.pult)):
+            with self.subTest(module=name):
+                self.assertIn("val PORTS = intArrayOf(8765, 8080, 8766, 8790)", source)
+                self.assertIn("const val DISCOVERY_PORT = 8765", source)
+
+    def test_sweep_budget_scales_with_the_number_of_targets(self):
+        for name, source in (("касса", self.kassa), ("пульт", self.pult)):
+            with self.subTest(module=name):
+                self.assertNotIn("timeoutMs * 6L", source)
+                self.assertIn("budgetMs(targets.size)", source)
+                self.assertIn("private fun budgetMs(targets: Int): Long", source)
+                self.assertIn("coerceIn(", source)
+
+    def test_all_ports_are_probed_for_every_address(self):
+        """Сначала адрес, внутри — все порты: иначе бюджет уходит на один порт."""
+        for name, source in (("касса", self.kassa), ("пульт", self.pult)):
+            with self.subTest(module=name):
+                self.assertIn("for (host in 1..254)", source)
+                self.assertIn("for (port in ports) targets.add(ip to port)", source)
+                # открытый порт ещё не сервер: печатаем только подтверждённое
+                self.assertIn("openPort(target.first, target.second)", source)
+                self.assertIn("probe(base, timeoutMs = timeoutMs)", source)
+
+    def test_operator_network_is_not_swept(self):
+        """Подсеть сотового оператора — 254 гарантированных таймаута."""
+        for name, source in (("касса", self.kassa), ("пульт", self.pult)):
+            with self.subTest(module=name):
+                self.assertIn("private fun cellular(name: String): Boolean", source)
+                self.assertIn('"rmnet", "ccmni", "pdp", "wwan"', source)
+                self.assertIn("if (cellular(name)) continue", source)
+
+    def test_discovery_is_the_first_step_and_is_confirmed_by_http(self):
+        for name, source in (("касса", self.kassa), ("пульт", self.pult)):
+            with self.subTest(module=name):
+                self.assertIn("PRINTFLOW?", source)
+                self.assertIn("fun discoverServers(timeoutMs: Int = 1200, confirmMs: Int = 1500)",
+                              source)
+                # в scan автопоиск идёт до перебора, а не после
+                self.assertLess(source.index("for (hit in discoverServers())"),
+                                source.index("for (host in 1..254)"))
+                # строку маяка разбираем строго: чужой JSON в сети — не сервер
+                self.assertIn('if (json.optString("app") != APP || json.optInt("proto", 0) != PROTO)',
+                              source)
+
+    def test_shell_uses_discovery_before_the_sweep(self):
+        for name, source in (("касса", self.kassa_activity), ("пульт", self.pult_activity)):
+            with self.subTest(module=name):
+                self.assertIn("Net.discoverServers()", source)
+        # сторож кассы: автопоиск идёт раньше перебора
+        self.assertIn("Net.discoverServers().ifEmpty { Net.scan(timeoutMs = 700) }",
+                      self.kassa_activity)
 
 
 class KotlinCallsResolveTests(unittest.TestCase):

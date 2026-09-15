@@ -29,12 +29,12 @@ android {
         applicationId 'ai.printflow.pult'
         minSdk 24
         targetSdk 34
-        // versionCode = major*10000 + minor*100 + patch: 17.0.26 -> 170026.
+        // versionCode = major*10000 + minor*100 + patch: 17.0.27 -> 170027.
         // Считается от APP_VERSION — расхождение проверяет
         // connector/tests/test_android_pult.py, потому что «обновись» на
         // телефоне сравнивает именно это число.
-        versionCode 170026
-        versionName '17.0.26'
+        versionCode 170027
+        versionName '17.0.27'
     }
 
     signingConfigs {
@@ -59,7 +59,7 @@ android {
     }
 
     buildFeatures {
-        // versionName читает панель сервера («NOZZA · Пульт v17.0.26») —
+        // versionName читает панель сервера («NOZZA · Пульт v17.0.27») —
         // одно место, где живёт версия, а не два.
         buildConfig true
     }

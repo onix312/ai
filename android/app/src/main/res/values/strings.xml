@@ -6,7 +6,7 @@
          для скринридера и не должны дублироваться в коде. -->
     <string name="panel_title">Касса NOZZA</string>
     <string name="panel_version_fmt">NOZZA · Касса v%1$s</string>
-    <string name="panel_hint_initial">Куда ходить за кассой? Обычно http://192.168.1.x:8765</string>
+    <string name="panel_hint_initial">Куда ходить за кассой? Нажмите «Найти сервер в сети» — адрес искать не нужно. Обычно http://192.168.1.x:8765</string>
     <string name="panel_hint_server">Адрес сервера в локальной сети</string>
     <string name="panel_hint_http">Сервер ответил ошибкой %1$d — касса не загрузилась. Проверьте, что PrintFlow запущен, или выберите другой адрес.</string>
     <string name="toast_revived">Страница кассы перезапущена — код кассира и корзина на месте</string>
@@ -22,7 +22,7 @@
     <string name="btn_battery">Экономия батареи: не ограничивать</string>
     <string name="scanning">Ищу…</string>
     <string name="scan_found">Найдено серверов: %1$d</string>
-    <string name="scan_none">Ничего не нашёл. Запустите PrintFlow и введите адрес вручную.</string>
+    <string name="scan_none">Ничего не нашёл. Проверьте: PrintFlow запущен на ПК, телефон в той же Wi-Fi сети, порт 8765 разрешён в брандмауэре. Адрес можно ввести вручную.</string>
     <!-- 17.0.13: связь сама восстанавливается, но у владельца есть кнопки:
          переподключиться (без повторного ввода адреса) и проверить обновление. -->
     <string name="btn_reconnect">Переподключиться</string>
