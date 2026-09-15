@@ -199,6 +199,17 @@ class BatchLauncherTests(unittest.TestCase):
         self.assertEqual(0, self.raw.count(b"\n") - self.raw.count(b"\r\n"),
                          "каждая строка .bat должна заканчиваться парой CRLF")
 
+    def test_gitattributes_do_not_normalize_the_file(self):
+        """`*.bat text eol=crlf` — ловушка: блоб в репозитории хранится с LF, а
+        рабочая копия с CRLF, и git считает файл изменённым навсегда. Батник
+        лежит с CRLF как есть, а `diff --check` успокаивает `cr-at-eol`."""
+        attrs = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        rules = [line for line in attrs.splitlines() if "*.bat" in line]
+        self.assertEqual(1, len(rules), "правило для .bat должно быть одно")
+        self.assertIn("cr-at-eol", rules[0])
+        self.assertNotIn("eol=crlf", rules[0])
+        self.assertNotIn(" -text", rules[0])
+
     def test_switches_the_console_to_utf8(self):
         """Без chcp 65001 русский текст в cmd превращается в кракозябры, и раньше
         по этой причине батник был написан английскими строками."""
