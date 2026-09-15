@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=17.0.2">
-<link rel="stylesheet" href="assets/app.css?v=17.0.24">
+<link rel="stylesheet" href="assets/app.css?v=18.3.0">
 <link rel="stylesheet" href="assets/more.css?v=17.1.3">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
@@ -401,7 +401,7 @@
 <!-- ================================================== ЗАКАЗЫ -->
 <section class="view" id="view-orders">
  <div class="view-head">
-  <div><span class="eyebrow">Продажи и производство</span><h1>Заказы</h1><p id="orders_sub">Перетаскивайте карточки между статусами.</p></div>
+  <div><span class="eyebrow">Продажи и производство</span><h1>Заказы</h1><p id="orders_sub">Загружаем заказы…</p></div>
   <div class="head-actions">
    <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
    <button class="btn" id="orders_statuses" type="button">Статусы</button>
@@ -411,8 +411,11 @@
  </div>
  <div class="toolbar">
   <div class="search-box"><input id="orders_search" type="search" placeholder="Изделие, клиент, номер, файл…"></div>
+  <select id="orders_preset" title="Сохранённый вид доски"><option value="all">Все заказы</option></select>
+  <button class="btn sm ghost" id="orders_preset_del" type="button" title="Удалить этот вид" hidden>✕</button>
   <select id="orders_filter_status"><option value="">Все статусы</option></select>
   <select id="orders_filter_niche"><option value="">Все ниши</option></select>
+  <select id="orders_sort" title="Порядок заказов"><option value="new">Сначала новые</option><option value="due">По сроку</option><option value="debt">По долгу</option><option value="stale">Забытые сверху</option></select>
   <div class="seg" id="orders_chan" role="group" aria-label="Канал продаж"><button type="button" data-chan="" class="on">Все каналы</button><button type="button" data-chan="telegram"><i data-icon="telegram">✈</i> Telegram</button><button type="button" data-chan="no-tg">Без TG</button></div>
   <div class="seg" id="orders_view"><button data-mode="kanban" class="on">Канбан</button><button data-mode="table">Таблица</button></div>
   <div class="seg" id="orders_box" role="group" aria-label="Доска или архив" title="Архив — снятые с доски заказы: данные, платежи и история на месте"><button type="button" data-box="" class="on">На доске</button><button type="button" data-box="archived">⌸ В архиве</button></div>
@@ -425,12 +428,9 @@
   <button class="btn sm ghost" id="bulk_clear" type="button">Снять выбор</button>
  </div>
  <div id="orders_kanban" class="kanban">
-  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:56%"></span></div><div class="ocard"><i class="skel" style="width:40%;height:12px;display:block"></i><i class="skel" style="width:82%;height:14px;margin-top:8px;display:block"></i><i class="skel" style="width:64%;height:10px;margin-top:8px;display:block"></i></div><div class="ocard"><i class="skel" style="width:34%;height:12px;display:block"></i><i class="skel" style="width:76%;height:14px;margin-top:8px;display:block"></i></div></div>
-  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:52%"></span></div><div class="ocard"><i class="skel" style="width:44%;height:12px;display:block"></i><i class="skel" style="width:70%;height:14px;margin-top:8px;display:block"></i></div></div>
-  <div class="kan-col kan-skel"><div class="kan-head"><i class="skel"></i><span class="skel" style="width:60%"></span></div><div class="ocard"><i class="skel" style="width:38%;height:12px;display:block"></i><i class="skel" style="width:84%;height:14px;margin-top:8px;display:block"></i><i class="skel" style="width:58%;height:10px;margin-top:8px;display:block"></i></div></div>
-  <div class="kan-col kan-skel empty-col"><div class="kan-head"><i class="skel"></i></div></div>
- </div>
- <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th class="w-check"></th><th>№</th><th>Изделие</th><th>Клиент</th><th>Ниша</th><th>Статус</th><th class="right">Часы</th><th class="right">Граммы</th><th class="right">Цена</th><th class="right">Прибыль</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
+  <div class="kan-loading" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+</div>
+ <div id="orders_table" class="table-wrap" hidden><table class="data"><thead><tr><th class="w-check"></th><th>№</th><th>Изделие</th><th>Клиент</th><th>Статус</th><th class="right">Цена</th><th>Срок</th></tr></thead><tbody id="orders_tbody"></tbody></table></div>
 </section>
 
 <!-- ================================================== КЛИЕНТЫ -->
@@ -3884,8 +3884,11 @@
 
 <dialog class="modal" id="order_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Карточка заказа</span><h2 id="order_modal_title">Новый заказ</h2><p id="order_modal_sub">Клиент создаётся автоматически по имени и телефону.</p></div><button class="icon-btn" type="button" data-close="order_modal">×</button></div>
+ <div class="ord-econ" id="order_econ_strip" hidden></div>
  <div class="modal-body">
-  <div class="verdict" id="of_intake_hint" hidden></div>
+  <div class="ord-tabs" role="tablist" aria-label="Разделы карточки" id="order_tabs"><button type="button" role="tab" data-ord-tab="order" class="on">Заказ</button><button type="button" role="tab" data-ord-tab="prod" class="">Производство</button><button type="button" role="tab" data-ord-tab="money" class="">Деньги</button><button type="button" role="tab" data-ord-tab="client" class="">Клиент</button><button type="button" role="tab" data-ord-tab="hist" class="">История</button></div>
+<div class="ord-pane" data-ord-pane="order">
+<div class="verdict" id="of_intake_hint" hidden></div>
   <div class="tg-cancel-banner" id="of_cancel_wrap" hidden>
    <span class="tgc-ic" data-icon="cancel" aria-hidden="true">✕</span>
    <div class="tgc-body"><b>Покупатель запросил отмену</b><small id="of_cancel_sub">Бот ничего не отменял сам — решение за мастером</small></div>
@@ -3927,7 +3930,19 @@
    <label class="field"><span>Телефон</span><input id="of_phone" placeholder="+7…"></label>
    <label class="field span-2"><span>Мессенджер / контакт</span><input id="of_messenger" placeholder="@telegram, WhatsApp"></label>
   </div><datalist id="customers_datalist"></datalist><datalist id="products_datalist"></datalist></div>
-  <div class="form-section"><h3>Производство</h3><div class="form-grid">
+  <div class="form-section">
+   <h3>Состав заказа <small class="muted" style="font-weight:normal">разные товары на одной плите</small></h3>
+   <div id="of_items"></div>
+   <div id="of_items_econ" style="margin-top:8px"></div>
+   <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+    <button class="btn sm ghost" type="button" id="of_item_add">+ Позиция</button>
+    <label class="check"><input type="checkbox" id="of_items_override"> Переопределить итоги состава</label>
+    <small class="muted" id="of_items_hint">При составе количество, изделие, цена, нормативы и себестоимость считаются из позиций. Ручной override включайте только осознанно.</small>
+   </div>
+  </div>
+  </div>
+<div class="ord-pane" data-ord-pane="prod" hidden>
+<div class="form-section"><h3>Производство</h3><div class="form-grid">
    <label class="field"><span>Материал <button class="btn sm ghost" type="button" id="of_ams_btn" title="Взять материал и цвет из AMS" style="margin-left:6px;padding:2px 6px;font-size:11px">⟳ AMS</button></span><input id="of_material" placeholder="PLA, PETG, TPU" list="materials_datalist"></label>
    <label class="field"><span>Цвет <small class="muted" id="of_ams_hint" style="margin-left:4px;font-weight:normal"></small></span><input id="of_color" placeholder="Чёрный + золотой"></label>
    <label class="field span-2"><span>Расход по цветам (многоцветная печать)</span><input id="of_colors" placeholder="Белый:40, Чёрный:15"></label>
@@ -3953,24 +3968,6 @@
    <input type="file" id="of_file_local" accept=".3mf,.gcode,.gcode.3mf" hidden>
    <small class="hint">«Обновить граммы» и «Скачать с принтера» кладут файл в папку uploads коннектора и читают вес плиты. Можно выбрать файл с компьютера.</small></label>
   </div></div>
-  <div class="form-section">
-   <h3>Состав заказа <small class="muted" style="font-weight:normal">разные товары на одной плите</small></h3>
-   <div id="of_items"></div>
-   <div id="of_items_econ" style="margin-top:8px"></div>
-   <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
-    <button class="btn sm ghost" type="button" id="of_item_add">+ Позиция</button>
-    <label class="check"><input type="checkbox" id="of_items_override"> Переопределить итоги состава</label>
-    <small class="muted" id="of_items_hint">При составе количество, изделие, цена, нормативы и себестоимость считаются из позиций. Ручной override включайте только осознанно.</small>
-   </div>
-  </div>
-  <div class="form-section"><h3>Экономика</h3><div class="form-grid">
-   <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
-   <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
-   <label class="field"><span>Получено по журналу, ₽</span><input id="of_prepaid" type="number" min="0" step="any" readonly><small class="hint">Только просмотр. Предоплата, оплата и возврат записываются отдельными операциями в разделе «Деньги».</small></label>
-   <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
-   <div class="span-2" id="of_econ"></div>
-   <div class="span-2" id="of_filament_fact"></div>
-  </div></div>
   <div class="form-section" id="of_production_wrap" hidden>
    <h3>Готовность производства</h3>
    <div id="of_production_ready" class="verdict">Проверяем файл, принтер и пластик…</div>
@@ -3979,11 +3976,6 @@
     <label class="field"><span>Катушка</span><select id="of_prepare_spool"></select></label>
    </div>
   </div>
-  <div class="form-section"><h3>Качество и заметки</h3><div class="form-grid">
-   <label class="field"><span>Проверка качества</span><select id="of_quality"><option value="pending">Не проверено</option><option value="passed">Проверено — всё хорошо</option><option value="rework">Нужна переделка</option></select></label>
-   <label class="field"><span>Результат / упаковка</span><input id="of_quality_note"></label>
-   <label class="field span-2"><span>Заметки</span><textarea id="of_notes" rows="3"></textarea></label>
-  </div></div>
   <div class="form-section" id="of_jobs_wrap" hidden><h3>Печати по заказу</h3><div id="of_jobs"></div></div>
   <div class="form-section" id="tl_wrap" hidden>
    <h3 style="display:flex;align-items:center;gap:10px">Таймлапс печати (№47)<span class="chip outline" style="font-size:11px" id="tl_chip" hidden></span></h3>
@@ -3998,6 +3990,11 @@
    </div>
    <p class="muted" id="tl_hint" style="font-size:12px;margin:6px 0 0"></p>
   </div>
+  <div class="form-section"><h3>Качество и заметки</h3><div class="form-grid">
+   <label class="field"><span>Проверка качества</span><select id="of_quality"><option value="pending">Не проверено</option><option value="passed">Проверено — всё хорошо</option><option value="rework">Нужна переделка</option></select></label>
+   <label class="field"><span>Результат / упаковка</span><input id="of_quality_note"></label>
+   <label class="field span-2"><span>Заметки</span><textarea id="of_notes" rows="3"></textarea></label>
+  </div></div>
   <div class="form-section">
    <h3 style="display:flex;align-items:center;gap:10px">Чек-лист качества
     <button class="btn sm ghost" type="button" id="order_defect_btn">✕ Записать брак</button></h3>
@@ -4025,24 +4022,17 @@
     <input type="file" id="of_photo_file" accept="image/*" hidden>
    </div>
   </div>
-  <div class="form-section tg-thread" id="of_tg_wrap" hidden>
-   <div class="tg-thread-head">
-    <h3><i data-icon="telegram">✈</i> Диалог с покупателем</h3>
-    <small class="muted" id="of_tg_sub">заказ из клиентского бота</small>
-    <button class="btn sm ghost" type="button" id="of_tg_summary_btn" title="Короткое резюме переписки: открытые вопросы, суммы, сроки (№61)">⌘ Резюме диалога</button>
-   </div>
-   <div id="of_tg_summary" class="verdict" hidden style="margin-bottom:8px;white-space:pre-line"></div>
-   <div class="tg-msgs" id="of_tg_msgs"></div>
-   <div class="tg-chips" id="of_tg_chips"></div>
-   <div class="tg-reply">
-    <textarea id="of_tg_reply" rows="2" placeholder="Ответ покупателю — уйдёт в Telegram через клиентского бота"></textarea>
-    <div class="tg-reply-acts">
-     <select id="of_tg_template" aria-label="Вставить шаблон"><option value="">Вставить шаблон…</option></select>
-     <button class="btn sm primary" type="button" id="of_tg_send">Отправить в чат</button>
-    </div>
-   </div>
-  </div>
   <div class="form-section" id="of_defects_wrap" hidden><h3>Брак по заказу</h3><div id="of_defects"></div></div>
+  </div>
+<div class="ord-pane" data-ord-pane="money" hidden>
+<div class="form-section"><h3>Экономика</h3><div class="form-grid">
+   <label class="field"><span>Цена, ₽</span><input id="of_price" type="number" min="0" step="any"></label>
+   <label class="field"><span>Себестоимость, ₽ (0 = считать автоматически)</span><input id="of_cost" type="number" min="0" step="any"></label>
+   <label class="field"><span>Получено по журналу, ₽</span><input id="of_prepaid" type="number" min="0" step="any" readonly><small class="hint">Только просмотр. Предоплата, оплата и возврат записываются отдельными операциями в разделе «Деньги».</small></label>
+   <label class="field"><span>Учёт себестоимости</span><select id="of_auto_cost"><option value="1">Автоматически по факту печати</option><option value="0">Только вручную</option></select></label>
+   <div class="span-2" id="of_econ"></div>
+   <div class="span-2" id="of_filament_fact"></div>
+  </div></div>
   <div class="form-section" id="of_docs_wrap" hidden>
    <h3>Документы</h3>
    <p class="muted" style="margin:0 0 8px">Печатные формы и расходная накладная по этому заказу.</p>
@@ -4064,6 +4054,30 @@
    </div>
   </div>
  </div>
+<div class="ord-pane" data-ord-pane="client" hidden>
+<div class="form-section" id="of_client_case_wrap"><h3>Дело клиента <small class="muted" style="font-weight:normal">его заказы, оплаты и сроки</small></h3><div id="of_client_case"><span class="muted">Откройте сохранённый заказ — подтянем его историю.</span></div></div>
+<div class="form-section tg-thread" id="of_tg_wrap" hidden>
+   <div class="tg-thread-head">
+    <h3><i data-icon="telegram">✈</i> Диалог с покупателем</h3>
+    <small class="muted" id="of_tg_sub">заказ из клиентского бота</small>
+    <button class="btn sm ghost" type="button" id="of_tg_summary_btn" title="Короткое резюме переписки: открытые вопросы, суммы, сроки (№61)">⌘ Резюме диалога</button>
+   </div>
+   <div id="of_tg_summary" class="verdict" hidden style="margin-bottom:8px;white-space:pre-line"></div>
+   <div class="tg-msgs" id="of_tg_msgs"></div>
+   <div class="tg-chips" id="of_tg_chips"></div>
+   <div class="tg-reply">
+    <textarea id="of_tg_reply" rows="2" placeholder="Ответ покупателю — уйдёт в Telegram через клиентского бота"></textarea>
+    <div class="tg-reply-acts">
+     <select id="of_tg_template" aria-label="Вставить шаблон"><option value="">Вставить шаблон…</option></select>
+     <button class="btn sm primary" type="button" id="of_tg_send">Отправить в чат</button>
+    </div>
+   </div>
+  </div>
+  </div>
+<div class="ord-pane" data-ord-pane="hist" hidden>
+<div class="form-section" id="of_history_wrap"><h3>Движение заказа</h3><div id="of_history_stages" class="hist-stages"></div><div id="of_history_list" class="hist-list"><span class="muted">Загружаем…</span></div></div>
+</div>
+</div>
  <div class="modal-foot"><button class="btn" type="button" id="order_archive" title="Убрать с доски: данные, платежи и история остаются в базе">⌸ В архив</button><button class="btn danger" type="button" id="order_delete">Удалить</button><button class="btn" type="button" id="order_payment" hidden>₽ Платёж / возврат</button><button class="btn" type="button" id="order_duplicate">⧉ Повторить</button><button class="btn" type="button" id="order_b2b">🧾 Документ</button><button class="btn" type="button" id="order_brand_card" hidden>✒ Бренд-карточка</button><button class="btn" type="button" id="order_pack_card" hidden>▦ Карточка упаковки</button><button class="btn" type="button" id="order_thread" hidden>〰 Нить изделия</button><span class="spacer"></span><button class="btn" type="button" id="order_queue">Проверить и в очередь</button><button class="btn" type="button" id="order_to_warehouse" hidden>▦ На склад</button><button class="btn ok" type="button" id="order_fulfill">✓ Выдать заказ</button><button class="btn" type="button" data-close="order_modal">Отмена</button><button class="btn" type="button" id="order_save_prepare">Сохранить и в очередь</button><button class="btn primary" type="button" id="order_save">Сохранить</button></div>
 </form></dialog>
 
@@ -4140,8 +4154,14 @@
  <div class="modal-foot"><button class="btn danger" type="button" id="niche_delete">Удалить</button><span class="spacer"></span><button class="btn" type="button" data-close="niche_modal">Отмена</button><button class="btn primary" type="button" id="niche_save">Сохранить</button></div>
 </form></dialog>
 
-<dialog class="modal narrow" id="status_modal"><form method="dialog">
- <div class="modal-head"><div><span class="eyebrow">Настройка</span><h2>Статусы заказов</h2><p>Порядок строк — порядок колонок канбана.</p></div><button class="icon-btn" type="button" data-close="status_modal">×</button></div>
+<dialog class="modal narrow" id="view_save_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Доска заказов</span><h2>Сохранить вид</h2><p>Запомним фильтры и сортировку — поиск не входит.</p></div><button class="icon-btn" type="button" data-close="view_save_modal">×</button></div>
+ <div class="modal-body"><label class="field"><span>Название вида</span><input id="view_save_name" placeholder="Например: Мои долги" maxlength="40"></label></div>
+ <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="view_save_modal">Отмена</button><button class="btn primary" type="button" id="view_save_confirm">Сохранить</button></div>
+</form></dialog>
+
+<dialog class="modal" id="status_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Настройка</span><h2>Статусы заказов</h2><p>Порядок строк — порядок колонок. «Далее» — куда карточку можно перетащить.</p></div><button class="icon-btn" type="button" data-close="status_modal">×</button></div>
  <div class="modal-body"><div id="status_editor"></div><button class="btn wide" type="button" id="status_add" style="margin-top:10px">+ Добавить статус</button></div>
  <div class="modal-foot"><span class="spacer"></span><button class="btn" type="button" data-close="status_modal">Отмена</button><button class="btn primary" type="button" id="status_save">Сохранить</button></div>
 </form></dialog>
@@ -5116,11 +5136,11 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=17.0.26"></script>
+<script src="assets/core.js?v=18.3.0"></script>
 <script src="assets/icons.js?v=17.0.1"></script>
 <script src="assets/printer.js?v=17.1.2"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
-<script src="assets/ops.js?v=17.0.24"></script>
+<script src="assets/ops.js?v=18.3.0"></script>
 <script src="assets/money.js?v=17.0.1"></script>
 <script src="assets/finance.js?v=17.0.6"></script>
 <script src="assets/shelf.js?v=17.0.2"></script>

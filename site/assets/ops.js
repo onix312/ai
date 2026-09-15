@@ -8,10 +8,15 @@ const { get, post, api } = PF.api;
 
 let editingOrder = null, editingOrderUpdatedAt = '', editingNiche = null, statusDraft = [];
 let fulfillmentDraft = null;
+let orderTab = 'order';
 let aftercareItems = [], aftercareCurrent = null;
-let filters = { q: '', status: '', niche: '', chan: '' };
+let filters = { q: '', status: '', niche: '', chan: '', sort: 'new', extra: '' };
 let orderView = 'kanban';
 let orderDensity = false;
+/* Раскрытые колонки и таблица сверх лимита: какие id уже показаны целиком.
+   Сбрасывается при смене фильтров — новый список начинается свернутым. */
+let boardExpanded = new Set();
+let activePreset = 'all';
 let customerSegment = 'all';
 
 const PRIORITY = { low: 'Низкий', normal: 'Обычный', high: 'Высокий', urgent: 'Срочный' };
@@ -48,6 +53,37 @@ setInterval(tickLiveDues, 60000);
 function ordersSource() {
   return PF.orderBox === 'archived' ? (PF.state.archivedOrders || []) : PF.state.orders;
 }
+
+/* Остаток к оплате и «забытость» заказа — для сортировки и быстрых видов.
+   Считаются из лёгкой строки доски, отдельных запросов не нужно. */
+function orderDebt(o) {
+  return Math.max(0, num(o.price) - Math.max(num(o.paid), num(o.prepaid)));
+}
+function orderStaleDays(o) {
+  const stamp = o.updated_at || o.created_at || '';
+  const ms = stamp ? new Date(stamp).getTime() : NaN;
+  if (!Number.isFinite(ms)) return 0;
+  return Math.max(0, (Date.now() - ms) / 864e5);
+}
+function boardCompare() {
+  if (filters.sort === 'due') {
+    return (a, b) => {
+      const ae = !a.due, be = !b.due;
+      if (ae !== be) return ae ? 1 : -1;
+      if (a.due !== b.due) return String(a.due || '').localeCompare(String(b.due || ''));
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    };
+  }
+  if (filters.sort === 'debt') {
+    return (a, b) => (orderDebt(b) - orderDebt(a))
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  }
+  if (filters.sort === 'stale') {
+    return (a, b) => String(a.updated_at || a.created_at || '')
+      .localeCompare(String(b.updated_at || b.created_at || ''));
+  }
+  return () => 0;   // «сначала новые» — сервер уже отдал в этом порядке
+}
 function filtered() {
   const q = filters.q.trim().toLowerCase();
   return ordersSource().filter((o) => {
@@ -55,10 +91,115 @@ function filtered() {
     if (filters.niche && o.niche_id !== filters.niche) return false;
     if (filters.chan === 'telegram' && !isTgOrder(o)) return false;
     if (filters.chan === 'no-tg' && isTgOrder(o)) return false;
+    if (filters.extra === 'hot') {
+      if (PF.isFinal(o) || !o.due) return false;
+      if (new Date(o.due + 'T23:59:59').getTime() - Date.now() > 3 * 864e5) return false;
+    }
+    if (filters.extra === 'nodue' && (o.due || PF.isFinal(o))) return false;
+    if (filters.extra === 'debt' && !(orderDebt(o) > 0)) return false;
+    if (filters.extra === 'stale' && (PF.isFinal(o) || orderStaleDays(o) < 7)) return false;
     if (!q) return true;
-    return [o.number, o.product, o.customer_name, o.phone, o.file, o.notes]
+    return [o.number, o.product, o.customer_name, o.phone, o.file, o.notes, o.messenger]
       .some((v) => String(v || '').toLowerCase().includes(q));
-  });
+  }).sort(boardCompare());
+}
+
+/* Сохранённые виды доски (18.3): пресет одним кликом ставит связку фильтров,
+   свои виды живут в U.store рядом с памятью канала (pf_orders_chan) — это
+   настройка показа, а не дублирование серверных данных. Поиск в вид не
+   входит: строка поиска всегда ручная. */
+const PRESET_VIEWS = [
+  { id: 'all', name: 'Все заказы', f: {} },
+  { id: 'hot', name: 'Горящее · 3 дня', f: { extra: 'hot', sort: 'due' } },
+  { id: 'nodue', name: 'Без срока', f: { extra: 'nodue', sort: 'stale' } },
+  { id: 'debt', name: 'Должники', f: { extra: 'debt', sort: 'debt' } },
+  { id: 'stale', name: 'Забытые · 7+ дней', f: { extra: 'stale', sort: 'stale' } },
+];
+function customViews() {
+  try {
+    const list = JSON.parse(U.store.get('pf_orders_views', '[]'));
+    return Array.isArray(list) ? list.filter((v) => v && v.id && v.name) : [];
+  } catch (e) { return []; }
+}
+function writeCustomViews(list) {
+  U.store.set('pf_orders_views', JSON.stringify(list.slice(0, 20)));
+}
+function renderPresetOptions() {
+  const sel = $('orders_preset');
+  if (!sel) return;
+  const customs = customViews();
+  let html = PRESET_VIEWS.map((v) => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+  if (customs.length) {
+    html += `<option disabled>──────────</option>`
+      + customs.map((v) => `<option value="${esc(v.id)}">★ ${esc(v.name)}</option>`).join('');
+  }
+  html += '<option value="__save">＋ Сохранить текущий вид…</option>';
+  sel.innerHTML = html;
+  sel.value = activePreset;
+  if (sel.value !== activePreset) sel.value = 'all';
+  const del = $('orders_preset_del');
+  if (del) del.hidden = !customs.some((v) => v.id === activePreset);
+}
+function presetMatchesFilters(id) {
+  const all = [...PRESET_VIEWS, ...customViews()];
+  const view = all.find((v) => v.id === id);
+  if (!view) return false;
+  const f = view.f || {};
+  return (f.status || '') === filters.status && (f.niche || '') === filters.niche
+    && (f.chan || '') === filters.chan && (f.sort || 'new') === filters.sort
+    && (f.extra || '') === filters.extra;
+}
+function syncFilterControls() {
+  const st = $('orders_filter_status'), nc = $('orders_filter_niche');
+  if (st) st.value = filters.status;
+  if (nc) nc.value = filters.niche;
+  $$('#orders_chan button').forEach((b) => b.classList.toggle('on', b.dataset.chan === filters.chan));
+  const sort = $('orders_sort');
+  if (sort) sort.value = filters.sort;
+  const ps = $('orders_preset');
+  if (ps && activePreset !== '__save') {
+    // Ручные фильтры — честная подпись вместо чужого имени вида.
+    let manual = ps.querySelector('option[value="__manual"]');
+    if (!presetMatchesFilters(activePreset)) {
+      if (!manual) {
+        manual = document.createElement('option');
+        manual.value = '__manual';
+        manual.textContent = 'Фильтры вручную';
+        ps.prepend(manual);
+      }
+      ps.value = '__manual';
+    } else {
+      if (manual) manual.remove();
+      if (ps.value !== activePreset) ps.value = activePreset;
+    }
+  }
+  const del = $('orders_preset_del');
+  if (del) del.hidden = !customViews().some((v) => v.id === activePreset);
+}
+function applyPreset(id) {
+  const all = [...PRESET_VIEWS, ...customViews()];
+  const view = all.find((v) => v.id === id) || PRESET_VIEWS[0];
+  activePreset = view.id;
+  filters.status = view.f.status || '';
+  filters.niche = view.f.niche || '';
+  filters.chan = view.f.chan || '';
+  filters.sort = view.f.sort || 'new';
+  filters.extra = view.f.extra || '';
+  U.store.set('pf_orders_chan', filters.chan);
+  U.store.set('pf_orders_sort', filters.sort);
+  boardExpanded = new Set();
+  syncFilterControls();
+  renderOrders();
+}
+function touchCustomPreset() {
+  // Ручная правка фильтров: совпали с каким-то видом — подсветить его,
+  // нет — селект покажет «Фильтры вручную» (см. syncFilterControls).
+  if (!presetMatchesFilters(activePreset)) {
+    const all = [...PRESET_VIEWS, ...customViews()];
+    const hit = all.find((v) => presetMatchesFilters(v.id));
+    activePreset = hit ? hit.id : activePreset;
+  }
+  syncFilterControls();
 }
 
 /* ============================================================== канбан */
@@ -92,7 +233,7 @@ function orderCard(o) {
   if (overdue(o)) cls.push('late');
   if (o.cancel_requested_at) cls.push('cancel-req');
 
-  // Приоритет
+  // Приоритет и тревоги одной строкой: срочность, запрос отмены, приёмка.
   let prioBadge = '';
   if (o.priority === 'urgent') {
     prioBadge = '<span class="prio-tag urgent" title="Срочный заказ"><i data-icon="bolt">⚡</i>Срочно</span>';
@@ -101,9 +242,16 @@ function orderCard(o) {
   } else if (o.priority === 'low') {
     prioBadge = '<span class="prio-tag low" title="Низкий приоритет">💤 Низкий</span>';
   }
-  // ЗА3: запрос отмены из Telegram виден прямо на карточке
   if (o.cancel_requested_at) {
     prioBadge += '<span class="prio-tag cancel" title="Покупатель просит отменить — решите в карточке"><i data-icon="cancel">✕</i>Просит отмену</span>';
+  }
+  // Производство без проверки не уходит клиенту: «Готов» без приёмки подсвечен.
+  if (o.status === 'ready' && (o.quality || 'pending') === 'pending') {
+    prioBadge += '<span class="warn-chip" title="Качество не подтверждено — проверьте перед выдачей">без приёмки</span>';
+  }
+  // Задание в очереди, а печатать нечего: выяснится у принтера, если не здесь.
+  if (o.status === 'queue' && !o.file) {
+    prioBadge += '<span class="warn-chip" title="Нет файла печати — задание встанет">нет файла</span>';
   }
 
   // Канал продаж
@@ -116,13 +264,13 @@ function orderCard(o) {
   const channelChip = isTgOrder(o) ? tgChipOf(o)
     : (channelName ? `<span class="channel-chip">${esc(channelName)}</span>` : '');
 
-  // Срок сдачи + 13.1 (29): живой отсчёт «до дедлайна» на ближайших заказах
+  // Срок сдачи + живой отсчёт «до дедлайна» на ближайших заказах
   let dueBadge = '';
   if (o.due) {
     if (overdue(o)) {
       dueBadge = `<span class="due-badge bad" title="Срок сдачи просрочен"><i data-icon="timer">⚠</i>${esc(dateText(o.due))}</span>`;
     } else {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayISO();
       const dueMs = new Date(o.due + 'T23:59:59').getTime();
       const hoursLeft = (dueMs - Date.now()) / 36e5;
       if (o.due === today) {
@@ -134,9 +282,11 @@ function orderCard(o) {
         dueBadge = `<span class="due-badge" title="Срок сдачи"><i data-icon="timer">📅</i>${esc(dateText(o.due))}</span>`;
       }
     }
+  } else if (!PF.isFinal(o)) {
+    dueBadge = '<span class="due-badge dim" title="Срок не назначен — заказ невидим в горящем">без срока</span>';
   }
 
-  // Оплата
+  // Оплата: остаток виден сразу, нулевая цена — чипом, а не пустотой.
   let payChip = '';
   if (price > 0) {
     if (paid >= price) {
@@ -144,8 +294,10 @@ function orderCard(o) {
     } else if (paid > 0) {
       payChip = `<span class="pay-chip warn" title="Оплачено ${money(paid)}, остаток ${money(left)}">Оплата ${money(paid)} · ост. ${money(left)}</span>`;
     } else {
-      payChip = '<span class="pay-chip dim" title="Не оплачен">Не оплачен</span>';
+      payChip = `<span class="pay-chip dim" title="Не оплачен, к получению ${money(price)}">Не оплачен</span>`;
     }
+  } else if (!PF.isFinal(o)) {
+    payChip = '<span class="pay-chip warn" title="Цена не назначена — заявка без оценки">нет цены</span>';
   }
 
   // Файл печати
@@ -168,6 +320,11 @@ function orderCard(o) {
   if (dueBadge) {
     specs.push(dueBadge);
   }
+  // Забытый заказ: тихо висит в статусе дольше недели — показываем счётчик.
+  const staleDays = Math.floor(orderStaleDays(o));
+  if (!PF.isFinal(o) && staleDays >= 7) {
+    specs.push(`<span class="stale-chip" title="Заказ без движения с ${esc(dateText((o.updated_at || o.created_at || '').slice(0, 10)))}">${staleDays} дн без движения</span>`);
+  }
 
   // Прибыль
   let profitChip = '';
@@ -175,7 +332,7 @@ function orderCard(o) {
     const profitNum = num(econ.profit);
     const pos = profitNum >= 0;
     const marginStr = econ.margin != null ? ` (${nfmt(econ.margin, 0)}%)` : '';
-    profitChip = `<span class="profit-chip ${pos ? 'pos' : 'neg'}" title="Расчётная прибыль">${pos ? '+' : ''}${money(profitNum)}${marginStr}</span>`;
+    profitChip = `<span class="profit-chip ${pos ? 'pos' : 'neg'}" title="Расчётная прибыль${pos ? '' : ' — заказ в минус'}">${pos ? '+' : ''}${money(profitNum)}${marginStr}</span>`;
   }
 
   // Количество / состав
@@ -186,23 +343,35 @@ function orderCard(o) {
     qtyBadge = `<span class="cnt-badge">${nfmt(o.qty)} шт</span>`;
   }
 
-  /* Стрелка «→» (17.0.16): куда можно шагнуть, говорит сервер (order.next из
-     карты переходов repo.ORDER_TRANSITIONS). Фронт не хранит свою карту и не
-     придумывает порядок — имена берёт из тех же /api/statuses. */
+  /* Стрелка «→»: куда можно шагнуть, говорит сервер (order.next из карты
+     переходов). Фронт не хранит свою карту и не придумывает порядок — имена
+     берёт из тех же /api/statuses. */
   const nextId = (Array.isArray(o.next) ? o.next : []).find((x) => x && x !== o.status) || '';
 
-  // ЗА1 + 13.1 (39): инициалы, а у безымянных — детерминированный эмодзи-аватар
   const who = o.customer_name || '';
   const avGlyph = who ? esc(initials(who)) : esc(U.avatarEmoji('', o.id) || '👤');
   const av = `<span class="who-av" style="--av:${avColor(o.customer_name)}" title="${esc(who || 'Без клиента')}">${avGlyph}</span>`;
 
-  // 13.1 (32): прогресс печати прямо на карточке — «а оно уже печатается?»
+  // Прогресс печати прямо на карточке — «а оно уже печатается?»
   const job = (PF.state.jobs.queue || []).find((j) => j.state === 'running' && j.order && j.order.id === o.id);
   const printProg = job
     ? `<div class="ocard-print" title="Задание связано: ${esc(job.name || job.file || 'печать')}">`
       + `<div class="bar thin"><i style="width:${clamp(num(job.progress), 0, 100)}%"></i></div>`
       + `<small><i data-icon="printer">◉</i> Печатается · ${Math.round(clamp(num(job.progress), 0, 100))}%</small></div>`
     : '';
+
+  // Частые пути в один клик: дальше по этапу, выдача из «Готов», карточка.
+  let actions = '';
+  if (nextId) {
+    actions += `<button class="btn xs ghost" type="button" data-order-action="advance" data-order="${esc(o.id)}" title="Перевести в «${esc(PF.status(nextId).name)}» без перетаскивания">→ ${esc(PF.status(nextId).name)}</button>`;
+  }
+  if (o.status === 'ready') {
+    actions += `<button class="btn xs ok" type="button" data-order-action="fulfill" data-order="${esc(o.id)}" title="Выдать заказ с подтверждением">✓ Выдать</button>`;
+  }
+  actions += `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа"><i data-icon="pen">✎</i> Открыть</button>`;
+  if (!st.is_final) {
+    actions += `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати"><i data-icon="queue">⎙</i> В очередь</button>`;
+  }
 
   return `<article class="${cls.join(' ')}" draggable="true" data-order="${esc(o.id)}">`
     + `<div class="strip" style="background:${esc(st.color)}"></div>`
@@ -226,11 +395,7 @@ function orderCard(o) {
     + payChip
     + profitChip
     + `</div>`
-    + `<div class="ocard-actions">`
-    + (nextId ? `<button class="btn xs ghost" type="button" data-order-action="advance" data-order="${esc(o.id)}" title="Перевести в «${esc(PF.status(nextId).name)}» без перетаскивания">→ ${esc(PF.status(nextId).name)}</button>` : '')
-    + `<button class="btn xs ghost" type="button" data-order-action="open" data-order="${esc(o.id)}" title="Открыть карточку заказа"><i data-icon="pen">✎</i> Открыть</button>`
-    + (!st.is_final ? `<button class="btn xs ghost" type="button" data-order-action="queue" data-order="${esc(o.id)}" title="Добавить в очередь печати"><i data-icon="queue">⎙</i> В очередь</button>` : '')
-    + `</div>`
+    + `<div class="ocard-actions">${actions}</div>`
     + `</article>`;
 }
 
@@ -265,6 +430,14 @@ document.addEventListener('click', (e) => {
   location.hash = '#clientbot';
 });
 
+/* Лимиты показа (18.3): DOM не резиновый — колонка и таблица рисуют первые
+   N строк, остальные открываются кнопкой «показать ещё». Данные при этом уже
+   загружены: кнопка только дорисовывает, без запросов к серверу. */
+const BOARD_COL_CAP = 60;
+const BOARD_TABLE_CAP = 200;
+/* Штатные этапы воронки: всё остальное — свои статусы мастера. */
+const STOCK_STATUSES = ['new', 'estimate', 'prepay', 'queue', 'printing', 'post', 'ready', 'done', 'stocked'];
+
 function renderKanban(list) {
   const host = $('orders_kanban');
   refreshChatBadges();
@@ -274,9 +447,19 @@ function renderKanban(list) {
       + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>';
     return;
   }
+  /* Кто в какой этап может попасть: для своих статусов без входящих связей
+     колонка честно говорит «настройте переходы», а не молчит тупиком. */
+  const incoming = {};
+  (PF.state.statuses || []).forEach((s) => {
+    (Array.isArray(s.next) ? s.next : []).forEach((t) => {
+      if (!incoming[t]) incoming[t] = [];
+      incoming[t].push(s.id);
+    });
+  });
   host.innerHTML = PF.state.statuses.map((st) => {
     const items = list.filter((o) => o.status === st.id);
     const sum = items.reduce((a, o) => a + num(o.price), 0);
+    const debt = items.reduce((a, o) => a + orderDebt(o), 0);
     const lateN = items.filter(overdue).length;
     const tgN = items.filter(isTgOrder).length;
     const cancelN = items.filter((o) => o.cancel_requested_at).length;
@@ -285,15 +468,28 @@ function renderKanban(list) {
       tgN ? `<i class="km tg" title="Из Telegram: ${tgN}"><i data-icon="telegram">✈</i>${tgN}</i>` : '',
       cancelN ? `<i class="km cancel" title="Запросы на отмену: ${cancelN}"><i data-icon="cancel">✕</i></i>` : '',
     ].join('');
-    return `<div class="kan-col${items.length ? '' : ' empty-col'}" data-status="${esc(st.id)}">`
+    const expanded = boardExpanded.has('col:' + st.id);
+    const shown = expanded ? items : items.slice(0, BOARD_COL_CAP);
+    const more = items.length - shown.length;
+    const isFinal = num(st.is_final);
+    const isCustom = !STOCK_STATUSES.includes(st.id);
+    let hint = '';
+    if (isCustom && !(incoming[st.id] || []).length) {
+      hint = '<div class="kan-hint">в этап нельзя попасть — свяжите переходы в «Статусы»</div>';
+    } else if (isFinal) {
+      hint = `<div class="kan-hint" title="Финальный этап: карточку сюда не перетащить">только через ${st.id === 'stocked' ? 'склад' : 'выдачу'}</div>`;
+    }
+    return `<div class="kan-col${items.length ? '' : ' empty-col'}${isFinal ? ' fin-col' : ''}" data-status="${esc(st.id)}">`
       + `<div class="kan-head"><i style="background:${esc(st.color)}"></i><b>${esc(st.name)}</b>`
       + `<span class="kan-marks">${marks}</span><span class="n">${items.length}</span></div>`
-      + (sum ? `<div class="kan-sum" data-sum="${esc(st.id)}">${money(sum)}</div>` : '')
-      + (items.length ? items.map(orderCard).join('') : '')
+      + (sum ? `<div class="kan-sum" data-sum="${esc(st.id)}" title="Сумма заказов${debt ? ` · долг ${money(debt)}` : ''}">${money(sum)}${debt ? ` <small class="kan-debt">· ${money(debt)}</small>` : ''}</div>` : '')
+      + hint
+      + (shown.length ? shown.map(orderCard).join('') : '')
+      + (more > 0 ? `<button class="btn sm ghost kan-more" type="button" data-board-more="col:${esc(st.id)}">показать ещё ${more}</button>` : '')
       + '</div>';
   }).join('');
   if (window.PFIcons) window.PFIcons.apply(host);
-  // Н3-приём: сумма колонки мягко докручивается, а не подменяется рывком
+  // Сумма колонки мягко докручивается, а не подменяется рывком
   host.querySelectorAll('.kan-sum').forEach((el) => {
     const key = el.dataset.sum;
     const prev = kanSums.get(key);
@@ -312,36 +508,44 @@ function updateBulkBar() {
   if (!bulkSelected.size) $('orders_tbody').querySelectorAll('[data-bulk]').forEach((c) => { c.checked = false; });
 }
 function renderTable(list) {
-  $('orders_tbody').innerHTML = list.length ? list.map((o) => {
-    const st = PF.status(o.status), n = PF.niche(o.niche_id), econ = o.economics || {};
+  const expanded = boardExpanded.has('table');
+  const shown = expanded ? list : list.slice(0, BOARD_TABLE_CAP);
+  const more = list.length - shown.length;
+  $('orders_tbody').innerHTML = shown.length ? shown.map((o) => {
+    const st = PF.status(o.status), n = PF.niche(o.niche_id);
     const checked = bulkSelected.has(o.id) ? ' checked' : '';
-    return `<tr class="clickable${o.cancel_requested_at ? ' cancel-req' : ''}" data-order="${esc(o.id)}">`
+    const debt = orderDebt(o);
+    return `<tr class="clickable${o.cancel_requested_at ? ' cancel-req' : ''}${overdue(o) ? ' row-late' : ''}" data-order="${esc(o.id)}">`
       + `<td class="w-check" onclick="event.stopPropagation()"><input type="checkbox" data-bulk="${esc(o.id)}"${checked}></td>`
       + `<td class="strong">№${esc(o.number)}</td>`
-      + `<td><b>${esc(o.product)}</b>${o.file ? `<br><small class="muted">${esc(o.file)}</small>` : ''}</td>`
+      + `<td><b>${esc(o.product || 'Без названия')}</b>${n ? `<br><small class="muted">${esc(n.icon || '')} ${esc(n.name)}</small>` : ''}${o.file ? `<br><small class="muted">${esc(o.file)}</small>` : ''}</td>`
       + `<td>${esc(o.customer_name || '—')}${o.phone ? `<br><small class="muted">${esc(o.phone)}</small>` : ''}`
       + (isTgOrder(o) ? `<br><span class="channel-chip tg mini" title="Заказ из Telegram"><i data-icon="telegram">✈</i>TG</span>` : '')
-      + (o.cancel_requested_at ? `<br><small class="neg">✕ ${'просит отмену'}</small>` : '') + `</td>`
-      + `<td>${n ? `${esc(n.icon || '')} ${esc(n.name)}` : '—'}</td>`
+      + (o.cancel_requested_at ? `<br><small class="neg">✕ просит отмену</small>` : '') + `</td>`
       + `<td><span class="chip" style="background:${esc(st.color)}22;color:${esc(st.color)}">${esc(st.name)}</span></td>`
-      + `<td class="right tnum">${o.hours ? nfmt(o.hours, 1) : '—'}</td>`
-      + `<td class="right tnum">${o.grams ? nfmt(o.grams) : '—'}</td>`
-      + `<td class="right tnum">${money(o.price)}</td>`
-      + `<td class="right tnum ${num(econ.profit) >= 0 ? 'pos' : 'neg'}">${money(econ.profit)}</td>`
-      + `<td class="${overdue(o) ? 'neg' : ''}">${o.due ? esc(dateText(o.due)) : '—'}</td></tr>`;
-  }).join('') : `<tr><td colspan="10">${!ordersSource().length
-    ? '<div class="empty"><span class="big">▦</span><b>Заказов нет</b><span>Нет заказов — создайте из сообщения или с нуля.</span>'
-      + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'
-    : '<div class="empty compact"><span>Заказов не найдено.</span></div>'}</td></tr>`;
+      + `<td class="right tnum">${money(o.price)}${debt > 0 ? `<br><small class="neg">долг ${money(debt)}</small>` : ''}</td>`
+      + `<td class="${overdue(o) ? 'neg' : ''}">${o.due ? esc(dateText(o.due)) : '<span class="muted">—</span>'}</td></tr>`;
+  }).join('') + (more > 0 ? `<tr><td colspan="7"><button class="btn sm ghost" type="button" data-board-more="table">показать ещё ${more} из ${list.length}</button></td></tr>` : '')
+    : `<tr><td colspan="7">${!ordersSource().length
+      ? '<div class="empty"><span class="big">▦</span><b>Заказов нет</b><span>Нет заказов — создайте из сообщения или с нуля.</span>'
+        + '<button class="btn sm primary" type="button" data-empty-click="orders_new">+ Новый заказ</button></div>'
+      : '<div class="empty compact"><span>Заказов не найдено.</span></div>'}</td></tr>`;
 }
 
 function renderOrders() {
   const archived = PF.orderBox === 'archived';
   const source = ordersSource();
   const list = filtered();
-  text('orders_sub', archived
-    ? `${list.length} из ${source.length} заказов в архиве · «Вернуть на доску» — в карточке заказа`
-    : `${list.length} из ${PF.state.orders.length} заказов · перетаскивайте карточки между статусами`);
+  const viewName = ([...PRESET_VIEWS, ...customViews()].find((v) => v.id === activePreset) || {}).name || '';
+  const sortName = { new: '', due: 'по сроку', debt: 'по долгу', stale: 'забытые сверху' }[filters.sort] || '';
+  const parts = [`${list.length} из ${archived ? source.length : PF.state.orders.length} заказов`];
+  if (archived) parts.push('в архиве · «Вернуть на доску» — в карточке заказа');
+  else {
+    if (viewName && activePreset !== 'all') parts.push(`вид «${viewName}»`);
+    if (sortName) parts.push(sortName);
+    if (!parts[1]) parts.push('перетаскивайте карточки между статусами');
+  }
+  text('orders_sub', parts.join(' · '));
   const tag = $('nav_orders_tag');
   const activeCount = PF.state.orders.filter((o) => !PF.isFinal(o)).length;
   tag.hidden = !activeCount;
@@ -401,27 +605,62 @@ let dragId = null;
    перетаскивание пальцем и кнопка «→» делают ровно одно и то же —
    оптимистично переставляют карточку, спрашивают сервер и откатываются
    с подсветкой колонки, если переход запрещён. */
+/* Смена статуса одна на все входы (18.3): перетаскивание мышью, пальцем и
+   кнопка «→» делают одно и то же — оптимистично переставляют карточку,
+   спрашивают сервер и точечно вливают ответ в строку. Полного refreshCore
+   больше нет: строка уже свежая из ответа, остальное тихо подтянет фоновая
+   синхронизация по SSE. Финансы смена статуса не двигает. */
 async function applyOrderStatus(orderId, status) {
-  const order = PF.state.orders.find((o) => o.id === orderId);
+  const order = ordersSource().find((o) => o.id === orderId);
   if (!order || order.status === status) return;
+  const target = PF.status(status);
+  // Финалы — не для перетаскивания, но вместо сухого отказа ведём по пути:
+  // «Готов» → «Выдан» открывает выдачу, «Готов» → «На складе» — приёмку.
+  if (num(target.is_final)) {
+    if (status === 'done' && order.status === 'ready') { openOrderFulfillment(orderId); return; }
+    if (status === 'stocked' && order.status === 'ready') { openOrderStock(orderId); return; }
+    flashKanCol(status);
+    fail(new Error(`«${target.name}» ставится не перетаскиванием — доведите заказ до «Готов» и оформите ${status === 'stocked' ? 'приёмку на склад' : 'выдачу'} из карточки`));
+    return;
+  }
+  // Быстрая проверка по карте сервера: перехода нет в order.next — слова
+  // сразу, без запроса. Пустой next у старого кэша — пропускаем к серверу.
+  const next = Array.isArray(order.next) ? order.next : [];
+  if (next.length && !next.includes(status)) {
+    flashKanCol(status);
+    fail(new Error(`Из «${PF.status(order.status).name}» в «${target.name}» шага нет — ${next.length ? 'доступно: ' + next.map((x) => '«' + PF.status(x).name + '»').join(', ') : 'этап тупиковый, настройте переходы в «Статусы»'}`));
+    return;
+  }
   const prev = order.status;
   order.status = status;
   renderOrders();
   try {
-    const res = await post('/api/order/status', { id: order.id, status });
-    Object.assign(order, res.order);
+    const res = await post('/api/order/status', {
+      id: order.id, status, expected_updated_at: order.updated_at || '',
+    });
+    Object.assign(order, res.order || {});
     toast('Статус обновлён', `№${order.number} → ${PF.status(status).name}`);
-    PF.refreshCore();
-    PF.refreshFinance();
+    renderOrders();
   } catch (err) {
     order.status = prev;
+    // Конфликт версий: заказ уже двинули в другом окне — подтягиваем свежую
+    // строку, чтобы доска не врала, и объясняем словами.
+    if (/уже изменён/.test(String((err && err.message) || ''))) {
+      try {
+        const fresh = await get('/api/order', { id: orderId });
+        if (fresh && fresh.id) Object.assign(order, fresh);
+      } catch (e2) { /* строка останется локальной до фоновой синхронизации */ }
+    }
     renderOrders();
-    // ЗА8: мягкий откат — колонка-получатель вспыхивает, если сервер возразил
-    const host = $('orders_kanban');
-    const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
-    if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
+    // Мягкий откат — колонка-получатель вспыхивает, если сервер возразил
+    flashKanCol(status);
     fail(err);
   }
+}
+function flashKanCol(status) {
+  const host = $('orders_kanban');
+  const flashCol = host && host.querySelector(`.kan-col[data-status="${status}"]`);
+  if (flashCol) { flashCol.classList.add('flash'); setTimeout(() => flashCol.classList.remove('flash'), 650); }
 }
 
 /* Кнопка «→» на карточке: тот же переход, что и перетаскивание в соседнюю
@@ -1396,12 +1635,22 @@ async function openOrder(id, intakeDraft, intakeMeta) {
   renderCancelBanner(data);                   // ЗА3: плашка «покупатель просит отмену»
   loadTgThread(id ? data : null);             // ЗА4/ЗА5: диалог и быстрые действия
   updateEcon();
+  setOrderTab('order');
   openModal('order_modal');
   if (id) {
     loadOrderReadiness(id);
     loadOrderCompletion(id);
     loadOrderDocuments(id);
     loadFilamentFact(id);
+    loadOrderHistory(id);
+    renderClientCase(data);
+  } else {
+    const hl = $('of_history_list');
+    if (hl) hl.innerHTML = '<span class="muted">История появится после сохранения заказа.</span>';
+    const hs = $('of_history_stages');
+    if (hs) hs.innerHTML = '';
+    const cc = $('of_client_case');
+    if (cc) cc.innerHTML = '<span class="muted">Откройте сохранённый заказ — подтянем его историю.</span>';
   }
   // Автоподстановка граммов: если поле пустое, попробуем взять вес плиты
   // с принтера / файла / базы товаров. Ручной ввод не перезаписываем.
@@ -1674,6 +1923,16 @@ async function updateEcon() {
     + (kind === 'ok' ? '<br>Заказ в норме по прибыли за час принтера.' : '')
     + spoolNote
     + '</div>';
+  // Полоса «что даст заказ» в шапке карточки: часы, граммы, прибыль крупно.
+  const strip = $('order_econ_strip');
+  if (strip) {
+    const tGrams = grams * k, tHours = hours * k;
+    strip.hidden = !(price || tGrams || tHours);
+    strip.innerHTML = `<span title="Время печати всего заказа"><b>${tHours ? hoursText(tHours) : '—'}</b><small>печать</small></span>`
+      + `<span title="Вес пластика всего заказа"><b>${tGrams ? nfmt(tGrams) + ' г' : '—'}</b><small>пластик</small></span>`
+      + `<span title="Цена минус себестоимость"><b class="${profit >= 0 ? 'pos' : 'neg'}">${money(profit)}</b><small>прибыль</small></span>`
+      + (left ? `<span title="Осталось получить"><b class="neg">${money(left)}</b><small>долг</small></span>` : '');
+  }
 }
 const updateEconDebounced = debounce(updateEcon, 350);
 
@@ -1732,7 +1991,7 @@ async function saveOrder(prepareAfter) {
       } catch (prepareError) {
         toast(wasEditing ? 'Заказ обновлён' : 'Заказ создан',
           `№${res.order.number} · проверьте готовность`, 'warn');
-        await PF.refreshCore();
+        mergeSavedOrder(res.order);
         await openOrder(res.order.id);
         fail(prepareError);
         return res;
@@ -1742,10 +2001,157 @@ async function saveOrder(prepareAfter) {
       toast(wasEditing ? 'Заказ обновлён' : 'Заказ создан',
         `№${res.order.number} · ${res.order.product}`);
     }
-    await PF.refreshCore();
-    PF.refreshFinance();
+    // Точечное вливание вместо полного рефетча: строка уже свежая из
+    // ответа, справочники дешёвые, а деньги сохранение не двигает
+    // (оплата идёт отдельным журналом). Остальное подтянет фон по SSE.
+    mergeSavedOrder(res.order);
+    PF.refreshLists().then(() => { fillSelectors(); renderOrders(); }).catch(() => {});
     return res;
   } catch (e) { fail(e); return null; }
+}
+
+/* Свежая строка из ответа — в список без перезагрузки всего: новый заказ
+   встаёт сверху (порядок «сначала новые»), правленный заменяется на месте. */
+function mergeSavedOrder(saved) {
+  if (!saved || !saved.id) return;
+  const list = num(saved.archived) ? (PF.state.archivedOrders || []) : PF.state.orders;
+  const at = list.findIndex((o) => o.id === saved.id);
+  if (at >= 0) Object.assign(list[at], saved);
+  else if (!num(saved.archived)) PF.state.orders.unshift(saved);
+  renderOrders();
+}
+
+/* ================================================== вкладки карточки
+   Простыня на ~40 полей разрезана на пять разделов: создание заказа целиком
+   живёт на первом («Заказ»), остальное — по смыслу. Все id полей прежние,
+   вкладки только прячут секции. */
+function setOrderTab(name) {
+  orderTab = name;
+  $$('#order_tabs [data-ord-tab]').forEach((b) => {
+    const on = b.dataset.ordTab === name;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $$('#order_modal [data-ord-pane]').forEach((pane) => { pane.hidden = pane.dataset.ordPane !== name; });
+}
+
+/* История заказа (18.3): маршрут /api/order/history годами писал в базу,
+   но фронт его не вызывал. Теперь это таймлайн «кто, когда, что поменял»
+   плюс время на этапах — из тех же записей, без новых таблиц. */
+const HIST_FIELDS = {
+  status: 'Статус', price: 'Цена', cost: 'Себестоимость', product: 'Изделие',
+  customer_name: 'Клиент', phone: 'Телефон', messenger: 'Мессенджер',
+  channel: 'Канал', niche_id: 'Ниша', qty: 'Количество', due: 'Срок',
+  material: 'Материал', color: 'Цвет', grams: 'Граммы', hours: 'Часы',
+  manual_minutes: 'Ручная работа', file: 'Файл', notes: 'Заметки',
+  quality: 'Качество', quality_note: 'Упаковка', priority: 'Приоритет',
+  discount: 'Скидка', delivery: 'Доставка', fee: 'Комиссия', gift: 'Подарочный',
+  nom_id: 'Товар', warehouse_id: 'Склад', reserved: 'Резерв',
+};
+function histVal(field, v) {
+  const s = String(v ?? '');
+  if (!s) return '—';
+  if (field === 'status') return PF.status(s).name || s;
+  if (field === 'niche_id') return (PF.niche(s) || {}).name || s;
+  if (field === 'channel') {
+    return { direct: 'Напрямую', shop: 'Витрина', telegram: 'Telegram', avito: 'Авито', ozon: 'Маркетплейс', b2b: 'B2B' }[s] || s;
+  }
+  if (field === 'priority') return PRIORITY[s] || s;
+  if (field === 'quality') return { pending: 'Не проверено', passed: 'Всё хорошо', rework: 'Нужна переделка' }[s] || s;
+  if (field === 'due' && /^\d{4}-\d{2}-\d{2}$/.test(s)) return dateText(s);
+  if (['price', 'cost', 'discount', 'delivery', 'fee'].includes(field) && Number.isFinite(num(s))) return money(s);
+  return s.length > 90 ? s.slice(0, 90) + '…' : s;
+}
+function fmtDur(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const mins = Math.floor(ms / 6e4);
+  if (mins < 1) return 'меньше минуты';
+  if (mins < 60) return `${mins} мин`;
+  const h = Math.floor(mins / 60);
+  if (h < 48) return `${h} ч${mins % 60 ? ` ${mins % 60} мин` : ''}`;
+  const d = Math.floor(h / 24);
+  return `${d} дн${h % 24 ? ` ${h % 24} ч` : ''}`;
+}
+function renderOrderHistory(order, entries) {
+  const listHost = $('of_history_list'), stagesHost = $('of_history_stages');
+  if (!listHost) return;
+  const rows = Array.isArray(entries) ? entries : [];
+  if (!rows.length) {
+    if (stagesHost) stagesHost.innerHTML = '';
+    listHost.innerHTML = '<span class="muted">Пока тихо: заказ создан и ещё не менялся.</span>';
+    return;
+  }
+  // Время на этапах: цепочка смен статуса от старой к новой, хвост — «по сейчас».
+  const chain = rows.filter((e) => e.field === 'status').slice().reverse();
+  const moves = chain.filter((e) => String(e.old_value || '') && String(e.new_value || ''));
+  let stages = '';
+  if (moves.length) {
+    const spans = moves.map((e, i) => {
+      const from = new Date(e.at).getTime();
+      const nextAt = moves[i + 1] ? moves[i + 1].at : null;
+      const to = nextAt ? new Date(nextAt).getTime() : Date.now();
+      const dur = Number.isFinite(from) && Number.isFinite(to) ? fmtDur(to - from) : '—';
+      return `<span class="stage-chip" title="С ${esc(dateTimeText(e.at))}${nextAt ? ` по ${esc(dateTimeText(nextAt))}` : ' по сейчас'}">${esc(PF.status(e.old_value).name || e.old_value)} · ${dur}</span>`;
+    });
+    const lastNew = moves[moves.length - 1].new_value;
+    spans.push(`<span class="stage-chip now">→ ${esc(PF.status(lastNew).name || lastNew)}</span>`);
+    stages = spans.join('');
+  }
+  if (stagesHost) stagesHost.innerHTML = stages;
+  listHost.innerHTML = rows.map((e) => {
+    const label = HIST_FIELDS[e.field] || e.field || 'изменение';
+    const oldV = histVal(e.field, e.old_value), newV = histVal(e.field, e.new_value);
+    return `<div class="hist-row"><span class="hist-at">${esc(dateTimeText(e.at))}</span>`
+      + `<span class="hist-what"><b>${esc(label)}</b> · ${esc(oldV)} → ${esc(newV)}</span>`
+      + (e.author && e.author !== 'user' ? `<span class="hist-by">${esc(e.author)}</span>` : '')
+      + `</div>`;
+  }).join('');
+}
+async function loadOrderHistory(orderId) {
+  const listHost = $('of_history_list');
+  if (!orderId || !listHost) return;
+  listHost.innerHTML = '<span class="muted">Загружаем…</span>';
+  try {
+    const d = await get('/api/order/history', { id: orderId });
+    if (editingOrder !== orderId) return;   // карточку уже переоткрыли
+    renderOrderHistory(null, (d && d.history) || []);
+  } catch (e) {
+    if (editingOrder === orderId) listHost.innerHTML = '<span class="neg">Не удалось загрузить историю.</span>';
+  }
+}
+
+/* Дело клиента (18.3, лёгкое): его заказы, оплаты и сроки — из уже
+   загруженных списков доски и архива, без новых запросов. Строка кликабельна:
+   повторный вопрос решается переходом, а не поиском. */
+function renderClientCase(order) {
+  const host = $('of_client_case');
+  if (!host) return;
+  const cid = String(order.customer_id || '');
+  const phone = String(order.phone || '').trim();
+  const name = String(order.customer_name || '').trim().toLowerCase();
+  const pool = [...(PF.state.orders || []), ...(PF.state.archivedOrders || [])];
+  const mine = pool.filter((o) => {
+    if (o.id === order.id) return false;
+    if (cid && String(o.customer_id || '') === cid) return true;
+    if (phone && String(o.phone || '').trim() === phone) return true;
+    return Boolean(name) && String(o.customer_name || '').trim().toLowerCase() === name
+      && String(o.phone || '').trim() === phone;
+  }).slice(0, 12);
+  const total = mine.reduce((a, o) => a + num(o.price), 0);
+  const paid = mine.reduce((a, o) => a + Math.max(num(o.paid), num(o.prepaid)), 0);
+  let html = `<div class="case-sum"><span><b>${mine.length}</b> прошлых заказов</span>`
+    + `<span>на <b>${money(total)}</b></span>`
+    + (total - paid > 0 ? `<span class="neg">долг <b>${money(total - paid)}</b></span>` : '<span class="pos">без долгов</span>')
+    + `</div>`;
+  html += mine.length ? mine.map((o) => {
+    const st = PF.status(o.status);
+    return `<div class="mini-row clickable" data-order="${esc(o.id)}" role="button" tabindex="0" title="Открыть заказ №${esc(o.number)}">`
+      + `<span class="dot" style="background:${esc(st.color)}"></span>`
+      + `<div class="mbody"><b>№${esc(o.number)} · ${esc(o.product || 'Без названия')}</b>`
+      + `<small>${esc(st.name)} · ${money(o.price)}${o.due ? ` · срок ${esc(dateText(o.due))}` : ''}</small></div></div>`;
+  }).join('') : '<span class="muted">Первый заказ клиента — истории пока нет.</span>';
+  host.innerHTML = html;
+  if (window.PFIcons) window.PFIcons.apply(host);
 }
 
 /* ======================================= Telegram-контур карточки (12.2)
@@ -2679,21 +3085,48 @@ function openNiche(id) {
   openModal('niche_modal');
 }
 
-/* ============================================================ статусы */
+/* ============================================================ статусы
+   Этапы и переходы (18.3): у каждого статуса свой список «далее →».
+   Пустой список у штатного этапа — обычные переходы из карты сервера;
+   у своего этапа пустой список — тупик, пока его не связать. В финальные
+   этапы (Выдан, На складе) стрелка не ведёт: туда переводят выдача и склад. */
 function renderStatusEditor() {
-  $('status_editor').innerHTML = statusDraft.map((s, i) => `<div class="status-row">`
-    + `<input type="color" value="${esc(s.color || '#64748b')}" data-st-color="${i}">`
-    + `<input value="${esc(s.name)}" data-st-name="${i}" placeholder="Название">`
-    + `<label class="check" title="Финальный статус закрывает заказ"><input type="checkbox" data-st-final="${i}"${num(s.is_final) ? ' checked' : ''}>финал</label>`
-    + `<button class="icon-btn sm" type="button" data-st-up="${i}"${i === 0 ? ' disabled' : ''}>↑</button>`
-    + `<button class="icon-btn sm" type="button" data-st-down="${i}"${i === statusDraft.length - 1 ? ' disabled' : ''}>↓</button>`
-    + `<button class="icon-btn sm danger" type="button" data-st-del="${i}"${statusDraft.length < 2 ? ' disabled' : ''}>×</button>`
-    + '</div>').join('');
+  const finals = new Set(statusDraft.filter((s) => num(s.is_final)).map((s) => s.id));
+  $('status_editor').innerHTML = statusDraft.map((s, i) => {
+    const next = Array.isArray(s.next) ? s.next : [];
+    const from = statusDraft.filter((x) => (Array.isArray(x.next) ? x.next : []).includes(s.id));
+    const targets = statusDraft.filter((x) => x.id !== s.id && !finals.has(x.id));
+    const isCustom = !STOCK_STATUSES.includes(s.id);
+    const changed = JSON.stringify([...next].sort()) !== JSON.stringify([...(s._origNext || [])].sort());
+    const boxes = targets.length
+      ? targets.map((x) => `<label class="check"><input type="checkbox" data-st-next="${i}:${esc(x.id)}"${next.includes(x.id) ? ' checked' : ''}>${esc(x.name)}</label>`).join('')
+      : '<small class="muted">нефинальных этапов больше нет</small>';
+    return `<div class="status-row">`
+      + `<input type="color" value="${esc(s.color || '#64748b')}" data-st-color="${i}">`
+      + `<input value="${esc(s.name)}" data-st-name="${i}" placeholder="Название">`
+      + `<label class="check" title="Финальный статус закрывает заказ"><input type="checkbox" data-st-final="${i}"${num(s.is_final) ? ' checked' : ''}>финал</label>`
+      + `<button class="icon-btn sm" type="button" data-st-up="${i}"${i === 0 ? ' disabled' : ''}>↑</button>`
+      + `<button class="icon-btn sm" type="button" data-st-down="${i}"${i === statusDraft.length - 1 ? ' disabled' : ''}>↓</button>`
+      + `<button class="icon-btn sm danger" type="button" data-st-del="${i}"${statusDraft.length < 2 ? ' disabled' : ''}>×</button>`
+      + `</div><details class="status-links"><summary>далее → ${next.length ? next.map((x) => esc((statusDraft.find((d) => d.id === x) || {}).name || x)).join(', ') : 'никуда'}`
+      + `${from.length ? ` <span class="muted">· ← из: ${from.map((x) => esc(x.name)).join(', ')}</span>` : ' <span class="muted">· ← ниоткуда</span>'}`
+      + `${isCustom && !from.length ? ' <span class="warn-chip">тупик</span>' : ''}</summary>`
+      + `<div class="status-links-body">${boxes}`
+      + (!isCustom && changed ? `<div><button class="btn sm ghost" type="button" data-st-reset="${i}">⟳ обычные переходы</button></div>` : '')
+      + `</div></details>`;
+  }).join('');
 }
 function readStatusEditor() {
   $$('[data-st-name]').forEach((el) => { statusDraft[+el.dataset.stName].name = el.value.trim() || statusDraft[+el.dataset.stName].name; });
   $$('[data-st-color]').forEach((el) => { statusDraft[+el.dataset.stColor].color = el.value; });
   $$('[data-st-final]').forEach((el) => { statusDraft[+el.dataset.stFinal].is_final = el.checked ? 1 : 0; });
+  const picked = {};
+  $$('[data-st-next]').forEach((el) => {
+    const [i, tid] = String(el.dataset.stNext).split(':');
+    if (!picked[i]) picked[i] = [];
+    if (el.checked) picked[i].push(tid);
+  });
+  Object.entries(picked).forEach(([i, list]) => { statusDraft[+i].next = list; });
 }
 
 /* ============================================================== экспорт */
@@ -2904,8 +3337,22 @@ function bind() {
     const status = $('bulk_status').value;
     const label = ($('bulk_status').selectedOptions[0] || {}).textContent || status;
     if (!status || !bulkSelected.size) return;
-    if (!confirmDanger(`Сменить статус у ${bulkSelected.size} заказов на «${label}»?`)) return;
     try {
+      // Сухая примерка: «17 из 20 можно» — до нажатия, а не после.
+      const dry = await post('/api/orders/bulk-status', { ids: [...bulkSelected], status, check_only: true });
+      const okN = (dry.allowed || []).length;
+      const bad = dry.skipped || [];
+      if (!okN) {
+        fail(new Error(bad.length ? `Ни один не перейдёт: ${bad[0].error}` : 'Нет заказов для перевода'));
+        return;
+      }
+      const lines = [`Сменить статус у ${okN} из ${bulkSelected.size} на «${label}»?`];
+      if (bad.length) {
+        const names = bad.slice(0, 4).map((b) => `№${b.number || b.id}`).join(', ');
+        lines.push(`Не перейдут (${bad.length}): ${names}${bad.length > 4 ? '…' : ''}`);
+        lines.push(`Причина: ${bad[0].error}`);
+      }
+      if (!confirmDanger(lines.join('\n'))) return;
       const res = await post('/api/orders/bulk-status', { ids: [...bulkSelected], status });
       toast('Готово', `Статус сменён у ${res.updated} заказов`);
       bulkSelected.clear();
@@ -2913,7 +3360,7 @@ function bind() {
       renderOrders();
     } catch (e) { fail(e); }
   });
-  $('orders_search').addEventListener('input', debounce((e) => { filters.q = e.target.value; renderOrders(); }, 180));
+  $('orders_search').addEventListener('input', debounce((e) => { filters.q = e.target.value; boardExpanded = new Set(); renderOrders(); }, 180));
   // 13.1 (33): компактные карточки канбана
   const odens = $('orders_density');
   if (odens) odens.addEventListener('click', () => {
@@ -2949,7 +3396,7 @@ function bind() {
       if (!e.target.closest('tr[data-order]')) hoverCard.hidden = true;
     });
   }
-  $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; renderOrders(); });
+  $('orders_filter_status').addEventListener('change', (e) => { filters.status = e.target.value; boardExpanded = new Set(); touchCustomPreset(); renderOrders(); });
   const boxSeg = $('orders_box');
   if (boxSeg) {
     boxSeg.addEventListener('click', (e) => {
@@ -2958,7 +3405,7 @@ function bind() {
       setOrderBox(btn.dataset.box);
     });
   }
-  $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; renderOrders(); });
+  $('orders_filter_niche').addEventListener('change', (e) => { filters.niche = e.target.value; boardExpanded = new Set(); touchCustomPreset(); renderOrders(); });
   $('orders_view').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-mode]');
     if (!btn) return;
@@ -2966,7 +3413,7 @@ function bind() {
     $$('#orders_view button').forEach((b) => b.classList.toggle('on', b === btn));
     renderOrders();
   });
-  // ЗА2: фильтр по каналу (Telegram) с запоминанием выбора
+  // Фильтр по каналу с запоминанием выбора + сортировка и виды доски.
   const chanHost = $('orders_chan');
   if (chanHost) {
     const savedChan = U.store.get('pf_orders_chan', '');
@@ -2980,9 +3427,79 @@ function bind() {
       filters.chan = btn.dataset.chan;
       $$('#orders_chan button').forEach((b) => b.classList.toggle('on', b === btn));
       U.store.set('pf_orders_chan', filters.chan);
+      boardExpanded = new Set();
+      touchCustomPreset();
       renderOrders();
     });
   }
+  const sortSel = $('orders_sort');
+  if (sortSel) {
+    const savedSort = U.store.get('pf_orders_sort', 'new');
+    if (savedSort) { filters.sort = savedSort; sortSel.value = savedSort; }
+    sortSel.addEventListener('change', () => {
+      filters.sort = sortSel.value || 'new';
+      U.store.set('pf_orders_sort', filters.sort);
+      boardExpanded = new Set();
+      touchCustomPreset();
+      renderOrders();
+    });
+  }
+  renderPresetOptions();
+  const presetSel = $('orders_preset');
+  if (presetSel) {
+    presetSel.addEventListener('change', () => {
+      if (presetSel.value === '__manual') {
+        presetSel.value = activePreset;
+        return;
+      }
+      if (presetSel.value === '__save') {
+        presetSel.value = activePreset;
+        $('view_save_name').value = '';
+        openModal('view_save_modal');
+        setTimeout(() => $('view_save_name').focus(), 50);
+        return;
+      }
+      filters.q = '';
+      const sq = $('orders_search');
+      if (sq) sq.value = '';
+      applyPreset(presetSel.value);
+    });
+  }
+  const presetSave = $('view_save_confirm');
+  if (presetSave) {
+    presetSave.addEventListener('click', () => {
+      const name = ($('view_save_name').value || '').trim();
+      if (!name) return fail(new Error('Назовите вид — например «Мои долги»'));
+      const list = customViews();
+      const id = 'v_' + Date.now().toString(36);
+      list.push({ id, name, f: {
+        status: filters.status, niche: filters.niche, chan: filters.chan,
+        sort: filters.sort, extra: filters.extra,
+      } });
+      writeCustomViews(list);
+      closeModal('view_save_modal');
+      renderPresetOptions();
+      applyPreset(id);
+      toast('Вид сохранён', name);
+    });
+  }
+  const presetDel = $('orders_preset_del');
+  if (presetDel) {
+    presetDel.addEventListener('click', () => {
+      const list = customViews().filter((v) => v.id !== activePreset);
+      writeCustomViews(list);
+      renderPresetOptions();
+      applyPreset('all');
+    });
+  }
+  // Автоплотность: на узком экране канбан сразу компактный, кнопка — ручной
+  // переключатель поверх. Отдельного «умного» режима нет: предсказуемость
+  // важнее — одна кнопка, одно состояние.
+  try {
+    if (typeof window !== 'undefined' && window.innerWidth && window.innerWidth < 1400) {
+      orderDensity = true;
+    }
+  } catch (e) { /* headless-стенд: window игрушечный */ }
   // ЗА3: разбор запроса отмены
   const keepBtn = $('of_cancel_keep');
   if (keepBtn) keepBtn.addEventListener('click', () => resolveCancel('keep'));
@@ -3015,6 +3532,14 @@ function bind() {
     if (review) tgSetMode('review');
   });
   document.addEventListener('click', (e) => {
+    const moreBtn = e.target.closest('[data-board-more]');
+    if (moreBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      boardExpanded.add(moreBtn.dataset.boardMore);
+      renderOrders();
+      return;
+    }
     const actionBtn = e.target.closest('[data-order-action]');
     if (actionBtn) {
       e.stopPropagation();
@@ -3024,6 +3549,7 @@ function bind() {
       if (act === 'open') openOrder(orderId);
       else if (act === 'queue') quickQueueOrder(orderId);
       else if (act === 'advance') advanceOrder(orderId);
+      else if (act === 'fulfill') openOrderFulfillment(orderId);
       return;
     }
     const card = e.target.closest('[data-order]');
@@ -3043,6 +3569,13 @@ function bind() {
     }
   });
 
+  const ordTabs = $('order_tabs');
+  if (ordTabs) {
+    ordTabs.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ord-tab]');
+      if (b) setOrderTab(b.dataset.ordTab);
+    });
+  }
   const spoolAdd = $('of_spool_add');
   if (spoolAdd) spoolAdd.addEventListener('click', () => {
     const host = $('of_spool_rows');
@@ -3552,16 +4085,27 @@ function bind() {
   });
 
   $('orders_statuses').addEventListener('click', () => {
-    statusDraft = PF.state.statuses.map((s) => Object.assign({}, s));
+    statusDraft = PF.state.statuses.map((s) => Object.assign({}, s, {
+      next: Array.isArray(s.next) ? [...s.next] : [],
+      _origNext: Array.isArray(s.next) ? [...s.next] : [],
+    }));
     renderStatusEditor();
     openModal('status_modal');
   });
   $('status_add').addEventListener('click', () => {
     readStatusEditor();
-    statusDraft.push({ id: 'st_' + Date.now().toString(36), name: 'Новый статус', color: '#64748b', is_final: 0 });
+    statusDraft.push({ id: 'st_' + Date.now().toString(36), name: 'Новый статус', color: '#64748b', is_final: 0, next: [], _origNext: [] });
     renderStatusEditor();
   });
   $('status_editor').addEventListener('click', (e) => {
+    const reset = e.target.closest('[data-st-reset]');
+    if (reset) {
+      readStatusEditor();
+      const i = +reset.dataset.stReset;
+      statusDraft[i].next = [...(statusDraft[i]._origNext || [])];
+      renderStatusEditor();
+      return;
+    }
     const up = e.target.closest('[data-st-up]'), down = e.target.closest('[data-st-down]'), del = e.target.closest('[data-st-del]');
     if (!up && !down && !del) return;
     readStatusEditor();
@@ -3579,7 +4123,17 @@ function bind() {
     readStatusEditor();
     try {
       for (let i = 0; i < statusDraft.length; i++) {
-        await post('/api/status/save', Object.assign({}, statusDraft[i], { position: i }));
+        const row = statusDraft[i];
+        const edited = [...(Array.isArray(row.next) ? row.next : [])].sort();
+        const orig = [...(row._origNext || [])].sort();
+        // Штатный этап без правок хранит «обычные» (пусто), а не слепок карты:
+        // иначе будущие правки карты сервера не дойдут до этой базы.
+        const nextIds = (!STOCK_STATUSES.includes(row.id) || JSON.stringify(edited) !== JSON.stringify(orig))
+          ? edited : '';
+        await post('/api/status/save', {
+          id: row.id, name: row.name, color: row.color,
+          position: i, is_final: num(row.is_final) ? 1 : 0, next_ids: nextIds,
+        });
       }
       const removed = PF.state.statuses.filter((s) => !statusDraft.some((d) => d.id === s.id));
       for (const s of removed) await post('/api/status/delete', { id: s.id });

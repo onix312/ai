@@ -61,10 +61,10 @@ TG_CLIENT_SOURCES = ("telegram", "catalog", "custom", "individual")
 # Список закрытый: экономика обязан совпадать с полным видом, поэтому здесь
 # все входы order_economics (цена, скидка, комиссия, катушки, факты).
 BOARD_COLUMNS = (
-    "id number product customer_name phone status priority niche_id channel "
-    "client_source due paid prepaid price discount fee payer delivery material "
-    "color grams hours actual_grams actual_hours actual_cost cost "
-    "manual_minutes design_minutes qty spools file quality "
+    "id number product customer_name phone messenger status priority niche_id "
+    "channel client_source due paid prepaid price discount fee payer delivery "
+    "material color grams hours actual_grams actual_hours actual_cost cost "
+    "manual_minutes design_minutes qty spools file notes quality "
     "cancel_requested_at archived created_at updated_at"
 ).split()
 

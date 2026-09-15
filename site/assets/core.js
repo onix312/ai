@@ -1459,8 +1459,10 @@ async function bootstrap() {
 }
 
 async function refreshCore() {
+  // Лёгкая строка доски (18.3): view=board отдаёт ~40 полей вместо 60+,
+  // карточка заказа всегда догружает полную строку своим GET /api/order.
   const [orders, customers, spools, catalog, jobs, nomenclature] = await Promise.all([
-    get('/api/orders'), get('/api/customers'), get('/api/spools'),
+    get('/api/orders', { view: 'board' }), get('/api/customers'), get('/api/spools'),
     get('/api/catalog'), get('/api/jobs', { limit: 60 }),
     get('/api/nomenclature'),
   ]);

@@ -64,18 +64,18 @@ class BoardViewTests(unittest.TestCase):
 
     def test_board_view_drops_card_only_fields(self):
         row = self.repo.orders(view="board")[0]
-        for heavy in ("notes", "messenger", "colors", "qc_done", "nom_id",
+        for heavy in ("colors", "qc_done", "nom_id",
                       "warehouse_id", "gift", "quality_note", "closed_at",
                       "client_request_id", "archived_at", "auto_cost",
                       "account_id", "customer_id", "reserved", "rush"):
             self.assertNotIn(heavy, row, f"доске не нужно поле {heavy}")
         for need in ("id", "number", "product", "customer_name", "phone",
-                     "status", "priority", "niche_id", "channel",
+                     "messenger", "status", "priority", "niche_id", "channel",
                      "client_source", "due", "paid", "prepaid", "price",
                      "discount", "fee", "payer", "delivery", "material",
                      "color", "grams", "hours", "actual_grams",
                      "actual_hours", "actual_cost", "cost", "manual_minutes",
-                     "design_minutes", "qty", "spools", "file", "quality",
+                     "design_minutes", "qty", "spools", "file", "notes", "quality",
                      "cancel_requested_at", "archived", "created_at",
                      "updated_at", "items_count", "economics", "next"):
             self.assertIn(need, row, f"доске нужно поле {need}")
