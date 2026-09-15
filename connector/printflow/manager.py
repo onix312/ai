@@ -21,7 +21,7 @@ from .config import (BACKUP_DIR, DANGEROUS_AUTOMATION_COMMANDS, UPLOAD_DIR,
                      now_iso, rotate_backups)
 from .db import Database, backup_database_file
 from .repo import Repo
-from .telegram_bot import TelegramBot
+from .staffbot import StaffBot as TelegramBot
 from .watchdog import Watchdog
 
 # Сколько сорванных печатей подряд останавливает автозапуск (18.0.9).

@@ -353,7 +353,7 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
         from unittest import mock as _mock
         self.bot.last_poll = _time.time()
         fresh = _time.strftime("%Y-%m-%dT%H:%M:%S")
-        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+        with _mock.patch("connector.printflow.staffbot.views.list_backups",
                          return_value=[{"at": fresh}]):
             text = self.bot.text_doctor()
         self.assertIn("Цех здоров", text)
@@ -365,7 +365,7 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
         from unittest import mock as _mock
         self.bot.last_poll = 0.0
         stale = (_dt.now() - _td(hours=80)).strftime("%Y-%m-%dT%H:%M:%S")
-        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+        with _mock.patch("connector.printflow.staffbot.views.list_backups",
                          return_value=[{"at": stale}]):
             text = self.bot.text_doctor()
         self.assertIn("Проблем: 2", text)
@@ -377,7 +377,7 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
         from unittest import mock as _mock
         self.bot.last_poll = _time.time()
         fresh = _time.strftime("%Y-%m-%dT%H:%M:%S")
-        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+        with _mock.patch("connector.printflow.staffbot.views.list_backups",
                          return_value=[{"at": fresh}]):
             text = self.bot.text_digest()
         self.assertIn("Цех здоров", text)
@@ -385,7 +385,7 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
     def test_digest_lists_problems(self):
         from unittest import mock as _mock
         self.bot.last_poll = 0.0
-        with _mock.patch("connector.printflow.telegram_bot.list_backups",
+        with _mock.patch("connector.printflow.staffbot.views.list_backups",
                          return_value=[]):
             text = self.bot.text_digest()
         self.assertIn("Цех требует внимания", text)
