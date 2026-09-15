@@ -350,6 +350,7 @@ class BotCore:
                 self.scenes.sweep()  # уборка просроченных диалогов
                 self._maybe_digest(settings)
                 self._maybe_weekly(settings)
+                self._maybe_evening_chart(settings)
                 self._maybe_live()
                 self._maybe_watch()
                 self._maybe_shelf_low(settings)

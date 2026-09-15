@@ -13,7 +13,8 @@ from .. import APP_VERSION
 from ..accounting import num
 from ..config import now_iso
 from ..db import SCHEMA_VERSION, list_backups
-from .ui import HELP, STATE_RU, hm, money
+from .charts import daily_report
+from .ui import HELP, STATE_RU, hm, keyboard, money
 
 
 class ViewsMixin:
@@ -798,7 +799,24 @@ class ViewsMixin:
             return self._reply(chat, self.text_weekly())
         if "месяц" in text:
             return self._reply(chat, self.text_month_report())
-        self._reply(chat, self.text_today())
+        self._reply(chat, self.text_today(),
+                    keyboard([("📈 Картинкой", "cmd:chart")]))
+
+    def cmd_chart(self, chat: str, raw: str, text: str) -> None:
+        """«график» — отчёт дня картинкой (PNG без внешних библиотек)."""
+        self.send_day_chart(chat)
+
+    def send_day_chart(self, chat: str) -> None:
+        """Фото-отчёт дня: столбики по часам + подпись с итогами и кассой."""
+        try:
+            png, caption = daily_report(self.db)
+        except Exception as exc:
+            return self._reply(chat, f"Не удалось собрать график: {exc}")
+        token = self._settings().get("telegram_token", "")
+        try:
+            self.manager._send_photo(token, chat, caption, png)
+        except Exception as exc:
+            self._reply(chat, f"Не удалось отправить график: {exc}")
 
     def cmd_debts(self, chat: str, raw: str, text: str) -> None:
         self._reply(chat, self.text_debts())
@@ -833,6 +851,10 @@ class ViewsMixin:
 
     def cb_today(self, chat: str, params: str) -> str:
         return self.text_today()
+
+    def cb_chart(self, chat: str, message_id: str, params: str) -> None:
+        """Кнопка «📈 Картинкой»: фото-отчёт вместо текстового дайджеста."""
+        self.send_day_chart(chat)
 
     def cb_weekly(self, chat: str, params: str) -> str:
         return self.text_weekly()

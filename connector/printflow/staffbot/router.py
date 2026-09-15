@@ -213,6 +213,7 @@ TEXT_COMMANDS: tuple[Command, ...] = (
     Command(("касса",), "finance", "cmd_cash"),
     Command(("забрали", "выемка"), "finance", "cmd_collect"),
     Command(("день", "сегодня", "итоги"), "finance", "cmd_today"),
+    Command(("график", "картинкой"), "finance", "cmd_chart"),
     Command(("долги", "должники", "debt", "долг"), "finance", "cmd_debts"),
     # --- полка
     Command(("стеллаж", "полка", "витрина", "shelf"), "shelf", "cmd_shelf"),
@@ -292,6 +293,7 @@ CALLBACKS: tuple[Route, ...] = (
     Route("filament", "view", "cb_filament", kind="text"),
     Route("money", "finance", "cb_money", kind="text"),
     Route("today", "finance", "cb_today", kind="text"),
+    Route("chart", "finance", "cb_chart"),
     Route("weekly", "finance", "cb_weekly", kind="text"),
     Route("inbox", "inbox", "cb_inbox", kind="text"),
     Route("team", "staff", "cb_team", kind="text"),

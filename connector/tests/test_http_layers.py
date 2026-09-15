@@ -27,7 +27,8 @@ sys.path.insert(0, str(ROOT / "connector"))
 from connector.printflow import static_serve  # noqa: E402
 from connector.printflow.api import Handler  # noqa: E402
 from connector.printflow.http_helpers import (  # noqa: E402
-    CLIENT_DISCONNECT_ERRORS, MAX_JSON, MAX_UPLOAD, _form_bool, _upload_filename,
+    CLIENT_DISCONNECT_ERRORS, MAX_JSON, MAX_UPLOAD, STREAM_DISCONNECT_ERRORS,
+    _form_bool, _upload_filename,
     parse_multipart, rate_bucket, request_length, request_origin_allowed,
     safe_file, save_upload, uploads_root)
 from connector.printflow.uploads import UploadMixin  # noqa: E402
@@ -254,6 +255,29 @@ class HandlerWiringTests(unittest.TestCase):
     def test_client_disconnect_errors_cover_browser_closes(self):
         self.assertIn(ConnectionResetError, CLIENT_DISCONNECT_ERRORS)
         self.assertIn(ConnectionAbortedError, CLIENT_DISCONNECT_ERRORS)
+
+    def test_stream_disconnect_errors_tuple_is_flat(self):
+        """Python 3.14 запрещает вложенные кортежи в except (17.0.27, Win10053).
+
+        Проверяем заранее собранный кортеж стрима: каждый элемент — класс
+        исключения, кортежей внутри нет. На Python 3.11 вложенный вариант
+        молча разворачивался, поэтому ловим структурно, а не поведением.
+        """
+        for item in STREAM_DISCONNECT_ERRORS:
+            self.assertTrue(issubclass(item, BaseException),
+                            f"в except-кортеже не класс: {item!r}")
+
+    def test_stream_disconnect_errors_catch_camera_abort(self):
+        """Обрыв MJPEG-потока (WinError 10053) уходит в except, а не в TypeError."""
+        caught = []
+        for exc in (ConnectionAbortedError, ConnectionResetError,
+                    BrokenPipeError, TimeoutError, OSError):
+            with self.subTest(exc=exc.__name__):
+                try:
+                    raise exc("обрыв соединения камеры")
+                except STREAM_DISCONNECT_ERRORS:
+                    caught.append(exc)
+        self.assertEqual(len(caught), 5, "какой-то из разрывов не пойман")
 
 
 class HandlerJobsStartBridgeTests(unittest.TestCase):

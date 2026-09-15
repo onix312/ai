@@ -68,3 +68,28 @@ class SchedulesMixin:
         chat = str(settings.get("telegram_chat_id") or "")
         if chat:
             self.manager.notify_async(self.text_weekly())
+
+    def _maybe_evening_chart(self, settings: dict) -> None:
+        """Вечерний отчёт-картинка: итоги дня (включая мобильную кассу) в ТГ.
+
+        Просьба владельца: «отчётность с кассы мобильной кидать в тг».
+        Раз в сутки в ``evening_chart_time`` (по умолчанию 20:00) в чат
+        уходит тот же PNG-график, что и по команде «график».
+        """
+        at = str(settings.get("evening_chart_time") or "20:00")
+        now = datetime.now()
+        if now.strftime("%H:%M") != at:
+            return
+        today = now.strftime("%Y-%m-%d")
+        if str(settings.get("evening_chart_last") or "") == today:
+            return
+        self.db.set_settings({"evening_chart_last": today})
+        chat = str(settings.get("telegram_chat_id") or "")
+        if not chat:
+            return
+        try:
+            from .charts import daily_report
+            png, caption = daily_report(self.db)
+        except Exception:
+            return
+        self.manager.notify_async(caption, photo=png)
