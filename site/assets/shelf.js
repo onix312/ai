@@ -341,7 +341,7 @@ function openShelfCheck() {
     const discrepancy = st === 'empty' || st === 'low' || num(i.plan_qty) > 0;
     return `<label class="shelf-check-row ${checked ? 'done' : ''}" data-check-id="${esc(i.id)}">`
       + `<span class="switch"><input type="checkbox" data-shelf-check="${esc(i.id)}"${checked ? ' checked' : ''}><i></i></span>`
-      + `<span class="check-name">${esc(i.name)}<small>${esc(i.cell || 'без ячейки')} · остаток ${nfmt(i.qty)} шт</small></span>`
+      + `<span class="check-name">${esc(i.name)}<small>${i.variant_label ? esc(i.variant_label) + ' · ' : ''}${esc(i.cell || 'без ячейки')} · остаток ${nfmt(i.qty)} шт</small></span>`
       + (discrepancy ? `<span class="chip ${warn}">${st === 'empty' ? 'пусто' : st === 'low' ? 'мало' : 'нужно напечатать ' + nfmt(i.plan_qty)}</span>` : `<span class="chip ok">ок</span>`)
       + `<span class="check-time muted">${checked ? esc(done[i.id]) : ''}</span></label>`;
   }).join('');
@@ -414,7 +414,7 @@ function fillStockGoodsSelect() {
   const sel = $('shf_stock_item');
   sel.innerHTML = '<option value="">Заполню вручную</option>'
     + stockGoods.map((i, idx) =>
-      `<option value="${idx}">${esc(i.name)} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} ${esc(i.unit || 'шт')}</option>`).join('');
+      `<option value="${idx}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} ${esc(i.unit || 'шт')}</option>`).join('');
   $('shf_stock_info').hidden = true;
 }
 
@@ -438,6 +438,10 @@ function onStockGoodChange() {
   if (!$('shf_nom_id').value) $('shf_nom_id').value = row.nom_id || '';
   if (!num($('shf_price').value)) $('shf_price').value = num(row.price);
   if (!num($('shf_cost').value)) $('shf_cost').value = num(row.avg_cost);
+  if (row.variant_id) {
+    if (!$('shf_barcode').value.trim()) $('shf_barcode').value = row.barcode || '';
+    if (!$('shf_sku').value.trim()) $('shf_sku').value = row.sku || '';
+  }
   // Остаток придёт переносом со склада, а не «начальным остатком».
   qtyEl.disabled = true;
   qtyEl.value = '';
@@ -458,7 +462,7 @@ function onStockGoodChange() {
 /* ============================================================== позиция */
 function fillShelfSelectors(keep) {
   const items = shelfData.items || [];
-  const opts = items.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  const opts = items.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''}</option>`).join('');
   const set = (id, val) => { const el = $(id); if (el) { el.innerHTML = val; if (keep) el.value = keep; } };
   set('spf_item', opts);
   set('sif_item', opts);
@@ -557,6 +561,7 @@ async function saveShelf() {
       ? await post('/api/shelf/save-from-stock', {
           ...payload,
           nom_id: stockRow.nom_id, warehouse_id: stockRow.warehouse_id, qty: stockQty,
+          variant_id: stockRow.variant_id || '',
         })
       : await post('/api/shelf/save', payload);
     savedItemId = res.item && res.item.id;

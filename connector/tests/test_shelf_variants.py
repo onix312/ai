@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
-from connector.printflow.accounting import Accounting  # noqa: E402
+from connector.printflow.accounting import Accounting, num  # noqa: E402
 from connector.printflow.cashier import Cashier  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.nomenclature import Nomenclature  # noqa: E402
@@ -200,6 +200,51 @@ class ShelfVariantSaveTests(ShelfVariantCase):
         self.assertEqual(1, len(items))
         self.assertEqual("", items[0]["variant_id"])
         self.assertEqual("", items[0]["variant_label"])
+
+
+class ShelfVariantCreateTests(ShelfVariantCase):
+    """Новая позиция полки прямо из вариации: так и заводят цвет на стеллаже."""
+
+    def setUp(self):
+        super().setUp()
+        self.red_l = self.variant_by_name("Красный / L")
+        self.put_stock(self.red_l["id"], 2)
+
+    def test_new_card_keeps_variant_and_its_codes(self):
+        res = self.shelf.create_item_from_stock(
+            {"name": "Адресник", "price": 450}, "nom1", self.warehouse, 2,
+            variant_id=self.red_l["id"])
+        item = res["item"]
+        self.assertEqual(self.red_l["id"], item["variant_id"])
+        self.assertEqual("Красный · L", item["variant_label"])
+        self.assertEqual(str(self.red_l.get("barcode") or ""), item["barcode"])
+        self.assertEqual(str(self.red_l.get("sku") or ""), item["sku"])
+        self.assertEqual("nom1", item["nom_id"])
+
+    def test_new_card_transfers_only_that_variant(self):
+        self.shelf.create_item_from_stock({}, "nom1", self.warehouse, 2,
+                                          variant_id=self.red_l["id"])
+        free = {str(r.get("variant_id") or ""): r["qty"]
+                for r in self.shelf.stock_available()}
+        self.assertEqual(0.0, num(free.get(self.red_l["id"])))
+        blue = self.variant_by_name("Синий / L")
+        self.assertEqual(0.0, num(free.get(blue["id"])),
+                         "перенос красного не должен создавать остаток синему")
+
+    def test_new_card_refuses_more_than_the_variant_has(self):
+        with self.assertRaises(ValueError) as ctx:
+            self.shelf.create_item_from_stock({}, "nom1", self.warehouse, 5,
+                                              variant_id=self.red_l["id"])
+        self.assertIn("5", str(ctx.exception))
+
+    def test_new_card_without_variant_uses_product_codes(self):
+        self.db.execute("UPDATE nomenclature SET barcode=?, sku=? WHERE id=?",
+                        ("4600000000001", "ADR-1", "nom1"))
+        self.stock.add_move("nom1", self.warehouse, 1, 100.0, doc_kind="produce")
+        item = self.shelf.create_item_from_stock({}, "nom1", self.warehouse, 1)["item"]
+        self.assertEqual("", item["variant_id"])
+        self.assertEqual("4600000000001", item["barcode"])
+        self.assertEqual("ADR-1", item["sku"])
 
 
 class CashierVariantTests(ShelfVariantCase):
