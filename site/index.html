@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=17.0.2">
-<link rel="stylesheet" href="assets/app.css?v=18.3.0">
+<link rel="stylesheet" href="assets/app.css?v=18.4.0">
 <link rel="stylesheet" href="assets/more.css?v=17.1.3">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
@@ -405,7 +405,7 @@
   <div class="head-actions">
    <button class="btn" id="orders_export" type="button">Экспорт CSV</button>
    <button class="btn" id="orders_statuses" type="button">Статусы</button>
-   <button class="btn" id="orders_intake" type="button">✦ Заказ из текста</button>
+   <button class="btn" id="orders_wishes" type="button" title="Хотелки клиентов: что просили, что нашли">♥ Хотелки <span class="tag" id="orders_wishes_tag" hidden></span></button>
    <button class="btn primary" id="orders_new" type="button">+ Новый заказ</button>
   </div>
  </div>
@@ -4489,6 +4489,22 @@
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="wish_modal">Закрыть</button></div>
 </form></dialog>
+<dialog class="modal" id="wishes_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Хотелки</span><h2>Что просили клиенты</h2><p>Блокнот хотелок: старые сверху. Поймали → нашли модель → отправили в заказ.</p></div><button class="icon-btn" type="button" data-close="wishes_modal">×</button></div>
+ <div class="modal-body">
+  <div class="wish-capture">
+   <select id="wishes_customer" class="field" title="Клиент из базы — или новый ниже"></select>
+   <input id="wishes_client_name" class="field" placeholder="Новый клиент: имя" autocomplete="off">
+   <input id="wishes_client_phone" class="field" placeholder="Новый клиент: телефон" autocomplete="off">
+   <input id="wishes_text" class="field wide" placeholder="Что просили — например: держатель для наушников" autocomplete="off">
+   <input id="wishes_link" class="field" placeholder="Ссылка на модель (если уже есть)" autocomplete="off">
+   <select id="wishes_source" class="field" title="Где поймали"><option value="лично">Поймано лично</option><option value="чат">Поймано в чате</option></select>
+   <button class="btn sm ok" type="button" id="wishes_add">Записать</button>
+  </div>
+  <div id="wishes_queue" class="muted">Загружаем…</div>
+ </div>
+ <div class="modal-foot"><button class="btn" type="button" data-close="wishes_modal">Закрыть</button></div>
+</form></dialog>
 <dialog class="modal narrow" id="my_nozza_modal"><form method="dialog">
  <div class="modal-head"><div><span class="eyebrow">Мой NOZZA</span><h2 id="my_title">Страница клиента</h2><p>Код даёт заказчику доступ к статусу, фото и долгу без звонка.</p></div><button class="icon-btn" type="button" data-close="my_nozza_modal">×</button></div>
  <div class="modal-body" style="text-align:center">
@@ -5140,7 +5156,7 @@
 <script src="assets/icons.js?v=17.0.1"></script>
 <script src="assets/printer.js?v=17.1.2"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
-<script src="assets/ops.js?v=18.3.0"></script>
+<script src="assets/ops.js?v=18.4.0"></script>
 <script src="assets/money.js?v=17.0.1"></script>
 <script src="assets/finance.js?v=17.0.6"></script>
 <script src="assets/shelf.js?v=17.0.2"></script>

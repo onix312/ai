@@ -1256,6 +1256,15 @@ class Api:
                 "SELECT * FROM wishes WHERE customer_id=? ORDER BY created_at DESC",
                 (customer_id,)) if customer_id else []
             return 200, {"wishes": rows}
+        if path == "/api/wish/queue":
+            # Очередь хотелок (18.4): все открытые, старые сверху, с именем
+            # клиента — мастер разбирает «что просили» по порядку.
+            rows = self.db.query(
+                "SELECT w.*, c.name customer_name, c.phone customer_phone"
+                " FROM wishes w LEFT JOIN customers c ON c.id=w.customer_id"
+                " WHERE w.status IN ('pending','found')"
+                " ORDER BY w.created_at ASC")
+            return 200, {"wishes": rows}
         # ------------------------------------------------- 8.5: генераторы
         return 404, {"error": "Неизвестный маршрут"}
 
@@ -3263,6 +3272,24 @@ class Api:
             return 200, {"ok": True}
         # --- 8.5: Фаза 11 --------------------------------------------------
         if path == "/api/wish/save":
+            if body.get("id"):
+                # Правка открытой хотелки: дописать ссылку на модель, уточнить
+                # текст. Разрешённую трогать нельзя — это уже история.
+                wish = self.db.one("SELECT * FROM wishes WHERE id=?",
+                                   (str(body.get("id") or ""),))
+                if not wish:
+                    return 404, {"error": "Пожелание не найдено"}
+                if wish["status"] not in ("pending", "found"):
+                    return 400, {"error": "Разрешённую хотелку править нельзя"}
+                text = str(body.get("text") or wish["text"] or "").strip()
+                if not text:
+                    return 400, {"error": "Нужен текст пожелания"}
+                self.db.execute(
+                    "UPDATE wishes SET text=?, link=?, source=? WHERE id=?",
+                    (text[:500], str(body.get("link") or wish["link"] or ""),
+                     str(body.get("source") or wish["source"] or ""), wish["id"]))
+                return 200, {"ok": True, "wish": self.db.one(
+                    "SELECT * FROM wishes WHERE id=?", (wish["id"],))}
             customer_id = str(body.get("customer_id") or "")
             text = str(body.get("text") or "").strip()
             if not customer_id or not text:
@@ -3270,7 +3297,8 @@ class Api:
             row = self.db.upsert("wishes", {
                 "id": uid("wish"), "customer_id": customer_id,
                 "order_id": str(body.get("order_id") or ""),
-                "text": text[:500], "status": "pending",
+                "text": text[:500], "link": str(body.get("link") or ""),
+                "source": str(body.get("source") or ""), "status": "pending",
                 "created_at": now_iso(), "resolved_at": ""})
             self.db.add_event("crm", "Wish-list: добавлено", text[:80],
                               "", {"customer_id": customer_id})
@@ -3280,9 +3308,14 @@ class Api:
                                (str(body.get("id") or ""),))
             if not wish:
                 return 404, {"error": "Пожелание не найдено"}
-            status = "done" if body.get("status") == "done" else "declined"
-            self.db.execute("UPDATE wishes SET status=?, resolved_at=? WHERE id=?",
-                            (status, now_iso(), wish["id"]))
+            status = str(body.get("status") or "declined")
+            # found (18.4): модель найдена, но заказа ещё нет — хотелка
+            # остаётся в очереди с пометкой, а не исчезает.
+            if status not in ("done", "found", "declined"):
+                return 400, {"error": "Неизвестный статус хотелки"}
+            order_id = str(body.get("order_id") or wish["order_id"] or "")
+            self.db.execute("UPDATE wishes SET status=?, resolved_at=?, order_id=? WHERE id=?",
+                            (status, now_iso(), order_id, wish["id"]))
             if status == "done":
                 # «Сделали — взять?» (идея 72): готовый текст в буфер.
                 customer = self.db.one("SELECT * FROM customers WHERE id=?",

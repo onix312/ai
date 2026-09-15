@@ -2460,3 +2460,14 @@ tr.row-late td:first-child { box-shadow: inset 3px 0 var(--bad); }
   .hist-at { min-width: 0; }
   .kan-loading i:nth-child(n+3) { display: none; }
 }
+
+/* ==================================================== 18.4: хотелки + кастом
+   Очередь хотелок: захват одной строкой, разбор построчно. Найденная
+   модель — зелёной кромкой: глазом видно, что уже можно в заказ. */
+.wish-capture { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.wish-capture .field { flex: 1 1 150px; min-width: 130px; }
+.wish-capture .field.wide { flex: 2 1 260px; }
+.wish-row { align-items: flex-start; }
+.wish-row.found { border-left: 3px solid var(--ok); padding-left: 8px; }
+.wish-link { margin-top: 6px; width: 100%; }
+.wish-actions { display: flex; flex-direction: column; gap: 6px; margin-left: auto; flex-shrink: 0; }

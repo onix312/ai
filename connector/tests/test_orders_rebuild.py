@@ -361,3 +361,129 @@ class DueIndexTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def make_api(test: unittest.TestCase):
+    tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(tmp.cleanup)
+    db = Database(pathlib.Path(tmp.name) / "wish.sqlite3")
+    test.addCleanup(db.close)
+    repo = Repo(db)
+    api = Api.__new__(Api)
+    api.db = db
+    api.repo = repo
+    api.bus = types.SimpleNamespace(publish=lambda *a, **k: None)
+    return api
+
+
+class WishQueueTests(unittest.TestCase):
+    """Хотелки 18.4: очередь «что просили» поверх таблицы wishes."""
+
+    def setUp(self):
+        self.api = make_api(self)
+        self.db = self.api.db
+        self.db.upsert("customers", {"id": "c1", "name": "Анна",
+                                     "phone": "+7 900 111-22-33"})
+        self.db.upsert("wishes", {"id": "w1", "customer_id": "c1",
+                                  "text": "Держатель для наушников",
+                                  "status": "pending",
+                                  "created_at": "2026-09-01T10:00:00"})
+        self.db.upsert("wishes", {"id": "w2", "customer_id": "c1",
+                                  "text": "Крючок на дверь",
+                                  "status": "pending",
+                                  "created_at": "2026-09-05T10:00:00"})
+        self.db.upsert("wishes", {"id": "w3", "customer_id": "c1",
+                                  "text": "Готовая полка", "status": "done",
+                                  "created_at": "2026-09-02T10:00:00"})
+
+    def test_link_and_source_columns_migrate(self):
+        self.db.upsert("wishes", {"id": "w9", "customer_id": "c1",
+                                  "text": "Ссылка", "status": "pending",
+                                  "link": "https://example.com/m.stl",
+                                  "source": "чат",
+                                  "created_at": now_iso()})
+        row = self.db.one("SELECT * FROM wishes WHERE id=?", ("w9",))
+        self.assertEqual(row["link"], "https://example.com/m.stl")
+        self.assertEqual(row["source"], "чат")
+
+    def test_queue_returns_open_oldest_first_with_customer(self):
+        code, payload = self.api.get("/api/wish/queue", {}) \
+            if hasattr(self.api, "get") else (None, None)
+        self.assertIsNotNone(code, "маршрут GET /api/wish/queue не найден")
+        self.assertEqual(code, 200)
+        ids = [w["id"] for w in payload["wishes"]]
+        self.assertEqual(ids, ["w1", "w2"],
+                         "открытые, старые сверху; готовая не в очереди")
+        self.assertEqual(payload["wishes"][0]["customer_name"], "Анна")
+        self.assertEqual(payload["wishes"][0]["customer_phone"],
+                         "+7 900 111-22-33")
+
+    def test_save_accepts_link_and_source(self):
+        code, payload = self.api.post("/api/wish/save", {
+            "customer_id": "c1", "text": "Брелок", "link": "file.stl",
+            "source": "лично"}, {})
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["wish"]["link"], "file.stl")
+        self.assertEqual(payload["wish"]["source"], "лично")
+
+    def test_save_with_id_updates_open_wish(self):
+        code, payload = self.api.post("/api/wish/save", {
+            "id": "w1", "customer_id": "c1", "text": "Держатель для наушников",
+            "link": "hook.stl"}, {})
+        self.assertEqual(code, 200)
+        row = self.db.one("SELECT * FROM wishes WHERE id=?", ("w1",))
+        self.assertEqual(row["link"], "hook.stl")
+        self.assertEqual(row["status"], "pending")
+
+    def test_save_refuses_to_edit_resolved(self):
+        code, payload = self.api.post("/api/wish/save", {
+            "id": "w3", "customer_id": "c1", "text": "Другое"}, {})
+        self.assertEqual(code, 400)
+
+    def test_resolve_found_stores_order_id(self):
+        code, _ = self.api.post("/api/wish/resolve", {
+            "id": "w1", "status": "found", "order_id": "o9"}, {})
+        self.assertEqual(code, 200)
+        row = self.db.one("SELECT * FROM wishes WHERE id=?", ("w1",))
+        self.assertEqual(row["status"], "found")
+        self.assertEqual(row["order_id"], "o9")
+        # Найденная модель остаётся в очереди, пока не стала заказом.
+        _, payload = self.api.get("/api/wish/queue", {})
+        self.assertIn("w1", [w["id"] for w in payload["wishes"]])
+
+    def test_resolve_rejects_unknown_status(self):
+        code, payload = self.api.post("/api/wish/resolve", {
+            "id": "w1", "status": "maybe"}, {})
+        self.assertEqual(code, 400)
+        self.assertEqual(
+            self.db.one("SELECT status FROM wishes WHERE id=?", ("w1",))["status"],
+            "pending")
+
+    def test_resolve_missing_is_404(self):
+        code, _ = self.api.post("/api/wish/resolve", {"id": "nope"}, {})
+        self.assertEqual(code, 404)
+
+
+class FreeItemsTests(unittest.TestCase):
+    """Кастом 18.4: состав без товара в базе — полноправные позиции."""
+
+    def test_manual_values_survive_without_nom(self):
+        repo = make_repo(self)
+        order = repo.save_order({
+            "product": "Кастомный набор", "status": "new",
+            "items": [
+                {"name": "Штука под заказ", "qty": 2, "price": 800,
+                 "grams": 35, "hours": 4},
+                {"name": "Вариация побольше", "qty": 1, "price": 500,
+                 "grams": 20, "hours": 2},
+            ]})
+        # Цена/вес/время — за штуку: 800×2 + 500 = 2100.
+        self.assertEqual(order["price"], 2100)
+        self.assertEqual(order["qty"], 3)
+        self.assertEqual(order["grams"], 90)
+        self.assertEqual(order["hours"], 10)
+        rows = repo.db.query("SELECT * FROM order_items WHERE order_id=? ORDER BY position",
+                             (order["id"],))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["nom_id"], "")
+        self.assertEqual(rows[0]["name"], "Штука под заказ")

@@ -552,6 +552,7 @@ function renderOrders() {
   tag.textContent = String(activeCount);
   const late = PF.state.orders.filter(overdue).length;
   tag.className = 'tag' + (late ? ' warn' : '');
+  updateWishesBadge();
 
   const bs = $('bulk_status');
   if (bs && bs.options.length !== PF.state.statuses.length + 1) {
@@ -1059,12 +1060,13 @@ function renderOrderItems(items) {
   const rows = (items && items.length ? items : [{}]);
   host.innerHTML = rows.map((r) => `<div class="of-item-row">`
     + `<select data-item-nom>${itemNomOptions(r.nom_id || '')}</select>`
-    + `<input data-item-name value="${esc(r.name || '')}" placeholder="Название">`
+    + `<input data-item-name value="${esc(r.name || '')}" placeholder="Название позиции — товар из базы не обязателен">`
     + `<input type="number" min="1" step="1" data-item-qty value="${r.qty != null ? esc(String(r.qty)) : '1'}" title="Количество">`
     + `<input type="number" min="0" step="any" data-item-price value="${num(r.price) ? esc(String(r.price)) : ''}" placeholder="цена, ₽">`
-    + `<input type="number" min="0" step="any" data-item-grams value="${num(r.grams) ? esc(String(r.grams)) : ''}" placeholder="г/шт из базы" title="Вес штуки — подставляется из базы товаров">`
-    + `<input type="number" min="0" step="any" data-item-hours value="${num(r.hours) ? esc(String(r.hours)) : ''}" placeholder="ч/шт из базы" title="Время печати штуки — подставляется из базы товаров">`
+    + `<input type="number" min="0" step="any" data-item-grams value="${num(r.grams) ? esc(String(r.grams)) : ''}" placeholder="г/шт" title="Вес штуки, г: впишите вручную или подставится из базы товаров">`
+    + `<input type="number" min="0" step="any" data-item-hours value="${num(r.hours) ? esc(String(r.hours)) : ''}" placeholder="ч/шт" title="Время печати штуки, ч: впишите вручную или подставится из базы товаров">`
     + `<button class="btn sm ghost" type="button" data-item-create title="Создать товар в базе">+ товар</button>`
+    + `<button class="btn sm ghost" type="button" data-item-dup title="Клонировать позицию: копия для вариации">⧉</button>`
     + '<button class="icon-btn sm danger" type="button" data-item-del title="Убрать позицию">×</button></div>').join('');
 }
 function collectOrderItems() {
@@ -2005,6 +2007,7 @@ async function saveOrder(prepareAfter) {
     // ответа, справочники дешёвые, а деньги сохранение не двигает
     // (оплата идёт отдельным журналом). Остальное подтянет фон по SSE.
     mergeSavedOrder(res.order);
+    if (!wasEditing) resolvePendingWish(res.order.id);
     PF.refreshLists().then(() => { fillSelectors(); renderOrders(); }).catch(() => {});
     return res;
   } catch (e) { fail(e); return null; }
@@ -2148,7 +2151,8 @@ function renderClientCase(order) {
     return `<div class="mini-row clickable" data-order="${esc(o.id)}" role="button" tabindex="0" title="Открыть заказ №${esc(o.number)}">`
       + `<span class="dot" style="background:${esc(st.color)}"></span>`
       + `<div class="mbody"><b>№${esc(o.number)} · ${esc(o.product || 'Без названия')}</b>`
-      + `<small>${esc(st.name)} · ${money(o.price)}${o.due ? ` · срок ${esc(dateText(o.due))}` : ''}</small></div></div>`;
+      + `<small>${esc(st.name)} · ${money(o.price)}${o.due ? ` · срок ${esc(dateText(o.due))}` : ''}</small></div>`
+      + `<button class="btn xs" type="button" data-case-repeat="${esc(o.id)}" title="Новый заказ: те же клиент, изделие и состав">↻ Повторить</button></div>`;
   }).join('') : '<span class="muted">Первый заказ клиента — истории пока нет.</span>';
   host.innerHTML = html;
   if (window.PFIcons) window.PFIcons.apply(host);
@@ -3286,6 +3290,194 @@ async function wishAction(action, id) {
   } catch (e) { fail(e); }
 }
 
+/* ============================================ очередь хотелок (18.4)
+   Блокнот «что просили»: захват (лично/чат), статусы «ждёт → модель
+   найдена → в заказе», конвертация в черновик заказа одним кликом.
+   pendingWishOrder — хотелка, из которой открыт текущий черновик: после
+   сохранения заказа она сама помечается готовой с привязкой к заказу. */
+let wishesQueue = [];
+let pendingWishOrder = null;
+let wishesBadgeAt = 0;
+
+async function updateWishesBadge(force) {
+  const tag = $('orders_wishes_tag');
+  if (!tag) return;
+  if (!force && Date.now() - wishesBadgeAt < 60000) return;
+  try {
+    const d = await get('/api/wish/queue');
+    wishesBadgeAt = Date.now();
+    const n = (d.wishes || []).length;
+    tag.hidden = !n;
+    tag.textContent = n ? String(n) : '';
+    tag.title = n ? `Открытых хотелок: ${n} — старые сверху` : '';
+  } catch (e) { /* тихо: счётчик — подсказка, а не критичные данные */ }
+}
+
+function wishesCustomerOptions() {
+  return '<option value="">— новый клиент —</option>' + (PF.state.customers || [])
+    .map((c) => `<option value="${esc(c.id)}">${esc(c.name || 'Без имени')}${c.phone ? ' · ' + esc(c.phone) : ''}</option>`).join('');
+}
+
+async function openWishesQueue() {
+  if ($('wishes_customer')) $('wishes_customer').innerHTML = wishesCustomerOptions();
+  openModal('wishes_modal');
+  await loadWishesQueue();
+}
+
+async function loadWishesQueue() {
+  const host = $('wishes_queue');
+  try {
+    const d = await get('/api/wish/queue');
+    wishesQueue = d.wishes || [];
+    renderWishesQueue();
+    updateWishesBadge(true);
+  } catch (e) {
+    if (host) host.innerHTML = `<span style="color:#ef4444">${esc(e.message)}</span>`;
+  }
+}
+
+function renderWishesQueue() {
+  const host = $('wishes_queue');
+  if (!host) return;
+  const count = $('wishes_count');
+  if (count) count.textContent = wishesQueue.length ? `Открыто: ${wishesQueue.length}` : '';
+  if (!wishesQueue.length) {
+    host.innerHTML = '<div class="empty compact"><span>Очередь пуста — все хотелки разобраны.</span></div>';
+    return;
+  }
+  host.innerHTML = wishesQueue.map((w) => {
+    const who = esc(w.customer_name || 'Клиент') + (w.customer_phone ? ` · ${esc(w.customer_phone)}` : '');
+    const found = w.status === 'found';
+    const link = w.link ? `<a href="${esc(w.link)}" target="_blank" rel="noopener" title="Найденная модель">${esc(w.link.length > 40 ? w.link.slice(0, 40) + '…' : w.link)}</a>` : '';
+    return `<div class="mini-row wish-row${found ? ' found' : ''}">`
+      + `<span class="dot${found ? ' on' : ''}"></span>`
+      + `<div class="mbody"><b>${esc(w.text)}</b>`
+      + `<small>${who} · ${esc(w.source || 'лично')} · ${esc(dateTimeText(w.created_at))}${found ? ' · <b>модель найдена</b>' : ''}</small>`
+      + (link ? `<small>${link}</small>` : '')
+      + `<input class="field wish-link" data-wish-link="${esc(w.id)}" placeholder="Ссылка на найденную модель" value="${esc(w.link || '')}" autocomplete="off">`
+      + `</div><div class="wish-actions">`
+      + (found
+        ? `<button class="btn xs primary" type="button" data-wish-order="${esc(w.id)}" title="Черновик заказа из хотелки">В заказ →</button>`
+        : `<button class="btn xs ok" type="button" data-wish-found="${esc(w.id)}" title="Модель найдена — впишите ссылку слева">Нашёл</button>`
+        + `<button class="btn xs" type="button" data-wish-order="${esc(w.id)}" title="Сразу в заказ, без поиска модели">В заказ →</button>`)
+      + `<button class="btn xs ghost" type="button" data-wish-no="${esc(w.id)}" title="Отказать: не берёмся">Отказ</button>`
+      + `<button class="btn xs ghost" type="button" data-wish-x="${esc(w.id)}" title="Удалить запись">×</button>`
+      + `</div></div>`;
+  }).join('');
+}
+
+async function captureWish() {
+  const text = ($('wishes_text').value || '').trim();
+  if (!text) return fail(new Error('Опишите, что просили'));
+  let customerId = $('wishes_customer').value || '';
+  try {
+    if (!customerId) {
+      const name = ($('wishes_client_name').value || '').trim();
+      const phone = ($('wishes_client_phone').value || '').trim();
+      if (!name) return fail(new Error('Выберите клиента из базы или впишите имя нового'));
+      const saved = await post('/api/customer/save', { name, phone });
+      customerId = (saved.customer || {}).id || '';
+      if (!customerId) throw new Error('Клиент не записался');
+      try { await PF.refreshLists(); } catch (e) { /* справочник подтянет фон */ }
+      if ($('wishes_customer')) $('wishes_customer').innerHTML = wishesCustomerOptions();
+    }
+    await post('/api/wish/save', {
+      customer_id: customerId, text,
+      link: ($('wishes_link').value || '').trim(),
+      source: $('wishes_source').value || 'лично',
+    });
+    $('wishes_text').value = '';
+    $('wishes_link').value = '';
+    $('wishes_client_name').value = '';
+    $('wishes_client_phone').value = '';
+    await loadWishesQueue();
+    toast('Хотелка записана', 'Разберите очередь, когда будет время');
+  } catch (e) { fail(e); }
+}
+
+/* Ссылка живёт в строке очереди: «Нашёл» забирает её из поля ввода. */
+function wishLinkValue(id) {
+  const input = document.querySelector(`[data-wish-link="${CSS.escape(id)}"]`);
+  return (input && input.value || '').trim();
+}
+
+async function wishQueueAction(action, id) {
+  const wish = wishesQueue.find((w) => w.id === id);
+  try {
+    if (action === 'found') {
+      await post('/api/wish/save', { id, text: (wish && wish.text) || 'хотелка', link: wishLinkValue(id) });
+      await post('/api/wish/resolve', { id, status: 'found' });
+      await loadWishesQueue();
+      toast('Модель найдена', 'Хотелка ждёт отправки в заказ');
+    } else if (action === 'order') {
+      const link = wishLinkValue(id);
+      if (link && wish && link !== (wish.link || '')) {
+        try { await post('/api/wish/save', { id, text: wish.text, link }); } catch (e) { /* ссылка не критична */ }
+      }
+      closeModal('wishes_modal');
+      await wishToOrder(id);
+    } else if (action === 'no') {
+      if (!confirmDanger('Отказать по хотелке? Клиент услышит «не берёмся».')) return;
+      await post('/api/wish/resolve', { id, status: 'declined' });
+      await loadWishesQueue();
+    } else if (action === 'x') {
+      if (!confirmDanger('Удалить хотелку из очереди?')) return;
+      await post('/api/wish/delete', { id });
+      await loadWishesQueue();
+    }
+  } catch (e) { fail(e); }
+}
+
+/* Хотелка → черновик заказа: клиент и текст подставлены, модель — в файл. */
+async function wishToOrder(id) {
+  const wish = wishesQueue.find((w) => w.id === id);
+  if (!wish) return fail(new Error('Хотелка уже разобрана — обновите очередь'));
+  pendingWishOrder = id;
+  await openOrder(null, {
+    product: wish.text || '',
+    customer_name: wish.customer_name || '',
+    phone: wish.customer_phone || '',
+    file: wish.link || '',
+  });
+  const sub = $('order_modal_sub');
+  if (sub) sub.textContent = 'Черновик из хотелки — проверьте поля и нажмите «Сохранить».';
+}
+
+async function resolvePendingWish(orderId) {
+  if (!pendingWishOrder) return;
+  const id = pendingWishOrder;
+  pendingWishOrder = null;
+  try {
+    await post('/api/wish/resolve', { id, status: 'done', order_id: orderId });
+    updateWishesBadge(true);
+    if ($('wishes_modal') && $('wishes_modal').open) loadWishesQueue();
+  } catch (e) { toast('Хотелка не закрылась', e.message || '', 'warn'); }
+}
+
+/* Повтор из дела клиента (18.4): те же клиент, изделие и состав — новый
+   заказ без перепечатки. Цены и сроки — как были: мастер правит руками. */
+async function repeatOrder(id) {
+  try {
+    const src = await get('/api/order', { id });
+    if (!src || !src.id) throw new Error('Прошлый заказ не найден');
+    const items = Array.isArray(src.items) ? src.items.map((i) => ({
+      nom_id: i.nom_id || '', name: i.name || '', qty: i.qty || 1,
+      price: num(i.price), grams: num(i.grams), hours: num(i.hours),
+    })) : [];
+    await openOrder(null, {
+      product: src.product || '', customer_id: src.customer_id || '',
+      customer_name: src.customer_name || '', phone: src.phone || '',
+      messenger: src.messenger || '', channel: src.channel || 'direct',
+      qty: src.qty || 1, price: num(src.price), material: src.material || '',
+      color: src.color || '', grams: num(src.grams) || '', hours: num(src.hours) || '',
+      file: src.file || '', niche_id: src.niche_id || '', nom_id: src.nom_id || '',
+      notes: src.notes || '', items,
+    });
+    const sub = $('order_modal_sub');
+    if (sub) sub.textContent = `Повтор заказа №${src.number || ''} — проверьте цены и срок, затем «Сохранить».`;
+  } catch (e) { fail(e); }
+}
+
 /* ============================================== 8.5: «Мой NOZZA» (#94) */
 async function openMyNozza(id) {
   const box = $('my_code');
@@ -3319,7 +3511,8 @@ function copyTextLocal(text, label) {
 /* ============================================================= события */
 function bind() {
   $('orders_new').addEventListener('click', () => openOrder());
-  $('orders_intake').addEventListener('click', openOrderIntake);
+  const intakeBtn = $('orders_intake');
+  if (intakeBtn) intakeBtn.addEventListener('click', openOrderIntake);
   $('intake_preview').addEventListener('click', previewOrderIntake);
   $('intake_text').addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') previewOrderIntake();
@@ -3639,6 +3832,19 @@ function bind() {
       const create = e.target.closest('[data-item-create]');
       if (create) {
         createProductFromItemRow(create.closest('.of-item-row'));
+        return;
+      }
+      /* Кастом 18.4: клонирование позиции — штука и её вариация
+         набираются одним кликом, а не перепечаткой строки. */
+      const dup = e.target.closest('[data-item-dup]');
+      if (dup) {
+        const rows = $$('#of_items .of-item-row');
+        const at = rows.indexOf(dup.closest('.of-item-row'));
+        const current = collectOrderItems();
+        const src = current[at] || {};
+        current.splice(at + 1, 0, Object.assign({}, src, { name: (src.name || 'Позиция') + ' (вариант)' }));
+        renderOrderItems(current);
+        updateOrderItemsSummary();
         return;
       }
       const del = e.target.closest('[data-item-del]');
@@ -3981,6 +4187,33 @@ function bind() {
     if (done) { wishAction('done', done.dataset.wishDone); return; }
     const del = e.target.closest('[data-wish-del]');
     if (del && confirmDanger('Удалить пожелание?')) wishAction('del', del.dataset.wishDel);
+  });
+  /* Очередь хотелок 18.4: кнопка в шапке «Заказов», захват и разбор. */
+  const wishesBtn = $('orders_wishes');
+  if (wishesBtn) wishesBtn.addEventListener('click', openWishesQueue);
+  const wishesAdd = $('wishes_add');
+  if (wishesAdd) wishesAdd.addEventListener('click', captureWish);
+  const wishesHost = $('wishes_queue');
+  if (wishesHost) wishesHost.addEventListener('click', (e) => {
+    if (e.target.closest('[data-wish-link]')) return;
+    const pick = (sel) => e.target.closest(sel);
+    const found = pick('[data-wish-found]');
+    if (found) { wishQueueAction('found', found.dataset.wishFound); return; }
+    const order = pick('[data-wish-order]');
+    if (order) { wishQueueAction('order', order.dataset.wishOrder); return; }
+    const no = pick('[data-wish-no]');
+    if (no) { wishQueueAction('no', no.dataset.wishNo); return; }
+    const x = pick('[data-wish-x]');
+    if (x) wishQueueAction('x', x.dataset.wishX);
+  });
+  document.addEventListener('click', (e) => {
+    const rep = e.target.closest('[data-case-repeat]');
+    if (rep) {
+      e.stopPropagation();
+      e.preventDefault();
+      closeModal('order_modal');
+      repeatOrder(rep.dataset.caseRepeat);
+    }
   });
   $('aftercare_copy_request').addEventListener('click', () =>
     copyAftercare('aftercare_request_text', 'Запрос скопирован'));

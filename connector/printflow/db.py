@@ -415,6 +415,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # не свяжет этап с соседями в редакторе.
         ("next_ids", "TEXT DEFAULT ''"),
     ],
+    "wishes": [
+        # 18.4: очередь хотелок. source — где поймали (лично/чат), link —
+        # найденная модель (URL или файл), чтобы «нашёл» не жил в голове.
+        ("link", "TEXT DEFAULT ''"),
+        ("source", "TEXT DEFAULT ''"),
+    ],
 }
 
 SCHEMA = """
