@@ -1034,13 +1034,16 @@ class Api:
             try:
                 variants: dict[str, list[dict]] = {}
                 for v in self.db.query(
-                        "SELECT nom_id, name, color_name, color_hex"
+                        "SELECT id, nom_id, name, sku, barcode, color_name, color_hex"
                         " FROM nom_variants WHERE archived=0 ORDER BY position"):
                     nom_id = str(v.get("nom_id") or "")
                     if not nom_id:
                         continue
                     variants.setdefault(nom_id, []).append({
+                        "id": v.get("id") or "",
                         "name": v.get("name") or "",
+                        "sku": v.get("sku") or "",
+                        "barcode": v.get("barcode") or "",
                         "color_name": v.get("color_name") or "",
                         "color_hex": v.get("color_hex") or "",
                     })
@@ -1960,13 +1963,13 @@ class Api:
             return 200, self.shelf.transfer_from_stock(
                 body.get("nom_id", ""), body.get("warehouse_id", ""),
                 num(body.get("qty")), body.get("item_id", ""),
-                body.get("note", ""))
+                body.get("note", ""), body.get("variant_id", ""))
         if path == "/api/shelf/save-from-stock":
             # Новая позиция стеллажа сразу с готовым товаром со склада:
             # создание позиции и перенос штук — одной операцией.
             return 200, self.shelf.create_item_from_stock(
                 body, body.get("nom_id", ""), body.get("warehouse_id", ""),
-                num(body.get("qty")))
+                num(body.get("qty")), body.get("variant_id", ""))
         if path == "/api/shelf/sale":
             return 200, self.shelf.sale(body.get("item_id", ""), num(body.get("qty")),
                                         num(body.get("price")), body.get("channel", "shelf"),

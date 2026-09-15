@@ -110,6 +110,10 @@ function queueItemHtml(j) {
   const progress = clamp(num(j.progress), 0, 100);
   // 6: плашка дефицита пластика — если на задание не хватает катушки
   const spool = j.spool_id ? (PF.state.spools || []).find((s) => s.id === j.spool_id) : null;
+  const spoolLine = j.spool_id
+    ? (spool ? `${esc(spool.material || 'пластик')} ${esc(spool.color_name || '')} · ${nfmt(spool.remaining_grams)} г`
+      : 'катушка не в списке склада')
+    : '';
   const needG = num(j.est_grams);
   const haveG = spool ? num(spool.remaining_grams) : 0;
   const deficit = spool && haveG > 0 && needG > haveG + 5;
@@ -132,6 +136,7 @@ function queueItemHtml(j) {
     + (j.mixed_label ? ` · <span class="chip outline" title="Смешанная плита">${esc(j.mixed_label)}</span>` : '')
     + (num(j.no_auto) ? ' · без автостарта' : '')
     + (num(j.est_minutes) ? ` · оценка ${minutesText(j.est_minutes)}${needG ? ' · ~' + nfmt(needG) + ' г' : ''}` : '')
+    + (spoolLine ? `<span class="chip outline q-spool" title="Катушка, с которой спишется пластик этого задания"><i data-icon="spool">◎</i> ${spoolLine}</span>` : '')
     + tl
     + '</small>'
     + (deficit ? `<div class="notice warn q-deficit"><span>◍</span><span>Мало ${esc(spool.material || 'пластика')} ${esc(spool.color_name || '')} — на задание нужно ${nfmt(needG - haveG)} г сверх остатка (${nfmt(haveG)} г)</span></div>` : '')
@@ -143,6 +148,8 @@ function queueItemHtml(j) {
     + (!order ? `<button class="btn sm primary" type="button" data-job-link="${esc(j.id)}" title="Привязать это задание к уже существующему заказу"><i data-icon="link">🔗</i> К заказу</button>` : '')
     + (!order ? `<button class="btn sm ghost" type="button" data-job-convert="${esc(j.id)}" title="Создать новый заказ из задания"><i data-icon="sparkles">✨</i> Новый</button>` : '')
     + (j.state === 'queued' ? `<button class="btn sm primary" type="button" data-job-start="${esc(j.id)}">Печать</button>` : '')
+    + (j.state === 'running' || j.state === 'queued'
+      ? `<button class="btn sm ghost" type="button" data-job-spool="${esc(j.id)}" title="Катушка: с какой списать пластик этой плиты"><i data-icon="spool">◎</i> Катушка</button>` : '')
     + `<button class="btn sm ghost" type="button" data-job-clone="${esc(j.id)}" title="Копия в очередь"><i data-icon="copy">⧉</i></button>`
     + (j.state === 'queued' ? `<button class="btn sm ghost" type="button" data-job-noauto="${esc(j.id)}" title="Автостарт">${num(j.no_auto) ? 'авто вкл' : 'без авто'}</button>` : '')
     + `<button class="icon-btn sm danger" type="button" data-job-cancel="${esc(j.id)}" title="Отменить">×</button>`

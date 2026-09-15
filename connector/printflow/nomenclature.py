@@ -58,6 +58,22 @@ def variant_slug(value: str) -> str:
     return slug
 
 
+def variant_label(variant: dict | None) -> str:
+    """Подпись вариации для документов, стеллажа и кассы: «Красный · L».
+
+    Собирается из признаков, а не из имени: владелец может переименовать
+    вариацию, а цвет с размером остаются тем, чем один товар отличается от
+    другого — и в складском документе, и на полке.
+    """
+    if not variant:
+        return ""
+    bits = [str(variant.get("color_name") or "").strip(),
+            str(variant.get("size") or "").strip(),
+            str(variant.get("material") or "").strip()]
+    label = " · ".join(bit for bit in bits if bit)
+    return label or str(variant.get("name") or "").strip()
+
+
 def axis_kind(name: str) -> str:
     """Что за ось: цвет, размер, пластик или просто признак."""
     low = str(name or "").casefold()

@@ -13,6 +13,8 @@ import json
 import os
 import pathlib
 import re
+import shutil
+import tempfile
 import time
 import unittest
 
@@ -512,6 +514,89 @@ class KotlinSourceTests(unittest.TestCase):
                      "Net.scan(onFound = ", "Net.json(base, \"/api/app/android"):
             self.assertIn(call, self.activity, f"вызов из оболочки не совпадает: {call}")
 
+
+
+# ---------------------------------------------------------------- вызовы Kotlin
+# Вызовы платформы, которые пишутся без получателя: внутри Activity, Service и
+# View `getString(...)`, `startActivity(...)` вызываются «от себя». Список
+# закрытый: он отделяет вызовы Android/языка от наших методов, а значит —
+# любой вызов, которого в проекте нет, становится виден без компилятора.
+KOTLIN_PLATFORM_CALLS = frozenset({
+    "addFlags", "append", "compareBy", "emptyArray", "emptyList", "enableVibration",
+    "finish", "getSharedPreferences", "getString", "getSystemService", "intArrayOf",
+    "longArrayOf", "minOf", "moveTaskToBack", "or", "requestPermissions",
+    "setBackgroundColor", "setColor", "setContentView", "setPadding",
+    "setRequestProperty", "setSound", "setStroke", "setTextColor", "startActivity",
+    "startForeground", "stopForeground", "synchronized",
+})
+
+KOTLIN_KEYWORDS = frozenset({
+    "if", "for", "while", "when", "catch", "return", "else", "object", "arrayOf",
+    "super", "constructor",
+})
+
+
+def _kotlin_code(path: pathlib.Path) -> str:
+    """Исходник без комментариев и строковых литералов."""
+    source = path.read_text(encoding="utf-8")
+    source = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", source, flags=re.S))
+    return re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', source)
+
+
+def _undeclared_kotlin_calls(folder: pathlib.Path) -> list[str]:
+    """Вызовы без получателя, которых нет ни в проекте, ни в списке платформы.
+
+    Ловит ровно тот случай, из-за которого падала сборка: метод позвали, а
+    он не объявлен (или потерялся при переносе кода). Получатель не нужен —
+    значит это либо наш метод, либо функция языка, либо API платформы.
+    """
+    declared: set[str] = set()
+    called: dict[str, str] = {}
+    for path in sorted(folder.rglob("*.kt")):
+        code = _kotlin_code(path)
+        declared |= set(re.findall(r"\bfun\s+(?:<[^>]*>\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*[(<]", code))
+        declared |= set(re.findall(r"\bval\s+([a-z][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*\{", code))
+        declared |= set(re.findall(r"\b([a-z][A-Za-z0-9_]*)\s*:\s*(?:\([^)]*\)|\w+)\s*->", code))
+        declared |= set(re.findall(r"[{(,]\s*([a-z][A-Za-z0-9_]*)\s*->", code))
+        for match in re.finditer(r"(?<![.\w])([a-z][A-Za-z0-9_]*)[ \t]*\(", code):
+            called.setdefault(match.group(1), path.name)
+    return sorted(f"{name} (в {where})" for name, where in called.items()
+                  if name not in declared and name not in KOTLIN_KEYWORDS
+                  and name not in KOTLIN_PLATFORM_CALLS)
+
+
+class KotlinCallsResolveTests(unittest.TestCase):
+    """Вызов метода, которого нет, виден без Gradle — на сборке владельца поздно.
+
+    `:app:compileDebugKotlin` падал на `Unresolved reference: showPanelText`:
+    панель вынесли в отдельный метод, а объявление потеряли. Компилятора в
+    песочнице нет, но у этой ошибки есть точный признак — вызов без получателя,
+    которому не соответствует ни объявление в проекте, ни API платформы.
+    """
+
+    def test_no_call_to_a_method_that_does_not_exist(self):
+        for module in ("app", "pult"):
+            with self.subTest(module=module):
+                folder = ROOT / "android" / module
+                if not folder.is_dir():
+                    continue
+                self.assertEqual([], _undeclared_kotlin_calls(folder),
+                                 "вызов метода, которого нет в проекте: объявите его "
+                                 "или добавьте в KOTLIN_PLATFORM_CALLS, если это API платформы")
+
+    def test_checker_finds_a_missing_method(self):
+        """Проверка не пустая: подсунутый вызов несуществующего метода ловится."""
+        folder = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, True)
+        (folder / "Probe.kt").write_text(
+            "package ai.printflow.probe\n"
+            "class Probe {\n"
+            "    fun start() { lostHelper(1) }\n"
+            "    fun known() { probeLambda() }\n"
+            "    private fun probeLambda() {}\n"
+            "}\n", encoding="utf-8")
+        found = _undeclared_kotlin_calls(folder)
+        self.assertEqual(["lostHelper (в Probe.kt)"], found)
 
 if __name__ == "__main__":
     unittest.main()

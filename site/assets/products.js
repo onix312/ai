@@ -903,7 +903,8 @@ function moveRow(m) {
   return '<div class="tx-row">'
     + `<span class="tx-ic ${positive ? 'income' : 'expense'}">${positive ? '↑' : '↓'}</span>`
     + `<div class="tx-body"><b>${esc(DOC_KIND[m.doc_kind] || m.doc_kind || 'Движение')}`
-    + (m.doc_number ? ` · ${esc(m.doc_number)}` : '') + '</b>'
+    + (m.doc_number ? ` · ${esc(m.doc_number)}` : '')
+    + (m.variant_label ? ` · ${esc(m.variant_label)}` : '') + '</b>'
     + `<small>${esc(dateTimeText(m.at))} · ${esc(m.warehouse_name || '')}${m.note ? ' · ' + esc(m.note) : ''}</small></div>`
     + `<span class="amt ${positive ? 'pos' : 'neg'}">${positive ? '+' : ''}${nfmt(m.qty)}</span>`
     + revert + '</div>';
@@ -1466,9 +1467,10 @@ async function openDoc(id, kind, preset) {
     $('df_note').value = '';
   }
   docRows = ((doc && doc.items) || []).map((i) => ({
-    nom_id: i.nom_id, qty: num(i.qty), qty_fact: num(i.qty_fact),
+    nom_id: i.nom_id, variant_id: i.variant_id || '',
+    qty: num(i.qty), qty_fact: num(i.qty_fact),
     price: num(i.price), cost: num(i.cost) }));
-  if (!docRows.length) docRows = [{ nom_id: '', qty: 1, price: 0, qty_fact: 0 }];
+  if (!docRows.length) docRows = [{ nom_id: '', variant_id: '', qty: 1, price: 0, qty_fact: 0 }];
   renderDocRows();
 
   const posted = doc && doc.state === 'posted';
@@ -1508,6 +1510,25 @@ function refreshConsumePlan() {
   renderConsumePlan(rows, ($('df_warehouse') || {}).value || '');
 }
 
+/* Вариации позиции для строки документа: список приходит вместе с товаром. */
+function variantsOf(nomId) {
+  const item = data.items.find((i) => i.id === nomId);
+  return (item && Array.isArray(item.variants)) ? item.variants.filter((v) => v && v.id) : [];
+}
+
+function variantSelectHtml(index, row) {
+  const variants = variantsOf(row.nom_id);
+  if (!variants.length) {
+    return '<td class="muted" title="У товара нет вариаций — движение идёт по позиции целиком">—</td>';
+  }
+  const options = variants.map((v) => {
+    const label = [v.color_name, v.size, v.material].filter(Boolean).join(' · ') || v.name || v.id;
+    return `<option value="${esc(v.id)}">${esc(label)}</option>`;
+  }).join('');
+  return `<td><select data-row-var="${index}" title="Вариация: остаток и себестоимость считаются по ней">`
+    + `<option value="">все вариации</option>${options}</select></td>`;
+}
+
 function renderDocRows() {
   const kind = $('doc_modal').dataset.kind || 'receipt';
   const opts = formatNomGroupedOptions(
@@ -1518,6 +1539,7 @@ function renderDocRows() {
   );
   $('df_tbody').innerHTML = docRows.map((r, index) =>
     `<tr><td><select data-row-nom="${index}"><option value="">— выберите —</option>${opts}</select></td>`
+    + variantSelectHtml(index, r)
     + `<td class="right"><input type="number" min="0" step="any" data-row-qty="${index}" value="${esc(r.qty)}"></td>`
     + (kind === 'inventory'
       ? `<td class="right"><input type="number" min="0" step="any" data-row-fact="${index}" value="${esc(r.qty_fact)}"></td>` : '')
@@ -1527,6 +1549,8 @@ function renderDocRows() {
   docRows.forEach((r, index) => {
     const sel = $('df_tbody').querySelector(`[data-row-nom="${index}"]`);
     if (sel) sel.value = r.nom_id || '';
+    const varSel = $('df_tbody').querySelector(`[data-row-var="${index}"]`);
+    if (varSel) varSel.value = r.variant_id || '';
   });
   updateDocTotal();
 }
@@ -1542,7 +1566,8 @@ function updateDocTotal() {
 function docPayload() {
   const kind = $('doc_modal').dataset.kind || 'receipt';
   const items = docRows.filter((r) => r.nom_id).map((r) => ({
-    nom_id: r.nom_id, qty: num(r.qty), qty_fact: num(r.qty_fact),
+    nom_id: r.nom_id, variant_id: r.variant_id || '',
+    qty: num(r.qty), qty_fact: num(r.qty_fact),
     price: num(r.price),
     cost: (kind === 'receipt' || kind === 'production') ? num(r.price) : num(r.cost),
   }));
@@ -2316,7 +2341,7 @@ function bind() {
     openDoc(row.dataset.doc || row.dataset.docOpen);
   });
   $('df_add_row').addEventListener('click', () => {
-    docRows.push({ nom_id: '', qty: 1, price: 0, qty_fact: 0 });
+    docRows.push({ nom_id: '', variant_id: '', qty: 1, price: 0, qty_fact: 0 });
     renderDocRows();
   });
   $('df_tbody').addEventListener('input', (e) => {
@@ -2324,6 +2349,10 @@ function bind() {
     if (nom) {
       const index = +nom.dataset.rowNom;
       docRows[index].nom_id = nom.value;
+      // Вариация принадлежит товару: у нового товара её быть не может.
+      if (!variantsOf(nom.value).some((v) => v.id === docRows[index].variant_id)) {
+        docRows[index].variant_id = '';
+      }
       const item = data.items.find((i) => i.id === nom.value);
       const kind = $('doc_modal').dataset.kind;
       if (item && !num(docRows[index].price)) {
@@ -2331,6 +2360,12 @@ function bind() {
           ? num(item.cost) : num(item.price);
       }
       renderDocRows();
+      return;
+    }
+    const variant = e.target.closest('[data-row-var]');
+    if (variant) {
+      const index = +variant.dataset.rowVar;
+      docRows[index].variant_id = variant.value || '';
       return;
     }
     const qty = e.target.closest('[data-row-qty]');

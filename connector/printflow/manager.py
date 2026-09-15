@@ -940,6 +940,51 @@ class PrinterManager:
         self._release_order(job.get("order_id") or "", "задание отменено")
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or {}
 
+    def set_job_spool(self, job_id: str, spool_id: str = "") -> dict:
+        """Катушка задания: чем именно печатается эта плита.
+
+        17.0.26: раньше катушку можно было указать только в модалке запуска.
+        Задание, поставленное в очередь из заказа, оставалось без неё — и к
+        завершению пластик списывался с той катушки, что стоит в активном
+        слоте AMS. Если за это время катушку переставили, расход уходил на
+        чужой материал, а «печать без катушки» всплывала уже в сводке
+        проблем. Теперь катушка выбирается и у задания в очереди, а пустой
+        выбор честно означает «определить по AMS» (``""`` — снять выбор).
+
+        Возвращаем задание и предупреждение, если на катушке не хватает
+        граммов: это не отказ — оператор мог поставить вторую катушку на
+        дозаправку, — но панель обязана сказать об этом до старта.
+        """
+        job_id = str(job_id or "").strip()
+        if not job_id:
+            raise ValueError("Не указано задание печати")
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,))
+        if not job:
+            raise ValueError("Задание не найдено")
+        if job.get("state") in ("done", "failed", "cancelled"):
+            raise ValueError("Задание уже завершено — катушку не поменять")
+        spool_id = str(spool_id or "").strip()
+        spool = None
+        if spool_id:
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (spool_id,))
+            if not spool:
+                raise ValueError("Катушка не найдена — обновите список катушек")
+            if num(spool.get("archived")):
+                raise ValueError(
+                    f"Катушка {spool.get('material') or ''} {spool.get('color_name') or ''}".strip()
+                    + " в архиве — выберите другую")
+        self.db.execute("UPDATE print_jobs SET spool_id=? WHERE id=?",
+                        (spool_id or None, job_id))
+        job = self.db.one("SELECT * FROM print_jobs WHERE id=?", (job_id,)) or job
+        warning = ""
+        if spool:
+            need = num(job.get("est_grams"))
+            have = num(spool.get("remaining_grams"))
+            if need > 0 and have + 5 < need:
+                warning = (f"На катушке {round(have)} г, а на задание нужно "
+                           f"{round(need)} г — не хватает {round(need - have)} г")
+        return {"ok": True, "job": job, "spool": spool or {}, "warning": warning}
+
     def _local_job_file(self, filename: str) -> Path | None:
         """Локальная копия задания, если она загружена в uploads."""
         name = Path(str(filename or "").replace("\\", "/")).name

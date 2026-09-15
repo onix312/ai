@@ -158,6 +158,23 @@ class Shelf:
             "SELECT * FROM nomenclature WHERE legacy_shelf_id=? LIMIT 1",
             (row.get("id") or "",))
 
+    def _variant(self, variant_id: str) -> dict | None:
+        """Вариация товара по id: цвет, размер, пластик, свой штрихкод."""
+        variant_id = str(variant_id or "").strip()
+        if not variant_id:
+            return None
+        return self.db.one("SELECT * FROM nom_variants WHERE id=?", (variant_id,))
+
+    @staticmethod
+    def variant_label(variant: dict | None) -> str:
+        """Подпись вариации для карточки и кассы: «Красный · L».
+
+        Одна на весь проект: тем же текстом вариацию зовут документы склада,
+        иначе «Адресник · L» на полке и «Адресник» в накладной — разные вещи.
+        """
+        from .nomenclature import variant_label as shared
+        return shared(variant)
+
     def _with_cashier_data(self, row: dict) -> dict:
         """Добавить эффективные артикул/штрихкод и данные печатного ценника."""
         result = dict(row)
@@ -175,6 +192,20 @@ class Shelf:
             result["sku"] = own_sku
             result.setdefault("material", "")
             result.setdefault("grams", 0.0)
+        # Вариация: у неё свой штрихкод и артикул — сканер на кассе должен
+        # находить именно этот цвет и размер, а не «товар вообще».
+        variant = self._variant(result.get("variant_id"))
+        if variant:
+            result["variant_id"] = variant.get("id") or ""
+            result["variant_label"] = self.variant_label(variant)
+            result["variant"] = variant
+            result["barcode"] = own_barcode or str(variant.get("barcode") or "").strip() \
+                or result.get("barcode") or ""
+            result["sku"] = own_sku or str(variant.get("sku") or "").strip() \
+                or result.get("sku") or ""
+        else:
+            result.setdefault("variant_label", "")
+            result.setdefault("variant", None)
         result["barcode_source"] = ("shelf" if own_barcode else
                                     ("nomenclature" if result.get("barcode") else ""))
         # API always returns a current physical format.  Raw legacy values remain
@@ -247,16 +278,21 @@ class Shelf:
         delta = round(num(delta), 3)
         if not delta:
             return None
+        # Вариация живёт на витрине отдельным остатком: красных L может быть
+        # три, а синих M — ни одной, и спутать их нельзя.
+        variant_id = str(item.get("variant_id") or "").strip()
         if delta < 0 and check_free:
-            free = stock.free(nom_id, zone)
+            free = stock.free(nom_id, zone, variant_id)
             if free < -delta - 1e-9:
                 name = item.get("name") or nom.get("name") or nom_id
+                label = self.variant_label(self._variant(variant_id))
                 raise ValueError(
-                    f"«{name}»: на витрине свободно {round(free, 3)} шт — "
-                    f"отпустить {round(-delta, 3)} нельзя (остальное в резерве)")
-        unit = num(unit_cost) or stock.avg_cost(nom_id, zone)
+                    f"«{name}{' · ' + label if label else ''}»: на витрине свободно "
+                    f"{round(free, 3)} шт — отпустить {round(-delta, 3)} нельзя "
+                    f"(остальное в резерве)")
+        unit = num(unit_cost) or stock.avg_cost(nom_id, zone, variant_id)
         return stock.add_move(nom_id, zone, delta, round(unit * delta, 2),
-                              doc_kind=doc_kind, note=note)
+                              doc_kind=doc_kind, variant_id=variant_id, note=note)
 
     def save_item(self, data: dict) -> dict:
         data = dict(data)
@@ -279,6 +315,20 @@ class Shelf:
                            ("tag_note", 180), ("note", 500)):
             if key in data:
                 data[key] = str(data.get(key) or "").strip()[:limit]
+        # Вариация проверяется по id: чужая вариация в карточке означала бы
+        # расход и продажу не того цвета, который стоит на полке.
+        if "variant_id" in data:
+            variant_id = str(data.get("variant_id") or "").strip()
+            if variant_id:
+                variant = self._variant(variant_id)
+                if not variant:
+                    raise ValueError("Вариация не найдена в товаре")
+                if data.get("nom_id") and str(variant.get("nom_id") or "") \
+                        and str(variant.get("nom_id")) != str(data.get("nom_id")):
+                    raise ValueError("Вариация принадлежит другому товару")
+                if not data.get("nom_id"):
+                    data["nom_id"] = variant.get("nom_id") or ""
+            data["variant_id"] = variant_id
         barcode = str(data.get("barcode") or "").strip()
         if barcode:
             from .barcode import validate
@@ -940,17 +990,24 @@ class Shelf:
         Полка магазина (склад kind='shelf') исключается — оттуда не «перемещают
         на стеллаж», это и есть стеллаж. ``goods_only`` оставляет только готовые
         товары (product/kit/semi) — их переносят в новые позиции стеллажа.
+
+        Вариации идут отдельными строками: у красного L и синего M свои
+        остаток, штрихкод и цена, поэтому переносить и продавать их нужно
+        по отдельности, а товар в учёте остаётся один.
         """
-        sql = ("SELECT m.nom_id, m.warehouse_id, COALESCE(w.name,'Склад') warehouse_name,"
-               " n.name, n.photo, n.unit, n.kind,"
-               " COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
+        sql = ("SELECT m.nom_id, COALESCE(m.variant_id,'') variant_id, m.warehouse_id,"
+               " COALESCE(w.name,'Склад') warehouse_name, n.name, n.photo, n.unit, n.kind,"
+               " v.color_name, v.color_hex, v.size, v.barcode variant_barcode,"
+               " v.sku variant_sku, COALESCE(SUM(m.qty),0) q, COALESCE(SUM(m.cost),0) c"
                " FROM stock_moves m"
                " JOIN nomenclature n ON n.id=m.nom_id AND n.archived=0"
+               " LEFT JOIN nom_variants v ON v.id=m.variant_id"
                " LEFT JOIN warehouses w ON w.id=m.warehouse_id"
                " WHERE COALESCE(w.kind,'') != 'shelf'")
         if goods_only:
             sql += " AND n.kind IN ('product','kit','semi')"
-        sql += " GROUP BY m.nom_id, m.warehouse_id HAVING q > 0 ORDER BY n.name"
+        sql += (" GROUP BY m.nom_id, COALESCE(m.variant_id,''), m.warehouse_id"
+                " HAVING q > 0 ORDER BY n.name")
         rows = self.db.query(sql)
         # Базовая цена готовых товаров — для подстановки в новый ценник.
         from .nomenclature import Nomenclature
@@ -965,20 +1022,33 @@ class Shelf:
             # и метражные (кг/м/л) можно вынести хоть грамм — это не «дробная штука».
             if unit in ("шт", "шт.", "piece", "pcs") and qty < 1:
                 continue
+            variant_id = str(row.get("variant_id") or "").strip()
+            label = self.variant_label({
+                "color_name": row.get("color_name"), "size": row.get("size"),
+                "name": "", "material": "",
+            }) if variant_id else ""
+            price = round(num((prices.get(row["nom_id"]) or {}).get(base_type, 0)), 2)
+            if variant_id and not label:
+                # Признаков у вариации нет — подпишемся её именем из карточки.
+                label = str((self._variant(variant_id) or {}).get("name") or "").strip()
             out.append({
                 "nom_id": row["nom_id"], "name": row["name"] or "Без названия",
+                "variant_id": variant_id, "variant_label": label,
                 "photo": row.get("photo") or "", "unit": unit,
                 "kind": str(row.get("kind") or "product"),
                 "warehouse_id": row["warehouse_id"] or "",
                 "warehouse_name": row["warehouse_name"],
                 "qty": round(qty, 3),
                 "avg_cost": round(max(0.0, num(row["c"])) / qty, 2) if qty > 0 else 0.0,
-                "price": round(num((prices.get(row["nom_id"]) or {}).get(base_type, 0)), 2),
+                "price": price,
+                "barcode": str(row.get("variant_barcode") or "").strip(),
+                "sku": str(row.get("variant_sku") or "").strip(),
             })
         return out
 
     def transfer_from_stock(self, nom_id: str, warehouse_id: str, qty: float,
-                            item_id: str = "", note: str = "") -> dict:
+                            item_id: str = "", note: str = "",
+                            variant_id: str = "") -> dict:
         """Переместить готовый товар с учётного склада на стеллаж магазина.
 
         Правила (И2 «единый регистр»):
@@ -990,16 +1060,31 @@ class Shelf:
           Продажа со стеллажа списывает зону, остаток нигде не зависает;
         • стеллаж получает приход штук с себестоимостью по средней складской.
 
+        Вариация (``variant_id``) — это цвет и размер одного и того же товара:
+        у неё свои остаток, штрихкод и ценник, поэтому и карточка стеллажа
+        своя. Так адресник в двенадцати цветах остаётся одним товаром в
+        учёте, а не двенадцатью.
+
         Позиция стеллажа находится по item_id, по связке nomenclature.
         legacy_shelf_id или по имени; если её нет — создаётся автоматически.
         Найденная по имени позиция усыновляется (ей проставляется nom_id):
-        сам факт перемещения доказывает связку.
+        сам факт перемещения доказывает связку. Для вариации усыновление
+        по имени запрещено: имя у всех цветов одно, и по нему легко отдать
+        чужой остаток.
         """
         nom = self.db.one("SELECT * FROM nomenclature WHERE id=?", (nom_id,))
         if not nom:
             raise ValueError("Товар не найден в номенклатуре")
         if not warehouse_id:
             raise ValueError("Укажите склад-источник")
+        variant_id = str(variant_id or "").strip()
+        variant = None
+        if variant_id:
+            variant = self._variant(variant_id)
+            if not variant:
+                raise ValueError("Вариация не найдена в товаре")
+            if str(variant.get("nom_id") or "") and str(variant.get("nom_id")) != str(nom_id):
+                raise ValueError("Вариация принадлежит другому товару")
         unit = str(nom.get("unit") or "шт")
         piece_unit = unit in ("шт", "шт.", "piece", "pcs")
         qty = num(qty)
@@ -1010,7 +1095,7 @@ class Shelf:
         qty = float(round(qty)) if piece_unit else round(qty, 3)
         from .stock import Stock
         stock = Stock(self.db)
-        available = stock.free(nom_id, warehouse_id)
+        available = stock.free(nom_id, warehouse_id, variant_id)
         if available < qty:
             raise ValueError(f"На складе только {round(available, 3)} {unit}, "
                              f"а переместить просят {round(qty, 3)} {unit}")
@@ -1020,23 +1105,37 @@ class Shelf:
         display_only = str(nom.get("kind") or "product") == "showcase"
         # Витрина без производственного учёта: даже если при оприходовании
         # указали цену, себестоимость на стеллаже остаётся нулевой.
-        unit_cost = 0.0 if display_only else stock.avg_cost(nom_id, warehouse_id)
+        unit_cost = 0.0 if display_only else stock.avg_cost(nom_id, warehouse_id, variant_id)
         cost = round(unit_cost * qty, 2)
         move_note = (note or "перемещение на стеллаж").strip()
         with self.db.transaction():
             # 1) регистр: расход с источника + приход на витрину-зону
             stock.add_move(nom_id, warehouse_id, -qty, -cost, doc_kind="move",
-                           note=move_note)
+                           variant_id=variant_id, note=move_note)
             # 2) позиция стеллажа: найти или создать
             item = None
             if item_id:
                 item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item_id,))
-            if not item and nom.get("legacy_shelf_id"):
+                if item and variant_id and str(item.get("variant_id") or "") \
+                        and str(item.get("variant_id")) != variant_id:
+                    raise ValueError("Эта позиция стеллажа — другая вариация товара")
+            if item and variant_id and not str(item.get("variant_id") or "").strip():
+                # Позиция нашлась без вариации: занимаем её под этот цвет.
+                self.db.execute("UPDATE shelf_items SET variant_id=?, updated_at=? WHERE id=?",
+                                (variant_id, now_iso(), item["id"]))
+                item = self.db.one("SELECT * FROM shelf_items WHERE id=?", (item["id"],))
+            if not item and variant_id:
+                # Карточка именно этой вариации — свои штрихкод и ценник.
+                item = self.db.one(
+                    "SELECT * FROM shelf_items WHERE active=1 AND nom_id=? AND variant_id=?",
+                    (nom_id, variant_id))
+            if not item and not variant_id and nom.get("legacy_shelf_id"):
                 item = self.db.one("SELECT * FROM shelf_items WHERE id=? AND active=1",
                                    (nom["legacy_shelf_id"],))
-            if not item:
+            if not item and not variant_id:
                 item = self.db.one(
-                    "SELECT * FROM shelf_items WHERE active=1 AND lower(name)=lower(?)",
+                    "SELECT * FROM shelf_items WHERE active=1 AND lower(name)=lower(?)"
+                    " AND COALESCE(variant_id,'')=''",
                     (str(nom.get("name") or ""),))
             if not item:
                 from .nomenclature import Nomenclature
@@ -1046,14 +1145,27 @@ class Shelf:
                     price = num(prices.get(Nomenclature(self.db)._base_type()))
                 except Exception:
                     price = 0.0
+                # У вариации своя цена: считаем её тем же способом, что и
+                # товар целиком — из себестоимости, а не «по среднему».
+                if variant_id:
+                    try:
+                        econ = Nomenclature(self.db).variant_economics(variant_id)
+                        price = num(econ.get("price")) or price
+                        unit_cost = num(econ.get("cost")) or unit_cost
+                        cost = round(unit_cost * qty, 2)
+                    except Exception:
+                        pass
                 item = self.save_item({
                     "name": nom.get("name") or "Товар со склада",
                     "nom_id": nom_id,
-                    "barcode": nom.get("barcode") or "",
-                    "sku": nom.get("sku") or nom.get("code") or "",
+                    "variant_id": variant_id,
+                    "barcode": str((variant or {}).get("barcode") or nom.get("barcode") or ""),
+                    "sku": str((variant or {}).get("sku") or nom.get("sku")
+                               or nom.get("code") or ""),
                     "price": price, "cost_per_unit": unit_cost,
                     "photo": nom.get("photo") or "",
-                    "note": "создано перемещением со склада",
+                    "note": "создано перемещением со склада"
+                            + (f" · {self.variant_label(variant)}" if variant else ""),
                 })
             elif not str(item.get("nom_id") or "").strip():
                 # Усыновление связки: позиция нашлась по имени/legacy —
@@ -1077,14 +1189,15 @@ class Shelf:
                                     (item["id"],))}
 
     def create_item_from_stock(self, data: dict, nom_id: str, warehouse_id: str,
-                               qty: float) -> dict:
+                               qty: float, variant_id: str = "") -> dict:
         """Новая позиция стеллажа сразу с готовым товаром со склада.
 
         Создаёт позицию по полям формы (название, цена ценника, ценник,
         заметка…) и в одной транзакции переносит готовые штуки с учётного
         склада на полку: остаток и себестоимость приходят движением, а не
         «начальным остатком» без проводки. Пустые название, цена,
-        себестоимость и штрихкод берутся из номенклатуры.
+        себестоимость и штрихкод берутся из номенклатуры, а для вариации —
+        из неё самой: у цвета и размера свои артикул, штрихкод и цена.
         """
         from .nomenclature import Nomenclature
         from .stock import Stock
@@ -1096,31 +1209,48 @@ class Shelf:
         qty = num(qty)
         if qty <= 0:
             raise ValueError("Переносить нужно больше нуля")
+        variant_id = str(variant_id or "").strip()
+        variant = self._variant(variant_id) if variant_id else None
+        if variant_id and not variant:
+            raise ValueError("Вариация не найдена в товаре")
         data = dict(data)
         data["id"] = ""  # всегда новая позиция
+        if variant_id:
+            data["variant_id"] = variant_id
         if not str(data.get("name") or "").strip():
             data["name"] = str(nom.get("name") or "Товар со склада").strip()
         if not data.get("nom_id"):
             data["nom_id"] = nom_id
         if not str(data.get("barcode") or "").strip():
-            data["barcode"] = str(nom.get("barcode") or "").strip()
+            data["barcode"] = str((variant or {}).get("barcode")
+                                  or nom.get("barcode") or "").strip()
         if not str(data.get("sku") or "").strip():
-            data["sku"] = str(nom.get("sku") or nom.get("code") or "").strip()
+            data["sku"] = str((variant or {}).get("sku") or nom.get("sku")
+                              or nom.get("code") or "").strip()
         if not num(data.get("price")):
-            try:
-                prices = Nomenclature(self.db)._prices_of(nom_id)
-                data["price"] = num(prices.get(Nomenclature(self.db)._base_type()))
-            except Exception:
-                data["price"] = 0.0
+            data["price"] = 0.0
+            if variant_id:
+                try:
+                    econ = Nomenclature(self.db).variant_economics(variant_id)
+                    data["price"] = num(econ.get("price"))
+                except Exception:
+                    data["price"] = 0.0
+            if not num(data.get("price")):
+                try:
+                    prices = Nomenclature(self.db)._prices_of(nom_id)
+                    data["price"] = num(prices.get(Nomenclature(self.db)._base_type()))
+                except Exception:
+                    data["price"] = 0.0
         display_only = str(nom.get("kind") or "product") == "showcase"
-        unit_cost = 0.0 if display_only else Stock(self.db).avg_cost(nom_id, warehouse_id)
+        unit_cost = 0.0 if display_only else Stock(self.db).avg_cost(
+            nom_id, warehouse_id, variant_id)
         if not num(data.get("cost_per_unit")):
             data["cost_per_unit"] = round(unit_cost, 2)
         data["qty"] = 0  # остаток придёт переносом
         with self.db.transaction():
             item = self.save_item(data)
             moved = self.transfer_from_stock(nom_id, warehouse_id, qty,
-                                             item_id=item["id"],
+                                             item_id=item["id"], variant_id=variant_id,
                                              note="перенос готового товара при создании позиции")
             return {"ok": True, "item": self.item(item["id"]),
                     "move": moved.get("move"), "qty": moved.get("qty"),

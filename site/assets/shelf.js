@@ -102,6 +102,15 @@ function liveBadgeFor(id) {
   return '';
 }
 
+/* Вариация на карточке: цвет и размер — то, чем один и тот же товар
+   отличается на полке. У каждой вариации своя карточка и свой ценник. */
+function variantChip(i) {
+  const label = String((i && i.variant_label) || '').trim();
+  if (!label) return '';
+  const hex = String(((i.variant || {}).color_hex) || '').trim();
+  const dot = hex ? `<i class="var-dot" style="background:${esc(hex)}"></i>` : '';
+  return `<span class="chip outline variant-chip" title="Вариация товара">${dot}${esc(label)}</span>`;
+}
 function renderShelf() {
   const s = shelfData.summary || {};
   const head = shelfData.head;
@@ -150,7 +159,7 @@ function renderShelf() {
       + `<div class="shead">`
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
-      + `<div class="sinfo"><h3>${esc(i.name)}${liveBadgeFor(i.id)}</h3>`
+      + `<div class="sinfo"><h3>${esc(i.name)}${variantChip(i)}${liveBadgeFor(i.id)}</h3>`
       + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
       + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
@@ -332,7 +341,7 @@ function openShelfCheck() {
     const discrepancy = st === 'empty' || st === 'low' || num(i.plan_qty) > 0;
     return `<label class="shelf-check-row ${checked ? 'done' : ''}" data-check-id="${esc(i.id)}">`
       + `<span class="switch"><input type="checkbox" data-shelf-check="${esc(i.id)}"${checked ? ' checked' : ''}><i></i></span>`
-      + `<span class="check-name">${esc(i.name)}<small>${esc(i.cell || 'без ячейки')} · остаток ${nfmt(i.qty)} шт</small></span>`
+      + `<span class="check-name">${esc(i.name)}<small>${i.variant_label ? esc(i.variant_label) + ' · ' : ''}${esc(i.cell || 'без ячейки')} · остаток ${nfmt(i.qty)} шт</small></span>`
       + (discrepancy ? `<span class="chip ${warn}">${st === 'empty' ? 'пусто' : st === 'low' ? 'мало' : 'нужно напечатать ' + nfmt(i.plan_qty)}</span>` : `<span class="chip ok">ок</span>`)
       + `<span class="check-time muted">${checked ? esc(done[i.id]) : ''}</span></label>`;
   }).join('');
@@ -405,7 +414,7 @@ function fillStockGoodsSelect() {
   const sel = $('shf_stock_item');
   sel.innerHTML = '<option value="">Заполню вручную</option>'
     + stockGoods.map((i, idx) =>
-      `<option value="${idx}">${esc(i.name)} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} ${esc(i.unit || 'шт')}</option>`).join('');
+      `<option value="${idx}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} ${esc(i.unit || 'шт')}</option>`).join('');
   $('shf_stock_info').hidden = true;
 }
 
@@ -429,6 +438,10 @@ function onStockGoodChange() {
   if (!$('shf_nom_id').value) $('shf_nom_id').value = row.nom_id || '';
   if (!num($('shf_price').value)) $('shf_price').value = num(row.price);
   if (!num($('shf_cost').value)) $('shf_cost').value = num(row.avg_cost);
+  if (row.variant_id) {
+    if (!$('shf_barcode').value.trim()) $('shf_barcode').value = row.barcode || '';
+    if (!$('shf_sku').value.trim()) $('shf_sku').value = row.sku || '';
+  }
   // Остаток придёт переносом со склада, а не «начальным остатком».
   qtyEl.disabled = true;
   qtyEl.value = '';
@@ -449,7 +462,7 @@ function onStockGoodChange() {
 /* ============================================================== позиция */
 function fillShelfSelectors(keep) {
   const items = shelfData.items || [];
-  const opts = items.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+  const opts = items.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''}</option>`).join('');
   const set = (id, val) => { const el = $(id); if (el) { el.innerHTML = val; if (keep) el.value = keep; } };
   set('spf_item', opts);
   set('sif_item', opts);
@@ -548,6 +561,7 @@ async function saveShelf() {
       ? await post('/api/shelf/save-from-stock', {
           ...payload,
           nom_id: stockRow.nom_id, warehouse_id: stockRow.warehouse_id, qty: stockQty,
+          variant_id: stockRow.variant_id || '',
         })
       : await post('/api/shelf/save', payload);
     savedItemId = res.item && res.item.id;
@@ -619,9 +633,9 @@ async function openTransfer() {
     return fail(new Error('На учётных складах нет товара с остатком от 1 шт — перемещать нечего.'));
   }
   $('stf_item').innerHTML = stockAvail.map((i, idx) =>
-    `<option value="${idx}">${esc(i.name)} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} шт</option>`).join('');
+    `<option value="${idx}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''} · ${esc(i.warehouse_name)} · ${nfmt(i.qty)} шт</option>`).join('');
   $('stf_shelf_item').innerHTML = '<option value="">Найти по названию / создать автоматически</option>'
-    + (shelfData.items || []).map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('');
+    + (shelfData.items || []).map((i) => `<option value="${esc(i.id)}">${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''}</option>`).join('');
   $('stf_qty').value = 1;
   $('stf_note').value = '';
   updateTransferInfo();
@@ -656,6 +670,7 @@ async function saveTransfer() {
   try {
     await post('/api/shelf/transfer', {
       nom_id: row.nom_id, warehouse_id: row.warehouse_id, qty,
+      variant_id: row.variant_id || '',
       item_id: $('stf_shelf_item').value, note: $('stf_note').value.trim(),
     });
     closeModal('shelf_transfer_modal');
@@ -674,7 +689,7 @@ function openSales() {
   if (!items.length) return fail(new Error('На стеллаже нет товара'));
   $('ssf_channel').value = 'shelf';
   $('ssf_rows').innerHTML = items.map((i) => `<div class="sale-row">`
-    + `<div class="sinfo"><b>${esc(i.name)}</b><small>на стеллаже ${nfmt(i.qty)} шт · ${money(i.price)}/шт</small></div>`
+    + `<div class="sinfo"><b>${esc(i.name)}${i.variant_label ? ' · ' + esc(i.variant_label) : ''}</b><small>на стеллаже ${nfmt(i.qty)} шт · ${money(i.price)}/шт</small></div>`
     + `<input type="number" min="0" max="${Math.max(0, Math.round(num(i.qty)))}" step="1" value="" placeholder="0" data-sale-qty="${esc(i.id)}">`
     + `</div>`).join('');
   openModal('shelf_sale_modal');

@@ -30,10 +30,37 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # создавались схемой v3 без этой колонки и падали на загрузке каталога.
         ("color", "TEXT DEFAULT '#6366f1'"),
     ],
+    "nom_variants": [
+        # Вариации жили на живой базе ещё до того, как у них появились
+        # пластик, катушка и цена. Без догоняющего ALTER старая база падала
+        # на старте: `CREATE INDEX idx_variant_spool` в SCHEMA_V3 выполняется
+        # раньше этой миграции, а колонки spool_id в таблице ещё нет.
+        # Перечислены все поля карточки вариации: база владельца — источник
+        # правды, и любое из них могло появиться позже, чем сама таблица.
+        ("name", "TEXT DEFAULT ''"),
+        ("color_name", "TEXT DEFAULT ''"),
+        ("color_hex", "TEXT DEFAULT ''"),
+        ("size", "TEXT DEFAULT ''"),
+        ("sku", "TEXT DEFAULT ''"),
+        ("barcode", "TEXT DEFAULT ''"),
+        ("grams", "REAL DEFAULT 0"),
+        ("hours", "REAL DEFAULT 0"),
+        ("file", "TEXT DEFAULT ''"),
+        ("position", "INTEGER DEFAULT 0"),
+        ("archived", "INTEGER DEFAULT 0"),
+        ("material", "TEXT DEFAULT ''"),
+        ("spool_id", "TEXT DEFAULT ''"),
+        ("price", "REAL DEFAULT 0"),
+        ("cost", "REAL DEFAULT 0"),
+        ("updated_at", "TEXT DEFAULT ''"),
+    ],
     "reserves": [
         # И2 «единый регистр»: вид удержания — резерв под заказ или холд
         # ожидающей СБП-продажи (снимается подтверждением/отклонением/таймаутом).
         ("kind", "TEXT DEFAULT 'reserve'"),
+        # Вариации товара: заказ на красный L не должен уменьшать доступность
+        # синего M. У старых баз колонки нет — движение шло по товару целиком.
+        ("variant_id", "TEXT"),
     ],
     "staff": [
         # И3: личный PIN для входа в кассу (хеш pin:v1:…, сам PIN не хранится).
@@ -49,6 +76,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # «Домашний`) производству были не видны, проведение падало с
         # «не хватает… есть 0». Пусто = коннектор выберет склад материалов сам.
         ("warehouse_id", "TEXT"),
+        # Состав списывается по вариации расходника: цвет и размер — часть учёта.
+        ("variant_id", "TEXT"),
     ],
     "cashier_tokens": [
         # 17.0.13: когда касса последний раз выходила на связь. Нужна панели:
@@ -122,6 +151,8 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # смешанная плита: разные товары на одном столе, JSON-состав
         # [{"nom_id": "...", "qty_per_plate": 3, "grams": 40, "hours": 1.2}]
         ("items", "TEXT DEFAULT ''"),
+        # Партия помнит вариацию: приход ложится на свой цвет, а не «на товар».
+        ("variant_id", "TEXT"),
     ],
     "client_chats": [
         # Воронка 10.0: обращение проходит путь от нового лида до заказа.
@@ -158,6 +189,17 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     ],
     "order_items": [
         ("variant_id", "TEXT DEFAULT ''"),
+    ],
+    "doc_items": [
+        # Строка документа помнит вариацию: приход, продажа и списание идут по
+        # своему цвету, а не «по товару вообще».
+        ("variant_id", "TEXT"),
+    ],
+    "stock_moves": [
+        ("variant_id", "TEXT"),
+    ],
+    "prices": [
+        ("variant_id", "TEXT"),
     ],
     "printers": [
         ("camera_demo", "INTEGER DEFAULT 0"),      # показывать демо-поток без принтера
@@ -249,6 +291,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("archived_at", "TEXT DEFAULT ''"),
     ],
     "print_jobs": [
+        # Катушка задания: колонка появилась вместе с учётом пластика по AMS,
+        # а пишет в неё и выбор катушки на задании. У базы, созданной раньше,
+        # её нет — `UPDATE print_jobs SET spool_id=?` упал бы на старте печати.
+        ("spool_id", "TEXT"),
         ("est_minutes", "REAL DEFAULT 0"),   # оценка из слайсера (3MF/G-code)
         ("est_grams", "REAL DEFAULT 0"),
         ("batch_id", "TEXT"),                # к какой партии относится запуск
@@ -341,6 +387,11 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("tag_old_price", "REAL DEFAULT 0"),
         # 13.1 (58): ячейка на схеме полки («A1», «B3»…) — карта вместо списка
         ("cell", "TEXT DEFAULT ''"),
+        # Вариация товара (nom_variants.id): одна карточка номенклатуры может
+        # стоять на полке несколькими цветами и размерами. Это разные ценники
+        # и разные штрихкоды, но по-прежнему один товар в учёте — ровно затем,
+        # чтобы адресник в двенадцати цветах не превращался в двенадцать товаров.
+        ("variant_id", "TEXT DEFAULT ''"),
     ],
     "shelf_moves": [
         # Внешний ключ строки чека делает повторную отправку из 1С безопасной.
@@ -1145,6 +1196,7 @@ CREATE TABLE IF NOT EXISTS shelf_items (
     name TEXT DEFAULT '',
     catalog_id TEXT,
     nom_id TEXT DEFAULT '',         -- canonical номенклатура PrintFlow / 1С
+    variant_id TEXT DEFAULT '',     -- вариация товара (цвет/размер) — своя карточка и ценник
     qty REAL DEFAULT 0,             -- штук на стеллаже
     price REAL DEFAULT 0,           -- цена ценника, ₽
     cost_per_unit REAL DEFAULT 0,   -- себестоимость штуки, ₽
@@ -1895,6 +1947,10 @@ class Database:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_client_log_chat"
                 " ON client_bot_log(chat_id, id DESC)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_variant_spool"
+                " ON nom_variants(spool_id)"
             )
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_client_log_inbox"
