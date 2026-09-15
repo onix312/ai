@@ -62,8 +62,7 @@
     var cfg=c();
     if(!el('city').value) el('city').value = cfg.city || 'Симферополь';
     if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8765/order.html';
-    var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
-    var mark=el('mark'); if(mark) mark.src='../assets/brand/nozza-mark-'+id+'-white.svg';
+    var mark=el('mark'); if(mark) mark.src='../assets/brand/nozza-mark-1-white.svg'; // знак выбран (вариант 1), выбор удалён в 18.4.1
   }
   function money(v){ return Math.round(parseFloat(v)||0).toLocaleString('ru-RU')+' ₽'; }
   function render(rows, demo){

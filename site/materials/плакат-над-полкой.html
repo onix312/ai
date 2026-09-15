@@ -55,9 +55,8 @@
 // QR и знак берём из общих настроек генераторов (localStorage), плейсхолдер заменяем живым кодом.
 (function(){
   var c={}; try{ c=JSON.parse(localStorage.getItem('nozza:contact')||'{}'); }catch(e){}
-  var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
   var mark=document.querySelector('.brandrow img');
-  if(mark) mark.src='../assets/brand/nozza-mark-'+id+'.svg';
+  if(mark) mark.src='../assets/brand/nozza-mark-1.svg'; // знак выбран (вариант 1), выбор удалён в 18.4.1
   var city=c.city||'Симферополь';
   var tagEl=document.querySelector('.brandrow .btag');
   if(tagEl) tagEl.textContent='Там, где рождается форма · '+city;

@@ -44,10 +44,8 @@
     <label>Сайт / ссылка <input type="text" id="site" value="nozza.ru"></label>
     <label>Ссылка в QR бирок <input type="text" id="qrbase" value="https://nozza.ru/p/"></label>
     <label>Источник бирок <select id="src"><option value="api">Каталог PrintFlow</option><option value="demo">Демо-набор</option></select></label>
-    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn" id="reload">Обновить</button>
     <button class="btn primary" id="print">Печать</button>
-    <a class="btn" href="логотипы-на-выбор.html">Лого</a>
     <span class="status" id="status">загрузка…</span>
   </div>
 </div>
@@ -58,11 +56,11 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-const LS_CONTACT='nozza:contact'; const LS_LOGO='nozza:logo';
+const LS_CONTACT='nozza:contact';
 function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
 function saveContact(p){ const c=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...c,...p})); }
-function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
-function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+// Вариант знака выбран (1 — «слои»); выбор вариантов удалён в 18.4.1.
+function loadLogo(){ return '1'; }
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const DEMO=[
   {id:'d1',name:'Органайзер для стола',price:890,material:'PLA',grams:120},
@@ -88,11 +86,11 @@ function render(items){
   const site=$('site').value.trim();
   const city=$('city').value.trim()||'Симферополь';
   const qrbase=$('qrbase').value.trim();
-  const logoId=$('logoSel')?$('logoSel').value:loadLogo();
+  const logoId=loadLogo();
   const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
   const markWhite=`../assets/brand/nozza-mark-${logoId}-white.svg`;
   if($('panelMark')) $('panelMark').src=markSrc;
-  saveContact({city, site, qrbase}); saveLogo(logoId);
+  saveContact({city, site, qrbase});
   const roundDark=Array.from({length:12},()=>roundSticker('', `${site} · ${city}`, markWhite)).join('');
   const roundLight=Array.from({length:8},()=>roundSticker('light', `${site} · ${city}`, markSrc)).join('');
   const roundSmall=Array.from({length:20},()=>roundSticker('small', city, markWhite)).join('');
@@ -102,7 +100,6 @@ function render(items){
 }
 async function load(){
   const status=$('status');
-  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
   if($('src').value==='demo'){ status.textContent='демо-набор'; status.className='status'; render(DEMO); return; }
   try{
     const res=await fetch('/api/catalog').then(r=>r.json());
@@ -117,9 +114,8 @@ function init(){
   if(c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
   if(c.site) $('site').value=c.site;
   if(c.qrbase) $('qrbase').value=c.qrbase;
-  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
 }
-['city','site','qrbase','src','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('change', load); });
+['city','site','qrbase','src'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('change', load); });
 $('reload').addEventListener('click', load);
 $('print').addEventListener('click', ()=>window.print());
 init(); load();

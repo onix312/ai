@@ -254,7 +254,7 @@ python3 scripts/acceptance.py                     # живая приёмка с
 
 <a id="текущая-версия"></a>
 
-## Текущая версия: 18.4.0
+## Текущая версия: 18.4.1
 
 Версия берётся из `connector/printflow/__init__.py` (`APP_VERSION`); контракт
 `connector/tests/test_docs_versions.py` не даёт этому заголовку разъехаться с
@@ -303,15 +303,23 @@ python3 scripts/acceptance.py                     # живая приёмка с
 ```text
 ai/
 ├── README.md                       # эта страница
+├── CHANGELOG.md                    # полный журнал версий (начиная с 18.x — сверху свежее)
 ├── КАК-ЗАПУСТИТЬ.txt               # подробная инструкция по запуску
+├── ЗАПУСТИТЬ.bat                   # двойной клик на Windows: запуск и ярлык
+├── СОБРАТЬ-EXE.bat                 # сборка автономного бинаря Windows (PyInstaller)
 ├── pf.py                           # лаунчер: запуск, окно, установка, обслуживание
 ├── launcher_window.py              # окно управления на tkinter
+├── ПРОМТ-ПЕРЕСМОТР-СИСТЕМ.md       # протокол пересмотра систем: допрос → идеи → прожарка → заход
+├── PROMPT-ИНЖЕНЕРА-PRINTFLOW.md    # протокол реализации: изучить → сделать → check.py зелёный → отчёт
+├── PROMPT-ДЛЯ-ИИ.md                # бизнес-контекст NOZZA для агента
+├── PROMPT-ГЛОБАЛЬНЫЙ-АУДИТ.md      # протокол сквозного аудита репозитория
 ├── connector/
 │   ├── printflow_connector.py      # точка входа (CLI)
 │   ├── requirements.txt            # paho-mqtt, pillow, pywebview
 │   ├── pyinstaller.spec            # сборка автономного бинаря
 │   ├── printflow/                  # вся серверная логика: база, репо, учёт, принтеры, API
 │   └── tests/                      # тесты Python (см. docs/ТЕСТЫ.md)
+├── frontend/                       # исходники Lit-компонентов; сборка Vite в site/assets/dist
 ├── site/                           # интерфейс: HTML + JS/CSS без сборщиков
 │   ├── index.html                  # панель
 │   ├── cashier.html                # касса, cashier.webmanifest, оболочка Android
@@ -321,7 +329,7 @@ ai/
 │   └── assets/                     # тема, модули панели, иконки, бренд, dist-сборка
 ├── android/                        # :app (касса) и :pult (пульт) — оболочки WebView
 ├── scripts/                        # проверки, стенды, приёмки, сборка APK
-├── docs/                           # документы, ТЗ, отчёты, схемы (docs/img/)
+├── docs/                           # документы, ТЗ, отчёты по версиям, схемы (docs/img/)
 └── финмодель-окупаемости.xlsx      # расчёт окупаемости мастерской
 ```
 

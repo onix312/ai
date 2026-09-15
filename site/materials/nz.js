@@ -29,7 +29,6 @@
 'use strict';
 
 const LS_CONTACT = 'nozza:contact';
-const LS_LOGO = 'nozza:logo';
 
 const DEFAULTS = {
   city: 'Симферополь',
@@ -51,12 +50,11 @@ function writeLS(key, value) {
 function contact() { return Object.assign({}, DEFAULTS, readLS(LS_CONTACT) || {}); }
 function contactSave(patch) { writeLS(LS_CONTACT, Object.assign(contact(), patch)); }
 
-function logo() {
-  let v = '1';
-  try { v = localStorage.getItem(LS_LOGO) || '1'; } catch (e) { /* noop */ }
-  return /^[1-4]$/.test(v) ? v : '1';
-}
-function logoSave(id) { try { localStorage.setItem(LS_LOGO, String(id)); } catch (e) { /* noop */ } }
+// Вариант знака выбран владельцем (1 — «слои»); варианты 2–4 и страница
+// выбора удалены в 18.4.1. Ключ nozza:logo больше не читаем: устаревшие id
+// (2–4) в старых браузерах не должны тянуть удалённые файлы.
+function logo() { return '1'; }
+function logoSave(id) { /* выбор удалён в 18.4.1: запись варианта ни на что не влияет */ }
 function markSrc(white) { return `../assets/brand/nozza-mark-${logo()}${white ? '-white' : ''}.svg`; }
 
 function pageKey() { return 'nozza:page:' + location.pathname; }

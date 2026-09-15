@@ -58,9 +58,7 @@
     <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
     <label>Ссылка <input type="text" id="site" value="https://nozza.ru"></label>
     <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
-    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn primary" id="print">Печать</button>
-    <a class="btn" href="логотипы-на-выбор.html">Лого</a>
   </div>
 </div>
 <div class="note noprint"><b>Печать:</b> визитки 90 × 50 мм — картон 300 г/м², лицо и оборот на разных листах (при двусторонней печати ставьте «переворот по длинной стороне»). Город Симферополь сохраняется автоматически.</div>
@@ -70,11 +68,11 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-const LS_CONTACT='nozza:contact'; const LS_LOGO='nozza:logo';
+const LS_CONTACT='nozza:contact';
 function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
 function saveContact(p){ const c=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...c,...p})); }
-function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
-function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+// Вариант знака выбран (1 — «слои»); выбор вариантов удалён в 18.4.1.
+function loadLogo(){ return '1'; }
 const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const SIGNS=[
   {k:'Можно трогать',t:'Берите в руки',d:'Все образцы на полке можно потрогать, покрутить и примерить. Так понятнее, чем на фото.'},
@@ -88,11 +86,11 @@ function render(){
   const who=$('who').value.trim(); const role=$('role').value.trim()||'3D-печать на заказ';
   const city=$('city').value.trim()||'Симферополь';
   const phone=$('phone').value.trim(); const site=$('site').value.trim(); const tg=$('tg').value.trim();
-  const logoId=$('logoSel')?$('logoSel').value:loadLogo();
+  const logoId=loadLogo();
   const markSrc=`../assets/brand/nozza-mark-${logoId}.svg`;
   const markWhite=`../assets/brand/nozza-mark-${logoId}-white.svg`;
   if($('panelMark')) $('panelMark').src=markSrc;
-  saveContact({who, role, city, phone, site, tg}); saveLogo(logoId);
+  saveContact({who, role, city, phone, site, tg});
   const shortSite=site.replace(/^https?:\/\//,'');
   const qrSite=QR.svg(site,{ecl:'M',margin:1});
   const qrTg=QR.svg('https://t.me/'+tg.replace(/^@/,''),{ecl:'M',margin:1});
@@ -111,9 +109,8 @@ function init(){
   if(c.phone) $('phone').value=c.phone;
   if(c.site) $('site').value=c.site;
   if(c.tg) $('tg').value=c.tg;
-  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
 }
-['who','role','city','phone','site','tg','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', render); });
+['who','role','city','phone','site','tg'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', render); });
 $('print').addEventListener('click', ()=>window.print());
 init(); render();
 </script>
