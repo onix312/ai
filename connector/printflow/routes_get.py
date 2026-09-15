@@ -14,7 +14,7 @@ import json
 import time
 from typing import Any
 
-from . import APP_VERSION
+from . import APP_VERSION, DEFAULT_PORT
 from .accounting import num
 from .bambu import BambuPrinter
 from .config import now_iso
@@ -673,7 +673,7 @@ def get_shelf_qr_link(api: Any, ctx: Ctx):
     info = api.shelf.qr_link(
         ctx.one("id"), getattr(api, "last_host", ""),
         str(api.db.setting("public_url", "") or ""),
-        int(getattr(api, "listen_port", 8080) or 8080))
+        int(getattr(api, "listen_port", DEFAULT_PORT) or DEFAULT_PORT))
     return 200, info
 
 

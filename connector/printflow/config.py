@@ -14,6 +14,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import DEFAULT_PORT
+
 if getattr(sys, "frozen", False):
     # Собранный PyInstaller-бинарь: ресурсы (папка site) распакованы во
     # временный каталог _MEIPASS, а не лежат рядом с исходниками.
@@ -438,7 +440,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "ui_start_view": "dashboard",
     "debug_verbose": False,
     # База для QR-наклеек (катушка, ценник). Пусто — берём LAN IP компьютера.
-    # Пример: http://192.168.1.50:8080 или Tailscale http://pc.tailnet.ts.net:8080
+    # Пример: http://192.168.1.50:8765 или Tailscale http://pc.tailnet.ts.net:8765
     "public_url": "",
     # --- 8.0: Бэкап 2.0 ---------------------------------------------------
     "backup_keep": DEFAULT_BACKUP_KEEP,
@@ -643,7 +645,7 @@ _LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"
 
 
 def host_name(host: str) -> str:
-    """Имя хоста без порта: ``192.168.1.50:8080`` → ``192.168.1.50``."""
+    """Имя хоста без порта: ``192.168.1.50:8765`` → ``192.168.1.50``."""
     host = (host or "").strip()
     if host.startswith("["):
         end = host.find("]")
@@ -653,7 +655,7 @@ def host_name(host: str) -> str:
     return host.lower()
 
 
-def host_port(host: str, default: int = 8080) -> int:
+def host_port(host: str, default: int = DEFAULT_PORT) -> int:
     """Порт из ``Host``-заголовка. Без порта — ``default``."""
     host = (host or "").strip()
     if host.startswith("["):
@@ -691,7 +693,7 @@ def normalize_base(url_or_host: str) -> str:
 
 
 def public_base(host_header: str = "", public_url: str = "",
-                lan_ips: list[str] | None = None, listen_port: int = 8080) -> dict:
+                lan_ips: list[str] | None = None, listen_port: int = DEFAULT_PORT) -> dict:
     """Базовый URL для QR, который откроется с телефона в той же сети.
 
     Приоритет:
@@ -711,7 +713,7 @@ def public_base(host_header: str = "", public_url: str = "",
             "source": "setting",
             "ips": ips,
         }
-    port = host_port(host_header, listen_port or 8080)
+    port = host_port(host_header, listen_port or DEFAULT_PORT)
     if host_header and not is_loopback_host(host_header):
         base = normalize_base(host_header)
         return {
@@ -742,7 +744,7 @@ def public_base(host_header: str = "", public_url: str = "",
 
 def public_page_url(path: str, query: str = "", host_header: str = "",
                     public_url: str = "", lan_ips: list[str] | None = None,
-                    listen_port: int = 8080) -> dict:
+                    listen_port: int = DEFAULT_PORT) -> dict:
     """Полный URL страницы для QR-наклейки + служебные поля ``public_base``."""
     info = public_base(host_header, public_url, lan_ips, listen_port)
     path = path if str(path).startswith("/") else "/" + str(path)

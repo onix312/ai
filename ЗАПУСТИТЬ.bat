@@ -1,7 +1,20 @@
 @echo off
+rem ─────────────────────────────────────────────────────────────────────────
+rem  NOZZA · PrintFlow — запуск одним двойным кликом.
+rem
+rem  Этот файл ничего не делает сам: он находит рабочий Python и передаёт
+rem  управление лаунчеру pf.py. Все адреса, QR-код, проверки и подсказки
+rem  печатает pf.py — держать их здесь вторым списком нельзя, иначе порт и
+rem  версия в .bat разъедутся с кодом (так и было до 17.0.27: в батнике
+rem  печаталось 8080, а касса искала 8765).
+rem ─────────────────────────────────────────────────────────────────────────
 setlocal EnableExtensions
 cd /d "%~dp0"
 title NOZZA PrintFlow
+
+rem Русские сообщения в cmd: без этой кодовой страницы текст превращается
+rem в кракозябры, поэтому раньше здесь были английские строки.
+chcp 65001 >nul 2>&1
 
 rem ---- find a working Python (py -3, python, python3) ------------------
 rem Each candidate is verified with "-c import sys": "where" alone is not
@@ -30,9 +43,9 @@ if not defined PY (
 
 if not defined PY (
   echo.
-  echo  Python not found.
-  echo  Install Python 3.10+ from https://www.python.org/downloads/
-  echo  Enable the checkbox: Add python.exe to PATH
+  echo  Python не найден.
+  echo  Поставьте Python 3.10 или новее: https://www.python.org/downloads/
+  echo  В установщике включите галочку "Add python.exe to PATH".
   echo.
   pause
   exit /b 1
@@ -40,26 +53,28 @@ if not defined PY (
 
 if not exist "pf.py" (
   echo.
-  echo  pf.py not found in this folder:
-  echo  %CD%
-  echo  Put this BAT next to pf.py
+  echo  Рядом с этим файлом нет pf.py.
+  echo  Текущая папка: %CD%
+  echo  Положите ЗАПУСТИТЬ.bat в папку с pf.py.
   echo.
   pause
   exit /b 1
 )
 
-echo.
-echo  Starting NOZZA PrintFlow...
-echo  Panel:  http://127.0.0.1:8080/
-echo  Close this window to stop.
-echo.
+rem Если PrintFlow уже запущен на любом порту — pf.py покажет адреса для
+rem телефона и откроет панель, вместо ошибки "порт занят".
+%PY% "pf.py"
+set "CODE=%ERRORLEVEL%"
 
-%PY% "pf.py" app
-if errorlevel 1 (
+rem Ошибочный выход можно и не заметить: окно просто закроется. Поэтому при
+rem ошибке показываем, куда смотреть (журнал) и что запускать (диагностика).
+if not "%CODE%"=="0" (
   echo.
-  echo  Native window failed, starting usual mode...
-  %PY% "pf.py"
+  echo  PrintFlow завершился с кодом %CODE%.
+  echo  Диагностика:      %PY% pf.py doctor
+  echo  Что с телефоном:  %PY% pf.py net
+  echo  Журнал:           %PY% pf.py logs
+  echo.
+  pause
 )
-
-echo.
-pause
+endlocal

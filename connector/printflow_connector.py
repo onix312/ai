@@ -9,8 +9,12 @@
 
 Запуск:
     python connector/printflow_connector.py
-    python connector/printflow_connector.py --host 0.0.0.0 --port 8080
+    python connector/printflow_connector.py --host 0.0.0.0 --port 8765
     python connector/printflow_connector.py --lan  # то же что --host 0.0.0.0
+
+Порт по умолчанию — 8765: он же в подсказках мобильной кассы и пульта, и он же
+у UDP-маяка автопоиска (`printflow/discovery.py`), поэтому телефону не нужно
+угадывать адрес сервера.
 
 Обычный путь запуска — лаунчер в корне репозитория: ``python pf.py``.
 """
@@ -27,12 +31,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from printflow import APP_VERSION  # noqa: E402
+from printflow import discovery  # noqa: E402
 from printflow.api import serve  # noqa: E402
-from printflow.logging_setup import setup_logging  # noqa: E402
 from printflow.config import DATA_DIR, get_local_ips  # noqa: E402
+from printflow.logging_setup import setup_logging  # noqa: E402
+
+# Порт по умолчанию задаётся один раз здесь и повторяется в лаунчере (`pf.py`),
+# в подсказках мобильной кассы и в UDP-маяке. Держать его в одном месте важнее,
+# чем «привычные» 8080: касса ищет сервер именно по этому номеру.
+DEFAULT_PORT = 8765
 
 
 def print_banner(host: str, port: int, data_dir: Path, lan_ips: list[str]) -> None:
+    """Адреса и «что делать с телефоном» — для запуска коннектора напрямую.
+
+    Тот же смысл, что у баннера лаунчера: один раз показать владельцу, куда
+    зайти с телефона. Адреса телефона печатаем и тогда, когда сервер поднят
+    только на localhost, — иначе «не открывается с телефона» выглядит загадкой.
+    """
     line = "─" * 58
     print()
     print(f"  {line}")
@@ -42,36 +58,33 @@ def print_banner(host: str, port: int, data_dir: Path, lan_ips: list[str]) -> No
     print(f"  Папка данных: {data_dir}")
     print()
 
-    local_url = f"http://localhost:{port}/"
-    # Для красоты показываем и 127.0.0.1
-    print("  ЛОКАЛЬНЫЙ ДОСТУП (на этом компьютере):")
-    print(f"    → {local_url}")
-    if port != 8080:
-        print(f"    → http://127.0.0.1:{port}/")
+    print("  Панель владельца (на этом компьютере):")
+    print(f"    → http://localhost:{port}/")
     print()
 
-    if lan_ips:
-        print("  СЕТЬ Wi-Fi / LAN (для телефона, планшета, другого ПК):")
-        for ip in lan_ips:
-            print(f"    → http://{ip}:{port}/")
-        print()
-    else:
-        print("  Сетевой IP не определился (нет сети). Подключитесь к Wi-Fi/LAN.")
-        print()
-
     if host in ("127.0.0.1", "localhost"):
-        print("  ⚠ Сейчас сервер слушает ТОЛЬКО localhost (127.0.0.1).")
-        print("    С других устройств по сетевому IP зайти НЕ получится.")
-        print("    Для доступа по сети запустите:")
-        print(f"      python connector/printflow_connector.py --host 0.0.0.0 --port {port}")
-        print("    Или проще — лаунчер (он уже запускает с --host 0.0.0.0):")
+        print("  ⚠ Сервер слушает ТОЛЬКО localhost (127.0.0.1):")
+        print("    с телефона по сети зайти не получится.")
+        print("    Запустите с доступом по сети — лаунчером:")
         print("      python pf.py")
+        print("    или вручную:")
+        print(f"      python connector/printflow_connector.py --host 0.0.0.0 --port {port}")
+        print()
     else:
-        print(f"  Сервер слушает {host}:{port} (все интерфейсы)" if host == "0.0.0.0" else f"  Сервер слушает {host}:{port}")
-        print("  Если не открывается с другого устройства:")
-        print("    - проверьте что оба устройства в одной Wi-Fi сети")
-        print(f"    - разрешите порт {port} в Брандмауэре Windows / Firewall")
-        print("    - попробуйте выключить VPN")
+        print("  Телефон и планшет в той же Wi-Fi сети:")
+        if lan_ips:
+            for ip in lan_ips:
+                print(f"    панель  → http://{ip}:{port}/")
+                print(f"    касса   → http://{ip}:{port}/cashier.html")
+                print(f"    пульт   → http://{ip}:{port}/pult")
+        else:
+            print("    сетевой IP не определился — подключите Wi-Fi или кабель")
+        print()
+        print(f"  Сервер объявляет себя в сети (UDP {discovery.BEACON_PORT}):")
+        print("    приложение кассы находит его само — «Найти сервер в сети».")
+        print("    Если не находит: разрешите порты "
+              f"{port}/TCP и {discovery.BEACON_PORT}/UDP в брандмауэре")
+        print("    и убедитесь, что телефон не в гостевой сети Wi-Fi.")
     print()
     print(f"  {line}")
     print("  Не закрывайте это окно: без него сайт не сохраняет данные.")
@@ -84,7 +97,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="PrintFlow — локальный сервер производства")
     parser.add_argument("--host", default="127.0.0.1",
                         help="адрес прослушивания (127.0.0.1 — только этот ПК, 0.0.0.0 — вся локалка)")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help=f"порт панели (по умолчанию {DEFAULT_PORT})")
     parser.add_argument("--lan", action="store_true",
                         help="короткий флаг для --host 0.0.0.0 (доступ по сети)")
     parser.add_argument("--no-browser", action="store_true", help="не открывать браузер")

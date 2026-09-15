@@ -422,7 +422,11 @@ class MainActivity : Activity() {
                 // если прошлый адрес тоже молчит.
                 if (attempt >= 6 && !scanned) {
                     scanned = true
-                    val hits = Net.scan(timeoutMs = 700)
+                    // Сначала автопоиск: сервер сам отвечает «я тут» (UDP 8765),
+                    // и адрес находится за десятые доли секунды — без перебора
+                    // 254 адресов. Перебор оставлен для сетей, где широковещание
+                    // закрыто (гостевая Wi-Fi-сеть, изоляция клиентов).
+                    val hits = Net.discoverServers().ifEmpty { Net.scan(timeoutMs = 700) }
                     val fresh = hits.map { it.first }.filter { it != base }
                     if (hits.size == 1) {
                         val only = hits[0].first
@@ -472,8 +476,11 @@ class MainActivity : Activity() {
         }
         hintView?.text = getString(R.string.reconnecting)
         Thread {
+            // Тот же порядок, что у сторожа: сохранённый адрес → автопоиск →
+            // перебор. Кнопка «Переподключиться» должна отвечать за секунды.
             val version = if (Net.probe(base, timeoutMs = 2500) != null) base
-            else Net.scan(timeoutMs = 700).takeIf { it.size == 1 }?.get(0)?.first
+            else Net.discoverServers().takeIf { it.size == 1 }?.get(0)?.first
+                ?: Net.scan(timeoutMs = 700).takeIf { it.size == 1 }?.get(0)?.first
             if (version != null) {
                 prefs.edit().putString(KEY_LAST_OK, version).apply()
                 runOnUiThread { load(version) }

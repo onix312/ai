@@ -287,9 +287,20 @@ class MainActivity : Activity() {
         val note = scanNote ?: return
         note.text = getString(R.string.scanning)
         Thread {
-            val found = Net.scan(onFound = { count ->
+            // Автопоиск (UDP 8765) отвечает за десятые доли секунды — перебор
+            // подсети остаётся запасным путём для сетей без широковещания.
+            val fast = Net.discoverServers()
+            if (fast.size == 1) {
+                runOnUiThread {
+                    urlField?.setText(fast[0].first)
+                    note.text = getString(R.string.reconnect_found, fast[0].first)
+                    openPult(fast[0].first)
+                }
+                return@Thread
+            }
+            val found = if (fast.isEmpty()) Net.scan(onFound = { count ->
                 runOnUiThread { note.text = getString(R.string.scan_found, count) }
-            })
+            }) else fast
             runOnUiThread {
                 when {
                     found.isEmpty() -> note.text = getString(R.string.scan_none)

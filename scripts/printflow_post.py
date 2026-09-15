@@ -40,9 +40,12 @@ def main():
         return
     # уведомляем PrintFlow по сети
     for url in [
-        os.environ.get("PRINTFLOW_URL", "http://127.0.0.1:8080/api/slicer/push"),
-        "http://localhost:8080/api/slicer/push",
-        "http://printflow.local:8080/api/slicer/push",
+        os.environ.get("PRINTFLOW_URL", "http://127.0.0.1:8765/api/slicer/push"),
+        "http://localhost:8765/api/slicer/push",
+        "http://printflow.local:8765/api/slicer/push",
+        # установки до 17.0.27 слушали 8080 — пробуем и его, чтобы чужой
+        # скрипт-наблюдатель не сломался от смены порта
+        "http://127.0.0.1:8080/api/slicer/push",
     ]:
         try:
             data = json.dumps({"file": str(dst), "source": "bambu_post"}).encode()

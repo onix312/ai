@@ -16,8 +16,9 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
-from . import APP_VERSION
+from . import APP_VERSION, DEFAULT_PORT
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
@@ -164,7 +165,7 @@ class Api:
         self.search = None
         self.last_host = ""
         self.listen_host = "127.0.0.1"
-        self.listen_port = 8080
+        self.listen_port = DEFAULT_PORT
         self.started_at = time.time()
 
     # ------------------------------------------------- события каталога
@@ -197,7 +198,7 @@ class Api:
             path, query,
             host_header=getattr(self, "last_host", ""),
             public_url=str(self.db.setting("public_url", "") or ""),
-            listen_port=int(getattr(self, "listen_port", 8080) or 8080))
+            listen_port=int(getattr(self, "listen_port", DEFAULT_PORT) or DEFAULT_PORT))
 
     def _ams_slot_num(self, tray: dict) -> int:
         return int(num(tray.get("unit"))) * 4 + int(num(tray.get("slot")))
@@ -3514,9 +3515,24 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     flags: list[str] = []
+    # Маяк автопоиска (см. `discovery.py`): телефон находит сервер сам, без
+    # ввода адреса. Живёт до закрытия сервера и гаснет вместе с ним.
+    beacon: Any = None
+
+    def server_close(self) -> None:
+        up = self.beacon
+        self.beacon = None
+        stop = getattr(up, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:  # закрытие сервера не должно падать из-за маяка
+                pass
+        super().server_close()
 
 
-def serve(host: str = "127.0.0.1", port: int = 8080, flags: list[str] | None = None) -> Server:
+def serve(host: str = "127.0.0.1", port: int = DEFAULT_PORT,
+          flags: list[str] | None = None) -> Server:
     Handler.api = Api()
     Handler.api.listen_host = host
     Handler.api.listen_port = port
@@ -3524,4 +3540,12 @@ def serve(host: str = "127.0.0.1", port: int = 8080, flags: list[str] | None = N
     server.flags = flags or []
     thread = threading.Thread(target=server.serve_forever, name="pf-http", daemon=True)
     thread.start()
+    # 17.0.27: «касса не находит сервер» лечится не перебором /24, а тем, что
+    # сервер сам о себе говорит. Маяк поднимается только когда сервер виден по
+    # сети (--local в нём не нуждается) и никогда не мешает запуску.
+    try:
+        from . import discovery
+        server.beacon = discovery.start(port, host, version=APP_VERSION)
+    except Exception:
+        server.beacon = None
     return server
