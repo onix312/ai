@@ -15,9 +15,8 @@
 <link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=17.0.2">
-<link rel="stylesheet" href="assets/app.css?v=18.4.2">
-<link rel="stylesheet" href="assets/more.css?v=17.1.3">
-</head><body>
+<link rel="stylesheet" href="assets/app.css?v=18.5.0">
+<link rel="stylesheet" href="assets/more.css?v=18.5.0">
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
 <div class="splash" id="splash" aria-hidden="true"><div class="splash-mark"><svg class="splash-svg" viewBox="0 0 72 72" width="72" height="72" role="img" aria-label="NOZZA">
@@ -4247,6 +4246,17 @@
   <label class="field"><span>Бренд</span><input id="sf_brand" placeholder="Bambu Lab"></label>
   <label class="field"><span>Цвет</span><input id="sf_color_name" placeholder="Чёрный"></label>
   <label class="field"><span>Оттенок</span><input id="sf_color_hex" type="color" value="#333333"></label>
+  <label class="field"><span>Вид цвета</span><select id="sf_color_kind">
+   <option value="">Однотонный</option>
+   <option value="gradient">Градиент</option>
+   <option value="rainbow">Радуга (сектора)</option>
+   <option value="silk">Шёлк-2</option>
+  </select></label>
+  <div class="field span-2" id="sf_colors_wrap" hidden>
+   <span>Цвета по мотку по порядку (первый — основной оттенок)</span>
+   <div id="sf_colors_list" class="spool-colors"></div>
+  </div>
+  <label class="field span-2"><span>Рекомендации производителя</span><textarea id="sf_rec_settings" rows="2" maxlength="2000" placeholder="Со стикера бобины: сопло 210–230°, стол 60–70°, сушить, закрытая камера…"></textarea></label>
   <label class="field"><span>Вес катушки, г</span><input id="sf_total_grams" type="number" min="1" step="any" value="1000"></label>
   <label class="field"><span>Осталось, г</span><input id="sf_remaining_grams" type="number" min="0" step="any" value="1000"></label>
   <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>
@@ -4610,11 +4620,18 @@
    <p class="muted" style="margin-bottom:10px">Вариация — сочетание признаков одного товара: цвет, размер, пластик. У каждой своя катушка, себестоимость и цена: грамм считается по цене той катушки, которой вариант реально печатают.</p>
    <div class="card-head"><div><h3>Собрать вариации</h3><p>Оси перемножаются: 12 цветов × 5 размеров = 60 вариаций</p></div></div>
    <div id="nf_var_axes"></div>
-   <button class="btn sm ghost" type="button" id="nf_var_axis_add">+ Ось вариаций</button>
+   <div class="var-presets">
+    <button class="btn sm ghost" type="button" id="nf_var_axis_add">+ Ось</button>
+    <button class="btn sm ghost" type="button" data-axis-preset="Цвет">+ Цвет</button>
+    <button class="btn sm ghost" type="button" data-axis-preset="Размер">+ Размер</button>
+    <button class="btn sm ghost" type="button" data-axis-preset="Пластик">+ Пластик</button>
+   </div>
    <div class="notice info" id="nf_var_preview" style="margin-top:10px"><span>ⓘ</span><span>Добавьте ось со значениями — здесь появится число вариаций.</span></div>
    <button class="btn primary" type="button" id="nf_var_make" disabled style="margin-top:8px">Создать вариации</button>
    <div class="card-head" style="margin-top:16px"><div><h3>Вариации товара</h3><p id="nf_var_count"></p></div>
-    <button class="btn sm" type="button" id="nf_var_recalc">↻ Посчитать цены</button></div>
+    <div style="display:flex;gap:6px">
+    <button class="btn sm danger ghost" type="button" id="nf_var_clear" hidden title="Удалить все вариации товара одним нажатием">× Очистить</button>
+    <button class="btn sm" type="button" id="nf_var_recalc">↻ Посчитать цены</button></div></div>
    <div id="nf_variants"></div>
   </div>
   <div class="pane" id="nompane-stock">
@@ -4625,6 +4642,7 @@
  </div>
  <div class="modal-foot">
   <button class="btn danger" type="button" id="nom_delete">Удалить</button>
+  <button class="btn" type="button" id="nom_duplicate" hidden title="Создать такую же карточку: цены и состав скопируются, артикул и штрихкод — пустые">⧉ Дублировать</button>
   <button class="btn" type="button" id="nom_batch">⎙ Напечатать партию</button>
   <span class="spacer"></span>
   <button class="btn" type="button" data-close="nom_modal">Отмена</button>
@@ -5153,14 +5171,14 @@
 
 <script src="assets/qr.js?v=17.0.1"></script>
 <script src="assets/core.js?v=18.3.0"></script>
+<script src="assets/colors.js?v=18.5.0"></script>
 <script src="assets/icons.js?v=17.0.1"></script>
-<script src="assets/printer.js?v=17.1.2"></script>
+<script src="assets/printer.js?v=18.5.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
-<script src="assets/ops.js?v=18.4.2"></script>
-<script src="assets/money.js?v=17.0.1"></script>
-<script src="assets/finance.js?v=17.0.6"></script>
+<script src="assets/ops.js?v=18.5.0"></script>
+<script src="assets/money.js?v=18.5.0"></script>
 <script src="assets/shelf.js?v=17.0.2"></script>
-<script src="assets/products.js?v=17.0.14"></script>
+<script src="assets/products.js?v=18.5.0"></script>
 <script src="assets/bridge.js?v=17.0.1"></script>
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->

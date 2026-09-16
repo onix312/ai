@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
 <script src="/assets/theme-init.js?v=17.0.1"></script>
+<script src="/assets/colors.js?v=18.5.0"></script>
 <style>
 /* 17.0 data-theme bridge: ручная тёмная тема действует на страницах со своей палитрой */
 :root[data-theme="dark"] { color-scheme: dark; }
@@ -59,6 +60,7 @@
   <p class="name" id="name">Загрузка…</p>
   <p class="muted" id="mat"></p>
   <div class="rest" id="rest">—</div>
+  <p class="muted" id="recLine" hidden style="white-space:pre-wrap;font-size:12.5px;line-height:1.5"></p>
   <p class="muted" id="dry"></p>
   <label>Принтер
    <select id="printer"><option value="">Не выбран</option></select>
@@ -77,6 +79,11 @@
 <script>
 (function () {
   'use strict';
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c];
+    });
+  }
   var id = new URLSearchParams(location.search).get('id') || '';
   var spool = null;
   var suggest = { slot: '', reason: '', trays: [] };
@@ -125,10 +132,20 @@
   function render(s, printers, sug) {
     spool = s;
     suggest = sug || suggest;
-    $('#name').textContent = (s.material || 'Катушка') + ' ' + (s.color_name || '');
+    // М1: многоцветная катушка — градиентный свотч + вид; рекомендации
+    // производителя видны на карте бобины (открывается по QR с этикетки).
+    var swCss = window.PFSpoolColor ? PFSpoolColor.swatchCss(s, '#4b5563') : (s.color_hex || '#4b5563');
+    var kindTxt = (window.PFSpoolColor && s.color_kind) ? PFSpoolColor.kindLabel(s.color_kind) : '';
+    $('#name').innerHTML = '<span style="display:inline-block;width:16px;height:16px;border-radius:50%;vertical-align:-2px;margin-right:7px;background:'
+      + swCss + '"></span>'
+      + esc((s.material || 'Катушка') + ' ' + (s.color_name || ''))
+      + (kindTxt ? ' <small class="muted">· ' + esc(kindTxt) + '</small>' : '');
     var bound = s.ams_slot !== '' && s.ams_slot != null;
     $('#mat').textContent = (s.brand || '') + (bound ? ' · ' + slotLabel(s.ams_slot) : ' · не привязана');
     $('#rest').textContent = Math.round(num(s.remaining_grams)) + ' г из ' + Math.round(num(s.total_grams)) + ' г';
+    var rec = String(s.rec_settings || '').trim();
+    $('#recLine').hidden = !rec;
+    if (rec) $('#recLine').textContent = 'Рекомендации производителя: ' + rec;
     $('#dry').textContent = dryLine(s);
     var pick = bound ? s.ams_slot : (suggest.slot || s.ams_slot);
     fillSlots(pick);

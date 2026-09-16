@@ -67,10 +67,14 @@
 <div id="warn" class="warn" hidden></div>
 <div class="sheet" id="sheet"></div>
 <script src="/assets/qr.js"></script>
+<script src="/assets/colors.js?v=18.5.0"></script>
 <script>
 (function () {
   'use strict';
   var kind = new URLSearchParams(location.search).get('kind') || 'all';
+  function swatchOf(s) { // многоцветная катушка — градиентный свотч (М1)
+    return window.PFSpoolColor ? PFSpoolColor.swatchCss(s, '') : (s.color_hex || '');
+  }
   // Старые закладки «labels?kind=shelf» ведём в полноценный конструктор.
   if (kind === 'shelf') { location.replace('/price-tags.html'); return; }
   function esc(s) {
@@ -104,7 +108,7 @@
     (d.spools || []).forEach(function (s) {
       var rest = [s.brand, s.remaining_grams != null ? Math.round(s.remaining_grams) + ' г' : '']
         .filter(Boolean).join(' · ');
-      html.push(card((s.material || '') + ' ' + (s.color_name || ''), rest, s.url, s.color_hex));
+      html.push(card((s.material || '') + ' ' + (s.color_name || ''), rest, s.url, swatchOf(s)));
     });
     (d.shelf || []).forEach(function (i) {
       var rest = (i.price != null ? Math.round(i.price) + ' ₽' : '')

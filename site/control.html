@@ -2,6 +2,7 @@
 <html lang="ru" data-theme="dark">
 <head>
 <script src="/assets/theme-init.js?v=17.0.1"></script>
+<script src="/assets/colors.js?v=18.5.0"></script>
 <link rel="manifest" href="/pult.webmanifest">
 <meta name="theme-color" content="#4f46e5">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -813,7 +814,7 @@
         ? ('слот ' + (num(sp.ams_slot, -1) + 1)) : 'на складе';
       return '<button class="pk-pick" type="button" data-ams="bind" data-slot="'
         + esc(item.slot) + '" data-spool="' + esc(sp.id) + '">'
-        + '<span class="pk-chip" style="background:' + esc(hex(sp.color_hex)) + '"></span>'
+        + '<span class="pk-chip" style="background:' + esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(sp, hex(sp.color_hex)) : hex(sp.color_hex)) + '"></span>'
         + '<span><b>' + esc(spoolTitle(sp)) + '</b><small>'
         + Math.round(num(sp.remaining_grams)) + ' г · ' + esc(where) + '</small></span></button>';
     });

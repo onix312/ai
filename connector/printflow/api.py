@@ -38,6 +38,24 @@ from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
                            begin_request, parse_multipart, rate_bucket,
                            request_length, request_origin_allowed,
                            safe_file, save_upload)
+
+# 18.5 (М5): в AMS вместе с типом/цветом подаём температуры сопла со стикера
+# бобины — только если они написаны явно («сопло 210–230°» / «nozzle …»).
+# Другие диапазоны в тексте (стол, сушка, скорость) рядом с ключевым словом
+# не стоят и в сопло не уедут.
+_NOZZLE_RANGE_RE = re.compile(
+    r"(?:сопл[аоеу]?|nozzle|hotend|экструдер)[^0-9]{0,30}(\d{2,3})\s*°?\s*[–—\-]+\s*(\d{2,3})",
+    re.IGNORECASE)
+
+
+def _nozzle_range_from_rec(text: str) -> tuple | None:
+    m = _NOZZLE_RANGE_RE.search(text or "")
+    if not m:
+        return None
+    lo, hi = int(m.group(1)), int(m.group(2))
+    if not (100 <= lo <= hi <= 350):
+        return None
+    return (lo, hi)
 from .router import register_all as register_routes, router
 
 # 14.0 (идея 1): маршруты объявляются декораторами в модулях-роутерах,
@@ -853,6 +871,20 @@ class Api:
             if isinstance(value, (list, dict)):
                 body[key] = _json.dumps(value, ensure_ascii=False)
         with self.db.transaction():
+            if not str(body.get("spools") or "").strip():
+                # М2: заказ «часть делегата» CSS-вариации с составом — катушки
+                # подставляются из состава автоматически: idle-списание тогда
+                # уйдёт по своим катушкам, а не по одной выбранной.
+                variant_id = str(body.get("client_variant_id") or "").strip()
+                if variant_id:
+                    structures = self.nom.variant_structures(variant_id)
+                    if structures:
+                        qty = max(1.0, num(body.get("qty"), 1))
+                        body["spools"] = _json.dumps([{
+                            "spool_id": r["spool_id"],
+                            "grams": round(r["grams"] * qty, 1),
+                            "note": f"Состав вариации ({r['material']} {r['color_name']})".strip(),
+                        } for r in structures], ensure_ascii=False)
             order = self.repo.save_order(body)
             # У заказа может быть только один актуальный резерв. При изменении
             # количества/товара старую строку закрываем и создаём новую.
@@ -2424,11 +2456,17 @@ class Api:
                 (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
             if push_ams and printer:
                 try:
-                    printer.command("ams_filament", {
+                    payload = {
                         "ams_id": slot_n // 4, "tray_id": slot_n % 4,
                         "type": spool.get("material") or "PLA",
                         "color": spool.get("color_hex") or "FFFFFFFF",
-                    })
+                    }
+                    # М5: температуры производителя уйдут вместе с типом,
+                    # если на стикере бобины записан диапазон сопла
+                    nozzle = _nozzle_range_from_rec(spool.get("rec_settings") or "")
+                    if nozzle:
+                        payload["temp_min"], payload["temp_max"] = nozzle
+                    printer.command("ams_filament", payload)
                     pushed = True
                 except Exception as exc:
                     push_error = str(exc)

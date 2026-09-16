@@ -68,3 +68,41 @@ def nomenclature_variant_spool(api: Any, ctx: Ctx):
         "spool_id": body.get("spool_id", "")})
     return 200, {"ok": True,
                  "item": api.nom.variant_economics(body.get("id", ""))}
+
+
+@router.post("/api/nomenclature/variant/structures",
+             audit="Номенклатура: изменён состав вариации",
+             doc="Состав вариации: несколько катушек × граммы (до 8 строк, 18.5)")
+def nomenclature_variant_structures(api: Any, ctx: Ctx):
+    """М2: вариация из нескольких пластиков (например, тело + хвост брелока).
+
+    Себестоимость собирается суммой граммов по каждой катушке, цена — по
+    общей наценке. Пустой список rows снимает состав: вариация снова
+    однокатушечная, поведение байт-в-байт прежнее.
+    """
+    body = ctx.body or {}
+    variant_id = str(body.get("variant_id") or "").strip()
+    rows = body.get("rows") if isinstance(body.get("rows"), list) else []
+    try:
+        structures = api.nom.save_variant_structures(variant_id, rows)
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    return 200, {"ok": True, "structures": structures}
+
+
+@router.post("/api/nomenclature/variant/photo",
+             doc="Фото вариации для витрины кассы (18.5, М4)")
+def nomenclature_variant_photo(api: Any, ctx: Ctx):
+    """Фото вариации грузит владелец. Те же правила, что у общего фото
+    товара: data URL, до 8 МБ. Общее фото остаётся самим по себе —
+    /api/nomenclature/photo."""
+    body = ctx.body or {}
+    variant_id = str(body.get("id") or "").strip()
+    try:
+        name = api.nom.set_variant_photo(variant_id, body.get("data"))
+    except LookupError:
+        return 404, {"error": "Вариация не найдена"}
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    api.catalog_changed("variant_photo")
+    return 200, {"ok": True, "photo": name}

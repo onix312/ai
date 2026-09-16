@@ -480,6 +480,21 @@ class Cashier:
         all_nom_ids = list({str(it.get("nom_id") or "").strip() for it in shelf_raw if str(it.get("nom_id") or "").strip()} | set(offer.keys()))
         nom_map = self._nom_map(all_nom_ids)
 
+        # 18.5 (М3): витрина отдаёт признаки вариации (цвет, размер, пластик) —
+        # касса группирует позиции в одну плитку и даёт кассиру выбор.
+        # Форма ответа не меняется: добавляются только плоские поля.
+        variant_map: dict[str, dict] = {}
+        if all_nom_ids:
+            qmarks = ",".join("?" for _ in all_nom_ids)
+            try:
+                for v in self.db.query(
+                        "SELECT id, nom_id, color_name, color_hex, size, material, photo"
+                        " FROM nom_variants WHERE archived=0 AND nom_id IN (" + qmarks + ")",
+                        tuple(all_nom_ids)):
+                    variant_map[f"{v['nom_id']}|{v['id']}"] = v
+            except Exception:
+                variant_map = {}
+
         for it in shelf_raw:
             nom_id = str(it.get("nom_id") or "").strip()
             variant_id = str(it.get("variant_id") or "").strip()
@@ -511,7 +526,6 @@ class Cashier:
                 "variant_id": variant_id,
                 "variant_label": str(it.get("variant_label") or ""),
                 "unit": str(it.get("unit") or "шт"), "warehouse_name": "",
-                "group_id": nm.get("group_id") or "",
                 "group_name": nm.get("group_name") or "",
                 "group_color": nm.get("group_color") or "",
                 "niche_id": nm.get("niche_id") or "",
@@ -519,6 +533,16 @@ class Cashier:
                 "niche_color": nm.get("niche_color") or "",
                 "niche_icon": nm.get("niche_icon") or "",
             }
+            vrow = variant_map.get(f"{nom_id}|{variant_id}") if variant_id else None
+            if vrow:
+                row["variant_color"] = str(vrow.get("color_name") or "")
+                row["variant_color_hex"] = str(vrow.get("color_hex") or "")
+                row["variant_size"] = str(vrow.get("size") or "")
+                row["variant_material"] = str(vrow.get("material") or "")
+                # М4: фото вариации кладём отдельным URL — плитка/шторка кассы
+                # покажут его в карусели (первым слайдом идёт общее фото товара)
+                if str(vrow.get("photo") or "").strip():
+                    row["variant_photo_url"] = f"/api/nomenclature/variant/photo.jpg?id={variant_id}"
             items.append(row)
             by_id[row["id"]] = row
             if nom_id:
