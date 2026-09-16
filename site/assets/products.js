@@ -698,10 +698,12 @@ async function openNom(id) {
     : 'Нормативы производства, цены и остатки';
   renderNomSummary(d);
   $('nom_delete').hidden = !id;
+  $('nom_duplicate').hidden = !id;
   $('nom_batch').hidden = !id;
   switchPane('nom_tabs', 'nompane', 'main');
   openModal('nom_modal');
   updateNomCost();
+  if (!id) setTimeout(() => { const el = $('nf_name'); if (el) el.focus(); }, 60);
 }
 
 const updateNomCost = debounce(async () => {
@@ -751,13 +753,52 @@ const updateNomCost = debounce(async () => {
    собираются перемножением осей, а цена каждой считается из её катушки:
    грамм стоит по-разному у PLA за 1600 и PETG за 3200. */
 let variantRows = [];
-let variantAxes = [{ name: 'Цвет', values: '' }];
+// Ось вариаций: name + ручные значения строкой + picks — чипы живых катушек
+// склада. Чип несёт hex и пластик катушки, так что сервер сам привяжет
+// вариацию к катушке, когда совпадение однозначно.
+let variantAxes = [{ name: 'Цвет', values: '', picks: [] }];
+
+function spoolPickKey(s) {
+  return ((s.material || '') + '|' + (s.color_name || '')).toLowerCase();
+}
+
+function spoolChipsHtml(axis, i) {
+  const spools = (data.spools || []).filter((s) => s.color_name || s.material);
+  if (!spools.length) return '';
+  const seen = new Set();
+  const unique = [];
+  spools.forEach((s) => {
+    const k = spoolPickKey(s);
+    if (!seen.has(k)) { seen.add(k); unique.push(s); }
+  });
+  const picks = new Set((axis.picks || []).map((p) => p.key));
+  const shown = unique.slice(0, 24);
+  return '<div class="var-chips" style="grid-column:1 / -1">'
+    + '<span class="muted" style="font-size:11.5px;align-self:center">Из катушек:</span>'
+    + shown.map((s) => {
+      const k = spoolPickKey(s);
+      const on = picks.has(k);
+      const label = [s.material, s.color_name].filter(Boolean).join(' · ') || s.brand || 'катушка';
+      return '<button class="var-chip' + (on ? ' on' : '') + '" type="button"'
+        + ' data-axis-pick="' + i + '" data-pick-key="' + esc(k) + '"'
+        + ' title="Клик — добавить значением: цвет и пластик уедут в вариацию сами">'
+        // М1: многоцветная катушка видна своим градиентом и в чипе оси
+        + '<i style="background:' + esc((window.PFSpoolColor && (s.color_kind || s.colors_json))
+          ? PFSpoolColor.swatchCss(s, '#8a94a6') : (s.color_hex || '#8a94a6')) + '"></i>' + esc(label)
+        + (on ? '<span class="x">×</span>' : '') + '</button>';
+    }).join('')
+    + (unique.length > shown.length
+      ? '<span class="muted" style="font-size:11.5px;align-self:center">…ещё '
+        + (unique.length - shown.length) + '</span>' : '')
+    + '</div>';
+}
 
 function collectVariantAxes() {
   return variantAxes
     .map((axis) => ({
       name: String(axis.name || '').trim(),
-      values: String(axis.values || '').split(',').map((v) => v.trim()).filter(Boolean),
+      values: String(axis.values || '').split(',').map((v) => v.trim()).filter(Boolean)
+        .concat((axis.picks || []).map((p) => ({ name: p.name, hex: p.hex, material: p.material }))),
     }))
     .filter((axis) => axis.name && axis.values.length);
 }
@@ -765,13 +806,14 @@ function collectVariantAxes() {
 function renderVariantAxes() {
   const box = $('nf_var_axes');
   if (!box) return;
-  box.innerHTML = variantAxes.map((axis, i) => '<div class="var-axis">'
+  box.innerHTML = variantAxes.map((axis, i) => '<div class="var-axis" style="align-items:start">'
     + '<label class="field"><span>Ось</span><input type="text" data-axis-name="' + i
     + '" value="' + esc(axis.name) + '" placeholder="Цвет, размер, пластик"></label>'
     + '<label class="field"><span>Значения через запятую</span><input type="text" data-axis-values="'
     + i + '" value="' + esc(axis.values) + '" placeholder="Чёрный, Белый, Красный"></label>'
     + '<button class="btn sm danger" type="button" data-axis-del="' + i
-    + '" title="Убрать ось">×</button></div>').join('');
+    + '" title="Убрать ось" style="margin-top:24px">×</button>'
+    + spoolChipsHtml(axis, i) + '</div>').join('');
   variantPreview();
 }
 
@@ -793,6 +835,7 @@ const variantPreview = debounce(async () => {
       { nom_id: editingNom, axes, preview: true });
     const parts = [(r.would_create || 0) + ' вариаций'];
     if (num(r.skipped)) parts.push(num(r.skipped) + ' уже есть');
+    if (num(r.spools_bound)) parts.push('катушки подставятся у ' + num(r.spools_bound));
     parts.push('предел ' + num(r.limit));
     hint.innerHTML = '<span>ⓘ</span><span>Получится ' + esc(parts.join(' · '))
       + (num(r.total) ? '. Сейчас у товара: ' + num(r.total) + ' шт.' : '') + '</span>';
@@ -813,9 +856,10 @@ async function makeVariants() {
     const r = await post('/api/nomenclature/variants/generate',
       { nom_id: editingNom, axes: collectVariantAxes() });
     toast('Вариации созданы', (num(r.created) + ' шт')
-      + (num(r.skipped) ? ' · ' + num(r.skipped) + ' уже были' : ''));
+      + (num(r.skipped) ? ' · ' + num(r.skipped) + ' уже были' : '')
+      + (num(r.spools_bound) ? ' · катушки привязаны у ' + num(r.spools_bound) : ''));
     await reloadVariants();
-    variantAxes = [{ name: '', values: '' }];
+    variantAxes = [{ name: '', values: '', picks: [] }];
     renderVariantAxes();
   } catch (e) { fail(e); }
 }
@@ -825,6 +869,7 @@ async function reloadVariants() {
   try {
     const item = await get('/api/nomenclature/item', { id: editingNom });
     variantRows = item.variants || [];
+    window._variantStructs = item.variant_structures || {};
     renderVariants();
   } catch (e) { /* карточка offline — таблица остаётся прежней */ }
 }
@@ -840,8 +885,38 @@ function varRow(v) {
   const opts = ['<option value="">— как у товара —</option>'].concat(spools.map((s) =>
     '<option value="' + esc(s.id) + '"' + (s.id === (v.spool_id || '') ? ' selected' : '')
     + '>' + esc(spoolLabel(s)) + '</option>')).join('');
+  // М2: состав вариации — несколько катушек × граммы (до 8 строк).
+  // Без состава — одна катушка и старое поведение байт-в-байт.
+  function variantStructHtml(vv) {
+    const rows = (window._variantStructs || {})[vv.id] || [];
+    const sopts = ['<option value="">Катушка…</option>'].concat(spools.map((s) =>
+      '<option value="' + esc(s.id) + '">'
+      + esc([s.material, s.color_name].filter(Boolean).join(' · ') || s.brand || s.id)
+      + '</option>')).join('');
+    const list = rows.map((r) =>
+      '<span class="struct-pill">'
+      + esc([r.material, r.color_name].filter(Boolean).join(' ') || r.spool_id)
+      + ' · ' + round1(r.grams) + ' г</span>').join('');
+    return '<div class="struct-row" data-struct-of="' + esc(vv.id) + '">'
+      + '<span class="struct-title">Состав' + (rows.length ? ' (' + rows.length + '): ' + list : ' — одна катушка') + '</span>'
+      + '<div class="struct-add">'
+      + '<select data-struct-spool="' + esc(vv.id) + '">' + sopts + '</select>'
+      + '<input type="number" min="0.5" step="any" placeholder="г" data-struct-grams="' + esc(vv.id) + '">'
+      + '<button class="btn sm" type="button" data-struct-push="' + esc(vv.id) + '"'
+      + (rows.length >= 8 ? ' disabled title="Не больше 8 строк состава"' : '') + '>+</button>'
+      + (rows.length ? '<button class="btn sm" type="button" data-struct-clear="' + esc(vv.id) + '" title="Убрать состав — вернуться к одной катушке">сброс</button>' : '')
+      + '</div></div>';
+  }
   const sub = [v.sku, v.material, v.size].filter(Boolean).join(' · ');
+  // М4: фото вариации — владелец грузит с телефона/ноута прямо из карточки
+  const photoBtn = '<button class="var-photo" type="button" data-var-photo="' + esc(v.id) + '"'
+    + ' title="Фото вариации: уедет в витрину кассы и в бота">'
+    + (v.photo
+      ? '<img src="/api/nomenclature/variant/photo.jpg?id=' + esc(v.id) + '" alt="">'
+      : '📷') + '</button>';
+  const structHtml = variantStructHtml(v);
   return '<div class="var-row">'
+    + photoBtn
     + '<span class="var-swatch" style="background:' + esc(v.color_hex || '#8a94a6') + '"></span>'
     + '<div class="var-body"><b>' + esc(v.name || '—') + '</b>'
     + (sub ? '<small class="muted">' + esc(sub) + '</small>' : '') + '</div>'
@@ -851,12 +926,41 @@ function varRow(v) {
     + '<input type="number" min="0" step="any" data-var-price="' + esc(v.id) + '" value="'
     + (num(v.price) ? esc(v.price) : '') + '" placeholder="авто" title="Пусто — цена из себестоимости">'
     + '<button class="btn sm danger" type="button" data-var-del="' + esc(v.id) + '" title="Удалить вариацию">×</button>'
-    + '</div>';
+    + '</div>' + structHtml;
+}
+
+// М2: состав вариации — несколько катушек × граммы (до 8 строк).
+// Без состава — одна катушка и старое поведение байт-в-байт.
+function variantStructHtml(v) {
+  const rows = (window._variantStructs || {})[v.id] || [];
+  const spools = data.spools || [];
+  const opts = ['<option value="">Катушка…</option>'].concat(spools.map((s) =>
+    '<option value="' + esc(s.id) + '">' + esc(spoolLabelShort(s)) + '</option>')).join('');
+  const list = rows.map((r) =>
+    '<span class="struct-pill">'
+    + esc([r.material, r.color_name].filter(Boolean).join(' ') || r.spool_id)
+    + ' · ' + round1(r.grams) + ' г</span>').join('');
+  return '<div class="struct-row" data-struct-of="' + esc(v.id) + '">'
+    + '<span class="struct-title">Состав ' + (rows.length ? '(' + rows.length + ')' : '')
+    + (rows.length ? ': ' + list : ' — одна катушка') + '</span>'
+    + '<div class="struct-add" data-struct-add="' + esc(v.id) + '">'
+    + '<select data-struct-spool="' + esc(v.id) + '">' + opts + '</select>'
+    + '<input type="number" min="0.5" step="any" placeholder="г" data-struct-grams="' + esc(v.id) + '">'
+    + '<button class="btn sm" type="button" data-struct-push="' + esc(v.id) + '"'
+    + (rows.length >= 8 ? ' disabled title="Не больше 8 строк состава"' : '') + '>+</button>'
+    + (rows.length ? '<button class="btn sm" type="button" data-struct-clear="' + esc(v.id) + '" title="Убрать состав">сброс</button>' : '')
+    + '</div></div>';
+}
+
+function spoolLabelShort(s) {
+  return [s.material, s.color_name].filter(Boolean).join(' · ') || s.brand || s.id;
 }
 
 function renderVariants() {
   const box = $('nf_variants');
   if (!box) return;
+  const clearBtn = $('nf_var_clear');
+  if (clearBtn) clearBtn.hidden = !variantRows.length;
   const count = $('nf_var_count');
   if (count) {
     count.textContent = variantRows.length
@@ -883,7 +987,7 @@ async function recalcVariantPrices() {
 
 async function loadVariantData(d) {
   variantRows = d.variants || [];
-  if (!variantRows.length) variantAxes = [{ name: 'Цвет', values: '' }];
+  if (!variantRows.length) variantAxes = [{ name: 'Цвет', values: '', picks: [] }];
   renderVariants();
   renderVariantAxes();
   if (!data.spools) {
@@ -953,6 +1057,8 @@ function renderSpec() {
 }
 
 async function saveNom() {
+  const isNew = !editingNom;
+  const saveBtn = $('nom_save');
   const payload = {
     id: editingNom || '',
     ...(editingNomUpdatedAt ? { expected_updated_at: editingNomUpdatedAt } : {}),
@@ -978,6 +1084,7 @@ async function saveNom() {
   $$('[data-price]', $('nf_prices')).forEach((el) => {
     if (el.value !== '') payload.prices[el.dataset.price] = num(el.value);
   });
+  if (saveBtn) saveBtn.disabled = true;
   try {
     const res = await post('/api/nomenclature/save', payload);
     editingNomUpdatedAt = String(res.item.updated_at || '');
@@ -1000,10 +1107,26 @@ async function saveNom() {
         reader.readAsDataURL(file);
       });
     }
-    closeModal('nom_modal');
-    await refresh();
-    toast('Сохранено', payload.name);
+    if (isNew) {
+      // Новый товар не закрываем: карточка стала живой (id уже есть),
+      // и вариации можно собрать сразу, без поиска товара в списке.
+      editingNom = id;
+      $('nom_modal_title').textContent = payload.name;
+      $('nom_modal_sub').textContent = `${res.item.code || ''} · новый товар · сохранён`;
+      $('nom_delete').hidden = false;
+      $('nom_duplicate').hidden = false;
+      $('nom_batch').hidden = false;
+      renderNomSummary(res.item);
+      variantPreview();
+      toast('Товар создан', payload.name + ' — вариации собираются тут же, на своей вкладке');
+      refresh().catch(() => {});
+    } else {
+      closeModal('nom_modal');
+      await refresh();
+      toast('Сохранено', payload.name);
+    }
   } catch (e) { fail(e); }
+  if (saveBtn) saveBtn.disabled = false;
 }
 
 /* ============================================================== партии */
@@ -1952,9 +2075,13 @@ function bind() {
   $('prod_add').addEventListener('click', () => openNom());
   // --- вариации товара
   $('nf_var_axis_add').addEventListener('click', () => {
-    variantAxes.push({ name: '', values: '' });
+    variantAxes.push({ name: '', values: '', picks: [] });
     renderVariantAxes();
   });
+  $$('[data-axis-preset]').forEach((b) => b.addEventListener('click', () => {
+    variantAxes.push({ name: b.dataset.axisPreset, values: '', picks: [] });
+    renderVariantAxes();
+  }));
   $('nf_var_make').addEventListener('click', makeVariants);
   $('nf_var_recalc').addEventListener('click', recalcVariantPrices);
   $('nf_var_axes').addEventListener('input', (e) => {
@@ -1965,12 +2092,52 @@ function bind() {
     variantPreview();
   });
   $('nf_var_axes').addEventListener('click', (e) => {
+    const pick = e.target.closest('[data-axis-pick]');
+    if (pick) {
+      const axis = variantAxes[num(pick.dataset.axisPick)];
+      const key = pick.dataset.pickKey;
+      if (!axis) return;
+      axis.picks = axis.picks || [];
+      const at = axis.picks.findIndex((p) => p.key === key);
+      if (at >= 0) {
+        axis.picks.splice(at, 1);
+      } else {
+        const sp = (data.spools || []).find((s) => spoolPickKey(s) === key);
+        if (sp) {
+          // На оси «Пластик» чип даёт материал, на остальных — цвет катушки.
+          const name = /пластик|материал|material|филамент/i.test(axis.name || '')
+            ? (sp.material || sp.color_name || sp.brand || 'значение')
+            : (sp.color_name || sp.material || sp.brand || 'значение');
+          axis.picks.push({ key, name, hex: sp.color_hex || '', material: sp.material || '' });
+        }
+      }
+      renderVariantAxes();
+      return;
+    }
     const del = e.target.closest('[data-axis-del]');
     if (!del) return;
     variantAxes.splice(num(del.dataset.axisDel), 1);
-    if (!variantAxes.length) variantAxes = [{ name: '', values: '' }];
+    if (!variantAxes.length) variantAxes = [{ name: '', values: '', picks: [] }];
     renderVariantAxes();
   });
+  if ($('nf_var_clear')) {
+    $('nf_var_clear').addEventListener('click', async () => {
+      if (!editingNom || !variantRows.length) return;
+      if (!confirmDanger(`Удалить все вариации (${variantRows.length} шт)?\n\nИх цены и привязки катушек пропадут — сам товар останется.`)) return;
+      const btn = $('nf_var_clear');
+      btn.disabled = true;
+      let done = 0;
+      try {
+        for (const v of [...variantRows]) {
+          await post('/api/nomenclature/variant/delete', { id: v.id });
+          done += 1;
+        }
+        toast('Вариации удалены', done + ' шт');
+      } catch (err) { fail(err); }
+      btn.disabled = false;
+      await reloadVariants();
+    });
+  }
   $('nf_variants').addEventListener('change', async (e) => {
     const t = e.target;
     const spool = t.dataset.varSpool;
@@ -1997,7 +2164,71 @@ function bind() {
       } catch (err) { fail(err); }
     }
   });
+  // М4: фото вариации грузит владелец прямо из строки
+  let _photoInput = null;
+  function _askVariantPhoto(variantId) {
+    if (!_photoInput) {
+      _photoInput = document.createElement('input');
+      _photoInput.type = 'file';
+      _photoInput.accept = 'image/*';
+      _photoInput.style.display = 'none';
+      _photoInput.onchange = async () => {
+        const f = _photoInput.files && _photoInput.files[0];
+        const vid = _photoInput._vid;
+        _photoInput.value = '';
+        if (!f || !vid) return;
+        const url = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result);
+          r.onerror = rej;
+          r.readAsDataURL(f);
+        });
+        try {
+          const resp = await post('/api/nomenclature/variant/photo', { id: vid, data: url });
+          const v = variantRows.find((x) => x.id === vid);
+          if (v) v.photo = resp.photo || 'set';
+          renderVariants();
+          toast('Фото вариации сохранено', 'Появится в витрине кассы и в боте');
+        } catch (err) { fail(err); }
+      };
+      document.body.appendChild(_photoInput);
+    }
+    _photoInput._vid = variantId;
+    _photoInput.click();
+  }
+  // М2: состав вариации (несколько катушек × граммы)
+  async function _pushVariantStruct(vid) {
+    const rows = (window._variantStructs || {})[vid] || [];
+    if (rows.length >= 8) { toast('Состав не длиннее 8 строк', 'Сложите граммы одной катушки в одну строку'); return; }
+    const spoolSel = document.querySelector('[data-struct-spool="' + vid + '"]');
+    const gramsInp = document.querySelector('[data-struct-grams="' + vid + '"]');
+    const spoolId = spoolSel ? spoolSel.value : '';
+    const grams = num(gramsInp ? gramsInp.value : 0);
+    if (!spoolId || grams <= 0) { toast('Выберите катушку и граммы', 'Состав: «катушка × граммы», до 8 строк'); return; }
+    const rowsNow = rows.concat([{ spool_id: spoolId, grams }])
+      .map((r) => ({ spool_id: r.spool_id || r.spoolId, grams: num(r.grams) }));
+    try {
+      const resp = await post('/api/nomenclature/variant/structures', { variant_id: vid, rows: rowsNow });
+      (window._variantStructs = window._variantStructs || {})[vid] = resp.structures || [];
+      renderVariants();
+      toast('Состав вариации сохранён', 'Себестоимость посчитается суммой по катушкам');
+    } catch (err) { fail(err); }
+  }
+  async function _clearVariantStruct(vid) {
+    try {
+      await post('/api/nomenclature/variant/structures', { variant_id: vid, rows: [] });
+      (window._variantStructs = window._variantStructs || {})[vid] = [];
+      renderVariants();
+      toast('Состав убран', 'Вариация снова печатается одной катушкой');
+    } catch (err) { fail(err); }
+  }
   $('nf_variants').addEventListener('click', async (e) => {
+    const ph = e.target.closest('[data-var-photo]');
+    if (ph) { _askVariantPhoto(ph.dataset.varPhoto); return; }
+    const push = e.target.closest('[data-struct-push]');
+    if (push) { _pushVariantStruct(push.dataset.structPush); return; }
+    const clearBtn = e.target.closest('[data-struct-clear]');
+    if (clearBtn) { _clearVariantStruct(clearBtn.dataset.structClear); return; }
     const del = e.target.closest('[data-var-del]');
     if (!del) return;
     try {
@@ -2164,6 +2395,30 @@ function bind() {
   });
   $('nom_save').addEventListener('click', saveNom);
   $('nf_recalc_prices').addEventListener('click', () => recalcNomPrices());
+  $('nom_duplicate').addEventListener('click', async () => {
+    // Карточка-двойник: нормативы, цены и состав копируются — артикул,
+    // штрихкод, фото и вариации нарочно нет (штрихкоды дублировать нельзя,
+    // вариации двойника могут быть другими).
+    if (!editingNom) return;
+    try {
+      const src = await get('/api/nomenclature/item', { id: editingNom });
+      const payload = { id: '', name: (src.name || '') + ' (копия)', sku: '', barcode: '', prices: {} };
+      ['kind', 'unit', 'group_id', 'niche_id', 'material', 'grams', 'hours',
+        'fit_per_plate', 'post_minutes', 'file', 'model_url', 'license', 'print_group',
+        'min_qty', 'max_qty', 'vat', 'marked', 'client_bot_published',
+        'client_bot_description', 'note'].forEach((k) => {
+        if (src[k] != null) payload[k] = src[k];
+      });
+      Object.assign(payload.prices, src.prices || {});
+      const res = await post('/api/nomenclature/save', payload);
+      const rows = (((src.spec || {}).items) || [])
+        .map((s) => ({ nom_id: s.nom_id, qty: num(s.qty, 1), warehouse_id: s.warehouse_id || '' }));
+      if (rows.length) await post('/api/spec/save', { nom_id: res.item.id, items: rows });
+      toast('Двойник создан', (res.item.name || '') + ' · артикул, штрихкод и фото — заново');
+      refresh().catch(() => {});
+      openNom(res.item.id);
+    } catch (err) { fail(err); }
+  });
   $('nom_batch').addEventListener('click', () => {
     closeModal('nom_modal');
     openBatch(editingNom);

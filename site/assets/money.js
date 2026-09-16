@@ -144,14 +144,16 @@ function renderStock() {
       : '';
     const loc = locLabel[s.location || 'shop'] || s.location || 'магазин';
     const locIc = locIcon[s.location || 'shop'] || '📦';
-    const colorHex = s.color_hex || '#4b5563';
-    return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить" style="--filament:${esc(colorHex)}">`
+    const colorCss = window.PFSpoolColor ? PFSpoolColor.swatchCss(s, '#4b5563') : (s.color_hex || '#4b5563');
+    const kindTag = (window.PFSpoolColor && s.color_kind)
+      ? ` <small class="muted">· ${esc(PFSpoolColor.kindLabel(s.color_kind))}</small>` : '';
+    return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить" style="--filament:${esc(colorCss)}">`
       + `<div class="spool-top">`
-      + `<div class="reel" style="--filament:${esc(colorHex)};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
+      + `<div class="reel" style="--filament:${esc(colorCss)};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
       + `<div class="body">`
       + `<div class="spool-title-row">`
       + `<span class="mat-chip" data-mat="${esc(s.material || '')}">${esc(s.material || 'Тип не задан')}</span>`
-      + `<b class="spool-name"><span class="color-swatch-dot" style="background:${esc(colorHex)}"></span>${esc(s.color_name || 'Без названия')}</b>`
+      + `<b class="spool-name"><span class="color-swatch-dot" style="background:${esc(colorCss)}"></span>${esc(s.color_name || 'Без названия')}${kindTag}</b>`
       + `</div>`
       + `<div class="spool-meta-row">`
       + `<span class="spool-brand">${esc(s.brand || 'без бренда')}</span>`
@@ -962,6 +964,41 @@ function _rebuildAmsSlotSelect() {
   }
 }
 
+// Редактор списка цветов многоцветной катушки (М1): первый — основной
+// оттенок, свотчи-градиенты на всех экранах рисует assets/colors.js.
+let _spoolColorVals = [];
+
+function _renderSpoolColors() {
+  const wrap = $('sf_colors_wrap');
+  const list = $('sf_colors_list');
+  const kindSel = $('sf_color_kind');
+  if (!wrap || !list || !kindSel) return;
+  const on = !!kindSel.value;
+  wrap.hidden = !on;
+  if (!on) return;
+  if (_spoolColorVals.length < 2) {
+    _spoolColorVals = [
+      _spoolColorVals[0] || ($('sf_color_hex') && $('sf_color_hex').value) || '#333333',
+      _spoolColorVals[1] || '#cccccc',
+    ];
+  }
+  list.innerHTML = _spoolColorVals.map((c, i) =>
+    `<span class="citem"><input type="color" data-color-idx="${i}" value="${esc(c || '#333333')}">`
+    + `<button type="button" class="rm" data-color-rm="${i}" title="Убрать цвет">×</button></span>`).join('')
+    + '<button type="button" class="add" id="sf_color_add" title="Добавить цвет">+</button>';
+  list.querySelectorAll('input[type=color]').forEach((inp) => {
+    inp.oninput = () => {
+      _spoolColorVals[num(inp.dataset.colorIdx, 0)] = inp.value;
+      if (num(inp.dataset.colorIdx, 0) === 0 && $('sf_color_hex')) $('sf_color_hex').value = inp.value;
+    };
+  });
+  const add = $('sf_color_add');
+  if (add) add.onclick = () => { _spoolColorVals.push('#cccccc'); _renderSpoolColors(); };
+  list.querySelectorAll('.rm').forEach((btn) => {
+    btn.onclick = () => { _spoolColorVals.splice(num(btn.dataset.colorRm, 0), 1); _renderSpoolColors(); };
+  });
+}
+
 function openSpool(id) {
   editingSpool = id || null;
   const s = id ? PF.state.spools.find((x) => x.id === id) : null;
@@ -974,6 +1011,16 @@ function openSpool(id) {
   editingSpoolUpdatedAt = id ? String(d.updated_at || '') : '';
   ['material', 'brand', 'color_name', 'color_hex', 'total_grams', 'remaining_grams', 'price']
     .forEach((k) => { $('sf_' + k).value = d[k] ?? ''; });
+  // Многоцвет (М1): вид + цвета мотка + рекомендации производителя
+  const kindSel = $('sf_color_kind');
+  if (kindSel) {
+    kindSel.value = d.color_kind || '';
+    kindSel.onchange = _renderSpoolColors;
+  }
+  if ($('sf_rec_settings')) $('sf_rec_settings').value = d.rec_settings || '';
+  _spoolColorVals = window.PFSpoolColor ? PFSpoolColor.colorsOf(d) : [];
+  if (_spoolColorVals.length && $('sf_color_hex')) $('sf_color_hex').value = _spoolColorVals[0];
+  _renderSpoolColors();
   const slotSel = $('sf_ams_slot');
   if (slotSel) slotSel.dataset.current = String(d.ams_slot ?? '').trim();
   if ($('sf_location')) $('sf_location').value = d.location || 'shop';
@@ -1315,6 +1362,9 @@ function bind() {
       brand: $('sf_brand').value.trim(),
       color_name: $('sf_color_name').value.trim(),
       color_hex: $('sf_color_hex').value,
+      color_kind: ($('sf_color_kind') && $('sf_color_kind').value) || '',
+      colors: ($('sf_color_kind') && $('sf_color_kind').value) ? _spoolColorVals.filter(Boolean) : [],
+      rec_settings: ($('sf_rec_settings') && $('sf_rec_settings').value.trim()) || '',
       total_grams: num($('sf_total_grams').value, 1000),
       remaining_grams: num($('sf_remaining_grams').value),
       price: num($('sf_price').value),

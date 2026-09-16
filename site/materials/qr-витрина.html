@@ -63,8 +63,7 @@
     var cfg = c();
     if(!el('city').value) el('city').value = cfg.city || 'Симферополь';
     if(!el('link').value) el('link').value = cfg.site || 'http://127.0.0.1:8765/order.html';
-    var id='1'; try{ id=localStorage.getItem('nozza:logo')||'1'; }catch(e){}
-    el('mark').src = '../assets/brand/nozza-mark-'+id+'-white.svg';
+    el('mark').src = '../assets/brand/nozza-mark-1-white.svg'; // знак выбран (вариант 1), выбор удалён в 18.4.1
     el('btag').textContent = 'Там, где рождается форма · ' + el('city').value;
     var box = el('qr');
     if (window.QR) box.innerHTML = QR.svg(el('link').value, { ecl: 'M', margin: 1 });

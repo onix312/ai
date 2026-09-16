@@ -75,7 +75,7 @@
   <section>
     <h3>Вывеси и таблички — конструктор</h3>
     <div class="cards">
-      <a class="card" href="вывеси-и-таблички.html">
+      <a class="card" href="вывески-и-таблички.html">
         <div class="badges"><span class="badge new">Новый</span><span class="badge edit">Весь текст меняем</span></div>
         <h2>Вывеси и таблички — конструктор</h2>
         <p>21 ситуация: «Мы открыты», «Перерыв», «Идёт 3D-печать — не отключать», «Горячее сопло», Wi-Fi, «Выдача заказов». Четыре размера, шесть цветов, QR. Всё редактируется.</p>
@@ -164,9 +164,9 @@
         <p>Мини-рекламки для держателей: 15 штук на A4, QR, контакты, разные темы, клик по карточке — редактирование. Внутри готовые офферы: ремонт деталей, бизнес-партии, адресники, оснастка и печать на заказ.</p>
       </a>
       <a class="card" href="наклейки-и-бирки.html">
-        <div class="badges"><span class="badge live">Живые данные</span></div>
-        <h2>Наклейки и бирки</h2>
-        <p>Круглые Ø40 и Ø30 мм, прямоугольные 50 × 25 мм, бирки 32 × 55 мм с QR и ценой из каталога.</p>
+        <div class="badges"><span class="badge edit">Тираж и текст</span></div>
+        <h2>Наклейки</h2>
+        <p>Круглые Ø40 и Ø30 мм, прямоугольные 50 × 25 с QR в Telegram. Своё количество копий, подпись, режим чёрно-белой печати для копицентра.</p>
       </a>
       <a class="card" href="прайс-на-подставку.html">
         <div class="badges"><span class="badge live">Живые данные</span></div>
@@ -188,11 +188,6 @@
         <div class="badges"><span class="badge">Комплект</span></div>
         <h2>Визитки, таблички, вкладыш</h2>
         <p>Визитки 90 × 50 мм (лицо и оборот), шесть табличек на полку, вкладыш «спасибо за покупку» A6 с уходом за изделием.</p>
-      </a>
-      <a class="card" href="логотипы-на-выбор.html">
-        <div class="badges"><span class="badge live">4 варианта</span></div>
-        <h2>Логотипы на выбор</h2>
-        <p>4 варианта знака NOZZA. Выбор сохраняется и подтягивается во все генераторы автоматически.</p>
       </a>
       <a class="card" href="плакат-над-полкой.html">
         <div class="badges"><span class="badge">A4</span></div>
@@ -222,12 +217,10 @@
 
 </div>
 <script>
-// Подставляем выбранный на странице «Логотипы» вариант знака.
+// Знак выбран владельцем (вариант 1, «слои»); страница выбора удалена в 18.4.1.
 (function(){
-  var id='1';
-  try { id = localStorage.getItem('nozza:logo') || '1'; } catch(e) {}
   var img=document.getElementById('heroMark');
-  if(img) img.src='../assets/brand/nozza-mark-'+id+'-white.svg';
+  if(img) img.src='../assets/brand/nozza-mark-1-white.svg';
 })();
 </script>
 </body></html>

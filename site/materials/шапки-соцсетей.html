@@ -27,9 +27,7 @@
     <label>Телефон <input type="text" id="phone" value="+7 ___ ___-__-__"></label>
     <label>Telegram <input type="text" id="tg" value="@nozza_shop" style="min-width:130px"></label>
     <label>Сайт <input type="text" id="site" value="https://nozza.ru" style="min-width:160px"></label>
-    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
     <button class="btn primary" id="redraw">Обновить</button>
-    <a class="btn" href="логотипы-на-выбор.html" style="text-decoration:none">4 логотипа</a>
   </div>
 </div>
 
@@ -82,7 +80,6 @@
 const $ = (id) => document.getElementById(id);
 const BRAND = '#4f46e5', BRAND2 = '#7c3aed', INK = '#131a2b';
 const LS_CONTACT='nozza:contact';
-const LS_LOGO='nozza:logo';
 
 function loadContact(){
   try{ const v=JSON.parse(localStorage.getItem(LS_CONTACT)||'{}'); return v&&typeof v==='object'?v:{} }catch(e){ return {}; }
@@ -91,8 +88,8 @@ function saveContact(patch){
   const cur=loadContact(); const next={...cur, ...patch};
   localStorage.setItem(LS_CONTACT, JSON.stringify(next));
 }
-function loadLogoId(){ return localStorage.getItem(LS_LOGO)||'1'; }
-function saveLogoId(id){ localStorage.setItem(LS_LOGO, id); }
+// Вариант знака выбран владельцем (1 — «слои»); выбор вариантов удалён в 18.4.1.
+function loadLogoId(){ return '1'; }
 
 function grad(ctx, w, h) {
   const g = ctx.createLinearGradient(0, 0, w, h);
@@ -115,39 +112,8 @@ function drawMarkV1(ctx, x, y, size, color) {
   for(const [bx,by,bw,bh,op] of bars){ ctx.globalAlpha=op; roundRect(ctx,bx*u,by*u,bw*u,bh*u,(bh/2)*u); ctx.fill(); }
   ctx.globalAlpha=0.9; ctx.beginPath(); ctx.arc(36*u,58*u,4.5*u,0,Math.PI*2); ctx.fill(); ctx.restore();
 }
-function drawMarkV2(ctx,x,y,size,color){
-  const u=size/72;
-  ctx.save(); ctx.translate(x,y);
-  ctx.strokeStyle=color; ctx.lineWidth=3.2*u; ctx.lineCap='round'; ctx.lineJoin='round';
-  function hex(cx,cy,r){ ctx.beginPath(); for(let i=0;i<6;i++){ const a=Math.PI/3*i - Math.PI/6; const px=cx+Math.cos(a)*r; const py=cy+Math.sin(a)*r; if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);} ctx.closePath(); ctx.stroke(); }
-  ctx.globalAlpha=0.95; hex(36*u,30*u,16*u);
-  ctx.globalAlpha=0.7; ctx.lineWidth=2.2*u; hex(36*u,30*u,9*u);
-  ctx.globalAlpha=1; ctx.fillStyle=color; ctx.beginPath(); ctx.arc(36*u,30*u,4.2*u,0,Math.PI*2); ctx.fill();
-  ctx.restore();
-}
-function drawMarkV3(ctx,x,y,size,color){
-  const u=size/72;
-  ctx.save(); ctx.translate(x,y); ctx.fillStyle=color;
-  ctx.globalAlpha=0.98;
-  const p=new Path2D();
-  p.moveTo(16*u,54*u); p.lineTo(16*u,18*u); p.lineTo(20*u,16*u); p.lineTo(25*u,16*u); p.lineTo(27*u,18*u); p.lineTo(27*u,32*u); p.lineTo(39*u,16*u); p.lineTo(44*u,16*u); p.lineTo(46*u,18*u); p.lineTo(46*u,52*u); p.lineTo(42*u,54*u); p.lineTo(37*u,54*u); p.lineTo(35*u,52*u); p.lineTo(35*u,37*u); p.lineTo(23*u,54*u); p.closePath();
-  ctx.fill(p);
-  ctx.restore();
-}
-function drawMarkV4(ctx,x,y,size,color){
-  const u=size/72;
-  ctx.save(); ctx.translate(x,y);
-  ctx.strokeStyle=color; ctx.lineWidth=1.8*u; ctx.globalAlpha=0.92;
-  ctx.beginPath(); ctx.arc(36*u,36*u,20*u,0,Math.PI*2); ctx.stroke();
-  ctx.setLineDash([2*u,2.5*u]); ctx.globalAlpha=0.6; ctx.lineWidth=1.2*u; ctx.beginPath(); ctx.arc(36*u,36*u,14.5*u,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle=color; ctx.globalAlpha=1; ctx.font=`900 ${11*u}px Inter, sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('NOZZA',36*u,38*u);
-  ctx.restore();
-}
+// Вариант выбран (1 — «слои»); варианты 2–4 канвы удалены в 18.4.1.
 function drawMark(ctx,x,y,size,color){
-  const id=loadLogoId();
-  if(id==='2') return drawMarkV2(ctx,x,y,size,color);
-  if(id==='3') return drawMarkV3(ctx,x,y,size,color);
-  if(id==='4') return drawMarkV4(ctx,x,y,size,color);
   return drawMarkV1(ctx,x,y,size,color);
 }
 function avatar(id, light) {
@@ -198,7 +164,6 @@ function texts() {
 function redraw() {
   const contact={city:$('city').value.trim()||'Симферополь', phone:$('phone').value.trim(), tg:$('tg').value.trim(), site:$('site').value.trim()};
   saveContact(contact);
-  if($('logoSel')) saveLogoId($('logoSel').value);
   const logoId=loadLogoId();
   const markPath=`../assets/brand/nozza-mark-${logoId}.svg`;
   const panelMark=$('panelMark'); if(panelMark) panelMark.src=markPath;
@@ -215,8 +180,7 @@ function init(){
   if(c.phone) $('phone').value=c.phone;
   if(c.tg) $('tg').value=c.tg;
   if(c.site && $('site')) $('site').value=c.site;
-  const logoId=loadLogoId(); if($('logoSel')) $('logoSel').value=logoId;
-  ['city','phone','tg','site','logoSel'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', redraw); });
+  ['city','phone','tg','site'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input', redraw); });
 }
 document.querySelectorAll('[data-dl]').forEach((b) => {
   b.addEventListener('click', () => {

@@ -52,6 +52,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("spool_id", "TEXT DEFAULT ''"),
         ("price", "REAL DEFAULT 0"),
         ("cost", "REAL DEFAULT 0"),
+        # 18.5 (М4): фото вариации. Общее фото товара живёт в nomenclature.photo
+        # и идёт первым слайдом карусели; фото грузит владелец с панели,
+        # витрина кассы листает их раз в 3 секунды (мало фото — ничего не движется).
+        ("photo", "TEXT DEFAULT ''"),
         ("updated_at", "TEXT DEFAULT ''"),
     ],
     "reserves": [
@@ -362,6 +366,12 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("price_per_kg", "REAL DEFAULT 0"),
         ("supplier_id", "TEXT DEFAULT ''"),
         ("received_doc_id", "TEXT DEFAULT ''"),
+        # 18.5 (М1): многоцветные катушки. colors_json — список hex по мотку
+        # (больше трёх тоже), color_kind — вид (градиент/радуга/шёлк),
+        # rec_settings — рекомендованные производителем настройки со стикера.
+        ("colors_json", "TEXT DEFAULT ''"),
+        ("color_kind", "TEXT DEFAULT ''"),
+        ("rec_settings", "TEXT DEFAULT ''"),
     ],
     "catalog": [
         # Старые финансовые поля плюс связь с canonical nomenclature.
@@ -850,6 +860,9 @@ CREATE TABLE IF NOT EXISTS spools (
     brand TEXT DEFAULT '',
     color_name TEXT DEFAULT '',
     color_hex TEXT DEFAULT '#4b5563',
+    colors_json TEXT DEFAULT '',      -- многоцветные: JSON-список hex («Радуга» — до любого числа)
+    color_kind TEXT DEFAULT '',       -- '' однотон | gradient | rainbow | silk
+    rec_settings TEXT DEFAULT '',     -- рекомендации производителя, как на бобине
     total_grams REAL DEFAULT 1000,
     remaining_grams REAL DEFAULT 1000,
     price REAL DEFAULT 1600,
@@ -861,6 +874,21 @@ CREATE TABLE IF NOT EXISTS spools (
     created_at TEXT,
     updated_at TEXT
 );
+
+-- 18.5 (М2): состав вариации из нескольких катушек — «покомпонентная» печать:
+-- брелок тело + хвост, фигурка с подставкой. Себестоимость собирается суммой
+-- граммов по каждой катушке, цена считается по общей наценке. Вариации без
+-- состава идут старым путём (одна катушка вариации / автоподбор) — поле
+-- spool_id в nom_variants никуда не девается.
+CREATE TABLE IF NOT EXISTS nom_variant_structures (
+    id TEXT PRIMARY KEY,
+    variant_id TEXT NOT NULL,
+    spool_id TEXT NOT NULL,
+    grams REAL DEFAULT 0,
+    position INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_vstruct_variant ON nom_variant_structures(variant_id);
 
 CREATE TABLE IF NOT EXISTS print_jobs (
     id TEXT PRIMARY KEY,

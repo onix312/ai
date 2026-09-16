@@ -1315,8 +1315,37 @@ button.pc-dots:hover { text-decoration: underline; text-underline-offset: 3px; }
 .var-body b{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .var-body small{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .var-cost{font-variant-numeric:tabular-nums;font-size:13px;font-weight:700;text-align:right;white-space:nowrap}
+/* Чипы катушек в осях (18.4): цвет и пластик выбираются кликом по живой
+   катушке склада — hex и материал уезжают в вариацию сами, катушка
+   привязывается при однозначном совпадении. */
+.var-presets{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
+.var-chips{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0 2px}
+.var-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1.4;padding:3px 9px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer}
+.var-chip i{width:10px;height:10px;border-radius:50%;border:1px solid var(--line);flex:none}
+.var-chip.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.var-chip .x{opacity:.6;font-weight:700}
 @media (max-width:720px){
   .var-axis{grid-template-columns:1fr}
   .var-row{grid-template-columns:18px 1fr 96px 90px 30px}
   .var-row select{grid-column:1 / -1}
 }
+
+/* 18.5: редактор цветов многоцветной катушки (М1) */
+.spool-colors{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.spool-colors .citem{display:flex;align-items:center;gap:3px}
+.spool-colors input[type=color]{width:40px;height:32px;padding:2px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.spool-colors .citem .rm{border:none;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px}
+.spool-colors .add{border:1px dashed var(--line);border-radius:10px;background:none;color:var(--muted);font-size:17px;width:40px;height:32px;cursor:pointer}
+
+/* 18.5 (М4): фото вариации — кнопка-миниатюра в строке вариации */
+.var-photo{width:34px;height:34px;flex:none;border:1px solid var(--line);border-radius:9px;
+  background:var(--panel);cursor:pointer;padding:0;overflow:hidden;font-size:15px;line-height:32px;text-align:center}
+.var-photo img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* 18.5 (М2): состав вариации — строки «катушка × граммы» */
+.struct-row{width:100%;margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)}
+.struct-row .struct-title{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+.struct-row .struct-pill{display:inline-block;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:2px 9px;font-size:11.5px;margin:0 4px 4px 0}
+.struct-row .struct-add{display:flex;gap:4px;flex-wrap:wrap}
+.struct-row .struct-add select{flex:1;min-width:140px;max-width:260px}
+.struct-row .struct-add input[type=number]{width:70px}

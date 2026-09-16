@@ -116,6 +116,8 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 return self.serve_shelf_photo((query.get("id") or [""])[0])
             if path == "/api/nomenclature/photo.jpg":
                 return self.serve_nom_photo((query.get("id") or [""])[0])
+            if path == "/api/nomenclature/variant/photo.jpg":
+                return self.serve_variant_photo((query.get("id") or [""])[0])
             if path == "/api/order/photo.jpg":
                 return self.serve_order_photo((query.get("photo_id") or [""])[0])
             if path == "/api/job/keyframe.jpg":
@@ -305,6 +307,11 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
     def serve_nom_photo(self, nom_id: str):
         """Фото карточки номенклатуры."""
         row = self.api.db.one("SELECT photo FROM nomenclature WHERE id=?", (nom_id,))
+        return self.serve_photo_file((row or {}).get("photo") or "")
+
+    def serve_variant_photo(self, variant_id: str):
+        """Фото вариации (18.5, М4)."""
+        row = self.api.db.one("SELECT photo FROM nom_variants WHERE id=?", (variant_id,))
         return self.serve_photo_file((row or {}).get("photo") or "")
 
     # ------------------------------------------------ 8.5: вспомогательные
