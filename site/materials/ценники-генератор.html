@@ -106,7 +106,6 @@
     <label>Наценка, % <input type="number" id="markup" value="0" step="5" style="width:60px"></label>
     <label>Округлять до <select id="round"><option value="0">не округлять</option><option value="10" selected>10 ₽</option><option value="50">50 ₽</option><option value="100">100 ₽</option></select></label>
     <label>Город <input type="text" id="city" value="Симферополь" style="width:120px"></label>
-    <label>Лого <select id="logoSel"><option value="1">1 — Слои</option><option value="2">2 — Сопло</option><option value="3">3 — Нить</option><option value="4">4 — Штамп</option></select></label>
   </div>
   <div class="panel-row" style="margin-top:9px">
     <label>Ссылка в QR <input type="text" id="qrbase" value="https://nozza.ru/p/" placeholder="https://nozza.ru/p/"></label>
@@ -115,7 +114,6 @@
     <label><input type="checkbox" id="showCity" checked> город на ценнике</label>
     <button class="btn" id="reload">Обновить</button>
     <button class="btn primary" id="print">Печать</button>
-    <a class="btn" href="логотипы-на-выбор.html" style="text-decoration:none">Логотипы</a>
     <span class="status" id="status">загрузка…</span>
   </div>
 
@@ -159,7 +157,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const LS_CONTACT='nozza:contact';
-const LS_LOGO='nozza:logo';
 const LS_CUSTOM='nozza:priceCustom';
 const PER_PAGE={standard:27,promo:15};
 
@@ -176,8 +173,8 @@ const DEMO=[
 
 function loadContact(){ try{return JSON.parse(localStorage.getItem(LS_CONTACT)||'{}')}catch(e){return{}} }
 function saveContact(p){ const cur=loadContact(); localStorage.setItem(LS_CONTACT, JSON.stringify({...cur,...p})); }
-function loadLogo(){ return localStorage.getItem(LS_LOGO)||'1'; }
-function saveLogo(id){ localStorage.setItem(LS_LOGO,id); }
+// Вариант знака выбран (1 — «слои»); выбор вариантов удалён в 18.4.1.
+function loadLogo(){ return '1'; }
 function loadCustom(){
   try{ const arr=JSON.parse(localStorage.getItem(LS_CUSTOM)||'[]'); return Array.isArray(arr)?arr:[] }catch(e){ return []; }
 }
@@ -252,8 +249,7 @@ function render(){
   const opts=getOpts();
   const city=opts.city;
   saveContact({city, qrbase:opts.qrbase});
-  saveLogo($('logoSel').value);
-  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${$('logoSel').value||loadLogo()}.svg`;
+  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
   const custom=loadCustom();
   $('customCount').textContent=custom.length;
   let base=[];
@@ -437,7 +433,7 @@ $('btnExport').addEventListener('click', ()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 });
 
-['src','size','markup','round','qron','blanks','showCity','qrbase','city','logoSel'].forEach(id=>{
+['src','size','markup','round','qron','blanks','showCity','qrbase','city'].forEach(id=>{
   const el=$(id); if(el) el.addEventListener('change', render);
 });
 $('reload').addEventListener('click', loadCatalog);
@@ -448,8 +444,7 @@ function init(){
   if(c.city) $('city').value=c.city;
   if(!c.city || c.city==='Москва'){ $('city').value='Симферополь'; saveContact({city:'Симферополь'}); }
   if(c.qrbase) $('qrbase').value=c.qrbase;
-  const logoId=loadLogo(); if($('logoSel')) $('logoSel').value=logoId;
-  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${logoId}.svg`;
+  if($('panelMark')) $('panelMark').src=`../assets/brand/nozza-mark-${loadLogo()}.svg`;
   // restore last manual form if any
   try{
     const last=JSON.parse(localStorage.getItem('nozza:priceManualForm')||'{}');

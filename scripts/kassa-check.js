@@ -318,6 +318,100 @@ if (problems.length === 0) {
     if (pv.ev('state.cart["s1"]') !== 1) throw new Error('короткий тап перестал продавать');
   });
 
+  // 18.5 (М3): товар с вариациями — одна плитка на витрине, тап открывает
+  // шторку выбора, и в корзину едет именно выбранная вариация. Продажа товара
+  // без вариаций не получает ни одного лишнего нажатия (условие прожарки).
+  checkAsync('вариантная плитка открывает шторку, кладёт выбранное и не трогает обычную продажу', async () => {
+    const pv = createKassa({ transport: 'stub' });
+    pv.run();
+    pv.ev('state.items=['
+      + '{id:"s1",nom_id:"nom1",variant_id:"v1",variant_label:"Чёрный / L",'
+      + 'variant_color_hex:"#111111",variant_color:"Чёрный",variant_size:"L",'
+      + 'variant_material:"PLA",name:"Адресник",qty:3,price:500,sku:"A-1" },'
+      + '{id:"s2",nom_id:"nom1",variant_id:"v2",variant_label:"Белый / M",'
+      + 'variant_color_hex:"#eeeeee",variant_color:"Белый",variant_size:"M",'
+      + 'variant_material:"PLA",name:"Адресник",qty:2,price:500,sku:"A-2" }'
+      + '];state.cart={};renderGrid();');
+    const html = pv.ev('$("grid").innerHTML');
+    const tiles = (html.match(/data-group=/g) || []).length + (html.match(/data-id=/g) || []).length;
+    if (tiles !== 1) throw new Error('плиток на витрине ' + tiles + ', ждали одну групповую');
+    if (!/data-group="nom1"/.test(html)) throw new Error('плитка вариаций не собралась в группу');
+    if (!/вариантов: 2/.test(html)) throw new Error('плитка не сообщает число вариантов');
+    // Тап по групповой плитке: шторка открылась, корзина пуста.
+    const tile = { getAttribute: (k) => (k === 'data-group' ? 'nom1' : null) };
+    pv.ev('$("grid")._h.click').call(null, {
+      target: { closest: (sel) => (sel === '.tile' ? tile : null) },
+    });
+    if (pv.ev('Object.keys(state.cart).length') !== 0) {
+      throw new Error('тап по групповой плитке молча положил товар');
+    }
+    if (!pv.ev('$("varModal")._classes.has("on")')) {
+      throw new Error('шторка вариантов не открылась');
+    }
+    const sheet = pv.ev('$("varList").innerHTML');
+    if (!/Белый \/ M/.test(sheet) || !/Чёрный \/ L/.test(sheet)) {
+      throw new Error('в шторке не обе вариации');
+    }
+    // Выбор «Белый / M» кладёт именно его и закрывает шторку.
+    const chip = { getAttribute: (k) => (k === 'data-vid' ? 's2' : null) };
+    pv.ev('$("varList")._h.click').call(null, {
+      target: { closest: (sel) => (sel.indexOf('button') === 0 ? chip : null) },
+    });
+    if (pv.ev('state.cart["s2"]') !== 1) throw new Error('выбор вариации положил не её');
+    if (pv.ev('state.cart["s1"]')) throw new Error('в корзину попала и невыбранная вариация');
+    if (pv.ev('$("varModal")._classes.has("on")')) throw new Error('шторка не закрылась после выбора');
+    // Товар без вариаций — ровно один тап в корзину, как и было.
+    pv.ev('state.items=[{id:"s9",name:"Плёнка",qty:5,price:350}];state.cart={};renderGrid();');
+    const plainHtml = pv.ev('$("grid").innerHTML');
+    if (/data-group=/.test(plainHtml)) throw new Error('обычный товар получил группу');
+    const plainTile = { getAttribute: (k) => (k === 'data-id' ? 's9' : null) };
+    pv.ev('$("grid")._h.click').call(null, {
+      target: { closest: (sel) => (sel === '.tile' ? plainTile : null) },
+    });
+    if (pv.ev('state.cart["s9"]') !== 1) throw new Error('обычная продажа сломалась');
+    if (pv.ev('$("varModal")._classes.has("on")')) throw new Error('обычный товар открыл шторку');
+  });
+
+  // М4: карусель на групповой плитке — первый кадр всегда общее фото товара,
+  // дальше фото вариаций; один кадр — статика (условие владельца).
+  checkAsync('карусель групповой плитки: общее фото первым, мало кадров — статика', async () => {
+    const pv = createKassa({ transport: 'stub' });
+    pv.run();
+    pv.ev('state.items=['
+      + '{id:"s1",nom_id:"nom1",variant_id:"v1",variant_label:"Чёрный / L",'
+      + 'photo_url:"/api/nomenclature/photo.jpg?id=nom1",'
+      + 'variant_photo_url:"/api/nomenclature/variant/photo.jpg?id=v1",'
+      + 'name:"Адресник",qty:3,price:500},'
+      + '{id:"s2",nom_id:"nom1",variant_id:"v2",variant_label:"Белый / M",'
+      + 'photo_url:"/api/nomenclature/photo.jpg?id=nom1",'
+      + 'variant_photo_url:"/api/nomenclature/variant/photo.jpg?id=v2",'
+      + 'name:"Адресник",qty:2,price:500}'
+      + '];state.cart={};renderGrid();');
+    const html = pv.ev('$("grid").innerHTML');
+    const m = html.match(/data-carpix="([^"]+)"/);
+    if (!m) throw new Error('плитка с двумя кадрами не получила карусель');
+    const frames = JSON.parse(m[1].replace(/&quot;/g, '"'));
+    if (frames[0] !== '/api/nomenclature/photo.jpg?id=nom1') {
+      throw new Error('первый кадр — не общее фото товара (' + frames[0] + ')');
+    }
+    if (frames.length !== 3 || frames[1] !== '/api/nomenclature/variant/photo.jpg?id=v1') {
+      throw new Error('кадры не в порядке общее → вариации: ' + JSON.stringify(frames));
+    }
+    if (!/data-cur=/.test(html)) throw new Error('нет метки текущего кадра');
+    // Одна вариация с фото → один кадр → атрибута карусели нет вообще.
+    pv.ev('state.items=['
+      + '{id:"s3",nom_id:"nom9",variant_id:"v9",variant_label:"Один",'
+      + 'photo_url:"/api/nomenclature/photo.jpg?id=nom9",'
+      + 'variant_photo_url:"",name:"Одиночка",qty:1,price:100},'
+      + '{id:"s4",nom_id:"nom9",variant_id:"v8",variant_label:"Два",'
+      + 'photo_url:"/api/nomenclature/photo.jpg?id=nom9",'
+      + 'variant_photo_url:"",name:"Одиночка",qty:1,price:100}'
+      + '];state.cart={};renderGrid();');
+    if (/data-carpix=/.test(pv.ev('$("grid").innerHTML'))) {
+      throw new Error('единственный кадр всё ещё крутит карусель');
+    }
+  });
+
   // 17. Жест отменяется, если палец уехал: это прокрутка витрины, а не просьба
   //     показать карточку.
   checkAsync('прокрутка витрины не открывает карточку', async () => {

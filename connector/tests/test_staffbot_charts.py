@@ -23,7 +23,9 @@ from connector.printflow.staffbot import TelegramBot  # noqa: E402
 from connector.printflow.staffbot.charts import daily_report  # noqa: E402
 from connector.printflow.staffbot.router import ROUTER  # noqa: E402
 
-DAY = "2026-09-15"
+# День отчёта — всегда «сегодня»: генератор показывает текущую дату,
+# и жёстко вписанная дата делала тест мёртвым наутро после её смены.
+DAY = datetime.now().date().isoformat()
 
 
 def _seed(db: Database) -> None:

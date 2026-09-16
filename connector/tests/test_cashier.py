@@ -33,6 +33,67 @@ def add_item(db: Database, item_id: str = "s1", qty: float = 10, price: float = 
         "cost_per_unit": 120, "active": 1})
 
 
+class CashierVariantTilesTests(unittest.TestCase):
+    """Витрина отдаёт признаки вариации (18.5, М3): цвет, размер, пластик.
+
+    Касса группирует строки полки одного товара в одну плитку и даёт выбор
+    варианта шторкой — для этого каждая строка обязана нести признаки своей
+    вариации. Строки без вариаций новых полей не получают: форма ответа
+    старого клиента не меняется.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.cashier = Cashier(self.db, self.acc)
+        self.db.set_settings({"cashier_code": "1234"})
+        self.db.upsert("nomenclature", {
+            "id": "nom1", "name": "Адресник «Кость»", "kind": "product",
+            "unit": "шт", "archived": 0})
+        for vid, color, hexv, size in (("v-b", "Чёрный", "#111111", "L"),
+                                       ("v-w", "Белый", "#eeeeee", "M")):
+            self.db.upsert("nom_variants", {
+                "id": vid, "nom_id": "nom1", "name": f"{color} / {size}",
+                "color_name": color, "color_hex": hexv, "size": size,
+                "material": "PLA", "archived": 0})
+        for sid, vid, label, qty in (("s1", "v-b", "Чёрный / L", 3),
+                                     ("s2", "v-w", "Белый / M", 2)):
+            self.db.upsert("shelf_items", {
+                "id": sid, "name": "Адресник «Кость»", "qty": qty, "price": 500,
+                "cost_per_unit": 120, "active": 1, "nom_id": "nom1",
+                "variant_id": vid, "variant_label": label})
+        self.token = self.cashier.login("1234")["token"]
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_variant_rows_carry_traits(self):
+        items = self.cashier.catalog()["items"]
+        by_variant = {i["variant_id"]: i for i in items}
+        self.assertEqual({"v-b", "v-w"}, set(by_variant))
+        black = by_variant["v-b"]
+        self.assertEqual("Чёрный", black["variant_color"])
+        self.assertEqual("#111111", black["variant_color_hex"])
+        self.assertEqual("L", black["variant_size"])
+        self.assertEqual("PLA", black["variant_material"])
+        # Остатки и цены остались строковыми — группировка фронта их суммирует.
+        self.assertEqual(3, black["qty"])
+        self.assertEqual(500, black["price"])
+
+    def test_archived_variant_traits_are_not_served(self):
+        self.db.upsert("nom_variants", {"id": "v-b", "archived": 1})
+        items = self.cashier.catalog()["items"]
+        black = next(i for i in items if i["id"] == "s1")
+        self.assertNotIn("variant_color", black)
+
+    def test_plain_rows_have_no_variant_traits(self):
+        add_item(self.db, "s9", qty=4, price=300)
+        items = self.cashier.catalog()["items"]
+        plain = next(i for i in items if i["id"] == "s9")
+        self.assertNotIn("variant_color", plain)
+        self.assertNotIn("variant_color_hex", plain)
+
+
 class CashierSchemaTests(unittest.TestCase):
     def test_old_nom_groups_gets_color_column(self):
         """База до 17.0 не должна ронять каталог ошибкой no such column."""
@@ -578,3 +639,55 @@ class PersistentSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CashierVariantPhotoTests(unittest.TestCase):
+    """Фото вариаций в витрине кассы (18.5, М4).
+
+    Каталог отдаёт URL фото только у вариации с загруженным фото; карусель
+    на плитке всегда открывается общим фото товара, кадр каждые 3 секунды,
+    а при меньше чем 2 кадрах ничего не двигается (условия владельца).
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.cashier = Cashier(self.db, self.acc)
+        self.db.set_settings({"cashier_code": "1234"})
+        self.db.upsert("nomenclature", {
+            "id": "nom1", "name": "Адресник", "kind": "product",
+            "unit": "шт", "archived": 0})
+        self.db.upsert("nom_variants", {
+            "id": "v-b", "nom_id": "nom1", "name": "Чёрный / L",
+            "color_name": "Чёрный", "archived": 0, "photo": "var_v-b.jpg"})
+        self.db.upsert("shelf_items", {
+            "id": "s1", "name": "Адресник", "qty": 3, "price": 500,
+            "cost_per_unit": 120, "active": 1, "nom_id": "nom1",
+            "variant_id": "v-b", "variant_label": "Чёрный / L"})
+        self.db.upsert("nom_variants", {
+            "id": "v-w", "nom_id": "nom1", "name": "Белый / M",
+            "color_name": "Белый", "archived": 0, "photo": ""})
+        self.db.upsert("shelf_items", {
+            "id": "s2", "name": "Адресник", "qty": 2, "price": 500,
+            "cost_per_unit": 120, "active": 1, "nom_id": "nom1",
+            "variant_id": "v-w", "variant_label": "Белый / M"})
+        self.token = self.cashier.login("1234")["token"]
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_photo_variant_gets_url_plain_does_not(self):
+        items = self.cashier.catalog()["items"]
+        by_variant = {i["variant_id"]: i for i in items}
+        self.assertEqual("/api/nomenclature/variant/photo.jpg?id=v-b",
+                         by_variant["v-b"]["variant_photo_url"])
+        self.assertNotIn("variant_photo_url", by_variant["v-w"])
+
+    def test_cashier_page_honours_carousel_terms(self):
+        page = open("site/cashier.html", encoding="utf-8").read()
+        # Фиксированный такт витрины — 3 секунды, общее фото первым слайдом,
+        # меньше двух кадров — статика; всё это условия владельца, не догадки.
+        self.assertIn("TILE_CAROUSEL_MS=3000", page)
+        self.assertIn("data-carpix", page)
+        self.assertIn("carpix.push(photoUrl)", page)
+        self.assertIn("list.length<2)return", page)

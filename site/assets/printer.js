@@ -591,7 +591,7 @@ function renderAbCurrent() {
     return;
   }
   host.innerHTML = '<div class="ab-cur">'
-    + `<span class="sw" style="background:${esc(occ.color_hex || '#cbd5e1')}"></span>`
+    + `<span class="sw" style="background:${esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(occ, '#cbd5e1') : (occ.color_hex || '#cbd5e1'))}"></span>`
     + `<span><b>Сейчас: ${esc(occ.material || '')} ${esc(occ.color_name || '')}</b><br>`
     + `<small class="muted">${Math.round(num(occ.remaining_grams))} г · ${esc(occ.brand || 'без бренда')}</small></span></div>`;
 }
@@ -640,7 +640,7 @@ function renderAbList() {
       const dis = (isCur || empty) ? ' disabled' : '';
       const pct = Math.round(clamp(num(s.percent), 0, 100));
       return `<button class="ab-row${sel ? ' sel' : ''}" type="button" data-ab-pick="${esc(s.id)}"${dis}>`
-        + `<span class="sw" style="background:${esc(s.color_hex || '#cbd5e1')}"></span>`
+        + `<span class="sw" style="background:${esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(s, '#cbd5e1') : (s.color_hex || '#cbd5e1'))}"></span>`
         + `<span class="grow"><b>${esc(s.material || '')} ${esc(s.color_name || '')}</b>`
         + `<small>${esc(s.brand || 'без бренда')} · ${esc(s.location === 'ams' ? 'в AMS' : (s.location_note || s.location || 'склад'))}</small></span>`
         + tag

@@ -946,6 +946,39 @@ class Repo:
         if not str(data.get("location") or "").strip():
             data["location"] = "shop"
 
+        # Многоцветные катушки (18.5, М1): primary color_hex остаётся для
+        # совместимости, полный моток — списком colors. Вид задаёт человек
+        # (градиент/радуга/шёлк); список длиннее одного без вида честно
+        # считаем градиентом — бобины градиентов встречаются чаще.
+        raw_colors = data.pop("colors", None)
+        if raw_colors is None:
+            raw_colors = data.get("colors_json") or ""
+        if isinstance(raw_colors, str):
+            text = raw_colors.strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    raw_colors = parsed if isinstance(parsed, list) else [text]
+                except Exception:
+                    raw_colors = [c.strip() for c in text.split(",")]
+        colors: list[str] = []
+        if isinstance(raw_colors, (list, tuple)):
+            for c in raw_colors:
+                c = str(c or "").strip()
+                if c and c not in colors:
+                    colors.append(c)
+        kinds = {"", "gradient", "rainbow", "silk"}
+        kind = str(data.get("color_kind") or "").strip().lower()
+        kind = kind if kind in kinds else ""
+        if len(colors) > 1 and not kind:
+            kind = "gradient"
+        data["color_kind"] = kind
+        data["colors_json"] = (
+            json.dumps(colors, ensure_ascii=False) if (kind and len(colors) > 1) else "")
+        if colors:
+            data["color_hex"] = colors[0]
+        data["rec_settings"] = str(data.get("rec_settings") or "").strip()[:2000]
+
         data["updated_at"] = now_iso()
         return self.db.upsert("spools", data)
 

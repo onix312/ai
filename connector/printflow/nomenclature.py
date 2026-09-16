@@ -316,6 +316,11 @@ class Nomenclature:
         item["variants"] = self.db.query(
             "SELECT * FROM nom_variants WHERE nom_id=? AND archived=0 ORDER BY position, name",
             (resolved,))
+        # М2: состав каждой вариации (несколько катушек × граммы). Пустой —
+        # вариация однокатушечная, старое поведение полностью сохраняется.
+        item["variant_structures"] = {
+            v["id"]: self.variant_structures(v["id"]) for v in item["variants"]
+        }
         item["price_history"] = self.db.query(
             "SELECT p.*, t.name type_name FROM prices p"
             " LEFT JOIN price_types t ON t.id=p.price_type_id"
@@ -706,8 +711,31 @@ class Nomenclature:
             "SELECT COUNT(*) n FROM nom_variants WHERE nom_id=? AND archived=0",
             (nom_id,)) or {}).get("n") or 0)
 
+        # Авто-привязка катушки: если цвет и/или пластик сочетания однозначно
+        # указывают на живую катушку склада — вариация сразу печатается с неё,
+        # а цена грамма посчитается из её цены. Ровно один кандидат —
+        # привязываем; ноль или несколько — оставляем человеку выбор в
+        # карточке: ошибочная привязка стоит дороже её отсутствия.
+        spools = self.db.query(
+            "SELECT id, material, color_name FROM spools WHERE archived=0")
+
+        def _spool_match(material: str, color: str) -> str:
+            material = material.strip().casefold()
+            color = color.strip().casefold()
+            if not material and not color:
+                return ""
+            found = set()
+            for sp in spools:
+                if material and (sp.get("material") or "").strip().casefold() != material:
+                    continue
+                if color and (sp.get("color_name") or "").strip().casefold() != color:
+                    continue
+                found.add(sp["id"])
+            return next(iter(found)) if len(found) == 1 else ""
+
         created: list[dict] = []
         skipped = 0
+        spools_bound = 0
         for combo in combos:
             name = " / ".join(part["name"] for part in combo)
             slug = "-".join(variant_slug(part["name"]) for part in combo)
@@ -738,6 +766,15 @@ class Nomenclature:
                     row["grams"] = part["grams"]
                 if part.get("hours") and not num(row.get("hours")):
                     row["hours"] = part["hours"]
+            # Пластик для поиска катушки: своя ось «Пластик» важнее, но и
+            # значение цвета-чипа может нести материал («PLA из чипа»).
+            pick_material = str(row.get("material") or next(
+                (str(p.get("material") or "") for p in combo if p.get("material")),
+                "") or "")
+            spool_id = _spool_match(pick_material, str(row.get("color_name") or ""))
+            if spool_id:
+                row["spool_id"] = spool_id
+                spools_bound += 1
             if not preview:
                 self.db.upsert("nom_variants", row)
             created.append(row)
@@ -752,6 +789,7 @@ class Nomenclature:
             "total": total_now + (0 if preview else len(created)),
             "axes": [{"name": a["name"], "values": len(a["values"])} for a in clean],
             "limit": MAX_VARIANTS_TOTAL,
+            "spools_bound": spools_bound,
             "preview": bool(preview),
             "items": created[:50],
         }
@@ -777,6 +815,17 @@ class Nomenclature:
                     or str(spool.get("material") or "").strip()
                     or str(nom.get("material") or "").strip())
         fit = max(1, int(num(nom.get("fit_per_plate"), 1) or 1))
+        # М2: состав вариации — каждая часть на своей катушке со своей ценой
+        # грамма. Общий вес — сумма частей, стоимость пластика — не «граммы ×
+        # цена одной катушки», а сумма по катушкам состава.
+        structures = self.variant_structures(row["id"])
+        filament_cost: float | None = None
+        if structures:
+            grams = round(sum(num(r["grams"]) for r in structures), 2)
+            filament_cost = round(sum(num(r["filament_cost"]) for r in structures), 2)
+            # Привязанная к вариации катушка в расчёте пластика не участвует:
+            # она замена хранится как «чем печатать, если состава нет».
+            spool, spool_source = {}, "structures"
         kwargs = {
             "manual_minutes": num(row.get("post_minutes"))
                               or num(nom.get("post_minutes")),
@@ -787,6 +836,9 @@ class Nomenclature:
         if spool:
             kwargs["spool_price"] = num(spool.get("price"))
             kwargs["spool_weight"] = num(spool.get("total_grams"))
+        if filament_cost is not None:
+            # Изделий на плите fit штук: стоимость пластика на плиту
+            kwargs["filament_cost"] = filament_cost * fit
         if grams > 0 and hours > 0:
             kwargs["plate_grams"] = grams * fit
             kwargs["plate_hours"] = hours * fit
@@ -808,6 +860,7 @@ class Nomenclature:
             "markup": num(suggested.get("markup")),
             "spool": spool or {},
             "spool_source": spool_source,
+            "structures": structures,
             "breakdown": breakdown,
         }
 
@@ -868,11 +921,144 @@ class Nomenclature:
                 return spool, "auto"
         return {}, "none"
 
+    # ----------------------------------------------------------- М2: состав вариации
+    MAX_VARIANT_STRUCTURES = 8
+
+    def variant_structures(self, variant_id: str) -> list[dict]:
+        """Состав вариации из нескольких катушек (18.5, М2).
+
+        Каждая строка — «катушка × граммы». Цена грамма считается из своей
+        катушки, а не «средней по складу». Без состава вариация идёт старым
+        путём — одна катушка вариации или автоподбор.
+        """
+        rows = self.db.query(
+            "SELECT * FROM nom_variant_structures WHERE variant_id=?"
+            " ORDER BY position, id", (variant_id,))
+        out: list[dict] = []
+        for r in rows:
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (r["spool_id"],))
+            per_gram = 0.0
+            if spool:
+                weight = max(1.0, num(spool.get("total_grams"), 1000) or 1000.0)
+                per_gram = num(spool.get("price")) / weight
+            out.append({
+                "id": r["id"],
+                "variant_id": variant_id,
+                "spool_id": r["spool_id"],
+                "grams": round(num(r["grams"]), 1),
+                "position": int(num(r.get("position"))),
+                "material": (spool or {}).get("material") or "",
+                "color_name": (spool or {}).get("color_name") or "",
+                "color_hex": (spool or {}).get("color_hex") or "",
+                "color_kind": (spool or {}).get("color_kind") or "",
+                "colors_json": (spool or {}).get("colors_json") or "",
+                "spool_missing": spool is None,
+                "filament_cost": round(num(r["grams"]) * per_gram, 4),
+            })
+        return out
+
+    def save_variant_structures(self, variant_id: str, rows: list[dict]) -> list[dict]:
+        """Перезаписать состав вариации целиком (до 8 строк).
+
+        Транзакционно: частично записанный состав не оставляем — себестоимость
+        старого мгновенного пересчёта обязана совпасть с новым составом.
+        """
+        variant = self.db.one(
+            "SELECT id, nom_id FROM nom_variants WHERE id=?", (variant_id,))
+        if not variant:
+            raise ValueError("Вариация не найдена")
+        clean: list[dict] = []
+        seen: set[str] = set()
+        for raw in rows or []:
+            if not isinstance(raw, dict):
+                continue
+            spool_id = str(raw.get("spool_id") or "").strip()
+            grams = num(raw.get("grams"))
+            if not spool_id:
+                continue
+            if grams <= 0:
+                raise ValueError("Укажите граммы для каждой катушки состава")
+            if spool_id in seen:
+                raise ValueError("Катушка в составе дважды — сложите граммы в одну строку")
+            seen.add(spool_id)
+            if not self.db.one(
+                    "SELECT id FROM spools WHERE id=? AND archived=0", (spool_id,)):
+                raise ValueError("Катушка из состава не найдена на складе")
+            clean.append({"spool_id": spool_id, "grams": round(grams, 1)})
+        if len(clean) > self.MAX_VARIANT_STRUCTURES:
+            raise ValueError(
+                f"Состав не длиннее {self.MAX_VARIANT_STRUCTURES} строк — "
+                f"больше уже не набор, а новая технология печати")
+        if len(clean) == 1:
+            # Одна катушка — это не «состав», а обычная привязка вариации:
+            # пишем в spool_id вариации, чтобы оба пути давали одну цену.
+            with self.db.transaction():
+                self.db.execute(
+                    "DELETE FROM nom_variant_structures WHERE variant_id=?", (variant_id,))
+                self.db.upsert("nom_variants", {
+                    "id": variant_id, "spool_id": clean[0]["spool_id"],
+                    "updated_at": now_iso()})
+            self.recalc_variant_prices(variant["nom_id"])
+            return self.variant_structures(variant_id)
+        with self.db.transaction():
+            self.db.execute(
+                "DELETE FROM nom_variant_structures WHERE variant_id=?", (variant_id,))
+            for pos, row in enumerate(clean):
+                self.db.upsert("nom_variant_structures", {
+                    "id": uid("vstruct"),
+                    "variant_id": variant_id,
+                    "spool_id": row["spool_id"],
+                    "grams": row["grams"],
+                    "position": pos,
+                    "updated_at": now_iso(),
+                })
+        self.recalc_variant_prices(variant["nom_id"])
+        return self.variant_structures(variant_id)
+
+    def delete_variant_structures(self, variant_id: str) -> None:
+        variant = self.db.one(
+            "SELECT id, nom_id FROM nom_variants WHERE id=?", (variant_id,))
+        if not variant:
+            raise ValueError("Вариация не найдена")
+        self.db.execute(
+            "DELETE FROM nom_variant_structures WHERE variant_id=?", (variant_id,))
+        self.recalc_variant_prices(variant["nom_id"])
+
+    def set_variant_photo(self, variant_id: str, data_url: str) -> str:
+        """Фото вариации (18.5, М4): data URL → файл, ссылка — в строке вариации.
+
+        Те же правила, что у общего фото товара: до 8 МБ. Общее фото живёт
+        отдельно в nomenclature.photo и остаётся первым кадром карусели кассы.
+        """
+        from .config import PHOTO_DIR
+        import base64
+        variant = self.db.one("SELECT id FROM nom_variants WHERE id=?", (variant_id,))
+        if not variant:
+            raise LookupError("Вариация не найдена")
+        data_url = str(data_url or "")
+        if "," not in data_url:
+            raise ValueError("Не похоже на data URL")
+        head, _, b64 = data_url.partition(",")
+        ext = "png" if "png" in head else "jpg"
+        try:
+            raw = base64.b64decode(b64)
+        except Exception as exc:
+            raise ValueError("Не похоже на data URL") from exc
+        if len(raw) > 8 * 1024 * 1024:
+            raise ValueError("Фото больше 8 МБ")
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"var_{variant_id}.{ext}"
+        (PHOTO_DIR / name).write_bytes(raw)
+        self.db.execute("UPDATE nom_variants SET photo=?, updated_at=? WHERE id=?",
+                        (name, now_iso(), variant_id))
+        return name
+
     def spool_options(self) -> list[dict]:
         """Катушки склада для выбора в карточке: цена за грамм видна сразу."""
         rows = self.db.query(
-            "SELECT id, material, brand, color_name, color_hex, price,"
-            " total_grams, remaining_grams FROM spools WHERE archived=0"
+            "SELECT id, material, brand, color_name, color_hex, color_kind,"
+            " colors_json, price, total_grams, remaining_grams"
+            " FROM spools WHERE archived=0"
             " ORDER BY material, color_name")
         out = []
         for r in rows:
@@ -883,6 +1069,8 @@ class Nomenclature:
                 "brand": r.get("brand") or "",
                 "color_name": r.get("color_name") or "",
                 "color_hex": r.get("color_hex") or "#4b5563",
+                "color_kind": r.get("color_kind") or "",
+                "colors_json": r.get("colors_json") or "",
                 "price": round(num(r.get("price")), 2),
                 "per_gram": round(num(r.get("price")) / weight, 4),
                 "remaining_grams": round(num(r.get("remaining_grams")), 1),

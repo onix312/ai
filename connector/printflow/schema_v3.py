@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS nom_variants (
                                     -- цена грамма берётся именно из неё
     price REAL DEFAULT 0,           -- своя цена продажи (0 = из себестоимости)
     cost REAL DEFAULT 0,            -- рассчитанная себестоимость (кэш)
+    photo TEXT DEFAULT '',          -- фото вариации (18.5, М4; общее — nomenclature.photo)
     updated_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);

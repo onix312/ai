@@ -257,6 +257,20 @@
  /* modals — большие зоны нажатия */
  .modal{position:fixed;inset:0;background:rgba(0,0,0,.52);backdrop-filter:blur(6px);display:none;align-items:flex-end;z-index:50;padding:10px;padding-top:calc(10px + env(safe-area-inset-top));padding-bottom:calc(10px + env(safe-area-inset-bottom))}
  .modal.on{display:flex}
+ /* выбор варианта (18.5): крупные строки под палец кассира */
+ .vchip{display:flex;align-items:center;gap:12px;width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:14px;background:var(--bg);margin-bottom:8px;text-align:left;color:var(--text);font-size:16px;min-height:56px}
+ .vchip:active{transform:scale(.985)}
+ .vchip .vs{width:28px;height:28px;border-radius:9px;border:1px solid var(--line);flex:none;background:#8a94a6}
+ .vchip .vn{flex:1;min-width:0}
+ .vchip .vn b{display:block;font-size:16px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .vchip .vn small{color:var(--muted);font-size:12.5px}
+ .vchip .vp{font-weight:850;white-space:nowrap;font-size:16px}
+ .vchip .vph{width:44px;height:44px;border-radius:11px;object-fit:cover;flex:none;border:1px solid var(--line)}
+ .vchip.empty{opacity:.45}
+ /* М4: карусель фото вариантов на плитке товара (3 с, двигается только если
+    фотографий больше одной; первым слайдом — общее фото товара) */
+ .tile .imgBox img{transition:opacity .28s ease}
+ .tile .imgBox img.fade{opacity:.15}
  .sheet{width:100%;max-width:520px;margin:0 auto;background:var(--panel);border-radius:22px 22px 16px 16px;padding:20px 16px calc(20px + env(safe-area-inset-bottom));border:1px solid var(--line);box-shadow:0 20px 60px -20px rgba(0,0,0,.6);animation:up .22s ease;max-height:calc(100vh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto}
  @keyframes up{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
  @keyframes spin{to{transform:rotate(360deg)}}
@@ -458,6 +472,14 @@
    <button class="btn ghost" id="bCartClose" style="flex:1">Закрыть</button>
    <button class="btn pay" id="bCartPay" style="flex:1">Оплатить</button>
   </div>
+ </div>
+</div>
+
+<div class="modal" id="varModal">
+ <div class="sheet">
+  <h3 id="varTitle">Выбор варианта</h3>
+  <div id="varList"></div>
+  <button class="btn ghost" id="bVarClose" type="button" style="width:100%;margin-top:10px">Отмена</button>
  </div>
 </div>
 
@@ -1033,6 +1055,7 @@ function loadCatalog(quiet){
     // скрываем пустые, чтобы кассир не ошибся. Остальное — в панели.
     state._allItems=all;
     state.items=all.filter(function(it){return (Number(it.qty)||0)>0;});
+    _catalogLoaded=true;
     // если всё пусто но было что-то — покажем подсказку
     state.cats=c.categories||[];
     state.sbpEnabled=!!c.sbp_enabled;
@@ -1138,9 +1161,79 @@ function renderGrid(){
   /* Полоса остатка (17.0.23) считается относительно самого полного товара на
      витрине, а не по выдуманному «максимуму»: так кассир за секунду видит,
      где товар заканчивается, не читая числа на каждом бейдже. */
+  /* М3 (18.5): товар с вариациями — одна плитка на витрине, выбор варианта
+     шторкой после тапа. Две одинаковые карточки «Адресник» сбивали кассира;
+     строки без вариаций и товары с одной вариацией рисуются как раньше. */
+  var grouped={};
+  list.forEach(function(it){
+    if(it.variant_id&&it.nom_id)(grouped[it.nom_id]=grouped[it.nom_id]||[]).push(it);
+  });
+  var units=[],doneGroup={};
+  list.forEach(function(it){
+    var g=(it.variant_id&&it.nom_id)?grouped[it.nom_id]:null;
+    if(g&&g.length>1){
+      if(doneGroup[it.nom_id])return;
+      doneGroup[it.nom_id]=1;
+      units.push({group:1,nom_id:it.nom_id,rows:g});
+    } else units.push({it:it});
+  });
   var maxQty=1;
-  list.forEach(function(it){var n=Math.floor(Number(it.qty)||0);if(n>maxQty)maxQty=n;});
-  box.innerHTML=list.map(function(it){
+  units.forEach(function(u){
+    var n=u.group?u.rows.reduce(function(s,r){return s+Math.floor(Number(r.qty)||0);},0)
+      :Math.floor(Number(u.it.qty)||0);
+    if(n>maxQty)maxQty=n;
+  });
+  box.innerHTML=units.map(function(u){
+    return u.group?groupTileHTML(u,maxQty):tileHTML(u.it,maxQty);
+  }).join("");
+  stopTileCarousel();
+  startTileCarousel();
+  renderCart();
+}
+
+/* М4: карусель фото групповой плитки — первый слайд общее фото товара,
+   дальше фото вариаций. Заведомо: меньше двух кадров — ничего не движется
+   (подтверждено владельцем), пауза на скрытой вкладке — по системе. */
+var TILE_CAROUSEL_MS=3000;
+var _tileCarTimer=null,_tileCarIdx=0;
+// Плавный показ карусели добавляем только при загруженном каталоге:
+// плитка рисуется при открытии кассы, а запрос фото долго делает её «серой
+// коробкой». На кассе время показа важнее плавности — поэтому и 3 секунды.
+var _catalogLoaded=false;
+function stopTileCarousel(){
+  if(_tileCarTimer){clearInterval(_tileCarTimer);_tileCarTimer=null;}
+  _tileCarIdx=0;
+}
+function startTileCarousel(){
+  if(!_catalogLoaded)return;
+  stopTileCarousel();
+  var imgs=Array.prototype.slice.call(document.querySelectorAll('#grid [data-carpix]'));
+  var moving=imgs.some(function(img){
+    try{return JSON.parse(img.getAttribute('data-carpix')||'[]').length>1;}
+    catch(_e){return false;}
+  });
+  if(!moving)return;
+  _tileCarTimer=setInterval(function(){
+    _tileCarIdx+=1;
+    imgs.forEach(function(img){
+      var list;
+      try{list=JSON.parse(img.getAttribute('data-carpix')||'[]');}catch(_e){list=[];}
+      if(list.length<2)return;
+      var next=list[(_tileCarIdx%list.length)];
+      if(img.getAttribute('data-cur')===next)return;
+      img.classList.add('fade');
+      setTimeout(function(){
+        img.src=next;
+        img.setAttribute('data-cur',next);
+        img.onload=function(){img.classList.remove('fade');};
+      },180);
+    });
+  },TILE_CAROUSEL_MS);
+}
+
+/* Плитка одного товара — та же разметка, что и до группировки: нажатий у
+   обычной продажи не прибавилось (условие прожарки М3). */
+function tileHTML(it,maxQty){
     var qty=Math.floor(Number(it.qty)||0);
     var price=it.price_missing?'<span class="p miss">цена не задана</span>':'<span class="p">'+esc(money(it.price))+'</span>';
     var inCart=state.cart[it.id]||0;
@@ -1158,8 +1251,39 @@ function renderGrid(){
       +(it.variant_label?'<div class="vari">'+esc(it.variant_label)+'</div>':'')
       +'<div class="metaLine">'+price+'</div>'+stock+'</div>'
       +'</div>';
-  }).join("");
-  renderCart();
+}
+
+function groupTileHTML(u,maxQty){
+  var rows=u.rows;
+  var qty=rows.reduce(function(s,r){return s+Math.floor(Number(r.qty)||0);},0);
+  var inCart=rows.reduce(function(s,r){return s+(state.cart[r.id]||0);},0);
+  var prices=rows.map(function(r){return Number(r.price)||0;});
+  var pmin=Math.min.apply(null,prices),pmax=Math.max.apply(null,prices);
+  var price='<span class="p">'+(pmin===pmax?esc(money(pmin)):esc(money(pmin))+' – '+esc(money(pmax)))+'</span>';
+  var qtyBadge = qty<=5 ? '<span class="qb low">мало: '+qty+' шт</span>' : '<span class="qb qty">'+qty+' шт</span>';
+  var pct=Math.max(4,Math.min(100,Math.round(qty/maxQty*100)));
+  var stock='<div class="stk'+(qty<=5?' low':'')+'" role="img" aria-label="Остаток '+qty+' шт">'
+    +'<i style="width:'+pct+'%"></i></div>';
+  var phIcon=window.PFIcons?PFIcons.svg("box",30):"📦";
+  var withPhoto=null;
+  rows.some(function(r){if(r.photo_url){withPhoto=r;return true;}return false;});
+  var photoUrl=withPhoto?withPhoto.photo_url:"";
+  // М4: кадры карусели — общее фото товара первым, затем фото вариаций
+  // (без повторов). Один кадр — статика, меньше одного — иконка.
+  var carpix=[];
+  if(photoUrl)carpix.push(photoUrl);
+  rows.forEach(function(r){
+    var u=r.variant_photo_url;
+    if(u&&carpix.indexOf(u)<0)carpix.push(u);
+  });
+  var carAttr=carpix.length>1?' data-carpix="'+esc(JSON.stringify(carpix))+'" data-cur="'+esc(carpix[0])+'"':'';
+  var img=carpix.length? '<img src="'+esc(carpix[0])+'" loading="lazy"'+carAttr+' onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><div class="ph" style="display:none">'+phIcon+'</div>' : '<div class="ph">'+phIcon+'</div>';
+  return '<div class="tile'+(inCart?' sel':'')+'" data-group="'+esc(u.nom_id)+'" role="button" tabindex="0" aria-label="'+esc(rows[0].name)+' — вариантов '+rows.length+'">'
+    +'<div class="imgBox">'+img+'<div class="badge">'+qtyBadge+'</div><span class="inBadge">'+inCart+'</span></div>'
+    +'<div class="info"><div class="n">'+esc(rows[0].name)+'</div>'
+    +'<div class="vari">вариантов: '+rows.length+' — нажмите и выберите</div>'
+    +'<div class="metaLine">'+price+'</div>'+stock+'</div>'
+    +'</div>';
 }
 
 /* Класс плотности вешаем на саму сетку, а не перерисовываем плитки: разметка
@@ -1232,18 +1356,13 @@ function renderCart(){
   $("cartWh").textContent="";
 }
 
-$("grid").addEventListener("click",function(ev){
-  if(ev.target.closest(".qbtn")) return;
-  // Открыто превью — этот тап закрывает карточку, а не кладёт товар в корзину.
-  if(previewBox){previewClose();return;}
-  var t=ev.target.closest(".tile");if(!t)return;
-  var id=t.getAttribute("data-id");
+function addToCartId(id){
   var it=state.items.find(function(x){return x.id===id;}) || (state._allItems||[]).find(function(x){return x.id===id;});
-  if(!it|| (Number(it.qty)||0)<=0){toast("Нет в наличии");return;}
-  if(it.price_missing){toast("Цена не задана — укажите её в номенклатуре");return;}
+  if(!it|| (Number(it.qty)||0)<=0){toast("Нет в наличии");return false;}
+  if(it.price_missing){toast("Цена не задана — укажите её в номенклатуре");return false;}
   var cur=state.cart[id]||0;
   var max=Math.floor(Number(it.qty)||0);
-  if(cur>=max){toast("Больше нет — в наличии "+max+" шт");return;}
+  if(cur>=max){toast("Больше нет — в наличии "+max+" шт");return false;}
   state.cart[id]=cur+1;
   state.cartSeen[id]=Number(it.price)||0;   // цена, которую кассир назвал покупателю
   state.saleRequest={cash:"",sbp:""};
@@ -1254,6 +1373,47 @@ $("grid").addEventListener("click",function(ev){
   if(fresh){fresh.classList.add("hit");setTimeout(function(){fresh.classList.remove("hit");},340);}
   // лёгкая вибрация на мобилке
   if(navigator.vibrate) try{navigator.vibrate(18);}catch(_e){}
+  return true;
+}
+
+/* М3 (18.5): шторка выбора варианта. Открывается тапом по групповой плитке;
+   цена и остаток — прямо в строкях, чтобы выбор был за секунду, без угадайки. */
+function variantRowsOf(nomId){
+  return (state.items||[]).filter(function(x){return x.nom_id===nomId && x.variant_id;});
+}
+function closeVariantSheet(){$("varModal").classList.remove("on");}
+function openVariantSheet(nomId){
+  var rows=variantRowsOf(nomId);
+  if(rows.length<2){
+    // Единственная вариация — группы нет: продаём как обычный товар.
+    if(rows.length===1) addToCartId(rows[0].id);
+    return;
+  }
+  $("varTitle").textContent=(rows[0]&&rows[0].name)||"Выбор варианта";
+  $("varList").innerHTML=rows.map(function(it){
+    var qty=Math.floor(Number(it.qty)||0);
+    var sub=[it.variant_color,it.variant_material,it.variant_size]
+      .filter(function(s){return s;}).join(" · ");
+    var face=it.variant_photo_url
+      ?'<img class="vph" src="'+esc(it.variant_photo_url)+'" loading="lazy" alt="" onerror="this.outerHTML=\'<span class=&quot;vs&quot; style=&quot;background:#8a94a6&quot;></span>\'">'
+      :'<span class="vs" style="background:'+esc(it.variant_color_hex||'#8a94a6')+'"></span>';
+    return '<button class="vchip'+(qty<=0?' empty':'')+'" type="button" data-vid="'+esc(it.id)+'">'
+      +face
+      +'<span class="vn"><b>'+esc(it.variant_label||'Вариант')+'</b>'
+      +'<small>'+(sub?esc(sub)+' · ':'')+qty+' шт</small></span>'
+      +'<span class="vp">'+esc(money(it.price))+'</span></button>';
+  }).join("");
+  $("varModal").classList.add("on");
+}
+
+$("grid").addEventListener("click",function(ev){
+  if(ev.target.closest(".qbtn")) return;
+  // Открыто превью — этот тап закрывает карточку, а не кладёт товар в корзину.
+  if(previewBox){previewClose();return;}
+  var t=ev.target.closest(".tile");if(!t)return;
+  var gid=t.getAttribute("data-group");
+  if(gid){openVariantSheet(gid);return;}
+  addToCartId(t.getAttribute("data-id"));
 });
 $("grid").addEventListener("keydown",function(ev){
   if(ev.key==="Enter"||ev.key===" "){
@@ -1273,7 +1433,7 @@ function previewClose(){
   if(previewTimer){clearTimeout(previewTimer);previewTimer=0;}
   if(previewBox){try{document.body.removeChild(previewBox);}catch(_e){}previewBox=null;}
 }
-function previewOpen(it){
+function previewOpen(it,extraRows){
   previewClose();
   var box=document.createElement("div");
   box.className="pv";
@@ -1295,6 +1455,7 @@ function previewOpen(it){
     ["Штрихкод",it.barcode||"—"],
     ["Категория",it.category_name||"—"]
   ];
+  if(extraRows)rows=rows.concat(extraRows);
   rows.forEach(function(r){
     var row=add("div","pvRow");
     var k=add("span","pvK",r[0]);row.appendChild(k);
@@ -1322,6 +1483,13 @@ function previewOpen(it){
     if(previewTimer)clearTimeout(previewTimer);
     previewTimer=setTimeout(function(){
       previewTimer=0;
+      var gid=tile&&tile.getAttribute?tile.getAttribute("data-group"):"";
+      if(gid){
+        // Групповая плитка: превью по первой вариации + строка про выбор.
+        var grows=variantRowsOf(gid);
+        if(grows.length)previewOpen(grows[0],[["Вариантов",grows.length+" — короткий тап откроет выбор"]]);
+        return;
+      }
       var id=tile&&tile.getAttribute?tile.getAttribute("data-id"):"";
       var it=id&&((state.items||[]).find(function(x){return x.id===id;})
         ||(state._allItems||[]).find(function(x){return x.id===id;}));
@@ -1415,6 +1583,11 @@ $("cartList").addEventListener("click",function(ev){ if(ev.target===ev.currentTa
 $("bCartClose") && $("bCartClose").addEventListener("click",function(){$("cartModal").classList.remove("on");});
 $("bToggleCart").addEventListener("dblclick",function(){if(cartHasItems())openCartModal();});
 $("bCartPay") && $("bCartPay").addEventListener("click",function(){$("cartModal").classList.remove("on");$("bPay").click();});
+$("bVarClose") && $("bVarClose").addEventListener("click",closeVariantSheet);
+$("varList") && $("varList").addEventListener("click",function(ev){
+  var b=ev.target.closest("button[data-vid]");if(!b)return;
+  if(addToCartId(b.getAttribute("data-vid"))) closeVariantSheet();
+});
 
 function cartTotal(){
   return Object.keys(state.cart).reduce(function(s,id){
