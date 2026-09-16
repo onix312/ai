@@ -117,7 +117,8 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
             if path == "/api/nomenclature/photo.jpg":
                 return self.serve_nom_photo((query.get("id") or [""])[0])
             if path == "/api/nomenclature/variant/photo.jpg":
-                return self.serve_variant_photo((query.get("id") or [""])[0])
+                return self.serve_variant_photo((query.get("id") or [""])[0],
+                                                (query.get("n") or [""])[0])
             if path == "/api/order/photo.jpg":
                 return self.serve_order_photo((query.get("photo_id") or [""])[0])
             if path == "/api/job/keyframe.jpg":
@@ -309,10 +310,25 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         row = self.api.db.one("SELECT photo FROM nomenclature WHERE id=?", (nom_id,))
         return self.serve_photo_file((row or {}).get("photo") or "")
 
-    def serve_variant_photo(self, variant_id: str):
-        """Фото вариации (18.5, М4)."""
-        row = self.api.db.one("SELECT photo FROM nom_variants WHERE id=?", (variant_id,))
-        return self.serve_photo_file((row or {}).get("photo") or "")
+    def serve_variant_photo(self, variant_id: str, frame: str = ""):
+        """Фото вариации (18.5, М4; 18.6 — кадры галереи по ?n=).
+
+        Без n отдаётся обложка — байт-в-байт как раньше: касса, бот и
+        старые витрины ничего не заметили. n=1… — кадры галереи.
+        """
+        try:
+            gallery = self.api.nom.variant_gallery(variant_id)
+        except LookupError:
+            return self.send_json(404, {"error": "Вариация не найдена"})
+        name = ""
+        if frame not in (None, ""):
+            try:
+                name = gallery[int(frame)]
+            except (ValueError, IndexError):
+                return self.send_json(404, {"error": "Кадр не найден"})
+        else:
+            name = gallery[0] if gallery else ""
+        return self.serve_photo_file(name)
 
     # ------------------------------------------------ 8.5: вспомогательные
     def serve_keyframe(self, job_id: str, name: str):

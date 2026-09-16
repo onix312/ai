@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS nom_variants (
     price REAL DEFAULT 0,           -- своя цена продажи (0 = из себестоимости)
     cost REAL DEFAULT 0,            -- рассчитанная себестоимость (кэш)
     photo TEXT DEFAULT '',          -- фото вариации (18.5, М4; общее — nomenclature.photo)
+    brand TEXT DEFAULT '',          -- бренд пластика (18.6: вариация как товар)
+    description TEXT DEFAULT '',    -- описание вариации (18.6)
+    photos_json TEXT DEFAULT '',    -- галерея: JSON-список файлов сверх обложки (18.6)
     updated_at TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_variant_nom ON nom_variants(nom_id);

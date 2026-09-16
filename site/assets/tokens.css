@@ -284,3 +284,35 @@ button:disabled, .btn[disabled], .btn.disabled {
   background: var(--accent-soft);
 }
 .nav-link.nav-link-ext .ic { color: var(--accent); }
+
+/* ============================================ 18.6: бак остатка (pf-tank)
+   Один индикатор вместо трёх кружков процентов: карточка катушки (md),
+   остаток товара (sm), слот AMS и пульт (xs). Рендерит PFSpoolColor.tank()
+   из assets/colors.js — CSS и функция живут парой, дубли не заводить.
+   Уровень — --lvl, заливка — --fill (цвет пластика или его градиент). */
+.pf-tank { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; flex: none; }
+.pf-tank i {
+  position: relative; width: 36px; height: 54px; border: 1.5px solid var(--line-strong);
+  border-radius: 10px; background: var(--panel-2); overflow: hidden;
+}
+.pf-tank i::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+  height: var(--lvl, 100%); background: var(--fill, #8a94a6); transition: height .3s;
+}
+.pf-tank i::before {
+  content: ""; position: absolute; top: 3px; bottom: 3px; left: 4px; width: 4px; z-index: 1;
+  border-radius: 99px; background: rgba(255, 255, 255, .35);
+}
+.pf-tank b { font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.pf-tank.sm i { width: 24px; height: 36px; border-radius: 7px; }
+.pf-tank.sm i::before { left: 3px; width: 3px; }
+.pf-tank.sm b { font-size: 10px; }
+.pf-tank.xs { flex-direction: row; gap: 5px; }
+.pf-tank.xs i { width: 13px; height: 26px; border-radius: 5px; border-width: 1px; }
+.pf-tank.xs i::before { display: none; }
+.pf-tank.xs b { font-size: 10.5px; }
+.pf-tank.low i { border-color: var(--warn); }
+.pf-tank.low b { color: var(--warn); }
+.pf-tank.empty i { border-style: dashed; }
+.pf-tank.empty i::after { display: none; }
+.pf-tank.empty b { color: var(--muted); }

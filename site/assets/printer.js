@@ -253,10 +253,25 @@ function pslotHtml(p, x) {
   const title = `${x.label || ('Слот ' + (slot + 1))} · ${has ? (x.type || 'AMS') : 'пусто'}`
     + (bound ? ` · ${bound.material || ''} ${bound.color_name || ''} · ${Math.round(num(bound.remaining_grams))} г` : '')
     + (remain != null ? ` · ${Math.round(remain)}%` : '') + ' — клик: привязка катушки';
+  // 18.6: свотч слота — цветом привязанной катушки (двойные цвета,
+  // градиент, радуга, шёлк-2 через общий swatchCss), сырой hex принтера —
+  // только когда привязки нет. Остаток — общим «баком», а не текстом.
+  const swCss = bound && window.PFSpoolColor
+    ? PFSpoolColor.swatchCss(bound, x.color || '#cbd5e1')
+    : (x.color || '#cbd5e1');
+  const tankHtml = (remain != null && has)
+    ? ((window.PFSpoolColor && PFSpoolColor.tank)
+      ? PFSpoolColor.tank({
+        pct: remain, fill: swCss, size: 'xs',
+        title: `${Math.round(remain)}%`
+          + (bound ? ` · ${Math.round(num(bound.remaining_grams))} г на катушке` : ''),
+      })
+      : `<span class="pf-tank xs"><i></i><b>${Math.round(remain)}%</b></span>`)
+    : '';
   return `<button class="${cls.join(' ')}" type="button" data-pslot="${esc(p.id)}:${slot}" title="${esc(title)}">`
-    + `<span class="sw" style="background:${esc(x.color || '#cbd5e1')}"></span>`
+    + `<span class="sw" style="background:${esc(swCss)}"></span>`
     + `<span class="tx">${esc((x.type || (has ? 'AMS' : '—')) + ' · ' + (slot + 1))}<small>${esc(sub)}</small></span>`
-    + (remain != null && has ? `<span class="pc">${Math.round(remain)}%</span>` : '')
+    + tankHtml
     + '</button>';
 }
 
@@ -1112,13 +1127,21 @@ function renderAms(p) {
     const slotNum = traySlotNum(t);
     const bound = slotSpool(p.id, t);
     const spoolHint = bound && bound.color_name ? ' · ' + bound.color_name : '';
+    // 18.6 (дефект Б): трубка и бирка красятся цветом привязанной катушки
+    // через общий swatchCss — двойные цвета, градиент, радуга, шёлк-2.
+    // Сырой цвет принтера — только когда привязки нет.
+    const tubeCss = bound && window.PFSpoolColor
+      ? PFSpoolColor.swatchCss(bound, t.color || '#cbd5e1')
+      : (bound && bound.color_hex) || t.color || '#cbd5e1';
+    const tubeFillBg = String(tubeCss).indexOf('gradient(') >= 0
+      ? `background:${esc(tubeCss)};` : '';
     const spoolTag = bound
-      ? `<span class="spool-tag"><i style="background:${esc(bound.color_hex || '#cbd5e1')}"></i>${esc((bound.material || '') + ' ' + (bound.color_name || ''))} · ${Math.round(num(bound.remaining_grams))} г</span>`
+      ? `<span class="spool-tag"><i style="background:${esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(bound, '#cbd5e1') : (bound.color_hex || '#cbd5e1'))}"></i>${esc((bound.material || '') + ' ' + (bound.color_name || ''))} · ${Math.round(num(bound.remaining_grams))} г</span>`
       : (empty ? '' : '<span class="spool-tag none">не привязана</span>');
     const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
     return `<div class="ams-tube${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}${low ? ' low' : ''}${(!empty && !bound) ? ' unbound' : ''}"`
       + ` title="${esc((t.label || ('Слот ' + (num(t.slot) + 1))) + ' · ' + typeLabel + (human && !empty ? ' · ' + human : '') + spoolHint + (remain != null ? ` · ${Math.round(remain)}%` : '') + drying)}">`
-      + `<div class="tube-body"><i class="tube-fill" style="--filament:${esc(t.color || '#cbd5e1')};--lvl:${empty ? 0 : (remain == null ? 100 : clamp(remain, 3, 100))}%"></i>`
+      + `<div class="tube-body"><i class="tube-fill" style="--filament:${esc(String(tubeCss).indexOf('gradient(') >= 0 ? (t.color || '#cbd5e1') : tubeCss)};--lvl:${empty ? 0 : (remain == null ? 100 : clamp(remain, 3, 100))}%;${tubeFillBg}"></i>`
       + `<span class="tube-pct">${empty ? '' : (remain != null ? Math.round(remain) + '%' : '—')}</span>`
       + (t.active ? '<span class="tube-use" title="Сейчас печатает этим">▶</span>' : '')
       + '</div>'

@@ -790,18 +790,7 @@ html[data-density="shop"] .kpi .value { font-size: 28px; }
    плиток (17), режим «витрина глазами покупателя» (18), бейдж «цены
    просели» (19), таблица с живыми цифрами (Б4). */
 .prod-card .pqty-donut-row { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 2px; }
-.prod-donut {
-  flex: none; width: 34px; height: 34px; border-radius: 50%;
-  background: conic-gradient(var(--ok) calc(var(--p) * 1%), var(--panel-3) 0);
-  position: relative;
-}
-.prod-donut::after {
-  content: ""; position: absolute; inset: 7px; border-radius: 50%;
-  background: var(--panel); border: 1px solid var(--line);
-}
-.prod-donut.warn { background: conic-gradient(var(--warn) calc(var(--p) * 1%), var(--panel-3) 0); }
-.prod-donut.bad { background: conic-gradient(var(--bad) calc(var(--p) * 1%), var(--panel-3) 0); }
-.prod-donut.ok { background: conic-gradient(var(--ok) calc(var(--p) * 1%), var(--panel-3) 0); }
+/* 18.6: бублик остатка заменён общим баком (pf-tank, tokens.css) */
 .prod-card .pfacts .prod-spark { flex: none; opacity: .75; margin-left: 2px; align-self: center; }
 .prod-card .pfacts .prod-spark.up { color: var(--ok); }
 .prod-card .pfacts .prod-spark:not(.up) { color: var(--bad); }

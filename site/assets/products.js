@@ -388,10 +388,18 @@ function renderCards(list) {
         + `<polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`
         + `<circle cx="60" cy="${(18 - num(days[days.length - 1]) / peak * 16).toFixed(1)}" r="1.8" fill="currentColor"/></svg>`;
     })();
-    // 13.1 (13): бублик остатка — свободно/резерв/витрина формой, а не числом
-    const donut = disp
-      ? '<span class="prod-donut ok" style="--p:100" title="Витрина — без учёта остатков"></span>'
-      : `<span class="prod-donut ${stockHealthCls}" style="--p:${total ? stockPct : 0}" title="Свободно ${nfmt(free)} · резерв ${nfmt(reserved)}"></span>`;
+    // 13.1 (13) → 18.6: остаток — тем же «баком», что катушки и слоты AMS
+    // (PFSpoolColor.tank): свободно/резерв/витрина формой, а не числом
+    const donut = (window.PFSpoolColor && PFSpoolColor.tank)
+      ? PFSpoolColor.tank({
+        pct: disp ? 100 : (total ? stockPct : 0),
+        fill: 'var(--' + (disp ? 'ok' : stockHealthCls) + ')',
+        size: 'sm', low: !disp && (st === 'low'),
+        title: disp ? 'Витрина — без учёта остатков'
+          : ('Свободно ' + nfmt(free) + ' · резерв ' + nfmt(reserved)),
+      })
+      : `<span class="pf-tank sm" title="Свободно ${nfmt(free)} · резерв ${nfmt(reserved)}">`
+        + `<i style="height:36px"></i><b>${disp ? 100 : (total ? stockPct : 0)}%</b></span>`;
     // В63: стикеры витрины — по фактам, а не по настроению
     const stickers = [];
     const createdDays = i.created_at
@@ -925,6 +933,7 @@ function varRow(v) {
     + '<span class="var-cost">' + (num(v.cost) ? money(v.cost) : '—') + '</span>'
     + '<input type="number" min="0" step="any" data-var-price="' + esc(v.id) + '" value="'
     + (num(v.price) ? esc(v.price) : '') + '" placeholder="авто" title="Пусто — цена из себестоимости">'
+    + '<button class="btn sm" type="button" data-var-edit="' + esc(v.id) + '" title="Открыть карточку вариации: фото, поля, AMS">✎</button>'
     + '<button class="btn sm danger" type="button" data-var-del="' + esc(v.id) + '" title="Удалить вариацию">×</button>'
     + '</div>' + structHtml;
 }
@@ -968,9 +977,9 @@ function renderVariants() {
       : 'Нет ни одной вариации';
   }
   box.innerHTML = variantRows.length
-    ? '<div class="var-table"><div class="var-row var-head"><span></span>'
+    ? '<div class="var-table"><div class="var-row var-head"><span></span><span></span>'
       + '<div class="var-body">Вариант</div><span>Катушка</span>'
-      + '<span>Себестоимость</span><span>Цена</span><span></span></div>'
+      + '<span>Себестоимость</span><span>Цена</span><span></span><span></span></div>'
       + variantRows.map(varRow).join('') + '</div>'
     : '<div class="empty compact"><span>Вариаций пока нет — соберите их по осям выше.</span></div>';
 }
@@ -983,6 +992,251 @@ async function recalcVariantPrices() {
       + (num(r.kept_manual_price) ? ' · ' + num(r.kept_manual_price) + ' со своей ценой не тронуты' : ''));
     await reloadVariants();
   } catch (e) { fail(e); }
+}
+
+/* ================================================== редактор вариации (18.6)
+   Вариация — полноценный товар: галерея с обложкой, все поля карточки,
+   экономика и живой слот AMS её пластика. Быстрые правки (катушка, цена)
+   остаются в строке; всё остальное — здесь. Привязка к AMS — только через
+   катушку/состав, прямых привязок вариации к слоту нет. */
+let editingVariant = null;
+let variantCard = null;
+let variantPrinters = null;
+let variantBindSpool = '';
+
+function variantFrameUrl(vid, n) {
+  return '/api/nomenclature/variant/photo.jpg?id=' + encodeURIComponent(vid) + '&n=' + n;
+}
+
+async function openVariantEditor(vid) {
+  let card = null;
+  try {
+    card = await get('/api/nomenclature/variant/card', { id: vid });
+  } catch (err) { fail(err); return; }
+  variantCard = card;
+  editingVariant = vid;
+  variantBindSpool = '';
+  const v = card.variant || {};
+  $('vf_title').textContent = v.name || 'Вариация';
+  const parent = (data.items || []).find((i) => i.id === v.nom_id);
+  $('vf_sub').textContent = 'Товар: ' + (parent ? parent.name : (v.nom_id || ''));
+  const setv = (key, value) => { const el = $('vf_' + key); if (el) el.value = value ?? ''; };
+  setv('name', v.name); setv('color_name', v.color_name);
+  setv('color_hex', v.color_hex); setv('material', v.material);
+  setv('brand', v.brand); setv('size', v.size);
+  setv('grams', num(v.grams) ? v.grams : '');
+  setv('hours', num(v.hours) ? v.hours : '');
+  setv('sku', v.sku); setv('barcode', v.barcode);
+  setv('description', v.description);
+  setv('price', num(v.price) ? v.price : '');
+  const pick = $('vf_color_pick');
+  if (pick) pick.value = /^#[0-9a-f]{6}$/i.test(v.color_hex || '') ? v.color_hex : '#8a94a6';
+  const spools = data.spools || [];
+  $('vf_spool').innerHTML = '<option value="">— как у товара —</option>' + spools.map((s) =>
+    '<option value="' + esc(s.id) + '"' + (s.id === (v.spool_id || '') ? ' selected' : '')
+    + '>' + esc(spoolLabel(s)) + '</option>').join('');
+  renderVariantGallery();
+  renderVariantEconomy();
+  renderVariantAms();
+  openModal('variant_modal');
+}
+
+function renderVariantGallery() {
+  const box = $('vf_gallery');
+  if (!box || !variantCard) return;
+  const gallery = variantCard.gallery || [];
+  if (!gallery.length) {
+    box.innerHTML = '<div class="vf-empty"><span>Фото нет — витрина показывает цветной свотч</span>'
+      + '<button class="btn sm primary" type="button" data-vf-add>＋ Добавить фото</button></div>';
+    return;
+  }
+  box.innerHTML = '<div class="vf-cover"><img src="' + variantFrameUrl(editingVariant, 0) + '" alt="">'
+    + '<span class="vf-badge">обложка · витрина и бот</span></div>'
+    + '<div class="vf-thumbs">'
+    + gallery.map((name, n) =>
+      '<span class="vf-thumb' + (n === 0 ? ' cover' : '') + '">'
+      + '<img src="' + variantFrameUrl(editingVariant, n) + '" alt="" loading="lazy">'
+      + '<span class="vf-thumb-acts">'
+      + (n === 0 ? '' : '<button type="button" data-vf-cover="' + n + '" title="Сделать обложкой">★</button>')
+      + '<button type="button" data-vf-del="' + n + '" title="Удалить кадр">×</button>'
+      + '</span></span>').join('')
+    + (gallery.length < 6
+      ? '<button class="vf-add" type="button" data-vf-add title="Добавить кадр (до 6)">＋</button>' : '')
+    + '</div>';
+}
+
+function renderVariantEconomy() {
+  const box = $('vf_economy');
+  if (!box) return;
+  const eco = (variantCard && variantCard.economics) || {};
+  if (eco.cost == null) { box.innerHTML = ''; return; }
+  const br = eco.breakdown || {};
+  box.innerHTML = '<div class="vf-eco-row"><span>Себестоимость <b>' + money(eco.cost) + '</b></span>'
+    + '<span>Цена <b>' + money(eco.price) + '</b>'
+    + (eco.auto_price ? ' <small class="muted">авто</small>' : '') + '</span>'
+    + '<span>Наценка <b>' + nfmt(eco.markup, 1) + '%</b></span></div>'
+    + '<div class="vf-eco-row"><span>Пластик <b>' + nfmt(eco.grams, 1) + ' г</b></span>'
+    + '<span>Печать <b>' + nfmt(eco.hours, 2) + ' ч</b></span>'
+    + '<span>Энергия <b>' + nfmt(br.energy_kwh, 3) + ' кВт·ч</b></span></div>';
+}
+
+function renderVariantAms() {
+  const box = $('vf_ams');
+  if (!box) return;
+  const ams = (variantCard && variantCard.ams) || {};
+  const rows = [];
+  if (ams.spool) rows.push({ label: 'Катушка вариации', slot: ams.spool });
+  (ams.structures || []).forEach((s) => rows.push({
+    label: 'Состав · ' + ([s.material, s.color_name].filter(Boolean).join(' ') || 'катушка')
+      + ' · ' + round1(s.grams) + ' г',
+    slot: s.slot || {},
+  }));
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty compact"><span>Катушка не привязана — вариация печатается «чем придётся». Выберите катушку выше и сохраните.</span></div>';
+    return;
+  }
+  box.innerHTML = rows.map((r) => {
+    const s = r.slot || {};
+    const where = s.missing ? '<span class="chip xs bad">катушка удалена со склада</span>'
+      : (s.in_ams
+        ? `<span class="chip xs ok">AMS · ${esc(s.printer_name || s.printer_id || '')} · слот ${num(s.ams_slot) + 1}</span>`
+        : '<span class="chip xs warn">не в AMS</span>');
+    const grams = num(s.remaining_grams) ? ` · ${nfmt(s.remaining_grams)} г` : '';
+    const act = s.missing ? ''
+      : (s.in_ams
+        ? `<button class="btn sm ghost" type="button" data-vf-unbind="${esc(s.spool_id)}">Отвязать</button>`
+        : `<button class="btn sm" type="button" data-vf-bind="${esc(s.spool_id)}">В слот…</button>`);
+    return `<div class="vf-ams-row"><span class="sw" style="background:${esc(s.color_hex || '#cbd5e1')}"></span>`
+      + `<span class="grow"><b>${esc(r.label)}</b><small class="muted">${esc([s.material, s.color_name].filter(Boolean).join(' '))}${grams}</small></span>`
+      + where + act + '</div>';
+  }).join('') + '<div class="vf-bind" id="vf_bind_row" hidden></div>';
+}
+
+async function saveVariantEditor() {
+  if (!editingVariant) return;
+  const val = (key) => { const el = $('vf_' + key); return el ? el.value.trim() : ''; };
+  const payload = {
+    id: editingVariant, nom_id: editingNom,
+    name: val('name'), color_name: val('color_name'), color_hex: val('color_hex'),
+    material: val('material'), brand: val('brand'), size: val('size'),
+    grams: num(val('grams')), hours: num(val('hours')),
+    sku: val('sku'), barcode: val('barcode'), description: val('description'),
+    price: num(val('price')), spool_id: ($('vf_spool') || {}).value || '',
+  };
+  try {
+    const saved = await post('/api/nomenclature/variant/save', payload);
+    variantCard = await get('/api/nomenclature/variant/card', { id: editingVariant });
+    const v = variantRows.find((x) => x.id === editingVariant);
+    const eco = variantCard.economics || {};
+    if (v) {
+      Object.assign(v, (saved && saved.variant) || {});
+      if (eco.cost != null) v.cost = eco.cost;
+      if (eco.auto_price) v.price = eco.price;
+    }
+    $('vf_title').textContent = ((saved && saved.variant) || {}).name || 'Вариация';
+    renderVariantGallery();
+    renderVariantEconomy();
+    renderVariantAms();
+    renderVariants();
+    toast('Вариация сохранена', 'Строка в карточке товара обновлена');
+  } catch (err) { fail(err); }
+}
+
+async function deleteVariantEditor() {
+  if (!editingVariant) return;
+  if (!confirmDanger('Удалить вариацию? Фото и состав удалятся вместе с ней.')) return;
+  try {
+    await post('/api/nomenclature/variant/delete', { id: editingVariant });
+    variantRows = variantRows.filter((v) => v.id !== editingVariant);
+    editingVariant = null;
+    variantCard = null;
+    closeModal('variant_modal');
+    renderVariants();
+    toast('Вариация удалена', '');
+  } catch (err) { fail(err); }
+}
+
+async function refreshVariantCard() {
+  if (!editingVariant) return;
+  try {
+    variantCard = await get('/api/nomenclature/variant/card', { id: editingVariant });
+    renderVariantGallery();
+    renderVariantEconomy();
+    renderVariantAms();
+  } catch (err) { fail(err); }
+}
+
+function syncVariantGalleryResp(resp) {
+  if (!resp) return;
+  variantCard.gallery = resp.gallery || [];
+  variantCard.variant.photo = (resp.gallery || [])[0] || '';
+  const v = variantRows.find((x) => x.id === editingVariant);
+  if (v) v.photo = variantCard.variant.photo;
+  renderVariantGallery();
+  renderVariants();
+}
+
+async function addVariantPhotoFile(file) {
+  if (!file || !editingVariant) return;
+  const url = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  try {
+    const resp = await post('/api/nomenclature/variant/photos', { id: editingVariant, data: url });
+    syncVariantGalleryResp(resp);
+    toast('Кадр добавлен', 'Первый кадр — обложка витрины и бота');
+  } catch (err) { fail(err); }
+}
+
+async function bindVariantSpool(spoolId, printerId, slot, force) {
+  try {
+    await post('/api/spool/bind', {
+      id: spoolId, printer_id: printerId, ams_slot: String(slot),
+      push_ams: true, confirmed: true, ...(force ? { force: true } : {}),
+    });
+    variantBindSpool = '';
+    await refreshVariantCard();
+    toast('Катушка в слоте', 'Материал отправлен в принтер');
+  } catch (err) {
+    const msg = (err && err.message) || '';
+    if (!force && msg.indexOf('уже занят') >= 0
+        && confirmDanger(msg + '\nЗаменить катушку в этом слоте?')) {
+      await bindVariantSpool(spoolId, printerId, slot, true);
+      return;
+    }
+    fail(err);
+  }
+}
+
+async function openVariantBindRow(spoolId) {
+  variantBindSpool = spoolId;
+  if (!variantPrinters) {
+    try {
+      const d = await get('/api/printers');
+      variantPrinters = (d && d.printers) || [];
+    } catch (err) { fail(err); return; }
+  }
+  if (!variantPrinters.length) { toast('Принтеров нет', 'Сначала добавьте принтер'); return; }
+  const row = $('vf_bind_row');
+  if (!row) return;
+  const slots = [];
+  for (let i = 0; i < 16; i++) slots.push(`<option value="${i}">${i + 1}</option>`);
+  row.innerHTML = '<select id="vf_bind_printer">'
+    + variantPrinters.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('')
+    + '</select><select id="vf_bind_slot">' + slots.join('') + '</select>'
+    + '<button class="btn sm primary" type="button" id="vf_bind_ok">Привязать</button>'
+    + '<button class="btn sm ghost" type="button" id="vf_bind_cancel">Отмена</button>';
+  row.hidden = false;
+  $('vf_bind_ok').addEventListener('click', () => {
+    bindVariantSpool(variantBindSpool, $('vf_bind_printer').value, $('vf_bind_slot').value, false);
+  });
+  $('vf_bind_cancel').addEventListener('click', () => {
+    variantBindSpool = '';
+    row.hidden = true;
+  });
 }
 
 async function loadVariantData(d) {
@@ -2225,6 +2479,8 @@ function bind() {
   $('nf_variants').addEventListener('click', async (e) => {
     const ph = e.target.closest('[data-var-photo]');
     if (ph) { _askVariantPhoto(ph.dataset.varPhoto); return; }
+    const ed = e.target.closest('[data-var-edit]');
+    if (ed) { openVariantEditor(ed.dataset.varEdit); return; }
     const push = e.target.closest('[data-struct-push]');
     if (push) { _pushVariantStruct(push.dataset.structPush); return; }
     const clearBtn = e.target.closest('[data-struct-clear]');
@@ -2442,6 +2698,54 @@ function bind() {
       $('nf_photo_preview').hidden = false;
     };
     reader.readAsDataURL(file);
+  });
+  // --- редактор вариации (18.6)
+  $('vf_save').addEventListener('click', saveVariantEditor);
+  $('vf_delete').addEventListener('click', deleteVariantEditor);
+  $('vf_photo_file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (file) addVariantPhotoFile(file);
+  });
+  $('vf_gallery').addEventListener('click', async (e) => {
+    const add = e.target.closest('[data-vf-add]');
+    if (add) { $('vf_photo_file').click(); return; }
+    const cover = e.target.closest('[data-vf-cover]');
+    if (cover) {
+      try {
+        const name = (variantCard.gallery || [])[num(cover.dataset.vfCover)];
+        syncVariantGalleryResp(await post('/api/nomenclature/variant/cover',
+          { id: editingVariant, name }));
+        toast('Обложка заменена', 'Витрина и бот покажут новый первый кадр');
+      } catch (err) { fail(err); }
+      return;
+    }
+    const del = e.target.closest('[data-vf-del]');
+    if (del) {
+      try {
+        const name = (variantCard.gallery || [])[num(del.dataset.vfDel)];
+        syncVariantGalleryResp(await post('/api/nomenclature/variant/photos/delete',
+          { id: editingVariant, name }));
+        toast('Кадр удалён', '');
+      } catch (err) { fail(err); }
+    }
+  });
+  $('vf_ams').addEventListener('click', async (e) => {
+    const bind = e.target.closest('[data-vf-bind]');
+    if (bind) { openVariantBindRow(bind.dataset.vfBind); return; }
+    const unbind = e.target.closest('[data-vf-unbind]');
+    if (unbind) {
+      try {
+        await post('/api/spool/bind', { id: unbind.dataset.vfUnbind, ams_slot: '' });
+        await refreshVariantCard();
+        toast('Катушка отвязана', 'Слот AMS свободен');
+      } catch (err) { fail(err); }
+    }
+  });
+  $('vf_color_pick').addEventListener('input', (e) => { $('vf_color_hex').value = e.target.value; });
+  $('vf_color_hex').addEventListener('input', (e) => {
+    const v = e.target.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) $('vf_color_pick').value = v;
   });
   if ($('short_allow')) {
     $('short_allow').addEventListener('click', async () => {

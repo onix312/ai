@@ -149,7 +149,13 @@ function renderStock() {
       ? ` <small class="muted">· ${esc(PFSpoolColor.kindLabel(s.color_kind))}</small>` : '';
     return `<article class="spool ${cls}" data-spool="${esc(s.id)}" title="Нажмите, чтобы изменить" style="--filament:${esc(colorCss)}">`
       + `<div class="spool-top">`
-      + `<div class="reel" style="--filament:${esc(colorCss)};--p:${Math.round(p)}"><span class="reel-pct">${Math.round(p)}%</span></div>`
+      + ((window.PFSpoolColor && PFSpoolColor.tank)
+        ? PFSpoolColor.tank({
+          pct: p, fill: colorCss, size: 'md',
+          low: p > 0 && p < num(PF.state.settings.filament_low_threshold, 15),
+          title: `${nfmt(s.remaining_grams)} / ${nfmt(s.total_grams)} г · ${Math.round(p)}%`,
+        })
+        : `<span class="pf-tank md" title="${nfmt(s.remaining_grams)} г"><i></i><b>${Math.round(p)}%</b></span>`)
       + `<div class="body">`
       + `<div class="spool-title-row">`
       + `<span class="mat-chip" data-mat="${esc(s.material || '')}">${esc(s.material || 'Тип не задан')}</span>`

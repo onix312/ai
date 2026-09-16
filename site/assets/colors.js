@@ -36,5 +36,25 @@ window.PFSpoolColor = (() => {
     return ({ gradient: 'градиент', rainbow: 'радуга', silk: 'шёлк-2' })[kind] || '';
   }
 
-  return { colorsOf, swatchCss, kindLabel };
+  /* Вертикальный «бак» остатка (18.6): один индикатор на все экраны вместо
+     трёх разных кружков процентов (катушка на складе, остаток товара, слот
+     AMS). Заливка — цветом пластика (многоцвет — тем же градиентом, что
+     свотч), подпись — проценты, точные граммы — в подсказке. Чистая функция
+     без DOM: прогоняется в node-тесте по исходнику.
+     o: { pct, fill, size ('md'|'sm'|'xs'), caption, title, low } */
+  function tank(o) {
+    o = o || {};
+    var pct = Math.max(0, Math.min(100, Math.round(+o.pct || 0)));
+    var fill = String(o.fill || '#8a94a6').replace(/[";]/g, '');
+    var size = o.size === 'sm' || o.size === 'xs' ? ' ' + o.size : ' md';
+    var low = o.low != null ? !!o.low : (pct > 0 && pct < 15);
+    var cls = 'pf-tank' + size + (pct <= 0 ? ' empty' : (low ? ' low' : ''));
+    var caption = o.caption != null ? String(o.caption) : pct + '%';
+    var title = String(o.title || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return '<span class="' + cls + '" style="--lvl:' + pct + '%;--fill:' + fill + '"'
+      + (title ? ' title="' + title + '"' : '') + '>'
+      + '<i aria-hidden="true"></i><b>' + caption.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</b></span>';
+  }
+
+  return { colorsOf, swatchCss, kindLabel, tank };
 })();
