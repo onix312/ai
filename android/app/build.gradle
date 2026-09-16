@@ -28,7 +28,8 @@ android {
         // Оболочка сравнивает его с `version_code` из site/app/version.json
         // и сама предлагает обновиться — расхождение с APP_VERSION ломает это.
         versionCode 180500
-        versionName '18.5.0'    }
+        versionName '18.5.0'
+    }
 
     signingConfigs {
         if (hasKeystore) {
