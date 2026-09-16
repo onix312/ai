@@ -28,6 +28,10 @@ GOOD_KINDS = {"product", "kit", "semi"}
 MAX_VARIANTS_TOTAL = 2000
 MAX_AXES = 6
 
+# Галерея вариации (18.6): обложка + кадры. Шесть кадров хватает на товар
+# с четырёх сторон, а телефон владельца не превращается в фотоархив.
+VARIANT_GALLERY_MAX = 6
+
 _SLUG_MAP = {
     "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
     "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
@@ -638,6 +642,7 @@ class Nomenclature:
             raise ValueError("Не указана номенклатура")
         if not data.get("id"):
             data["id"] = uid("var")
+        data.setdefault("updated_at", now_iso())
         return self.db.upsert("nom_variants", data)
 
     def delete_variant(self, variant_id: str) -> None:
@@ -1029,12 +1034,29 @@ class Nomenclature:
 
         Те же правила, что у общего фото товара: до 8 МБ. Общее фото живёт
         отдельно в nomenclature.photo и остаётся первым кадром карусели кассы.
+        С 18.6 это обложка галереи: замена бьёт только файл обложки, кадры
+        галереи не трогает.
         """
         from .config import PHOTO_DIR
-        import base64
-        variant = self.db.one("SELECT id FROM nom_variants WHERE id=?", (variant_id,))
+        self._require_variant(variant_id)
+        ext, raw = self._decode_variant_photo(data_url)
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"var_{variant_id}.{ext}"
+        (PHOTO_DIR / name).write_bytes(raw)
+        self.db.execute("UPDATE nom_variants SET photo=?, updated_at=? WHERE id=?",
+                        (name, now_iso(), variant_id))
+        return name
+
+    def _require_variant(self, variant_id: str) -> dict:
+        variant = self.db.one("SELECT * FROM nom_variants WHERE id=?", (variant_id,))
         if not variant:
             raise LookupError("Вариация не найдена")
+        return variant
+
+    @staticmethod
+    def _decode_variant_photo(data_url: str) -> tuple[str, bytes]:
+        """Data URL → (расширение, байты). Правила одни на обложку и галерею."""
+        import base64
         data_url = str(data_url or "")
         if "," not in data_url:
             raise ValueError("Не похоже на data URL")
@@ -1046,12 +1068,155 @@ class Nomenclature:
             raise ValueError("Не похоже на data URL") from exc
         if len(raw) > 8 * 1024 * 1024:
             raise ValueError("Фото больше 8 МБ")
+        return ext, raw
+
+    def variant_gallery(self, variant_id: str) -> list[str]:
+        """Кадры вариации обложкой вперёд: photo + photos_json без дублей."""
+        import json
+        row = self.db.one("SELECT photo, photos_json FROM nom_variants WHERE id=?",
+                          (variant_id,))
+        if not row:
+            raise LookupError("Вариация не найдена")
+        out: list[str] = []
+        for name in [row.get("photo") or ""] + self._gallery_names(row.get("photos_json")):
+            name = str(name or "").strip()
+            if name and name not in out:
+                out.append(name)
+        return out
+
+    @staticmethod
+    def _gallery_names(raw: str) -> list[str]:
+        import json
+        try:
+            parsed = json.loads(raw or "[]")
+        except (ValueError, TypeError):
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(x).strip() for x in parsed if str(x).strip()]
+
+    def add_variant_photo(self, variant_id: str, data_url: str) -> dict[str, Any]:
+        """Галерея вариации (18.6): новый кадр в конец, обложка не меняется.
+
+        Обложки нет — первый кадр становится ею (старые витрины, знающие
+        только photo, видят его сразу). Больше шести кадров не держим:
+        телефон владельца и так распухнет от фото бобины.
+        """
+        import json
+        from .config import PHOTO_DIR
+        self._require_variant(variant_id)
+        ext, raw = self._decode_variant_photo(data_url)
+        gallery = self.variant_gallery(variant_id)
+        if len(gallery) >= VARIANT_GALLERY_MAX:
+            raise ValueError(f"Больше {VARIANT_GALLERY_MAX} фото не держим")
         PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-        name = f"var_{variant_id}.{ext}"
+        if not gallery:
+            name = f"var_{variant_id}.{ext}"
+            (PHOTO_DIR / name).write_bytes(raw)
+            self.db.execute("UPDATE nom_variants SET photo=?, updated_at=? WHERE id=?",
+                            (name, now_iso(), variant_id))
+            return {"photo": name, "gallery": [name]}
+        taken = set(gallery)
+        slot = 1
+        while f"var_{variant_id}_{slot}.{ext}" in taken:
+            slot += 1
+        name = f"var_{variant_id}_{slot}.{ext}"
         (PHOTO_DIR / name).write_bytes(raw)
-        self.db.execute("UPDATE nom_variants SET photo=?, updated_at=? WHERE id=?",
-                        (name, now_iso(), variant_id))
-        return name
+        row = self.db.one("SELECT photos_json FROM nom_variants WHERE id=?", (variant_id,))
+        names = self._gallery_names((row or {}).get("photos_json"))
+        names.append(name)
+        self.db.execute("UPDATE nom_variants SET photos_json=?, updated_at=? WHERE id=?",
+                        (json.dumps(names, ensure_ascii=False), now_iso(), variant_id))
+        return {"photo": name, "gallery": self.variant_gallery(variant_id)}
+
+    def delete_variant_photo(self, variant_id: str, name: str) -> dict[str, Any]:
+        """Убрать кадр из галереи. Удалённая обложка не оставляет дыру:
+        обложкой становится следующий кадр, витрина не пустеет."""
+        import json
+        from .config import PHOTO_DIR
+        row = self._require_variant(variant_id)
+        name = str(name or "").strip()
+        gallery = self.variant_gallery(variant_id)
+        if name not in gallery:
+            raise ValueError("Такого кадра у вариации нет")
+        try:
+            (PHOTO_DIR / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+        cover = str(row.get("photo") or "")
+        rest = [g for g in self._gallery_names(row.get("photos_json")) if g != name]
+        if name == cover:
+            cover = rest.pop(0) if rest else ""
+        self.db.execute("UPDATE nom_variants SET photo=?, photos_json=?, updated_at=? WHERE id=?",
+                        (cover, json.dumps(rest, ensure_ascii=False), now_iso(), variant_id))
+        return {"photo": cover, "gallery": self.variant_gallery(variant_id)}
+
+    def set_variant_cover(self, variant_id: str, name: str) -> dict[str, Any]:
+        """Сделать кадр галереи обложкой (бывшая обложка уходит в галерею)."""
+        import json
+        row = self._require_variant(variant_id)
+        name = str(name or "").strip()
+        gallery = self.variant_gallery(variant_id)
+        if name not in gallery:
+            raise ValueError("Такого кадра у вариации нет")
+        cover = str(row.get("photo") or "")
+        rest = [g for g in gallery if g != name]
+        if cover and cover != name:
+            rest.insert(0, cover)
+        self.db.execute("UPDATE nom_variants SET photo=?, photos_json=?, updated_at=? WHERE id=?",
+                        (name, json.dumps(rest, ensure_ascii=False), now_iso(), variant_id))
+        return {"photo": name, "gallery": self.variant_gallery(variant_id)}
+
+    def variant_card(self, variant_id: str) -> dict[str, Any]:
+        """Карточка вариации для мини-редактора (18.6): строка, галерея,
+        экономика и живой слот AMS её пластика — привязка всегда через
+        катушку/состав, прямых привязок вариации к слоту нет."""
+        row = self._require_variant(variant_id)
+        economics: dict[str, Any] = {}
+        try:
+            economics = self.variant_economics(variant_id)
+        except ValueError:
+            economics = {}
+        return {
+            "variant": row,
+            "gallery": self.variant_gallery(variant_id),
+            "economics": economics,
+            "ams": self._variant_ams(row),
+        }
+
+    def _variant_ams(self, row: dict) -> dict[str, Any]:
+        """Где физически лежит пластик вариации: слот AMS её катушки
+        (и катушек состава). Пусто — вариация печатается «чем придётся»."""
+        out: dict[str, Any] = {"spool": None, "structures": []}
+        spool_id = str(row.get("spool_id") or "").strip()
+        if spool_id:
+            out["spool"] = self._spool_slot(spool_id)
+        for struct in self.variant_structures(row.get("id") or ""):
+            struct = dict(struct)
+            struct["slot"] = self._spool_slot(str(struct.get("spool_id") or ""))
+            out["structures"].append(struct)
+        return out
+
+    def _spool_slot(self, spool_id: str) -> dict[str, Any]:
+        spool = self.db.one(
+            "SELECT id, material, color_name, color_hex, remaining_grams,"
+            " printer_id, ams_slot FROM spools WHERE id=?", (spool_id,)) or {}
+        if not spool:
+            return {"spool_id": spool_id, "missing": True}
+        printer_id = str(spool.get("printer_id") or "")
+        printer = self.db.one("SELECT id, name FROM printers WHERE id=?",
+                              (printer_id,)) if printer_id else None
+        slot = str(spool.get("ams_slot") or "")
+        return {
+            "spool_id": spool.get("id"), "material": spool.get("material") or "",
+            "color_name": spool.get("color_name") or "",
+            "color_hex": spool.get("color_hex") or "",
+            "remaining_grams": num(spool.get("remaining_grams")),
+            "printer_id": printer_id,
+            "printer_name": str((printer or {}).get("name") or printer_id),
+            "ams_slot": slot,
+            "in_ams": bool(printer_id and slot not in ("", None)),
+        }
 
     def spool_options(self) -> list[dict]:
         """Катушки склада для выбора в карточке: цена за грамм видна сразу."""

@@ -2,7 +2,7 @@
 <html lang="ru" data-theme="dark">
 <head>
 <script src="/assets/theme-init.js?v=17.0.1"></script>
-<script src="/assets/colors.js?v=18.5.0"></script>
+<script src="/assets/colors.js?v=18.6.0"></script>
 <link rel="manifest" href="/pult.webmanifest">
 <meta name="theme-color" content="#4f46e5">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,7 +12,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · пульт цеха</title>
-<link rel="stylesheet" href="assets/tokens.css?v=17.0.1">
+<link rel="stylesheet" href="assets/tokens.css?v=18.6.0">
 <style>
  /* Пульт цеха (18.0) — отдельное приложение, а не панель: один экран на
     задачу, крупные кнопки под палец, работа с телефона и планшета.
@@ -102,6 +102,8 @@
  @media (min-width:780px) { .pk-slots { grid-template-columns:1fr 1fr; } }
  .pk-slot { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:14px; }
  .pk-slot.active { border-color:var(--accent); }
+ /* 18.6: бак остатка в строке состояния слота */
+ .pk-sub-tank { display:flex; align-items:center; gap:9px; }
  .pk-chip { display:inline-block; width:22px; height:22px; border-radius:8px; flex:none;
    border:1px solid var(--line); background:#CBD5E1; }
  .pk-slot-act { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:12px; }
@@ -670,9 +672,25 @@
   function slotHtml(item){
     var stx = slotState(item);
     var live = item.live, mem = item.mem;
+    // 18.6: чип слота — цветом привязанной катушки (двойные цвета, градиент,
+    // радуга, шёлк-2 через общий swatchCss), остаток — общим «баком».
+    var bound = null;
+    if (mem && mem.spool_id && st.spools) {
+      for (var bi = 0; bi < st.spools.length; bi++) {
+        if (String(st.spools[bi].id) === String(mem.spool_id)) { bound = st.spools[bi]; break; }
+      }
+    }
+    var chipCss = (bound && window.PFSpoolColor)
+      ? PFSpoolColor.swatchCss(bound, stx.color) : stx.color;
+    var tankHtml = '';
+    if (stx.pct >= 0 && window.PFSpoolColor && PFSpoolColor.tank) {
+      var gramsBit = stx.grams > 0 ? Math.round(stx.grams) + ' г · ' : '';
+      tankHtml = PFSpoolColor.tank({ pct: stx.pct, fill: chipCss, size: 'xs',
+        title: gramsBit + Math.round(stx.pct) + '%' });
+    }
     var bits = [];
     if (stx.material) bits.push(esc(stx.material) + (stx.colorName ? ' ' + esc(stx.colorName) : ''));
-    if (stx.pct >= 0) bits.push(Math.round(stx.pct) + '%');
+    if (stx.pct >= 0 && !tankHtml) bits.push(Math.round(stx.pct) + '%');
     if (stx.grams > 0) bits.push(Math.round(stx.grams) + ' г');
     var source = [];
     if (stx.livePresent) source.push('живой слот');
@@ -699,11 +717,12 @@
     }
     return '<div class="pk-slot' + ((live && live.active) ? ' active' : '') + '" data-slot-card="'
       + esc(item.slot) + '">'
-      + '<div class="pk-row"><span class="pk-chip" style="background:' + esc(stx.color) + '"></span>'
+      + '<div class="pk-row"><span class="pk-chip" style="background:' + esc(chipCss) + '"></span>'
       + '<span class="pk-name" style="font-size:15.5px">' + esc(slotName(item)) + '</span>'
       + ((live && live.active) ? '<span class="pk-pill">печатает</span>' : '')
       + (stx.empty ? '<span class="pk-pill">пусто</span>' : '') + '</div>'
-      + '<div class="pk-sub">' + (bits.length ? bits.join(' · ') : 'пластик неизвестен') + '</div>'
+      + '<div class="pk-sub' + (tankHtml ? ' pk-sub-tank' : '') + '">' + tankHtml
+      + '<span>' + (bits.length ? bits.join(' · ') : 'пластик неизвестен') + '</span></div>'
       + (source.length ? '<div class="pk-note">' + esc(source.join(' · ')) + '</div>' : '')
       + '<div class="pk-slot-act">' + actions.join('') + '</div></div>';
   }

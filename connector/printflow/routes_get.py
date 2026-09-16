@@ -720,6 +720,20 @@ def get_variant_economics(api: Any, ctx: Ctx):
         return 404, {"error": str(exc)}
 
 
+@router.get("/api/nomenclature/variant/card",
+            doc="GET /api/nomenclature/variant/card")
+def get_variant_card(api: Any, ctx: Ctx):
+    """Карточка вариации для мини-редактора (18.6): строка, галерея,
+    экономика и живой слот AMS её пластика."""
+    variant_id = str(ctx.one("id") or ctx.one("variant_id") or "").strip()
+    if not variant_id:
+        return 400, {"error": "Не указана вариация"}
+    try:
+        return 200, api.nom.variant_card(variant_id)
+    except LookupError as exc:
+        return 404, {"error": str(exc)}
+
+
 @router.get("/api/nomenclature/spools", doc="GET /api/nomenclature/spools")
 def get_nomenclature_spools(api: Any, ctx: Ctx):
     """Катушки склада для выбора в карточке: цена за грамм видна сразу."""

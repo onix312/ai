@@ -7,6 +7,11 @@ const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, hoursText, minutesText, 
 const { get, post, api } = PF.api;
 
 let editingOrder = null, editingOrderUpdatedAt = '', editingNiche = null, statusDraft = [];
+// 18.6 (прожарка): ключ нового заказа против двойного клика «Сохранить».
+// Сервер уже умеет client_request_id (повтор превращается в чтение), но
+// панель его не слала — второй тап заводил заказ-дубль. Ключ живёт, пока
+// форма нового заказа не сохранилась или не закрылась.
+let orderRequestKey = '';
 let fulfillmentDraft = null;
 let orderTab = 'order';
 let aftercareItems = [], aftercareCurrent = null;
@@ -1506,6 +1511,8 @@ async function downloadOrderFile() {
 
 async function openOrder(id, intakeDraft, intakeMeta) {
   editingOrder = id || null;
+  orderRequestKey = id ? '' : ((window.crypto && crypto.randomUUID)
+    ? `panel-order-${crypto.randomUUID()}` : `panel-order-${Date.now()}`);
   fillSelectors();
   let order = id ? PF.state.orders.find((o) => o.id === id) : null;
   if (id) { try { order = await get('/api/order', { id }); } catch (e) { /* используем локальную копию */ } }
@@ -1958,6 +1965,7 @@ async function loadFilamentFact(orderId) {
 async function saveOrder(prepareAfter) {
   const payload = { id: editingOrder || '' };
   if (editingOrderUpdatedAt) payload.expected_updated_at = editingOrderUpdatedAt;
+  if (!editingOrder && orderRequestKey) payload.client_request_id = orderRequestKey;
   OF.forEach((k) => { const el = $('of_' + k); if (el) payload[k] = el.value; });
   if (payload.colors !== undefined) payload.colors = colorsToJson(payload.colors);
   distributeSpoolGrams();
@@ -1976,10 +1984,16 @@ async function saveOrder(prepareAfter) {
   // отдельной подтверждаемой операцией через /api/payment/save.
   payload.auto_cost = +$('of_auto_cost').value;
   const wasEditing = Boolean(editingOrder);
+  // 18.6: кнопки глушим на время запроса (как nom_save в 18.4.3) — второй
+  // слой против дублей поверх client_request_id.
+  const saveBtns = ['order_save', 'order_save_prepare', 'order_queue']
+    .map((bid) => $(bid)).filter(Boolean);
+  saveBtns.forEach((b) => { b.disabled = true; });
   try {
     const res = await post('/api/order/save', payload);
     editingOrder = res.order.id;
     editingOrderUpdatedAt = String(res.order.updated_at || '');
+    if (!wasEditing) orderRequestKey = '';
     if (prepareAfter) {
       try {
         const prepared = await post('/api/order/prepare', {
@@ -2011,6 +2025,7 @@ async function saveOrder(prepareAfter) {
     PF.refreshLists().then(() => { fillSelectors(); renderOrders(); }).catch(() => {});
     return res;
   } catch (e) { fail(e); return null; }
+  finally { saveBtns.forEach((b) => { b.disabled = false; }); }
 }
 
 /* Свежая строка из ответа — в список без перезагрузки всего: новый заказ

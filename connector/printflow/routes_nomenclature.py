@@ -106,3 +106,56 @@ def nomenclature_variant_photo(api: Any, ctx: Ctx):
         return 400, {"error": str(exc)}
     api.catalog_changed("variant_photo")
     return 200, {"ok": True, "photo": name}
+
+
+@router.post("/api/nomenclature/variant/photos",
+             doc="Добавить кадр в галерею вариации (18.6)")
+def nomenclature_variant_photos(api: Any, ctx: Ctx):
+    """Галерея вариации: новый кадр в конец, обложка не меняется.
+
+    Первый кадр при пустой галерее становится обложкой — старые витрины,
+    знающие только photo, видят его сразу. Та же data-URL до 8 МБ.
+    """
+    body = ctx.body or {}
+    variant_id = str(body.get("id") or "").strip()
+    try:
+        result = api.nom.add_variant_photo(variant_id, body.get("data"))
+    except LookupError:
+        return 404, {"error": "Вариация не найдена"}
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    api.catalog_changed("variant_photo")
+    return 200, {"ok": True, **result}
+
+
+@router.post("/api/nomenclature/variant/photos/delete",
+             doc="Убрать кадр из галереи вариации (18.6)")
+def nomenclature_variant_photos_delete(api: Any, ctx: Ctx):
+    """Удаление кадра не оставляет дыру: за удалённой обложкой обложкой
+    становится следующий кадр, витрина не пустеет."""
+    body = ctx.body or {}
+    variant_id = str(body.get("id") or "").strip()
+    try:
+        result = api.nom.delete_variant_photo(variant_id, body.get("name"))
+    except LookupError:
+        return 404, {"error": "Вариация не найдена"}
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    api.catalog_changed("variant_photo")
+    return 200, {"ok": True, **result}
+
+
+@router.post("/api/nomenclature/variant/cover",
+             doc="Сделать кадр обложкой вариации (18.6)")
+def nomenclature_variant_cover(api: Any, ctx: Ctx):
+    """Бывшая обложка уходит в галерею первым кадром — фото не теряется."""
+    body = ctx.body or {}
+    variant_id = str(body.get("id") or "").strip()
+    try:
+        result = api.nom.set_variant_cover(variant_id, body.get("name"))
+    except LookupError:
+        return 404, {"error": "Вариация не найдена"}
+    except ValueError as exc:
+        return 400, {"error": str(exc)}
+    api.catalog_changed("variant_photo")
+    return 200, {"ok": True, **result}

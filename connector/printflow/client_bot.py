@@ -1330,7 +1330,25 @@ class ClientBot:
              (current or {}).get("created_at") or stamp, stamp))
         self._funnel(chat, "cart_add", source="telegram", nom_id=nom_id,
                      data={"variant_id": variant_id, "qty": qty})
+        # 18.6 (прожарка): у товара с вариантами подтверждение обязано назвать
+        # вариант и цену — иначе «Красный / L» и «Синий / M» подтверждаются
+        # одинаково и покупатель не понимает, что положил.
         label = item.get("name") or "Позиция"
+        if variant_id:
+            vrow = self.db.one(
+                "SELECT name, color_name, size FROM nom_variants WHERE id=?",
+                (variant_id,)) or {}
+            vlabel = str(vrow.get("name") or vrow.get("color_name")
+                         or vrow.get("size") or "").strip()
+            vprice = self.db.one(
+                "SELECT p.price price FROM prices p JOIN price_types t"
+                " ON t.id=p.price_type_id WHERE p.variant_id=? AND t.is_base=1"
+                " ORDER BY datetime(p.at) DESC LIMIT 1", (variant_id,)) or {}
+            unit = num(vprice.get("price")) or num(item.get("price"))
+            if vlabel:
+                label = f"{label} · {vlabel}"
+            if unit > 0:
+                label = f"{label} — {_money(unit)}/шт"
         return f"«{label}» добавлена в корзину ✓ Количество: {qty:g}."
 
     def _remove_from_cart(self, chat: str, nom_id: str, variant_id: str = "") -> str:

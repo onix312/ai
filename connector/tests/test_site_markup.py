@@ -1188,7 +1188,7 @@ class PultFileScreenTests(TestCase):
 
     def test_theme_and_assets_are_local(self):
         # Как у остальных страниц: ассеты относительные, токены темы — с пином.
-        self.assertIn('href="assets/tokens.css?v=17.0.1"', self.html)
+        self.assertIn('href="assets/tokens.css?v=18.6.0"', self.html)
         self.assertIn('src="/assets/theme-init.js?v=17.0.1"', self.html)
         self.assertIn('src="assets/brand/nozza-mark-white.svg"', self.html)
         self.assertIn("navigator.serviceWorker.register('/sw.js')", self.html)
