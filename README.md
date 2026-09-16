@@ -254,7 +254,7 @@ python3 scripts/acceptance.py                     # живая приёмка с
 
 <a id="текущая-версия"></a>
 
-## Текущая версия: 18.4.1
+## Текущая версия: 18.4.2
 
 Версия берётся из `connector/printflow/__init__.py` (`APP_VERSION`); контракт
 `connector/tests/test_docs_versions.py` не даёт этому заголовку разъехаться с
