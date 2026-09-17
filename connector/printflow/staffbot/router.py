@@ -256,7 +256,7 @@ TEXT_COMMANDS: tuple[Command, ...] = (
     Command(("поток", "flow"), "printers", "cmd_flow"),
     Command(("повторить", "перепечатать", "reprint", "повтор"), "printers", "cmd_reprint"),
     Command(("выше", "ниже"), "printers", "cmd_reorder"),
-    Command(("снял", "снято", "забрал"), "view", "cmd_removed"),
+    Command(("снял", "снято", "забрал", "чисто", "стол чист"), "view", "cmd_removed"),
     # --- команда
     Command(("команда", "сотрудники", "team"), "staff", "cmd_team"),
     Command(("пригласить", "приглашение"), "staff", "cmd_invite"),

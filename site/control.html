@@ -313,6 +313,35 @@
  </div>
 </div>
 
+<div class="pk-sheet-wrap" id="pk_studio_wrap" hidden>
+ <div class="pk-sheet" role="dialog" aria-modal="true" aria-labelledby="pk_studio_title">
+  <div class="pk-h"><span style="font-size:12px;text-transform:uppercase;color:var(--accent);font-weight:800;letter-spacing:0.5px">Bambu Studio</span>
+  <h3 id="pk_studio_title" style="margin-top:2px">Новый проект</h3></div>
+  <div class="pk-sub" id="pk_studio_sub"></div>
+  <div id="pk_studio_thumb" style="text-align:center;margin:8px 0"></div>
+  <div id="pk_studio_filaments" class="pk-card" style="margin:8px 0;padding:10px" hidden></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0">
+    <label style="font-size:12px;color:var(--muted)">Принтер
+      <select id="pk_studio_printer" style="width:100%;height:38px;margin-top:4px;border-radius:10px;background:var(--bg);color:var(--text);border:1px solid var(--line);font-size:14px;padding:0 8px"></select>
+    </label>
+    <label style="font-size:12px;color:var(--muted)">Плита
+      <input type="number" id="pk_studio_plate" min="1" max="16" value="1" style="width:100%;height:38px;margin-top:4px;border-radius:10px;background:var(--bg);color:var(--text);border:1px solid var(--line);font-size:14px;padding:0 8px">
+    </label>
+  </div>
+  <div style="display:flex;gap:12px;margin:10px 0;font-size:13px">
+    <label><input type="checkbox" id="pk_studio_bed" checked> Стол</label>
+    <label><input type="checkbox" id="pk_studio_flow"> Flow</label>
+    <label><input type="checkbox" id="pk_studio_time"> Timelapse</label>
+  </div>
+  <div id="pk_studio_err" class="pk-alert bad" style="margin:8px 0" hidden></div>
+  <div class="pk-sheet-act" style="display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:8px;margin-top:14px">
+    <button class="pk-btn pk-hit" type="button" id="pk_studio_reject" style="min-height:48px">Отклонить</button>
+    <button class="pk-btn pk-hit" type="button" id="pk_studio_queue" style="min-height:48px">В очередь</button>
+    <button class="pk-btn pk-hit go" type="button" id="pk_studio_start" style="min-height:48px">▶ Старт</button>
+  </div>
+ </div>
+</div>
+
 <div class="pk-msg" id="pk_msg"></div>
 
 <nav class="pk-tabs" aria-label="Экраны пульта">
@@ -861,7 +890,7 @@
     if (force) body.force = true;
     return post('/api/spool/bind', body).then(function(d){
       if (d && d.push_error) toast('Привязано, но в принтер не ушло: ' + d.push_error);
-      else toast('Катушка в слоте — материал отправлен в принтер');
+      else toast('Катушка в слоте — профиль отправлен в AMS и Bambu Studio');
       closeSheet();
       return tick();
     }).catch(function(e){
@@ -894,6 +923,110 @@
       .then(function(d){ toast('Память слота очищена (забыто: ' + num(d && d.removed) + ')');
         closeSheet(); return tick(); })
       .catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+
+  /* ------------------------------------------- Studio Gateway Confirm Modal */
+  var currentStudioPending = null;
+  function closeStudioModal(){
+    currentStudioPending = null;
+    var wrap = $('#pk_studio_wrap');
+    if (wrap) wrap.hidden = true;
+  }
+  function openStudioModal(pending){
+    currentStudioPending = pending;
+    var wrap = $('#pk_studio_wrap');
+    if (!wrap) return;
+    wrap.hidden = false;
+    var title = $('#pk_studio_title');
+    var sub = $('#pk_studio_sub');
+    var thumbBox = $('#pk_studio_thumb');
+    var filBox = $('#pk_studio_filaments');
+    var pSelect = $('#pk_studio_printer');
+    var plateInput = $('#pk_studio_plate');
+    var errBox = $('#pk_studio_err');
+
+    if (title) title.textContent = pending.filename || 'Проект Bambu Studio';
+    var estM = Math.round(num(pending.est_minutes));
+    var estG = Math.round(num(pending.est_grams));
+    if (sub) sub.textContent = '⏱ ' + humanMin(estM) + ' · ⚖ ' + estG + ' г · плита №' + (pending.plate || 1);
+
+    var thumbs = pending.thumbnails || {};
+    var firstKey = Object.keys(thumbs)[0];
+    if (thumbBox) {
+      if (firstKey) {
+        thumbBox.innerHTML = '<img src="data:image/png;base64,' + esc(thumbs[firstKey]) + '" style="max-height:160px;max-width:100%;border-radius:10px;object-fit:contain">';
+        thumbBox.hidden = false;
+      } else {
+        thumbBox.innerHTML = '';
+        thumbBox.hidden = true;
+      }
+    }
+
+    var fils = pending.filaments || [];
+    if (filBox) {
+      if (fils.length) {
+        filBox.innerHTML = '<b>Расход:</b> ' + fils.map(function(f){
+          var c = f.color ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#' + esc(f.color) + ';margin:0 4px;vertical-align:middle;border:1px solid rgba(0,0,0,0.2)"></span>' : '';
+          return c + esc(f.type || 'PLA') + ' (' + Math.round(num(f.used_g || f.grams)) + ' г)';
+        }).join(' · ');
+        filBox.hidden = false;
+      } else {
+        filBox.hidden = true;
+      }
+    }
+
+    if (pSelect) {
+      var curId = pending.printer_id || '';
+      var poolOpt = '<option value="">⚡ Пул: любой свободный</option>';
+      pSelect.innerHTML = poolOpt + st.printers.map(function(p){
+        return '<option value="' + esc(p.id) + '"' + (p.id === curId ? ' selected' : '') + '>'
+          + esc(p.name || p.id) + ' (' + esc(p.model || 'Bambu') + ')</option>';
+      }).join('');
+    }
+    if (plateInput) plateInput.value = pending.plate || 1;
+    if (errBox) { errBox.hidden = true; errBox.textContent = ''; }
+  }
+
+  function handleStudioAction(action){
+    if (!currentStudioPending) return;
+    var pendingId = currentStudioPending.id;
+    var pSelect = $('#pk_studio_printer');
+    var plateInput = $('#pk_studio_plate');
+    var bedCb = $('#pk_studio_bed');
+    var flowCb = $('#pk_studio_flow');
+    var timeCb = $('#pk_studio_time');
+    var errBox = $('#pk_studio_err');
+
+    var printerId = (pSelect && pSelect.value) || '';
+    var plate = plateInput ? parseInt(plateInput.value, 10) : 1;
+    var bed = bedCb ? bedCb.checked : true;
+    var flow = flowCb ? flowCb.checked : false;
+    var timelapse = timeCb ? timeCb.checked : false;
+
+    if (errBox) { errBox.hidden = true; errBox.textContent = ''; }
+
+    post('/api/studio/confirm', {
+      pending_id: pendingId,
+      action: action,
+      printer_id: printerId,
+      plate: plate,
+      bed_level: bed,
+      flow_cali: flow,
+      timelapse: timelapse
+    }).then(function(res){
+      closeStudioModal();
+      if (action === 'start') toast('Печать запущена!');
+      else if (action === 'queue') toast('Задание добавлено в очередь');
+      else toast('Проект отклонён');
+      tick();
+    }).catch(function(err){
+      if (errBox) {
+        errBox.textContent = err.message || 'Ошибка обработки действия';
+        errBox.hidden = false;
+      } else {
+        toast(err.message || 'Ошибка');
+      }
+    });
   }
 
   /* ----------------------------------------------------------- камера */
@@ -1842,6 +1975,16 @@
     if (d.spools) st.spools = d.spools;
     if (!st.active && st.printers.length) st.active = st.printers[0].id;
     if (st.active && !printerById(st.active) && st.printers.length) st.active = st.printers[0].id;
+
+    // Входящие проекты из Studio в режиме подтверждения
+    var pendingStudio = d.pending_studio || [];
+    if (pendingStudio.length && (!currentStudioPending || currentStudioPending.id !== pendingStudio[0].id)) {
+      var wrap = $('#pk_studio_wrap');
+      if (!wrap || wrap.hidden) {
+        openStudioModal(pendingStudio[0]);
+      }
+    }
+
     setOnline(true);
     remember(d);
     setFreshness();
@@ -1911,6 +2054,10 @@
     if (hit.closest('#pk_b_refresh')) { camFrame(); toast('Кадр обновлён'); return; }
     if (hit.closest('#pk_sheet_close')) { closeSheet(); return; }
     if (hit.closest('#pk_sheet_wrap') && !hit.closest('.pk-sheet')) { closeSheet(); return; }
+    if (hit.closest('#pk_studio_reject')) { handleStudioAction('reject'); return; }
+    if (hit.closest('#pk_studio_queue')) { handleStudioAction('queue'); return; }
+    if (hit.closest('#pk_studio_start')) { handleStudioAction('start'); return; }
+    if (hit.closest('#pk_studio_wrap') && !hit.closest('.pk-sheet')) { closeStudioModal(); return; }
     var cmdBtn = hit.closest('[data-cmd]');
     if (cmdBtn) {
       if (cmdBtn.disabled) return;

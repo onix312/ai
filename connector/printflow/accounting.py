@@ -983,8 +983,10 @@ class Accounting:
             if remaining <= 0.5:
                 # Катушка опустела — архивируем сами, чтобы склад не висел
                 # с «0 г, но в работе», и заводим событие «замените катушку».
+                # Также очищаем привязку к слоту AMS, чтобы принтер не плодил фантомов.
                 self.db.execute(
-                    "UPDATE spools SET archived=1, remaining_grams=0, updated_at=? WHERE id=?",
+                    "UPDATE spools SET archived=1, remaining_grams=0, ams_slot='',"
+                    " tray_uuid='', printer_id=NULL, updated_at=? WHERE id=?",
                     (now_iso(), spool["id"]))
                 self.db.add_event(
                     "filament_low", "Катушка закончилась",

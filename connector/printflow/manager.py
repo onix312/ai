@@ -73,6 +73,7 @@ class PrinterManager:
         self._first_layer_alerted: set[str] = set()
         self._auto_resume_attempts: dict[str, dict] = {}
         self._auto_resume_blocked_at: dict[str, float] = {}
+        self._bed_cleared: dict[str, bool] = {}
         self._startup_ts = time.time()
         self.reload()
         # Если коннектор перезапустился во время печати, сохраняем кандидата
@@ -426,6 +427,7 @@ class PrinterManager:
             job["remote_task_id"] = remote_task_id
         self._finalize_job(job, state, kind, duration, grams, data)
         if kind == "complete":
+            self._bed_cleared[printer_id] = False
             self.watch_bed(printer_id)
         self._maybe_start_next(printer_id)
 
@@ -823,6 +825,7 @@ class PrinterManager:
             "ams_mapping": json.dumps(data.get("ams_mapping") or []),
             "priority": int(num(data.get("priority"))),
             "spool_id": data.get("spool_id") or None,
+            "material": str(data.get("material") or "").strip().upper(),
             "est_minutes": max(0.0, num(data.get("est_minutes"))),
             "est_grams": max(0.0, num(data.get("est_grams"))),
             "no_auto": 1 if data.get("no_auto") else 0,
@@ -911,7 +914,12 @@ class PrinterManager:
                 and self.db.setting("unattended_dangerous_actions", False)
                 and data.get("allow_auto_start", True)
                 and not job.get("no_auto")):
-            self._maybe_start_next(job["printer_id"] or "")
+            target_pid = job.get("printer_id") or ""
+            if target_pid:
+                self._maybe_start_next(target_pid)
+            else:
+                for pid in list(self.printers.keys()):
+                    self._maybe_start_next(pid)
         # Автозапуск может синхронно перевести это задание в starting/running.
         # Не возвращаем устаревшую копию «queued» — UI должен показывать факт.
         return self.db.one("SELECT * FROM print_jobs WHERE id=?", (job["id"],)) or row
@@ -1395,7 +1403,9 @@ class PrinterManager:
             return False
 
     def _job_material(self, job: dict) -> str:
-        """Материал задания: из катушки, из заказа или из каталога."""
+        """Материал задания: из задания, из катушки, из заказа или из каталога."""
+        if job.get("material"):
+            return str(job["material"]).strip().upper()
         if job.get("spool_id"):
             spool = self.db.one("SELECT material FROM spools WHERE id=?", (job["spool_id"],))
             if spool and spool.get("material"):
@@ -1469,7 +1479,7 @@ class PrinterManager:
         jobs = self.db.query(
             "SELECT j.*, o.hours AS order_hours, o.due AS due"
             " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
-            " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id=?)"
+            " WHERE j.state='queued' AND (j.printer_id IS NULL OR j.printer_id='' OR j.printer_id=?)"
             " AND j.file<>'' AND COALESCE(j.source,'')"
             " NOT IN ('order-prepared','defect-recovery','reprint-confirmed')"
             " AND COALESCE(j.no_auto,0)=0", (printer_id,))
@@ -1498,6 +1508,10 @@ class PrinterManager:
             return jobs[0]
         # Сначала то, что печатается уже заправленным материалом:
         # меньше смен катушки — меньше отходов на продувку.
+        # Для заданий с конкретно указанным материалом выбираем полное совпадение.
+        matching = [j for j in jobs if self._job_material(j) and self._job_material(j) in loaded]
+        if matching:
+            return matching[0]
         same = [j for j in jobs if not self._job_material(j)
                 or self._job_material(j) in loaded]
         return same[0] if same else jobs[0]
@@ -1561,6 +1575,8 @@ class PrinterManager:
         label = str(info.get("state_label") or state or "нет данных")
         if state not in ("IDLE", "FINISH"):
             return False, f"принтер занят: {label.lower()}"
+        if self._bed_cleared.get(printer.id) is False and self.db.setting("bed_watch_enabled", False):
+            return False, "на столе осталась деталь (требуется подтверждение снятия)"
         if info.get("problems"):
             return False, "принтер сообщает об ошибке — сначала разберитесь с ней"
         if not job:
@@ -1743,6 +1759,8 @@ class PrinterManager:
             return
         snap = printer.snapshot()
         if snap["printer"]["state"] not in ("IDLE", "FINISH"):
+            return
+        if self._bed_cleared.get(printer_id) is False and self.db.setting("bed_watch_enabled", False):
             return
         if self.quiet_now():
             return
@@ -3146,6 +3164,9 @@ class PrinterManager:
     def part_removed(self, printer_id: str = "") -> dict:
         """«Деталь снята» — зафиксировать ручное действие и замерить простой."""
         printer = self.get(printer_id)
+        pid = printer.id if printer else printer_id
+        if pid:
+            self._bed_cleared[pid] = True
         job = self.db.one(
             "SELECT * FROM print_jobs WHERE state='done' ORDER BY datetime(finished_at) DESC LIMIT 1")
         idle = 0
@@ -3159,10 +3180,13 @@ class PrinterManager:
         name = printer.record.get("name", "Принтер") if printer else "Принтер"
         self.db.add_event("production", "Деталь снята",
                           f"{name} · простой после печати {idle} мин",
-                          printer_id, {"idle_min": idle})
+                          pid, {"idle_min": idle})
         if idle >= 5:
             self.notify_async(f"PrintFlow · {name}\nДеталь снята.\n"
                               f"Принтер простаивал {int(idle)} мин после завершения печати.")
+        # Разблокировка стола может открыть дорогу следующему заданию из очереди
+        if pid:
+            self._maybe_start_next(pid)
         return {"ok": True, "idle_min": idle}
 
     # ------------------------------------------------------------ мониторинг AMS
@@ -3452,6 +3476,16 @@ class PrinterManager:
             return
         threshold = num(self.db.setting("bed_watch_threshold", 6.0), 6.0)
         if ratio > threshold:
+            self._bed_cleared[printer_id] = False
+            # Проверка FarmLoop: если включен авто-сброс и камера показала, что стол уже очистился
+            # или если сработал цикл снятия деталей
+            farm_auto = bool(self.db.setting("farmloop_auto_next", False))
+            farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
+            if farm_auto and farm_sensor in ("camera", "both") and ratio <= num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0):
+                self._bed_cleared[printer_id] = True
+                self.part_removed(printer_id)
+                return
+
             self.db.add_event(
                 "guard", "Деталь могла остаться на столе",
                 f"Кадр отличается от пустого стола на {ratio}% — снимите деталь",
@@ -3461,6 +3495,9 @@ class PrinterManager:
                     f"PrintFlow: печать завершена, стол не пустой (разница {ratio}%). "
                     "Снимите деталь.", frame,
                     buttons=[("🤚 Снял", "cmd:removed")], critical=True)
+        else:
+            # Стол пуст — разница ниже порога
+            self._bed_cleared[printer_id] = True
 
     def set_bed_reference(self, printer_id: str) -> dict:
         """Калибровка: сохранить текущий кадр как эталон пустого стола."""

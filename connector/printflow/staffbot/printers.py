@@ -398,3 +398,39 @@ class PrintersMixin:
 
     def cb_printers(self, chat: str, params: str) -> str:
         return self._list_printers(chat)
+
+    def _handle_bed_photo_clearance(self, chat: str, photo: list, caption: str = "", printer=None) -> None:
+        """Подтверждение очистки стола по присланному фото (Photo Clearance)."""
+        file_id = str((photo[-1] or {}).get("file_id") or "")
+        if not file_id:
+            return self._reply(chat, "Не удалось получить фото.")
+        raw = self._download_file(file_id)
+        if not raw:
+            return self._reply(chat, "Не удалось скачать фото.")
+
+        p = printer or self._pick_printer(chat)
+        pid = p.id if p else ""
+        p_name = p.record.get("name", "Принтер") if p else "Принтер"
+
+        # Сохраняем фото в директорию снимков стола/заказов
+        from ..config import PHOTO_DIR
+        PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"bed_clear_{pid or 'p'}_{int(time.time())}.jpg"
+        (PHOTO_DIR / filename).write_bytes(raw)
+
+        # Вызываем подтверждение снятия детали в диспетчере
+        res = self.manager.part_removed(pid)
+        idle_min = res.get("idle_min", 0)
+
+        self.db.add_event(
+            "production", "Стол очищен по фото (Telegram)",
+            f"{p_name} · фото подтверждено оператором (файл {filename})",
+            pid, {"photo": filename, "idle_min": idle_min}
+        )
+
+        msg = f"✅ Фото получено: стол {p_name} подтверждён чистым!\nПростой: {idle_min} мин."
+        # Если есть задания в очереди, проверяем автозапуск следующего
+        next_job = self.manager.next_job(pid) if pid else None
+        if next_job and bool(self.db.setting("auto_queue", False)):
+            msg += f"\n▶ Очередь разблокирована: готово к запуску «{next_job.get('name')}»."
+        self._reply(chat, msg)

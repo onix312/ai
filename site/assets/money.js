@@ -288,6 +288,7 @@ function openShoppingReceive(item) {
   if ([...$('sr_account').options].some((o) => o.value === defaultAccount)) {
     $('sr_account').value = defaultAccount;
   }
+  if ($('sr_location')) $('sr_location').value = 'shop';
   $('sr_warehouse').innerHTML = '<option value="">Без привязки</option>'
     + (PF.state.warehouses || []).filter((w) => !num(w.archived)).map((w) =>
       `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
@@ -317,6 +318,7 @@ async function submitShoppingReceive() {
       total_amount: amount,
       account_id: $('sr_account').value,
       warehouse_id: $('sr_warehouse').value,
+      location: ($('sr_location') && $('sr_location').value) || 'shop',
       request_id: receivingShoppingRequestId,
     });
     closeModal('shopping_receive_modal');
@@ -1299,6 +1301,10 @@ function bind() {
   const spoolLabels = $('spool_labels');
   if (spoolLabels) spoolLabels.addEventListener('click', () => {
     window.open('/labels.html?kind=spool', '_blank', 'noopener');
+  });
+  const spoolBambuExport = $('spool_bambu_export');
+  if (spoolBambuExport) spoolBambuExport.addEventListener('click', () => {
+    toast('Экспорт для Bambu Studio', 'Скачивание архива с пресетами катушек. В слайсере: Файл → Импорт → Импорт конфигураций.');
   });
   $('spool_add').addEventListener('click', () => openSpool());
   const spoolCleanup = $('spool_cleanup');

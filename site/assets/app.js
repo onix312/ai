@@ -997,7 +997,7 @@ const WATCH = [
 const STUDIO = [
   ['studio_gateway_enabled', 'Шлюз Bambu Studio', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
   ['studio_gateway_name', 'Имя в Studio', 'Как принтер называется в списке устройств', 'text'],
-  ['studio_gateway_mode', 'Режим', 'queue — только очередь. autostart — печать сразу, если включены автостарт шлюза и safety-gate.', 'text'],
+  ['studio_gateway_mode', 'Режим', 'confirm — окно подтверждения на пульте/ПК при нажатии Print в Studio. queue — сразу в очередь. autostart — печать сразу при safety-gate.', 'text'],
   ['studio_gateway_autostart', 'Автостарт с шлюза', 'Печатать сразу после Slice/Print. Нужны режим autostart и «действия без присмотра».', 'bool'],
   ['studio_gateway_serial', 'Серийный номер', 'Пусто — сгенерируется. Studio идентифицирует устройство по нему.', 'text'],
   ['studio_gateway_printer_id', 'Принтер (id)', 'На какой физический принтер уходит очередь. Пусто — первый доступный.', 'text'],

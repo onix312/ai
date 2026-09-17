@@ -97,6 +97,7 @@ class StudioGatewayTests(unittest.TestCase):
         self.db.set_settings({
             "studio_gateway_access_code": "abcd1234",
             "studio_gateway_name": "NOZZA-PrintFlow",
+            "studio_gateway_mode": "queue",
         })
         self.mgr = FakeMgr(self.db)
         self.gw = StudioGateway(self.db, self.mgr, bind=False)
@@ -105,7 +106,7 @@ class StudioGatewayTests(unittest.TestCase):
     def test_defaults(self):
         self.assertFalse(DEFAULT_SETTINGS["studio_gateway_enabled"])
         self.assertEqual(DEFAULT_SETTINGS["studio_gateway_name"], "NOZZA-PrintFlow")
-        self.assertEqual(DEFAULT_SETTINGS["studio_gateway_mode"], "queue")
+        self.assertEqual(DEFAULT_SETTINGS["studio_gateway_mode"], "confirm")
         self.assertFalse(DEFAULT_SETTINGS["studio_gateway_autostart"])
         self.assertEqual(DEFAULT_SETTINGS["studio_gateway_serial"], "")
         self.assertEqual(DEFAULT_SETTINGS["studio_gateway_access_code"], "")

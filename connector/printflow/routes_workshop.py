@@ -213,7 +213,7 @@ def workshop_supplier_price(api: Any, ctx: Ctx):
 @router.post("/api/workshop/receipt", audit="Приход пластика", idempotent=True)
 def workshop_receipt(api: Any, ctx: Ctx):
     body = ctx.body
-    return workshop(api).filament_receipt(
+    res = workshop(api).filament_receipt(
         items=body.get("items") if isinstance(body.get("items"), list) else None,
         material=str(body.get("material") or ""),
         color_name=str(body.get("color_name") or ""),
@@ -227,10 +227,20 @@ def workshop_receipt(api: Any, ctx: Ctx):
         supplier_id=str(body.get("supplier_id") or ""),
         shopping_id=str(body.get("shopping_id") or ""),
         account_id=str(body.get("account_id") or ""),
+        location=str(body.get("location") or "shop"),
+        location_note=str(body.get("location_note") or ""),
+        warehouse_id=str(body.get("warehouse_id") or ""),
         note=str(body.get("note") or ""),
         confirmed=body.get("confirmed") is True,
         request_id=str(body.get("request_id") or ""),
     )
+    bus = getattr(api, "bus", None)
+    if bus:
+        try:
+            bus.publish("resync", {})
+        except Exception:
+            pass
+    return res
 
 
 @router.post("/api/workshop/preset/save", audit="Пресет плиты: сохранение")

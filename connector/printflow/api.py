@@ -2460,6 +2460,7 @@ class Api:
                         "ams_id": slot_n // 4, "tray_id": slot_n % 4,
                         "type": spool.get("material") or "PLA",
                         "color": spool.get("color_hex") or "FFFFFFFF",
+                        "brand": spool.get("brand") or "",
                     }
                     # М5: температуры производителя уйдут вместе с типом,
                     # если на стикере бобины записан диапазон сопла
@@ -2473,7 +2474,16 @@ class Api:
             self.db.add_event("spool", "Катушка привязана к слоту AMS",
                               f"{spool.get('material')} {spool.get('color_name')} → слот {slot}",
                               printer_id, {"spool_id": spool_id, "pushed": pushed})
-            result = {"ok": True, "spool": self.repo.spool(spool_id) or {}, "pushed": pushed}
+            from .materials import bambu_filament_preset
+            nozzle_tuple = _nozzle_range_from_rec(spool.get("rec_settings") or "")
+            bambu_preset = bambu_filament_preset(
+                spool.get("material") or "PLA", spool.get("brand") or "", nozzle_tuple)
+            result = {
+                "ok": True,
+                "spool": self.repo.spool(spool_id) or {},
+                "pushed": pushed,
+                "bambu_preset": bambu_preset,
+            }
             if push_error:
                 result["push_error"] = push_error
             return 200, result
@@ -2556,6 +2566,7 @@ class Api:
                 account_id=str(body.get("account_id") or ""),
                 supplier=str(body.get("supplier") or ""),
                 warehouse_id=str(body.get("warehouse_id") or ""),
+                location=str(body.get("location") or "shop"),
                 request_id=str(body.get("request_id") or ""),
             )
         if path == "/api/shopping/delete":

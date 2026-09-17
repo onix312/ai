@@ -668,7 +668,10 @@ function renderAbList() {
   const choiceBox = $('ab_choice');
   if (choiceBox) {
     choiceBox.hidden = !sp;
-    if (sp) text('ab_choice_text', `${sp.material} ${sp.color_name} · ${Math.round(num(sp.remaining_grams))} г → слот ${abSlotHuman(abState.slot)}`);
+    if (sp) {
+      const bBrand = sp.brand ? ' · ' + sp.brand : '';
+      text('ab_choice_text', `${sp.material} ${sp.color_name}${bBrand} · ${Math.round(num(sp.remaining_grams))} г → слот ${abSlotHuman(abState.slot)} (настройки уйдут в AMS и Bambu Studio)`);
+    }
   }
 }
 async function doAbBind(btn) {
@@ -708,8 +711,9 @@ async function doAbBind(btn) {
         tray_uuid: (tray && tray.uuid) || '', push_ams: !!push, confirmed: true, force,
       });
       closeModal('ams_bind_modal');
+      const bInfo = (res && res.bambu_preset && res.bambu_preset.preset_name) ? (' · Bambu: ' + res.bambu_preset.preset_name) : '';
       toast('Катушка привязана',
-        `${sp.material || ''} ${sp.color_name || ''} → слот ${abSlotHuman(abState.slot)}`
+        `${sp.material || ''} ${sp.color_name || ''} → слот ${abSlotHuman(abState.slot)}${bInfo}`
         + (res && res.push_error ? ' · AMS: ' + res.push_error : ''));
       await PF.refreshCore();
       setTimeout(PF.poll, 800);

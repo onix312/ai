@@ -130,7 +130,7 @@ function queueItemHtml(j) {
     + ` data-job-id="${esc(j.id)}" data-pos="${i}">`
       + `<div class="q-plate" data-plate="${esc(j.file || '')}" title="Превью плиты из файла задания">▦</div>`
       + `<span class="qnum">${i + 1}</span><div class="qbody"><b>${esc(j.name || j.file || 'Задание')}</b>`
-    + `<small>${jobStateChip(j.state)} ${esc(printer ? printer.name : 'любой принтер')}`
+    + `<small>${jobStateChip(j.state)} ${printer ? `<span class="chip outline">${esc(printer.name)}</span>` : `<span class="chip accent" style="font-weight:700">⚡ Пул: любой свободный</span>`}`
     + (queuedPos ? ` · <span class="chip outline">№ ${queuedPos} в очереди</span>` : '')
     + (order ? ` · <a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">заказ №${esc(order.number)}</a>` : '')
     + (j.mixed_label ? ` · <span class="chip outline" title="Смешанная плита">${esc(j.mixed_label)}</span>` : '')
