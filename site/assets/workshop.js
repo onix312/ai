@@ -208,19 +208,29 @@ function openFilamentReceipt(initialData) {
 
   const wh = $('fr_warehouse');
   if (wh) {
+    const warehouses = (PF.state && Array.isArray(PF.state.warehouses)) ? PF.state.warehouses : [];
     wh.innerHTML = '<option value="">Без привязки к складу</option>'
-      + (PF.state.warehouses || []).filter((w) => !num(w.archived)).map((w) =>
-        `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+      + warehouses.filter((w) => w && !num(w.archived)).map((w) =>
+        `<option value="${esc(w.id || '')}">${esc(w.name || w.id || 'Склад')}</option>`).join('');
   }
 
   const acc = $('fr_account');
   if (acc) {
-    const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
-    acc.innerHTML = accounts.map((a) =>
-      `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-    const defaultAccount = (PF.state.settings && PF.state.settings.default_account) || '';
-    if ([...acc.options].some((o) => o.value === defaultAccount)) {
-      acc.value = defaultAccount;
+    const rawAccounts = (PF.state && Array.isArray(PF.state.accounts))
+      ? PF.state.accounts
+      : ((PF.state && PF.state.money && PF.state.money.accounts && Array.isArray(PF.state.money.accounts.accounts))
+          ? PF.state.money.accounts.accounts
+          : []);
+    const accounts = rawAccounts.filter((a) => a && !num(a.archived));
+    if (accounts.length) {
+      acc.innerHTML = accounts.map((a) =>
+        `<option value="${esc(a.id || '')}">${esc(a.name || a.id || 'Касса')}</option>`).join('');
+      const defaultAccount = (PF.state && PF.state.settings && PF.state.settings.default_account) || '';
+      if ([...acc.options].some((o) => o.value === defaultAccount)) {
+        acc.value = defaultAccount;
+      }
+    } else {
+      acc.innerHTML = '<option value="">Основная касса (по умолчанию)</option>';
     }
   }
 
@@ -243,8 +253,11 @@ function openFilamentReceipt(initialData) {
   updateReceiptSummary();
   if (typeof openModal === 'function') {
     openModal('filament_receipt_modal');
-  } else if (modal.showModal) {
+  } else if (typeof modal.showModal === 'function') {
     modal.showModal();
+  } else {
+    modal.setAttribute('open', '');
+    modal.style.display = 'block';
   }
 }
 
@@ -339,7 +352,10 @@ function bind() {
   const shiftBtn = $('shift_refresh');
   if (shiftBtn) shiftBtn.addEventListener('click', loadShift);
   const receiptBtn = $('filament_receipt_btn');
-  if (receiptBtn) receiptBtn.addEventListener('click', () => openFilamentReceipt());
+  if (receiptBtn) receiptBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openFilamentReceipt();
+  });
   const addRowBtn = $('fr_add_row');
   if (addRowBtn) addRowBtn.addEventListener('click', () => addReceiptRow());
   const submitBtn = $('fr_submit');
@@ -380,10 +396,20 @@ function bind() {
   });
 }
 
+document.addEventListener('click', (e) => {
+  const btn = e.target && e.target.closest && e.target.closest('#filament_receipt_btn');
+  if (btn) {
+    e.preventDefault();
+    openFilamentReceipt();
+  }
+});
+
 PF.on('ready', () => { bind(); loadShift(); loadSuppliers(); loadPresets(); });
 PF.on('view', (d) => {
   if (d.view === 'inventory') { loadShift(); loadSuppliers(); loadPresets(); }
   if (d.view === 'printers' || d.view === 'queue') loadPresets();
 });
+window.openFilamentReceipt = openFilamentReceipt;
+PF.openFilamentReceipt = openFilamentReceipt;
 PF.modules.workshop = { loadShift, loadSuppliers, loadPresets, openFilamentReceipt };
 })();

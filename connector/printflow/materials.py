@@ -1442,8 +1442,14 @@ def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
     else:
         hex_color = "#FFFFFF"
 
-    # Рекомендованные температуры сопла
+    # Рекомендованные температуры сопла и стола
     rec = spool.get("rec_settings")
+    if isinstance(rec, str) and rec.strip().startswith("{"):
+        try:
+            import json
+            rec = json.loads(rec)
+        except Exception:
+            pass
     rec_temp = None
     if isinstance(rec, dict):
         rec_temp = rec.get("temp_nozzle")
@@ -1458,6 +1464,13 @@ def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
     mat_info = get_material(preset_meta["key"])
     density = num(mat_info.get("density"), 1.24)
     bed_temp = mat_info.get("temp_bed") or (55, 65)
+    if isinstance(rec, dict) and rec.get("temp_bed") and len(rec.get("temp_bed")) == 2:
+        try:
+            b_lo, b_hi = int(rec["temp_bed"][0]), int(rec["temp_bed"][1])
+            if 0 <= b_lo <= b_hi <= 200:
+                bed_temp = (b_lo, b_hi)
+        except (ValueError, TypeError):
+            pass
     bed_def = int(num(bed_temp[0], 55))
 
     # Название пресета в списке нитей Bambu Studio

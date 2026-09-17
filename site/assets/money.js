@@ -1007,6 +1007,51 @@ function _renderSpoolColors() {
   });
 }
 
+const SPOOL_MATERIAL_PRESETS = {
+  'PLA': { nozzle: [200, 230], bed: [45, 60], speed: [50, 250], dry_temp: 50, dry_hours: 5 },
+  'PLA+': { nozzle: [210, 235], bed: [50, 60], speed: [50, 250], dry_temp: 50, dry_hours: 5 },
+  'PLA SILK': { nozzle: [215, 240], bed: [50, 60], speed: [40, 200], dry_temp: 50, dry_hours: 5 },
+  'PLA MATTE': { nozzle: [200, 230], bed: [45, 60], speed: [50, 250], dry_temp: 50, dry_hours: 5 },
+  'PLA-CF': { nozzle: [210, 240], bed: [45, 60], speed: [40, 200], dry_temp: 55, dry_hours: 6 },
+  'PETG': { nozzle: [230, 260], bed: [70, 85], speed: [40, 200], dry_temp: 63, dry_hours: 7 },
+  'PETG-CF': { nozzle: [250, 270], bed: [70, 85], speed: [40, 180], dry_temp: 65, dry_hours: 8 },
+  'TPU': { nozzle: [220, 245], bed: [35, 50], speed: [20, 60], dry_temp: 65, dry_hours: 10 },
+  'TPU 95A': { nozzle: [220, 245], bed: [35, 50], speed: [20, 60], dry_temp: 65, dry_hours: 10 },
+  'TPU 85A': { nozzle: [215, 240], bed: [30, 45], speed: [15, 40], dry_temp: 60, dry_hours: 10 },
+  'ABS': { nozzle: [250, 270], bed: [90, 100], speed: [50, 250], dry_temp: 75, dry_hours: 5 },
+  'ASA': { nozzle: [250, 280], bed: [90, 105], speed: [50, 250], dry_temp: 75, dry_hours: 5 },
+  'PC': { nozzle: [260, 290], bed: [90, 110], speed: [40, 150], dry_temp: 80, dry_hours: 10 },
+  'PAHT-CF': { nozzle: [280, 300], bed: [90, 100], speed: [40, 150], dry_temp: 85, dry_hours: 10 },
+  'PA-CF': { nozzle: [280, 300], bed: [90, 100], speed: [40, 150], dry_temp: 85, dry_hours: 10 },
+  'PET-CF': { nozzle: [270, 300], bed: [80, 100], speed: [40, 150], dry_temp: 75, dry_hours: 8 },
+  'HIPS': { nozzle: [230, 250], bed: [90, 100], speed: [40, 180], dry_temp: 63, dry_hours: 4 },
+  'PVA': { nozzle: [195, 225], bed: [45, 60], speed: [30, 80], dry_temp: 45, dry_hours: 8 },
+};
+
+function getMaterialPreset(matName) {
+  const norm = String(matName || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+  for (const [key, preset] of Object.entries(SPOOL_MATERIAL_PRESETS)) {
+    const kNorm = key.toUpperCase().replace(/[\s\-_]+/g, '');
+    if (kNorm === norm || norm.startsWith(kNorm) || kNorm.startsWith(norm)) {
+      return preset;
+    }
+  }
+  return SPOOL_MATERIAL_PRESETS['PLA'];
+}
+
+function applySpoolMaterialPreset(matName) {
+  const preset = getMaterialPreset(matName);
+  if (!preset) return;
+  if ($('sf_rec_nozzle_min')) $('sf_rec_nozzle_min').value = preset.nozzle[0];
+  if ($('sf_rec_nozzle_max')) $('sf_rec_nozzle_max').value = preset.nozzle[1];
+  if ($('sf_rec_bed_min')) $('sf_rec_bed_min').value = preset.bed[0];
+  if ($('sf_rec_bed_max')) $('sf_rec_bed_max').value = preset.bed[1];
+  if ($('sf_rec_speed_min')) $('sf_rec_speed_min').value = preset.speed ? preset.speed[0] : 50;
+  if ($('sf_rec_speed_max')) $('sf_rec_speed_max').value = preset.speed ? preset.speed[1] : 250;
+  if ($('sf_rec_dry_temp')) $('sf_rec_dry_temp').value = preset.dry_temp;
+  if ($('sf_rec_dry_hours')) $('sf_rec_dry_hours').value = preset.dry_hours;
+}
+
 function openSpool(id) {
   editingSpool = id || null;
   const s = id ? PF.state.spools.find((x) => x.id === id) : null;
@@ -1025,7 +1070,62 @@ function openSpool(id) {
     kindSel.value = d.color_kind || '';
     kindSel.onchange = _renderSpoolColors;
   }
-  if ($('sf_rec_settings')) $('sf_rec_settings').value = d.rec_settings || '';
+  const rawRec = String(d.rec_settings || '').trim();
+  let recObj = null;
+  if (rawRec.startsWith('{')) {
+    try { recObj = JSON.parse(rawRec); } catch (e) { recObj = null; }
+  }
+  if ($('sf_rec_nozzle_min')) {
+    if (recObj && typeof recObj === 'object') {
+      const nz = Array.isArray(recObj.temp_nozzle) ? recObj.temp_nozzle : [];
+      $('sf_rec_nozzle_min').value = nz[0] ?? '';
+      $('sf_rec_nozzle_max').value = nz[1] ?? '';
+      const bd = Array.isArray(recObj.temp_bed) ? recObj.temp_bed : [];
+      $('sf_rec_bed_min').value = bd[0] ?? '';
+      $('sf_rec_bed_max').value = bd[1] ?? '';
+      const sp = Array.isArray(recObj.print_speed) ? recObj.print_speed : [];
+      $('sf_rec_speed_min').value = sp[0] ?? '';
+      $('sf_rec_speed_max').value = sp[1] ?? '';
+      $('sf_rec_dry_temp').value = recObj.dry_temp ?? '';
+      $('sf_rec_dry_hours').value = recObj.dry_hours ?? '';
+    } else if (rawRec) {
+      const nzMatch = rawRec.match(/(?:сопл[аоеу]?|nozzle|hotend|экструдер)[^0-9]{0,30}(\d{2,3})\s*°?\s*[–—\-]+\s*(\d{2,3})/i);
+      if (nzMatch) {
+        $('sf_rec_nozzle_min').value = nzMatch[1];
+        $('sf_rec_nozzle_max').value = nzMatch[2];
+      } else {
+        $('sf_rec_nozzle_min').value = '';
+        $('sf_rec_nozzle_max').value = '';
+      }
+      const bdMatch = rawRec.match(/(?:стол|bed)[^0-9]{0,30}(\d{2,3})\s*°?\s*[–—\-]+\s*(\d{2,3})/i);
+      if (bdMatch) {
+        $('sf_rec_bed_min').value = bdMatch[1];
+        $('sf_rec_bed_max').value = bdMatch[2];
+      } else {
+        $('sf_rec_bed_min').value = '';
+        $('sf_rec_bed_max').value = '';
+      }
+      $('sf_rec_speed_min').value = '';
+      $('sf_rec_speed_max').value = '';
+      const dryMatch = rawRec.match(/(?:суш|dry)[^0-9]{0,30}(\d{2,3})\s*°?/i);
+      $('sf_rec_dry_temp').value = dryMatch ? dryMatch[1] : '';
+      $('sf_rec_dry_hours').value = '';
+    } else {
+      if (!id && $('sf_material') && $('sf_material').value) {
+        applySpoolMaterialPreset($('sf_material').value);
+      } else {
+        $('sf_rec_nozzle_min').value = '';
+        $('sf_rec_nozzle_max').value = '';
+        $('sf_rec_bed_min').value = '';
+        $('sf_rec_bed_max').value = '';
+        $('sf_rec_speed_min').value = '';
+        $('sf_rec_speed_max').value = '';
+        $('sf_rec_dry_temp').value = '';
+        $('sf_rec_dry_hours').value = '';
+      }
+    }
+  }
+  if ($('sf_rec_settings')) $('sf_rec_settings').value = rawRec;
   _spoolColorVals = window.PFSpoolColor ? PFSpoolColor.colorsOf(d) : [];
   if (_spoolColorVals.length && $('sf_color_hex')) $('sf_color_hex').value = _spoolColorVals[0];
   _renderSpoolColors();
@@ -1306,7 +1406,22 @@ function bind() {
   if (spoolBambuExport) spoolBambuExport.addEventListener('click', () => {
     toast('Экспорт для Bambu Studio', 'Скачивание архива с пресетами катушек. В слайсере: Файл → Импорт → Импорт конфигураций.');
   });
-  $('spool_add').addEventListener('click', () => openSpool());
+  const spoolAddBtn = $('spool_add');
+  if (spoolAddBtn) spoolAddBtn.addEventListener('click', () => openSpool());
+  const receiptBtn = $('filament_receipt_btn');
+  if (receiptBtn && !receiptBtn.dataset.wired) {
+    receiptBtn.dataset.wired = '1';
+    receiptBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (typeof openFilamentReceipt === 'function') {
+        openFilamentReceipt();
+      } else if (window.openFilamentReceipt) {
+        window.openFilamentReceipt();
+      } else if (PF.modules && PF.modules.workshop && PF.modules.workshop.openFilamentReceipt) {
+        PF.modules.workshop.openFilamentReceipt();
+      }
+    });
+  }
   const spoolCleanup = $('spool_cleanup');
   if (spoolCleanup) spoolCleanup.addEventListener('click', async () => {
     if (!confirmDanger('Очистить фантомные катушки AMS? Дубли слотов будут архивированы, пустые отвязаны от AMS и возвращены на склад.')) return;
@@ -1358,6 +1473,25 @@ function bind() {
     });
   }
 
+  const recPresetBtn = $('sf_rec_preset_btn');
+  if (recPresetBtn && !recPresetBtn.dataset.wired) {
+    recPresetBtn.dataset.wired = '1';
+    recPresetBtn.addEventListener('click', () => {
+      const mat = ($('sf_material') && $('sf_material').value) || 'PLA';
+      applySpoolMaterialPreset(mat);
+      toast('Паспортные параметры подставлены', mat);
+    });
+  }
+  const matInput = $('sf_material');
+  if (matInput && !matInput.dataset.wired) {
+    matInput.dataset.wired = '1';
+    matInput.addEventListener('change', () => {
+      if ($('sf_rec_nozzle_min') && !$('sf_rec_nozzle_min').value && matInput.value) {
+        applySpoolMaterialPreset(matInput.value);
+      }
+    });
+  }
+
   $('spool_save').addEventListener('click', async () => {
     const slotVal = ($('sf_ams_slot') && $('sf_ams_slot').value || '').trim();
     let locVal = ($('sf_location') && $('sf_location').value) || 'shop';
@@ -1366,6 +1500,35 @@ function bind() {
       if (locVal === 'shop') locVal = 'ams';
     } else {
       if (locVal === 'ams') locVal = 'shop';
+    }
+    let recSettingsVal = '';
+    if ($('sf_rec_nozzle_min') && $('sf_rec_nozzle_max')) {
+      const nMin = $('sf_rec_nozzle_min').value.trim();
+      const nMax = $('sf_rec_nozzle_max').value.trim();
+      const bMin = $('sf_rec_bed_min') ? $('sf_rec_bed_min').value.trim() : '';
+      const bMax = $('sf_rec_bed_max') ? $('sf_rec_bed_max').value.trim() : '';
+      const sMin = $('sf_rec_speed_min') ? $('sf_rec_speed_min').value.trim() : '';
+      const sMax = $('sf_rec_speed_max') ? $('sf_rec_speed_max').value.trim() : '';
+      const dTemp = $('sf_rec_dry_temp') ? $('sf_rec_dry_temp').value.trim() : '';
+      const dHours = $('sf_rec_dry_hours') ? $('sf_rec_dry_hours').value.trim() : '';
+
+      if (nMin || nMax || bMin || bMax || sMin || sMax || dTemp || dHours) {
+        const recDict = {};
+        if (nMin || nMax) {
+          recDict.temp_nozzle = [num(nMin, 200), num(nMax, 230)];
+        }
+        if (bMin || bMax) {
+          recDict.temp_bed = [num(bMin, 50), num(bMax, 60)];
+        }
+        if (sMin || sMax) {
+          recDict.print_speed = [num(sMin, 50), num(sMax, 250)];
+        }
+        if (dTemp) recDict.dry_temp = num(dTemp);
+        if (dHours) recDict.dry_hours = num(dHours);
+        recSettingsVal = JSON.stringify(recDict);
+      }
+    } else if ($('sf_rec_settings')) {
+      recSettingsVal = $('sf_rec_settings').value.trim();
     }
     const payload = {
       id: editingSpool || '',
@@ -1376,7 +1539,7 @@ function bind() {
       color_hex: $('sf_color_hex').value,
       color_kind: ($('sf_color_kind') && $('sf_color_kind').value) || '',
       colors: ($('sf_color_kind') && $('sf_color_kind').value) ? _spoolColorVals.filter(Boolean) : [],
-      rec_settings: ($('sf_rec_settings') && $('sf_rec_settings').value.trim()) || '',
+      rec_settings: recSettingsVal,
       total_grams: num($('sf_total_grams').value, 1000),
       remaining_grams: num($('sf_remaining_grams').value),
       price: num($('sf_price').value),

@@ -144,6 +144,17 @@
     $('#mat').textContent = (s.brand || '') + (bound ? ' · ' + slotLabel(s.ams_slot) : ' · не привязана');
     $('#rest').textContent = Math.round(num(s.remaining_grams)) + ' г из ' + Math.round(num(s.total_grams)) + ' г';
     var rec = String(s.rec_settings || '').trim();
+    if (rec.startsWith('{')) {
+      try {
+        var rj = JSON.parse(rec);
+        var parts = [];
+        if (rj.temp_nozzle && rj.temp_nozzle.length === 2) parts.push('Сопло ' + rj.temp_nozzle[0] + '–' + rj.temp_nozzle[1] + '°C');
+        if (rj.temp_bed && rj.temp_bed.length === 2) parts.push('Стол ' + rj.temp_bed[0] + '–' + rj.temp_bed[1] + '°C');
+        if (rj.print_speed && rj.print_speed.length === 2) parts.push('Скорость ' + rj.print_speed[0] + '–' + rj.print_speed[1] + ' мм/с');
+        if (rj.dry_temp) parts.push('Сушка ' + rj.dry_temp + '°C' + (rj.dry_hours ? ' (' + rj.dry_hours + ' ч)' : ''));
+        if (parts.length) rec = parts.join(' · ');
+      } catch (e) {}
+    }
     $('#recLine').hidden = !rec;
     if (rec) $('#recLine').textContent = 'Рекомендации производителя: ' + rec;
     $('#dry').textContent = dryLine(s);

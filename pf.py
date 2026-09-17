@@ -231,11 +231,34 @@ def ensure_venv(force_deps: bool = False, quiet: bool = False) -> Path:
     return python
 
 
+def ensure_crypto_prerequisites(python: Path, quiet: bool = False) -> None:
+    """Автоустановка cryptography и pyOpenSSL при их отсутствии."""
+    check = subprocess.run([str(python), "-c", "import cryptography"],
+                           capture_output=True)
+    if check.returncode == 0:
+        return
+    if not quiet:
+        step("Установка библиотек безопасности (cryptography, OpenSSL)…")
+    cmd = [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-q",
+           "cryptography>=41.0", "pyOpenSSL>=23.0"]
+    res = subprocess.run(cmd, capture_output=True)
+    if res.returncode != 0:
+        cmd_break = [str(python), "-m", "pip", "install", "--disable-pip-version-check", "-q",
+                     "--break-system-packages", "cryptography>=41.0", "pyOpenSSL>=23.0"]
+        subprocess.run(cmd_break, capture_output=True)
+    if not quiet:
+        ok("Библиотеки cryptography и OpenSSL готовы")
+
+
 def interpreter(system: bool = False, quiet: bool = False) -> Path:
     """Python, которым запускать сервер: из окружения либо системный."""
     if system:
-        return Path(sys.executable)
-    return ensure_venv(quiet=quiet)
+        py = Path(sys.executable)
+        ensure_crypto_prerequisites(py, quiet=quiet)
+        return py
+    py = ensure_venv(quiet=quiet)
+    ensure_crypto_prerequisites(py, quiet=quiet)
+    return py
 
 
 def check_python_version() -> None:
