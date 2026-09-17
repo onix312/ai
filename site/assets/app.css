@@ -117,7 +117,6 @@ html[data-theme="dark"] .chart-tip b { color: #11162a; }
 .orbit .cap { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
 .orbit .cap b { display: block; font-size: 20px; font-weight: 680; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .orbit .cap span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
-}
 .state-badge.running { background: var(--accent-soft); color: var(--accent); }
 .state-badge.ok { background: var(--ok-soft); color: var(--ok); }
 .state-badge.warn { background: var(--warn-soft); color: var(--warn); }

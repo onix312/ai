@@ -143,7 +143,7 @@ class ShoppingReceiptApiRouteTests(unittest.TestCase):
             "shop-1", received_confirmed=True, payment_confirmed=False,
             material="PLA", color_name="", color_hex="", brand="",
             spool_count=2.0, spool_grams=1000.0, total_amount=2000.0,
-            account_id="", supplier="", warehouse_id="", request_id="receipt-1",
+            account_id="", supplier="", warehouse_id="", location="shop", request_id="receipt-1",
         )
 
 

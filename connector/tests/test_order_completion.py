@@ -70,6 +70,8 @@ class OrderCompletionTests(unittest.TestCase):
         manager.guard = mock.Mock()
         manager.get = mock.Mock(return_value=None)
         manager._maybe_start_next = mock.Mock()
+        # память bed-watch (контроль детали на столе) — создаётся в __init__
+        manager._bed_cleared = {}
         return manager
 
     def test_finalize_is_atomic_and_idempotent_before_any_second_write(self):

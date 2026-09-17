@@ -184,7 +184,7 @@ const ok = (label, cond, extra) => checks.push([label, !!cond, extra]);
     kind: { value: 'fragile' }, size: { value: '88x44' }, copies: { value: '4' },
   };
   const card = { querySelector: (sel) => { const m = /data-opt="([^"]+)"/.exec(sel); return m ? fields[m[1]] : null; } };
-  const button = { closest: () => card, disabled: false, dataset: { print: 'stickers' } };
+  const button = { closest: () => card, disabled: false, dataset: { print: 'stickers' }, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, textContent: 'Печать листа' };
   const host = element('pr_forms');
   host._listeners.filter(([t]) => t === 'click').forEach(([, fn]) => fn({ target: { closest: () => button } }));
   await new Promise((r) => setTimeout(r, 30));
@@ -194,7 +194,7 @@ const ok = (label, cond, extra) => checks.push([label, !!cond, extra]);
 
   // --- страница целиком (карточка упаковки) и штрихкод
   requests.length = 0;
-  host._listeners.filter(([t]) => t === 'click').forEach(([, fn]) => fn({ target: { closest: () => ({ closest: () => card, disabled: false, dataset: { print: 'pack-sheet' } }) } }));
+  host._listeners.filter(([t]) => t === 'click').forEach(([, fn]) => fn({ target: { closest: () => ({ closest: () => card, disabled: false, dataset: { print: 'pack-sheet' }, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, textContent: 'Печать листа' }) } }));
   await new Promise((r) => setTimeout(r, 30));
   ok('страница печати без JSON тоже открывается', (printed[1] || {}).html === '<html>УПАКОВКА</html>', JSON.stringify((printed[1] || {}).html || '').slice(0, 40));
 

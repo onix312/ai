@@ -795,8 +795,14 @@ class Repo:
             b = tuple(base.get(base_key) or fallback)
             vmin = data.get(min_field)
             vmax = data.get(max_field)
-            return (num(vmin) if vmin not in (None, "") else b[0],
-                    num(vmax) if vmax not in (None, "") else b[1])
+            # 0 и пустое = «не задано» — наследуем шаблон/каталог (18.6.3):
+            # раньше ноль записывался в базу, и у материала выходили
+            # «сопло 222–0°C», «стол 0–0°C».
+            lo = num(vmin) if vmin not in (None, "") and num(vmin) > 0 else num(b[0], fallback[0])
+            hi = num(vmax) if vmax not in (None, "") and num(vmax) > 0 else num(b[1], fallback[1])
+            if lo > hi:
+                lo, hi = hi, lo
+            return (lo, hi)
 
         existing = self.db.one(
             "SELECT * FROM materials WHERE key=?", (key,))

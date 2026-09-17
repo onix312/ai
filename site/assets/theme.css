@@ -37,11 +37,6 @@ button { cursor: pointer; }
 ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
-  background-image: var(--bg-grad);
-  background-attachment: fixed;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
 h1, h2, h3, h4 { margin: 0; font-weight: 640; line-height: 1.25; letter-spacing: -.01em; }
 p { margin: 0; }
 a { color: var(--accent); text-decoration: none; }

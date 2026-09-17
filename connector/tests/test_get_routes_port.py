@@ -18,7 +18,7 @@ API_SOURCE = (ROOT / "connector" / "printflow" / "api.py").read_text(encoding="u
 
 # Сколько маршрутов перенесено. Число фиксируется намеренно: следующая порция
 # должна изменить его явно, а не «само получилось».
-PORTED_COUNT = 157
+PORTED_COUNT = 159
 
 
 def ported_routes() -> list[dict]:

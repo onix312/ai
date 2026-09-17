@@ -950,6 +950,25 @@ def material_from_row(row: dict) -> dict:
     price = num(row.get("price_per_kg"))
     if price <= 0:
         price = num(base.get("price_per_kg"))
+
+    def temps(min_field: str, max_field: str, base_key: str,
+              fallback: tuple) -> tuple:
+        """Температуры строки; 0/пустое = «не задано» — берём из базы каталога.
+
+        18.6.3: раньше пустое поле формы сохранялось нулём, и по складу
+        расползались «сопло 222–0°C» и «стол 0–0°C». Такие строки лечатся
+        здесь: ноль и перепутанный порядок (мин > макс) заменяются значением
+        каталога, а не едут в AMS и калькулятор.
+        """
+        catalog = tuple(base.get(base_key) or fallback)
+        lo = num(row.get(min_field))
+        hi = num(row.get(max_field))
+        lo = num(lo) if lo and lo > 0 else num(catalog[0], fallback[0])
+        hi = num(hi) if hi and hi > 0 else num(catalog[1], fallback[1])
+        if lo > hi:
+            lo, hi = hi, lo
+        return (lo, hi)
+
     return {
         "key": key,
         "name": str(row.get("name") or base.get("name") or key or "Материал"),
@@ -960,10 +979,10 @@ def material_from_row(row: dict) -> dict:
         if row.get("support_factor") not in (None, "")
         else num(base.get("support_factor"), 0.10),
         "price_per_kg": price,
-        "temp_nozzle": (num(row.get("temp_nozzle_min"), 210),
-                        num(row.get("temp_nozzle_max"), 240)),
-        "temp_bed": (num(row.get("temp_bed_min"), 45),
-                     num(row.get("temp_bed_max"), 65)),
+        "temp_nozzle": temps("temp_nozzle_min", "temp_nozzle_max",
+                             "temp_nozzle", (210, 240)),
+        "temp_bed": temps("temp_bed_min", "temp_bed_max",
+                          "temp_bed", (45, 65)),
         "chamber": str(row.get("chamber") or base.get("chamber") or "open"),
         "fan": num(row.get("fan"), 100),
         "shrinkage": num(row.get("shrinkage"), 0.25),

@@ -468,8 +468,12 @@ class Analytics:
         • группировку по материалу.
         """
         s = self.db.settings()
+        # 18.6.3: o.material обязан иметь псевдоним. Рядом с ним идёт j.*,
+        # у print_jobs есть своя колонка material; без AS sqlite3.Row
+        # оставлял первое вхождение — и группировка по материалу всегда
+        # видела пустую строку, собирая «PLA-задания» в группу OTHER.
         queued = self.db.query(
-            "SELECT j.*, o.material, o.due, o.product, o.number, o.customer_name"
+            "SELECT j.*, o.material AS order_material, o.due, o.product, o.number, o.customer_name"
             " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
             " WHERE j.state='queued' AND j.file<>''"
             " ORDER BY COALESCE(o.due,'9999-12-31'), j.priority DESC")
@@ -482,17 +486,24 @@ class Analytics:
         for p in printers:
             # Простой способ: берём последний материал из заданий running
             running = self.db.one(
-                "SELECT o.material FROM print_jobs j"
+                "SELECT o.material AS order_material, j.material AS job_material"
+                " FROM print_jobs j"
                 " LEFT JOIN orders o ON o.id=j.order_id"
                 " WHERE j.printer_id=? AND j.state='running'", (p["id"],))
-            if running and running.get("material"):
-                current_mat = str(running["material"]).upper()
+            if running and (running.get("order_material") or running.get("job_material")):
+                current_mat = str(running.get("order_material")
+                                  or running.get("job_material")).upper()
                 break
 
-        # Группируем по материалу
+        # Группируем по материалу: материал заказа (order_material), а если
+        # у задания материал проставлен прямо в print_jobs — берём его.
+        def job_material(j: dict) -> str:
+            return (str(j.get("order_material") or j.get("material") or "")
+                    .strip().upper())
+
         groups: dict[str, list[dict]] = {}
         for j in queued:
-            mat = (j.get("material") or "OTHER").upper()
+            mat = job_material(j) or "OTHER"
             groups.setdefault(mat, []).append(j)
 
         # Порядок: сначала текущий материал, потом по количеству заданий
@@ -523,7 +534,7 @@ class Analytics:
         naive_changes = 0
         prev = ""
         for j in queued:
-            mat = (j.get("material") or "OTHER").upper()
+            mat = job_material(j) or "OTHER"
             if mat != prev and prev:
                 naive_changes += 1
             prev = mat
