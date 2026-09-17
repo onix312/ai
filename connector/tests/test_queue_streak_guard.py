@@ -59,6 +59,8 @@ class StreakGuardTests(unittest.TestCase):
         self.manager.db = self.db
         self.manager.printers = {"prn1": FakePrinter()}
         self.manager.lock = mock.MagicMock()
+        # память bed-watch (контроль детали на столе) — создаётся в __init__
+        self.manager._bed_cleared = {}
         self.made = 0
 
     def tearDown(self):

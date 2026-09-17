@@ -91,6 +91,10 @@ class _PageParser(html.parser.HTMLParser):
             value = attributes.get(key) or ""
             if not value or value.startswith(("#", "http:", "https:", "mailto:", "data:")):
                 continue
+            # /api/... — живой маршрут коннектора (например, скачивание ZIP
+            # пресетов Bambu Studio), а не файл в site/ — ассетом не является.
+            if value.split("?")[0].split("#")[0].startswith("/api/"):
+                continue
             clean = value.split("?")[0].split("#")[0]
             if not clean:
                 continue

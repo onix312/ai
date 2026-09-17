@@ -6,6 +6,16 @@ const U = PF.ui, { $, $$, esc, num, clamp, money, nfmt, pct, hoursText, minutesT
   openModal, closeModal } = U;
 const { get, post } = PF.api;
 
+/* Отказоустойчивая привязка и отрисовка (18.6.3).
+   Раньше один отсутствующий в разметке элемент ронял bind() или
+   renderSettings() целиком: обработчики после него не навешивались,
+   карточки настроек оставались пустыми — пользователь видел это как
+   «вкладки «Принтеры и Bambu» и «Склад и пластик» не открываются».
+   Теперь отсутствующий элемент просто пропускается, а сбой одной
+   карточки не мешает соседним. */
+const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+const put = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+
 let dashMode = 'money';
 
 /* ============================================================ дашборд */
@@ -62,7 +72,7 @@ function renderDashboard() {
   const load = capacity ? clamp(needHours / capacity * 100, 0, 999) : 0;
   const stock = num(s.stock_grams);
 
-  $('dash_kpis').innerHTML = [
+  put('dash_kpis', [
     kpi('Печатает сейчас', `${nfmt(farm.printing)} / ${nfmt(farm.total)}`,
       `${nfmt(farm.online)} на связи · загрузка ${nfmt(farm.utilization)}%`,
       num(farm.printing) ? 'ok' : ''),
@@ -79,7 +89,7 @@ function renderDashboard() {
       num((farm.idle && farm.idle.lost_profit) || 0) > 0 ? 'warn' : 'ok'),
     kpi('Нужно пластика', `${nfmt(needGrams)} г`, `на складе ${nfmt(stock)} г`,
       needGrams > stock ? 'warn' : 'ok'),
-  ].join('');
+  ].join(''));
   animateKpis();
 
   const series = (PF.state.finance && PF.state.finance.series) || [];
@@ -109,7 +119,7 @@ function renderDashboard() {
   const printers = (live && live.printers) || [];
   // ПР9: компактные карточки парка в том же языке, что и лента на «Принтерах».
   const DPC = 2 * Math.PI * 15.5;
-  $('dash_printers').innerHTML = printers.length ? `<div class="dp-grid">` + printers.map((p) => {
+  put('dash_printers', printers.length ? `<div class="dp-grid">` + printers.map((p) => {
     const st = p.printer.state;
     const running = st === 'RUNNING' || st === 'PREPARE';
     const progress = clamp(num(p.printer.progress), 0, 100);
@@ -134,13 +144,13 @@ function renderDashboard() {
       }).join('')}</span></span>`
       + `<span class="dp-flags">${alerts ? '<i class="flag alarm" title="Тревога сторожа">!</i>' : ''}${problems ? `<i class="flag hms" title="HMS: ${problems}">▲</i>` : ''}</span>`
       + `</button>`;
-  }).join('') + '</div>' : '<div class="empty compact"><span>Принтер ещё не добавлен.</span></div>';
+  }).join('') + '</div>' : '<div class="empty compact"><span>Принтер ещё не добавлен.</span></div>');
 
   const due = activeOrders
     .filter((o) => o.due)
     .sort((a, b) => String(a.due).localeCompare(String(b.due)))
     .slice(0, 8);
-  $('dash_due').innerHTML = due.length ? due.map((o) => {
+  put('dash_due', due.length ? due.map((o) => {
     const st = PF.status(o.status);
     const isLate = o.due < today, isToday = o.due === today;
     return `<div class="tx-row clickable" data-order="${esc(o.id)}" style="cursor:pointer">`
@@ -148,7 +158,7 @@ function renderDashboard() {
       + `<div class="tx-body"><b>№${esc(o.number)} · ${esc(o.product)}</b>`
       + `<small>${esc(o.customer_name || 'без клиента')} · ${esc(st.name)}</small></div>`
       + `<span class="amt ${isLate ? 'neg' : ''}">${isLate ? 'просрочен' : isToday ? 'сегодня' : esc(dateText(o.due))}</span></div>`;
-  }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>';
+  }).join('') : '<div class="empty compact"><span>Заказов со сроками нет.</span></div>');
 
   renderOperatorFocus();
   renderOwnerCash();
@@ -314,11 +324,11 @@ function renderOwnerCash() {
 
 function renderEvents() {
   const list = PF.state.events || [];
-  $('dash_events').innerHTML = list.length ? list.slice(0, 18).map((e) => `<div class="event ${esc(e.kind)}">`
+  put('dash_events', list.length ? list.slice(0, 18).map((e) => `<div class="event ${esc(e.kind)}">`
     + '<span class="edot"></span><span class="etext">'
     + `<b>${esc(e.title)}</b><small>${esc(e.detail || '')}</small></span>`
     + `<time title="${esc(dateTimeText(e.at))}">${esc(agoText(e.at))}</time></div>`).join('')
-    : '<div class="empty compact"><span>Событий пока нет.</span></div>';
+    : '<div class="empty compact"><span>Событий пока нет.</span></div>');
 }
 
 /* ================================================= виджеты панели */
@@ -431,8 +441,8 @@ function initDashDrag() {
 }
 function renderWidgetsList() {
   const prefs = widgetPrefs();
-  $('dash_widgets_list').innerHTML = DASH_WIDGETS.map(([id, label]) =>
-    `<label class="widget-check${prefs.includes(id) ? ' on' : ''}"><input type="checkbox" data-widget-check="${id}"${prefs.includes(id) ? ' checked' : ''}><span>${esc(label)}</span></label>`).join('');
+  put('dash_widgets_list', DASH_WIDGETS.map(([id, label]) =>
+    `<label class="widget-check${prefs.includes(id) ? ' on' : ''}"><input type="checkbox" data-widget-check="${id}"${prefs.includes(id) ? ' checked' : ''}><span>${esc(label)}</span></label>`).join(''));
 }
 function dashEmpty(msg) { return `<div class="empty compact"><span>${esc(msg)}</span></div>`; }
 
@@ -1037,13 +1047,13 @@ const AUTOS = [
   ['unattended_dangerous_actions', 'Разрешить опасные действия без оператора', 'Safety-gate для автозапуска, расписаний, нагрева и подачи филамента. Power-loss recovery имеет отдельную строгую политику.', 'bool'],
 ];
 const NOTIFY = [
-  ['notify_complete', 'Завершение печати'],
-  ['notify_error', 'Ошибки и HMS'],
-  ['notify_pause', 'Пауза'],
-  ['notify_filament_low', 'Пластик заканчивается'],
-  ['notify_guard', 'Тревоги сторожа печати'],
-  ['notify_maintenance', 'Пора обслужить принтер'],
-  ['notify_photo', 'Прикладывать кадр с камеры'],
+  ['notify_complete', 'Завершение печати', 'Сообщение, когда задание дошло до конца: имя файла, время и вес пластика'],
+  ['notify_error', 'Ошибки и HMS', 'Коды ошибок принтера и сбои задания — чтобы реагировать, пока брак не разросся'],
+  ['notify_pause', 'Пауза', 'Печать встала на паузу (вручную или по сторожу) — уведомление придёт сразу'],
+  ['notify_filament_low', 'Пластик заканчивается', 'Остаток катушки упал ниже порога из блока «Склад и пластик»'],
+  ['notify_guard', 'Тревоги сторожа печати', 'Срабатывания защиты: перегрев, зависание, спагетти-детектор'],
+  ['notify_maintenance', 'Пора обслужить принтер', 'Регламент ТО: смазка, протяжка, чистка — по наработке часов парка'],
+  ['notify_photo', 'Прикладывать кадр с камеры', 'К уведомлениям о событиях прикладывается снимок с камеры принтера'],
 ];
 const AUTO_EXTRA = [
   ['weekly_capacity_hours', 'Сколько часов печати в неделю', 'Реальный потолок парка станков', 'select', [
@@ -1276,8 +1286,9 @@ function schemaControl(f) {
 function schemaCard(title, sub, fields, opts = {}) {
   const rows = fields.map((f) => {
     const adv = f.advanced ? ' data-advanced="1"' : '';
-    return `<div class="set-row"${adv} data-set-row><div class="sinfo"><b>${esc(f.label)}</b>`
-      + (f.advanced ? '<small>техническое</small>' : '')
+    // 18.6.3: у каждой настройки видно пояснение (hint из схемы), а не только подпись.
+    const hint = f.hint ? `<small>${esc(f.hint)}</small>` : (f.advanced ? '<small>техническое</small>' : '');
+    return `<div class="set-row"${adv} data-set-row><div class="sinfo"><b>${esc(f.label)}</b>${hint}`
       + `</div>${schemaControl(f)}</div>`;
   }).join('');
   return `<div class="card" data-set-card data-schema-group="${opts.group || ''}">`
@@ -1309,9 +1320,9 @@ async function renderAllSettings() {
     $$('[data-schema-group]', host).forEach((card) => {
       let n = 0;
       $$('[data-advanced]', card).forEach((r) => {
-        const on = showAdv;
-        r.classList.toggle('hidden', !on);
-        if (on) n++;
+        const isOn = showAdv;
+        r.classList.toggle('hidden', !isOn);
+        if (isOn) n++;
       });
       n += $$('.set-row:not([data-advanced])', card).length;
       card.classList.toggle('hidden', n === 0);
@@ -1410,7 +1421,7 @@ async function renderCashierSettings() {
   const s = PF.state.settings;
   const mk = (groups) => groups.flatMap((g) => d.fields[g] || [])
     .filter((f) => !f.secret && f.type !== 'json')
-    .map((f) => settingRow(f.key, f.label, f.advanced ? 'Технический ключ' : '', schemaControl(f)))
+    .map((f) => settingRow(f.key, f.label, f.hint || (f.advanced ? 'Технический ключ' : ''), schemaControl(f)))
     .join('');
 
   const cEl = $('set_cashier_fields');
@@ -1579,8 +1590,8 @@ function openMaterial(id) {
   const m = id ? materialsFull.find((x) => x.id === id) : null;
   const isBuiltin = Boolean(m && m.builtin);
   const catalog = materialsFull.filter((x) => x.builtin);
-  $('mat_base').innerHTML = '<option value="">— без шаблона —</option>'
-    + catalog.map((b) => `<option value="${esc(b.key)}">${esc(b.name)}</option>`).join('');
+  put('mat_base', '<option value="">— без шаблона —</option>'
+    + catalog.map((b) => `<option value="${esc(b.key)}">${esc(b.name)}</option>`).join(''));
   // У встроенного типа ключ не меняется — он и есть имя типа.
   const keyEl = $('mat_key');
   if (keyEl) { keyEl.readOnly = isBuiltin; keyEl.disabled = isBuiltin; }
@@ -1643,26 +1654,32 @@ function fillMaterialFromBase(key) {
   if (!$('mat_uv_resistant').checked) $('mat_uv_resistant').checked = Boolean(m.uv_resistant);
 }
 async function saveMaterial() {
+  /* 18.6.3: пустое числовое поле = «не задано», а не ноль. Раньше пустые
+     температуры/цену saveMaterial отправлял как 0 — у материала появлялись
+     «сопло 222–0°C», «стол 0–0°C», и значения казались несохранёнными.
+     Теперь на сервер уходит null: он возьмёт значение из шаблона (base)
+     или каталога пластиков. */
+  const numOrNull = (id) => { const v = $(id).value.trim(); return v === '' ? null : num(v); };
   const payload = {
     id: editingMaterial || '',
     name: $('mat_name').value.trim(),
     key: $('mat_key').value.trim(),
     base: $('mat_base').value,
     full_name: $('mat_full_name').value.trim(),
-    price_per_kg: num($('mat_price_per_kg').value),
-    speed_factor: num($('mat_speed_factor').value),
-    temp_nozzle_min: num($('mat_nozzle_min').value),
-    temp_nozzle_max: num($('mat_nozzle_max').value),
-    temp_bed_min: num($('mat_bed_min').value),
-    temp_bed_max: num($('mat_bed_max').value),
-    fan: num($('mat_fan').value),
+    price_per_kg: numOrNull('mat_price_per_kg'),
+    speed_factor: numOrNull('mat_speed_factor'),
+    temp_nozzle_min: numOrNull('mat_nozzle_min'),
+    temp_nozzle_max: numOrNull('mat_nozzle_max'),
+    temp_bed_min: numOrNull('mat_bed_min'),
+    temp_bed_max: numOrNull('mat_bed_max'),
+    fan: numOrNull('mat_fan'),
     chamber: $('mat_chamber').value,
-    density: num($('mat_density').value),
-    shrinkage: num($('mat_shrinkage').value),
-    dry_temp: num($('mat_dry_temp').value),
-    dry_hours: num($('mat_dry_hours').value),
-    heat_resistance: num($('mat_heat_resistance').value),
-    support_factor: num($('mat_support_factor').value),
+    density: numOrNull('mat_density'),
+    shrinkage: numOrNull('mat_shrinkage'),
+    dry_temp: numOrNull('mat_dry_temp'),
+    dry_hours: numOrNull('mat_dry_hours'),
+    heat_resistance: numOrNull('mat_heat_resistance'),
+    support_factor: numOrNull('mat_support_factor'),
     abrasive: $('mat_abrasive').checked ? 1 : 0,
     uv_resistant: $('mat_uv_resistant').checked ? 1 : 0,
     food_safe: $('mat_food_safe').checked ? 1 : 0,
@@ -1694,146 +1711,189 @@ async function deleteMaterial(id) {
 
 function renderSettings() {
   const s = PF.state.settings;
-  if ($('set_rates')) $('set_rates').innerHTML = settingGroup(RATES);
-  if ($('set_storage_rules')) $('set_storage_rules').innerHTML = settingGroup(STORAGE_RULES);
+  /* Каждая карточка рисуется независимо (18.6.3): сбой одной (нет элемента в
+     старой кэшированной разметке, неожиданные данные) раньше обрывал функцию —
+     и все карточки ниже оставались пустыми, включая «Принтеры и Bambu» и
+     «Материалы для печати». Теперь падение изолировано внутри своей карточки. */
+  const safe = (name, fn) => {
+    try { fn(); } catch (e) { console.error('Настройки · карточка «' + name + '»: ', e); }
+  };
+
+  safe('tarifs', () => {
+    if ($('set_rates')) put('set_rates', settingGroup(RATES));
+  });
+
+  safe('storage', () => {
+    if ($('set_storage_rules')) put('set_storage_rules', settingGroup(STORAGE_RULES));
+  });
 
   // --- бизнес
-  $('set_company').innerHTML = settingGroup(COMPANY);
-  $('set_goals').innerHTML = settingGroup(GOALS);
+  safe('business', () => {
+    put('set_company', settingGroup(COMPANY));
+    put('set_goals', settingGroup(GOALS));
+  });
 
   // --- налоги
-  const mode = s.tax_mode || 'none';
-  $('set_tax_mode').value = mode;
-  const hints = (PF.modules.finance && PF.modules.finance.MODE_HINTS) || {};
-  $('set_tax_hint').lastElementChild.textContent = hints[mode] || '';
-  $('set_tax').innerHTML = settingGroup(TAX_FIELDS[mode] || [])
-    || '<div class="empty compact"><span>Для этого режима настраивать нечего.</span></div>';
-  $('set_insurance').innerHTML = ['usn6', 'usn15', 'patent'].includes(mode)
-    ? settingGroup(INSURANCE)
-    : '<div class="notice"><span>ℹ</span><span>На выбранном режиме страховые взносы «за себя» не платятся.</span></div>';
-  $('set_vat').innerHTML = settingGroup(VAT);
+  safe('tax', () => {
+    const mode = s.tax_mode || 'none';
+    if ($('set_tax_mode')) $('set_tax_mode').value = mode;
+    const hints = (PF.modules.finance && PF.modules.finance.MODE_HINTS) || {};
+    if ($('set_tax_hint') && $('set_tax_hint').lastElementChild) {
+      $('set_tax_hint').lastElementChild.textContent = hints[mode] || '';
+    }
+    put('set_tax', settingGroup(TAX_FIELDS[mode] || [])
+      || '<div class="empty compact"><span>Для этого режима настраивать нечего.</span></div>');
+    put('set_insurance', ['usn6', 'usn15', 'patent'].includes(mode)
+      ? settingGroup(INSURANCE)
+      : '<div class="notice"><span>ℹ</span><span>На выбранном режиме страховые взносы «за себя» не платятся.</span></div>');
+    put('set_vat', settingGroup(VAT));
+  });
 
   // --- цены
-  $('set_pricing').innerHTML = settingGroup(PRICING);
-  $('set_discounts').innerHTML = settingGroup(DISCOUNTS);
-  $('set_payments').innerHTML = settingGroup(PAYMENTS);
+  safe('pricing', () => {
+    put('set_pricing', settingGroup(PRICING));
+    put('set_discounts', settingGroup(DISCOUNTS));
+    put('set_payments', settingGroup(PAYMENTS));
+  });
 
   // --- учёт денег
-  const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
-  const BANK_RULES_SAMPLE = [
-    { match: 'ozon', kind: 'income', category: 'sale', title: 'Продажа (Ozon)' },
-    { match: 'пластик|филамент|petg|pla|abs|tpu', kind: 'expense', category: 'filament', title: 'Закупка пластика' },
-    { match: 'электроэнергия|энергосбыт', kind: 'expense', category: 'energy', title: 'Электричество' },
-    { match: 'налог', kind: 'expense', category: 'tax', title: 'Налог' },
-  ];
-  const bankRules = Array.isArray(s.bank_rules) && s.bank_rules.length ? s.bank_rules : BANK_RULES_SAMPLE;
-  $('set_money_rules').innerHTML = settingGroup(MONEY_RULES)
-    + settingRow('bank_rules', 'Правила импорта выписки', 'JSON: match — регулярное выражение по назначению платежа, kind: income|expense, category — статья, title — название проводки.',
-      `<textarea data-setting="bank_rules" rows="7" style="width:100%;font-family:ui-monospace,monospace;font-size:12px">${esc(JSON.stringify(bankRules, null, 1))}</textarea>`)
-    + settingRow('default_account', 'Касса по умолчанию', 'Куда попадают деньги без уточнения',
-      `<select data-setting="default_account">${accounts.map((a) =>
-        `<option value="${esc(a.id)}"${(s.default_account || 'cash') === a.id ? ' selected' : ''}>${esc(a.name)}</option>`)
-        .join('') || '<option value="cash">Наличные</option>'}</select>`);
-  $('set_auto').innerHTML = AUTOS.map(([k, label, sub]) => settingRow(k, label, sub,
-    `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('');
-  $('set_auto_extra').innerHTML = settingGroup(AUTO_EXTRA);
-  $('set_guard').innerHTML = settingGroup(GUARD);
-  $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
-  $('set_upkeep').innerHTML = settingGroup(UPKEEP);
-  if ($('set_watch')) {
-    $('set_watch').innerHTML = settingGroup(WATCH)
-      + `<div class="set-row" data-set-row><div class="sinfo"><b>Быстрый выбор пути</b><small>Нажмите, чтобы подставить типовую папку для 3MF</small></div>`
-      + `<div style="display:flex;gap:6px;flex-wrap:wrap">`
-      + `<button class="btn sm" type="button" data-watch-preset="default">~/PrintFlow-Inbox</button>`
-      + `<button class="btn sm" type="button" data-watch-preset="desktop">~/Desktop/3MF</button>`
-      + `<button class="btn sm" type="button" data-watch-preset="win">C:\\PrintFlow-Inbox</button>`
-      + `</div></div>`;
-  }
-  if ($('set_studio')) {
-    const printerOpts = [['', 'Любой свободный принтер']].concat(
-      (PF.state.printers || []).map((p) => [p.id, `${p.name} (${p.model || 'Bambu'})`])
-    );
-    const curPrinter = s.studio_gateway_printer_id || '';
-    const printerSelect = `<select data-setting="studio_gateway_printer_id">`
-      + printerOpts.map(([val, label]) => `<option value="${esc(val)}"${val === curPrinter ? ' selected' : ''}>${esc(label)}</option>`).join('')
-      + `</select>`;
-
-    $('set_studio').innerHTML = settingGroup(STUDIO)
-      + settingRow('studio_gateway_printer_id', 'Принтер по умолчанию для шлюза', 'На какой принтер направлять печать из Studio', printerSelect)
-      + settingRow('studio_gateway_access_code', 'Access Code для Studio',
-        s.has_studio_gateway_access_code
-          ? 'Сохранён — оставьте пустым, чтобы не менять. Studio спросит этот код при подключении.'
-          : 'Задайте сами: Studio спросит его при подключении. Пусто при включении — сгенерируется и повторно не покажется.',
-        '<input type="password" autocomplete="new-password" data-setting="studio_gateway_access_code" data-secret="1" placeholder="'
-          + (s.has_studio_gateway_access_code ? '••••••••' : 'задайте код') + '">');
-    get('/api/studio/status').then((data) => {
-      const el = $('studio_status');
-      if (!el) return;
-      const on = data.enabled ? 'вкл' : 'выкл';
-      const run = data.running ? 'слушает LAN' : 'без сокетов';
-      const model = esc(data.dev_model || data.model || '');
-      el.innerHTML = `<span>ℹ</span><span>Шлюз ${on} · ${run} · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model} · MQTT :${data.mqtt_port || 8883} · FTPS :${data.ftp_port || 990}${data.last_error ? ' · ' + esc(data.last_error) : ''}</span>`;
-    }).catch(() => {});
-    get('/api/slicer/status').then((data) => {
-      const el = $('studio_status');
-      if (!el || !data) return;
-      const extra = data.available
-        ? ` · слайсер ${esc(data.name || data.bin || '')}`
-        : ' · CLI-слайсер не найден';
-      if (el.lastElementChild) el.lastElementChild.textContent += extra;
-    }).catch(() => {});
-  }
-  if ($('set_preflight')) $('set_preflight').innerHTML = settingGroup(PREFLIGHT);
-  if ($('set_ftps')) $('set_ftps').innerHTML = settingGroup(FTPS);
-  if ($('set_mqtt')) $('set_mqtt').innerHTML = settingGroup(MQTT);
-  if ($('set_ams')) $('set_ams').innerHTML = settingGroup(AMS_SETTINGS);
-  if ($('set_phase11')) $('set_phase11').innerHTML = settingGroup(PHASE11);
-  if ($('set_system2')) $('set_system2').innerHTML = settingGroup(SYSTEM2);
-  // профили настроек
-  if ($('set_profiles')) renderProfiles();
-  // правила «если-то»
-  if ($('set_rules')) renderRules();
-
-  $('set_tg').innerHTML = settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
-    `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
-    + settingRow('telegram_token', 'Bot Token', s.has_telegram_token ? 'Сохранён — оставьте пустым, чтобы не менять' : 'Получите у @BotFather',
-      '<input type="password" autocomplete="new-password" data-setting="telegram_token" data-secret="1" placeholder="' + (s.has_telegram_token ? '••••••••' : 'токен') + '">')
-    + settingRow('telegram_chat_id', 'Chat ID', 'Ваш идентификатор в Telegram',
-      `<input type="text" data-setting="telegram_chat_id" value="${esc(String(s.telegram_chat_id || ''))}">`)
-    + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
-      `<label class="switch"><input type="checkbox" data-setting="telegram_bot"${s.telegram_bot ? ' checked' : ''}><i></i></label>`)
-    + NOTIFY.map(([k, label]) => settingRow(k, label, '',
-      `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('')
-    + settingRow('browser_notify_enabled', 'Уведомления в браузере', 'Пока PrintFlow открыт вкладкой — события приходят сразу',
-      `<label class="switch"><input type="checkbox" data-setting="browser_notify_enabled"${s.browser_notify_enabled ? ' checked' : ''}><i></i></label>
-       <button class="btn sm" type="button" id="notify_perm_btn" style="margin-top:8px">Разрешить уведомления</button>`);
-
-  if ($('set_cloud')) renderCloudSettings(s);
-  $('set_theme').value = s.theme || 'system';
-  $('set_accent').innerHTML = ACCENTS.map(([name, color]) =>
-    `<button type="button" data-accent="${name}" class="${(s.accent || 'indigo') === name ? 'on' : ''}" style="background:${color}" title="${name}"></button>`).join('');
-
-  $('set_printers').innerHTML = PF.state.printers.length ? PF.state.printers.map((p) => {
-    const livep = PF.livePrinter(p.id);
-    return `<div class="set-row"><div class="sinfo"><b>${esc(p.name)}</b>`
-      + `<small>${esc(p.model || '')} · ${esc(p.host || 'IP не задан')} · ${p.has_access_code ? 'код сохранён' : 'нет Access Code'}`
-      + `${livep ? ' · ' + esc(livep.printer.state_label) : ''}</small></div>`
-      + `<button class="btn sm" type="button" data-printer-edit="${esc(p.id)}">Изменить</button></div>`;
-  }).join('') : '<div class="empty compact"><span>Принтеры не добавлены.</span></div>';
-
-  $('set_data_dir').textContent = navigator.platform.toLowerCase().includes('win')
-    ? '%APPDATA%\\PrintFlow' : '~/.config/printflow';
-  $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
-    button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
+  safe('money', () => {
+    const accounts = (PF.state.accounts || []).filter((a) => !num(a.archived));
+    const BANK_RULES_SAMPLE = [
+      { match: 'ozon', kind: 'income', category: 'sale', title: 'Продажа (Ozon)' },
+      { match: 'пластик|филамент|petg|pla|abs|tpu', kind: 'expense', category: 'filament', title: 'Закупка пластика' },
+      { match: 'электроэнергия|энергосбыт', kind: 'expense', category: 'energy', title: 'Электричество' },
+      { match: 'налог', kind: 'expense', category: 'tax', title: 'Налог' },
+    ];
+    const bankRules = Array.isArray(s.bank_rules) && s.bank_rules.length ? s.bank_rules : BANK_RULES_SAMPLE;
+    put('set_money_rules', settingGroup(MONEY_RULES)
+      + settingRow('bank_rules', 'Правила импорта выписки', 'JSON: match — регулярное выражение по назначению платежа, kind: income|expense, category — статья, title — название проводки.',
+        `<textarea data-setting="bank_rules" rows="7" style="width:100%;font-family:ui-monospace,monospace;font-size:12px">${esc(JSON.stringify(bankRules, null, 1))}</textarea>`)
+      + settingRow('default_account', 'Касса по умолчанию', 'Куда попадают деньги без уточнения',
+        `<select data-setting="default_account">${accounts.map((a) =>
+          `<option value="${esc(a.id)}"${(s.default_account || 'cash') === a.id ? ' selected' : ''}>${esc(a.name)}</option>`)
+          .join('') || '<option value="cash">Наличные</option>'}</select>`));
   });
-  // 17.0 (И4): вкладки «Касса / СБП / Банк» и «Все настройки» строятся из схемы
-  renderCashierSettings().catch(() => {});
-  renderAllSettings().catch(() => {
-    if ($('set_all_fields')) {
-      $('set_all_fields').innerHTML = '<div class="empty compact"><span>Схема настроек недоступна — проверьте связь с коннектором.</span></div>';
+
+  safe('production', () => {
+    put('set_auto', AUTOS.map(([k, label, sub]) => settingRow(k, label, sub,
+      `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join(''));
+    put('set_auto_extra', settingGroup(AUTO_EXTRA));
+    put('set_guard', settingGroup(GUARD));
+    put('set_queue_rules', settingGroup(QUEUE_RULES));
+    put('set_upkeep', settingGroup(UPKEEP));
+    if ($('set_rules')) renderRules();
+  });
+
+  safe('watch', () => {
+    if ($('set_watch')) {
+      put('set_watch', settingGroup(WATCH)
+        + `<div class="set-row" data-set-row><div class="sinfo"><b>Быстрый выбор пути</b><small>Нажмите, чтобы подставить типовую папку для 3MF</small></div>`
+        + `<div style="display:flex;gap:6px;flex-wrap:wrap">`
+        + `<button class="btn sm" type="button" data-watch-preset="default">~/PrintFlow-Inbox</button>`
+        + `<button class="btn sm" type="button" data-watch-preset="desktop">~/Desktop/3MF</button>`
+        + `<button class="btn sm" type="button" data-watch-preset="win">C:\\PrintFlow-Inbox</button>`
+        + `</div></div>`);
     }
   });
-  renderUpdateInfo();
+  safe('studio', () => {
+    if ($('set_studio')) {
+      const printerOpts = [['', 'Любой свободный принтер']].concat(
+        (PF.state.printers || []).map((p) => [p.id, `${p.name} (${p.model || 'Bambu'})`])
+      );
+      const curPrinter = s.studio_gateway_printer_id || '';
+      const printerSelect = `<select data-setting="studio_gateway_printer_id">`
+        + printerOpts.map(([val, label]) => `<option value="${esc(val)}"${val === curPrinter ? ' selected' : ''}>${esc(label)}</option>`).join('')
+        + `</select>`;
+
+      put('set_studio', settingGroup(STUDIO)
+        + settingRow('studio_gateway_printer_id', 'Принтер по умолчанию для шлюза', 'На какой принтер направлять печать из Studio', printerSelect)
+        + settingRow('studio_gateway_access_code', 'Access Code для Studio',
+          s.has_studio_gateway_access_code
+            ? 'Сохранён — оставьте пустым, чтобы не менять. Studio спросит этот код при подключении.'
+            : 'Задайте сами: Studio спросит его при подключении. Пусто при включении — сгенерируется и повторно не покажется.',
+          '<input type="password" autocomplete="new-password" data-setting="studio_gateway_access_code" data-secret="1" placeholder="'
+            + (s.has_studio_gateway_access_code ? '••••••••' : 'задайте код') + '">'));
+      get('/api/studio/status').then((data) => {
+        const el = $('studio_status');
+        if (!el) return;
+        const st = data.enabled ? 'вкл' : 'выкл';
+        const run = data.running ? 'слушает LAN' : 'без сокетов';
+        const model = esc(data.dev_model || data.model || '');
+        el.innerHTML = `<span>ℹ</span><span>Шлюз ${st} · ${run} · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model} · MQTT :${data.mqtt_port || 8883} · FTPS :${data.ftp_port || 990}${data.last_error ? ' · ' + esc(data.last_error) : ''}</span>`;
+      }).catch(() => {});
+      get('/api/slicer/status').then((data) => {
+        const el = $('studio_status');
+        if (!el || !data) return;
+        const extra = data.available
+          ? ` · слайсер ${esc(data.name || data.bin || '')}`
+          : ' · CLI-слайсер не найден';
+        if (el.lastElementChild) el.lastElementChild.textContent += extra;
+      }).catch(() => {});
+    }
+  });
+
+  safe('bambu-protocols', () => {
+    if ($('set_preflight')) put('set_preflight', settingGroup(PREFLIGHT));
+    if ($('set_ftps')) put('set_ftps', settingGroup(FTPS));
+    if ($('set_mqtt')) put('set_mqtt', settingGroup(MQTT));
+    if ($('set_ams')) put('set_ams', settingGroup(AMS_SETTINGS));
+    if ($('set_phase11')) put('set_phase11', settingGroup(PHASE11));
+    if ($('set_system2')) put('set_system2', settingGroup(SYSTEM2));
+    // профили настроек
+    if ($('set_profiles')) renderProfiles();
+  });
+
+  safe('telegram', () => {
+    put('set_tg', settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
+      `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
+      + settingRow('telegram_token', 'Bot Token', s.has_telegram_token ? 'Сохранён — оставьте пустым, чтобы не менять' : 'Получите у @BotFather',
+        '<input type="password" autocomplete="new-password" data-setting="telegram_token" data-secret="1" placeholder="' + (s.has_telegram_token ? '••••••••' : 'токен') + '">')
+      + settingRow('telegram_chat_id', 'Chat ID', 'Ваш идентификатор в Telegram',
+        `<input type="text" data-setting="telegram_chat_id" value="${esc(String(s.telegram_chat_id || ''))}">`)
+      + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
+        `<label class="switch"><input type="checkbox" data-setting="telegram_bot"${s.telegram_bot ? ' checked' : ''}><i></i></label>`)
+      + NOTIFY.map(([k, label, sub]) => settingRow(k, label, sub || '',
+        `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('')
+      + settingRow('browser_notify_enabled', 'Уведомления в браузере', 'Пока PrintFlow открыт вкладкой — события приходят сразу',
+        `<label class="switch"><input type="checkbox" data-setting="browser_notify_enabled"${s.browser_notify_enabled ? ' checked' : ''}><i></i></label>
+         <button class="btn sm" type="button" id="notify_perm_btn" style="margin-top:8px">Разрешить уведомления</button>`));
+  });
+
+  safe('theme', () => {
+    if ($('set_cloud')) renderCloudSettings(s);
+    if ($('set_theme')) $('set_theme').value = s.theme || 'system';
+    put('set_accent', ACCENTS.map(([name, color]) =>
+      `<button type="button" data-accent="${name}" class="${(s.accent || 'indigo') === name ? 'on' : ''}" style="background:${color}" title="${name}"></button>`).join(''));
+  });
+
+  safe('printers', () => {
+    put('set_printers', PF.state.printers.length ? PF.state.printers.map((p) => {
+      const livep = PF.livePrinter(p.id);
+      return `<div class="set-row"><div class="sinfo"><b>${esc(p.name)}</b>`
+        + `<small>${esc(p.model || '')} · ${esc(p.host || 'IP не задан')} · ${p.has_access_code ? 'код сохранён' : 'нет Access Code'}`
+        + `${livep ? ' · ' + esc(livep.printer.state_label) : ''}</small></div>`
+        + `<button class="btn sm" type="button" data-printer-edit="${esc(p.id)}">Изменить</button></div>`;
+    }).join('') : '<div class="empty compact"><span>Принтеры не добавлены.</span></div>');
+  });
+
+  safe('misc', () => {
+    if ($('set_data_dir')) {
+      $('set_data_dir').textContent = navigator.platform.toLowerCase().includes('win')
+        ? '%APPDATA%\\PrintFlow' : '~/.config/printflow';
+    }
+    $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
+      button.classList.toggle('on', button.dataset.setShortcut === settingsPane);
+    });
+    // 17.0 (И4): вкладки «Касса / СБП / Банк» и «Все настройки» строятся из схемы
+    renderCashierSettings().catch(() => {});
+    renderAllSettings().catch(() => {
+      if ($('set_all_fields')) {
+        put('set_all_fields', '<div class="empty compact"><span>Схема настроек недоступна — проверьте связь с коннектором.</span></div>');
+      }
+    });
+    renderUpdateInfo();
+  });
 }
 
 /* ============================================================ обновления */
@@ -2510,8 +2570,8 @@ function openRuleModal(){
   openModal('rule_modal');
   if ($('rl_event').options.length) return;
   get('/api/rules').then(d=>{
-    $('rl_event').innerHTML=Object.entries(d.triggers||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
-    $('rl_action').innerHTML=Object.entries(d.actions||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join('');
+    put('rl_event',Object.entries(d.triggers||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join(''));
+    put('rl_action',Object.entries(d.actions||{}).map(([k,v])=>`<option value="${esc(k)}">${esc(v)}</option>`).join(''));
   });
 }
 function saveRule(){
@@ -2612,11 +2672,11 @@ function filterLibrary() {
   cards.forEach((card) => {
     const category = card.dataset.libraryCategory || 'tools';
     const text = `${card.textContent || ''} ${card.dataset.article || ''} ${card.dataset.libraryLabel || ''}`.toLowerCase();
-    const on = (libraryFilter === 'all' || category === libraryFilter) && (!query || text.includes(query));
-    card.hidden = !on;
-    if (on) visible += 1;
+    const isOn = (libraryFilter === 'all' || category === libraryFilter) && (!query || text.includes(query));
+    card.hidden = !isOn;
+    if (isOn) visible += 1;
     // 13.1 (64): совпадения в <mark>, а не просто «нашлось/не нашлось»
-    if (on && query) highlightLibCard(card, rawQuery);
+    if (isOn && query) highlightLibCard(card, rawQuery);
   });
   if (count) count.textContent = query || libraryFilter !== 'all'
     ? `Найдено ${visible} из ${cards.length}`
@@ -2652,9 +2712,9 @@ function showArticle(name) {
   const articles = $$('#library-body .library-article');
   let activeArticle = null;
   articles.forEach((article) => {
-    const on = article.dataset.article === name;
-    article.classList.toggle('on', on);
-    if (on) activeArticle = article;
+    const isOn = article.dataset.article === name;
+    article.classList.toggle('on', isOn);
+    if (isOn) activeArticle = article;
   });
   // 13.1 (65): «прочитано» и возврат к месту остановки
   if (activeArticle && name) {
@@ -2708,7 +2768,7 @@ function bind() {
     PF.state.activePrinter = btn.dataset.dpPrinter;
     location.hash = '#printers';
   });
-  $('dash_period').addEventListener('click', async (e) => {
+  on('dash_period', 'click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;
     $$('#dash_period button').forEach((b) => b.classList.toggle('on', b === btn));
@@ -2716,21 +2776,21 @@ function bind() {
     if (PF.state.dashDays > PF.state.financeDays) await PF.refreshFinance(PF.state.dashDays);
     renderDashboard();
   });
-  $('dash_chart_mode').addEventListener('click', (e) => {
+  on('dash_chart_mode', 'click', (e) => {
     const btn = e.target.closest('[data-mode]');
     if (!btn) return;
     $$('#dash_chart_mode button').forEach((b) => b.classList.toggle('on', b === btn));
     dashMode = btn.dataset.mode;
     renderDashboard();
   });
-  $('dash_refresh').addEventListener('click', async () => {
+  on('dash_refresh', 'click', async () => {
     try {
       await Promise.all([PF.refreshCore(), PF.refreshFinance(), PF.refreshEvents(), refreshTimeline(), refreshPlan(), refreshInsights()]);
       toast('Обновлено');
     } catch (e) { fail(e); }
   });
-  $('dash_events_refresh').addEventListener('click', () => PF.refreshEvents().catch(fail));
-  $('operator_focus_refresh').addEventListener('click', async () => {
+  on('dash_events_refresh', 'click', () => PF.refreshEvents().catch(fail));
+  on('operator_focus_refresh', 'click', async () => {
     const button = $('operator_focus_refresh');
     button.disabled = true;
     try {
@@ -2741,7 +2801,7 @@ function bind() {
   });
   const cashStrip = $('owner_cash');
   if (cashStrip) cashStrip.addEventListener('click', () => PF.go('finance'));
-  $('operator_focus').addEventListener('click', (e) => {
+  on('operator_focus', 'click', (e) => {
     const fulfill = e.target.closest('[data-focus-fulfill]');
     if (fulfill) {
       if (PF.modules.ops && PF.modules.ops.openOrderFulfillment) PF.modules.ops.openOrderFulfillment(fulfill.dataset.focusFulfill);
@@ -2755,8 +2815,8 @@ function bind() {
     if (action.dataset.focusRoute === 'printers' && action.dataset.focusId) PF.state.activePrinter = action.dataset.focusId;
     PF.go(action.dataset.focusRoute);
   });
-  $('dash_widgets_btn').addEventListener('click', () => { renderWidgetsList(); openModal('dash_widgets_modal'); });
-  $('dash_widgets_list').addEventListener('change', (e) => {
+  on('dash_widgets_btn', 'click', () => { renderWidgetsList(); openModal('dash_widgets_modal'); });
+  on('dash_widgets_list', 'change', (e) => {
     const cb = e.target.closest('[data-widget-check]');
     if (!cb) return;
     let prefs = widgetPrefs();
@@ -2766,19 +2826,19 @@ function bind() {
     applyWidgets();
     renderWidgetsList();
   });
-  $('dash_widgets_reset').addEventListener('click', () => {
+  on('dash_widgets_reset', 'click', () => {
     saveWidgetPrefs(DASH_WIDGETS.map(([id]) => id));
     renderWidgetsList();
     applyWidgets();
     toast('Все виджеты возвращены');
   });
-  $('dash_pdf').addEventListener('click', () => window.print());
+  on('dash_pdf', 'click', () => window.print());
 
-  $('settings_save').addEventListener('click', saveSettings);
-  $('settings_reset').addEventListener('click', resetSettings);
-  $('mat_add').addEventListener('click', () => openMaterial(''));
-  $('mat_save').addEventListener('click', saveMaterial);
-  $('mat_reset').addEventListener('click', async () => {
+  on('settings_save', 'click', saveSettings);
+  on('settings_reset', 'click', resetSettings);
+  on('mat_add', 'click', () => openMaterial(''));
+  on('mat_save', 'click', saveMaterial);
+  on('mat_reset', 'click', async () => {
     const m = materialsFull.find((x) => x.id === editingMaterial);
     if (!m || !m.builtin) return;
     if (!confirmDanger(`Вернуть «${m.name}» к заводским параметрам каталога?`)) return;
@@ -2790,13 +2850,13 @@ function bind() {
       if (PF.modules.money && PF.modules.money.loadCalcMaterials) PF.modules.money.loadCalcMaterials();
     } catch (e) { fail(e); }
   });
-  $('set_materials').addEventListener('click', (e) => {
+  on('set_materials', 'click', (e) => {
     const edit = e.target.closest('[data-mat-edit]');
     const del = e.target.closest('[data-mat-del]');
     if (edit) return openMaterial(edit.dataset.matEdit);
     if (del) return deleteMaterial(del.dataset.matDel);
   });
-  $('mat_base').addEventListener('change', (e) => fillMaterialFromBase(e.target.value));
+  on('mat_base', 'change', (e) => fillMaterialFromBase(e.target.value));
   document.addEventListener('click', (e) => {
     const presetBtn = e.target.closest('[data-watch-preset]');
     if (presetBtn) {
@@ -2811,7 +2871,7 @@ function bind() {
       }
     }
   });
-  $('set_tabs').addEventListener('click', (e) => {
+  on('set_tabs', 'click', (e) => {
     const btn = e.target.closest('[data-pane]');
     if (btn) selectSettingsPane(btn.dataset.pane);
   });
@@ -2821,7 +2881,9 @@ function bind() {
     if (!btn) return;
     selectSettingsPane(btn.dataset.setShortcut);
     const tabs = $('set_tabs');
-    if (tabs) tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (tabs && typeof tabs.scrollIntoView === 'function') {
+      tabs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   });
   const settingsHost = $('view-settings');
   if (settingsHost) {
@@ -2839,35 +2901,35 @@ function bind() {
     settingsHost.addEventListener('input', syncSettingEl);
     settingsHost.addEventListener('change', syncSettingEl);
   }
-  $('set_search').addEventListener('input', U.debounce((e) => filterSettings(e.target.value), 150));
-  $('set_tax_mode').addEventListener('change', (e) => {
+  on('set_search', 'input', U.debounce((e) => filterSettings(e.target.value), 150));
+  on('set_tax_mode', 'change', (e) => {
     // Показываем поля выбранного режима сразу, не дожидаясь сохранения.
     PF.state.settings.tax_mode = e.target.value;
     renderSettings();
     $('set_search').value = '';
     filterSettings('');
   });
-  $('set_accent').addEventListener('click', (e) => {
+  on('set_accent', 'click', (e) => {
     const btn = e.target.closest('[data-accent]');
     if (!btn) return;
     PF.state.settings.accent = btn.dataset.accent;
     PF.applyTheme();
     $$('#set_accent button').forEach((b) => b.classList.toggle('on', b === btn));
   });
-  $('set_theme').addEventListener('change', (e) => {
+  on('set_theme', 'change', (e) => {
     PF.state.settings.theme = e.target.value;
     PF.applyTheme();
   });
-  $('set_printer_add').addEventListener('click', () => PF.modules.printer.openPrinterModal());
-  if ($('rule_add')) $('rule_add').addEventListener('click', openRuleModal);
-  if ($('rule_save')) $('rule_save').addEventListener('click', saveRule);
-  $('set_printers').addEventListener('click', (e) => {
+  on('set_printer_add', 'click', () => PF.modules.printer.openPrinterModal());
+  if ($('rule_add')) on('rule_add', 'click', openRuleModal);
+  if ($('rule_save')) on('rule_save', 'click', saveRule);
+  on('set_printers', 'click', (e) => {
     const btn = e.target.closest('[data-printer-edit]');
     if (btn) PF.modules.printer.openPrinterModal(btn.dataset.printerEdit);
   });
   const permBtn = $('notify_perm_btn');
   if (permBtn) permBtn.addEventListener('click', requestBrowserNotify);
-  $('tg_test').addEventListener('click', async () => {
+  on('tg_test', 'click', async () => {
     const token = $$('[data-setting="telegram_token"]')[0].value;
     const chat = $$('[data-setting="telegram_chat_id"]')[0].value;
     try {
@@ -2877,11 +2939,11 @@ function bind() {
     } catch (e) { fail(e); }
   });
 
-  $('backup_download').addEventListener('click', downloadBackup);
-  $('backup_restore').addEventListener('click', restoreBackup);
-  $('backup_import_ls').addEventListener('click', importLocalStorage);
-  $('backup_wipe').addEventListener('click', wipeData);
-  $('db_backup_now').addEventListener('click', async () => {
+  on('backup_download', 'click', downloadBackup);
+  on('backup_restore', 'click', restoreBackup);
+  on('backup_import_ls', 'click', importLocalStorage);
+  on('backup_wipe', 'click', wipeData);
+  on('db_backup_now', 'click', async () => {
     try {
       const res = await post('/api/system/backup', {});
       if (!res.ok) return fail(new Error(res.error || 'Копия не создалась'));
@@ -2892,10 +2954,10 @@ function bind() {
   loadDbBackups();
   const profSave=$('prof_save');
   if (profSave) profSave.addEventListener('click', async()=>{ const name=await ask({title:'Снапшот настроек',fields:[{name:'name',label:'Название',type:'text',value:'Снапшот '+new Date().toLocaleString('ru-RU')}],ok:'Сохранить'}); if(name==null) return; try{ await post('/api/settings/profile/save',{name}); renderProfiles(); toast('Снапшот сохранён', name);}catch(e){fail(e);} });
-  $('data_check_btn').addEventListener('click', runDataCheck);
+  on('data_check_btn', 'click', runDataCheck);
 
-  $('env_add').addEventListener('click', () => envSave(''));
-  $('set_envelopes').addEventListener('click', (e) => {
+  on('env_add', 'click', () => envSave(''));
+  on('set_envelopes', 'click', (e) => {
     const edit = e.target.closest('[data-env-edit]');
     if (edit) { envSave(edit.dataset.envEdit); return; }
     const out = e.target.closest('[data-env-out]');
@@ -2907,29 +2969,29 @@ function bind() {
   });
 
   initLibraryDiscovery();
-  $('library_home').addEventListener('click', (e) => {
+  on('library_home', 'click', (e) => {
     const button = e.target.closest('[data-library-open]');
     if (button && button.dataset.libraryOpen) PF.go('library', button.dataset.libraryOpen);
   });
-  $('lib_grid').addEventListener('click', (e) => {
+  on('lib_grid', 'click', (e) => {
     const card = e.target.closest('[data-article]');
     if (!card) return;
     e.preventDefault();
     PF.go('library', card.dataset.article);
   });
-  $('lib_back').addEventListener('click', () => PF.go('library'));
-  $('lib_reset_filters').addEventListener('click', () => {
+  on('lib_back', 'click', () => PF.go('library'));
+  on('lib_reset_filters', 'click', () => {
     libraryFilter = 'all';
     $('lib_search').value = '';
     $$('#lib_filters [data-lib-filter]').forEach((button) => button.classList.toggle('on', button.dataset.libFilter === 'all'));
     filterLibrary();
   });
-  $('lib_article_nav_links').addEventListener('click', (e) => {
+  on('lib_article_nav_links', 'click', (e) => {
     const button = e.target.closest('[data-library-heading]');
     const heading = button && document.getElementById(button.dataset.libraryHeading);
     if (heading) heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
-  $('lib_article_top').addEventListener('click', () => {
+  on('lib_article_top', 'click', () => {
     const article = document.querySelector('#library-body .library-article.on');
     if (article) article.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
@@ -3028,7 +3090,7 @@ async function renderTour() {
   if (st.active) {
     el.innerHTML = `<div class="notice" style="margin-bottom:8px"><span>🎬</span><span>Демо активно: виртуальный принтер и демо-данные работают. Откат вернёт базу из копии ${esc(st.backup || '')}.</span></div>`
       + `<button class="btn danger wide" type="button" id="tour_stop">■ Завершить tour и вернуть мои данные</button>`;
-    $('tour_stop').addEventListener('click', async () => {
+    on('tour_stop', 'click', async () => {
       if (!confirmDanger('Завершить NOZZA tour? Приложение перезапустится с исходной базой.')) return;
       try { const r = await post('/api/tour/stop', {}); toast('Tour завершён', r.message || 'Перезапуск…'); }
       catch (e) { fail(e); }
@@ -3037,7 +3099,7 @@ async function renderTour() {
   }
   el.innerHTML = `<p class="muted" style="font-size:12.5px;margin-bottom:8px">Покажите PrintFlow гостю: симулятор P1S печатает, заказы и полка живые, но всё — демо-данные. Завершение одной кнопкой откатывает базу.</p>`
     + `<button class="btn primary wide" type="button" id="tour_start">▶ Запустить NOZZA tour</button>`;
-  $('tour_start').addEventListener('click', async () => {
+  on('tour_start', 'click', async () => {
     try { const r = await post('/api/tour/start', {}); toast('Tour запущен', r.job_started ? 'Виртуальная печать стартовала' : 'Демо-данные готовы'); renderSettings(); }
     catch (e) { fail(e); }
   });
@@ -3083,8 +3145,14 @@ PF.on('printers', renderCycobar);
 PF.on('bootstrap', PF.whenView('settings', renderSettings));
 PF.on('money', () => { if (document.querySelector('#view-settings.on')) renderSettings(); });
 PF.on('view', (d) => {
+  // 18.6.3: каждый шаг — сам по себе. Падение отрисовки настроек больше
+  // не отменяет загрузку материалов и тура (и наоборот).
   if (d.view === 'library') showArticle(d.sub || '');
-  if (d.view === 'settings') { renderSettings(); loadMaterials(); renderTour(); }
+  if (d.view === 'settings') {
+    try { renderSettings(); } catch (e) { console.error('renderSettings:', e); }
+    try { loadMaterials(); } catch (e) { console.error('loadMaterials:', e); }
+    try { renderTour(); } catch (e) { console.error('renderTour:', e); }
+  }
   if (d.view === 'dashboard') {
     renderDashboard();
     if (PF.refreshMoney) PF.refreshMoney();
