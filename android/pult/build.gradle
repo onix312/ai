@@ -29,12 +29,12 @@ android {
         applicationId 'ai.printflow.pult'
         minSdk 24
         targetSdk 34
-        // versionCode = major*10000 + minor*100 + patch: 18.6.4 -> 180604.
+        // versionCode = major*10000 + minor*100 + patch: 18.7.0 -> 180700.
         // Считается от APP_VERSION — расхождение проверяет
         // connector/tests/test_android_pult.py, потому что «обновись» на
         // телефоне сравнивает именно это число.
-        versionCode 180604
-        versionName '18.6.4'
+        versionCode 180700
+        versionName '18.7.0'
     }
 
     signingConfigs {

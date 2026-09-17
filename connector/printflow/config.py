@@ -342,6 +342,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # --- 11.0: шлюз Bambu Studio + библиотека + CLI-слайсер ---------------
     "studio_gateway_enabled": False,
     "studio_gateway_name": "NOZZA-PrintFlow",
+    "studio_gateway_host": "",  # адрес для SSDP/PASV; пусто — авто по get_local_ips
     "studio_gateway_mode": "confirm",  # confirm | queue | autostart
     "studio_gateway_autostart": False,
     "studio_gateway_serial": "",

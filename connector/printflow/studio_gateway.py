@@ -101,6 +101,18 @@ class StudioGateway:
         self.bus = bus
         self.bind = bool(bind)
         self.last_error = ""
+        # Диагностика 18.7: сбой каждого сервиса отдельно (SSDP/MQTT/FTPS),
+        # счётчики подключений и неудачных авторизаций, адрес последнего
+        # клиента. Видны в /api/studio/status и в журнале коннектора.
+        self._errors: dict[str, str] = {"ssdp": "", "mqtt": "", "ftps": ""}
+        self._counters: dict[str, int] = {
+            "mqtt_connections": 0,
+            "mqtt_auth_failures": 0,
+            "ftp_connections": 0,
+            "ftp_auth_failures": 0,
+        }
+        self._last_client = ""
+        self._last_auth_fail_at = ""
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._incoming: dict[str, bytes] = {}
@@ -146,6 +158,9 @@ class StudioGateway:
             self.db.set_settings(patch)
 
     def _host_ip(self) -> str:
+        pinned = self._pinned_host()
+        if pinned:
+            return pinned
         if not self.bind:
             return "127.0.0.1"
         if self._host_cache:
@@ -158,6 +173,32 @@ class StudioGateway:
         except Exception:
             pass
         return "127.0.0.1"
+
+    def _pinned_host(self) -> str:
+        """Адрес из настройки studio_gateway_host (пусто = авто).
+
+        Владелец закрепляет адрес, когда на компьютере есть VirtualBox /
+        Hyper-V / Docker / VPN: их виртуальные 192.168.* оказываются первыми
+        в get_local_ips(), Studio получает их в SSDP и подключается не туда.
+        Непохожее на IPv4 значение игнорируется, но попадает в диагностику.
+        """
+        raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        if not raw:
+            return ""
+        parts = raw.split(".")
+        ok = len(parts) == 4
+        if ok:
+            for part in parts:
+                if not part.isdigit() or not 0 <= int(part) <= 255:
+                    ok = False
+                    break
+        if not ok:
+            message = f"настройка studio_gateway_host не похожа на IPv4: {raw!r}"
+            if self._errors.get("host") != message:
+                self._errors["host"] = message
+            return ""
+        self._errors["host"] = ""
+        return raw
 
     def _bound_printer(self):
         if not self.manager or not hasattr(self.manager, "get"):
@@ -203,11 +244,53 @@ class StudioGateway:
             "ftp_port": FTP_PORT,
         }
 
+    def _note_auth_failure(self, channel: str) -> None:
+        """Засчитать отказ авторизации (MQTT или FTP) и показать в журнале.
+
+        Studio, которой ввели неверный Access Code, молча стучится снова и
+        снова — без счётчика владелец видит только «код=-1» без причины.
+        """
+        key = f"{channel}_auth_failures"
+        with self._lock:
+            self._counters[key] = int(self._counters.get(key, 0)) + 1
+            self._last_auth_fail_at = now_iso()
+            total = self._counters[key]
+        try:
+            from .logging_setup import log
+            log().warning(
+                "Шлюз Bambu Studio: %s: клиент не прошёл Access Code (раз: %d)",
+                "MQTT" if channel == "mqtt" else "FTPS", total)
+        except Exception:
+            pass
+
+    def _record_error(self, service: str, exc: Exception | str) -> None:
+        """Сохранить сбой сервиса шлюза и продублировать его в журнал.
+
+        Раньше last_error перезаписывался следующим сервисом: при занятых
+        8883 и 990 владелец видел только «FTPS: …» и не знал про MQTT.
+        """
+        text = str(exc).strip() or "неизвестная ошибка"
+        self._errors[service.lower()] = text
+        self.last_error = f"{service}: {text}"
+        try:
+            from .logging_setup import log
+            log().warning("Шлюз Bambu Studio: %s: %s", service, text)
+        except Exception:
+            pass
+
     def status(self) -> dict:
         ident = self.identity()
+        pinned_raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        with self._lock:
+            counters = dict(self._counters)
+            last_client = self._last_client
+            last_auth_fail_at = self._last_auth_fail_at
         out = {
             "enabled": self._enabled(),
             "running": bool(self._mqtt_sock or self._ftp_sock or self._ssdp_sock),
+            "mqtt_running": bool(self._mqtt_sock),
+            "ftp_running": bool(self._ftp_sock),
+            "ssdp_running": bool(self._ssdp_sock),
             "bind": self.bind,
             "mode": str(self.db.setting("studio_gateway_mode", "queue") or "queue"),
             "autostart": bool(self.db.setting("studio_gateway_autostart", False)),
@@ -217,6 +300,14 @@ class StudioGateway:
             "ftp_port": FTP_PORT,
             "ssdp_ports": list(SSDP_PORTS),
             "last_error": self.last_error,
+            "errors": {key: value for key, value in self._errors.items() if value},
+            "host_pinned": bool(pinned_raw),
+            "mqtt_connections": int(counters.get("mqtt_connections", 0)),
+            "mqtt_auth_failures": int(counters.get("mqtt_auth_failures", 0)),
+            "ftp_connections": int(counters.get("ftp_connections", 0)),
+            "ftp_auth_failures": int(counters.get("ftp_auth_failures", 0)),
+            "last_client": last_client,
+            "last_auth_fail_at": last_auth_fail_at,
             "has_access_code": bool(self._access_code()),
             "urn": SSDP_NT,
         }
@@ -628,6 +719,12 @@ class StudioGateway:
             pass_ok = bool(expected) and info.get("password") == expected
             rc = 0 if user_ok and pass_ok else 4
             self._mqtt_authed = rc == 0
+            if rc == 0:
+                with self._lock:
+                    self._counters["mqtt_connections"] = \
+                        int(self._counters.get("mqtt_connections", 0)) + 1
+            else:
+                self._note_auth_failure("mqtt")
             return [encode_connack(rc)]
         if ptype == PINGREQ:
             return [encode_pingresp()]
@@ -684,13 +781,19 @@ class StudioGateway:
         if cmd == "USER":
             self._ftp_user = arg.strip()
             self._ftp_authed = False
+            with self._lock:
+                self._counters["ftp_connections"] = \
+                    int(self._counters.get("ftp_connections", 0)) + 1
             return "331 Password required"
         if cmd == "PASS":
             expected = self._access_code()
             user_ok = self._ftp_user == MQTT_USER
             pass_ok = bool(expected) and arg == expected
             self._ftp_authed = user_ok and pass_ok
-            return "230 Login successful" if self._ftp_authed else "530 Login incorrect"
+            if self._ftp_authed:
+                return "230 Login successful"
+            self._note_auth_failure("ftp")
+            return "530 Login incorrect"
         if cmd == "QUIT":
             self._ftp_authed = False
             return "221 Goodbye"
@@ -712,7 +815,7 @@ class StudioGateway:
             self._ftp_cwd = "/" + arg.strip("/ ")
             return "250 Directory changed"
         if cmd == "PASV":
-            return "227 Entering Passive Mode (127,0,0,1,0,20)"
+            return self._pasv_reply(20)
         if cmd == "EPSV":
             return "229 Entering Extended Passive Mode (|||20|)"
         if cmd in ("LIST", "NLST"):
@@ -756,26 +859,27 @@ class StudioGateway:
             return
         self._stop.clear()
         self._ensure_identity()
+        self._errors = {"ssdp": "", "mqtt": "", "ftps": ""}
         self.last_error = ""
         try:
             self._start_ssdp()
         except Exception as exc:
-            self.last_error = f"SSDP: {exc}"
+            self._record_error("SSDP", exc)
         cert = key = None
         try:
             from .studio_tls import ensure_certificate
             cert, key = ensure_certificate(self.identity()["name"])
         except Exception as exc:
-            self.last_error = str(exc)
+            self._record_error("TLS", exc)
             return
         try:
             self._start_mqtt(cert, key)
         except Exception as exc:
-            self.last_error = f"MQTT: {exc}"
+            self._record_error("MQTT", exc)
         try:
             self._start_ftp(cert, key)
         except Exception as exc:
-            self.last_error = f"FTPS: {exc}"
+            self._record_error("FTPS", exc)
 
     def stop(self) -> None:
         self._stop.set()
@@ -893,6 +997,11 @@ class StudioGateway:
     def _mqtt_client(self, conn) -> None:
         self._mqtt_authed = False
         try:
+            with self._lock:
+                try:
+                    self._last_client = conn.getpeername()[0]
+                except Exception:
+                    pass
             conn.settimeout(90)
             while not self._stop.is_set():
                 try:
@@ -930,6 +1039,21 @@ class StudioGateway:
                 break
         return buf.decode("utf-8", "replace").strip()
 
+    def _pasv_reply(self, port: int) -> str:
+        """Ответ на PASV: адрес из _host_ip() (закреплённый или авто) и порт.
+
+        Если объявить в PASV виртуальный адрес, Studio зальёт файл не туда —
+        поэтому здесь тот же источник адреса, что и в SSDP.
+        """
+        host = self._host_ip().split(".")
+        if len(host) != 4:
+            host = ["127", "0", "0", "1"]
+        p1, p2 = divmod(int(port) % 65536, 256)
+        return (
+            f"227 Entering Passive Mode "
+            f"({host[0]},{host[1]},{host[2]},{host[3]},{p1},{p2})"
+        )
+
     def _ftp_client(self, conn) -> None:
         self._ftp_user = ""
         self._ftp_authed = False
@@ -961,15 +1085,8 @@ class StudioGateway:
                     pasv_sock.bind(("0.0.0.0", 0))
                     pasv_sock.listen(1)
                     pasv_sock.settimeout(30)
-                    host = self._host_ip().split(".")
-                    if len(host) != 4:
-                        host = ["127", "0", "0", "1"]
                     port = pasv_sock.getsockname()[1]
-                    p1, p2 = divmod(port, 256)
-                    reply = (
-                        f"227 Entering Passive Mode "
-                        f"({host[0]},{host[1]},{host[2]},{host[3]},{p1},{p2})"
-                    )
+                    reply = self._pasv_reply(port)
                 if cmd in ("STOR", "APPE"):
                     stor_name = Path(arg.replace("\\", "/")).name or "upload.bin"
                 try:

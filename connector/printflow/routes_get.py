@@ -132,7 +132,8 @@ def get_spools_presets(api: Any, ctx: Ctx):
     """Список пресетов филамента Bambu Studio / OrcaSlicer для всех активных катушек склада."""
     from .materials import generate_bambu_studio_filament_preset
     spools = api.repo.spools(ctx.one("all") == "1")
-    presets = [generate_bambu_studio_filament_preset(s) for s in spools]
+    # db нужен для уровня «справочник» в температурах: катушка → справочник → каталог Bambu
+    presets = [generate_bambu_studio_filament_preset(s, db=api.db) for s in spools]
     return 200, {"presets": presets, "count": len(presets)}
 
 
@@ -980,9 +981,27 @@ def get_studio_status(api: Any, ctx: Ctx):
         payload = studio.status()
         payload.pop("access_code", None)
         return 200, payload
+    # Шлюз ещё не создан (коннектор только поднялся) — карточка в настройках
+    # ждёт те же поля, поэтому отдаём безопасные нули, а не 404.
     return 200, {
         "enabled": bool(api.db.setting("studio_gateway_enabled", False)),
         "running": False,
+        "mqtt_running": False,
+        "ftp_running": False,
+        "ssdp_running": False,
+        "host": str(api.db.setting("studio_gateway_host", "") or "").strip() or "127.0.0.1",
+        "host_pinned": bool(str(api.db.setting("studio_gateway_host", "") or "").strip()),
+        "mqtt_port": 8883,
+        "ftp_port": 990,
+        "ssdp_ports": [1900, 1990, 2021],
+        "mqtt_connections": 0,
+        "mqtt_auth_failures": 0,
+        "ftp_connections": 0,
+        "ftp_auth_failures": 0,
+        "last_client": "",
+        "last_auth_fail_at": "",
+        "errors": {},
+        "last_error": "",
         "has_access_code": bool(api.db.setting("studio_gateway_access_code", "")),
     }
 
