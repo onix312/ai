@@ -28,6 +28,7 @@ import subprocess
 import sys
 import textwrap
 import time
+import traceback
 import urllib.error
 import urllib.request
 import webbrowser
@@ -102,7 +103,12 @@ class Style:
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-        cls.enabled = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+        # pythonw.exe (ярлык с рабочего стола, автозапуск Windows) стартует без
+        # консоли: sys.stdout там None. Раньше на этой строке main() падал с
+        # AttributeError в первый же момент запуска — окно не появлялось вовсе,
+        # а трассировку было некуда напечатать.
+        cls.enabled = (sys.stdout is not None and sys.stdout.isatty()
+                       and os.environ.get("NO_COLOR") is None)
         if cls.enabled and IS_WINDOWS:
             try:  # включаем обработку ANSI в консоли Windows 10+
                 import ctypes
@@ -161,7 +167,7 @@ def ask(question: str, default: bool = True) -> bool:
     hint = "Д/н" if default else "д/Н"
     try:
         answer = input(Style.paint(f"  {question} [{hint}] ", Style.CYAN)).strip().lower()
-    except (EOFError, KeyboardInterrupt):
+    except (EOFError, KeyboardInterrupt, RuntimeError):
         say()
         return False
     if not answer:
@@ -926,6 +932,19 @@ def print_net_report(report: dict, show_qr: bool = True) -> None:
 
 
 # ──────────────────────────────────────────────────────────────── команды
+def open_in_browser(url: str) -> bool:
+    """Открыть адрес в браузере и честно ответить, получилось ли.
+
+    Раньше результат `webbrowser.open()` никого не интересовал: при сбое
+    («браузер по умолчанию не задан») лаунчер молча завершался с кодом 0 —
+    владелец видел только мелькнувшее чёрное окно.
+    """
+    try:
+        return bool(webbrowser.open(url))
+    except Exception:
+        return False
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Запустить сервер и показать владельцу, что с этим делать.
 
@@ -952,8 +971,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         say("    Остановить: python pf.py stop   ·   Другой порт: python pf.py --port N",
             Style.DIM)
         say_phone_hint(already, host)
-        if not args.no_browser:
-            webbrowser.open(f"http://localhost:{already}/")
+        if not args.no_browser and not open_in_browser(f"http://localhost:{already}/"):
+            warn("Браузер не открылся — наберите адрес из списка выше вручную")
+            hold_console()
+            return 1
         return 0
 
     if port_busy(port):
@@ -963,8 +984,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             say()
             ok(f"PrintFlow {alive.get('version', '')} уже работает на порту {running}")
             say_phone_hint(running, host)
-            if not args.no_browser:
-                webbrowser.open(f"http://localhost:{running}/")
+            if not args.no_browser and not open_in_browser(f"http://localhost:{running}/"):
+                warn("Браузер не открылся — наберите адрес из списка выше вручную")
+                hold_console()
+                return 1
             return 0
         owner = port_owner(port)
         if args.auto_port:
@@ -975,9 +998,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             fail(f"Порт {port} занят" + (f": {owner}" if owner else " другой программой"))
             if not owner:
                 say("    Определить занявший процесс не удалось (нет прав?)", Style.DIM)
-            say(f"    Свободный порт:  python pf.py --auto-port")
+            say("    Свободный порт:  python pf.py --auto-port")
             say(f"    Или вручную:     python pf.py --port {free_port(port + 1)}")
-            say(f"    Другой PrintFlow ищется сам: python pf.py status", Style.DIM)
+            say("    Другой PrintFlow ищется сам: python pf.py status", Style.DIM)
             return 1
 
     if port < 1024 and not IS_WINDOWS:
@@ -1009,8 +1032,14 @@ def cmd_start(args: argparse.Namespace) -> int:
     process = subprocess.Popen(command, cwd=str(ROOT))
     write_pid(process.pid)
     if not args.no_browser:
-        wait_for_server(port)
-        webbrowser.open(f"http://localhost:{port}/")
+        if not wait_for_server(port):
+            warn("Сервер не ответил вовремя — открываю панель, она может быть пустой")
+            say("    Если страница пустая: python pf.py logs", Style.DIM)
+        if not open_in_browser(f"http://localhost:{port}/"):
+            # Сервер уже работает, поэтому это не провал запуска, а только
+            # подсказка: иначе владелец решит, что «PrintFlow не открылся».
+            warn("Браузер не открылся — наберите http://localhost:"
+                 f"{port}/ вручную")
     try:
         return process.wait()
     except KeyboardInterrupt:
@@ -2615,16 +2644,34 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
 # ─────────────────────────────────────────────────────────── окно управления
 def cmd_gui(args: argparse.Namespace) -> int:
+    """Окно управления вместо консоли.
+
+    Правило простое: окно не поднялось — панель всё равно должна открыться.
+    Иначе владелец видит ровно то, с чего начиналась эта правка: тёмная
+    панель мелькнула и закрылась, а PrintFlow как не работал, так и не работает.
+    """
     try:
         import tkinter  # noqa: F401
     except ImportError:
         warn("Графическая оболочка недоступна (нет модуля tkinter)")
         say("    Linux: sudo apt install python3-tk")
+        if not interactive_console():
+            # Запуск из ярлыка (pythonw): текстовое меню никто не увидит, а
+            # процесс молча завершится — в этом случае панель поднимаем в браузере.
+            say("    Консоли для меню нет — открываю панель в браузере.")
+            return cmd_start(args)
         say("    Открываю текстовое меню.")
         return cmd_menu(args)
-    from launcher_window import run_window  # локальный модуль рядом с pf.py
+    try:
+        from launcher_window import run_window  # локальный модуль рядом с pf.py
 
-    return run_window(args)
+        return run_window(args)
+    except Exception as exc:
+        log = write_crash_log(exc, "gui")
+        warn(f"Окно управления не открылось: {exc}")
+        say(f"    Трассировка: {log}", Style.DIM)
+        say("    Открываю панель в браузере…")
+        return cmd_start(args)
 
 
 def cmd_app(args: argparse.Namespace) -> int:
@@ -2657,6 +2704,12 @@ def cmd_app(args: argparse.Namespace) -> int:
 
 def cmd_menu(args: argparse.Namespace) -> int:
     """Текстовое меню — запасной вариант, когда окно недоступно."""
+    if not interactive_console():
+        # Меню читает ввод. Под pythonw.exe ввода нет: раньше input() получал
+        # конец файла, команда возвращала 0 — и консоль исчезала без объяснения.
+        fail("Текстовое меню требует консоли, а её нет")
+        say("    Панель в браузере: python pf.py", Style.DIM)
+        return 1
     actions = [
         ("Запустить панель", lambda: cmd_start(args)),
         ("Состояние", lambda: cmd_status(args)),
@@ -2675,7 +2728,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
         say()
         try:
             choice = input(Style.paint("  Номер: ", Style.CYAN)).strip()
-        except (EOFError, KeyboardInterrupt):
+        except (EOFError, KeyboardInterrupt, RuntimeError):
             say()
             return 0
         if choice in ("0", "q", ""):
@@ -2684,7 +2737,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
             actions[int(choice) - 1][1]()
             try:
                 input(Style.paint("  Enter — вернуться в меню ", Style.DIM))
-            except (EOFError, KeyboardInterrupt):
+            except (EOFError, KeyboardInterrupt, RuntimeError):
                 return 0
 
 
@@ -2830,6 +2883,140 @@ COMMANDS = {
 }
 
 
+# ─────────────────────────────────────── сбой, который нельзя потерять (18.6.4)
+# Окно, открытое двойным кликом, живёт ровно столько, сколько процесс: закрылся
+# pf.py — закрылась и консоль, а трассировка ушла вместе с ней. Отсюда и
+# «чёрная панель появилась и сразу закрылась» — единственное, что видел
+# владелец. Теперь сбой показывается тремя способами сразу: в консоль (если
+# она есть), в журнал запуска (если консоль уже закрылась) и системным окном —
+# когда PrintFlow поднят через pythonw.exe и консоли нет вовсе.
+
+
+def console_alive() -> bool:
+    """Есть ли консоль, куда можно печатать.
+
+    `pythonw.exe` (ярлык с рабочего стола и автозапуск Windows) запускается без
+    консоли: `sys.stdout` там `None`. Именно из-за этого `Style.setup()` падал
+    в первой же строке `main()`, а окно управления не появлялось вообще.
+    """
+    return sys.stdout is not None
+
+
+def interactive_console() -> bool:
+    """Консоль, в которой можно задать вопрос (текстовое меню, «нажмите Enter»)."""
+    try:
+        return sys.stdin is not None and bool(sys.stdin.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def write_crash_log(exc: BaseException, command: str = "") -> Path:
+    """Записать трассировку в журнал запуска: окно закроется, файл останется."""
+    try:
+        RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
+        trace = "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip()
+        with RUN_LOG.open("a", encoding="utf-8", errors="replace") as handle:
+            handle.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+                         f"pf.py {command or '—'}: {type(exc).__name__}: {exc}\n")
+            handle.write(f"  Python {platform.python_version()} · {platform.platform()}\n")
+            handle.write(trace + "\n")
+    except (OSError, ValueError):
+        pass
+    return RUN_LOG
+
+
+def show_message(title: str, text: str) -> bool:
+    """Системное окно с сообщением — когда печатать некуда (pythonw.exe)."""
+    try:
+        import tkinter
+        from tkinter import messagebox
+    except Exception:
+        return False
+    try:
+        root = tkinter.Tk()
+        root.withdraw()
+        messagebox.showerror(title, text)
+        root.destroy()
+        return True
+    except Exception:
+        return False
+
+
+def report_failure(exc: BaseException | None, command: str = "",
+                   log: Path | None = None) -> None:
+    """Показать сбой так, чтобы его нельзя было не заметить."""
+    reason = "" if exc is None else (str(exc).strip() or type(exc).__name__)
+    say()
+    fail(f"PrintFlow не смог выполнить «{command}»" + (f": {reason}" if reason else ""))
+    if log is not None:
+        say(f"    Трассировка: {log}", Style.DIM)
+    for line in ("Диагностика: python pf.py doctor",
+                 "Журнал:      python pf.py logs"):
+        say(f"    {line}", Style.DIM)
+    if not console_alive():
+        lines = [reason] if reason else []
+        if log is not None:
+            lines.append(f"Трассировка: {log}")
+        lines.append("Диагностика: python pf.py doctor")
+        show_message(f"PrintFlow · {command or 'запуск'}", "\n".join(lines))
+
+
+def _parent_pid() -> int:
+    """PID родительского процесса (Windows: чтобы отличить двойной клик)."""
+    if not IS_WINDOWS:
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _BasicInformation(ctypes.Structure):
+            _fields_ = [("reserved1", ctypes.c_void_p), ("peb", ctypes.c_void_p),
+                        ("reserved2", ctypes.c_void_p * 2), ("pid", ctypes.c_void_p),
+                        ("parent", ctypes.c_void_p)]
+
+        info = _BasicInformation()
+        status = ctypes.windll.ntdll.NtQueryInformationProcess(
+            ctypes.windll.kernel32.GetCurrentProcess(), 0, ctypes.byref(info),
+            ctypes.sizeof(info), ctypes.byref(wintypes.ULONG()))
+        return int(info.parent or 0) if status == 0 else 0
+    except Exception:
+        return 0
+
+
+def parent_process_name() -> str:
+    """Имя родителя: `explorer.exe` значит, что pf.py открыт двойным кликом."""
+    pid = _parent_pid()
+    if not pid:
+        return ""
+    try:
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=10).stdout
+        return listing.split(",")[0].strip('"').strip().lower()
+    except Exception:
+        return ""
+
+
+def hold_console(reason: str = "") -> None:
+    """Подержать консоль открытой, если её открыл Проводник, а не человек.
+
+    Двойной клик по pf.py: Windows создаёт консоль сама и убивает её вместе с
+    процессом — текст ошибки не успевают прочитать. Из cmd или PowerShell ждать
+    не нужно: там и так всё видно, а лишний Enter только мешает.
+    """
+    if not IS_WINDOWS or not interactive_console():
+        return
+    if parent_process_name() != "explorer.exe":
+        return
+    try:
+        say()
+        input(Style.paint(f"  {reason or 'Нажмите Enter, чтобы закрыть окно…'}",
+                          Style.DIM))
+    except (EOFError, KeyboardInterrupt, OSError, RuntimeError):
+        pass
+
+
 def suggest_command(typed: str) -> str:
     """Ближайшая команда к тому, что набрали: «statsu» → «status»."""
     import difflib
@@ -2876,6 +3063,21 @@ def main(argv: list[str] | None = None) -> int:
         say()
         say("  Прервано.", Style.DIM)
         return 130
+    except SystemExit as request:  # команда сама решила остановиться (нет окружения…)
+        code = request.code
+        code = 0 if code is None else (code if isinstance(code, int) else 1)
+        if code:
+            if not console_alive():
+                show_message(f"PrintFlow · {args.command}",
+                             "Не удалось выполнить команду. "
+                             "Запустите в консоли: python pf.py doctor")
+            hold_console()
+        return code
+    except Exception as exc:  # окно двойного клика иначе скроет трассировку
+        log = write_crash_log(exc, args.command)
+        report_failure(exc, args.command, log)
+        hold_console()
+        return 1
 
 
 if __name__ == "__main__":
