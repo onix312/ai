@@ -843,23 +843,74 @@ function requestBrowserNotify() {
 
 /* =========================================================== настройки */
 const RATES = [
-  ['power_kw', 'Мощность принтера, кВт', 'Средняя потребляемая мощность', 0.01],
-  ['energy_price', 'Цена электричества, ₽/кВт·ч', 'По вашему тарифу', 0.1],
-  ['amortization_per_hour', 'Амортизация, ₽/ч', 'Износ принтера за час печати', 1],
-  ['maintenance_per_hour', 'Обслуживание, ₽/ч', 'Сопла, ремни, смазка', 1],
-  ['default_spool_price', 'Цена катушки, ₽', 'По умолчанию для расчётов', 10],
-  ['default_spool_weight', 'Вес катушки, г', 'Обычно 1000', 50],
-  ['failure_rate', 'Резерв на брак, %', 'Закладывается в себестоимость', 0.5],
-  ['filament_low_threshold', 'Порог остатка, %', 'Когда предупреждать о пластике', 1],
+  ['energy_price', 'Цена электричества, ₽/кВт·ч', 'Тариф за электроэнергию по вашему договору', 'select', [
+    [4.5, '4.50 ₽ (льготный тариф)'],
+    [5.5, '5.50 ₽'],
+    [6.0, '6.00 ₽ (стандартный тариф)'],
+    [7.0, '7.00 ₽'],
+    [8.5, '8.50 ₽ (коммерческий тариф)'],
+  ]],
+  ['power_kw', 'Мощность принтера, кВт', 'P1S в активной печати потребляет ~0.15 кВт', 'num', 0.01],
+  ['amortization_per_hour', 'Амортизация оборудования, ₽/ч', 'Износ станка за каждый час печати', 'num', 1],
+  ['maintenance_per_hour', 'Обслуживание станка, ₽/ч', 'Сопла, ремни, смазка и расходники', 'num', 1],
+  ['target_profit_per_hour', 'Норма прибыли за час, ₽', 'Порог окупаемости машино-часа станка', 'select', [
+    [200, '200 ₽/ч (базовый)'],
+    [300, '300 ₽/ч'],
+    [400, '400 ₽/ч (стандарт)'],
+    [500, '500 ₽/ч'],
+    [800, '800 ₽/ч (высокая маржа)'],
+  ]],
+  ['labor_rate', 'Стоимость часа оператора, ₽', 'Время на снятие детали, постобработку и заправку', 'num', 50],
+  ['failure_rate', 'Резерв на брак, %', 'Закладывается в себестоимость деталей', 'select', [
+    [2, '2% (очень стабильный цех)'],
+    [5, '5% (стандарт NOZZA)'],
+    [8, '8%'],
+    [10, '10% (сложная печать / новые материалы)'],
+  ]],
 ];
-/* Ставка своей работы, упаковка, норма прибыли и ёмкость живут на вкладках
-   «Цены» и «Бизнес» — второй раз их здесь не рисуем, иначе при сохранении
-   побеждает то поле, которое в разметке ниже, и правка молча теряется. */
-/* Группы настроек по вкладкам: [ключ, подпись, пояснение, тип, шаг|опции] */
+
+const STORAGE_RULES = [
+  ['filament_low_threshold', 'Порог низкого остатка катушки, %', 'Предупреждать в Telegram и панели, когда остаток ниже порога', 'select', [
+    [10, '10% (минимальный резерв)'],
+    [15, '15% (по умолчанию)'],
+    [20, '20% (рекомендуется для больших деталей)'],
+    [25, '25% (раннее оповещение)'],
+    [30, '30% (серийное производство)'],
+  ]],
+  ['auto_consume_filament', 'Автосписание пластика по завершении', 'Списывать фактический вес детали с катушки, стоявшей в AMS', 'bool'],
+  ['default_location', 'Место хранения по умолчанию', 'Основное место для прихода новых катушек', 'select', [
+    ['shop', 'Магазин / Основной склад'],
+    ['home', 'Дом / Мастерская'],
+    ['dry', 'Сушильный шкаф'],
+    ['other', 'Другое место'],
+  ]],
+  ['default_spool_weight', 'Вес катушки по умолчанию, г', 'Стандартная масса пластика в новой бобине', 'select', [
+    [1000, '1 000 г (стандартная бобина 1 кг)'],
+    [750, '750 г'],
+    [500, '500 г'],
+    [250, '250 г (пробник)'],
+  ]],
+  ['default_spool_price', 'Цена катушки по умолчанию, ₽', 'Используется для быстрой оценки себестоимости', 'select', [
+    [1200, '1 200 ₽'],
+    [1400, '1 400 ₽'],
+    [1600, '1 600 ₽ (средний PLA / PETG)'],
+    [1800, '1 800 ₽'],
+    [2200, '2 200 ₽ (инженерный пластик)'],
+    [2600, '2 600 ₽ (композиты)'],
+  ]],
+  ['restock_remind', 'Напоминать о закупке пластика', 'Ежедневная сводка по катушкам ниже порога', 'bool'],
+  ['ams_auto_spools', 'Заводить катушки из AMS автоматически', 'Вставили бобину в AMS — она появилась на складе', 'bool'],
+  ['ams_sync_remaining', 'Обновлять остаток по датчику AMS', 'Только для катушек с флагом синхронизации с AMS', 'bool'],
+  ['dry_humidity_threshold', 'Порог влажности AMS для сушки, %', 'Выше порога — событие сушки и оповещение', 'select', [
+    [20, '20% (строгий контроль)'],
+    [25, '25%'],
+    [30, '30% (стандарт AMS)'],
+    [40, '40% (допустимый для PLA)'],
+  ]],
+];
+
 const GOALS = [
   ['goal_profit_month', 'Цель по прибыли в месяц, ₽', 'От неё считается план продаж', 'num', 1000],
-  ['target_profit_per_hour', 'Норма прибыли за час, ₽', 'Порог, ниже которого заказ невыгоден', 'num', 10],
-  ['weekly_capacity_hours', 'Сколько часов печати в неделю', 'Реальный потолок вашего парка', 'num', 5],
   ['printer_investment', 'Во сколько обошёлся принтер, ₽', 'Для расчёта окупаемости (виджет «Здоровье бизнеса»)', 'num', 10000],
 ];
 const COMPANY = [
@@ -905,21 +956,66 @@ const VAT = [
   ['tax_reserve_extra', 'Запас сверх ставки, %', 'Чтобы точно хватило', 'num', 0.5],
 ];
 const PRICING = [
-  ['default_markup', 'Наценка к себестоимости, %', 'База для подсказки цены', 'num', 5],
-  ['min_order_price', 'Минимальный чек, ₽', 'Ниже этой суммы браться невыгодно', 'num', 50],
-  ['price_rounding', 'Округление цены, ₽', 'Цена округляется вверх до кратной суммы', 'num', 5],
-  ['design_rate', 'Моделирование, ₽/ч', 'Оплата за подготовку модели', 'num', 50],
-  ['labor_rate', 'Ваш час работы, ₽', 'Ориентир для оценки своей работы', 'num', 50],
+  ['default_markup', 'Наценка к себестоимости, %', 'Базовый процент маржи для подсказки цены изделия', 'select', [
+    [50, '50% (минимальная)'],
+    [100, '100% (в 2 раза)'],
+    [150, '150% (в 2.5 раза, стандарт NOZZA)'],
+    [200, '200% (в 3 раза)'],
+    [250, '250%'],
+    [300, '300% (в 4 раза)'],
+  ]],
+  ['min_order_price', 'Минимальный чек, ₽', 'Ниже этой суммы браться за печать невыгодно', 'select', [
+    [150, '150 ₽'],
+    [200, '200 ₽'],
+    [300, '300 ₽ (стандарт)'],
+    [500, '500 ₽'],
+    [1000, '1 000 ₽'],
+  ]],
+  ['price_rounding', 'Округление цены, ₽', 'Округлять итоговую цену клиенту вверх до кратной суммы', 'select', [
+    [1, '1 ₽ (без округления)'],
+    [5, 'до 5 ₽'],
+    [10, 'до 10 ₽ (стандарт)'],
+    [50, 'до 50 ₽'],
+    [100, 'до 100 ₽'],
+  ]],
+  ['design_rate', 'Моделирование и подготовка, ₽/ч', 'Оплата за подготовку или доработку 3D-модели', 'num', 50],
 ];
 const DISCOUNTS = [
-  ['bulk_discount_10', 'Скидка от 10 шт, %', 'Автоматически в расчёте цены', 'num', 1],
-  ['bulk_discount_50', 'Скидка от 50 шт, %', 'Для крупных партий', 'num', 1],
-  ['rush_surcharge', 'Надбавка за срочность, %', 'Когда нужно «на вчера»', 'num', 5],
+  ['bulk_discount_10', 'Скидка от 10 шт, %', 'Автоматически рассчитывается в оптовой партии', 'select', [
+    [0, '0% (без скидки)'],
+    [5, '5%'],
+    [10, '10% (стандарт)'],
+    [15, '15%'],
+    [20, '20%'],
+  ]],
+  ['bulk_discount_50', 'Скидка от 50 шт, %', 'Для крупных серийных тиражей', 'select', [
+    [0, '0% (без скидки)'],
+    [10, '10%'],
+    [15, '15%'],
+    [20, '20% (стандарт)'],
+    [25, '25%'],
+    [30, '30%'],
+  ]],
+  ['rush_surcharge', 'Надбавка за срочность, %', 'Когда заказ нужен вне очереди («на вчера»)', 'select', [
+    [0, '0% (без наценки)'],
+    [20, '20%'],
+    [30, '30% (стандарт)'],
+    [50, '50% (х1.5)'],
+    [100, '100% (х2)'],
+  ]],
 ];
 const PAYMENTS = [
-  ['acquiring_fee', 'Эквайринг, %', 'Комиссия за приём карт', 'num', 0.1],
-  ['delivery_cost', 'Доставка на заказ, ₽', 'Средние затраты, если платите вы', 'num', 10],
-  ['packaging_cost', 'Упаковка на заказ, ₽', 'Пакет, коробка, бирка', 'num', 5],
+  ['acquiring_fee', 'Комиссия эквайринга, %', 'Банковская комиссия за приём карт и СБП', 'select', [
+    [0, '0% (без комиссии)'],
+    [0.7, '0.7% (СБП льготный)'],
+    [1.0, '1.0% (СБП стандарт)'],
+    [1.5, '1.5%'],
+    [2.0, '2.0%'],
+    [2.5, '2.5% (интернет-эквайринг)'],
+    [3.0, '3.0%'],
+  ]],
+  ['delivery_cost', 'Доставка на заказ, ₽', 'Средние затраты, если доставку оплачивает ферма', 'num', 10],
+  ['packaging_cost', 'Упаковка на заказ, ₽', 'Коробка, пузырчатая плёнка, брендированный стикер', 'num', 5],
 ];
 const MONEY_RULES = [
   ['count_labor_in_cost', 'Считать свою работу расходом', 'По умолчанию выключено: ваш час — это прибыль', 'bool'],
@@ -950,16 +1046,32 @@ const NOTIFY = [
   ['notify_photo', 'Прикладывать кадр с камеры'],
 ];
 const AUTO_EXTRA = [
-  ['printer_info_sync', 'Собирать данные принтера в базу', 'Прошивка, Wi-Fi, влажность AMS — в карточку принтера', 'bool'],
-  ['ams_auto_spools', 'Заводить катушки из AMS автоматически', 'Вставили катушку — она появилась на складе', 'bool'],
-  ['ams_sync_remaining', 'Обновлять остаток по датчику AMS', 'Только у катушек с галочкой «Обновлять из AMS»', 'bool'],
-  ['restock_remind', 'Напоминать о закупке пластика', 'Раз в день: катушки ниже порога', 'bool'],
-  ['queue_check_material', 'Проверять материал в AMS', 'Не запускать PETG, если в слоте PLA', 'bool'],
-  ['dry_humidity_threshold', 'Влажность AMS для сушки, %', 'Выше порога — событие и Telegram', 'num', 1],
-  ['notify_finish_remind_min', 'Напомнить о финише за, мин', '0 — выключено', 'num', 1],
-  ['digest_time', 'Утренний дайджест, время', 'Например 09:00', 'text'],
-  ['weekly_report_day', 'День недельного отчёта', '1 = понедельник … 7 = воскресенье', 'num', 1],
-  ['weekly_report_time', 'Время недельного отчёта', 'Например 20:00', 'text'],
+  ['weekly_capacity_hours', 'Сколько часов печати в неделю', 'Реальный потолок парка станков', 'select', [
+    [40, '40 ч (1 принтер, 1 смена)'],
+    [80, '80 ч (2 принтера / удлинённая смена)'],
+    [120, '120 ч (полукруглосуточно)'],
+    [168, '168 ч (круглосуточно 24/7)'],
+    [336, '336 ч (2 станка 24/7)'],
+    [500, '500 ч (ферма 3+ станка)'],
+  ]],
+  ['notify_finish_remind_min', 'Напомнить о финише за, мин', 'Оповещение оператору перед окончанием печати', 'select', [
+    [0, '0 — выключено'],
+    [5, 'за 5 минут'],
+    [10, 'за 10 минут (стандарт)'],
+    [15, 'за 15 минут'],
+    [30, 'за 30 минут'],
+  ]],
+  ['digest_time', 'Утренний дайджест, время', 'Ежедневная сводка по задачам и станкам в Telegram', 'select', [
+    ['08:00', '08:00'], ['08:30', '08:30'], ['09:00', '09:00 (стандарт)'], ['09:30', '09:30'], ['10:00', '10:00'],
+  ]],
+  ['weekly_report_day', 'День недельного отчёта', 'День недели для отправки сводки цеха', 'select', [
+    [1, '1 — Понедельник'],
+    [5, '5 — Пятница (конец недели)'],
+    [7, '7 — Воскресенье (вечер)'],
+  ]],
+  ['weekly_report_time', 'Время недельного отчёта', 'Время отправки недельного отчёта', 'select', [
+    ['18:00', '18:00'], ['19:00', '19:00'], ['20:00', '20:00 (стандарт)'], ['21:00', '21:00'],
+  ]],
 ];
 const GUARD = [
   ['guard_enabled', 'Сторож печати', 'Следит за ошибками, зависанием и температурой', 'bool'],
@@ -974,85 +1086,92 @@ const GUARD = [
   ['spaghetti_sensitivity', 'Чувствительность детекта, ×', 'Во сколько раз кромки должны превысить норму (2 — строже, 5 — мягче)', 'num', 0.5],
 ];
 const QUEUE_RULES = [
-  ['queue_check_filament', 'Проверять остаток пластика', 'Не запускать печать, если катушки не хватит', 'bool'],
-  ['queue_group_material', 'Группировать по материалу', 'Меньше перезаправок AMS подряд', 'bool'],
-  ['quiet_hours_enabled', 'Тихие часы', 'Ночью автозапуск откладывается до утра', 'bool'],
-  ['quiet_from', 'Тишина с', 'Например 23:00', 'text'],
-  ['quiet_to', 'Тишина до', 'Например 08:00', 'text'],
+  ['queue_check_filament', 'Проверять остаток пластика', 'Не запускать печать, если на катушке меньше граммов, чем нужно', 'bool'],
+  ['queue_group_material', 'Группировать очередь по материалу', 'Меньше перезаправок катушек и промывки сопла подряд', 'bool'],
+  ['quiet_hours_enabled', 'Тихие часы (ночной режим)', 'Ночью автозапуск очереди откладывается до утра', 'bool'],
+  ['quiet_from', 'Тишина с (время)', 'Начало тихих часов', 'select', [
+    ['20:00', '20:00'], ['21:00', '21:00'], ['22:00', '22:00'], ['23:00', '23:00 (стандарт)'], ['00:00', '00:00'],
+  ]],
+  ['quiet_to', 'Тишина до (время)', 'Окончание тихих часов', 'select', [
+    ['06:00', '06:00'], ['07:00', '07:00'], ['08:00', '08:00 (стандарт)'], ['09:00', '09:00'], ['10:00', '10:00'],
+  ]],
 ];
 const UPKEEP = [
-  ['maintenance_enabled', 'Регламент обслуживания', 'Напоминать о ТО по наработке часов', 'bool'],
-  ['telemetry_enabled', 'История показателей', 'Графики температур и обдува', 'bool'],
-  ['telemetry_keep_days', 'Хранить историю, дней', 'Старые точки удаляются автоматически', 'num', 1],
-  ['night_shift_enabled', 'Ночная смена', 'Планировать длинное на ночь, срочное — днём', 'bool'],
-  ['auto_backup_days', 'Автобэкап, раз в N дней', '0 — выключен. Общий лимит задаётся в разделе «Система»', 'num', 1],
+  ['maintenance_enabled', 'Регламент обслуживания (ТО)', 'Напоминать о ТО по наработке часов печати', 'bool'],
+  ['telemetry_enabled', 'История показателей станка', 'Графики температур стола, сопла и обдува', 'bool'],
+  ['telemetry_keep_days', 'Хранить историю, дней', 'Глубина хранения точек (старые удаляются сами)', 'select', [
+    [7, '7 дней'],
+    [14, '14 дней'],
+    [30, '30 дней (стандарт)'],
+    [60, '60 дней'],
+    [90, '90 дней'],
+  ]],
+  ['night_shift_enabled', 'Ночная смена', 'Планировать длинные задания на ночь, срочные — на день', 'bool'],
+  ['auto_backup_days', 'Автобэкап базы, раз в N дней', 'Резервная копия базы данных по расписанию (0 — выключен)', 'select', [
+    [0, '0 — выключен'],
+    [1, '1 день (каждые сутки)'],
+    [3, '3 дня'],
+    [7, '7 дней (раз в неделю)'],
+    [30, '30 дней'],
+  ]],
 ];
 const WATCH = [
-  ['watch_folder_enabled', 'Watch Folder — авто-импорт', 'Следить за папкой с 3MF из Bambu Studio', 'bool'],
-  ['watch_folder_path', 'Путь к Watch Folder', 'Например ~/PrintFlow-Inbox или C:\\PrintFlow-Inbox', 'text'],
-  ['watch_auto_action', 'Действие Watch Folder', 'notify — уведомление, queue — очередь без запуска. Значение print устарело и принудительно сводится к notify.', 'text'],
-  ['watch_link_order', 'Связывать с заказом по №', 'Искать № заказа в имени файла', 'bool'],
-  ['watch_create_order', 'Создавать черновик заказа', 'Если не нашли заказ — сделать новый', 'bool'],
+  ['watch_folder_enabled', 'Watch Folder — авто-импорт 3MF', 'Следить за локальной папкой и автоматически подхватывать 3MF из слайсера', 'bool'],
+  ['watch_auto_action', 'Действие при обнаружении файла', 'Что делать с новым файлом 3MF', 'select', [
+    ['notify', 'notify — Только уведомить оператора'],
+    ['queue', 'queue — Сразу поставить задание в очередь'],
+  ]],
+  ['watch_folder_path', 'Путь к локальной папке 3MF', 'Папка, куда слайсер сохраняет файлы для фермы', 'text'],
+  ['watch_link_order', 'Связывать с заказом по номеру', 'Искать номер заказа в названии 3MF файла', 'bool'],
+  ['watch_create_order', 'Создавать черновик заказа', 'Если заказ не найден — создать новую карточку', 'bool'],
 ];
 const STUDIO = [
-  ['studio_gateway_enabled', 'Шлюз Bambu Studio', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
-  ['studio_gateway_name', 'Имя в Studio', 'Как принтер называется в списке устройств', 'text'],
-  ['studio_gateway_mode', 'Режим', 'confirm — окно подтверждения на пульте/ПК при нажатии Print в Studio. queue — сразу в очередь. autostart — печать сразу при safety-gate.', 'text'],
-  ['studio_gateway_autostart', 'Автостарт с шлюза', 'Печатать сразу после Slice/Print. Нужны режим autostart и «действия без присмотра».', 'bool'],
-  ['studio_gateway_serial', 'Серийный номер', 'Пусто — сгенерируется. Studio идентифицирует устройство по нему.', 'text'],
-  ['studio_gateway_printer_id', 'Принтер (id)', 'На какой физический принтер уходит очередь. Пусто — первый доступный.', 'text'],
-  ['slicer_bin', 'Путь к CLI слайсера', 'Bambu Studio / OrcaSlicer / Cura / PrusaSlicer. Пусто — поиск в PATH.', 'text'],
-  ['slicer_profile_path', 'Профиль CuraEngine', 'JSON-профиль для CuraEngine; для Bambu/Orca не нужен', 'text'],
-  ['slicer_provider', 'Движок слайсинга', 'external — установленный слайсер. printflow — будущий собственный движок без копирования закрытого кода.', 'text'],
-  ['slicer_profile', 'Профиль принтера', 'Например bambu-p1s', 'text'],
-  ['slicer_layer_height', 'Высота слоя, мм', 'Обычно 0.08–0.28 для сопла 0.4 мм', 'num'],
-  ['slicer_first_layer_height', 'Высота первого слоя, мм', 'Отдельная высота первого слоя', 'num'],
-  ['slicer_walls', 'Количество стенок', 'Число периметров', 'num'],
-  ['slicer_infill_percent', 'Заполнение, %', 'Процент внутреннего заполнения', 'num'],
-  ['slicer_infill_pattern', 'Тип заполнения', 'grid / lines / triangles / gyroid', 'text'],
-  ['slicer_supports', 'Поддержки', 'Включить генерацию поддержек внешним слайсером', 'bool'],
-  ['slicer_brim', 'Brim', 'Добавлять юбку для прилипания', 'bool'],
-  ['slicer_brim_width', 'Ширина brim, мм', 'Ширина юбки', 'num'],
-  ['slicer_nozzle_mm', 'Диаметр сопла, мм', 'Проверяется в preflight', 'num'],
-  ['slicer_nozzle_temp', 'Температура сопла, °C', 'Профиль материала', 'num'],
-  ['slicer_bed_temp', 'Температура стола, °C', 'Профиль материала', 'num'],
-  ['slicer_speed_mm_s', 'Скорость печати, мм/с', 'Ограничение профиля', 'num'],
-  ['slicer_material', 'Материал', 'PLA / PETG / TPU / ABS / ASA', 'text'],
-  ['slicer_ams_slot', 'AMS-слот', 'Сверяется перед заданием', 'text'],
-  ['slicer_provider', 'Движок слайсинга', 'printflow — свой движок Stage 1, external — внешний CLI', 'text'],
-  ['slicer_mode', 'Слайсер: режим', 'manual — результат смотрит оператор, auto — доверяем гейтам', 'text'],
-  ['slicer_first_print_verified', 'Слайсер: первый прогон принят', 'Снимает блокировку автоматического режима', 'bool'],
-  ['slicer_auto_enqueue', 'Слайсер: ставить в очередь', 'Только при принятом первом прогоне', 'bool'],
-  ['slicer_auto_print', 'Слайсер: печать без оператора', 'Опасный режим, по умолчанию выключен', 'bool'],
-  ['slicer_extrusion_width_mm', 'Ширина экструзии, мм', '0 — авто: 1,125 диаметра сопла', 'num'],
-  ['slicer_top_solid_layers', 'Сплошных слоёв сверху', 'Сколько слоёв крыши делать сплошными', 'num'],
-  ['slicer_bottom_solid_layers', 'Сплошных слоёв снизу', 'Сколько слоёв дна делать сплошными', 'num'],
-  ['slicer_seam', 'Положение шва', 'nearest — в ближайшей точке, aligned — по одной линии', 'text'],
-  ['slicer_retract_mm', 'Ретракт, мм', 'Откат пластика на переезде', 'num'],
-  ['slicer_retract_speed_mm_s', 'Скорость ретракта, мм/с', 'Скорость отката и подачи', 'num'],
-  ['slicer_retract_min_travel_mm', 'Ретракт от переезда, мм', 'Короче — без ретракта', 'num'],
-  ['slicer_zhop_mm', 'Подъём по Z, мм', 'Поднимать сопло на переезде', 'num'],
-  ['slicer_fan_percent', 'Обдув, %', '0 — по материалу из справочника', 'num'],
-  ['slicer_support_spacing_mm', 'Шаг поддержек, мм', 'Шаг линий поддержки', 'num'],
-  ['slicer_travel_speed_mm_s', 'Скорость переездов, мм/с', 'Перемещения без печати', 'num'],
-  ['slicer_flow', 'Поток, коэффициент', '1.0 — номинал', 'num'],
-  ['slicer_center_model', 'Центрировать модель', 'Ставить модель в центр стола', 'bool'],
-  ['slicer_auto_postprocess_farmloop', 'Автопостобработка FarmLoop', 'Только после установки и проверки шаблона', 'bool'],
-  ['slicer_watch_auto_slice', 'Watch Folder: автоматически слайсить', 'Требует внешний CLI-слайсер', 'bool'],
-  ['slicer_watch_auto_queue', 'Watch Folder: ставить результат в очередь', 'Не запускает принтер автоматически', 'bool'],
-  ['farmloop_profile', 'FarmLoop: профиль', 'Профиль механики', 'text'],
-  ['farmloop_mechanics_verified', 'FarmLoop: механика проверена', 'После ручной проверки P1S', 'bool'],
-  ['farmloop_template_verified', 'FarmLoop: шаблон проверен', 'После проверки реального G-code', 'bool'],
-  ['farmloop_sensor_mode', 'FarmLoop: пустая платформа', 'manual / sensor / camera / both', 'text'],
-  ['farmloop_sensor_timeout_s', 'FarmLoop: таймаут подтверждения, с', 'При неизвестном состоянии цикл блокируется', 'num'],
-  ['farmloop_camera_threshold_pct', 'FarmLoop: порог камеры, %', 'Порог отличия от пустой платформы', 'num'],
-  ['farmloop_cooldown_s', 'FarmLoop: охлаждение, с', 'Пауза перед снятием детали', 'num'],
-  ['farmloop_pusher_enabled', 'FarmLoop: толкатель установлен', 'Физический safety gate', 'bool'],
-  ['farmloop_bender_enabled', 'FarmLoop: изгибатель установлен', 'Физический safety gate', 'bool'],
-  ['farmloop_auto_next', 'FarmLoop: следующий цикл', 'Разрешает только при подтверждённой пустой платформе', 'bool'],
-  ['farmloop_unattended_series', 'FarmLoop: бесконтрольная серия', 'Опасный режим, по умолчанию выключен', 'bool'],
-  ['farmloop_max_cycles', 'FarmLoop: максимум циклов', 'Ограничитель серии', 'num'],
-  ['farmloop_max_detach_attempts', 'FarmLoop: попытки снятия', 'После лимита — остановка и оператор', 'num'],
+  ['studio_gateway_enabled', 'Шлюз Bambu Studio (Studio Gateway)', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
+  ['studio_gateway_mode', 'Режим обработки заданий', 'confirm — подтверждение на пульте/ПК; queue — сразу в очередь; autostart — печать сразу', 'select', [
+    ['confirm', 'confirm — Окно подтверждения на пульте/ПК (безопасно)'],
+    ['queue', 'queue — Сразу отправлять в очередь печати'],
+    ['autostart', 'autostart — Автостарт (печатать немедленно)'],
+  ]],
+  ['studio_gateway_name', 'Имя виртуального принтера', 'Как PrintFlow называется в списке устройств Bambu Studio', 'text'],
+  ['studio_gateway_port', 'Сетевой порт шлюза', 'Порт вещания эмулятора принтера в сети LAN', 'select', [
+    [3000, '3000 (по умолчанию для Studio)'],
+    [6000, '6000 (альтернативный порт)'],
+    [8883, '8883 (MQTT TLS)'],
+  ]],
+  ['studio_gateway_autostart', 'Автостарт со шлюза', 'Печатать сразу после Slice/Print (требует режим autostart и safety-gate)', 'bool'],
+  ['studio_gateway_serial', 'Серийный номер устройства', 'Пусто — сгенерируется автоматически', 'text'],
+];
+const FTPS = [
+  ['ftps_timeout', 'Таймаут FTPS, сек', 'Время ожидания ответа SD-карты станка (порт 990)', 'select', [
+    [15, '15 сек'],
+    [30, '30 сек (рекомендуется)'],
+    [60, '60 сек (для больших 3MF)'],
+    [120, '120 сек'],
+  ]],
+  ['ftps_retries', 'Повторы загрузки FTPS', 'Количество автоматических повторов при обрыве', 'select', [
+    [1, '1 попытка (без повторов)'],
+    [3, '3 повтора (стандарт)'],
+    [5, '5 повторов'],
+  ]],
+  ['ftps_block_kb', 'Размер блока загрузки, КБ', 'Размер пакета передачи по FTPS (порт 990)', 'select', [
+    [16, '16 КБ (надёжно при слабом Wi-Fi)'],
+    [32, '32 КБ (сбалансированно)'],
+    [64, '64 КБ (быстро в хорошей сети)'],
+    [128, '128 КБ'],
+  ]],
+];
+const MQTT = [
+  ['mqtt_keepalive', 'Keepalive MQTT, сек', 'Интервал heartbeat-проверки связи со станком (порт 8883)', 'select', [
+    [5, '5 сек (быстрый отклик)'],
+    [15, '15 сек (стандарт)'],
+    [30, '30 сек'],
+    [60, '60 сек (экономия)'],
+  ]],
+  ['mqtt_backoff', 'Backoff переподключений', 'Увеличивать паузу после повторных сетевых сбоев', 'bool'],
+];
+const AMS_SETTINGS = [
+  ['ams_auto_spools', 'Заводить катушки из AMS автоматически', 'Вставили бобину в AMS — она появилась на складе', 'bool'],
+  ['ams_sync_remaining', 'Обновлять остаток по датчику AMS', 'Только для катушек с флагом синхронизации с AMS', 'bool'],
 ];
 const PREFLIGHT = [
   ['preflight_enabled', 'Preflight — проверка перед стартом', 'Блокировать старт при проблемах', 'bool'],
@@ -1062,18 +1181,6 @@ const PREFLIGHT = [
   ['preflight_block_bed', 'Блок: стол не пуст', 'До старта сравнить кадр с эталоном пустого стола. Нет эталона — проверка выключена.', 'bool'],
   ['preflight_warn_nozzle', 'Предупр.: сопло', 'Диаметр сопла в файле vs принтер', 'bool'],
   ['preflight_warn_humidity', 'Предупр.: влажность AMS', 'Выше порога — сушить', 'bool'],
-];
-const FTPS = [
-  ['ftps_timeout', 'Таймаут FTPS, сек', 'Для операций с SD-картой принтера', 'num', 1],
-  ['ftps_retries', 'Повторы загрузки FTPS', 'Сколько раз повторить временно оборванную загрузку', 'num', 1],
-  ['ftps_block_kb', 'Блок загрузки, КБ', 'Размер порции при отправке файла', 'num', 16],
-];
-const MQTT = [
-  ['mqtt_keepalive', 'Keepalive MQTT, сек', 'Интервал heartbeat', 'num', 5],
-  ['mqtt_backoff', 'Backoff переподключений', 'Увеличивать паузу после повторных сбоев', 'bool'],
-];
-const AMS_SETTINGS = [
-  ['dry_humidity_threshold', 'Порог влажности AMS, %', 'Выше порога система рекомендует сушку', 'num', 1],
 ];
 /* 8.5: умный цех — камера и виртуальный принтер */
 const PHASE11 = [
@@ -1089,7 +1196,6 @@ const SYSTEM2 = [
   ['encrypt_access_code', 'Шифровать Access Code', 'Рекомендуется: код хранится отдельно от ключа шифрования', 'bool'],
   ['backup_keep', 'Хранить бэкапов', 'Единый лимит для ручных, автоматических и страховочных копий', 'num', 1],
 ];
-
 const ACCENTS = [
   ['indigo', '#4f46e5'], ['violet', '#7c3aed'], ['blue', '#2563eb'],
   ['emerald', '#059669'], ['amber', '#d97706'], ['rose', '#e11d48'],
@@ -1102,14 +1208,26 @@ function settingRow(key, label, sub, control) {
 /** Рисует группу настроек по описанию [ключ, подпись, пояснение, тип, шаг]. */
 function settingGroup(list) {
   const s = PF.state.settings;
-  return list.map(([k, label, sub, type, step]) => {
+  return list.map(([k, label, sub, type, optionsOrStep]) => {
     let control;
     if (type === 'bool') {
       control = `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`;
+    } else if (type === 'select' && Array.isArray(optionsOrStep)) {
+      const cur = s[k] !== undefined && s[k] !== null ? String(s[k]) : '';
+      const hasMatch = optionsOrStep.some(([val]) => String(val) === cur);
+      let opts = '';
+      if (!hasMatch && cur !== '') {
+        opts += `<option value="${esc(cur)}" selected>${esc(cur)} (текущее)</option>`;
+      }
+      opts += optionsOrStep.map(([val, text]) => {
+        const sel = String(val) === cur ? ' selected' : '';
+        return `<option value="${esc(String(val))}"${sel}>${esc(text)}</option>`;
+      }).join('');
+      control = `<select data-setting="${k}">${opts}</select>`;
     } else if (type === 'text') {
       control = `<input type="text" data-setting="${k}" value="${esc(String(s[k] ?? ''))}">`;
     } else {
-      control = `<input type="number" step="${step || 1}" min="0" data-setting="${k}" value="${esc(String(num(s[k])))}">`;
+      control = `<input type="number" step="${optionsOrStep || 1}" min="0" data-setting="${k}" value="${esc(String(num(s[k])))}">`;
     }
     return settingRow(k, label, sub, control);
   }).join('');
@@ -1576,8 +1694,8 @@ async function deleteMaterial(id) {
 
 function renderSettings() {
   const s = PF.state.settings;
-  $('set_rates').innerHTML = RATES.map(([k, label, sub, step]) => settingRow(k, label, sub,
-    `<input type="number" step="${step}" min="0" data-setting="${k}" value="${esc(String(num(s[k])))}">`)).join('');
+  if ($('set_rates')) $('set_rates').innerHTML = settingGroup(RATES);
+  if ($('set_storage_rules')) $('set_storage_rules').innerHTML = settingGroup(STORAGE_RULES);
 
   // --- бизнес
   $('set_company').innerHTML = settingGroup(COMPANY);
@@ -1622,9 +1740,26 @@ function renderSettings() {
   $('set_guard').innerHTML = settingGroup(GUARD);
   $('set_queue_rules').innerHTML = settingGroup(QUEUE_RULES);
   $('set_upkeep').innerHTML = settingGroup(UPKEEP);
-  if ($('set_watch')) $('set_watch').innerHTML = settingGroup(WATCH);
+  if ($('set_watch')) {
+    $('set_watch').innerHTML = settingGroup(WATCH)
+      + `<div class="set-row" data-set-row><div class="sinfo"><b>Быстрый выбор пути</b><small>Нажмите, чтобы подставить типовую папку для 3MF</small></div>`
+      + `<div style="display:flex;gap:6px;flex-wrap:wrap">`
+      + `<button class="btn sm" type="button" data-watch-preset="default">~/PrintFlow-Inbox</button>`
+      + `<button class="btn sm" type="button" data-watch-preset="desktop">~/Desktop/3MF</button>`
+      + `<button class="btn sm" type="button" data-watch-preset="win">C:\\PrintFlow-Inbox</button>`
+      + `</div></div>`;
+  }
   if ($('set_studio')) {
+    const printerOpts = [['', 'Любой свободный принтер']].concat(
+      (PF.state.printers || []).map((p) => [p.id, `${p.name} (${p.model || 'Bambu'})`])
+    );
+    const curPrinter = s.studio_gateway_printer_id || '';
+    const printerSelect = `<select data-setting="studio_gateway_printer_id">`
+      + printerOpts.map(([val, label]) => `<option value="${esc(val)}"${val === curPrinter ? ' selected' : ''}>${esc(label)}</option>`).join('')
+      + `</select>`;
+
     $('set_studio').innerHTML = settingGroup(STUDIO)
+      + settingRow('studio_gateway_printer_id', 'Принтер по умолчанию для шлюза', 'На какой принтер направлять печать из Studio', printerSelect)
       + settingRow('studio_gateway_access_code', 'Access Code для Studio',
         s.has_studio_gateway_access_code
           ? 'Сохранён — оставьте пустым, чтобы не менять. Studio спросит этот код при подключении.'
@@ -1834,12 +1969,16 @@ function renderUpdateInfo() {
 }
 
 /** Поиск по настройкам: ищет сразу по всем вкладкам и прячет лишнее. */
-let settingsPane = 'business';
+let settingsPane = 'printers';
 
 function selectSettingsPane(name) {
-  const known = ['business', 'tax', 'pricing', 'money', 'production', 'cashier', 'sbp', 'bank', 'all', 'system'];
-  if (!known.includes(name)) return;
-  settingsPane = name;
+  let target = name;
+  if (target === 'tax') target = 'pricing';
+  if (target === 'money') target = 'business';
+  if (target === 'sbp' || target === 'bank') target = 'cashier';
+  const known = ['printers', 'production', 'storage', 'pricing', 'business', 'cashier', 'system', 'all', 'tax', 'money', 'sbp', 'bank'];
+  if (!known.includes(target)) return;
+  settingsPane = target;
   const search = $('set_search');
   if (search) search.value = '';
   $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
@@ -1856,7 +1995,10 @@ function filterSettings(query) {
     // Возврат к обычному режиму вкладок.
     panes.forEach((p) => {
       p.classList.toggle('on', p.id === `setpane-${settingsPane}`);
-      $$('[data-set-card]', p).forEach((c) => c.classList.remove('hidden'));
+      $$('[data-set-card]', p).forEach((c) => {
+        c.classList.remove('hidden');
+        c.classList.remove('search-hit');
+      });
       $$('[data-set-row]', p).forEach((r) => r.classList.remove('hidden'));
     });
     tabs.forEach((b) => {
@@ -1873,8 +2015,11 @@ function filterSettings(query) {
   }
   let found = 0;
   const hits = {};
+  let firstHitPane = null;
   panes.forEach((pane) => {
+    if (pane.hasAttribute('hidden')) return;
     let paneHits = 0;
+    const paneName = pane.id.replace('setpane-', '');
     $$('[data-set-card]', pane).forEach((card) => {
       const head = (card.querySelector('.card-head') || {}).textContent || '';
       const headHit = head.toLowerCase().includes(q);
@@ -1887,17 +2032,34 @@ function filterSettings(query) {
       });
       const visible = cardHits > 0 || (headHit && !rows.length);
       card.classList.toggle('hidden', !visible);
+      card.classList.toggle('search-hit', visible);
       if (visible) paneHits += cardHits || 1;
     });
-    pane.classList.toggle('on', paneHits > 0);
-    hits[pane.id.replace('setpane-', '')] = paneHits;
+    hits[paneName] = paneHits;
+    if (paneHits > 0 && !firstHitPane) {
+      firstHitPane = paneName;
+    }
     found += paneHits;
   });
-  // Вкладки в режиме поиска показывают, где именно нашлось.
+
+  // Автоматический переход к первой вкладке с совпадениями, если на текущей пусто
+  let activePane = settingsPane;
+  if (!hits[activePane] && firstHitPane) {
+    activePane = firstHitPane;
+  }
+
+  panes.forEach((pane) => {
+    if (pane.hasAttribute('hidden')) return;
+    const paneName = pane.id.replace('setpane-', '');
+    pane.classList.toggle('on', paneName === activePane && (hits[paneName] > 0 || found === 0));
+  });
+
+  // Вкладки в режиме поиска показывают бейджи с числом совпадений
   tabs.forEach((b) => {
-    const n = hits[b.dataset.pane] || 0;
-    b.classList.toggle('on', n > 0);
-    b.classList.toggle('dim', n === 0);
+    const pName = b.dataset.pane;
+    const n = hits[pName] || 0;
+    b.classList.toggle('on', pName === activePane);
+    b.classList.toggle('dim', n === 0 && pName !== activePane);
     let badge = b.querySelector('.tab-hits');
     if (n > 0) {
       if (!badge) { badge = document.createElement('i'); badge.className = 'tab-hits'; b.appendChild(badge); }
@@ -1932,6 +2094,8 @@ async function saveSettings() {
     else if (el.dataset.json === '1') {
       try { payload[k] = JSON.parse(el.value || 'null'); }
       catch (e) { jsonErrors.push(k); }
+    } else if (el.tagName === 'SELECT' && !isNaN(Number(el.value)) && el.value !== '' && !['tax_mode', 'default_location', 'studio_gateway_mode', 'watch_auto_action', 'digest_time', 'weekly_report_time', 'quiet_from', 'quiet_to', 'studio_gateway_name', 'theme'].includes(k)) {
+      payload[k] = num(el.value);
     } else payload[k] = el.value;
   });
   if (jsonErrors.length) {
@@ -2633,6 +2797,20 @@ function bind() {
     if (del) return deleteMaterial(del.dataset.matDel);
   });
   $('mat_base').addEventListener('change', (e) => fillMaterialFromBase(e.target.value));
+  document.addEventListener('click', (e) => {
+    const presetBtn = e.target.closest('[data-watch-preset]');
+    if (presetBtn) {
+      const p = presetBtn.dataset.watchPreset;
+      const inp = document.querySelector('[data-setting="watch_folder_path"]');
+      if (inp) {
+        if (p === 'default') inp.value = '~/PrintFlow-Inbox';
+        else if (p === 'desktop') inp.value = '~/Desktop/3MF';
+        else if (p === 'win') inp.value = 'C:\\PrintFlow-Inbox';
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        inp.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  });
   $('set_tabs').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-pane]');
     if (btn) selectSettingsPane(btn.dataset.pane);

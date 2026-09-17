@@ -3541,35 +3541,175 @@
 
 <section class="view" id="view-settings">
  <div class="view-head">
-  <div><span class="eyebrow">Система · только то, что влияет на расчёты</span><h1>Настройки</h1><p>Тарифы, налоги, автоматизация и данные. Секреты остаются только на этом компьютере.</p></div>
+  <div><span class="eyebrow">Система · параметры, парк и экономика</span><h1>Настройки</h1><p>Управление принтерами, шлюзом Bambu Studio, тарифами цеха, складом, ценами и автоматизацией.</p></div>
   <div class="head-actions">
    <input type="search" id="set_search" class="set-search" placeholder="Найти настройку…" autocomplete="off" aria-label="Найти настройку">
    <button class="btn" id="settings_reset" type="button">Сбросить</button>
    <button class="btn primary" id="settings_save" type="button">Сохранить</button>
   </div>
  </div>
+
  <div class="settings-quicknav" id="set_shortcuts" aria-label="Быстрый переход к настройкам">
-  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и цели</small></button>
-  <button type="button" data-set-shortcut="pricing"><span>₽</span><b>Цена</b><small>наценка и скидки</small></button>
-  <button type="button" data-set-shortcut="production"><span>◉</span><b>Цех</b><small>тарифы и автоматика</small></button>
-  <button type="button" data-set-shortcut="system"><span>⚙</span><b>Система</b><small>данные и связь</small></button>
+  <button type="button" data-set-shortcut="printers" class="on"><span>🖨</span><b>Принтеры</b><small>Bambu, шлюз, сеть</small></button>
+  <button type="button" data-set-shortcut="production"><span>◉</span><b>Цех</b><small>тарифы и смены</small></button>
+  <button type="button" data-set-shortcut="storage"><span>🧵</span><b>Склад</b><small>пластик и списание</small></button>
+  <button type="button" data-set-shortcut="pricing"><span>💰</span><b>Цены</b><small>наценка и налоги</small></button>
+  <button type="button" data-set-shortcut="business"><span>◈</span><b>Бизнес</b><small>реквизиты и кассы</small></button>
+  <button type="button" data-set-shortcut="system"><span>⚙</span><b>Система</b><small>Telegram и бэкапы</small></button>
  </div>
+
  <div class="seg tabs settings-tabs" id="set_tabs">
-  <button data-pane="business" class="on"><span aria-hidden="true">◈</span>Бизнес</button>
-  <button data-pane="tax"><span aria-hidden="true">% </span>Налоги</button>
-  <button data-pane="pricing"><span aria-hidden="true">₽</span>Цены</button>
-  <button data-pane="money"><span aria-hidden="true">▤</span>Учёт денег</button>
-  <button data-pane="production"><span aria-hidden="true">◉</span>Производство</button>
-  <button data-pane="cashier"><span aria-hidden="true">🧾</span>Касса</button>
-  <button data-pane="sbp"><span aria-hidden="true">▦</span>СБП</button>
-  <button data-pane="bank"><span aria-hidden="true">🏦</span>Банк</button>
-  <button data-pane="system"><span aria-hidden="true">⚙</span>Система</button>
+  <button data-pane="printers" class="on"><span aria-hidden="true">🖨</span>Принтеры и Bambu</button>
+  <button data-pane="production"><span aria-hidden="true">◉</span>Цех и тарифы</button>
+  <button data-pane="storage"><span aria-hidden="true">🧵</span>Склад и пластик</button>
+  <button data-pane="pricing"><span aria-hidden="true">💰</span>Цены и налоги</button>
+  <button data-pane="business"><span aria-hidden="true">◈</span>Бизнес</button>
+  <button data-pane="cashier"><span aria-hidden="true">🧾</span>Касса и СБП</button>
+  <button data-pane="system"><span aria-hidden="true">⚙</span>Система и боты</button>
   <button data-pane="all"><span aria-hidden="true">☷</span>Все настройки</button>
+  <button data-pane="tax" hidden><span aria-hidden="true">%</span>Налоги</button>
+  <button data-pane="money" hidden><span aria-hidden="true">▤</span>Учёт денег</button>
+  <button data-pane="sbp" hidden><span aria-hidden="true">▦</span>СБП</button>
+  <button data-pane="bank" hidden><span aria-hidden="true">🏦</span>Банк</button>
  </div>
  <div class="set-empty" id="set_no_results" hidden>По запросу ничего не нашлось. Очистите поиск, чтобы увидеть все настройки.</div>
 
- <!-- ------------------------------------------------------- бизнес -->
- <div class="pane on" id="setpane-business">
+ <!-- ------------------------------------------------------- 1. Принтеры и Bambu -->
+ <div class="pane on" id="setpane-printers">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Шлюз Bambu Studio</h2><p>Studio видит PrintFlow как принтер в LAN: Slice/Print идёт в очередь, не напрямую на станок</p></div></div>
+    <div id="set_studio"></div>
+    <div class="notice" style="margin-top:10px" id="studio_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Связь и протоколы станка</h2><p>Локальные порты MQTT (:8883) и FTPS (:990) для Bambu Lab в LAN Only Mode</p></div></div>
+    <div class="set-subhead" style="font-weight:600;font-size:12px;color:var(--muted);margin:8px 0 4px">MQTT — связь и телеметрия (:8883)</div>
+    <div id="set_mqtt"></div>
+    <div class="set-subhead" style="font-weight:600;font-size:12px;color:var(--muted);margin:14px 0 4px">FTPS — передача файлов 3MF (:990)</div>
+    <div id="set_ftps"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Парк принтеров</h2><p>Подключённые 3D-принтеры, IP-адреса и Access Code</p></div><button class="btn sm" id="set_printer_add" type="button">+ Принтер</button></div>
+    <div id="set_printers"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Watch Folder — авто-импорт 3MF</h2><p>Локальная папка для экспорта 3MF файлов из Bambu Studio / OrcaSlicer</p></div></div>
+    <div id="set_watch"></div>
+    <div class="notice" style="margin-top:10px" id="watch_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Bambu Cloud</h2><p>Управление принтером через облако Bambu без LAN Only Mode</p></div></div>
+    <div id="set_cloud"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Preflight — проверка перед стартом</h2><p>Блокировки и предупреждения перед отправкой задания на печать</p></div></div>
+    <div id="set_preflight"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Сторож печати</h2><p>Защита от брака, зависаний, перегрева и спагетти-детект по камере</p></div></div>
+    <div id="set_guard"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>AMS — материал и влажность</h2><p>Авто-маппинг слотов и контроль сушки катушек</p></div></div>
+    <div id="set_ams"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>8.5 — умный цех</h2><p>Камера: кейфреймы, первый слой, контроль пустого стола. Виртуальный демо-принтер.</p></div></div>
+    <div id="set_phase11"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------------- 2. Цех и тарифы -->
+ <div class="pane" id="setpane-production">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Тарифы производства</h2><p>Тариф за кВт·ч, амортизация, норма прибыли в час и себестоимость</p></div></div>
+    <div id="set_rates"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Напоминания и расписания</h2><p>Расписание смен, дайджест в Telegram, отчёты и ёмкость парка</p></div></div>
+    <div id="set_auto_extra"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Автоматизация</h2><p>Автоматический расчёт себестоимости и автозапуск очереди</p></div></div>
+    <div id="set_auto"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила очереди</h2><p>Группировка по материалу и ночной режим (тихие часы)</p></div></div>
+    <div id="set_queue_rules"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Наработка и история</h2><p>Регламент технического обслуживания и графики телеметрии</p></div></div>
+    <div id="set_upkeep"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила «если — то»</h2><p>Настраиваемая автоматизация: событие → действие</p></div><button class="btn sm" id="rule_add" type="button">+ Правило</button></div>
+    <div id="set_rules"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------------- 3. Склад и пластик -->
+ <div class="pane" id="setpane-storage">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Параметры склада и списание</h2><p>Порог низкого остатка, автосписание при завершении, место по умолчанию</p></div></div>
+    <div id="set_storage_rules"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Материалы для печати</h2><p>Каталог типов пластика; пользовательские настройки температур, скорости и цен</p></div><button class="btn sm" id="mat_add" type="button">+ Свой пластик</button></div>
+    <div id="set_materials"></div>
+    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Свои материалы появляются в калькуляторе, в оценке себестоимости и в подсказках AMS наравне со встроенными.</span></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------------- 4. Цены и налоги -->
+ <div class="pane" id="setpane-pricing">
+  <div class="set-grid">
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Правила ценообразования</h2><p>Базовая наценка, минимальный чек заказа и шаг округления цены</p></div></div>
+    <div id="set_pricing"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Скидки и надбавки</h2><p>Автоматические скидки от тиража и надбавка за срочность</p></div></div>
+    <div id="set_discounts"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Налоговый режим</h2><p>НПД (самозанятый), УСН, Патент или своя ставка</p></div></div>
+    <div class="set-row">
+     <div class="sinfo"><b>Режим налогообложения</b><small>Определяет формулу расчёта налога</small></div>
+     <select id="set_tax_mode" data-setting="tax_mode">
+      <option value="none">Без налога (не считать)</option>
+      <option value="npd">НПД (Самозанятый: 4% физлица / 6% юрлица)</option>
+      <option value="usn6">УСН Доходы (6%)</option>
+      <option value="usn15">УСН Доходы минус расходы (15%)</option>
+      <option value="patent">Патент (фиксированная сумма)</option>
+      <option value="manual">Своя ставка (% с оборота)</option>
+     </select>
+    </div>
+    <div class="tax-note" id="set_tax_hint"><span></span></div>
+    <div id="set_tax" style="margin-top:10px"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Страховые взносы</h2><p>Фиксированные и дополнительные взносы ИП за себя (2026 год)</p></div></div>
+    <div id="set_insurance"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>НДС и резерв</h2><p>Порог внимания к НДС и автоматический резерв под налог</p></div></div>
+    <div id="set_vat"></div>
+   </div>
+   <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Банковские комиссии и эквайринг</h2><p>Процент эквайринга, расходы на упаковку и доставку</p></div></div>
+    <div id="set_payments"></div>
+   </div>
+  </div>
+ </div>
+
+ <!-- ------------------------------------------------------- 5. Бизнес -->
+ <div class="pane" id="setpane-business">
   <div class="set-grid">
    <div class="card" data-set-card>
     <div class="card-head"><div><h2>Реквизиты</h2><p>Подставляются в документы и печатные материалы</p></div></div>
@@ -3581,225 +3721,63 @@
     <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Комиссия и реклама на заказ учитываются в расчёте цены и прибыли автоматически.</span></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Цели</h2><p>От них считается план и точка безубыточности</p></div></div>
+    <div class="card-head"><div><h2>Цели</h2><p>Финансовые ориентиры: система сравнивает с ними факт</p></div></div>
     <div id="set_goals"></div>
    </div>
-  </div>
- </div>
-
- <!-- -------------------------------------------------------- налоги -->
- <div class="pane" id="setpane-tax">
-  <div class="set-grid">
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Налоговый режим</h2><p>Выберите свою схему — расчёты подстроятся</p></div></div>
-    <div class="set-row"><div class="sinfo"><b>Режим</b><small>От него зависят ставки, лимиты и взносы</small></div>
-     <select id="set_tax_mode" data-setting="tax_mode">
-      <option value="none">Без налога</option>
-      <option value="npd">Самозанятый (НПД)</option>
-      <option value="usn6">УСН «Доходы» 6%</option>
-      <option value="usn15">УСН «Доходы минус расходы»</option>
-      <option value="patent">Патент</option>
-      <option value="manual">Своя ставка</option>
-     </select></div>
-    <div id="set_tax_hint" class="notice"><span>ℹ</span><span></span></div>
-    <div id="set_tax"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Страховые взносы</h2><p>Для ИП: фиксированная часть и 1% с дохода свыше лимита</p></div></div>
-    <div id="set_insurance"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>НДС и резерв</h2><p>Пригодится при выходе за 20 млн ₽ в год</p></div></div>
-    <div id="set_vat"></div>
-   </div>
-  </div>
- </div>
-
- <!-- --------------------------------------------------------- цены -->
- <div class="pane" id="setpane-pricing">
-  <div class="set-grid">
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Правила ценообразования</h2><p>Используются калькулятором и подсказками цены</p></div></div>
-    <div id="set_pricing"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Скидки и надбавки</h2><p>За объём и за срочность</p></div></div>
-    <div id="set_discounts"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Приём оплаты и доставка</h2><p>Эти расходы вычитаются из прибыли заказа</p></div></div>
-    <div id="set_payments"></div>
-   </div>
-  </div>
- </div>
-
- <!-- ---------------------------------------------------- учёт денег -->
- <div class="pane" id="setpane-money">
-  <div class="set-grid">
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Кассы и счета</h2><p>Наличные, карта, расчётный счёт</p></div><button class="btn sm" id="acc_add" type="button">+</button></div>
+    <div class="card-head"><div><h2>Кассы и счета</h2><p>Физические места денег: наличные, карта, р/с</p></div><button class="btn sm" id="acc_add" type="button">+</button></div>
     <div id="set_accounts"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Постоянные расходы</h2><p>Аренда, интернет, подписки — начисляются сами</p></div><button class="btn sm" id="fix_add" type="button">+</button></div>
+    <div class="card-head"><div><h2>Постоянные расходы</h2><p>Аренда, связь, подписки — то, что платится регулярно</p></div><button class="btn sm" id="fix_add" type="button">+</button></div>
     <div id="set_fixed"></div>
-    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Печатаете дома и постоянных расходов нет — просто оставьте список пустым.</span></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Правила учёта</h2><p>Как считать себестоимость и когда предупреждать</p></div></div>
+    <div class="card-head"><div><h2>Правила учёта</h2><p>Как считать прибыль и распределять постоянные расходы</p></div></div>
     <div id="set_money_rules"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Конверты-накопления</h2><p>Автоматически откладывать процент с дохода</p></div><button class="btn sm" id="env_add" type="button">+ Конверт</button></div>
+    <div class="card-head"><div><h2>Конверты-накопления</h2><p>Фонды под налоги, пластик, новый принтер</p></div><button class="btn sm" id="env_add" type="button">+</button></div>
     <div id="set_envelopes"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Статьи расходов</h2><p>Группировка в отчётах</p></div><button class="btn sm" id="cat_expense_add" type="button">+</button></div>
+    <div class="card-head"><div><h2>Статьи расходов</h2><p>Категории для ручных списаний и банковской выписки</p></div><button class="btn sm" id="cat_expense_add" type="button">+</button></div>
     <div id="set_categories"></div>
    </div>
   </div>
  </div>
 
- <!-- --------------------------------------------------- производство -->
- <div class="pane" id="setpane-production">
-  <div class="set-grid">
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Тарифы производства</h2><p>Основа автоматической себестоимости</p></div></div>
-    <div id="set_rates"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Автоматизация</h2><p>Что система делает сама</p></div></div>
-    <div id="set_auto"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Напоминания и расписания</h2><p>Закупка пластика, сушка, финиш печати, отчёты в Telegram</p></div></div>
-    <div id="set_auto_extra"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Сторож печати</h2><p>Что делать, если печать пошла не так</p></div></div>
-    <div id="set_guard"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Правила «если — то»</h2><p>Настраиваемая автоматизация: событие → действие</p></div><button class="btn sm" id="rule_add" type="button">+ Правило</button></div>
-    <div id="set_rules"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Правила очереди</h2><p>Когда и что запускать самому</p></div></div>
-    <div id="set_queue_rules"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Наработка и история</h2><p>Обслуживание и графики показателей</p></div></div>
-    <div id="set_upkeep"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Watch Folder — авто-импорт 3MF</h2><p>Папка с файлами из Bambu Studio</p></div></div>
-    <div id="set_watch"></div>
-    <div class="notice" style="margin-top:10px" id="watch_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Шлюз Bambu Studio</h2><p>Studio видит PrintFlow как принтер: Slice/Print идёт в очередь, не напрямую на P1S</p></div></div>
-    <div id="set_studio"></div>
-    <div class="notice" style="margin-top:10px" id="studio_status"><span>ℹ</span><span>Загрузка статуса…</span></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Preflight — проверка перед стартом</h2><p>Что блокирует или предупреждает</p></div></div>
-    <div id="set_preflight"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>8.5 — умный цех</h2><p>Камера: кейфреймы, первый слой, стол. Виртуальный принтер.</p></div></div>
-    <div id="set_phase11"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>FTPS — файлы на принтер</h2><p>Заливка 3MF на SD-карту</p></div></div>
-    <div id="set_ftps"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>MQTT — связь с принтером</h2><p>Локальный протокол Bambu Lab</p></div></div>
-    <div id="set_mqtt"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>AMS — материал и влажность</h2><p>Авто-маппинг слотов</p></div></div>
-    <div id="set_ams"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Материалы для печати</h2><p>Все типы пластика встроены; свои — со своими температурами, скоростью и ценой</p></div><button class="btn sm" id="mat_add" type="button">+ Свой пластик</button></div>
-    <div id="set_materials"></div>
-    <div class="notice" style="margin-top:10px"><span>ℹ</span><span>Свои материалы появляются в калькуляторе, в оценке себестоимости и в подсказках AMS наравне со встроенными.</span></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Принтеры</h2><p>Профили парка</p></div><button class="btn sm" id="set_printer_add" type="button">+</button></div>
-    <div id="set_printers"></div>
-   </div>
-  </div>
- </div>
-
- <!-- ------------------------------------------------------- касса (17.0) -->
+ <!-- ------------------------------------------------------- 6. Касса и СБП -->
  <div class="pane" id="setpane-cashier">
   <div class="set-grid">
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Мобильная касса</h2><p>Страница «Касса» открывается с телефона у стеллажа. Вход защищён кодом.</p></div>
-     <a class="btn sm" href="/cashier.html" target="_blank" rel="noopener">Открыть →</a></div>
+    <div class="card-head"><div><h2>Мобильная касса</h2><p>Общий код, смены, печать чеков и ограничения прав кассиров</p></div></div>
     <div id="set_cashier_fields"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Счёт по умолчанию</h2><p>Куда падают продажи без уточнения (настраивается также во вкладке «Учёт денег»).</p></div></div>
+    <div class="card-head"><div><h2>Счёт по умолчанию</h2><p>Куда падают розничные продажи с телефона</p></div></div>
     <div id="set_cashier_account"></div>
    </div>
-   <!-- 17.0.13: список касс. Раньше про обрыв у кассы владелец узнавал только
-        от кассира («не видно кассу»); теперь видно, кто на связи и кто молчит. -->
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Кассы на связи</h2><p>Кто вошёл в кассу с телефона и когда телефон последний раз отвечал. «Молчит» — связь с ПК потеряна, продажи копятся в очереди телефона и уйдут сами.</p></div>
-     <button class="btn sm ghost" id="cashier_sessions_reload" type="button">Обновить</button></div>
+    <div class="card-head"><div><h2>Кассы на связи</h2><p>Кто вошёл с телефона, когда отвечал и кто молчит</p></div><button class="btn sm" id="cashier_sessions_reload" type="button">↻</button></div>
     <div id="cashier_sessions"></div>
    </div>
-  </div>
- </div>
-
- <!-- --------------------------------------------------------- СБП (17.0) -->
- <div class="pane" id="setpane-sbp">
-  <div class="set-grid">
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>СБП · входящие</h2><p>Приём платежей по QR без эквайринга. Страница входящих — на телефоне кассира.</p></div>
-     <a class="btn sm" href="/sbp.html" target="_blank" rel="noopener">Открыть страницу →</a></div>
+    <div class="card-head"><div><h2>СБП · входящие</h2><p>QR-код на кассе, ожидание оплаты и автозачисление</p></div></div>
     <div id="set_sbp_fields"></div>
    </div>
-  </div>
- </div>
-
- <!-- --------------------------------------------------------- банк (17.0) -->
- <div class="pane" id="setpane-bank">
-  <div class="set-grid">
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Поступления из банка</h2><p>Выписка CSV из банка: сопоставление с заказами и авто-подтверждение СБП.</p></div>
-     <a class="btn sm" href="/bank.html" target="_blank" rel="noopener">Открыть страницу →</a></div>
+    <div class="card-head"><div><h2>Поступления из банка</h2><p>Точка, Т-Банк, Модуль, Сбер — авторазбор выписки</p></div></div>
     <div id="set_bank_fields"></div>
    </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Как подключить выписку</h2><p>CSV из интернет-банка → «Поступления банка». Дубли по дате+сумме+названию пропускаются.</p></div></div>
-    <div class="notice"><span>ℹ</span><span>Авто-подтверждение включается во вкладке «СБП» и срабатывает только при точной сумме и единственном ожидающем платеже в окне сопоставления.</span></div>
-   </div>
   </div>
  </div>
 
- <!-- ------------------------------------------ все 222 настройки (17.0) -->
- <div class="pane" id="setpane-all">
-  <div class="toolbar" style="align-items:center">
-   <div class="search-box"><input id="set_all_search" type="search" placeholder="Поиск по всем 222 настройкам…" aria-label="Поиск по всем настройкам"></div>
-   <label class="check" style="margin:0"><span class="switch"><input type="checkbox" id="set_all_advanced"><i></i></span>Показать технические</label>
-   <span class="muted" id="set_all_count" style="font-size:12.5px"></span>
-  </div>
-  <div id="set_all_fields"></div>
- </div>
-
- <!-- ------------------------------------------------------- система -->
+ <!-- ------------------------------------------------------- 7. Система и боты -->
  <div class="pane" id="setpane-system">
   <div class="set-grid">
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Bambu Cloud</h2><p>Управление принтером без LAN Only Mode — принтер остаётся в облачном режиме</p></div></div>
-    <div id="set_cloud"></div>
-   </div>
-   <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Токен хранится локально и не попадает в бэкап</p></div></div>
+    <div class="card-head"><div><h2>Telegram-уведомления</h2><p>Бот для сотрудников и оповещения о ходе печати</p></div></div>
     <div id="set_tg"></div>
     <button class="btn wide" id="tg_test" type="button" style="margin-top:10px">Отправить тестовое сообщение</button>
    </div>
@@ -3814,7 +3792,7 @@
     <div class="set-row"><div class="sinfo"><b>Акцент</b><small>Цвет кнопок и графиков</small></div><div class="theme-swatches" id="set_accent"></div></div>
     <div class="set-row"><div class="sinfo"><b>Меньше анимаций</b><small>Отключить движения: перекрывает настройку системы (reduced motion)</small></div>
      <label class="check"><span class="switch"><input type="checkbox" id="set_motion_off"><i></i></span>Выключено</label></div>
-    <div class="set-row"><div class="sinfo"><b>Высокий контраст</b><small>Усиленные границы и тёмнее текст — для проектора у станка</small></div>
+    <div class="set-row"><div class="sinfo"><b>Высокий контраст</b><small>Усиленные границы и тёмнее текст — для экрана у станка</small></div>
      <label class="check"><span class="switch"><input type="checkbox" id="set_contrast"><i></i></span>Включено</label></div>
     <div class="set-row"><div class="sinfo"><b>Режим дальтоников</b><small>Статусы дублируются штриховкой и иконками — не только цветом</small></div>
      <label class="check"><span class="switch"><input type="checkbox" id="set_colorblind"><i></i></span>Включено</label></div>
@@ -3829,15 +3807,15 @@
     <div id="set_update_rows"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Самодиагностика</h2><p>Потоки, база, бэкапы, очереди Telegram и парк — один снимок (Н1)</p></div><div class="row gap"><button class="btn sm" id="diag_refresh" type="button">⟳ Обновить</button><button class="btn sm ghost" id="diag_copy" type="button">Скопировать отчёт</button></div></div>
+    <div class="card-head"><div><h2>Самодиагностика</h2><p>Потоки, база, бэкапы, очереди Telegram и парк — один снимок</p></div><div class="row gap"><button class="btn sm" id="diag_refresh" type="button">⟳ Обновить</button><button class="btn sm ghost" id="diag_copy" type="button">Скопировать отчёт</button></div></div>
     <div id="set_diag" class="muted">Снимаем показания…</div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Система 2.0</h2><p>Плотность, шифрование, дебаг</p></div></div>
+    <div class="card-head"><div><h2>Система 2.0</h2><p>Плотность, шифрование токенов и доступ к сетевым портам</p></div></div>
     <div id="set_system2"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Профили настроек</h2><p>Снапшоты — откат в 1 клик</p></div><button class="btn sm" id="prof_save" type="button">+ Снапшот</button></div>
+    <div class="card-head"><div><h2>Профили настроек</h2><p>Снапшоты параметров — откат в 1 клик</p></div><button class="btn sm" id="prof_save" type="button">+ Снапшот</button></div>
     <div id="set_profiles"></div>
    </div>
    <div class="card" data-set-card>
@@ -3858,6 +3836,25 @@
    </div>
   </div>
  </div>
+
+ <!-- ------------------------------------------------------- 8. Все настройки -->
+ <div class="pane" id="setpane-all">
+  <div class="card" data-set-card>
+   <div class="card-head"><div><h2>Все настройки из схемы</h2><p>Полный реестр параметров с фильтром по ключам</p></div></div>
+   <div class="toolbar" style="margin-bottom:12px">
+    <input type="search" id="set_all_search" placeholder="Фильтр по ключу или названию…" style="flex:1">
+    <label class="check"><span class="switch"><input type="checkbox" id="set_all_advanced"><i></i></span>Технические ключи</label>
+    <span class="muted" id="set_all_count"></span>
+   </div>
+   <div id="set_all_fields"></div>
+  </div>
+ </div>
+
+ <!-- Служебные плейсхолдеры для обратной совместимости со старыми ссылками -->
+ <div class="pane" id="setpane-tax" hidden></div>
+ <div class="pane" id="setpane-money" hidden></div>
+ <div class="pane" id="setpane-sbp" hidden></div>
+ <div class="pane" id="setpane-bank" hidden></div>
 </section>
 
  </main>
@@ -4259,7 +4256,53 @@
    <span>Цвета по мотку по порядку (первый — основной оттенок)</span>
    <div id="sf_colors_list" class="spool-colors"></div>
   </div>
-  <label class="field span-2"><span>Рекомендации производителя</span><textarea id="sf_rec_settings" rows="2" maxlength="2000" placeholder="Со стикера бобины: сопло 210–230°, стол 60–70°, сушить, закрытая камера…"></textarea></label>
+  <div class="field span-2 rec-settings-card" id="sf_rec_wrap" style="background:var(--bg-card, #1e293b);border:1px solid var(--border-color, #334155);border-radius:10px;padding:12px 14px;margin:6px 0">
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px">
+    <div style="display:flex;align-items:center;gap:6px">
+     <span style="font-size:16px">🏷️</span>
+     <div>
+      <b style="font-size:13px;display:block">Рекомендации производителя</b>
+      <small class="muted" style="font-size:11px">Параметры со стикера бобины для профиля Bambu Studio</small>
+     </div>
+    </div>
+    <button class="btn sm" type="button" id="sf_rec_preset_btn" title="Заполнить паспортные параметры для выбранного материала">📋 Заполнить из стандарта</button>
+   </div>
+   <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px">
+    <div>
+     <span style="font-size:11px;font-weight:600;display:block;margin-bottom:3px;color:var(--muted-color, #94a3b8)">Сопло (°C)</span>
+     <div style="display:flex;align-items:center;gap:4px">
+      <input id="sf_rec_nozzle_min" type="number" min="100" max="450" placeholder="от" style="width:100%;text-align:center;padding:5px">
+      <span>–</span>
+      <input id="sf_rec_nozzle_max" type="number" min="100" max="450" placeholder="до" style="width:100%;text-align:center;padding:5px">
+     </div>
+    </div>
+    <div>
+     <span style="font-size:11px;font-weight:600;display:block;margin-bottom:3px;color:var(--muted-color, #94a3b8)">Стол (°C)</span>
+     <div style="display:flex;align-items:center;gap:4px">
+      <input id="sf_rec_bed_min" type="number" min="0" max="200" placeholder="от" style="width:100%;text-align:center;padding:5px">
+      <span>–</span>
+      <input id="sf_rec_bed_max" type="number" min="0" max="200" placeholder="до" style="width:100%;text-align:center;padding:5px">
+     </div>
+    </div>
+    <div>
+     <span style="font-size:11px;font-weight:600;display:block;margin-bottom:3px;color:var(--muted-color, #94a3b8)">Скорость (мм/с)</span>
+     <div style="display:flex;align-items:center;gap:4px">
+      <input id="sf_rec_speed_min" type="number" min="10" max="600" placeholder="от" style="width:100%;text-align:center;padding:5px">
+      <span>–</span>
+      <input id="sf_rec_speed_max" type="number" min="10" max="600" placeholder="до" style="width:100%;text-align:center;padding:5px">
+     </div>
+    </div>
+    <div>
+     <span style="font-size:11px;font-weight:600;display:block;margin-bottom:3px;color:var(--muted-color, #94a3b8)">Сушка (°C / ч)</span>
+     <div style="display:flex;align-items:center;gap:4px">
+      <input id="sf_rec_dry_temp" type="number" min="30" max="150" placeholder="°C" style="width:100%;text-align:center;padding:5px">
+      <span>/</span>
+      <input id="sf_rec_dry_hours" type="number" min="1" max="48" placeholder="ч" style="width:100%;text-align:center;padding:5px">
+     </div>
+    </div>
+   </div>
+   <input type="hidden" id="sf_rec_settings">
+  </div>
   <label class="field"><span>Вес катушки, г</span><input id="sf_total_grams" type="number" min="1" step="any" value="1000"></label>
   <label class="field"><span>Осталось, г</span><input id="sf_remaining_grams" type="number" min="0" step="any" value="1000"></label>
   <label class="field"><span>Цена катушки, ₽</span><input id="sf_price" type="number" min="0" step="any" value="1600"></label>

@@ -50,6 +50,21 @@ def ensure_certificate(cn: str = "NOZZA-PrintFlow") -> tuple[Path, Path]:
             return CERT_FILE, KEY_FILE
     except Exception as exc:
         errors.append(f"cryptography: {exc}")
+
+    # Автоустановка cryptography и OpenSSL при отсутствии
+    try:
+        import sys
+        cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-q", "cryptography>=41.0", "pyOpenSSL>=23.0"]
+        proc = subprocess.run(cmd, capture_output=True, timeout=60)
+        if proc.returncode != 0:
+            cmd_break = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-q", "--break-system-packages", "cryptography>=41.0", "pyOpenSSL>=23.0"]
+            subprocess.run(cmd_break, capture_output=True, timeout=60)
+        _via_cryptography(cn)
+        if certificate_ready():
+            return CERT_FILE, KEY_FILE
+    except Exception as exc2:
+        errors.append(f"auto-install: {exc2}")
+
     raise CertError(
         "Не удалось создать TLS-сертификат шлюза. Установите openssl "
         "или пакет cryptography. " + "; ".join(errors)

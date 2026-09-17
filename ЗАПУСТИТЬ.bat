@@ -61,6 +61,14 @@ if not exist "pf.py" (
   exit /b 1
 )
 
+rem Автоустановка cryptography и OpenSSL для безопасной связи со станками
+%PY% -c "import cryptography" >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo  Установка базовых библиотек безопасности (cryptography, OpenSSL)...
+  %PY% -m pip install --disable-pip-version-check -q cryptography pyOpenSSL >nul 2>&1
+)
+
 rem Если PrintFlow уже запущен на любом порту — pf.py покажет адреса для
 rem телефона и откроет панель, вместо ошибки "порт занят".
 %PY% "pf.py"

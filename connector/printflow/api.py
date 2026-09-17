@@ -48,8 +48,28 @@ _NOZZLE_RANGE_RE = re.compile(
     re.IGNORECASE)
 
 
-def _nozzle_range_from_rec(text: str) -> tuple | None:
-    m = _NOZZLE_RANGE_RE.search(text or "")
+def _nozzle_range_from_rec(text: Any) -> tuple | None:
+    if isinstance(text, dict):
+        tn = text.get("temp_nozzle")
+        if isinstance(tn, (list, tuple)) and len(tn) == 2:
+            try:
+                lo, hi = int(tn[0]), int(tn[1])
+                if 100 <= lo <= hi <= 350:
+                    return (lo, hi)
+            except (ValueError, TypeError):
+                pass
+    if isinstance(text, str) and text.strip().startswith("{"):
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                tn = data.get("temp_nozzle")
+                if isinstance(tn, (list, tuple)) and len(tn) == 2:
+                    lo, hi = int(tn[0]), int(tn[1])
+                    if 100 <= lo <= hi <= 350:
+                        return (lo, hi)
+        except Exception:
+            pass
+    m = _NOZZLE_RANGE_RE.search(str(text or ""))
     if not m:
         return None
     lo, hi = int(m.group(1)), int(m.group(2))

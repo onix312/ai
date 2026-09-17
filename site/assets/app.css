@@ -1185,6 +1185,64 @@ details.adv .adv-body { padding: 10px 14px 14px; background: var(--panel); }
 }
 .set-row.hidden, .card.hidden, .pane .set-grid > .card.hidden { display: none; }
 
+.card.search-hit {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent), var(--shadow-2) !important;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.settings-quicknav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.settings-quicknav button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  cursor: pointer;
+  text-align: left;
+  transition: all .15s var(--ease);
+}
+.settings-quicknav button:hover {
+  border-color: var(--accent-line);
+  background: var(--panel-2);
+}
+.settings-quicknav button.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-1);
+}
+.settings-quicknav button span {
+  font-size: 16px;
+  margin-bottom: 1px;
+}
+.settings-quicknav button b {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+.settings-quicknav button small {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.settings-tabs {
+  margin-bottom: 18px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.settings-tabs::-webkit-scrollbar { display: none; }
+
 .mini-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
 .mini-row:last-child { border-bottom: 0; }
 .mini-row .mbody { flex: 1; min-width: 0; }
