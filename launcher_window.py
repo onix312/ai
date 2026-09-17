@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import traceback
 import webbrowser
 from tkinter import messagebox, ttk
 
@@ -50,6 +51,9 @@ class LauncherWindow:
         self.root.configure(bg=BG)
         self.root.minsize(720, 620)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Ошибка в обработчике tkinter по умолчанию уходит в stderr — а при
+        # запуске из ярлыка (pythonw) stderr нет, и окно просто исчезало бы.
+        self.root.report_callback_exception = self.on_callback_error
         self._init_style()
         self._build()
         self.refresh_addresses()
@@ -272,13 +276,25 @@ class LauncherWindow:
             except SystemExit:
                 self.lines.put("Не удалось создать окружение Python")
                 return
+            except Exception as exc:  # ошибка в потоке иначе не видна нигде
+                self.lines.put(f"Не удалось подготовить Python: {exc}")
+                self.lines.put(f"Подробности: {pf.write_crash_log(exc, 'gui-start')}")
+                return
             host = "0.0.0.0" if self.lan_var.get() else "127.0.0.1"
             command = [str(python), str(pf.ENTRYPOINT), "--host", host,
                        "--port", str(port), "--no-browser", "--no-banner"]
-            self.process = subprocess.Popen(
-                command, cwd=str(pf.ROOT), stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                text=True, encoding="utf-8", errors="replace", bufsize=1)
+            try:
+                self.process = subprocess.Popen(
+                    command, cwd=str(pf.ROOT), stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                    text=True, encoding="utf-8", errors="replace", bufsize=1)
+            except OSError as exc:
+                # Частая причина «окно открылось и ничего не произошло»:
+                # сервер не поднялся, а журнал молчал.
+                self.lines.put(f"Не удалось запустить сервер: {exc}")
+                self.lines.put(f"Подробности: {pf.write_crash_log(exc, 'gui-start')}")
+                self.lines.put("Сервер не запущен")
+                return
             pf.write_pid(self.process.pid)
             for line in self.process.stdout:  # type: ignore[union-attr]
                 self.lines.put(line.rstrip())
@@ -314,17 +330,35 @@ class LauncherWindow:
                 argv.append("--system")
 
         def worker() -> None:
-            process = subprocess.Popen(
-                argv,
-                cwd=str(pf.ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
-                errors="replace", bufsize=1)
+            try:
+                process = subprocess.Popen(
+                    argv,
+                    cwd=str(pf.ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+                    errors="replace", bufsize=1)
+            except OSError as exc:
+                self.lines.put(f"Команда не запустилась: {exc}")
+                return
             for line in process.stdout:  # type: ignore[union-attr]
                 self.lines.put(line.rstrip())
 
         threading.Thread(target=worker, daemon=True).start()
 
     # --------------------------------------------------------------- прочее
+    def on_callback_error(self, exc, value, tb) -> None:
+        """Сбой внутри tkinter: окно продолжает работать, ошибка — в журнале."""
+        try:
+            log = pf.write_crash_log(value if value is not None else exc, "gui")
+        except Exception:
+            log = None
+        self.write(f"Ошибка интерфейса: {value}")
+        details = "".join(traceback.format_exception(exc, value, tb)).strip()
+        if details:
+            for line in details.splitlines()[-4:]:
+                self.write("    " + line)
+        if log:
+            self.write(f"Подробности: {log}")
+
     def open_panel(self) -> None:
         webbrowser.open(f"http://localhost:{self.current_port()}/")
 
@@ -339,6 +373,15 @@ class LauncherWindow:
             subprocess.Popen(["xdg-open", str(path)])
 
     def poll(self) -> None:
+        """Опрос обязан выжить после любой ошибки: иначе окно замирает,
+        индикатор врёт «Остановлено», а сервер в это время работает."""
+        try:
+            self.poll_once()
+        except Exception as exc:
+            self.on_callback_error(type(exc), exc, exc.__traceback__)
+        self.root.after(self.POLL_MS, self.poll)
+
+    def poll_once(self) -> None:
         while True:
             try:
                 self.write(self.lines.get_nowait())
@@ -352,7 +395,6 @@ class LauncherWindow:
                                       f"{uptime // 3600} ч {uptime % 3600 // 60} мин")
         elif self.state == "running":
             self.set_state("stopped", "Остановлено")
-        self.root.after(self.POLL_MS, self.poll)
 
     def on_close(self) -> None:
         if self.process and self.process.poll() is None:
