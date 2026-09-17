@@ -229,6 +229,8 @@ def summary(db, manager, printer_id: str = "", spool_limit: int = SPOOL_LIMIT) -
     backfill_slots(db, printer_id)
     slots = slot_memory(db, printer_id)
     alerts = [a for p in printers for a in p["guard"]["alerts"]]
+    studio = getattr(manager, "studio", None) if manager else None
+    pending_studio = studio.pending_list() if studio else []
     return {
         "at": now_iso(),
         "active_id": printer_id or (printers[0]["id"] if printers else ""),
@@ -238,6 +240,7 @@ def summary(db, manager, printer_id: str = "", spool_limit: int = SPOOL_LIMIT) -
         "queue": [_queue(j) for j in snap.get("queue", [])],
         "farm": snap.get("farm") or {},
         "quiet": snap.get("quiet"),
+        "pending_studio": pending_studio,
         "ams": {
             "printer_id": printer_id,
             "stale_min": MEMORY_STALE_MIN,

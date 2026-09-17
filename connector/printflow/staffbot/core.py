@@ -405,11 +405,25 @@ class BotCore:
             self.db.add_event("bot", "Посторонний в Telegram-боте",
                               f"chat_id {chat}: {text[:80]}", "", {})
             return
-        # Фото без подписи: прикрепляем к последнему активному заказу.
+        # Фото: если подпись «стол», «снял», «чисто», «стол чист» или стол ждёт подтверждения —
+        # обрабатываем фото-очистку стола (Photo Clearance), иначе прикрепляем к заказу.
         photo = message.get("photo")
         text = (message.get("text") or "").strip()
         caption = (message.get("caption") or "").strip()
-        if photo and not text:
+        low_cap = caption.lower().replace("ё", "е").strip()
+        is_clearance_caption = any(k in low_cap for k in ("снял", "чисто", "стол", "стол чист", "деталь снята", "clear"))
+        if photo and (not text or is_clearance_caption):
+            # Проверяем, есть ли принтер, ожидающий снятия детали
+            waiting_printer = None
+            for p in self.manager.printers.values():
+                if self.manager._bed_cleared.get(p.id) is False:
+                    waiting_printer = p
+                    break
+            if is_clearance_caption or waiting_printer:
+                try:
+                    return self._handle_bed_photo_clearance(chat, photo, caption, waiting_printer)
+                except Exception as exc:
+                    return self._reply(chat, f"Не получилось подтвердить снятие детали: {exc}")
             try:
                 return self._attach_photo(chat, photo, caption)
             except Exception as exc:

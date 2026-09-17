@@ -336,6 +336,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("mixed_label", "TEXT DEFAULT ''"),
         ("no_auto", "INTEGER DEFAULT 0"),
         ("plate_preset_id", "TEXT DEFAULT ''"),
+        ("material", "TEXT DEFAULT ''"),
     ],
     "defects": [
         ("note", "TEXT DEFAULT ''"),
@@ -436,6 +437,10 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         # найденная модель (URL или файл), чтобы «нашёл» не жил в голове.
         ("link", "TEXT DEFAULT ''"),
         ("source", "TEXT DEFAULT ''"),
+    ],
+    "workshop_docs": [
+        ("location", "TEXT DEFAULT 'shop'"),
+        ("warehouse_id", "TEXT DEFAULT ''"),
     ],
 }
 
@@ -939,6 +944,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     power_loss_layer INTEGER DEFAULT 0,
     power_loss_total_layers INTEGER DEFAULT 0,
     power_loss_task TEXT DEFAULT '',
+    material TEXT DEFAULT '',
     created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON print_jobs(state);
@@ -1395,6 +1401,8 @@ CREATE TABLE IF NOT EXISTS workshop_docs (
     shopping_id TEXT DEFAULT '',
     request_id TEXT DEFAULT '',
     note TEXT DEFAULT '',
+    location TEXT DEFAULT 'shop',
+    warehouse_id TEXT DEFAULT '',
     created_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workshop_docs_request

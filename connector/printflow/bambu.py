@@ -724,25 +724,29 @@ class BambuPrinter:
                                     "target": slot, "curr_temp": 220, "tar_temp": 220}})
         elif name == "ams_filament":
             data = value or {}
-            tray_type = str(data.get("type") or "").strip().upper()
-            if not tray_type:
+            raw_type = str(data.get("type") or "").strip()
+            if not raw_type:
                 raise ValueError("Укажите тип пластика")
-            from .materials import MATERIALS, get_material
-            mat = MATERIALS.get(tray_type.replace(" ", "_").replace("-", "_"))
-            if mat is None:
-                looked = get_material(tray_type)
-                looked_name = str(looked.get("name") or "").upper().replace(" ", "_")
-                if looked_name in (tray_type, tray_type.replace(" ", "_"), tray_type.replace("-", "_")):
-                    mat = looked
-            nozzle = tuple((mat or {}).get("temp_nozzle") or (190, 240))
+            brand = str(data.get("brand") or data.get("sub_brands") or data.get("tray_sub_brands") or "").strip()
+            from .materials import bambu_filament_preset
+            preset = bambu_filament_preset(raw_type, brand)
+
+            tray_type = str(data.get("tray_type") or preset["tray_type"])
+            tray_info_idx = str(data.get("idx") or data.get("tray_info_idx") or preset["tray_info_idx"])
+            tray_sub_brands = str(data.get("tray_sub_brands") or brand or preset["tray_sub_brands"])
+
+            nozzle_min = int(as_num(data.get("temp_min"), preset["nozzle_temp_min"]))
+            nozzle_max = int(as_num(data.get("temp_max"), preset["nozzle_temp_max"]))
+
             self.publish({"print": {
                 "sequence_id": seq, "command": "ams_filament_setting",
                 "ams_id": int(as_num(data.get("ams_id"))), "tray_id": int(as_num(data.get("tray_id"))),
                 "tray_color": str(data.get("color") or "FFFFFFFF").lstrip("#").upper().ljust(8, "F")[:8],
                 "tray_type": tray_type,
-                "tray_info_idx": str(data.get("idx", "")),
-                "nozzle_temp_min": int(as_num(data.get("temp_min"), nozzle[0])),
-                "nozzle_temp_max": int(as_num(data.get("temp_max"), nozzle[1])),
+                "tray_info_idx": tray_info_idx,
+                "tray_sub_brands": tray_sub_brands,
+                "nozzle_temp_min": nozzle_min,
+                "nozzle_temp_max": nozzle_max,
                 "setting_id": str(data.get("setting_id", "")),
             }})
         elif name == "timelapse":

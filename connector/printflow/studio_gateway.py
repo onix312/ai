@@ -25,7 +25,7 @@ import threading
 import time
 from pathlib import Path
 
-from .config import UPLOAD_DIR, get_local_ips
+from .config import UPLOAD_DIR, get_local_ips, now_iso
 from .studio_mqtt import (
     CONNECT,
     DISCONNECT,
@@ -115,6 +115,7 @@ class StudioGateway:
         self._threads: list[threading.Thread] = []
         self._last_notify = 0.0
         self._host_cache = ""
+        self._pending_confirm: dict[str, dict] = {}
 
     # ----------------------------------------------------------- настройки
     def _enabled(self) -> bool:
@@ -124,12 +125,15 @@ class StudioGateway:
         return str(self.db.setting("studio_gateway_access_code", "") or "")
 
     def _autostart_allowed(self) -> bool:
-        mode = str(self.db.setting("studio_gateway_mode", "queue") or "queue").strip().lower()
+        mode = str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
         return (
             mode == "autostart"
             and bool(self.db.setting("studio_gateway_autostart", False))
             and bool(self.db.setting("unattended_dangerous_actions", False))
         )
+
+    def _mode(self) -> str:
+        return str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
 
     def _ensure_identity(self) -> None:
         serial = str(self.db.setting("studio_gateway_serial", "") or "").strip()
@@ -303,6 +307,7 @@ class StudioGateway:
         setting_pid = str(self.db.setting("studio_gateway_printer_id", "") or "").strip()
         if setting_pid:
             printer_id = setting_pid
+        mode = self._mode()
         autostart = self._autostart_allowed()
         job = None
         error = ""
@@ -322,7 +327,9 @@ class StudioGateway:
             "no_auto": 0 if autostart else 1,
             "allow_auto_start": False,
         }
-        if self.manager and hasattr(self.manager, "enqueue") and can_print(name):
+        # В режиме queue или autostart сразу ставим в очередь;
+        # В режиме confirm ждём решения оператора в модальном окне
+        if mode in ("queue", "autostart") and self.manager and hasattr(self.manager, "enqueue") and can_print(name):
             try:
                 job = self.manager.enqueue(payload)
             except Exception as exc:
@@ -341,12 +348,40 @@ class StudioGateway:
                         job["autostart"] = True
                 except Exception as exc:
                     error = str(exc)
+        # Сохранение входящего проекта для окна подтверждения оператора
+        pending_id = f"st_{int(time.time()*1000)}"
+        pending_item = {
+            "id": pending_id,
+            "filename": name,
+            "upload_name": rec["upload_name"],
+            "library_id": rec.get("id"),
+            "job_id": (job or {}).get("id"),
+            "printer_id": printer_id,
+            "plate": plate,
+            "payload": payload,
+            "ams_mapping": mapping,
+            "est_grams": estimate.get("total_grams") or estimate.get("grams") or 0,
+            "est_minutes": estimate.get("total_minutes") or estimate.get("minutes") or 0,
+            "filaments": estimate.get("filaments") or [],
+            "thumbnails": estimate.get("thumbnails") or {},
+            "at": now_iso(),
+            "mode": mode,
+            "autostart": autostart,
+            "error": error,
+        }
+        with self._lock:
+            self._pending_confirm[pending_id] = pending_item
+            if len(self._pending_confirm) > 30:
+                oldest = sorted(self._pending_confirm.keys())[:10]
+                for k in oldest:
+                    self._pending_confirm.pop(k, None)
+
         try:
             self.db.add_event(
                 "studio", "Файл из Bambu Studio",
                 name, printer_id,
                 {"library_id": rec.get("id"), "job_id": (job or {}).get("id"),
-                 "autostart": autostart},
+                 "pending_id": pending_id, "autostart": autostart},
             )
         except Exception:
             pass
@@ -355,6 +390,8 @@ class StudioGateway:
                 self.bus.publish("studio", {
                     "file": name, "library_id": rec.get("id"),
                     "job_id": (job or {}).get("id"),
+                    "pending_id": pending_id,
+                    "pending": pending_item,
                 })
             except Exception:
                 pass
@@ -363,8 +400,22 @@ class StudioGateway:
             "job": job,
             "estimate": estimate,
             "autostart": autostart,
+            "pending_id": pending_id,
+            "pending": pending_item,
             "error": error,
         }
+
+    def pending_list(self) -> list[dict]:
+        with self._lock:
+            return sorted(self._pending_confirm.values(), key=lambda x: str(x.get("at") or ""), reverse=True)
+
+    def pending_get(self, pending_id: str) -> dict | None:
+        with self._lock:
+            return self._pending_confirm.get(pending_id)
+
+    def pending_dismiss(self, pending_id: str) -> bool:
+        with self._lock:
+            return bool(self._pending_confirm.pop(pending_id, None))
 
     def _file_bytes(self, filename: str) -> bytes | None:
         name = Path(str(filename or "").replace("\\", "/")).name
@@ -471,6 +522,48 @@ class StudioGateway:
         idle["print"]["gcode_state"] = "IDLE"
         return [report, idle]
 
+    def _ams_status(self) -> dict:
+        printer = self._bound_printer()
+        if printer:
+            try:
+                snap = printer.snapshot()
+                trays = (snap.get("ams") or {}).get("trays") or []
+                if trays:
+                    from .materials import bambu_filament_preset
+                    tray_list = []
+                    exist_bits = 0
+                    bbl_bits = 0
+                    for t in trays:
+                        slot_n = int(t.get("slot") or 0)
+                        if t.get("present"):
+                            exist_bits |= (1 << slot_n)
+                        if t.get("bambulab"):
+                            bbl_bits |= (1 << slot_n)
+                        preset = bambu_filament_preset(str(t.get("type") or "PLA"), "")
+                        raw_color = str(t.get("color") or "FFFFFFFF").lstrip("#").upper()
+                        if len(raw_color) == 6:
+                            raw_color += "FF"
+                        tray_list.append({
+                            "id": slot_n,
+                            "tray_type": preset["tray_type"],
+                            "tray_color": raw_color,
+                            "nozzle_temp_min": int(t.get("nozzle_min") or preset["nozzle_temp_min"]),
+                            "nozzle_temp_max": int(t.get("nozzle_max") or preset["nozzle_temp_max"]),
+                            "tray_info_idx": str(t.get("tray_info_idx") or preset["tray_info_idx"]),
+                            "remain": int(t.get("remain") if t.get("remain") is not None else 100),
+                            "tray_uuid": str(t.get("uuid") or ""),
+                        })
+                    return {
+                        "ams": [{"id": 0, "humidity": 3, "temp": "24.0", "tray": tray_list}],
+                        "ams_exist_bits": "1",
+                        "tray_exist_bits": str(exist_bits),
+                        "tray_is_bbl_bits": str(bbl_bits),
+                        "tray_now": "255",
+                    }
+            except Exception:
+                pass
+        return {"ams": [], "ams_exist_bits": "0", "tray_now": "255"}
+
     def _push_status(self, seq: str = "0") -> dict:
         ident = self.identity()
         return {"print": {
@@ -497,7 +590,7 @@ class StudioGateway:
             "home_flag": 0,
             "sdcard": True,
             "online": {"ahb": False, "rfid": False, "version": 0},
-            "ams": {"ams": [], "ams_exist_bits": "0", "tray_now": "255"},
+            "ams": self._ams_status(),
             "ipcam": {"ipcam_dev": "0", "ipcam_record": "disable"},
             "lights_report": [{"node": "chamber_light", "mode": "off"}],
             "upgrade_state": {"status": "IDLE"},

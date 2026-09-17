@@ -301,11 +301,178 @@ PF.on('view', (d)=>{
     get('/api/studio/status').then(data=>{
       const el=$('studio_status');
       if (!el) return;
-      el.innerHTML=`<span>ℹ</span><span>Шлюз ${data.enabled?'вкл':'выкл'} · ${data.running?'слушает LAN':'без сокетов'} · ${esc(data.name||'')} · ${esc(data.serial||'нет SN')} · MQTT :${data.mqtt_port||8883}</span>`;
+      el.innerHTML=`<span>ℹ</span><span>Шлюз ${data.enabled?'вкл':'выкл'} · режим <b>${esc(data.mode||'confirm')}</b> · ${data.running?'слушает LAN':'без сокетов'} · ${esc(data.name||'')} · ${esc(data.serial||'нет SN')} · MQTT :${data.mqtt_port||8883}</span>`;
     }).catch(()=>{});
   }
 });
 
+/* ======================================================== Studio Gateway Confirm Modal */
+let activeStudioModalPendingId = '';
+
+function renderStudioConfirmModal(pending) {
+  if (!pending) return;
+  activeStudioModalPendingId = pending.id;
+
+  let dlg = $('studio_confirm_modal');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'studio_confirm_modal';
+    dlg.className = 'modal';
+    document.body.appendChild(dlg);
+  }
+
+  const printers = (PF.state.printers || []).filter(p => !p.archived);
+  const curPrinterId = pending.printer_id || (PF.livePrinter()?.id) || (printers[0]?.id || '');
+  const filaments = pending.filaments || [];
+  const thumbs = pending.thumbnails || {};
+  const firstThumbKey = Object.keys(thumbs)[0];
+  const thumbSrc = firstThumbKey ? `data:image/png;base64,${thumbs[firstThumbKey]}` : '';
+
+  let printerOpts = `<option value="">⚡ Пул: любой свободный принтер</option>` + printers.map(p => {
+    const sel = (pending.printer_id && p.id === pending.printer_id) ? 'selected' : '';
+    return `<option value="${esc(p.id)}"${sel}>${esc(p.name || p.id)} (${esc(p.model || 'Bambu')})</option>`;
+  }).join('');
+
+  const estGrams = Math.round(pending.est_grams || 0);
+  const estMins = Math.round(pending.est_minutes || 0);
+  const timeFormatted = PF.fmt.minutes(estMins);
+
+  let amsHtml = '';
+  if (filaments.length) {
+    amsHtml = `<div class="notice" style="margin: 10px 0;"><span>🎨</span><span>Расход: ${filaments.map(f => {
+      const col = f.color ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#${esc(f.color)};margin:0 4px;vertical-align:middle;border:1px solid rgba(0,0,0,0.2)"></span>` : '';
+      return `${col}<b>${esc(f.type || 'PLA')}</b> (${Math.round(f.used_g || f.grams || 0)}г)`;
+    }).join(' · ')}</span></div>`;
+  }
+
+  dlg.innerHTML = `
+    <div class="modal-head">
+      <div>
+        <span class="eyebrow">Bambu Studio · Нажата кнопка «Печать»</span>
+        <h2>${esc(pending.filename || 'Новый проект')}</h2>
+      </div>
+      <button class="icon-btn" type="button" data-studio-action="reject">×</button>
+    </div>
+    <div class="modal-body" style="padding-top:12px;">
+      ${thumbSrc ? `<div style="text-align:center;margin-bottom:12px;"><img src="${thumbSrc}" style="max-height:180px;max-width:100%;border-radius:8px;object-fit:contain;box-shadow:0 2px 8px rgba(0,0,0,0.15)"></div>` : ''}
+      <div style="display:flex;gap:16px;margin-bottom:12px;font-size:14px;color:var(--text);">
+        <div>⏱ Время: <b>${timeFormatted}</b></div>
+        <div>⚖ Вес: <b>${estGrams} г</b></div>
+        <div>Плита: <b>№${pending.plate || 1}</b></div>
+      </div>
+      ${amsHtml}
+      <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap:10px; margin-top:8px;">
+        <label class="field">
+          <span>Целевой принтер</span>
+          <select id="st_conf_printer">${printerOpts}</select>
+        </label>
+        <label class="field">
+          <span>Номер плиты</span>
+          <input type="number" id="st_conf_plate" min="1" max="16" value="${pending.plate || 1}">
+        </label>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:10px;font-size:13px;">
+        <label class="chk"><input type="checkbox" id="st_conf_bed_level" checked> Калибровка стола</label>
+        <label class="chk"><input type="checkbox" id="st_conf_flow_cali"> Flow cali</label>
+        <label class="chk"><input type="checkbox" id="st_conf_timelapse"> Таймлапс</label>
+      </div>
+      <div id="st_conf_error" class="notice bad" style="margin-top:10px;display:none;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;gap:8px;">
+        <button class="btn ghost" type="button" data-studio-action="reject">Отклонить</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" type="button" data-studio-action="queue">В очередь</button>
+          <button class="btn primary" type="button" data-studio-action="start">▶ Печатать сейчас</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const btnReject = dlg.querySelectorAll('[data-studio-action="reject"]');
+  const btnQueue = dlg.querySelector('[data-studio-action="queue"]');
+  const btnStart = dlg.querySelector('[data-studio-action="start"]');
+  const errBox = dlg.querySelector('#st_conf_error');
+
+  const doAction = async (action) => {
+    const printerId = dlg.querySelector('#st_conf_printer')?.value || '';
+    const plate = parseInt(dlg.querySelector('#st_conf_plate')?.value || '1', 10);
+    const bedLevel = dlg.querySelector('#st_conf_bed_level')?.checked;
+    const flowCali = dlg.querySelector('#st_conf_flow_cali')?.checked;
+    const timelapse = dlg.querySelector('#st_conf_timelapse')?.checked;
+
+    if (errBox) { errBox.style.display = 'none'; errBox.textContent = ''; }
+
+    try {
+      const res = await post('/api/studio/confirm', {
+        pending_id: pending.id,
+        action: action,
+        printer_id: printerId,
+        plate: plate,
+        bed_level: bedLevel,
+        flow_cali: flowCali,
+        timelapse: timelapse,
+      });
+
+      dlg.close();
+      activeStudioModalPendingId = '';
+
+      if (action === 'start') {
+        toast('Печать запущена', pending.filename);
+      } else if (action === 'queue') {
+        toast('Добавлено в очередь', pending.filename);
+      } else {
+        toast('Проект отклонен', pending.filename);
+      }
+      PF.refreshCore();
+    } catch (err) {
+      if (errBox) {
+        errBox.style.display = 'flex';
+        errBox.textContent = err.message || 'Ошибка обработки действия';
+      } else {
+        fail(err);
+      }
+    }
+  };
+
+  btnReject.forEach(b => b.onclick = () => doAction('reject'));
+  if (btnQueue) btnQueue.onclick = () => doAction('queue');
+  if (btnStart) btnStart.onclick = () => doAction('start');
+
+  if (!dlg.open) dlg.showModal();
+}
+
+async function checkPendingStudioProjects() {
+  try {
+    const res = await get('/api/studio/pending');
+    const items = res.items || [];
+    if (items.length > 0) {
+      // Если модалка не открыта или открыта для другого id
+      const top = items[0];
+      if (top.mode === 'confirm' && top.id !== activeStudioModalPendingId) {
+        const dlg = $('studio_confirm_modal');
+        if (!dlg || !dlg.open) {
+          renderStudioConfirmModal(top);
+        }
+      }
+    }
+  } catch (e) {
+    // игнорируем ошибку опроса
+  }
+}
+
+// Слушаем события шины PrintFlow
+PF.on('studio', (data) => {
+  if (data && data.pending && data.pending.mode === 'confirm') {
+    renderStudioConfirmModal(data.pending);
+  } else {
+    checkPendingStudioProjects();
+  }
+});
+
+// Периодическая проверка pending проектов при поллинге
+PF.on('live', () => {
+  checkPendingStudioProjects();
+});
+
 // expose for debug
-PF.modules.bridge = { pollWatch, openWatchFile };
+PF.modules.bridge = { pollWatch, openWatchFile, renderStudioConfirmModal, checkPendingStudioProjects };
 })();

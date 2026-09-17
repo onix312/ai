@@ -127,6 +127,15 @@ def get_spools(api: Any, ctx: Ctx):
     return 200, {"spools": api.repo.spools(ctx.one("all") == "1")}
 
 
+@router.get("/api/spools/presets", doc="GET /api/spools/presets")
+def get_spools_presets(api: Any, ctx: Ctx):
+    """Список пресетов филамента Bambu Studio / OrcaSlicer для всех активных катушек склада."""
+    from .materials import generate_bambu_studio_filament_preset
+    spools = api.repo.spools(ctx.one("all") == "1")
+    presets = [generate_bambu_studio_filament_preset(s) for s in spools]
+    return 200, {"presets": presets, "count": len(presets)}
+
+
 @router.get("/api/catalog", doc="GET /api/catalog")
 def get_catalog(api: Any, ctx: Ctx):
     return 200, {"catalog": api.repo.catalog()}
@@ -976,6 +985,13 @@ def get_studio_status(api: Any, ctx: Ctx):
         "running": False,
         "has_access_code": bool(api.db.setting("studio_gateway_access_code", "")),
     }
+
+
+@router.get("/api/studio/pending", doc="GET /api/studio/pending")
+def get_studio_pending(api: Any, ctx: Ctx):
+    studio = getattr(api.manager, "studio", None) if api.manager else None
+    items = studio.pending_list() if studio else []
+    return 200, {"ok": True, "items": items}
 
 
 @router.get("/api/library", doc="GET /api/library")

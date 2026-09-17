@@ -204,6 +204,7 @@
       if (d.ok) {
         spool = d.spool || spool;
         var note = slot ? 'Катушка привязана к слоту ✓' : 'Катушка отвязана ✓';
+        if (slot && d.bambu_preset && d.bambu_preset.preset_name) note += ' (' + d.bambu_preset.preset_name + ' для Bambu Studio)';
         if (d.push_error) note += ' AMS: ' + d.push_error;
         showMsg(note, true);
         $('#mat').textContent = slot ? '· ' + slotLabel(slot) : '· не привязана';

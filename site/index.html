@@ -797,7 +797,9 @@
   <div><span class="eyebrow">Материалы</span><h1>Склад пластика</h1><p>Расход списывается автоматически с той катушки, что стояла в AMS.</p></div>
   <div class="head-actions">
    <a class="btn" href="/labels.html?kind=spool" target="_blank" rel="noopener" id="spool_labels">QR всех катушек</a>
+   <a class="btn" href="/api/spools/bambu-export" download="bambu_filament_presets.zip" id="spool_bambu_export" title="Скачать ZIP-архив JSON-профилей катушек склада для Bambu Studio / OrcaSlicer">🐼 Экспорт в Bambu Studio</a>
    <button class="btn" id="spool_cleanup" type="button" title="Убрать дубли и фантомы AMS со склада">🧹 Очистить фантомы AMS</button>
+   <button class="btn" id="filament_receipt_btn" type="button">📦 Приход пластика</button>
    <button class="btn primary" id="spool_add" type="button">+ Катушка</button>
   </div>
  </div>
@@ -4289,6 +4291,10 @@
    <label class="field"><span>Вес одной, г</span><input id="sr_spool_grams" type="number" min="1" max="10000" step="any" value="1000"></label>
    <label class="field"><span>Общая сумма, ₽</span><input id="sr_total_amount" type="number" min="0" step="any" value="0"><small class="hint">0 — принять без финансовой проводки</small></label>
    <label class="field"><span>Оплачено из кассы</span><select id="sr_account"></select></label>
+   <label class="field"><span>Место (ярлык)</span><select id="sr_location">
+    <option value="shop">Магазин</option><option value="home">Дом</option>
+    <option value="dry">Сушка</option><option value="other">Другое</option>
+   </select></label>
    <label class="field"><span>Склад</span><select id="sr_warehouse"><option value="">Без привязки</option></select></label>
    <label class="field"><span>Оттенок</span><input id="sr_color_hex" type="color" value="#4b5563"></label>
    <div class="notice span-2" id="sr_summary"><span>→</span><span></span></div>
@@ -4296,6 +4302,48 @@
   </div>
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="shopping_receive_modal">Отмена</button><button class="btn primary" type="button" id="sr_submit">Подтвердить приём</button></div>
+</form></dialog>
+
+<dialog class="modal wide" id="filament_receipt_modal"><form method="dialog">
+ <div class="modal-head"><div><span class="eyebrow">Цех и материалы</span><h2>Приход пластика</h2><p id="fr_sub">Пакетное поступление катушек: создаёт катушки на складе и фиксирует расход в финансах.</p></div><button class="icon-btn" type="button" data-close="filament_receipt_modal">×</button></div>
+ <div class="modal-body">
+  <div class="notice info"><span>i</span><span>Каждая катушка появится на складе отдельно на выбранном месте. Расход в кассе будет записан один раз на общую сумму накладной.</span></div>
+  <div class="form-grid" style="margin-top:12px">
+   <label class="field"><span>Место (ярлык)</span><select id="fr_location">
+    <option value="shop">Магазин</option><option value="home">Дом</option>
+    <option value="dry">Сушка</option><option value="other">Другое</option>
+   </select></label>
+   <label class="field"><span>Склад (опционально)</span><select id="fr_warehouse"><option value="">Без привязки к складу</option></select></label>
+   <label class="field"><span>Поставщик</span><input id="fr_supplier" placeholder="FDPlast, Filamentarno, Bambu..." list="fr_suppliers_datalist"></label>
+   <label class="field"><span>Оплачено из кассы</span><select id="fr_account"></select></label>
+   <label class="field span-2"><span>Заметка / комментарий к приходу</span><input id="fr_note" placeholder="Номер накладной, комментарий к партии..."></label>
+  </div>
+  <datalist id="fr_suppliers_datalist"></datalist>
+  <div class="card-head" style="margin-top:16px;margin-bottom:8px">
+   <div><h3>Список катушек / позиций</h3><p>Укажите пластики, цвета, количество катушек и цены</p></div>
+   <button class="btn sm" type="button" id="fr_add_row">+ Позиция</button>
+  </div>
+  <div class="table-wrap"><table class="data compact" id="fr_table">
+   <thead><tr>
+    <th style="min-width:110px">Материал</th>
+    <th style="min-width:130px">Цвет</th>
+    <th style="width:50px">Оттенок</th>
+    <th style="min-width:110px">Бренд</th>
+    <th class="right" style="width:90px">Катушек, шт</th>
+    <th class="right" style="width:90px">Вес 1 шт, г</th>
+    <th class="right" style="width:100px">₽ / кг</th>
+    <th class="right" style="width:110px">Сумма, ₽</th>
+    <th style="width:40px"></th>
+   </tr></thead>
+   <tbody id="fr_tbody"></tbody>
+  </table></div>
+  <div class="notice span-2" id="fr_summary" style="margin-top:12px"><span>→</span><span>Итого: 0 катушек · 0 г · 0 ₽</span></div>
+  <label class="check span-2" style="margin-top:12px"><input type="checkbox" id="fr_confirmed" checked> Пластик физически получен, количество и сумма проверены</label>
+ </div>
+ <div class="modal-foot">
+  <button class="btn" type="button" data-close="filament_receipt_modal">Отмена</button>
+  <button class="btn primary" type="button" id="fr_submit">Оформить приход пластика</button>
+ </div>
 </form></dialog>
 
 <dialog class="modal narrow" id="catalog_modal"><form method="dialog">
@@ -5130,7 +5178,7 @@
   <div class="ab-filters" id="ab_filters"></div>
   <label class="check" style="margin-top:8px"><span class="switch"><input type="checkbox" id="ab_only_stock" checked><i></i></span>Только с остатком</label>
   <div id="ab_list" style="margin-top:10px"></div>
-  <label class="check" style="margin-top:10px"><input type="checkbox" id="ab_push" checked> Записать тип и цвет в слот AMS</label>
+  <label class="check" style="margin-top:10px"><input type="checkbox" id="ab_push" checked> Отправить тип, цвет и профиль в AMS (для Bambu Studio)</label>
   <div class="notice" id="ab_choice" hidden style="margin-top:10px"><span>→</span><span id="ab_choice_text"></span></div>
  </div>
  <div class="modal-foot"><button class="btn danger" type="button" id="ab_unbind" hidden>Отвязать</button><span class="spacer"></span>

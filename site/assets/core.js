@@ -1582,6 +1582,20 @@ function connectSSE() {
     if (DATA_EVENTS.test(row.kind || '')) scheduleCore();
   });
 
+  es.addEventListener('studio', (msg) => {
+    if (offline) return;
+    let data;
+    try { data = JSON.parse(msg.data); } catch (e) { return; }
+    PF.emit('studio', data);
+  });
+
+  es.addEventListener('watch', (msg) => {
+    if (offline) return;
+    let data;
+    try { data = JSON.parse(msg.data); } catch (e) { return; }
+    PF.emit('watch', data);
+  });
+
   es.addEventListener('resync', () => {
     if (offline) return;
     poll();

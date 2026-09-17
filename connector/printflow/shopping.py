@@ -120,6 +120,7 @@ class ShoppingList:
         account_id: str = "",
         supplier: str = "",
         warehouse_id: str = "",
+        location: str = "shop",
         request_id: str = "",
     ) -> dict:
         """Атомарно принять закупку: отдельные катушки + расход + закрытие строки.
@@ -216,7 +217,7 @@ class ShoppingList:
                     "warehouse_id": warehouse_id or None,
                     "supplier": supplier,
                     "ams_sync": 1,
-                    "location": "shop",
+                    "location": location or "shop",
                     "price_per_kg": price_per_kg,
                     "created_at": stamp,
                     "updated_at": stamp,

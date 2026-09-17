@@ -140,6 +140,105 @@ def printer_shots(api: Any, ctx: Ctx):
     return {"shots": printer.camera.snapshot_list()}
 
 
+@router.post("/api/studio/confirm", audit="Bambu Studio: подтверждение входящего проекта",
+             doc="Подтверждение / запуск / постановка в очередь задания из Studio")
+def studio_confirm(api: Any, ctx: Ctx):
+    """Подтвердить входящий проект из Bambu Studio.
+
+    Оператор может:
+    - action = "start": запустить печать прямо сейчас на выбранном принтере
+    - action = "queue": поставить в очередь печати
+    - action = "reject": отклонить / закрыть уведомление
+    """
+    studio = getattr(api.manager, "studio", None) if api.manager else None
+    if not studio:
+        return 400, {"error": "Studio Gateway не инициализирован"}
+
+    pending_id = str(ctx.arg("pending_id") or "").strip()
+    action = str(ctx.arg("action") or "queue").strip().lower()
+
+    if not pending_id:
+        return 400, {"error": "Не указан pending_id"}
+
+    pending = studio.pending_get(pending_id)
+    if not pending:
+        return 404, {"error": "Проект не найден или уже обработан"}
+
+    if action == "reject":
+        studio.pending_dismiss(pending_id)
+        api.db.add_event(
+            "studio", "Проект отклонен оператором",
+            pending.get("filename") or "", pending.get("printer_id") or "",
+            {"pending_id": pending_id}
+        )
+        return {"ok": True, "action": "rejected", "pending_id": pending_id}
+
+    printer_id = str(ctx.arg("printer_id") or pending.get("printer_id") or "").strip()
+    mapping = ctx.arg("ams_mapping", None)
+    if not isinstance(mapping, list):
+        mapping = pending.get("ams_mapping") or []
+    plate = int(ctx.num("plate", pending.get("plate") or 1) or 1)
+
+    payload = dict(pending.get("payload") or {})
+    payload.update({
+        "printer_id": printer_id,
+        "plate": plate,
+        "ams_mapping": mapping,
+    })
+    if "bed_level" in ctx.body:
+        payload["bed_level"] = bool(ctx.body["bed_level"])
+    if "flow_cali" in ctx.body:
+        payload["flow_cali"] = bool(ctx.body["flow_cali"])
+    if "timelapse" in ctx.body:
+        payload["timelapse"] = bool(ctx.body["timelapse"])
+
+    job = None
+    started = False
+    error = ""
+
+    # Постановка в очередь
+    try:
+        job = api.manager.enqueue(payload)
+    except Exception as exc:
+        return 400, {"error": f"Ошибка добавления в очередь: {exc}"}
+
+    job_id = job.get("id") or ""
+
+    if action == "start":
+        if not printer_id:
+            return 400, {"error": "Для немедленного запуска необходимо выбрать принтер"}
+        try:
+            check = {}
+            if hasattr(api.manager, "preflight"):
+                check = api.manager.preflight(
+                    printer_id, payload.get("file") or "", plate, mapping
+                ) or {}
+            if check.get("blocks"):
+                first_block = (check.get("blocks") or [{}])[0].get("reason", "Запуск заблокирован preflight")
+                return 400, {"error": f"Проверка перед запуском: {first_block}"}
+
+            api.manager.start_job(job_id, printer_id)
+            started = True
+        except Exception as exc:
+            return 400, {"error": f"Не удалось запустить печать: {exc}"}
+
+    studio.pending_dismiss(pending_id)
+    api.db.add_event(
+        "studio", "Проект из Studio подтвержден",
+        f"{pending.get('filename')} → {'запущен' if started else 'в очереди'}",
+        printer_id,
+        {"pending_id": pending_id, "job_id": job_id, "action": action, "started": started}
+    )
+
+    return {
+        "ok": True,
+        "action": action,
+        "job": job,
+        "started": started,
+        "pending_id": pending_id,
+    }
+
+
 @router.get("/api/printer/health", doc="Самопроверка принтера")
 def printer_health(api: Any, ctx: Ctx):
     printer = api.printer_or_fail(ctx.one("printer_id"))

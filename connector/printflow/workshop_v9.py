@@ -50,6 +50,10 @@ class WorkshopV9:
                 ("supplier_id", "TEXT DEFAULT ''"),
                 ("received_doc_id", "TEXT DEFAULT ''"),
             ),
+            "workshop_docs": (
+                ("location", "TEXT DEFAULT 'shop'"),
+                ("warehouse_id", "TEXT DEFAULT ''"),
+            ),
             "shopping_items": (
                 ("receipt_doc_id", "TEXT DEFAULT ''"),
                 ("price_per_kg", "REAL DEFAULT 0"),
@@ -363,6 +367,9 @@ class WorkshopV9:
         supplier_id: str = "",
         shopping_id: str = "",
         account_id: str = "",
+        location: str = "shop",
+        location_note: str = "",
+        warehouse_id: str = "",
         note: str = "",
         confirmed: bool = False,
         request_id: str = "",
@@ -385,11 +392,26 @@ class WorkshopV9:
         payload = []
         total = 0.0
         grams_all = 0.0
+        if not self.repo:
+            try:
+                from .repo import Repo
+                self.repo = Repo(self.db)
+            except Exception:
+                pass
         for raw in rows:
             sc = max(1, int(num(raw.get("spool_count"), 1)))
             sg = num(raw.get("spool_grams"), 1000) or 1000
             amount = num(raw.get("total_amount"))
             ppk = num(raw.get("price_per_kg"))
+            item_mat = str(raw.get("material") or material or "PLA").strip() or "PLA"
+            item_color_name = str(raw.get("color_name") or color_name or "").strip()
+            item_color_hex = str(raw.get("color_hex") or color_hex or "#888888").strip() or "#888888"
+            item_brand = str(raw.get("brand") or brand or "").strip()
+            item_loc = str(raw.get("location") or location or "shop").strip() or "shop"
+            item_wh = str(raw.get("warehouse_id") or warehouse_id or "").strip()
+            item_loc_note = str(raw.get("location_note") or location_note or "").strip()
+            item_supp_id = str(raw.get("supplier_id") or supplier_id or "").strip()
+            item_supp = str(raw.get("supplier") or supplier or "").strip()
             if ppk <= 0 and amount > 0:
                 kg = (sc * sg) / 1000.0
                 ppk = round(amount / kg, 2) if kg else 0
@@ -397,21 +419,39 @@ class WorkshopV9:
                 amount = round(ppk * (sc * sg) / 1000.0, 2)
             total += amount
             grams_all += sc * sg
-            payload.append({**raw, "spool_count": sc, "spool_grams": sg,
-                            "total_amount": amount, "price_per_kg": ppk})
+            payload.append({
+                **raw,
+                "material": item_mat,
+                "color_name": item_color_name,
+                "color_hex": item_color_hex,
+                "brand": item_brand,
+                "spool_count": sc,
+                "spool_grams": sg,
+                "total_amount": amount,
+                "price_per_kg": ppk,
+                "location": item_loc,
+                "location_note": item_loc_note,
+                "warehouse_id": item_wh,
+                "supplier_id": item_supp_id,
+                "supplier": item_supp,
+            })
             if self.repo:
                 for _ in range(sc):
                     spool = self.repo.save_spool({
-                        "material": str(raw.get("material") or material or "PLA"),
-                        "color_name": str(raw.get("color_name") or color_name or ""),
-                        "color_hex": str(raw.get("color_hex") or color_hex or "#888888"),
-                        "brand": str(raw.get("brand") or brand or ""),
+                        "material": item_mat,
+                        "color_name": item_color_name,
+                        "color_hex": item_color_hex,
+                        "brand": item_brand,
                         "remaining_grams": sg,
+                        "total_grams": sg,
                         "spool_weight": sg,
                         "price": round(amount / sc, 2) if sc else amount,
                         "price_per_kg": ppk,
-                        "supplier_id": supplier_id or "",
-                        "location": "shop",
+                        "supplier_id": item_supp_id,
+                        "supplier": item_supp,
+                        "location": item_loc,
+                        "location_note": item_loc_note,
+                        "warehouse_id": item_wh or None,
                     })
                     created_spools.append(spool)
         doc = self.db.upsert("workshop_docs", {
@@ -424,6 +464,7 @@ class WorkshopV9:
             "payload": _json({
                 "items": payload, "supplier": supplier, "supplier_id": supplier_id,
                 "shopping_id": shopping_id, "account_id": account_id, "note": note,
+                "location": location, "warehouse_id": warehouse_id, "location_note": location_note,
                 "spool_ids": [s["id"] for s in created_spools],
             }),
             "total_amount": round(total, 2),
@@ -433,6 +474,8 @@ class WorkshopV9:
             "shopping_id": shopping_id or "",
             "request_id": rid,
             "note": note[:400],
+            "location": location,
+            "warehouse_id": warehouse_id or "",
             "created_at": now_iso(),
         })
         if created_spools:
@@ -457,18 +500,45 @@ class WorkshopV9:
                 f"UPDATE shopping_items SET {', '.join(sets)} WHERE id=?",
                 params,
             )
-        if self.acc and total > 0:
+        tx = None
+        if not self.acc:
             try:
-                self.acc.add_transaction(
-                    "expense", "filament", total,
-                    f"Приход пластика {doc['number']}",
-                    note or supplier, account_id=account_id, auto=True)
+                from .accounting import Accounting
+                self.acc = Accounting(self.db)
             except Exception:
                 pass
-        self.db.add_event("stock", "Приход пластика",
-                          f"{doc['number']} · {round(grams_all)} г · {round(total, 2)} ₽",
-                          "", {"doc_id": doc["id"]})
-        return {"ok": True, "document": doc, "spools": created_spools, "already": False}
+        if self.acc and total > 0:
+            try:
+                tx = self.acc.add_transaction(
+                    "expense", "filament", total,
+                    f"Приход пластика {doc['number']}",
+                    note or supplier or (f"{len(created_spools)} кат." if created_spools else ""),
+                    account_id=account_id,
+                    auto=False,
+                    deductible=True,
+                )
+            except Exception:
+                pass
+        if tx:
+            try:
+                p = _loads(doc.get("payload"))
+                p["transaction_id"] = tx.get("id") or ""
+                self.db.execute("UPDATE workshop_docs SET payload=? WHERE id=?",
+                                (_json(p), doc["id"]))
+                doc["payload"] = _json(p)
+            except Exception:
+                pass
+        self.db.add_event(
+            "stock", "Приход пластика",
+            f"{doc['number']} · {len(created_spools)} кат. · {round(grams_all)} г · {round(total, 2)} ₽",
+            "",
+            {
+                "doc_id": doc["id"],
+                "spool_ids": [s["id"] for s in created_spools],
+                "transaction_id": (tx or {}).get("id") or "",
+            },
+        )
+        return {"ok": True, "document": doc, "spools": created_spools, "transaction": tx, "already": False}
 
     def workshop_docs(self, kind: str = "", limit: int = 80) -> list[dict]:
         if kind:

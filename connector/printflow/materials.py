@@ -1221,3 +1221,284 @@ def recommend_material(use_case: str = "") -> list[str]:
     if any(w in use for w in ("адресник", "бирк", "брелок", "питом", "вод")):
         return ["PETG", "PLA+"]
     return ["PLA", "PLA_MATTE"]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Сопоставление с профилями Bambu Studio и кодами AMS (tray_info_idx)
+# ──────────────────────────────────────────────────────────────────────
+# Bambu Lab P1S / AMS требует строго канонические типы (tray_type)
+# и идентификаторы пресетов (tray_info_idx). Для сторонних катушек
+# (BestFilament, FDplast, eSun и т.д.) без RFID чипа это Generic-профили:
+# GFL99 (Generic PLA), GFG99 (Generic PETG), GFB99 (Generic ABS) и т.д.
+# Для катушек марки Bambu — официальные пресеты GFA00, GFG00 и т.д.
+BAMBU_FILAMENT_PRESETS: dict[str, dict[str, Any]] = {
+    "PLA": {
+        "tray_type": "PLA",
+        "generic_idx": "GFL99",
+        "bambu_idx": "GFA00",
+        "nozzle": (190, 240),
+        "generic_name": "Generic PLA",
+        "bambu_name": "Bambu PLA Basic",
+    },
+    "PLA_SILK": {
+        "tray_type": "PLA",
+        "generic_idx": "GFL99",
+        "bambu_idx": "GFA00",
+        "nozzle": (205, 235),
+        "generic_name": "Generic PLA (Silk)",
+        "bambu_name": "Bambu PLA Silk",
+    },
+    "PLA_MATTE": {
+        "tray_type": "PLA",
+        "generic_idx": "GFL99",
+        "bambu_idx": "GFA01",
+        "nozzle": (190, 230),
+        "generic_name": "Generic PLA (Matte)",
+        "bambu_name": "Bambu PLA Matte",
+    },
+    "PLA_CF": {
+        "tray_type": "PLA-CF",
+        "generic_idx": "GFL98",
+        "bambu_idx": "GFA02",
+        "nozzle": (210, 240),
+        "generic_name": "Generic PLA-CF",
+        "bambu_name": "Bambu PLA-CF",
+    },
+    "PETG": {
+        "tray_type": "PETG",
+        "generic_idx": "GFG99",
+        "bambu_idx": "GFG00",
+        "nozzle": (220, 255),
+        "generic_name": "Generic PETG",
+        "bambu_name": "Bambu PETG Basic",
+    },
+    "PETG_CF": {
+        "tray_type": "PETG-CF",
+        "generic_idx": "GFG98",
+        "bambu_idx": "GFG00",
+        "nozzle": (230, 260),
+        "generic_name": "Generic PETG-CF",
+        "bambu_name": "Bambu PETG-CF",
+    },
+    "ABS": {
+        "tray_type": "ABS",
+        "generic_idx": "GFB99",
+        "bambu_idx": "GFB00",
+        "nozzle": (240, 270),
+        "generic_name": "Generic ABS",
+        "bambu_name": "Bambu ABS",
+    },
+    "ASA": {
+        "tray_type": "ASA",
+        "generic_idx": "GFB98",
+        "bambu_idx": "GFB98",
+        "nozzle": (240, 270),
+        "generic_name": "Generic ASA",
+        "bambu_name": "Bambu ASA",
+    },
+    "PC": {
+        "tray_type": "PC",
+        "generic_idx": "GFC99",
+        "bambu_idx": "GFC00",
+        "nozzle": (260, 280),
+        "generic_name": "Generic PC",
+        "bambu_name": "Bambu PC",
+    },
+    "TPU": {
+        "tray_type": "TPU",
+        "generic_idx": "GFU99",
+        "bambu_idx": "GFU01",
+        "nozzle": (205, 240),
+        "generic_name": "Generic TPU",
+        "bambu_name": "Bambu TPU 95A",
+    },
+    "PA": {
+        "tray_type": "PA",
+        "generic_idx": "GFN99",
+        "bambu_idx": "GFN03",
+        "nozzle": (250, 280),
+        "generic_name": "Generic PA",
+        "bambu_name": "Bambu PA",
+    },
+    "PA_CF": {
+        "tray_type": "PA-CF",
+        "generic_idx": "GFN98",
+        "bambu_idx": "GFN03",
+        "nozzle": (260, 290),
+        "generic_name": "Generic PA-CF",
+        "bambu_name": "Bambu PA-CF",
+    },
+    "PVA": {
+        "tray_type": "PVA",
+        "generic_idx": "GFS99",
+        "bambu_idx": "GFS00",
+        "nozzle": (190, 220),
+        "generic_name": "Generic PVA",
+        "bambu_name": "Bambu Support W",
+    },
+    "HIPS": {
+        "tray_type": "HIPS",
+        "generic_idx": "GFB99",
+        "bambu_idx": "GFB99",
+        "nozzle": (230, 250),
+        "generic_name": "Generic HIPS",
+        "bambu_name": "Generic HIPS",
+    },
+}
+
+
+def normalize_bambu_material_key(name: str) -> str:
+    """Определить ключ семейства для Bambu Studio из произвольного названия."""
+    raw = (name or "").strip().upper().replace(" ", "_").replace("-", "_")
+    if not raw:
+        return "PLA"
+    # Композиты с углеволокном (CF)
+    if ("PA" in raw or "NYLON" in raw) and ("CF" in raw or "HT_CF" in raw or "GF" in raw):
+        return "PA_CF"
+    if ("PETG" in raw or "PET" in raw) and "CF" in raw:
+        return "PETG_CF"
+    if "PLA" in raw and "CF" in raw:
+        return "PLA_CF"
+    # Специфические виды PLA
+    if "SILK" in raw or "ШЕЛК" in raw or "ШЁЛК" in raw:
+        return "PLA_SILK"
+    if "MATTE" in raw or "МАТОВ" in raw:
+        return "PLA_MATTE"
+    # Базовые типы
+    if any(k in raw for k in ("PETG", "PET_G", "ПЕТГ", "ПЭТГ")):
+        return "PETG"
+    if any(k in raw for k in ("TPU", "ТПУ", "TPE", "FLEX", "ФЛЕКС")):
+        return "TPU"
+    if any(k in raw for k in ("ABS", "АБС")):
+        return "ABS"
+    if any(k in raw for k in ("ASA", "АСА")):
+        return "ASA"
+    if any(k in raw for k in ("PC", "ПК", "ПОЛИКАРБОНАТ")):
+        return "PC"
+    if any(k in raw for k in ("PA", "NYLON", "НЕЙЛОН", "ПОЛИАМИД")):
+        return "PA"
+    if any(k in raw for k in ("PVA", "ПВА", "BVOH")):
+        return "PVA"
+    if any(k in raw for k in ("HIPS", "ХИПС")):
+        return "HIPS"
+    if any(k in raw for k in ("PLA", "ПЛА")):
+        return "PLA"
+    return "PLA"
+
+
+def bambu_filament_preset(material: str, brand: str = "",
+                          rec_temp: tuple | None = None) -> dict[str, Any]:
+    """Сформировать параметры слота AMS для Bambu Studio.
+
+    Возвращает канонический tray_type, tray_info_idx (пресет в Bambu Studio),
+    название пресета, бренд и диапазон температур сопла.
+    """
+    key = normalize_bambu_material_key(material)
+    cfg = BAMBU_FILAMENT_PRESETS.get(key) or BAMBU_FILAMENT_PRESETS["PLA"]
+    b_brand = (brand or "").strip()
+    is_bambu = "bambu" in b_brand.lower()
+
+    tray_type = cfg["tray_type"]
+    tray_info_idx = cfg["bambu_idx"] if is_bambu else cfg["generic_idx"]
+    preset_name = cfg["bambu_name"] if is_bambu else cfg["generic_name"]
+    tray_sub_brands = b_brand or ("Bambu" if is_bambu else "Generic")
+
+    t_min, t_max = cfg["nozzle"]
+    if rec_temp and len(rec_temp) == 2:
+        try:
+            lo, hi = int(rec_temp[0]), int(rec_temp[1])
+            if 100 <= lo <= hi <= 350:
+                t_min, t_max = lo, hi
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "key": key,
+        "tray_type": tray_type,
+        "tray_info_idx": tray_info_idx,
+        "tray_sub_brands": tray_sub_brands,
+        "nozzle_temp_min": t_min,
+        "nozzle_temp_max": t_max,
+        "preset_name": preset_name,
+        "is_bambu": is_bambu,
+    }
+
+
+def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
+    """Сформировать валидный словарь конфигурации катушки для Bambu Studio / OrcaSlicer.
+
+    Формат полностью соответствует спецификации пользовательских пресетов (.json)
+    Bambu Studio, готовых к импорту через File -> Import -> Import Configs
+    или распаковке в %APPDATA%/BambuStudio/user/[id]/filament/
+    """
+    material_raw = str(spool.get("material") or "PLA").strip()
+    brand_raw = str(spool.get("brand") or "Generic").strip()
+    color_raw = str(spool.get("color_name") or "").strip()
+    hex_color = str(spool.get("color_hex") or "#FFFFFF").strip()
+    if not hex_color.startswith("#"):
+        hex_color = "#" + hex_color
+    if len(hex_color) == 7:
+        hex_color = hex_color.upper()
+    else:
+        hex_color = "#FFFFFF"
+
+    # Рекомендованные температуры сопла
+    rec = spool.get("rec_settings")
+    rec_temp = None
+    if isinstance(rec, dict):
+        rec_temp = rec.get("temp_nozzle")
+    preset_meta = bambu_filament_preset(material_raw, brand_raw, rec_temp)
+
+    tray_type = preset_meta["tray_type"]
+    t_min = preset_meta["nozzle_temp_min"]
+    t_max = preset_meta["nozzle_temp_max"]
+    t_def = int((t_min + t_max) / 2)
+
+    # Получаем плотность и температуру стола из справочника материалов
+    mat_info = get_material(preset_meta["key"])
+    density = num(mat_info.get("density"), 1.24)
+    bed_temp = mat_info.get("temp_bed") or (55, 65)
+    bed_def = int(num(bed_temp[0], 55))
+
+    # Название пресета в списке нитей Bambu Studio
+    name_parts = [brand_raw] if brand_raw and brand_raw.lower() != "generic" else []
+    name_parts.append(material_raw)
+    if color_raw:
+        name_parts.append(color_raw)
+    preset_name = " ".join(name_parts)
+    if not preset_name:
+        preset_name = f"Generic {tray_type}"
+
+    # Расчёт цены за 1 кг
+    price_per_kg = num(spool.get("price_per_kg"))
+    if price_per_kg <= 0:
+        total_g = num(spool.get("total_grams"), 1000)
+        spool_price = num(spool.get("price"))
+        if total_g > 0 and spool_price > 0:
+            price_per_kg = round(spool_price * 1000.0 / total_g, 2)
+        else:
+            price_per_kg = num(mat_info.get("price_per_kg"), 1800.0)
+
+    # Каноническое наследование от официального пресета Bambu Lab
+    inherits_name = f"Generic {tray_type}"
+
+    return {
+        "type": "filament",
+        "name": preset_name,
+        "from": "User",
+        "inherits": inherits_name,
+        "filament_settings_id": [preset_name],
+        "filament_type": [tray_type],
+        "filament_vendor": [brand_raw or "Generic"],
+        "default_filament_colour": [hex_color],
+        "filament_density": [str(round(density, 2))],
+        "filament_cost": [str(round(price_per_kg, 2))],
+        "nozzle_temperature": [str(t_def)],
+        "nozzle_temperature_initial_layer": [str(t_def)],
+        "nozzle_temperature_range_low": [str(t_min)],
+        "nozzle_temperature_range_high": [str(t_max)],
+        "textured_plate_temp": [str(bed_def)],
+        "textured_plate_temp_initial_layer": [str(bed_def)],
+        "compatible_printers": [],
+        "version": "1.9.0.0",
+    }

@@ -303,7 +303,7 @@ META.update({
     "watch_create_order": ("printers", "Watch Folder: создавать заказ", {}),
     "studio_gateway_name": ("printers", "Шлюз Bambu Studio: имя", {"max_len": 64}),
     "studio_gateway_mode": ("printers", "Шлюз Bambu Studio: режим",
-                            {"choices": ("queue", "printer")}),
+                            {"choices": ("confirm", "queue", "printer", "autostart")}),
     "studio_gateway_autostart": ("printers", "Шлюз Studio: автозапуск", {}),
     "studio_gateway_serial": ("printers", "Шлюз Studio: серийный номер", {"advanced": True, "max_len": 64}),
     "studio_gateway_printer_id": ("printers", "Шлюз Studio: привязанный принтер", {"advanced": True, "max_len": 64}),

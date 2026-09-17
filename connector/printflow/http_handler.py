@@ -126,6 +126,8 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 return self.serve_keyframe(job_id, (query.get("name") or [""])[0])
             if path == "/api/order/pack":
                 return self.serve_pack_sheet((query.get("id") or [""])[0])
+            if path in ("/api/spools/bambu-export", "/api/spools/bambu-export.zip"):
+                return self.serve_bambu_spools_export()
             if path == "/api/design/stl":
                 return self.serve_design_stl(query)
             if path == "/api/design/preview":
@@ -424,6 +426,53 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         except OSError:
             return self.send_json(500, {"error": "Эталон стола не читается"})
         self._send_bytes(data, "image/jpeg")
+
+    def serve_bambu_spools_export(self):
+        """Экспорт катушек склада в ZIP-архив с JSON-пресетами для Bambu Studio / OrcaSlicer."""
+        import io
+        import zipfile
+        import re
+        from .materials import generate_bambu_studio_filament_preset
+
+        spools = self.api.repo.spools(include_archived=False)
+        buf = io.BytesIO()
+        used_names: set[str] = set()
+
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            readme = (
+                "# Пресеты филамента PrintFlow для Bambu Studio / OrcaSlicer\n\n"
+                "Как импортировать в Bambu Studio:\n"
+                "1. Откройте Bambu Studio.\n"
+                "2. Перейдите в меню: Файл -> Импорт -> Импорт конфигураций (File -> Import -> Import Configs...).\n"
+                "3. Выберите из этого архива нужные .json файлы филаментов (или импортируйте распакованную папку).\n"
+                "4. Профили появятся в списке пользовательских нитей (User Presets) с сохранёнными цветами, температурами и ценой за 1 кг.\n\n"
+                "Либо скопируйте файлы напрямую в каталог пользовательских профилей:\n"
+                "- Windows: %APPDATA%\\BambuStudio\\user\\default\\filament\\\n"
+                "- macOS: ~/Library/Application Support/BambuStudio/user/default/filament/\n"
+                "- Linux: ~/.config/BambuStudio/user/default/filament/\n"
+            )
+            zf.writestr("README.txt", readme.encode("utf-8"))
+
+            for sp in spools:
+                preset = generate_bambu_studio_filament_preset(sp)
+                raw_name = preset.get("name") or "Filament"
+                # Очищаем имя от недопустимых символов файловой системы
+                clean_name = re.sub(r'[\\/*?:"<>|]', "_", raw_name).strip()
+                if not clean_name:
+                    clean_name = "Filament"
+
+                filename = f"{clean_name}.json"
+                counter = 2
+                while filename.lower() in used_names:
+                    filename = f"{clean_name}_{counter}.json"
+                    counter += 1
+                used_names.add(filename.lower())
+
+                json_bytes = json.dumps(preset, indent=4, ensure_ascii=False).encode("utf-8")
+                zf.writestr(filename, json_bytes)
+
+        data = buf.getvalue()
+        self._send_bytes(data, "application/zip", download="bambu_filament_presets.zip")
 
     def serve_camera_stream(self, printer_id: str):
         printer = self.api.manager.get(printer_id)
