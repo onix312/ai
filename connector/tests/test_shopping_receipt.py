@@ -96,6 +96,33 @@ class ShoppingReceiptTests(unittest.TestCase):
             self.receive(request_id="another-request")
         self.assertEqual(self.db.one("SELECT COUNT(*) n FROM spools")["n"], 2)
 
+    def test_default_location_setting_drives_new_spools(self):
+        """«Место хранения по умолчанию» решает, куда упадут новые катушки.
+
+        Ключ `default_location` рисовался в настройках, но не был известен
+        конфигу: сохранение молча отбрасывалось, и приход всегда шёл в shop.
+        """
+        self.assertEqual("shop", self.receive()["spools"][0]["location"],
+                         "без настройки — прежнее поведение")
+        self.db.set_settings({"default_location": "dry"})
+        self.item = self.shop.add({"id": "shop-2", "name": "PLA", "material": "PLA"})
+        result = self.shop.receive(
+            "shop-2", received_confirmed=True, payment_confirmed=True,
+            material="PLA", spool_count=1, spool_grams=1000,
+            total_amount=1600, account_id="cash", request_id="receipt-request-2",
+        )
+        self.assertTrue(all(row["location"] == "dry" for row in result["spools"]),
+                        "настройка места хранения не применяется")
+        # Явное место в запросе важнее настройки.
+        self.item = self.shop.add({"id": "shop-3", "name": "PLA", "material": "PLA"})
+        result = self.shop.receive(
+            "shop-3", received_confirmed=True, payment_confirmed=True,
+            material="PLA", spool_count=1, spool_grams=1000,
+            total_amount=1600, account_id="cash", location="home",
+            request_id="receipt-request-3",
+        )
+        self.assertEqual("home", result["spools"][0]["location"])
+
     def test_failure_rolls_back_spools_expense_and_item(self):
         with mock.patch.object(self.shop.acc, "add_transaction", side_effect=RuntimeError("cash failed")):
             with self.assertRaisesRegex(RuntimeError, "cash failed"):
@@ -143,7 +170,10 @@ class ShoppingReceiptApiRouteTests(unittest.TestCase):
             "shop-1", received_confirmed=True, payment_confirmed=False,
             material="PLA", color_name="", color_hex="", brand="",
             spool_count=2.0, spool_grams=1000.0, total_amount=2000.0,
-            account_id="", supplier="", warehouse_id="", location="shop", request_id="receipt-1",
+            account_id="", supplier="", warehouse_id="",
+            # Пусто: место хранения по умолчанию берёт сервис из настройки
+            # default_location (маршрут не трогает базу сам).
+            location="", request_id="receipt-1",
         )
 
 

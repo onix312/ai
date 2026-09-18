@@ -367,7 +367,8 @@ class WorkshopV9:
         supplier_id: str = "",
         shopping_id: str = "",
         account_id: str = "",
-        location: str = "shop",
+        # Пусто — место хранения берётся из настройки default_location.
+        location: str = "",
         location_note: str = "",
         warehouse_id: str = "",
         note: str = "",
@@ -378,6 +379,10 @@ class WorkshopV9:
         if confirmed is not True:
             raise ValueError("Подтвердите приход пластика")
         rid = (request_id or "").strip()[:120] or uid("frq")
+        # Место хранения по умолчанию — из настроек: оператор приходует
+        # катушки туда, где они физически оказываются (магазин, дом, сушка).
+        location = str(location or self.db.setting("default_location", "shop")
+                       or "shop").strip() or "shop"
         existing = self.db.one("SELECT * FROM workshop_docs WHERE request_id=?", (rid,))
         if existing:
             return {"ok": True, "document": existing, "already": True}

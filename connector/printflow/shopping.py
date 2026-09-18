@@ -120,7 +120,8 @@ class ShoppingList:
         account_id: str = "",
         supplier: str = "",
         warehouse_id: str = "",
-        location: str = "shop",
+        # Пусто — место хранения берётся из настройки default_location.
+        location: str = "",
         request_id: str = "",
     ) -> dict:
         """Атомарно принять закупку: отдельные катушки + расход + закрытие строки.
@@ -167,6 +168,9 @@ class ShoppingList:
         brand = str(brand or item.get("brand") or "").strip()
         supplier = str(supplier or "").strip()
         warehouse_id = str(warehouse_id or "").strip()
+        # Пустое место — настройка «Место хранения по умолчанию».
+        location = str(location or self.db.setting("default_location", "shop")
+                       or "shop").strip() or "shop"
         color_hex = str(color_hex or "#4b5563").strip()
         if not (len(color_hex) == 7 and color_hex.startswith("#")):
             color_hex = "#4b5563"

@@ -2555,6 +2555,9 @@ class Api:
                 "studio_gateway_enabled", "studio_gateway_name", "studio_gateway_mode",
                 "studio_gateway_autostart", "studio_gateway_serial",
                 "studio_gateway_access_code", "studio_gateway_printer_id",
+                # Адрес шлюза читается на каждое объявление, но перезапуск
+                # нужен, чтобы порты и SSDP перечитали личность целиком.
+                "studio_gateway_host",
             }
             if set(patch) & studio_keys:
                 studio = getattr(self.manager, "studio", None)
@@ -2586,7 +2589,7 @@ class Api:
                 account_id=str(body.get("account_id") or ""),
                 supplier=str(body.get("supplier") or ""),
                 warehouse_id=str(body.get("warehouse_id") or ""),
-                location=str(body.get("location") or "shop"),
+                location=str(body.get("location") or ""),
                 request_id=str(body.get("request_id") or ""),
             )
         if path == "/api/shopping/delete":

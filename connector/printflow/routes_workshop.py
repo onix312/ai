@@ -227,7 +227,7 @@ def workshop_receipt(api: Any, ctx: Ctx):
         supplier_id=str(body.get("supplier_id") or ""),
         shopping_id=str(body.get("shopping_id") or ""),
         account_id=str(body.get("account_id") or ""),
-        location=str(body.get("location") or "shop"),
+        location=str(body.get("location") or ""),
         location_note=str(body.get("location_note") or ""),
         warehouse_id=str(body.get("warehouse_id") or ""),
         note=str(body.get("note") or ""),
