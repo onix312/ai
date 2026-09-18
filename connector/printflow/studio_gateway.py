@@ -15,6 +15,7 @@ ssdp_notify / ingest_bytes / mqtt_handle_packet / ftp_command работают
 """
 from __future__ import annotations
 
+import errno
 import json
 import re
 import secrets
@@ -54,8 +55,32 @@ SSDP_GROUP = "239.255.255.250"
 # группу 239.255.255.250 — так шлюз видят и старые клиенты (1990/1900).
 SSDP_BROADCAST = "255.255.255.255"
 SSDP_PORTS = (2021, 1990, 1900)
-SSDP_LISTEN_PORTS = (2021, 1900)
+# Порты, которые шлюз СЛУШАЕТ. UDP 2021 шлюз не занимает и занимать не должен:
+# на нём слушает сам сетевой плагин Bambu Studio. Две розетки на одном порту с
+# SO_REUSEADDR в Windows делят входящий трафик непредсказуемо — шлюз,
+# поднявшийся раньше Studio, отбирал у неё единственный источник адреса
+# принтера, Studio получала пустой dev_ip и отдавала «код=-1» до MQTT.
+SSDP_LISTEN_PORTS = (1900,)
 SSDP_NOTIFY_PERIOD = 5.0  # принтеры анонсируют себя раз в ~5 секунд
+SSDP_NOTIFY_LOOPBACK = "127.0.0.1"  # адрес, по которому Studio видит шлюз всегда
+
+
+def directed_broadcast(ip: str) -> str:
+    """Направленный широковещательный адрес для /24: 192.168.1.50 → .255.
+
+    Пакет на такой адрес доходит до соседей по подсети на домашних роутерах
+    надёжнее, чем на «общий» 255.255.255.255: последний часть оборудования
+    режет. Если адрес не IPv4 — пустая строка (рассылать некуда).
+    """
+    parts = str(ip or "").strip().split(".")
+    if len(parts) != 4:
+        return ""
+    for part in parts:
+        if not part.isdigit() or not 0 <= int(part) <= 255:
+            return ""
+    return ".".join(parts[:3] + ["255"])
+
+
 MQTT_PORT = 8883
 FTP_PORT = 990
 # Порт, на котором Studio спрашивает личность принтера ДО MQTT
@@ -187,11 +212,15 @@ class StudioGateway:
         self._ftp_cwd = "/"
         self._stor_name = ""
         self._ssdp_sock = None
+        self._ssdp_bound_port = 0
+        self._ssdp_note = ""
         self._mqtt_sock = None
         self._ftp_sock = None
         self._threads: list[threading.Thread] = []
         self._last_notify = 0.0
         self._host_cache = ""
+        self._ips_cache: list[str] = []
+        self._ips_cache_at = 0.0
         self._pending_confirm: dict[str, dict] = {}
 
     # ----------------------------------------------------------- настройки
@@ -372,7 +401,12 @@ class StudioGateway:
             "bind_running": bool(self._bind_socks),
             "bind_requests": int(counters.get("bind_requests", 0)),
             "bind_detects": int(counters.get("bind_detects", 0)),
+            "dropped_connections": int(counters.get("dropped_connections", 0)),
             "ssdp_ports": list(SSDP_PORTS),
+            "ssdp_listen_ports": list(SSDP_LISTEN_PORTS),
+            "ssdp_bound_port": int(self._ssdp_bound_port),
+            "ssdp_note": self._ssdp_note,
+            "ssdp_targets": [f"{host}:{port}" for host, port in self._notify_targets()],
             "last_error": self.last_error,
             "errors": {key: value for key, value in self._errors.items() if value},
             "host_pinned": bool(pinned_raw),
@@ -413,7 +447,7 @@ class StudioGateway:
         ident = self.identity()
         return (
             "NOTIFY * HTTP/1.1\r\n"
-            f"HOST: {SSDP_GROUP}:1990\r\n"
+            f"HOST: {SSDP_GROUP}:1900\r\n"
             "Server: Buildroot/2018.02-rc3 UPnP/1.0 ssdpd/1.8\r\n"
             f"Location: {ident['host']}\r\n"
             f"NT: {SSDP_NT}\r\n"
@@ -714,19 +748,37 @@ class StudioGateway:
             except OSError:
                 pass
 
+    def _listen_tcp(self, port: int, backlog: int = 8, tls: bool = False,
+                    cert=None, key=None):
+        """Открыть слушающий TCP-порт шлюза, закрыв розетку при сбое.
+
+        Без этого занятый порт (второй PrintFlow, Bambu Connect, Orca) оставлял
+        висящую розетку — в журнале владелец видел ResourceWarning вместо
+        причины, а шлюз продолжал считать себя поднятым.
+        """
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            raw.bind(("0.0.0.0", port))
+            raw.listen(backlog)
+            raw.settimeout(1.0)
+            if tls:
+                ctx = self._tls_ctx or self._tls_context(cert, key)
+                return ctx.wrap_socket(raw, server_side=True)
+            return raw
+        except BaseException:
+            try:
+                raw.close()
+            except OSError:
+                pass
+            raise
+
     def _start_bind(self, cert, key) -> None:
         """Поднять :3000 (TCP) и :3002 (TLS) — пробу личности Studio."""
         for port in (BIND_PORT_PLAIN, BIND_PORT_TLS):
             try:
-                raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                raw.bind(("0.0.0.0", port))
-                raw.listen(8)
-                raw.settimeout(1.0)
-                if port == BIND_PORT_TLS:
-                    sock = self._tls_ctx.wrap_socket(raw, server_side=True)
-                else:
-                    sock = raw
+                sock = self._listen_tcp(port, 8, tls=(port == BIND_PORT_TLS),
+                                        cert=cert, key=key)
                 self._bind_socks.append(sock)
                 self._spawn(f"pf-studio-bind-{port}", self._accept_loop,
                             sock, self._bind_client)
@@ -1074,6 +1126,8 @@ class StudioGateway:
         self._ensure_identity()
         self._errors = {"ssdp": "", "mqtt": "", "ftps": "", "bind": ""}
         self.last_error = ""
+        self._ssdp_note = ""
+        self._ssdp_bound_port = 0
         try:
             self._start_ssdp()
         except Exception as exc:
@@ -1112,6 +1166,7 @@ class StudioGateway:
             except Exception:
                 pass
         self._ssdp_sock = self._mqtt_sock = self._ftp_sock = None
+        self._ssdp_bound_port = 0
         self._bind_socks = []
         self._threads = []
 
@@ -1132,18 +1187,30 @@ class StudioGateway:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except (AttributeError, OSError):
             pass
-        # Studio слушает UDP :2021 (именно туда станки шлют NOTIFY); 1900 —
-        # на случай, если порт занят Windows-службой SSDP Discovery.
-        bound = False
+        # Слушаем только 1900 (стандартный порт SSDP, туда Studio и прочие
+        # искалки шлют M-SEARCH). UDP 2021 не занимаем никогда: там слушает
+        # сетевой плагин Studio, и вторая розетка на том же порту отбирает у
+        # него входящие объявления — Studio остаётся без адреса принтера и
+        # отдаёт «код=-1». Если 1900 занят целиком (Windows-служба SSDP
+        # Discovery без SO_REUSEADDR), берём произвольный порт и честно
+        # показываем это в диагностике.
+        bound_port = 0
         for port in SSDP_LISTEN_PORTS:
             try:
                 sock.bind(("", port))
-                bound = True
+                bound_port = port
                 break
             except OSError:
                 continue
-        if not bound:
+        if not bound_port:
             sock.bind(("", 0))
+            bound_port = int(sock.getsockname()[1])
+            # Это не сбой: объявления (главный канал) уходят как обычно,
+            # теряется только ответ на чужой поиск M-SEARCH.
+            self._ssdp_note = (
+                "порт 1900 занят другой программой — M-SEARCH слушаем "
+                f"на :{bound_port}, объявления Studio всё равно получает")
+        self._ssdp_bound_port = bound_port
         try:
             mreq = struct.pack("4s4s", socket.inet_aton(SSDP_GROUP), socket.inet_aton("0.0.0.0"))
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
@@ -1172,25 +1239,95 @@ class StudioGateway:
             except OSError:
                 continue
 
+    def _local_ips(self) -> list[str]:
+        """Все IPv4-адреса этого ПК, кроме loopback (для адресной рассылки).
+
+        Список кэшируется: get_local_ips() пробует соединения с таймаутами, а
+        _notify_targets() спрашивают и рассылка, и карточка настроек.
+        """
+        now = time.time()
+        if self._ips_cache and now - self._ips_cache_at < 30.0:
+            return self._ips_cache
+        try:
+            from .config import get_local_ips
+            ips = [ip for ip in get_local_ips() if ip and not ip.startswith("127.")]
+        except Exception:
+            ips = []
+        self._ips_cache = ips
+        self._ips_cache_at = now
+        return ips
+
+    def _notify_targets(self) -> list[tuple[str, int]]:
+        """Куда шлём NOTIFY, чтобы Studio увидел шлюз на любой машине.
+
+        Порядок — от самого надёжного канала к самому капризному:
+
+        1. **loopback 127.0.0.1:2021** — сюда смотрит сетевой плагин Studio,
+           когда Studio стоит на том же компьютере, что и PrintFlow. Loopback
+           не фильтруется брандмауэром Windows вообще, поэтому объявление
+           доходит при любых правилах. Это же делает известный обходной путь
+           «отправить фальшивое объявление на 127.0.0.1:2021» — только здесь
+           отправляет сам шлюз, а не сторонний скрипт;
+        2. **свой сетевой адрес :2021** — та же доставка, но через интерфейс
+           LAN (Windows считает трафик на собственный адрес локальным и
+           брандмауэром его не режет);
+        3. **направленный broadcast x.y.z.255:2021** и **255.255.255.255:2021**
+           — как шлёт настоящий станок, чтобы Studio увидел шлюз и с другого
+           компьютера в сети;
+        4. **группа 239.255.255.250** (2021/1990/1900) — для старых клиентов
+           и сторонних искалок (OrcaSlicer, Home Assistant).
+        """
+        host = self._host_ip()
+        targets: list[tuple[str, int]] = [
+            (SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[0]),
+            (SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[2]),
+        ]
+        if host and not host.startswith("127."):
+            targets.append((host, SSDP_PORTS[0]))
+        for ip in self._local_ips():
+            targets.append((ip, SSDP_PORTS[0]))
+        directed = directed_broadcast(host)
+        if directed:
+            targets.append((directed, SSDP_PORTS[0]))
+        targets.append((SSDP_BROADCAST, SSDP_PORTS[0]))
+        targets.extend((SSDP_GROUP, port) for port in SSDP_PORTS)
+        unique: list[tuple[str, int]] = []
+        for target in targets:
+            if target not in unique:
+                unique.append(target)
+        return unique
+
     def _broadcast_notify(self) -> None:
         now = time.time()
         if now - self._last_notify < SSDP_NOTIFY_PERIOD:
             return
         self._last_notify = now
         payload = self.ssdp_notify().encode("utf-8")
-        # Станок шлёт NOTIFY широковещательно на 255.255.255.255:2021 — так
-        # его видит плагин Studio. Групповая рассылка оставлена для старых
-        # клиентов и сторонних искалок (OrcaSlicer, Home Assistant).
-        targets = [(SSDP_BROADCAST, SSDP_PORTS[0])]
-        targets.extend((SSDP_GROUP, port) for port in SSDP_PORTS)
-        for host, port in targets:
+        # Сокет один на весь цикл: объявление уходит на десяток адресов
+        # (loopback, свой адрес, broadcast, группа) — открывать по сокету на
+        # каждый адрес незачем. SO_BROADCAST нужен только широковещательным
+        # адресам, для loopback и группы он безвреден.
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        except OSError:
+            return
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        except OSError:
+            pass
+        try:
+            for host, port in self._notify_targets():
+                try:
+                    sock.sendto(payload, (host, port))
+                except OSError:
+                    # Один недостижимый адрес (например, направленный
+                    # broadcast в чужой подсети) не должен отменять остальные.
+                    continue
+        finally:
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                sock.sendto(payload, (host, port))
                 sock.close()
             except OSError:
-                continue
+                pass
 
     def _tls_context(self, cert, key):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -1206,35 +1343,62 @@ class StudioGateway:
         return ctx
 
     def _start_mqtt(self, cert, key) -> None:
-        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        raw.bind(("0.0.0.0", MQTT_PORT))
-        raw.listen(8)
-        raw.settimeout(1.0)
-        ctx = self._tls_ctx or self._tls_context(cert, key)
-        sock = ctx.wrap_socket(raw, server_side=True)
+        sock = self._listen_tcp(MQTT_PORT, 8, tls=True, cert=cert, key=key)
         self._mqtt_sock = sock
         self._spawn("pf-studio-mqtt", self._accept_loop, sock, self._mqtt_client)
 
     def _start_ftp(self, cert, key) -> None:
-        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        raw.bind(("0.0.0.0", FTP_PORT))
-        raw.listen(4)
-        raw.settimeout(1.0)
-        ctx = self._tls_ctx or self._tls_context(cert, key)
-        sock = ctx.wrap_socket(raw, server_side=True)
+        sock = self._listen_tcp(FTP_PORT, 4, tls=True, cert=cert, key=key)
         self._ftp_sock = sock
         self._spawn("pf-studio-ftps", self._accept_loop, sock, self._ftp_client)
 
+    def _note_dropped_connection(self, exc: Exception | str) -> None:
+        """Соединение отброшено (не TLS, обрыв, сбой рукопожатия) — не сбой службы."""
+        with self._lock:
+            self._counters["dropped_connections"] = int(
+                self._counters.get("dropped_connections", 0)) + 1
+        try:
+            from .logging_setup import log
+            log().debug("Шлюз Bambu Studio: соединение отброшено: %s", exc)
+        except Exception:
+            pass
+
     def _accept_loop(self, sock, handler) -> None:
+        """Приём соединений: сбой одного клиента не должен гасить службу.
+
+        accept() на TLS-розетке сам выполняет рукопожатие. Клиент, пришедший
+        без TLS (проверка «открыт ли порт», сканер сети, антивирус, оборванное
+        соединение Studio), раньше убивал цикл целиком: порт оставался в
+        состоянии LISTEN, но новых клиентов уже не принимал — Studio висела по
+        таймауту и показывала «код=-1» на исправном шлюзе. Теперь такое
+        соединение просто отбрасывается, а счётчик виден в статусе.
+        """
+        fatal_errno = {errno.EBADF, errno.EINVAL, errno.ENOTSOCK, errno.EOPNOTSUPP}
+        consecutive = 0
         while not self._stop.is_set():
             try:
                 conn, _addr = sock.accept()
             except socket.timeout:
+                consecutive = 0
                 continue
-            except OSError:
-                break
+            except (ssl.SSLError, ConnectionError) as exc:
+                # Почти всегда: клиент пришёл без TLS или оборвал рукопожатие.
+                self._note_dropped_connection(exc)
+                consecutive += 1
+                if consecutive >= 100:
+                    self._record_error("bind" if handler == self._bind_client else "mqtt",
+                                       f"приём соединений срывается: {exc}")
+                    break
+                continue
+            except OSError as exc:
+                if self._stop.is_set() or getattr(exc, "errno", None) in fatal_errno:
+                    break
+                self._note_dropped_connection(exc)
+                consecutive += 1
+                if consecutive >= 100:
+                    break
+                continue
+            consecutive = 0
             self._spawn("pf-studio-conn", handler, conn)
 
     def _mqtt_client(self, conn) -> None:

@@ -1853,6 +1853,20 @@ function renderSettings() {
           html += `<span style="display:block;margin-top:4px;color:var(--bad,#ef4444)">Studio не узна́ет шлюз: порт ${data.bind_port || 3000} не поднят —`
             + ` без него Studio отдаёт «код=-1» ещё до MQTT. Порт занят или шлюз не стартовал: смотрите ошибку ниже и журнал.</span>`;
         }
+        const targets = Array.isArray(data.ssdp_targets) ? data.ssdp_targets : [];
+        if (data.enabled && data.ssdp_running && targets.length) {
+          const viaLoopback = targets.includes('127.0.0.1:2021');
+          html += `<span style="display:block;margin-top:4px">Объявление уходит на ${targets.length} адрес(ов)`
+            + `${viaLoopback ? ', включая 127.0.0.1:2021 — Studio на этом же компьютере видит шлюз даже при включённом брандмауэре' : ''};`
+            + ` UDP :2021 шлюз не занимает (он принадлежит Studio)${data.ssdp_bound_port && data.ssdp_bound_port !== 1900 ? `, M-SEARCH слушается на :${data.ssdp_bound_port}` : ''}.</span>`;
+        }
+        if (data.ssdp_note) {
+          html += `<span style="display:block;margin-top:4px">⚠ ${esc(data.ssdp_note)}</span>`;
+        }
+        if ((data.dropped_connections || 0) > 0) {
+          html += `<span style="display:block;margin-top:4px">ℹ Отброшено соединений без TLS: ${data.dropped_connections}`
+            + ` — это проверки порта и сканеры; службы продолжают работать.</span>`;
+        }
         const fails = (data.mqtt_auth_failures || 0) + (data.ftp_auth_failures || 0);
         if (fails > 0) {
           const at = String(data.last_auth_fail_at || '').slice(11, 16);

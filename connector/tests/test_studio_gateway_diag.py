@@ -11,6 +11,7 @@ MQTT и FTP, запись сбоя старта в журнал коннекто
 """
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import shutil
@@ -52,6 +53,11 @@ class StudioCardMarkupTests(unittest.TestCase):
         self.assertIn("ssdp_running", app_js, "карточка не показывает состояние SSDP")
         self.assertIn("код не подошёл", app_js,
                       "карточка не рассказывает про отказы авторизации")
+        self.assertIn("ssdp_targets", app_js,
+                      "карточка не показывает, куда уходит объявление Studio")
+        self.assertIn("127.0.0.1:2021", app_js,
+                      "карточка не объясняет, что Studio на этом же ПК видит шлюз "
+                      "по loopback — это главный обход брандмауэра")
 
     def test_settings_form_has_pinned_host_row(self):
         app_js = (ROOT / "site" / "assets" / "app.js").read_text(encoding="utf-8")
@@ -222,13 +228,120 @@ class DiagnosticsTests(unittest.TestCase):
                             for record in captured),
                         "сбой старта не попал в журнал коннектора")
 
+    def test_status_fallback_has_the_same_fields(self):
+        """Шлюз ещё не создан — карточка всё равно получает новые поля.
+
+        Заглушка /api/studio/status должна идти нога в ногу с живым статусом,
+        иначе карточка покажет «undefined» в первые секунды после запуска.
+        """
+        from connector.tests.test_phase11 import make_api
+        api = make_api(self.db)
+        api.manager = None
+        code, payload = api.get("/api/studio/status", {})
+        self.assertEqual(200, code)
+        for key in ("ssdp_listen_ports", "ssdp_bound_port", "ssdp_note",
+                    "ssdp_targets", "dropped_connections"):
+            self.assertIn(key, payload)
+
     # ------------------------------------------------- статус без шлюза
     def test_status_payload_shape(self):
         """Статус несёт поля, которые ждёт карточка панели."""
         status = self.gw.status()
         for key in ("host", "host_pinned", "mqtt_port", "ftp_port",
-                    "last_client", "last_auth_fail_at", "errors", "last_error"):
+                    "last_client", "last_auth_fail_at", "errors", "last_error",
+                    "ssdp_listen_ports", "ssdp_bound_port", "ssdp_targets"):
             self.assertIn(key, status)
+
+
+def load_gateway_check():
+    """Импорт scripts/gateway-check.py (в имени дефис — только через spec)."""
+    import importlib.util
+    path = ROOT / "scripts" / "gateway-check.py"
+    spec = importlib.util.spec_from_file_location("gateway_check_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class GatewayCheckScriptTests(unittest.TestCase):
+    """Скрипт-диагностика — то, что владелец запускает руками после 18.7.2."""
+
+    def setUp(self):
+        self.db = make_db()
+        self.addCleanup(self.db.close)
+        self.db.set_settings({"studio_gateway_access_code": "abcd1234"})
+        self.mgr = FakeMgr(self.db)
+
+    def test_script_runs_and_prints_machine_readable_report(self):
+        """`python scripts/gateway-check.py --json` не падает и говорит по-русски."""
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "gateway-check.py"), "--json",
+             "--panel", "http://127.0.0.1:9"],
+            capture_output=True, text=True, cwd=str(ROOT), timeout=120)
+        self.assertNotIn("Traceback", result.stderr, result.stderr)
+        payload = json.loads(result.stdout)
+        names = [item["name"] for item in payload["results"]]
+        for expected in ("Панель PrintFlow", "Проба личности :3000",
+                         "Брандмауэр TCP 3000", "UDP :2021 (розетка Studio)"):
+            self.assertIn(expected, names)
+        self.assertTrue(payload["advice"], "скрипт не сказал, что делать")
+
+    def test_probe_detect_reads_a_live_gateway(self):
+        """Живая проба личности тем же кадром, что шлёт Studio.
+
+        Порты берём свободные (в песочнице 3000/3002 может занимать чужой
+        процесс), а проверяем именно протокол: кадр, ответ, серийник.
+        """
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl не найден — TLS-контекст не собрать")
+        from connector.printflow import studio_gateway as module_gw
+        from connector.tests.test_studio_gateway_bind import free_port, make_cert
+        cert, key = make_cert()
+        self.addCleanup(shutil.rmtree, cert.parent, ignore_errors=True)
+        plain_port, tls_port = free_port(), free_port()
+        gw = StudioGateway(self.db, self.mgr, bind=True)
+        self.mgr.studio = gw
+        gw._tls_ctx = gw._tls_context(cert, key)
+        with mock.patch.object(module_gw, "BIND_PORT_PLAIN", plain_port), \
+             mock.patch.object(module_gw, "BIND_PORT_TLS", tls_port):
+            gw._start_bind(cert, key)
+            self.addCleanup(gw.stop)
+            self.assertTrue(gw.status()["bind_running"],
+                            f"порты {plain_port}/{tls_port} заняты — проба невозможна")
+
+            module = load_gateway_check()
+            plain = module.probe_detect("127.0.0.1", plain_port)
+            self.assertEqual("ok", plain["state"], plain["detail"])
+            self.assertEqual(gw.identity()["serial"], plain["serial"])
+            tls = module.probe_detect("127.0.0.1", tls_port, tls=True)
+            self.assertEqual("ok", tls["state"], tls["detail"])
+        self.assertEqual("free", (gw.bind_reply({"login": {"command": "detect"}})
+                                  or {}).get("login", {}).get("bind"))
+
+    def test_probe_ssdp_and_studio_socket_are_reported(self):
+        """M-SEARCH доходит, а UDP 2021 шлюз не занимает — его розетка у Studio."""
+        module = load_gateway_check()
+        gw = StudioGateway(self.db, self.mgr, bind=True)
+        self.mgr.studio = gw
+        gw._start_ssdp()
+        self.addCleanup(gw.stop)
+        answer = module.probe_ssdp("127.0.0.1", timeout=2.0)
+        self.assertEqual("ok", answer["state"], answer["detail"])
+        socket_state = module.port_2021_state()
+        self.assertEqual("ok", socket_state["state"])
+        self.assertNotIn(2021, gw.status()["ssdp_listen_ports"])
+
+    def test_advice_names_the_real_cause(self):
+        """Вердикт скрипта указывает на порт 3000, а не на Access Code."""
+        module = load_gateway_check()
+        results = [
+            ("Проба личности :3000", {"state": "bad", "detail": "connection refused"}),
+            ("Панель PrintFlow", {"state": "warn", "detail": "не ответила"}),
+        ]
+        advice = " ".join(module.speech(results))
+        self.assertIn("3000", advice)
+        self.assertIn("код=-1", advice)
 
 
 if __name__ == "__main__":
