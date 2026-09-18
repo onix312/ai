@@ -225,31 +225,53 @@ class StudioGateway:
 
     # ----------------------------------------------------------- настройки
     def _enabled(self) -> bool:
-        return bool(self.db.setting("studio_gateway_enabled", False))
+        try:
+            return bool(self.db.setting("studio_gateway_enabled", False))
+        except Exception:
+            return False
 
     def _access_code(self) -> str:
-        return str(self.db.setting("studio_gateway_access_code", "") or "")
+        try:
+            return str(self.db.setting("studio_gateway_access_code", "") or "")
+        except Exception:
+            return ""
 
     def _autostart_allowed(self) -> bool:
-        mode = str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
-        return (
-            mode == "autostart"
-            and bool(self.db.setting("studio_gateway_autostart", False))
-            and bool(self.db.setting("unattended_dangerous_actions", False))
-        )
+        try:
+            mode = str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
+            return (
+                mode == "autostart"
+                and bool(self.db.setting("studio_gateway_autostart", False))
+                and bool(self.db.setting("unattended_dangerous_actions", False))
+            )
+        except Exception:
+            return False
 
     def _mode(self) -> str:
-        return str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
+        try:
+            return str(self.db.setting("studio_gateway_mode", "confirm") or "confirm").strip().lower()
+        except Exception:
+            return "confirm"
 
     def _ensure_identity(self) -> None:
-        serial = str(self.db.setting("studio_gateway_serial", "") or "").strip()
+        try:
+            serial = str(self.db.setting("studio_gateway_serial", "") or "").strip()
+        except Exception:
+            return
         patch: dict[str, object] = {}
         if not serial:
             patch["studio_gateway_serial"] = _new_serial()
-        if not self._access_code():
+        try:
+            need_code = not self._access_code()
+        except Exception:
+            need_code = False
+        if need_code:
             patch["studio_gateway_access_code"] = secrets.token_hex(4)
         if patch:
-            self.db.set_settings(patch)
+            try:
+                self.db.set_settings(patch)
+            except Exception:
+                pass
 
     def _host_ip(self) -> str:
         pinned = self._pinned_host()
@@ -276,8 +298,13 @@ class StudioGateway:
         в get_local_ips(), Studio получает их в SSDP и подключается не туда.
         Непохожее на IPv4 значение игнорируется, но попадает в диагностику.
         """
-        raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        try:
+            raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        except Exception:
+            return ""
         if not raw:
+            # пустая настройка — сбрасываем прошлую ошибку хоста, если она была
+            self._errors.pop("host", None)
             return ""
         parts = raw.split(".")
         ok = len(parts) == 4
@@ -297,7 +324,10 @@ class StudioGateway:
     def _bound_printer(self):
         if not self.manager or not hasattr(self.manager, "get"):
             return None
-        pid = str(self.db.setting("studio_gateway_printer_id", "") or "").strip()
+        try:
+            pid = str(self.db.setting("studio_gateway_printer_id", "") or "").strip()
+        except Exception:
+            pid = ""
         if pid:
             return self.manager.get(pid)
         try:
@@ -323,17 +353,39 @@ class StudioGateway:
 
     def identity(self) -> dict:
         """Публичная личность шлюза. Access Code сюда не входит."""
-        self._ensure_identity()
-        model = self._printer_model()
-        serial = str(self.db.setting("studio_gateway_serial", "") or "").strip()
-        name = str(self.db.setting("studio_gateway_name", "NOZZA-PrintFlow")
-                   or "NOZZA-PrintFlow").strip() or "NOZZA-PrintFlow"
+        try:
+            self._ensure_identity()
+        except Exception:
+            pass
+        try:
+            model = self._printer_model()
+        except Exception:
+            model = "P1S"
+        try:
+            serial = str(self.db.setting("studio_gateway_serial", "") or "").strip()
+        except Exception:
+            # БД закрыта (завершение процесса / тест) — не роняем SSDP-поток.
+            # Серийник остаётся прежним; если его не знаем — временный, без записи в БД.
+            serial = ""
+        try:
+            name = str(self.db.setting("studio_gateway_name", "NOZZA-PrintFlow")
+                       or "NOZZA-PrintFlow").strip() or "NOZZA-PrintFlow"
+        except Exception:
+            name = "NOZZA-PrintFlow"
+        if not serial:
+            # В нормальном старте сюда не попадаем: _ensure_identity уже создала серийник.
+            # При закрытой БД возвращаем временный, чтобы объявление не было пустым.
+            serial = _new_serial()
+        try:
+            host = self._host_ip()
+        except Exception:
+            host = "127.0.0.1"
         return {
             "serial": serial,
             "name": name,
             "model": model,
             "dev_model": _dev_model(model),
-            "host": self._host_ip(),
+            "host": host,
             "mqtt_port": MQTT_PORT,
             "ftp_port": FTP_PORT,
             "bind_port": BIND_PORT_PLAIN,
@@ -375,12 +427,44 @@ class StudioGateway:
             pass
 
     def status(self) -> dict:
-        ident = self.identity()
-        pinned_raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        # identity может упасть на закрытой БД — статус всё равно отдаём, без падения карточки.
+        try:
+            ident = self.identity()
+        except Exception:
+            ident = {
+                "serial": "", "name": "NOZZA-PrintFlow", "model": "P1S", "dev_model": "C12",
+                "host": "127.0.0.1", "mqtt_port": MQTT_PORT, "ftp_port": FTP_PORT,
+                "bind_port": BIND_PORT_PLAIN, "version": FIRMWARE_VERSION,
+            }
+        try:
+            pinned_raw = str(self.db.setting("studio_gateway_host", "") or "").strip()
+        except Exception:
+            pinned_raw = ""
         with self._lock:
             counters = dict(self._counters)
             last_client = self._last_client
             last_auth_fail_at = self._last_auth_fail_at
+        # настройки — каждая с защитой от закрытой БД
+        try:
+            mode = str(self.db.setting("studio_gateway_mode", "queue") or "queue")
+        except Exception:
+            mode = "queue"
+        try:
+            autostart = bool(self.db.setting("studio_gateway_autostart", False))
+        except Exception:
+            autostart = False
+        try:
+            printer_id = str(self.db.setting("studio_gateway_printer_id", "") or "")
+        except Exception:
+            printer_id = ""
+        try:
+            ssdp_targets = [f"{host}:{port}" for host, port in self._notify_targets()]
+        except Exception:
+            ssdp_targets = [f"{SSDP_NOTIFY_LOOPBACK}:{SSDP_PORTS[0]}"]
+        try:
+            has_code = bool(self._access_code())
+        except Exception:
+            has_code = False
         out = {
             "enabled": self._enabled(),
             "running": bool(self._mqtt_sock or self._ftp_sock or self._ssdp_sock
@@ -389,10 +473,10 @@ class StudioGateway:
             "ftp_running": bool(self._ftp_sock),
             "ssdp_running": bool(self._ssdp_sock),
             "bind": self.bind,
-            "mode": str(self.db.setting("studio_gateway_mode", "queue") or "queue"),
-            "autostart": bool(self.db.setting("studio_gateway_autostart", False)),
+            "mode": mode,
+            "autostart": autostart,
             "autostart_allowed": self._autostart_allowed(),
-            "printer_id": str(self.db.setting("studio_gateway_printer_id", "") or ""),
+            "printer_id": printer_id,
             "mqtt_port": MQTT_PORT,
             "ftp_port": FTP_PORT,
             "bind_port": BIND_PORT_PLAIN,
@@ -406,7 +490,7 @@ class StudioGateway:
             "ssdp_listen_ports": list(SSDP_LISTEN_PORTS),
             "ssdp_bound_port": int(self._ssdp_bound_port),
             "ssdp_note": self._ssdp_note,
-            "ssdp_targets": [f"{host}:{port}" for host, port in self._notify_targets()],
+            "ssdp_targets": ssdp_targets,
             "last_error": self.last_error,
             "errors": {key: value for key, value in self._errors.items() if value},
             "host_pinned": bool(pinned_raw),
@@ -416,7 +500,7 @@ class StudioGateway:
             "ftp_auth_failures": int(counters.get("ftp_auth_failures", 0)),
             "last_client": last_client,
             "last_auth_fail_at": last_auth_fail_at,
-            "has_access_code": bool(self._access_code()),
+            "has_access_code": has_code,
             "urn": SSDP_NT,
         }
         out.update(ident)
@@ -504,7 +588,11 @@ class StudioGateway:
             mapping = []
             filaments = estimate.get("filaments") or []
             printer = self._bound_printer()
-            if filaments and printer and bool(self.db.setting("ams_auto_map", True)):
+            try:
+                ams_auto = bool(self.db.setting("ams_auto_map", True))
+            except Exception:
+                ams_auto = True
+            if filaments and printer and ams_auto:
                 try:
                     snap = printer.snapshot()
                     trays = ((snap.get("ams") or {}).get("trays") or [])
@@ -515,7 +603,10 @@ class StudioGateway:
         printer_id = ""
         if printer:
             printer_id = str((getattr(printer, "record", {}) or {}).get("id") or "")
-        setting_pid = str(self.db.setting("studio_gateway_printer_id", "") or "").strip()
+        try:
+            setting_pid = str(self.db.setting("studio_gateway_printer_id", "") or "").strip()
+        except Exception:
+            setting_pid = ""
         if setting_pid:
             printer_id = setting_pid
         mode = self._mode()
@@ -1222,13 +1313,20 @@ class StudioGateway:
 
     def _ssdp_loop(self, sock) -> None:
         while not self._stop.is_set():
+            # Рассылка объявления — не должна ронять цикл при ошибке БД/кодирования.
             try:
                 self._broadcast_notify()
+            except Exception:
+                # _broadcast_notify уже логирует, но падение потока недопустимо
+                pass
+            try:
                 data, addr = sock.recvfrom(4096)
             except socket.timeout:
                 continue
             except OSError:
                 break
+            except Exception:
+                continue
             text = data.decode("utf-8", "replace")
             if "M-SEARCH" not in text:
                 continue
@@ -1236,7 +1334,7 @@ class StudioGateway:
                 continue
             try:
                 sock.sendto(self.ssdp_search_response().encode("utf-8"), addr)
-            except OSError:
+            except (OSError, Exception):
                 continue
 
     def _local_ips(self) -> list[str]:
@@ -1302,7 +1400,11 @@ class StudioGateway:
         if now - self._last_notify < SSDP_NOTIFY_PERIOD:
             return
         self._last_notify = now
-        payload = self.ssdp_notify().encode("utf-8")
+        try:
+            payload = self.ssdp_notify().encode("utf-8")
+        except Exception:
+            # БД закрыта или другая ошибка — пропустим этот цикл, но не роняем SSDP
+            return
         # Сокет один на весь цикл: объявление уходит на десяток адресов
         # (loopback, свой адрес, broadcast, группа) — открывать по сокету на
         # каждый адрес незачем. SO_BROADCAST нужен только широковещательным
