@@ -360,7 +360,6 @@ class TelegramSensorsDoctorTests(unittest.TestCase):
         self.assertIn("схема", text)
 
     def test_doctor_flags_silent_bot_and_stale_backup(self):
-        import time as _time
         from datetime import datetime as _dt, timedelta as _td
         from unittest import mock as _mock
         self.bot.last_poll = 0.0

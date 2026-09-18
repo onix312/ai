@@ -64,7 +64,7 @@ class Route:
     method: str
     kind: str = "handler"
     # late_answer: маршрутизатор не отвечает за нажатие заранее — обработчик
-    # сам говорит谢谢 toast с текстом (отказ роли у «goto» обязан быть видим).
+    # сам показывает toast с текстом (отказ роли у «goto» обязан быть видим).
     late_answer: bool = False
 
 

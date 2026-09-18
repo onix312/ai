@@ -1,5 +1,4 @@
 """Тесты 3D-визуализации (релиз 12.5.0)."""
-import json
 import unittest
 from pathlib import Path
 

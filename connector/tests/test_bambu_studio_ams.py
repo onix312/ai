@@ -15,14 +15,12 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.materials import (  # noqa: E402
-    BAMBU_FILAMENT_PRESETS,
     bambu_filament_preset,
     normalize_bambu_material_key,
 )

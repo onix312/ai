@@ -11,7 +11,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -152,9 +152,8 @@ class BankReceiptsTests(unittest.TestCase):
 
     def test_manual_link_and_confirm(self):
         order(self.db)
-        p = self._payment(1000)
+        self._payment(1000)
         self.bank.ingest([{"at": self._now(), "amount": 1000, "purpose": "Перевод"}])
-        receipt = self.db.one("SELECT * FROM bank_receipts")
         # уже подтверждено авто — для ручного сценария сделаем новый
         order(self.db, id="o2", number="1002", paid=0)
         p2 = self._payment(500, order_id="o2")

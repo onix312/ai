@@ -1,5 +1,4 @@
 import unittest
-from connector.printflow.db import Database
 from connector.printflow.repo import Repo
 from connector.printflow.accounting import Accounting
 from connector.printflow.shopping import ShoppingList

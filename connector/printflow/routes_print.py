@@ -46,7 +46,7 @@ def _int_param(ctx: Ctx, name: str, default: int, low: int, high: int) -> int:
 
 @router.get("/api/print/forms", doc="Каталог печатных форм: бумага, размер, источник")
 def get_print_forms(api: Any, ctx: Ctx):
-    from .printing import FORMS, groups
+    from .printing import groups
 
     group = ctx.one("group")
     if group and group not in groups():

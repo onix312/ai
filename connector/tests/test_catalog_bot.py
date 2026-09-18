@@ -147,7 +147,7 @@ class CatalogCommandTests(unittest.TestCase):
     # -------------------------------------------------------------- витрина
     def test_hide_and_show_item(self):
         self._dispatch("товар Адресник 900р")
-        nom = self._nom_row("Адресник")
+        self._nom_row("Адресник")
         self._dispatch("показать адресник")
         self.assertEqual(int(self._nom_row("Адресник")["client_bot_published"]), 1)
         self._dispatch("скрыть адресник")
@@ -343,7 +343,6 @@ class CatalogCallbackTests(unittest.TestCase):
     def test_recalc_all_asks_confirmation(self):
         ask = self._callback("cmd:cat-recalc:all")[0]
         self.assertIn("Пересчитать цены", ask["text"])
-        answer = self.replies[-1] if self.replies else ""
         self._callback("cmd:cat-recalc:allgo")
         self.assertTrue(any("Пересчёт" in r for r in self.replies), self.replies)
 

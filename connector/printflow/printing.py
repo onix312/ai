@@ -392,7 +392,8 @@ def warranty_html(db: Database, order_id: str, customer_id: str = "") -> str:
         f'<div class="wt-sign"><span>Выдал</span><span>Получил</span></div>'
         f'</div>{pf.ruler()}'
     )
-    return pf.page(f"Гарантийный талон — заказ №{number}", body, margin="14mm")
+    return pf.page(f"Гарантийный талон — заказ №{number}", body, css=css,
+                   margin="14mm")
 
 
 # ---------------------------------------------------------------- таблички цеха

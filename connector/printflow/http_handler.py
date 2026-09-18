@@ -21,17 +21,14 @@ import json
 import mimetypes
 import re
 import sqlite3
-import threading
 import time
 import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler
 from typing import TYPE_CHECKING
 
-from . import static_serve
-from .config import now_iso
+from . import config, static_serve
 from .accounting import num
-from .config import PHOTO_DIR, SITE, ensure_dirs, now_iso
+from .config import now_iso
 from .db import friendly_sqlite_error
 from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
                            STREAM_DISCONNECT_ERRORS, begin_request,
@@ -290,8 +287,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
 
     def serve_photo_file(self, name: str):
-        from .config import PHOTO_DIR
-        target = safe_file(PHOTO_DIR, name) if name else None
+        target = safe_file(config.PHOTO_DIR, name) if name else None
         if not target or not target.is_file():
             return self.send_json(404, {"error": "Фото не найдено"})
         data = target.read_bytes()
@@ -335,8 +331,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
     # ------------------------------------------------ 8.5: вспомогательные
     def serve_keyframe(self, job_id: str, name: str):
         """Кейфрейм видео печати (идея 61)."""
-        from .config import PHOTO_DIR
-        d = (PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
+        d = (config.PHOTO_DIR / "keyframes" / str(job_id)) if job_id else None
         if not d or not d.is_dir() or "/" in name or "\\" in name or name.startswith("."):
             return self.send_json(400, {"error": "Недопустимый файл"})
         f = d / name
@@ -416,9 +411,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
 
     def serve_bed_reference(self):
         """Эталон пустого стола — фон для калибровки проекции (119)."""
-        from .config import PHOTO_DIR
-
-        target = PHOTO_DIR / "bed_reference.jpg"
+        target = config.PHOTO_DIR / "bed_reference.jpg"
         if not target.is_file():
             return self.send_json(404, {"error": "Эталон стола не снят — нажмите «Пустой стол» на вкладке принтера"})
         try:
@@ -431,7 +424,6 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         """Экспорт катушек склада в ZIP-архив с JSON-пресетами для Bambu Studio / OrcaSlicer."""
         import io
         import zipfile
-        import re
         from .materials import generate_bambu_studio_filament_preset
 
         spools = self.api.repo.spools(include_archived=False)
@@ -514,7 +506,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
             return self.send_json(403, {"error": "Запрос отклонён: посторонний источник"})
         # 14.0 (идеи 5, 11, 34): контекст запроса, ограничение частоты и
         # идемпотентность. Всё на входе в обработчик, а не внутри веток.
-        request_id = begin_request(self, "POST", path)
+        begin_request(self, "POST", path)
         try:
             bucket = rate_bucket(path)
             if bucket:

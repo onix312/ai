@@ -237,7 +237,7 @@ class BatchLauncherTests(unittest.TestCase):
     def test_errors_point_to_the_right_command(self):
         import pf
 
-        self.assertIn(f'%PY% "pf.py"', self.text)
+        self.assertIn('%PY% "pf.py"', self.text)
         for hint in ("doctor", "net"):
             with self.subTest(hint=hint):
                 self.assertIn(f"pf.py {hint}", self.text)

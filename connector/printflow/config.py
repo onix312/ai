@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
+import struct
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -603,57 +606,596 @@ def rotate_backups(directory: Path = BACKUP_DIR,
     return removed
 
 
+# ---------------------------------------------------------------------------
+# Сетевые интерфейсы: LAN против VPN
+#
+# Зачем это нужно. Раньше адреса машины угадывались через «подключиться к
+# 8.8.8.8 и посмотреть, какой источник выбрало ядро». С поднятым VPN
+# (WireGuard, OpenVPN, Tailscale, Amnezia, Pangolin) ядро выбирает туннель:
+# у PrintFlow «появлялся» адрес 10.0.0.1/30, он уходил в SSDP-объявление и в
+# PASV, Bambu Studio пыталась достучаться до 10.0.0.1 — и отдавала «код=-1»,
+# хотя руками порт 3000 пробивался. Обратная сторона той же ошибки: настоящий
+# LAN-адрес (192.168.0.108/24) не находился вовсе, потому что перечислением
+# интерфейсов никто не занимался.
+#
+# Поэтому адреса здесь ПЕРЕЧИСЛЯЮТСЯ вместе с именем интерфейса и длиной
+# префикса, а затем фильтруются. Отбрасываются:
+#
+#   * loopback (127/8) и 0.0.0.0;
+#   * APIPA 169.254/16 — DHCP не выдал адрес, LAN нерабочая;
+#   * multicast и broadcast (224/4 и выше);
+#   * туннельные интерфейсы: tun*, tap*, utun*, wg*, WireGuard, OpenVPN,
+#     Tailscale, ZeroTier, PPP/L2TP/PPTP, а также виртуальные мосты
+#     Docker/Hyper-V/VirtualBox/VMware/WSL — SSDP-объявление в них уходит
+#     в никуда, а Studio получает адрес, по которому принтера нет;
+#   * любой префикс /30, /31, /32 — это точка-точка (туннель или аплинк
+#     провайдера), а не сегмент LAN: широковещательного адреса там нет,
+#     значит и SSDP там работать не может. Именно так выглядит 10.0.0.1/30.
+# ---------------------------------------------------------------------------
+
+# Признаки туннельных и виртуальных интерфейсов (регистр не важен).
+VPN_IFACE_TOKENS = (
+    "tun", "tap", "utun", "wg", "wireguard", "openvpn", "ovpn", "tailscale",
+    "zerotier", "nordlynx", "mullvad", "protonvpn", "amnezia", "outline",
+    "ppp", "l2tp", "pptp", "sstp", "ipsec", "vpn",
+    "docker", "veth", "br-", "virbr", "vboxnet", "vmnet", "venet",
+    "vethernet", "hyper-v", "virtualbox", "vmware", "wsl", "loopback",
+)
+# /30 и уже — точка-точка: ни широковещательного адреса, ни SSDP.
+POINT_TO_POINT_PREFIX = 30
+# Диапазон CGNAT 100.64/10 (Tailscale и подобные): держим в самом конце
+# списка — для владельца «издалека» такой адрес лучше, чем ничего.
+CGNAT_PRIORITY = 3
+_INTERFACE_CACHE: dict[str, object] = {"at": 0.0, "items": []}
+_INTERFACE_CACHE_TTL = 30.0
+
+
+def _ipv4_parts(ip: str) -> tuple[int, int, int, int] | None:
+    """Четыре октета IPv4 или None, если значение адресом не является."""
+    parts = str(ip or "").strip().split(".")
+    if len(parts) != 4:
+        return None
+    values: list[int] = []
+    for part in parts:
+        if not part.isdigit() or not 0 <= int(part) <= 255:
+            return None
+        values.append(int(part))
+    return (values[0], values[1], values[2], values[3])
+
+
+def _is_ipv4(ip: str) -> bool:
+    return _ipv4_parts(ip) is not None
+
+
+def is_vpn_interface(name: str) -> bool:
+    """True, если имя/описание интерфейса похоже на туннель или виртуальный мост."""
+    text = str(name or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in VPN_IFACE_TOKENS)
+
+
+def _netmask_to_prefix(mask: str) -> int:
+    """``0xffffff00`` / ``255.255.255.0`` → 24. Ноль, если не разобрать."""
+    text = str(mask or "").strip()
+    try:
+        if text.lower().startswith("0x"):
+            return bin(int(text, 16)).count("1")
+        parts = _ipv4_parts(text)
+        if parts:
+            value = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+            return bin(value).count("1")
+    except ValueError:
+        pass
+    return 0
+
+
+def _iface_index_name(index: int) -> str:
+    try:
+        return socket.if_indextoname(int(index))
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def _netlink_addresses() -> list[dict]:
+    """IPv4-адреса Linux через netlink (без внешних команд и зависимостей)."""
+    RTM_GETADDR, RTM_NEWADDR = 22, 20
+    NLM_F_REQUEST, NLM_F_ROOT, NLM_F_MATCH = 1, 0x100, 0x200
+    NLMSG_ERROR, NLMSG_DONE = 2, 3
+    IFA_ADDRESS, IFA_LOCAL, IFA_LABEL = 1, 2, 3
+    sock = socket.socket(socket.AF_NETLINK, socket.SOCK_DGRAM, socket.NETLINK_ROUTE)
+    items: list[dict] = []
+    try:
+        sock.bind((0, 0))
+        sock.settimeout(2.0)
+        body = struct.pack("=BHBBi", socket.AF_INET, 0, 0, 0, 0)
+        header = struct.pack("=IHHII", 16 + len(body), RTM_GETADDR,
+                             NLM_F_REQUEST | NLM_F_ROOT | NLM_F_MATCH, 1, 0)
+        sock.send(header + body)
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            offset, finished = 0, False
+            while offset + 16 <= len(chunk):
+                length, mtype = struct.unpack_from("=IH", chunk, offset)[:2]
+                if length < 16 or offset + length > len(chunk):
+                    break
+                if mtype in (NLMSG_DONE, NLMSG_ERROR):
+                    finished = True
+                    break
+                if mtype == RTM_NEWADDR:
+                    payload = chunk[offset + 16:offset + length]
+                    family, prefix = struct.unpack_from("=BB", payload, 0)
+                    index = struct.unpack_from("=i", payload, 4)[0]
+                    attrs: dict[int, bytes] = {}
+                    pos = 8
+                    while pos + 4 <= len(payload):
+                        rta_len, rta_type = struct.unpack_from("=HH", payload, pos)
+                        if rta_len < 4:
+                            break
+                        attrs[rta_type] = payload[pos + 4:pos + rta_len]
+                        pos += (rta_len + 3) & ~3
+                    raw = attrs.get(IFA_LOCAL) or attrs.get(IFA_ADDRESS) or b""
+                    if family == socket.AF_INET and len(raw) >= 4:
+                        label = attrs.get(IFA_LABEL, b"").split(b"\x00")[0]
+                        items.append({
+                            "name": label.decode("utf-8", "replace") or _iface_index_name(index),
+                            "ip": socket.inet_ntoa(raw[:4]),
+                            "prefix": int(prefix),
+                            "index": int(index),
+                        })
+                offset += (length + 3) & ~3
+            if finished:
+                break
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+    return items
+
+
+def _linux_interfaces() -> list[dict]:
+    """Адреса Linux: netlink, запасной вариант — команда ``ip``."""
+    try:
+        items = _netlink_addresses()
+        if items:
+            return items
+    except (OSError, struct.error, AttributeError):
+        pass
+    binary = "ip"
+    try:
+        proc = subprocess.run([binary, "-o", "-4", "addr", "show"],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    items = []
+    for line in (proc.stdout or "").splitlines():
+        fields = line.replace("\\", " ").split()
+        if "inet" not in fields:
+            continue
+        name = fields[1] if len(fields) > 1 else ""
+        spot = fields.index("inet")
+        value = fields[spot + 1] if spot + 1 < len(fields) else ""
+        ip, _slash, prefix = value.partition("/")
+        items.append({"name": name, "ip": ip,
+                      "prefix": int(prefix) if prefix.isdigit() else 0})
+    return items
+
+
+def _windows_interfaces() -> list[dict]:
+    """Адреса Windows: Get-NetIPAddress + Get-NetAdapter одним вызовом.
+
+    Имя адаптера и его описание нужны, чтобы отличить «WireGuard Tunnel» от
+    «Realtek PCIe GbE»: адрес 10.x может быть и настоящей LAN, и туннелем.
+    Вывод переводим в UTF-8 — на русской Windows консоль иначе отдаёт cp866,
+    и JSON с кириллическими именами адаптеров не разбирается.
+    """
+    script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+        "$a=Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,"
+        "PrefixLength,InterfaceAlias,InterfaceIndex;"
+        "$n=Get-NetAdapter | Select-Object ifIndex,Name,InterfaceDescription,Status;"
+        "@{ip=$a;ad=$n} | ConvertTo-Json -Compress -Depth 4"
+    )
+    powershell = "powershell.exe" if os.name == "nt" else "powershell"
+    raw = b""
+    for command in (
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", script],
+    ):
+        try:
+            proc = subprocess.run(command, capture_output=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode == 0 and (proc.stdout or b"").strip():
+            raw = proc.stdout
+            break
+    if not raw:
+        return []
+    text = ""
+    for encoding in ("utf-8", "cp1251", "cp866"):
+        try:
+            text = raw.decode(encoding, "strict")
+            break
+        except UnicodeDecodeError:
+            continue
+    if not text:
+        text = raw.decode("utf-8", "replace")
+    try:
+        data = json.loads(text[text.find("{"):text.rfind("}") + 1] or "{}")
+    except (ValueError, json.JSONDecodeError):
+        return []
+
+    def as_list(value) -> list:
+        if value is None:
+            return []
+        return value if isinstance(value, list) else [value]
+
+    adapters: dict[str, dict] = {}
+    for adapter in as_list(data.get("ad")):
+        if not isinstance(adapter, dict):
+            continue
+        index = str(adapter.get("ifIndex") or "")
+        if index:
+            adapters[index] = adapter
+    items: list[dict] = []
+    for entry in as_list(data.get("ip")):
+        if not isinstance(entry, dict):
+            continue
+        ip = str(entry.get("IPAddress") or "").strip()
+        if not _is_ipv4(ip):
+            continue
+        index = str(entry.get("InterfaceIndex") or "")
+        adapter = adapters.get(index, {})
+        alias = str(entry.get("InterfaceAlias") or "").strip()
+        name = alias or str(adapter.get("Name") or "").strip()
+        description = str(adapter.get("InterfaceDescription") or "").strip()
+        prefix = entry.get("PrefixLength")
+        items.append({
+            # Имя и описание склеиваются: VPN-адаптер узнаётся и по «tun0»,
+            # и по «WireGuard Tunnel», и по «TAP-Windows Adapter V9».
+            "name": " ".join(part for part in (name, description) if part),
+            "iface": name,
+            "ip": ip,
+            "prefix": int(prefix) if str(prefix).isdigit() else 0,
+            "status": str(adapter.get("Status") or ""),
+        })
+    return items
+
+
+def _bsd_interfaces() -> list[dict]:
+    """Адреса macOS/BSD: разбор ``ifconfig -a`` (имя + inet + netmask)."""
+    try:
+        proc = subprocess.run(["ifconfig", "-a"], capture_output=True,
+                              text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    items: list[dict] = []
+    name = ""
+    for line in (proc.stdout or "").splitlines():
+        if not line:
+            continue
+        if not line[0].isspace():
+            name = line.split(":", 1)[0].strip()
+            continue
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "inet" and _is_ipv4(fields[1]):
+            prefix = 0
+            if "netmask" in fields:
+                prefix = _netmask_to_prefix(fields[fields.index("netmask") + 1])
+            items.append({"name": name, "ip": fields[1], "prefix": prefix})
+    return items
+
+
+def _route_default_interface() -> str:
+    """Имя интерфейса, через который идёт маршрут по умолчанию ('' — неизвестно)."""
+    if sys.platform.startswith("linux"):
+        try:
+            text = Path("/proc/net/route").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+        for line in text.splitlines()[1:]:
+            fields = line.split()
+            if len(fields) > 1 and fields[1] == "00000000":
+                return fields[0]
+        return ""
+    if os.name == "nt":
+        try:
+            proc = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                 "$ErrorActionPreference='SilentlyContinue';"
+                 "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+                 "(Get-NetRoute -DestinationPrefix 0.0.0.0/0 | "
+                 "Sort-Object RouteMetric | Select-Object -First 1)."
+                 "InterfaceAlias"],
+                capture_output=True, timeout=15)
+            return (proc.stdout or b"").decode("utf-8", "replace").strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    try:
+        proc = subprocess.run(["route", "-n", "get", "default"],
+                              capture_output=True, text=True, timeout=5)
+        for line in (proc.stdout or "").splitlines():
+            if "interface:" in line:
+                return line.split("interface:", 1)[1].strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def _probe_addresses() -> list[dict]:
+    """Запасной способ: источник, который ядро выбирает для внешнего адреса.
+
+    Префикс здесь неизвестен (0), поэтому такие адреса принимаются только из
+    частных диапазонов LAN и только если их нет среди адресов туннелей.
+    """
+    found: list[dict] = []
+    for target in (("8.8.8.8", 80), ("1.1.1.1", 80), ("192.168.1.1", 80)):
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(0.8)
+            sock.connect(target)
+            ip = sock.getsockname()[0]
+            if _is_ipv4(ip):
+                found.append({"name": "", "ip": ip, "prefix": 0, "probe": True})
+        except OSError:
+            continue
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if _is_ipv4(ip):
+                found.append({"name": socket.gethostname(), "ip": ip,
+                              "prefix": 0, "probe": True})
+    except OSError:
+        pass
+    return found
+
+
+def network_interfaces(use_cache: bool = True) -> list[dict]:
+    """Все IPv4-адреса машины: ``{name, ip, prefix}`` по каждому интерфейсу.
+
+    Список кэшируется на 30 секунд: перечисление в Windows — это вызов
+    PowerShell (~0.5 с), а адреса спрашивают и SSDP-рассылка, и карточка
+    настроек, и генератор QR-кодов.
+    """
+    now = time.time()
+    cached = _INTERFACE_CACHE.get("items") or []
+    if use_cache and cached and now - float(_INTERFACE_CACHE.get("at") or 0.0) \
+            < _INTERFACE_CACHE_TTL:
+        return list(cached)  # type: ignore[arg-type]
+    if os.name == "nt":
+        items = _windows_interfaces()
+    elif sys.platform.startswith("linux"):
+        items = _linux_interfaces()
+    else:
+        items = _bsd_interfaces()
+    if not items:
+        items = _probe_addresses()
+    else:
+        # Туннельные адреса уже перечислены; пробуем только то, чего нет.
+        known = {item["ip"] for item in items}
+        items.extend(entry for entry in _probe_addresses()
+                     if entry["ip"] not in known)
+    _INTERFACE_CACHE["items"] = items
+    _INTERFACE_CACHE["at"] = now
+    return list(items)
+
+
+def reset_interface_cache() -> None:
+    """Сбросить кэш интерфейсов (тесты, смена сети, подключение VPN)."""
+    _INTERFACE_CACHE["items"] = []
+    _INTERFACE_CACHE["at"] = 0.0
+
+
+def _address_priority(ip: str, prefix: int, name: str) -> int | None:
+    """Приоритет адреса для LAN-анонса; None — адрес не годится.
+
+    Порядок тот же, что и раньше (192.168 → 10 → 172.16-31 → CGNAT), но
+    туннели и точка-точка теперь отсеиваются до сортировки.
+    """
+    parts = _ipv4_parts(ip)
+    if parts is None:
+        return None
+    first, second = parts[0], parts[1]
+    if first in (0, 127) or first >= 224:
+        return None                      # loopback, «все сети», multicast
+    if first == 169 and second == 254:
+        return None                      # APIPA: DHCP не выдал адрес
+    if prefix and prefix >= POINT_TO_POINT_PREFIX:
+        return None                      # /30, /31, /32 — туннель, не LAN
+    if is_vpn_interface(name):
+        return None
+    if first == 192 and second == 168:
+        return 0
+    if first == 10:
+        return 1
+    if first == 172 and 16 <= second <= 31:
+        return 2
+    if first == 100 and 64 <= second <= 127:
+        return CGNAT_PRIORITY            # Tailscale и прочий CGNAT
+    return None                          # публичный адрес в LAN не анонсируем
+
+
+def lan_addresses(interfaces: list[dict] | None = None) -> list[str]:
+    """IPv4-адреса, годные для LAN: без VPN, без точка-точка, без APIPA."""
+    items = list(interfaces) if interfaces is not None else network_interfaces()
+
+    def key(entry: dict):
+        priority = _address_priority(str(entry.get("ip") or ""),
+                                     int(entry.get("prefix") or 0),
+                                     str(entry.get("name") or ""))
+        return (priority if priority is not None else 99, str(entry.get("ip")))
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for entry in sorted(items, key=key):
+        priority = _address_priority(str(entry.get("ip") or ""),
+                                     int(entry.get("prefix") or 0),
+                                     str(entry.get("name") or ""))
+        if priority is None:
+            continue
+        ip = str(entry["ip"])
+        if ip in seen:
+            continue
+        seen.add(ip)
+        result.append(ip)
+    return result
+
+
+def vpn_addresses(interfaces: list[dict] | None = None) -> list[dict]:
+    """Адреса, которые LAN-анонс обязан пропустить, с причиной отбраковки.
+
+    Нужны для диагностики: владелец должен видеть, ЧТО именно перехватило
+    сеть (``tun0 10.0.0.1/30``), а не догадываться по «код=-1».
+    """
+    items = list(interfaces) if interfaces is not None else network_interfaces()
+    found: list[dict] = []
+    for entry in items:
+        ip = str(entry.get("ip") or "")
+        prefix = int(entry.get("prefix") or 0)
+        name = str(entry.get("name") or "")
+        if _ipv4_parts(ip) is None:
+            continue
+        if _address_priority(ip, prefix, name) is not None:
+            continue
+        if ip.startswith("127.") or ip.startswith("0."):
+            continue                     # loopback — не «перехват», а норма
+        reason = ""
+        if is_vpn_interface(name):
+            reason = "туннельный/виртуальный интерфейс"
+        elif prefix and prefix >= POINT_TO_POINT_PREFIX:
+            reason = f"префикс /{prefix} — точка-точка, не сегмент LAN"
+        elif ip.startswith("169.254."):
+            reason = "APIPA: адрес не выдан DHCP"
+        else:
+            reason = "не частный LAN-диапазон"
+        found.append({"name": name or "?", "ip": ip, "prefix": prefix,
+                      "reason": reason})
+    return found
+
+
+def subnet_of(ip: str, prefix: int = 24) -> str:
+    """Сеть адреса: ``192.168.0.108`` → ``192.168.0.0/24`` ('' — не IPv4)."""
+    parts = _ipv4_parts(ip)
+    if parts is None:
+        return ""
+    prefix = int(prefix) if 0 < int(prefix) <= 32 else 24
+    value = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]
+    mask = (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF
+    network = value & mask
+    return (f"{(network >> 24) & 255}.{(network >> 16) & 255}."
+            f"{(network >> 8) & 255}.{network & 255}/{prefix}")
+
+
+def prefix_of(ip: str, interfaces: list[dict] | None = None) -> int:
+    """Длина префикса адреса на этой машине (0 — неизвестна)."""
+    items = list(interfaces) if interfaces is not None else network_interfaces()
+    for entry in items:
+        if str(entry.get("ip") or "") == str(ip or ""):
+            return int(entry.get("prefix") or 0)
+    return 0
+
+
+def interface_of(ip: str, interfaces: list[dict] | None = None) -> str:
+    """Имя интерфейса, на котором висит адрес ('' — такого адреса нет)."""
+    items = list(interfaces) if interfaces is not None else network_interfaces()
+    for entry in items:
+        if str(entry.get("ip") or "") == str(ip or ""):
+            return str(entry.get("iface") or entry.get("name") or "")
+    return ""
+
+
+def vpn_interception(host: str = "") -> dict:
+    """Перехватывает ли VPN локальную сеть (причина «код=-1» при живом шлюзе).
+
+    Возвращает словарь для диагностики и журнала:
+
+    * ``active`` — туннельные адреса на машине вообще есть;
+    * ``intercepting`` — они мешают LAN (маршрут по умолчанию уходит в
+      туннель, LAN-адресов не осталось, или закреплённый адрес шлюза не
+      найден ни на одном интерфейсе);
+    * ``names`` — какие именно адаптеры мешают (APIPA сюда не попадает: это
+      сбой DHCP, а не туннель, и совет «отключите eth0» только запутает);
+    * ``advice`` — готовая строка владельцу, ровно та, что пишется в журнал.
+    """
+    items = network_interfaces()
+    tunnels = vpn_addresses(items)
+    lan = lan_addresses(items)
+    default_iface = _route_default_interface()
+    default_is_vpn = bool(default_iface) and is_vpn_interface(default_iface)
+    pinned = str(host or "").strip()
+    # Закреплённый loopback — нормальная конфигурация (Studio и PrintFlow на
+    # одном ПК, тесты), а не признак перехвата: совет про split-tunnel для
+    # 127.0.0.0/8 был бы просто вредным.
+    pinned_relevant = bool(_is_ipv4(pinned)) and not pinned.startswith(("127.", "0."))
+    pinned_missing = pinned_relevant and pinned not in lan
+    intercepting = bool(tunnels) and (
+        default_is_vpn or not lan or pinned_missing)
+    culprits = [
+        entry for entry in tunnels
+        if is_vpn_interface(str(entry.get("name")))
+        or not str(entry.get("ip") or "").startswith("169.254.")
+    ]
+    names = ", ".join(dict.fromkeys(
+        str(entry.get("iface") or entry.get("name") or "").strip() or "?"
+        for entry in culprits)) or (str(tunnels[0].get("name") or "tun0")
+                                    if tunnels else "tun0")
+    if pinned_relevant:
+        network = subnet_of(pinned, prefix_of(pinned, items) or 24)
+    elif lan:
+        network = subnet_of(lan[0], prefix_of(lan[0], items) or 24)
+    else:
+        network = ""
+    detail = "; ".join(
+        f"{entry['name']} {entry['ip']}"
+        + (f"/{entry['prefix']}" if entry["prefix"] else "")
+        + f" — {entry['reason']}" for entry in tunnels)
+    advice = ""
+    if intercepting:
+        advice = (f"VPN перехватывает LAN, отключите {names}"
+                  + (f" или добавьте {network} в split-tunnel" if network else ""))
+    return {
+        "active": bool(tunnels),
+        "intercepting": intercepting,
+        "tunnels": tunnels,
+        "names": names,
+        "culprits": culprits,
+        "lan": lan,
+        "default_interface": default_iface,
+        "default_is_vpn": default_is_vpn,
+        "host": pinned,
+        "host_missing": pinned_missing,
+        "subnet": network,
+        "detail": detail,
+        "advice": advice,
+    }
+
+
 def get_local_ips() -> list[str]:
     """IPv4-адреса этого ПК в локальной сети (для доступа с телефона/планшета).
 
     При нескольких роутерах/подсетях полезно видеть все адреса: телефон может
     сидеть в другой Wi-Fi сети, чем та, которую вы подумали первой.
+
+    Адреса перечисляются по интерфейсам, поэтому VPN-туннель (``tun0``
+    ``10.0.0.1/30``) в список не попадает: ни QR-код, ни SSDP-объявление не
+    должны вести на адрес, по которому машины владельца нет. См. также
+    :func:`vpn_interception` — она объясняет, что именно отброшено.
     """
-    ips: set[str] = set()
-    try:
-        hostname = socket.gethostname()
-        for ip in socket.gethostbyname_ex(hostname)[2]:
-            if ip and not ip.startswith("127.") and "." in ip:
-                ips.add(ip)
-    except Exception:
-        pass
-    for target in [("8.8.8.8", 80), ("1.1.1.1", 80), ("192.168.1.1", 80)]:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(0.8)
-            s.connect(target)
-            ip = s.getsockname()[0]
-            s.close()
-            if ip and not ip.startswith("127.") and "." in ip:
-                ips.add(ip)
-        except Exception:
-            pass
-
-    def sort_key(ip: str):
-        if ip.startswith("192.168."):
-            return (0, ip)
-        if ip.startswith("10."):
-            return (1, ip)
-        if ip.startswith("172."):
-            try:
-                second = int(ip.split(".")[1])
-                if 16 <= second <= 31:
-                    return (2, ip)
-            except (IndexError, ValueError):
-                pass
-        if ip.startswith("100."):  # CGNAT, в том числе Tailscale
-            try:
-                second = int(ip.split(".")[1])
-                if 64 <= second <= 127:
-                    return (3, ip)
-            except (IndexError, ValueError):
-                pass
-        return (99, ip)
-
-    # APIPA 169.254/16 появляется, когда DHCP не выдал адрес. Такой QR почти
-    # всегда бесполезен для телефона и не должен выглядеть как исправная LAN.
-    return sorted((ip for ip in ips if sort_key(ip)[0] < 99), key=sort_key)
-
+    return lan_addresses()
 
 _LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"})
 
