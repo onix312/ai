@@ -52,6 +52,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "packaging_cost": 15.0,       # ₽ упаковки на заказ
     "default_spool_price": 1600.0,
     "default_spool_weight": 1000.0,
+    # Куда по умолчанию класть новые катушки: shop | home | dry | other.
+    "default_location": "shop",
     "target_profit_per_hour": 250.0,
     "weekly_capacity_hours": 110.0,
     "failure_rate": 5.0,          # % брака, закладывается в себестоимость
@@ -287,6 +289,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_maintenance": True,   # напоминания об обслуживании
     "notify_photo": True,         # прикладывать кадр камеры к сообщению
     "notify_finish_remind_min": 10.0,  # напомнить о финише за N минут (0 = выкл)
+    # Web Notifications: пока панель открыта вкладкой, события приходят сразу.
+    # Туманное имя ключа осталось из интерфейса — раньше его не было в схеме,
+    # и настройка молча отбрасывалась при сохранении.
+    "browser_notify_enabled": True,
     "filament_low_threshold": 15.0,   # % остатка катушки, ниже — тревога
     "shopping_runout_days": 7.0,    # «материал кончится через N дней» → в закупку
     "dry_humidity_threshold": 55.0,  # влажность AMS, выше которой пора сушить пластик

@@ -1167,12 +1167,7 @@ const STUDIO = [
     ['autostart', 'autostart — Автостарт (печатать немедленно)'],
   ]],
   ['studio_gateway_name', 'Имя виртуального принтера', 'Как PrintFlow называется в списке устройств Bambu Studio', 'text'],
-  ['studio_gateway_host', 'Адрес шлюза в сети (пусто — авто)', 'Какой адрес объявлять Studio в SSDP и PASV. VirtualBox/Hyper-V/Docker/VPN подсовывают виртуальный IP — закрепите реальный, например 192.168.1.50', 'text'],
-  ['studio_gateway_port', 'Сетевой порт шлюза', 'Порт вещания эмулятора принтера в сети LAN', 'select', [
-    [3000, '3000 (по умолчанию для Studio)'],
-    [6000, '6000 (альтернативный порт)'],
-    [8883, '8883 (MQTT TLS)'],
-  ]],
+  ['studio_gateway_host', 'Адрес шлюза в сети (пусто — авто)', 'Какой адрес объявлять Studio в SSDP и PASV. VirtualBox/Hyper-V/Docker/VPN подсовывают виртуальный IP — закрепите реальный, например 192.168.1.50. Порты Studio меняет нельзя: опрос :3000/:3002, команды :8883, файл :990', 'text'],
   ['studio_gateway_autostart', 'Автостарт со шлюза', 'Печатать сразу после Slice/Print (требует режим autostart и safety-gate)', 'bool'],
   ['studio_gateway_serial', 'Серийный номер устройства', 'Пусто — сгенерируется автоматически', 'text'],
 ];
@@ -1849,10 +1844,15 @@ function renderSettings() {
         const model = esc(data.dev_model || data.model || '');
         const hostPinned = data.host_pinned ? ' (закреплён в настройках)' : ' (авто)';
         let html = `<span>ℹ</span><span>Шлюз ${st} · адрес <b>${esc(data.host || '—')}</b>${hostPinned}`
+          + ` · опрос :${data.bind_port || 3000}${data.bind_tls_port ? `/${data.bind_tls_port}` : ''} ${mark(data.bind_running)}`
           + ` · MQTT :${data.mqtt_port || 8883} ${mark(data.mqtt_running)}`
           + ` · FTPS :${data.ftp_port || 990} ${mark(data.ftp_running)}`
           + ` · SSDP ${mark(data.ssdp_running)}`
           + ` · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model}</span>`;
+        if (data.enabled && !data.bind_running) {
+          html += `<span style="display:block;margin-top:4px;color:var(--bad,#ef4444)">Studio не узна́ет шлюз: порт ${data.bind_port || 3000} не поднят —`
+            + ` без него Studio отдаёт «код=-1» ещё до MQTT. Порт занят или шлюз не стартовал: смотрите ошибку ниже и журнал.</span>`;
+        }
         const fails = (data.mqtt_auth_failures || 0) + (data.ftp_auth_failures || 0);
         if (fails > 0) {
           const at = String(data.last_auth_fail_at || '').slice(11, 16);
@@ -1860,7 +1860,7 @@ function renderSettings() {
             + `${at ? `, последний в ${esc(at)}` : ''} — сверйте Access Code в настройках шлюза</span>`;
         }
         const errs = data.errors || {};
-        const errBits = ['ssdp', 'mqtt', 'ftps', 'host']
+        const errBits = ['bind', 'ssdp', 'mqtt', 'ftps', 'host']
           .map((k) => errs[k] ? `${k.toUpperCase()}: ${errs[k]}` : '')
           .filter(Boolean);
         const lastErr = errBits.join(' · ') || (data.last_error ? String(data.last_error) : '');

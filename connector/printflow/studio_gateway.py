@@ -49,9 +49,24 @@ from .studio_mqtt import (
 
 SSDP_NT = "urn:bambulab-com:device:3dprinter:1"
 SSDP_GROUP = "239.255.255.250"
-SSDP_PORTS = (1900, 1990, 2021)
+# Настоящие принтеры шлют NOTIFY широковещательно на 255.255.255.255:2021,
+# а сетевой плагин Studio слушает UDP :2021. Дополнительно рассылаем в
+# группу 239.255.255.250 — так шлюз видят и старые клиенты (1990/1900).
+SSDP_BROADCAST = "255.255.255.255"
+SSDP_PORTS = (2021, 1990, 1900)
+SSDP_LISTEN_PORTS = (2021, 1900)
+SSDP_NOTIFY_PERIOD = 5.0  # принтеры анонсируют себя раз в ~5 секунд
 MQTT_PORT = 8883
 FTP_PORT = 990
+# Порт, на котором Studio спрашивает личность принтера ДО MQTT
+# (bambu_network_bind_detect): обычный TCP, один кадр login/detect.
+# Нет ответа — Studio не добавляет принтер и пишет «Сбой подключения, код=-1».
+BIND_PORT_PLAIN = 3000
+BIND_PORT_TLS = 3002
+BIND_MAGIC_HEAD = b"\xa5\xa5"
+BIND_MAGIC_TAIL = b"\xa7\xa7"
+# Прошивка, которую шлюз называет Studio (SSDP DevVersion и login/detect).
+FIRMWARE_VERSION = "01.07.00.00"
 MQTT_USER = "bblp"
 
 DEV_MODELS = {
@@ -84,6 +99,50 @@ def _new_serial() -> str:
     return "01P00A" + secrets.token_hex(5)[:9].upper()
 
 
+def encode_bind_frame(payload: dict) -> bytes:
+    """Кадр порта 3000/3002: A5A5 + длина (u16 LE) + JSON + A7A7.
+
+    Длина считается по всему кадру вместе с обеими магиями и полем длины —
+    так же, как её кладёт прошивка принтера (и как читает плагин Studio).
+    """
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    total = len(BIND_MAGIC_HEAD) + 2 + len(body) + len(BIND_MAGIC_TAIL)
+    if total > 0xFFFF:
+        raise ValueError("кадр шлюза слишком большой для поля длины")
+    return BIND_MAGIC_HEAD + struct.pack("<H", total) + body + BIND_MAGIC_TAIL
+
+
+def decode_bind_frame(chunk: bytes) -> tuple[dict | None, bytes]:
+    """Разобрать первый кадр из буфера: (payload, остаток).
+
+    Возвращает ``(None, rest)``, если кадра нет целиком или он битый —
+    вызывающий копит буфер дальше. Это тот же разбор, что делает
+    Bambu-плагин (ищет магию, читает длину, проверяет хвост), только без
+    молчаливого выбрасывания «лишних» байт.
+    """
+    data = bytes(chunk or b"")
+    head = BIND_MAGIC_HEAD
+    start = data.find(head)
+    if start < 0:
+        return None, b""
+    if start:
+        data = data[start:]
+    if len(data) < 6:
+        return None, data
+    total = struct.unpack_from("<H", data, 2)[0]
+    if total < 6 or len(data) < total:
+        return None, data
+    if data[total - 2:total] != BIND_MAGIC_TAIL:
+        return None, data[2:]
+    try:
+        payload = json.loads(data[4:total - 2].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, data[total:]
+    if not isinstance(payload, dict):
+        return None, data[total:]
+    return payload, data[total:]
+
+
 def _filename_from_url(url: str) -> str:
     text = str(url or "").strip()
     if not text:
@@ -104,15 +163,21 @@ class StudioGateway:
         # Диагностика 18.7: сбой каждого сервиса отдельно (SSDP/MQTT/FTPS),
         # счётчики подключений и неудачных авторизаций, адрес последнего
         # клиента. Видны в /api/studio/status и в журнале коннектора.
-        self._errors: dict[str, str] = {"ssdp": "", "mqtt": "", "ftps": ""}
+        self._errors: dict[str, str] = {"ssdp": "", "mqtt": "", "ftps": "", "bind": ""}
         self._counters: dict[str, int] = {
             "mqtt_connections": 0,
             "mqtt_auth_failures": 0,
             "ftp_connections": 0,
             "ftp_auth_failures": 0,
+            "bind_requests": 0,
+            "bind_detects": 0,
         }
         self._last_client = ""
         self._last_auth_fail_at = ""
+        self._tls_ctx = None
+        self._bind_socks: list = []
+        self._data_conn = None
+        self._data_ready = threading.Event()
         self._stop = threading.Event()
         self._lock = threading.RLock()
         self._incoming: dict[str, bytes] = {}
@@ -242,6 +307,8 @@ class StudioGateway:
             "host": self._host_ip(),
             "mqtt_port": MQTT_PORT,
             "ftp_port": FTP_PORT,
+            "bind_port": BIND_PORT_PLAIN,
+            "version": FIRMWARE_VERSION,
         }
 
     def _note_auth_failure(self, channel: str) -> None:
@@ -287,7 +354,8 @@ class StudioGateway:
             last_auth_fail_at = self._last_auth_fail_at
         out = {
             "enabled": self._enabled(),
-            "running": bool(self._mqtt_sock or self._ftp_sock or self._ssdp_sock),
+            "running": bool(self._mqtt_sock or self._ftp_sock or self._ssdp_sock
+                            or self._bind_socks),
             "mqtt_running": bool(self._mqtt_sock),
             "ftp_running": bool(self._ftp_sock),
             "ssdp_running": bool(self._ssdp_sock),
@@ -298,6 +366,12 @@ class StudioGateway:
             "printer_id": str(self.db.setting("studio_gateway_printer_id", "") or ""),
             "mqtt_port": MQTT_PORT,
             "ftp_port": FTP_PORT,
+            "bind_port": BIND_PORT_PLAIN,
+            "bind_tls_port": BIND_PORT_TLS,
+            "bind_ports": [BIND_PORT_PLAIN, BIND_PORT_TLS],
+            "bind_running": bool(self._bind_socks),
+            "bind_requests": int(counters.get("bind_requests", 0)),
+            "bind_detects": int(counters.get("bind_detects", 0)),
             "ssdp_ports": list(SSDP_PORTS),
             "last_error": self.last_error,
             "errors": {key: value for key, value in self._errors.items() if value},
@@ -315,23 +389,39 @@ class StudioGateway:
         return out
 
     # ----------------------------------------------------------- SSDP
+    def _ssdp_headers(self) -> str:
+        """Поля объявления, которые разбирает сетевой плагин Studio.
+
+        DevVersion / DevCap / Devseclink / DevInf не косметика: плагин
+        собирает из них JSON для DeviceManager и падает на отсутствующих
+        ключах, а по DevVersion Studio решает, как общаться с устройством.
+        """
+        ident = self.identity()
+        return (
+            f"DevModel.bambu.com: {ident['dev_model']}\r\n"
+            f"DevName.bambu.com: {ident['name']}\r\n"
+            "DevSignal.bambu.com: -44\r\n"
+            "DevConnect.bambu.com: lan\r\n"
+            "DevBind.bambu.com: free\r\n"
+            "Devseclink.bambu.com: secure\r\n"
+            "DevInf.bambu.com: eth0\r\n"
+            f"DevVersion.bambu.com: {ident['version']}\r\n"
+            "DevCap.bambu.com: 1\r\n"
+        )
+
     def ssdp_notify(self) -> str:
         ident = self.identity()
         return (
             "NOTIFY * HTTP/1.1\r\n"
-            f"HOST: {SSDP_GROUP}:1900\r\n"
+            f"HOST: {SSDP_GROUP}:1990\r\n"
             "Server: Buildroot/2018.02-rc3 UPnP/1.0 ssdpd/1.8\r\n"
             f"Location: {ident['host']}\r\n"
             f"NT: {SSDP_NT}\r\n"
             "NTS: ssdp:alive\r\n"
             f"USN: {ident['serial']}\r\n"
             "Cache-Control: max-age=1800\r\n"
-            f"DevModel.bambu.com: {ident['dev_model']}\r\n"
-            f"DevName.bambu.com: {ident['name']}\r\n"
-            "DevSignal.bambu.com: -44\r\n"
-            "DevConnect.bambu.com: lan\r\n"
-            "DevBind.bambu.com: free\r\n"
-            "\r\n"
+            + self._ssdp_headers()
+            + "\r\n"
         )
 
     def ssdp_search_response(self) -> str:
@@ -343,12 +433,8 @@ class StudioGateway:
             f"Location: {ident['host']}\r\n"
             "Cache-Control: max-age=1800\r\n"
             "Server: Buildroot/2018.02-rc3 UPnP/1.0 ssdpd/1.8\r\n"
-            f"DevModel.bambu.com: {ident['dev_model']}\r\n"
-            f"DevName.bambu.com: {ident['name']}\r\n"
-            "DevSignal.bambu.com: -44\r\n"
-            "DevConnect.bambu.com: lan\r\n"
-            "DevBind.bambu.com: free\r\n"
-            "\r\n"
+            + self._ssdp_headers()
+            + "\r\n"
         )
 
     # ----------------------------------------------------------- ingest
@@ -532,6 +618,122 @@ class StudioGateway:
             return upload.read_bytes()
         return None
 
+    # ------------------------------------------------- порт 3000/3002: detect
+    def bind_reply(self, payload: dict) -> dict | None:
+        """Ответ шлюза на кадр порта 3000/3002 (проба личности от Studio).
+
+        Studio спрашивает принтер ДО MQTT и ДО FTPS: ``bind_detect``
+        открывает обычный TCP на :3000, шлёт ``login/detect`` и ждёт
+        серийник, модель и состояние привязки. Раньше на :3000 nobody не
+        слушал — соединение сбрасывалось, плагин возвращал
+        «socket connect failed» и Studio показывала «код=-1».
+        """
+        if not isinstance(payload, dict):
+            return None
+        login = payload.get("login")
+        if not isinstance(login, dict):
+            return None
+        command = str(login.get("command") or "").strip().lower()
+        ident = self.identity()
+        with self._lock:
+            if command == "detect":
+                self._counters["bind_requests"] = int(
+                    self._counters.get("bind_requests", 0)) + 1
+                self._counters["bind_detects"] = int(
+                    self._counters.get("bind_detects", 0)) + 1
+        if command == "detect":
+            return {"login": {
+                "bind": "free",
+                "command": "detect",
+                "connect": "lan",
+                "dev_cap": 1,
+                "id": ident["serial"],
+                "model": ident["dev_model"],
+                "name": ident["name"],
+                "sequence_id": 3021,   # принтер отвечает числом, не эхом строки
+                "version": ident["version"],
+            }}
+        if command == "login":
+            # Привязка к аккаунту — облачная история (тикет + подтверждение в
+            # Bambu Cloud), её шлюз не изображает. Локальное подключение по
+            # Access Code этим не пользуется, поэтому честно отвечаем успехом
+            # LAN-входа: Studio не висит в ожидании ответа до таймаута.
+            return {"login": {
+                "command": "login_report",
+                "sequence_id": -1,
+                "session_id": 0,
+                "status": "SUCCESS",
+            }}
+        return None
+
+    def bind_handle_bytes(self, chunk: bytes) -> bytes:
+        """Кадр порта 3000/3002 без сети → готовый кадр с ответом (или b'')."""
+        payload, _rest = decode_bind_frame(chunk)
+        if payload is None:
+            return b""
+        reply = self.bind_reply(payload)
+        if not reply:
+            return b""
+        return encode_bind_frame(reply)
+
+    def _bind_client(self, conn) -> None:
+        """Один клиент порта 3000/3002: один запрос — один ответ, как у станка."""
+        try:
+            conn.settimeout(15)
+            try:
+                peer = conn.getpeername()[0]
+            except OSError:
+                peer = ""
+            if peer:
+                with self._lock:
+                    self._last_client = peer
+            buf = b""
+            deadline = time.time() + 15
+            while time.time() < deadline and len(buf) < 65536:
+                try:
+                    piece = conn.recv(4096)
+                except (socket.timeout, TimeoutError):
+                    continue
+                except OSError:
+                    return
+                if not piece:
+                    return
+                buf += piece
+                payload, buf = decode_bind_frame(buf)
+                if payload is None:
+                    continue
+                reply = self.bind_reply(payload)
+                if reply:
+                    conn.sendall(encode_bind_frame(reply))
+                return   # принтер закрывает сессию после одного обмена
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def _start_bind(self, cert, key) -> None:
+        """Поднять :3000 (TCP) и :3002 (TLS) — пробу личности Studio."""
+        for port in (BIND_PORT_PLAIN, BIND_PORT_TLS):
+            try:
+                raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                raw.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                raw.bind(("0.0.0.0", port))
+                raw.listen(8)
+                raw.settimeout(1.0)
+                if port == BIND_PORT_TLS:
+                    sock = self._tls_ctx.wrap_socket(raw, server_side=True)
+                else:
+                    sock = raw
+                self._bind_socks.append(sock)
+                self._spawn(f"pf-studio-bind-{port}", self._accept_loop,
+                            sock, self._bind_client)
+            except Exception as exc:
+                self._record_error(
+                    "bind", f"порт {port}: {exc}" if isinstance(exc, OSError) else exc)
+
     # ----------------------------------------------------------- MQTT
     def handle_mqtt_request(self, payload: dict, topic: str = "") -> list[dict]:
         """JSON-команда Studio → список отчётов на device/{serial}/report."""
@@ -550,13 +752,20 @@ class StudioGateway:
             reports.append(self._version_report(str(info.get("sequence_id") or "0")))
         system = payload.get("system")
         if isinstance(system, dict) and system.get("command"):
-            reports.append({
+            command = str(system.get("command") or "")
+            reply = {
                 "system": {
-                    "command": system.get("command"),
+                    "command": command,
                     "sequence_id": str(system.get("sequence_id") or "0"),
                     "result": "success",
                 }
-            })
+            }
+            # Сетевой плагин спрашивает код сразу после подключения — без
+            # поля access_code Studio считает ответ пустым и не показывает
+            # принтер как доступный.
+            if command == "get_access_code":
+                reply["system"]["access_code"] = self._access_code()
+            reports.append(reply)
         return reports
 
     def mqtt_handle(self, payload: dict, topic: str = "") -> list[dict]:
@@ -660,6 +869,10 @@ class StudioGateway:
         return {"print": {
             "command": "push_status",
             "sequence_id": str(seq),
+            # msg: 0 — полный снимок состояния (не дифференциальное
+            # обновление): Studio по нему целиком пересобирает карточку
+            # принтера после pushall.
+            "msg": 0,
             "gcode_state": "IDLE",
             "mc_percent": 0,
             "mc_remaining_time": 0,
@@ -855,11 +1068,11 @@ class StudioGateway:
     def start(self) -> None:
         if not self.bind or not self._enabled():
             return
-        if self._mqtt_sock or self._ftp_sock or self._ssdp_sock:
+        if self._mqtt_sock or self._ftp_sock or self._ssdp_sock or self._bind_socks:
             return
         self._stop.clear()
         self._ensure_identity()
-        self._errors = {"ssdp": "", "mqtt": "", "ftps": ""}
+        self._errors = {"ssdp": "", "mqtt": "", "ftps": "", "bind": ""}
         self.last_error = ""
         try:
             self._start_ssdp()
@@ -868,10 +1081,17 @@ class StudioGateway:
         cert = key = None
         try:
             from .studio_tls import ensure_certificate
-            cert, key = ensure_certificate(self.identity()["name"])
+            # Сертификат — на серийный номер: так же делает прошивка принтера
+            # (leaf CN=<serial>), и Studio при желании сверяет именно его.
+            cert, key = ensure_certificate(self.identity()["serial"])
         except Exception as exc:
             self._record_error("TLS", exc)
             return
+        self._tls_ctx = self._tls_context(cert, key)
+        try:
+            self._start_bind(cert, key)
+        except Exception as exc:
+            self._record_error("bind", exc)
         try:
             self._start_mqtt(cert, key)
         except Exception as exc:
@@ -883,7 +1103,8 @@ class StudioGateway:
 
     def stop(self) -> None:
         self._stop.set()
-        for sock in (self._ssdp_sock, self._mqtt_sock, self._ftp_sock):
+        for sock in (self._ssdp_sock, self._mqtt_sock, self._ftp_sock,
+                     *self._bind_socks):
             if sock is None:
                 continue
             try:
@@ -891,6 +1112,7 @@ class StudioGateway:
             except Exception:
                 pass
         self._ssdp_sock = self._mqtt_sock = self._ftp_sock = None
+        self._bind_socks = []
         self._threads = []
 
     def reload(self) -> None:
@@ -910,9 +1132,17 @@ class StudioGateway:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         except (AttributeError, OSError):
             pass
-        try:
-            sock.bind(("", 1900))
-        except OSError:
+        # Studio слушает UDP :2021 (именно туда станки шлют NOTIFY); 1900 —
+        # на случай, если порт занят Windows-службой SSDP Discovery.
+        bound = False
+        for port in SSDP_LISTEN_PORTS:
+            try:
+                sock.bind(("", port))
+                bound = True
+                break
+            except OSError:
+                continue
+        if not bound:
             sock.bind(("", 0))
         try:
             mreq = struct.pack("4s4s", socket.inet_aton(SSDP_GROUP), socket.inet_aton("0.0.0.0"))
@@ -944,15 +1174,20 @@ class StudioGateway:
 
     def _broadcast_notify(self) -> None:
         now = time.time()
-        if now - self._last_notify < 12:
+        if now - self._last_notify < SSDP_NOTIFY_PERIOD:
             return
         self._last_notify = now
         payload = self.ssdp_notify().encode("utf-8")
-        for port in SSDP_PORTS:
+        # Станок шлёт NOTIFY широковещательно на 255.255.255.255:2021 — так
+        # его видит плагин Studio. Групповая рассылка оставлена для старых
+        # клиентов и сторонних искалок (OrcaSlicer, Home Assistant).
+        targets = [(SSDP_BROADCAST, SSDP_PORTS[0])]
+        targets.extend((SSDP_GROUP, port) for port in SSDP_PORTS)
+        for host, port in targets:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                sock.sendto(payload, (SSDP_GROUP, port))
+                sock.sendto(payload, (host, port))
                 sock.close()
             except OSError:
                 continue
@@ -960,6 +1195,14 @@ class StudioGateway:
     def _tls_context(self, cert, key):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(str(cert), str(key))
+        try:
+            # Studio приходит с набором, где есть AES-GCM; на сборках OpenSSL
+            # с жёстким DEFAULT (и на Windows) без явного перечисления
+            # рукопожатие может не состояться — тогда Studio молчит «код=-1».
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.set_ciphers("DEFAULT:AES256-GCM-SHA384:AES128-GCM-SHA256")
+        except (ssl.SSLError, ValueError):
+            pass
         return ctx
 
     def _start_mqtt(self, cert, key) -> None:
@@ -968,7 +1211,7 @@ class StudioGateway:
         raw.bind(("0.0.0.0", MQTT_PORT))
         raw.listen(8)
         raw.settimeout(1.0)
-        ctx = self._tls_context(cert, key)
+        ctx = self._tls_ctx or self._tls_context(cert, key)
         sock = ctx.wrap_socket(raw, server_side=True)
         self._mqtt_sock = sock
         self._spawn("pf-studio-mqtt", self._accept_loop, sock, self._mqtt_client)
@@ -979,7 +1222,7 @@ class StudioGateway:
         raw.bind(("0.0.0.0", FTP_PORT))
         raw.listen(4)
         raw.settimeout(1.0)
-        ctx = self._tls_context(cert, key)
+        ctx = self._tls_ctx or self._tls_context(cert, key)
         sock = ctx.wrap_socket(raw, server_side=True)
         self._ftp_sock = sock
         self._spawn("pf-studio-ftps", self._accept_loop, sock, self._ftp_client)
@@ -1054,6 +1297,47 @@ class StudioGateway:
             f"({host[0]},{host[1]},{host[2]},{host[3]},{p1},{p2})"
         )
 
+    def _data_channel(self, conn, timeout: int = 30, peek_timeout: float = 2.0):
+        """Канал данных PASV: TLS, если клиент начинает рукопожатие.
+
+        Клиенты Bambu расходятся: одни поднимают TLS на канале данных сразу
+        после connect, другие (например P2S) только дожидаются ``150`` и
+        начинают рукопожатие потом. Поэтому тип канала определяем по первому
+        байту, не съедая его (MSG_PEEK): начинается с 0x16 — оборачиваем в
+        TLS, иначе читаем как есть. Ожидание первого байта короткое: клиент
+        подключается к каналу данных только когда готов слать, но ждать его
+        секундами нельзя — иначе заливка встанет на таймауте.
+        """
+        try:
+            conn.settimeout(timeout)
+        except OSError:
+            return conn
+        if self._tls_ctx is None:
+            return conn
+        try:
+            conn.settimeout(peek_timeout)
+            first = conn.recv(1, socket.MSG_PEEK)
+            conn.settimeout(timeout)
+        except (socket.timeout, TimeoutError, OSError):
+            return conn
+        if not first or first[0] != 0x16:
+            return conn
+        try:
+            return self._tls_ctx.wrap_socket(conn, server_side=True)
+        except (ssl.SSLError, OSError):
+            return conn
+
+    def _accept_data(self, sock) -> None:
+        """Принять канал данных PASV в фоне (клиент может прийти до STOR)."""
+        try:
+            conn, _addr = sock.accept()
+        except (socket.timeout, TimeoutError, OSError):
+            return
+        conn = self._data_channel(conn)
+        with self._lock:
+            self._data_conn = conn
+        self._data_ready.set()
+
     def _ftp_client(self, conn) -> None:
         self._ftp_user = ""
         self._ftp_authed = False
@@ -1080,6 +1364,8 @@ class StudioGateway:
                             pasv_sock.close()
                         except Exception:
                             pass
+                    self._data_conn = None
+                    self._data_ready.clear()
                     pasv_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     pasv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     pasv_sock.bind(("0.0.0.0", 0))
@@ -1087,6 +1373,10 @@ class StudioGateway:
                     pasv_sock.settimeout(30)
                     port = pasv_sock.getsockname()[1]
                     reply = self._pasv_reply(port)
+                    # Клиент может подключиться к каналу данных и до STOR —
+                    # приём ждёт в отдельном потоке, иначе рукопожатие
+                    # раннего клиента подвиснет до нашего accept().
+                    self._spawn("pf-studio-pasv", self._accept_data, pasv_sock)
                 if cmd in ("STOR", "APPE"):
                     stor_name = Path(arg.replace("\\", "/")).name or "upload.bin"
                 try:
@@ -1096,7 +1386,11 @@ class StudioGateway:
                 if cmd in ("STOR", "APPE") and pasv_sock and reply.startswith("150"):
                     data_conn = None
                     try:
-                        data_conn, _ = pasv_sock.accept()
+                        self._data_ready.wait(30)
+                        data_conn = self._data_conn
+                        self._data_conn = None
+                        if data_conn is None:
+                            raise ConnectionError("клиент не открыл канал данных")
                         chunks = []
                         while True:
                             chunk = data_conn.recv(65536)
@@ -1122,6 +1416,12 @@ class StudioGateway:
         except Exception:
             pass
         finally:
+            if self._data_conn:
+                try:
+                    self._data_conn.close()
+                except Exception:
+                    pass
+            self._data_conn = None
             if pasv_sock:
                 try:
                     pasv_sock.close()

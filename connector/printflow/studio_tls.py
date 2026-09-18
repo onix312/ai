@@ -18,6 +18,10 @@ from .config import DATA_DIR
 CERT_DIR = DATA_DIR / "studio-gateway"
 CERT_FILE = CERT_DIR / "cert.pem"
 KEY_FILE = CERT_DIR / "key.pem"
+# Рядом с сертификатом лежит имя (CN), на которое он выписан: станки Bambu
+# выписывают leaf на серийный номер, и Studio при желании сверяет именно его.
+# Если CN перестал совпадать с личностью шлюза — сертификат перевыпускается.
+CN_FILE = CERT_DIR / "cert.pem.cn"
 
 
 class CertError(RuntimeError):
@@ -32,21 +36,36 @@ def certificate_ready() -> bool:
     return CERT_FILE.is_file() and KEY_FILE.is_file() and CERT_FILE.stat().st_size > 0
 
 
+def stored_cn() -> str:
+    """CN, на который выписан лежащий на диске сертификат ('' — неизвестно)."""
+    try:
+        return CN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 def ensure_certificate(cn: str = "NOZZA-PrintFlow") -> tuple[Path, Path]:
-    """Вернуть пути к cert.pem/key.pem, создав их при необходимости."""
+    """Вернуть пути к cert.pem/key.pem, создав их при необходимости.
+
+    Сертификат перевыпускается, если его CN разошёлся с личностью шлюза
+    (серийным номером): старый выпуск делался на имя принтера, а Studio
+    ожидает CN=<серийник>, как у настоящего станка.
+    """
     CERT_DIR.mkdir(parents=True, exist_ok=True)
-    if certificate_ready():
+    if certificate_ready() and stored_cn() == cn:
         return CERT_FILE, KEY_FILE
     errors: list[str] = []
     try:
         _via_openssl(cn)
         if certificate_ready():
+            CN_FILE.write_text(cn, encoding="utf-8")
             return CERT_FILE, KEY_FILE
     except Exception as exc:
         errors.append(f"openssl: {exc}")
     try:
         _via_cryptography(cn)
         if certificate_ready():
+            CN_FILE.write_text(cn, encoding="utf-8")
             return CERT_FILE, KEY_FILE
     except Exception as exc:
         errors.append(f"cryptography: {exc}")
@@ -61,6 +80,7 @@ def ensure_certificate(cn: str = "NOZZA-PrintFlow") -> tuple[Path, Path]:
             subprocess.run(cmd_break, capture_output=True, timeout=60)
         _via_cryptography(cn)
         if certificate_ready():
+            CN_FILE.write_text(cn, encoding="utf-8")
             return CERT_FILE, KEY_FILE
     except Exception as exc2:
         errors.append(f"auto-install: {exc2}")
