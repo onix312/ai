@@ -27,6 +27,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -45,17 +46,24 @@ from connector.printflow.studio_gateway import (  # noqa: E402
     SSDP_NT,
     SSDP_NOTIFY_LOOPBACK,
     SSDP_PORTS,
+    MqttSession,
     StudioGateway,
     decode_bind_frame,
     encode_bind_frame,
+    is_loopback,
 )
 from connector.printflow.studio_mqtt import (  # noqa: E402
     CONNACK,
     PUBLISH,
+    SUBACK,
     decode_publish,
     encode_connect,
+    encode_disconnect,
     encode_publish,
+    encode_utf8,
+    parse_fixed_header,
     read_packet,
+    wrap_packet,
 )
 from connector.tests.test_phase11 import make_db  # noqa: E402
 from connector.tests.test_studio_gateway import FakeMgr  # noqa: E402
@@ -74,7 +82,11 @@ def free_port() -> int:
 
 
 def make_cert(cn: str = "01P00ATEST") -> tuple[pathlib.Path, pathlib.Path]:
-    """Настоящий самоподписанный сертификат через openssl (как в проде)."""
+    """Настоящий самоподписанный сертификат через openssl (как в проде).
+
+    С SAN: без ``subjectAltName`` Bambu Studio Beta рукопожатие режет, и тест
+    проверял бы поведение, которого в проде не бывает.
+    """
     if shutil.which("openssl") is None:
         raise unittest.SkipTest("openssl не найден — TLS не поднять")
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pf-bind-cert-"))
@@ -82,7 +94,8 @@ def make_cert(cn: str = "01P00ATEST") -> tuple[pathlib.Path, pathlib.Path]:
     subprocess.run(
         ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
          "-keyout", str(key), "-out", str(cert), "-days", "2",
-         "-subj", f"/CN={cn}"],
+         "-subj", f"/CN={cn}",
+         "-addext", f"subjectAltName=DNS:{cn},IP:127.0.0.1"],
         check=True, capture_output=True)
     return cert, key
 
@@ -142,9 +155,26 @@ class BindDetectReplyTests(unittest.TestCase):
         self.assertEqual("free", login["bind"], "занятый принтер Studio не возьмёт")
         self.assertEqual("lan", login["connect"])
         self.assertEqual(FIRMWARE_VERSION, login["version"])
-        self.assertEqual(3021, login["sequence_id"])
+        # Эхо, а не константа: плагин сверяет sequence_id ответа со своим и
+        # отбрасывает ответ, который пришёл «не на его запрос».
+        self.assertEqual(20000, login["sequence_id"])
         self.assertIsInstance(login["sequence_id"], int,
                               "принтер отвечает числом, плагин ждёт int")
+
+    def test_detect_echoes_whatever_sequence_id_studio_sent(self):
+        """Разные клиенты нумеруют запросы по-разному — шлюз повторяет число."""
+        for value, expected in (("20000", 20000), ("1", 1), (777, 777),
+                                ("0", 0), ("", 0), (None, 0), ("abc", 0)):
+            login = self.gw.bind_reply(
+                {"login": {"command": "detect", "sequence_id": value}})["login"]
+            self.assertEqual(expected, login["sequence_id"], f"эхо {value!r}")
+            self.assertIsInstance(login["sequence_id"], int)
+
+    def test_login_echoes_sequence_id_too(self):
+        payload, _rest = decode_bind_frame(self.gw.bind_handle_bytes(
+            encode_bind_frame({"login": {"command": "login", "sequence_id": "20001"}})))
+        self.assertEqual(20001, payload["login"]["sequence_id"])
+        self.assertEqual("SUCCESS", payload["login"]["status"])
 
     def test_detect_counts_and_reports_in_status(self):
         self.gw.bind_handle_bytes(encode_bind_frame(DETECT_REQUEST))
@@ -178,6 +208,8 @@ class BindDetectReplyTests(unittest.TestCase):
 
     def test_certificate_is_issued_for_the_serial(self):
         """Сертификат выписывается на серийник (leaf CN=<serial>, как у станка)."""
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl не найден — сертификат не выпустить")
         with tempfile.TemporaryDirectory(prefix="pf-cn-") as tmp:
             cert_dir = pathlib.Path(tmp)
             paths = {
@@ -185,6 +217,7 @@ class BindDetectReplyTests(unittest.TestCase):
                 "CERT_FILE": cert_dir / "cert.pem",
                 "KEY_FILE": cert_dir / "key.pem",
                 "CN_FILE": cert_dir / "cert.pem.cn",
+                "SAN_FILE": cert_dir / "cert.pem.san",
             }
             with mock.patch.multiple("connector.printflow.studio_tls", **paths):
                 from connector.printflow import studio_tls
@@ -196,7 +229,146 @@ class BindDetectReplyTests(unittest.TestCase):
                 self.assertEqual("01P00AOTHER", studio_tls.stored_cn())
                 self.assertNotEqual(first, cert.read_bytes())
 
+    def test_certificate_has_the_san_studio_beta_requires(self):
+        """SAN DNS:<серийник> + IP:127.0.0.1: без него Beta режет рукопожатие.
 
+        Сетевой плагин Studio Beta (22710816+) живёт на WebView2 и сверяет
+        subjectAltName, а не CN. Сертификат, выпущенный до этой правки, лежал
+        на диске с верным CN и без SAN — и Studio молча отдавала «код=-1».
+        """
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl не найден — сертификат не выпустить")
+        from connector.printflow import studio_tls
+        with tempfile.TemporaryDirectory(prefix="pf-san-") as tmp:
+            cert_dir = pathlib.Path(tmp)
+            with mock.patch.multiple(
+                    "connector.printflow.studio_tls",
+                    CERT_DIR=cert_dir, CERT_FILE=cert_dir / "cert.pem",
+                    KEY_FILE=cert_dir / "key.pem",
+                    CN_FILE=cert_dir / "cert.pem.cn",
+                    SAN_FILE=cert_dir / "cert.pem.san"):
+                cert, _key = studio_tls.ensure_certificate("01P00ASAN")
+                san = studio_tls.certificate_san(cert)
+                self.assertIn("DNS:01P00ASAN", san, f"нет DNS в SAN: {san}")
+                self.assertTrue(any("127.0.0.1" in item for item in san),
+                                f"нет IP:127.0.0.1 в SAN: {san}")
+                self.assertEqual("DNS:01P00ASAN,IP:127.0.0.1",
+                                 studio_tls.stored_san())
+                # Выпуск без SAN (имитация старого сертификата) — перевыпуск.
+                stale = cert.read_bytes()
+                subprocess.run(
+                    ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                     "-keyout", str(cert_dir / "key.pem"), "-out", str(cert),
+                     "-days", "2", "-subj", "/CN=01P00ASAN"],
+                    check=True, capture_output=True)
+                self.assertEqual([], studio_tls.certificate_san(cert))
+                studio_tls.ensure_certificate("01P00ASAN")
+                self.assertNotEqual(stale, cert.read_bytes(),
+                                    "сертификат без SAN не перевыпущен")
+                self.assertIn("DNS:01P00ASAN", studio_tls.certificate_san(cert))
+
+    def test_san_survives_a_space_in_the_device_name(self):
+        """Имя с пробелом не должно ронять выпуск сертификата."""
+        if shutil.which("openssl") is None:
+            self.skipTest("openssl не найден — сертификат не выпустить")
+        from connector.printflow import studio_tls
+        with tempfile.TemporaryDirectory(prefix="pf-san-name-") as tmp:
+            cert_dir = pathlib.Path(tmp)
+            with mock.patch.multiple(
+                    "connector.printflow.studio_tls",
+                    CERT_DIR=cert_dir, CERT_FILE=cert_dir / "cert.pem",
+                    KEY_FILE=cert_dir / "key.pem",
+                    CN_FILE=cert_dir / "cert.pem.cn",
+                    SAN_FILE=cert_dir / "cert.pem.san"):
+                san = studio_tls.san_for("NOZZA PrintFlow")
+                self.assertEqual("DNS:NOZZA-PrintFlow,IP:127.0.0.1", san)
+                cert, _key = studio_tls.ensure_certificate("NOZZA PrintFlow")
+                self.assertIn("DNS:NOZZA-PrintFlow",
+                              studio_tls.certificate_san(cert))
+
+
+class IdentityRaceTests(unittest.TestCase):
+    """Серийник создаётся один раз, даже если шлюз спросили одновременно.
+
+    Без блокировки два потока (``start()`` и поток SSDP, или два клиента на
+    :3000) оба видели пустой серийник и записывали каждый свой: объявление
+    уходило с одним USN, а в базе оставался другой. Для Studio это принтер,
+    который меняет личность, — устройство приходится пересоздавать.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.addCleanup(self.db.close)
+        self.db.set_settings({"studio_gateway_access_code": "abcd1234"})
+        self.mgr = FakeMgr(self.db)
+        self.gw = StudioGateway(self.db, self.mgr, bind=False)
+        self.mgr.studio = self.gw
+
+    def test_concurrent_identity_calls_yield_one_serial(self):
+        issued: list[str] = []
+
+        def fake_serial() -> str:
+            issued.append("01P00A%09d" % len(issued))
+            return issued[-1]
+
+        barrier = threading.Barrier(8)
+        results: list[str] = []
+        lock = threading.Lock()
+
+        def ask() -> None:
+            barrier.wait()          # все восемь стартуют в один момент
+            serial = self.gw.identity()["serial"]
+            with lock:
+                results.append(serial)
+
+        with mock.patch("connector.printflow.studio_gateway._new_serial", fake_serial):
+            threads = [threading.Thread(target=ask) for _ in range(8)]
+            for item in threads:
+                item.start()
+            for item in threads:
+                item.join(timeout=10)
+        self.assertEqual(1, len(issued),
+                         f"серийник создан {len(issued)} раз(а): {issued} — "
+                         "шлюз показывает Studio разную личность")
+        self.assertEqual(1, len(set(results)),
+                         f"потоки увидели разные серийники: {sorted(set(results))}")
+        stored = str(self.db.setting("studio_gateway_serial", "") or "")
+        self.assertEqual(issued[0], stored,
+                         "в базе остался не тот серийник, который объявляли")
+
+    def test_access_code_is_created_once_too(self):
+        db = make_db()
+        self.addCleanup(db.close)
+        # Серийник задан: _new_serial() тоже берёт байты из secrets, и без
+        # этого подсчёт ловил бы его вызов вместо Access Code.
+        db.set_settings({"studio_gateway_serial": "01P00AFIXED0001"})
+        # Access Code не задан — шлюз обязан создать его ровно один раз.
+        mgr = FakeMgr(db)
+        gw = StudioGateway(db, mgr, bind=False)
+        mgr.studio = gw
+        generated: list[str] = []
+
+        def fake_token(_n: int) -> str:
+            generated.append("code%04d" % len(generated))
+            return generated[-1]
+
+        barrier = threading.Barrier(6)
+
+        def ask() -> None:
+            barrier.wait()
+            gw.identity()
+
+        with mock.patch("connector.printflow.studio_gateway.secrets.token_hex",
+                        fake_token):
+            threads = [threading.Thread(target=ask) for _ in range(6)]
+            for item in threads:
+                item.start()
+            for item in threads:
+                item.join(timeout=10)
+        self.assertEqual(1, len(generated),
+                         f"Access Code создан {len(generated)} раз(а) — "
+                         "Studio могла получить отказ уже после привязки")
+        self.assertTrue(gw.status()["has_access_code"])
 class SsdpAnnounceTests(unittest.TestCase):
     """Объявление, из которого плагин собирает JSON для DeviceManager."""
 
@@ -224,18 +396,43 @@ class SsdpAnnounceTests(unittest.TestCase):
             self.assertIn(header, text)
 
     def test_notify_goes_to_broadcast_2021_like_a_printer(self):
-        """Станки шлют NOTIFY на 255.255.255.255:2021 — там его и ждут."""
-        sent: list[tuple[str, int]] = []
+        """Станки шлют NOTIFY на 255.255.255.255:2021 — там его и ждут.
+
+        И проверяем, ЧЕМ отправлен каждый адрес: ядро не выпустит пакет на
+        127.0.0.1 с источника LAN-адреса (и наоборот), поэтому в loopback
+        шлёт отдельный сокет. Раньше сокет был один, привязанный к LAN, — и
+        как только у машины появлялся обычный адрес, объявления для Studio на
+        этом же компьютере молча терялись (sendto → EINVAL).
+        """
+        # (с какого адреса отправлено, куда)
+        sent: list[tuple[str, tuple[str, int]]] = []
+        bound: list[tuple[str, int]] = []
 
         class FakeUdp:
+            """Заглушка UDP-сокета: пишем и bind (привязка к LAN), и отправку."""
+
             def __init__(self, *_a, **_k):
-                pass
+                self.source = "0.0.0.0"
 
             def setsockopt(self, *_a, **_k):
                 return None
 
+            def bind(self, addr):
+                self.source = str(addr[0])
+                bound.append(tuple(addr))
+                return None
+
             def sendto(self, payload, addr):
-                sent.append(addr)
+                sent.append((self.source, tuple(addr)))
+
+            def sendmsg(self, buffers, control=None, flags=0, address=None):
+                # Реальный вызов позиционный: sendmsg([data], [cmsg], 0, addr).
+                assert buffers, "пустая дейтаграмма"
+                if address is not None:
+                    sent.append((self.source, tuple(address)))
+
+            def getsockname(self):
+                return (self.source, 0)
 
             def close(self):
                 return None
@@ -243,13 +440,30 @@ class SsdpAnnounceTests(unittest.TestCase):
         self.gw._last_notify = 0.0
         with mock.patch("connector.printflow.studio_gateway.socket.socket", FakeUdp):
             self.gw._broadcast_notify()
-        self.assertIn((SSDP_BROADCAST, 2021), sent,
+        destinations = [addr for _source, addr in sent]
+        self.assertIn((SSDP_BROADCAST, 2021), destinations,
                       "без широковещательной рассылки Studio шлюз не увидит")
-        self.assertIn((SSDP_BROADCAST, SSDP_PORTS[0]), sent)
+        self.assertIn((SSDP_BROADCAST, SSDP_PORTS[0]), destinations)
         for port in SSDP_PORTS:
-            self.assertIn(("239.255.255.250", port), sent)
-        self.assertIn((SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[0]), sent,
+            self.assertIn(("239.255.255.250", port), destinations)
+        self.assertIn((SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[0]), destinations,
                       "Studio на том же ПК узнаёт шлюз только по loopback")
+        # В loopback (включая направленный broadcast 127.0.0.255) — только с
+        # loopback-источника, иначе пакет не уйдёт вовсе.
+        loopback_sends = [source for source, addr in sent if is_loopback(addr[0])]
+        self.assertIn((SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[0]),
+                      [addr for _s, addr in sent if is_loopback(addr[0])],
+                      "объявление в loopback не отправлено")
+        self.assertTrue(all(source.startswith("127.") for source in loopback_sends),
+                        f"в loopback шлём с {loopback_sends} — пакет не дойдёт до "
+                        "сетевого плагина Studio на этом же компьютере")
+        # Во внешнюю сеть — не с loopback-источника (иначе Studio не увидит
+        # шлюз с другого компьютера, а ответ не совпадёт с Location).
+        outside = [(source, addr) for source, addr in sent
+                   if not is_loopback(addr[0])]
+        self.assertTrue(outside, "во внешнюю сеть ничего не отправлено")
+        self.assertEqual([], [item for item in outside if item[0].startswith("127.")],
+                         "во внешнюю сеть незачем слать с loopback-источника")
 
     def test_notify_period_is_printer_like(self):
         from connector.printflow import studio_gateway as module
@@ -292,6 +506,94 @@ class SsdpAnnounceTests(unittest.TestCase):
         self.assertEqual("", directed_broadcast("192.168.1.999"))
         self.assertEqual("", directed_broadcast(""))
         self.assertEqual("", directed_broadcast("не адрес"))
+
+    def test_ssdp_socket_is_not_shared_while_the_port_is_free(self):
+        """Свободный 1900 слушаем единолично, без SO_REUSEPORT.
+
+        С SO_REUSEPORT ядро делит входящие дейтаграммы между всеми сокетами на
+        порту: зависший после перезапуска процесс или чужая служба SSDP
+        перехватывают часть M-SEARCH, и Studio не находит принтер через раз.
+        """
+        options: list[int] = []
+        binds: list[tuple[str, int]] = []
+
+        class FakeUdp:
+            def __init__(self, *_a, **_k):
+                pass
+
+            def setsockopt(self, level, option, value):
+                if level == socket.SOL_SOCKET:
+                    options.append(option)
+
+            def bind(self, addr):
+                binds.append(tuple(addr))
+
+            def getsockname(self):
+                return ("0.0.0.0", SSDP_LISTEN_PORTS[0])
+
+            def settimeout(self, *_a):
+                return None
+
+            def close(self):
+                return None
+
+        self.gw._spawn = lambda *args, **kwargs: None
+        with mock.patch("connector.printflow.studio_gateway.socket.socket", FakeUdp):
+            self.gw._start_ssdp()
+        self.addCleanup(self.gw.stop)
+        self.assertEqual(SSDP_LISTEN_PORTS[0], self.gw._ssdp_bound_port)
+        # Привязка исходящего сокета (к LAN-адресу) тут не в счёт: считаем
+        # только розетку приёма, она привязывается к "".
+        listen_binds = [addr for addr in binds if addr[0] == ""]
+        self.assertEqual(1, len(listen_binds),
+                         "порт свободен — вторая привязка не нужна")
+        self.assertNotIn(socket.SO_REUSEPORT, options,
+                         "SO_REUSEPORT на свободном порту делит M-SEARCH с чужаками")
+        self.assertIn(socket.SO_REUSEADDR, options)
+        self.assertEqual("", self.gw._ssdp_note)
+
+    def test_ssdp_port_is_shared_only_when_someone_else_holds_it(self):
+        """1900 занят (служба SSDP Discovery) — делим порт и честно это пишем."""
+        options: list[int] = []
+        binds: list[tuple[str, int]] = []
+        attempts = {"n": 0}
+
+        class BusyUdp:
+            def __init__(self, *_a, **_k):
+                pass
+
+            def setsockopt(self, level, option, value):
+                if level == socket.SOL_SOCKET:
+                    options.append(option)
+
+            def bind(self, addr):
+                binds.append(tuple(addr))
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise OSError(98, "Address already in use")
+
+            def getsockname(self):
+                return ("0.0.0.0", SSDP_LISTEN_PORTS[0])
+
+            def settimeout(self, *_a):
+                return None
+
+            def close(self):
+                return None
+
+        self.gw._spawn = lambda *args, **kwargs: None
+        with mock.patch("connector.printflow.studio_gateway.socket.socket", BusyUdp):
+            self.gw._start_ssdp()
+        self.addCleanup(self.gw.stop)
+        self.assertEqual(SSDP_LISTEN_PORTS[0], self.gw._ssdp_bound_port,
+                         "занятый порт надо делить, а не уходить на случайный")
+        self.assertIn(socket.SO_REUSEPORT, options)
+        listen_binds = [addr for addr in binds if addr[0] == ""]
+        self.assertEqual(2, len(listen_binds),
+                         "занятый порт пробуем дважды: сначала единолично, "
+                         "потом совместно")
+        self.assertIn("SO_REUSEPORT", self.gw._ssdp_note,
+                      "владелец должен видеть, что порт делится с чужой программой")
 
     def test_status_reports_listen_port_and_targets(self):
         status = self.gw.status()
@@ -373,6 +675,119 @@ class MqttReportTests(unittest.TestCase):
         self.assertEqual("abcd1234", reports[0]["system"]["access_code"])
 
 
+
+def subscribe_packet(packet_id: int = 1, topic: str = "device/01P00ATEST/request") -> bytes:
+    """Пакет SUBSCRIBE (в studio_mqtt есть только декодер, кодируем руками)."""
+    payload = packet_id.to_bytes(2, "big") + encode_utf8(topic) + b"\x00"
+    return wrap_packet(8, payload, flags=2)
+
+
+class MqttPerConnectionAuthTests(unittest.TestCase):
+    """Авторизация MQTT — своя у каждого соединения.
+
+    Настоящий станок авторизует клиентов независимо. Если флаг общий, то
+    чужой вход с неверным Access Code (или чужой DISCONNECT) гасит отчёты у
+    уже работающей Studio: соединение живое, CONNACK был 0, а
+    ``device/<серийник>/report`` молчит. Выглядит это как «подключился, но
+    принтер пустой», поэтому поведение проверяем отдельно.
+    """
+
+    CODE = "abcd1234"
+
+    def setUp(self):
+        self.db = make_db()
+        self.addCleanup(self.db.close)
+        self.db.set_settings({"studio_gateway_access_code": self.CODE})
+        self.mgr = FakeMgr(self.db)
+        # bind=True: именно в этом режиме шлюз требует вход перед PUBLISH.
+        self.gw = StudioGateway(self.db, self.mgr, bind=True)
+        self.mgr.studio = self.gw
+        self.topic = f"device/{self.gw.identity()['serial']}/request"
+
+    def login(self, session: MqttSession, password: str) -> int:
+        packet = encode_connect(client_id="studio", username="bblp",
+                                password=password)
+        replies = self.gw.mqtt_handle_packet(packet, session)
+        ptype, _flags, payload = parse_fixed_header(replies[0])
+        self.assertEqual(CONNACK, ptype)
+        return payload[1]
+
+    def reports(self, session: MqttSession) -> list[dict]:
+        packet = encode_publish(self.topic, json.dumps(
+            {"info": {"command": "get_version", "sequence_id": "2"}}))
+        out = []
+        for reply in self.gw.mqtt_handle_packet(packet, session):
+            ptype, flags, payload = parse_fixed_header(reply)
+            if ptype == PUBLISH:
+                pub = decode_publish(flags, payload)
+                out.append(json.loads(pub["payload"]))
+        return out
+
+    def test_two_clients_authorize_independently(self):
+        studio, guest = MqttSession(peer="192.168.0.50"), MqttSession(peer="10.0.0.2")
+        self.assertEqual(0, self.login(studio, self.CODE))
+        self.assertEqual(4, self.login(guest, "неверный"))
+        self.assertTrue(studio.authed)
+        self.assertFalse(guest.authed)
+
+    def test_failed_login_elsewhere_does_not_mute_the_working_client(self):
+        studio, guest = MqttSession(), MqttSession()
+        self.assertEqual(0, self.login(studio, self.CODE))
+        self.assertTrue(self.reports(studio), "до чужого входа отчёты есть")
+        # Чужой клиент ошибся кодом — у Studio отчёты обязаны остаться.
+        self.assertEqual(4, self.login(guest, "oops1234"))
+        reports = self.reports(studio)
+        self.assertTrue(reports, "чужой неверный код заглушил работающую Studio")
+        self.assertEqual(1, len(reports))
+        self.assertEqual("get_version", reports[0]["info"]["command"])
+
+    def test_disconnect_elsewhere_does_not_mute_the_working_client(self):
+        studio, guest = MqttSession(), MqttSession()
+        self.login(studio, self.CODE)
+        self.login(guest, self.CODE)
+        self.gw.mqtt_handle_packet(encode_disconnect(), guest)
+        self.assertFalse(guest.authed)
+        self.assertTrue(studio.authed, "чужой DISCONNECT сбросил нашу авторизацию")
+        self.assertTrue(self.reports(studio))
+
+    def test_another_guest_can_log_in_after_the_first_one_left(self):
+        studio, guest = MqttSession(), MqttSession()
+        self.login(studio, self.CODE)
+        self.login(guest, self.CODE)
+        self.gw.mqtt_handle_packet(encode_disconnect(), studio)
+        self.assertTrue(guest.authed)
+        self.assertTrue(self.reports(guest), "после чужого DISCONNECT отчёты пропали")
+
+    def test_subscribe_before_login_gets_nothing(self):
+        guest = MqttSession()
+        self.assertEqual([], self.gw.mqtt_handle_packet(subscribe_packet(), guest),
+                         "SUBACK до входа — так станок не делает")
+        self.login(guest, self.CODE)
+        replies = self.gw.mqtt_handle_packet(subscribe_packet(), guest)
+        self.assertEqual(1, len(replies))
+        self.assertEqual(SUBACK, parse_fixed_header(replies[0])[0])
+
+    def test_publish_before_login_gets_nothing(self):
+        guest = MqttSession()
+        self.assertEqual([], self.reports(guest),
+                         "PUBLISH до входа обязан отбрасываться")
+
+    def test_default_session_keeps_the_socketless_api(self):
+        """Вызов без сессии работает как раньше (тесты, диагностика, скрипты)."""
+        packet = encode_connect(client_id="diag", username="bblp", password=self.CODE)
+        ptype, _flags, payload = parse_fixed_header(
+            self.gw.mqtt_handle_packet(packet)[0])
+        self.assertEqual((CONNACK, 0), (ptype, payload[1]))
+        self.assertTrue(self.gw._mqtt_authed, "свойство _mqtt_authed не отражает сессию")
+        self.gw._mqtt_authed = False
+        self.assertFalse(self.gw._mqtt_session.authed)
+
+    def test_default_and_live_sessions_do_not_leak_into_each_other(self):
+        live = MqttSession()
+        self.login(live, self.CODE)
+        # «Сброс» сессии по умолчанию не трогает живое соединение.
+        self.gw._mqtt_authed = False
+        self.assertTrue(live.authed)
 class LiveStudioHandshakeTests(unittest.TestCase):
     """Живой прогон: тест играет Studio, шлюз работает на свободных портах."""
 
@@ -401,10 +816,16 @@ class LiveStudioHandshakeTests(unittest.TestCase):
             "BIND_PORT_PLAIN": free_port(),
             "BIND_PORT_TLS": free_port(),
         }
+        # SSDP-порт тоже свой: на 1900 в одном процессе могут слушать шлюзы
+        # соседних тестов, и ядро начнёт делить между ними M-SEARCH.
+        self.ssdp_port = free_port()
         patches = [
             mock.patch(f"connector.printflow.studio_gateway.{name}", port)
             for name, port in self.ports.items()
         ]
+        patches.append(mock.patch(
+            "connector.printflow.studio_gateway.SSDP_LISTEN_PORTS",
+            (self.ssdp_port,)))
         patches.append(mock.patch("connector.printflow.studio_tls.ensure_certificate",
                                   return_value=(self.cert, self.key)))
         for item in patches:
