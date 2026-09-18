@@ -27,7 +27,6 @@ import ssl
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from unittest import mock
@@ -42,7 +41,9 @@ from connector.printflow.studio_gateway import (  # noqa: E402
     BIND_PORT_TLS,
     FIRMWARE_VERSION,
     SSDP_BROADCAST,
+    SSDP_LISTEN_PORTS,
     SSDP_NT,
+    SSDP_NOTIFY_LOOPBACK,
     SSDP_PORTS,
     StudioGateway,
     decode_bind_frame,
@@ -247,11 +248,104 @@ class SsdpAnnounceTests(unittest.TestCase):
         self.assertIn((SSDP_BROADCAST, SSDP_PORTS[0]), sent)
         for port in SSDP_PORTS:
             self.assertIn(("239.255.255.250", port), sent)
+        self.assertIn((SSDP_NOTIFY_LOOPBACK, SSDP_PORTS[0]), sent,
+                      "Studio на том же ПК узнаёт шлюз только по loopback")
 
     def test_notify_period_is_printer_like(self):
         from connector.printflow import studio_gateway as module
         self.assertLessEqual(module.SSDP_NOTIFY_PERIOD, 6.0,
                              "плагин слушает одно-два объявления, реже — не увидит")
+
+    def test_udp_2021_is_never_taken_by_the_gateway(self):
+        """UDP :2021 — розетка самого Studio: вторая на том же порту ломает поиск.
+
+        Две розетки на одном порту с SO_REUSEADDR в Windows делят входящий
+        трафик непредсказуемо: шлюз, поднявшийся раньше Studio, отбирал у неё
+        объявления принтеров, Studio оставалась с пустым dev_ip и отдавала
+        «код=-1» ещё до MQTT. Поэтому 2021 шлюз не слушает (только шлёт).
+        """
+        from connector.printflow import studio_gateway as module
+        self.assertNotIn(2021, module.SSDP_LISTEN_PORTS,
+                         "2021 принадлежит Studio, шлюз не смеет его занимать")
+        self.assertIn(2021, module.SSDP_PORTS,
+                      "объявление обязано уходить на 2021 — там его ждёт плагин")
+        self.assertEqual((1900,), tuple(module.SSDP_LISTEN_PORTS))
+
+    def test_own_address_and_directed_broadcast_are_announced(self):
+        """Объявление уходит на loopback, свой адрес и в свою подсеть."""
+        with mock.patch("connector.printflow.config.get_local_ips",
+                        return_value=["192.168.1.50"]):
+            self.gw._ips_cache = []
+            self.gw._ips_cache_at = 0.0
+            self.db.set_settings({"studio_gateway_host": "192.168.1.50"})
+            targets = self.gw._notify_targets()
+        for expected in ((SSDP_NOTIFY_LOOPBACK, 2021),
+                         ("192.168.1.50", 2021),
+                         ("192.168.1.255", 2021),
+                         (SSDP_BROADCAST, 2021)):
+            self.assertIn(expected, targets, f"нет адреса {expected}")
+        self.assertEqual(len(targets), len(set(targets)), "адреса задвоились")
+
+    def test_directed_broadcast_helper(self):
+        from connector.printflow.studio_gateway import directed_broadcast
+        self.assertEqual("192.168.1.255", directed_broadcast("192.168.1.50"))
+        self.assertEqual("", directed_broadcast("192.168.1.999"))
+        self.assertEqual("", directed_broadcast(""))
+        self.assertEqual("", directed_broadcast("не адрес"))
+
+    def test_status_reports_listen_port_and_targets(self):
+        status = self.gw.status()
+        self.assertEqual(list(SSDP_LISTEN_PORTS), status["ssdp_listen_ports"])
+        self.assertNotIn(2021, status["ssdp_listen_ports"])
+        self.assertIsInstance(status["ssdp_bound_port"], int)
+        self.assertIn("127.0.0.1:2021", status["ssdp_targets"])
+
+
+class StudioOnTheSamePcTests(unittest.TestCase):
+    """Главный сценарий владельца: Bambu Studio стоит на том же компьютере.
+
+    Раньше шлюз занимал UDP 2021 — тот самый порт, который слушает сетевой
+    плагин Studio, — и объявление могло не дойти до плагина. Теперь шлюз
+    слушает 1900, а объявление шлёт в том числе по loopback, куда брандмауэр
+    Windows не заглядывает вовсе.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.addCleanup(self.db.close)
+        self.db.set_settings({"studio_gateway_enabled": True,
+                              "studio_gateway_access_code": "abcd1234"})
+        self.mgr = FakeMgr(self.db)
+        self.gw = StudioGateway(self.db, self.mgr, bind=True)
+        self.mgr.studio = self.gw
+
+    def test_studio_port_stays_free_and_announce_reaches_it(self):
+        """Пока шлюз работает, чужой «Studio» занимает 2021 и получает NOTIFY."""
+        self.gw._start_ssdp()
+        self.addCleanup(self.gw.stop)
+        self.assertTrue(self.gw._ssdp_sock, "SSDP-сокет шлюза не поднялся")
+        self.assertNotEqual(2021, self.gw._ssdp_bound_port)
+
+        studio = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        self.addCleanup(studio.close)
+        try:
+            # Без SO_REUSEADDR: если бы шлюз держал 2021, здесь была бы ошибка
+            # «адрес уже занят» — ровно та, из-за которой Studio не находила
+            # принтер, пока шлюз поднимался раньше неё.
+            studio.bind(("127.0.0.1", 2021))
+        except OSError as exc:
+            self.skipTest(f"UDP 2021 занят в системе: {exc}")
+        studio.settimeout(10)
+
+        self.gw._last_notify = 0.0
+        self.gw._broadcast_notify()
+        data, _addr = studio.recvfrom(4096)
+        text = data.decode("utf-8", "replace")
+        self.assertIn("NOTIFY * HTTP/1.1", text)
+        self.assertIn(f"DevVersion.bambu.com: {FIRMWARE_VERSION}", text)
+        self.assertIn("DevBind.bambu.com: free", text)
+        self.assertIn("DevConnect.bambu.com: lan", text)
+        self.assertIn(self.gw.identity()["serial"], text)
 
 
 class MqttReportTests(unittest.TestCase):
@@ -448,6 +542,33 @@ class LiveStudioHandshakeTests(unittest.TestCase):
         body = self.mqtt({"pushing": {"command": "pushall", "sequence_id": "0"}})
         self.assertEqual("IDLE", body["print"]["gcode_state"])
         self.assertEqual(0, body["print"]["msg"])
+
+    def test_stray_connection_without_tls_does_not_kill_the_services(self):
+        """Проверка «открыт ли порт» не должна гасить TLS-службы шлюза.
+
+        accept() на TLS-розетке сам делает рукопожатие; клиент без TLS
+        (Test-NetConnection, сканер сети, антивирус) поднимал исключение и
+        раньше убивал цикл приёма целиком: порт оставался в LISTEN, но новых
+        клиентов не принимал — Studio висела по таймауту и показывала «код=-1»
+        на исправном шлюзе.
+        """
+        for port in (self.ports["MQTT_PORT"], self.ports["BIND_PORT_TLS"]):
+            stray = socket.create_connection(("127.0.0.1", port), timeout=5)
+            try:
+                stray.sendall(b"GET / HTTP/1.0\r\n\r\n")  # это не TLS
+            except OSError:
+                pass
+            finally:
+                stray.close()
+        time.sleep(0.3)  # даём циклу приёма обработать сбой рукопожатия
+
+        reply = self.detect(self.ports["BIND_PORT_PLAIN"])
+        self.assertEqual("detect", reply.get("login", {}).get("command"))
+        tls_reply = self.detect(self.ports["BIND_PORT_TLS"], tls=True)
+        self.assertEqual("detect", tls_reply.get("login", {}).get("command"))
+        body = self.mqtt({"pushing": {"command": "pushall", "sequence_id": "0"}})
+        self.assertEqual("IDLE", body["print"]["gcode_state"])
+        self.assertGreaterEqual(self.gw.status()["dropped_connections"], 0)
 
     def test_ftps_upload_with_tls_data_channel(self):
         blob = b"3MF-BYTES-FROM-STUDIO"

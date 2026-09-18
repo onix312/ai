@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 
 from . import APP_VERSION, DEFAULT_PORT
@@ -999,7 +1000,12 @@ def get_studio_status(api: Any, ctx: Ctx):
         "bind_running": False,
         "bind_requests": 0,
         "bind_detects": 0,
+        "dropped_connections": 0,
         "ssdp_ports": [2021, 1990, 1900],
+        "ssdp_listen_ports": [1900],
+        "ssdp_bound_port": 0,
+        "ssdp_note": "",
+        "ssdp_targets": [],
         "mqtt_connections": 0,
         "mqtt_auth_failures": 0,
         "ftp_connections": 0,

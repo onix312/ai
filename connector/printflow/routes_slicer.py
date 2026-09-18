@@ -197,8 +197,8 @@ def slicer_slice(api, ctx: Ctx):
     # Исходный G-code остаётся рядом, в отдельный файл пишется копия с блоком.
     farmloop_report = None
     farm_profile = str(body.get("farmloop_profile") or "").strip()
-    if not farm_profile and raw.get("slicer_auto_postprocess_farmloop"):
-        farm_profile = str(raw.get("farmloop_profile") or "").strip()
+    if not farm_profile and _raw_settings(api).get("slicer_auto_postprocess_farmloop"):
+        farm_profile = str(body.get("farmloop_profile") or "").strip()
     if farm_profile:
         from .farmloop import prepare_file
         template_path = DATA_DIR / "farmloop-templates" / f"{farm_profile}.gcode"
