@@ -41,7 +41,7 @@ from typing import Any
 from .accounting import Accounting, num, uid
 from .config import now_iso
 from .payment_purpose import build as build_purpose
-from .sbp import Sbp, STATUS_PENDING
+from .sbp import Sbp
 from .shelf import Shelf
 
 SESSION_TTL = 12 * 3600  # смена 12 часов, затем код вводится заново
@@ -1578,7 +1578,6 @@ class Cashier:
             raise ValueError("Списком больше 50 записей не работаем")
         if not reason:
             raise ValueError("Причина обязательна: «дубликат», «передумали»…")
-        stamp = now_iso()
         who = self._session_name(session) or "кассир"
         found = []
         for rid in ids:

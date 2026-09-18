@@ -1,6 +1,6 @@
 import unittest
 
-from connector.printflow.farmloop_cycle import CycleConfig, CycleMachine, CycleState
+from connector.printflow.farmloop_cycle import CycleConfig, CycleMachine
 
 
 class FarmLoopCycleTests(unittest.TestCase):

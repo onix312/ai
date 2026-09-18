@@ -4,7 +4,6 @@ import unittest
 import zipfile
 from connector.printflow.materials import (
     generate_bambu_studio_filament_preset,
-    bambu_filament_preset,
 )
 from connector.printflow.repo import Repo
 from connector.tests.test_phase11 import make_db

@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import io
 import pathlib
+import re
 import sys
 import tempfile
 import time
 import types
 import unittest
 import zipfile
-from datetime import date
 from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -607,6 +607,31 @@ class PrintTests(unittest.TestCase):
         self.assertIn("______", html)
         with self.assertRaises(ValueError):
             warranty_html(self.db, "nope")
+
+    def test_warranty_ticket_carries_its_own_styles(self):
+        """Талон печатается со своими правилами, а не голым текстом.
+
+        `pf.page(css=…)` — единственное место, куда попадают правила
+        конкретной формы. `warranty_html` собирал блок `.wt/.wt-qr/.wt-sign`,
+        но в `pf.page` его не передавал: талон уезжал на печать без рамки
+        148 мм, без размера QR и без линей подписей — голый текст на A4.
+        Нашёл линтер (F841: переменная `css` не использовалась), держит этот
+        тест. Проверяем по факту: каждый собственный класс талона обязан быть
+        описан в стилях листа, а рамка 148 мм — присутствовать.
+        """
+        from connector.printflow.printing import warranty_html
+        html = warranty_html(self.db, "o1")
+        style, sep, body = html.partition("</style>")
+        self.assertTrue(sep, "печатный лист без блока стилей")
+        used = {c for cls in re.findall(r'class="([^"]+)"', body)
+                for c in cls.split() if c.startswith("wt")}
+        self.assertIn("wt", used, "в талоне нет собственного класса .wt")
+        for cls in sorted(used):
+            self.assertRegex(style, rf"\.{cls}\s*\{{",
+                             f"класс .{cls} использован в талоне, но не описан "
+                             "в стилях листа: css формы не доехал до pf.page")
+        self.assertIn("148mm", style,
+                      "рамка талона 148 мм пропала из стилей листа")
 
     def test_print_forms_catalog_has_parameters(self):
         """Каталог форм — источник правды для панели: у каждой формы с

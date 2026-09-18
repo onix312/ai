@@ -41,7 +41,7 @@ function rsEncode(data, ecLen) {
 }
 
 /* ------------------------------------------- таблицы блоков (версии 1–10) */
-/* [총 codewords, ecPerBlock, group1blocks, group1data, group2blocks, group2data] */
+/* [всего кодовых слов, ecPerBlock, group1blocks, group1data, group2blocks, group2data] */
 const RS = {
   L: [[26,7,1,19,0,0],[44,10,1,34,0,0],[70,15,1,55,0,0],[100,20,1,80,0,0],[134,26,1,108,0,0],
       [172,18,2,68,0,0],[196,20,2,78,0,0],[242,24,2,97,0,0],[292,30,2,116,0,0],[346,18,2,68,2,69]],

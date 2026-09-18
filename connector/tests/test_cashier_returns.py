@@ -118,9 +118,6 @@ class CashierReturnTests(unittest.TestCase):
         self.assertEqual(live["expected"], 0.0)
         self.assertEqual(round(float(self.shelf_qty()), 2), 10.0)
 
-    def shelf_qty(self) -> float:
-        return float(self.db.one("SELECT qty FROM shelf_items WHERE id='s1'")["qty"])
-
     def test_partial_return_then_the_rest(self):
         sale = self._sale(3)
         move_id = str((sale["items"][0] or {}).get("move_id") or "")

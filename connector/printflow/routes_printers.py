@@ -194,7 +194,6 @@ def studio_confirm(api: Any, ctx: Ctx):
 
     job = None
     started = False
-    error = ""
 
     # Постановка в очередь
     try:

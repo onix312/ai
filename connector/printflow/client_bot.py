@@ -44,7 +44,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from pathlib import Path
 
 from .accounting import num, uid
 from .config import now_iso

@@ -1072,7 +1072,6 @@ class Nomenclature:
 
     def variant_gallery(self, variant_id: str) -> list[str]:
         """Кадры вариации обложкой вперёд: photo + photos_json без дублей."""
-        import json
         row = self.db.one("SELECT photo, photos_json FROM nom_variants WHERE id=?",
                           (variant_id,))
         if not row:

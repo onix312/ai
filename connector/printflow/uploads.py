@@ -11,11 +11,9 @@ from __future__ import annotations
 
 import json
 import mimetypes
-import time
-import urllib.parse
 from pathlib import Path
 
-from .accounting import num, uid
+from .accounting import num
 from .config import DATA_DIR, UPLOAD_DIR, now_iso
 from .http_helpers import (MAX_UPLOAD, _form_bool, _upload_filename,
                            parse_multipart, request_length, safe_file,

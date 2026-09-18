@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pathlib
 import sys
-import threading
 import unittest
 from unittest import mock
 
@@ -13,7 +12,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.manager import PrinterManager
 from connector.printflow.repo import Repo
-from connector.tests.test_phase11 import make_api, make_db, _held
+from connector.tests.test_phase11 import make_db, _held
 
 
 class FakeCam:

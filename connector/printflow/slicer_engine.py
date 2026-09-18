@@ -26,7 +26,6 @@ from __future__ import annotations
 import math
 import re
 import struct
-from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -230,7 +229,8 @@ def mesh_bbox(mesh: Mesh) -> dict:
 
 
 def mesh_manifold(mesh: Mesh) -> bool | None:
-    """Замкнута ли сетка: у замкнутой每个 ребро ровно у двух треугольников.
+    """Замкнута ли сетка: у замкнутой каждое ребро принадлежит ровно двум
+    треугольникам.
 
     `None` — проверка пропущена (слишком большая модель), а не «всё хорошо».
     """

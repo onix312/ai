@@ -31,7 +31,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Iterable
 
 from .accounting import num
 

@@ -8,13 +8,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import mimetypes
 import re
-import sqlite3
 import threading
 import time
-import urllib.parse
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -22,22 +19,19 @@ from . import APP_VERSION, DEFAULT_PORT
 from .accounting import Accounting, num, uid
 from .bambu import BambuPrinter
 from .bus import EventBus, LiveBroadcaster
-from .config import (DANGEROUS_AUTOMATION_COMMANDS, SITE, UPLOAD_DIR,
-                     ensure_dirs, now_iso)
+from .config import DANGEROUS_AUTOMATION_COMMANDS, ensure_dirs, now_iso
 from .consumption import MaterialShortage, plan as plan_consumption
-from .db import Database, friendly_sqlite_error
+from .db import Database
 from .manager import PrinterManager
-from .idempotency import IdempotencyStore, extract_key as extract_idempotency_key
-from .rate_limit import client_key, limiter
+from .idempotency import IdempotencyStore
 from .repo import Repo
-from . import static_serve
-from .uploads import UploadMixin
 from .http_handler import Handler
-from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
-                           MAX_UPLOAD, _form_bool, _upload_filename,
-                           begin_request, parse_multipart, rate_bucket,
-                           request_length, request_origin_allowed,
-                           safe_file, save_upload)
+from .http_helpers import save_upload
+# Этот модуль — фасад: после разбора на `http_handler`/`http_helpers`/`uploads`
+# четыре имени исторически берут «из api» (test_process_reliability,
+# test_queue_local_files). Ре-экспорт держим, поэтому noqa; новым кодом
+# импортируйте их из `http_helpers` напрямую.
+from .http_helpers import MAX_JSON, _upload_filename, request_length, request_origin_allowed  # noqa: F401
 
 # 18.5 (М5): в AMS вместе с типом/цветом подаём температуры сопла со стикера
 # бобины — только если они написаны явно («сопло 210–230°» / «nozzle …»).

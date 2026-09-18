@@ -19,7 +19,6 @@ import argparse
 import json
 import re
 import socket
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -191,14 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     token = ""
     if args.code:
         code, login, ms = post(base, "/api/cashier/login", {"code": args.code})
-        print(f"\n== Вход кассира ==")
+        print("\n== Вход кассира ==")
         print(f"  {code}  {ms:.1f} мс  роль: {login.get('role') or login.get('error', '—')}")
         token = str(login.get("token") or "")
         if token:
             code, catalog, ms = get(
                 base, "/api/cashier/catalog?" + urllib.parse.urlencode({"token": token}))
             items = catalog.get("items") or []
-            print(f"\n== Каталог кассы ==")
+            print("\n== Каталог кассы ==")
             print(f"  {code}  {ms:.1f} мс  позиций: {len(items)}")
             code, incoming, ms = get(
                 base, "/api/cashier/incoming?" + urllib.parse.urlencode({"token": token}))

@@ -18,7 +18,7 @@ import csv
 import hashlib
 import io
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from .accounting import Accounting, num, uid
@@ -305,9 +305,9 @@ class BankReceipts:
             payment = candidates[0]
             auto = bool(self.db.setting("sbp_auto_confirm", True))
             if auto:
-                result = self.sbp.confirm(payment["id"], actor=actor,
-                                          note="Авто-подтверждение по поступлению из банка",
-                                          authorized="сверка банка")
+                self.sbp.confirm(payment["id"], actor=actor,
+                                 note="Авто-подтверждение по поступлению из банка",
+                                 authorized="сверка банка")
                 self.db.execute(
                     "UPDATE bank_receipts SET status=?,sbp_id=?,matched_at=?,matched_by=?,"
                     "note=? WHERE id=?",

@@ -15,7 +15,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
-from connector.printflow.client_bot import ClientBot  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.manager import PrinterManager  # noqa: E402
 from connector.printflow.repo import Repo  # noqa: E402
@@ -105,8 +104,8 @@ class ClientBotTests(unittest.TestCase):
         self.assertIn("1002", mine)
 
     def test_push_notifies_once_per_status(self):
-        row = self._chat_row()
-        order = self.db.upsert("orders", {
+        self._chat_row()
+        self.db.upsert("orders", {
             "id": "o1003", "number": "1003", "customer_name": "Иван",
             "product": "крючок", "price": 200, "status": "new",
             "created_at": "2026-08-24T10:00:00",
@@ -126,7 +125,7 @@ class ClientBotTests(unittest.TestCase):
         self.assertIn("крючок", pushes[0][1])
 
     def test_log_and_stats(self):
-        row = self._chat_row()
+        self._chat_row()
         self.bot._log("555", "Иван", "каталог", "вот каталог")
         stats = self.bot.stats()
         self.assertGreaterEqual(stats["chats"], 1)
@@ -179,7 +178,7 @@ class ClientBotTests(unittest.TestCase):
 
     def test_text_commands_are_sent(self):
         """Баг 9.3: «мои заказы»/«статус» возвращали текст без отправки."""
-        row = self._chat_row()
+        self._chat_row()
         sent = self._wire()
         self.bot._handle(self._msg("мои заказы"))
         self.assertTrue(self._sends(sent))
@@ -196,7 +195,7 @@ class ClientBotTests(unittest.TestCase):
         self.assertTrue(any("принят" in p["text"] for p in self._sends(sent)))
 
     def test_status_button_shows_own_order_card(self):
-        row = self._chat_row()
+        self._chat_row()
         self.db.upsert("orders", {
             "id": "o1001", "number": "1001", "customer_name": "Иван",
             "product": "адресник", "price": 300, "status": "print",
@@ -261,7 +260,7 @@ class ClientBotTests(unittest.TestCase):
         self.assertEqual(buttons["keyboard"][0][0]["request_contact"], True)
 
     def test_push_includes_menu_buttons(self):
-        row = self._chat_row()
+        self._chat_row()
         self.db.upsert("orders", {
             "id": "o1003", "number": "1003", "customer_name": "Иван",
             "product": "крючок", "price": 200, "status": "new",
@@ -331,7 +330,7 @@ class ClientBotTests(unittest.TestCase):
 
     def test_kotvet_answers_client_from_internal_bot(self):
         """«кответ <чат> <текст>» — ответ уходит покупателю и в журнал."""
-        row = self._chat_row()
+        self._chat_row()
         sent = self._wire()
         answer = self.manager.bot._client_answer("кответ 555 Добрый день! Готово к пятнице.")
         self.assertIn("Отправлено ✓", answer)
@@ -345,7 +344,7 @@ class ClientBotTests(unittest.TestCase):
     def test_photo_without_caption_creates_lead_with_reference(self):
         """Фото без подписи: лид-заявка + файл в заказе + фото мастеру."""
         self._patch_photo_dir()
-        row = self._chat_row()
+        self._chat_row()
         notified = self._notify()
         sent = self._wire()
         self.bot._download_file = lambda file_id: b"\xff\xd8fake-jpeg"
@@ -361,7 +360,7 @@ class ClientBotTests(unittest.TestCase):
 
     def test_photo_with_caption_attaches_to_custom_order(self):
         self._patch_photo_dir()
-        row = self._chat_row()
+        self._chat_row()
         self._notify()
         self.bot._download_file = lambda file_id: b"\xff\xd8fake"
         self.bot._handle(self._msg(text=None, caption="индивидуальный держатель",
@@ -373,7 +372,7 @@ class ClientBotTests(unittest.TestCase):
 
     def test_photo_by_number_attaches_to_own_order(self):
         self._patch_photo_dir()
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1001")
         sent = self._wire()
         self.bot._download_file = lambda file_id: b"\xff\xd8fake"
@@ -450,7 +449,7 @@ class ClientBotTests(unittest.TestCase):
                         and "nozza_test_bot" in urls[0])
 
     def test_review_asked_once_and_rating_flow(self):
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1001", status="done", age="2026-08-20T10:00:00")
         self.db.execute("UPDATE orders SET client_delivered_at='2026-08-20T10:00:00' WHERE id='o1001'")
         sent = self._wire()
@@ -479,7 +478,7 @@ class ClientBotTests(unittest.TestCase):
         self.assertTrue(any("поправим" in p["text"] for p in self._sends(sent)))
 
     def test_pickup_reminder_once(self):
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1002", status="ready", age="2026-08-20T10:00:00")
         sent = self._wire()
         self.bot._maybe_remind_pickup()
@@ -491,25 +490,25 @@ class ClientBotTests(unittest.TestCase):
         self.assertFalse(self._sends(sent))
 
     def test_pay_card_and_paid_notice(self):
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1001", price=350.0)
         self.db.set_settings({"client_bot_pay_info": "СБП +7 900 000-00-00, NOZZA"})
         sent = self._wire()
-        self.bot._handle(self._cb(f"pay:o1001"))
+        self.bot._handle(self._cb("pay:o1001"))
         card = [p for p in self._sends(sent) if "350" in p["text"]]
         self.assertTrue(card)
         self.assertIn("СБП", card[0]["text"])
         self.assertIn("NOZZA №1001", card[0]["text"])
         notified = self._notify()
         sent.clear()
-        self.bot._handle(self._cb(f"paid:o1001"))
+        self.bot._handle(self._cb("paid:o1001"))
         self.assertTrue(any("Передал мастеру" in p["text"] for p in self._sends(sent)))
         self.assertTrue(any("сообщил об оплате" in n[0] for n in notified))
         self.assertIsNotNone(self.db.one(
             "SELECT * FROM events WHERE title='Покупатель сообщил об оплате'"))
 
     def test_track_url_button_in_order_card(self):
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1001")
         self.db.set_settings({"client_bot_track_url": "http://192.168.1.5:8080"})
         sent = self._wire()
@@ -562,7 +561,7 @@ class ClientBotTests(unittest.TestCase):
         self.db.execute("UPDATE orders SET client_quote_status='requested' WHERE id='o1001'")
         other = self.db.upsert("client_chats", {
             "chat_id": "556", "name": "Мария", "created_at": "2026-08-24T10:00:00"}, key="chat_id")
-        sent = self._wire()
+        self._wire()
         answer, _ = self.bot._run_callback("556", other, "quote_yes:o1001")
         self.assertIn("не ждёт", answer)
         self.assertEqual(self.db.one("SELECT client_quote_status FROM orders WHERE id='o1001'")["client_quote_status"], "requested")
@@ -573,7 +572,7 @@ class ClientBotTests(unittest.TestCase):
         self.assertIn("не ждёт", again)
 
     def test_review_requires_actual_handoff(self):
-        row = self._chat_row()
+        self._chat_row()
         self._own_order("1001", status="done", age="2026-08-20T10:00:00")
         sent = self._wire()
         self.bot._maybe_ask_reviews()
