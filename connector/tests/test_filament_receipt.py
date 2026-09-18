@@ -237,6 +237,58 @@ class FilamentReceiptTests(unittest.TestCase):
         spool = self.db.one("SELECT * FROM spools WHERE id=?", (res["spools"][0]["id"],))
         self.assertEqual(spool["location"], "home")
 
+    def test_filament_receipt_skips_empty_table_rows(self):
+        """Пустая строка таблицы прихода не превращается в катушку PLA.
+
+        В модалке «+ Позиция» добавляет строку; если владелец оставил её
+        незаполненной и нажал «Оформить приход» — раньше создавалась
+        лишняя катушка PLA с дефолтами, и расход задваивался.
+        """
+        res = self.workshop.filament_receipt(
+            items=[
+                {"material": "", "color_name": "", "spool_count": "", "total_amount": ""},
+                {"material": "PETG", "color_name": "Чёрный", "spool_count": 2,
+                 "spool_grams": 1000, "total_amount": 3600},
+            ],
+            location="shop",
+            supplier="ТестПластик",
+            confirmed=True,
+            request_id="empty-row-1",
+        )
+        self.assertTrue(res["ok"])
+        self.assertEqual(len(res["spools"]), 2, "пустая строка создала лишнюю катушку")
+        materials = {s["material"] for s in res["spools"]}
+        self.assertEqual(materials, {"PETG"}, "пустая строка уехала в катушки как PLA")
+
+    def test_filament_receipt_route_via_router_registry(self):
+        """POST /api/workshop/receipt идёт через реестр маршрутов и отвечает 4xx без подтверждения."""
+        register_all()
+        from connector.tests.test_phase11 import make_api
+        api = make_api(self.db)
+        api.repo = self.repo
+        api.shopping = self.shopping
+        api.acc = self.acc
+        api.workshop = self.workshop
+
+        # Без подтверждения маршрут возбуждает ValueError — транспортный слой
+        # (http_handler) превращает его в ответ 400 с полем error.
+        with self.assertRaises(ValueError) as caught:
+            router.dispatch(
+                api, "POST", "/api/workshop/receipt",
+                body={"items": [{"material": "PLA", "spool_count": 1}],
+                      "request_id": "no-confirm-1", "confirmed": False})
+        self.assertIn("Подтвердите", str(caught.exception))
+
+        status, body = router.dispatch(
+            api, "POST", "/api/workshop/receipt",
+            body={"items": [{"material": "PLA", "color_name": "Синий",
+                             "spool_count": 1, "total_amount": 1500}],
+                  "supplier": "РоутПоставщик", "confirmed": True,
+                  "request_id": "no-confirm-2"})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(len(body["spools"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

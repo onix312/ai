@@ -438,6 +438,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         buf = io.BytesIO()
         used_names: set[str] = set()
 
+        # db — для уровня «справочник» в температурах: катушка → справочник → каталог
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             readme = (
                 "# Пресеты филамента PrintFlow для Bambu Studio / OrcaSlicer\n\n"
@@ -454,7 +455,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
             zf.writestr("README.txt", readme.encode("utf-8"))
 
             for sp in spools:
-                preset = generate_bambu_studio_filament_preset(sp)
+                preset = generate_bambu_studio_filament_preset(sp, db=self.api.db)
                 raw_name = preset.get("name") or "Filament"
                 # Очищаем имя от недопустимых символов файловой системы
                 clean_name = re.sub(r'[\\/*?:"<>|]', "_", raw_name).strip()

@@ -1406,11 +1406,15 @@ def normalize_bambu_material_key(name: str) -> str:
 
 
 def bambu_filament_preset(material: str, brand: str = "",
-                          rec_temp: tuple | None = None) -> dict[str, Any]:
+                          rec_temp: tuple | None = None,
+                          catalog_temp: tuple | None = None) -> dict[str, Any]:
     """Сформировать параметры слота AMS для Bambu Studio.
 
     Возвращает канонический tray_type, tray_info_idx (пресет в Bambu Studio),
     название пресета, бренд и диапазон температур сопла.
+
+    Температуры — по трём уровням (18.7): стикер катушки (rec_temp), затем
+    справочник материалов (catalog_temp), затем встроенная таблица Bambu.
     """
     key = normalize_bambu_material_key(material)
     cfg = BAMBU_FILAMENT_PRESETS.get(key) or BAMBU_FILAMENT_PRESETS["PLA"]
@@ -1423,13 +1427,15 @@ def bambu_filament_preset(material: str, brand: str = "",
     tray_sub_brands = b_brand or ("Bambu" if is_bambu else "Generic")
 
     t_min, t_max = cfg["nozzle"]
-    if rec_temp and len(rec_temp) == 2:
-        try:
-            lo, hi = int(rec_temp[0]), int(rec_temp[1])
+    for candidate in (rec_temp, catalog_temp):
+        if candidate and len(candidate) == 2:
+            try:
+                lo, hi = int(candidate[0]), int(candidate[1])
+            except (TypeError, ValueError):
+                continue
             if 100 <= lo <= hi <= 350:
                 t_min, t_max = lo, hi
-        except (TypeError, ValueError):
-            pass
+                break
 
     return {
         "key": key,
@@ -1443,12 +1449,18 @@ def bambu_filament_preset(material: str, brand: str = "",
     }
 
 
-def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
+def generate_bambu_studio_filament_preset(spool: dict, db=None) -> dict[str, Any]:
     """Сформировать валидный словарь конфигурации катушки для Bambu Studio / OrcaSlicer.
 
     Формат полностью соответствует спецификации пользовательских пресетов (.json)
     Bambu Studio, готовых к импорту через File -> Import -> Import Configs
     или распаковке в %APPDATA%/BambuStudio/user/[id]/filament/
+
+    Температуры берутся по уровням (18.7): со стикера катушки (rec_settings),
+    при отсутствии — из справочника материалов (таблица materials, если db
+    передан, иначе встроенный каталог), затем из встроенной таблицы Bambu.
+    Значения одной катушки никогда не попадают в чужие пресеты: rec читается
+    только из переданной строки катушки.
     """
     material_raw = str(spool.get("material") or "PLA").strip()
     brand_raw = str(spool.get("brand") or "Generic").strip()
@@ -1461,7 +1473,7 @@ def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
     else:
         hex_color = "#FFFFFF"
 
-    # Рекомендованные температуры сопла и стола
+    # Рекомендованные температуры сопла и стола — со стикера этой катушки
     rec = spool.get("rec_settings")
     if isinstance(rec, str) and rec.strip().startswith("{"):
         try:
@@ -1469,23 +1481,27 @@ def generate_bambu_studio_filament_preset(spool: dict) -> dict[str, Any]:
             rec = json.loads(rec)
         except Exception:
             pass
-    rec_temp = None
-    if isinstance(rec, dict):
-        rec_temp = rec.get("temp_nozzle")
-    preset_meta = bambu_filament_preset(material_raw, brand_raw, rec_temp)
+    rec_temp = rec.get("temp_nozzle") if isinstance(rec, dict) else None
+    rec_bed = rec.get("temp_bed") if isinstance(rec, dict) else None
+
+    # Справочник — источник значения по умолчанию (второй уровень)
+    mat_info = get_material(normalize_bambu_material_key(material_raw), db)
+    density = num(mat_info.get("density"), 1.24)
+    catalog_temp = mat_info.get("temp_nozzle") or None
+    catalog_bed = mat_info.get("temp_bed") or None
+
+    preset_meta = bambu_filament_preset(material_raw, brand_raw, rec_temp,
+                                        catalog_temp)
 
     tray_type = preset_meta["tray_type"]
     t_min = preset_meta["nozzle_temp_min"]
     t_max = preset_meta["nozzle_temp_max"]
     t_def = int((t_min + t_max) / 2)
 
-    # Получаем плотность и температуру стола из справочника материалов
-    mat_info = get_material(preset_meta["key"])
-    density = num(mat_info.get("density"), 1.24)
-    bed_temp = mat_info.get("temp_bed") or (55, 65)
-    if isinstance(rec, dict) and rec.get("temp_bed") and len(rec.get("temp_bed")) == 2:
+    bed_temp = catalog_bed or (55, 65)
+    if rec_bed and len(rec_bed) == 2:
         try:
-            b_lo, b_hi = int(rec["temp_bed"][0]), int(rec["temp_bed"][1])
+            b_lo, b_hi = int(rec_bed[0]), int(rec_bed[1])
             if 0 <= b_lo <= b_hi <= 200:
                 bed_temp = (b_lo, b_hi)
         except (ValueError, TypeError):

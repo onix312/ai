@@ -106,6 +106,7 @@ META: dict[str, dict] = {
     "cloud_uid": ("printers", "UID облака", {"secret": True}),
     "studio_gateway_access_code": ("printers", "Access Code шлюза Studio", {"secret": True}),
     "studio_gateway_enabled": ("printers", "Шлюз Bambu Studio включён", {}),
+    "studio_gateway_host": ("printers", "Шлюз Studio: адрес в сети", {"max_len": 45}),
     # --- касса (Касса 16.0): вход кассира
     "cashier_code": ("cashier", "Код кассы (вход кассира)", {"max_len": 32}),
     "cashier_shift_mode": ("cashier", "Смены на кассе",
@@ -711,6 +712,7 @@ HINTS: dict[str, str] = {
     "studio_gateway_access_code": "Код, который Bambu Studio спросит при подключении к шлюзу PrintFlow. Пусто при включении — сгенерируется сам.",
     "studio_gateway_autostart": "Поднимать шлюз Studio при запуске коннектора.",
     "studio_gateway_enabled": "Шлюз делает Studio видимой PrintFlow как принтер: Slice → Print уходит в очередь, а не напрямую на станок.",
+    "studio_gateway_host": "Адрес, который шлюз объявляет в SSDP и отдаёт в ответе PASV. Пусто — первый адрес этого компьютера (192.168.* → 10.* → 172.16–31). Задайте вручную (например, 192.168.1.50), если на компьютере есть VirtualBox, Hyper-V, Docker или VPN: их виртуальные адреса уводят Studio не туда.",
     "studio_gateway_mode": "Режим шлюза: полный (с AMS и очередью) или лёгкий (только приём заданий).",
     "studio_gateway_name": "Имя виртуального принтера, под которым PrintFlow виден в Bambu Studio.",
     "studio_gateway_printer_id": "На какой реальный принтер направлять печать из Studio, если не выбран «любой свободный».",

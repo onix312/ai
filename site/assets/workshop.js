@@ -351,11 +351,10 @@ async function submitFilamentReceipt() {
 function bind() {
   const shiftBtn = $('shift_refresh');
   if (shiftBtn) shiftBtn.addEventListener('click', loadShift);
-  const receiptBtn = $('filament_receipt_btn');
-  if (receiptBtn) receiptBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    openFilamentReceipt();
-  });
+  /* Кнопку «Приход пластика» здесь не вешаем (18.7): единый обработчик —
+     делегированный ниже по документу. Он один, навешивается один раз при
+     загрузке модуля и не зависит от порядка скриптов: раньше клик крутил
+     openFilamentReceipt до трёх раз (здесь, в money.js и в делегаторе). */
   const addRowBtn = $('fr_add_row');
   if (addRowBtn) addRowBtn.addEventListener('click', () => addReceiptRow());
   const submitBtn = $('fr_submit');
@@ -396,6 +395,9 @@ function bind() {
   });
 }
 
+/* Единственный обработчик кнопки «Приход пластика» (18.7): делегированный,
+   навешивается один раз при загрузке модуля и переживает перерисовку
+   раздела и любой порядок подключения скриптов. */
 document.addEventListener('click', (e) => {
   const btn = e.target && e.target.closest && e.target.closest('#filament_receipt_btn');
   if (btn) {

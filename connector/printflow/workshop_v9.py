@@ -399,6 +399,14 @@ class WorkshopV9:
             except Exception:
                 pass
         for raw in rows:
+            # Пустая строка таблицы прихода (пользователь добавил позицию, но
+            # не заполнил материал) не должна превращаться в катушку PLA:
+            # молча пропускаем строку без материала, бренда и количества.
+            if items and not str(raw.get("material") or "").strip() \
+                    and not str(raw.get("brand") or "").strip() \
+                    and not str(raw.get("color_name") or "").strip() \
+                    and not num(raw.get("spool_count")):
+                continue
             sc = max(1, int(num(raw.get("spool_count"), 1)))
             sg = num(raw.get("spool_grams"), 1000) or 1000
             amount = num(raw.get("total_amount"))

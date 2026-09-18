@@ -1135,6 +1135,30 @@ const WATCH = [
   ['watch_link_order', 'Связывать с заказом по номеру', 'Искать номер заказа в названии 3MF файла', 'bool'],
   ['watch_create_order', 'Создавать черновик заказа', 'Если заказ не найден — создать новую карточку', 'bool'],
 ];
+/* FarmLoop (18.7): конвейер вернулся в настройки — карточка пропала при
+   пересборке настроек в 18.6.3. Подписи safety-gate честно говорят, что это
+   допуск на работу без человека: пока галочки не стоят, авто-режимы сами
+   не включатся (гейт проверяется на сервере, settings_schema.validate). */
+const FARMLOOP = [
+  ['farmloop_profile', 'FarmLoop: профиль', 'Профиль конвейера под вашу обвязку', 'text'],
+  ['farmloop_mechanics_verified', 'Механика конвейера проверена (допуск)', 'Допуск на работу без человека: толкатель и направляющие выставлены и проверены', 'bool'],
+  ['farmloop_template_verified', 'Шаблон серии проверен (допуск)', 'Допуск на работу без человека: задание уходит в цикл корректно', 'bool'],
+  ['farmloop_pusher_enabled', 'Толкатель установлен (допуск)', 'Конвейер может снимать детали сам', 'bool'],
+  ['farmloop_bender_enabled', 'Изгибатель установлен (допуск)', 'Детали отгибаются от стола после печати', 'bool'],
+  ['farmloop_sensor_mode', 'Подтверждение пустой платформы', 'Как конвейер понимает, что деталь снята', 'select', [
+    ['manual', 'manual — Подтверждает человек'],
+    ['sensor', 'sensor — По датчику'],
+    ['camera', 'camera — По камере'],
+    ['both', 'both — Датчик и камера'],
+  ]],
+  ['farmloop_sensor_timeout_s', 'Таймаут подтверждения, с', 'Сколько секунд ждать подтверждения пустой платформы', 'num', 1],
+  ['farmloop_camera_threshold_pct', 'Порог камеры, %', 'Насколько (%) должен опустеть кадр платформы, чтобы цикл продолжился', 'num', 0.5],
+  ['farmloop_cooldown_s', 'Пауза между циклами, с', 'Охлаждение конвейера перед следующим циклом', 'num', 1],
+  ['farmloop_auto_next', 'Следующий цикл автоматически', 'Требует допуска: механика, шаблон, толкатель, изгибатель и датчик/камера', 'bool'],
+  ['farmloop_max_cycles', 'Максимум циклов за серию', 'Сколько деталей конвейер напечатает подряд (1 — одна деталь за серию)', 'num', 1],
+  ['farmloop_unattended_series', 'Бесконтрольная серия (без человека)', 'Допуск на серию без присмотра: требует авто-цикл и больше одного цикла', 'bool'],
+  ['farmloop_max_detach_attempts', 'Попытки снятия детали', 'Сколько попыток снять деталь, прежде чем позвать человека', 'num', 1],
+];
 const STUDIO = [
   ['studio_gateway_enabled', 'Шлюз Bambu Studio (Studio Gateway)', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
   ['studio_gateway_mode', 'Режим обработки заданий', 'confirm — подтверждение на пульте/ПК; queue — сразу в очередь; autostart — печать сразу', 'select', [
@@ -1143,6 +1167,7 @@ const STUDIO = [
     ['autostart', 'autostart — Автостарт (печатать немедленно)'],
   ]],
   ['studio_gateway_name', 'Имя виртуального принтера', 'Как PrintFlow называется в списке устройств Bambu Studio', 'text'],
+  ['studio_gateway_host', 'Адрес шлюза в сети (пусто — авто)', 'Какой адрес объявлять Studio в SSDP и PASV. VirtualBox/Hyper-V/Docker/VPN подсовывают виртуальный IP — закрепите реальный, например 192.168.1.50', 'text'],
   ['studio_gateway_port', 'Сетевой порт шлюза', 'Порт вещания эмулятора принтера в сети LAN', 'select', [
     [3000, '3000 (по умолчанию для Studio)'],
     [6000, '6000 (альтернативный порт)'],
@@ -1818,9 +1843,29 @@ function renderSettings() {
         const el = $('studio_status');
         if (!el) return;
         const st = data.enabled ? 'вкл' : 'выкл';
-        const run = data.running ? 'слушает LAN' : 'без сокетов';
+        const mark = (on) => on
+          ? '<b style="color:var(--ok,#22c55e)">✓</b>'
+          : '<b style="color:var(--bad,#ef4444)">✗</b>';
         const model = esc(data.dev_model || data.model || '');
-        el.innerHTML = `<span>ℹ</span><span>Шлюз ${st} · ${run} · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model} · MQTT :${data.mqtt_port || 8883} · FTPS :${data.ftp_port || 990}${data.last_error ? ' · ' + esc(data.last_error) : ''}</span>`;
+        const hostPinned = data.host_pinned ? ' (закреплён в настройках)' : ' (авто)';
+        let html = `<span>ℹ</span><span>Шлюз ${st} · адрес <b>${esc(data.host || '—')}</b>${hostPinned}`
+          + ` · MQTT :${data.mqtt_port || 8883} ${mark(data.mqtt_running)}`
+          + ` · FTPS :${data.ftp_port || 990} ${mark(data.ftp_running)}`
+          + ` · SSDP ${mark(data.ssdp_running)}`
+          + ` · ${esc(data.name || '')} · ${esc(data.serial || 'нет SN')} · ${model}</span>`;
+        const fails = (data.mqtt_auth_failures || 0) + (data.ftp_auth_failures || 0);
+        if (fails > 0) {
+          const at = String(data.last_auth_fail_at || '').slice(11, 16);
+          html += `<span style="display:block;margin-top:4px">⚠ Studio стучалась, код не подошёл: ${fails} раз`
+            + `${at ? `, последний в ${esc(at)}` : ''} — сверйте Access Code в настройках шлюза</span>`;
+        }
+        const errs = data.errors || {};
+        const errBits = ['ssdp', 'mqtt', 'ftps', 'host']
+          .map((k) => errs[k] ? `${k.toUpperCase()}: ${errs[k]}` : '')
+          .filter(Boolean);
+        const lastErr = errBits.join(' · ') || (data.last_error ? String(data.last_error) : '');
+        if (lastErr) html += `<span style="display:block;margin-top:4px;color:var(--bad,#ef4444)">Ошибка: ${esc(lastErr)}</span>`;
+        el.innerHTML = html;
       }).catch(() => {});
       get('/api/slicer/status').then((data) => {
         const el = $('studio_status');
@@ -1840,6 +1885,7 @@ function renderSettings() {
     if ($('set_ams')) put('set_ams', settingGroup(AMS_SETTINGS));
     if ($('set_phase11')) put('set_phase11', settingGroup(PHASE11));
     if ($('set_system2')) put('set_system2', settingGroup(SYSTEM2));
+    if ($('set_farmloop')) put('set_farmloop', settingGroup(FARMLOOP));
     // профили настроек
     if ($('set_profiles')) renderProfiles();
   });

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html.parser
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -227,6 +228,63 @@ class TestOrderFileButtonsWired(unittest.TestCase):
         html = body.decode("utf-8", errors="replace")
         self.assertIn('accept=".3mf,.gcode,.gcode.3mf"', html,
                       "index.html: input файла потерял допустимые расширения")
+
+
+class TestFilamentReceiptButtonAlive(unittest.TestCase):
+    """Кнопка «Приход пластика»: оба конца проводки и единственный обработчик.
+
+    Жалоба владельца 18.6.x: кнопка «ничего не делает». В коде было три
+    навешивания (money.js, workshop.js, делегатор) — при устаревшей кэшированной
+    разметке bind() в money.js падал до строки навешивания, и обработчики
+    терялись/срабатывали по несколько раз. Теперь обработчик один
+    (делегированный в workshop.js), а тест держит контракт: кнопка есть,
+    модалка есть, все id, которых ждёт JS, на месте.
+    Проверка клика без браузера невозможна (docs/ТЕСТЫ.md, п. 4) — строковый
+    контракт; поведение маршрута прихода покрыто в test_filament_receipt.py.
+    """
+
+    MODAL_IDS = (
+        "filament_receipt_modal", "fr_sub", "fr_location", "fr_warehouse",
+        "fr_supplier", "fr_account", "fr_note", "fr_suppliers_datalist",
+        "fr_add_row", "fr_tbody", "fr_summary", "fr_confirmed", "fr_submit",
+    )
+
+    def _index_html(self) -> str:
+        _, _, body = serve("/")
+        return body.decode("utf-8", errors="replace")
+
+    def test_button_and_modal_exist_with_all_ids(self):
+        parser = parse_page(self._index_html().encode("utf-8"))
+        self.assertIn("filament_receipt_btn", parser.ids,
+                      "index.html: нет кнопки «Приход пластика»")
+        for element_id in self.MODAL_IDS:
+            self.assertIn(element_id, parser.ids,
+                          f"index.html: модалка прихода потеряла id={element_id}")
+
+    def test_exactly_one_click_handler_for_the_button(self):
+        """Обработчик клика навешивается один раз — только делегатор workshop.js."""
+        workshop_js = (SITE / "assets" / "workshop.js").read_text(encoding="utf-8")
+        money_js = (SITE / "assets" / "money.js").read_text(encoding="utf-8")
+        direct = re.findall(r"filament_receipt_btn['\"]\)\s*;?\s*\n?\s*(?:if\s*\([^)]*\)\s*)?"
+                            r"[^\n]*addEventListener\('click'", workshop_js)
+        self.assertEqual([], direct,
+                         "workshop.js: у кнопки снова прямой обработчик — оставьте делегатора")
+        delegated = workshop_js.count("closest('#filament_receipt_btn')")
+        self.assertEqual(1, delegated,
+                         "workshop.js: делегированный обработчик кнопки не единственный")
+        self.assertNotIn("$('filament_receipt_btn')", money_js,
+                         "money.js: у кнопки появился второй обработчик")
+        self.assertIn("window.openFilamentReceipt", workshop_js,
+                      "workshop.js: функция открытия не экспортирована для консоли/модулей")
+
+    def test_receipt_submit_wired_in_workshop(self):
+        workshop_js = (SITE / "assets" / "workshop.js").read_text(encoding="utf-8")
+        for element_id in ("fr_add_row", "fr_submit"):
+            self.assertIn(f"$('{element_id}')", workshop_js,
+                          f"workshop.js: элемент {element_id} не обрабатывается")
+        self.assertIn("submitFilamentReceipt", workshop_js)
+        self.assertIn("/api/workshop/receipt", workshop_js,
+                      "workshop.js: отправка прихода ушла с маршрута")
 
 
 if __name__ == "__main__":

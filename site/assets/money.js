@@ -1052,6 +1052,77 @@ function applySpoolMaterialPreset(matName) {
   if ($('sf_rec_dry_hours')) $('sf_rec_dry_hours').value = preset.dry_hours;
 }
 
+/* 18.7: три уровня рекомендаций — справочник (значение по умолчанию) →
+   катушка (факт со стикера) → профиль Bambu (экспорт на сервере).
+   «Заполнить из стандарта» берёт значение из справочника материалов
+   (его правят в Настройках), а не из зашитой таблицы; таблица — запасной
+   аэродром. Кнопка только заполняет поля формы: пока «Сохранить» не
+   нажато, чужие катушки не затрагиваются. */
+let _catalogRecCache = null;
+
+async function _spoolCatalogMaterials() {
+  if (Array.isArray(_catalogRecCache)) return _catalogRecCache;
+  try {
+    // app.js грузится после money.js и держит справочник в materialsFull:
+    // на клик он уже загружен, при загрузке — берём с сервера сами.
+    if (typeof materialsFull !== 'undefined' && Array.isArray(materialsFull) && materialsFull.length) {
+      _catalogRecCache = materialsFull;
+      return _catalogRecCache;
+    }
+  } catch (e) { /* materialsFull ещё не объявлен — не страшно */ }
+  try {
+    const data = await get('/api/materials');
+    _catalogRecCache = (data && Array.isArray(data.materials_full)) ? data.materials_full : [];
+  } catch (e) { _catalogRecCache = []; }
+  return _catalogRecCache;
+}
+
+function _normMatKey(text) {
+  return String(text || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+}
+
+function catalogRecFor(items, matName) {
+  const norm = _normMatKey(matName);
+  if (!norm || !Array.isArray(items)) return null;
+  let loose = null;
+  for (const m of items) {
+    const kNorm = _normMatKey(m.key);
+    const nNorm = _normMatKey(m.name);
+    if (kNorm === norm || nNorm === norm) return m;
+    if (!loose && (kNorm.startsWith(norm) || norm.startsWith(kNorm))
+        && Array.isArray(m.temp_nozzle)) loose = m;
+  }
+  return loose;
+}
+
+function applyRecFieldsFromCatalog(item, matName) {
+  // Сначала скорость — её в справочнике нет, берём из стандарта материала;
+  // затем температуры/сушку из справочника, если он для материала задан.
+  applySpoolMaterialPreset(matName);
+  if (!item) return false;
+  const set = (id, value) => { const el = $(id); if (el && value != null && value !== '') el.value = value; };
+  if (Array.isArray(item.temp_nozzle) && item.temp_nozzle.length === 2) {
+    set('sf_rec_nozzle_min', item.temp_nozzle[0]);
+    set('sf_rec_nozzle_max', item.temp_nozzle[1]);
+  }
+  if (Array.isArray(item.temp_bed) && item.temp_bed.length === 2) {
+    set('sf_rec_bed_min', item.temp_bed[0]);
+    set('sf_rec_bed_max', item.temp_bed[1]);
+  }
+  if (num(item.dry_temp, 0) > 0) {
+    set('sf_rec_dry_temp', item.dry_temp);
+    set('sf_rec_dry_hours', item.dry_hours);
+  }
+  return true;
+}
+
+async function applySpoolRecStandard(matName) {
+  const items = await _spoolCatalogMaterials();
+  const item = catalogRecFor(items, matName);
+  applyRecFieldsFromCatalog(item, matName);
+  return Boolean(item);
+}
+
 function openSpool(id) {
   editingSpool = id || null;
   const s = id ? PF.state.spools.find((x) => x.id === id) : null;
@@ -1112,7 +1183,11 @@ function openSpool(id) {
       $('sf_rec_dry_hours').value = '';
     } else {
       if (!id && $('sf_material') && $('sf_material').value) {
-        applySpoolMaterialPreset($('sf_material').value);
+        // Новая катушка: значение по умолчанию из справочника, если он уже
+        // загружен (кэш), иначе — из стандарта; поля формы, не склад.
+        const cached = catalogRecFor(Array.isArray(_catalogRecCache) ? _catalogRecCache : [],
+          $('sf_material').value);
+        applyRecFieldsFromCatalog(cached, $('sf_material').value);
       } else {
         $('sf_rec_nozzle_min').value = '';
         $('sf_rec_nozzle_max').value = '';
@@ -1317,18 +1392,26 @@ function bind() {
       try { await PF.refreshFinance(); } catch (e) { /* офлайн */ }
     } catch (e) { fail(e); }
   }
-  $('mc_key').addEventListener('change', async () => {
+  /* 18.7: привязки ниже больше не падают на первом отсутствующем элементе
+     (устаревшая кэшированная разметка) — раньше сбой здесь обрывал bind()
+     до хвоста, и кнопки ниже по коду, включая «Приход пластика»,
+     оставались мёртвыми. */
+  const mcKey = $('mc_key');
+  if (mcKey) mcKey.addEventListener('change', async () => {
     try {
-      mcState = await get('/api/month-close?key=' + encodeURIComponent($('mc_key').value));
+      mcState = await get('/api/month-close?key=' + encodeURIComponent(mcKey.value));
       renderMc();
     } catch (e) { fail(e); }
   });
-  $('fin_month_close').addEventListener('click', openMonthClose);
+  const monthCloseBtn = $('fin_month_close');
+  if (monthCloseBtn) monthCloseBtn.addEventListener('click', openMonthClose);
 
   /* ===================== импорт банковской выписки (M1) ===================== */
   let bankPreview = [];
-  $('bank_file_btn').addEventListener('click', () => $('bank_file').click());
-  $('bank_file').addEventListener('change', async () => {
+  const bankFileBtn = $('bank_file_btn');
+  const bankFile = $('bank_file');
+  if (bankFileBtn && bankFile) bankFileBtn.addEventListener('click', () => bankFile.click());
+  if (bankFile) bankFile.addEventListener('change', async () => {
     const file = $('bank_file').files[0];
     if (!file) return;
     try {
@@ -1366,15 +1449,19 @@ function bind() {
     $('bank_file').value = '';
   });
 
-  $('fin_period').addEventListener('click', async (e) => {
+  const finPeriod = $('fin_period');
+  if (finPeriod) finPeriod.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-days]');
     if (!btn) return;
     $$('#fin_period button').forEach((b) => b.classList.toggle('on', b === btn));
     await PF.refreshFinance(+btn.dataset.days);
   });
-  $('fin_add').addEventListener('click', () => openTx());
-  $('tf_kind').addEventListener('change', syncTxKind);
-  $('tx_save').addEventListener('click', async () => {
+  const finAdd = $('fin_add');
+  if (finAdd) finAdd.addEventListener('click', () => openTx());
+  const tfKind = $('tf_kind');
+  if (tfKind) tfKind.addEventListener('change', syncTxKind);
+  const txSave = $('tx_save');
+  if (txSave) txSave.addEventListener('click', async () => {
     const amount = num($('tf_amount').value);
     if (amount <= 0) return fail(new Error('Укажите сумму больше нуля'));
     const income = $('tf_kind').value === 'income';
@@ -1408,20 +1495,11 @@ function bind() {
   });
   const spoolAddBtn = $('spool_add');
   if (spoolAddBtn) spoolAddBtn.addEventListener('click', () => openSpool());
-  const receiptBtn = $('filament_receipt_btn');
-  if (receiptBtn && !receiptBtn.dataset.wired) {
-    receiptBtn.dataset.wired = '1';
-    receiptBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (typeof openFilamentReceipt === 'function') {
-        openFilamentReceipt();
-      } else if (window.openFilamentReceipt) {
-        window.openFilamentReceipt();
-      } else if (PF.modules && PF.modules.workshop && PF.modules.workshop.openFilamentReceipt) {
-        PF.modules.workshop.openFilamentReceipt();
-      }
-    });
-  }
+  /* Кнопку «Приход пластика» (filament_receipt_btn) здесь больше не вешаем
+     (18.7): у неё был второй обработчик в workshop.js, плюс делегированный —
+     клик срабатывал до трёх раз. Единственный владелец — workshop.js через
+     делегированный обработчик: он не зависит от порядка загрузки скриптов
+     и переживает перерисовку раздела. */
   const spoolCleanup = $('spool_cleanup');
   if (spoolCleanup) spoolCleanup.addEventListener('click', async () => {
     if (!confirmDanger('Очистить фантомные катушки AMS? Дубли слотов будут архивированы, пустые отвязаны от AMS и возвращены на склад.')) return;
@@ -1476,10 +1554,11 @@ function bind() {
   const recPresetBtn = $('sf_rec_preset_btn');
   if (recPresetBtn && !recPresetBtn.dataset.wired) {
     recPresetBtn.dataset.wired = '1';
-    recPresetBtn.addEventListener('click', () => {
+    recPresetBtn.addEventListener('click', async () => {
       const mat = ($('sf_material') && $('sf_material').value) || 'PLA';
-      applySpoolMaterialPreset(mat);
-      toast('Паспортные параметры подставлены', mat);
+      const fromCatalog = await applySpoolRecStandard(mat);
+      toast(fromCatalog ? 'Параметры из справочника материалов' : 'Паспортные параметры подставлены',
+        mat + (fromCatalog ? '' : ' · справочник не задан — стандарт'));
     });
   }
   const matInput = $('sf_material');
@@ -1487,7 +1566,7 @@ function bind() {
     matInput.dataset.wired = '1';
     matInput.addEventListener('change', () => {
       if ($('sf_rec_nozzle_min') && !$('sf_rec_nozzle_min').value && matInput.value) {
-        applySpoolMaterialPreset(matInput.value);
+        applySpoolRecStandard(matInput.value);
       }
     });
   }
@@ -1849,7 +1928,7 @@ function bind() {
 }
 
 /* =============================================================== старт */
-PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); });
+PF.on('ready', () => { loadFilamentStats(); loadShopping(); loadCalcMaterials(); bind(); restoreCalc(); _spoolCatalogMaterials(); });
 PF.on('data', PF.whenView(['inventory', 'calc'], () => { renderStock(); renderCatalog(); }));
 PF.on('finance', PF.whenView(['inventory', 'calc', 'finance'], renderFinance));
 PF.on('view', (d) => { if (d.view === 'calc') runCalc(); });
