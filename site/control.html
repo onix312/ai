@@ -120,6 +120,10 @@
    min-height:48px; padding:10px 12px; font-size:16px; border-radius:10px;
    border:1px solid var(--line); background:var(--bg); color:var(--text); }
  .pk-defect-wrap .pk-btn { width:100%; min-height:56px; font-size:15px; margin-top:12px; }
+ .pk-ho-m { display:block; min-height:48px; padding:12px; margin-top:8px;
+   font-size:16px; border:1px solid var(--line); border-radius:10px;
+   background:var(--bg); }
+ .pk-ho-m input { min-width:20px; min-height:20px; margin-right:8px; }
 
  /* --- камера: кадр и кнопки --- */
  .pk-frame { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:18px;
@@ -262,6 +266,22 @@
     <input id="pk_defect_note" class="pk-defect-note" type="text" placeholder="что проверить или изменить" autocomplete="off">
     <label class="pk-defect-l" id="pk_defect_reprint_l"><input type="checkbox" id="pk_defect_reprint"> Повторить печать (клон в очередь, без автостарта)</label>
     <button class="pk-btn danger" type="button" id="pk_b_defect_ok">Записать брак</button>
+   </div>
+
+   <!-- Выдача заказа у прилавка (18.8): деньги идут штатным маршрутом —
+        наличные/долг через «Выдать» заказа, СБП — создание платежа на точную
+        сумму остатка (QR — на странице СБП). Код магазина спрашивается только
+        на шагах с деньгами; «Уже оплачено» — просто подтверждение передачи. -->
+   <div class="pk-defect-wrap" id="pk_handover_wrap" hidden>
+    <div class="pk-file-head"><b>Выдать заказ</b><span id="pk_ho_summary">—</span></div>
+    <label class="pk-defect-l">Оплата</label>
+    <label class="pk-ho-m"><input type="radio" name="pk_ho_method" id="pk_ho_cash" value="cash" checked> Наличные — деньги в кассу</label>
+    <label class="pk-ho-m"><input type="radio" name="pk_ho_method" id="pk_ho_sbp" value="sbp"> СБП — показать QR на сумму остатка</label>
+    <label class="pk-ho-m"><input type="radio" name="pk_ho_method" id="pk_ho_debt" value="debt"> В долг — записать задолженность</label>
+    <label class="pk-ho-m" id="pk_ho_paid_l" style="display:none"><input type="radio" name="pk_ho_method" id="pk_ho_paid" value="paid"> Уже оплачено — без движения денег</label>
+    <label class="pk-defect-l" for="pk_ho_code" id="pk_ho_code_l">Код (PIN или код магазина)</label>
+    <input id="pk_ho_code" class="pk-defect-note" type="password" inputmode="numeric" autocomplete="off" placeholder="спрашивается на шагах с деньгами">
+    <button class="pk-btn go" type="button" id="pk_b_handover_ok">Подтвердить выдачу</button>
    </div>
 
    <div class="pk-cmd" id="pk_cmd">
@@ -656,7 +676,11 @@
     if (!d.defect_reason) {
       var right = '<button class="pk-btn pk-hit danger" type="button" id="pk_b_defect">Брак</button>';
       var cols = '1fr';
-      if (d.order && d.order.id && d.order.status !== 'ready') {
+      if (d.order && d.order.id && d.order.status === 'ready') {
+        // Заказ принят: последний шаг у прилавка — выдать с оплатой.
+        right = '<button class="pk-btn pk-hit go" type="button" id="pk_b_handover">Выдать</button>' + right;
+        cols = '1fr 1fr';
+      } else if (d.order && d.order.id) {
         right = '<button class="pk-btn pk-hit go" type="button" id="pk_b_accept">Готов к выдаче</button>' + right;
         cols = '1fr 1fr';
       }
@@ -670,6 +694,8 @@
     if (box) box.innerHTML = factHtml();
     var dw = $('#pk_defect_wrap');
     if (dw) dw.hidden = !(defectOpen && factVisible());
+    var hw = $('#pk_handover_wrap');
+    if (hw) hw.hidden = !(handoverOpen && factVisible());
   }
   function acceptDone(){
     var d = st.done || {};
@@ -749,6 +775,102 @@
       }
     });
   }
+  /* Выдача заказа с оплатой (18.8): деньги идут только штатными маршрутами —
+     наличные и долг через «Выдать» заказа (/api/order/fulfill), СБП — создание
+     платежа на точную сумму остатка (/api/sbp/create), QR — на странице СБП.
+     Код магазина (или PIN) проверяется одноразовым /api/cashier/verify только
+     на шагах с деньгами; «Уже оплачено» — подтверждение передачи вещи. */
+  var handoverOpen = false;
+  function moneyText(v){
+    var n = num(v);
+    return (n % 1 === 0 ? String(n) : String(Math.round(n * 100) / 100).replace('.', ',')) + ' ₽';
+  }
+  function hoMethod(){
+    var names = ['cash', 'sbp', 'debt', 'paid'];
+    for (var i = 0; i < names.length; i++) {
+      var el = $('#pk_ho_' + names[i]);
+      if (el && el.checked) return names[i];
+    }
+    return 'cash';
+  }
+  function openHandover(){
+    var d = st.done || {};
+    var o = d.order || {};
+    if (!o.id || o.status !== 'ready') {
+      toast('Сначала примите результат: «Готов к выдаче»');
+      return;
+    }
+    handoverOpen = true;
+    var sum = $('#pk_ho_summary');
+    if (sum) {
+      sum.textContent = 'Заказ №' + o.number + ' · остаток ' + moneyText(o.due);
+    }
+    // «Уже оплачено» — только когда реально ничего не осталось: сервер и так
+    // отклонит выдачу без оплаты при ненулевом остатке, но кнопку скрываем,
+    // чтобы оператор не натыкался на ошибку.
+    var paidL = $('#pk_ho_paid_l');
+    if (paidL) paidL.style.display = num(o.due) > 0 ? 'none' : '';
+    renderFact();
+  }
+  function confirmHandover(){
+    var d = st.done || {};
+    var o = d.order || {};
+    if (!o.id) return;
+    var method = hoMethod();
+    var codeEl = $('#pk_ho_code');
+    var code = codeEl ? String(codeEl.value || '').trim() : '';
+    var needsCode = method !== 'paid';
+    if (needsCode && !code) {
+      toast('Введите код (PIN или код магазина)');
+      return;
+    }
+    var close = function(msg){
+      handoverOpen = false;
+      if (codeEl) codeEl.value = '';
+      renderFact();
+      toast(msg);
+      tick();
+    };
+    var fulfill = function(action, payMethod, msg){
+      post('/api/order/fulfill', {
+        id: o.id, handoff_confirmed: true,
+        payment_action: action, payment_method: payMethod || ''
+      }).then(function(){ close(msg);
+      }).catch(function(e){ toast(e.message || 'Не вышло'); });
+    };
+    var afterCode = function(onOk){
+      if (!needsCode) { onOk(); return; }
+      post('/api/cashier/verify', { code: code }).then(function(){ onOk();
+      }).catch(function(e){ toast(e.message || 'Код не подошёл'); });
+    };
+    if (method === 'sbp') {
+      afterCode(function(){
+        post('/api/sbp/create', {
+          amount: num(o.due), order_id: o.id,
+          purpose: 'Заказ №' + o.number,
+          request_id: 'pult-ho-' + o.id + '-' + Date.now(),
+          actor: 'pult'
+        }).then(function(){
+          close('СБП-платёж создан — QR на странице СБП. Выдайте заказ после прихода денег.');
+        }).catch(function(e){ toast(e.message || 'Не вышло'); });
+      });
+      return;
+    }
+    if (method === 'debt') {
+      afterCode(function(){
+        fulfill('debt', '', 'Заказ №' + o.number + ' выдан в долг');
+      });
+      return;
+    }
+    if (method === 'paid') {
+      fulfill('none', '', 'Заказ №' + o.number + ' выдан');
+      return;
+    }
+    afterCode(function(){
+      fulfill('received', 'cash', 'Заказ №' + o.number + ' выдан, деньги в кассе');
+    });
+  }
+
   function partRemoved(){
     var p = selected();
     if (!p) { toast('Принтера нет'); return; }
@@ -2117,6 +2239,7 @@
       if (st.done && d.last_done.id && st.done.id !== d.last_done.id) {
         defectOpen = false;
         defectPreview = null;
+        handoverOpen = false;
       }
       st.done = d.last_done;
     }
@@ -2201,6 +2324,8 @@
     }
     if (hit.closest('#pk_b_removed')) { partRemoved(); return; }
     if (hit.closest('#pk_b_accept')) { acceptDone(); return; }
+    if (hit.closest('#pk_b_handover')) { openHandover(); return; }
+    if (hit.closest('#pk_b_handover_ok')) { confirmHandover(); return; }
     if (hit.closest('#pk_b_defect_ok')) { confirmDefect(); return; }
     if (hit.closest('#pk_b_defect')) { toggleDefect(); return; }
     if (hit.closest('#pk_ams_sync')) { syncAms(); return; }

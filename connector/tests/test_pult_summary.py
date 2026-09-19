@@ -199,9 +199,40 @@ class PultSummaryTests(unittest.TestCase):
         data = summary(self.db, self.manager, "prn1")
         done = data["last_done"]
         self.assertEqual({"id": "order-pult", "number": "1042",
-                          "product": "Подставка", "status": "post"}, done["order"])
+                          "product": "Подставка", "status": "post",
+                          "price": 0.0, "paid": 0.0, "due": 0.0}, done["order"])
         self.assertEqual("", done["defect_reason"])
         self.assertEqual("", done["defect_title"])
+
+    def _money_order(self, order_row: dict, job_id: str) -> None:
+        finished = "2026-09-19T05:00:00+00:00"
+        self.db.upsert("orders", order_row)
+        self.db.upsert("print_jobs", {
+            "id": job_id, "name": order_row["product"], "printer_id": "prn1",
+            "state": "done", "order_id": order_row["id"],
+            "finished_at": finished, "created_at": finished})
+
+    def test_last_done_order_carries_money_for_the_handover(self):
+        """Выдача со сменой денег идёт на пульте: сводка несёт цену,
+        оплаченное и остаток, посчитанные сервером, — без второго запроса."""
+        self._money_order({"id": "order-money", "number": "1044",
+                           "product": "Корпус", "status": "ready",
+                           "price": 1200.0, "paid": 300.0}, "job_money")
+        data = summary(self.db, self.manager, "prn1")
+        order = data["last_done"]["order"]
+        self.assertEqual(1200.0, order["price"])
+        self.assertEqual(300.0, order["paid"])
+        self.assertEqual(900.0, order["due"])
+
+    def test_last_done_order_due_never_goes_negative(self):
+        """Переплата не превращает остаток в долг по минусу: остаток 0."""
+        self._money_order({"id": "order-over", "number": "1045",
+                           "product": "Крышка", "status": "ready",
+                           "price": 500.0, "prepaid": 700.0}, "job_over")
+        data = summary(self.db, self.manager, "prn1")
+        order = data["last_done"]["order"]
+        self.assertEqual(700.0, order["paid"])
+        self.assertEqual(0.0, order["due"])
 
     def test_last_done_reports_a_confirmed_defect(self):
         """У задания уже подтверждённый брак: карточка покажет записанную

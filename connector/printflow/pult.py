@@ -182,11 +182,21 @@ def _last_done(db, printer_id: str = "") -> dict:
     defect_reason = ""
     defect_title = ""
     if job.get("order_id"):
-        row = db.one("SELECT id, number, product, status FROM orders WHERE id=?",
-                     (job["order_id"],))
+        row = db.one(
+            "SELECT id, number, product, status, price, paid, prepaid FROM orders"
+            " WHERE id=?", (job["order_id"],))
         if row:
-            order = {"id": row.get("id"), "number": row.get("number"),
-                     "product": row.get("product"), "status": row.get("status") or ""}
+            price = num(row.get("price"))
+            paid = max(num(row.get("paid")), num(row.get("prepaid")))
+            order = {
+                "id": row.get("id"), "number": row.get("number"),
+                "product": row.get("product"), "status": row.get("status") or "",
+                # Остаток к оплате: пульт показывает точную сумму до запроса,
+                # а СБП-платёж создаётся ровно на неё, без ручного пересчёта.
+                "price": price,
+                "paid": round(paid, 2),
+                "due": round(max(0.0, price - paid), 2),
+            }
     defect_row = db.one(
         "SELECT reason FROM defects WHERE job_id=? AND confirmed_at<>''"
         " ORDER BY datetime(confirmed_at) DESC LIMIT 1", (job["id"],))

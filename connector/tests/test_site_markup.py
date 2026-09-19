@@ -1074,19 +1074,26 @@ class PultFinishedCardTests(TestCase):
                       "«Снял детали» идёт тем же маршрутом, что мини-панель")
 
     def test_final_actions_use_only_the_agreed_routes(self):
-        """Финал заказа у станка (18.8): карточка может снять деталь, принять
-        заказ и разобрать брак — и только это. Очередь, команды принтера и
-        деньги («Выдать» со способами оплаты) мимо карточки не ходят."""
+        """Финал заказа у станка (18.8): карточка снимает деталь, принимает
+        заказ, разбирает брак и выдает его с оплатой. Деньги — только штатными
+        маршрутами: fulfill с payment_action (наличные/долг/уже оплачено),
+        одноразовая проверка кода кассы и создание СБП-платежа на остаток.
+        Очередь, команды принтера и редактирование заказов мимо карточки не
+        ходят, журнал СБП на пульт не вывозится."""
         self.assertIn('id="pk_b_accept"', self.html)
         self.assertIn('id="pk_b_defect"', self.html)
         self.assertIn('id="pk_b_defect_ok"', self.html)
+        self.assertIn('id="pk_b_handover"', self.html)
+        self.assertIn('id="pk_b_handover_ok"', self.html)
         start = self.html.index("function factVisible(){")
         body = self.html[start:self.html.index("function renderCmdBar(){")]
         for route in ("/api/printer/part-removed", "/api/order/accept",
-                      "/api/defect/recovery", "/api/defect/recover"):
+                      "/api/defect/recovery", "/api/defect/recover",
+                      "/api/order/fulfill", "/api/cashier/verify",
+                      "/api/sbp/create"):
             self.assertIn(route, body, f"в действиях карточки нет маршрута {route!r}")
-        for forbidden in ("/api/jobs/", "/api/order/fulfill", "/api/order/save",
-                          "/api/order/delete", "/api/printer/command", "/api/sbp/"):
+        for forbidden in ("/api/jobs/", "/api/order/save", "/api/order/delete",
+                          "/api/printer/command", "/api/sbp/payments"):
             self.assertNotIn(forbidden, body,
                              f"карточка факта не имеет права трогать {forbidden!r}")
 

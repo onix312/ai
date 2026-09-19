@@ -43,7 +43,7 @@ function check(label, condition, detail) {
 function mkEl(id) {
   const el = {
     id, hidden: false, textContent: '', innerHTML: '', src: '', className: '', disabled: false,
-    value: '', files: [], dataset: {}, style: {}, attrs: {}, handlers: {}, clicks: 0,
+    value: '', checked: false, files: [], dataset: {}, style: {}, attrs: {}, handlers: {}, clicks: 0,
     classList: (() => {
       const set = new Set();
       return {
@@ -1440,6 +1440,105 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
       && defectHtml.indexOf('id="pk_b_defect"') < 0
       && defectHtml.indexOf('id="pk_b_accept"') < 0,
       defectHtml.slice(-300));
+  }
+
+  /* 13. Выдача заказа с оплатой (18.8): деньги — только штатными маршрутами */
+  {
+    const hoState = makeState('IDLE', true);
+    hoState.last_done = Object.assign({}, hoState.last_done, {
+      order: { id: 'ord1', number: '1042', product: 'Подставка', status: 'ready',
+               price: 1200, paid: 300, due: 900 },
+    });
+    const page = runPage({ state: hoState });
+    await wait(60);
+    const html = page.store['pk_fact'].innerHTML;
+    check('выдача: готовому заказу предлагают «Выдать» вместо приёмки',
+      html.indexOf('id="pk_b_handover"') >= 0 && html.indexOf('id="pk_b_accept"') < 0,
+      html.slice(-300));
+
+    page.requests.length = 0;
+    page.clickId('pk_b_handover');
+    await wait(60);
+    check('выдача: форма открыта, остаток показан по цифрам сервера',
+      page.store['pk_handover_wrap'].hidden === false
+      && page.store['pk_ho_summary'].textContent.indexOf('900') >= 0,
+      page.store['pk_ho_summary'].textContent);
+    check('выдача: «Уже оплачено» скрыто при ненулевом остатке',
+      page.store['pk_ho_paid_l'].style.display === 'none');
+
+    // Наличные: код проверяется, выдача — штатным маршрутом с подтверждением.
+    page.requests.length = 0;
+    page.store['pk_ho_code'].value = '4321';
+    page.clickId('pk_b_handover_ok');
+    await wait(150);
+    const verifies = page.posts().filter((r) => r.url === '/api/cashier/verify');
+    const fulfills = page.posts().filter((r) => r.url === '/api/order/fulfill');
+    check('выдача: код магазина уходит на одноразовую проверку',
+      verifies.length === 1 && verifies[0].payload.code === '4321',
+      JSON.stringify(verifies));
+    check('выдача: наличные — /api/order/fulfill с received/cash и подтверждением передачи',
+      fulfills.length === 1 && fulfills[0].payload.id === 'ord1'
+      && fulfills[0].payload.handoff_confirmed === true
+      && fulfills[0].payload.payment_action === 'received'
+      && fulfills[0].payload.payment_method === 'cash',
+      JSON.stringify(fulfills));
+    check('выдача: после подтверждения форма закрывается',
+      page.store['pk_handover_wrap'].hidden === true
+      && page.store['pk_ho_code'].value === '');
+
+    // Без кода денежный шаг не уходить.
+    const noCode = runPage({ state: hoState });
+    await wait(60);
+    noCode.clickId('pk_b_handover');
+    await wait(60);
+    noCode.requests.length = 0;
+    noCode.clickId('pk_b_handover_ok');
+    await wait(120);
+    check('выдача: без кода ни проверки, ни выдачи не уходят',
+      noCode.requests.length === 0,
+      JSON.stringify(noCode.requests.map((r) => [r.method, r.url])));
+
+    // СБП: платёж создаётся на точную сумму остатка и привязан к заказу.
+    page.requests.length = 0;
+    page.clickId('pk_b_handover');
+    await wait(60);
+    page.store['pk_ho_sbp'].checked = true;
+    page.store['pk_ho_cash'].checked = false;
+    page.store['pk_ho_code'].value = '4321';
+    page.clickId('pk_b_handover_ok');
+    await wait(150);
+    const sbpCreates = page.posts().filter((r) => r.url === '/api/sbp/create');
+    const sbpFulfills = page.posts().filter((r) => r.url === '/api/order/fulfill');
+    check('выдача: СБП создаёт платёж на сумму остатка по заказу',
+      sbpCreates.length === 1 && sbpCreates[0].payload.amount === 900
+      && sbpCreates[0].payload.order_id === 'ord1'
+      && String(sbpCreates[0].payload.request_id).indexOf('pult-ho-ord1-') === 0,
+      JSON.stringify(sbpCreates));
+    check('выдача: СБП-создание не выдаёт заказ сам — выдача ждёт прихода денег',
+      sbpFulfills.length === 0, JSON.stringify(sbpFulfills));
+
+    // Ноль остатка: «Уже оплачено» доступно и кода не требует.
+    const paidState = makeState('IDLE', true);
+    paidState.last_done = Object.assign({}, paidState.last_done, {
+      order: { id: 'ord1', number: '1042', product: 'Подставка', status: 'ready',
+               price: 1200, paid: 1200, due: 0 },
+    });
+    const paidPage = runPage({ state: paidState });
+    await wait(60);
+    paidPage.clickId('pk_b_handover');
+    await wait(60);
+    check('выдача: при нулевом остатке «Уже оплачено» видно',
+      paidPage.store['pk_ho_paid_l'].style.display !== 'none');
+    paidPage.store['pk_ho_paid'].checked = true;
+    paidPage.store['pk_ho_cash'].checked = false;
+    paidPage.requests.length = 0;
+    paidPage.clickId('pk_b_handover_ok');
+    await wait(150);
+    const paidPosts = paidPage.posts();
+    check('выдача: «Уже оплачено» — выдача без кода и без движения денег',
+      paidPosts.length === 1 && paidPosts[0].url === '/api/order/fulfill'
+      && paidPosts[0].payload.payment_action === 'none',
+      JSON.stringify(paidPosts));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`
