@@ -30,6 +30,7 @@ from .slicer_profile import (
     validate_settings,
 )
 from .slicer_run import SliceMachine, config_from_settings
+from .farmloop import P1S_STAGE1, farmloop_gate, farmloop_profile_id
 
 # Поля, которые запрос может переопределить на один вызов.
 _OVERRIDE_KEYS = (
@@ -117,6 +118,9 @@ def slicer_profile_route(api, ctx: Ctx):
         "can_slice": bool(machine.config.engine_gate),
         "gates": machine.gates(),
         "blocked_reason": machine.blocked_reason(),
+        # 18.8: конвейерные гейты для карточки слайсера — «Для конвейера»
+        # честно показывает, почему серия не пойдёт сама (или уже пойдёт).
+        "farmloop": farmloop_gate(raw),
     })
     return payload
 
@@ -174,6 +178,21 @@ def slicer_slice(api, ctx: Ctx):
     `enqueue` вместе с `confirm`, когда гейты это разрешают.
     """
     body = ctx.body or {}
+    # 18.8: пластик со склада — катушка указывается id из склада пластика.
+    # Проверяем до нарезки: после печати расход спишется именно с неё,
+    # а AMS-маппинг задания возьмётся из её слота.
+    spool = None
+    spool_id = str(body.get("spool_id") or "").strip()
+    if spool_id:
+        repo = getattr(api, "repo", None)
+        spool = repo.spool(spool_id) if repo is not None else None
+        if spool is None:
+            return 400, {"error": f"Катушка {spool_id} не найдена на складе пластика"}
+        # Источник истины — катушка: материал и AMS-слот нарезки берутся
+        # из склада, если вызывающий не переопределил их явно.
+        for key in ("material", "ams_slot"):
+            if key not in body and spool.get(key):
+                body = {**body, key: spool[key]}
     try:
         settings, warnings, machine = _prepare(api, body)
         source = _resolve_input(api, body)
@@ -196,9 +215,12 @@ def slicer_slice(api, ctx: Ctx):
     # FarmLoop поверх своей нарезки: тот же конвейер, что у внешнего CLI.
     # Исходный G-code остаётся рядом, в отдельный файл пишется копия с блоком.
     farmloop_report = None
+    raw = _raw_settings(api)
     farm_profile = str(body.get("farmloop_profile") or "").strip()
-    if not farm_profile and _raw_settings(api).get("slicer_auto_postprocess_farmloop"):
-        farm_profile = str(body.get("farmloop_profile") or "").strip()
+    # 18.8: авто-постобработка — профиль берётся из настроек. Раньше здесь
+    # перечитывали пустое поле body, и включённый переключатель молчал.
+    if not farm_profile and raw.get("slicer_auto_postprocess_farmloop"):
+        farm_profile = farmloop_profile_id(raw)
     if farm_profile:
         from .farmloop import prepare_file
         template_path = DATA_DIR / "farmloop-templates" / f"{farm_profile}.gcode"
@@ -217,13 +239,15 @@ def slicer_slice(api, ctx: Ctx):
                 "job_id": body.get("job_id", ""), "cycle": body.get("cycle", 1),
                 "cycles": body.get("cycles", 1), "ams": settings.ams_slot,
                 "material": settings.material, "color": body.get("color", ""),
+                "spool": spool["id"] if spool else "",
             })
         # 18.8 (вкладка «Конвейер»): нарезка сразу для серии — событие журнала.
         try:
             api.db.add_event(
                 "farmloop", "Нарезка подготовлена для конвейера",
                 farm_output.name, "",
-                {"profile": farm_profile, "model": Path(source).name})
+                {"profile": farm_profile, "model": Path(source).name,
+                 "spool": spool["id"] if spool else ""})
         except Exception:
             pass
         destination = farm_output
@@ -264,6 +288,13 @@ def slicer_slice(api, ctx: Ctx):
         "report": report,
         "audit": gcode_audit,
         "farmloop": farmloop_report,
+        "farmloop_profile": farm_profile or "",
+        "spool": ({
+            "id": spool["id"], "material": spool.get("material") or "",
+            "color_name": spool.get("color_name") or "",
+            "remaining_grams": spool.get("remaining_grams"),
+            "ams_slot": spool.get("ams_slot") or "",
+        } if spool else None),
         "model_audit": audit,
         "warnings": warnings + list(audit.get("warnings") or [])
                     + list(gcode_audit.get("warnings") or []),

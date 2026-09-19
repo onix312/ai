@@ -808,6 +808,47 @@ class PrinterManager:
             " ORDER BY datetime(finished_at) DESC LIMIT ?", (int(limit),))
 
     def enqueue(self, data: dict) -> dict:
+        """Одно задание или серия конвейера (18.8: `cycles`).
+
+        `cycles > 1` — конвейерная серия: N одинаковых заданий в очереди
+        одной транзакцией. После каждого снятия детали (ручного или
+        авто-по камере) `_maybe_start_next` тянет следующее — серия
+        продолжается, пока не закончится очередь или не кончатся допуски.
+        """
+        try:
+            cycles = int(num(data.get("cycles")) or 1)
+        except (TypeError, ValueError):
+            cycles = 1
+        cycles = max(1, min(cycles, 100))
+        if cycles == 1:
+            return self.enqueue_one(data)
+        return self._enqueue_conveyor_series(dict(data), cycles)
+
+    def _enqueue_conveyor_series(self, data: dict, cycles: int) -> dict:
+        """Серия конвейера: N одинаковых заданий + событие журнала.
+
+        Событие kind=farmloop видно во вкладке «Конвейер» (История):
+        откуда серия, сколько циклов, id всех заданий.
+        """
+        data = dict(data)
+        data.pop("cycles", None)
+        jobs = []
+        with self.db.transaction():
+            for _ in range(cycles):
+                jobs.append(self.enqueue_one(data))
+        first = jobs[0]
+        job_ids = [job["id"] for job in jobs]
+        self.db.add_event(
+            "farmloop", "Серия конвейера поставлена в очередь",
+            f"{cycles} цикла(ов) · {first.get('name') or first.get('file')}",
+            first.get("printer_id") or "",
+            {"cycles": cycles, "file": first.get("file") or "",
+             "job_ids": job_ids})
+        first = dict(first)
+        first["series"] = {"cycles": cycles, "job_ids": job_ids}
+        return first
+
+    def enqueue_one(self, data: dict) -> dict:
         file_value = str(data.get("file") or "").strip()
         job = {
             "id": uid("job"),

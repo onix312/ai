@@ -1045,6 +1045,13 @@
     <input type="file" id="pr_sl_file" accept=".stl,.obj" hidden aria-hidden="true">
     <button class="btn" id="pr_sl_models_refresh" type="button" title="Обновить список моделей из библиотеки">↻</button>
    </div>
+   <div class="pr-slicer-row pr-slicer-conveyor">
+    <label class="pr-sl-check"><input type="checkbox" id="pr_sl_farm">Для конвейера (FarmLoop)</label>
+    <label class="sr-only" for="pr_sl_cycles">Циклов в серии</label>
+    <input type="number" id="pr_sl_cycles" class="field pr-sl-num" min="1" max="100" value="1" aria-label="Циклов в серии" title="Сколько одинаковых заданий поставит кнопка «В конвейер»">
+    <label class="sr-only" for="pr_sl_spool">Катушка со склада пластика</label>
+    <select id="pr_sl_spool" class="field" aria-label="Катушка со склада пластика"><option value="">Катушка: как в настройках</option></select>
+   </div>
    <div class="pr-slicer-row">
     <button class="btn primary" id="pr_sl_plan" type="button" disabled>План</button>
     <button class="btn" id="pr_sl_slice" type="button" disabled>Нарезать</button>
@@ -1097,7 +1104,7 @@
  <section class="card cv-how">
   <div class="card-head"><div><span class="card-kicker">Как это работает</span><h2>Серия без человека</h2></div></div>
   <ol class="cv-steps">
-   <li>Задание загружается с профилем FarmLoop — файл пересобирается с проверенным шаблоном из <code>data/farmloop-templates</code>.</li>
+   <li>Задание попадает в конвейер двумя путями: загрузка G-code с профилем FarmLoop или нарезка в карточке слайсера «Печать» с флагом «Для конвейера». Файл пересобирается с проверенным шаблоном из <code>data/farmloop-templates</code>.</li>
    <li>После печати камера сравнивает платформу с эталоном: совпало — деталь снята, цикл продолжается.</li>
    <li>Следующий цикл стартует сам, только когда все допуски включены и датчик или камера подтвердили пустую платформу.</li>
   </ol>

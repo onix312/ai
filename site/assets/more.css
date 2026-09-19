@@ -1291,6 +1291,13 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .pr-slicer-row .field { min-width: 0; flex: 1 1 240px; }
 .pr-slicer-row .btn { min-height: 40px; }
 .pr-slicer-row small { color: var(--muted); font-size: 11.5px; }
+/* 18.8: конвейерная строка карточки слайсера — флаг FarmLoop, циклы,
+   катушка склада. Своя подложка, чтобы оператор видел отдельный режим. */
+.pr-slicer-conveyor { padding: 10px 12px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); }
+.pr-slicer-conveyor .field { min-height: 40px; }
+.pr-sl-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer; user-select: none; }
+.pr-sl-check input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.pr-sl-num { flex: 0 0 110px !important; min-width: 110px; }
 .pr-sl-result { padding: 12px 14px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
 .pr-sl-result h3 { margin: 0 0 6px; font-size: 13px; color: var(--text); }
 .pr-sl-result dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px 14px; margin: 8px 0; }

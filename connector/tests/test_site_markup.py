@@ -1301,6 +1301,7 @@ class SlicerCardTests(TestCase):
             'accept=".stl,.obj"', 'id="pr_sl_upload_btn"',
             'id="pr_sl_models_refresh"', 'id="pr_sl_plan"', 'id="pr_sl_slice"',
             'id="pr_sl_status"', 'id="pr_sl_result"', 'id="pr_sl_actions"',
+            'id="pr_sl_farm"', 'id="pr_sl_cycles"', 'id="pr_sl_spool"',
         ):
             self.assertIn(attr, self.html, f"в карточке слайсера нет {attr}")
 
@@ -1308,10 +1309,27 @@ class SlicerCardTests(TestCase):
         self.assertIn("get('/api/slicer/engine'", self.js)
         self.assertIn("get('/api/slicer/profile'", self.js)
         self.assertIn("get('/api/library', { kind: 'stl'", self.js)
+        self.assertIn("get('/api/spools')", self.js)
         self.assertIn("post('/api/library/upload', form)", self.js)
         self.assertIn("post('/api/slicer/plan', { id: sel.value })", self.js)
-        self.assertIn("post('/api/slicer/slice', { id: sel.value })", self.js)
-        self.assertIn("post('/api/jobs/enqueue', {", self.js)
+        self.assertIn("post('/api/slicer/slice', payload)", self.js)
+        self.assertIn("post('/api/jobs/enqueue',", self.js)
+
+    def test_conveyor_series_contract(self):
+        """18.8: нарезка уходит в конвейер серией, пластик — со склада.
+
+        Кнопка «В конвейер» ставит N заданий одной операцией (cycles),
+        источник — printflow-conveyor, а spool_id связывает задание
+        с катушкой склада: расход спишется с неё, AMS-маппинг — из её слота.
+        """
+        self.assertIn("source: 'printflow-conveyor'", self.js)
+        self.assertIn("cycles", self.js)
+        self.assertIn("spool_id", self.js)
+        self.assertIn("ams_mapping", self.js)
+        # Катушка передаёт материал и AMS-слот в саму нарезку.
+        self.assertIn("payload.material = spool.material", self.js)
+        self.assertIn("payload.ams_slot = spool.ams_slot", self.js)
+        self.assertIn("payload.farmloop_profile", self.js)
 
     def test_enqueue_is_manual_and_non_autostart(self):
         # Оператор нажимает сам, автостарта нет — как и в конвейере слайсера.
