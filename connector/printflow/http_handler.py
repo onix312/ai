@@ -519,6 +519,11 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 return self.handle_job_upload()
             if path == "/api/estimate/upload":
                 return self.handle_estimate_upload()
+            if path == "/api/library/upload":
+                # 18.8 (слайсер-карточка): модель STL с компьютера — в
+                # библиотеку. Байтовый маршрут, поэтому в цепочке до реестра,
+                # как и остальные загрузки: реестр принимает только JSON.
+                return self.handle_library_upload()
             length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
             if too_large:
                 return self.send_json(413, {"error": "JSON-запрос слишком большой"})

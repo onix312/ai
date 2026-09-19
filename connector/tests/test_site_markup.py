@@ -1279,3 +1279,49 @@ class PultFileScreenTests(TestCase):
         self.assertIn('src="/assets/theme-init.js?v=17.0.1"', self.html)
         self.assertIn('src="assets/brand/nozza-mark-white.svg"', self.html)
         self.assertIn("navigator.serviceWorker.register('/sw.js')", self.html)
+
+
+class SlicerCardTests(TestCase):
+    """Слайсер-карточка панели (18.8): рабочая, а не статусная.
+
+    Карточка «Свой слайсер» в разделе «Печать» зовёт только существующие
+    маршруты, и её поля не должны потеряться при правках — именно так в
+    срезе 3 потерялся блок viewOrders и его поймал только этот контракт.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.js = (ROOT / "site" / "assets" / "print.js").read_text(encoding="utf-8")
+
+    def test_card_fields_survive(self):
+        for attr in (
+            'id="pr_slicer"', 'id="pr_slicer_text"', 'id="pr_slicer_meta"',
+            'id="pr_slicer_tag"', 'id="pr_sl_model"', 'id="pr_sl_file"',
+            'accept=".stl,.obj"', 'id="pr_sl_upload_btn"',
+            'id="pr_sl_models_refresh"', 'id="pr_sl_plan"', 'id="pr_sl_slice"',
+            'id="pr_sl_status"', 'id="pr_sl_result"', 'id="pr_sl_actions"',
+        ):
+            self.assertIn(attr, self.html, f"в карточке слайсера нет {attr}")
+
+    def test_card_calls_only_existing_routes(self):
+        self.assertIn("get('/api/slicer/engine'", self.js)
+        self.assertIn("get('/api/slicer/profile'", self.js)
+        self.assertIn("get('/api/library', { kind: 'stl'", self.js)
+        self.assertIn("post('/api/library/upload', form)", self.js)
+        self.assertIn("post('/api/slicer/plan', { id: sel.value })", self.js)
+        self.assertIn("post('/api/slicer/slice', { id: sel.value })", self.js)
+        self.assertIn("post('/api/jobs/enqueue', {", self.js)
+
+    def test_enqueue_is_manual_and_non_autostart(self):
+        # Оператор нажимает сам, автостарта нет — как и в конвейере слайсера.
+        self.assertIn("no_auto: 1,", self.js)
+        self.assertIn("allow_auto_start: false,", self.js)
+        self.assertIn("confirmDanger(message)", self.js)
+
+    def test_model_upload_goes_through_library_route(self):
+        # Ни одного нового пути: модель с компьютера — в библиотеку, оттуда
+        # её резает план/нарезка по id, результат скачивается из uploads.
+        self.assertIn("'/api/library/upload'", self.js)
+        self.assertIn("/api/uploads?file=", self.js)
+        self.assertNotIn("'/api/slice'", self.js)

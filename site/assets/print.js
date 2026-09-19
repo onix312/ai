@@ -9,8 +9,9 @@
 (() => {
 'use strict';
 
-const { $, $$, esc, nfmt, toast, fail, render, html, raw } = PF.ui;
-const { get } = PF.api;
+const { $, $$, esc, num, nfmt, toast, fail, render, html, raw,
+        minutesText, confirmDanger } = PF.ui;
+const { get, post } = PF.api;
 
 let forms = [];
 let groups = [];
@@ -18,6 +19,9 @@ let loaded = false;
 let loading = false;
 let farmloopLoaded = false;
 let slicerLoaded = false;
+let slicerReady = false;      // свой движок выбран и доступен (гейт engine)
+let slicerModels = [];        // модели STL из библиотеки
+let slicerLast = null;        // результат последней нарезки: {output, stem, report, machine}
 
 /* ============================================================ окно печати */
 /* Печать серверного листа. Своё окно, а не iframe: браузер печатает его
@@ -165,6 +169,7 @@ async function loadSlicerStatus() {
       meta.textContent = `printflow v${engine.version} · STL до ${engine.limits.model_mb} МБ · `
         + `слой ${settings.layer_height} мм · стенок ${settings.walls}`;
     }
+    slicerReady = !!profile.can_slice;
     if (profile.can_slice) {
       if (tag) { tag.textContent = 'Движок готов'; tag.className = 'tag ok'; }
       if (text) {
@@ -179,9 +184,219 @@ async function loadSlicerStatus() {
       }
     }
   } catch (error) {
+    slicerReady = false;
     if (tag) { tag.textContent = 'Нет связи'; tag.className = 'tag bad'; }
     if (text) text.textContent = 'Не удалось проверить движок нарезки. Повторите после восстановления связи.';
     if (meta) meta.textContent = '';
+  }
+  updateSlicerButtons();
+}
+
+/* ================================================== слайсер: рабочая часть
+   18.8: карточка «Свой слайсер» перестала быть статусной — оператор
+   выбирает модель (из библиотеки или с компьютера), смотрит план (аудит
+   без записи), нарезает (G-code уходит в библиотеку, отчёт — на экран)
+   и сам решает, ставить ли результат в очередь. Всё — через существующие
+   маршруты: /api/library, /api/library/upload, /api/slicer/plan,
+   /api/slicer/slice, /api/jobs/enqueue. */
+function slModelSelect() { return $('pr_sl_model'); }
+
+function updateSlicerButtons() {
+  const sel = slModelSelect();
+  const plan = $('pr_sl_plan');
+  const slice = $('pr_sl_slice');
+  const hasModel = !!(sel && sel.value);
+  if (plan) plan.disabled = !hasModel;
+  if (slice) slice.disabled = !hasModel || !slicerReady;
+}
+
+async function loadSlicerModels() {
+  const sel = slModelSelect();
+  if (!sel) return;
+  try {
+    const data = await get('/api/library', { kind: 'stl', limit: '300' });
+    slicerModels = data.files || [];
+    const current = sel.value;
+    const options = ['<option value="">— выберите модель из библиотеки —</option>']
+      .concat(slicerModels.map((m) =>
+        `<option value="${esc(m.id)}">${esc(m.name)}`
+        + (m.size ? ` · ${nfmt(m.size / 1048576, 1)} МБ` : '') + '</option>')).join('');
+    sel.innerHTML = options;
+    if (slicerModels.some((m) => m.id === current)) sel.value = current;
+    if (!slicerModels.length) sel.innerHTML = '<option value="">В библиотеке нет моделей STL — загрузите первую</option>';
+  } catch (error) {
+    sel.innerHTML = '<option value="">Список моделей не загрузился</option>';
+  }
+  updateSlicerButtons();
+}
+
+async function uploadSlicerModel(file) {
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const btn = $('pr_sl_upload_btn');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await post('/api/library/upload', form);
+    const rec = data.library || {};
+    toast('Модель в библиотеке', `${rec.name || file.name} · ${rec.id || ''}`);
+    await loadSlicerModels();
+    const sel = slModelSelect();
+    if (sel && rec.id) { sel.value = rec.id; updateSlicerButtons(); }
+  } catch (error) {
+    toast('Модель не загружена', error && error.message ? error.message : String(error), 'bad');
+  } finally {
+    if (btn) btn.disabled = false;
+    const input = $('pr_sl_file');
+    if (input) input.value = '';
+  }
+}
+
+function slWarningsHtml(warnings) {
+  const list = (warnings || []).filter(Boolean);
+  if (!list.length) return '';
+  return `<ul class="pr-sl-warn">${list.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`;
+}
+
+function renderSlicerPlan(data) {
+  const box = $('pr_sl_result');
+  if (!box) return;
+  const m = data.model || {};
+  const bbox = (m.bbox_mm || [0, 0, 0]).map((v) => nfmt(v, 1)).join(' × ');
+  box.hidden = false;
+  box.innerHTML = `<div class="pr-sl-result">
+   <h3>План нарезки · ${esc(m.model || '')}</h3>
+   <dl>
+    <div><dt>Сетка</dt><dd>${nfmt(m.triangles)} треугольников · ${m.closed === false ? '<span class="pr-sl-bad">не замкнута</span>' : m.closed === null ? 'проверка недоступна' : 'замкнута'}</dd></div>
+    <div><dt>Размер</dt><dd>${bbox} мм</dd></div>
+    <div><dt>Слоёв</dt><dd>${nfmt(m.layers)}</dd></div>
+    <div><dt>Стол</dt><dd>${m.fits_bed ? '<span class="pr-sl-ok">влезает</span>' : '<span class="pr-sl-bad">не влезает</span>'}</dd></div>
+   </dl>
+   ${slWarningsHtml(data.warnings)}
+  </div>`;
+}
+
+function renderSlicerSlice(data) {
+  const box = $('pr_sl_result');
+  const acts = $('pr_sl_actions');
+  if (!box) return;
+  const r = data.report || {};
+  const lib = data.library || {};
+  const machine = data.machine || {};
+  const minutes = num(r.minutes);
+  const grams = num(r.weight_g);
+  box.hidden = false;
+  box.innerHTML = `<div class="pr-sl-result">
+   <h3>Нарезка завершена · ${esc(data.output || '')}</h3>
+   <dl>
+    <div><dt>Слоёв</dt><dd>${nfmt(r.layers)}</dd></div>
+    <div><dt>Размер</dt><dd>${(r.bbox_mm || []).map((v) => nfmt(v, 1)).join(' × ')} мм</dd></div>
+    <div><dt>Время</dt><dd>≈ ${minutes ? minutesText(minutes) : '—'}</dd></div>
+    <div><dt>Пластик</dt><dd>≈ ${grams ? nfmt(grams, 1) + ' г' : '—'}</dd></div>
+    <div><dt>Библиотека</dt><dd>${esc(lib.name || data.output || '')}</dd></div>
+   </dl>
+   ${slWarningsHtml(data.warnings)}
+  </div>`;
+  slicerLast = {
+    output: data.output || '',
+    stem: slStemOf((data.model_audit && data.model_audit.model) || data.output),
+    minutes, grams,
+    material: (r.settings && r.settings.material) || '',
+    machine,
+  };
+  if (acts) {
+    acts.hidden = false;
+    const gate = machine.blocked_reason || '';
+    acts.innerHTML =
+      `<a class="btn sm" href="/api/uploads?file=${encodeURIComponent(data.output || '')}" download>Скачать .gcode</a>`
+      + `<button class="btn sm primary" id="pr_sl_enqueue" type="button">В очередь</button>`
+      + (gate ? `<p class="pr-sl-gate">⚠ ${esc(gate)}</p>` : '');
+    const enq = $('pr_sl_enqueue');
+    if (enq) enq.addEventListener('click', enqueueSlicerJob);
+  }
+}
+
+/* Имя без папок и расширения — человеческое имя нарезанной детали. */
+function slStemOf(name) {
+  const base = String(name || '').split('/').pop() || '';
+  return base.replace(/\.[^.]+$/, '');
+}
+
+/* Заглушка занятости: кнопка «работает», а статус строка говорит, что ищем. */
+function slSetBusy(busy, label) {
+  const plan = $('pr_sl_plan');
+  const slice = $('pr_sl_slice');
+  const status = $('pr_sl_status');
+  if (plan && busy) plan.disabled = true;
+  if (slice && busy) slice.disabled = true;
+  if (status) status.textContent = busy ? (label || 'Работаем…') : '';
+  if (!busy) updateSlicerButtons();
+}
+
+async function runSlicerPlan() {
+  const sel = slModelSelect();
+  if (!sel || !sel.value) return;
+  slSetBusy(true, 'Считаем план: аудит модели без записи…');
+  try {
+    const data = await post('/api/slicer/plan', { id: sel.value });
+    renderSlicerPlan(data);
+  } catch (error) {
+    const box = $('pr_sl_result');
+    if (box) {
+      box.hidden = false;
+      box.innerHTML = `<div class="pr-sl-result"><span class="pr-sl-bad">План не посчитался: `
+        + `${esc(error && error.message ? error.message : String(error))}</span></div>`;
+    }
+  } finally {
+    slSetBusy(false);
+  }
+}
+
+async function runSlicerSlice() {
+  const sel = slModelSelect();
+  if (!sel || !sel.value || !slicerReady) return;
+  slSetBusy(true, 'Нарезаем: G-code уходит в библиотеку, отчёт — сюда…');
+  try {
+    const data = await post('/api/slicer/slice', { id: sel.value });
+    renderSlicerSlice(data);
+  } catch (error) {
+    const box = $('pr_sl_result');
+    if (box) {
+      box.hidden = false;
+      box.innerHTML = `<div class="pr-sl-result"><span class="pr-sl-bad">Нарезка не прошла: `
+        + `${esc(error && error.message ? error.message : String(error))}</span></div>`;
+    }
+  } finally {
+    slSetBusy(false);
+  }
+}
+
+async function enqueueSlicerJob() {
+  if (!slicerLast || !slicerLast.output) return;
+  const btn = $('pr_sl_enqueue');
+  const message = `Поставить «${slicerLast.output}» в очередь печати?\n`
+    + `Файл — из нарезки PrintFlow. Автостарта не будет: старт даст оператор.`;
+  if (!confirmDanger(message)) return;
+  if (btn) btn.disabled = true;
+  try {
+    const data = await post('/api/jobs/enqueue', {
+      file: slicerLast.output,
+      name: slicerLast.stem,
+      source: 'printflow-slicer',
+      plate: 1,
+      no_auto: 1,
+      allow_auto_start: false,
+      est_minutes: slicerLast.minutes || 0,
+      est_grams: slicerLast.grams || 0,
+      material: slicerLast.material || '',
+    });
+    toast('В очереди', `Задание ${data.job && data.job.id ? data.job.id : ''} · старт — вручную`);
+    const acts = $('pr_sl_actions');
+    if (acts) acts.innerHTML = `<span class="pr-sl-ok">Задание ${esc((data.job && data.job.id) || '')} поставлено в очередь · старт — вручную</span>`;
+    // Само задание в раздел «Очередь» приедет с ближайшим снимком /api/stream.
+  } catch (error) {
+    toast('В очередь не поставлено', error && error.message ? error.message : String(error), 'bad');
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -399,6 +614,28 @@ function bind() {
       if (event.key === 'Enter') { event.preventDefault(); buildBarcode(); }
     });
   }
+
+  // Слайсер (18.8): модель → план → нарезка → в очередь.
+  const sel = $('pr_sl_model');
+  if (sel) sel.addEventListener('change', updateSlicerButtons);
+  const uploadBtn = $('pr_sl_upload_btn');
+  if (uploadBtn) uploadBtn.addEventListener('click', () => {
+    const input = $('pr_sl_file');
+    if (input) input.click();
+  });
+  const fileInput = $('pr_sl_file');
+  if (fileInput) fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (file) uploadSlicerModel(file);
+  });
+  const modelsRefresh = $('pr_sl_models_refresh');
+  if (modelsRefresh) modelsRefresh.addEventListener('click', () => {
+    loadSlicerModels().then(() => toast('Список моделей обновлён', 'Взяли библиотеку заново'));
+  });
+  const planBtn = $('pr_sl_plan');
+  if (planBtn) planBtn.addEventListener('click', runSlicerPlan);
+  const sliceBtn = $('pr_sl_slice');
+  if (sliceBtn) sliceBtn.addEventListener('click', runSlicerSlice);
 }
 
 PF.module('print', () => {
@@ -406,6 +643,7 @@ PF.module('print', () => {
   loadCatalog({ quiet: true }).catch(fail);
   loadFarmLoopStatus();
   loadSlicerStatus();
+  loadSlicerModels();
 });
 
 PF.on('data', () => {
@@ -418,5 +656,6 @@ PF.on('view', (detail) => {
   if (!loaded) loadCatalog({ quiet: true }).catch(fail);
   loadFarmLoopStatus();
   loadSlicerStatus();
+  loadSlicerModels();
 });
 })();

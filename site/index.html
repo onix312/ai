@@ -11,12 +11,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=17.0.1"></script>
+<script src="assets/theme-init.js?v=18.8.0"></script>
 <link rel="stylesheet" href="assets/tokens.css?v=18.6.0">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=18.6.0">
 <link rel="stylesheet" href="assets/app.css?v=18.6.0">
-<link rel="stylesheet" href="assets/more.css?v=18.6.0">
+<link rel="stylesheet" href="assets/more.css?v=18.8.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -1031,9 +1031,27 @@
   <span id="pr_farmloop_tag" class="tag">Проверяем</span>
  </section>
  <section class="card pr-slicer-card" id="pr_slicer" aria-live="polite">
-  <div class="pr-slicer-mark" aria-hidden="true">◺</div>
-  <div class="pr-slicer-main"><div class="card-kicker">PrintFlow Slicer · P1S</div><h2>Свой слайсер Stage 1</h2><p id="pr_slicer_text">Проверяем движок нарезки…</p><small id="pr_slicer_meta" class="muted"></small></div>
-  <span id="pr_slicer_tag" class="tag">Проверяем</span>
+  <div class="pr-slicer-top">
+   <div class="pr-slicer-mark" aria-hidden="true">◺</div>
+   <div class="pr-slicer-main"><div class="card-kicker">PrintFlow Slicer · P1S</div><h2>Свой слайсер Stage 1</h2><p id="pr_slicer_text">Проверяем движок нарезки…</p><small id="pr_slicer_meta" class="muted"></small></div>
+   <span id="pr_slicer_tag" class="tag">Проверяем</span>
+  </div>
+  <div class="pr-slicer-work">
+   <div class="pr-slicer-row">
+    <label class="sr-only" for="pr_sl_model">Модель из библиотеки</label>
+    <select id="pr_sl_model" class="field" aria-label="Модель из библиотеки"><option value="">Загружаем список моделей…</option></select>
+    <button class="btn" id="pr_sl_upload_btn" type="button">Загрузить STL…</button>
+    <input type="file" id="pr_sl_file" accept=".stl,.obj" hidden aria-hidden="true">
+    <button class="btn" id="pr_sl_models_refresh" type="button" title="Обновить список моделей из библиотеки">↻</button>
+   </div>
+   <div class="pr-slicer-row">
+    <button class="btn primary" id="pr_sl_plan" type="button" disabled>План</button>
+    <button class="btn" id="pr_sl_slice" type="button" disabled>Нарезать</button>
+    <small id="pr_sl_status" class="muted"></small>
+   </div>
+   <div id="pr_sl_result" hidden></div>
+   <div id="pr_sl_actions" class="pr-slicer-row" hidden></div>
+  </div>
  </section>
  <div class="pr-grid">
   <section class="card pr-barcode-card">

@@ -235,6 +235,41 @@ class UploadMixin:
             "estimate": estimate,
         })
 
+    def handle_library_upload(self):
+        """Сохранить модель (STL/OBJ) в библиотеку — вход для карточки слайсера.
+
+        Карточка «Свой слайсер» (18.8) нарезает модель своим движком, а
+        движок Stage 1 принимает только STL. До этого маршрута у панели не
+        было способа привести в библиотеку модель с компьютера: 3MF/G-code
+        принимают `/api/jobs/upload` и `/api/estimate/upload`, а на них —
+        «Поддерживаются только 3MF и G-code». Файл попадает в SHA-хранилище
+        библиотеки и в копия в uploads — дальше её резает `/api/slicer/plan`
+        и `/api/slicer/slice` по `id`, как и любые другие файлы библиотеки.
+        """
+        fields, upload = self._multipart_upload()
+        if not upload:
+            return self.send_json(400, {"error": "Файл не передан"})
+        if not upload[1]:
+            return self.send_json(400, {"error": "Файл пустой"})
+        try:
+            requested_name = _upload_filename(upload[0])
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if not requested_name.lower().endswith((".stl", ".obj")):
+            return self.send_json(400, {
+                "error": "В библиотеку для слайсера принимается модель STL или OBJ; "
+                         "G-code и 3MF — через загрузку в очередь",
+            })
+        from .library import FileLibrary
+        source = str(fields.get("source") or "").strip() or "upload"
+        note = str(fields.get("note") or "").strip()
+        record = FileLibrary(self.api.db).put(requested_name, upload[1],
+                                              source=source, note=note)
+        return self.send_json(200, {
+            "ok": True, "file": record["name"], "saved": record["upload_name"],
+            "source": source, "library": record,
+        })
+
     def handle_upload(self, query: dict):
         """Приём файла модели и отправка его на принтер по FTPS."""
         length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)

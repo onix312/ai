@@ -1245,12 +1245,30 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .pr-farmloop-main h2 { margin: 3px 0 4px; font-size: 17px; }
 .pr-farmloop-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
 .pr-farmloop-main small { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
-.pr-slicer-card { display: flex; align-items: center; gap: 14px; margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.pr-slicer-card { margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.pr-slicer-top { display: flex; align-items: center; gap: 14px; }
 .pr-slicer-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 22px; font-weight: 800; }
 .pr-slicer-main { min-width: 0; flex: 1; }
 .pr-slicer-main h2 { margin: 3px 0 4px; font-size: 17px; }
 .pr-slicer-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
 .pr-slicer-main small { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+/* Рабочая часть карточки (18.8): модель → план → нарезка → в очередь. */
+.pr-slicer-work { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--accent-line); }
+.pr-slicer-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.pr-slicer-row .field { min-width: 0; flex: 1 1 240px; }
+.pr-slicer-row .btn { min-height: 40px; }
+.pr-slicer-row small { color: var(--muted); font-size: 11.5px; }
+.pr-sl-result { padding: 12px 14px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.pr-sl-result h3 { margin: 0 0 6px; font-size: 13px; color: var(--text); }
+.pr-sl-result dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px 14px; margin: 8px 0; }
+.pr-sl-result dt { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+.pr-sl-result dd { margin: 0; font-weight: 650; color: var(--text); }
+.pr-sl-result .pr-sl-warn { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.pr-sl-result .pr-sl-warn li { padding-left: 20px; position: relative; color: var(--warn, #b45309); }
+.pr-sl-result .pr-sl-warn li::before { position: absolute; left: 2px; content: "⚠"; }
+.pr-sl-result .pr-sl-ok { color: var(--ok); font-weight: 700; }
+.pr-sl-result .pr-sl-bad { color: var(--bad); font-weight: 700; }
+.pr-sl-actions .pr-sl-gate { flex-basis: 100%; margin: 0; font-size: 11.5px; color: var(--warn, #b45309); }
 .pr-error { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .pr-error > span:nth-child(2) { flex: 1 1 240px; }
 .pr-error-mark { display: grid; width: 24px; height: 24px; flex: none; place-items: center; border-radius: 8px; background: var(--bad); color: #fff; font-weight: 800; }
@@ -1279,9 +1297,10 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 @media (max-width: 380px) {
   .pr-card { padding: 14px; }
   .pr-farmloop-card { align-items: flex-start; flex-wrap: wrap; }
-  .pr-slicer-card { align-items: flex-start; flex-wrap: wrap; }
+  .pr-slicer-top { align-items: flex-start; flex-wrap: wrap; }
   .pr-farmloop-card .tag { margin-left: 58px; }
-  .pr-slicer-card .tag { margin-left: 58px; }
+  .pr-slicer-top .tag { margin-left: 58px; }
+  .pr-slicer-row .btn { flex: 1 1 140px; }
   .pr-card-facts { gap: 6px; }
   .pr-card-facts > div { padding: 8px; }
 }
