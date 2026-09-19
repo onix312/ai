@@ -69,7 +69,8 @@ class LazyModuleFeedbackTests(unittest.TestCase):
         registry = block("const LAZY_MODULES = {", "};")
         for name, file in (("print", "print.js"),
                            ("clientbot", "clientbot.js"),
-                           ("ops10", "ops10.js")):
+                           ("ops10", "ops10.js"),
+                           ("conveyor", "conveyor.js")):
             self.assertIn(f"{name}: ['{file}']", registry)
             self.assertTrue((ROOT / "site" / "assets" / file).exists(), f"нет {file}")
 

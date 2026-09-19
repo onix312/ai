@@ -1149,6 +1149,11 @@ def write_gcode(polys: list, settings: SliceSettings, profile,
         f"; estimated_volume_cm3: {volume / 1000.0:.2f}",
         f"; estimated_weight_g: {weight:.2f}",
         f"; estimated_time_s: {int(round(writer.seconds))}",
+        # Строки сметы в формате Bambu Studio: их читает estimate_file,
+        # поэтому задание из нарезки PrintFlow в очереди показывает «≈ время
+        # · ≈ граммы», а не пустую смету (18.8, слайсер-карточка).
+        f";TIME:{int(round(writer.seconds))}",
+        f";Filament used [g]: {weight:.1f}",
         END,
     ]
     if settings.ams_slot:

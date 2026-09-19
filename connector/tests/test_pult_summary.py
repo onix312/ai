@@ -184,6 +184,77 @@ class PultSummaryTests(unittest.TestCase):
         # Простой считает сервер: часы телефона у станка могут врать.
         self.assertAlmostEqual(90.0, done["idle_min"], delta=2.0)
 
+    def test_last_done_carries_the_order_id_and_status_for_acceptance(self):
+        """Пульт закрывает финал заказа у станка: приёмке нужен id заказа,
+        а пометке «уже готов» — статус, без второго запроса к панели."""
+        from datetime import datetime, timedelta, timezone
+        finished = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self.db.upsert("orders", {
+            "id": "order-pult", "number": "1042", "product": "Подставка",
+            "status": "post"})
+        self.db.upsert("print_jobs", {
+            "id": "job_pult", "name": "Готовое", "printer_id": "prn1", "state": "done",
+            "order_id": "order-pult", "finished_at": finished,
+            "created_at": finished})
+        data = summary(self.db, self.manager, "prn1")
+        done = data["last_done"]
+        self.assertEqual({"id": "order-pult", "number": "1042",
+                          "product": "Подставка", "status": "post",
+                          "price": 0.0, "paid": 0.0, "due": 0.0}, done["order"])
+        self.assertEqual("", done["defect_reason"])
+        self.assertEqual("", done["defect_title"])
+
+    def _money_order(self, order_row: dict, job_id: str) -> None:
+        finished = "2026-09-19T05:00:00+00:00"
+        self.db.upsert("orders", order_row)
+        self.db.upsert("print_jobs", {
+            "id": job_id, "name": order_row["product"], "printer_id": "prn1",
+            "state": "done", "order_id": order_row["id"],
+            "finished_at": finished, "created_at": finished})
+
+    def test_last_done_order_carries_money_for_the_handover(self):
+        """Выдача со сменой денег идёт на пульте: сводка несёт цену,
+        оплаченное и остаток, посчитанные сервером, — без второго запроса."""
+        self._money_order({"id": "order-money", "number": "1044",
+                           "product": "Корпус", "status": "ready",
+                           "price": 1200.0, "paid": 300.0}, "job_money")
+        data = summary(self.db, self.manager, "prn1")
+        order = data["last_done"]["order"]
+        self.assertEqual(1200.0, order["price"])
+        self.assertEqual(300.0, order["paid"])
+        self.assertEqual(900.0, order["due"])
+
+    def test_last_done_order_due_never_goes_negative(self):
+        """Переплата не превращает остаток в долг по минусу: остаток 0."""
+        self._money_order({"id": "order-over", "number": "1045",
+                           "product": "Крышка", "status": "ready",
+                           "price": 500.0, "prepaid": 700.0}, "job_over")
+        data = summary(self.db, self.manager, "prn1")
+        order = data["last_done"]["order"]
+        self.assertEqual(700.0, order["paid"])
+        self.assertEqual(0.0, order["due"])
+
+    def test_last_done_reports_a_confirmed_defect(self):
+        """У задания уже подтверждённый брак: карточка покажет записанную
+        причину (ключ и человекочитаемое имя), а не предложит разбор дважды."""
+        from datetime import datetime, timedelta, timezone
+        finished = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self.db.upsert("orders", {
+            "id": "order-pult", "number": "1043", "product": "Основание",
+            "status": "post"})
+        self.db.upsert("print_jobs", {
+            "id": "job_def", "name": "Основание", "printer_id": "prn1",
+            "state": "done", "order_id": "order-pult",
+            "finished_at": finished, "created_at": finished})
+        self.db.upsert("defects", {
+            "id": "df1", "job_id": "job_def", "printer_id": "prn1",
+            "order_id": "order-pult", "reason": "warp",
+            "confirmed_at": finished, "at": finished})
+        data = summary(self.db, self.manager, "prn1")
+        done = data["last_done"]
+        self.assertEqual("warp", done["defect_reason"])
+        self.assertEqual("Деформация", done["defect_title"])
+
     def test_last_print_is_empty_when_nothing_was_printed(self):
         """Нечего показывать — пусто, а не выдуманная нулевая печать."""
         data = summary(self.db, self.manager, "prn1")

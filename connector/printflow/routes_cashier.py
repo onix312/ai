@@ -34,6 +34,12 @@ def cashier_logout(api: Any, ctx: Ctx):
     return _cashier(api).logout(_token(ctx))
 
 
+@router.post("/api/cashier/verify", audit="Касса: код проверен (пульт)",
+             doc="Одноразовая проверка кода кассы без сессии — для выдачи заказа с пульта")
+def cashier_verify(api: Any, ctx: Ctx):
+    return _cashier(api).verify_code(str(ctx.arg("code", "") or ""))
+
+
 @router.get("/api/cashier/catalog", doc="Полка для кассы: товары, цены, остатки")
 def cashier_catalog(api: Any, ctx: Ctx):
     _cashier(api).require(_token(ctx))

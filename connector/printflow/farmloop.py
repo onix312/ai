@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config import DATA_DIR
+
 BEGIN = "; PRINTFLOW FARMLOOP BEGIN"
 END = "; PRINTFLOW FARMLOOP END"
 PROFILE_ID = "bambu-p1s-farmloop-stage1"
@@ -32,6 +34,52 @@ class FarmLoopProfile:
 
 
 P1S_STAGE1 = FarmLoopProfile()
+
+
+def farmloop_profile_id(raw: dict | None = None) -> str:
+    """Активный FarmLoop-профиль: из настроек или дефолт Stage 1."""
+    return str((raw or {}).get("farmloop_profile") or "").strip() or P1S_STAGE1.id
+
+
+def farmloop_gate(raw: dict | None = None) -> dict:
+    """18.8: гейты конвейера из словаря настроек (без доступа к базе).
+
+    Зовут карточка слайсера (раздел «Печать») и вкладка «Конвейер»:
+      * can_prepare — файл серии можно собрать (шаблон на месте);
+      * can_series  — серия продолжит сама (механика + датчик + шаблон);
+      * max_cycles  — предел циклов из настроек, 1..1000.
+    Логика та же, что в routes_farmloop: не вычисляем гейт дважды.
+    """
+    raw = raw or {}
+    profile = farmloop_profile_id(raw)
+    template = DATA_DIR / "farmloop-templates" / f"{profile}.gcode"
+    template_ok = bool(template.is_file())
+    physical = all(bool(raw.get(key)) for key in (
+        "farmloop_mechanics_verified", "farmloop_template_verified",
+        "farmloop_pusher_enabled", "farmloop_bender_enabled"))
+    sensing = str(raw.get("farmloop_sensor_mode") or "") in {"sensor", "camera", "both"}
+    can_series = bool(physical and sensing and template_ok)
+    if not template_ok:
+        reason = "Нет установленного шаблона FarmLoop"
+    elif not physical:
+        reason = "Не подтверждена механика конвейера (допуски)"
+    elif not sensing:
+        reason = "Не выбран датчик подтверждения пустой платформы"
+    else:
+        reason = ""
+    try:
+        max_cycles = max(1, int(raw.get("farmloop_max_cycles") or 1))
+    except (TypeError, ValueError):
+        max_cycles = 1
+    return {
+        "profile_id": profile,
+        "template_installed": template_ok,
+        "auto_postprocess": bool(raw.get("slicer_auto_postprocess_farmloop")),
+        "can_prepare": template_ok,
+        "can_series": can_series,
+        "max_cycles": max_cycles,
+        "blocked_reason": reason,
+    }
 
 
 def _lines(text: str) -> list[str]:
@@ -132,7 +180,8 @@ def prepare_gcode(gcode: str, template: str,
         f"; printer: {profile.printer}",
         f"; stage: {profile.stage}",
     ]
-    for key in ("job_id", "cycle", "cycles", "ams", "material", "color"):
+    # 18.8: spool — id катушки со склада, с которой серия должна печататься.
+    for key in ("job_id", "cycle", "cycles", "ams", "material", "color", "spool"):
         if key in meta and str(meta[key]).strip():
             value = str(meta[key]).replace("\n", " ").replace("\r", " ")[:160]
             header.append(f"; {key}: {value}")

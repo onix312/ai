@@ -134,6 +134,10 @@ class DefectRecovery:
             "previous_same_reason": previous_same,
             "repeat_risk": previous_same >= 1,
             "external_action_performed": False,
+            # Справочник причин для пульта у станка: список берётся с сервера,
+            # а не дублируется в разметке — новый код причины не потребует
+            # второй правки страницы.
+            "reasons": {key: title for key, (title, _tip) in REASONS.items()},
         }
 
     def recover(

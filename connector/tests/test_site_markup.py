@@ -762,6 +762,72 @@ class CashierAddFeedbackTests(TestCase):
         self.assertIn('fresh.classList.remove("hit")', self.html)
 
 
+class CashierOrdersTabTests(TestCase):
+    """Вкладка «Заказы» кассы (18.8, срез 3): выдача готовых заказов у прилавка.
+
+    Печать закончилась и заказ принят (статус «Готов») — кассир видит его в
+    кассе и закрывает финал теми же штатными маршрутами, что и пульт у станка:
+    наличные/долг/уже-оплачено — POST /api/order/fulfill с payment_action,
+    СБП — POST /api/sbp/create на точную сумму остатка. Код заново не
+    спрашивается (кассир вошёл в кассу именно кодом), а редактирование заказов,
+    очередь и команды принтера вкладке недоступны: это не панель.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_tab_and_view_are_on_the_page(self):
+        self.assertIn('id="tabOrders"', self.html)
+        self.assertIn('id="tabOrdersLbl"', self.html)
+        self.assertIn('id="viewOrders"', self.html)
+        self.assertIn('id="ordersBox"', self.html)
+        # Иконка — из общего реестра, а не самодельная: «box» уже есть в icons.js.
+        self.assertIn('data-icon="box"', self.html)
+        self.assertIn('$("tabOrders").addEventListener', self.html)
+
+    def test_orders_tab_is_wired_into_settab_and_refresh(self):
+        self.assertIn('$("viewOrders").hidden=state.tab!=="orders"', self.html)
+        self.assertIn('if(state.tab==="orders") loadOrders()', self.html)
+        # Бейдж обновляется в общем ритме «Входящие» — готовый заказ обязан
+        # всплыть, даже когда кассир отвлёкся на продажу.
+        self.assertIn("loadOrders(true)", self.html)
+
+    def test_list_reads_ready_orders_from_the_regular_route(self):
+        self.assertIn('"/api/orders?status=ready&view=board&limit=100"', self.html,
+                      "список — штатная доска заказов, статус считает сервер")
+        # Остаток — экономика с сервера (тот же debt, что и в СБП и выдаче),
+        # а не пересчёт по price-paid в браузере.
+        self.assertIn('(o.economics||{}).debt', self.html)
+
+    def test_money_goes_through_the_regular_routes_only(self):
+        self.assertIn('"/api/order/fulfill"', self.html)
+        self.assertIn("handoff_confirmed:true", self.html)
+        self.assertIn("payment_action:action,payment_method:method", self.html)
+        self.assertIn('"/api/sbp/create"', self.html)
+        self.assertIn("order_id:oid", self.html)
+        # Ключ идемпотентности привязан к заказу: повторное создание платежа
+        # по одному заказу не задвоится молча.
+        self.assertIn('request_id:"cash-ho-"', self.html)
+        # «Уже оплачено» — выдача без движения денег.
+        self.assertIn('fulfillOrder(oid,"none","",', self.html)
+
+    def test_no_code_prompt_and_no_order_editing_from_the_tab(self):
+        # Код кассы здесь не нужен: сессия кассы сама за кодом.
+        self.assertNotIn("/api/cashier/verify", self.html,
+                         "касса уже вошла по коду — повторный спрос лишний")
+        for forbidden in ("/api/order/save", "/api/order/delete",
+                          "/api/orders/bulk-status", "/api/printer/command",
+                          "/api/jobs/"):
+            self.assertNotIn(forbidden, self.html,
+                             f"вкладка выдачи не имеет права трогать {forbidden!r}")
+
+    def test_shell_cache_was_bumped_for_orders_tab(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        self.assertGreaterEqual(int(re.search(r"printflow-shell-v(\d+)", sw).group(1)), 73,
+                                "правка cashier.html требует поднятия CACHE")
+
+
 class PultControlPageTests(TestCase):
     """Пульт цеха (18.0.1) — отдельное приложение для телефона и планшета.
 
@@ -1045,12 +1111,14 @@ class PultAutoScreenTests(TestCase):
 
 
 class PultFinishedCardTests(TestCase):
-    """Карточка «факт против плана» после финиша (18.0.10).
+    """Карточка «факт против плана» после финиша (18.0.10, финал 18.8).
 
     Оператору у станка нужно не «готово», а цифры: сколько обещал слайсер и
     сколько вышло, и сколько принтер уже стоит. Считает всё сервер — странице
-    запрещено выдумывать и досчитывать: единственное её действие тут — «Снял
-    детали» в существующий маршрут мини-панели.
+    запрещено выдумывать и досчитывать. Действия карточки: «Снял детали»
+    (маршрут мини-панели), «Готов к выдаче» (приёмка заказа) и «Брак»
+    (разбор с подтверждённой причиной). Деньги по заказу карточке не
+    положены: «Выдать» со способами оплаты — у кассы и панели, не у станка.
     """
 
     @classmethod
@@ -1070,9 +1138,28 @@ class PultFinishedCardTests(TestCase):
         self.assertIn('id="pk_b_removed"', self.html)
         self.assertIn("post('/api/printer/part-removed', { printer_id: p.id })", self.html,
                       "«Снял детали» идёт тем же маршрутом, что мини-панель")
-        start = self.html.index("function factHtml(){")
-        body = self.html[start:self.html.index("function renderFact(){")]
-        for forbidden in ("/api/jobs/", "/api/defect/", "/api/order/"):
+
+    def test_final_actions_use_only_the_agreed_routes(self):
+        """Финал заказа у станка (18.8): карточка снимает деталь, принимает
+        заказ, разбирает брак и выдает его с оплатой. Деньги — только штатными
+        маршрутами: fulfill с payment_action (наличные/долг/уже оплачено),
+        одноразовая проверка кода кассы и создание СБП-платежа на остаток.
+        Очередь, команды принтера и редактирование заказов мимо карточки не
+        ходят, журнал СБП на пульт не вывозится."""
+        self.assertIn('id="pk_b_accept"', self.html)
+        self.assertIn('id="pk_b_defect"', self.html)
+        self.assertIn('id="pk_b_defect_ok"', self.html)
+        self.assertIn('id="pk_b_handover"', self.html)
+        self.assertIn('id="pk_b_handover_ok"', self.html)
+        start = self.html.index("function factVisible(){")
+        body = self.html[start:self.html.index("function renderCmdBar(){")]
+        for route in ("/api/printer/part-removed", "/api/order/accept",
+                      "/api/defect/recovery", "/api/defect/recover",
+                      "/api/order/fulfill", "/api/cashier/verify",
+                      "/api/sbp/create"):
+            self.assertIn(route, body, f"в действиях карточки нет маршрута {route!r}")
+        for forbidden in ("/api/jobs/", "/api/order/save", "/api/order/delete",
+                          "/api/printer/command", "/api/sbp/payments"):
             self.assertNotIn(forbidden, body,
                              f"карточка факта не имеет права трогать {forbidden!r}")
 
@@ -1192,3 +1279,126 @@ class PultFileScreenTests(TestCase):
         self.assertIn('src="/assets/theme-init.js?v=17.0.1"', self.html)
         self.assertIn('src="assets/brand/nozza-mark-white.svg"', self.html)
         self.assertIn("navigator.serviceWorker.register('/sw.js')", self.html)
+
+
+class SlicerCardTests(TestCase):
+    """Слайсер-карточка панели (18.8): рабочая, а не статусная.
+
+    Карточка «Свой слайсер» в разделе «Печать» зовёт только существующие
+    маршруты, и её поля не должны потеряться при правках — именно так в
+    срезе 3 потерялся блок viewOrders и его поймал только этот контракт.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.js = (ROOT / "site" / "assets" / "print.js").read_text(encoding="utf-8")
+
+    def test_card_fields_survive(self):
+        for attr in (
+            'id="pr_slicer"', 'id="pr_slicer_text"', 'id="pr_slicer_meta"',
+            'id="pr_slicer_tag"', 'id="pr_sl_model"', 'id="pr_sl_file"',
+            'accept=".stl,.obj"', 'id="pr_sl_upload_btn"',
+            'id="pr_sl_models_refresh"', 'id="pr_sl_plan"', 'id="pr_sl_slice"',
+            'id="pr_sl_status"', 'id="pr_sl_result"', 'id="pr_sl_actions"',
+            'id="pr_sl_farm"', 'id="pr_sl_cycles"', 'id="pr_sl_spool"',
+        ):
+            self.assertIn(attr, self.html, f"в карточке слайсера нет {attr}")
+
+    def test_card_calls_only_existing_routes(self):
+        self.assertIn("get('/api/slicer/engine'", self.js)
+        self.assertIn("get('/api/slicer/profile'", self.js)
+        self.assertIn("get('/api/library', { kind: 'stl'", self.js)
+        self.assertIn("get('/api/spools')", self.js)
+        self.assertIn("post('/api/library/upload', form)", self.js)
+        self.assertIn("post('/api/slicer/plan', { id: sel.value })", self.js)
+        self.assertIn("post('/api/slicer/slice', payload)", self.js)
+        self.assertIn("post('/api/jobs/enqueue',", self.js)
+
+    def test_conveyor_series_contract(self):
+        """18.8: нарезка уходит в конвейер серией, пластик — со склада.
+
+        Кнопка «В конвейер» ставит N заданий одной операцией (cycles),
+        источник — printflow-conveyor, а spool_id связывает задание
+        с катушкой склада: расход спишется с неё, AMS-маппинг — из её слота.
+        """
+        self.assertIn("source: 'printflow-conveyor'", self.js)
+        self.assertIn("cycles", self.js)
+        self.assertIn("spool_id", self.js)
+        self.assertIn("ams_mapping", self.js)
+        # Катушка передаёт материал и AMS-слот в саму нарезку.
+        self.assertIn("payload.material = spool.material", self.js)
+        self.assertIn("payload.ams_slot = spool.ams_slot", self.js)
+        self.assertIn("payload.farmloop_profile", self.js)
+
+    def test_enqueue_is_manual_and_non_autostart(self):
+        # Оператор нажимает сам, автостарта нет — как и в конвейере слайсера.
+        self.assertIn("no_auto: 1,", self.js)
+        self.assertIn("allow_auto_start: false,", self.js)
+        self.assertIn("confirmDanger(message)", self.js)
+
+    def test_model_upload_goes_through_library_route(self):
+        # Ни одного нового пути: модель с компьютера — в библиотеку, оттуда
+        # её резает план/нарезка по id, результат скачивается из uploads.
+        self.assertIn("'/api/library/upload'", self.js)
+        self.assertIn("/api/uploads?file=", self.js)
+        self.assertNotIn("'/api/slice'", self.js)
+
+
+class ConveyorTabTests(TestCase):
+    """18.8: вкладка «Конвейер» (FarmLoop) — отдельный раздел цеха.
+
+    Файл на месте, зарегистрирован как ленивый модуль и в PWA-оболочке,
+    навигация ссылается на него, а сама вкладка держит живые контейнеры,
+    которые рисует conveyor.js. Разметка строковый контракт: DOM без
+    браузера не проверить (docs/ТЕСТЫ.md, п. 4).
+    """
+
+    def setUp(self):
+        self.html = INDEX_HTML.read_text(encoding="utf-8")
+        self.js = (ROOT / "site" / "assets" / "conveyor.js").read_text(encoding="utf-8")
+        self.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+        self.sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+
+    def test_view_exists_in_workshop_group(self):
+        self.assertIn('id="view-conveyor"', self.html)
+        # Ссылка в навигации, и она — между «Очередью» и «Заказами» (группа «Цех»).
+        self.assertIn('href="#conveyor" data-view="conveyor"', self.html)
+        queue_at = self.html.index('data-view="queue"')
+        conveyor_at = self.html.index('href="#conveyor"')
+        orders_at = self.html.index('data-view="orders"')
+        self.assertLess(queue_at, conveyor_at)
+        self.assertLess(conveyor_at, orders_at)
+
+    def test_conveyor_elements_survive(self):
+        for attr in (
+            'id="cv_status_text"', 'id="cv_status_meta"', 'id="cv_status_tag"',
+            'id="cv_settings"', 'id="cv_save"', 'id="cv_gate_note"',
+            'id="cv_history"', 'id="cv_refresh"', 'id="cv_tag"',
+        ):
+            self.assertIn(attr, self.html, f"во вкладке «Конвейер» нет {attr}")
+
+    def test_conveyor_js_drives_the_view(self):
+        self.assertIn("PF.module('conveyor'", self.js)
+        self.assertIn("put('cv_settings', settingGroup(FARMLOOP))", self.js)
+        self.assertIn("get('/api/farmloop/profile'", self.js)
+        self.assertIn("get('/api/farmloop/settings'", self.js)
+        self.assertIn("get('/api/events'", self.js)
+        self.assertIn("post('/api/settings', payload)", self.js)
+
+    def test_core_registers_the_lazy_module_and_view(self):
+        self.assertIn("conveyor: ['conveyor.js']", self.core)
+        self.assertIn("conveyor: { title: 'Конвейер'", self.core)
+        # Псевдоним: старая ссылка #farmloop ведёт на новую вкладку.
+        self.assertIn("farmloop: 'conveyor'", self.core)
+
+    def test_sw_precaches_the_conveyor_module(self):
+        self.assertIn("'/assets/conveyor.js'", self.sw)
+
+    def test_settings_pane_card_moved_to_tab(self):
+        """Из «Настроек» карточка снята, в «Печати» — только ссылка на вкладку."""
+        printers_pane = self.html.split('id="setpane-printers"', 1)[1].split('id="setpane-production"', 1)[0]
+        self.assertNotIn('id="set_farmloop"', printers_pane)
+        # В «Печати» компактная ссылка, а не дубль группы.
+        self.assertIn("pr-farmloop-link", self.html)
+        self.assertIn('href="#conveyor"', self.html)

@@ -236,6 +236,12 @@
  .cth.ph svg{width:20px;height:20px}
  .row b{font-size:14px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .row small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px;line-height:1.4}
+ /* Заказы к выдаче (18.8): карточка — номер, кто/что, остаток; кнопки под палец. */
+ .ocard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:13px 14px;margin-bottom:10px}
+ .ocard .oh{display:flex;justify-content:space-between;align-items:center;gap:8px}
+ .ocard .oh b{font-size:16.5px;letter-spacing:-.01em}
+ .ocard .om{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.45}
+ .ocard .oact{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px}
  .amt{font-weight:850;font-size:14.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
  .qtyCtr{display:flex;align-items:center;gap:6px}
  .qbtn{width:48px;height:48px;border-radius:11px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-weight:850;cursor:pointer;display:grid;place-items:center;font-size:18px;flex:0 0 48px}
@@ -372,6 +378,7 @@
   <div class="install" id="installHint" hidden><span>📲</span><span id="installText"></span><a id="installGo" href="#" download>Скачать</a><button class="btn ghost sm" id="installOff" type="button">Не показывать</button></div>
   <div class="tabs">
    <button class="tab on" id="tabSell" type="button"><span class="tic" data-icon="cart"></span><span>Продажа</span></button>
+   <button class="tab" id="tabOrders" type="button"><span class="tic" data-icon="box"></span><span id="tabOrdersLbl">Заказы</span></button>
    <button class="tab" id="tabIn" type="button"><span class="tic" data-icon="incoming"></span><span id="tabInLbl">Входящие</span></button>
    <button class="tab" id="tabShift" type="button"><span class="tic" data-icon="receipt"></span><span>Смена</span></button>
   </div>
@@ -397,6 +404,10 @@
 
   <div id="viewIn" hidden>
    <div id="incoming"></div>
+  </div>
+
+  <div id="viewOrders" hidden>
+   <div id="ordersBox"></div>
   </div>
 
   <div id="viewShift" class="shift" hidden>
@@ -521,7 +532,7 @@ function nextFs(){
   try{localStorage.setItem(FS_KEY,v);}catch(_e){}
   applyFs(v);
 }
-var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", qrPhone:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",offline:!navigator.onLine};
+var state = {cartSeen:{},token: localStorage.getItem("cashier_token")||"", name: localStorage.getItem("cashier_name")||"", role: localStorage.getItem("cashier_role")||"", legacy: localStorage.getItem("cashier_legacy")==="1", items:[], cats:[], cart:{}, sbpEnabled:true, sbp:{}, pendingPayment:"", qrText:"", qrSvg:"", qrUrl:"", qrPhone:"", cat:"", search:"", tab:"sell", loading:false, saleRequest:{cash:"",sbp:""},npd:{},shiftFilter:"all",orders:[],offline:!navigator.onLine};
 
 function toast(t){var m=$("msg");m.textContent=t;m.classList.add("on");clearTimeout(toast._t);toast._t=setTimeout(function(){m.classList.remove("on");},2800);}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
@@ -596,6 +607,7 @@ function onLinkBack(){
   loadCatalog(true);offQrRefresh(false);
   if(offQueue.length)offFlush(true);
   refreshBadge();
+  if(state.tab==="orders")loadOrders(true);
   if(state.tab==="in")loadIncoming();
   if(state.tab==="shift")loadShift();
 }
@@ -993,12 +1005,15 @@ function openCartModal(){
 function setTab(tab){
   state.tab=tab||"sell";
   $("tabSell").classList.toggle("on",state.tab==="sell");
+  $("tabOrders").classList.toggle("on",state.tab==="orders");
   $("tabIn").classList.toggle("on",state.tab==="in");
   $("tabShift").classList.toggle("on",state.tab==="shift");
   $("viewSell").hidden=state.tab!=="sell";
+  $("viewOrders").hidden=state.tab!=="orders";
   $("viewIn").hidden=state.tab!=="in";
   $("viewShift").hidden=state.tab!=="shift";
   $("cartBar").hidden=state.tab!=="sell";
+  if(state.tab==="orders") loadOrders();
   if(state.tab==="in") loadIncoming();
   if(state.tab==="shift") loadShift();
 }
@@ -1571,6 +1586,7 @@ window.addEventListener("keydown",function(ev){
 });
 
 $("tabSell").addEventListener("click",function(){setTab("sell");});
+$("tabOrders").addEventListener("click",function(){setTab("orders");});
 $("tabIn").addEventListener("click",function(){setTab("in");});
 
 $("bToggleCart").addEventListener("click",function(){
@@ -1927,6 +1943,98 @@ document.addEventListener("click",function(ev){
     api("/api/cashier/reject-sbp",{token:state.token,payment_id:id,reason:reason,goods_taken:goods})
       .then(function(){toast("Отклонено");loadIncoming();})
       .catch(function(e){sessionError(e);});
+  }
+});
+
+// ------------------------------------------------------- заказы к выдаче (18.8)
+// Печать закончена, результат принят (статус «Готов») — осталось выдать вещь
+// и снять остаток. Касса видит те же заказы, что пульт у станка, и закрывает
+// их теми же штатными маршрутами: наличные/долг/уже-оплачено —
+// POST /api/order/fulfill с payment_action, СБП — POST /api/sbp/create на
+// точную сумму остатка (сверка на странице «СБП», после прихода денег выдача
+// «Уже оплачено»). Код заново не спрашиваем: кассир вошёл в кассу им и так.
+function ordersUrl(){return "/api/orders?status=ready&view=board&limit=100";}
+function orderDue(o){return Math.max(0,Math.round((Number((o.economics||{}).debt)||0)*100)/100);}
+function orderById(id){return (state.orders||[]).filter(function(o){return o.id===id;})[0]||{};}
+function ordersBadge(n){
+  var lbl=$("tabOrdersLbl"),tab=$("tabOrders");
+  if(lbl)lbl.textContent=n?("Заказы · "+n):"Заказы";
+  if(tab)tab.classList.toggle("nudge",n>0);
+}
+function renderOrders(list){
+  var box=$("ordersBox");if(!box)return;
+  if(!list.length){
+    box.innerHTML='<div class="empty"><b>Заказов на выдачу нет</b>Здесь появляются заказы в статусе «Готов» — после приёмки печати.<br><span style="font-size:12px;opacity:.7">Список обновится сам</span></div>';
+    return;
+  }
+  box.innerHTML=list.map(function(o){
+    var due=orderDue(o);
+    var num=esc(o.number||o.id);
+    var who=[o.customer_name,o.phone].filter(Boolean).map(esc).join(" · ");
+    var dueDate=String(o.due||"").slice(0,10);
+    var meta=[esc(o.product||""),who].concat(dueDate?["до "+dueDate]:[]).filter(Boolean).join(" · ");
+    var badge=due>0?'<span class="qb low">остаток '+money(due)+'</span>':'<span class="qb qty">оплачен</span>';
+    var acts;
+    if(due>0){
+      acts='<button class="btn pay sm" data-oact="cash" data-oid="'+esc(o.id)+'" data-onum="'+num+'" data-odue="'+due+'">Наличные '+money(due)+'</button>'
+        +'<button class="btn ghost sm" data-oact="sbp" data-oid="'+esc(o.id)+'" data-onum="'+num+'" data-odue="'+due+'">СБП</button>'
+        +'<button class="btn ghost sm" data-oact="debt" data-oid="'+esc(o.id)+'" data-onum="'+num+'" data-odue="'+due+'" style="grid-column:1/-1">Выдать в долг</button>';
+    }else{
+      acts='<button class="btn pay sm" data-oact="paid" data-oid="'+esc(o.id)+'" data-onum="'+num+'" style="grid-column:1/-1">Выдать · уже оплачено</button>';
+    }
+    return '<div class="ocard"><div class="oh"><b>№'+num+'</b>'+badge+'</div>'
+      +'<div class="om">'+(meta||"—")+'</div><div class="oact">'+acts+'</div></div>';
+  }).join("");
+}
+function loadOrders(quiet){
+  var box=$("ordersBox");
+  if(!quiet)box.innerHTML='<div class="loading">Загружаем заказы…</div>';
+  return api(ordersUrl()).then(function(r){
+    var list=r.orders||[];
+    state.orders=list;
+    ordersBadge(list.length);
+    if(!$("viewOrders").hidden)renderOrders(list);
+  }).catch(function(e){
+    if(quiet)return;   // фоновый бейдж молча: ошибка не кардинал, пока вкладки нет
+    box.innerHTML=errorCard("Заказы недоступны",e.message,false);sessionError(e);
+  });
+}
+function fulfillOrder(oid,action,method,msg,b){
+  withBusy(b,function(){
+    return api("/api/order/fulfill",{id:oid,handoff_confirmed:true,
+      payment_action:action,payment_method:method})
+      .then(function(r){
+        toast(r&&r.already_fulfilled?"Заказ уже был выдан":msg);
+        loadOrders(true);
+      })
+      .catch(function(e){toast(e.message||"Не вышло");sessionError(e);});
+  });
+}
+$("ordersBox").addEventListener("click",function(ev){
+  var b=ev.target.closest("[data-oact]");if(!b)return;
+  var act=b.getAttribute("data-oact"),oid=b.getAttribute("data-oid");
+  var o=orderById(oid),num=b.getAttribute("data-onum")||String(o.number||"");
+  var due=orderDue(o);
+  if(act==="cash"){
+    if(!confirm("Выдать заказ №"+num+"?\nНаличные "+money(due)+" — в кассу."))return;
+    fulfillOrder(oid,"received","cash","Заказ №"+num+" выдан · "+money(due)+" в кассе",b);
+  }else if(act==="debt"){
+    if(!confirm("Выдать заказ №"+num+" в долг?\nОстаток "+money(due)+" останется к оплате."))return;
+    fulfillOrder(oid,"debt","","Заказ №"+num+" выдан в долг",b);
+  }else if(act==="paid"){
+    if(!confirm("Выдать заказ №"+num+"?\nОплата уже получена — просто фиксируем выдачу."))return;
+    fulfillOrder(oid,"none","","Заказ №"+num+" выдан",b);
+  }else if(act==="sbp"){
+    if(!confirm("Создать СБП-платёж "+money(due)+" по заказу №"+num+"?\nСверка — на странице «СБП». После прихода денег выдайте заказ как «Уже оплачено»."))return;
+    withBusy(b,function(){
+      return api("/api/sbp/create",{amount:due,order_id:oid,purpose:"Заказ №"+num,
+        request_id:"cash-ho-"+oid+"-"+Date.now(),actor:"cashier"})
+        .then(function(p){
+          toast("СБП-платёж №"+(p.number||"")+" создан — ждём прихода денег");
+          loadOrders(true);
+        })
+        .catch(function(e){toast(e.message||"Не вышло");sessionError(e);});
+    });
   }
 });
 
@@ -2353,6 +2461,9 @@ function refreshBadge(){
     $("tabInLbl").textContent=n?("Входящие · "+n):"Входящие";
     tab.classList.toggle("nudge",n>0);
   }).catch(function(){});
+  // Заказы к выдаче обновляем в том же ритме, что и входящие: готовый заказ
+  // должен всплыть на вкладке, даже если кассир отвлёкся на продажу.
+  loadOrders(true);
 }
 // первый заход: уже висящие платежи отмечаем бейджем без звонка — кассир про
 // них знает, а будить его по уже известному факту нельзя
@@ -2412,6 +2523,7 @@ function resetMoney(){
   stopMoneyPoll();
   var tab=$("tabIn");$("tabInLbl").textContent="Входящие";tab.classList.remove("nudge");
   $("moneyAlert").hidden=true;
+  state.orders=[];ordersBadge(0);
 }
 var hiddenAt=0;
 document.addEventListener("visibilitychange",function(){

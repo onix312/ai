@@ -1139,26 +1139,8 @@ const WATCH = [
    пересборке настроек в 18.6.3. Подписи safety-gate честно говорят, что это
    допуск на работу без человека: пока галочки не стоят, авто-режимы сами
    не включатся (гейт проверяется на сервере, settings_schema.validate). */
-const FARMLOOP = [
-  ['farmloop_profile', 'FarmLoop: профиль', 'Профиль конвейера под вашу обвязку', 'text'],
-  ['farmloop_mechanics_verified', 'Механика конвейера проверена (допуск)', 'Допуск на работу без человека: толкатель и направляющие выставлены и проверены', 'bool'],
-  ['farmloop_template_verified', 'Шаблон серии проверен (допуск)', 'Допуск на работу без человека: задание уходит в цикл корректно', 'bool'],
-  ['farmloop_pusher_enabled', 'Толкатель установлен (допуск)', 'Конвейер может снимать детали сам', 'bool'],
-  ['farmloop_bender_enabled', 'Изгибатель установлен (допуск)', 'Детали отгибаются от стола после печати', 'bool'],
-  ['farmloop_sensor_mode', 'Подтверждение пустой платформы', 'Как конвейер понимает, что деталь снята', 'select', [
-    ['manual', 'manual — Подтверждает человек'],
-    ['sensor', 'sensor — По датчику'],
-    ['camera', 'camera — По камере'],
-    ['both', 'both — Датчик и камера'],
-  ]],
-  ['farmloop_sensor_timeout_s', 'Таймаут подтверждения, с', 'Сколько секунд ждать подтверждения пустой платформы', 'num', 1],
-  ['farmloop_camera_threshold_pct', 'Порог камеры, %', 'Насколько (%) должен опустеть кадр платформы, чтобы цикл продолжился', 'num', 0.5],
-  ['farmloop_cooldown_s', 'Пауза между циклами, с', 'Охлаждение конвейера перед следующим циклом', 'num', 1],
-  ['farmloop_auto_next', 'Следующий цикл автоматически', 'Требует допуска: механика, шаблон, толкатель, изгибатель и датчик/камера', 'bool'],
-  ['farmloop_max_cycles', 'Максимум циклов за серию', 'Сколько деталей конвейер напечатает подряд (1 — одна деталь за серию)', 'num', 1],
-  ['farmloop_unattended_series', 'Бесконтрольная серия (без человека)', 'Допуск на серию без присмотра: требует авто-цикл и больше одного цикла', 'bool'],
-  ['farmloop_max_detach_attempts', 'Попытки снятия детали', 'Сколько попыток снять деталь, прежде чем позвать человека', 'num', 1],
-];
+// Группа FarmLoop (18.8) переехала в раздел «Конвейер» (conveyor.js):
+// настройки живут там, где конвейер настраивают, а не в свалке «Настройки».
 const STUDIO = [
   ['studio_gateway_enabled', 'Шлюз Bambu Studio (Studio Gateway)', 'Studio находит PrintFlow как принтер в LAN. Slice/Print падает в очередь с preflight и AMS-map.', 'bool'],
   ['studio_gateway_mode', 'Режим обработки заданий', 'confirm — подтверждение на пульте/ПК; queue — сразу в очередь; autostart — печать сразу', 'select', [
@@ -1899,7 +1881,7 @@ function renderSettings() {
     if ($('set_ams')) put('set_ams', settingGroup(AMS_SETTINGS));
     if ($('set_phase11')) put('set_phase11', settingGroup(PHASE11));
     if ($('set_system2')) put('set_system2', settingGroup(SYSTEM2));
-    if ($('set_farmloop')) put('set_farmloop', settingGroup(FARMLOOP));
+    // FarmLoop — в разделе «Конвейер» (18.8), из настроек карточка снята.
     // профили настроек
     if ($('set_profiles')) renderProfiles();
   });
@@ -3589,6 +3571,8 @@ document.addEventListener('click', (e) => {
     .then(() => toast('Скопировано', sw.dataset.copy, 'info'), () => {});
 });
 
+// settingGroup/settingRow открыты для других разделов (18.8): «Конвейер»
+// рисует свою карточку допусков тем же рендерером, что и «Настройки».
 PF.modules.settings = { downloadBackup, renderSettings, saveSettings, resetSettings, filterSettings,
-  renderDiag, refreshDiag };
+  renderDiag, refreshDiag, settingGroup, settingRow };
 })();

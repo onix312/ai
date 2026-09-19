@@ -175,11 +175,38 @@ def _last_done(db, printer_id: str = "") -> dict:
                      " ORDER BY datetime(COALESCE(finished_at, created_at)) DESC LIMIT 1")
     if not job:
         return {}
+    # Заказ по готовой печати: пульт закрывает финал заказа у станка —
+    # приёмке и браку нужны id, статус (чтобы не дублировать «готов») и
+    # уже записанный брак, чтобы карточка не предлагала разбор дважды.
     order = {}
+    defect_reason = ""
+    defect_title = ""
     if job.get("order_id"):
-        row = db.one("SELECT number, product FROM orders WHERE id=?", (job["order_id"],))
+        row = db.one(
+            "SELECT id, number, product, status, price, paid, prepaid FROM orders"
+            " WHERE id=?", (job["order_id"],))
         if row:
-            order = {"number": row.get("number"), "product": row.get("product")}
+            price = num(row.get("price"))
+            paid = max(num(row.get("paid")), num(row.get("prepaid")))
+            order = {
+                "id": row.get("id"), "number": row.get("number"),
+                "product": row.get("product"), "status": row.get("status") or "",
+                # Остаток к оплате: пульт показывает точную сумму до запроса,
+                # а СБП-платёж создаётся ровно на неё, без ручного пересчёта.
+                "price": price,
+                "paid": round(paid, 2),
+                "due": round(max(0.0, price - paid), 2),
+            }
+    defect_row = db.one(
+        "SELECT reason FROM defects WHERE job_id=? AND confirmed_at<>''"
+        " ORDER BY datetime(confirmed_at) DESC LIMIT 1", (job["id"],))
+    if defect_row:
+        defect_reason = str(defect_row.get("reason") or "")
+        try:
+            from .defect_recovery import REASONS
+            defect_title = REASONS.get(defect_reason, ("", ""))[0]
+        except Exception:  # noqa: BLE001 — справочник не должен ломать сводку
+            defect_title = defect_reason
     # Сколько принтер стоит с момента финиша. Считаем на сервере: часы телефона
     # у станка могут врать, а «простой 0 минут» после ночной печати — обидно.
     idle_min = 0.0
@@ -206,6 +233,8 @@ def _last_done(db, printer_id: str = "") -> dict:
         "result": str(job.get("result") or ""),
         "idle_min": idle_min,
         "order": order or None,
+        "defect_reason": defect_reason,
+        "defect_title": defect_title,
     }
 
 

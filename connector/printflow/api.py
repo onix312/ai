@@ -3277,16 +3277,58 @@ class Api:
             if watch:
                 watch.dismiss(body.get("fid",""))
             return 200, {"ok": True}
+        if path == "/api/watch/ensure":
+            # 18.8: главный путь в один клик — папка создаётся с сервера,
+            # чтобы оператору не пришлось mkdir руками.
+            path = str(self.db.setting("watch_folder_path", "") or "").strip()
+            if not path:
+                raise ValueError("Не задан путь Watch Folder (Настройки → Принтеры)")
+            from pathlib import Path as _P
+            target = _P(path).expanduser()
+            target.mkdir(parents=True, exist_ok=True)
+            return 200, {"ok": True, "path": str(target), "exists": target.is_dir()}
         if path == "/api/watch/enqueue":
             watch = getattr(self.manager, "watch", None)
             fid = body.get("fid","")
             info = watch.get_pending(fid) if watch else None
             if not info:
                 raise ValueError("Файл не найден в Watch Folder")
-            self.manager.enqueue({"file": info.get("name") or Path(info.get("file","")).name, "order_id": info.get("order_id") or body.get("order_id",""), "plate": int(num(body.get("plate"),1)), "ams_mapping": body.get("ams_mapping", []), "printer_id": body.get("printer_id","")})
+            filename = info.get("name") or Path(info.get("file","")).name
+            # 18.8: пластик со склада — катушка подбирается по материалу
+            # из 3MF/G-code, если вызывающий не назначил сам. Расход после
+            # печати спишется с этой бобины; AMS-маппинг — из её слота.
+            material = str(body.get("material") or info.get("material") or info.get("filament_type") or "").strip()
+            spool_id = str(body.get("spool_id") or "").strip()
+            ams_mapping = body.get("ams_mapping") or []
+            spool = None
+            if not spool_id and material:
+                from .watch_folder import pick_warehouse_spool
+                spool = pick_warehouse_spool(self.db, material)
+                if spool:
+                    spool_id = spool["id"]
+                    if not ams_mapping and str(spool.get("ams_slot") or "").strip():
+                        ams_mapping = [int(spool["ams_slot"])]
+            payload = {"file": filename, "order_id": info.get("order_id") or body.get("order_id",""), "plate": int(num(body.get("plate"),1)), "ams_mapping": ams_mapping, "printer_id": body.get("printer_id","")}
+            if material:
+                payload["material"] = material
+            if spool_id:
+                payload["spool_id"] = spool_id
+            # 18.8: «В конвейер (N)» — серия одной транзакцией (см. enqueue).
+            # Только для файлов с проверенным FarmLoop-блоком: конвейер
+            # печатает серию одинаковых деталей, а не чужой файл.
+            try:
+                cycles = int(num(body.get("cycles"), 1) or 1)
+            except (TypeError, ValueError):
+                cycles = 1
+            cycles = max(1, min(cycles, 100))
+            if cycles > 1:
+                if not bool(info.get("farmloop")):
+                    raise ValueError("Серия конвейера — только для G-code с проверенным FarmLoop-блоком")
+                payload["cycles"] = cycles
+            job = self.manager.enqueue(payload)
             if watch:
                 watch.dismiss(fid)
-            return 200, {"ok": True}
+            return 200, {"ok": True, "job": job, "spool_id": spool_id or "", "cycles": cycles}
         if path == "/api/watch/create-order":
             watch = getattr(self.manager, "watch", None)
             fid = body.get("fid","")

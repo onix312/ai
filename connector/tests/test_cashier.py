@@ -490,7 +490,8 @@ class CashierRouteTests(unittest.TestCase):
         for path in ("/api/cashier/login", "/api/cashier/logout",
                      "/api/cashier/catalog", "/api/cashier/incoming",
                      "/api/cashier/sell", "/api/cashier/confirm-sbp",
-                     "/api/cashier/reject-sbp", "/api/cashier/reconcile"):
+                     "/api/cashier/reject-sbp", "/api/cashier/reconcile",
+                     "/api/cashier/verify"):
             self.assertIn(path, paths, path)
 
 
@@ -691,3 +692,74 @@ class CashierVariantPhotoTests(unittest.TestCase):
         self.assertIn("data-carpix", page)
         self.assertIn("carpix.push(photoUrl)", page)
         self.assertIn("list.length<2)return", page)
+
+class CashierVerifyCodeTests(unittest.TestCase):
+    """Одноразовая проверка кода (18.8, пульт): выдача на пульте подтверждается
+    тем же кодом магазина, что и касса — но без сессии: пульт не входит в кассу,
+    ему нужна только ответка «код принят». PIN тоже проходит: оператор у
+    прилавка может держать PIN, а не код магазина.
+    """
+
+    def setUp(self):
+        self.db = make_db()
+        self.acc = Accounting(self.db)
+        self.cashier = Cashier(self.db, self.acc)
+        self.db.set_settings({"cashier_code": "1234"})
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_shop_code_is_accepted_as_employee(self):
+        res = self.cashier.verify_code("1234")
+        self.assertTrue(res["ok"])
+        self.assertEqual("shop_code", res["kind"])
+        self.assertEqual("employee", res["role"])
+
+    def test_pin_is_accepted_with_their_role(self):
+        from connector.printflow.staff import Staff
+        staff = Staff(self.db)
+        row = staff.add("Ира", "manager", "")
+        staff.set_pin(row["id"], "5555")
+        res = self.cashier.verify_code("5555")
+        self.assertTrue(res["ok"])
+        self.assertEqual("pin", res["kind"])
+        self.assertEqual("manager", res["role"])
+        self.assertEqual("Ира", res["name"])
+
+    def test_wrong_code_is_rejected(self):
+        # ValueError — штатный ответ: роутер превращает его в 400 с текстом.
+        with self.assertRaisesRegex(ValueError, "Неверный код кассы"):
+            self.cashier.verify_code("0000")
+
+    def test_wrong_code_mentions_pin_when_pins_exist(self):
+        """Касса в режиме PIN не выдает, какой именно код неверен: PIN или общий."""
+        from connector.printflow.staff import Staff
+        staff = Staff(self.db)
+        row = staff.add("Ира", "manager", "")
+        staff.set_pin(row["id"], "5555")
+        with self.assertRaisesRegex(ValueError, "Неверный PIN или код кассы"):
+            self.cashier.verify_code("0000")
+
+    def test_empty_code_is_rejected(self):
+        for bad in ("", "   "):
+            with self.assertRaisesRegex(ValueError, "Введите код"):
+                self.cashier.verify_code(bad)
+
+    def test_missing_code_is_a_setting_hint(self):
+        """Код не настроен — подсказка куда его задать, а не просто «неверный»."""
+        self.db.set_settings({"cashier_code": ""})
+        with self.assertRaisesRegex(ValueError, "настройте"):
+            self.cashier.verify_code("1234")
+
+    def test_verify_route_is_registered_stateless(self):
+        """Маршрут отвечает без сессии: заголовок авторизации пульту не нужен
+        (у него его и нет), поэтому проверка кода живёт рядом с кассой, но
+        отдельно от require(token)."""
+        from connector.printflow.api import register_routes
+        register_routes()
+        from connector.printflow.router import router
+        self.assertIn("/api/cashier/verify", router.paths())
+
+
+if __name__ == "__main__":
+    unittest.main()

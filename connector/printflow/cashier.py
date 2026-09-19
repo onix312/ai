@@ -292,6 +292,35 @@ class Cashier:
             raise ValueError("Неверный PIN или код кассы")
         raise ValueError("Неверный код кассы")
 
+    def verify_code(self, code: str) -> dict:
+        """Бессессионная проверка кода для пульта у станка.
+
+        Пульт не держит сессию кассы (нет смены и ящика), поэтому на денежном
+        шаге выдачи он проверяет код по тому же правилу, что и login, — PIN
+        сотрудника или общий код магазина, — но сессию не создаёт: на телефоне
+        у станка не должно появляться «кассир вошёл».
+        """
+        from .staff import Staff
+        staff = Staff(self.db)
+        code = str(code or "").strip()
+        if not code:
+            raise ValueError("Введите код (PIN или код магазина)")
+        member = staff.find_by_pin(code)
+        if member:
+            role = str(member.get("role") or "employee")
+            if role not in ("manager", "employee"):
+                role = "employee"
+            return {"ok": True, "kind": "pin", "role": role,
+                    "name": str(member.get("name") or "")}
+        expected = str(self.db.setting("cashier_code", "") or "").strip()
+        if not expected:
+            raise ValueError("Код кассы не задан — настройте его в панели (Касса и СБП)")
+        if code == expected:
+            return {"ok": True, "kind": "shop_code", "role": "employee", "name": ""}
+        if staff.pins_count() > 0:
+            raise ValueError("Неверный PIN или код кассы")
+        raise ValueError("Неверный код кассы")
+
     def logout(self, token: str) -> dict:
         token = str(token or "").strip()
         self._sessions.pop(token, None)

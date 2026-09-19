@@ -499,6 +499,160 @@ if (problems.length === 0) {
       throw new Error('подсказка про стеллаж осталась при выключенном режиме');
     }
   });
+
+  // 18.8 (срез 3): вкладка «Заказы» — выдача готовых заказов у прилавка.
+  // Деньги идут только штатными маршрутами: наличные/долг/уже-оплачено —
+  // /api/order/fulfill с payment_action, СБП — /api/sbp/create на точную
+  // сумму остатка. Автовыдачи до прихода денег быть не должно.
+  const hoOrder = (id, debt, extra) => Object.assign({
+    id, number: '1042', product: 'Подставка', customer_name: 'Иван',
+    phone: '+7 900 000-00-00', status: 'ready', price: 1200, paid: 300,
+    prepaid: 0, due: '2026-09-20',
+    economics: { price: 1200, paid: 300, debt },
+  }, extra || {});
+  const hoKassa = () => createKassa({
+    transport: 'stub',
+    respond: (url) => {
+      const u = String(url);
+      if (u.indexOf('/api/orders?status=ready') >= 0) {
+        return { body: { orders: [hoOrder('ord1', 900)] } };
+      }
+      if (u.indexOf('/api/cashier/incoming') >= 0) return { body: { payments: [] } };
+      if (u.indexOf('/api/order/fulfill') >= 0) return { body: { ok: true } };
+      if (u.indexOf('/api/sbp/create') >= 0) return { body: { id: 'sbp1', number: '57' } };
+      return {};
+    },
+  });
+  // Клик по кнопке выдачи: делегирование вешено на #ordersBox, кнопка —
+  // подделка с атрибутами и classList (withBusy крутит и то и другое).
+  const hoTap = (kassa, act, oid = 'ord1', onum = '1042') => {
+    // Страница зовёт голый confirm(): в браузере это глобальное, в vm-контексте
+    // оно живёт только на window — подставляем то, что дал бы браузер.
+    kassa.ev('if(typeof confirm==="undefined")confirm=window.confirm;');
+    const attrs = { 'data-oact': act, 'data-oid': oid, 'data-onum': onum };
+    const btn = {
+      getAttribute: (n) => (n in attrs ? attrs[n] : null),
+      classList: { contains: () => false, add() {}, remove() {} },
+      disabled: false,
+    };
+    kassa.ev('document.getElementById("ordersBox")._h.click')
+      .call(null, { target: { closest: (sel) => (sel === '[data-oact]' ? btn : null) } });
+  };
+
+  checkAsync('«Заказы»: готовый заказ с остатком, счётчик на вкладке', async () => {
+    const k2 = hoKassa();
+    k2.run();
+    k2.ev('setTab("orders");');
+    await settle();
+    const html = String(k2.ev('document.getElementById("ordersBox").innerHTML') || '');
+    if (html.indexOf('№1042') < 0) throw new Error('нет номера заказа: ' + html.slice(0, 120));
+    if (html.indexOf('Иван') < 0 || html.indexOf('+7 900 000-00-00') < 0) {
+      throw new Error('не видно клиента и телефон: ' + html.slice(0, 200));
+    }
+    if (html.indexOf('900 ₽') < 0) throw new Error('остаток не посчитан: ' + html.slice(0, 200));
+    if (html.indexOf('data-oact="paid"') >= 0) {
+      throw new Error('«Уже оплачено» показано при ненулевом остатке');
+    }
+    if (k2.ev('document.getElementById("tabOrdersLbl").textContent') !== 'Заказы · 1') {
+      throw new Error('счётчика на вкладке нет: '
+        + k2.ev('document.getElementById("tabOrdersLbl").textContent'));
+    }
+  });
+
+  checkAsync('выдача наличными: fulfill с received/cash и подтверждением передачи', async () => {
+    const k2 = hoKassa();
+    k2.run();
+    k2.ev('setTab("orders");');
+    await settle();
+    k2.ev('var _toasts=[];toast=function(t){_toasts.push(t);};');
+    hoTap(k2, 'cash');
+    await settle();
+    const fills = k2.callsFor('/api/order/fulfill');
+    if (fills.length !== 1) throw new Error(`вызовов fulfill ${fills.length}, ждали 1`);
+    const body = JSON.parse(fills[0].body);
+    if (body.id !== 'ord1' || body.handoff_confirmed !== true
+        || body.payment_action !== 'received' || body.payment_method !== 'cash') {
+      throw new Error('пейлоад fulfill не тот: ' + fills[0].body);
+    }
+    if (!/выдан · 900 ₽ в кассе/.test(k2.ev('_toasts').join('|'))) {
+      throw new Error('кассир не услышал про деньги в кассе: ' + k2.ev('_toasts'));
+    }
+    if (k2.callsFor('/api/sbp/create').length) throw new Error('наличные создали СБП-платёж');
+  });
+
+  checkAsync('выдача СБП: платёж на точный остаток, без автовыдачи', async () => {
+    const k2 = hoKassa();
+    k2.run();
+    k2.ev('setTab("orders");');
+    await settle();
+    k2.ev('var _toasts=[];toast=function(t){_toasts.push(t);};');
+    hoTap(k2, 'sbp');
+    await settle();
+    const creates = k2.callsFor('/api/sbp/create');
+    if (creates.length !== 1) throw new Error(`вызовов СБП ${creates.length}, ждали 1`);
+    const body = JSON.parse(creates[0].body);
+    if (body.amount !== 900 || body.order_id !== 'ord1') {
+      throw new Error('платёж не на остаток заказа: ' + creates[0].body);
+    }
+    if (String(body.request_id).indexOf('cash-ho-ord1-') !== 0) {
+      throw new Error('ключ запроса не привязан к заказу: ' + body.request_id);
+    }
+    if (k2.callsFor('/api/order/fulfill').length) {
+      throw new Error('заказ выдан до прихода денег');
+    }
+    if (!/СБП-платёж №57 создан/.test(k2.ev('_toasts').join('|'))) {
+      throw new Error('кассир не узнал о созданном платеже: ' + k2.ev('_toasts'));
+    }
+  });
+
+  checkAsync('выдача в долг: fulfill с debt, денег не берём', async () => {
+    const k2 = hoKassa();
+    k2.run();
+    k2.ev('setTab("orders");');
+    await settle();
+    hoTap(k2, 'debt');
+    await settle();
+    const fills = k2.callsFor('/api/order/fulfill');
+    if (fills.length !== 1) throw new Error(`вызовов fulfill ${fills.length}, ждали 1`);
+    const body = JSON.parse(fills[0].body);
+    if (body.payment_action !== 'debt' || body.payment_method !== '') {
+      throw new Error('долг должен идти payment_action=debt: ' + fills[0].body);
+    }
+    if (k2.callsFor('/api/sbp/create').length) throw new Error('долг создал платёж');
+  });
+
+  checkAsync('нулевой остаток: «Уже оплачено» и выдача без движения денег', async () => {
+    const k2 = createKassa({
+      transport: 'stub',
+      respond: (url) => {
+        const u = String(url);
+        if (u.indexOf('/api/orders?status=ready') >= 0) {
+          return { body: { orders: [hoOrder('ord2', 0, { id: 'ord2', number: '1043', paid: 1200 })] } };
+        }
+        if (u.indexOf('/api/order/fulfill') >= 0) return { body: { ok: true } };
+        return {};
+      },
+    });
+    k2.run();
+    k2.ev('setTab("orders");');
+    await settle();
+    const html = String(k2.ev('document.getElementById("ordersBox").innerHTML') || '');
+    if (html.indexOf('data-oact="paid"') < 0) {
+      throw new Error('кнопки «Уже оплачено» нет: ' + html.slice(0, 200));
+    }
+    if (html.indexOf('data-oact="cash"') >= 0 || html.indexOf('data-oact="sbp"') >= 0) {
+      throw new Error('оплаченному заказу всё ещё предлагают платить');
+    }
+    k2.ev('var _toasts=[];toast=function(t){_toasts.push(t);};');
+    hoTap(k2, 'paid', 'ord2', '1043');
+    await settle();
+    const fills = k2.callsFor('/api/order/fulfill');
+    if (fills.length !== 1) throw new Error(`вызовов fulfill ${fills.length}, ждали 1`);
+    const body = JSON.parse(fills[0].body);
+    if (body.id !== 'ord2' || body.payment_action !== 'none' || body.handoff_confirmed !== true) {
+      throw new Error('выдача «уже оплачено» не та: ' + fills[0].body);
+    }
+  });
 }
 
 function report() {

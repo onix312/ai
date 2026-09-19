@@ -245,7 +245,7 @@ class HandlerWiringTests(unittest.TestCase):
 
     def test_upload_methods_survived_the_split(self):
         for name in ("serve_upload", "handle_job_upload", "handle_estimate_upload",
-                     "handle_upload", "_multipart_upload"):
+                     "handle_library_upload", "handle_upload", "_multipart_upload"):
             self.assertTrue(hasattr(Handler, name), f"потерян {name}")
 
     def test_transport_methods_survived_the_split(self):
