@@ -762,6 +762,72 @@ class CashierAddFeedbackTests(TestCase):
         self.assertIn('fresh.classList.remove("hit")', self.html)
 
 
+class CashierOrdersTabTests(TestCase):
+    """Вкладка «Заказы» кассы (18.8, срез 3): выдача готовых заказов у прилавка.
+
+    Печать закончилась и заказ принят (статус «Готов») — кассир видит его в
+    кассе и закрывает финал теми же штатными маршрутами, что и пульт у станка:
+    наличные/долг/уже-оплачено — POST /api/order/fulfill с payment_action,
+    СБП — POST /api/sbp/create на точную сумму остатка. Код заново не
+    спрашивается (кассир вошёл в кассу именно кодом), а редактирование заказов,
+    очередь и команды принтера вкладке недоступны: это не панель.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = CASHIER_HTML.read_text(encoding="utf-8")
+
+    def test_tab_and_view_are_on_the_page(self):
+        self.assertIn('id="tabOrders"', self.html)
+        self.assertIn('id="tabOrdersLbl"', self.html)
+        self.assertIn('id="viewOrders"', self.html)
+        self.assertIn('id="ordersBox"', self.html)
+        # Иконка — из общего реестра, а не самодельная: «box» уже есть в icons.js.
+        self.assertIn('data-icon="box"', self.html)
+        self.assertIn('$("tabOrders").addEventListener', self.html)
+
+    def test_orders_tab_is_wired_into_settab_and_refresh(self):
+        self.assertIn('$("viewOrders").hidden=state.tab!=="orders"', self.html)
+        self.assertIn('if(state.tab==="orders") loadOrders()', self.html)
+        # Бейдж обновляется в общем ритме «Входящие» — готовый заказ обязан
+        # всплыть, даже когда кассир отвлёкся на продажу.
+        self.assertIn("loadOrders(true)", self.html)
+
+    def test_list_reads_ready_orders_from_the_regular_route(self):
+        self.assertIn('"/api/orders?status=ready&view=board&limit=100"', self.html,
+                      "список — штатная доска заказов, статус считает сервер")
+        # Остаток — экономика с сервера (тот же debt, что и в СБП и выдаче),
+        # а не пересчёт по price-paid в браузере.
+        self.assertIn('(o.economics||{}).debt', self.html)
+
+    def test_money_goes_through_the_regular_routes_only(self):
+        self.assertIn('"/api/order/fulfill"', self.html)
+        self.assertIn("handoff_confirmed:true", self.html)
+        self.assertIn("payment_action:action,payment_method:method", self.html)
+        self.assertIn('"/api/sbp/create"', self.html)
+        self.assertIn("order_id:oid", self.html)
+        # Ключ идемпотентности привязан к заказу: повторное создание платежа
+        # по одному заказу не задвоится молча.
+        self.assertIn('request_id:"cash-ho-"', self.html)
+        # «Уже оплачено» — выдача без движения денег.
+        self.assertIn('fulfillOrder(oid,"none","",', self.html)
+
+    def test_no_code_prompt_and_no_order_editing_from_the_tab(self):
+        # Код кассы здесь не нужен: сессия кассы сама за кодом.
+        self.assertNotIn("/api/cashier/verify", self.html,
+                         "касса уже вошла по коду — повторный спрос лишний")
+        for forbidden in ("/api/order/save", "/api/order/delete",
+                          "/api/orders/bulk-status", "/api/printer/command",
+                          "/api/jobs/"):
+            self.assertNotIn(forbidden, self.html,
+                             f"вкладка выдачи не имеет права трогать {forbidden!r}")
+
+    def test_shell_cache_was_bumped_for_orders_tab(self):
+        sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+        self.assertGreaterEqual(int(re.search(r"printflow-shell-v(\d+)", sw).group(1)), 73,
+                                "правка cashier.html требует поднятия CACHE")
+
+
 class PultControlPageTests(TestCase):
     """Пульт цеха (18.0.1) — отдельное приложение для телефона и планшета.
 
