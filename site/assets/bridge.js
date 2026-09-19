@@ -35,6 +35,7 @@ async function pollWatch(){
     const data = await get('/api/watch/pending', {limit: 6});
     const items = data.items || [];
     renderWatchBanner(items);
+    renderWatchCard(items.length);
     // тост для новых
     const ids = new Set(items.map(i=>i.fid));
     let newOnes = items.filter(i=>!lastWatchIds.has(i.fid));
@@ -44,6 +45,58 @@ async function pollWatch(){
     }
     lastWatchIds = ids;
   }catch(e){}
+}
+
+/* 18.8: папка — главный путь нарезки, поэтому её статус виден всегда,
+   а не только когда есть новые файлы. Включить/создать — в один клик. */
+async function renderWatchCard(pendingCount){
+  let status;
+  try{ status = await get('/api/watch/status'); }catch(e){ return; }
+  const text = $('pr_watch_text');
+  const meta = $('pr_watch_meta');
+  const tag = $('pr_watch_tag');
+  const en = $('pr_watch_enable');
+  const dis = $('pr_watch_disable');
+  const ensure = $('pr_watch_ensure');
+  if (!text) return;
+  const path = status.path || '';
+  if (status.enabled){
+    if (tag){ tag.textContent = 'Включена'; tag.className = 'tag ok'; }
+    if (text){
+      const n = num(pendingCount);
+      text.textContent = n
+        ? `${n} новый(ые) файл(а) из папки — откройте баннер выше.`
+        : 'Папка на связи: слайсер сохранил 3MF или G-code — файл появится здесь сам.';
+    }
+    if (meta){ meta.textContent = path + (status.exists ? '' : ' · папка ещё не создана'); }
+    if (en) en.hidden = true;
+    if (dis) dis.hidden = false;
+    if (ensure) ensure.hidden = !!status.exists;
+  } else {
+    if (tag){ tag.textContent = 'Выключена'; tag.className = 'tag warn'; }
+    if (text) text.textContent = 'Главный путь нарезки выключен: включите папку и укажите её в настройках слайсера (Bambu Studio / OrcaSlicer → экспорт).';
+    if (meta){ meta.textContent = path ? `Путь: ${path}` : 'Путь не задан — задайте в Настройках → Принтеры и Bambu'; }
+    if (en) en.hidden = false;
+    if (dis) dis.hidden = true;
+    if (ensure) ensure.hidden = !!status.exists;
+  }
+}
+
+async function setWatchEnabled(on){
+  try{
+    await post('/api/settings', { watch_folder_enabled: on });
+    toast(on ? 'Watch Folder включён' : 'Watch Folder выключен',
+          on ? 'Следим за папкой: новый файл появится в разделе «Печать»' : 'Папку больше не смотрим', 'info');
+    renderWatchCard(0);
+  }catch(e){ fail(e); }
+}
+
+async function ensureWatchFolder(){
+  try{
+    const r = await post('/api/watch/ensure', {});
+    toast('Папка готова', r.path || '', 'info');
+    renderWatchCard(0);
+  }catch(e){ fail(e); }
 }
 
 function initWatch(){
@@ -66,6 +119,13 @@ function initWatch(){
   }
   pollWatch();
   watchTimer = setInterval(pollWatch, 4000);
+  // 18.8: карточка-статус — главный путь, кнопки — один клик
+  const en = $('pr_watch_enable');
+  const dis = $('pr_watch_disable');
+  const ensure = $('pr_watch_ensure');
+  if (en) en.onclick = ()=>setWatchEnabled(true);
+  if (dis) dis.onclick = ()=>setWatchEnabled(false);
+  if (ensure) ensure.onclick = ensureWatchFolder;
   // слушать SSE watch
   PF.on('watch', (d)=>{
     // live event via bus — fallback polling already
@@ -99,8 +159,18 @@ async function openWatchFile(fid){
     if (plates.length>1){
       html += `<div style="margin:8px 0"><b>Плиты:</b> `+plates.map((p,i)=>`<label class="chk"><input type="checkbox" data-plate-cb value="${i+1}" ${i===0?'checked':''}> Плита ${i+1} (${p.grams}г ${p.minutes}мин)</label>`).join(' ')+`</div>`;
     }
+    // 18.8: G-code с проверенным FarmLoop-блоком — можно прямо в конвейер,
+    // и катушка со склада подбирается по материалу автоматически
+    const mat = (est.estimate?.material || filaments[0]?.type || '');
+    if (it.farmloop){
+      html += `<div class="notice" style="border-color:var(--accent);margin-top:10px"><span>🔁</span><span>G-code с проверенным <b>FarmLoop-блоком</b> — можно поставить серию в конвейер.</span></div>`;
+    }
     // actions
-    html += `<div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="watch_enqueue">В очередь</button><button class="btn" id="watch_create_order">Создать заказ</button><button class="btn ghost" id="watch_dismiss">Скрыть</button></div>`;
+    html += `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn primary" id="watch_enqueue">В очередь</button>`;
+    if (it.farmloop){
+      html += `<input id="watch_cycles" type="number" min="1" max="100" value="5" style="width:74px" aria-label="Циклов конвейера"><button class="btn" id="watch_enqueue_series">В конвейер</button>`;
+    }
+    html += `<button class="btn" id="watch_create_order">Создать заказ</button><button class="btn ghost" id="watch_dismiss">Скрыть</button></div>`;
     let dlg = $('watch_modal');
     if (!dlg){
       dlg = document.createElement('dialog');
@@ -113,10 +183,11 @@ async function openWatchFile(fid){
     dlg.querySelector('[data-close="watch_modal"]').onclick=()=>dlg.close();
     dlg.querySelector('#watch_dismiss').onclick=async()=>{ await post('/api/watch/dismiss',{fid}); dlg.close(); pollWatch(); };
     dlg.querySelector('#watch_create_order').onclick=async()=>{ try{ const r=await post('/api/watch/create-order',{fid}); toast('Заказ создан','№'+r.order.number); }catch(e){fail(e);} };
-    dlg.querySelector('#watch_enqueue').onclick=async()=>{
+    async function enqueueWatch(extra){
       const sel = Array.from(dlg.querySelectorAll('[data-plate-cb]:checked')).map(cb=>parseInt(cb.value)) || [1];
       const plate = sel[0]||1;
-      // AMS auto-map
+      // AMS auto-map — только если сам сервер не подберёт катушку со склада
+      // (spool с AMS-слотом задаёт маппинг сам, см. pick_warehouse_spool)
       let mapping=[];
       try{
         const pr = PF.livePrinter()?.id || '';
@@ -125,8 +196,25 @@ async function openWatchFile(fid){
           mapping = res.mapping || [];
         }
       }catch(e){}
-      try{ await post('/api/watch/enqueue',{fid, plate, ams_mapping: mapping}); toast('В очереди', it.name); dlg.close(); pollWatch(); PF.refreshCore(); }catch(e){fail(e);}
-    };
+      const payload = {fid, plate, ams_mapping: mapping, material: mat};
+      Object.assign(payload, extra);
+      const r = await post('/api/watch/enqueue', payload);
+      if (extra.cycles > 1){
+        toast('Конвейер: серия в очереди', `${it.name} × ${extra.cycles}${r.spool_id ? ' · катушка ' + r.spool_id : ''}`);
+      } else {
+        toast('В очереди', it.name + (r.spool_id ? ' · катушка ' + r.spool_id : ''));
+      }
+      dlg.close(); pollWatch(); PF.refreshCore();
+    }
+    dlg.querySelector('#watch_enqueue').onclick=async()=>{ try{ await enqueueWatch({}); }catch(e){fail(e);} };
+    const seriesBtn = dlg.querySelector('#watch_enqueue_series');
+    if (seriesBtn){
+      seriesBtn.onclick=async()=>{
+        let c = parseInt((dlg.querySelector('#watch_cycles')||{}).value, 10) || 1;
+        c = Math.max(1, Math.min(100, c));
+        try{ await enqueueWatch({cycles: c}); }catch(e){fail(e);}
+      };
+    }
   }catch(e){ fail(e); }
 }
 

@@ -972,7 +972,17 @@ def get_watch_pending(api: Any, ctx: Ctx):
 @router.get("/api/watch/status", doc="GET /api/watch/status")
 def get_watch_status(api: Any, ctx: Ctx):
     watch = getattr(api.manager, "watch", None)
-    return 200, {"enabled": bool(api.db.setting("watch_folder_enabled", False)), "path": str(api.db.setting("watch_folder_path","")), "pending": len(watch._pending) if watch else 0}
+    path = str(api.db.setting("watch_folder_path", "") or "").strip()
+    # 18.8: «папка как главный путь» — карточка «Печать» показывает,
+    # существует ли папка вообще: оператору не надо проверять руками.
+    exists = False
+    if path:
+        try:
+            from pathlib import Path as _P
+            exists = _P(path).expanduser().is_dir()
+        except Exception:
+            exists = False
+    return 200, {"enabled": bool(api.db.setting("watch_folder_enabled", False)), "path": path, "exists": exists, "pending": len(watch._pending) if watch else 0}
 
 
 @router.get("/api/studio/status", doc="GET /api/studio/status")

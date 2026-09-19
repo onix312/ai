@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from .config import UPLOAD_DIR, now_iso
+from .farmloop import BEGIN as FARMLOOP_BEGIN
 
 DEFAULT_WATCH = Path.home() / "PrintFlow-Inbox"
 
@@ -23,6 +24,34 @@ DEFAULT_WATCH = Path.home() / "PrintFlow-Inbox"
 ORDER_RE = re.compile(r"[№#](\d{2,6})")
 # также коммент внутри gcode: ;PrintFlow-order: 1023
 GCODE_ORDER_RE = re.compile(r"PrintFlow-order\s*[:=]\s*(\d+)")
+
+
+def pick_warehouse_spool(db, material: str) -> dict | None:
+    """18.8: катушка со склада под материал из 3MF/G-code.
+
+    Главный путь через папку не обязан знать, какая бобина в AMS: склад
+    знает. Подбираем катушку с тем же материалом (регистр не важен),
+    неархивную, с остатком; приоритет — поставленная в AMS и проверенная.
+    С задания потом спишется расход именно с этой катушки (spool_id).
+    """
+    mat = str(material or "").strip()
+    if not mat:
+        return None
+    rows = db.query("SELECT * FROM spools WHERE archived=0")
+    candidates = [
+        row for row in rows
+        if str(row.get("material") or "").strip().lower() == mat.lower()
+        and float(row.get("remaining_grams") or 0) > 0
+    ]
+    if not candidates:
+        return None
+
+    def rank(row: dict):
+        in_ams = 1 if str(row.get("ams_slot") or "").strip() else 0
+        verified = 1 if row.get("verified") else 0
+        return (in_ams, verified, float(row.get("remaining_grams") or 0))
+
+    return sorted(candidates, key=rank, reverse=True)[0]
 
 
 class WatchFolder:
@@ -140,6 +169,10 @@ class WatchFolder:
                 if text:
                     from .estimate import _parse_gcode_head as _pg
                     info.update(_pg(text))
+                    # 18.8 (папка как главный путь): G-code с проверенным
+                    # FarmLoop-блоком — это кандидат в серию конвейера, а не
+                    # одиночная плита: модалка предложит «В конвейер (N)».
+                    info["farmloop"] = FARMLOOP_BEGIN in text
         except Exception as exc:
             info["error"] = str(exc)
 
@@ -300,12 +333,16 @@ class WatchFolder:
         return True, ""
 
     def list_pending(self, limit: int = 20) -> list[dict]:
-        # последние файлы из watch — сортируем по fid
-        items = sorted(self._pending.values(), key=lambda x: x.get("at", ""), reverse=True)[:limit]
+        # последние файлы из watch — сортируем по времени
+        # 18.8: fid возвращается в каждом элементе — UI адресует именно
+        # тот файл, на который кликнул оператор (раньше fid не отдавался,
+        # и модалка открывала первый pending)
+        items = sorted(self._pending.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:limit]
         # убрать большие thumbnails для списка
         out = []
-        for it in items:
+        for fid, it in items:
             cp = {k: v for k, v in it.items() if k not in ("thumbnails_full",)}
+            cp["fid"] = fid
             # вернуть короткие thumbnails preview
             if "thumbnails" in it and isinstance(it["thumbnails"], dict):
                 # уже короткие

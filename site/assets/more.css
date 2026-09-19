@@ -1250,6 +1250,20 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .pr-farmloop-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
 .pr-farmloop-main small { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ===================================================== Watch Folder — главный путь (раздел «Печать») */
+.pr-watch-card { margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.pr-watch-top { display: flex; align-items: center; gap: 14px; }
+.pr-watch-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 22px; font-weight: 800; }
+.pr-watch-main { min-width: 0; flex: 1; }
+.pr-watch-main h2 { margin: 3px 0 4px; font-size: 17px; }
+.pr-watch-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+.pr-watch-main small { display: block; margin-top: 5px; color: var(--muted); font-size: 11.5px; word-break: break-all; }
+.pr-watch-card .pr-slicer-row { margin-top: 12px; }
+@media (max-width: 380px) {
+  .pr-watch-top { align-items: flex-start; flex-wrap: wrap; }
+  .pr-watch-card .tag { margin-left: 58px; }
+}
+
 /* ===================================================== вкладка «Конвейер» */
 .cv-status-card { display: flex; align-items: center; gap: 14px; border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
 .cv-status-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 24px; font-weight: 800; }
