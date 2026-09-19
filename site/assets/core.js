@@ -708,6 +708,7 @@ const LAZY_MODULES = {
   print: ['print.js'],
   clientbot: ['clientbot.js'],
   ops10: ['ops10.js'],
+  conveyor: ['conveyor.js'],
 };
 const lazyLoaded = new Set();
 const lazyPending = new Map();
@@ -965,6 +966,7 @@ const VIEWS = {
   dashboard: { title: 'Обзор', sub: 'Производство, деньги и принтеры в одном месте' },
   printers: { title: 'Принтеры', sub: 'Живое состояние парка Bambu Lab' },
   queue: { title: 'Очередь печати', sub: 'Задания парка и журнал печати' },
+  conveyor: { title: 'Конвейер', sub: 'FarmLoop Stage 1: допуски, датчики и история серии' },
   orders: { title: 'Заказы', sub: 'Канбан, сроки и экономика заказов' },
   customers: { title: 'Клиенты', sub: 'История покупок и сегменты' },
   products: { title: 'Товары', sub: 'Номенклатура, остатки, цены и экономика' },
@@ -984,6 +986,7 @@ const VIEWS = {
 };
 /* привычные синонимы разделов, чтобы ссылки вида #spools не бросали на обзор */
 const VIEW_ALIASES = {
+  farmloop: 'conveyor',
   spools: 'inventory', filament: 'inventory', stock: 'inventory',
   shelf2: 'shelf', store: 'shelf', polka: 'shelf',
   nomenclature: 'products', goods: 'products', catalog: 'products', items: 'products',

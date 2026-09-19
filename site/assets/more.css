@@ -1239,12 +1239,45 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .pr-card-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 2px; }
 .pr-card-foot .btn { min-height: 42px; }
 .pr-card-path { overflow: hidden; color: var(--muted); font-family: var(--mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+/* 18.8: карточка FarmLoop в «Печати» — компактная ссылка на вкладку
+   «Конвейер»: сам конвейер там настраивается, здесь только статус. */
 .pr-farmloop-card { display: flex; align-items: center; gap: 14px; margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.pr-farmloop-link { color: inherit; cursor: pointer; text-decoration: none; transition: border-color .15s ease, transform .15s ease; }
+.pr-farmloop-link:hover { border-color: var(--accent); transform: translateY(-1px); }
 .pr-farmloop-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 24px; font-weight: 800; }
 .pr-farmloop-main { min-width: 0; flex: 1; }
 .pr-farmloop-main h2 { margin: 3px 0 4px; font-size: 17px; }
 .pr-farmloop-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
 .pr-farmloop-main small { display: block; overflow: hidden; margin-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ===================================================== вкладка «Конвейер» */
+.cv-status-card { display: flex; align-items: center; gap: 14px; border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
+.cv-status-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 24px; font-weight: 800; }
+.cv-status-main { min-width: 0; flex: 1; }
+.cv-status-main h2 { margin: 3px 0 4px; font-size: 17px; }
+.cv-status-main p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+.cv-status-main small { display: block; margin-top: 5px; color: var(--muted); font-size: 11.5px; }
+.cv-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--print-gap, 14px); margin-top: 14px; }
+.cv-settings-card .set-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.cv-settings-card .set-row:last-child { border-bottom: none; }
+.cv-gate-note { margin: 12px 0 2px; padding: 10px 12px; border-radius: var(--r-sm); font-size: 12.5px; line-height: 1.45; }
+.cv-gate-note.warn { background: color-mix(in srgb, var(--warn, #f59e0b) 12%, transparent); color: var(--warn, #b45309); border: 1px solid color-mix(in srgb, var(--warn, #f59e0b) 35%, transparent); }
+.cv-gate-note.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
+.cv-gate-note.info { background: var(--panel-2); color: var(--text-2); border: 1px solid var(--line); }
+.cv-history { display: grid; gap: 8px; max-height: 380px; overflow: auto; padding-right: 4px; }
+.cv-event { display: flex; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); }
+.cv-event-dot { width: 8px; height: 8px; flex: none; margin-top: 5px; border-radius: 50%; background: var(--accent); }
+.cv-event-body { min-width: 0; }
+.cv-event-body b { display: block; font-size: 12.5px; }
+.cv-event-body small { display: block; margin-top: 3px; color: var(--muted); font-size: 11.5px; }
+.cv-history-empty { color: var(--muted); font-size: 12.5px; line-height: 1.5; padding: 10px 2px; }
+.cv-steps { margin: 0; padding: 0 0 0 20px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
+.cv-steps code { font-family: var(--mono); font-size: 11.5px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 860px) {
+  .cv-grid { grid-template-columns: 1fr; }
+  .cv-status-card { align-items: flex-start; flex-wrap: wrap; }
+  .cv-status-card .tag { margin-left: 58px; }
+}
 .pr-slicer-card { margin-top: var(--print-gap); border-color: var(--accent-line); background: linear-gradient(110deg, var(--accent-soft), var(--panel)); }
 .pr-slicer-top { display: flex; align-items: center; gap: 14px; }
 .pr-slicer-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-size: 22px; font-weight: 800; }

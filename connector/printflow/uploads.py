@@ -138,6 +138,16 @@ class UploadMixin:
                         "color": fields.get("color") or "",
                     },
                 )
+                # 18.8 (вкладка «Конвейер»): подготовка файла для серии —
+                # событие журнала, иначе у истории конвейера нечего показать.
+                try:
+                    self.api.db.add_event(
+                        "farmloop", "Файл подготовлен для конвейера",
+                        prepared_name, "",
+                        {"profile": farmloop_profile,
+                         "source_file": name})
+                except Exception:
+                    pass
                 if created:
                     local.unlink(missing_ok=True)
                 name, local = prepared_name, prepared

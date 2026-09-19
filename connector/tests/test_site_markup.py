@@ -1325,3 +1325,62 @@ class SlicerCardTests(TestCase):
         self.assertIn("'/api/library/upload'", self.js)
         self.assertIn("/api/uploads?file=", self.js)
         self.assertNotIn("'/api/slice'", self.js)
+
+
+class ConveyorTabTests(TestCase):
+    """18.8: вкладка «Конвейер» (FarmLoop) — отдельный раздел цеха.
+
+    Файл на месте, зарегистрирован как ленивый модуль и в PWA-оболочке,
+    навигация ссылается на него, а сама вкладка держит живые контейнеры,
+    которые рисует conveyor.js. Разметка строковый контракт: DOM без
+    браузера не проверить (docs/ТЕСТЫ.md, п. 4).
+    """
+
+    def setUp(self):
+        self.html = INDEX_HTML.read_text(encoding="utf-8")
+        self.js = (ROOT / "site" / "assets" / "conveyor.js").read_text(encoding="utf-8")
+        self.core = (ROOT / "site" / "assets" / "core.js").read_text(encoding="utf-8")
+        self.sw = (ROOT / "site" / "sw.js").read_text(encoding="utf-8")
+
+    def test_view_exists_in_workshop_group(self):
+        self.assertIn('id="view-conveyor"', self.html)
+        # Ссылка в навигации, и она — между «Очередью» и «Заказами» (группа «Цех»).
+        self.assertIn('href="#conveyor" data-view="conveyor"', self.html)
+        queue_at = self.html.index('data-view="queue"')
+        conveyor_at = self.html.index('href="#conveyor"')
+        orders_at = self.html.index('data-view="orders"')
+        self.assertLess(queue_at, conveyor_at)
+        self.assertLess(conveyor_at, orders_at)
+
+    def test_conveyor_elements_survive(self):
+        for attr in (
+            'id="cv_status_text"', 'id="cv_status_meta"', 'id="cv_status_tag"',
+            'id="cv_settings"', 'id="cv_save"', 'id="cv_gate_note"',
+            'id="cv_history"', 'id="cv_refresh"', 'id="cv_tag"',
+        ):
+            self.assertIn(attr, self.html, f"во вкладке «Конвейер» нет {attr}")
+
+    def test_conveyor_js_drives_the_view(self):
+        self.assertIn("PF.module('conveyor'", self.js)
+        self.assertIn("put('cv_settings', settingGroup(FARMLOOP))", self.js)
+        self.assertIn("get('/api/farmloop/profile'", self.js)
+        self.assertIn("get('/api/farmloop/settings'", self.js)
+        self.assertIn("get('/api/events'", self.js)
+        self.assertIn("post('/api/settings', payload)", self.js)
+
+    def test_core_registers_the_lazy_module_and_view(self):
+        self.assertIn("conveyor: ['conveyor.js']", self.core)
+        self.assertIn("conveyor: { title: 'Конвейер'", self.core)
+        # Псевдоним: старая ссылка #farmloop ведёт на новую вкладку.
+        self.assertIn("farmloop: 'conveyor'", self.core)
+
+    def test_sw_precaches_the_conveyor_module(self):
+        self.assertIn("'/assets/conveyor.js'", self.sw)
+
+    def test_settings_pane_card_moved_to_tab(self):
+        """Из «Настроек» карточка снята, в «Печати» — только ссылка на вкладку."""
+        printers_pane = self.html.split('id="setpane-printers"', 1)[1].split('id="setpane-production"', 1)[0]
+        self.assertNotIn('id="set_farmloop"', printers_pane)
+        # В «Печати» компактная ссылка, а не дубль группы.
+        self.assertIn("pr-farmloop-link", self.html)
+        self.assertIn('href="#conveyor"', self.html)

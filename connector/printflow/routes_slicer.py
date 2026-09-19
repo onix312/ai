@@ -218,6 +218,14 @@ def slicer_slice(api, ctx: Ctx):
                 "cycles": body.get("cycles", 1), "ams": settings.ams_slot,
                 "material": settings.material, "color": body.get("color", ""),
             })
+        # 18.8 (вкладка «Конвейер»): нарезка сразу для серии — событие журнала.
+        try:
+            api.db.add_event(
+                "farmloop", "Нарезка подготовлена для конвейера",
+                farm_output.name, "",
+                {"profile": farm_profile, "model": Path(source).name})
+        except Exception:
+            pass
         destination = farm_output
         text = destination.read_text(encoding="utf-8", errors="replace")
 

@@ -3483,6 +3483,15 @@ class PrinterManager:
             farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
             if farm_auto and farm_sensor in ("camera", "both") and ratio <= num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0):
                 self._bed_cleared[printer_id] = True
+                # 18.8 (вкладка «Конвейер»): автоматическое снятие — событие
+                # журнала: у истории конвейера должно быть что показывать.
+                try:
+                    self.db.add_event(
+                        "farmloop", "Платформа пуста — цикл продолжается",
+                        f"Кадр совпал с пустым столом ({ratio}%)",
+                        printer_id, {"sensor": farm_sensor, "diff_pct": ratio})
+                except Exception:
+                    pass
                 self.part_removed(printer_id)
                 return
 

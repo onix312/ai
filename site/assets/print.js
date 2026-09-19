@@ -129,26 +129,24 @@ function clearError() {
 }
 
 async function loadFarmLoopStatus() {
+  // 18.8: настройки и журнал конвейера живут во вкладке «Конвейер»; здесь —
+  // только статус-ссылка, чтобы с «Печати» было куда перейти.
   if (farmloopLoaded) return;
   const text = $('pr_farmloop_text');
-  const meta = $('pr_farmloop_meta');
   const tag = $('pr_farmloop_tag');
   try {
     const data = await get('/api/farmloop/profile');
     farmloopLoaded = true;
     if (data.template_installed) {
       if (tag) { tag.textContent = 'Профиль готов'; tag.className = 'tag ok'; }
-      if (text) text.textContent = 'G-code из Bambu Studio можно подготовить отдельным FarmLoop-файлом.';
-      if (meta) meta.textContent = `${data.template_name} · вход: ${data.input_format} · профиль ${data.id}`;
+      if (text) text.textContent = 'Конвейер готов к серии — допуски, датчики и журнал во вкладке «Конвейер» →';
     } else {
       if (tag) { tag.textContent = 'Ждёт шаблон'; tag.className = 'tag warn'; }
       if (text) text.textContent = data.blocked_reason || 'Сначала установите и проверьте механику FarmLoop Stage 1 на P1S.';
-      if (meta) meta.textContent = `Профиль ${data.id} · вход: ${data.input_format}`;
     }
   } catch (error) {
     if (tag) { tag.textContent = 'Нет связи'; tag.className = 'tag bad'; }
-    if (text) text.textContent = 'Не удалось проверить профиль FarmLoop. Повторите после восстановления связи.';
-    if (meta) meta.textContent = '';
+    if (text) text.textContent = 'Не удалось проверить конвейер. Повторите после восстановления связи.';
   }
 }
 
