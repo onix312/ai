@@ -184,6 +184,46 @@ class PultSummaryTests(unittest.TestCase):
         # Простой считает сервер: часы телефона у станка могут врать.
         self.assertAlmostEqual(90.0, done["idle_min"], delta=2.0)
 
+    def test_last_done_carries_the_order_id_and_status_for_acceptance(self):
+        """Пульт закрывает финал заказа у станка: приёмке нужен id заказа,
+        а пометке «уже готов» — статус, без второго запроса к панели."""
+        from datetime import datetime, timedelta, timezone
+        finished = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self.db.upsert("orders", {
+            "id": "order-pult", "number": "1042", "product": "Подставка",
+            "status": "post"})
+        self.db.upsert("print_jobs", {
+            "id": "job_pult", "name": "Готовое", "printer_id": "prn1", "state": "done",
+            "order_id": "order-pult", "finished_at": finished,
+            "created_at": finished})
+        data = summary(self.db, self.manager, "prn1")
+        done = data["last_done"]
+        self.assertEqual({"id": "order-pult", "number": "1042",
+                          "product": "Подставка", "status": "post"}, done["order"])
+        self.assertEqual("", done["defect_reason"])
+        self.assertEqual("", done["defect_title"])
+
+    def test_last_done_reports_a_confirmed_defect(self):
+        """У задания уже подтверждённый брак: карточка покажет записанную
+        причину (ключ и человекочитаемое имя), а не предложит разбор дважды."""
+        from datetime import datetime, timedelta, timezone
+        finished = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        self.db.upsert("orders", {
+            "id": "order-pult", "number": "1043", "product": "Основание",
+            "status": "post"})
+        self.db.upsert("print_jobs", {
+            "id": "job_def", "name": "Основание", "printer_id": "prn1",
+            "state": "done", "order_id": "order-pult",
+            "finished_at": finished, "created_at": finished})
+        self.db.upsert("defects", {
+            "id": "df1", "job_id": "job_def", "printer_id": "prn1",
+            "order_id": "order-pult", "reason": "warp",
+            "confirmed_at": finished, "at": finished})
+        data = summary(self.db, self.manager, "prn1")
+        done = data["last_done"]
+        self.assertEqual("warp", done["defect_reason"])
+        self.assertEqual("Деформация", done["defect_title"])
+
     def test_last_print_is_empty_when_nothing_was_printed(self):
         """Нечего показывать — пусто, а не выдуманная нулевая печать."""
         data = summary(self.db, self.manager, "prn1")

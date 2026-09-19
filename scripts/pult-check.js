@@ -184,6 +184,19 @@ function runPage(options) {
     uploadNetworkFail: !!opts.uploadNetworkFail,
     uploads: [],
     autoMap: opts.autoMap || null,
+    // Превью разбора брака (GET /api/defect/recovery): список причин —
+    // с сервера, и именно по нему страница наполняет селект.
+    defect: opts.defect || {
+      reasons: {
+        detached: 'Деталь отклеилась', clog: 'Засор сопла', shift: 'Смещение слоёв',
+        runout: 'Закончился пластик', warp: 'Деформация',
+        quality: 'Не прошло контроль качества', support: 'Ошибка поддержек',
+        wrong_material: 'Неверный материал', power: 'Сбой питания/связи',
+        other: 'Другое',
+      },
+      reason: '', can_reprint: true, blockers: [], repeat_risk: false,
+      already_recorded: false,
+    },
   };
   const sandbox = {
     console,
@@ -278,6 +291,9 @@ function runPage(options) {
       }
       if (url.indexOf('/api/ams/memory') === 0) {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.ams) });
+      }
+      if (url.indexOf('/api/defect/recovery') === 0) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.defect) });
       }
       if (url === '/api/spools') {
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(env.spools) });
@@ -1328,6 +1344,102 @@ const text = (html) => String(html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' '
     check('факт: карточка показывается только для выбранного принтера',
       text(second.store['pk_fact'].innerHTML) === '',
       text(second.store['pk_fact'].innerHTML).slice(0, 120));
+  }
+
+  /* 12. Финал заказа у станка (18.8): приёмка и брак на карточке «Печать закончена» */
+  {
+    const state = makeState('IDLE', true);
+    state.last_done = Object.assign({}, state.last_done, {
+      order: { id: 'ord1', number: '1042', product: 'Подставка', status: 'post' },
+    });
+    const page = runPage({ state });
+    await wait(60);
+    const fact = text(page.store['pk_fact'].innerHTML);
+    check('финал: заказ на карточке — номер и изделие, а не незримая строка',
+      fact.indexOf('Заказ №1042') >= 0 && fact.indexOf('Подставка') >= 0, fact.slice(0, 300));
+    check('финал: «Готов к выдаче» и «Брак» рядом с «Снял детали»',
+      page.store['pk_fact'].innerHTML.indexOf('id="pk_b_accept"') >= 0
+      && page.store['pk_fact'].innerHTML.indexOf('id="pk_b_defect"') >= 0
+      && page.store['pk_fact'].innerHTML.indexOf('id="pk_b_removed"') >= 0,
+      page.store['pk_fact'].innerHTML.slice(-300));
+
+    page.requests.length = 0;
+    page.clickId('pk_b_accept');
+    await wait(120);
+    const acceptPosts = page.posts().filter((r) => r.url === '/api/order/accept');
+    check('финал: приёмка уходит в /api/order/accept с quality_confirmed',
+      acceptPosts.length === 1 && acceptPosts[0].payload.id === 'ord1'
+      && acceptPosts[0].payload.quality_confirmed === true,
+      JSON.stringify(acceptPosts));
+
+    // Заказ уже «Готов»: приёмку не предлагаем, вместо неё пометка.
+    const readyState = makeState('IDLE', true);
+    readyState.last_done = Object.assign({}, readyState.last_done, {
+      order: { id: 'ord1', number: '1042', product: 'Подставка', status: 'ready' },
+    });
+    const readyPage = runPage({ state: readyState });
+    await wait(60);
+    const readyFact = text(readyPage.store['pk_fact'].innerHTML);
+    check('финал: готовому заказу не предлагают приёмку повторно',
+      readyPage.store['pk_fact'].innerHTML.indexOf('id="pk_b_accept"') < 0
+      && readyFact.indexOf('готов к выдаче') >= 0, readyFact.slice(0, 300));
+    check('финал: брак доступен и у готового заказа',
+      readyPage.store['pk_fact'].innerHTML.indexOf('id="pk_b_defect"') >= 0,
+      readyPage.store['pk_fact'].innerHTML.slice(-200));
+
+    // Брак: форма открывается, причины — с сервера, запись — с request_id.
+    page.requests.length = 0;
+    page.clickId('pk_b_defect');
+    await wait(120);
+    const recoveryGets = page.requests.filter((r) => r.url.indexOf('/api/defect/recovery') === 0);
+    check('финал: список причин брака берётся с сервера по id задания',
+      recoveryGets.length === 1 && recoveryGets[0].url.indexOf('job_id=job7') >= 0
+      && page.store['pk_defect_wrap'].hidden === false,
+      JSON.stringify(recoveryGets));
+    check('финал: селект наполнен серверными причинами',
+      page.store['pk_defect_reason'].innerHTML.indexOf('value="quality"') >= 0
+      && page.store['pk_defect_reason'].innerHTML.indexOf('Не прошло контроль качества') >= 0,
+      page.store['pk_defect_reason'].innerHTML.slice(0, 160));
+    page.store['pk_defect_reason'].value = 'quality';
+    page.store['pk_defect_note'].value = 'поправить профиль';
+    page.clickId('pk_b_defect_ok');
+    await wait(120);
+    const defectPosts = page.posts().filter((r) => r.url === '/api/defect/recover');
+    check('финал: запись брака подтверждена, с request_id, без повторной печати',
+      defectPosts.length === 1 && defectPosts[0].payload.defect_confirmed === true
+      && defectPosts[0].payload.reason === 'quality'
+      && defectPosts[0].payload.job_id === 'job7'
+      && String(defectPosts[0].payload.request_id).indexOf('pult-job7-') === 0
+      && defectPosts[0].payload.reprint_confirmed === false,
+      JSON.stringify(defectPosts));
+    check('финал: после записи форма закрывается',
+      page.store['pk_defect_wrap'].hidden === true);
+
+    // Печать без заказа: приёмки нет, но брак остаётся (брак — про задание).
+    const noOrder = makeState('IDLE', true);
+    noOrder.last_done = Object.assign({}, noOrder.last_done, { order: null });
+    const noOrderPage = runPage({ state: noOrder });
+    await wait(60);
+    const noOrderHtml = noOrderPage.store['pk_fact'].innerHTML;
+    check('финал: печать без заказа — без приёмки, с браком',
+      noOrderHtml.indexOf('id="pk_b_accept"') < 0
+      && noOrderHtml.indexOf('id="pk_b_defect"') >= 0,
+      noOrderHtml.slice(-240));
+
+    // Брак уже записан по заданию: повторный разбор не предлагаем.
+    const doneDefect = makeState('IDLE', true);
+    doneDefect.last_done = Object.assign({}, doneDefect.last_done, {
+      order: { id: 'ord1', number: '1042', product: 'Подставка', status: 'post' },
+      defect_reason: 'warp', defect_title: 'Деформация',
+    });
+    const defectPage = runPage({ state: doneDefect });
+    await wait(60);
+    const defectHtml = defectPage.store['pk_fact'].innerHTML;
+    check('финал: записанный брак виден, повторного разбора и приёмки нет',
+      defectHtml.indexOf('Брак записан: Деформация') >= 0
+      && defectHtml.indexOf('id="pk_b_defect"') < 0
+      && defectHtml.indexOf('id="pk_b_accept"') < 0,
+      defectHtml.slice(-300));
   }
 
   console.log(`\n${failed ? 'FAILED' : 'OK'}: стенд пульта — ${passed - failed < 0 ? 0 : passed} проверок пройдено`

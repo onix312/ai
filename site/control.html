@@ -110,6 +110,16 @@
  .pk-slot-act .pk-btn { min-height:48px; font-size:14px; }
  .pk-note { margin-top:6px; font-size:12px; color:var(--muted); }
  .pk-note.warn { color:var(--warn); }
+ .pk-note.ok { color:var(--ok); }
+ .pk-note.order { color:var(--text); font-size:13px; font-weight:600; }
+ /* Разбор брака на карточке «Печать закончена»: поля крупные, под палец. */
+ .pk-defect-wrap { margin-top:12px; padding:12px; background:var(--panel);
+   border:1px solid var(--line); border-radius:16px; }
+ .pk-defect-l { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+ .pk-defect-select, .pk-defect-note { width:100%; box-sizing:border-box;
+   min-height:48px; padding:10px 12px; font-size:16px; border-radius:10px;
+   border:1px solid var(--line); background:var(--bg); color:var(--text); }
+ .pk-defect-wrap .pk-btn { width:100%; min-height:56px; font-size:15px; margin-top:12px; }
 
  /* --- камера: кадр и кнопки --- */
  .pk-frame { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:18px;
@@ -240,6 +250,19 @@
    <div class="pk-h"><h2>Парк принтеров</h2><p class="pk-hint" id="pk_farm">—</p></div>
    <div class="pk-tiles" id="pk_tiles"></div>
    <div id="pk_fact"></div>
+
+   <!-- Разбор брака по готовой печати: форма статичная, список причин
+        наполняет сервер (GET /api/defect/recovery). Поле «Повторить печать»
+        видно, только если у задания есть файл и повтор ещё не подготовлен. -->
+   <div class="pk-defect-wrap" id="pk_defect_wrap" hidden>
+    <div class="pk-file-head"><b>Разбор брака</b><span>запись в журнал, повтор — только по явному флагу</span></div>
+    <label class="pk-defect-l" for="pk_defect_reason">Причина</label>
+    <select id="pk_defect_reason" class="pk-defect-select"></select>
+    <label class="pk-defect-l" for="pk_defect_note">Комментарий (обязателен для «Другое»)</label>
+    <input id="pk_defect_note" class="pk-defect-note" type="text" placeholder="что проверить или изменить" autocomplete="off">
+    <label class="pk-defect-l" id="pk_defect_reprint_l"><input type="checkbox" id="pk_defect_reprint"> Повторить печать (клон в очередь, без автостарта)</label>
+    <button class="pk-btn danger" type="button" id="pk_b_defect_ok">Записать брак</button>
+   </div>
 
    <div class="pk-cmd" id="pk_cmd">
     <div class="pk-cmd-who">Выбран: <b id="pk_cmd_name">—</b><span id="pk_cmd_hint"></span></div>
@@ -574,11 +597,16 @@
   function factBit(value, label){
     return '<div><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
   }
+  function factVisible(){
+    var d = st.done || {};
+    if (!d.id) return false;
+    var p = selected();
+    return !(d.printer_id && p && String(d.printer_id) !== String(p.id));
+  }
   function factHtml(){
     var d = st.done || {};
     if (!d.id) return '';
-    var p = selected();
-    if (d.printer_id && p && String(d.printer_id) !== String(p.id)) return '';
+    if (!factVisible()) return '';
     var same = num(d.plan_grams) > 0 && Math.abs(num(d.grams) - num(d.plan_grams)) >= 0.05;
     var idle = num(d.idle_min);
     return '<div class="pk-card"><div class="pk-file-head"><b>Печать закончена</b>'
@@ -597,13 +625,129 @@
         : 'Расход совпал с планом слайсера.')
       + (idle ? ' Принтер стоит ' + humanMin(idle) + ' с момента финиша.' : '')
       + '</div>'
-      + '<div class="pk-slot-act" style="grid-template-columns:1fr">'
-      + '<button class="pk-btn pk-hit go" type="button" id="pk_b_removed">Снял детали</button>'
+      + factActionsHtml(d)
       + '</div></div>';
+  }
+  /* Финал заказа у станка (18.8): приёмка и брак прямо на карточке «Печать
+     закончена». Карточка показывает ровно то, что сервер дал в last_done:
+     заказ (id/статус) и уже записанный брак — поэтому «Готов к выдаче» не
+     предлагается для заказа, который уже готов, а брак не разбирают дважды.
+     «Готов к выдаче» — POST /api/order/accept (quality_confirmed);
+     «Брак» — форма ниже, список причин — с сервера (GET /api/defect/recovery),
+     запись — POST /api/defect/recover с уникальным request_id: двойное
+     нажатие отсечёт сервер идемпотентностью, а не пользовательский UI. */
+  var defectOpen = false, defectPreview = null;
+  function factActionsHtml(d){
+    var parts = '';
+    if (d.order) {
+      parts += '<div class="pk-note order">Заказ №' + esc(d.order.number) + ' · '
+        + esc(d.order.product || 'заказ') + '</div>';
+    }
+    if (d.defect_reason) {
+      parts += '<div class="pk-note warn">Брак записан: '
+        + esc(d.defect_title || d.defect_reason) + '</div>';
+    } else if (d.order && d.order.status === 'ready') {
+      parts += '<div class="pk-note ok">Заказ №' + esc(d.order.number)
+        + ' готов к выдаче.</div>';
+    }
+    parts += '<div class="pk-slot-act" style="grid-template-columns:1fr">'
+      + '<button class="pk-btn pk-hit" type="button" id="pk_b_removed">Снял детали</button>'
+      + '</div>';
+    if (!d.defect_reason) {
+      var right = '<button class="pk-btn pk-hit danger" type="button" id="pk_b_defect">Брак</button>';
+      var cols = '1fr';
+      if (d.order && d.order.id && d.order.status !== 'ready') {
+        right = '<button class="pk-btn pk-hit go" type="button" id="pk_b_accept">Готов к выдаче</button>' + right;
+        cols = '1fr 1fr';
+      }
+      parts += '<div class="pk-slot-act" style="grid-template-columns:' + cols + '">'
+        + right + '</div>';
+    }
+    return parts;
   }
   function renderFact(){
     var box = $('#pk_fact');
     if (box) box.innerHTML = factHtml();
+    var dw = $('#pk_defect_wrap');
+    if (dw) dw.hidden = !(defectOpen && factVisible());
+  }
+  function acceptDone(){
+    var d = st.done || {};
+    if (!d.order || !d.order.id) { toast('Нет заказа по этой печати'); return; }
+    if (!confirm('Принять качество? Заказ №' + d.order.number
+        + ' станет «Готов к выдаче», клиент получит сообщение.')) return;
+    post('/api/order/accept', { id: d.order.id, quality_confirmed: true }).then(function(){
+      toast('Заказ №' + d.order.number + ' готов к выдаче');
+      tick();
+    }).catch(function(e){ toast(e.message || 'Не вышло'); });
+  }
+  function toggleDefect(){
+    var d = st.done || {};
+    if (!d.id) return;
+    if (defectOpen) { defectOpen = false; renderFact(); return; }
+    defectOpen = true;
+    renderFact();
+    get('/api/defect/recovery?job_id=' + encodeURIComponent(d.id)).then(function(pv){
+      if (!defectOpen) return;
+      defectPreview = pv || {};
+      var sel = $('#pk_defect_reason');
+      if (sel) {
+        sel.innerHTML = Object.keys(defectPreview.reasons || {}).map(function(k){
+          return '<option value="' + esc(k) + '">' + esc(defectPreview.reasons[k]) + '</option>';
+        }).join('');
+        if (defectPreview.reason) sel.value = defectPreview.reason;
+      }
+      var repL = $('#pk_defect_reprint_l');
+      var rep = $('#pk_defect_reprint');
+      if (repL) repL.style.display = defectPreview.can_reprint ? '' : 'none';
+      if (rep && defectPreview.repeat_risk && !confirm(
+          'Эта причина уже была по этому заказу. '
+          + 'Подтвердите, что модель или профиль исправлены.')) {
+        if (rep) rep.checked = false;
+      }
+    }).catch(function(e){
+      toast(e.message || 'Не вышло');
+      defectOpen = false;
+      renderFact();
+    });
+  }
+  function confirmDefect(){
+    var d = st.done || {};
+    if (!d.id) return;
+    var sel = $('#pk_defect_reason');
+    var noteEl = $('#pk_defect_note');
+    var rep = $('#pk_defect_reprint');
+    var reason = sel ? sel.value : '';
+    if (!reason) { toast('Выберите причину брака'); return; }
+    var body = {
+      job_id: d.id, defect_confirmed: true, reason: reason,
+      note: noteEl ? noteEl.value : '',
+      reprint_confirmed: !!(rep && rep.checked),
+      repeat_risk_confirmed: false,
+      printer_id: d.printer_id || '',
+      request_id: 'pult-' + d.id + '-' + Date.now()
+    };
+    var finish = function(res){
+      defectOpen = false; defectPreview = null;
+      if (noteEl) noteEl.value = '';
+      if (rep) rep.checked = false;
+      renderFact();
+      toast(res && res.repeat_job ? 'Брак записан, повтор в очереди' : 'Брак записан');
+      tick();
+    };
+    post('/api/defect/recover', body).then(finish).catch(function(e){
+      var msg = e && e.message ? e.message : 'Не вышло';
+      // Сервер спросит подтверждение повторно пришедшей причины — не теряем
+      // уже выбранную причину, только подтверждаем риск вторым запросом.
+      if (msg.indexOf('уже повторялась') >= 0
+          && confirm(msg + String.fromCharCode(10) + 'Подтвердить повторную причину?')) {
+        post('/api/defect/recover',
+             Object.assign({}, body, { repeat_risk_confirmed: true }))
+          .then(finish).catch(function(e2){ toast(e2.message || 'Не вышло'); });
+      } else {
+        toast(msg);
+      }
+    });
   }
   function partRemoved(){
     var p = selected();
@@ -1967,7 +2111,15 @@
     // Отчёт автономности и факт последней печати — из той же сводки
     // (18.0.8/18.0.10). У старого коннектора их нет: оставляем как было.
     if (d.autonomy) st.auto = d.autonomy;
-    if (d.last_done) st.done = d.last_done;
+    if (d.last_done) {
+      // Карточка «печать закончена» сменилась задание-в-задание: полупустая
+      // форма разбора брака от старого задания вводит в заблуждение.
+      if (st.done && d.last_done.id && st.done.id !== d.last_done.id) {
+        defectOpen = false;
+        defectPreview = null;
+      }
+      st.done = d.last_done;
+    }
     if (d.ams) {
       st.ams = { slots: d.ams.slots || [], printer: st.active,
                  at: Date.now() / 1000 };
@@ -2048,6 +2200,9 @@
       return;
     }
     if (hit.closest('#pk_b_removed')) { partRemoved(); return; }
+    if (hit.closest('#pk_b_accept')) { acceptDone(); return; }
+    if (hit.closest('#pk_b_defect_ok')) { confirmDefect(); return; }
+    if (hit.closest('#pk_b_defect')) { toggleDefect(); return; }
     if (hit.closest('#pk_ams_sync')) { syncAms(); return; }
     if (hit.closest('#pk_b_shot')) { takeShot(); return; }
     if (hit.closest('#pk_b_light')) { toggleLight(); return; }

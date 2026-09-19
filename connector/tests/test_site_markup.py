@@ -1045,12 +1045,14 @@ class PultAutoScreenTests(TestCase):
 
 
 class PultFinishedCardTests(TestCase):
-    """Карточка «факт против плана» после финиша (18.0.10).
+    """Карточка «факт против плана» после финиша (18.0.10, финал 18.8).
 
     Оператору у станка нужно не «готово», а цифры: сколько обещал слайсер и
     сколько вышло, и сколько принтер уже стоит. Считает всё сервер — странице
-    запрещено выдумывать и досчитывать: единственное её действие тут — «Снял
-    детали» в существующий маршрут мини-панели.
+    запрещено выдумывать и досчитывать. Действия карточки: «Снял детали»
+    (маршрут мини-панели), «Готов к выдаче» (приёмка заказа) и «Брак»
+    (разбор с подтверждённой причиной). Деньги по заказу карточке не
+    положены: «Выдать» со способами оплаты — у кассы и панели, не у станка.
     """
 
     @classmethod
@@ -1070,9 +1072,21 @@ class PultFinishedCardTests(TestCase):
         self.assertIn('id="pk_b_removed"', self.html)
         self.assertIn("post('/api/printer/part-removed', { printer_id: p.id })", self.html,
                       "«Снял детали» идёт тем же маршрутом, что мини-панель")
-        start = self.html.index("function factHtml(){")
-        body = self.html[start:self.html.index("function renderFact(){")]
-        for forbidden in ("/api/jobs/", "/api/defect/", "/api/order/"):
+
+    def test_final_actions_use_only_the_agreed_routes(self):
+        """Финал заказа у станка (18.8): карточка может снять деталь, принять
+        заказ и разобрать брак — и только это. Очередь, команды принтера и
+        деньги («Выдать» со способами оплаты) мимо карточки не ходят."""
+        self.assertIn('id="pk_b_accept"', self.html)
+        self.assertIn('id="pk_b_defect"', self.html)
+        self.assertIn('id="pk_b_defect_ok"', self.html)
+        start = self.html.index("function factVisible(){")
+        body = self.html[start:self.html.index("function renderCmdBar(){")]
+        for route in ("/api/printer/part-removed", "/api/order/accept",
+                      "/api/defect/recovery", "/api/defect/recover"):
+            self.assertIn(route, body, f"в действиях карточки нет маршрута {route!r}")
+        for forbidden in ("/api/jobs/", "/api/order/fulfill", "/api/order/save",
+                          "/api/order/delete", "/api/printer/command", "/api/sbp/"):
             self.assertNotIn(forbidden, body,
                              f"карточка факта не имеет права трогать {forbidden!r}")
 

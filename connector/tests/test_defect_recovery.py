@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.accounting import Accounting
 from connector.printflow.api import Api
-from connector.printflow.defect_recovery import DefectRecovery
+from connector.printflow.defect_recovery import REASONS, DefectRecovery
 from connector.printflow.manager import PrinterManager
 from connector.printflow.db import Database
 
@@ -75,6 +75,15 @@ class DefectRecoveryTests(unittest.TestCase):
         self.assertEqual(result["loss"]["wear"], 15)
         self.assertEqual(result["loss"]["total"], 66.2)
         self.assertEqual(self.db.one("SELECT COUNT(*) n FROM defects")["n"], 0)
+
+    def test_summary_exposes_the_reason_reference_for_the_pult(self):
+        """Пульт у станка строит форму разбора по ответу превью: справочник
+        причин обязан приходить с сервера, а не дублироваться в разметке."""
+        data = self.service.summary("job-1")
+        self.assertIn("reasons", data)
+        self.assertEqual(len(REASONS), len(data["reasons"]))
+        self.assertEqual("Деформация", data["reasons"]["warp"])
+        self.assertEqual("Другое", data["reasons"]["other"])
 
     def test_confirmation_is_required_and_other_needs_note(self):
         with self.assertRaisesRegex(ValueError, "Подтвердите"):
