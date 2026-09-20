@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -204,11 +205,16 @@ class FarmLoopConstructorAndCleanTests(unittest.TestCase):
                 (tmpl_dir / "bambu-p1s-farmloop-stage1.gcode").write_text(
                     f"{BEGIN}\nG1 Z10 F1200\nG1 Y200 F2400\n{END}\n", encoding="utf-8")
 
-                # 3. Отказ, если принтер занят (RUNNING)
+                # 3. Отказ, если принтер занят (RUNNING). 18.12.1: менеджер без
+                # пула printers — станок берётся как «первый», а причина отказа
+                # называется в перечне свободных («занят (статус: …)»).
                 printer.snapshot = lambda: {"printer": {"state": "RUNNING", "bed_temp": 60}}
                 code, res = router.dispatch(api, "POST", "/api/farmloop/test-clean", body={"confirmed": True})
                 self.assertEqual(code, 400)
-                self.assertIn("Принтер занят", res["error"])
+                self.assertIn("занят (статус: RUNNING)", res["error"])
+                self.assertIn("«Тестовый P1S»", res["error"])
+                self.assertIn("Нет свободного станка", res["error"])
+                self.assertEqual([], sent_commands, "команды ушли на занятый станок")
 
                 # 4. Успешный запуск, когда принтер IDLE
                 printer.snapshot = lambda: {"printer": {"state": "IDLE", "bed_temp": 30}}
@@ -217,6 +223,160 @@ class FarmLoopConstructorAndCleanTests(unittest.TestCase):
                 self.assertTrue(res["ok"])
                 self.assertEqual(res["executed_commands"], 2)
                 self.assertEqual(sent_commands, ["G1 Z10 F1200", "G1 Y200 F2400"])
+
+
+class FarmLoopTestCleanPrinterChoiceTests(unittest.TestCase):
+    """18.12.1: «Тестовая очистка стола» выбирает станок, а не «первый в словаре».
+
+    Панель слала ``{confirmed: true}`` без ``printer_id``, ``manager.get('')``
+    возвращал ПЕРВЫЙ принтер словаря — занятый или отключённый, и кнопка
+    отвечала «Принтер занят» при живом свободном станке рядом.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import connector.printflow.routes_farmloop  # noqa: F401
+
+    @staticmethod
+    def _printer(pid: str, name: str, state: str = "IDLE", connected: bool = True):
+        """Станок как его видит маршрут: record, connected, snapshot, gcode."""
+        return types.SimpleNamespace(
+            id=pid,
+            record={"name": name},
+            connected=connected,
+            snapshot=lambda: {"printer": {"state": state}},
+            gcode=lambda cmd: None,
+        )
+
+    @staticmethod
+    def _manager(*printers):
+        """Менеджер с пулом: имя атрибута именно ``printers`` (dict)."""
+        pool = {printer.id: printer for printer in printers}
+        return types.SimpleNamespace(
+            printers=pool,
+            get=lambda pid="": pool.get(pid) if pid else next(iter(pool.values()), None),
+        )
+
+    def _installed(self, tmp_data: Path) -> None:
+        """Проверенный шаблон: без него маршрут не доходит до выбора станка."""
+        folder = tmp_data / "farmloop-templates"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "bambu-p1s-farmloop-stage1.gcode").write_text(
+            f"{BEGIN}\nG1 Z10 F1200\nG1 Y200 F2400\n{END}\n", encoding="utf-8")
+
+    def _dispatch(self, api, body: dict):
+        from connector.printflow.router import router
+        return router.dispatch(api, "POST", "/api/farmloop/test-clean", body=body)
+
+    def test_auto_pick_takes_the_free_printer_not_the_first(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                sent: list[str] = []
+                busy = self._printer("p1", "P1S-1", state="RUNNING")
+                offline = self._printer("p2", "P1S-2", connected=False)
+                free = self._printer("p3", "P1S-3", state="IDLE")
+                free.gcode = lambda cmd: sent.append(cmd)
+                api = types.SimpleNamespace(db=None,
+                                            manager=self._manager(busy, offline, free))
+                code, res = self._dispatch(api, {"confirmed": True})
+                self.assertEqual(200, code)
+                self.assertEqual("p3", res["printer_id"], "выбран первый в словаре, а не свободный")
+                self.assertEqual("P1S-3", res["printer"])
+                self.assertTrue(res["auto_selected"])
+                self.assertEqual(["G1 Z10 F1200", "G1 Y200 F2400"], sent)
+
+    def test_finish_state_counts_as_free(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                done = self._printer("p1", "P1S-1", state="FINISH")
+                api = types.SimpleNamespace(db=None, manager=self._manager(done))
+                code, res = self._dispatch(api, {"confirmed": True})
+                self.assertEqual(200, code)
+                self.assertEqual("p1", res["printer_id"])
+
+    def test_all_busy_gives_400_with_the_list_of_reasons(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                api = types.SimpleNamespace(db=None, manager=self._manager(
+                    self._printer("p1", "P1S-1", state="RUNNING"),
+                    self._printer("p2", "P1S-2", connected=False),
+                ))
+                code, res = self._dispatch(api, {"confirmed": True})
+                self.assertEqual(400, code)
+                self.assertIn("Нет свободного станка", res["error"])
+                self.assertIn("«P1S-1» — занят (статус: RUNNING)", res["error"])
+                self.assertIn("«P1S-2» — не подключен", res["error"])
+                self.assertIn("Освободите станок или выберите другой в списке.", res["error"])
+                self.assertEqual(2, len(res["blocked"]))
+
+    def test_explicit_busy_printer_is_refused_with_its_own_reason(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                sent: list[str] = []
+                busy = self._printer("p1", "P1S-1", state="RUNNING")
+                busy.gcode = lambda cmd: sent.append(cmd)
+                free = self._printer("p2", "P1S-2", state="IDLE")
+                api = types.SimpleNamespace(db=None, manager=self._manager(busy, free))
+                code, res = self._dispatch(api, {"confirmed": True, "printer_id": "p1"})
+                self.assertEqual(400, code)
+                self.assertIn("«P1S-1»", res["error"])
+                self.assertIn("занят (статус: RUNNING)", res["error"])
+                self.assertEqual([], sent, "команды ушли на занятый станок")
+                # Явный выбор свободного станка работает.
+                code, res = self._dispatch(api, {"confirmed": True, "printer_id": "p2"})
+                self.assertEqual(200, code)
+                self.assertEqual("p2", res["printer_id"])
+                self.assertFalse(res["auto_selected"])
+
+    def test_unknown_printer_id_is_still_not_found(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                api = types.SimpleNamespace(db=None, manager=self._manager(
+                    self._printer("p1", "P1S-1")))
+                code, res = self._dispatch(api, {"confirmed": True, "printer_id": "нет-такого"})
+                self.assertEqual(400, code)
+                self.assertIn("не найден", res["error"].lower())
+
+    def test_empty_pool_says_to_add_a_printer(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", Path(tmp)):
+                self._installed(Path(tmp))
+                api = types.SimpleNamespace(db=None, manager=self._manager())
+                code, res = self._dispatch(api, {"confirmed": True})
+                self.assertEqual(400, code)
+                self.assertIn("Принтеров нет", res["error"])
+
+    def test_helper_blockers_and_names(self):
+        from connector.printflow.routes_farmloop import (
+            _pick_free_printer, _printer_name, _test_clean_blockers)
+        busy = self._printer("p1", "P1S-1", state="PAUSE")
+        offline = self._printer("p2", "P1S-2", state="IDLE", connected=False)
+        free = self._printer("p3", "P1S-3", state="FINISH")
+        self.assertEqual([], _test_clean_blockers(free))
+        self.assertEqual(["занят (статус: PAUSE)"], _test_clean_blockers(busy))
+        self.assertEqual(["не подключен"], _test_clean_blockers(offline))
+        both = self._printer("p4", "P1S-4", state="UNKNOWN", connected=False)
+        self.assertEqual(["не подключен", "занят (статус: UNKNOWN)"],
+                         _test_clean_blockers(both))
+        self.assertEqual("P1S-3", _printer_name(free))
+        self.assertEqual("p1", _printer_name(types.SimpleNamespace(id="p1")),
+                         "нет record — имя берётся из id, а не падает")
+        picked, notes = _pick_free_printer(self._manager(busy, offline, free))
+        self.assertIs(free, picked)
+        self.assertEqual(["«P1S-1» — занят (статус: PAUSE)",
+                          "«P1S-2» — не подключен"], notes)
+        self.assertEqual((None, []), _pick_free_printer(types.SimpleNamespace()))
 
 
 if __name__ == "__main__":

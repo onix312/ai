@@ -66,6 +66,25 @@ def _handler(body: bytes, db) -> tuple:
     return handler, boundary, sent
 
 
+def _transport(path: str, body: bytes, headers: dict | None = None,
+               client_address: tuple = ("192.168.1.66", 51234)):
+    """Обработчик для транспортных веток do_POST (18.12.1).
+
+    Ранние ответы (403 по Origin, 429 по лимиту, 400 от multipart) живут до
+    бизнес-логики, поэтому `api` им не нужен — нужны путь, заголовки, тело и
+    адрес сокета: по нему считается ключ ограничения частоты.
+    """
+    handler = Handler.__new__(Handler)
+    handler.headers = {"Content-Length": str(len(body)), **(headers or {})}
+    handler.rfile = io.BytesIO(body)
+    handler.path = path
+    handler.client_address = client_address
+    handler.close_connection = False
+    sent = {}
+    handler.send_json = lambda code, payload: sent.update(code=code, payload=payload)
+    return handler, sent
+
+
 class LibraryUploadTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -161,6 +180,101 @@ class LibraryUploadTests(unittest.TestCase):
         rec = sent["payload"]["library"]
         self.assertEqual(rec["note"], "модель клиента")
         self.assertEqual(rec["source"], "print-panel")
+
+
+class EarlyAnswerDrainTests(unittest.TestCase):
+    """18.12.1: ранний ответ обязан дочитать тело запроса.
+
+    Баг владельца: загрузка модели в конвейере показывала «Нет связи с
+    коннектором PrintFlow» вместо причины. Ответ, отправленный НЕ дочитав
+    тело, рвёт соединение на середине загрузки — браузер ещё льёт байты,
+    сервер уже закрыл канал, `fetch` падает сетевой ошибкой.
+    """
+
+    BOUNDARY = "----printflow-library-test"
+    BODY = _multipart("----printflow-library-test", [("part.stl", FAKE_STL)])
+
+    def test_foreign_origin_answer_is_sent_after_draining_the_body(self):
+        handler, sent = _transport(
+            "/api/library/upload", self.BODY,
+            {"Content-Type": f"multipart/form-data; boundary={self.BOUNDARY}",
+             "Origin": "http://evil.example", "Host": "192.168.1.50:8765"})
+        handler.do_POST()
+        self.assertEqual(403, sent["code"])
+        self.assertIn("посторонний источник", sent["payload"]["error"])
+        self.assertEqual(b"", handler.rfile.read(),
+                         "тело не дочитано: браузер получит обрыв соединения вместо 403")
+        self.assertTrue(handler.close_connection)
+
+    def test_rate_limit_answer_is_sent_after_draining_the_body(self):
+        handler, sent = _transport(
+            "/api/library/upload", self.BODY,
+            {"Content-Type": f"multipart/form-data; boundary={self.BOUNDARY}"})
+        denied = (False, {"bucket": "upload", "limit": 30, "window": 600,
+                          "retry_after": 42,
+                          "error": "Слишком много запросов. Повторите через 42 с."})
+        with patch("connector.printflow.http_handler.limiter.check", return_value=denied) as check:
+            handler.do_POST()
+        self.assertEqual(429, sent["code"])
+        self.assertEqual(42, sent["payload"]["retry_after"])
+        self.assertEqual(b"", handler.rfile.read(),
+                         "429 без дочитывания тела рвёт загрузку модели")
+        # Ключ клиента — адрес сокета, а не общий "unknown" на всю панель.
+        self.assertEqual(("upload", "192.168.1.66"), check.call_args[0])
+
+    def test_own_origin_is_not_rejected(self):
+        """Контракт рядом: свой Origin проходит дальше по веткам загрузки."""
+        handler, _sent = _transport(
+            "/api/library/upload", self.BODY,
+            {"Content-Type": f"multipart/form-data; boundary={self.BOUNDARY}",
+             "Origin": "http://192.168.1.50:8765", "Host": "192.168.1.50:8765"})
+        self.assertTrue(handler.check_origin())
+
+    def test_multipart_value_error_drains_body_and_closes_connection(self):
+        """«Файл слишком большой» / «нет boundary» — 400 доходит до браузера."""
+        handler, sent = _transport(
+            "/api/library/upload", self.BODY,
+            {"Content-Type": "multipart/form-data"})   # boundary отсутствует
+        handler.api = SimpleNamespace(db=None, manager=None)
+        handler.do_POST()
+        self.assertEqual(400, sent["code"])
+        self.assertIn("multipart/form-data", sent["payload"]["error"])
+        self.assertEqual(b"", handler.rfile.read())
+        self.assertTrue(handler.close_connection,
+                        "после 400 от multipart тело может быть прочитано наполовину —"
+                        " на keep-alive следующий запрос разобрать уже нельзя")
+
+    def test_oversized_body_is_not_swallowed(self):
+        """Тело больше лимита не глотаем: только честное закрытие соединения.
+
+        Предел передаётся явно: значение по умолчанию в сигнатуре
+        ``_drain_body(limit=MAX_UPLOAD)`` вычисляется один раз при импорте,
+        поэтому подмена константы модуля на него не действует.
+        """
+        body = b"x" * 4096
+        handler, sent = _transport(
+            "/api/library/upload", body,
+            {"Content-Type": f"multipart/form-data; boundary={self.BOUNDARY}",
+             "Origin": "http://evil.example", "Host": "192.168.1.50:8765"})
+        handler._drain_body(limit=1024)
+        handler.send_json(403, {"error": "Запрос отклонён: посторонний источник"})
+        self.assertEqual(403, sent["code"])
+        self.assertTrue(handler.close_connection)
+        self.assertEqual(body, handler.rfile.read(),
+                         "сотни мегабайт мусора не должны читаться в память")
+
+    def test_oversized_upload_reaches_the_browser_as_400(self):
+        """«Файл слишком большой» — 400 с причиной, а не сетевая ошибка."""
+        body = b"x" * 4096
+        handler, sent = _transport(
+            "/api/library/upload", body,
+            {"Content-Type": f"multipart/form-data; boundary={self.BOUNDARY}"})
+        handler.api = SimpleNamespace(db=None, manager=None)
+        with patch("connector.printflow.uploads.MAX_UPLOAD", 1024):
+            handler.do_POST()
+        self.assertEqual(400, sent["code"])
+        self.assertIn("слишком большой", sent["payload"]["error"].lower())
+        self.assertTrue(handler.close_connection)
 
 
 if __name__ == "__main__":

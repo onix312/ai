@@ -95,7 +95,7 @@ from .studio_mqtt import (
     encode_suback,
     encode_unsuback,
     parse_fixed_header,
-    read_packet,
+    read_packet_rest,
 )
 
 # --------------------------------------------------------------------- SSDP
@@ -328,6 +328,12 @@ class StudioGateway:
             "mqtt_connections": 0,
             "mqtt_auth_failures": 0,
             "mqtt_publishes": 0,
+            # 18.12.1: пакеты, прерванные тайм-аутом ПОСЛЕ первого байта.
+            # Такой поток дочитывать нельзя — соединение рвётся честно.
+            "mqtt_broken_packets": 0,
+            # 18.12.1: Studio подписалась на device/<чужой серийник>/report —
+            # отчёты шлюза идут на свою тему, карточка устройства гаснет.
+            "subscribe_serial_mismatch": 0,
             "ftp_connections": 0,
             "ftp_auth_failures": 0,
             "ftp_uploads": 0,
@@ -340,6 +346,9 @@ class StudioGateway:
             "tls_handshake_timeouts": 0,
         }
         self._last_client = ""
+        # 18.12.1: темы, на которые подписались клиенты (ветка SUBSCRIBE).
+        # По ним видно, на тот ли серийник смотрит Studio.
+        self._subscribe_topics: list[str] = []
         # Ретранслятор SSDP (18.11): когда и сколько реальных станков объявили.
         self._relay_last: list[dict] = []
         self._last_auth_fail_at = ""
@@ -707,6 +716,47 @@ class StudioGateway:
         except Exception:
             pass
 
+    def _note_subscribes(self, topics) -> None:
+        """Запомнить темы SUBSCRIBE и проверить серийник в ``device/<SN>/report``.
+
+        18.12.1: отчёты шлюза уходят строго в ``device/<серийник шлюза>/report``.
+        Если Studio подписалась на чужой серийник (устройство пересоздавали,
+        серийник вводили руками, подключение осталось от прошлой установки),
+        отчёты до неё не доходят и карточка гаснет — а в интерфейсе нет ни
+        причины, ни подсказки. Теперь есть: счётчик, тема в статусе и запись
+        в диагностике с прямым указанием, где взять правильный серийник.
+        """
+        items = [str(topic or "").strip() for topic in (topics or [])]
+        items = [topic for topic in items if topic]
+        if not items:
+            return
+        try:
+            own = str(self.identity().get("serial") or "").strip()
+        except Exception:
+            own = ""
+        mismatched: list[str] = []
+        for topic in items:
+            parts = topic.split("/")
+            if len(parts) >= 3 and parts[0] == "device" and parts[2] == "report":
+                serial = parts[1].strip()
+                if serial and serial != "*" and own and serial != own:
+                    mismatched.append(topic)
+        with self._lock:
+            for topic in items:
+                if topic not in self._subscribe_topics:
+                    self._subscribe_topics.append(topic)
+            self._subscribe_topics = self._subscribe_topics[-32:]
+        if not mismatched:
+            return
+        self._bump("subscribe_serial_mismatch", len(mismatched))
+        self._record_error(
+            "mqtt",
+            "Studio подписалась на отчёты чужого устройства: "
+            + ", ".join(mismatched)
+            + f" — отчёты шлюза уходят в device/{own or '<серийник>'}/report. "
+              "Пересоздайте подключение: введите серийник из карточки шлюза.",
+        )
+
     def _bump(self, key: str, delta: int = 1) -> int:
         """Увеличить счётчик и вернуть новое значение."""
         with self._lock:
@@ -778,6 +828,7 @@ class StudioGateway:
             ssdp_source = self._ssdp_source
             cert_cn, cert_san = self._cert_cn, self._cert_san
             cert_expires = self._cert_expires
+            subscribe_topics = list(self._subscribe_topics)
         # настройки — каждая с защитой от закрытой БД
         mode = self._mode()
         try:
@@ -867,6 +918,11 @@ class StudioGateway:
             "mqtt_connections": int(counters.get("mqtt_connections", 0)),
             "mqtt_auth_failures": int(counters.get("mqtt_auth_failures", 0)),
             "mqtt_publishes": int(counters.get("mqtt_publishes", 0)),
+            # 18.12.1: рассинхрон потока (пакет прерван тайм-аутом) и подписка
+            # на чужой серийник — обе причины «Unsubscribe device» в Studio.
+            "mqtt_broken_packets": int(counters.get("mqtt_broken_packets", 0)),
+            "subscribe_topics": subscribe_topics,
+            "subscribe_serial_mismatch": int(counters.get("subscribe_serial_mismatch", 0)),
             "ftp_connections": int(counters.get("ftp_connections", 0)),
             "ftp_auth_failures": int(counters.get("ftp_auth_failures", 0)),
             "ftp_uploads": int(counters.get("ftp_uploads", 0)),
@@ -1965,6 +2021,9 @@ class StudioGateway:
                 sub = decode_subscribe(payload)
             except Exception:
                 return []
+            # 18.12.1: темы подписки запоминаются, а серийник в
+            # device/<SN>/report сверяется с нашим — чужой SN гасит карточку.
+            self._note_subscribes([topic for topic, _qos in (sub.get("filters") or [])])
             qos = [0] * len(sub.get("filters") or [0])
             return [encode_suback(sub["packet_id"], qos or [0])]
         if ptype == UNSUBSCRIBE:
@@ -2422,10 +2481,32 @@ class StudioGateway:
                 self._last_client = peer or self._last_client
             conn.settimeout(MQTT_KEEPALIVE)
             while not self._stop.is_set():
+                # 18.12.1: ожидание первого байта и дочитывание пакета —
+                # разные события. Тайм-аут ДО первого байта значит «клиент
+                # молчит» (простой — норма, ждём дальше). Тайм-аут ПОСЛЕ
+                # него значит, что пакет оборван на середине: поток прочитан
+                # наполовину, и продолжать разбор нельзя — дальше пойдут
+                # мусорные пакеты, Studio перестанет получать отчёты и
+                # отпишет устройство («Unsubscribe device»). Рвём честно:
+                # Studio переподключится сама.
                 try:
-                    ptype, flags, payload = read_packet(conn.recv)
+                    first = conn.recv(1)
                 except (socket.timeout, TimeoutError):
                     continue
+                except (ConnectionError, OSError, ssl.SSLError):
+                    break
+                if not first:
+                    break
+                try:
+                    ptype, flags, payload = read_packet_rest(conn.recv, first)
+                except (socket.timeout, TimeoutError):
+                    self._bump("mqtt_broken_packets")
+                    self._record_error(
+                        "mqtt",
+                        "пакет прерван тайм-аутом после первого байта: поток "
+                        "рассинхронизирован, соединение закрыто (Studio "
+                        "переподключится сама)")
+                    break
                 except (ConnectionError, OSError, ssl.SSLError):
                     break
                 from .studio_mqtt import encode_remaining_length
