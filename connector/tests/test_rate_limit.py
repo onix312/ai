@@ -89,6 +89,35 @@ class ClientKeyTests(unittest.TestCase):
                                   if name == "X-Real-IP" else default)
         self.assertEqual(client_key(headers), "7.7.7.7")
 
+    def test_peer_is_the_fallback_key(self):
+        """18.12.1: без прокси-заголовков ключ — адрес сокета, а не общий "unknown".
+
+        Общий ключ делил лимит «30 загрузок за 600 с» на ВСЕХ клиентов панели:
+        26-я загрузка подряд ловила 429, хотя загружал один оператор, и панель
+        блокировала сама себя.
+        """
+        self.assertEqual(client_key({}, peer="192.168.1.66"), "192.168.1.66")
+        self.assertEqual(client_key(None, peer="192.168.1.66"), "192.168.1.66")
+
+    def test_empty_peer_still_gives_anonymous_key(self):
+        """Адреса сокета нет (клиент не дошёл до accept) — прежний "unknown"."""
+        self.assertEqual(client_key({}, peer=""), "unknown")
+        self.assertEqual(client_key({}, peer=None), "unknown")
+
+    def test_proxy_headers_win_over_peer(self):
+        """За прокси адрес сокета один на всех — считаем клиента по заголовку."""
+        headers = {"X-Forwarded-For": "9.9.9.9, 10.0.0.1"}
+        self.assertEqual(client_key(headers, peer="10.0.0.1"), "9.9.9.9")
+        self.assertEqual(client_key({"X-Real-IP": "8.8.8.8"}, peer="10.0.0.1"), "8.8.8.8")
+
+    def test_peer_keys_do_not_share_the_limit(self):
+        """Два оператора за одним коннектором не блокируют друг друга."""
+        limiter = RateLimiter(rules={"upload": (1, 600)})
+        self.assertTrue(limiter.check("upload", client_key({}, peer="192.168.1.66"))[0])
+        self.assertFalse(limiter.check("upload", client_key({}, peer="192.168.1.66"))[0])
+        self.assertTrue(limiter.check("upload", client_key({}, peer="192.168.1.90"))[0],
+                        "второй клиент получил чужой 429 — ключ снова общий")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2149,6 +2149,24 @@ function renderSettings() {
           html += `<span style="display:block;margin-top:4px">🔐 TLS: рукопожатий ${data.tls_handshakes}, возобновлено сессий ${data.tls_resumed || 0}`
             + `${sess.cached != null ? `, в кэше ${sess.cached}` : ''} — возобновление означает, что FTPS-канал данных не жмёт руку заново.</span>`;
         }
+        // 18.12.1: Studio подписалась на device/<чужой серийник>/report —
+        // отчёты шлюза уходят в свою тему, карточка гаснет, а Studio пишет
+        // «Unsubscribe device». Причина видна здесь, а не только в журнале.
+        if ((data.subscribe_serial_mismatch || 0) > 0) {
+          const topics = Array.isArray(data.subscribe_topics) ? data.subscribe_topics : [];
+          html += `<span style="display:block;margin-top:4px;color:var(--warn,#f59e0b)">⚠ Studio подписалась на чужой серийник`
+            + `${topics.length ? ` (${topics.map(esc).join(', ')})` : ''} — пересоздайте подключение,`
+            + ` серийник из этой карточки: <b>${esc(data.serial || '—')}</b>.`
+            + ` Отчёты шлюза идут только на свою тему, поэтому карточка устройства гаснет`
+            + ` и Studio отписывает принтер («Unsubscribe device»).</span>`;
+        }
+        // 18.12.1: пакет MQTT прервался тайм-аутом после первого байта —
+        // поток рассинхронизирован, соединение закрыто защитой, не сбой службы.
+        if ((data.mqtt_broken_packets || 0) > 0) {
+          html += `<span style="display:block;margin-top:4px;color:var(--muted,#6b7280)">ℹ MQTT: разорвано по защите от рассинхрона — ${data.mqtt_broken_packets} пакет(ов)`
+            + ` прервано тайм-аутом после первого байта. Stream был прочитан наполовину, поэтому соединение закрыто честно:`
+            + ` Studio переподключится сама.</span>`;
+        }
         // 18.11: ретранслятор реальных станков.
         if (data.enabled && data.relay_enabled) {
           const rp = Array.isArray(data.relay_printers) ? data.relay_printers : [];

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ftplib
 import io
+import json
 import pathlib
 import shutil
 import socket
@@ -45,6 +46,18 @@ from connector.printflow.studio_gateway import (  # noqa: E402
     SSDP_NT,
     StudioGateway,
 )
+from connector.printflow.studio_mqtt import (  # noqa: E402
+    CONNACK,
+    PUBLISH,
+    SUBACK,
+    SUBSCRIBE,
+    decode_publish,
+    encode_connect,
+    encode_publish,
+    encode_utf8,
+    read_packet,
+    wrap_packet,
+)
 from connector.tests.test_phase11 import make_api, make_db  # noqa: E402
 from connector.tests.test_studio_gateway import FakeMgr  # noqa: E402
 from connector.tests.test_studio_gateway_bind import free_port, make_cert  # noqa: E402
@@ -63,6 +76,30 @@ def _gateway(db, **settings) -> StudioGateway:
     gw = StudioGateway(db, mgr, bind=True)
     mgr.studio = gw
     return gw
+
+
+def subscribe_packet(packet_id: int, topic: str, qos: int = 0) -> bytes:
+    """SUBSCRIBE руками: кодировщика в ``studio_mqtt`` нет, только декодер.
+
+    Тело пакета: packet id + MQTT-строка темы + запрошенный QoS, а в
+    фиксированном заголовке SUBSCRIBE обязан стоять флаг 0x02.
+    """
+    return wrap_packet(SUBSCRIBE,
+                       int(packet_id).to_bytes(2, "big") + encode_utf8(topic) + bytes([qos & 0x03]),
+                       flags=2)
+
+
+def publish_json(topic: str, payload: dict, packet_id: int = 1) -> bytes:
+    """PUBLISH с JSON-телом и QoS 1 — как шлёт сетевой плагин Studio."""
+    return encode_publish(topic, json.dumps(payload, ensure_ascii=False),
+                          qos=1, packet_id=packet_id)
+
+
+def foreign_serial(own: str) -> str:
+    """Серийник, который заведомо не наш: последняя цифра инвертируется."""
+    tail = own[-1] if own else "0"
+    other = "1" if tail != "1" else "2"
+    return (own[:-1] if own else "01P00A00000000") + other
 
 
 class SettingsContractTests(unittest.TestCase):
@@ -387,6 +424,138 @@ class LiveTlsTests(unittest.TestCase):
         worker.join(5)
         self.assertEqual(1, len(results), "рукопожатие не завершилось")
         self.assertLess(results[0], 1.0)
+
+    # ------------------------------------------------- 18.12.1: MQTT-поток
+    def _read_packets(self, conn, timeout: float = 5.0) -> list[tuple]:
+        """Прочитать поток пакетов, пока не кончится отведённое время."""
+        conn.settimeout(timeout)
+        deadline = time.time() + timeout
+        out: list[tuple] = []
+        while time.time() < deadline:
+            try:
+                out.append(read_packet(conn.recv))
+            except (socket.timeout, TimeoutError, ConnectionError, OSError):
+                break
+        return out
+
+    def _connect_and_authorize(self, conn) -> None:
+        """CONNECT дефолтной сессии: bind=True режет анонимов, поэтому вход
+        с Access Code обязателен до SUBSCRIBE и PUBLISH."""
+        conn.sendall(encode_connect(client_id="studio", username="bblp",
+                                    password="abcd1234"))
+        packet_type, _flags, payload = read_packet(conn.recv)
+        self.assertEqual(CONNACK, packet_type)
+        self.assertEqual(0, payload[1], f"CONNACK отклонил вход: {payload[1]}")
+
+    def test_broken_packet_closes_the_connection_instead_of_desyncing(self):
+        """Тайм-аут ПОСЛЕ первого байта — честный разрыв, а не «простой — continue».
+
+        Раньше ``socket.timeout`` любого места пакета ловился как ожидание и
+        цикл продолжался: поток оставался прочитанным наполовину, следующие
+        пакеты парсились как мусор, Studio переставала получать ответы и
+        отписывала устройство («Unsubscribe device»).
+        """
+        client, server = socket.socketpair()
+        self.addCleanup(client.close)
+        keepalive = mock.patch("connector.printflow.studio_gateway.MQTT_KEEPALIVE", 1)
+        keepalive.start()                      # патч СТАРТУЕТ до потока
+        self.addCleanup(keepalive.stop)
+        worker = threading.Thread(target=self.gw._mqtt_client, args=(server,),
+                                  daemon=True, name="pf-test-mqtt-broken")
+        worker.start()
+        self.addCleanup(worker.join, 10)
+
+        packet = subscribe_packet(7, "device/+/report")
+        client.sendall(packet[:4])             # половина пакета: заголовок и длина
+        # Ждём больше keepalive (1 с): шлюз обязан упереться в тайм-аут на
+        # хвосте пакета и закрыть соединение. Без ожидания досылка хвоста
+        # успевает пройти до закрытия и тест становится лотереей.
+        time.sleep(1.6)
+        deadline = time.time() + 10
+        status = self.gw.status()
+        while time.time() < deadline and status["mqtt_broken_packets"] < 1:
+            time.sleep(0.1)
+            status = self.gw.status()
+        self.assertGreaterEqual(status["mqtt_broken_packets"], 1,
+                                "оборванный пакет не посчитан: тайм-аут снова считается простоем")
+        self.assertIn("прерван тайм-аутом", status["errors"].get("mqtt", ""))
+        self.assertIn("рассинхронизирован", status["errors"].get("mqtt", ""))
+        self.assertTrue(status["last_error"].lower().startswith("mqtt:"),
+                        f"сбой MQTT не виден в last_error: {status['last_error']}")
+        # Соединение закрыто, поэтому дослать хвост пакета нельзя.
+        with self.assertRaises(OSError):
+            client.sendall(packet[4:])
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "поток клиента не завершился после разрыва")
+
+    def test_subscribe_to_foreign_serial_is_reported_and_answers_still_go_to_ours(self):
+        """Подписка на чужой серийник видна в статусе, а отчёты идут на свой.
+
+        Отчёты шлюза уходят в ``device/<серийник шлюза>/report``. Studio,
+        которая подписалась на чужой серийник, их не получает и гасит
+        карточку — причина должна быть видна в панели, а не только в журнале.
+        """
+        ident = self.gw.identity()
+        own, other = ident["serial"], foreign_serial(ident["serial"])
+        self.assertNotEqual(own, other)
+        conn = socket.create_connection(("127.0.0.1", self.ports["MQTT_PORT"]), timeout=5)
+        conn = self.ctx.wrap_socket(conn)
+        self.addCleanup(conn.close)
+        conn.settimeout(5)
+        self._connect_and_authorize(conn)
+
+        conn.sendall(subscribe_packet(11, f"device/{other}/report"))
+        packet_type, _flags, _payload = read_packet(conn.recv)
+        self.assertEqual(SUBACK, packet_type, "шлюз не подтвердил подписку")
+
+        deadline = time.time() + 5
+        status = self.gw.status()
+        while time.time() < deadline and status["subscribe_serial_mismatch"] < 1:
+            time.sleep(0.1)
+            status = self.gw.status()
+        self.assertGreaterEqual(status["subscribe_serial_mismatch"], 1)
+        self.assertIn(f"device/{other}/report", status["subscribe_topics"])
+        self.assertIn("серийник из карточки шлюза", status["errors"].get("mqtt", ""))
+
+        # Подписка на свой серийник чужой не считается.
+        conn.sendall(subscribe_packet(12, f"device/{own}/report"))
+        self.assertEqual(SUBACK, read_packet(conn.recv)[0])
+        self.assertIn(f"device/{own}/report", self.gw.status()["subscribe_topics"])
+
+        # Отчёт приходит на НАШУ тему, хотя запрос Studio послала на чужую.
+        conn.sendall(publish_json(f"device/{other}/request",
+                                  {"pushing": {"command": "pushall", "sequence_id": "5"}}))
+        report = None
+        for packet_type, flags, payload in self._read_packets(conn, timeout=3.0):
+            if packet_type != PUBLISH:
+                continue
+            published = decode_publish(flags, payload)
+            self.assertEqual(f"device/{own}/report", published["topic"],
+                             "отчёт ушёл не на тему шлюза — карточка Studio гаснет")
+            body = json.loads(published["payload"].decode("utf-8"))
+            if body.get("print", {}).get("command") == "push_status":
+                report = body
+                break
+        self.assertIsNotNone(report, "шлюз не ответил на pushall")
+        self.assertEqual(0, report["print"]["msg"], "msg: 0 — полный снимок, а не diff")
+
+    def test_status_exposes_the_new_mqtt_diagnostics(self):
+        """Ключи статуса, которые читает карточка шлюза в app.js."""
+        status = self.gw.status()
+        for key in ("mqtt_broken_packets", "subscribe_topics", "subscribe_serial_mismatch"):
+            self.assertIn(key, status)
+        self.assertEqual([], status["subscribe_topics"])
+        self.assertEqual(0, status["mqtt_broken_packets"])
+        self.assertEqual(0, status["subscribe_serial_mismatch"])
+
+    def test_gateway_card_explains_both_mqtt_diagnoses(self):
+        """Карточка шлюза показывает обе причины «Unsubscribe device»."""
+        app_js = (ROOT / "site" / "assets" / "app.js").read_text(encoding="utf-8")
+        for fragment in ("subscribe_serial_mismatch", "mqtt_broken_packets",
+                         "подписалась на чужой серийник",
+                         "разорвано по защите от рассинхрона",
+                         "пересоздайте подключение"):
+            self.assertIn(fragment, app_js, f"в карточке шлюза нет «{fragment}»")
 
 
 if __name__ == "__main__":

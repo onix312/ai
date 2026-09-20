@@ -245,12 +245,19 @@ def encode_disconnect() -> bytes:
     return wrap_packet(DISCONNECT)
 
 
-def read_packet(recv, timeout: float | None = None) -> tuple[int, int, bytes]:
-    """Прочитать один MQTT-пакет с сокета или file-like ``recv(n) -> bytes``.
+def read_packet_rest(recv, first: bytes) -> tuple[int, int, bytes]:
+    """Дочитать пакет, первый байт которого уже взят.
 
-    ``recv`` — callable как ``socket.recv``. Тесты передают BytesIO.read.
+    18.12.1: чтение пакета разделено на «первый байт» и «остаток», потому что
+    тайм-аут посреди пакета — это не «простой в эфире». Если :func:`read_packet`
+    ловила ``socket.timeout`` на любом месте пакета и просто продолжала цикл,
+    поток оставался прочитанным наполовину: все следующие пакеты парсились как
+    мусор, Studio переставала получать отчёты и отписывала устройство.
+
+    Теперь ожидание первого байта и дочитывание хвоста разделены: тайм-аут на
+    первом байте — норма (клиент молчит), тайм-аут на хвосте — честный разрыв
+    соединения, который видит вызывающий код.
     """
-    first = recv(1)
     if not first:
         raise ConnectionError("MQTT: соединение закрыто")
     remaining = 0
@@ -272,3 +279,11 @@ def read_packet(recv, timeout: float | None = None) -> tuple[int, int, bytes]:
             raise ConnectionError("MQTT: обрезан payload")
         payload += chunk
     return first[0] >> 4, first[0] & 0x0F, payload
+
+
+def read_packet(recv, timeout: float | None = None) -> tuple[int, int, bytes]:
+    """Прочитать один MQTT-пакет с сокета или file-like ``recv(n) -> bytes``.
+
+    ``recv`` — callable как ``socket.recv``. Тесты передают BytesIO.read.
+    """
+    return read_packet_rest(recv, recv(1))

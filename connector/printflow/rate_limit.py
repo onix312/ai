@@ -91,8 +91,15 @@ class RateLimiter:
 limiter = RateLimiter()
 
 
-def client_key(headers) -> str:
-    """Идентификатор клиента: реальный IP за прокси, иначе адрес соединения."""
+def client_key(headers, peer: object = "") -> str:
+    """Идентификатор клиента: реальный IP за прокси, иначе адрес соединения.
+
+    18.12.1: без прокси-заголовков ключом становится адрес сокета. Раньше
+    здесь возвращался общий ``"unknown"``, и лимит загрузки «30 за 600 с»
+    делили ВСЕ клиенты панели сразу: 26-я загрузка подряд ловила 429, хотя
+    загружал один оператор. Прокси-заголовки по-прежнему сильнее адреса —
+    за nginx/Cloudflare адрес сокета один на всех.
+    """
     if headers is not None:
         forwarded = headers.get("X-Forwarded-For") or ""
         if forwarded:
@@ -100,4 +107,4 @@ def client_key(headers) -> str:
         real_ip = headers.get("X-Real-IP") or ""
         if real_ip:
             return str(real_ip).strip()
-    return "unknown"
+    return str(peer or "") or "unknown"

@@ -194,19 +194,70 @@ async function loadConveyorHistory() {
 }
 
 /* ------------------------------------------------------------ тестовая очистка стола */
+/* 18.12.1: станок выбирает оператор, а не «первый в словаре». Раньше панель
+   слала {confirmed: true} без printer_id, сервер брал первый принтер пула —
+   занятый или отключённый, — и кнопка отвечала «Принтер занят» при живом
+   свободном станке рядом. Список тянется из /api/state: ✓ = подключен и
+   свободен (IDLE/FINISH), · = занят или не в сети. */
+let testCleanPrinter = '';
+
+function testCleanSelectable(p) {
+  const connected = !!(p.connection && p.connection.connected);
+  const state = String((p.printer && p.printer.state) || '').toUpperCase();
+  return connected && (state === 'IDLE' || state === 'FINISH');
+}
+
+async function loadTestCleanPrinters() {
+  const sel = $('cv_test_clean_printer');
+  if (!sel) return;
+  let printers = [];
+  try {
+    const state = await get('/api/state');
+    printers = Array.isArray(state.printers) ? state.printers : [];
+  } catch (err) {
+    sel.innerHTML = '<option value="">Станок: первый свободный</option>';
+    sel.disabled = true;
+    sel.title = 'Список станков не подтянулся — сервер выберет первый свободный сам';
+    return;
+  }
+  sel.disabled = false;
+  const opts = ['<option value="">Станок: первый свободный</option>'];
+  printers.forEach((p) => {
+    const id = String(p.id || '');
+    if (!id) return;
+    const free = testCleanSelectable(p);
+    const stateLabel = String((p.printer && (p.printer.state_label || p.printer.state)) || 'нет связи');
+    opts.push(`<option value="${esc(id)}">${esc(p.name || id)} — ${esc(stateLabel)} ${free ? '✓' : '·'}</option>`);
+  });
+  sel.innerHTML = opts.join('');
+  sel.value = printers.some((p) => String(p.id || '') === testCleanPrinter) ? testCleanPrinter : '';
+  testCleanPrinter = sel.value;
+  sel.title = printers.length
+    ? '✓ — станок подключен и свободен (IDLE/FINISH), · — занят или не в сети'
+    : 'Станков в парке нет — добавьте принтер в разделе «Принтеры»';
+}
+
 async function handleTestClean() {
+  const sel = $('cv_test_clean_printer');
+  const printerId = (sel && sel.value) || '';
+  const where = printerId
+    ? `на выбранном станке (${(sel.options[sel.selectedIndex] || {}).text || printerId})`
+    : 'на первом свободном станке';
   const msg = 'Проверьте, что стол свободен, сопло остыло, корзина для деталей установлена.\n\n'
-    + 'Запустить тестовый проход толкателя по шаблону FarmLoop на свободном принтере?';
+    + `Запустить тестовый проход толкателя по шаблону FarmLoop ${where}?`;
   if (!confirmDanger(msg)) return;
 
   const btn = $('cv_test_clean_btn');
   if (btn) btn.disabled = true;
   try {
-    const res = await post('/api/farmloop/test-clean', { confirmed: true });
+    const payload = { confirmed: true };
+    if (printerId) payload.printer_id = printerId;
+    const res = await post('/api/farmloop/test-clean', payload);
     toast('Тестовая очистка стола', `Команд выполнено: ${res.executed_commands} на «${res.printer}»`);
-    await loadConveyorHistory();
+    await Promise.all([loadConveyorHistory(), loadTestCleanPrinters()]);
   } catch (err) {
     fail(err);
+    loadTestCleanPrinters();
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -616,6 +667,12 @@ function bind() {
   const testClean = $('cv_test_clean_btn');
   if (testClean) testClean.addEventListener('click', handleTestClean);
 
+  // Выбор станка запоминается: обновление списка не сбрасывает его.
+  const testCleanSel = $('cv_test_clean_printer');
+  if (testCleanSel) testCleanSel.addEventListener('change', () => {
+    testCleanPrinter = testCleanSel.value;
+  });
+
   const cSave = $('cv_c_save');
   if (cSave) cSave.addEventListener('click', () => saveConstructorTemplate(false));
 
@@ -655,6 +712,7 @@ async function refreshAll() {
     loadConstructorTemplate(),
     loadLibraryModels(),
     loadWarehouseSpools(),
+    loadTestCleanPrinters(),
   ]);
 }
 

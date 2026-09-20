@@ -30,7 +30,7 @@ from . import config, static_serve
 from .accounting import num
 from .config import now_iso
 from .db import friendly_sqlite_error
-from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON,
+from .http_helpers import (CLIENT_DISCONNECT_ERRORS, MAX_JSON, MAX_UPLOAD,
                            STREAM_DISCONNECT_ERRORS, begin_request,
                            rate_bucket, request_length,
                            request_origin_allowed, safe_file)
@@ -86,6 +86,43 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         return request_origin_allowed(
             self.headers.get("Origin"), self.headers.get("Host"))
 
+    # ------------------------------------------------------- ранние ответы
+    def _drain_body(self, limit: int = MAX_UPLOAD) -> int:
+        """Дочитать тело запроса перед ранним ответом (403/429/400).
+
+        18.12.1: ответ, отправленный НЕ дочитав тело, рвёт соединение на
+        середине загрузки — браузер ещё льёт байты, а сервер уже закрыл
+        канал. fetch падает сетевой ошибкой, и панель показывает «Нет связи
+        с коннектором PrintFlow» вместо настоящей причины (чужой Origin,
+        лимит частоты, «Файл слишком большой»).
+
+        Тело читается кусками по 64 КБ и выбрасывается: ответ уже готов,
+        байты не нужны. Тело больше ``limit`` не глотаем — такой поток
+        дочитывать бессмысленно, соединение закрывается честно.
+
+        Соединение закрывается в любом случае: ранний ответ — не штатный
+        ответ на запрос, а держать keep-alive после отклонённой загрузки
+        значит рискнуть рассинхроном потока (клиент может продолжать лить
+        байты, которые уже никто не читает).
+        """
+        self.close_connection = True
+        try:
+            length, too_large = request_length(self.headers.get("Content-Length"), limit)
+        except ValueError:
+            return 0
+        if too_large:
+            return 0
+        drained = 0
+        while drained < length:
+            try:
+                chunk = self.rfile.read(min(65536, length - drained))
+            except (OSError, ValueError):
+                break
+            if not chunk:
+                break
+            drained += len(chunk)
+        return drained
+
     # ------------------------------------------------------------------- GET
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -95,10 +132,15 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         try:
             # 14.0 (идея 34): публичные страницы и трекинг ограничены по
             # частоте; служебные потоки (камера, SSE, статика) — нет.
+            # 18.12.1: ключ клиента — прокси-заголовки, иначе адрес сокета
+            # (общий "unknown" блокировал всю панель разом), а перед 429
+            # тело запроса дочитывается — иначе ответ рвёт загрузку.
             bucket = rate_bucket(path)
             if bucket:
-                allowed, info = limiter.check(bucket, client_key(self.headers))
+                allowed, info = limiter.check(
+                    bucket, client_key(self.headers, self.client_address[0]))
                 if not allowed:
+                    self._drain_body()
                     return self.send_json(429, info)
             if path == "/api/printer/camera.jpg":
                 return self.serve_camera_frame((query.get("printer_id") or [""])[0])
@@ -503,6 +545,9 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
         if not self.check_origin():
+            # 18.12.1: тело дочитывается до отказа — иначе браузер, который
+            # ещё льёт модель, получает обрыв соединения и «Нет связи».
+            self._drain_body()
             return self.send_json(403, {"error": "Запрос отклонён: посторонний источник"})
         # 14.0 (идеи 5, 11, 34): контекст запроса, ограничение частоты и
         # идемпотентность. Всё на входе в обработчик, а не внутри веток.
@@ -510,8 +555,10 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
         try:
             bucket = rate_bucket(path)
             if bucket:
-                allowed, info = limiter.check(bucket, client_key(self.headers))
+                allowed, info = limiter.check(
+                    bucket, client_key(self.headers, self.client_address[0]))
                 if not allowed:
+                    self._drain_body()
                     return self.send_json(429, info)
             if path == "/api/printer/upload":
                 return self.handle_upload(query)
@@ -562,7 +609,16 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
             code, payload = self.api.post(path, body, query)
             return self.send_json(code, payload)
         except ValueError as exc:
-            return self.send_json(400, {"error": str(exc)})
+            # 18.12.1: «Файл слишком большой» и «нет boundary» прилетали из
+            # multipart в момент, когда браузер ещё льёт тело. Ответ без
+            # дочитывания рвал соединение, и панель показывала «Нет связи»
+            # вместо причины. Дочитываем (в пределах лимита) и закрываем
+            # соединение: тело может быть прочитано наполовину, и на
+            # keep-alive следующий запрос разобрать уже нельзя.
+            self._drain_body()
+            self.send_json(400, {"error": str(exc)})
+            self.close_connection = True
+            return
         except CLIENT_DISCONNECT_ERRORS:
             return
         except TimeoutError:

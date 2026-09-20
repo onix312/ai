@@ -11,6 +11,69 @@ from .config import DATA_DIR
 from .farmloop import P1S_STAGE1, profile_payload
 from .router import Ctx, router
 
+# Статусы станка, при которых тестовая очистка стола безопасна: стол пуст,
+# печать не идёт. Всё остальное (RUNNING, PAUSE, OFFLINE, UNKNOWN) — занято.
+FREE_STATES = ("IDLE", "FINISH")
+
+
+def _printer_name(printer: Any) -> str:
+    """Человеческое имя станка для текста ошибки."""
+    record = getattr(printer, "record", None)
+    if isinstance(record, dict) and record.get("name"):
+        return str(record["name"])
+    return str(getattr(printer, "id", "") or "P1S")
+
+
+def _printer_state(printer: Any) -> str:
+    """Статус станка из его снимка (пусто, если снимка нет)."""
+    try:
+        snap = printer.snapshot() if hasattr(printer, "snapshot") else {}
+    except Exception:
+        return ""
+    if not isinstance(snap, dict):
+        return ""
+    printer_part = snap.get("printer")
+    if not isinstance(printer_part, dict):
+        return ""
+    return str(printer_part.get("state") or "").upper()
+
+
+def _test_clean_blockers(printer: Any) -> list[str]:
+    """Почему на этом станке нельзя запускать тестовую очистку стола.
+
+    Пустой список — станок свободен: подключен и не печатает.
+    """
+    reasons: list[str] = []
+    if not getattr(printer, "connected", False):
+        reasons.append("не подключен")
+    state = _printer_state(printer)
+    if state not in FREE_STATES:
+        reasons.append(f"занят (статус: {state or 'неизвестен'})")
+    return reasons
+
+
+def _pick_free_printer(manager: Any) -> tuple[Any | None, list[str]]:
+    """Перебор пула: первый свободный станок и причины по остальным.
+
+    18.12.1: панель слала ``{confirmed: true}`` без ``printer_id``, а
+    ``manager.get('')`` возвращал ПЕРВЫЙ принтер словаря — обычно занятый
+    или отключённый. «Тестовая очистка стола» отвечала «Принтер занят» и
+    выглядела сломанной, хотя свободный станок в парке был.
+    """
+    printers = getattr(manager, "printers", None)
+    if not isinstance(printers, dict) or not printers:
+        return None, []
+    free = None
+    notes: list[str] = []
+    for printer in printers.values():
+        reasons = _test_clean_blockers(printer)
+        if not reasons and free is None:
+            free = printer
+            continue
+        if reasons:
+            notes.append(f"«{_printer_name(printer)}» — {'; '.join(reasons)}")
+    return free, notes
+
 
 @router.get("/api/farmloop/profile", doc="Профиль FarmLoop для принтера и готовность шаблона")
 def farmloop_profile(api: Any, ctx: Ctx):
@@ -190,26 +253,55 @@ def farmloop_test_clean(api: Any, ctx: Ctx):
     if not manager:
         return 400, {"error": "Менеджер принтеров недоступен"}
 
+    # 18.12.1: станок выбирается явно. Без printer_id маршрут перебирает пул
+    # и берёт первый свободный, а не «первый в словаре» (тот почти всегда
+    # занят или отключён). Причины отказа перечисляются по каждому станку —
+    # владелец видит, что именно освободить.
     pid = str(body.get("printer_id") or "").strip()
-    printer = manager.get(pid)
-    if not printer:
-        return 400, {"error": "Принтер не найден. Добавьте его в разделе «Принтеры»."}
+    pool = getattr(manager, "printers", None)
+    pool = pool if isinstance(pool, dict) else {}
+    auto_notes: list[str] = []
+    if pid:
+        printer = manager.get(pid)
+        if not printer:
+            return 400, {"error": "Принтер не найден. Добавьте его в разделе «Принтеры»."}
+        reasons = _test_clean_blockers(printer)
+        if reasons:
+            name = _printer_name(printer)
+            return 400, {
+                "error": f"«{name}» — {'; '.join(reasons)}. "
+                         "Тестовая очистка стола разрешена только на подключенном "
+                         "свободном станке (статус IDLE или FINISH).",
+                "printer_id": pid,
+                "printer": name,
+                "blocked": reasons,
+            }
+    else:
+        printer, auto_notes = _pick_free_printer(manager)
+        if printer is None and not pool:
+            # Пула нет (менеджер без словаря printers) — прежняя ветка «первого».
+            printer = manager.get("")
+            if printer is not None:
+                reasons = _test_clean_blockers(printer)
+                if reasons:
+                    auto_notes = [f"«{_printer_name(printer)}» — {'; '.join(reasons)}"]
+                    printer = None
+        if printer is None:
+            if not auto_notes:
+                return 400, {
+                    "error": "Принтеров нет: добавьте станок в разделе «Принтеры»."
+                }
+            listing = "; ".join(auto_notes)
+            return 400, {
+                "error": f"Нет свободного станка: {listing}. "
+                         "Освободите станок или выберите другой в списке.",
+                "blocked": auto_notes,
+            }
 
-    if not getattr(printer, "connected", False):
-        printer_name = printer.record.get("name", "P1S") if hasattr(printer, "record") else "P1S"
-        return 400, {"error": f"Принтер «{printer_name}» не подключен по локальной сети"}
-
-    snap = printer.snapshot() if hasattr(printer, "snapshot") else {}
-    state = str(snap.get("printer", {}).get("state", "UNKNOWN")).upper()
-    if state not in ("IDLE", "FINISH"):
-        return 400, {
-            "error": f"Принтер занят (статус: {state}). Тестовая очистка стола разрешена только при статусе IDLE."
-        }
-
+    printer_name = _printer_name(printer)
     for cmd in commands:
         printer.gcode(cmd)
 
-    printer_name = printer.record.get("name", "P1S") if hasattr(printer, "record") else "P1S"
     if getattr(api, "db", None):
         api.db.add_event(
             "farmloop",
@@ -223,6 +315,7 @@ def farmloop_test_clean(api: Any, ctx: Ctx):
         "ok": True,
         "executed_commands": len(commands),
         "printer": printer_name,
-        "printer_id": printer.id,
+        "printer_id": getattr(printer, "id", pid),
         "profile": requested,
+        "auto_selected": not pid,
     }
