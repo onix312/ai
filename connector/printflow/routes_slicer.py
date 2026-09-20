@@ -30,7 +30,7 @@ from .slicer_profile import (
     validate_settings,
 )
 from .slicer_run import SliceMachine, config_from_settings
-from .farmloop import P1S_STAGE1, farmloop_gate, farmloop_profile_id
+from .farmloop import farmloop_gate, farmloop_profile_id
 
 # Поля, которые запрос может переопределить на один вызов.
 _OVERRIDE_KEYS = (

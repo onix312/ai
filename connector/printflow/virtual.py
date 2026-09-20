@@ -261,6 +261,10 @@ class VirtualPrinter:
                 weight = self._est_grams * progress / 100.0
             if self._state == "PAUSE":
                 state = "PAUSE"
+            elif self._state == "PRINTING":
+                # Наружу отдаём словарь состояний Bambu (STATE_NAMES): «PRINTING» —
+                # внутреннее имя, его не знают ни Hero-пульт, ни менеджер, ни сторож.
+                state = "RUNNING"
             return {
                 "id": self.id,
                 "name": self.record.get("name") or "P1S (виртуальный)",

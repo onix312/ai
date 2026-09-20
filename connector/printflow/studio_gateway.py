@@ -140,6 +140,11 @@ BIND_TIMEOUT = 15
 FIRMWARE_VERSION = "01.07.00.00"
 MQTT_USER = "bblp"
 MQTT_KEEPALIVE = 90
+# Сколько секунд клиенту даётся на рукопожатие TLS (18.11). Рукопожатие
+# идёт в потоке клиента, а не в accept(): молчащий TCP-клиент (сканер
+# портов, антивирус, «проверка, открыт ли порт») больше не держит приём
+# всех остальных соединений — раньше именно это давало «код=-1» в Studio.
+TLS_HANDSHAKE_TIMEOUT = 8.0
 FTP_BANNER = "220 PrintFlow Studio Gateway"
 # Сколько байт входящего файла держим в памяти до записи в библиотеку.
 INCOMING_LIMIT = 32
@@ -328,9 +333,15 @@ class StudioGateway:
             "ftp_uploads": 0,
             "ssdp_notify": 0,
             "ssdp_searches": 0,
+            "ssdp_relay": 0,
             "dropped_connections": 0,
+            "tls_handshakes": 0,
+            "tls_resumed": 0,
+            "tls_handshake_timeouts": 0,
         }
         self._last_client = ""
+        # Ретранслятор SSDP (18.11): когда и сколько реальных станков объявили.
+        self._relay_last: list[dict] = []
         self._last_auth_fail_at = ""
         self._tls_ctx = None
         self._cert_cn = ""
@@ -791,6 +802,7 @@ class StudioGateway:
             lan_ips = []
         vpn = self._vpn_report()
         errors = {key: value for key, value in self._errors.items() if value}
+        relay = self.relay_report()
         out = {
             "enabled": self._enabled(),
             "running": bool(self._mqtt_sock or self._ftp_sock or self._ssdp_sock
@@ -824,6 +836,20 @@ class StudioGateway:
             # Адрес, с которого реально уходят объявления. Если он не совпал
             # с host — Studio получит ответ с чужого адреса и не поверит.
             "ssdp_source": ssdp_source,
+            # Ретранслятор реальных станков (18.11): Studio в другой подсети
+            # получает NOTIFY о принтерах фермы от PrintFlow, а не от станка.
+            "relay_enabled": bool(relay.get("enabled")),
+            "relay_targets": list(relay.get("targets") or []),
+            "relay_printers": list(relay.get("printers") or []),
+            "relay_sent": int(counters.get("ssdp_relay", 0)),
+            "relay_note": str(relay.get("note") or ""),
+            # TLS (18.11): рукопожатия, возобновлённые сессии и молчуны,
+            # отброшенные по таймауту, — отдельно от dropped_connections.
+            "tls_handshakes": int(counters.get("tls_handshakes", 0)),
+            "tls_resumed": int(counters.get("tls_resumed", 0)),
+            "tls_handshake_timeouts": int(counters.get("tls_handshake_timeouts", 0)),
+            "tls_handshake_timeout": TLS_HANDSHAKE_TIMEOUT,
+            "tls_sessions": self._tls_session_stats(),
             "last_error": self.last_error,
             "errors": errors,
             "host_pinned": bool(pinned_raw),
@@ -909,6 +935,167 @@ class StudioGateway:
             + "\r\n"
         )
 
+    # ------------------------------------------------- ретранслятор SSDP (18.11)
+    def _relay_enabled(self) -> bool:
+        try:
+            return bool(self.db.setting("studio_relay_enabled", False))
+        except Exception:
+            return False
+
+    def relay_targets(self) -> list[str]:
+        """Адреса компьютеров со Studio из настройки ``studio_relay_targets``.
+
+        Через запятую/пробел/перенос строки; порт не указывается — плагин
+        Studio всегда слушает UDP :2021. Мусор (не IPv4) молча отбрасывается,
+        чтобы одна опечатка не гасила рассылку остальным.
+        """
+        try:
+            raw = str(self.db.setting("studio_relay_targets", "") or "")
+        except Exception:
+            raw = ""
+        out: list[str] = []
+        for token in re.split(r"[\s,;]+", raw):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                socket.inet_aton(token)
+            except OSError:
+                continue
+            if token.count(".") != 3 or token in out:
+                continue
+            out.append(token)
+        return out
+
+    def relay_printers(self) -> list[dict]:
+        """Реальные станки фермы, о которых стоит объявить Studio.
+
+        Берём принтеры из БД (host + серийник обязательны, виртуальный
+        принтер тура пропускаем): по серийнику и адресу Studio сама выйдет
+        на станок напрямую — PrintFlow только «кричит» о нём в те подсети,
+        куда широковещательный SSDP самого станка не долетает.
+        """
+        try:
+            rows = self.db.query(
+                "SELECT id, name, model, host, serial, enabled FROM printers "
+                "ORDER BY position, name")
+        except Exception:
+            return []
+        out: list[dict] = []
+        for row in rows or []:
+            item = dict(row)
+            host = str(item.get("host") or "").strip()
+            serial = str(item.get("serial") or "").strip().upper()
+            if not host or not serial or str(item.get("id") or "") == "virtual":
+                continue
+            if not int(item.get("enabled") if item.get("enabled") is not None else 1):
+                continue
+            try:
+                socket.inet_aton(host)
+            except OSError:
+                # Имя хоста вместо IP: Studio в Location ждёт адрес, резолвим.
+                try:
+                    host = socket.gethostbyname(host)
+                except OSError:
+                    continue
+            model = str(item.get("model") or "P1S").strip() or "P1S"
+            out.append({
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or serial),
+                "model": model,
+                "dev_model": DEV_MODELS.get(model, "C12"),
+                "host": host,
+                "serial": serial,
+            })
+        return out
+
+    def ssdp_notify_for(self, printer: dict) -> str:
+        """NOTIFY о реальном станке — теми же полями, что шлёт сам станок."""
+        return (
+            "NOTIFY * HTTP/1.1\r\n"
+            f"HOST: {SSDP_GROUP}:1900\r\n"
+            "Server: Buildroot/2018.02-rc3 UPnP/1.0 ssdpd/1.8\r\n"
+            f"Location: {printer['host']}\r\n"
+            f"NT: {SSDP_NT}\r\n"
+            "NTS: ssdp:alive\r\n"
+            f"USN: {printer['serial']}\r\n"
+            "Cache-Control: max-age=1800\r\n"
+            f"DevModel.bambu.com: {printer.get('dev_model') or 'C12'}\r\n"
+            f"DevName.bambu.com: {printer.get('name') or printer['serial']}\r\n"
+            "DevSignal.bambu.com: -44\r\n"
+            "DevConnect.bambu.com: lan\r\n"
+            "DevBind.bambu.com: free\r\n"
+            "Devseclink.bambu.com: secure\r\n"
+            "DevInf.bambu.com: eth0\r\n"
+            f"DevVersion.bambu.com: {FIRMWARE_VERSION}\r\n"
+            "DevCap.bambu.com: 1\r\n"
+            "\r\n"
+        )
+
+    def relay_report(self) -> dict:
+        """Сводка ретранслятора для статуса и карточки в настройках."""
+        enabled = self._relay_enabled()
+        targets = self.relay_targets()
+        printers = self.relay_printers() if enabled else []
+        note = ""
+        if enabled and not printers:
+            note = ("ретранслировать нечего: у станков нет адреса или серийного "
+                    "номера (вкладка «Принтеры»)")
+        elif enabled and not targets:
+            note = ("адресаты не заданы — станки объявляются только в свою "
+                    "подсеть; впишите IP компьютеров со Studio")
+        return {
+            "enabled": enabled,
+            "targets": targets,
+            "printers": [
+                {"id": item["id"], "name": item["name"], "model": item["model"],
+                 "host": item["host"], "serial": item["serial"]}
+                for item in printers
+            ],
+            "note": note,
+        }
+
+    def announce_now(self) -> dict:
+        """Кнопка «Объявить сейчас»: внеочередная рассылка NOTIFY.
+
+        Не ждёт SSDP_NOTIFY_PERIOD и не зависит от потока SSDP — отрабатывает
+        синхронно, чтобы ответ содержал, сколько объявлений реально ушло.
+        """
+        if not self._enabled():
+            return {"ok": False, "sent": 0, "relay": 0,
+                    "error": "шлюз выключен — включите его выше"}
+        self._last_notify = 0.0
+        before = dict(self._counters)
+        self._broadcast_notify(force=True)
+        after = dict(self._counters)
+        sent = int(after.get("ssdp_notify", 0)) - int(before.get("ssdp_notify", 0))
+        relayed = int(after.get("ssdp_relay", 0)) - int(before.get("ssdp_relay", 0))
+        try:
+            targets = [f"{host}:{port}" for host, port in self._notify_targets()]
+        except Exception:
+            targets = []
+        return {"ok": True, "sent": sent, "relay": relayed, "targets": targets,
+                "relay_targets": self.relay_targets(),
+                "printers": len(self.relay_printers()) if self._relay_enabled() else 0}
+
+    def _tls_session_stats(self) -> dict:
+        """Кэш TLS-сессий общего контекста: видно, возобновляет ли Studio сессии."""
+        ctx = self._tls_ctx
+        if ctx is None:
+            return {}
+        try:
+            stats = ctx.session_stats()
+        except Exception:
+            return {}
+        return {
+            "cached": int(stats.get("number", 0)),
+            "accepts": int(stats.get("accept", 0)),
+            "accept_good": int(stats.get("accept_good", 0)),
+            "hits": int(stats.get("hits", 0)),
+            "misses": int(stats.get("misses", 0)),
+            "timeouts": int(stats.get("timeouts", 0)),
+        }
+
     def _notify_targets(self) -> list[tuple[str, int]]:
         """Куда шлём NOTIFY, чтобы Studio увидел шлюз на любой машине.
 
@@ -943,6 +1130,11 @@ class StudioGateway:
             targets.append((directed, SSDP_PORTS[0]))
         targets.append((SSDP_BROADCAST, SSDP_PORTS[0]))
         targets.extend((SSDP_GROUP, port) for port in SSDP_PORTS)
+        # Адресаты ретранслятора (18.11): компьютеры со Studio в других
+        # подсетях/VLAN, куда broadcast и multicast не маршрутизируются.
+        # Плагин Studio принимает unicast NOTIFY на :2021 без вопросов.
+        for ip in self.relay_targets():
+            targets.append((ip, SSDP_PORTS[0]))
         unique: list[tuple[str, int]] = []
         for target in targets:
             if target not in unique:
@@ -1052,10 +1244,15 @@ class StudioGateway:
         except OSError:
             return False
 
-    def _broadcast_notify(self) -> None:
-        """Один цикл рассылки объявления (не чаще SSDP_NOTIFY_PERIOD)."""
+    def _broadcast_notify(self, force: bool = False) -> None:
+        """Один цикл рассылки объявления (не чаще SSDP_NOTIFY_PERIOD).
+
+        Вместе с объявлением шлюза (18.11) уходят объявления реальных станков
+        фермы, если включён ретранслятор: тем же адресатам, тем же форматом.
+        ``force`` — кнопка «Объявить сейчас», период не соблюдается.
+        """
         now = time.time()
-        if now - self._last_notify < SSDP_NOTIFY_PERIOD:
+        if not force and now - self._last_notify < SSDP_NOTIFY_PERIOD:
             return
         self._last_notify = now
         try:
@@ -1063,7 +1260,18 @@ class StudioGateway:
         except Exception:
             # БД закрыта или другая ошибка — пропустим этот цикл, но не роняем SSDP
             return
+        relay_payloads: list[bytes] = []
+        if self._relay_enabled():
+            try:
+                printers = self.relay_printers()
+                relay_payloads = [self.ssdp_notify_for(item).encode("utf-8")
+                                  for item in printers]
+                with self._lock:
+                    self._relay_last = printers
+            except Exception:
+                relay_payloads = []
         sent = 0
+        relayed = 0
         temp: list = []
         try:
             for host, port in self._notify_targets():
@@ -1076,6 +1284,9 @@ class StudioGateway:
                     temp.append(sock)
                 if self._sendto_lan(sock, payload, (host, port)):
                     sent += 1
+                for extra in relay_payloads:
+                    if self._sendto_lan(sock, extra, (host, port)):
+                        relayed += 1
         finally:
             for sock in temp:
                 try:
@@ -1084,6 +1295,8 @@ class StudioGateway:
                     pass
         if sent:
             self._bump("ssdp_notify", sent)
+        if relayed:
+            self._bump("ssdp_relay", relayed)
         self._warn_vpn()
 
     def _ssdp_reply(self, addr: tuple) -> None:
@@ -1422,9 +1635,12 @@ class StudioGateway:
             raw.bind(("0.0.0.0", port))
             raw.listen(backlog)
             raw.settimeout(1.0)
-            if tls:
-                ctx = self._tls_ctx or self._tls_context(cert, key)
-                return ctx.wrap_socket(raw, server_side=True)
+            if tls and self._tls_ctx is None:
+                # Слушающая розетка остаётся обычной TCP (18.11): рукопожатие
+                # делает поток клиента (_tls_accept) с дедлайном, а контекст
+                # один на MQTT/FTPS/канал данных — так Studio возобновляет
+                # TLS-сессию на канале данных PASV, а не жмёт руку заново.
+                self._tls_ctx = self._tls_context(cert, key)
             return raw
         except BaseException:
             try:
@@ -1441,7 +1657,7 @@ class StudioGateway:
                                         cert=cert, key=key)
                 self._bind_socks.append(sock)
                 self._spawn(f"pf-studio-bind-{port}", self._accept_loop,
-                            sock, self._bind_client)
+                            sock, self._bind_client, port == BIND_PORT_TLS)
             except Exception as exc:
                 self._record_error(
                     "bind", f"порт {port}: {exc}" if isinstance(exc, OSError) else exc)
@@ -2096,22 +2312,25 @@ class StudioGateway:
     def _start_mqtt(self, cert, key) -> None:
         sock = self._listen_tcp(MQTT_PORT, 16, tls=True, cert=cert, key=key)
         self._mqtt_sock = sock
-        self._spawn("pf-studio-mqtt", self._accept_loop, sock, self._mqtt_client)
+        self._spawn("pf-studio-mqtt", self._accept_loop, sock, self._mqtt_client, True)
 
     def _start_ftp(self, cert, key) -> None:
         sock = self._listen_tcp(FTP_PORT, 16, tls=True, cert=cert, key=key)
         self._ftp_sock = sock
-        self._spawn("pf-studio-ftp", self._accept_loop, sock, self._ftp_client)
+        self._spawn("pf-studio-ftp", self._accept_loop, sock, self._ftp_client, True)
 
-    def _accept_loop(self, sock, handler) -> None:
+    def _accept_loop(self, sock, handler, tls: bool = False) -> None:
         """Приём соединений: сбой одного клиента не должен гасить службу.
 
-        accept() на TLS-розетке сам выполняет рукопожатие. Клиент, пришедший
-        без TLS (проверка «открыт ли порт», сканер сети, антивирус, оборванное
-        соединение Studio), раньше убивал цикл целиком: порт оставался в
-        состоянии LISTEN, но новых клиентов уже не принимал — Studio висела по
-        таймауту и показывала «код=-1» на исправном шлюзе. Теперь такое
-        соединение просто отбрасывается, а счётчик виден в статусе.
+        До 18.11 розетка была TLS-обёрткой и accept() сам выполнял
+        рукопожатие — блокирующе, в потоке приёма. Клиент, открывший TCP и
+        замолчавший (проверка «открыт ли порт», сканер сети, антивирус,
+        оборванное соединение Studio), держал приём для всех остальных, и
+        Studio, пришедшая следом, висела по таймауту с «код=-1» на исправном
+        шлюзе. Теперь accept() принимает чистый TCP и сразу уходит на
+        следующего клиента, а рукопожатие делает поток клиента с дедлайном
+        (:data:`TLS_HANDSHAKE_TIMEOUT`); молчун отбрасывается, счётчики
+        ``dropped_connections`` и ``tls_handshake_timeouts`` видны в статусе.
         """
         fatal_errno = {errno.EBADF, errno.EINVAL, errno.ENOTSOCK, errno.EOPNOTSUPP}
         service = "bind" if handler == self._bind_client else (
@@ -2124,7 +2343,7 @@ class StudioGateway:
                 consecutive = 0
                 continue
             except (ssl.SSLError, ConnectionError) as exc:
-                # Почти всегда: клиент пришёл без TLS или оборвал рукопожатие.
+                # Обрыв до завершения accept() — не сбой службы.
                 self._note_dropped_connection(exc)
                 consecutive += 1
                 if consecutive >= 100:
@@ -2140,7 +2359,55 @@ class StudioGateway:
                     break
                 continue
             consecutive = 0
-            self._spawn("pf-studio-conn", handler, conn)
+            self._spawn("pf-studio-conn", self._serve_client, conn, handler, tls, service)
+
+    def _serve_client(self, conn, handler, tls: bool, service: str) -> None:
+        """Поток одного клиента: рукопожатие TLS (если нужно) и обработчик."""
+        if tls:
+            conn = self._tls_accept(conn, service)
+            if conn is None:
+                return
+        handler(conn)
+
+    def _tls_accept(self, conn, service: str = ""):
+        """Серверное рукопожатие TLS с дедлайном — вне потока accept().
+
+        Возвращает TLS-сокет или ``None`` (клиент уже закрыт). Молчащий клиент
+        считается отдельно (``tls_handshake_timeouts``): это главный симптом
+        сканера/антивируса, а не Studio. Возобновлённая сессия (тот же
+        контекст, что и у контрольного канала FTPS) — ``tls_resumed``.
+        """
+        ctx = self._tls_ctx
+        if ctx is None:
+            try:
+                conn.close()
+            except OSError:
+                pass
+            return None
+        try:
+            conn.settimeout(TLS_HANDSHAKE_TIMEOUT)
+            tls_conn = ctx.wrap_socket(conn, server_side=True)
+        except (socket.timeout, TimeoutError) as exc:
+            self._bump("tls_handshake_timeouts")
+            self._note_dropped_connection(
+                f"{service}: клиент молчит, рукопожатие TLS не началось за "
+                f"{TLS_HANDSHAKE_TIMEOUT:.0f} с ({exc})")
+        except (ssl.SSLError, ConnectionError, OSError, ValueError) as exc:
+            # Почти всегда: клиент пришёл без TLS или оборвал рукопожатие.
+            self._note_dropped_connection(f"{service}: {exc}")
+        else:
+            self._bump("tls_handshakes")
+            try:
+                if tls_conn.session_reused:
+                    self._bump("tls_resumed")
+            except (AttributeError, ValueError):
+                pass
+            return tls_conn
+        try:
+            conn.close()
+        except OSError:
+            pass
+        return None
 
     def _mqtt_client(self, conn) -> None:
         """Одно MQTT/TLS-соединение: CONNECT → SUBSCRIBE → PUBLISH → отчёты."""
@@ -2216,9 +2483,18 @@ class StudioGateway:
         if not first or first[0] != 0x16:
             return conn
         try:
-            return self._tls_ctx.wrap_socket(conn, server_side=True)
+            tls_conn = self._tls_ctx.wrap_socket(conn, server_side=True)
         except (ssl.SSLError, OSError):
             return conn
+        # Канал данных обычно возобновляет сессию контрольного канала —
+        # общий контекст это позволяет, а счётчик показывает, что так и есть.
+        self._bump("tls_handshakes")
+        try:
+            if tls_conn.session_reused:
+                self._bump("tls_resumed")
+        except (AttributeError, ValueError):
+            pass
+        return tls_conn
 
     def _accept_data(self, sock) -> None:
         """Принять канал данных PASV в фоне (клиент может прийти до STOR)."""

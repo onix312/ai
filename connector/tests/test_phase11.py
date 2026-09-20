@@ -247,6 +247,25 @@ class VirtualPrinterTests(unittest.TestCase):
         self.assertEqual(vp._state, "IDLE")  # noqa: SLF001
         vp.shutdown()
 
+    def test_snapshot_speaks_bambu_states(self):
+        """Наружу — словарь Bambu: печать = RUNNING, иначе Hero-пульт, менеджер
+        и сторож виртуальный станок «не видят» (регресс тура 18.10)."""
+        events: list = []
+        vp = self._vp(events)
+        self.assertEqual(vp.snapshot()["printer"]["state"], "IDLE")
+        vp.start_print("test.3mf", subtask_name="Тест")
+        info = vp.snapshot()["printer"]
+        self.assertEqual(info["state"], "RUNNING")
+        self.assertEqual(info["state_label"], "Печать")
+        self.assertEqual(info["task"], "Тест")
+        vp.command("pause")
+        self.assertEqual(vp.snapshot()["printer"]["state"], "PAUSE")
+        vp.command("resume")
+        self.assertEqual(vp.snapshot()["printer"]["state"], "RUNNING")
+        vp.command("stop")
+        self.assertEqual(vp.snapshot()["printer"]["state"], "IDLE")
+        vp.shutdown()
+
     def test_pause_accumulates_time(self):
         events: list = []
         vp = self._vp(events)
