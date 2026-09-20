@@ -52,6 +52,27 @@ function slStemOf(name) {
   return base.replace(/\.[^.]+$/, '');
 }
 
+function parseAmsSlot(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const m = s.match(/(\d+)\s*$/);
+  const cand = m ? m[1] : s;
+  const n = Number(cand);
+  if (!Number.isFinite(n)) return null;
+  const iv = Math.trunc(n);
+  if ((iv >= 0 && iv <= 15) || iv === 254) return iv;
+  return null;
+}
+
+function filterUsableSpools(list) {
+  return (list || []).filter((sp) => {
+    if (sp.archived) return false;
+    const rem = Number(sp.remaining_grams);
+    if (Number.isFinite(rem) && rem <= 0) return false;
+    return true;
+  });
+}
+
 /* ------------------------------------------------------------ статус */
 async function loadConveyorStatus() {
   const text = $('cv_status_text');
@@ -339,7 +360,7 @@ function toggleGcodePreview() {
 async function loadWarehouseSpools() {
   try {
     const res = await get('/api/spools');
-    conveyorSpools = (res.spools || []).filter((s) => !s.archived);
+    conveyorSpools = filterUsableSpools(res.spools || []);
     renderSpoolOptions();
   } catch (err) {
     conveyorSpools = [];
@@ -351,8 +372,9 @@ function renderSpoolOptions() {
   if (!sel) return;
   const currentVal = sel.value;
   const opts = ['<option value="">Авто-подбор по материалу</option>'];
-  conveyorSpools.forEach((s) => {
-    const slot = s.ams_slot ? ` · AMS ${s.ams_slot}` : '';
+  filterUsableSpools(conveyorSpools).forEach((s) => {
+    const slotNum = parseAmsSlot(s.ams_slot);
+    const slot = slotNum != null ? ` · AMS ${slotNum}` : (s.ams_slot ? ` · AMS ${esc(s.ams_slot)}` : '');
     const rem = s.remaining_grams ? ` · ${Math.round(s.remaining_grams)}г` : '';
     opts.push(`<option value="${esc(s.id)}">${esc(s.material || 'PLA')} ${esc(s.color_name || '')}${slot}${rem}</option>`);
   });
@@ -364,8 +386,9 @@ function autoSelectSpool(material) {
   const sel = $('cv_prep_spool');
   if (!sel || !material) return;
   const matLower = String(material).toLowerCase();
-  const found = conveyorSpools.find((s) =>
-    String(s.material || '').toLowerCase() === matLower && (s.remaining_grams || 0) > 0
+  const usable = filterUsableSpools(conveyorSpools);
+  const found = usable.find((s) =>
+    String(s.material || '').toLowerCase() === matLower && (Number(s.remaining_grams) || 0) > 0
   );
   if (found) sel.value = found.id;
 }
@@ -453,7 +476,7 @@ async function handleFileUpload(file) {
 function handleGcodeReady(info) {
   const c = Math.max(1, Math.min(100, num($('cv_prep_cycles')?.value, 1)));
   const spoolSel = $('cv_prep_spool');
-  const spool = conveyorSpools.find((s) => s.id === (spoolSel && spoolSel.value)) || null;
+  const spool = filterUsableSpools(conveyorSpools).find((s) => s.id === (spoolSel && spoolSel.value)) || null;
   prepSliced = {
     output: info.file,
     stem: slStemOf(info.file),
@@ -487,11 +510,13 @@ async function handleSlice() {
     infill_percent: infill,
     cycles,
   };
-  const spool = conveyorSpools.find((s) => s.id === spoolId);
+  const spool = filterUsableSpools(conveyorSpools).find((s) => s.id === spoolId);
   if (spool) {
     payload.spool_id = spool.id;
     if (spool.material) payload.material = spool.material;
-    if (spool.ams_slot) payload.ams_slot = spool.ams_slot;
+    const slotNum = parseAmsSlot(spool.ams_slot);
+    if (slotNum != null) payload.ams_slot = slotNum;
+    else if (spool.ams_slot) payload.ams_slot = spool.ams_slot;
   }
   if (isFarm) {
     payload.farmloop_profile = (gates && gates.profile) || 'bambu-p1s-farmloop-stage1';
@@ -531,7 +556,8 @@ function renderPrepResult(data) {
   if (rBox) rBox.hidden = false;
 
   const c = data.cycles || 1;
-  const spoolDesc = data.spool ? `${data.spool.material} ${data.spool.color_name || ''} (AMS: ${data.spool.ams_slot || '—'})` : 'По умолчанию';
+  const slotNum = data.spool ? parseAmsSlot(data.spool.ams_slot) : null;
+  const spoolDesc = data.spool ? `${data.spool.material} ${data.spool.color_name || ''} (AMS: ${slotNum != null ? slotNum : (data.spool.ams_slot || '—')})` : 'По умолчанию';
 
   if (kpis) {
     kpis.innerHTML = `
@@ -563,6 +589,7 @@ async function handleEnqueueSeries() {
   if (btn) btn.disabled = true;
   try {
     const spool = prepSliced.spool;
+    const slotNum = spool ? parseAmsSlot(spool.ams_slot) : null;
     const payload = {
       file: prepSliced.output,
       name: prepSliced.stem || prepSliced.output,
@@ -576,7 +603,7 @@ async function handleEnqueueSeries() {
       est_grams: prepSliced.grams || 0,
       material: (spool && spool.material) || prepSliced.material || '',
       spool_id: (spool && spool.id) || '',
-      ams_mapping: (spool && spool.ams_slot) ? [num(spool.ams_slot)] : [],
+      ams_mapping: slotNum != null ? [slotNum] : [],
     };
     await post('/api/jobs/enqueue', payload);
     toast('Серия в конвейере', `${c} одинаковых заданий поставлены в очередь.`);

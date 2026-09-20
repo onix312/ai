@@ -927,19 +927,53 @@ class Accounting:
             })
         return out
 
+    @staticmethod
+    def _parse_ams_slot(raw) -> str | None:
+        """Парсит слот AMS из строки/числа: 'A1','AMS 1 slot 2','3' -> '3', 254 -> '254'.
+
+        Поддерживает формат из UI и из AMS: берём trailing digits, clamp 0-15/254.
+        """
+        import re
+        s = str(raw if raw is not None else "").strip()
+        if not s:
+            return None
+        m = re.search(r"(\d+)\s*$", s)
+        cand = m.group(1) if m else s
+        try:
+            iv = int(float(cand))
+        except (TypeError, ValueError):
+            return None
+        if (0 <= iv <= 15) or iv == 254:
+            return str(iv)
+        return None
+
     # ------------------------------------------------------------------ склад
     def pick_spool(self, printer_id: str = "", ams_slot: str = "",
                    material: str = "", tray_uuid: str = "") -> dict | None:
-        """Найти катушку: по метке AMS, затем по слоту, затем по материалу."""
+        """Найти катушку: по метке AMS, затем по слоту, затем по материалу.
+
+        18.12.1 fix: ams_slot может быть 'A1','AMS 1 slot 2','3' — парсим trailing digits,
+        фильтруем remaining>0 для материальных фолбэков, archived=0 везде.
+        """
         if tray_uuid:
             row = self.db.one(
                 "SELECT * FROM spools WHERE tray_uuid=? AND archived=0", (tray_uuid,))
             if row:
                 return row
-        if printer_id and ams_slot != "":
+        if printer_id and str(ams_slot or "").strip() != "":
+            norm = self._parse_ams_slot(ams_slot)
+            if norm is not None:
+                row = self.db.one(
+                    "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0"
+                    " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                    (printer_id, norm))
+                if row:
+                    return row
+            # fallback: exact match если не парсится (старые данные)
             row = self.db.one(
-                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
-                (printer_id, str(ams_slot)))
+                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0"
+                " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                (printer_id, str(ams_slot).strip()))
             if row:
                 return row
         if material:

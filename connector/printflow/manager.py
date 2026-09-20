@@ -3559,7 +3559,14 @@ class PrinterManager:
                     critical=True)
 
     def watch_bed(self, printer_id: str) -> None:
-        """Деталь осталась на столе (идея 10): кадр финиша vs эталон стола."""
+        """Деталь осталась на столе (идея 10): кадр финиша vs эталон стола.
+
+        18.12.1 fix: farm_auto проверка раньше threshold — иначе при
+        threshold=6 и cam_thresh=6 ветка `ratio>threshold` и `ratio<=cam_thresh`
+        несовместимы и автоснятие никогда не срабатывает (dead-code).
+        Правильный порядок: сначала проверить очистку по камере FarmLoop,
+        затем обычный bed_watch.
+        """
         if not self.db.setting("bed_watch_enabled", False):
             return
         printer = self.get(printer_id)
@@ -3576,27 +3583,26 @@ class PrinterManager:
         ratio = frame_diff_ratio(frame, ref_file.read_bytes())
         if ratio is None:
             return
+        # 1) FarmLoop авто-сброс по камере — имеет приоритет: если стол пуст
+        # по порогу камеры, сразу считаем очищенным и продолжаем серию.
+        farm_auto = bool(self.db.setting("farmloop_auto_next", False))
+        farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
+        cam_thresh = num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0)
+        if farm_auto and farm_sensor in ("camera", "both") and ratio <= cam_thresh:
+            self._bed_cleared[printer_id] = True
+            try:
+                self.db.add_event(
+                    "farmloop", "Платформа пуста — цикл продолжается",
+                    f"Кадр совпал с пустым столом ({ratio}%)",
+                    printer_id, {"sensor": farm_sensor, "diff_pct": ratio})
+            except Exception:
+                pass
+            self.part_removed(printer_id)
+            return
+
         threshold = num(self.db.setting("bed_watch_threshold", 6.0), 6.0)
         if ratio > threshold:
             self._bed_cleared[printer_id] = False
-            # Проверка FarmLoop: если включен авто-сброс и камера показала, что стол уже очистился
-            # или если сработал цикл снятия деталей
-            farm_auto = bool(self.db.setting("farmloop_auto_next", False))
-            farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
-            if farm_auto and farm_sensor in ("camera", "both") and ratio <= num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0):
-                self._bed_cleared[printer_id] = True
-                # 18.8 (вкладка «Конвейер»): автоматическое снятие — событие
-                # журнала: у истории конвейера должно быть что показывать.
-                try:
-                    self.db.add_event(
-                        "farmloop", "Платформа пуста — цикл продолжается",
-                        f"Кадр совпал с пустым столом ({ratio}%)",
-                        printer_id, {"sensor": farm_sensor, "diff_pct": ratio})
-                except Exception:
-                    pass
-                self.part_removed(printer_id)
-                return
-
             self.db.add_event(
                 "guard", "Деталь могла остаться на столе",
                 f"Кадр отличается от пустого стола на {ratio}% — снимите деталь",
