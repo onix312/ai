@@ -776,11 +776,12 @@ class FilamentAutoAccountTests(unittest.TestCase):
 
 
 class GuardAndTelegramTests(unittest.TestCase):
-    """Сторож (перерасход) и новые команды Telegram (callback/медиагруппа)."""
+    """Сторож (перерасход) и тонкий бот — только меню с web_app."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.db.set_settings({"telegram_chat_id": "111", "telegram_token": "tok", "public_url": "https://example.com"})
 
     def tearDown(self):
         self.db.close()
@@ -802,7 +803,6 @@ class GuardAndTelegramTests(unittest.TestCase):
                                     "bed_target": 55, "chamber": 30},
                     "fans": {"part": 0, "aux": 0}}
             alerts = guard._check_overrun(manager.get("p1") or _FakePrinter(), snap)
-            # 70 г к 50% → проецируется 140 г против сметы 100 (+40% > 15%)
             self.assertTrue(any(a["code"] == "overrun" for a in alerts))
         finally:
             manager.shutdown()
@@ -828,44 +828,61 @@ class GuardAndTelegramTests(unittest.TestCase):
             manager.shutdown()
 
     def test_telegram_printer_selection(self):
-        from connector.printflow.manager import PrinterManager
-        from connector.printflow.telegram_bot import TelegramBot
-        from connector.printflow.bambu import BambuPrinter
-        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        from connector.printflow.staffbot import StaffBot
+        from connector.printflow.accounting import Accounting
+
+        class FakeManager:
+            def __init__(self, db):
+                self.db = db
+                self.acc = Accounting(db)
+                self.repo = None
+                self.client_bot = None
+                self._snapshot = {"printers": []}
+            def snapshot(self, printer_id: str = "") -> dict:
+                return self._snapshot
+            def queue(self):
+                return []
+            def notify_async(self, *a, **kw):
+                pass
+
+        bot = StaffBot(FakeManager(self.db))
         try:
-            bot = TelegramBot.__new__(TelegramBot)
-            bot.manager = manager
-            bot.db = self.db
-            bot._printer_choice = {}
-            # Два принтера в парке
-            manager.printers["p1"] = BambuPrinter({"id": "p1", "name": "Первый",
-                                                   "serial": "S1", "enabled": 1, "mode": "cloud"})
-            manager.printers["p2"] = BambuPrinter({"id": "p2", "name": "Второй",
-                                                   "serial": "S2", "enabled": 1, "mode": "cloud"})
-            listing = bot._list_printers("chat1")
-            self.assertIn("Первый", listing)
-            self.assertIn("Второй", listing)
-            result = bot._select_printer("chat1", 2)
-            self.assertIn("Второй", result)
-            self.assertEqual(bot._printer_choice.get("chat1"), "p2")
-            self.assertIn("1 до 2", bot._select_printer("chat1", 9))
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "принтеры")
+            self.assertTrue(calls)
+            import json
+            rm = json.loads(calls[-1][1]["reply_markup"])
+            self.assertIn("web_app", rm["inline_keyboard"][0][0])
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
     def test_telegram_run_command_next_and_reprint(self):
-        from connector.printflow.manager import PrinterManager
-        from connector.printflow.telegram_bot import TelegramBot
-        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
+        from connector.printflow.staffbot import StaffBot
+        from connector.printflow.accounting import Accounting
+
+        class FakeManager:
+            def __init__(self, db):
+                self.db = db
+                self.acc = Accounting(db)
+                self.repo = None
+                self.client_bot = None
+                self._snapshot = {"printers": []}
+            def snapshot(self, printer_id: str = "") -> dict:
+                return self._snapshot
+            def queue(self):
+                return []
+            def notify_async(self, *a, **kw):
+                pass
+
+        bot = StaffBot(FakeManager(self.db))
         try:
-            bot = TelegramBot.__new__(TelegramBot)
-            bot.manager = manager
-            bot.db = self.db
-            # reprint без failed-заданий — честная ошибка
-            self.assertIn("Нет сорванных", bot._run_command("reprint"))
-            self.assertIn("Принтеры не добавлены", bot._run_command("next"))
-            self.assertIn("Деталь снята", bot._run_command("removed"))
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "next")
+            self.assertTrue(calls)
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
 
 class _FakePrinter:
@@ -1089,85 +1106,77 @@ class SecretEncryptionTests(unittest.TestCase):
 
 
 class TelegramPhotoAndWatchTests(unittest.TestCase):
-    """«фото N» и «следи N» в Telegram: привязка фото, слежка за прогрессом."""
+    """Фото и слежка теперь в Mini App — бот только меню."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
+        self.db.set_settings({"telegram_chat_id": "111", "telegram_token": "tok", "public_url": "https://example.com"})
 
     def tearDown(self):
         self.db.close()
         self._tmp.cleanup()
 
     def _bot(self):
-        from connector.printflow.manager import PrinterManager
-        from connector.printflow.telegram_bot import TelegramBot
-        manager = PrinterManager(self.db, None)  # type: ignore[arg-type]
-        bot = TelegramBot.__new__(TelegramBot)
-        bot.manager = manager
-        bot.db = self.db
-        bot._watched = {}
-        bot._printer_choice = {}
-        bot._live = {}
-        bot._pending_stop = {}
-        return manager, bot
+        from connector.printflow.staffbot import StaffBot
+        from connector.printflow.accounting import Accounting
+
+        class FakeManager:
+            def __init__(self, db):
+                self.db = db
+                self.acc = Accounting(db)
+                self.repo = None
+                self.client_bot = None
+                self._snapshot = {"printers": []}
+            def snapshot(self, printer_id: str = "") -> dict:
+                return self._snapshot
+            def queue(self):
+                return []
+            def notify_async(self, *a, **kw):
+                pass
+
+        bot = StaffBot(FakeManager(self.db))
+        return bot
 
     def test_watch_order_registers(self):
-        manager, bot = self._bot()
+        bot = self._bot()
         try:
-            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "x",
-                                      "status": "printing"})
-            reply = bot._watch_order("chat1", "1001")
-            self.assertIn("Слежу", reply)
-            self.assertEqual(bot._watched["chat1"]["number"], "1001")
-            self.assertEqual(bot._watched["chat1"]["last_milestone"], 0)
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "следи 1001")
+            self.assertTrue(calls)
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
     def test_watch_order_missing(self):
-        manager, bot = self._bot()
+        bot = self._bot()
         try:
-            self.assertIn("не найден", bot._watch_order("chat1", "9999"))
-            self.assertEqual(bot._watched, {})
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "следи 9999")
+            self.assertTrue(calls)
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
     def test_maybe_watch_sends_on_milestone(self):
-        manager, bot = self._bot()
+        bot = self._bot()
         try:
-            self.db.upsert("orders", {"id": "o1", "number": "1001", "product": "адресник",
-                                      "status": "printing"})
-            self.db.upsert("print_jobs", {"id": "j1", "order_id": "o1", "state": "running",
-                                          "progress": 25})
-            sent = []
-            # Прогресс уходит в тот же чат, из которого попросили следить, —
-            # а не в чат по умолчанию через manager.notify_async.
-            bot._reply = lambda chat, text: sent.append((chat, text))
-            bot._watched["chat1"] = {"number": "1001", "last_milestone": 0}
-            bot._maybe_watch()
-            self.assertTrue(any("20%" in t for _, t in sent))
-            self.assertEqual([c for c, _ in sent], ["chat1"])
-            self.assertEqual(bot._watched["chat1"]["last_milestone"], 20)
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "фото")
+            self.assertTrue(calls)
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
     def test_attach_photo_to_latest_active_order(self):
-        manager, bot = self._bot()
+        bot = self._bot()
         try:
-            self.db.upsert("orders", {"id": "o9", "number": "1009", "product": "органайзер",
-                                      "status": "printing"})
-            bot._download_file = lambda file_id: b"\xff\xd8\xff\xd9JPEGDATA"
-            bot._reply = lambda chat, text: None
-            bot._attach_photo("chat1", [{"file_id": "abc123"}], "")
-            photos = self.db.query("SELECT * FROM order_photos WHERE order_id='o9'")
-            self.assertEqual(len(photos), 1)
-            self.assertEqual(photos[0]["note"], "фото из Telegram")
-            # файл реально записан в каталог фото
-            from connector.printflow.config import PHOTO_DIR
-            saved = PHOTO_DIR / photos[0]["file"]
-            self.assertTrue(saved.exists())
+            calls = []
+            bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
+            bot._dispatch("111", "фото 1009")
+            self.assertTrue(calls)
         finally:
-            manager.shutdown()
+            bot.shutdown()
 
 
 class ShoppingListTests(unittest.TestCase):

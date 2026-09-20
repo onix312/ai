@@ -41,6 +41,8 @@ TAG_TITLES = {
     "routes_farmloop": "FarmLoop: профиль подготовки G-code для P1S",
     "routes_slicer": "Слайсер: свой движок нарезки STL для P1S",
     "routes_nomenclature": "Номенклатура: вариации товара и цена из себестоимости",
+    "routes_staff": "Команда: Mini App цеха — полка, заказы, принтеры, inbox",
+    "routes_staff_miniapp": "Команда: Mini App цеха — полка, заказы, принтеры, inbox",
 }
 
 

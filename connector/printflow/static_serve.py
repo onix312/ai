@@ -66,6 +66,8 @@ def cache_policy(target: Path, raw_path: str = "") -> str:
 # выводятся из имени файла (18.0.1: пульт цеха → control.html).
 SHORT_ALIASES = {
     "/pult": "control.html",
+    "/staff": "staff.html",
+    "/цех": "staff.html",
 }
 
 

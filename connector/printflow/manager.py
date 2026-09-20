@@ -2824,20 +2824,33 @@ class PrinterManager:
         printer = self.get(printer_id)
         name = printer.record.get("name", "Принтер") if printer else "PrintFlow"
         text = f"PrintFlow · {name}\n{title}\n{detail}".strip()
-        # К завершению и ошибке прикладываем кадр: сразу видно результат.
         photo = None
         if (printer and kind in ("complete", "error")
                 and settings.get("notify_photo", True)):
             photo = printer.camera.frame
-        # Уведомления с действиями: к завершению/ошибке добавляем inline-кнопки,
-        # чтобы реагировать не выходя из чата.
-        buttons = []
+        # Кнопка Mini App цеха — во всех уведомлениях, плюс старые action-кнопки
+        miniapp_url = ""
+        try:
+            from .staffbot.core.config import get_miniapp_url
+            miniapp_url = get_miniapp_url(self.db)
+        except Exception:
+            miniapp_url = str(settings.get("public_url") or settings.get("base_url") or "") .strip()
+            if miniapp_url:
+                miniapp_url = miniapp_url.rstrip("/") + "/staff"
+            else:
+                miniapp_url = "https://example.com/staff"
+        web_btn = {"text": "🏭 Открыть цех", "web_app": {"url": miniapp_url}}
+        buttons: list = []
+        # web_app первым рядом
+        buttons.append([web_btn])
         if kind == "complete":
-            buttons = [("📷 Кадр", "cmd:frame"), ("▶ Следующее", "cmd:next"),
-                       ("🤚 Снял", "cmd:removed")]
+            buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
+                            {"text": "▶ Следующее", "callback_data": "cmd:next"},
+                            {"text": "🤚 Снял", "callback_data": "cmd:removed"}])
         elif kind == "error":
-            buttons = [("📷 Кадр", "cmd:frame"), ("↻ Повторить", "cmd:reprint"),
-                       ("▶ Продолжить", "cmd:resume")]
+            buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
+                            {"text": "↻ Повторить", "callback_data": "cmd:reprint"},
+                            {"text": "▶ Продолжить", "callback_data": "cmd:resume"}])
         self.notify_async(text, photo, buttons=buttons or None)
 
     def notify_async(self, text: str, photo: bytes | None = None,
@@ -2874,7 +2887,7 @@ class PrinterManager:
             return False
 
     def send_telegram(self, text: str, photo: bytes | None = None,
-                      buttons: list[tuple[str, str]] | None = None,
+                      buttons: list | None = None,
                       critical: bool = False, event: str = "") -> dict:
         settings = self.db.settings(include_secrets=True)
         token, chat = settings.get("telegram_token"), settings.get("telegram_chat_id")
@@ -2884,8 +2897,56 @@ class PrinterManager:
             return {"ok": True, "skipped": "quiet"}
         reply_markup = ""
         if buttons:
-            reply_markup = json.dumps({"inline_keyboard": [
-                [{"text": t, "callback_data": d} for t, d in buttons]]})
+            # Поддержка web_app кнопок (Mini App full_miniapp):
+            # - старый формат: [("text","callback")]
+            # - новый: [[{"text":"...","web_app":{"url":...}}]] или [{"text":...,"web_app":...}]
+            # - смешанный: [(text,callback)] + dict с web_app
+            try:
+                kb_rows: list[list[dict]] = []
+                # если buttons — список списков словарей (inline_keyboard уже готов)
+                if buttons and isinstance(buttons[0], list) and buttons[0] and isinstance(buttons[0][0], dict):
+                    kb_rows = buttons  # type: ignore
+                elif buttons and isinstance(buttons[0], dict) and ("web_app" in buttons[0] or "callback_data" in buttons[0]):
+                    # один ряд из словарей
+                    kb_rows = [buttons]  # type: ignore
+                else:
+                    # считаем старый формат tuple или смешанный
+                    row: list[dict] = []
+                    for item in buttons:
+                        if isinstance(item, dict):
+                            row.append(item)
+                        elif isinstance(item, (list, tuple)) and len(item) == 2:
+                            t, d = item
+                            # если d — dict с web_app, то это уже кнопка
+                            if isinstance(d, dict) and "web_app" in d:
+                                row.append({"text": str(t), "web_app": d["web_app"]})
+                            else:
+                                row.append({"text": str(t), "callback_data": str(d)})
+                        elif isinstance(item, (list, tuple)):
+                            # вложенный ряд
+                            sub_row: list[dict] = []
+                            for sub in item:
+                                if isinstance(sub, dict):
+                                    sub_row.append(sub)
+                                elif isinstance(sub, (list, tuple)) and len(sub) == 2:
+                                    sub_row.append({"text": str(sub[0]), "callback_data": str(sub[1])})
+                            if sub_row:
+                                kb_rows.append(sub_row)
+                            continue
+                    if row:
+                        kb_rows.append(row)
+                if kb_rows:
+                    reply_markup = json.dumps({"inline_keyboard": kb_rows}, ensure_ascii=False)
+                else:
+                    reply_markup = json.dumps({"inline_keyboard": [
+                        [{"text": t, "callback_data": d} for t, d in buttons]]}, ensure_ascii=False)
+            except Exception:
+                # fallback к старому поведению
+                try:
+                    reply_markup = json.dumps({"inline_keyboard": [
+                        [{"text": t, "callback_data": d} for t, d in buttons]]}, ensure_ascii=False)
+                except Exception:
+                    reply_markup = ""
         # Н54: событие уходит подписанным сотрудникам; общий чат — запасной
         # канал (и единственный, если подписок нет или событие критичное).
         targets: list[str] = []
