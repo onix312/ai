@@ -242,3 +242,129 @@ def studio_confirm(api: Any, ctx: Ctx):
 def printer_health(api: Any, ctx: Ctx):
     printer = api.printer_or_fail(ctx.one("printer_id"))
     return printer.health() if hasattr(printer, "health") else {"ok": False}
+
+
+# ------------------------------------------------------------ 18.11: слои
+def _gcode_job_file(api: Any, ctx: Ctx) -> tuple[Any, Any, str]:
+    """Файл для шкалы слоёв: печатающееся задание принтера или файл по имени.
+
+    Возвращает ``(путь | None, задание | None, причина)``. Причина — уже
+    человеческая фраза для пустого состояния виджета.
+    """
+    from .config import UPLOAD_DIR
+    from .gcode_layers import resolve_job_file
+    from .library import LIBRARY_DIR
+
+    roots = (UPLOAD_DIR, LIBRARY_DIR)
+    name = str(ctx.one("file") or "").strip()
+    if name:
+        path = resolve_job_file(name, roots)
+        if path is None:
+            return None, None, "Файл не найден в загрузках и библиотеке"
+        return path, None, ""
+    printer_id = str(ctx.one("printer_id") or "").strip()
+    if not printer_id:
+        return None, None, "Не указан принтер"
+    from .bed_projection import running_job
+    job = running_job(api.db, printer_id)
+    if job is None:
+        return None, None, "Сейчас на этом принтере ничего не печатается"
+    job_file = str(job.get("file") or "")
+    if not job_file:
+        return None, job, "У задания не записан файл"
+    path = resolve_job_file(job_file, roots)
+    if path is None:
+        return None, job, ("Файл задания не найден локально — задание запущено "
+                           "с карты принтера или из Studio без копии")
+    if path.suffix.lower() not in (".3mf", ".gcode"):
+        return None, job, "Слои считаются только по G-code или 3MF с нарезкой"
+    return path, job, ""
+
+
+def _job_brief(job: Any) -> dict | None:
+    if not job:
+        return None
+    return {
+        "id": str(job.get("id") or ""),
+        "name": str(job.get("name") or job.get("file") or ""),
+        "file": str(job.get("file") or ""),
+        "plate": job.get("plate"),
+        "layers": job.get("layers"),
+        "progress": job.get("progress"),
+    }
+
+
+@router.get("/api/gcode/layers",
+            doc="Шкала слоёв: послойный индекс G-code печатающегося задания (18.11)")
+def gcode_layers(api: Any, ctx: Ctx):
+    """Индекс слоёв: список слоёв с высотой, отрезками, пластиком и M73.
+
+    Пока файл разбирается в фоне, отвечает ``building: true`` — виджет
+    опрашивает повторно. Без локального файла — ``has: false`` и причина.
+    """
+    from .gcode_layers import index_for
+
+    path, job, reason = _gcode_job_file(api, ctx)
+    if path is None:
+        return {"has": False, "reason": reason, "job": _job_brief(job)}
+    plate = None
+    try:
+        plate = int(job.get("plate") or 0) if job else int(ctx.one("plate") or 0)
+    except (TypeError, ValueError):
+        plate = None
+    idx = index_for(path, plate or None, wait=1.5)
+    if idx is None:
+        return {"has": False, "job": _job_brief(job),
+                "reason": "В 3MF нет нарезанного G-code (Metadata/plate_N.gcode) — "
+                          "файл нужно нарезать в Studio"}
+    out = idx.overview()
+    out.update({"has": True, "job": _job_brief(job), "file": path.name, "reason": ""})
+    return out
+
+
+@router.get("/api/gcode/layer",
+            doc="Шкала слоёв: отрезки одного слоя по корзинам (18.11)")
+def gcode_layer(api: Any, ctx: Ctx):
+    from .gcode_layers import index_for
+
+    path, job, reason = _gcode_job_file(api, ctx)
+    if path is None:
+        return 404, {"error": reason}
+    try:
+        number = int(ctx.one("layer") or 0)
+    except (TypeError, ValueError):
+        number = 0
+    plate = None
+    try:
+        plate = int(job.get("plate") or 0) if job else int(ctx.one("plate") or 0)
+    except (TypeError, ValueError):
+        plate = None
+    idx = index_for(path, plate or None, wait=1.5)
+    if idx is None:
+        return 404, {"error": "В файле нет нарезанного G-code"}
+    if idx.building:
+        return 202, {"building": True, "total": len(idx.layers)}
+    layer = idx.layer(number)
+    if layer is None:
+        return 404, {"error": f"Слоя {number} нет: в файле {len(idx.layers)} слоёв"}
+    out = layer.detail()
+    out["total"] = len(idx.layers)
+    return out
+
+
+# ------------------------------------------------------- 18.11: «Объявить сейчас»
+@router.post("/api/studio/announce", audit="Bambu Studio: объявление шлюза вручную",
+             doc="Разослать SSDP-объявления шлюза и станков немедленно (18.11)")
+def studio_announce(api: Any, ctx: Ctx):
+    """Кнопка «Объявить сейчас» в карточке шлюза.
+
+    Не ждёт периода рассылки: Studio, открытая только что, увидит шлюз и
+    ретранслируемые станки сразу. В ответе — сколько объявлений ушло и куда.
+    """
+    studio = getattr(api.manager, "studio", None) if api.manager else None
+    if not studio:
+        return 400, {"error": "Шлюз Studio не инициализирован"}
+    result = studio.announce_now()
+    if not result.get("ok"):
+        return 400, {"error": result.get("error") or "Шлюз выключен", **result}
+    return result

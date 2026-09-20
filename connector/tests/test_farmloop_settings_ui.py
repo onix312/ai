@@ -107,6 +107,29 @@ class FarmLoopConveyorTabTests(unittest.TestCase):
         self.assertIn("допуск", body)
         self.assertIn("без человека", body)
 
+    def test_conveyor_prepare_and_constructor_elements_survive(self):
+        """18.9: мастер «Подготовка серии», конструктор финала и кнопка тестовой очистки."""
+        for attr in (
+            'id="cv_test_clean_btn"', 'id="cv_prepare_card"', 'id="cv_dropzone"',
+            'id="cv_file_input"', 'id="cv_library_select"', 'id="cv_prep_params"',
+            'id="cv_prep_slice"', 'id="cv_prep_enqueue"', 'id="cv_constructor"',
+            'id="cv_c_save"', 'id="cv_c_reset"', 'id="cv_c_preview_btn"',
+        ):
+            self.assertIn(attr, INDEX_HTML, f"во вкладке «Конвейер» нет {attr}")
+
+    def test_conveyor_js_calls_expected_routes(self):
+        """18.9: conveyor.js управляет тестовой очисткой, конструктором и постановкой серии."""
+        for route_fragment in (
+            "post('/api/farmloop/test-clean'",
+            "get('/api/farmloop/template'",
+            "post('/api/farmloop/template'",
+            "post('/api/library/upload'",
+            "post('/api/estimate/upload'",
+            "post('/api/slicer/slice'",
+            "post('/api/jobs/enqueue'",
+        ):
+            self.assertIn(route_fragment, CONVEYOR_JS, f"в conveyor.js нет вызова {route_fragment}")
+
 
 class FarmLoopSettingsSchemaAndRouteTests(unittest.TestCase):
     """Схема и маршрут знают каждый ключ и вычисленные гейты."""

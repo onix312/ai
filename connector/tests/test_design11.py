@@ -111,6 +111,21 @@ class LivingPanelTests(unittest.TestCase):
         app = APP_JS.read_text(encoding="utf-8")
         self.assertIn('data-kpi="${esc(label)}"', app)
 
+    def test_dashboard_has_hero_pult_and_analytics_collapse_18_10(self):
+        """18.10.0: Hero-пульт станка и эргономика смены."""
+        index = INDEX.read_text(encoding="utf-8")
+        for anchor in ('id="dash_hero_pult"', 'id="dash_hero_printers"', 'id="dash_analytics_toggle"', 'id="dash_analytics_section"'):
+            self.assertIn(anchor, index)
+        css = (ROOT / "site" / "assets" / "more.css").read_text(encoding="utf-8")
+        self.assertIn(".hero-pult-card", css)
+        self.assertIn(".hero-live-dot", css)
+        self.assertIn(".hero-speed-seg", css)
+        app = APP_JS.read_text(encoding="utf-8")
+        self.assertIn("execHeroCommand", app)
+        self.assertIn("execHeroSpeed", app)
+        self.assertIn("execHeroStartJob", app)
+        self.assertIn("dashHeroPrinterId", app)
+
 
 if __name__ == "__main__":
     unittest.main()

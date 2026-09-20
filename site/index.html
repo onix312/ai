@@ -11,12 +11,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=18.8.0"></script>
+<script src="assets/theme-init.js?v=18.12.0"></script>
 <link rel="stylesheet" href="assets/tokens.css?v=18.6.0">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=18.6.0">
 <link rel="stylesheet" href="assets/app.css?v=18.6.0">
-<link rel="stylesheet" href="assets/more.css?v=18.8.0">
+<link rel="stylesheet" href="assets/more.css?v=18.12.0">
+<link rel="stylesheet" href="assets/controls.css?v=18.12.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -83,10 +84,34 @@
   <div class="top-spacer"></div>
   <button class="cmd-trigger" id="cmd_open" type="button"><span class="ic" data-icon="search">⌕</span><span class="label">Команда или поиск…</span><kbd>Ctrl K</kbd></button>
   <div class="live-pill" id="live_pill" hidden><span class="dot" id="live_dot"></span><span><b id="live_name">—</b> <small id="live_state"></small></span></div>
+  <button class="icon-btn inc-bell" id="incidents_btn" type="button" title="Инциденты: тревоги станков и цеха (Alt+I)" aria-label="Инциденты"><span class="ic" data-icon="siren">⚠</span></button>
+  <button class="icon-btn" id="sound_btn" type="button" title="Звуки панели" aria-pressed="true"><span class="ic" data-icon="volume">🔔</span></button>
   <button class="icon-btn" id="density_btn" type="button" title="Плотность интерфейса"><span class="ic" data-icon="layout">◫</span></button>
   <button class="icon-btn" id="theme_btn" type="button" title="Тема оформления"><span class="ic" data-icon="theme">◐</span></button>
   <button class="btn primary" id="quick_order" type="button"><span class="ic" data-icon="plus">+</span>Заказ</button>
  </header>
+
+ <!-- 18.11: шторка инцидентов — тревоги фермы с действием в строке -->
+ <aside id="incidents_drawer" class="inc-drawer" aria-hidden="true">
+  <div class="inc-panel" role="dialog" aria-modal="true" aria-label="Инциденты">
+   <div class="inc-head">
+    <div><b>Инциденты</b><small>Ошибки станков, защита печати, брак, склад — и действие сразу в строке</small></div>
+    <div class="row gap">
+     <button class="btn xs ghost" type="button" data-inc-readall title="Снять счётчик непрочитанного">Прочитано</button>
+     <button class="icon-btn sm" type="button" data-inc-close aria-label="Закрыть">×</button>
+    </div>
+   </div>
+   <div class="inc-filters">
+    <button class="chip on" type="button" data-inc-filter="all">Все <small></small></button>
+    <button class="chip" type="button" data-inc-filter="bad">Тревоги <small></small></button>
+    <button class="chip" type="button" data-inc-filter="warn">Внимание <small></small></button>
+    <button class="chip" type="button" data-inc-filter="info">Инфо <small></small></button>
+    <label class="check inc-only"><input type="checkbox" id="incidents_printers_only"> только станки</label>
+   </div>
+   <div id="incidents_list" class="inc-list"></div>
+   <div class="inc-foot muted">Alt+I — открыть или закрыть. Закрытие шторки отмечает всё увиденным; счётчик на кнопке — новые тревоги и предупреждения.</div>
+  </div>
+ </aside>
 
  <div id="cycobar" hidden>
   <span class="cb-item" title="Сердцебиение системы"><i class="cb-dot" id="cb_dot"></i><b>Цех</b></span>
@@ -111,74 +136,102 @@
    <button class="btn" id="dash_refresh" type="button"><span class="ic" data-icon="refresh">↻</span>Обновить</button>
   </div>
  </div>
- <div class="kpi-grid" id="dash_kpis" data-widget="kpis"><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div></div>
- <div class="card operator-focus" data-widget="operator_focus" style="margin-top:16px">
-  <div class="card-head"><div><h2>Сейчас нужно сделать</h2><p id="operator_focus_sub">Сначала опасное и срочное, потом плановая работа</p></div><button class="btn sm ghost" id="operator_focus_refresh" type="button">↻</button></div>
-  <div id="operator_focus"></div>
- </div>
- <div class="card" data-widget="plan" style="margin-top:16px">
-  <div class="card-head"><div><h2>План на сегодня</h2><p id="dash_plan_sub">Что печатать следующим — заказы и пополнение полки</p></div><a href="#queue" data-view="queue">Очередь →</a></div>
-  <div id="dash_plan"><div class="skel-row"><i class="skel" style="width:88%"></i></div><div class="skel-row"><i class="skel" style="width:72%"></i></div><div class="skel-row"><i class="skel" style="width:55%"></i></div></div>
- </div>
- <div class="card" data-widget="health" style="margin-top:16px">
-  <div class="card-head"><div><h2>Здоровье бизнеса</h2><p id="dash_health_sub">Цель месяца, касса вперёд и налоги</p></div><a href="#finance" data-view="finance">Финансы →</a></div>
-  <div id="dash_health"></div>
- </div>
- <div class="grid g-2-1" style="margin-top:16px">
-  <div class="card" data-widget="active">
-   <div class="card-head"><div><h2>Активная печать</h2><p id="dash_active_sub">—</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
-   <div id="dash_active"><div class="skel-row"><i class="skel" style="width:46%"></i></div><div class="skel-row"><i class="skel" style="width:78%"></i></div></div>
+
+ <!-- 18.10.0: Hero-пульт активного станка (производственный контур) -->
+ <div class="card hero-pult-card" id="dash_hero_pult">
+  <div class="card-head hero-pult-head">
+   <div class="hero-pult-title-wrap">
+    <div class="hero-pult-badge-row">
+     <span class="eyebrow">Живой цех</span>
+     <span class="hero-live-dot pulse" id="dash_hero_dot"></span>
+    </div>
+    <h2>Hero-пульт станка</h2>
+    <p id="dash_active_sub">—</p>
+   </div>
+   <div class="hero-pult-printers" id="dash_hero_printers"></div>
   </div>
-  <div class="card" data-widget="gauge">
-   <div class="card-head"><div><h2>Прибыль за час печати</h2><p>Норма — от <span id="dash_gauge_norm">250 ₽</span> за час</p></div></div>
-   <div id="dash_gauge" class="gauge-wrap"></div>
+  <div id="dash_active">
+   <div class="skel-row"><i class="skel" style="width:46%"></i></div>
+   <div class="skel-row"><i class="skel" style="width:78%"></i></div>
   </div>
  </div>
- <div class="grid g-2-1" style="margin-top:16px">
-  <div class="card" data-widget="filament">
-   <div class="card-head"><div><h2>Пластик на очередь</h2><p id="dash_filament_sub">Хватит ли катушек на задания</p></div><a href="#inventory" data-view="inventory">Склад →</a></div>
-   <div id="dash_filament"></div>
-  </div>
-  <div class="card" data-widget="ams">
-   <div class="card-head"><div><h2>AMS</h2><p id="dash_ams_env">—</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
-   <div id="dash_ams"></div>
-  </div>
- </div>
- <div class="grid g-2-1" style="margin-top:16px">
-  <div class="card" data-widget="chart">
-   <div class="card-head"><div><h2>Деньги и печать по дням</h2><p id="dash_chart_sub">Доход, расход и часы печати</p></div>
-    <div class="seg" id="dash_chart_mode"><button data-mode="money" class="on">Деньги</button><button data-mode="hours">Часы</button><button data-mode="grams">Граммы</button></div></div>
-   <div class="chart-wrap"><div id="dash_chart"></div><div class="chart-tip" id="dash_tip"></div></div>
-   <div class="chart-legend" id="dash_legend"></div>
-  </div>
-  <div class="card" data-widget="printers">
-   <div class="card-head"><div><h2>Парк принтеров</h2><p>Живое состояние</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
-   <div id="dash_printers"></div>
-  </div>
- </div>
+
+ <!-- 4 ключевых KPI смены -->
+ <div class="kpi-grid kpi-grid-4" id="dash_kpis" data-widget="kpis" style="margin-top:16px"><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div><div class="kpi"><span class="label"><i class="skel" style="width:52%"></i></span><b class="value"><i class="skel" style="width:64%;height:24px"></i></b><span class="sub"><i class="skel" style="width:74%"></i></span></div></div>
+
+ <!-- Оперативные действия: Сейчас нужно сделать + Ближайшие сроки -->
  <div class="grid g2" style="margin-top:16px">
+  <div class="card operator-focus" data-widget="operator_focus">
+   <div class="card-head"><div><h2>Сейчас нужно сделать</h2><p id="operator_focus_sub">Сначала опасное и срочное, потом плановая работа</p></div><button class="btn sm ghost" id="operator_focus_refresh" type="button">↻</button></div>
+   <div id="operator_focus"></div>
+  </div>
   <div class="card" data-widget="due">
    <div class="card-head"><div><h2>Ближайшие сроки</h2><p>Сначала просроченные и срочные</p></div><a href="#orders" data-view="orders">Все заказы →</a></div>
    <div id="dash_due"></div>
   </div>
-  <div class="card" data-widget="events">
+ </div>
+
+ <!-- Сворачиваемый блок аналитики и графиков -->
+ <div class="dash-analytics-bar" style="margin-top:20px;display:flex;align-items:center;justify-content:space-between">
+  <button class="btn sm ghost dash-toggle-btn" id="dash_analytics_toggle" type="button" aria-expanded="false" style="font-weight:600">
+   <span class="ic" data-icon="chart">📈</span> <span id="dash_analytics_toggle_txt">Показать аналитику и графики смены</span> <span class="arr" id="dash_analytics_arr">▾</span>
+  </button>
+  <small class="muted">Графики денег, часы печати, парк и таймлайн</small>
+ </div>
+
+ <div id="dash_analytics_section" class="dash-collapsible-analytics hidden" style="margin-top:12px">
+  <div class="card" data-widget="plan">
+   <div class="card-head"><div><h2>План на сегодня</h2><p id="dash_plan_sub">Что печатать следующим — заказы и пополнение полки</p></div><a href="#queue" data-view="queue">Очередь →</a></div>
+   <div id="dash_plan"><div class="skel-row"><i class="skel" style="width:88%"></i></div><div class="skel-row"><i class="skel" style="width:72%"></i></div><div class="skel-row"><i class="skel" style="width:55%"></i></div></div>
+  </div>
+  <div class="card" data-widget="health" style="margin-top:16px">
+   <div class="card-head"><div><h2>Здоровье бизнеса</h2><p id="dash_health_sub">Цель месяца, касса вперёд и налоги</p></div><a href="#finance" data-view="finance">Финансы →</a></div>
+   <div id="dash_health"></div>
+  </div>
+  <div class="grid g-2-1" style="margin-top:16px">
+   <div class="card" data-widget="gauge">
+    <div class="card-head"><div><h2>Прибыль за час печати</h2><p>Норма — от <span id="dash_gauge_norm">250 ₽</span> за час</p></div></div>
+    <div id="dash_gauge" class="gauge-wrap"></div>
+   </div>
+   <div class="card" data-widget="ams">
+    <div class="card-head"><div><h2>AMS</h2><p id="dash_ams_env">—</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
+    <div id="dash_ams"></div>
+   </div>
+  </div>
+  <div class="card" data-widget="filament" style="margin-top:16px">
+   <div class="card-head"><div><h2>Пластик на очередь</h2><p id="dash_filament_sub">Хватит ли катушек на задания</p></div><a href="#inventory" data-view="inventory">Склад →</a></div>
+   <div id="dash_filament"></div>
+  </div>
+  <div class="grid g-2-1" style="margin-top:16px">
+   <div class="card" data-widget="chart">
+    <div class="card-head"><div><h2>Деньги и печать по дням</h2><p id="dash_chart_sub">Доход, расход и часы печати</p></div>
+     <div class="seg" id="dash_chart_mode"><button data-mode="money" class="on">Деньги</button><button data-mode="hours">Часы</button><button data-mode="grams">Граммы</button></div></div>
+    <div class="chart-wrap"><div id="dash_chart"></div><div class="chart-tip" id="dash_tip"></div></div>
+    <div class="chart-legend" id="dash_legend"></div>
+   </div>
+   <div class="card" data-widget="printers">
+    <div class="card-head"><div><h2>Парк принтеров</h2><p>Живое состояние</p></div><a href="#printers" data-view="printers">Открыть →</a></div>
+    <div id="dash_printers"></div>
+   </div>
+  </div>
+  <div class="card" data-widget="events" style="margin-top:16px">
    <div class="card-head"><div><h2>Лента событий</h2><p>Печать, ошибки, склад и заказы</p></div><button class="btn sm ghost" id="dash_events_refresh" type="button">↻</button></div>
    <div class="event-list" id="dash_events"><div class="skel-row"><i class="skel" style="width:64%"></i></div><div class="skel-row"><i class="skel" style="width:46%"></i></div><div class="skel-row"><i class="skel" style="width:58%"></i></div><div class="skel-row"><i class="skel" style="width:38%"></i></div><div class="skel-row"><i class="skel" style="width:52%"></i></div></div>
   </div>
- </div>
- <div class="card" data-widget="timeline" style="margin-top:16px">
-  <div class="card-head"><div><h2>Таймлайн печати за день</h2><p id="dash_timeline_sub">—</p></div><a href="#queue" data-view="queue">Журнал →</a></div>
-  <div id="dash_timeline"></div>
- </div>
- <div class="grid2" style="margin-top:16px">
-  <div class="card" data-widget="achievements">
-   <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div></div>
-   <div class="dash-records" id="dash_records" hidden></div>
-   <div id="dash_achievements" class="muted">Загружаем…</div>
+  <div class="card" data-widget="timeline" style="margin-top:16px">
+   <div class="card-head"><div><h2>Таймлайн печати за день</h2><p id="dash_timeline_sub">—</p></div><a href="#queue" data-view="queue">Журнал →</a></div>
+   <div id="dash_timeline"></div>
   </div>
-  <div class="card" data-widget="heartbeat">
-   <div class="card-head"><div><h2>Здоровье системы</h2><p>Бот, принтеры, бэкапы и диск — что живёт</p></div></div>
-   <div id="dash_heartbeat" class="muted">Проверяем…</div>
+  <div class="grid2" style="margin-top:16px">
+   <div class="card" data-widget="achievements">
+    <div class="card-head"><div><h2>Достижения цеха</h2><p id="dash_ach_sub">Бейджи из фактов: печати, доход, брак</p></div></div>
+    <div class="dash-records" id="dash_records" hidden></div>
+    <div id="dash_achievements" class="muted">Загружаем…</div>
+   </div>
+   <div class="card" data-widget="heartbeat">
+    <div class="card-head"><div><h2>Здоровье системы</h2><p>Бот, принтеры, бэкапы и диск — что живёт</p></div></div>
+    <div id="dash_heartbeat" class="muted">Проверяем…</div>
+   </div>
   </div>
  </div>
 </section>
@@ -233,6 +286,9 @@
       <div class="wide"><span>Прибыль / окупаемость</span><b id="pr_job_profit">—</b></div>
      </div>
     </article>
+    <div class="card pr-layers-card" id="pr_layers_card" hidden>
+     <div id="pr_layers_host"></div>
+    </div>
     <div class="card" id="pr_ready_card">
      <div class="card-head"><div><h2>Готовность к старту</h2><p id="pr_ready_sub">Проверяем следующее задание…</p></div><span class="chip" id="pr_ready_chip">—</span></div>
      <div id="pr_ready"><div class="empty compact"><span>Проверяем очередь и AMS…</span></div></div>
@@ -280,7 +336,11 @@
       <button class="cmd-btn" id="pr_map_toggle" type="button" title="Проекция плиты поверх видео: контуры объектов (119)"><span class="ic" data-icon="layout">▤</span>Проекция плиты</button>
      </div>
      <div class="notice" id="pr_bed_status" hidden style="margin-top:8px"><span>▭</span><span id="pr_bed_status_text"></span></div>
-     <div class="cmd-row">
+     <div class="pr-knob-row" id="pr_speed_knob_row" hidden>
+      <div id="pr_speed_knob" aria-label="Регулятор скорости печати"></div>
+      <div class="pr-knob-note"><b>Регулятор скорости</b><p>Тихо 50 % · Стандарт 100 % · Спорт 124 % · Ludicrous 166 %. Поверните ручку, колесо мыши или клавиши ← →; деление подтверждает станок.</p></div>
+     </div>
+     <div class="cmd-row" id="pr_speed_row">
       <label class="field"><span>Скорость печати</span><select id="pr_speed_sel"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Ludicrous</option></select></label>
       <button class="btn" id="pr_speed_apply" type="button">Применить</button>
      </div>
@@ -336,6 +396,10 @@
 <div class="card">
       <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
      <div id="pr_ams_new"></div>
+     <div class="pr-ams-path" id="pr_ams_path" hidden>
+      <div class="hero-block-head"><b>Тракт AMS</b><small>подсвечена трубка, из которой станок печатает сейчас</small></div>
+      <div id="pr_ams_path_host"></div>
+     </div>
      <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
     </div>
   </div>
@@ -1053,10 +1117,12 @@
     <select id="pr_sl_spool" class="field" aria-label="Катушка со склада пластика"><option value="">Катушка: как в настройках</option></select>
    </div>
    <div class="pr-slicer-row">
+    <button class="btn" id="pr_sl_sections" type="button" disabled title="Разрезать модель на слои прямо в браузере (WebGPU или процессор) и показать слои, свесы, тонкие места и оценку пластика — без нарезки на сервере">Сечения</button>
     <button class="btn primary" id="pr_sl_plan" type="button" disabled>План</button>
     <button class="btn" id="pr_sl_slice" type="button" disabled>Нарезать</button>
     <small id="pr_sl_status" class="muted"></small>
    </div>
+   <div id="pr_sl_gpu" class="pr-sl-gpu" hidden></div>
    <div id="pr_sl_result" hidden></div>
    <div id="pr_sl_actions" class="pr-slicer-row" hidden></div>
   </div>
@@ -1096,32 +1162,133 @@
 <section class="view" id="view-conveyor">
  <div class="view-head">
   <div><span class="eyebrow">PrintFlow Farm · P1S Stage 1</span><h1>Конвейер</h1><p>Снятие детали и следующий цикл. Автоматика включится только когда подтверждены все допуски — гейты видны до старта.</p></div>
-  <div class="head-actions"><span id="cv_tag" class="tag" hidden></span><button class="btn" id="cv_refresh" type="button">↻ Обновить</button></div>
+  <div class="head-actions">
+   <span id="cv_tag" class="tag" hidden></span>
+   <button class="btn" id="cv_test_clean_btn" type="button" title="Пробный запуск G-code толкателя на свободном принтере">Тестовая очистка стола</button>
+   <button class="btn" id="cv_refresh" type="button">↻ Обновить</button>
+  </div>
  </div>
  <section class="card cv-status-card" aria-live="polite">
   <div class="cv-status-mark" aria-hidden="true">↻</div>
   <div class="cv-status-main"><div class="card-kicker">FarmLoop Stage 1</div><h2>Состояние конвейера</h2><p id="cv_status_text">Проверяем профиль и шаблон автоматического снятия…</p><small id="cv_status_meta" class="muted"></small></div>
   <span id="cv_status_tag" class="tag">Проверяем</span>
  </section>
+
+ <!-- Мастер подготовки серии (Ступени) -->
+ <section class="card cv-prepare-card" id="cv_prepare_card" aria-live="polite">
+  <div class="card-head">
+   <div>
+    <span class="card-kicker">Подготовка серии · P1S</span>
+    <h2>Загрузка и отправка в конвейер</h2>
+    <p>Бросьте STL для встроенной нарезки или готовый 3MF/G-code из Bambu Studio. Сервер добавит проверенный блок снятия FarmLoop и подберёт катушку со склада.</p>
+   </div>
+   <span id="cv_prep_tag" class="tag">Мастер серии</span>
+  </div>
+
+  <div class="cv-dropzone" id="cv_dropzone" tabindex="0" role="button" aria-label="Зона загрузки моделей">
+   <div class="cv-dropzone-icon" aria-hidden="true">⇪</div>
+   <div class="cv-dropzone-title">Перетащите сюда STL, 3MF или G-code</div>
+   <div class="cv-dropzone-sub">или нажмите кнопку для выбора файла с компьютера</div>
+   <button class="btn sm" id="cv_browse_btn" type="button">Выбрать файл…</button>
+   <input type="file" id="cv_file_input" accept=".stl,.obj,.3mf,.gcode" hidden aria-hidden="true">
+  </div>
+
+  <div class="cv-prep-work">
+   <div class="cv-prep-row">
+    <label class="sr-only" for="cv_library_select">Модель из библиотеки</label>
+    <select id="cv_library_select" class="field" aria-label="Модель из библиотеки"><option value="">Загружаем список моделей…</option></select>
+    <button class="btn" id="cv_library_refresh" type="button" title="Обновить список моделей">↻</button>
+   </div>
+
+   <!-- Ступень 1: Параметры для STL -->
+   <div id="cv_prep_params" class="cv-prep-work" hidden>
+    <div class="cv-prep-row">
+     <label class="field"><span>Слой, мм</span><input type="number" id="cv_prep_layer" step="0.04" min="0.08" max="0.28" value="0.20"></label>
+     <label class="field"><span>Заполнение, %</span><input type="number" id="cv_prep_infill" min="5" max="100" value="15"></label>
+     <label class="field"><span>Деталей в серии</span><input type="number" id="cv_prep_cycles" min="1" max="100" value="1" title="Количество деталей в серии"></label>
+     <label class="field"><span>Катушка со склада</span><select id="cv_prep_spool"><option value="">Авто-подбор по материалу</option></select></label>
+    </div>
+    <div class="cv-prep-row">
+     <label class="pr-sl-check"><input type="checkbox" id="cv_prep_farm" checked>Блок снятия детали (FarmLoop)</label>
+     <button class="btn primary" id="cv_prep_slice" type="button">Нарезать модель</button>
+     <button class="btn" id="cv_prep_cancel" type="button">Отмена</button>
+     <small id="cv_prep_status" class="muted"></small>
+    </div>
+   </div>
+
+   <!-- Ступень 2: Результат сметы и отправка в конвейер -->
+   <div id="cv_prep_result" class="cv-prep-work" hidden>
+    <div class="cv-prep-kpis" id="cv_prep_kpis"></div>
+    <div class="cv-prep-row">
+     <button class="btn primary" id="cv_prep_enqueue" type="button">В конвейер (1 деталь)</button>
+     <a class="btn" id="cv_prep_download" href="#" download hidden>Скачать .gcode</a>
+     <button class="btn" id="cv_prep_reset" type="button">Новый файл</button>
+     <small id="cv_prep_res_status" class="muted"></small>
+    </div>
+   </div>
+  </div>
+ </section>
+
+ <!-- Инженерный блок: Конструктор финала и Safety-gate -->
+ <details class="cv-engineering-block card" id="cv_eng_details">
+  <summary class="cv-eng-summary"><div><span class="card-kicker">Инженерия конвейера</span><h3 style="margin:2px 0;display:inline-block">Конструктор финала G-code и допуски</h3></div><span class="tag">Настройка</span></summary>
+  <div class="cv-engineering-inner">
+   <!-- Конструктор финала -->
+   <section class="cv-constructor-card" id="cv_constructor">
+    <div class="card-head">
+     <div>
+      <span class="card-kicker">G-code шаблонизатор</span>
+      <h2>Конструктор финала (FarmLoop)</h2>
+      <p>Последовательность действий по завершении печати для безопасного охлаждения и сброса деталей толкателем на Bambu Lab P1S.</p>
+     </div>
+     <div class="head-actions">
+      <button class="btn sm" id="cv_c_reset" type="button">Базовый P1S</button>
+      <button class="btn sm primary" id="cv_c_save" type="button">Сохранить шаблон</button>
+     </div>
+    </div>
+    <div class="cv-prep-row">
+     <label class="field"><span>Остывание стола до, °C</span><input type="number" id="cv_c_temp" min="20" max="80" value="35"></label>
+     <label class="field"><span>Подъём сопла Z, мм</span><input type="number" id="cv_c_zlift" min="5" max="100" value="15"></label>
+     <label class="field"><span>Вылет толкателя Y, мм</span><input type="number" id="cv_c_y" min="100" max="256" value="245"></label>
+     <label class="field"><span>Скорость толкателя F</span><input type="number" id="cv_c_speed" min="500" max="6000" value="2400"></label>
+    </div>
+    <div class="cv-prep-row">
+     <label class="pr-sl-check"><input type="checkbox" id="cv_c_fan" checked>Турбо-обдув камеры при остывании (M106 P2 S255)</label>
+    </div>
+    <label class="field">
+     <span>Свободные дополнения G-code (выполняются перед парковкой)</span>
+     <textarea id="cv_c_custom" class="field" rows="3" placeholder="; Дополнительные команды G-code..."></textarea>
+    </label>
+    <div class="cv-prep-row">
+     <button class="btn sm" id="cv_c_preview_btn" type="button">Показать итоговый G-code</button>
+     <small id="cv_c_status" class="muted"></small>
+    </div>
+    <pre id="cv_c_preview" class="cv-gcode-preview" hidden></pre>
+   </section>
+
+   <!-- Допуски и датчики (Safety-gate) -->
+   <section class="cv-settings-card">
+    <div class="card-head"><div><span class="card-kicker">Safety-gate</span><h2>Допуски и датчики</h2><p>Четыре допуска на работу без человека и подтверждение пустой платформы.</p></div><button class="btn sm" id="cv_save" type="button">Сохранить</button></div>
+    <div id="cv_settings"></div>
+    <p id="cv_gate_note" class="cv-gate-note" hidden></p>
+   </section>
+  </div>
+ </details>
+
  <div class="cv-grid">
-  <section class="card cv-settings-card">
-   <div class="card-head"><div><span class="card-kicker">Safety-gate</span><h2>Допуски и датчики</h2><p>Четыре допуска на работу без человека и подтверждение пустой платформы.</p></div><button class="btn sm" id="cv_save" type="button">Сохранить</button></div>
-   <div id="cv_settings"></div>
-   <p id="cv_gate_note" class="cv-gate-note" hidden></p>
-  </section>
   <section class="card cv-history-card">
    <div class="card-head"><div><span class="card-kicker">Журнал</span><h2>История конвейера</h2><p>Подготовленные файлы серии и автоматические снятия детали.</p></div></div>
    <div id="cv_history" class="cv-history" aria-live="polite"></div>
   </section>
+  <section class="card cv-how">
+   <div class="card-head"><div><span class="card-kicker">Как это работает</span><h2>Серия без человека</h2></div></div>
+   <ol class="cv-steps">
+    <li>Задание попадает в конвейер двумя путями: загрузка G-code с профилем FarmLoop или нарезка в карточке слайсера «Печать» с флагом «Для конвейера». Файл пересобирается с проверенным шаблоном из <code>data/farmloop-templates</code>.</li>
+    <li>После печати камера сравнивает платформу с эталоном: совпало — деталь снята, цикл продолжается.</li>
+    <li>Следующий цикл стартует сам, только когда все допуски включены и датчик или камера подтвердили пустую платформу.</li>
+   </ol>
+  </section>
  </div>
- <section class="card cv-how">
-  <div class="card-head"><div><span class="card-kicker">Как это работает</span><h2>Серия без человека</h2></div></div>
-  <ol class="cv-steps">
-   <li>Задание попадает в конвейер двумя путями: загрузка G-code с профилем FarmLoop или нарезка в карточке слайсера «Печать» с флагом «Для конвейера». Файл пересобирается с проверенным шаблоном из <code>data/farmloop-templates</code>.</li>
-   <li>После печати камера сравнивает платформу с эталоном: совпало — деталь снята, цикл продолжается.</li>
-   <li>Следующий цикл стартует сам, только когда все допуски включены и датчик или камера подтвердили пустую платформу.</li>
-  </ol>
- </section>
 </section>
 
 <!-- ============================================== ЦЕНТР 10.0 -->
@@ -3869,6 +4036,10 @@
      <label class="check"><span class="switch"><input type="checkbox" id="set_colorblind"><i></i></span>Включено</label></div>
    </div>
    <div class="card" data-set-card>
+    <div class="card-head"><div><h2>Звуки панели</h2><p>Клики команд и сигналы событий станков — синтез в браузере, без файлов</p></div></div>
+    <div id="set_sound" class="muted">Загружаем…</div>
+   </div>
+   <div class="card" data-set-card>
     <div class="card-head"><div><h2>NOZZA tour — демо для гостей</h2><p>Виртуальный принтер и демо-данные; откат по одной кнопке</p></div></div>
     <div id="set_tour" class="muted">Проверяем состояние…</div>
    </div>
@@ -5369,10 +5540,16 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=18.8.0"></script>
+<script src="assets/core.js?v=18.12.0"></script>
 <script src="assets/colors.js?v=18.6.0"></script>
-<script src="assets/icons.js?v=17.0.1"></script>
-<script src="assets/printer.js?v=18.6.0"></script>
+<script src="assets/icons.js?v=18.12.0"></script>
+<script src="assets/sound.js?v=18.12.0"></script>
+<script src="assets/knob.js?v=18.12.0"></script>
+<script src="assets/amspath.js?v=18.12.0"></script>
+<script src="assets/layers.js?v=18.12.0"></script>
+<script src="assets/incidents.js?v=18.12.0"></script>
+<script src="assets/gpuslice.js?v=18.12.0"></script>
+<script src="assets/printer.js?v=18.12.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=18.6.0"></script>
 <script src="assets/money.js?v=18.7.0"></script>
@@ -5383,7 +5560,7 @@
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
 <script src="assets/workshop.js?v=18.7.0"></script>
-<script src="assets/app.js?v=18.8.0"></script>
+<script src="assets/app.js?v=18.12.0"></script>
 <script type="module" src="assets/dist/printflow-app.js?v=17.0.1"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>

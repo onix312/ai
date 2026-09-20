@@ -342,6 +342,8 @@ function toast(title, sub, kind = 'ok', action = null) {
   el.className = 'toast ' + kind;
   el.dataset.group = title;
   el.dataset.seen = '1';
+  // 18.11: звуковой модуль слушает тосты (ошибка — сигнал «внимание»).
+  try { document.dispatchEvent(new CustomEvent('pf:toast', { detail: { kind, title } })); } catch (e) { /* без звука */ }
   const dur = kind === 'bad' ? 5200 : 3200;
   const act = (action && action.label)
     ? `<button class="toast-action" type="button">${esc(action.label)}</button>` : '';

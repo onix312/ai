@@ -357,6 +357,13 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "studio_gateway_serial": "",
     "studio_gateway_access_code": "",
     "studio_gateway_printer_id": "",
+    # Ретранслятор SSDP (18.11): PrintFlow объявляет Studio реальные станки
+    # фермы (serial + IP из вкладки «Принтеры») — для Studio на компьютере в
+    # другой подсети/VLAN, куда широковещательный SSDP станка не долетает.
+    # Адресаты — IPv4 компьютеров со Studio через запятую; они же получают
+    # unicast-объявление самого шлюза на UDP :2021.
+    "studio_relay_enabled": False,
+    "studio_relay_targets": "",
     "slicer_bin": "",
     "slicer_profile_path": "",
     # --- 8.0: 3MF парсер --------------------------------------------------

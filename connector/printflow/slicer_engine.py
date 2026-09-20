@@ -36,6 +36,17 @@ END = "; PRINTFLOW SLICER END"
 ENGINE_ID = "printflow"
 ENGINE_VERSION = 1
 
+# Имена ;TYPE: в форме PrusaSlicer/OrcaSlicer — их понимают шкала слоёв
+# PrintFlow (gcode_layers.bucket_of), Bambu Studio и сторонние просмотрщики.
+TYPE_MARKERS = {
+    "perimeter_outer": "External perimeter",
+    "perimeter": "Perimeter",
+    "skin": "Solid infill",
+    "infill": "Internal infill",
+    "support": "Support material",
+    "brim": "Skirt/Brim",
+}
+
 # Пределы Stage 1: движок честно отказывается, а не берётся за модель,
 # которую не осилит за разумное время на обычном компьютере цеха.
 MAX_MODEL_MB = 120.0
@@ -113,6 +124,7 @@ class Poly:
     width: float = 0.45
     height: float = 0.2
     flow: float = 1.0
+    outer: bool = False       # наружный периметр (последнее кольцо)
 
     @property
     def speed_kind(self) -> str:
@@ -883,7 +895,8 @@ def build_paths(layers: list, settings: SliceSettings, profile) -> tuple:
                 ring = offset_contour(pts, delta, is_hole)
                 if len(ring) >= 3:
                     polys.append(Poly("perimeter", index, z, ring, closed=True,
-                                      width=ext_w, height=height, flow=flow))
+                                      width=ext_w, height=height, flow=flow,
+                                      outer=(wall == 0)))
 
         raw_fill, fill_spanner = fill_contours(index, _fill_angle(
             settings.infill_pattern, index))
@@ -1079,6 +1092,10 @@ def write_gcode(polys: list, settings: SliceSettings, profile,
     filament_area = math.pi * (settings.filament_mm / 2.0) ** 2
     layer_index = None
     last_kind = ""
+    last_type = ""
+    # (номер строки тела, секунд к началу слоя) — для M73 вторым проходом,
+    # когда известно полное время.
+    layer_marks: list = []
     for poly in polys:
         if not poly.pts:
             continue
@@ -1088,6 +1105,16 @@ def write_gcode(polys: list, settings: SliceSettings, profile,
                 pwm = int(round(max(0, min(100, settings.fan_percent)) * 255 / 100))
                 writer.add(f"M106 S{pwm}")
             writer.add(f";LAYER:{layer_index}")
+            layer_marks.append((len(writer.lines), writer.seconds))
+            last_type = ""
+        type_name = TYPE_MARKERS.get(
+            "perimeter_outer" if (poly.kind == "perimeter" and poly.outer) else poly.kind,
+            "Custom")
+        if type_name != last_type:
+            # ;TYPE: — общий язык слайсеров: его читают шкала слоёв PrintFlow,
+            # G-code-просмотрщики и Bambu Studio (Prusa/Orca-совместимая форма).
+            writer.add(f";TYPE:{type_name}")
+            last_type = type_name
         first_layer = (poly.layer == 0)
         pts = poly.pts
         if poly.closed:
@@ -1123,6 +1150,15 @@ def write_gcode(polys: list, settings: SliceSettings, profile,
             writer.moves += 1
 
     body = list(writer.lines)
+    total_seconds = max(1.0, writer.seconds)
+    # M73 P<%> R<мин> в начале каждого слоя: принтер Bambu показывает прогресс и
+    # остаток по ним, шкала слоёв берёт из них проценты. Вставляем с конца, чтобы
+    # индексы строк не сдвигались.
+    for line_no, at_seconds in reversed(layer_marks):
+        pct = int(min(99, max(0, at_seconds / total_seconds * 100.0)))
+        remaining = int(math.ceil(max(0.0, total_seconds - at_seconds) / 60.0))
+        body.insert(line_no, f"M73 P{pct} R{remaining}")
+    body.append("M73 P100 R0")
     volume = writer.extruded * filament_area
     weight = volume / 1000.0 * float(settings.density_g_cm3)
     material = str(meta.get("material") or settings.material)

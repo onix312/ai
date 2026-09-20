@@ -40,6 +40,26 @@ class _FilesStub:
         return {"ok": True}
 
 
+def _layers_in_file(filename: Any) -> int:
+    """Число слоёв локальной копии G-code задания (0 — копии нет).
+
+    Виртуальный станок ведёт счётчик слоёв по настоящему файлу, чтобы шкала
+    слоёв Hero-пульта в туре шла в ногу с «печатью», а не с выдуманными 144
+    слоями из сметы.
+    """
+    try:
+        from .config import UPLOAD_DIR
+        from .gcode_layers import index_for, resolve_job_file
+        from .library import LIBRARY_DIR
+        path = resolve_job_file(str(filename or ""), (UPLOAD_DIR, LIBRARY_DIR))
+        if path is None:
+            return 0
+        index = index_for(path, wait=1.5)
+        return int(index.overview().get("total") or 0) if index is not None else 0
+    except Exception:
+        return 0
+
+
 class VirtualPrinter:
     """Симуляция Bambu Lab P1S: состояние, телеметрия, события."""
 
@@ -139,7 +159,8 @@ class VirtualPrinter:
                 if not self._est_min:
                     self._est_min = max(1.0, num(job.get("est_minutes"), 0) or 120.0)
                     self._est_grams = num(job.get("est_grams"), 0)
-                    self._total_layers = max(50, min(2000, int(self._est_min * 1.2)))
+                    self._total_layers = (_layers_in_file(job.get("file"))
+                                          or max(50, min(2000, int(self._est_min * 1.2))))
                 if self._state == "PRINTING":
                     elapsed = self._elapsed_min()
                     if elapsed >= self._est_min:
@@ -200,10 +221,10 @@ class VirtualPrinter:
                 self._state = "IDLE"
                 self._filename = ""
                 return {"ok": True}
-            if name == "light":
+            if name in ("light", "light_toggle"):
                 self._light = "on" if self._light == "off" else "off"
                 return {"ok": True}
-            if name == "speed_level" and value is not None:
+            if name in ("speed", "speed_level") and value is not None:
                 self._speed_level = int(num(value, 2))
                 return {"ok": True}
         return {"ok": True, "virtual": True}
@@ -261,6 +282,10 @@ class VirtualPrinter:
                 weight = self._est_grams * progress / 100.0
             if self._state == "PAUSE":
                 state = "PAUSE"
+            elif self._state == "PRINTING":
+                # Наружу отдаём словарь состояний Bambu (STATE_NAMES): «PRINTING» —
+                # внутреннее имя, его не знают ни Hero-пульт, ни менеджер, ни сторож.
+                state = "RUNNING"
             return {
                 "id": self.id,
                 "name": self.record.get("name") or "P1S (виртуальный)",

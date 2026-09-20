@@ -111,5 +111,113 @@ class FarmLoopPreparationTests(unittest.TestCase):
         self.assertTrue(payload["requires_verified_template"])
 
 
+class FarmLoopConstructorAndCleanTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import connector.printflow.routes_farmloop  # noqa: F401
+
+    def test_build_and_parse_template_blocks(self):
+        from connector.printflow.farmloop import build_template_from_blocks, parse_template_blocks
+        gcode = build_template_from_blocks(
+            cooldown_temp=38, fan_assist=True, z_lift=18.0, pusher_y=242.0,
+            pusher_speed=2500, custom_gcode="M300 S440 P100\n",
+        )
+        self.assertIn("M190 R38", gcode)
+        self.assertIn("G1 Z18.0 F1200", gcode)
+        self.assertIn("G1 Y242.0 F2500", gcode)
+        self.assertIn("M300 S440 P100", gcode)
+        blocks = parse_template_blocks(gcode)
+        self.assertEqual(blocks["cooldown_temp"], 38)
+        self.assertTrue(blocks["fan_assist"])
+        self.assertEqual(blocks["z_lift"], 18.0)
+        self.assertEqual(blocks["pusher_y"], 242.0)
+        self.assertEqual(blocks["pusher_speed"], 2500)
+        self.assertIn("M300", blocks["custom_gcode"])
+
+    def test_template_get_and_post_lifecycle(self):
+        import types
+        from unittest import mock
+        from connector.printflow.router import router
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_data = Path(tmp)
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", tmp_data):
+                # 1. Сначала шаблон не установлен
+                code, res = router.dispatch(None, "GET", "/api/farmloop/template", query={})
+                self.assertEqual(code, 200)
+                self.assertFalse(res["template_installed"])
+                self.assertTrue(res["gcode"])
+                self.assertEqual(res["blocks"]["cooldown_temp"], 35)
+
+                # 2. Сохраняем шаблон блоками конструктора
+                api = types.SimpleNamespace(db=None)
+                code, res = router.dispatch(api, "POST", "/api/farmloop/template", body={
+                    "blocks": {
+                        "cooldown_temp": 40,
+                        "fan_assist": True,
+                        "z_lift": 20.0,
+                        "pusher_y": 240.0,
+                        "pusher_speed": 2200,
+                        "custom_gcode": "; comment\n",
+                    }
+                })
+                self.assertEqual(code, 200)
+                self.assertTrue(res["template_installed"])
+                self.assertEqual(res["blocks"]["cooldown_temp"], 40)
+
+                # 3. Теперь GET сообщает, что шаблон установлен
+                code, res = router.dispatch(None, "GET", "/api/farmloop/template", query={})
+                self.assertEqual(code, 200)
+                self.assertTrue(res["template_installed"])
+                self.assertEqual(res["blocks"]["cooldown_temp"], 40)
+
+    def test_test_clean_safety_checks(self):
+        import types
+        from unittest import mock
+        from connector.printflow.router import router
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_data = Path(tmp)
+            with mock.patch("connector.printflow.routes_farmloop.DATA_DIR", tmp_data):
+                sent_commands = []
+                printer = types.SimpleNamespace(
+                    id="p1",
+                    record={"name": "Тестовый P1S"},
+                    connected=True,
+                    snapshot=lambda: {"printer": {"state": "IDLE", "bed_temp": 32}},
+                    gcode=lambda cmd: sent_commands.append(cmd),
+                )
+                manager = types.SimpleNamespace(get=lambda pid: printer)
+                api = types.SimpleNamespace(db=None, manager=manager)
+
+                # 1. Отказ без подтверждения confirmed: true
+                code, res = router.dispatch(api, "POST", "/api/farmloop/test-clean", body={})
+                self.assertEqual(code, 400)
+                self.assertIn("Подтвердите", res["error"])
+
+                # 2. Отказ, если шаблон ещё не установлен
+                code, res = router.dispatch(api, "POST", "/api/farmloop/test-clean", body={"confirmed": True})
+                self.assertEqual(code, 400)
+                self.assertIn("не установлен", res["error"])
+
+                # Устанавливаем шаблон
+                tmpl_dir = tmp_data / "farmloop-templates"
+                tmpl_dir.mkdir(parents=True)
+                (tmpl_dir / "bambu-p1s-farmloop-stage1.gcode").write_text(
+                    f"{BEGIN}\nG1 Z10 F1200\nG1 Y200 F2400\n{END}\n", encoding="utf-8")
+
+                # 3. Отказ, если принтер занят (RUNNING)
+                printer.snapshot = lambda: {"printer": {"state": "RUNNING", "bed_temp": 60}}
+                code, res = router.dispatch(api, "POST", "/api/farmloop/test-clean", body={"confirmed": True})
+                self.assertEqual(code, 400)
+                self.assertIn("Принтер занят", res["error"])
+
+                # 4. Успешный запуск, когда принтер IDLE
+                printer.snapshot = lambda: {"printer": {"state": "IDLE", "bed_temp": 30}}
+                code, res = router.dispatch(api, "POST", "/api/farmloop/test-clean", body={"confirmed": True})
+                self.assertEqual(code, 200)
+                self.assertTrue(res["ok"])
+                self.assertEqual(res["executed_commands"], 2)
+                self.assertEqual(sent_commands, ["G1 Z10 F1200", "G1 Y200 F2400"])
+
+
 if __name__ == "__main__":
     unittest.main()
