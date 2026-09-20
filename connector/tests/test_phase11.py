@@ -775,6 +775,59 @@ class TourTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tour.stop_backup_file(self.db)
 
+    def test_tour_job_has_real_gcode_for_layer_scale(self):
+        """18.12: файл задания тура — G-code своего движка, шкала слоёв его читает."""
+        from connector.printflow import tour
+        from connector.printflow.config import UPLOAD_DIR
+        from connector.printflow.gcode_layers import index_for, resolve_job_file
+        from connector.printflow.library import FileLibrary
+        tour.start(self.db)
+        job = self.db.one("SELECT * FROM print_jobs WHERE state='queued'"
+                          " AND printer_id='virtual'")
+        self.assertEqual(job["file"], tour.TOUR_GCODE)
+        path = resolve_job_file(job["file"], (UPLOAD_DIR,))
+        self.assertIsNotNone(path)
+        index = index_for(path, wait=3.0)
+        overview = index.overview()
+        self.assertGreaterEqual(overview["total"], 10)
+        kinds = set()
+        for layer in overview["layers"]:
+            kinds.update(layer["types"])
+        # свой движок теперь пишет ;TYPE: — корзины разложены, а не «прочее»
+        self.assertTrue({"wall_outer", "wall_inner", "solid"} <= kinds, kinds)
+        self.assertNotIn("other", kinds)
+        self.assertIsNotNone(overview["layers"][1]["pct"])  # M73 есть
+        # STL и G-code лежат в библиотеке с пометкой тура
+        names = {row["name"] for row in FileLibrary(self.db).list(limit=50)}
+        self.assertTrue({tour.TOUR_MODEL, tour.TOUR_GCODE} <= names, names)
+
+    def test_tour_gcode_failure_falls_back_to_old_name(self):
+        from unittest import mock
+        from connector.printflow import tour
+        with mock.patch("connector.printflow.slicer_engine.slice_model",
+                        side_effect=RuntimeError("нет движка")):
+            result = tour.build_tour_gcode(self.db)
+        self.assertEqual(result["file"], tour.TOUR_JOB_FALLBACK)
+
+    def test_virtual_printer_counts_layers_of_real_file(self):
+        from connector.printflow import tour
+        from connector.printflow.virtual import VirtualPrinter, _layers_in_file
+        built = tour.build_tour_gcode(self.db)
+        total = _layers_in_file(built["file"])
+        self.assertGreaterEqual(total, 10)
+        self.assertEqual(_layers_in_file("нет-такого.gcode"), 0)
+        self.db.upsert("print_jobs", {"id": "jobv", "printer_id": "virtual",
+                                      "name": "тур", "file": built["file"],
+                                      "state": "starting", "est_minutes": 120.0,
+                                      "est_grams": 30.0})
+        vp = VirtualPrinter(self.db, {"id": "virtual", "name": "Вирт", "model": "P1S"})
+        try:
+            vp.start_print(built["file"])
+            vp._tick()  # noqa: SLF001
+            self.assertEqual(vp.snapshot()["printer"]["total_layers"], total)
+        finally:
+            vp.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

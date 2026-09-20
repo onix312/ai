@@ -10,6 +10,9 @@
 """
 from __future__ import annotations
 
+import logging
+import math
+import struct
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,6 +20,8 @@ from typing import Any
 from .accounting import uid
 from .config import BACKUP_DIR, now_iso
 from .db import Database
+
+log = logging.getLogger("printflow")
 
 
 def _next_order_number(db: Database) -> str:
@@ -31,6 +36,90 @@ def _next_order_number(db: Database) -> str:
     return Repo(db).next_order_number()
 
 TOUR_MARK = "NOZZA tour (демо-данные)"
+TOUR_MODEL = "tour-name-tag.stl"
+TOUR_GCODE = "tour-name-tag.gcode"
+# Старое имя файла задания (до 18.12): локальной копии не было, и шкала слоёв
+# в туре показывала только причину. Оставлено как запасной вариант.
+TOUR_JOB_FALLBACK = "tour-name-tag.3mf"
+
+
+def _rounded_rect(width: float, height: float, radius: float, steps: int = 6) -> list:
+    """Скруглённый прямоугольник против часовой стрелки, центр в нуле."""
+    pts: list = []
+    cx, cy = width / 2.0 - radius, height / 2.0 - radius
+    for x, y, start in ((cx, cy, 0), (-cx, cy, 90), (-cx, -cy, 180), (cx, -cy, 270)):
+        for i in range(steps + 1):
+            a = math.radians(start + 90.0 * i / steps)
+            pts.append((x + radius * math.cos(a), y + radius * math.sin(a)))
+    return pts
+
+
+def tag_mesh_stl(width: float = 52.0, depth: float = 24.0, height: float = 3.2,
+                 taper: float = 0.86) -> bytes:
+    """Бинарный STL демо-адресника: скруглённая пластина с фаской по периметру.
+
+    Выпуклая призма с сужением кверху — замкнутая сетка без самопересечений,
+    каждый слой отличается от соседнего, поэтому на шкале слоёв видны и
+    стенки, и заполнение, и сплошные слои дна и крыши.
+    """
+    bottom = _rounded_rect(width, depth, 6.0)
+    top = [(x * taper, y * (taper - 0.06)) for x, y in bottom]
+    n = len(bottom)
+    tris: list = []
+    for i in range(n):
+        j = (i + 1) % n
+        b0, b1 = (*bottom[i], 0.0), (*bottom[j], 0.0)
+        t0, t1 = (*top[i], height), (*top[j], height)
+        tris.append((b0, b1, t1))
+        tris.append((b0, t1, t0))
+    for i in range(1, n - 1):
+        tris.append(((*bottom[0], 0.0), (*bottom[i + 1], 0.0), (*bottom[i], 0.0)))
+        tris.append(((*top[0], height), (*top[i], height), (*top[i + 1], height)))
+    out = bytearray(b"PrintFlow NOZZA tour: name tag".ljust(80, b"\0"))
+    out += struct.pack("<I", len(tris))
+    for a, b, c in tris:
+        ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+        vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+        nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+        length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+        out += struct.pack("<3f", nx / length, ny / length, nz / length)
+        for px, py, pz in (a, b, c):
+            out += struct.pack("<3f", px, py, pz)
+        out += b"\0\0"
+    return bytes(out)
+
+
+def build_tour_gcode(db: Database) -> dict[str, Any]:
+    """Нарезать демо-адресник своим движком и положить STL + G-code в библиотеку.
+
+    Возвращает ``{"file": имя для задания, "grams", "minutes", "layers"}``.
+    Любая ошибка — не повод срывать тур: тогда задание получает старое имя без
+    локальной копии, а шкала слоёв честно объяснит, почему пустая.
+    """
+    from .config import UPLOAD_DIR
+    from .library import FileLibrary
+    from .slicer_engine import slice_model
+    from .slicer_profile import P1S, settings_from
+
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        library = FileLibrary(db)
+        stl_row = library.put(TOUR_MODEL, tag_mesh_stl(), source="tour", note=TOUR_MARK)
+        stl_path = library.resolve(stl_row["id"])
+        settings = settings_from({"layer_height": 0.2, "infill_percent": 15.0,
+                                  "material": "PLA"})
+        text, report = slice_model(stl_path, settings, P1S)
+        estimate = {"grams": float(report.get("weight_g") or 0.0),
+                    "minutes": float(report.get("minutes") or 0.0),
+                    "material": "PLA"}
+        row = library.put(TOUR_GCODE, text.encode("utf-8"), source="tour",
+                          note=TOUR_MARK, estimate=estimate)
+        return {"file": row.get("upload_name") or TOUR_GCODE,
+                "grams": estimate["grams"], "minutes": estimate["minutes"],
+                "layers": int(report.get("layers") or 0)}
+    except Exception as exc:  # noqa: BLE001 — тур важнее демо-файла
+        log.warning("NOZZA tour: демо-G-code не собран: %s", exc)
+        return {"file": TOUR_JOB_FALLBACK, "grams": 0.0, "minutes": 0.0, "layers": 0}
 
 
 def start(db: Database) -> dict[str, Any]:
@@ -171,9 +260,14 @@ def _seed(db: Database) -> None:
         "prepaid": 450.0, "due": _day(-1), "created_at": _day(1),
         "updated_at": now_iso(), "notes": TOUR_MARK,
     })
+    # 18.12: файл задания — настоящий G-code, нарезанный своим движком, поэтому
+    # шкала слоёв Hero-пульта в туре показывает слои, а не причину пустоты.
+    # Смета задания остаётся демонстрационной (2 часа), чтобы печать в туре
+    # шла заметное время; вес — из нарезки, если она удалась.
+    demo_gcode = build_tour_gcode(db)
     db.upsert("print_jobs", {
         "id": uid("job"), "printer_id": "virtual",
-        "name": "Адресник «Рыжик» (красный)", "file": "tour-name-tag.3mf",
+        "name": "Адресник «Рыжик» (красный)", "file": demo_gcode["file"],
         "state": "queued", "source": "tour", "order_id": printing["id"],
         "est_minutes": 120.0, "est_grams": 30.0, "plate": 1,
         "ams_mapping": "[2]", "created_at": now_iso(),

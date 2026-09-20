@@ -11,13 +11,13 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="PrintFlow">
-<script src="assets/theme-init.js?v=18.11.0"></script>
+<script src="assets/theme-init.js?v=18.12.0"></script>
 <link rel="stylesheet" href="assets/tokens.css?v=18.6.0">
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=18.6.0">
 <link rel="stylesheet" href="assets/app.css?v=18.6.0">
-<link rel="stylesheet" href="assets/more.css?v=18.11.0">
-<link rel="stylesheet" href="assets/controls.css?v=18.11.0">
+<link rel="stylesheet" href="assets/more.css?v=18.12.0">
+<link rel="stylesheet" href="assets/controls.css?v=18.12.0">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
 <div class="top-load" id="top_load" hidden aria-hidden="true"></div>
@@ -286,6 +286,9 @@
       <div class="wide"><span>Прибыль / окупаемость</span><b id="pr_job_profit">—</b></div>
      </div>
     </article>
+    <div class="card pr-layers-card" id="pr_layers_card" hidden>
+     <div id="pr_layers_host"></div>
+    </div>
     <div class="card" id="pr_ready_card">
      <div class="card-head"><div><h2>Готовность к старту</h2><p id="pr_ready_sub">Проверяем следующее задание…</p></div><span class="chip" id="pr_ready_chip">—</span></div>
      <div id="pr_ready"><div class="empty compact"><span>Проверяем очередь и AMS…</span></div></div>
@@ -333,7 +336,11 @@
       <button class="cmd-btn" id="pr_map_toggle" type="button" title="Проекция плиты поверх видео: контуры объектов (119)"><span class="ic" data-icon="layout">▤</span>Проекция плиты</button>
      </div>
      <div class="notice" id="pr_bed_status" hidden style="margin-top:8px"><span>▭</span><span id="pr_bed_status_text"></span></div>
-     <div class="cmd-row">
+     <div class="pr-knob-row" id="pr_speed_knob_row" hidden>
+      <div id="pr_speed_knob" aria-label="Регулятор скорости печати"></div>
+      <div class="pr-knob-note"><b>Регулятор скорости</b><p>Тихо 50 % · Стандарт 100 % · Спорт 124 % · Ludicrous 166 %. Поверните ручку, колесо мыши или клавиши ← →; деление подтверждает станок.</p></div>
+     </div>
+     <div class="cmd-row" id="pr_speed_row">
       <label class="field"><span>Скорость печати</span><select id="pr_speed_sel"><option value="1">Тихая</option><option value="2" selected>Обычная</option><option value="3">Спорт</option><option value="4">Ludicrous</option></select></label>
       <button class="btn" id="pr_speed_apply" type="button">Применить</button>
      </div>
@@ -389,6 +396,10 @@
 <div class="card">
       <div class="card-head"><div><h2>AMS</h2><p id="pr_ams_env">Температура и влажность —</p></div><button class="btn sm ghost" id="pr_ams_sync" type="button" title="Занести катушки из AMS на склад и обновить остатки">⟳ В базу</button><button class="btn sm ghost" id="pr_ams_profiles" type="button" hidden>Профили</button><span class="chip" id="pr_ams_count">0 слотов</span></div>
      <div id="pr_ams_new"></div>
+     <div class="pr-ams-path" id="pr_ams_path" hidden>
+      <div class="hero-block-head"><b>Тракт AMS</b><small>подсвечена трубка, из которой станок печатает сейчас</small></div>
+      <div id="pr_ams_path_host"></div>
+     </div>
      <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
     </div>
   </div>
@@ -1106,10 +1117,12 @@
     <select id="pr_sl_spool" class="field" aria-label="Катушка со склада пластика"><option value="">Катушка: как в настройках</option></select>
    </div>
    <div class="pr-slicer-row">
+    <button class="btn" id="pr_sl_sections" type="button" disabled title="Разрезать модель на слои прямо в браузере (WebGPU или процессор) и показать слои, свесы, тонкие места и оценку пластика — без нарезки на сервере">Сечения</button>
     <button class="btn primary" id="pr_sl_plan" type="button" disabled>План</button>
     <button class="btn" id="pr_sl_slice" type="button" disabled>Нарезать</button>
     <small id="pr_sl_status" class="muted"></small>
    </div>
+   <div id="pr_sl_gpu" class="pr-sl-gpu" hidden></div>
    <div id="pr_sl_result" hidden></div>
    <div id="pr_sl_actions" class="pr-slicer-row" hidden></div>
   </div>
@@ -5527,15 +5540,16 @@
 <div id="toasts"></div>
 
 <script src="assets/qr.js?v=17.0.1"></script>
-<script src="assets/core.js?v=18.11.0"></script>
+<script src="assets/core.js?v=18.12.0"></script>
 <script src="assets/colors.js?v=18.6.0"></script>
-<script src="assets/icons.js?v=18.11.0"></script>
-<script src="assets/sound.js?v=18.11.0"></script>
-<script src="assets/knob.js?v=18.11.0"></script>
-<script src="assets/amspath.js?v=18.11.0"></script>
-<script src="assets/layers.js?v=18.11.0"></script>
-<script src="assets/incidents.js?v=18.11.0"></script>
-<script src="assets/printer.js?v=18.6.0"></script>
+<script src="assets/icons.js?v=18.12.0"></script>
+<script src="assets/sound.js?v=18.12.0"></script>
+<script src="assets/knob.js?v=18.12.0"></script>
+<script src="assets/amspath.js?v=18.12.0"></script>
+<script src="assets/layers.js?v=18.12.0"></script>
+<script src="assets/incidents.js?v=18.12.0"></script>
+<script src="assets/gpuslice.js?v=18.12.0"></script>
+<script src="assets/printer.js?v=18.12.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=18.6.0"></script>
 <script src="assets/money.js?v=18.7.0"></script>
@@ -5546,7 +5560,7 @@
 <!-- 14.0 (47): print.js грузится лениво при первом входе в раздел -->
 <!-- 14.0 (47): clientbot.js грузится лениво при первом входе в раздел -->
 <script src="assets/workshop.js?v=18.7.0"></script>
-<script src="assets/app.js?v=18.11.0"></script>
+<script src="assets/app.js?v=18.12.0"></script>
 <script type="module" src="assets/dist/printflow-app.js?v=17.0.1"></script>
 <!-- 14.0 (47): ops10.js грузится лениво при первом входе в раздел -->
 <script>

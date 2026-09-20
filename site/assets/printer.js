@@ -950,6 +950,7 @@ function renderLive() {
     : 'Мониторинг и управление по локальной сети. Принтер сейчас недоступен.');
 
   renderAms(p);
+  renderPultWidgets(p, kind); // 18.12: регулятор, тракт AMS, шкала слоёв — как в Hero-пульте
   renderAmsNew(p);      // N5: «новая катушка в слоте — привязать?»
   renderReady(p);       // N4: светофор готовности (тихо, из кэша)
   renderSuggestAuto(p); // N6: подбор задания под AMS
@@ -970,6 +971,66 @@ function renderLive() {
 
   const controls = $$('[data-cmd],[data-set],[data-jog]');
   controls.forEach((b) => { b.disabled = !p.connection.connected; });
+}
+
+/* ------------------------------------ 18.12: виджеты пульта во вкладке
+   «Принтеры». Те же модули, что в Hero-пульте на «Обзоре»: регулятор
+   скорости (knob.js) вместо пары «список + Применить», тракт AMS
+   (amspath.js) над стойкой катушек и шкала слоёв (layers.js) под карточкой
+   задания — пока станок печатает. Старый селектор остаётся запасным путём,
+   если модуль регулятора не загрузился. */
+function renderPultWidgets(p, kind) {
+  const running = kind === 'running' || p.printer.state === 'PAUSE' || p.printer.state === 'PAUSED';
+  // --- регулятор скорости
+  const knobRow = $('pr_speed_knob_row');
+  const knobEl = $('pr_speed_knob');
+  const oldRow = $('pr_speed_row');
+  if (knobRow && knobEl && window.PFKnob) {
+    knobRow.hidden = false;
+    if (oldRow) oldRow.hidden = true;
+    const level = num(p.printer.speed_level) || 2;
+    const hasKnob = !!(knobEl._knob && typeof knobEl._knob.set === 'function');
+    if (!hasKnob || knobEl.dataset.printer !== p.id) {
+      // Смена принтера — ручка собирается заново: onChange замкнут на id.
+      knobEl.dataset.printer = p.id;
+      knobEl._knob = null;
+      knobEl.innerHTML = '';
+      PFKnob.create(knobEl, {
+        value: level,
+        size: 96,
+        onChange: (lvl) => {
+          // command() → true при успехе; отказ/отмена → стрелка возвращается.
+          command('speed', lvl, { label: 'скорость' }).then((ok) => { if (ok !== true && knobEl._knob) knobEl._knob.fail(); });
+        },
+      });
+    } else {
+      PFKnob.create(knobEl, { value: level });
+    }
+    knobEl.classList.toggle('off', !p.connection.connected);
+  }
+  // --- тракт AMS
+  const pathBox = $('pr_ams_path');
+  const pathHost = $('pr_ams_path_host');
+  if (pathBox && pathHost && window.PFAmsPath) {
+    const trays = (p.ams && p.ams.trays) || [];
+    pathBox.hidden = !trays.length;
+    if (trays.length) PFAmsPath.mount(pathHost, p.ams, { compact: false });
+  }
+  // --- шкала слоёв
+  const layCard = $('pr_layers_card');
+  const layHost = $('pr_layers_host');
+  if (layCard && layHost && window.PFLayers) {
+    if (running) {
+      layCard.hidden = false;
+      const api = PFLayers.mount(layHost, { printerId: p.id, layer: p.printer.layer });
+      if (api && typeof api.update === 'function') api.update({ layer: p.printer.layer });
+    } else {
+      const api = layHost._layers;
+      if (api && typeof api.destroy === 'function') api.destroy();
+      layHost.innerHTML = '';
+      layCard.hidden = true;
+    }
+  }
 }
 
 /* --------------------------------------------- ПР3: температуры-приборы

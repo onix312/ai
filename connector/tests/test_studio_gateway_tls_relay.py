@@ -23,6 +23,8 @@
 """
 from __future__ import annotations
 
+import ftplib
+import io
 import pathlib
 import shutil
 import socket
@@ -285,6 +287,65 @@ class LiveTlsTests(unittest.TestCase):
         finally:
             conn.close()
         self.assertGreaterEqual(self.gw.status()["dropped_connections"], 1)
+
+    def test_studio_like_ftps_upload_reuses_session_on_data_channel(self):
+        """Заливка как у Studio: неявный TLS на управлении, PROT P, PASV-канал
+        данных с возобновлением сессии управления (ftplib так и делает)."""
+        received: dict = {}
+        self.gw.ftp_apply = lambda name, blob: received.__setitem__(name, blob)
+
+        class ImplicitFTPS(ftplib.FTP_TLS):
+            def __init__(self, *a, **k):
+                self._sock = None
+                super().__init__(*a, **k)
+
+            @property
+            def sock(self):
+                return self._sock
+
+            @sock.setter
+            def sock(self, value):
+                if value is not None and not isinstance(value, ssl.SSLSocket):
+                    value = self.context.wrap_socket(value)
+                self._sock = value
+
+            def makepasv(self):
+                _host, port = super().makepasv()
+                return "127.0.0.1", port
+
+            def ntransfercmd(self, cmd, rest=None):
+                """Канал данных с возобновлением сессии управления.
+
+                Python 3.11 ещё не передаёт ``session`` в ftplib (это 3.12+),
+                поэтому возобновление делаем вручную — как Studio: управление
+                открыто, канал данных продолжает его сессию.
+                """
+                conn, size = ftplib.FTP.ntransfercmd(self, cmd, rest)
+                conn = self.context.wrap_socket(
+                    conn, server_hostname=self.host, session=self.sock.session)
+                self._last_data_reused = conn.session_reused
+                return conn, size
+
+        blob = b"PK\x03\x04" + bytes(range(256)) * 300
+        client = ImplicitFTPS(context=self.ctx, timeout=8)
+        client.connect("127.0.0.1", self.ports["FTP_PORT"])
+        try:
+            client.login("bblp", "abcd1234")
+            client.prot_p()
+            client.storbinary("STOR /cache/деталь.3mf", io.BytesIO(blob))
+        finally:
+            try:
+                client.quit()
+            except Exception:
+                client.close()
+        self.assertEqual(received.get("деталь.3mf"), blob)
+        deadline = time.time() + 3
+        while time.time() < deadline and self.gw.status()["tls_resumed"] < 1:
+            time.sleep(0.05)
+        status = self.gw.status()
+        self.assertGreaterEqual(status["tls_resumed"], 1,
+                                "канал данных обязан возобновить сессию управления")
+        self.assertGreaterEqual(status["ftp_uploads"], 1)
 
     def test_session_resumes_across_channels(self):
         raw = socket.create_connection(("127.0.0.1", self.ports["FTP_PORT"]), timeout=5)

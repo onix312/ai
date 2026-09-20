@@ -220,6 +220,42 @@ class GcodeShapeTests(unittest.TestCase):
             self.assertEqual(markers[0], ";LAYER:0")
             self.assertEqual(markers[-1], ";LAYER:99")
 
+    def test_type_markers_speak_the_common_language(self):
+        """18.12: ;TYPE: в форме Prusa/Orca — шкала слоёв раскладывает корзины."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cube.stl"
+            write_binary_stl(path, *cube())
+            text, _report = engine.slice_model(path, engine.SliceSettings(), P1S)
+            types = [line.split(":", 1)[1] for line in text.splitlines()
+                     if line.startswith(";TYPE:")]
+            self.assertIn("External perimeter", types)
+            self.assertIn("Internal infill", types)
+            self.assertIn("Solid infill", types)
+            self.assertNotIn("Custom", types)
+            # снаружи стенка помечена раньше внутренней: порядок колец соблюдён
+            first_wall = types.index("External perimeter")
+            self.assertGreater(types.index("Perimeter", first_wall), first_wall)
+
+    def test_m73_progress_per_layer_is_written(self):
+        """18.12: M73 P/R в начале каждого слоя — прогресс и остаток в минутах."""
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "cube.stl"
+            write_binary_stl(path, *cube())
+            text, report = engine.slice_model(path, engine.SliceSettings(), P1S)
+            marks = [line for line in text.splitlines() if line.startswith("M73 ")]
+            self.assertEqual(len(marks), 101, "M73 — по одному на каждый слой плюс финальный")
+            self.assertTrue(marks[0].startswith("M73 P0 R"))
+            self.assertEqual(marks[-1], "M73 P100 R0")
+            import re as _re
+            pcts = [int(_re.match(r"M73 P(\d+)", m).group(1)) for m in marks]
+            self.assertEqual(pcts, sorted(pcts), "проценты только растут")
+            self.assertLessEqual(max(pcts[:-1]), 99)
+            # шкала слоёв PrintFlow читает проценты из этих строк
+            from connector.printflow import gcode_layers
+            overview = gcode_layers.parse_text(text).overview()
+            self.assertIsNotNone(overview["layers"][2]["pct"])
+            self.assertGreaterEqual(overview["layers"][2]["pct"], 0)
+
     def test_z_never_goes_below_bed(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "cube.stl"

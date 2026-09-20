@@ -8,7 +8,7 @@
   регулятора, SVG тракта AMS, важность и маршрут инцидента, группировка
   событий, счётчик непрочитанного, настройки звука и тихие часы.
 * **Строковые контракты**: разметка шапки и шторки в `index.html`, пины
-  `?v=18.11.0`, иконки реестра, исправление `p.temperature` в Hero-пульте,
+  `?v=18.12.0`, иконки реестра, исправление `p.temperature` в Hero-пульте,
   инкрементальный рендер (ключ структуры `heroKey`), точки монтирования
   новых модулей — DOM-логику стенд `panel-check.js` не воспроизводит.
 """
@@ -29,6 +29,7 @@ ASSETS = SITE / "assets"
 INDEX = (SITE / "index.html").read_text(encoding="utf-8")
 APP_JS = (ASSETS / "app.js").read_text(encoding="utf-8")
 SW_JS = (SITE / "sw.js").read_text(encoding="utf-8")
+PRINTER_JS = (ASSETS / "printer.js").read_text(encoding="utf-8")
 CONTROLS_CSS = (ASSETS / "controls.css").read_text(encoding="utf-8")
 ICONS_JS = (ASSETS / "icons.js").read_text(encoding="utf-8")
 LAYERS_JS = (ASSETS / "layers.js").read_text(encoding="utf-8")
@@ -233,13 +234,13 @@ class MarkupContractTests(unittest.TestCase):
 
     def test_new_assets_are_wired_with_current_version(self):
         for name in NEW_ASSETS:
-            self.assertIn(f'<script src="assets/{name}?v=18.11.0"></script>', INDEX, name)
+            self.assertIn(f'<script src="assets/{name}?v=18.12.0"></script>', INDEX, name)
             self.assertIn(f"'/assets/{name}'", SW_JS, f"{name} должен быть в SHELL sw.js")
-        self.assertIn('<link rel="stylesheet" href="assets/controls.css?v=18.11.0">', INDEX)
+        self.assertIn('<link rel="stylesheet" href="assets/controls.css?v=18.12.0">', INDEX)
         self.assertIn("'/assets/controls.css'", SW_JS)
-        self.assertIn('<script src="assets/app.js?v=18.11.0"></script>', INDEX)
-        self.assertIn('<script src="assets/core.js?v=18.11.0"></script>', INDEX)
-        self.assertIn("printflow-shell-v79", SW_JS)
+        self.assertIn('<script src="assets/app.js?v=18.12.0"></script>', INDEX)
+        self.assertIn('<script src="assets/core.js?v=18.12.0"></script>', INDEX)
+        self.assertIn("printflow-shell-v80", SW_JS)
         # Порядок: модули пульта грузятся после icons.js и до app.js.
         order = [INDEX.index(f"assets/{n}?v=") for n in ("icons.js", *NEW_ASSETS, "app.js")]
         self.assertEqual(order, sorted(order))
@@ -257,6 +258,10 @@ class MarkupContractTests(unittest.TestCase):
                        'data-inc-filter="all"', 'data-inc-filter="bad"', 'data-inc-filter="warn"',
                        'data-inc-filter="info"', 'id="incidents_printers_only"', 'Alt+I'):
             self.assertIn(needle, INDEX, needle)
+
+    def test_gpuslice_asset_wired(self):
+        self.assertIn('<script src="assets/gpuslice.js?v=18.12.0"></script>', INDEX)
+        self.assertIn("'/assets/gpuslice.js'", SW_JS)
 
     def test_sound_settings_card(self):
         self.assertIn('<h2>Звуки панели</h2>', INDEX)
@@ -307,6 +312,27 @@ class HeroPultContractTests(unittest.TestCase):
         self.assertIn("building", LAYERS_JS, "виджет умеет ждать фоновый разбор")
         self.assertIn("getContext('2d')", LAYERS_JS)
         self.assertIn("if (!ctx) return;", LAYERS_JS, "стенд без канвы не должен падать")
+
+    def test_printers_tab_mounts_the_same_widgets_as_hero(self):
+        """18.12: «Принтеры» — те же виджеты, что и Hero-пульт на «Обзоре»."""
+        for needle in ('id="pr_speed_knob_row"', 'id="pr_speed_knob"',
+                       'id="pr_ams_path"', 'id="pr_ams_path_host"',
+                       'id="pr_layers_card"', 'id="pr_layers_host"',
+                       'Регулятор скорости', 'Тихо 50 %'):
+            self.assertIn(needle, INDEX, needle)
+        for needle in ("function renderPultWidgets", "renderPultWidgets(p, kind)",
+                       "PFKnob.create(knobEl", "PFAmsPath.mount(pathHost, p.ams",
+                       "PFLayers.mount(layHost", "knobEl._knob.fail()",
+                       "api.destroy", "layCard.hidden = true"):
+            self.assertIn(needle, PRINTER_JS, needle)
+        for cls in (".pr-knob-row", ".pr-knob-note", ".pr-layers-card", ".pr-ams-path"):
+            self.assertIn(cls, CONTROLS_CSS, cls)
+
+    def test_old_speed_selector_stays_as_fallback(self):
+        # старый путь не выброшен: если knob.js не загрузился, селектор возвращается
+        self.assertIn('id="pr_speed_row"', INDEX)
+        self.assertIn('id="pr_speed_apply"', INDEX)
+        self.assertIn("oldRow.hidden = true", PRINTER_JS)
 
     def test_studio_card_shows_relay_tls_and_announce(self):
         for needle in ("studio_relay_enabled", "studio_relay_targets", "tls_handshake_timeouts",

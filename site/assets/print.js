@@ -21,6 +21,8 @@ let farmloopLoaded = false;
 let slicerLoaded = false;
 let slicerReady = false;      // свой движок выбран и доступен (гейт engine)
 let slicerFarm = null;        // 18.8: конвейерные гейты из /api/slicer/profile
+let slicerProfile = null;     // 18.12: профиль + настройки нарезки для GPU-сечений
+const GPU_AUTO_MB = 30;       // модели до этого размера режем в браузере сразу при выборе
 let slicerModels = [];        // модели STL из библиотеки
 let slicerSpools = [];        // 18.8: катушки склада пластика для нарезки
 let slicerLast = null;        // результат последней нарезки: {output, stem, report, machine}
@@ -165,6 +167,7 @@ async function loadSlicerStatus() {
     const profile = await get('/api/slicer/profile');
     slicerLoaded = true;
     slicerFarm = profile.farmloop || null; // 18.8: конвейерные гейты
+    slicerProfile = profile;
     const settings = profile.settings || {};
     if (meta) {
       meta.textContent = `printflow v${engine.version} · STL до ${engine.limits.model_mb} МБ · `
@@ -231,9 +234,63 @@ function updateSlicerButtons() {
   const sel = slModelSelect();
   const plan = $('pr_sl_plan');
   const slice = $('pr_sl_slice');
+  const sections = $('pr_sl_sections');
   const hasModel = !!(sel && sel.value);
   if (plan) plan.disabled = !hasModel;
   if (slice) slice.disabled = !hasModel || !slicerReady;
+  if (sections) {
+    sections.disabled = !hasModel || !window.PFGpuSlice;
+    if (!window.PFGpuSlice) sections.title = 'Модуль GPU-сечений не загрузился';
+  }
+}
+
+/* 18.12: GPU-сечения — модель режется на слои в браузере (WebGPU, иначе
+   процессор в фоне) и до нарезки показывает слои, свесы, тонкие места и
+   оценку пластика. Настройки слоя и стола — те же, что у движка Stage 1
+   (/api/slicer/profile), поэтому число слоёв совпадает с «Планом». */
+function gpuSectionSettings() {
+  const prof = slicerProfile || {};
+  const st = prof.settings || {};
+  return Object.assign({}, st, { bed_mm: prof.bed_mm || [256, 256], max_print_height_mm: prof.max_print_height_mm || 256 });
+}
+
+async function runGpuSections(opts) {
+  opts = opts || {};
+  const host = $('pr_sl_gpu');
+  const sel = slModelSelect();
+  if (!host || !sel || !sel.value || !window.PFGpuSlice) return;
+  const model = slicerModels.find((m) => m.id === sel.value);
+  if (!model) return;
+  const name = model.upload_name || model.name;
+  if (!name) { toast('Сечения недоступны', 'У файла нет копии в загрузках', 'bad'); return; }
+  const kind = String(model.kind || model.ext || name).toLowerCase();
+  if (!/stl/.test(kind)) {
+    if (!opts.auto) toast('Сечения только для STL', 'Для 3MF и G-code используйте «План» или шкалу слоёв', 'warn');
+    return;
+  }
+  if (opts.auto && num(model.size) > GPU_AUTO_MB * 1048576) {
+    host.hidden = false;
+    host.innerHTML = `<div class="gs gs-note">Модель ${nfmt(num(model.size) / 1048576, 0)} МБ — сечения по кнопке «Сечения», чтобы не качать файл без надобности.</div>`;
+    return;
+  }
+  host.hidden = false;
+  if (host.dataset.model !== model.id || !host._gpuslice) {
+    host.dataset.model = model.id;
+    host.innerHTML = '<div class="gs gs-note"><span class="spin"></span> Забираем модель из библиотеки…</div>';
+  }
+  const btn = $('pr_sl_sections');
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await fetch('/api/uploads?file=' + encodeURIComponent(name), { credentials: 'same-origin' });
+    if (!resp.ok) throw new Error(`Файл не отдался: HTTP ${resp.status}`);
+    const buffer = await resp.arrayBuffer();
+    const api = host._gpuslice || PFGpuSlice.mount(host, {});
+    await api.load(buffer, { name: model.name, settings: gpuSectionSettings() });
+  } catch (error) {
+    host.innerHTML = `<div class="gs gs-note gs-err">Сечения не получились: ${esc(error && error.message ? error.message : String(error))}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function loadSlicerModels() {
@@ -268,7 +325,7 @@ async function uploadSlicerModel(file) {
     toast('Модель в библиотеке', `${rec.name || file.name} · ${rec.id || ''}`);
     await loadSlicerModels();
     const sel = slModelSelect();
-    if (sel && rec.id) { sel.value = rec.id; updateSlicerButtons(); }
+    if (sel && rec.id) { sel.value = rec.id; updateSlicerButtons(); runGpuSections({ auto: true }); }
   } catch (error) {
     toast('Модель не загружена', error && error.message ? error.message : String(error), 'bad');
   } finally {
@@ -721,7 +778,9 @@ function bind() {
 
   // Слайсер (18.8): модель → план → нарезка → в очередь.
   const sel = $('pr_sl_model');
-  if (sel) sel.addEventListener('change', updateSlicerButtons);
+  if (sel) sel.addEventListener('change', () => { updateSlicerButtons(); runGpuSections({ auto: true }); });
+  const sectionsBtn = $('pr_sl_sections');
+  if (sectionsBtn) sectionsBtn.addEventListener('click', () => runGpuSections({ auto: false }));
   const uploadBtn = $('pr_sl_upload_btn');
   if (uploadBtn) uploadBtn.addEventListener('click', () => {
     const input = $('pr_sl_file');

@@ -181,3 +181,49 @@ body.inc-open { overflow: hidden; }
 
 /* маленький индикатор ожидания для пустых состояний (шкала слоёв) */
 .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: pfSpin .8s linear infinite; display: inline-block; flex: none; }
+
+/* ================================= 18.12: виджеты пульта во вкладке «Принтеры» */
+.pr-knob-row { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; padding: 6px 0 10px; }
+.pr-knob-row .pf-knob.off { opacity: .45; pointer-events: none; }
+.pr-knob-note b { font-size: 13px; display: block; }
+.pr-knob-note p { margin: 2px 0 0; font-size: 12px; color: var(--muted); max-width: 420px; }
+.pr-layers-card { padding: 12px 14px; }
+.pr-ams-path { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--panel-2); }
+@media (max-width: 640px) { .pr-knob-row { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
+
+/* ============================================ 18.12: GPU-сечения (gpuslice.js) */
+.pr-sl-gpu { margin-top: 12px; }
+.gs { border: 1px solid var(--line); border-radius: var(--r-md, 12px); background: var(--panel-2); padding: 12px 14px; }
+.gs-note { font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; }
+.gs-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.gs-head b { font-size: 14px; }
+.gs-sub { font-size: 11.5px; color: var(--muted); margin-left: 6px; }
+.gs-badge { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; background: var(--panel-3); color: var(--text-2); vertical-align: middle; }
+.gs-badge.gpu { background: var(--ok-soft); color: var(--ok); }
+.gs-badge.cpu { background: var(--info-soft, var(--panel-3)); color: var(--info, var(--text-2)); }
+.gs-badge.bad { background: var(--bad-soft); color: var(--bad); }
+.gs-tools { display: flex; gap: 8px; align-items: center; }
+.gs-pref { font-size: 11.5px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.gs-pref select { font-size: 11.5px; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.gs-help { font-size: 12px; color: var(--text-2); margin: 8px 0 4px; padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--panel); border-radius: 6px; }
+.gs-state { font-size: 13px; color: var(--text-2); display: flex; gap: 8px; align-items: center; min-height: 0; }
+.gs-state:empty { display: none; }
+.gs-err { color: var(--bad); }
+.gs-main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 12px; margin-top: 10px; }
+.gs-canvas { width: 100%; height: auto; aspect-ratio: 560 / 380; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel); }
+.gs-side { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.gs-side div, .gs-stats div { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--panel); }
+.gs-side span, .gs-stats span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.gs-side b, .gs-stats b { font-size: 13px; }
+.gs-stats small { font-size: 11px; color: var(--muted); }
+.gs-ok { color: var(--ok); } .gs-bad { color: var(--bad); } .gs-over { color: #ec4899; }
+.gs-slider { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.gs-slider input[type=range] { flex: 1; }
+.gs-pos { font-size: 12px; color: var(--text-2); white-space: nowrap; min-width: 160px; text-align: right; }
+.gs-strip { width: 100%; height: 34px; display: block; margin-top: 4px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line-soft); }
+.gs-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 10px; font-size: 12px; }
+.gs-warn { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gs-warn li { font-size: 12.5px; padding: 6px 10px 6px 26px; border-radius: 8px; position: relative; background: var(--panel); border: 1px solid var(--line-soft); }
+.gs-warn li::before { content: ''; position: absolute; left: 10px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--info, #3b82f6); }
+.gs-warn li.warn::before { background: var(--warn); } .gs-warn li.bad::before { background: var(--bad); } .gs-warn li.ok::before { background: var(--ok); }
+@media (max-width: 720px) { .gs-main { grid-template-columns: 1fr; } .gs-side { flex-direction: row; flex-wrap: wrap; } .gs-side div { flex: 1 1 120px; } }
