@@ -1287,6 +1287,25 @@ tr.cancel-req td:first-of-type { box-shadow: inset 3px 0 0 var(--bad); }
 .cv-history-empty { color: var(--muted); font-size: 12.5px; line-height: 1.5; padding: 10px 2px; }
 .cv-steps { margin: 0; padding: 0 0 0 20px; display: grid; gap: 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; }
 .cv-steps code { font-family: var(--mono); font-size: 11.5px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+/* Мастер подготовки серии и конструктор FarmLoop (18.9) */
+.cv-prepare-card { margin-top: 14px; border-color: var(--accent-line); }
+.cv-dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 22px 16px; border: 2px dashed var(--line); border-radius: var(--r-md); background: var(--panel-2); text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
+.cv-dropzone:hover, .cv-dropzone.dragover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel-2)); }
+.cv-dropzone-icon { font-size: 26px; line-height: 1; color: var(--accent); }
+.cv-dropzone-title { font-weight: 600; font-size: 14px; }
+.cv-dropzone-sub { color: var(--muted); font-size: 12px; }
+.cv-prep-work { display: grid; gap: 12px; margin-top: 12px; }
+.cv-prep-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.cv-prep-row .field { min-width: 0; flex: 1 1 160px; }
+.cv-prep-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; padding: 12px; border-radius: var(--r-sm); background: var(--panel-2); border: 1px solid var(--line); }
+.cv-prep-kpi b { display: block; font-size: 15px; color: var(--text); }
+.cv-prep-kpi span { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.cv-engineering-block { margin-top: 14px; padding: 0; }
+.cv-eng-summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 12px 14px; list-style: none; }
+.cv-eng-summary::-webkit-details-marker { display: none; }
+.cv-engineering-inner { padding: 14px; display: grid; gap: 16px; border-top: 1px solid var(--line); }
+.cv-constructor-card { display: grid; gap: 12px; }
+.cv-gcode-preview { max-height: 220px; overflow: auto; padding: 10px; border-radius: var(--r-sm); background: var(--bg); font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); margin: 0; }
 @media (max-width: 860px) {
   .cv-grid { grid-template-columns: 1fr; }
   .cv-status-card { align-items: flex-start; flex-wrap: wrap; }
@@ -1455,4 +1474,473 @@ button.pc-dots:hover { text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width:720px){
   .vf-gallery{flex-direction:column}
   .vf-cover{width:100%;height:220px}
+}
+
+/* ================================================= 18.10.0: HERO-ПУЛЬТ СТАНКА И ЭРГОНОМИКА СМЕНЫ */
+.hero-pult-card {
+  position: relative;
+  overflow: hidden;
+  border: 1.5px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 59, 130, 246), 0.04) 0%, var(--panel) 100%);
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.08);
+}
+.hero-pult-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.hero-pult-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hero-pult-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+  display: inline-block;
+}
+.hero-live-dot.pulse {
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  animation: hero-dot-pulse 2s infinite;
+}
+.hero-live-dot.warn {
+  background: var(--warn);
+  animation: none;
+}
+.hero-live-dot.off {
+  background: var(--muted);
+  animation: none;
+}
+@keyframes hero-dot-pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.hero-pult-printers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.hero-printer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.hero-printer-pill:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.hero-printer-pill.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+.hero-printer-pill .st-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.hero-printer-pill.run .st-dot { background: var(--ok); }
+.hero-printer-pill.pause .st-dot { background: var(--warn); }
+
+/* Внутренняя сетка пульта */
+.hero-body {
+  padding: 16px 18px;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  gap: 20px;
+  align-items: stretch;
+}
+.hero-cam-col {
+  display: flex;
+  flex-direction: column;
+}
+.hero-cam-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: #0b0f19;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hero-cam-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.hero-cam-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(4px);
+  z-index: 2;
+}
+.hero-cam-badge .live-red {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+}
+.hero-cam-fps {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #94a3b8;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  z-index: 2;
+}
+.hero-cam-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.hero-cam-fallback svg {
+  width: 32px;
+  height: 32px;
+  stroke: var(--muted);
+  fill: none;
+  stroke-width: 1.5;
+}
+
+/* Правая колонка информации и управления */
+.hero-info-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+.hero-job-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hero-job-main {
+  min-width: 0;
+  flex: 1;
+}
+.hero-job-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.3;
+  word-break: break-word;
+  color: var(--text);
+}
+.hero-order-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-2);
+  text-decoration: none;
+}
+.hero-order-badge:hover {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.hero-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hero-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hero-pct-big {
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--text);
+}
+.hero-pct-big small {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 2px;
+}
+.hero-time-rem {
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+.hero-time-rem b {
+  color: var(--text);
+}
+.hero-progress-bar {
+  height: 9px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.hero-progress-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-hover, #2563eb) 100%);
+  transition: width 0.3s ease;
+}
+.hero-progress-bar.paused i {
+  background: var(--warn);
+}
+.hero-facts-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.hero-facts-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Телеметрия: сопло, стол, камера, активный филамент */
+.hero-telemetry-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.hero-chip b {
+  color: var(--text);
+  font-weight: 600;
+}
+.hero-chip-sw {
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  flex: none;
+}
+
+/* Панель оперативного управления */
+.hero-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.hero-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hero-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.hero-speed-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-speed-label {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.hero-speed-seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  padding: 2px;
+  gap: 2px;
+}
+.hero-speed-btn {
+  border: none;
+  background: none;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.hero-speed-btn:hover {
+  color: var(--text);
+  background: var(--panel);
+}
+.hero-speed-btn.on {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Режим простоя (IDLE / FINISH) */
+.hero-idle-container {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: 20px;
+  align-items: center;
+}
+.hero-idle-status {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hero-idle-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  width: fit-content;
+}
+.hero-idle-badge .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.hero-idle-card {
+  padding: 16px;
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  border: 1.5px dashed var(--accent-line);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.hero-idle-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hero-idle-card-head b {
+  font-size: 14px;
+  color: var(--text);
+}
+.hero-idle-job-details {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* 4 ключевых KPI смены */
+.kpi-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+@media (max-width: 960px) {
+  .kpi-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .hero-grid, .hero-idle-container {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 560px) {
+  .kpi-grid-4 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Сворачиваемая секция аналитики */
+.dash-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+.dash-collapsible-analytics.hidden {
+  display: none !important;
 }

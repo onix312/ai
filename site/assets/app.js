@@ -80,15 +80,7 @@ function renderDashboard() {
       load > 100 ? 'bad' : load > 85 ? 'warn' : '',
       `<div class="bar ${load > 100 ? 'bad' : load > 85 ? 'warn' : ''}"><i style="width:${clamp(load, 0, 100)}%"></i></div>`),
     kpi('Активные заказы', String(activeOrders.length), `${nfmt(farm.queued)} заданий в производстве`),
-    kpi('Требуют внимания', String(late.length), 'срок сегодня или прошёл', late.length ? 'bad' : 'ok'),
-    kpi('Ждём оплату', money(pipeline), 'по активным заказам'),
-    kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}`, num(s.profit) >= 0 ? 'ok' : 'bad'),
-    kpi('Сегодня напечатано', `${nfmt(farm.today_hours, 1)} ч`, `${nfmt(farm.today_grams)} г · ${nfmt(farm.today_jobs)} задан.`),
-    kpi('Простой парка', `${nfmt((farm.idle && farm.idle.idle_hours) || 0, 1)} ч`,
-      `упущено ≈ ${money((farm.idle && farm.idle.lost_profit) || 0)}`,
-      num((farm.idle && farm.idle.lost_profit) || 0) > 0 ? 'warn' : 'ok'),
-    kpi('Нужно пластика', `${nfmt(needGrams)} г`, `на складе ${nfmt(stock)} г`,
-      needGrams > stock ? 'warn' : 'ok'),
+    kpi('Прибыль за период', money(s.profit), `маржа ${pct(s.margin)}` + (farm.today_hours ? ` · сегодня ${nfmt(farm.today_hours, 1)} ч` : ''), num(s.profit) >= 0 ? 'ok' : 'bad'),
   ].join(''));
   animateKpis();
 
@@ -333,20 +325,20 @@ function renderEvents() {
 
 /* ================================================= виджеты панели */
 const DASH_WIDGETS = [
-  ['kpis', 'Показатели (KPI-ряд)'],
+  ['kpis', 'Показатели смены (4 KPI)'],
   ['operator_focus', 'Сейчас нужно сделать'],
-  ['owner_cash', 'Касса одной строкой'],
+  ['due', 'Ближайшие сроки'],
   ['plan', 'План на сегодня'],
   ['health', 'Здоровье бизнеса'],
-  ['active', 'Активная печать'],
   ['gauge', 'Прибыль за час печати'],
   ['filament', 'Пластик на очередь'],
   ['ams', 'AMS на главной'],
   ['chart', 'Деньги и печать по дням'],
   ['printers', 'Парк принтеров'],
-  ['due', 'Ближайшие сроки'],
   ['events', 'Лента событий'],
   ['timeline', 'Таймлайн печати за день'],
+  ['achievements', 'Достижения цеха'],
+  ['heartbeat', 'Здоровье системы'],
 ];
 const WIDGET_KEY = 'pf_dash_widgets';
 function widgetPrefs() {
@@ -446,57 +438,304 @@ function renderWidgetsList() {
 }
 function dashEmpty(msg) { return `<div class="empty compact"><span>${esc(msg)}</span></div>`; }
 
-/* ================================================ большая карточка печати */
+/* ================================================ 18.10.0: HERO-ПУЛЬТ СТАНКА НА ГЛАВНОМ ЭКРАНЕ */
+async function execHeroCommand(printerId, cmd, btn) {
+  if (!printerId || !cmd) return;
+  const DANGER_MSGS = {
+    pause: 'Поставить печать на паузу? Оператор должен контролировать состояние принтера.',
+    resume: 'Продолжить печать? Принтер снова нагреется и продолжит движение.',
+    stop: 'Остановить печать? Задание будет прервано, деталь придётся печатать заново.',
+  };
+  const ask = DANGER_MSGS[cmd];
+  if (ask && !confirmDanger(ask)) return;
+  try {
+    await U.withBusy(btn, async () => {
+      await post('/api/printer/command', {
+        printer_id: printerId,
+        command: cmd,
+        confirmed: Boolean(ask),
+      });
+      toast('Команда отправлена', cmd === 'light_toggle' ? 'Свет' : cmd);
+      setTimeout(PF.poll, 500);
+    });
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function execHeroSpeed(printerId, level, btn) {
+  if (!printerId || !level) return;
+  try {
+    await U.withBusy(btn, async () => {
+      await post('/api/printer/command', {
+        printer_id: printerId,
+        command: 'speed',
+        value: level,
+      });
+      const labels = { 1: 'Тихий (50%)', 2: 'Стандарт (100%)', 3: 'Спорт (124%)', 4: 'Ludicrous (166%)' };
+      toast('Скорость изменена', labels[level] || `${level}`);
+      setTimeout(PF.poll, 500);
+    });
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function execHeroStartJob(jobId, printerId, btn) {
+  if (!jobId || !printerId) return;
+  try {
+    await U.withBusy(btn, async () => {
+      const check = await post('/api/printer/preflight', {
+        job_id: jobId,
+        printer_id: printerId,
+      });
+      const blocks = (check && check.blocks) || [];
+      if (blocks.length) {
+        throw new Error('Preflight блокирует старт: ' + blocks.map((x) => x.title || x.detail).join('; '));
+      }
+      const warns = (check && check.warnings) || [];
+      if (warns.length) {
+        const msg = 'Preflight предупреждения:\n' + warns.map((x) => '• ' + (x.title || x.detail)).join('\n')
+          + '\n\nПодтвердите запуск задания.';
+        if (!confirmDanger(msg)) return;
+      }
+      await post('/api/jobs/start', {
+        id: jobId,
+        printer_id: printerId,
+        confirmed: true,
+        preflight_acknowledged: true,
+      });
+      toast('Задание запущено', 'Печать начата');
+      setTimeout(PF.poll, 500);
+    });
+  } catch (err) {
+    fail(err);
+  }
+}
+
 function renderActivePrint() {
   const host = $('dash_active');
   const live = PF.state.live;
-  const snap = (live && (live.active || (live.printers || [])[0])) || null;
-  if (!snap) { host.innerHTML = dashEmpty('Принтер не добавлен — подключите его в разделе «Принтеры».'); return; }
-  const info = snap.printer || {};
-  const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(info.state);
-  if (!running) {
-    $('dash_active_sub').textContent = `${snap.name} · ${info.state_label || 'готов'}`;
-    host.innerHTML = `<div class="active-print idle">`
-      + `<div class="ap-main"><b class="ap-pct">—</b><div class="ap-info">`
-      + `<b>${esc(snap.name)} свободен</b><small>${esc(info.state_label || 'Готов к печати')}</small></div></div>`
-      + ((info.problems && info.problems.length) ? `<div class="ap-warn">⚠ ${esc(info.problems[0].title)}</div>` : '')
-      + '</div>';
+  const printers = (live && live.printers) || [];
+
+  // Смарт-фокус: выбранный оператором или приоритетный принтер
+  let snap = null;
+  if (PF.state.dashHeroPrinterId) {
+    snap = printers.find((p) => p.id === PF.state.dashHeroPrinterId);
+  }
+  if (!snap) {
+    snap = printers.find((p) => ['RUNNING', 'PAUSE', 'PREPARE'].includes((p.printer || {}).state));
+    if (!snap) snap = printers.find((p) => ((p.printer || {}).problems || []).length > 0);
+    if (!snap) snap = printers.find((p) => (p.connection || {}).connected);
+    if (!snap) snap = (live && (live.active || printers[0])) || null;
+  }
+
+  // Селектор принтеров фермы в шапке
+  const prHost = $('dash_hero_printers');
+  if (prHost) {
+    if (printers.length > 1) {
+      prHost.innerHTML = printers.map((p) => {
+        const st = (p.printer || {}).state;
+        const isRun = st === 'RUNNING' || st === 'PREPARE';
+        const isPause = st === 'PAUSE';
+        const isOn = snap && p.id === snap.id;
+        return `<button class="hero-printer-pill${isOn ? ' on' : ''}${isRun ? ' run' : ''}${isPause ? ' pause' : ''}" type="button" data-hero-printer="${esc(p.id)}" title="${esc(p.name)} · ${esc((p.printer || {}).state_label || '')}">`
+          + `<span class="st-dot"></span><span>${esc(p.name)}</span></button>`;
+      }).join('');
+    } else {
+      prHost.innerHTML = '';
+    }
+  }
+
+  const dot = $('dash_hero_dot');
+  if (!snap) {
+    if (dot) dot.className = 'hero-live-dot off';
+    if ($('dash_active_sub')) $('dash_active_sub').textContent = 'Принтеры не добавлены';
+    if (host) host.innerHTML = dashEmpty('Принтер не добавлен — подключите его в разделе «Принтеры».');
     return;
   }
-  const job = snap.job || {};
-  const order = job.order || {};
+
+  const p = snap;
+  const info = p.printer || {};
+  const t = p.temperatures || {};
+  const running = ['RUNNING', 'PAUSE', 'PREPARE'].includes(info.state);
+
+  if (dot) {
+    dot.className = 'hero-live-dot' + (running ? (info.state === 'PAUSE' ? ' warn' : ' pulse') : (p.connection && p.connection.connected ? '' : ' off'));
+  }
+
+  if (!running) {
+    // Режим простоя (IDLE / FINISH)
+    const isConn = p.connection && p.connection.connected;
+    if ($('dash_active_sub')) {
+      $('dash_active_sub').textContent = `${esc(p.name)} · ${esc(isConn ? (info.state_label || 'Готов к печати') : 'Нет связи')}`;
+    }
+
+    const queue = (PF.state.jobs && PF.state.jobs.queue) || [];
+    const queuedJobs = queue.filter((j) => !['done', 'failed', 'cancelled'].includes(j.state));
+    const nextJob = queuedJobs[0];
+
+    const trays = (p.ams && p.ams.trays) || [];
+    const activeTray = trays.find((tr) => tr.present !== false && (tr.present || tr.type || tr.uuid));
+
+    const temperHtml = `
+      <div class="hero-telemetry-row">
+        <span class="hero-chip">🌡 Сопло: <b>${nfmt(t.nozzle, 0)}°C</b>${t.nozzle_target ? ' / ' + nfmt(t.nozzle_target, 0) + '°' : ''}</span>
+        <span class="hero-chip">🛏 Стол: <b>${nfmt(t.bed, 0)}°C</b>${t.bed_target ? ' / ' + nfmt(t.bed_target, 0) + '°' : ''}</span>
+        ${t.chamber ? `<span class="hero-chip">□ Камера: <b>${nfmt(t.chamber, 0)}°C</b></span>` : ''}
+        ${activeTray ? `<span class="hero-chip"><span class="hero-chip-sw" style="background:${esc(activeTray.color || '#38445c')}"></span> <b>${esc(activeTray.type || activeTray.material || 'Пластик')}</b> <small>${esc(activeTray.slot || '')}</small></span>` : ''}
+      </div>`;
+
+    let nextJobHtml = '';
+    if (nextJob) {
+      const orders = PF.state.orders || [];
+      const order = nextJob.order || orders.find((o) => o.id === nextJob.order_id);
+      nextJobHtml = `
+        <div class="hero-idle-card">
+          <div class="hero-idle-card-head">
+            <div>
+              <b>Следующее задание из очереди: «${esc(nextJob.name || nextJob.file || 'Задание')}»</b>
+              ${order ? `<small style="display:block;margin-top:3px;color:var(--text-2)"><a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number || '')} · ${esc(order.product || '')}</a></small>` : ''}
+            </div>
+            <button class="btn sm primary hero-btn" type="button" data-hero-start-job="${esc(nextJob.id)}" data-pid="${esc(p.id)}" ${isConn ? '' : 'disabled'}>
+              <span class="ic">▶</span>Запустить из очереди
+            </button>
+          </div>
+          <div class="hero-idle-job-details">
+            ${nextJob.est_minutes ? `<span>Оценка: <b>${minutesText(nextJob.est_minutes)}</b></span>` : ''}
+            ${nextJob.est_grams ? `<span>Расход: <b>${nfmt(nextJob.est_grams)} г</b></span>` : ''}
+            ${nextJob.material ? `<span>Материал: <b>${esc(nextJob.material)}</b></span>` : ''}
+          </div>
+        </div>`;
+    } else {
+      nextJobHtml = `
+        <div class="hero-idle-card" style="border-style:dashed">
+          <div class="hero-idle-card-head">
+            <span style="color:var(--muted)">Очередь печати пуста.</span>
+            <a href="#print" class="btn sm ghost" data-view="print">Перейти к нарезке →</a>
+          </div>
+        </div>`;
+    }
+
+    if (host) {
+      host.innerHTML = `
+        <div class="hero-body">
+          <div class="hero-idle-container">
+            <div class="hero-idle-status">
+              <span class="hero-idle-badge"><i class="dot" style="${isConn ? '' : 'background:var(--bad)'}"></i> ${esc(isConn ? (info.state_label || 'Готов к печати') : 'Нет связи')}</span>
+              ${temperHtml}
+            </div>
+            ${nextJobHtml}
+          </div>
+        </div>`;
+    }
+    return;
+  }
+
+  // Режим печати (RUNNING / PAUSE / PREPARE)
+  const job = p.job || {};
+  const orders = PF.state.orders || [];
+  const order = job.order || orders.find((o) => o.id === job.order_id) || {};
   const progress = clamp(num(info.progress), 0, 100);
   const remaining = num(info.remaining_min);
   const elapsed = num(info.elapsed_min);
   const eta = info.eta ? String(info.eta).slice(11, 16) : '';
   const facts = [];
-  if (info.layer) facts.push(`Слой ${info.layer} / ${info.total_layers || '—'}`);
-  if (remaining) facts.push(`Осталось ${minutesText(remaining)}`);
-  if (eta) facts.push(`Финиш в ${eta}`);
-  if (elapsed) facts.push(`Идёт ${minutesText(elapsed)}`);
-  $('dash_active_sub').textContent = `${snap.name} · ${info.state_label}`;
-  const APC = 2 * Math.PI * 19;
-  host.innerHTML = `<div class="active-print${info.state === 'PAUSE' ? ' paused' : ''}${running ? ' run' : ''}">`
-    + `<div class="ap-main"><span class="ap-dial"><span class="ap-ring"><svg viewBox="0 0 44 44" aria-hidden="true">`
-    + `<circle class="tr" cx="22" cy="22" r="19"/>`
-    + `<circle class="fl" cx="22" cy="22" r="19" stroke-dasharray="${APC.toFixed(1)}" style="stroke-dashoffset:${(APC * (1 - progress / 100)).toFixed(1)}"/>`
-    + `</svg></span><b class="ap-pct">${Math.round(progress)}<small>%</small></b></span>`
-    + `<div class="ap-info"><b>${esc(info.task || 'Печать')}</b>`
-    + (order.number
-      ? `<small><a href="#orders" class="order-link" data-order-open="${esc(order.id || '')}">Заказ №${esc(order.number)} · ${esc(order.product || '')}${order.customer_name ? ' · ' + esc(order.customer_name) : ''}</a></small>`
-      : `<small>${esc(snap.name)} · <button class="btn xs primary" type="button" data-convert-order="${esc(snap.id)}" style="padding:1px 8px;font-size:11px"><span class="ic">✨</span>В заказ</button></small>`)
-    + `<div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div></div></div>`
-    + `<div class="ap-facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}</div>`
-    + (num(job.spent)
-      ? `<div class="ap-money"><span>Потрачено <b>${money(job.spent)}</b></span>`
-        + (num(job.cost_total) ? `<span>Итого печать ≈ <b>${money(job.cost_total)}</b></span>` : '')
-        + (job.profit != null && num(job.price) ? `<span>Прибыль <b class="${num(job.profit) >= 0 ? 'pos' : 'neg'}">${money(job.profit)}</b></span>` : '')
-        + (job.break_even_pct != null ? `<span>Затраты съели <b>${nfmt(job.break_even_pct)}%</b> цены</span>` : '')
-        + (num(job.per_hour) ? `<span>Стоимость часа <b>${money(job.per_hour)}</b></span>` : '')
-        + '</div>'
-      : '')
-    + (info.state === 'PAUSE' ? '<div class="ap-warn">⚠ На паузе — проверьте принтер</div>' : '')
-    + '</div>';
+  if (info.layer) facts.push(`<span>Слой <b>${info.layer} / ${info.total_layers || '—'}</b></span>`);
+  if (elapsed) facts.push(`<span>В печати <b>${minutesText(elapsed)}</b></span>`);
+  if (eta) facts.push(`<span>Финиш в <b>${eta}</b></span>`);
+
+  if ($('dash_active_sub')) {
+    $('dash_active_sub').textContent = `${esc(p.name)} · ${esc(info.state_label || 'Печать')}`;
+  }
+
+  const trays = (p.ams && p.ams.trays) || [];
+  const activeTray = trays.find((tr) => tr.present !== false && (tr.present || tr.type || tr.uuid));
+
+  const camUrl = `/api/printer/camera.mjpeg?printer_id=${encodeURIComponent(p.id)}&t=${PF.state.camSession || Date.now()}`;
+  const camAvailable = p.camera && p.camera.available !== false;
+
+  const camHtml = camAvailable ? `
+    <div class="hero-cam-col">
+      <div class="hero-cam-wrap">
+        <span class="hero-cam-badge"><i class="live-red"></i> LIVE</span>
+        <img class="hero-cam-img" src="${camUrl}" alt="Камера ${esc(p.name)}"
+             onerror="this.parentElement.innerHTML='<div class=\\'hero-cam-fallback\\'><span class=\\'ic\\'>📷</span><span>Камера принтера временно недоступна</span></div>'">
+      </div>
+    </div>` : `
+    <div class="hero-cam-col">
+      <div class="hero-cam-wrap">
+        <div class="hero-cam-fallback">
+          <span class="ic">📷</span>
+          <span>Камера выключена или недоступна</span>
+          <small class="muted">${esc(p.name)}</small>
+        </div>
+      </div>
+    </div>`;
+
+  const speedLvl = num(info.speed_level, 2);
+
+  const orderLink = order.number
+    ? `<a href="#orders" class="hero-order-badge" data-order-open="${esc(order.id || '')}"><span>№${esc(order.number)}</span> · <span>${esc(order.product || '')}</span>${order.customer_name ? ' · <small>' + esc(order.customer_name) + '</small>' : ''}</a>`
+    : `<button class="btn xs primary" type="button" data-convert-order="${esc(p.id)}" style="margin-top:6px;padding:2px 8px;font-size:11px"><span class="ic">✨</span>Создать заказ из печати</button>`;
+
+  if (host) {
+    host.innerHTML = `
+      <div class="hero-body">
+        <div class="hero-grid">
+          ${camHtml}
+          <div class="hero-info-col">
+            <div class="hero-job-header">
+              <div class="hero-job-main">
+                <h3 class="hero-job-title">${esc(info.task || 'Печать задания')}</h3>
+                ${orderLink}
+              </div>
+            </div>
+
+            <div class="hero-progress-section">
+              <div class="hero-progress-meta">
+                <span class="hero-pct-big">${Math.round(progress)}<small>%</small></span>
+                <span class="hero-time-rem">${remaining ? `Осталось <b>${minutesText(remaining)}</b>` : (info.state === 'PAUSE' ? 'На паузе' : '')}</span>
+              </div>
+              <div class="hero-progress-bar${info.state === 'PAUSE' ? ' paused' : ''}">
+                <i style="width:${progress}%"></i>
+              </div>
+              <div class="hero-facts-row">
+                ${facts.join('')}
+              </div>
+            </div>
+
+            <div class="hero-telemetry-row">
+              <span class="hero-chip">🌡 Сопло: <b>${nfmt(t.nozzle, 0)}°C</b>${t.nozzle_target ? ' / ' + nfmt(t.nozzle_target, 0) + '°' : ''}</span>
+              <span class="hero-chip">🛏 Стол: <b>${nfmt(t.bed, 0)}°C</b>${t.bed_target ? ' / ' + nfmt(t.bed_target, 0) + '°' : ''}</span>
+              ${t.chamber ? `<span class="hero-chip">□ Камера: <b>${nfmt(t.chamber, 0)}°C</b></span>` : ''}
+              ${activeTray ? `<span class="hero-chip"><span class="hero-chip-sw" style="background:${esc(activeTray.color || '#38445c')}"></span> <b>${esc(activeTray.type || activeTray.material || 'Пластик')}</b> <small>${esc(activeTray.slot || '')}</small></span>` : ''}
+            </div>
+
+            <div class="hero-control-bar">
+              <div class="hero-action-buttons">
+                ${info.state === 'PAUSE'
+                  ? `<button class="btn sm primary hero-btn" type="button" data-hero-cmd="resume" data-pid="${esc(p.id)}"><span class="ic">▶</span>Продолжить</button>`
+                  : `<button class="btn sm hero-btn" type="button" data-hero-cmd="pause" data-pid="${esc(p.id)}"><span class="ic">⏸</span>Пауза</button>`
+                }
+                <button class="btn sm ghost hero-btn" type="button" data-hero-cmd="light_toggle" data-pid="${esc(p.id)}" title="Подсветка камеры"><span class="ic">☀</span>Свет</button>
+                <button class="btn sm danger hero-btn" type="button" data-hero-cmd="stop" data-pid="${esc(p.id)}" title="Прервать печать"><span class="ic">⏹</span>Стоп</button>
+              </div>
+
+              <div class="hero-speed-wrap">
+                <span class="hero-speed-label">Скорость:</span>
+                <div class="hero-speed-seg">
+                  <button class="hero-speed-btn${speedLvl === 1 ? ' on' : ''}" type="button" data-hero-speed="1" data-pid="${esc(p.id)}" title="Тихий режим (50%)">Тихая</button>
+                  <button class="hero-speed-btn${speedLvl === 2 || !speedLvl ? ' on' : ''}" type="button" data-hero-speed="2" data-pid="${esc(p.id)}" title="Стандартный режим (100%)">100%</button>
+                  <button class="hero-speed-btn${speedLvl === 3 ? ' on' : ''}" type="button" data-hero-speed="3" data-pid="${esc(p.id)}" title="Спорт (124%)">Спорт</button>
+                  <button class="hero-speed-btn${speedLvl === 4 ? ' on' : ''}" type="button" data-hero-speed="4" data-pid="${esc(p.id)}" title="Ludicrous (166%)">🚀</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
 }
 
 /* ============================================== спидометр «прибыль за час» */
@@ -1921,7 +2160,7 @@ function renderSettings() {
 
   safe('misc', () => {
     if ($('set_data_dir')) {
-      $('set_data_dir').textContent = navigator.platform.toLowerCase().includes('win')
+      $('set_data_dir').textContent = (navigator.platform || '').toLowerCase().includes('win')
         ? '%APPDATA%\\PrintFlow' : '~/.config/printflow';
     }
     $$('#set_shortcuts [data-set-shortcut]').forEach((button) => {
@@ -2857,6 +3096,69 @@ function bind() {
     if (action.dataset.focusRoute === 'printers' && action.dataset.focusId) PF.state.activePrinter = action.dataset.focusId;
     PF.go(action.dataset.focusRoute);
   });
+  on('dash_hero_pult', 'click', async (e) => {
+    const pill = e.target.closest('[data-hero-printer]');
+    if (pill) {
+      PF.state.dashHeroPrinterId = pill.dataset.heroPrinter;
+      renderActivePrint();
+      return;
+    }
+    const cmdBtn = e.target.closest('[data-hero-cmd]');
+    if (cmdBtn) {
+      const pid = cmdBtn.dataset.pid;
+      const cmd = cmdBtn.dataset.heroCmd;
+      await execHeroCommand(pid, cmd, cmdBtn);
+      return;
+    }
+    const speedBtn = e.target.closest('[data-hero-speed]');
+    if (speedBtn) {
+      const pid = speedBtn.dataset.pid;
+      const level = parseInt(speedBtn.dataset.heroSpeed, 10);
+      await execHeroSpeed(pid, level, speedBtn);
+      return;
+    }
+    const startBtn = e.target.closest('[data-hero-start-job]');
+    if (startBtn) {
+      const jobId = startBtn.dataset.heroStartJob;
+      const pid = startBtn.dataset.pid;
+      await execHeroStartJob(jobId, pid, startBtn);
+      return;
+    }
+    const convOrder = e.target.closest('[data-convert-order]');
+    if (convOrder) {
+      if (PF.modules.printer && PF.modules.printer.convertActiveToOrder) {
+        PF.modules.printer.convertActiveToOrder(convOrder.dataset.convertOrder);
+      } else {
+        PF.go('printers');
+      }
+      return;
+    }
+  });
+
+  on('dash_analytics_toggle', 'click', () => {
+    const sec = $('dash_analytics_section');
+    const btn = $('dash_analytics_toggle');
+    if (!sec || !btn) return;
+    const willShow = sec.classList.contains('hidden');
+    sec.classList.toggle('hidden', !willShow);
+    btn.setAttribute('aria-expanded', String(willShow));
+    const txt = $('dash_analytics_toggle_txt');
+    const arr = $('dash_analytics_arr');
+    if (txt) txt.textContent = willShow ? 'Скрыть аналитику и графики' : 'Показать аналитику и графики смены';
+    if (arr) arr.textContent = willShow ? '▴' : '▾';
+    store.set('pf_dash_analytics_open', willShow ? '1' : '0');
+  });
+  if (store.get('pf_dash_analytics_open') === '1') {
+    const sec = $('dash_analytics_section');
+    const btn = $('dash_analytics_toggle');
+    if (sec) sec.classList.remove('hidden');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    const txt = $('dash_analytics_toggle_txt');
+    const arr = $('dash_analytics_arr');
+    if (txt) txt.textContent = 'Скрыть аналитику и графики';
+    if (arr) arr.textContent = '▴';
+  }
+
   on('dash_widgets_btn', 'click', () => { renderWidgetsList(); openModal('dash_widgets_modal'); });
   on('dash_widgets_list', 'change', (e) => {
     const cb = e.target.closest('[data-widget-check]');

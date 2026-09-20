@@ -127,6 +127,97 @@ def validate_template(template: str, profile: FarmLoopProfile = P1S_STAGE1) -> d
     }
 
 
+def build_template_from_blocks(
+    cooldown_temp: int = 35,
+    fan_assist: bool = True,
+    z_lift: float = 15.0,
+    pusher_y: float = 245.0,
+    pusher_speed: int = 2400,
+    custom_gcode: str = "",
+) -> str:
+    """Собрать проверенный G-code шаблон FarmLoop из параметров конструктора."""
+    lines = [
+        BEGIN,
+        "; FarmLoop Stage 1: автоматическое охлаждение и безопасный сброс детали P1S",
+        "; 1. Охлаждение стола",
+        "M140 S0",
+        "M104 S0",
+    ]
+    if fan_assist:
+        lines.append("M106 P2 S255")
+    temp = max(20, min(100, int(cooldown_temp or 35)))
+    lines.append(f"M190 R{temp}")
+    if fan_assist:
+        lines.append("M106 P2 S0")
+    lines.extend([
+        "; 2. Отвод сопла",
+        "G91",
+        f"G1 Z{float(z_lift):.1f} F1200",
+        "G90",
+        "; 3. Проход толкателя",
+        "G1 X128 Y10 F3000",
+        f"G1 Y{float(pusher_y):.1f} F{int(pusher_speed)}",
+        "G1 Y10 F3000",
+        "; 4. Парковка",
+        "G28 X Y",
+    ])
+    if custom_gcode and custom_gcode.strip():
+        lines.append("; 5. Дополнения")
+        for line in custom_gcode.strip().splitlines():
+            line_str = line.strip()
+            if line_str and not line_str.startswith("; PRINTFLOW FARMLOOP"):
+                lines.append(line_str)
+    lines.append(END)
+    return "\n".join(lines) + "\n"
+
+
+DEFAULT_STAGE1_TEMPLATE = build_template_from_blocks()
+
+
+def parse_template_blocks(template: str) -> dict:
+    """Разобрать G-code шаблона на параметры для блочного конструктора."""
+    import re
+    blocks = {
+        "cooldown_temp": 35,
+        "fan_assist": False,
+        "z_lift": 15.0,
+        "pusher_y": 245.0,
+        "pusher_speed": 2400,
+        "custom_gcode": "",
+    }
+    lines = _lines(template)
+    custom_lines = []
+    in_custom = False
+    for line in lines:
+        raw = line.strip()
+        if not raw or raw in (BEGIN, END):
+            continue
+        if "; 5. Дополнения" in raw or "; Дополнения" in raw:
+            in_custom = True
+            continue
+        if in_custom:
+            if not raw.startswith("; PRINTFLOW"):
+                custom_lines.append(raw)
+            continue
+        m_cool = re.search(r"M190\s+R(\d+)", raw, re.IGNORECASE)
+        if m_cool:
+            blocks["cooldown_temp"] = int(m_cool.group(1))
+        if re.search(r"M106\s+P2\s+S255", raw, re.IGNORECASE):
+            blocks["fan_assist"] = True
+        m_z = re.search(r"G1\s+Z(\d+(?:\.\d+)?)", raw, re.IGNORECASE)
+        if m_z:
+            blocks["z_lift"] = float(m_z.group(1))
+        m_y = re.search(r"G1\s+Y(\d+(?:\.\d+)?)\s+F(\d+)", raw, re.IGNORECASE)
+        if m_y:
+            y_val = float(m_y.group(1))
+            speed_val = int(m_y.group(2))
+            if y_val > 50:
+                blocks["pusher_y"] = y_val
+                blocks["pusher_speed"] = speed_val
+    blocks["custom_gcode"] = "\n".join(custom_lines)
+    return blocks
+
+
 def audit_source(gcode: str, profile: FarmLoopProfile = P1S_STAGE1) -> dict:
     """Минимальный аудит исходника до внедрения FarmLoop."""
     lines = _lines(gcode)

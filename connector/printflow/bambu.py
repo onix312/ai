@@ -666,8 +666,13 @@ class BambuPrinter:
             if level not in SPEED_LEVELS:
                 raise ValueError("Режим скорости: 1–4")
             self.publish({"print": {"sequence_id": seq, "command": "print_speed", "param": str(level)}})
-        elif name == "light":
-            mode = "on" if value in (True, "on", 1, "1") else "off"
+        elif name in ("light", "light_toggle"):
+            if value is None or name == "light_toggle":
+                cur = next((x.get("mode", "off") for x in (self._last_report or {}).get("print", {}).get("lights_report", []) or []
+                            if x.get("node") == "chamber_light"), "off")
+                mode = "off" if cur == "on" else "on"
+            else:
+                mode = "on" if value in (True, "on", 1, "1") else "off"
             self.publish({"system": {"sequence_id": seq, "command": "ledctrl",
                                      "led_node": "chamber_light", "led_mode": mode,
                                      "led_on_time": 500, "led_off_time": 500,

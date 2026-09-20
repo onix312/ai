@@ -200,10 +200,10 @@ class VirtualPrinter:
                 self._state = "IDLE"
                 self._filename = ""
                 return {"ok": True}
-            if name == "light":
+            if name in ("light", "light_toggle"):
                 self._light = "on" if self._light == "off" else "off"
                 return {"ok": True}
-            if name == "speed_level" and value is not None:
+            if name in ("speed", "speed_level") and value is not None:
                 self._speed_level = int(num(value, 2))
                 return {"ok": True}
         return {"ok": True, "virtual": True}
