@@ -46,6 +46,7 @@ class Ctx:
     query: dict = field(default_factory=dict)
     request_id: str = ""
     started_at: float = 0.0
+    headers: dict = field(default_factory=dict)
 
     def one(self, key: str, default: str = "") -> str:
         """Первое значение query-параметра (как `one` в legacy-диспетчере)."""
@@ -62,6 +63,13 @@ class Ctx:
     def num(self, key: str, default: float = 0.0) -> float:
         from .accounting import num
         return num(self.arg(key, self.one(key, "")), default)
+
+    def header(self, key: str, default: str = "") -> str:
+        """Заголовок запроса (lower-case)."""
+        try:
+            return str(self.headers.get(key.lower(), default) or default)
+        except Exception:
+            return default
 
 
 @dataclass
@@ -122,13 +130,15 @@ class Router:
         return self._routes.get((method.upper(), path))
 
     def dispatch(self, api: Any, method: str, path: str, body: dict | None = None,
-                 query: dict | None = None, request_id: str = "") -> tuple[int, Any] | None:
+                 query: dict | None = None, request_id: str = "",
+                 headers: dict | None = None) -> tuple[int, Any] | None:
         """Выполнить маршрут. `None` — маршрута нет, вызывающий идёт дальше."""
         route = self.find(method, path)
         if route is None:
             return None
         ctx = Ctx(body=body if isinstance(body, dict) else {},
-                  query=query or {}, request_id=request_id, started_at=time.time())
+                  query=query or {}, request_id=request_id, started_at=time.time(),
+                  headers={k.lower(): v for k, v in (headers or {}).items()})
         result = route.handler(api, ctx)
         if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], int):
             return result
@@ -163,7 +173,8 @@ def register_all() -> int:
     for name in ("routes_workshop", "routes_system", "routes_sbp", "routes_cashier",
                  "routes_bank", "routes_npd", "routes_app", "routes_printers",
                  "routes_print", "routes_get", "routes_farmloop",
-                 "routes_slicer", "routes_nomenclature"):
+                 "routes_slicer", "routes_nomenclature",
+                 "routes_staff_miniapp"):
         try:
             register_module(name)
         except Exception as exc:  # pragma: no cover - защита от частичного релиза

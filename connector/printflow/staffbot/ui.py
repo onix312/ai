@@ -1,61 +1,81 @@
-"""Оформление сообщений бота сотрудников: форматы, тексты, клавиатуры.
+"""UI бота — клавиатуры и тексты, без бизнеса и без сети.
 
-Здесь нет ни бизнеса, ни Telegram-API — только «как выглядит ответ»:
-часы «2 ч 15 мин», деньги «12 500 ₽», строки состояний принтера и сборки
-inline-клавиатур. Отдельные кнопки конкретных экранов живут рядом со своими
-сценариями (sales/catalog/…), здесь — общие для всех.
+Бот тонкий: только уведомления + кнопка «Открыть цех» web_app.
 """
 from __future__ import annotations
 
 from .. import APP_VERSION
-from ..accounting import num
 
-# Состояния принтера на языке цеха. Английские коды Bambu остаются
-# служебными, человек читает русскую строку.
 STATE_RU = {
-    "RUNNING": "печатает", "IDLE": "свободен", "PAUSE": "на паузе",
-    "PAUSED": "на паузе", "FINISH": "печать завершена", "PREPARE": "готовится",
-    "FAILED": "ошибка", "OFFLINE": "не в сети", "UNKNOWN": "нет данных",
+    "RUNNING": "печатает",
+    "IDLE": "свободен",
+    "PAUSE": "на паузе",
+    "PAUSED": "на паузе",
+    "FINISH": "печать завершена",
+    "PREPARE": "готовится",
+    "FAILED": "ошибка",
+    "OFFLINE": "не в сети",
+    "UNKNOWN": "нет данных",
 }
 
-HELP = f"""PrintFlow {APP_VERSION} — цех в кармане.
+HELP = (
+    f"PrintFlow {APP_VERSION} — цех в кармане.\n\n"
+    "Откройте цех кнопкой ниже — там полка, касса, очередь, принтеры, заказы, inbox, деньги.\n"
+    "Я пришлю важное сам: печать, низкий остаток, кассу, заказы.\n\n"
+    "Команды: /start, /help, /code — ваш chat_id для владельца."
+)
 
-Все действия — кнопками ниже:
-🛒 Продать · 📦 Полка · 💰 Касса · 📷 Кадр · 📊 Итоги · ⚙️ Ещё
-
-Если бот попросит цифру, сумму или имя — просто напишите.
-Важное я пришлю сам: печать, низкий остаток, кассу, заказы."""
-
-# Кнопки нижней панели главного меню → команда диспетчера. Кнопка — основной
-# интерфейс; текстовые команды остаются скрытым способом для опытных.
+# Совместимость со старыми тестами: нижняя панель → канонические команды
 REPLY_ALIASES: dict[str, str] = {
-    "🛒 продать": "продажа", "продать": "продажа",
-    "📦 полка": "стеллаж", "полка": "стеллаж",
-    "💰 касса": "касса", "касса": "касса",
-    "📷 кадр": "кадр", "кадр": "кадр",
-    "📊 итоги": "день", "итоги": "день",
-    "⚙️ ещё": "more", "⚙️ еще": "more",
-    "ещё": "more", "еще": "more", "more": "more",
+    "🛒 продать": "меню",
+    "📦 полка": "меню",
+    "💰 касса": "меню",
+    "📷 кадр": "меню",
+    "📊 итоги": "меню",
+    "⚙️ ещё": "меню",
+    "⚙️ еще": "меню",
+    "ещё": "меню",
+    "еще": "меню",
+    "more": "меню",
+    "продажа": "меню",
+    "стеллаж": "меню",
+    "полка": "меню",
+    "касса": "меню",
+    "принтеры": "меню",
+    "очередь": "меню",
+    "заказы": "меню",
+    "деньги": "меню",
 }
 
 
-def hm(minutes: float) -> str:
-    """Минуты → «2 ч 15 мин»: так читается быстрее, чем «135 мин»."""
-    total = int(max(0, num(minutes)))
-    hours, mins = divmod(total, 60)
-    if hours and mins:
-        return f"{hours} ч {mins} мин"
-    if hours:
-        return f"{hours} ч"
-    return f"{mins} мин"
+def web_app_keyboard(url: str, extra_rows: list[list[dict]] | None = None) -> dict:
+    """Клавиатура с кнопкой web_app «Открыть цех» + опциональные строки."""
+    url = (url or "").strip() or "https://example.com/staff"
+    rows: list[list[dict]] = [[{"text": "🏭 Открыть цех", "web_app": {"url": url}}]]
+    if extra_rows:
+        rows.extend(extra_rows)
+    return {"inline_keyboard": rows}
 
 
-def money(value: float) -> str:
-    return f"{round(num(value)):,}".replace(",", " ") + " ₽"
+def main_menu_keyboard(url: str) -> dict:
+    """Главное меню — только кнопка цеха и помощь."""
+    return web_app_keyboard(
+        url,
+        extra_rows=[
+            [
+                {"text": "❔ Помощь", "callback_data": "cmd:help"},
+                {"text": "🆔 Мой код", "callback_data": "cmd:code"},
+            ]
+        ],
+    )
+
+
+def help_keyboard(url: str) -> dict:
+    return web_app_keyboard(url)
 
 
 def keyboard(*rows: list[tuple[str, str]]) -> dict:
-    """Inline-клавиатура: [[(текст, callback_data)], ...]."""
+    """Совместимый helper: [(text, callback_data)] → inline_keyboard."""
     return {
         "inline_keyboard": [
             [{"text": text, "callback_data": data} for text, data in row]
@@ -64,51 +84,10 @@ def keyboard(*rows: list[tuple[str, str]]) -> dict:
     }
 
 
-def inline_rows(buttons: list[list[dict]]) -> dict:
-    """Inline-клавиатура из уже готовых кнопок-словарей."""
-    return {"inline_keyboard": buttons}
-
-
-def home_row(label: str = "🏠 В меню") -> list[dict]:
-    """Кнопка возврата в главное меню — должна быть на каждом экране."""
-    return [{"text": label, "callback_data": "cmd:menu"}]
-
-
-def nav_row(prefix: str, page: int, total_pages: int,
-            label: str = "") -> list[dict]:
-    """Строка листания «◀ 2/5 ▶» для inline-списков."""
-    head = f"{label} " if label else ""
-    return [
-        {"text": "◀", "callback_data": f"cmd:{prefix}:prev"},
-        {"text": f"{head}{page + 1}/{total_pages}", "callback_data": f"cmd:{prefix}"},
-        {"text": "▶", "callback_data": f"cmd:{prefix}:next"},
-    ]
-
-
-def paginate(rows: list, page: int, per_page: int = 8) -> tuple:
-    """Нарезать список на страницы; вернуть (срез, page, total_pages)."""
+def paginate(rows: list, page: int, per_page: int = 8) -> tuple[list, int, int]:
     per_page = max(1, int(per_page))
     total = len(rows)
-    total_pages = max(1, -(-total // per_page))  # округление вверх
+    total_pages = max(1, -(-total // per_page))
     page = max(0, min(int(page), total_pages - 1))
     start = page * per_page
-    return rows[start:start + per_page], page, total_pages
-
-
-def page_from_command(command: str, prefix: str, state: dict,
-                      chat: str) -> int:
-    """Страница пагинации из callback «prefix:next/prev/число»."""
-    part = command[len(prefix):].lstrip(":")
-    if part in ("next", "вперёд"):
-        return state.get(chat, 0) + 1
-    if part in ("prev", "назад"):
-        return state.get(chat, 0) - 1
-    try:
-        return max(0, int(num(part)))
-    except (TypeError, ValueError):
-        return 0
-
-
-def money_or(value: float, empty: str = "без цены") -> str:
-    """Деньги, если сумма задана, иначе честная заглушка."""
-    return money(value) if num(value) else empty
+    return rows[start : start + per_page], page, total_pages

@@ -178,7 +178,7 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
             if path == "/api/uploads":
                 return self.serve_upload((query.get("file") or query.get("name") or [""])[0])
             if path.startswith("/api/"):
-                code, payload = self.api.get(path, query)
+                code, payload = self.api.get(path, query, headers=dict(self.headers))
                 return self.send_json(code, payload)
             return self.serve_static(path)
         except CLIENT_DISCONNECT_ERRORS:
@@ -602,11 +602,11 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                     replay["replayed"] = True
                     replay["idempotency_key"] = key
                     return self.send_json(200, replay)
-                code, payload = self.api.post(path, body, query)
+                code, payload = self.api.post(path, body, query, headers=dict(self.headers))
                 if 200 <= code < 300:
                     store.put(key, path, payload)
                 return self.send_json(code, payload)
-            code, payload = self.api.post(path, body, query)
+            code, payload = self.api.post(path, body, query, headers=dict(self.headers))
             return self.send_json(code, payload)
         except ValueError as exc:
             # 18.12.1: «Файл слишком большой» и «нет boundary» прилетали из
