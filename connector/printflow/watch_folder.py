@@ -355,6 +355,20 @@ class WatchFolder:
             "use_ams": True,
             "ams_mapping": ams_mapping,
         }
+        # spool auto-pick by material
+        try:
+            mat = str(info.get("material") or "").strip()
+            if mat:
+                from .accounting import Accounting
+                acc = Accounting(self.db)
+                # pick_spool by material
+                spool = acc.pick_spool(material=mat)
+                if spool:
+                    payload["spool_id"] = spool["id"]
+                    payload["material"] = mat
+        except Exception:
+            pass
+
         try:
             mat = str(info.get("material") or "").strip()
             if mat:
