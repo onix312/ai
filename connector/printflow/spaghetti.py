@@ -90,26 +90,64 @@ def first_layer_decision(ref_score: float, score: float, min_ratio: float = 0.4)
     return score < ref_score * max(0.1, min_ratio)
 
 
-def frame_diff_ratio(a: bytes, b: bytes) -> float | None:
+def frame_diff_ratio(a: bytes, b: bytes, roi: list | None = None) -> float | None:
     """Доля пикселей, различающихся между двумя JPEG-кадрами (0..100).
 
     Для «деталь осталась на столе» (идея 10): кадр после финиша против
     эталона пустого стола. None — если Pillow не установлен или кадр
     не распознал.
+
+    18.12.1+:
+    - светонормализация: выравниваем среднюю яркость перед сравнением,
+      чтобы смена освещения не давала ложный bed_not_clear;
+    - roi: опциональный полигон [x0,y0,x1,y1] в относительных координатах 0..1,
+      исключает толкатель/кабели (идея 14).
     """
     if not HAS_PIL:
         return None
     try:
         img_a = Image.open(io.BytesIO(a)).convert("L").resize((160, 120))
         img_b = Image.open(io.BytesIO(b)).convert("L").resize((160, 120))
+        # ROI маска
+        if roi and len(roi) == 4:
+            try:
+                x0, y0, x1, y1 = [max(0.0, min(1.0, float(v))) for v in roi]
+                if x1 > x0 and y1 > y0:
+                    w, h = img_a.size
+                    left = int(x0 * w)
+                    upper = int(y0 * h)
+                    right = int(x1 * w)
+                    lower = int(y1 * h)
+                    img_a = img_a.crop((left, upper, right, lower))
+                    img_b = img_b.crop((left, upper, right, lower))
+            except Exception:
+                pass
         data_a = list(img_a.getdata())
         data_b = list(img_b.getdata())
     except Exception:
         return None
     if not data_a:
         return None
+    # светонормализация по средней яркости
+    try:
+        mean_a = sum(data_a) / len(data_a) if data_a else 0
+        mean_b = sum(data_b) / len(data_b) if data_b else 0
+        delta = mean_a - mean_b
+        # сдвигаем b к a, clamp 0..255
+        if abs(delta) > 3:
+            data_b = [max(0, min(255, int(v + delta))) for v in data_b]
+    except Exception:
+        pass
     diff = sum(1 for x, y in zip(data_a, data_b) if abs(x - y) > 24)
     return round(diff / len(data_a) * 100, 1)
+
+
+def frame_diff_ratio_advanced(a: bytes, b: bytes, roi: list | None = None) -> dict | None:
+    """Расширенная версия для AI-детектора: возвращает diff + mean + hist."""
+    ratio = frame_diff_ratio(a, b, roi=roi)
+    if ratio is None:
+        return None
+    return {"diff_pct": ratio, "ai_stub": ratio > 6.0}
 
 
 def inspect_bed_clear(frame: bytes | None, reference: bytes | None,

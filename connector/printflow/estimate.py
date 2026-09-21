@@ -899,16 +899,98 @@ def extract_thumbnails(path: str | Path) -> dict[str, str]:
         return {}
 
 
-def color_distance(a_hex: str, b_hex: str) -> float:
-    """Евклидово расстояние между цветами #RRGGBB."""
+_ESTIMATE_CACHE: dict[str, dict] = {}
+_ESTIMATE_CACHE_MAX = 100
+
+
+def estimate_file_cached(path: str | Path, ttl_sec: float = 300.0) -> dict:
+    """17+ кэш оценок файлов — по mtime+size, TTL."""
     try:
-        a = a_hex.lstrip("#")[:6].ljust(6, "0")
-        b = b_hex.lstrip("#")[:6].ljust(6, "0")
-        ar, ag, ab = int(a[0:2], 16), int(a[2:4], 16), int(a[4:6], 16)
-        br, bg, bb = int(b[0:2], 16), int(b[2:4], 16), int(b[4:6], 16)
-        return ((ar - br) ** 2 + (ag - bg) ** 2 + (ab - bb) ** 2) ** 0.5
+        p = Path(path)
+        if not p.exists():
+            return {}
+        stat = p.stat()
+        key = f"{p.resolve()}::{stat.st_size}::{int(stat.st_mtime)}"
+        import time as _time
+        now = _time.time()
+        entry = _ESTIMATE_CACHE.get(key)
+        if entry and now - entry.get("_ts", 0) < ttl_sec:
+            return entry.get("data") or {}
+        data = estimate_file(p)
+        if len(_ESTIMATE_CACHE) > _ESTIMATE_CACHE_MAX:
+            oldest = min(_ESTIMATE_CACHE.items(), key=lambda kv: kv[1].get("_ts", 0))
+            _ESTIMATE_CACHE.pop(oldest[0], None)
+        _ESTIMATE_CACHE[key] = {"data": data, "_ts": now}
+        return data
     except Exception:
-        return 999.0
+        return estimate_file(path)
+
+
+def auto_orient_suggestion(bbox: dict) -> dict:
+    """23: авто-ориентация — минимизировать Z и поддержки."""
+    try:
+        sx = float(bbox.get("size_x") or 0)
+        sy = float(bbox.get("size_y") or 0)
+        sz = float(bbox.get("size_z") or 0)
+        if not sx or not sy or not sz:
+            return {"suggest": "none", "reason": "no bbox"}
+        if sz > sx and sz > sy:
+            if sx < sy:
+                return {"suggest": "rotate_x_90", "reason": f"Z={sz} > X={sx},Y={sy} — положить на X"}
+            else:
+                return {"suggest": "rotate_y_90", "reason": f"Z={sz} > X={sx},Y={sy} — положить на Y"}
+        if sz < min(sx, sy) * 0.3:
+            return {"suggest": "keep", "reason": "плоская деталь — уже оптимально"}
+        return {"suggest": "keep", "reason": "ориентация ок"}
+    except Exception:
+        return {"suggest": "none", "reason": "error"}
+
+
+def _hex_to_rgb(hex_str: str) -> tuple[float, float, float]:
+    try:
+        h = hex_str.lstrip("#")[:6].ljust(6, "0")
+        return int(h[0:2], 16) / 255.0, int(h[2:4], 16) / 255.0, int(h[4:6], 16) / 255.0
+    except Exception:
+        return 0.5, 0.5, 0.5
+
+def _rgb_to_lab(r: float, g: float, b: float) -> tuple[float, float, float]:
+    # sRGB -> linear
+    def lin(c):
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    rl, gl, bl = lin(r), lin(g), lin(b)
+    # XYZ D65
+    x = rl * 0.4124564 + gl * 0.3575761 + bl * 0.1804375
+    y = rl * 0.2126729 + gl * 0.7151522 + bl * 0.0721750
+    z = rl * 0.0193339 + gl * 0.1191920 + bl * 0.9503041
+    # normalize
+    xn, yn, zn = 0.95047, 1.0, 1.08883
+    x /= xn; y /= yn; z /= zn
+    def f(t):
+        return t ** (1/3) if t > 0.008856 else (7.787 * t + 16/116)
+    fx, fy, fz = f(x), f(y), f(z)
+    L = 116 * fy - 16
+    a = 500 * (fx - fy)
+    b_ = 200 * (fy - fz)
+    return L, a, b_
+
+def color_distance(a_hex: str, b_hex: str) -> float:
+    """ΔE CIE76 через Lab — точнее RGB для подбора катушек."""
+    try:
+        ar, ag, ab = _hex_to_rgb(a_hex)
+        br, bg, bb = _hex_to_rgb(b_hex)
+        l1, a1, b1 = _rgb_to_lab(ar, ag, ab)
+        l2, a2, b2 = _rgb_to_lab(br, bg, bb)
+        return ((l1 - l2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2) ** 0.5
+    except Exception:
+        # fallback RGB
+        try:
+            a = a_hex.lstrip("#")[:6].ljust(6, "0")
+            b = b_hex.lstrip("#")[:6].ljust(6, "0")
+            ar, ag, ab = int(a[0:2], 16), int(a[2:4], 16), int(a[4:6], 16)
+            br, bg, bb = int(b[0:2], 16), int(b[2:4], 16), int(b[4:6], 16)
+            return ((ar - br) ** 2 + (ag - bg) ** 2 + (ab - bb) ** 2) ** 0.5
+        except Exception:
+            return 999.0
 
 
 def auto_ams_map(required: list[dict], trays: list[dict]) -> list[int]:

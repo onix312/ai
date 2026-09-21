@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import threading
@@ -20,20 +21,11 @@ from .farmloop import BEGIN as FARMLOOP_BEGIN
 
 DEFAULT_WATCH = Path.home() / "PrintFlow-Inbox"
 
-# имя файла может содержать № заказа: адресник_№1023_6шт.3mf или #1023
 ORDER_RE = re.compile(r"[№#](\d{2,6})")
-# также коммент внутри gcode: ;PrintFlow-order: 1023
 GCODE_ORDER_RE = re.compile(r"PrintFlow-order\s*[:=]\s*(\d+)")
 
 
 def pick_warehouse_spool(db, material: str) -> dict | None:
-    """18.8: катушка со склада под материал из 3MF/G-code.
-
-    Главный путь через папку не обязан знать, какая бобина в AMS: склад
-    знает. Подбираем катушку с тем же материалом (регистр не важен),
-    неархивную, с остатком; приоритет — поставленная в AMS и проверенная.
-    С задания потом спишется расход именно с этой катушки (spool_id).
-    """
     mat = str(material or "").strip()
     if not mat:
         return None
@@ -61,8 +53,8 @@ class WatchFolder:
         self.bus = bus
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._seen: dict[str, float] = {}  # path -> mtime
-        self._pending: dict[str, dict] = {}  # file -> info awaiting confirm
+        self._seen: dict[str, float] = {}
+        self._pending: dict[str, dict] = {}
 
     def start(self):
         if self._thread and self._thread.is_alive():
@@ -104,14 +96,12 @@ class WatchFolder:
                 size = st.st_size
             except OSError:
                 continue
-            # файл ещё пишется — ждём 2 сек стабильности
             if time.time() - mtime < 2:
                 continue
             key = str(path.resolve())
             if self._seen.get(key) == mtime:
                 continue
             self._seen[key] = mtime
-            # проверка размера не изменился за 1 сек
             time.sleep(0.5)
             try:
                 if path.stat().st_size != size:
@@ -120,7 +110,6 @@ class WatchFolder:
                 continue
             self._handle_file(path)
 
-        # также gcode
         for path in watch.glob("*.gcode"):
             try:
                 st = path.stat()
@@ -135,7 +124,6 @@ class WatchFolder:
             self._seen[key] = mtime
             self._handle_file(path)
 
-        # очистка старых seen (храним 500)
         if len(self._seen) > 500:
             self._seen = dict(list(self._seen.items())[-300:])
 
@@ -150,7 +138,6 @@ class WatchFolder:
                 detail = parse_3mf_complete(path)
                 est = {}
                 if detail.get("plates"):
-                    # взять суммарно
                     total_g = round(sum(p.get("grams", 0) for p in detail["plates"]), 1)
                     total_m = round(sum(p.get("minutes", 0) for p in detail["plates"]), 1)
                     first = detail["plates"][0]
@@ -159,8 +146,7 @@ class WatchFolder:
                     est["total_minutes"] = total_m
                     est["plates"] = detail["plates"]
                     est["plate_count"] = len(detail["plates"])
-                    est["thumbnails"] = {k: v[:120] + "..." if len(v) > 120 else v for k, v in detail.get("thumbnails", {}).items()}  # truncate for event
-                    # полные thumbnails сохраним отдельно
+                    est["thumbnails"] = {k: v[:120] + "..." if len(v) > 120 else v for k, v in detail.get("thumbnails", {}).items()}
                     info["thumbnails_full"] = detail.get("thumbnails", {})
                 info.update(detail)
                 info.update(est)
@@ -169,22 +155,15 @@ class WatchFolder:
                 if text:
                     from .estimate import _parse_gcode_head as _pg
                     info.update(_pg(text))
-                    # 18.8 (папка как главный путь): G-code с проверенным
-                    # FarmLoop-блоком — это кандидат в серию конвейера, а не
-                    # одиночная плита: модалка предложит «В конвейер (N)».
                     info["farmloop"] = FARMLOOP_BEGIN in text
         except Exception as exc:
             info["error"] = str(exc)
 
-        # Попытка найти order_id по имени файла отключается настройкой. Раньше
-        # переключатель ``watch_link_order`` был декоративным: связь искалась
-        # всегда, несмотря на выбор пользователя.
         order_id = (self._find_order_id(path.name, info)
                     if self.db.setting("watch_link_order", True) else "")
         info["order_id"] = order_id
         info["at"] = now_iso()
 
-        # копируем в uploads для очереди
         try:
             UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
             dest = UPLOAD_DIR / path.name
@@ -194,17 +173,13 @@ class WatchFolder:
         except Exception:
             pass
 
-        # сохраняем в pending для UI
         fid = f"wf_{int(time.time()*1000)}"
         self._pending[fid] = info
-        # чистим старые pending >50
         if len(self._pending) > 50:
             oldest = sorted(self._pending.keys())[:10]
             for k in oldest:
                 self._pending.pop(k, None)
 
-        # Автопечать без подтверждения и preflight небезопасна и пока не
-        # поддерживается. Старое значение ``print`` мягко сводим к уведомлению.
         action = str(self.db.setting("watch_auto_action", "notify"))
         if action not in {"notify", "queue"}:
             action = "notify"
@@ -212,13 +187,11 @@ class WatchFolder:
         if self.bus:
             try:
                 self.bus.publish("watch", {"file": path.name, "order_id": order_id, "info": {k: v for k, v in info.items() if k != "thumbnails_full"}, "fid": fid})
-                # thumbnails отдельно если нужно
                 if info.get("thumbnails_full"):
                     self.bus.publish("watch_thumb", {"fid": fid, "thumbnails": info["thumbnails_full"]})
             except Exception:
                 pass
 
-        # авто-действия
         watch_create = bool(self.db.setting("watch_create_order", False) or self.db.setting("slicer_auto_create_order", False))
         if watch_create and not order_id:
             try:
@@ -232,8 +205,6 @@ class WatchFolder:
                 pass
 
         if action == "queue":
-            # Молчать здесь нельзя: событие с action=queue уже ушло в ленту, и
-            # без причины оператор видит «файл принят», хотя печать не началась.
             ok, reason = self._enqueue(path.name, info, order_id)
             info["queue_ok"] = ok
             if not ok:
@@ -248,27 +219,22 @@ class WatchFolder:
                     except Exception:
                         pass
 
-        # оригинал можно переместить в архив Watch Folder/processed
         try:
             processed = self._watch_path() / "processed"
             processed.mkdir(exist_ok=True)
-            # не перемещаем, копируем и оставляем исходник — пользователь сам решит
         except Exception:
             pass
 
     def _find_order_id(self, filename: str, info: dict) -> str:
-        # по имени файла
         m = ORDER_RE.search(filename)
         if m:
             num = m.group(1)
             row = self.db.one("SELECT id FROM orders WHERE number=?", (num,))
             if row:
                 return row["id"]
-            # поиск по LIKE
             row = self.db.one("SELECT id FROM orders WHERE number LIKE ?", (f"%{num}%",))
             if row:
                 return row["id"]
-        # по G-code комменту
         try:
             g = info.get("project_settings", {}).get("raw", "") if isinstance(info.get("project_settings"), dict) else ""
             m2 = GCODE_ORDER_RE.search(str(g))
@@ -276,12 +242,6 @@ class WatchFolder:
                 row = self.db.one("SELECT id FROM orders WHERE number=?", (m2.group(1),))
                 if row:
                     return row["id"]
-        except Exception:
-            pass
-        # по estimate gcode text если есть
-        try:
-            if info.get("gcode_file"):
-                pass
         except Exception:
             pass
         return ""
@@ -308,45 +268,129 @@ class WatchFolder:
             "channel": "shop",
         })
 
+    def _file_hash(self, filename: str) -> str:
+        try:
+            candidates = []
+            try:
+                candidates.append(self._watch_path() / filename)
+            except Exception:
+                pass
+            candidates.append(UPLOAD_DIR / filename)
+            for cand in candidates:
+                try:
+                    if cand.exists() and cand.stat().st_size > 0:
+                        h = hashlib.sha256()
+                        with open(cand, "rb") as f:
+                            for chunk in iter(lambda: f.read(1024*1024), b""):
+                                h.update(chunk)
+                        return h.hexdigest()[:16]
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return ""
+
     def _enqueue(self, filename: str, info: dict, order_id: str) -> tuple[bool, str]:
         """Поставить файл в очередь печати, вернув (получилось, причина).
 
-        `manager.enqueue` бросает ValueError на файлах, которые печатать нельзя
-        (логи, таймлапс, ipcam), и раньше вызывающий код глотал это в
-        `except Exception: pass` — файл исчезал из виду без следа.
+        18.12+: Watch+AMS (13) + persistence (12) через spool_mapping_repo.
         """
         if not self.manager:
             return False, "нет подключения к менеджеру печати"
+
+        file_hash = self._file_hash(filename)
+        ams_mapping: list[int] = []
+        printer_id_for_map = ""
+
+        try:
+            import json as _json
+            # 12: spool_mapping_repo
+            if file_hash:
+                try:
+                    from .spool_mapping_repo import load_mapping
+                    loaded = load_mapping(self.db, file_hash, "")
+                    if loaded:
+                        ams_mapping = loaded
+                except Exception:
+                    pass
+            # legacy setting fallback
+            if not ams_mapping:
+                raw = self.db.setting(f"ams_map_{filename}", "")
+                if raw:
+                    try:
+                        ams_mapping = _json.loads(raw) if isinstance(raw, str) else raw
+                    except Exception:
+                        ams_mapping = []
+            # auto-map if still empty
+            if not ams_mapping and self.manager:
+                try:
+                    from .estimate import auto_ams_map
+                    filaments = []
+                    if info.get("filaments"):
+                        filaments = info["filaments"]
+                    elif info.get("material"):
+                        filaments = [{"type": info.get("material"), "color": info.get("color_hex") or "#CCCCCC"}]
+                    if filaments:
+                        printers = list(getattr(self.manager, "printers", {}).values())
+                        for pr in printers:
+                            try:
+                                snap = pr.snapshot()
+                                trays = (snap.get("ams") or {}).get("trays", [])
+                                if trays:
+                                    ams_mapping = auto_ams_map(filaments, trays)
+                                    printer_id_for_map = pr.id
+                                    break
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+        except Exception:
+            ams_mapping = []
+
         payload = {
             "file": filename,
             "name": Path(filename).stem,
             "order_id": order_id,
             "plate": 1,
             "use_ams": True,
+            "ams_mapping": ams_mapping,
         }
         try:
+            mat = str(info.get("material") or "").strip()
+            if mat:
+                from .accounting import Accounting
+                acc = Accounting(self.db)
+                spool = acc.pick_spool(material=mat)
+                if spool:
+                    payload["spool_id"] = spool["id"]
+                    payload["material"] = mat
+        except Exception:
+            pass
+
+        try:
             result = self.manager.enqueue(payload)
-        except Exception as exc:  # noqa: BLE001 - причину надо показать оператору
+        except Exception as exc:
             return False, str(exc) or type(exc).__name__
         if isinstance(result, dict) and (result.get("error") or result.get("ok") is False):
             return False, str(result.get("error") or "менеджер отклонил файл")
+
+        try:
+            if ams_mapping:
+                import json as _json
+                self.db.set_setting(f"ams_map_{filename}", _json.dumps(ams_mapping))
+                if file_hash:
+                    from .spool_mapping_repo import save_mapping
+                    save_mapping(self.db, file_hash, filename, printer_id_for_map, ams_mapping)
+        except Exception:
+            pass
         return True, ""
 
     def list_pending(self, limit: int = 20) -> list[dict]:
-        # последние файлы из watch — сортируем по времени
-        # 18.8: fid возвращается в каждом элементе — UI адресует именно
-        # тот файл, на который кликнул оператор (раньше fid не отдавался,
-        # и модалка открывала первый pending)
         items = sorted(self._pending.items(), key=lambda kv: kv[1].get("at", ""), reverse=True)[:limit]
-        # убрать большие thumbnails для списка
         out = []
         for fid, it in items:
             cp = {k: v for k, v in it.items() if k not in ("thumbnails_full",)}
             cp["fid"] = fid
-            # вернуть короткие thumbnails preview
-            if "thumbnails" in it and isinstance(it["thumbnails"], dict):
-                # уже короткие
-                pass
             out.append(cp)
         return out
 
