@@ -311,25 +311,83 @@ class WatchFolder:
     def _enqueue(self, filename: str, info: dict, order_id: str) -> tuple[bool, str]:
         """Поставить файл в очередь печати, вернув (получилось, причина).
 
-        `manager.enqueue` бросает ValueError на файлах, которые печатать нельзя
-        (логи, таймлапс, ipcam), и раньше вызывающий код глотал это в
-        `except Exception: pass` — файл исчезал из виду без следа.
+        18.12.1+: Watch+AMS (13) — автоподбор AMS mapping, persistence (12).
         """
         if not self.manager:
             return False, "нет подключения к менеджеру печати"
+        # AMS auto-map
+        ams_mapping = []
+        try:
+            # persistence: ищем сохранённый маппинг по имени файла
+            import json as _json
+            raw = self.db.setting(f"ams_map_{filename}", "")
+            if raw:
+                try:
+                    ams_mapping = _json.loads(raw) if isinstance(raw, str) else raw
+                except Exception:
+                    ams_mapping = []
+            # если нет сохранённого — пробуем auto-map по первому принтеру
+            if not ams_mapping and self.manager:
+                try:
+                    from .estimate import auto_ams_map
+                    # filaments из info
+                    filaments = []
+                    if info.get("filaments"):
+                        filaments = info["filaments"]
+                    elif info.get("material"):
+                        filaments = [{"type": info.get("material"), "color": info.get("color_hex") or "#CCCCCC"}]
+                    if filaments:
+                        # берём первый принтер
+                        printers = list(getattr(self.manager, "printers", {}).values())
+                        for pr in printers:
+                            try:
+                                snap = pr.snapshot()
+                                trays = (snap.get("ams") or {}).get("trays", [])
+                                if trays:
+                                    ams_mapping = auto_ams_map(filaments, trays)
+                                    break
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+        except Exception:
+            ams_mapping = []
+
         payload = {
             "file": filename,
             "name": Path(filename).stem,
             "order_id": order_id,
             "plate": 1,
             "use_ams": True,
+            "ams_mapping": ams_mapping,
         }
+        # spool auto-pick by material
+        try:
+            mat = str(info.get("material") or "").strip()
+            if mat:
+                from .accounting import Accounting
+                acc = Accounting(self.db)
+                # pick_spool by material
+                spool = acc.pick_spool(material=mat)
+                if spool:
+                    payload["spool_id"] = spool["id"]
+                    payload["material"] = mat
+        except Exception:
+            pass
+
         try:
             result = self.manager.enqueue(payload)
-        except Exception as exc:  # noqa: BLE001 - причину надо показать оператору
+        except Exception as exc:
             return False, str(exc) or type(exc).__name__
         if isinstance(result, dict) and (result.get("error") or result.get("ok") is False):
             return False, str(result.get("error") or "менеджер отклонил файл")
+        # persistence save
+        try:
+            if ams_mapping:
+                import json as _json
+                self.db.set_setting(f"ams_map_{filename}", _json.dumps(ams_mapping))
+        except Exception:
+            pass
         return True, ""
 
     def list_pending(self, limit: int = 20) -> list[dict]:

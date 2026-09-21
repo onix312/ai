@@ -60,6 +60,12 @@ class PrinterManager:
         self._cost_limit_reported: set[str] = set()
         self._dry_reported: float = 0.0
         self._last_ams_sync: dict[str, float] = {}
+        # 18.12.1+: фантомы AMS фоном каждые 5 мин (идея 5)
+        self._last_ams_cleanup: float = 0.0
+        # 2: авто bed_reference после успешной очистки
+        self._last_bed_reference_update: float = 0.0
+        # 36: auto-tune push distance per printer
+        self._farmloop_push_tune: dict[str, float] = {}
         # Память слотов AMS: дозаполнение старых привязок — один раз за запуск.
         self._ams_backfilled: set[str] = set()
         self._last_cloud_sync: dict[str, float] = {}
@@ -2824,20 +2830,33 @@ class PrinterManager:
         printer = self.get(printer_id)
         name = printer.record.get("name", "Принтер") if printer else "PrintFlow"
         text = f"PrintFlow · {name}\n{title}\n{detail}".strip()
-        # К завершению и ошибке прикладываем кадр: сразу видно результат.
         photo = None
         if (printer and kind in ("complete", "error")
                 and settings.get("notify_photo", True)):
             photo = printer.camera.frame
-        # Уведомления с действиями: к завершению/ошибке добавляем inline-кнопки,
-        # чтобы реагировать не выходя из чата.
-        buttons = []
+        # Кнопка Mini App цеха — во всех уведомлениях, плюс старые action-кнопки
+        miniapp_url = ""
+        try:
+            from .staffbot.core.config import get_miniapp_url
+            miniapp_url = get_miniapp_url(self.db)
+        except Exception:
+            miniapp_url = str(settings.get("public_url") or settings.get("base_url") or "") .strip()
+            if miniapp_url:
+                miniapp_url = miniapp_url.rstrip("/") + "/staff"
+            else:
+                miniapp_url = "https://example.com/staff"
+        web_btn = {"text": "🏭 Открыть цех", "web_app": {"url": miniapp_url}}
+        buttons: list = []
+        # web_app первым рядом
+        buttons.append([web_btn])
         if kind == "complete":
-            buttons = [("📷 Кадр", "cmd:frame"), ("▶ Следующее", "cmd:next"),
-                       ("🤚 Снял", "cmd:removed")]
+            buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
+                            {"text": "▶ Следующее", "callback_data": "cmd:next"},
+                            {"text": "🤚 Снял", "callback_data": "cmd:removed"}])
         elif kind == "error":
-            buttons = [("📷 Кадр", "cmd:frame"), ("↻ Повторить", "cmd:reprint"),
-                       ("▶ Продолжить", "cmd:resume")]
+            buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
+                            {"text": "↻ Повторить", "callback_data": "cmd:reprint"},
+                            {"text": "▶ Продолжить", "callback_data": "cmd:resume"}])
         self.notify_async(text, photo, buttons=buttons or None)
 
     def notify_async(self, text: str, photo: bytes | None = None,
@@ -2874,7 +2893,7 @@ class PrinterManager:
             return False
 
     def send_telegram(self, text: str, photo: bytes | None = None,
-                      buttons: list[tuple[str, str]] | None = None,
+                      buttons: list | None = None,
                       critical: bool = False, event: str = "") -> dict:
         settings = self.db.settings(include_secrets=True)
         token, chat = settings.get("telegram_token"), settings.get("telegram_chat_id")
@@ -2884,8 +2903,56 @@ class PrinterManager:
             return {"ok": True, "skipped": "quiet"}
         reply_markup = ""
         if buttons:
-            reply_markup = json.dumps({"inline_keyboard": [
-                [{"text": t, "callback_data": d} for t, d in buttons]]})
+            # Поддержка web_app кнопок (Mini App full_miniapp):
+            # - старый формат: [("text","callback")]
+            # - новый: [[{"text":"...","web_app":{"url":...}}]] или [{"text":...,"web_app":...}]
+            # - смешанный: [(text,callback)] + dict с web_app
+            try:
+                kb_rows: list[list[dict]] = []
+                # если buttons — список списков словарей (inline_keyboard уже готов)
+                if buttons and isinstance(buttons[0], list) and buttons[0] and isinstance(buttons[0][0], dict):
+                    kb_rows = buttons  # type: ignore
+                elif buttons and isinstance(buttons[0], dict) and ("web_app" in buttons[0] or "callback_data" in buttons[0]):
+                    # один ряд из словарей
+                    kb_rows = [buttons]  # type: ignore
+                else:
+                    # считаем старый формат tuple или смешанный
+                    row: list[dict] = []
+                    for item in buttons:
+                        if isinstance(item, dict):
+                            row.append(item)
+                        elif isinstance(item, (list, tuple)) and len(item) == 2:
+                            t, d = item
+                            # если d — dict с web_app, то это уже кнопка
+                            if isinstance(d, dict) and "web_app" in d:
+                                row.append({"text": str(t), "web_app": d["web_app"]})
+                            else:
+                                row.append({"text": str(t), "callback_data": str(d)})
+                        elif isinstance(item, (list, tuple)):
+                            # вложенный ряд
+                            sub_row: list[dict] = []
+                            for sub in item:
+                                if isinstance(sub, dict):
+                                    sub_row.append(sub)
+                                elif isinstance(sub, (list, tuple)) and len(sub) == 2:
+                                    sub_row.append({"text": str(sub[0]), "callback_data": str(sub[1])})
+                            if sub_row:
+                                kb_rows.append(sub_row)
+                            continue
+                    if row:
+                        kb_rows.append(row)
+                if kb_rows:
+                    reply_markup = json.dumps({"inline_keyboard": kb_rows}, ensure_ascii=False)
+                else:
+                    reply_markup = json.dumps({"inline_keyboard": [
+                        [{"text": t, "callback_data": d} for t, d in buttons]]}, ensure_ascii=False)
+            except Exception:
+                # fallback к старому поведению
+                try:
+                    reply_markup = json.dumps({"inline_keyboard": [
+                        [{"text": t, "callback_data": d} for t, d in buttons]]}, ensure_ascii=False)
+                except Exception:
+                    reply_markup = ""
         # Н54: событие уходит подписанным сотрудникам; общий чат — запасной
         # канал (и единственный, если подписок нет или событие критичное).
         targets: list[str] = []
@@ -3497,8 +3564,31 @@ class PrinterManager:
                     buttons=[("⏸ Пауза", "cmd:pause"), ("📷 Кадр", "cmd:frame")],
                     critical=True)
 
+    # 18.12.1+ идеи 2,3,14
+    def _get_bed_roi(self) -> list | None:
+        try:
+            raw = self.db.setting("bed_roi", None)
+            if not raw:
+                return None
+            import json as _json
+            roi = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(roi, list) and len(roi) == 4:
+                return [float(x) for x in roi]
+        except Exception:
+            pass
+        return None
+
     def watch_bed(self, printer_id: str) -> None:
-        """Деталь осталась на столе (идея 10): кадр финиша vs эталон стола."""
+        """Деталь осталась на столе (идея 10): кадр финиша vs эталон стола.
+
+        18.12.1 fix: farm_auto проверка раньше threshold — иначе при
+        threshold=6 и cam_thresh=6 ветка `ratio>threshold` и `ratio<=cam_thresh`
+        несовместимы и автоснятие никогда не срабатывает (dead-code).
+        Правильный порядок: сначала проверить очистку по камере FarmLoop,
+        затем обычный bed_watch.
+
+        18.12.1+: светонормализация (3), ROI (14), авто-reference (2).
+        """
         if not self.db.setting("bed_watch_enabled", False):
             return
         printer = self.get(printer_id)
@@ -3512,30 +3602,31 @@ class PrinterManager:
         if not ref_file.exists():
             return
         from .spaghetti import frame_diff_ratio
-        ratio = frame_diff_ratio(frame, ref_file.read_bytes())
+        roi = self._get_bed_roi()
+        ratio = frame_diff_ratio(frame, ref_file.read_bytes(), roi=roi)
         if ratio is None:
             return
+        # 1) FarmLoop авто-сброс по камере — имеет приоритет: если стол пуст
+        # по порогу камеры, сразу считаем очищенным и продолжаем серию.
+        farm_auto = bool(self.db.setting("farmloop_auto_next", False))
+        farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
+        cam_thresh = num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0)
+        if farm_auto and farm_sensor in ("camera", "both") and ratio <= cam_thresh:
+            self._bed_cleared[printer_id] = True
+            try:
+                self.db.add_event(
+                    "farmloop", "Платформа пуста — цикл продолжается",
+                    f"Кадр совпал с пустым столом ({ratio}%)",
+                    printer_id, {"sensor": farm_sensor, "diff_pct": ratio})
+            except Exception:
+                pass
+            self.part_removed(printer_id)
+            self._auto_update_bed_reference(printer_id, frame, ratio)
+            return
+
         threshold = num(self.db.setting("bed_watch_threshold", 6.0), 6.0)
         if ratio > threshold:
             self._bed_cleared[printer_id] = False
-            # Проверка FarmLoop: если включен авто-сброс и камера показала, что стол уже очистился
-            # или если сработал цикл снятия деталей
-            farm_auto = bool(self.db.setting("farmloop_auto_next", False))
-            farm_sensor = str(self.db.setting("farmloop_sensor_mode", "manual"))
-            if farm_auto and farm_sensor in ("camera", "both") and ratio <= num(self.db.setting("farmloop_camera_threshold_pct", 6.0), 6.0):
-                self._bed_cleared[printer_id] = True
-                # 18.8 (вкладка «Конвейер»): автоматическое снятие — событие
-                # журнала: у истории конвейера должно быть что показывать.
-                try:
-                    self.db.add_event(
-                        "farmloop", "Платформа пуста — цикл продолжается",
-                        f"Кадр совпал с пустым столом ({ratio}%)",
-                        printer_id, {"sensor": farm_sensor, "diff_pct": ratio})
-                except Exception:
-                    pass
-                self.part_removed(printer_id)
-                return
-
             self.db.add_event(
                 "guard", "Деталь могла остаться на столе",
                 f"Кадр отличается от пустого стола на {ratio}% — снимите деталь",
@@ -3545,9 +3636,114 @@ class PrinterManager:
                     f"PrintFlow: печать завершена, стол не пустой (разница {ratio}%). "
                     "Снимите деталь.", frame,
                     buttons=[("🤚 Снял", "cmd:removed")], critical=True)
+            # 36: auto-tune push при фейле
+            self._auto_tune_push(printer_id, False)
         else:
             # Стол пуст — разница ниже порога
             self._bed_cleared[printer_id] = True
+            self._auto_update_bed_reference(printer_id, frame, ratio)
+            self._auto_tune_push(printer_id, True)
+
+    def _auto_update_bed_reference(self, printer_id: str, frame: bytes, ratio: float) -> None:
+        """2: авто-калибровка эталона пустого стола после успешной очистки."""
+        if not self.db.setting("bed_auto_reference", False):
+            return
+        # только если стол реально пуст (ratio <2%)
+        if ratio > 2.0:
+            return
+        now = time.time()
+        # не чаще раза в 30 мин
+        if now - self._last_bed_reference_update < 1800:
+            return
+        try:
+            from .config import PHOTO_DIR
+            PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+            (PHOTO_DIR / "bed_reference.jpg").write_bytes(frame)
+            self._last_bed_reference_update = now
+            self.db.add_event("system", "Эталон пустого стола обновлён авто",
+                              f"diff {ratio}%", printer_id, {"diff_pct": ratio})
+        except Exception:
+            pass
+
+    def _auto_tune_push(self, printer_id: str, success: bool) -> None:
+        """36: авто-подстройка силы толкателя по результату снятия."""
+        try:
+            if not self.db.setting("farmloop_auto_tune", False):
+                return
+            cur = float(self.db.setting(f"farmloop_push_mm_{printer_id}", 0) or 0)
+            if not success:
+                # фейл — увеличиваем на 5мм до 40мм
+                new = min(40.0, (cur or 15.0) + 5.0)
+                self.db.set_setting(f"farmloop_push_mm_{printer_id}", new)
+                self._farmloop_push_tune[printer_id] = new
+                self.db.add_event("farmloop", "Авто-тюнинг толкателя",
+                                  f"Не снялась — увеличил до {new}мм", printer_id,
+                                  {"push_mm": new})
+            else:
+                # успех — можно слегка уменьшить для экономии, но не ниже 10
+                if cur > 12:
+                    new = max(10.0, cur - 1.0)
+                    self.db.set_setting(f"farmloop_push_mm_{printer_id}", new)
+        except Exception:
+            pass
+
+    def _cleanup_ams_phantoms_periodic(self) -> None:
+        """5: фоновая очистка фантомных AMS слотов каждые 5 мин."""
+        now = time.time()
+        if now - self._last_ams_cleanup < 300:
+            return
+        self._last_ams_cleanup = now
+        try:
+            from .repo import cleanup_ams_phantoms
+            res = cleanup_ams_phantoms(self.db)
+            if res.get("removed", 0) > 0:
+                self.db.add_event("ams", "Фантомные AMS слоты очищены",
+                                  f"Удалено {res['removed']}", "",
+                                  {"removed": res["removed"]})
+        except Exception as exc:
+            self.db.add_event("error", "Очистка AMS фантомов не удалась", str(exc))
+
+    def farmloop_metrics(self) -> dict:
+        """20: метрики FarmLoop — успех, среднее время, фейлы."""
+        try:
+            rows = self.db.query(
+                "SELECT * FROM events WHERE kind='farmloop' ORDER BY datetime(at) DESC LIMIT 200")
+        except Exception:
+            rows = []
+        success = sum(1 for r in rows if "пуста" in (r.get("title") or "") or "продолжается" in (r.get("title") or ""))
+        fail = sum(1 for r in rows if "осталась" in (r.get("detail") or "") or "не снялась" in (r.get("detail") or ""))
+        # uptime из printer_stats
+        try:
+            stats = self.db.one("SELECT COALESCE(SUM(jobs_done),0) d, COALESCE(SUM(jobs_failed),0) f FROM printer_stats") or {}
+        except Exception:
+            stats = {}
+        return {
+            "success": success,
+            "fail": fail,
+            "total": success + fail,
+            "success_rate": round(success / max(1, success + fail) * 100, 1),
+            "jobs_done": int(stats.get("d") or 0),
+            "jobs_failed": int(stats.get("f") or 0),
+        }
+
+    def farmloop_digital_twin(self, printer_id: str = "") -> dict:
+        """27: цифровой двойник конвейера — состояние стола, толкателя, очереди."""
+        pid = printer_id or (next(iter(self.printers.keys()), "") if self.printers else "")
+        printer = self.get(pid) if pid else None
+        snap = printer.snapshot() if printer else {}
+        bed_cleared = self._bed_cleared.get(pid, True) if pid else True
+        push_mm = float(self.db.setting(f"farmloop_push_mm_{pid}", 15.0) or 15.0) if pid else 15.0
+        return {
+            "printer_id": pid,
+            "bed_cleared": bed_cleared,
+            "push_mm": push_mm,
+            "queue_len": len([j for j in self.queue() if j.get("state") == "queued"]),
+            "state": (snap.get("printer") or {}).get("state") if snap else "OFFLINE",
+            "progress": (snap.get("printer") or {}).get("progress") if snap else 0,
+            "metrics": self.farmloop_metrics(),
+            "roi": self._get_bed_roi(),
+            "at": now_iso(),
+        }
 
     def set_bed_reference(self, printer_id: str) -> dict:
         """Калибровка: сохранить текущий кадр как эталон пустого стола."""
@@ -3560,9 +3756,48 @@ class PrinterManager:
         from .config import PHOTO_DIR
         PHOTO_DIR.mkdir(parents=True, exist_ok=True)
         (PHOTO_DIR / "bed_reference.jpg").write_bytes(frame)
+        self._last_bed_reference_update = time.time()
         self.db.add_event("system", "Эталон пустого стола сохранён",
                           "Для проверки «деталь на столе»", printer_id)
         return {"ok": True}
+
+    def balance_queue(self) -> dict:
+        """26: балансировщик — распределить queued по принтерам."""
+        try:
+            jobs = self.db.query("SELECT * FROM print_jobs WHERE state='queued' ORDER BY priority DESC, datetime(created_at)")
+            printers = list(self.printers.values())
+            snaps = {}
+            for pr in printers:
+                try:
+                    snaps[pr.id] = pr.snapshot()
+                except Exception:
+                    snaps[pr.id] = {}
+            plan = []
+            for job in jobs:
+                need_mat = str(job.get("material") or "").upper()
+                best_pid = ""
+                best_score = -999
+                for pr in printers:
+                    snap = snaps.get(pr.id, {})
+                    state = (snap.get("printer") or {}).get("state") or "OFFLINE"
+                    if state not in ("IDLE", "FINISH"):
+                        continue
+                    loaded = {str(t.get("type") or "").upper() for t in (snap.get("ams") or {}).get("trays", [])}
+                    score = 0
+                    if need_mat and need_mat in loaded:
+                        score += 10
+                    if not need_mat:
+                        score += 5
+                    qlen = len([j for j in jobs if j.get("printer_id") == pr.id])
+                    score -= qlen
+                    if score > best_score:
+                        best_score = score
+                        best_pid = pr.id
+                if best_pid:
+                    plan.append({"job_id": job["id"], "printer_id": best_pid, "score": best_score})
+            return {"ok": True, "plan": plan}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def night_reset_if_due(self) -> None:
         """Ночной сброс цеха (идея 85): один раз в день — итоги дня в базу."""
@@ -3645,6 +3880,7 @@ class PrinterManager:
         while not self._stop.wait(30):
             try:
                 self.auto_backup_if_due()
+                self._cleanup_ams_phantoms_periodic()
                 with self.lock:
                     printers = list(self.printers.values())
                 for printer in printers:

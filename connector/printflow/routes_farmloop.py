@@ -319,3 +319,227 @@ def farmloop_test_clean(api: Any, ctx: Ctx):
         "profile": requested,
         "auto_selected": not pid,
     }
+
+
+# 18.12.1+ новые маршруты
+
+@router.get("/api/farmloop/metrics", doc="Метрики FarmLoop")
+def farmloop_metrics(api: Any, ctx: Ctx):
+    manager = getattr(api, "manager", None)
+    if not manager or not hasattr(manager, "farmloop_metrics"):
+        return {"success": 0, "fail": 0, "success_rate": 0}
+    return manager.farmloop_metrics()
+
+
+@router.get("/api/farmloop/digital-twin", doc="Цифровой двойник конвейера")
+def farmloop_digital_twin(api: Any, ctx: Ctx):
+    manager = getattr(api, "manager", None)
+    pid = str(ctx.one("printer_id", "") or "")
+    if manager and hasattr(manager, "farmloop_digital_twin"):
+        return manager.farmloop_digital_twin(pid)
+    return {"ok": False, "error": "менеджер недоступен"}
+
+
+@router.get("/api/farmloop/roi", doc="ROI стол для проверки детали")
+def farmloop_roi_get(api: Any, ctx: Ctx):
+    raw = api.db.setting("bed_roi", "")
+    try:
+        import json as _json
+        roi = _json.loads(raw) if isinstance(raw, str) and raw else raw
+    except Exception:
+        roi = None
+    return {"roi": roi, "raw": raw}
+
+
+@router.post("/api/farmloop/roi", audit="Конвейер: ROI", doc="Сохранить ROI")
+def farmloop_roi_post(api: Any, ctx: Ctx):
+    body = ctx.body or {}
+    roi = body.get("roi")
+    if not isinstance(roi, list) or len(roi) != 4:
+        return 400, {"error": "roi должен быть [x0,y0,x1,y1] 0..1"}
+    try:
+        vals = [float(x) for x in roi]
+        if not all(0.0 <= v <= 1.0 for v in vals):
+            return 400, {"error": "координаты 0..1"}
+        if vals[2] <= vals[0] or vals[3] <= vals[1]:
+            return 400, {"error": "x1>x0 и y1>y0"}
+        import json as _json
+        api.db.set_setting("bed_roi", _json.dumps(vals))
+        return {"ok": True, "roi": vals}
+    except Exception as exc:
+        return 400, {"error": str(exc)}
+
+
+@router.post("/api/farmloop/timeline/preview", doc="Live G-code preview из timeline")
+def farmloop_timeline_preview(api: Any, ctx: Ctx):
+    from .farmloop import FarmLoopError, build_from_timeline
+    body = ctx.body or {}
+    blocks = body.get("blocks")
+    if not isinstance(blocks, list):
+        return 400, {"error": "blocks — список"}
+    try:
+        res = build_from_timeline(blocks)
+        return res
+    except FarmLoopError as exc:
+        return 400, {"error": str(exc), "ok": False}
+
+
+@router.post("/api/farmloop/timeline/validate", doc="Dry-run валидация timeline")
+def farmloop_timeline_validate(api: Any, ctx: Ctx):
+    from .farmloop import FarmLoopError, build_from_timeline, dry_run_validate
+    body = ctx.body or {}
+    if body.get("blocks"):
+        try:
+            res = build_from_timeline(body["blocks"])
+            return {"ok": True, "warnings": res.get("warnings", []), "preview_path": res.get("preview_path", [])}
+        except FarmLoopError as exc:
+            return 400, {"ok": False, "error": str(exc)}
+    gcode = str(body.get("gcode") or "")
+    if not gcode:
+        return 400, {"error": "gcode или blocks"}
+    res = dry_run_validate(gcode)
+    if not res.get("ok"):
+        return 400, res
+    return res
+
+
+@router.post("/api/farmloop/timeline/save", audit="Конвейер: timeline", doc="Сохранить timeline как шаблон")
+def farmloop_timeline_save(api: Any, ctx: Ctx):
+    from .farmloop import FarmLoopError, build_from_timeline, validate_template
+    body = ctx.body or {}
+    blocks = body.get("blocks")
+    profile = str(body.get("profile") or P1S_STAGE1.id)
+    if not isinstance(blocks, list):
+        return 400, {"error": "blocks — список"}
+    try:
+        built = build_from_timeline(blocks)
+        gcode = built["gcode"]
+        validate_template(gcode)
+    except FarmLoopError as exc:
+        return 400, {"error": str(exc)}
+    template_dir = DATA_DIR / "farmloop-templates"
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / f"{profile}.gcode"
+    template_path.write_text(gcode, encoding="utf-8", newline="\n")
+    try:
+        import json as _json
+        (template_dir / f"{profile}.timeline.json").write_text(_json.dumps(blocks, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    api.db.add_event("farmloop", "Timeline сохранён", f"{profile} {len(blocks)} блоков", "", {"profile": profile})
+    return {"ok": True, "profile": profile, "gcode": gcode, "preview_path": built.get("preview_path", []), "warnings": built.get("warnings", [])}
+
+
+@router.get("/api/farmloop/timeline", doc="Загрузить timeline")
+def farmloop_timeline_get(api: Any, ctx: Ctx):
+    profile = str(ctx.one("profile", P1S_STAGE1.id) or P1S_STAGE1.id)
+    p = DATA_DIR / "farmloop-templates" / f"{profile}.timeline.json"
+    if not p.is_file():
+        return {"ok": True, "blocks": [], "profile": profile, "exists": False}
+    try:
+        import json as _json
+        blocks = _json.loads(p.read_text(encoding="utf-8"))
+        return {"ok": True, "blocks": blocks, "profile": profile, "exists": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/api/farmloop/queue/balance", doc="Балансировщик очереди")
+def farmloop_queue_balance(api: Any, ctx: Ctx):
+    manager = getattr(api, "manager", None)
+    if not manager:
+        return {"ok": False, "error": "менеджер недоступен"}
+    if hasattr(manager, "balance_queue"):
+        try:
+            res = manager.balance_queue()
+            if isinstance(res, dict) and res.get("ok"):
+                jobs = api.db.query("SELECT COUNT(*) n FROM print_jobs WHERE state='queued'")
+                return {"ok": True, "plan": res.get("plan", []), "jobs": (jobs[0].get("n") if jobs else 0), "printers": len(getattr(manager, "printers", {}))}
+        except Exception:
+            pass
+    try:
+        jobs = api.db.query("SELECT * FROM print_jobs WHERE state='queued' ORDER BY priority DESC, datetime(created_at)")
+        printers = list(getattr(manager, "printers", {}).values())
+        snaps = {}
+        for pr in printers:
+            try:
+                snaps[pr.id] = pr.snapshot()
+            except Exception:
+                snaps[pr.id] = {}
+        plan = []
+        used = set()
+        for job in jobs:
+            need_mat = str(job.get("material") or "").upper()
+            best_pid = ""
+            best_score = -1
+            for pr in printers:
+                if pr.id in used and len(jobs) > len(printers):
+                    continue
+                snap = snaps.get(pr.id, {})
+                state = (snap.get("printer") or {}).get("state") or "OFFLINE"
+                if state not in ("IDLE", "FINISH"):
+                    continue
+                loaded = {str(t.get("type") or "").upper() for t in (snap.get("ams") or {}).get("trays", [])}
+                score = 0
+                if need_mat and need_mat in loaded:
+                    score += 10
+                if not need_mat:
+                    score += 5
+                qlen = len([j for j in jobs if j.get("printer_id") == pr.id])
+                score -= qlen
+                if score > best_score:
+                    best_score = score
+                    best_pid = pr.id
+            if best_pid:
+                plan.append({"job_id": job["id"], "printer_id": best_pid, "score": best_score, "material": need_mat})
+                used.add(best_pid)
+        return {"ok": True, "plan": plan, "jobs": len(jobs), "printers": len(printers)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/api/farmloop/ams/cleanup", audit="AMS: очистка фантомов", doc="Очистить фантомные AMS слоты")
+def farmloop_ams_cleanup(api: Any, ctx: Ctx):
+    from .repo import cleanup_ams_phantoms
+    res = cleanup_ams_phantoms(api.db)
+    return res
+
+
+@router.get("/api/farmloop/bed/projection", doc="Проекция слоя на камеру")
+def farmloop_bed_projection(api: Any, ctx: Ctx):
+    raw = api.db.setting("bed_projection", "")
+    try:
+        import json as _json
+        proj = _json.loads(raw) if isinstance(raw, str) and raw else raw
+    except Exception:
+        proj = None
+    return {"projection": proj, "raw": raw}
+
+
+@router.post("/api/farmloop/bed/projection", audit="Конвейер: проекция", doc="Сохранить проекцию")
+def farmloop_bed_projection_post(api: Any, ctx: Ctx):
+    body = ctx.body or {}
+    proj = body.get("projection")
+    if not isinstance(proj, dict):
+        return 400, {"error": "projection — объект homography"}
+    try:
+        import json as _json
+        api.db.set_setting("bed_projection", _json.dumps(proj))
+        return {"ok": True, "projection": proj}
+    except Exception as exc:
+        return 400, {"error": str(exc)}
+
+
+@router.get("/api/farmloop/spools/delta", doc="ΔE поиск катушек")
+def farmloop_spools_delta(api: Any, ctx: Ctx):
+    target = str(ctx.one("hex", ctx.one("color", "")) or "")
+    material = str(ctx.one("material", "") or "")
+    if not target:
+        return 400, {"error": "hex required"}
+    try:
+        from .accounting import Accounting
+        acc = Accounting(api.db)
+        res = acc.spools_by_delta(target, material)
+        return {"ok": True, "spools": res, "target": target}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}

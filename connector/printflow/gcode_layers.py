@@ -565,6 +565,43 @@ def resolve_job_file(filename: str, roots: Iterable[Path]) -> Path | None:
 _CACHE: "OrderedDict[tuple, LayerIndex]" = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 
+# 18.12.1+ Worker (6): один воркер вместо N потоков, очередь задач.
+_WORK_QUEUE: list[tuple[LayerIndex, Path, str | None]] = []
+_WORK_QUEUE_LOCK = threading.Lock()
+_WORKER_STARTED = False
+
+
+def _worker_loop() -> None:
+    while True:
+        task = None
+        with _WORK_QUEUE_LOCK:
+            if _WORK_QUEUE:
+                task = _WORK_QUEUE.pop(0)
+        if task is None:
+            time.sleep(0.1)
+            continue
+        idx, path, member = task
+        try:
+            idx.build(iter_lines(path, member))
+        except Exception:
+            try:
+                idx.error = "worker failed"
+                idx.ready.set()
+            except Exception:
+                pass
+
+
+def _ensure_worker() -> None:
+    global _WORKER_STARTED
+    if _WORKER_STARTED:
+        return
+    with _WORK_QUEUE_LOCK:
+        if _WORKER_STARTED:
+            return
+        _WORKER_STARTED = True
+        t = threading.Thread(target=_worker_loop, name="pf-gcode-layers-worker", daemon=True)
+        t.start()
+
 
 def _cache_key(path: Path, member: str | None) -> tuple:
     st = path.stat()
@@ -573,10 +610,9 @@ def _cache_key(path: Path, member: str | None) -> tuple:
 
 def index_for(path: Path, plate: int | None = None,
               wait: float = 0.0) -> LayerIndex | None:
-    """Индекс файла из кэша; при промахе — запуск разбора в фоне.
+    """Индекс файла из кэша; при промахе — запуск разбора в фоне Worker (6).
 
-    ``wait`` — сколько секунд подождать готовности (малые файлы успевают за
-    десятки миллисекунд, и первый ответ уже полный).
+    ``wait`` — сколько секунд подождать готовности.
     """
     path = Path(path)
     if not path.is_file():
@@ -599,10 +635,9 @@ def index_for(path: Path, plate: int | None = None,
             _CACHE[key] = idx
             while len(_CACHE) > CACHE_SIZE:
                 _CACHE.popitem(last=False)
-            worker = threading.Thread(
-                target=idx.build, args=(iter_lines(path, member),),
-                name="pf-gcode-layers", daemon=True)
-            worker.start()
+            _ensure_worker()
+            with _WORK_QUEUE_LOCK:
+                _WORK_QUEUE.append((idx, path, member))
     if wait > 0:
         idx.ready.wait(wait)
     return idx
@@ -611,6 +646,8 @@ def index_for(path: Path, plate: int | None = None,
 def clear_cache() -> None:
     with _CACHE_LOCK:
         _CACHE.clear()
+    with _WORK_QUEUE_LOCK:
+        _WORK_QUEUE.clear()
 
 
 def parse_text(text: str) -> LayerIndex:
