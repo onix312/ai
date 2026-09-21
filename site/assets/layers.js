@@ -48,13 +48,16 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
-    const box = (bbox && bbox.length === 4) ? bbox : [0, 0, 256, 256];
+    let box = (bbox && bbox.length === 4) ? bbox : null;
+    if (!box || !box.every((v) => Number.isFinite(Number(v)))) box = [0, 0, 256, 256];
+    // защита от вырожденного bbox [0,0,0,0] во время building
+    if (!(box[2] > box[0]) || !(box[3] > box[1])) box = [0, 0, 256, 256];
     const pad = 10;
     const bw = Math.max(1, box[2] - box[0]), bh = Math.max(1, box[3] - box[1]);
     const scale = Math.min((cssW - pad * 2) / bw, (cssH - pad * 2) / bh);
     const ox = (cssW - bw * scale) / 2, oy = (cssH - bh * scale) / 2;
     const X = (x) => ox + (x - box[0]) * scale;
-    const Y = (y) => cssH - (oy + (y - box[1]) * scale);   // ось Y стола вверх
+    const Y = (y) => cssH - (oy + (y - box[1]) * scale);   // front=0 внизу кадра (совпадает с bed_projection: front-left=(0,plate_h))
     // сетка стола (шаг 50 мм в пределах рамки)
     ctx.strokeStyle = 'rgba(148,163,184,.18)';
     ctx.lineWidth = 1;
@@ -100,19 +103,22 @@
     let max = 0;
     layers.forEach((l) => { if (l.ext > max) max = l.ext; });
     if (max <= 0) max = 1;
-    const cols = Math.min(n, Math.floor(cssW));
+    const cols = Math.max(1, Math.min(n, Math.floor(cssW) || 1));
     const per = n / cols;
     ctx.fillStyle = 'rgba(99,102,241,.35)';
     for (let c = 0; c < cols; c++) {
       let s = 0, k = 0;
-      for (let i = Math.floor(c * per); i < Math.min(n, Math.floor((c + 1) * per)) || k === 0; i++) { s += num(layers[i] && layers[i].ext); k++; if (i >= n - 1) break; }
-      const h = Math.max(1, (s / k) / max * (cssH - 2));
+      const from = Math.floor(c * per);
+      const to = Math.min(n, Math.floor((c + 1) * per));
+      for (let i = from; i < to || k === 0; i++) { s += num(layers[i] && layers[i].ext); k++; if (i >= n - 1) break; }
+      const h = Math.max(1, (s / Math.max(1, k)) / max * (cssH - 2));
       const x = c * (cssW / cols);
-      ctx.fillStyle = (current && Math.floor(c * per) < current) ? 'rgba(99,102,241,.55)' : 'rgba(148,163,184,.35)';
+      const isPast = current && current > 0 && Math.floor(c * per) < current;
+      ctx.fillStyle = isPast ? 'rgba(99,102,241,.55)' : 'rgba(148,163,184,.35)';
       ctx.fillRect(x, cssH - h, Math.max(1, cssW / cols - 0.5), h);
     }
     const mark = (layer, color) => {
-      if (!layer) return;
+      if (!layer || layer <= 0) return;
       const x = ((layer - 1) / Math.max(1, n - 1)) * (cssW - 1) + 0.5;
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;

@@ -131,7 +131,10 @@ class FileLibrary:
                  nom_id, order_id, model_id,
                  grams, grams, minutes, minutes, material, note, now, existing["id"]),
             )
-            return self.get(existing["id"])
+            row = self.get(existing["id"])
+            row["dedup"] = True
+            row["existing_id"] = existing["id"]
+            return row
         fid = uid("lib")
         self.db.execute(
             """INSERT INTO library_files

@@ -1045,11 +1045,11 @@ class Api:
         return verdicts
 
     # ------------------------------------------------------------------- GET
-    def get(self, path: str, query: dict) -> tuple[int, object]:
+    def get(self, path: str, query: dict, headers: dict | None = None, **_kw) -> tuple[int, object]:
         one = lambda key, default="": (query.get(key) or [default])[0]  # noqa: E731
         # 14.0 (идеи 1, 9, З3): сначала реестр маршрутов, затем legacy-цепочка.
         # Маршруты переносятся в реестр порциями, поэтому оба пути живые.
-        routed = router.dispatch(self, "GET", path, query=query)
+        routed = router.dispatch(self, "GET", path, query=query, headers=headers or {})
         if routed is not None:
             return routed
 
@@ -1315,9 +1315,9 @@ class Api:
         return 404, {"error": "Неизвестный маршрут"}
 
     # ------------------------------------------------------------------ POST
-    def post(self, path: str, body: dict, query: dict) -> tuple[int, object]:
+    def post(self, path: str, body: dict, query: dict, headers: dict | None = None, **_kw) -> tuple[int, object]:
         pid = body.get("printer_id") or (query.get("printer_id") or [""])[0]
-        routed = router.dispatch(self, "POST", path, body=body, query=query)
+        routed = router.dispatch(self, "POST", path, body=body, query=query, headers=headers or {})
         if routed is not None:
             return routed
 

@@ -927,19 +927,130 @@ class Accounting:
             })
         return out
 
+    @staticmethod
+    def _parse_ams_slot(raw) -> str | None:
+        """Парсит слот AMS из строки/числа: 'A1','AMS 1 slot 2','3' -> '3', 254 -> '254'.
+
+        Поддерживает формат из UI и из AMS: берём trailing digits, clamp 0-15/254.
+        """
+        import re
+        s = str(raw if raw is not None else "").strip()
+        if not s:
+            return None
+        m = re.search(r"(\d+)\s*$", s)
+        cand = m.group(1) if m else s
+        try:
+            iv = int(float(cand))
+        except (TypeError, ValueError):
+            return None
+        if (0 <= iv <= 15) or iv == 254:
+            return str(iv)
+        return None
+
+    @staticmethod
+    def _hex_to_rgb(hex_str: str) -> tuple[int, int, int] | None:
+        try:
+            h = str(hex_str or "").strip().lstrip("#")
+            if len(h) == 3:
+                h = "".join(c * 2 for c in h)
+            if len(h) != 6:
+                return None
+            return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _color_distance_rgb(hex_a: str, hex_b: str) -> float:
+        """ΔE упрощённый: евклид в RGB, 0=идентично."""
+        try:
+            from .estimate import color_distance
+            return color_distance(hex_a, hex_b)
+        except Exception:
+            pass
+        # fallback
+        def _to_rgb(h):
+            try:
+                hs = str(h or "").strip().lstrip("#")
+                if len(hs) == 3:
+                    hs = "".join(c * 2 for c in hs)
+                return int(hs[0:2], 16), int(hs[2:4], 16), int(hs[4:6], 16)
+            except Exception:
+                return None
+        a = _to_rgb(hex_a)
+        b = _to_rgb(hex_b)
+        if not a or not b:
+            return 999.0
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5
+
+    def find_closest_spool_by_color(self, target_hex: str, material: str = "",
+                                    max_delta: float = 100.0) -> dict | None:
+        """11: ΔE spool — ближайшая катушка по цвету (color_hex)."""
+        target_hex = str(target_hex or "").strip()
+        if not target_hex:
+            return None
+        candidates = self.db.query(
+            "SELECT * FROM spools WHERE archived=0 AND remaining_grams>0"
+            " AND COALESCE(color_hex,'')<>''")
+        best = None
+        best_dist = 9999.0
+        for spool in candidates:
+            if material and spool.get("material") and str(spool["material"]).upper() != material.upper():
+                continue
+            d = self._color_distance_rgb(target_hex, spool.get("color_hex") or "")
+            if d < best_dist and d <= max_delta:
+                best_dist = d
+                best = spool
+        if best:
+            best = dict(best)
+            best["_delta_e"] = round(best_dist, 1)
+        return best
+
+    def spools_by_delta(self, target_hex: str, material: str = "") -> list[dict]:
+        """Список катушек отсортированных по ΔE к target."""
+        target_hex = str(target_hex or "").strip()
+        if not target_hex:
+            return []
+        rows = self.db.query(
+            "SELECT * FROM spools WHERE archived=0 AND remaining_grams>0")
+        out = []
+        for spool in rows:
+            if material and spool.get("material") and str(spool["material"]).upper() != material.upper():
+                continue
+            hex_c = spool.get("color_hex") or ""
+            if not hex_c:
+                continue
+            d = self._color_distance_rgb(target_hex, hex_c)
+            out.append({**spool, "_delta_e": round(d, 1)})
+        out.sort(key=lambda x: x["_delta_e"])
+        return out[:20]
+
     # ------------------------------------------------------------------ склад
     def pick_spool(self, printer_id: str = "", ams_slot: str = "",
                    material: str = "", tray_uuid: str = "") -> dict | None:
-        """Найти катушку: по метке AMS, затем по слоту, затем по материалу."""
+        """Найти катушку: по метке AMS, затем по слоту, затем по материалу.
+
+        18.12.1 fix: ams_slot может быть 'A1','AMS 1 slot 2','3' — парсим trailing digits,
+        фильтруем remaining>0 для материальных фолбэков, archived=0 везде.
+        """
         if tray_uuid:
             row = self.db.one(
                 "SELECT * FROM spools WHERE tray_uuid=? AND archived=0", (tray_uuid,))
             if row:
                 return row
-        if printer_id and ams_slot != "":
+        if printer_id and str(ams_slot or "").strip() != "":
+            norm = self._parse_ams_slot(ams_slot)
+            if norm is not None:
+                row = self.db.one(
+                    "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0"
+                    " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                    (printer_id, norm))
+                if row:
+                    return row
+            # fallback: exact match если не парсится (старые данные)
             row = self.db.one(
-                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
-                (printer_id, str(ams_slot)))
+                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0"
+                " AND remaining_grams>0 ORDER BY remaining_grams DESC LIMIT 1",
+                (printer_id, str(ams_slot).strip()))
             if row:
                 return row
         if material:

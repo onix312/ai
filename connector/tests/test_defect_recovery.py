@@ -35,19 +35,21 @@ class DefectRecoveryTests(unittest.TestCase):
             "total_grams": 1000, "remaining_grams": 700, "price": 1500,
             "archived": 0,
         })
+        from connector.printflow.config import now_iso as _now
+        now = _now()
         self.db.upsert("print_jobs", {
             "id": "job-1", "printer_id": "printer-1", "order_id": "order-1",
             "name": "Корпус.3mf", "file": "Корпус.3mf", "state": "failed",
             "source": "printer", "spool_id": "spool-1", "grams": 100,
             "duration_min": 60, "energy_kwh": 0.2, "cost": 180,
-            "finished_at": "2026-08-21T10:00:00+03:00",
-            "accounted_at": "2026-08-21T10:00:01+03:00",
-            "created_at": "2026-08-21T09:00:00+03:00",
+            "finished_at": now,
+            "accounted_at": now,
+            "created_at": now,
         })
         self.db.execute(
             "INSERT INTO filament_usage(at,spool_id,job_id,order_id,grams,cost,note,auto)"
             " VALUES(?,?,?,?,?,?,?,?)",
-            ("2026-08-21T10:00:00+03:00", "spool-1", "job-1", "order-1",
+            (now, "spool-1", "job-1", "order-1",
              100, 50, "test", 1),
         )
 

@@ -1,30 +1,16 @@
-"""Бот сотрудников PrintFlow — пакет вместо бог-класса (18.1).
+"""Бот сотрудников PrintFlow — тонкий, notify_only + Mini App.
 
-Было. `telegram_bot.py` — один класс на 3 700 строк и ~140 методов:
-транспорт, диспетчеризация цепочкой if/elif (78 веток), каталог, продажи,
-касса, заказы, принтеры, команда, расписания. Правка любого раздела
-трогала один файл, порядок веток диспетчера был хрупким.
-
-Стало. Пакет `staffbot`:
-
-* `core.py` — цикл опроса, приём обновлений, отправка, главное меню;
-* `router.py` — таблицы текстовых команд и inline-кнопок (декларативно:
-  слова → права → метод), подсказки «возможно, вы имели в виду»;
-* `scenes.py` — диалоги (флоу продажи, сверка кассы, ответ клиенту)
-  в SQLite с TTL: переживают перезапуск коннектора;
-* `views.py` — обзорные тексты; `printers.py` — принтеры и камера;
-  `sales.py` — полка, продажа, касса магазина; `catalog.py` — номенклатура;
-  `orders.py` — заказы; `team.py` — команда; `inbox.py` — покупатели;
-  `schedules.py` — дайджесты и напоминания;
-* `bot.py` — `StaffBot`, сборка из примесей.
-
-Публичный контракт прежний: `TelegramBot(manager)` и `shutdown()`
-(имя `TelegramBot` — псевдоним), транспорт и журнал обновлений общие
-с клиентским ботом через `tg.py`.
+Архитектура clean_layers:
+- core/config, core/db, core/api_client
+- router
+- handlers/menu (кнопка web_app), handlers/notify (все уведомления)
+- scenes SQLite с нуля
+- ui keyboards
+- miniapp auth HMAC
 """
 from .bot import StaffBot, TelegramBot
 from .router import suggest_command
 from .ui import HELP, REPLY_ALIASES, STATE_RU
+from .scenes import BotScenes, SELL
 
-__all__ = ["StaffBot", "TelegramBot", "suggest_command", "HELP",
-           "REPLY_ALIASES", "STATE_RU"]
+__all__ = ["StaffBot", "TelegramBot", "suggest_command", "HELP", "REPLY_ALIASES", "STATE_RU", "BotScenes", "SELL"]

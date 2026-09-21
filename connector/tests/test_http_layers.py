@@ -291,7 +291,7 @@ class HandlerJobsStartBridgeTests(unittest.TestCase):
         raw = json.dumps(body).encode("utf-8")
         seen = {}
 
-        def fake_post(path, payload, query):
+        def fake_post(path, payload, query, headers=None, **_kw):
             seen["path"] = path
             seen["payload"] = dict(payload)
             return 200, {"ok": True}

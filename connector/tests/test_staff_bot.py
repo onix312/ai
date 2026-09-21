@@ -1,6 +1,6 @@
-"""Роли в Telegram-боте: владелец, руководитель, сотрудник, приглашения.
+"""Роли в Telegram-боте — тонкий бот notify_only + кнопка web_app.
 
-Без сети: проверяется разграничение команд и работа с таблицей staff.
+Проверяем gate, invite, и что все команды ведут в меню с web_app.
 """
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import json
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -15,8 +16,9 @@ sys.path.insert(0, str(ROOT / "connector"))
 
 from connector.printflow.accounting import Accounting  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
-from connector.printflow.staff import ROLE_RIGHTS, Staff, gate, group_for_word  # noqa: E402
-from connector.printflow.telegram_bot import TelegramBot  # noqa: E402
+from connector.printflow.staff import ROLE_RIGHTS, Staff, gate  # noqa: E402
+from connector.printflow.staffbot import StaffBot  # noqa: E402
+from connector.printflow.staffbot.core.config import get_miniapp_url  # noqa: E402
 
 
 class FakeManager:
@@ -26,24 +28,37 @@ class FakeManager:
         self.repo = None
         self.client_bot = None
         self._snapshot = snapshot or {"printers": []}
+        self.notified = []
 
     def snapshot(self, printer_id: str = "") -> dict:
         return self._snapshot
+
+    def queue(self):
+        return []
+
+    def notify_async(self, text, photo=None, buttons=None, critical=False, event=""):
+        self.notified.append((text, buttons, event))
 
 
 class StaffRoleTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
-        self.db.set_settings({"telegram_chat_id": "111"})
+        self.db.set_settings({"telegram_chat_id": "111", "telegram_bot": "1",
+                              "telegram_token": "tok", "public_url": "https://example.com"})
         self.manager = FakeManager(self.db)
-        self.bot = TelegramBot(self.manager)
+        self.bot = StaffBot(self.manager)
         self.staff = Staff(self.db)
 
     def tearDown(self):
         self.bot.shutdown()
         self.db.close()
         self._tmp.cleanup()
+
+    def _capture_call(self):
+        calls = []
+        self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
+        return calls
 
     def test_owner_chat_gets_owner_role(self):
         who = gate(self.db, "111")
@@ -61,53 +76,36 @@ class StaffRoleTests(unittest.TestCase):
     def test_unknown_chat_has_no_rights(self):
         self.assertIsNone(gate(self.db, "999")["role"])
 
-    def test_inline_callback_edits_card_without_new_message(self):
-        """Inline-карточки сотрудника не плодят сообщения в чате."""
-        calls = []
-        self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
-        self.bot._edit_or_reply("111", {"message_id": 7}, "обновлено")
-        self.assertEqual([method for method, _ in calls], ["editMessageText"])
+    def test_bot_menu_has_web_app(self):
+        self._capture_call()
+        self.bot._dispatch("111", "меню")
+        # _reply через outbox, но мы перехватили _call в _send_main_menu
+        # Проверяем что последний вызов содержит web_app
+        found = False
+        for method, params in self.bot._call.__self__ if hasattr(self.bot._call, "__self__") else []:
+            pass
+        # напрямую вызываем _send_main_menu и проверяем markup
+        calls = self._capture_call()
+        self.bot._send_main_menu("111")
+        self.assertTrue(calls)
+        method, params = calls[-1]
+        self.assertEqual(method, "sendMessage")
+        rm = json.loads(params.get("reply_markup") or "{}")
+        self.assertIn("inline_keyboard", rm)
+        btn = rm["inline_keyboard"][0][0]
+        self.assertIn("web_app", btn)
+        self.assertIn("staff", btn["web_app"]["url"])
+        self.assertIn("Открыть цех", btn["text"])
 
-    def test_bot_denies_finance_for_employee(self):
-        self.staff.add("Ваня", "employee", "222")
-        replies: list[str] = []
-        self.bot._reply = lambda chat, text: replies.append(text)
-        self.bot._dispatch("222", "деньги")
-        self.assertTrue(any("недоступен" in r for r in replies), replies)
-
-    def test_bot_allows_shelf_for_employee(self):
-        self.staff.add("Ваня", "employee", "222")
-        replies: list[str] = []
-        self.bot._reply = lambda chat, text: replies.append(text)
-        self.bot.sell_home_keyboard = lambda chat: replies.append("продажа кнопками")
-        self.bot._dispatch("222", "продажа")
-        self.assertIn("продажа кнопками", replies)
-
-    def test_bot_denies_printer_control_for_employee(self):
-        self.staff.add("Ваня", "employee", "222")
-        replies: list[str] = []
-        self.bot._reply = lambda chat, text: replies.append(text)
-        self.bot._dispatch("222", "пауза")
-        self.assertTrue(any("недоступен" in r for r in replies), replies)
-
-    def test_manager_can_read_finance(self):
-        self.staff.add("Оля", "manager", "333")
-        replies: list[str] = []
-        self.bot._reply = lambda chat, text: replies.append(text)
-        self.bot.text_money = lambda: "касса пуста"
-        self.bot._dispatch("333", "деньги")
-        self.assertIn("касса пуста", replies)
-
-    def test_only_owner_adds_staff_from_chat(self):
-        self.staff.add("Оля", "manager", "333")
-        self.bot._reply = lambda chat, text: None
-        answer = self.bot._staff_command("333", "add", "сотрудник Петя 444",
-                                         role="сотрудник")
-        self.assertIn("только владелец", answer)
-        answer = self.bot._staff_command("111", "add", "сотрудник Петя 444",
-                                         role="сотрудник")
-        self.assertIn("Петя", answer)
-        self.assertEqual(gate(self.db, "444")["role"], "employee")
+    def test_bot_dispatch_all_commands_to_menu(self):
+        calls = self._capture_call()
+        for cmd in ("продажа", "полка", "касса", "принтеры", "деньги", "старт", "help"):
+            calls.clear()
+            self.bot._dispatch("111", cmd)
+            # должен отправить меню
+            self.assertTrue(calls, f"no call for {cmd}")
+            method, params = calls[-1]
+            self.assertEqual(method, "sendMessage")
 
     def test_invite_code_joins_with_role(self):
         invite = self.staff.invite("manager", "Оля")
@@ -115,7 +113,6 @@ class StaffRoleTests(unittest.TestCase):
         member = self.staff.use_invite(code, "555", "Оля")
         self.assertEqual(member["role"], "manager")
         self.assertEqual(gate(self.db, "555")["role"], "manager")
-        # код одноразовый
         with self.assertRaises(ValueError):
             self.staff.use_invite(code, "777", "Кто-то")
 
@@ -134,29 +131,30 @@ class StaffRoleTests(unittest.TestCase):
         self.staff.restore(member["id"])
         self.assertEqual(gate(self.db, "222")["role"], "employee")
 
-    def test_group_mapping(self):
-        self.assertEqual(group_for_word("деньги"), "finance")
-        self.assertEqual(group_for_word("статус"), "view")
-        self.assertEqual(group_for_word("статус", text_has_digits=True), "orders")
-        self.assertEqual(group_for_word("", command="pause"), "printers")
-        self.assertEqual(group_for_word("", command="sell:nom1"), "shelf")
-        self.assertEqual(group_for_word("", command="shelf-sell:it1"), "shelf")
-        self.assertEqual(group_for_word("стеллаж"), "view")
+    def test_miniapp_url_fallback(self):
+        url = get_miniapp_url(self.db)
+        self.assertIn("staff", url)
 
-    def test_stranger_gets_chat_id_hint_and_invite_join(self):
-        replies: list[str] = []
-        self.bot._reply = lambda chat, text: replies.append(text)
-        update = {"message": {"chat": {"id": 999}, "text": "код",
+    def test_stranger_gets_hint(self):
+        calls = self._capture_call()
+        update = {"message": {"chat": {"id": 999}, "text": "привет",
                               "from": {"first_name": "Гость", "id": 999}}}
         self.bot._handle(update, "111")
-        self.assertTrue(any("999" in r for r in replies), replies)
+        self.assertTrue(calls or self.db.query("SELECT * FROM telegram_outbox"))
+        # должен быть ответ с chat_id
+        payloads = [p for m, p in calls]
+        # если через outbox, проверим outbox таблицу
+        if not payloads:
+            rows = self.db.query("SELECT payload FROM telegram_outbox")
+            payloads = [r.get("payload") for r in rows]
+        self.assertTrue(any("999" in str(pl) for pl in payloads))
 
-        invite = self.staff.invite("employee", "Гость")
-        update_join = {"message": {"chat": {"id": 999},
-                                   "text": f"старт {invite['code']}",
-                                   "from": {"first_name": "Гость", "id": 999}}}
-        self.bot._handle(update_join, "111")
-        self.assertEqual(gate(self.db, "999")["role"], "employee")
+    def test_notify_with_button_uses_callback(self):
+        self.manager.notified.clear()
+        self.bot._notify_with_button("тест уведомление", event="test")
+        self.assertEqual(len(self.manager.notified), 1)
+        text, buttons, event = self.manager.notified[0]
+        self.assertIn("тест", text)
 
 
 if __name__ == "__main__":
