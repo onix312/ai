@@ -247,7 +247,24 @@ def get_timeline(api: Any, ctx: Ctx):
 
 @router.get("/api/shelf", doc="GET /api/shelf")
 def get_shelf(api: Any, ctx: Ctx):
-    return 200, {"items": api.shelf.items(), "summary": api.shelf.summary()}
+    return 200, {
+        "items": api.shelf.items(),
+        "summary": api.shelf.summary(),
+        "groups": api.shelf.groups(),
+    }
+
+
+@router.get("/api/shelf/groups", doc="GET /api/shelf/groups — группы витрины")
+def get_shelf_groups(api: Any, ctx: Ctx):
+    return 200, {"groups": api.shelf.groups()}
+
+
+@router.get("/api/shelf/group", doc="GET /api/shelf/group?id= — одна группа витрины")
+def get_shelf_group(api: Any, ctx: Ctx):
+    group = api.shelf.group(ctx.one("id"))
+    if not group:
+        return 404, {"error": "Группа витрины не найдена"}
+    return 200, {"group": group}
 
 
 @router.get("/api/shelf/moves", doc="GET /api/shelf/moves")

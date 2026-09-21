@@ -8,9 +8,15 @@ const U = PF.ui, { $, $$, esc, num, money, nfmt, hoursText, dateText, dateTimeTe
 const { get, post } = PF.api;
 
 let editingShelf = null;
-let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null, cash: null };
+let editingGroup = null;
+let shelfData = { items: [], summary: {}, moves: [], tags: {}, forecast: [], head: null, cash: null, groups: [] };
 let stockGoods = [];
 let shelfFilter = { q: '', status: '', linkedOnly: false };
+const GROUP_STATUS_LABEL = {
+  incomplete: 'Неполная',
+  needs_align: 'Нужно выровнять цены',
+  ready: 'Готова к печати',
+};
 
 const KIND_LABEL = {
   produce: 'Приход', sale: 'Продажа', online: 'Продажа онлайн',
@@ -60,7 +66,7 @@ async function refreshShelf() {
     shelfData = {
       items: data.items || [], summary: data.summary || {}, moves: moves.moves || [],
       tags: tags || {}, forecast: forecast.items || [], head: head || null,
-      cash: cash || null,
+      cash: cash || null, groups: data.groups || [],
     };
     if (document.querySelector('#view-shelf.on')) renderShelf();
     updateNavTag();
@@ -143,6 +149,7 @@ function renderShelf() {
       shelfKpi('План пополнения', `${nfmt(s.plan_qty)} шт`, 'напечатать, чтобы хватило на 7 дней'),
     ].join('') + fcHtml;
   renderShelfCash();
+  renderShelfGroups();
 
   const items = filteredShelfItems();
   const emptyText = (shelfData.items || []).length
@@ -159,8 +166,8 @@ function renderShelf() {
       + `<div class="shead">`
       + (i.photo ? `<img class="sphoto" src="/api/shelf/photo.jpg?id=${esc(i.id)}&t=${esc(i.updated_at || '')}" alt="">`
         : `<span class="sphoto ph">◻</span>`)
-      + `<div class="sinfo"><h3>${esc(i.name)}${variantChip(i)}${liveBadgeFor(i.id)}</h3>`
-      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}</small>`
+      + `<div class="sinfo"><h3>${esc(i.name)}${variantChip(i)}${liveBadgeFor(i.id)}${i.group_name ? `<span class="chip outline" title="Группа витрины">▦ ${esc(i.group_name)}</span>` : ''}</h3>`
+      + `<small class="muted">${i.barcode ? `1С ✓ · ${esc(i.barcode)}` : '1С: код не задан'} · ${tagFormatLabel(i.tag_template)} · ${tagVariantLabel(i.tag_variant)}${i.tag_badge ? ' · ' + esc(i.tag_badge) : ''}${i.group_name ? ' · средний ценник группы' : ''}</small>`
       + (i.note ? `<small class="muted">${esc(i.note)}</small>` : '') + `</div>`
       + `<button class="icon-btn sm" type="button" data-shelf-edit="${esc(i.id)}" title="Изменить">✎</button></div>`
       + `<div class="sbody">`
@@ -227,6 +234,159 @@ function renderShelfCash() {
       + `<div class="mbody"><b>${money(r.amount)}</b><small>${esc(dateText(r.at))}${r.note ? ' · ' + esc(r.note) : ''}</small></div>`
       + `<button class="icon-btn sm" type="button" data-shelf-cash-undo="${esc(r.id)}" title="Отменить выемку">✕</button></div>`).join('')
     : '';
+}
+
+function renderShelfGroups() {
+  const host = $('shelf_groups_list');
+  if (!host) return;
+  const groups = shelfData.groups || [];
+  if (!groups.length) {
+    host.innerHTML = '<div class="muted" style="padding:8px 0">Пока нет групп — соберите ряд товаров под один средний ценник.</div>';
+    return;
+  }
+  host.innerHTML = groups.map((g) => {
+    const st = g.status || 'incomplete';
+    const warn = st === 'ready' ? 'ok' : st === 'needs_align' ? 'warn' : '';
+    const priceLine = g.median
+      ? (g.printable ? money(g.median) : `медиана ${money(g.median)}`)
+      : 'нет цен';
+    return `<div class="row" style="align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)">`
+      + `<div class="sinfo" style="flex:1"><b>${esc(g.name)}</b>`
+      + `<small>${nfmt(g.member_count)} поз. · ${esc(GROUP_STATUS_LABEL[st] || st)} · ${priceLine}</small></div>`
+      + `<span class="chip ${warn}">${esc(GROUP_STATUS_LABEL[st] || st)}</span>`
+      + (g.printable
+        ? `<a class="btn sm ghost" href="/price-tags.html?group=${encodeURIComponent(g.id)}" target="_blank" rel="noopener">▦ Ценник</a>`
+        : '')
+      + `<button class="btn sm" type="button" data-shelf-group-edit="${esc(g.id)}">Открыть</button>`
+      + `</div>`;
+  }).join('');
+}
+
+function openShelfGroup(id) {
+  editingGroup = id || null;
+  const g = id ? (shelfData.groups || []).find((x) => x.id === id) : null;
+  $('shelf_group_title').textContent = g ? g.name : 'Новая группа витрины';
+  $('sgf_id').value = g ? g.id : '';
+  $('sgf_name').value = g ? g.name : '';
+  $('sgf_delete').hidden = !g;
+  $('sgf_align_preview').hidden = !g;
+  $('sgf_align').hidden = !g;
+  const printBtn = $('sgf_print');
+  if (printBtn) {
+    printBtn.hidden = !(g && g.printable);
+    printBtn.href = g ? `/price-tags.html?group=${encodeURIComponent(g.id)}` : '/price-tags.html';
+  }
+  const statusBox = $('sgf_status');
+  const statusText = $('sgf_status_text');
+  if (g) {
+    statusBox.hidden = false;
+    statusText.textContent = `${GROUP_STATUS_LABEL[g.status] || g.status}`
+      + (g.median ? ` · медиана ${money(g.median)}` : '')
+      + (g.printable ? ' · можно печатать средний ценник' : '');
+  } else {
+    statusBox.hidden = true;
+  }
+  $('sgf_preview').hidden = true;
+  $('sgf_preview_rows').innerHTML = '';
+  const memberSet = new Set((g && g.members || []).map((m) => m.id));
+  const items = shelfData.items || [];
+  $('sgf_members').innerHTML = items.length
+    ? items.map((i) => {
+      const inOther = i.group_id && (!g || i.group_id !== g.id);
+      const checked = memberSet.has(i.id) ? 'checked' : '';
+      const disabled = inOther ? 'disabled' : '';
+      const note = inOther
+        ? ` · уже в «${esc(i.group_name || i.group_id)}»`
+        : '';
+      return `<label class="check" style="display:flex;gap:8px;align-items:flex-start;padding:4px 0">`
+        + `<input type="checkbox" data-sgf-member="${esc(i.id)}" ${checked} ${disabled}>`
+        + `<span><b>${esc(i.name)}</b>${i.variant_label ? ' · ' + esc(i.variant_label) : ''}`
+        + `<small class="muted"> · ${money(i.price)} · ${nfmt(i.qty)} шт${note}</small></span></label>`;
+    }).join('')
+    : '<div class="muted">На стеллаже нет позиций</div>';
+  openModal('shelf_group_modal');
+}
+
+function selectedGroupMemberIds() {
+  return Array.from(document.querySelectorAll('#sgf_members input[data-sgf-member]:checked'))
+    .map((el) => el.dataset.sgfMember)
+    .filter(Boolean);
+}
+
+async function saveShelfGroup() {
+  const name = ($('sgf_name').value || '').trim();
+  const member_ids = selectedGroupMemberIds();
+  if (!name) return fail(new Error('Укажите название группы'));
+  if (member_ids.length < 2) return fail(new Error('В группе минимум 2 позиции'));
+  try {
+    const res = await post('/api/shelf/group/save', {
+      id: $('sgf_id').value || '',
+      name,
+      member_ids,
+    });
+    await refreshShelf();
+    toast('Группа сохранена', name);
+    if (res && res.group) openShelfGroup(res.group.id);
+    else closeModal('shelf_group_modal');
+  } catch (e) { fail(e); }
+}
+
+async function previewAlignGroup() {
+  const id = $('sgf_id').value;
+  if (!id) return;
+  try {
+    const res = await post('/api/shelf/group/align/preview', { id });
+    const box = $('sgf_preview');
+    const rows = $('sgf_preview_rows');
+    box.hidden = false;
+    const changes = res.changes || [];
+    const unchanged = res.unchanged || [];
+    if (!changes.length) {
+      rows.innerHTML = `<div class="muted">Все ненулевые цены уже = ${money(res.median)}. Можно печатать.</div>`;
+      return;
+    }
+    rows.innerHTML = `<div class="muted" style="margin-bottom:6px">Медиана ${money(res.median)} — будет записана только ненулевым</div>`
+      + changes.map((m) =>
+        `<div class="row"><span style="flex:1">${esc(m.name)}</span>`
+        + `<span class="muted">${money(m.price)}</span>`
+        + `<span>→ <b>${money(m.new_price)}</b></span></div>`).join('')
+      + (unchanged.length
+        ? `<div class="muted" style="margin-top:6px">Без изменений: ${unchanged.map((m) => esc(m.name)).join(', ')}</div>`
+        : '');
+  } catch (e) { fail(e); }
+}
+
+async function alignShelfGroup() {
+  const id = $('sgf_id').value;
+  if (!id) return;
+  try {
+    // Превью обязательно перед записью — владелец видит было→стало.
+    const preview = await post('/api/shelf/group/align/preview', { id });
+    const changes = preview.changes || [];
+    if (!changes.length) {
+      toast('Уже выровнено', `Все цены = ${money(preview.median)}`);
+      openShelfGroup(id);
+      return;
+    }
+    const lines = changes.map((m) => `«${m.name}»: ${money(m.price)} → ${money(m.new_price)}`).join('\n');
+    if (!confirmDanger(`Выровнять цены группы по медиане ${money(preview.median)}?\n\n${lines}\n\ntag_old_price и выход из группы цены не откатывают.`)) return;
+    const res = await post('/api/shelf/group/align', { id });
+    await refreshShelf();
+    toast('Цены выровнены', `${money(res.median)} · изменено ${nfmt(res.changed)}`);
+    openShelfGroup(id);
+  } catch (e) { fail(e); }
+}
+
+async function deleteShelfGroup() {
+  const id = $('sgf_id').value;
+  if (!id) return;
+  if (!confirmDanger('Расформировать группу? Цены позиций останутся как есть, средний ценник пропадёт.')) return;
+  try {
+    await post('/api/shelf/group/delete', { id });
+    closeModal('shelf_group_modal');
+    await refreshShelf();
+    toast('Группа расформирована');
+  } catch (e) { fail(e); }
 }
 
 async function collectShelfCash() {
@@ -800,6 +960,20 @@ async function openShelfCard(itemId) {
 /* =============================================================== события */
 function bind() {
   $('shelf_add').addEventListener('click', () => openShelf());
+  const openGroup = () => openShelfGroup();
+  if ($('shelf_group_add')) $('shelf_group_add').addEventListener('click', openGroup);
+  if ($('shelf_group_add2')) $('shelf_group_add2').addEventListener('click', openGroup);
+  if ($('sgf_save')) $('sgf_save').addEventListener('click', saveShelfGroup);
+  if ($('sgf_delete')) $('sgf_delete').addEventListener('click', deleteShelfGroup);
+  if ($('sgf_align_preview')) $('sgf_align_preview').addEventListener('click', previewAlignGroup);
+  if ($('sgf_align')) $('sgf_align').addEventListener('click', alignShelfGroup);
+  const groupsList = $('shelf_groups_list');
+  if (groupsList) {
+    groupsList.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-shelf-group-edit]');
+      if (btn) openShelfGroup(btn.dataset.shelfGroupEdit);
+    });
+  }
   if ($('shelf_search')) {
     $('shelf_search').addEventListener('input', applyShelfFilter);
     $('shelf_filter_status').addEventListener('change', applyShelfFilter);
@@ -965,5 +1139,6 @@ PF.on('view', (d) => { if (d.view === 'shelf') refreshShelf(); });
 setInterval(() => { if (document.querySelector('#view-shelf.on')) guardedShelfRefresh(); }, 60000);
 
 PF.modules.shelf = { refreshShelf, openShelf, openProduce, openSales, openInventory,
+  openShelfGroup,
   get shelfSummary() { return shelfSummaryText(); } };
 })();

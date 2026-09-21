@@ -1307,6 +1307,26 @@ CREATE TABLE IF NOT EXISTS shelf_collections (
     note TEXT DEFAULT ''
 );
 
+-- Группы витрины: несколько позиций стеллажа → один средний ценник.
+-- Позиция не больше чем в одной группе (idx_shelf_group_item UNIQUE).
+CREATE TABLE IF NOT EXISTS shelf_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    active INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS shelf_group_members (
+    group_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    position INTEGER DEFAULT 0,
+    PRIMARY KEY (group_id, item_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shelf_group_item
+    ON shelf_group_members(item_id);
+CREATE INDEX IF NOT EXISTS idx_shelf_group_members_group
+    ON shelf_group_members(group_id, position);
+
 -- ------------------------------------------------- 5.0: конверты-накопления
 CREATE TABLE IF NOT EXISTS envelopes (
     id TEXT PRIMARY KEY,
@@ -2083,6 +2103,31 @@ class Database:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_shelf_item_barcode"
                 " ON shelf_items(barcode) WHERE barcode<>''"
+            )
+            # Группы витрины: таблицы из SCHEMA + индекс «позиция ≤ 1 группа».
+            # CREATE IF NOT EXISTS безопасен и для свежих, и для старых баз.
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS shelf_groups ("
+                " id TEXT PRIMARY KEY,"
+                " name TEXT NOT NULL,"
+                " active INTEGER DEFAULT 1,"
+                " created_at TEXT,"
+                " updated_at TEXT)"
+            )
+            self.conn.execute(
+                "CREATE TABLE IF NOT EXISTS shelf_group_members ("
+                " group_id TEXT NOT NULL,"
+                " item_id TEXT NOT NULL,"
+                " position INTEGER DEFAULT 0,"
+                " PRIMARY KEY (group_id, item_id))"
+            )
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_shelf_group_item"
+                " ON shelf_group_members(item_id)"
+            )
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shelf_group_members_group"
+                " ON shelf_group_members(group_id, position)"
             )
             self.conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_start_request"

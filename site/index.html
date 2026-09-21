@@ -826,6 +826,7 @@
    <button class="btn" id="shelf_sale_btn" type="button">💰 Продажи за день</button>
    <button class="btn" id="shelf_produce_btn" type="button">+ Приход</button>
    <button class="btn" id="shelf_transfer_btn" type="button">📦 Со склада</button>
+   <button class="btn" id="shelf_group_add" type="button" title="Несколько позиций — один средний ценник">▦ Группа</button>
    <button class="btn primary" id="shelf_add" type="button">+ Позиция</button>
   </div>
  </div>
@@ -842,6 +843,13 @@
   <label class="check"><span class="switch"><input type="checkbox" id="shelf_filter_linked"><i></i></span>Только с кодом 1С</label>
  </div>
  <div class="kpi-grid" id="shelf_kpis"></div>
+ <div class="card" id="shelf_groups_widget" style="margin-top:16px">
+  <div class="card-head">
+   <div><h2>Группы витрины</h2><p>Один средний ценник на несколько товаров — меньше бумаги на полке</p></div>
+   <button class="btn sm" id="shelf_group_add2" type="button">+ Группа</button>
+  </div>
+  <div id="shelf_groups_list"></div>
+ </div>
  <div class="card" id="shelf_cash_widget" style="margin-top:16px">
   <div class="card-head">
    <div><h2>Касса магазина</h2><p>Деньги от стеллажа лежат физически в кассе — заберите и запишите выемку</p></div>
@@ -5345,6 +5353,31 @@
  </div>
  <div class="modal-foot"><button class="btn" type="button" data-close="shelf_sale_modal">Отмена</button>
   <button class="btn primary" type="button" id="shelf_sale_save">Записать продажи</button></div>
+</dialog>
+
+<dialog id="shelf_group_modal" class="modal wide">
+ <div class="modal-head"><div><h3 id="shelf_group_title">Группа витрины</h3><p>Несколько позиций — один средний ценник; касса по-прежнему выбирает товар с фото</p></div>
+  <button class="icon-btn" type="button" data-close="shelf_group_modal">✕</button></div>
+ <div class="modal-body">
+  <input type="hidden" id="sgf_id">
+  <label>Название группы<input id="sgf_name" maxlength="200" placeholder="Например: Крючки и петли"></label>
+  <div class="notice" id="sgf_status" style="margin-top:10px" hidden><span>ℹ</span><span id="sgf_status_text"></span></div>
+  <div style="margin-top:12px"><b>Состав</b> <small class="muted">минимум 2 позиции; позиция — только в одной группе</small></div>
+  <div id="sgf_members" style="margin-top:8px;max-height:280px;overflow:auto"></div>
+  <div id="sgf_preview" style="margin-top:12px" hidden>
+   <b>Выравнивание по медиане</b>
+   <div id="sgf_preview_rows" style="margin-top:6px"></div>
+  </div>
+ </div>
+ <div class="modal-foot">
+  <button class="btn danger" type="button" id="sgf_delete" hidden>Расформировать</button>
+  <span class="spacer"></span>
+  <button class="btn" type="button" data-close="shelf_group_modal">Отмена</button>
+  <button class="btn" type="button" id="sgf_align_preview" hidden>Превью цен</button>
+  <button class="btn" type="button" id="sgf_align" hidden>Выровнять по медиане</button>
+  <a class="btn" id="sgf_print" href="/price-tags.html" target="_blank" rel="noopener" hidden>▦ Печать</a>
+  <button class="btn primary" type="button" id="sgf_save">Сохранить</button>
+ </div>
 </dialog>
 
 <dialog id="shelf_inventory_modal" class="modal">

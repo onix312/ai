@@ -173,7 +173,12 @@ class ShelfPriceTagFrontendTests(unittest.TestCase):
         self.assertIn('width:67mm; height:32mm', page)
         self.assertIn('width:67mm; height:57mm', page)
         self.assertIn('PER_PAGE = {standard:27,promo:15}', page)
-        self.assertIn("items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));", page)
+        # 18.12.1: ответ /api/labels разделился на позицию и средний ценник группы;
+        # члены групп в списке ценников прячутся за showGroupMembers.
+        self.assertIn("const shelfItems = (data.shelf || []).map((item) => ({", page)
+        self.assertIn("is_group: false,", page)
+        self.assertIn("const groupItems = (data.shelf_groups || []).map((item) => ({", page)
+        self.assertIn("let showGroupMembers = false;", page)
         self.assertIn("TAG_VARIANTS = ['clean','accent','sale','mono','photo']", page)
         self.assertIn('data-tag-preset="photo"', page)
         self.assertIn('id="selectNeeds"', page)

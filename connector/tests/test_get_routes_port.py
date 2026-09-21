@@ -18,7 +18,8 @@ API_SOURCE = (ROOT / "connector" / "printflow" / "api.py").read_text(encoding="u
 
 # Сколько маршрутов перенесено. Число фиксируется намеренно: следующая порция
 # должна изменить его явно, а не «само получилось».
-PORTED_COUNT = 159
+# 18.12.1: +2 за группы витрины (GET /api/shelf/groups, GET /api/shelf/group).
+PORTED_COUNT = 161
 
 
 def ported_routes() -> list[dict]:
@@ -90,8 +91,9 @@ class DispatcherShrinksTests(unittest.TestCase):
             if re.search(r"if path (==|in )", line):
                 count += len(re.findall(r'"(/api/[^"]+)"', line))
         # 18.4: +1 за очередь хотелок GET /api/wish/queue; 18.8: +1 за
-        # POST /api/watch/ensure (создание папки Watch Folder, в справке 246).
-        self.assertLessEqual(count, 246,
+        # POST /api/watch/ensure (создание папки Watch Folder, в справке 246);
+        # 18.12.1: +4 за группы витрины (save/delete/align/preview, в справке 250).
+        self.assertLessEqual(count, 250,
                              "if-цепочек в api.py больше, чем записано в справке")
 
 
