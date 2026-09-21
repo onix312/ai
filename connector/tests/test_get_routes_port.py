@@ -29,8 +29,14 @@ def ported_routes() -> list[dict]:
 
 def get_dispatcher_region() -> str:
     """Тело `Api.get()` — до `Api.post()`, где пути повторяются законно."""
-    start = API_SOURCE.index("    def get(self, path: str, query: dict)")
-    end = API_SOURCE.index("    def post(self, path: str, body: dict")
+    m = re.search(r"    def get\(self, path: str, query: dict", API_SOURCE)
+    if not m:
+        raise ValueError("не найден def get")
+    start = m.start()
+    m2 = re.search(r"    def post\(self, path: str, body: dict", API_SOURCE)
+    if not m2:
+        raise ValueError("не найден def post")
+    end = m2.start()
     return API_SOURCE[start:end]
 
 

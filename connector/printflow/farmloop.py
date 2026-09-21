@@ -136,39 +136,192 @@ def build_template_from_blocks(
     custom_gcode: str = "",
 ) -> str:
     """Собрать проверенный G-code шаблон FarmLoop из параметров конструктора."""
-    lines = [
-        BEGIN,
-        "; FarmLoop Stage 1: автоматическое охлаждение и безопасный сброс детали P1S",
-        "; 1. Охлаждение стола",
-        "M140 S0",
-        "M104 S0",
+    # legacy wrapper -> timeline builder
+    blocks = [
+        {"type": "cool", "bed": 0, "nozzle": 0},
+        {"type": "fan", "on": bool(fan_assist), "p": 2, "speed": 255},
+        {"type": "cool", "bed_wait": int(cooldown_temp or 35)},
+        {"type": "fan", "on": False, "p": 2},
+        {"type": "park", "z_lift": float(z_lift)},
+        {"type": "push", "x": 128, "y_start": 10, "y_end": float(pusher_y), "speed": int(pusher_speed)},
+        {"type": "park", "home_xy": True},
     ]
-    if fan_assist:
-        lines.append("M106 P2 S255")
-    temp = max(20, min(100, int(cooldown_temp or 35)))
-    lines.append(f"M190 R{temp}")
-    if fan_assist:
-        lines.append("M106 P2 S0")
-    lines.extend([
-        "; 2. Отвод сопла",
-        "G91",
-        f"G1 Z{float(z_lift):.1f} F1200",
-        "G90",
-        "; 3. Проход толкателя",
-        "G1 X128 Y10 F3000",
-        f"G1 Y{float(pusher_y):.1f} F{int(pusher_speed)}",
-        "G1 Y10 F3000",
-        "; 4. Парковка",
-        "G28 X Y",
-    ])
     if custom_gcode and custom_gcode.strip():
-        lines.append("; 5. Дополнения")
-        for line in custom_gcode.strip().splitlines():
-            line_str = line.strip()
-            if line_str and not line_str.startswith("; PRINTFLOW FARMLOOP"):
-                lines.append(line_str)
+        blocks.append({"type": "custom", "gcode": custom_gcode})
+    return build_from_timeline(blocks)["gcode"]
+
+
+# 18.12.1+: full timeline constructor
+TIMELINE_TYPES = {"cool", "fan", "park", "push", "dwell", "custom"}
+
+def build_from_timeline(blocks: list[dict]) -> dict:
+    """Собрать G-code из timeline блоков: Cool/Fan/Park/Push/Dwell/Custom.
+
+    Возвращает {gcode, preview_path, warnings, blocks_count}.
+    """
+    if not isinstance(blocks, list) or not blocks:
+        raise FarmLoopError("Timeline пуст")
+    if len(blocks) > 50:
+        raise FarmLoopError("Слишком много блоков (max 50)")
+    lines = [BEGIN, "; FarmLoop timeline constructor"]
+    preview_path: list[dict] = []
+    cur_x, cur_y, cur_z = 128.0, 10.0, 15.0
+    warnings: list[str] = []
+
+    def clamp(v, lo, hi):
+        try:
+            return max(lo, min(hi, float(v)))
+        except Exception:
+            return lo
+
+    for idx, b in enumerate(blocks):
+        if not isinstance(b, dict):
+            raise FarmLoopError(f"Блок {idx} не объект")
+        t = str(b.get("type") or "").lower()
+        if t not in TIMELINE_TYPES:
+            raise FarmLoopError(f"Блок {idx}: неизвестный тип {t}")
+        if t == "cool":
+            bed = b.get("bed")
+            nozzle = b.get("nozzle")
+            bed_wait = b.get("bed_wait")
+            if bed is not None:
+                lines.append(f"M140 S{int(clamp(bed,0,120))}")
+            if nozzle is not None:
+                lines.append(f"M104 S{int(clamp(nozzle,0,300))}")
+            if bed_wait is not None:
+                bw = int(clamp(bed_wait,20,100))
+                lines.append(f"M190 R{bw} ; wait bed {bw}C")
+        elif t == "fan":
+            p = int(b.get("p", 2))
+            on = bool(b.get("on", True))
+            speed = int(clamp(b.get("speed", 255), 0, 255))
+            if on:
+                lines.append(f"M106 P{p} S{speed} ; fan on")
+            else:
+                lines.append(f"M106 P{p} S0 ; fan off")
+        elif t == "park":
+            x = b.get("x")
+            y = b.get("y")
+            z_lift = b.get("z_lift")
+            home_xy = bool(b.get("home_xy"))
+            if z_lift is not None:
+                zl = clamp(z_lift, 0, 50)
+                lines.append("G91")
+                lines.append(f"G1 Z{zl:.1f} F1200 ; lift")
+                lines.append("G90")
+                cur_z += zl
+            if home_xy:
+                lines.append("G28 X Y ; home xy")
+                cur_x, cur_y = 128.0, 10.0
+            else:
+                if x is not None or y is not None:
+                    nx = clamp(x, 0, 256) if x is not None else cur_x
+                    ny = clamp(y, 0, 256) if y is not None else cur_y
+                    lines.append(f"G1 X{nx:.1f} Y{ny:.1f} F3000 ; park")
+                    preview_path.append({"x": cur_x, "y": cur_y, "x2": nx, "y2": ny, "type": "move"})
+                    cur_x, cur_y = nx, ny
+        elif t == "push":
+            x = clamp(b.get("x", cur_x), 0, 256)
+            y_start = clamp(b.get("y_start", 10), 0, 256)
+            y_end = clamp(b.get("y_end", 245), 0, 256)
+            speed = int(clamp(b.get("speed", 2400), 300, 10000))
+            repeat = max(1, min(5, int(b.get("repeat", 1) or 1)))
+            # move to start
+            lines.append(f"G1 X{x:.1f} Y{y_start:.1f} F3000 ; push start")
+            preview_path.append({"x": cur_x, "y": cur_y, "x2": x, "y2": y_start, "type": "move"})
+            cur_x, cur_y = x, y_start
+            for _ in range(repeat):
+                lines.append(f"G1 Y{y_end:.1f} F{speed} ; push forward")
+                preview_path.append({"x": cur_x, "y": cur_y, "x2": x, "y2": y_end, "type": "push"})
+                cur_x, cur_y = x, y_end
+                lines.append(f"G1 Y{y_start:.1f} F3000 ; push back")
+                preview_path.append({"x": cur_x, "y": cur_y, "x2": x, "y2": y_start, "type": "return"})
+                cur_x, cur_y = x, y_start
+            # force feedback hint
+            if repeat > 1:
+                warnings.append(f"push repeat {repeat} — проверь нагрузку на толкатель")
+        elif t == "dwell":
+            ms = int(clamp(b.get("ms", b.get("seconds", 2) * 1000 if b.get("seconds") else 1000), 100, 30000))
+            lines.append(f"G4 P{ms} ; dwell {ms}ms")
+        elif t == "custom":
+            g = str(b.get("gcode") or "").strip()
+            if not g:
+                continue
+            # safety: forbid dangerous
+            upper = g.upper()
+            if "M112" in upper or "M999" in upper:
+                raise FarmLoopError(f"Блок {idx}: запрещённая команда M112/M999")
+            # check each line
+            for line in g.splitlines():
+                ls = line.strip()
+                if not ls:
+                    continue
+                if ls.startswith("; PRINTFLOW FARMLOOP"):
+                    continue
+                # validate no out-of-bounds moves
+                import re
+                mx = re.search(r"X(-?\d+(?:\.\d+)?)", ls.upper())
+                my = re.search(r"Y(-?\d+(?:\.\d+)?)", ls.upper())
+                if mx:
+                    try:
+                        xv = float(mx.group(1))
+                        if xv < -10 or xv > 266:
+                            warnings.append(f"custom X {xv} вне стола")
+                    except Exception:
+                        pass
+                if my:
+                    try:
+                        yv = float(my.group(1))
+                        if yv < -10 or yv > 266:
+                            warnings.append(f"custom Y {yv} вне стола")
+                    except Exception:
+                        pass
+                lines.append(ls)
     lines.append(END)
-    return "\n".join(lines) + "\n"
+    gcode = "\n".join(lines) + "\n"
+    # dry-run validation
+    val = dry_run_validate(gcode)
+    warnings.extend(val.get("warnings", []))
+    if not val.get("ok"):
+        raise FarmLoopError("; ".join(val.get("errors", ["validation failed"])))
+    return {"gcode": gcode, "preview_path": preview_path, "warnings": warnings,
+            "blocks_count": len(blocks), "ok": True}
+
+
+def dry_run_validate(gcode: str) -> dict:
+    """Dry-run валидация G-code: границы, опасные команды."""
+    errors = []
+    warnings = []
+    try:
+        lines = gcode.splitlines()
+        for i, line in enumerate(lines, 1):
+            up = line.strip().upper()
+            if not up or up.startswith(";"):
+                continue
+            # опасные
+            if up.startswith("M112") or "M997" in up or "M999" in up:
+                errors.append(f"строка {i}: запрещённая команда {up[:10]}")
+            # температура
+            import re
+            m = re.search(r"M10[49]\s+S(\d+)", up)
+            if m:
+                try:
+                    t = int(m.group(1))
+                    if t > 300:
+                        errors.append(f"строка {i}: температура сопла {t} >300")
+                except Exception:
+                    pass
+            m = re.search(r"M14[09]\s+S(\d+)", up)
+            if m:
+                try:
+                    t = int(m.group(1))
+                    if t > 120:
+                        warnings.append(f"строка {i}: температура стола {t} высокая")
+                except Exception:
+                    pass
+        return {"ok": len(errors) == 0, "errors": errors, "warnings": warnings}
+    except Exception as exc:
+        return {"ok": False, "errors": [str(exc)], "warnings": warnings}
 
 
 DEFAULT_STAGE1_TEMPLATE = build_template_from_blocks()
