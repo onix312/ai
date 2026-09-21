@@ -284,6 +284,7 @@ class Api:
                     "remaining_grams": s.get("remaining_grams"),
                     "ams_slot": s.get("ams_slot"),
                 })
+        shelf_groups = []
         if kind in ("", "all", "shelf"):
             from .barcode import svg as barcode_svg
             for item in self.shelf.items():
@@ -312,9 +313,40 @@ class Api:
                     "tag_color": item.get("tag_color") or "#4f46e5",
                     "tag_old_price": item.get("tag_old_price") or 0,
                     "photo": bool(item.get("photo")),
+                    # Член группы витрины: штучный ценник по умолчанию не
+                    # печатаем — на полке висит средний ценник группы.
+                    "group_id": item.get("group_id") or "",
+                    "group_name": item.get("group_name") or "",
+                })
+            # Средние ценники: только группы ready (цены сведены).
+            for group in self.shelf.groups():
+                if not group.get("printable"):
+                    continue
+                shelf_groups.append({
+                    "id": group["id"],
+                    "kind": "group",
+                    "name": group.get("name") or "",
+                    "price": group.get("price") or group.get("median") or 0,
+                    "qty": sum(num(m.get("qty")) for m in (group.get("members") or [])),
+                    "member_count": group.get("member_count") or 0,
+                    "tag_template": "promo",
+                    "tag_variant": "clean",
+                    "tag_color": "#4f46e5",
+                    "tag_badge": "",
+                    "tag_note": f"{group.get('member_count') or 0} позиций на полке",
+                    "tag_old_price": 0,
+                    "sku": "",
+                    "barcode": "",
+                    "barcode_svg": "",
+                    "material": "",
+                    "grams": 0,
+                    "note": "",
+                    "photo": False,
+                    "url": "",
+                    "is_group": True,
                 })
         return {"base": base["base"], "reachable": base["reachable"], "source": base["source"],
-                "spools": spools, "shelf": shelf,
+                "spools": spools, "shelf": shelf, "shelf_groups": shelf_groups,
                 "one_c": {"linked": sum(1 for item in shelf if item.get("barcode")),
                            "total": len(shelf)}}
 
@@ -2060,6 +2092,23 @@ class Api:
             # Отменить выемку (ошиблись суммой) — деньги возвращаются в остаток.
             self.shelf.delete_collection(body.get("id", ""))
             return 200, {"ok": True}
+        # --- группы витрины (средний ценник)
+        if path == "/api/shelf/group/save":
+            group = self.shelf.save_group(body)
+            self.catalog_changed("shelf_group_save")
+            return 200, {"ok": True, "group": group}
+        if path == "/api/shelf/group/delete":
+            self.shelf.delete_group(body.get("id", "") or body.get("group_id", ""))
+            self.catalog_changed("shelf_group_delete")
+            return 200, {"ok": True}
+        if path == "/api/shelf/group/align/preview":
+            return 200, self.shelf.align_group_preview(
+                body.get("id", "") or body.get("group_id", ""))
+        if path == "/api/shelf/group/align":
+            result = self.shelf.align_group(
+                body.get("id", "") or body.get("group_id", ""))
+            self.catalog_changed("shelf_group_align")
+            return 200, result
 
         # --- брак, фото заказа, шаблоны, AMS-профили, отложенные команды
         # ------------------------------------------------ учёт 3.0: номенклатура

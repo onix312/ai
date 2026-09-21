@@ -351,7 +351,12 @@ dialog::backdrop { background:rgba(16,24,40,.52); backdrop-filter:blur(3px); }
         <button class="mini" type="button" id="selectNone">Снять все</button>
         <button class="mini" type="button" id="selectLinked">Только с кодом 1С</button>
         <button class="mini" type="button" id="selectNeeds">Нужны на полку</button>
+        <button class="mini" type="button" id="selectGroups">Группы ready</button>
+        <button class="mini" type="button" id="selectMembers" title="Показать штучные ценники членов групп">Члены групп</button>
       </div>
+      <label class="check" style="display:flex;gap:8px;align-items:center;margin:6px 0 4px;font-size:12px">
+        <input type="checkbox" id="showGroupMembers"> Показывать члены групп (штучные)
+      </label>
       <div class="item-list" id="itemBox">
         <div class="list-empty"><span class="spinner"></span> Загружаем товары из PrintFlow…</div>
       </div>
@@ -564,6 +569,8 @@ let apiInfo = { base: '', reachable: true, source: '' };
 let loadState = 'loading';
 let renderTimer = 0;
 let fatalShown = false;
+// Члены групп витрины по умолчанию скрыты: на полке висит средний ценник.
+let showGroupMembers = false;
 
 /* ============================== настройки ==============================
    Единственный источник правды о полях: каждое поле знает свой элемент,
@@ -674,6 +681,9 @@ function normalizeVariant(value) {
   return TAG_VARIANTS.includes(variant) ? variant : 'clean';
 }
 function typeOf(item, opts) {
+  // Средний ценник группы в v1 — всегда промостенд 67 × 57: на мелком
+  // 67 × 32 шапка ряда не читается, и формат у группы не переопределяется.
+  if (item.is_group || item.kind === 'group') return 'promo';
   return opts.template === 'card' ? normalizeType(item.tag_template) : normalizeType(opts.template);
 }
 function variantOf(item, type, opts) {
@@ -704,34 +714,41 @@ function todayRu() {
   return two(now.getDate()) + '.' + two(now.getMonth() + 1) + '.' + now.getFullYear();
 }
 function tagHtml(item, type, opts) {
-  const variant = variantOf(item, type, opts);
+  const isGroup = Boolean(item.is_group || item.kind === 'group');
+  const variant = isGroup ? 'accent' : variantOf(item, type, opts);
   const color = variant === 'mono' ? '#172033' : colorOf(item, opts);
-  const badge = opts.badge || item.tag_badge || '';
+  const badge = opts.badge || item.tag_badge || (isGroup ? 'Группа' : '');
   const note = item.tag_note || item.note || '';
   /* Дата ценника (17.0.16): «цена действительна на…». Витрина живёт неделями,
      а пересчёт цен идёт из панели — без даты невозможно понять, свежая ли
      бумага на полке. Печатаем датой печати, а не «сегодня» в момент чтения. */
-  const meta = [item.material || '',
+  const meta = [
+    isGroup && item.member_count ? (item.member_count + ' поз. на полке') : '',
+    item.material || '',
     item.grams ? Math.round(item.grams) + ' г' : '',
-    opts.showStock ? (item.qty + ' шт в наличии') : '',
+    opts.showStock && !isGroup ? (item.qty + ' шт в наличии') : '',
     opts.showDate ? 'ценник от ' + todayRu() : ''].filter(Boolean).join(' · ');
   const logo = opts.showLogo
     ? `<span class="tag-brand"><img src="/assets/brand/nozza-mark-1.svg" alt=""><span>${esc(opts.brandName || 'NOZZA')}</span></span>`
     : '<span></span>';
   // API стеллажа не дублирует цифры рядом с кодом: артикул уже рядом, а
   // всю физическую высоту на 67 × 32 мм отдают полоскам сканера.
-  const barcode = opts.showBarcode
+  // Средний ценник группы — без штрихкода: касса идёт поиском + фото.
+  const barcode = (!isGroup && opts.showBarcode)
     ? (item.barcode_svg
       ? `<div class="barcode">${item.barcode_svg.replace(/<svg\b/, '<svg preserveAspectRatio="none"')}</div>`
       : '<div class="barcode"><span class="barcode-missing">нет кода 1С</span></div>')
     : '';
-  const sku = opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
+  const sku = !isGroup && opts.showSku && item.sku ? `<div class="sku">арт. ${esc(item.sku)}</div>` : '';
   const currentPrice = Number(item.price) || 0;
   const oldPrice = Number(item.tag_old_price) || 0;
-  const oldPriceHtml = oldPrice > currentPrice && currentPrice > 0 ? `<span class="old-price">было ${esc(money(oldPrice))}</span>` : '';
+  const oldPriceHtml = !isGroup && oldPrice > currentPrice && currentPrice > 0 ? `<span class="old-price">было ${esc(money(oldPrice))}</span>` : '';
   const lead = opts.priceLead ? `<span class="price-lead">${esc(opts.priceLead)}</span>` : '';
   const priceNoteHtml = opts.priceNote ? `<span class="price-note">${esc(opts.priceNote)}</span>` : '';
   const footer = opts.footer && type === 'promo' ? `<div class="footer-line">${esc(opts.footer)}</div>` : '';
+  // Группа: QR/фото штуки не печатаем — это шапка ряда, не карточка SKU.
+  const qr = isGroup ? '' : qrSvg(item, opts);
+  const photo = isGroup ? '' : promoPhoto(item, type, variant);
   return `<article class="price-tag ${type} variant-${variant} font-${esc(opts.fontFamily)} border-${esc(opts.borderMode)}" style="--tag-color:${esc(color)};--font-scale:${opts.fontScale / 100}">
     <div class="tag-top">${logo}${badge ? `<span class="badge">${esc(badge)}</span>` : ''}</div>
     <div class="tag-body"><div class="tag-main">
@@ -740,8 +757,8 @@ function tagHtml(item, type, opts) {
       <div class="price-line">${lead}<div class="tag-price">${esc(priceDigits(item.price))} <span>₽</span></div></div>
       ${(oldPriceHtml || priceNoteHtml) ? `<div class="price-subrow">${oldPriceHtml}${priceNoteHtml}</div>` : ''}
       ${meta ? `<div class="tag-meta">${esc(meta)}</div>` : ''}
-    </div>${qrSvg(item, opts)}</div>
-    ${promoPhoto(item, type, variant)}
+    </div>${qr}</div>
+    ${photo}
     ${(barcode || sku) ? `<div class="tag-bottom">${barcode}${sku}</div>` : ''}
     ${footer}
   </article>`;
@@ -768,16 +785,31 @@ function updateChrome(opts) {
   }
 }
 
+function listableItems() {
+  // Члены групп скрыты, пока не включили «Показывать члены групп».
+  // Сами группы (is_group) всегда в списке, если printable пришло с API.
+  return items.filter((item) => {
+    if (item.is_group || item.kind === 'group') return true;
+    if (item.group_id && !showGroupMembers) return false;
+    return true;
+  });
+}
 function renderList() {
   const query = String($('search').value || '').trim().toLocaleLowerCase('ru');
-  const visible = items.filter((item) =>
-    !query || [item.name, item.sku, item.barcode].join(' ').toLocaleLowerCase('ru').includes(query));
+  const visible = listableItems().filter((item) =>
+    !query || [item.name, item.sku, item.barcode, item.group_name].join(' ').toLocaleLowerCase('ru').includes(query));
   $('itemBox').innerHTML = visible.map((item) => {
-    const type = normalizeType(item.tag_template);
+    const isGroup = Boolean(item.is_group || item.kind === 'group');
+    const type = isGroup ? 'promo' : normalizeType(item.tag_template);
+    const sub = isGroup
+      ? `группа · ${item.member_count || 0} поз. · ${TYPE_NAMES.promo}`
+      : `${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'}`
+        + ` · ${TYPE_NAMES[type] || TYPE_NAMES.standard}`
+        + (item.group_name ? ` · в группе «${esc(item.group_name)}»` : '');
     return `<label class="item-row">
       <input type="checkbox" data-id="${esc(item.id)}" ${selected.has(item.id) ? 'checked' : ''}>
-      <span class="item-text"><b>${esc(item.name || 'Без названия')}</b><small>${item.barcode ? `1С · ${esc(item.barcode)}` : 'штрихкод 1С не задан'} · ${TYPE_NAMES[type] || TYPE_NAMES.standard}</small></span>
-      <i class="link-dot ${item.barcode ? 'ok' : ''}" title="${item.barcode ? 'Связан с 1С' : 'Нет кода 1С'}"></i>
+      <span class="item-text"><b>${isGroup ? '▦ ' : ''}${esc(item.name || 'Без названия')}</b><small>${sub}</small></span>
+      <i class="link-dot ${isGroup || item.barcode ? 'ok' : ''}" title="${isGroup ? 'Средний ценник группы' : (item.barcode ? 'Связан с 1С' : 'Нет кода 1С')}"></i>
     </label>`;
   }).join('') || '<div class="list-empty">Ничего не найдено</div>';
   $('itemCount').textContent = `${visible.length} из ${items.length}`;
@@ -842,7 +874,7 @@ function queueRender() {
   renderTimer = setTimeout(safeRender, 40);
 }
 function setSelection(predicate) {
-  selected = new Set(items.filter(predicate).map((item) => item.id));
+  selected = new Set(listableItems().filter(predicate).map((item) => item.id));
   renderList();
   queueRender();
 }
@@ -906,11 +938,34 @@ async function loadData() {
     catch (err) { throw new Error('Панель вернула пустой или повреждённый ответ'); }
     if (!response.ok) throw new Error((data && data.error) || `Ошибка сервера (код ${response.status})`);
     apiInfo = data || {};
-    items = (data.shelf || []).map((item) => ({...item, id: String(item.id)}));
-    // Глубокая ссылка ?item=… — из карточки стеллажа «печать ценника».
-    const requested = new URLSearchParams(location.search).get('item');
-    selected = (requested && items.some((item) => item.id === requested))
-      ? new Set([requested]) : new Set(items.map((item) => item.id));
+    const shelfItems = (data.shelf || []).map((item) => ({
+      ...item, id: String(item.id), is_group: false,
+    }));
+    // Средние ценники групп ready — отдельный список, id не пересекается с shf_*.
+    const groupItems = (data.shelf_groups || []).map((item) => ({
+      ...item,
+      id: String(item.id),
+      is_group: true,
+      kind: 'group',
+      tag_template: 'promo',
+    }));
+    items = groupItems.concat(shelfItems);
+    // Глубокая ссылка ?item=… / ?group=… — из карточки стеллажа.
+    const params = new URLSearchParams(location.search);
+    const requestedItem = params.get('item');
+    const requestedGroup = params.get('group');
+    if (requestedGroup && items.some((item) => item.id === requestedGroup && item.is_group)) {
+      selected = new Set([requestedGroup]);
+    } else if (requestedItem && items.some((item) => item.id === requestedItem)) {
+      // Запросили штучный: если он в группе — всё равно показываем (явный выбор).
+      showGroupMembers = true;
+      const showEl = $('showGroupMembers');
+      if (showEl) showEl.checked = true;
+      selected = new Set([requestedItem]);
+    } else {
+      // По умолчанию: все listable (группы + позиции вне групп).
+      selected = new Set(listableItems().map((item) => item.id));
+    }
     const oneC = apiInfo.one_c || {};
     const linked = Number(oneC.linked) || 0;
     const total = oneC.total != null ? Number(oneC.total) : items.length;
@@ -986,9 +1041,32 @@ function bindEvents() {
   $('btnRefresh').addEventListener('click', loadData);
   $('selectAll').addEventListener('click', () => setSelection(() => true));
   $('selectNone').addEventListener('click', () => setSelection(() => false));
-  $('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode)));
+  $('selectLinked').addEventListener('click', () => setSelection((item) => Boolean(item.barcode) && !item.is_group));
   $('selectNeeds').addEventListener('click', () => setSelection((item) =>
-    Boolean(item.low) || item.status === 'empty' || item.status === 'dead' || Number(item.plan_qty) > 0));
+    !item.is_group && (Boolean(item.low) || item.status === 'empty' || item.status === 'dead' || Number(item.plan_qty) > 0)));
+  if ($('selectGroups')) {
+    $('selectGroups').addEventListener('click', () => setSelection((item) => Boolean(item.is_group)));
+  }
+  if ($('selectMembers')) {
+    $('selectMembers').addEventListener('click', () => {
+      showGroupMembers = true;
+      const showEl = $('showGroupMembers');
+      if (showEl) showEl.checked = true;
+      setSelection((item) => Boolean(item.group_id) && !item.is_group);
+    });
+  }
+  if ($('showGroupMembers')) {
+    $('showGroupMembers').addEventListener('change', (event) => {
+      showGroupMembers = Boolean(event.target.checked);
+      // Скрытые id снимаем с выбора, чтобы не печатать «невидимое».
+      if (!showGroupMembers) {
+        const allowed = new Set(listableItems().map((item) => item.id));
+        selected = new Set([...selected].filter((id) => allowed.has(id)));
+      }
+      renderList();
+      queueRender();
+    });
+  }
   $('templates').addEventListener('change', queueRender);
   $('variants').addEventListener('change', queueRender);
   // Текстовые поля, ползунок и цвет перерисовываются на лету; остальное —

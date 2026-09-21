@@ -55,6 +55,30 @@ LEGACY_TAG_VARIANT_ALIASES = {"classic": "clean", "minimal": "mono"}
 DEFAULT_TAG_COLOR = "#4f46e5"
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+# Статусы группы витрины (средний ценник).
+# incomplete — меньше 2 позиций или меньше 2 ненулевых цен;
+# needs_align — ненулевые цены разъехались, печать закрыта;
+# ready — ≥2 с price>0 и все ненулевые цены равны → можно печатать средний ценник.
+GROUP_STATUS_INCOMPLETE = "incomplete"
+GROUP_STATUS_NEEDS_ALIGN = "needs_align"
+GROUP_STATUS_READY = "ready"
+
+
+def group_median(prices: list[float] | tuple[float, ...]) -> float:
+    """Медиана ненулевых цен группы, округление до рубля.
+
+    Чётное N: среднее двух центральных. Нулевые и отрицательные в расчёт
+    не входят — «ещё не оценили» не должно двигать витрину.
+    """
+    vals = sorted(round(num(p), 2) for p in prices if num(p) > 0)
+    if not vals:
+        return 0.0
+    n = len(vals)
+    mid = n // 2
+    if n % 2:
+        return float(round(vals[mid]))
+    return float(round((vals[mid - 1] + vals[mid]) / 2.0))
+
 
 def normalize_tag_template(value: Any, fallback: str = DEFAULT_TAG_TEMPLATE) -> str:
     """Return a current physical tag format, accepting records from older builds.
@@ -86,12 +110,27 @@ class Shelf:
         self.acc = Accounting(db)
 
     # ------------------------------------------------------------ позиции
+    def _group_membership_map(self) -> dict[str, dict]:
+        """item_id → {group_id, group_name} для активных групп витрины."""
+        rows = self.db.query(
+            "SELECT m.item_id, g.id group_id, g.name group_name"
+            " FROM shelf_group_members m"
+            " JOIN shelf_groups g ON g.id=m.group_id AND g.active=1")
+        return {
+            str(r["item_id"]): {
+                "group_id": r["group_id"],
+                "group_name": r.get("group_name") or "",
+            }
+            for r in rows
+        }
+
     def items(self) -> list[dict]:
         """Позиции стеллажа с аналитикой: продажи, оборачиваемость, статус."""
         rows = self.db.query("SELECT * FROM shelf_items WHERE active=1 ORDER BY name")
         since7 = (datetime.now() - timedelta(days=SALE_DAYS)).isoformat()
         since30 = (datetime.now() - timedelta(days=30)).isoformat()
         since_dead = (datetime.now() - timedelta(days=DEAD_DAYS)).isoformat()
+        membership = self._group_membership_map()
         out = []
         for raw_row in rows:
             row = self._with_cashier_data(raw_row)
@@ -113,6 +152,7 @@ class Shelf:
             plan = 0
             if rate and qty < rate * PLAN_DAYS:
                 plan = max(1, int(rate * PLAN_DAYS - qty + 0.999))
+            mem = membership.get(str(row["id"])) or {}
             out.append({
                 **row,
                 "qty": round(qty, 1),
@@ -127,6 +167,8 @@ class Shelf:
                 "low": low,
                 "status": status,
                 "plan_qty": plan,
+                "group_id": mem.get("group_id") or "",
+                "group_name": mem.get("group_name") or "",
             })
         return out
 
@@ -1256,6 +1298,234 @@ class Shelf:
             return {"ok": True, "item": self.item(item["id"]),
                     "move": moved.get("move"), "qty": moved.get("qty"),
                     "cost": moved.get("cost")}
+
+    # ------------------------------------------------------ группы витрины
+    def _group_member_rows(self, group_id: str) -> list[dict]:
+        """Активные позиции-члены группы с ценой и именем (порядок состава)."""
+        return self.db.query(
+            "SELECT i.id, i.name, i.price, i.qty, i.active, i.tag_old_price,"
+            " i.barcode, i.sku, m.position"
+            " FROM shelf_group_members m"
+            " JOIN shelf_items i ON i.id=m.item_id"
+            " WHERE m.group_id=? AND i.active=1"
+            " ORDER BY m.position, i.name", (group_id,))
+
+    def _enrich_group(self, row: dict) -> dict:
+        """Статус, медиана, состав и флаг печати для карточки группы."""
+        group_id = str(row.get("id") or "")
+        members = self._group_member_rows(group_id)
+        prices = [num(m.get("price")) for m in members]
+        priced = [p for p in prices if p > 0]
+        median = group_median(priced)
+        member_count = len(members)
+        priced_count = len(priced)
+        if member_count < 2 or priced_count < 2:
+            status = GROUP_STATUS_INCOMPLETE
+            printable = False
+        elif all(abs(p - priced[0]) < 0.005 for p in priced):
+            status = GROUP_STATUS_READY
+            printable = True
+            # На среднем ценнике — фактическая общая цена (все ненулевые равны).
+            median = float(round(priced[0]))
+        else:
+            status = GROUP_STATUS_NEEDS_ALIGN
+            printable = False
+        preview = []
+        for m in members:
+            old = round(num(m.get("price")), 2)
+            # Выравнивание трогает только ненулевые (план в.17).
+            new = median if old > 0 else old
+            preview.append({
+                "id": m["id"],
+                "name": m.get("name") or "",
+                "price": old,
+                "qty": round(num(m.get("qty")), 1),
+                "new_price": new,
+                "changed": old > 0 and abs(old - new) >= 0.005,
+                "barcode": m.get("barcode") or "",
+                "sku": m.get("sku") or "",
+            })
+        return {
+            "id": group_id,
+            "name": row.get("name") or "",
+            "active": int(row.get("active") or 0),
+            "created_at": row.get("created_at") or "",
+            "updated_at": row.get("updated_at") or "",
+            "members": preview,
+            "member_count": member_count,
+            "priced_count": priced_count,
+            "median": median,
+            "status": status,
+            "printable": printable,
+            # v1: средний ценник всегда promo 67×57.
+            "tag_template": "promo",
+            "price": median if printable else 0.0,
+        }
+
+    def groups(self) -> list[dict]:
+        """Активные группы витрины со статусом и медианой."""
+        rows = self.db.query(
+            "SELECT * FROM shelf_groups WHERE active=1 ORDER BY name")
+        return [self._enrich_group(r) for r in rows]
+
+    def group(self, group_id: str) -> dict | None:
+        """Одна группа витрины или None."""
+        group_id = str(group_id or "").strip()
+        if not group_id:
+            return None
+        row = self.db.one("SELECT * FROM shelf_groups WHERE id=?", (group_id,))
+        if not row or not int(row.get("active") or 0):
+            return None
+        return self._enrich_group(row)
+
+    def save_group(self, data: dict) -> dict:
+        """Создать или обновить группу витрины (имя + состав).
+
+        Правила v1: имя обязательно; при сохранении ≥2 позиций; позиция —
+        не больше чем в одной группе; цены при save не трогаем.
+        """
+        data = dict(data or {})
+        group_id = str(data.get("id") or "").strip()
+        name = str(data.get("name") or "").strip()[:200]
+        if not name:
+            raise ValueError("Укажите название группы витрины")
+        raw_members = data.get("member_ids")
+        if raw_members is None:
+            raw_members = data.get("members") or []
+        member_ids: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_members:
+            if isinstance(raw, dict):
+                item_id = str(raw.get("id") or raw.get("item_id") or "").strip()
+            else:
+                item_id = str(raw or "").strip()
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            member_ids.append(item_id)
+        if len(member_ids) < 2:
+            raise ValueError("В группе витрины должно быть минимум 2 позиции")
+
+        for item_id in member_ids:
+            item = self.db.one(
+                "SELECT id,name,active FROM shelf_items WHERE id=?", (item_id,))
+            if not item or not int(item.get("active") or 0):
+                raise ValueError(f"Позиция стеллажа не найдена: {item_id}")
+            foreign = self.db.one(
+                "SELECT g.id, g.name FROM shelf_group_members m"
+                " JOIN shelf_groups g ON g.id=m.group_id AND g.active=1"
+                " WHERE m.item_id=? AND m.group_id<>? LIMIT 1",
+                (item_id, group_id or ""))
+            if foreign:
+                raise ValueError(
+                    f"«{item.get('name') or item_id}» уже в группе "
+                    f"«{foreign.get('name') or foreign['id']}»")
+
+        new = not group_id
+        if new:
+            group_id = uid("shg")
+        else:
+            existing = self.db.one(
+                "SELECT id FROM shelf_groups WHERE id=?", (group_id,))
+            if not existing:
+                raise ValueError("Группа витрины не найдена")
+
+        now = now_iso()
+        with self.db.transaction():
+            payload = {
+                "id": group_id,
+                "name": name,
+                "active": 1,
+                "updated_at": now,
+            }
+            if new:
+                payload["created_at"] = now
+            else:
+                old = self.db.one(
+                    "SELECT created_at FROM shelf_groups WHERE id=?", (group_id,)) or {}
+                payload["created_at"] = old.get("created_at") or now
+            self.db.upsert("shelf_groups", payload)
+            self.db.execute(
+                "DELETE FROM shelf_group_members WHERE group_id=?", (group_id,))
+            for pos, item_id in enumerate(member_ids):
+                self.db.execute(
+                    "INSERT INTO shelf_group_members(group_id,item_id,position)"
+                    " VALUES(?,?,?)", (group_id, item_id, pos))
+        self.db.add_event(
+            "shelf",
+            "Группа витрины создана" if new else "Группа витрины изменена",
+            name,
+            data={"group_id": group_id, "members": member_ids})
+        return self.group(group_id) or {}
+
+    def delete_group(self, group_id: str) -> None:
+        """Расформировать группу: членство снять, цены не откатывать."""
+        group_id = str(group_id or "").strip()
+        if not group_id:
+            raise ValueError("Не указана группа")
+        row = self.db.one("SELECT * FROM shelf_groups WHERE id=?", (group_id,))
+        if not row:
+            raise ValueError("Группа витрины не найдена")
+        with self.db.transaction():
+            self.db.execute(
+                "DELETE FROM shelf_group_members WHERE group_id=?", (group_id,))
+            # Мягкое удаление: история событий сохраняет id группы.
+            self.db.execute(
+                "UPDATE shelf_groups SET active=0, updated_at=? WHERE id=?",
+                (now_iso(), group_id))
+        self.db.add_event(
+            "shelf", "Группа витрины расформирована",
+            row.get("name") or group_id,
+            data={"group_id": group_id})
+
+    def align_group_preview(self, group_id: str) -> dict:
+        """Превью выравнивания: было → станет, без записи цен."""
+        group = self.group(group_id)
+        if not group:
+            raise ValueError("Группа витрины не найдена")
+        if group["status"] == GROUP_STATUS_INCOMPLETE:
+            raise ValueError(
+                "Задайте цены минимум двум товарам и держите в группе "
+                "не меньше двух позиций")
+        changes = [m for m in group["members"] if m.get("changed")]
+        return {
+            "ok": True,
+            "group": group,
+            "median": group["median"],
+            "changes": changes,
+            "unchanged": [m for m in group["members"] if not m.get("changed")],
+        }
+
+    def align_group(self, group_id: str) -> dict:
+        """Выровнять ненулевые цены членов по медиане (явная кнопка).
+
+        tag_old_price не трогаем — это не акция, а общая цена ряда.
+        """
+        preview = self.align_group_preview(group_id)
+        group = preview["group"]
+        median = float(preview["median"])
+        if median <= 0:
+            raise ValueError("Нечего выравнивать: нет ненулевых цен")
+        changed_ids: list[str] = []
+        with self.db.transaction():
+            for member in group["members"]:
+                old = num(member.get("price"))
+                if old <= 0:
+                    continue
+                if abs(old - median) < 0.005:
+                    continue
+                self.db.execute(
+                    "UPDATE shelf_items SET price=?, updated_at=? WHERE id=?",
+                    (median, now_iso(), member["id"]))
+                changed_ids.append(member["id"])
+        self.db.add_event(
+            "shelf", "Выравнивание цен группы витрины",
+            f"{group.get('name') or ''} → {round(median)} ₽",
+            data={"group_id": group_id, "median": median,
+                  "changed_ids": changed_ids})
+        fresh = self.group(group_id) or {}
+        return {"ok": True, "group": fresh, "median": median,
+                "changed": len(changed_ids), "changed_ids": changed_ids}
 
     # ------------------------------------------------------------- QR-ценник
     def qr_link(self, item_id: str, host: str = "", public_url: str = "",
