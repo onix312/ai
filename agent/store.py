@@ -89,7 +89,10 @@ SCHEMA = (
         min_price INTEGER DEFAULT 0,
         enabled INTEGER DEFAULT 1,
         last_checked TEXT DEFAULT '',
-        last_count INTEGER DEFAULT 0)""",
+        last_count INTEGER DEFAULT 0,
+        check_interval_hours INTEGER DEFAULT 0,
+        notify_enabled INTEGER DEFAULT 0,
+        last_auto_check TEXT DEFAULT '')""",
     """CREATE TABLE IF NOT EXISTS avito_listings(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         watch_id INTEGER NOT NULL,
@@ -100,9 +103,13 @@ SCHEMA = (
         city TEXT DEFAULT '',
         snippet TEXT DEFAULT '',
         seen_at TEXT NOT NULL,
-        is_new INTEGER DEFAULT 1)""",
+        is_new INTEGER DEFAULT 1,
+        image_url TEXT DEFAULT '',
+        image_hash TEXT DEFAULT '',
+        price_int INTEGER DEFAULT 0)""",
     "CREATE INDEX IF NOT EXISTS avito_listings_watch ON avito_listings(watch_id)",
     "CREATE INDEX IF NOT EXISTS avito_listings_external ON avito_listings(external_id)",
+    "CREATE INDEX IF NOT EXISTS avito_listings_image_hash ON avito_listings(image_hash)",
     """CREATE TABLE IF NOT EXISTS tg_drafts(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         at TEXT NOT NULL,
@@ -111,6 +118,40 @@ SCHEMA = (
         text TEXT NOT NULL,
         source TEXT DEFAULT '',
         status TEXT DEFAULT 'draft')""",
+    # --- 18.16: архив переписок, шаблоны, календарь, идеи ----------------
+    """CREATE TABLE IF NOT EXISTS avito_threads(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        thread_text TEXT NOT NULL,
+        intent TEXT DEFAULT '',
+        city TEXT DEFAULT '',
+        replies_json TEXT DEFAULT '[]',
+        status TEXT DEFAULT 'new',
+        source TEXT DEFAULT 'manual')""",
+    """CREATE TABLE IF NOT EXISTS tg_templates(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        name TEXT NOT NULL,
+        tone TEXT DEFAULT '',
+        template_text TEXT NOT NULL,
+        vars_json TEXT DEFAULT '[]')""",
+    """CREATE TABLE IF NOT EXISTS tg_schedule(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        draft_id INTEGER NOT NULL,
+        planned_at TEXT NOT NULL,
+        status TEXT DEFAULT 'planned',
+        chat TEXT DEFAULT '',
+        result TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS tg_ideas(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        context TEXT DEFAULT '',
+        idea_text TEXT NOT NULL,
+        draft_id INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'new')""",
+    "CREATE INDEX IF NOT EXISTS tg_ideas_status ON tg_ideas(status)",
+    "CREATE INDEX IF NOT EXISTS tg_schedule_status ON tg_schedule(status)",
 )
 
 
@@ -140,6 +181,47 @@ class Store:
             for statement in SCHEMA:
                 self._conn.execute(statement)
             self._conn.commit()
+            # --- миграции 18.16: добавить колонки к старым таблицам -----------
+            self._migrate_1816()
+
+    def _migrate_1816(self) -> None:
+        """Добавить колонки, которых не было в 18.15 — без пересоздания таблиц."""
+        def has_column(table: str, col: str) -> bool:
+            try:
+                rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+                return any(r[1] == col for r in rows)
+            except sqlite3.Error:
+                return False
+
+        def add_column(table: str, col_def: str) -> None:
+            col_name = col_def.split()[0]
+            if not has_column(table, col_name):
+                try:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+                except sqlite3.Error:
+                    pass
+
+        # avito_watches
+        add_column("avito_watches", "check_interval_hours INTEGER DEFAULT 0")
+        add_column("avito_watches", "notify_enabled INTEGER DEFAULT 0")
+        add_column("avito_watches", "last_auto_check TEXT DEFAULT ''")
+        # avito_listings
+        add_column("avito_listings", "image_url TEXT DEFAULT ''")
+        add_column("avito_listings", "image_hash TEXT DEFAULT ''")
+        add_column("avito_listings", "price_int INTEGER DEFAULT 0")
+        try:
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
+        # индексы 18.16
+        try:
+            self._conn.execute("CREATE INDEX IF NOT EXISTS avito_listings_image_hash ON avito_listings(image_hash)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS tg_ideas_status ON tg_ideas(status)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS tg_schedule_status ON tg_schedule(status)")
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
+
 
     # --- служебное --------------------------------------------------------
     def close(self) -> None:
@@ -481,6 +563,226 @@ class Store:
         return self._run("UPDATE tg_drafts SET status=? WHERE id=?",
                          (status, int(draft_id))).rowcount > 0
 
+    # --- 18.16: архив переписок Авито (И191) ------------------------------
+    def add_avito_thread(self, thread_text: str, intent: str = "", city: str = "",
+                         replies: list[str] | None = None, status: str = "new",
+                         source: str = "manual") -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO avito_threads(at,thread_text,intent,city,replies_json,status,source) VALUES(?,?,?,?,?,?,?)",
+            (at, str(thread_text)[:8000], str(intent or "")[:300], str(city or "")[:120],
+             json.dumps(replies or [], ensure_ascii=False)[:8000],
+             str(status or "new")[:20], str(source or "manual")[:60]))
+        return {"id": cursor.lastrowid, "at": at, "thread_text": str(thread_text)[:8000],
+                "intent": str(intent or "")[:300], "city": str(city or "")[:120],
+                "replies": replies or [], "status": str(status or "new")[:20],
+                "source": str(source or "manual")[:60]}
+
+    def list_avito_threads(self, limit: int = 50, status: str = "") -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 50)))
+        if status:
+            rows = self._rows("SELECT * FROM avito_threads WHERE status=? ORDER BY id DESC LIMIT ?",
+                              (str(status), limit))
+        else:
+            rows = self._rows("SELECT * FROM avito_threads ORDER BY id DESC LIMIT ?", (limit,))
+        for r in rows:
+            try:
+                r["replies"] = json.loads(r.get("replies_json") or "[]")
+            except json.JSONDecodeError:
+                r["replies"] = []
+        return rows
+
+    def get_avito_thread(self, thread_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM avito_threads WHERE id=?", (int(thread_id),))
+        if not rows:
+            return None
+        r = rows[0]
+        try:
+            r["replies"] = json.loads(r.get("replies_json") or "[]")
+        except json.JSONDecodeError:
+            r["replies"] = []
+        return r
+
+    def update_avito_thread_status(self, thread_id: int, status: str) -> bool:
+        return self._run("UPDATE avito_threads SET status=? WHERE id=?",
+                         (str(status)[:20], int(thread_id))).rowcount > 0
+
+    # --- 18.16: расписание проверки Авито (И195) + уведомления (И197) -----
+    def set_avito_watch_schedule(self, watch_id: int, interval_hours: int = 0,
+                                 notify: bool | None = None) -> bool:
+        fields: list[str] = []
+        params: list[Any] = []
+        if interval_hours is not None:
+            fields.append("check_interval_hours=?")
+            params.append(max(0, min(168, int(interval_hours))))
+        if notify is not None:
+            fields.append("notify_enabled=?")
+            params.append(1 if notify else 0)
+        if not fields:
+            return False
+        params.append(int(watch_id))
+        sql = f"UPDATE avito_watches SET {', '.join(fields)} WHERE id=?"
+        return self._run(sql, tuple(params)).rowcount > 0
+
+    def watches_due_for_check(self, now: str | None = None) -> list[dict[str, Any]]:
+        # возвращает вотчи у которых interval>0 и last_auto_check старше интервала
+        # логика в executor, здесь просто все активные с интервалом
+        return self._rows(
+            "SELECT * FROM avito_watches WHERE enabled=1 AND check_interval_hours>0 ORDER BY last_auto_check ASC")
+
+    def update_avito_watch_auto(self, watch_id: int, last_count: int | None = None) -> bool:
+        if last_count is not None:
+            return self._run(
+                "UPDATE avito_watches SET last_auto_check=?, last_checked=?, last_count=? WHERE id=?",
+                (now_iso(), now_iso(), int(last_count), int(watch_id))).rowcount > 0
+        return self._run(
+            "UPDATE avito_watches SET last_auto_check=?, last_checked=? WHERE id=?",
+            (now_iso(), now_iso(), int(watch_id))).rowcount > 0
+
+    # --- 18.16: дедуп по фото (И196) --------------------------------------
+    def save_avito_listing_image(self, listing_id: int, image_url: str = "", image_hash: str = "",
+                                 price_int: int = 0) -> bool:
+        fields: list[str] = []
+        params: list[Any] = []
+        if image_url:
+            fields.append("image_url=?")
+            params.append(str(image_url)[:600])
+        if image_hash:
+            fields.append("image_hash=?")
+            params.append(str(image_hash)[:120])
+        if price_int:
+            fields.append("price_int=?")
+            params.append(int(price_int))
+        if not fields:
+            return False
+        params.append(int(listing_id))
+        return self._run(f"UPDATE avito_listings SET {', '.join(fields)} WHERE id=?",
+                         tuple(params)).rowcount > 0
+
+    def find_duplicate_listings_by_image(self, image_hash: str, limit: int = 20) -> list[dict[str, Any]]:
+        if not image_hash:
+            return []
+        return self._rows(
+            "SELECT * FROM avito_listings WHERE image_hash=? ORDER BY id DESC LIMIT ?",
+            (str(image_hash)[:120], max(1, min(100, int(limit or 20)))))
+
+    def list_duplicate_image_groups(self, limit: int = 20) -> list[dict[str, Any]]:
+        # группы где image_hash повторяется
+        return self._rows(
+            """SELECT image_hash, COUNT(*) as cnt FROM avito_listings
+               WHERE image_hash!='' GROUP BY image_hash HAVING cnt>1 ORDER BY cnt DESC LIMIT ?""",
+            (max(1, min(100, int(limit or 20))),))
+
+    # --- 18.16: шаблоны ТГ (И200) ------------------------------------------
+    def add_tg_template(self, name: str, tone: str, template_text: str,
+                        vars_list: list[str] | None = None) -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO tg_templates(at,name,tone,template_text,vars_json) VALUES(?,?,?,?,?)",
+            (at, str(name)[:200], str(tone or "")[:60], str(template_text)[:8000],
+             json.dumps(vars_list or [], ensure_ascii=False)[:1000]))
+        return {"id": cursor.lastrowid, "at": at, "name": str(name)[:200],
+                "tone": str(tone or "")[:60], "template_text": str(template_text)[:8000],
+                "vars": vars_list or []}
+
+    def list_tg_templates(self, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM tg_templates ORDER BY id DESC LIMIT ?",
+                          (max(1, min(200, int(limit or 50))),))
+        for r in rows:
+            try:
+                r["vars"] = json.loads(r.get("vars_json") or "[]")
+            except json.JSONDecodeError:
+                r["vars"] = []
+        return rows
+
+    def get_tg_template(self, template_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM tg_templates WHERE id=?", (int(template_id),))
+        if not rows:
+            return None
+        r = rows[0]
+        try:
+            r["vars"] = json.loads(r.get("vars_json") or "[]")
+        except json.JSONDecodeError:
+            r["vars"] = []
+        return r
+
+    def delete_tg_template(self, template_id: int) -> bool:
+        return self._run("DELETE FROM tg_templates WHERE id=?", (int(template_id),)).rowcount > 0
+
+    # --- 18.16: календарь постов (И198) ------------------------------------
+    def add_tg_schedule(self, draft_id: int, planned_at: str, chat: str = "") -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO tg_schedule(at,draft_id,planned_at,status,chat,result) VALUES(?,?,?,?,?,?)",
+            (at, int(draft_id), str(planned_at)[:30], "planned", str(chat or "")[:200], ""))
+        return {"id": cursor.lastrowid, "at": at, "draft_id": int(draft_id),
+                "planned_at": str(planned_at)[:30], "status": "planned",
+                "chat": str(chat or "")[:200], "result": ""}
+
+    def list_tg_schedules(self, limit: int = 50, status: str = "") -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 50)))
+        if status:
+            return self._rows("SELECT * FROM tg_schedule WHERE status=? ORDER BY planned_at ASC LIMIT ?",
+                              (str(status), limit))
+        return self._rows("SELECT * FROM tg_schedule ORDER BY planned_at ASC LIMIT ?", (limit,))
+
+    def update_tg_schedule_status(self, schedule_id: int, status: str, result: str = "") -> bool:
+        return self._run("UPDATE tg_schedule SET status=?, result=? WHERE id=?",
+                         (str(status)[:20], str(result or "")[:600], int(schedule_id))).rowcount > 0
+
+    # --- 18.16: идеи ТГ + конверсия (И205) ---------------------------------
+    def add_tg_idea(self, context: str, idea_text: str, status: str = "new") -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO tg_ideas(at,context,idea_text,draft_id,status) VALUES(?,?,?,?,?)",
+            (at, str(context or "")[:600], str(idea_text)[:2000], 0, str(status)[:20]))
+        return {"id": cursor.lastrowid, "at": at, "context": str(context or "")[:600],
+                "idea_text": str(idea_text)[:2000], "draft_id": 0, "status": str(status)[:20]}
+
+    def list_tg_ideas(self, limit: int = 50, status: str = "") -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 50)))
+        if status:
+            return self._rows("SELECT * FROM tg_ideas WHERE status=? ORDER BY id DESC LIMIT ?",
+                              (str(status), limit))
+        return self._rows("SELECT * FROM tg_ideas ORDER BY id DESC LIMIT ?", (limit,))
+
+    def link_tg_idea_to_draft(self, idea_id: int, draft_id: int) -> bool:
+        return self._run("UPDATE tg_ideas SET draft_id=?, status='used' WHERE id=?",
+                         (int(draft_id), int(idea_id))).rowcount > 0
+
+    def tg_ideas_stats(self) -> dict[str, Any]:
+        def cnt(sql: str, params: tuple = ()) -> int:
+            rows = self._rows(sql, params)
+            return int(rows[0]["n"]) if rows else 0
+        total = cnt("SELECT COUNT(*) as n FROM tg_ideas")
+        used = cnt("SELECT COUNT(*) as n FROM tg_ideas WHERE status='used'")
+        drafts = cnt("SELECT COUNT(*) as n FROM tg_drafts")
+        posted = cnt("SELECT COUNT(*) as n FROM tg_drafts WHERE status='posted'")
+        scheduled = cnt("SELECT COUNT(*) as n FROM tg_schedule")
+        planned = cnt("SELECT COUNT(*) as n FROM tg_schedule WHERE status='planned'")
+        return {"ideas_total": total, "ideas_used": used,
+                "ideas_conversion": round(used / total * 100, 1) if total else 0,
+                "drafts_total": drafts, "drafts_posted": posted,
+                "drafts_conversion": round(posted / drafts * 100, 1) if drafts else 0,
+                "schedules_total": scheduled, "schedules_planned": planned}
+
+    # --- 18.16: поиск и экспорт ТГ (И203, И204) ----------------------------
+    def search_tg_drafts(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        q = f"%{str(query or '').strip().casefold()}%"
+        if not str(query or '').strip():
+            return []
+        limit = max(1, min(100, int(limit or 20)))
+        return self._rows(
+            "SELECT * FROM tg_drafts WHERE pylower(topic) LIKE ? OR pylower(text) LIKE ? ORDER BY id DESC LIMIT ?",
+            (q, q, limit))
+
+    def export_tg_drafts(self, status: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit or 100)))
+        if status:
+            return self._rows("SELECT * FROM tg_drafts WHERE status=? ORDER BY id DESC LIMIT ?",
+                              (str(status), limit))
+        return self._rows("SELECT * FROM tg_drafts ORDER BY id DESC LIMIT ?", (limit,))
+
     # --- сводка -----------------------------------------------------------
     def stats(self) -> dict[str, Any]:
         """Что лежит в памяти ассистента — для окна и для диагностики."""
@@ -494,4 +796,8 @@ class Store:
                 "journal": count("journal"),
                 "avito_watches": count("avito_watches"),
                 "avito_listings": count("avito_listings"),
-                "tg_drafts": count("tg_drafts")}
+                "tg_drafts": count("tg_drafts"),
+                "avito_threads": count("avito_threads"),
+                "tg_templates": count("tg_templates"),
+                "tg_schedule": count("tg_schedule"),
+                "tg_ideas": count("tg_ideas")}

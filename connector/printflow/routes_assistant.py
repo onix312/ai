@@ -1,6 +1,6 @@
-"""Маршруты помощника (18.15): рантайм, действия, голос, агент, журнал, Авито, ТГ.
+"""Маршруты помощника (18.16): рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Шестнадцать маршрутов, и каждый отвечает за свою часть договорённости:
+Тридцать три маршрута, и каждый отвечает за свою часть договорённости:
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -12,12 +12,14 @@
   * `ask` — ответ на вопрос владельца по фактам его же базы (18.14, идея И1);
   * `day` — утренний брифинг или итог дня, собранный детерминированно (И174);
   * `skills` — реестр навыков ассистента компьютера, который отдаёт агент (И136);
-  * `avito/*` — слежка за Авито, поиск, проверка, варианты ответа (18.15, И181–И186);
-  * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188).
+  * `avito/*` — слежка за Авито, поиск, проверка, варианты ответа (18.15, И181–И186),
+    архив переписок, связка с заказом, расписание, дедуп по фото, уведомления (18.16, И191, И193, И195-И197);
+  * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188),
+    календарь, шаблоны, хештеги, поиск, экспорт, статистика конверсии (18.16, И198, И200-И205).
 
 Деньги и печать эти маршруты не двигают: выполнение делает панель через обычные
 маршруты системы с `confirmed`, взятым из каталога, а не из ответа модели.
-Маршруты 18.14 тоже только читают, а 18.15 проксируют вызовы к агенту: панель
+Маршруты 18.14 тоже только читают, а 18.15-18.16 проксируют вызовы к агенту: панель
 не исполняет Авито и ТГ сама, а просит агента по loopback — тот же узор, что у
 реестра навыков.
 """
@@ -286,3 +288,171 @@ def assistant_tg_post(api: Any, ctx: Ctx):
                            int(body.get("draft_id") or ctx.num("draft_id", 0) or 0),
                            str(body.get("text") or ""),
                            str(body.get("chat") or ""))
+
+# --- 18.16: архив переписок, связка, расписание, дедуп -------------------
+
+@router.get("/api/assistant/avito/threads", doc="Помощник: архив переписок Авито")
+def assistant_avito_threads(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.avito_threads(api.db, int(ctx.num("limit", 30)), str(ctx.one("status") or ""))
+
+
+@router.post("/api/assistant/avito/thread/save", doc="Помощник: сохранить переписку Авито")
+def assistant_avito_thread_save(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    thread = str(body.get("thread") or body.get("text") or "")
+    if not thread:
+        return 400, {"ok": False, "error": "Пустая переписка"}
+    return service.avito_thread_save(api.db, thread,
+                                     str(body.get("intent") or ""),
+                                     str(body.get("city") or ""),
+                                     str(body.get("status") or "new"))
+
+
+@router.post("/api/assistant/avito/to-order", doc="Помощник: объявление Авито в заказ",
+             audit="Помощник: Авито-объявление в заказ")
+def assistant_avito_to_order(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True,
+                "reason": "Создание заказа из Авито требует подтверждения",
+                "text": f"Создать заказ из объявления {str(body.get('title') or body.get('url') or '')[:80]}"}
+    return service.avito_to_order(api.db,
+                                  int(body.get("listing_id") or ctx.num("listing_id", 0) or 0),
+                                  str(body.get("url") or ""),
+                                  str(body.get("title") or ""),
+                                  str(body.get("price") or ""),
+                                  str(body.get("city") or ""))
+
+
+@router.post("/api/assistant/avito/schedule", doc="Помощник: расписание проверки Авито")
+def assistant_avito_schedule(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    watch_id = int(body.get("watch_id") or ctx.num("watch_id", 0) or 0)
+    if not watch_id:
+        return 400, {"ok": False, "error": "Не указан watch_id"}
+    interval = int(body.get("interval_hours") or ctx.num("interval_hours", 0) or 0)
+    notify = bool(body.get("notify")) if "notify" in body else bool(ctx.one("notify"))
+    if "notify" not in body and not ctx.one("notify"):
+        # если notify не передали — оставляем как есть
+        return service.avito_schedule(api.db, watch_id, interval, False)
+    return service.avito_schedule(api.db, watch_id, interval, notify)
+
+
+@router.post("/api/assistant/avito/notify", doc="Помощник: уведомления Авито")
+def assistant_avito_notify(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    watch_id = int(body.get("watch_id") or ctx.num("watch_id", 0) or 0)
+    if not watch_id:
+        return 400, {"ok": False, "error": "Не указан watch_id"}
+    enabled = bool(body.get("enabled")) if "enabled" in body else True
+    return service.avito_notify(api.db, watch_id, enabled)
+
+
+@router.get("/api/assistant/avito/dedup", doc="Помощник: дубли Авито по фото")
+def assistant_avito_dedup(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.avito_dedup(api.db, int(ctx.num("limit", 20)), str(ctx.one("image_hash") or ""))
+
+
+# --- 18.16: ТГ календарь, шаблоны, хештеги, поиск, экспорт, статистика -----
+
+@router.post("/api/assistant/tg/schedule", doc="Помощник: запланировать пост ТГ")
+def assistant_tg_schedule(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    draft_id = int(body.get("draft_id") or ctx.num("draft_id", 0) or 0)
+    planned_at = str(body.get("planned_at") or ctx.one("planned_at") or "")
+    if not draft_id or not planned_at:
+        return 400, {"ok": False, "error": "Нужны draft_id и planned_at"}
+    return service.tg_schedule(api.db, draft_id, planned_at, str(body.get("chat") or ""))
+
+
+@router.get("/api/assistant/tg/schedules", doc="Помощник: календарь ТГ-постов")
+def assistant_tg_schedules(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.tg_schedules(api.db, int(ctx.num("limit", 30)), str(ctx.one("status") or ""))
+
+
+@router.post("/api/assistant/tg/template/save", doc="Помощник: сохранить шаблон ТГ")
+def assistant_tg_template_save(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    name = str(body.get("name") or "").strip()
+    tmpl = str(body.get("template") or body.get("template_text") or "").strip()
+    if not name or not tmpl:
+        return 400, {"ok": False, "error": "Нужны name и template"}
+    return service.tg_template_save(api.db, name, str(body.get("tone") or ""), tmpl)
+
+
+@router.get("/api/assistant/tg/templates", doc="Помощник: шаблоны ТГ-постов")
+def assistant_tg_templates(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.tg_templates(api.db, int(ctx.num("limit", 30)))
+
+
+@router.post("/api/assistant/tg/template/apply", doc="Помощник: пост из шаблона ТГ")
+def assistant_tg_template_apply(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    template_id = int(body.get("template_id") or ctx.num("template_id", 0) or 0)
+    return service.tg_template_apply(api.db, template_id,
+                                     str(body.get("facts") or ""),
+                                     str(body.get("topic") or ""),
+                                     str(body.get("tone") or ""))
+
+
+@router.post("/api/assistant/tg/hashtags", doc="Помощник: хештеги для ТГ")
+def assistant_tg_hashtags(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    txt = str(body.get("text") or body.get("topic") or "")
+    if not txt:
+        return 400, {"ok": False, "error": "Пустой текст"}
+    return service.tg_hashtags(api.db, txt, int(body.get("limit") or ctx.num("limit", 6) or 6))
+
+
+@router.get("/api/assistant/tg/search", doc="Помощник: поиск по черновикам ТГ")
+def assistant_tg_search(api: Any, ctx: Ctx):
+    from . import assistant as service
+    q = str(ctx.one("q") or ctx.one("query") or "")
+    if not q:
+        body = ctx.body if isinstance(ctx.body, dict) else {}
+        q = str(body.get("query") or body.get("q") or "")
+    if not q:
+        return 400, {"ok": False, "error": "Пустой запрос"}
+    return service.tg_search(api.db, q, int(ctx.num("limit", 20)))
+
+
+@router.get("/api/assistant/tg/export", doc="Помощник: экспорт черновиков ТГ")
+def assistant_tg_export(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.tg_export(api.db, str(ctx.one("status") or ""),
+                             int(ctx.num("limit", 100)), str(ctx.one("format") or "md"))
+
+
+@router.get("/api/assistant/tg/stats", doc="Помощник: статистика ТГ")
+def assistant_tg_stats(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.tg_stats(api.db)
+
+
+@router.post("/api/assistant/tg/idea/save", doc="Помощник: сохранить идею ТГ")
+def assistant_tg_idea_save(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    idea = str(body.get("idea") or body.get("idea_text") or "").strip()
+    if not idea:
+        return 400, {"ok": False, "error": "Пустая идея"}
+    return service.tg_idea_save(api.db, str(body.get("context") or ""), idea)
+
+
+@router.get("/api/assistant/tg/ideas/history", doc="Помощник: история идей ТГ")
+def assistant_tg_ideas_history(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service.tg_ideas_history(api.db, int(ctx.num("limit", 30)), str(ctx.one("status") or ""))

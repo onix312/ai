@@ -856,7 +856,7 @@ def agent_status(db: Database) -> dict[str, Any]:
 
 
 def agent_skills(db: Database) -> dict[str, Any]:
-    """Реестр навыков ассистента компьютера (18.15, идея И136).
+    """Реестр навыков ассистента компьютера (18.16, идеи И136, И191-И205).
 
     Панель показывает реестр, но не владеет им: навыки объявляет агент, а панель
     читает их по loopback. Поэтому здесь нет ни списка навыков, ни их параметров
@@ -940,3 +940,79 @@ def tg_post(db: Database, draft_id: int = 0, text: str = "", chat: str = "") -> 
     return _call_agent_skill(db, "tg.post",
                              {"draft_id": draft_id, "text": text, "chat": chat},
                              timeout=20.0)
+
+
+# --- 18.16: архив переписок, связка, расписание, дедуп, календарь, шаблоны ---
+
+def avito_threads(db: Database, limit: int = 30, status: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.threads", {"limit": limit, "status": status})
+
+
+def avito_thread_save(db: Database, thread: str, intent: str = "", city: str = "", status: str = "new") -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.thread_save",
+                             {"thread": thread, "intent": intent, "city": city, "status": status})
+
+
+def avito_to_order(db: Database, listing_id: int = 0, url: str = "", title: str = "", price: str = "", city: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.to_order",
+                             {"listing_id": listing_id, "url": url, "title": title, "price": price, "city": city},
+                             timeout=30.0)
+
+
+def avito_schedule(db: Database, watch_id: int, interval_hours: int = 0, notify: bool = False) -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.schedule",
+                             {"watch_id": watch_id, "interval_hours": interval_hours, "notify": notify})
+
+
+def avito_notify(db: Database, watch_id: int, enabled: bool = True) -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.notify", {"watch_id": watch_id, "enabled": enabled})
+
+
+def avito_dedup(db: Database, limit: int = 20, image_hash: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.dedup", {"limit": limit, "image_hash": image_hash})
+
+
+def tg_schedule(db: Database, draft_id: int, planned_at: str, chat: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.schedule",
+                             {"draft_id": draft_id, "planned_at": planned_at, "chat": chat})
+
+
+def tg_schedules(db: Database, limit: int = 30, status: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.schedules", {"limit": limit, "status": status})
+
+
+def tg_template_save(db: Database, name: str, tone: str = "", template: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.template_save", {"name": name, "tone": tone, "template": template})
+
+
+def tg_templates(db: Database, limit: int = 30) -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.templates", {"limit": limit})
+
+
+def tg_template_apply(db: Database, template_id: int, facts: str = "", topic: str = "", tone: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.template_apply",
+                             {"template_id": template_id, "facts": facts, "topic": topic, "tone": tone})
+
+
+def tg_hashtags(db: Database, text: str, limit: int = 6) -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.hashtags", {"text": text, "limit": limit})
+
+
+def tg_search(db: Database, query: str, limit: int = 20) -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.search", {"query": query, "limit": limit})
+
+
+def tg_export(db: Database, status: str = "", limit: int = 100, fmt: str = "md") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.export", {"status": status, "limit": limit, "format": fmt})
+
+
+def tg_stats(db: Database) -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.stats", {})
+
+
+def tg_idea_save(db: Database, context: str = "", idea: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.idea_save", {"context": context, "idea": idea})
+
+
+def tg_ideas_history(db: Database, limit: int = 30, status: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.ideas_history", {"limit": limit, "status": status})

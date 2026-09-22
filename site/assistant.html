@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
-<script src="/assets/theme-init.js?v=18.15.0"></script>
+<script src="/assets/theme-init.js?v=18.16.0"></script>
 <meta name="theme-color" content="#4f46e5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · помощник</title>
-<link rel="stylesheet" href="assets/tokens.css?v=18.15.0">
+<link rel="stylesheet" href="assets/tokens.css?v=18.16.0">
 <style>
  * { box-sizing:border-box; margin:0; padding:0; }
  html, body { height:100%; }
@@ -811,13 +811,186 @@
   $('as_day_briefing').addEventListener('click', function () { loadDay('briefing'); });
   $('as_day_summary').addEventListener('click', function () { loadDay('summary'); });
   $('as_skills_refresh').addEventListener('click', refreshSkills);
-  $('av_watch').addEventListener('click', avitoWatch);
+
+  // --- 18.16: архив переписок, связка, расписание, дедуп ---
+  function avitoThreads() {
+    var st = $('av_thread_status').value.trim();
+    var url = '/api/assistant/avito/threads?limit=30' + (st ? '&status='+encodeURIComponent(st) : '');
+    $('av_threads_result').innerHTML = '<span class="muted">Загружаем архив…</span>';
+    get(url).then(function (data) {
+      if (!data.ok) { $('av_threads_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      var rows = data.threads||[];
+      if (!rows.length) { $('av_threads_result').innerHTML = '<span class="muted">Пусто</span>'; return; }
+      var html = rows.map(function (r) {
+        return '<div class="as-item"><div class="as-item-head"><b>#'+r.id+'</b> '+esc((r.thread_text||'').slice(0,120))+' <span class="muted">'+esc(r.status||'')+' '+esc(r.at||'')+'</span></div><div class="as-item-body">'+(r.replies||[]).map(function (t){ return '<div class="as-reply"><span>'+esc(t)+'</span> <button class="btn xs" type="button" data-copy="'+esc(t).replace(/"/g,'&quot;')+'">Копировать</button></div>'; }).join('')+'</div></div>';
+      }).join('');
+      $('av_threads_result').innerHTML = html;
+      $('av_threads_result').querySelectorAll('button[data-copy]').forEach(function (b){ b.addEventListener('click', function(){ navigator.clipboard.writeText(this.dataset.copy||''); this.textContent='Скопировано'; }); });
+    }).catch(function (e){ $('av_threads_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function avitoThreadSave() {
+    var thread = $('av_thread').value.trim();
+    if (!thread) { $('av_threads_result').innerHTML = '<div class="warnline">Введите переписку в поле выше (Авито-слежка)</div>'; return; }
+    $('av_threads_result').innerHTML = '<span class="muted">Сохраняем…</span>';
+    post('/api/assistant/avito/thread/save', { thread: thread, intent: $('av_intent').value.trim(), city: $('av_city').value.trim(), status: $('av_thread_status').value.trim()||'new' }).then(function (data){
+      if (!data.ok) { $('av_threads_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      var replies = data.replies||[];
+      var html = '<div class="body">✅ Сохранено #'+(data.thread&&data.thread.id||'')+'</div>' + replies.map(function (t){ return '<div class="as-reply"><span>'+esc(t)+'</span> <button class="btn xs" type="button" data-copy="'+esc(t).replace(/"/g,'&quot;')+'">Копировать</button></div>'; }).join('');
+      $('av_threads_result').innerHTML = html;
+      $('av_threads_result').querySelectorAll('button[data-copy]').forEach(function (b){ b.addEventListener('click', function(){ navigator.clipboard.writeText(this.dataset.copy||''); this.textContent='Скопировано'; }); });
+    }).catch(function (e){ $('av_threads_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function avitoToOrder() {
+    var listing_id = parseInt($('av_listing_id').value||'0',10)||0;
+    var payload = { listing_id: listing_id, confirmed: true };
+    // если listing_id пустой, возьмём из последнего результата avitoRender? для простоты требуем id
+    $('av_extra_result').textContent = 'Создаём заказ…';
+    post('/api/assistant/avito/to-order', payload).then(function (data){
+      if (!data.ok && data.needs_confirmation) {
+        // второй раз с confirmed уже есть, но если сервер просит — ещё раз
+        return post('/api/assistant/avito/to-order', { listing_id: listing_id, confirmed: true });
+      }
+      return data;
+    }).then(function (data){
+      if (!data.ok) { $('av_extra_result').innerHTML = '<span class="warnline">'+esc(data.reason||'Ошибка')+'</span>'; return; }
+      $('av_extra_result').innerHTML = '✅ '+(data.hint||'Готово');
+    }).catch(function (e){ $('av_extra_result').innerHTML = '<span class="warnline">✗ '+esc(e.message||e)+'</span>'; });
+  }
+  function avitoSchedule() {
+    var watch_id = parseInt($('av_watch_id').value||'0',10)||0;
+    var interval = parseInt($('av_interval').value||'0',10)||0;
+    var notify = $('av_notify').checked;
+    if (!watch_id) { $('av_extra_result').textContent = 'Укажите watch_id'; return; }
+    $('av_extra_result').textContent = 'Сохраняем расписание…';
+    post('/api/assistant/avito/schedule', { watch_id: watch_id, interval_hours: interval, notify: notify }).then(function (data){
+      $('av_extra_result').textContent = data.ok ? '✅ Расписание: '+interval+'ч, notify='+notify : '❌ '+(data.reason||'');
+    }).catch(function (e){ $('av_extra_result').textContent = '✗ '+(e.message||e); });
+  }
+  function avitoDedup() {
+    var h = $('av_image_hash').value.trim();
+    $('av_dedup_result').innerHTML = '<span class="muted">Ищем дубли…</span>';
+    get('/api/assistant/avito/dedup?limit=20'+(h ? '&image_hash='+encodeURIComponent(h):'')).then(function (data){
+      if (!data.ok) { $('av_dedup_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      if (data.duplicates) {
+        var html = data.duplicates.map(function (r){ return '<div class="as-item"><b>'+esc(r.title||'')+'</b> '+esc(r.url||'')+' '+esc(r.price||'')+'</div>'; }).join('') || '<span class="muted">Дублей нет</span>';
+        $('av_dedup_result').innerHTML = html;
+      } else {
+        var groups = data.groups||[];
+        if (!groups.length) { $('av_dedup_result').innerHTML = '<span class="muted">Дублей по фото нет</span>'; return; }
+        var html = groups.map(function (g){ return '<div class="as-item"><b>hash '+esc(g.image_hash)+' x'+g.count+'</b><div>'+(g.items||[]).map(function (it){ return '<div>'+esc(it.title||'')+' '+esc(it.url||'')+'</div>'; }).join('')+'</div></div>'; }).join('');
+        $('av_dedup_result').innerHTML = html;
+      }
+    }).catch(function (e){ $('av_dedup_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+
+  // --- 18.16: ТГ календарь, шаблоны, хештеги, поиск, экспорт, статистика ---
+  function tgSchedule() {
+    var date = $('tg_plan_date').value.trim();
+    if (!date) { $('tg_schedules_result').innerHTML = '<div class="warnline">Введите дату YYYY-MM-DD HH:MM</div>'; return; }
+    if (!lastTgDraftId) { $('tg_schedules_result').innerHTML = '<div class="warnline">Нет черновика для планирования</div>'; return; }
+    $('tg_schedules_result').innerHTML = '<span class="muted">Планируем…</span>';
+    post('/api/assistant/tg/schedule', { draft_id: lastTgDraftId, planned_at: date }).then(function (data){
+      $('tg_schedules_result').innerHTML = data.ok ? '<div class="body">✅ Запланировано #'+data.schedule.id+' на '+esc(data.schedule.planned_at)+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_schedules_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgSchedules() {
+    $('tg_schedules_result').innerHTML = '<span class="muted">Загружаем календарь…</span>';
+    get('/api/assistant/tg/schedules?limit=30').then(function (data){
+      if (!data.ok) { $('tg_schedules_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.schedules||[];
+      if (!rows.length) { $('tg_schedules_result').innerHTML = '<span class="muted">Пусто</span>'; return; }
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+r.id+'</b> draft '+r.draft_id+' на '+esc(r.planned_at)+' <span class="muted">'+esc(r.status)+'</span></div>'; }).join('');
+      $('tg_schedules_result').innerHTML = html;
+    }).catch(function (e){ $('tg_schedules_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplSave() {
+    var name = $('tg_tpl_name').value.trim();
+    var txt = $('tg_tpl_text').value.trim();
+    if (!name || !txt) { $('tg_templates_result').innerHTML = '<div class="warnline">Имя и текст шаблона обязательны</div>'; return; }
+    post('/api/assistant/tg/template/save', { name: name, tone: $('tg_tpl_tone').value, template: txt }).then(function (data){
+      $('tg_templates_result').innerHTML = data.ok ? '<div class="body">✅ Шаблон #'+data.template.id+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplList() {
+    $('tg_templates_result').innerHTML = '<span class="muted">Загружаем шаблоны…</span>';
+    get('/api/assistant/tg/templates?limit=30').then(function (data){
+      if (!data.ok) { $('tg_templates_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.templates||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+(r.id||0)+'</b> '+esc(r.name||'')+' ['+esc(r.tone||'')+'] vars: '+(r.vars||[]).join(',')+'<div class="muted">'+esc((r.template_text||r.template||'').slice(0,120))+'</div><button class="btn xs" type="button" data-tpl="'+(r.id||0)+'">Применить</button></div>'; }).join('');
+      $('tg_templates_result').innerHTML = html || '<span class="muted">Пусто</span>';
+      $('tg_templates_result').querySelectorAll('button[data-tpl]').forEach(function (b){ b.addEventListener('click', function(){ $('tg_tpl_id').value = this.dataset.tpl; }); });
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplApply() {
+    var id = parseInt($('tg_tpl_id').value||'0',10)||0;
+    $('tg_templates_result').innerHTML = '<span class="muted">Применяем шаблон…</span>';
+    post('/api/assistant/tg/template/apply', { template_id: id, facts: $('tg_facts').value.trim(), topic: $('tg_topic').value.trim(), tone: $('tg_tpl_tone').value }).then(function (data){
+      if (!data.ok) { $('tg_templates_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      $('tg_templates_result').innerHTML = '<div class="body">✅ Черновик #'+data.draft_id+'<div>'+esc(data.text||'')+'</div></div>';
+      lastTgDraftId = data.draft_id||lastTgDraftId;
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgHashtags() {
+    var txt = $('tg_hash_text').value.trim() || $('tg_topic').value.trim() + ' ' + $('tg_facts').value.trim();
+    if (!txt) { $('tg_hash_result').innerHTML = '<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/tg/hashtags', { text: txt, limit: 8 }).then(function (data){
+      $('tg_hash_result').innerHTML = data.ok ? '<div class="body">'+(data.hashtags||[]).map(function (h){ return '<span style="margin-right:6px">'+esc(h)+'</span>'; }).join('')+' <button class="btn xs" type="button" id="hash_copy">Копировать</button></div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+      var btn = document.getElementById('hash_copy');
+      if (btn) btn.addEventListener('click', function(){ navigator.clipboard.writeText((data.hashtags||[]).join(' ')); this.textContent='Скопировано'; });
+    }).catch(function (e){ $('tg_hash_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgSearch() {
+    var q = $('tg_search_q').value.trim();
+    if (!q) { $('tg_search_result').innerHTML = '<div class="warnline">Введите запрос</div>'; return; }
+    get('/api/assistant/tg/search?q='+encodeURIComponent(q)+'&limit=20').then(function (data){
+      if (!data.ok) { $('tg_search_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.results||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>'+esc(r.topic||'')+'</b> ['+esc(r.tone||'')+'] '+esc((r.text||'').slice(0,120))+'</div>'; }).join('') || '<span class="muted">Ничего не нашлось</span>';
+      $('tg_search_result').innerHTML = html;
+    }).catch(function (e){ $('tg_search_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgExport() {
+    var fmt = $('tg_export_fmt').value;
+    get('/api/assistant/tg/export?limit=100&format='+encodeURIComponent(fmt)).then(function (data){
+      if (!data.ok) { $('tg_export_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      $('tg_export_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">'+esc(data.text||'')+'</pre><button class="btn xs" type="button" id="exp_copy">Копировать</button></div>';
+      var btn = document.getElementById('exp_copy');
+      if (btn) btn.addEventListener('click', function(){ navigator.clipboard.writeText(data.text||''); this.textContent='Скопировано'; });
+    }).catch(function (e){ $('tg_export_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgStats() {
+    get('/api/assistant/tg/stats').then(function (data){
+      if (!data.ok) { $('tg_stats_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var s = data.stats||{};
+      $('tg_stats_result').innerHTML = '<div class="body">Идей: '+s.ideas_total+' (used '+s.ideas_used+' '+s.ideas_conversion+'%)<br>Черновиков: '+s.drafts_total+' (posted '+s.drafts_posted+' '+s.drafts_conversion+'%)<br>Календарь: всего '+s.schedules_total+' план '+s.schedules_planned+'</div>';
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgIdeaSave() {
+    var ctx = $('tg_idea_ctx').value.trim();
+    var idea = $('tg_idea_text').value.trim();
+    if (!idea) { $('tg_stats_result').innerHTML = '<div class="warnline">Введите идею</div>'; return; }
+    post('/api/assistant/tg/idea/save', { context: ctx, idea: idea }).then(function (data){
+      $('tg_stats_result').innerHTML = data.ok ? '<div class="body">✅ Идея #'+data.idea.id+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgIdeasHist() {
+    get('/api/assistant/tg/ideas/history?limit=30').then(function (data){
+      if (!data.ok) { $('tg_stats_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.ideas||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+r.id+'</b> '+esc(r.idea_text||'')+' <span class="muted">'+esc(r.status||'')+' draft '+r.draft_id+'</span></div>'; }).join('') || '<span class="muted">Пусто</span>';
+      $('tg_stats_result').innerHTML = html;
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+
+
+$('av_watch').addEventListener('click', avitoWatch);
   $('av_search').addEventListener('click', avitoSearch);
   $('av_check').addEventListener('click', avitoCheck);
   $('av_reply').addEventListener('click', avitoReply);
   $('tg_ideas').addEventListener('click', tgIdeas);
   $('tg_draft').addEventListener('click', tgDraft);
   $('tg_list').addEventListener('click', tgList);
+  $('av_watch').addEventListener('click', avitoWatch);
   $('tg_post_btn').addEventListener('click', tgPostLast);
 
   refreshState();
@@ -825,5 +998,85 @@
   refreshSkills();
 })();
 </script>
+
+  <div class="as-card" id="card-avito-threads">
+   <div class="as-head"><div class="as-title">Авито — архив переписок (И191)</div><div class="as-sub">Только текст для копирования, без авто-отправки</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="av_threads" type="button">Архив</button>
+    <button class="btn sm" id="av_thread_save" type="button">Сохранить текущую</button>
+    <input class="inp sm" id="av_thread_status" placeholder="статус new/replied" style="width:140px">
+   </div>
+   <div id="av_threads_result" style="margin-top:6px"><span class="muted">Переписки появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-avito-extra">
+   <div class="as-head"><div class="as-title">Авито — связка, расписание, дедуп (И193, И195-И197)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="av_listing_id" placeholder="listing_id" style="width:90px">
+    <button class="btn sm primary" id="av_to_order" type="button">В заказ (с подтверждением)</button>
+    <input class="inp sm" id="av_watch_id" placeholder="watch_id" style="width:80px">
+    <input class="inp sm" id="av_interval" placeholder="интервал ч" style="width:90px" type="number">
+    <label class="as-check"><input type="checkbox" id="av_notify"> уведомление</label>
+    <button class="btn sm" id="av_schedule" type="button">Расписание</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <button class="btn sm" id="av_dedup" type="button">Дубли по фото</button>
+    <input class="inp sm" id="av_image_hash" placeholder="image_hash (опц)" style="width:200px">
+    <span class="muted" id="av_extra_result"></span>
+   </div>
+   <div id="av_dedup_result" style="margin-top:6px"><span class="muted">Дубли появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-calendar">
+   <div class="as-head"><div class="as-title">ТГ — календарь постов (И198)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="tg_plan_date" placeholder="YYYY-MM-DD HH:MM" style="width:170px">
+    <button class="btn sm primary" id="tg_schedule_btn" type="button">Запланировать последний черновик</button>
+    <button class="btn sm" id="tg_schedules_btn" type="button">Календарь</button>
+   </div>
+   <div id="tg_schedules_result" style="margin-top:6px"><span class="muted">План появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-templates">
+   <div class="as-head"><div class="as-title">ТГ — шаблоны и хештеги (И200, И202)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_tpl_name" placeholder="Имя шаблона" style="width:160px">
+    <select class="inp" id="tg_tpl_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_tpl_text" placeholder="Шаблон: {topic} {fact} {detail} {price}">
+    <button class="btn sm" id="tg_tpl_save" type="button">Сохранить шаблон</button>
+    <button class="btn sm" id="tg_tpl_list" type="button">Шаблоны</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="tg_tpl_id" placeholder="template_id" style="width:90px">
+    <button class="btn sm primary" id="tg_tpl_apply" type="button">Применить → черновик</button>
+    <input class="inp wide" id="tg_hash_text" placeholder="Текст для хештегов">
+    <button class="btn sm" id="tg_hash_btn" type="button">Хештеги</button>
+   </div>
+   <div id="tg_templates_result" style="margin-top:6px"><span class="muted">Шаблоны появятся здесь.</span></div>
+   <div id="tg_hash_result" style="margin-top:6px"><span class="muted">Хештеги появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-search-export">
+   <div class="as-head"><div class="as-title">ТГ — поиск, экспорт, статистика (И203-И205)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_search_q" placeholder="Поиск по черновикам">
+    <button class="btn sm" id="tg_search_btn" type="button">Найти</button>
+    <select class="inp sm" id="tg_export_fmt"><option value="md">md</option><option value="json">json</option><option value="txt">txt</option></select>
+    <button class="btn sm" id="tg_export_btn" type="button">Экспорт</button>
+    <button class="btn sm" id="tg_stats_btn" type="button">Статистика</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_idea_ctx" placeholder="Контекст идеи">
+    <input class="inp wide" id="tg_idea_text" placeholder="Идея поста">
+    <button class="btn sm" id="tg_idea_save" type="button">Сохранить идею</button>
+    <button class="btn sm" id="tg_ideas_hist" type="button">История идей</button>
+   </div>
+   <div id="tg_search_result" style="margin-top:6px"><span class="muted">Результаты поиска.</span></div>
+   <div id="tg_export_result" style="margin-top:6px"><span class="muted">Экспорт появится здесь.</span></div>
+   <div id="tg_stats_result" style="margin-top:6px"><span class="muted">Статистика конверсии.</span></div>
+  </div>
+
 </body>
 </html>

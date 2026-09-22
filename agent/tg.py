@@ -1,16 +1,18 @@
-"""ТГ-посты ассистента (18.15): идеи и черновики из фактов цеха.
+"""ТГ-посты ассистента (18.16): идеи, черновики, шаблоны, календарь, хештеги, поиск, экспорт.
 
-Идея И182: ассистент придумывает посты в Telegram-канал цеха из того, что знает
+Идеи И182, И184, И198, И200-И205: ассистент придумывает посты в Telegram-канал цеха из того, что знает
 сам — недавних печатей, знаний цеха, фактов из документов, а не из воздуха.
 
 Границы те же, что у `files.ask` и `knowledge.shop`:
   * факты — детерминированные (из индекса, из панели, из заметок);
   * модель — только для формулировки, числа не выдумывает;
   * без модели — шаблоны и список тем, а не отказ.
+  * хештеги — локальный словарь (И202), без внешних API.
 """
 
 from __future__ import annotations
 
+import json
 import random
 import re
 from typing import Any
@@ -23,6 +25,36 @@ TONE_PRESETS = {
     "короткий": "1-2 предложения, суть и фото.",
     "история": "История одного заказа: от запроса до выдачи.",
 }
+
+# И202: локальный словарь хештегов
+HASHTAG_DICT = {
+    "3d": ["#3dпечать", "#3dprint"],
+    "печать": ["#3dпечать", "#аддитивка"],
+    "petg": ["#PETG", "#прочный"],
+    "pla": ["#PLA", "#экопластик"],
+    "адресник": ["#адресник", "#дляпитомцев"],
+    "брелок": ["#брелок", "#сувенир"],
+    "модель": ["#3dмодель", "#прототип"],
+    "заказ": ["#назаказ", "#производство"],
+    "цех": ["#цех", "#производство"],
+    "москва": ["#москва", "#мск"],
+    "спб": ["#спб", "#питер"],
+    "игрушка": ["#игрушка", "#подарок"],
+    "корпус": ["#корпус", "#деталь"],
+    "шестерня": ["#шестерня", "#механика"],
+}
+
+BUILTIN_TEMPLATES = [
+    {"name": "Подборка недели", "tone": "дружелюбный",
+     "template": "На этой неделе печатали:\n{fact}\n\n{detail}\n\nХотите так же — пишите, посчитаем за 10 минут.",
+     "vars": ["fact", "detail"]},
+    {"name": "Кейс", "tone": "техничный",
+     "template": "Кейс: {topic}\nМатериал: {material}, слой 0.2, время {time}\n\n{fact}\n{detail}",
+     "vars": ["topic", "material", "time", "fact", "detail"]},
+    {"name": "Продающий", "tone": "продающий",
+     "template": "Ищете {topic}? Мы уже делаем такое.\n{fact}\nЦена от {price}. Напишите — скинем расчёт.",
+     "vars": ["topic", "fact", "price"]},
+]
 
 DEFAULT_IDEAS = [
     "Что напечатали на этой неделе — подборка 3-5 изделий с фото",
@@ -229,3 +261,131 @@ def draft_post(topic: str, tone: str = "дружелюбный",
             "model": "", "reason": "", "source": "template",
             "facts": facts_clean,
             "hint": "Модель недоступна — черновик из шаблона. Запустите рантайм для живого текста."}
+
+
+# ---------------------------------------------------------------------------
+# 18.16: шаблоны, хештеги, поиск, экспорт, календарь, идеи (И198, И200-И205)
+# ---------------------------------------------------------------------------
+
+def _extract_vars(template: str) -> list[str]:
+    return sorted(set(re.findall(r"\{(\w+)\}", str(template or ""))))
+
+
+def save_template(name: str, tone: str, template_text: str) -> dict[str, Any]:
+    name_c = _clean(name, 200)
+    if not name_c:
+        return {"ok": False, "reason": "Пустое имя шаблона"}
+    txt = str(template_text or "").strip()
+    if not txt:
+        return {"ok": False, "reason": "Пустой текст шаблона"}
+    tone_c = str(tone or "").strip().lower()
+    if tone_c and tone_c not in TONE_PRESETS:
+        tone_c = "дружелюбный"
+    vars_list = _extract_vars(txt)
+    return {"ok": True, "name": name_c, "tone": tone_c, "template_text": txt[:8000],
+            "vars": vars_list}
+
+
+def apply_template(template_text: str, vars_dict: dict[str, str]) -> dict[str, Any]:
+    txt = str(template_text or "")
+    if not txt.strip():
+        return {"ok": False, "text": "", "reason": "Пустой шаблон"}
+    out = txt
+    for k, v in (vars_dict or {}).items():
+        out = out.replace(f"{{{k}}}", str(v or ""))
+    # непокрытые переменные оставляем как есть, но предупреждаем
+    missing = _extract_vars(out)
+    return {"ok": True, "text": out[:8000], "missing": missing,
+            "reason": f"Не заполнены: {', '.join(missing)}" if missing else ""}
+
+
+def generate_hashtags(text: str, limit: int = 6) -> dict[str, Any]:
+    """И202: локальный подбор хештегов по словарю."""
+    q = _clean(text, 1000).lower()
+    if not q:
+        return {"ok": False, "hashtags": [], "reason": "Пустой текст"}
+    found: list[str] = []
+    for key, tags in HASHTAG_DICT.items():
+        if key in q:
+            for t in tags:
+                if t not in found:
+                    found.append(t)
+    # добавим общие если мало
+    if len(found) < 3:
+        for t in ["#3dпечать", "#цех", "#назаказ"]:
+            if t not in found:
+                found.append(t)
+    limit = max(1, min(12, int(limit or 6)))
+    return {"ok": True, "hashtags": found[:limit], "reason": ""}
+
+
+def search_drafts(query: str, drafts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """И203: поиск по черновикам — если drafts переданы, фильтрует в памяти."""
+    q = _clean(query, 200).lower()
+    if not q:
+        return {"ok": False, "results": [], "reason": "Пустой запрос"}
+    if drafts is None:
+        # поиск делает store, здесь только заглушка
+        return {"ok": True, "results": [], "query": q, "reason": "Передайте список черновиков"}
+    res = []
+    for d in drafts:
+        hay = f"{d.get('topic','')} {d.get('text','')}".lower()
+        if q in hay:
+            res.append(d)
+    return {"ok": True, "results": res[:50], "count": len(res), "query": q}
+
+
+def export_drafts_text(drafts: list[dict[str, Any]], fmt: str = "md") -> dict[str, Any]:
+    """И204: экспорт черновиков в текст (md/json)."""
+    fmt_c = str(fmt or "md").lower()
+    if fmt_c not in ("md", "json", "txt"):
+        fmt_c = "md"
+    if not drafts:
+        return {"ok": False, "text": "", "reason": "Нет черновиков для экспорта"}
+    if fmt_c == "json":
+        text = json.dumps(drafts, ensure_ascii=False, indent=2)[:20000]
+        return {"ok": True, "text": text, "format": "json", "count": len(drafts)}
+    # md / txt
+    parts = []
+    for d in drafts:
+        topic = _clean(d.get("topic") or "", 200)
+        tone = d.get("tone") or ""
+        txt = _clean(d.get("text") or "", 2000)
+        status = d.get("status") or "draft"
+        at = d.get("at") or ""
+        if fmt_c == "md":
+            parts.append(f"## {topic} [{tone}] ({status}) {at}\n\n{txt}\n")
+        else:
+            parts.append(f"{topic} [{tone}] {status}\n{txt}\n---\n")
+    out = "\n".join(parts)[:20000]
+    return {"ok": True, "text": out, "format": fmt_c, "count": len(drafts)}
+
+
+def schedule_post(draft_id: int, planned_at: str, chat: str = "") -> dict[str, Any]:
+    """И198: добавить в календарь."""
+    if not draft_id:
+        return {"ok": False, "reason": "Не указан draft_id"}
+    pa = _clean(planned_at, 30)
+    if not pa:
+        return {"ok": False, "reason": "Пустая дата публикации"}
+    # простая проверка формата YYYY-MM-DD HH:MM или YYYY-MM-DD
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", pa):
+        return {"ok": False, "reason": "Дата должна быть YYYY-MM-DD или YYYY-MM-DD HH:MM"}
+    return {"ok": True, "draft_id": int(draft_id), "planned_at": pa,
+            "chat": _clean(chat, 200), "status": "planned"}
+
+
+def idea_to_draft_link(idea_text: str, draft_text: str) -> dict[str, Any]:
+    """И205: связать идею с черновиком — эвристика по совпадению слов."""
+    idea = _clean(idea_text, 500).lower()
+    draft = _clean(draft_text, 1000).lower()
+    if not idea or not draft:
+        return {"ok": False, "linked": False, "reason": "Пустая идея или черновик"}
+    # считаем общие слова
+    iw = set(idea.split())
+    dw = set(draft.split())
+    common = iw & dw
+    score = len(common) / max(1, len(iw))
+    linked = score >= 0.3 or any(w in draft for w in idea.split()[:3])
+    return {"ok": True, "linked": bool(linked), "score": round(score, 2),
+            "common": list(common)[:10]}

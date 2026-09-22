@@ -1,4 +1,4 @@
-"""Исполнение навыков ассистента (18.15).
+"""Исполнение навыков ассистента (18.16).
 
 Порядок один для всех навыков, и именно он держит договорённость с владельцем:
 
@@ -15,7 +15,8 @@
 Отказ здесь — нормальный ответ, а не исключение: у каждого отказа есть
 `reason`, который можно показать человеку и который объясняет `agent.why`.
 
-18.15: добавлены Авито-слежка (И181, И183, И185, И186) и ТГ-посты (И182, И184).
+18.16: архив переписок, связка, расписание, дедуп, календарь ТГ, шаблоны, хештеги, поиск, экспорт, статистика
+# 18.15: добавлены Авито-слежка (И181, И183, И185, И186) и ТГ-посты (И182, И184).
 """
 
 from __future__ import annotations
@@ -63,7 +64,28 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         did = params.get("draft_id")
         return f"{title}: черновик {did}" if did else f"{title}: «{str(params.get('text') or '')[:60]}»"
     if name == "avito.reply":
-        return f"{title}: ответ на «{str(params.get('thread') or '')[:60]}»"
+        return f"{title}: ответ на «{str(params.get('thread') or '')[:60]}» (только для копирования)"
+    if name == "avito.thread_save":
+        return f"{title}: «{str(params.get('thread') or '')[:60]}» → архив"
+    if name == "avito.to_order":
+        lid = params.get("listing_id") or params.get("url") or params.get("title") or "—"
+        return f"{title}: объявление {lid} → черновик заказа"
+    if name == "avito.schedule":
+        return f"{title}: вотч {params.get('watch_id')} интервал {params.get('interval_hours')}ч"
+    if name == "avito.dedup":
+        return f"{title}: дубли по фото {params.get('image_hash') or 'все группы'}"
+    if name == "tg.schedule":
+        return f"{title}: черновик {params.get('draft_id')} на {params.get('planned_at')}"
+    if name == "tg.template_save":
+        return f"{title}: шаблон «{params.get('name') or '—'}»"
+    if name == "tg.template_apply":
+        return f"{title}: шаблон {params.get('template_id')} → черновик"
+    if name == "tg.hashtags":
+        return f"{title}: «{str(params.get('text') or '')[:50]}»"
+    if name == "tg.search":
+        return f"{title}: поиск «{params.get('query') or ''}»"
+    if name == "tg.export":
+        return f"{title}: экспорт {params.get('status') or 'все'} {params.get('format') or 'md'}"
     shown = ", ".join(f"{key}=«{str(value)[:60]}»" for key, value in list(params.items())[:3])
     return f"{title}" + (f": {shown}" if shown else "")
 
@@ -207,6 +229,24 @@ class Runner:
             "tg.drafts": self._tg_drafts,
             "tg.ideas": self._tg_ideas,
             "tg.post": self._tg_post,
+            # 18.16: архив, связка, расписание, дедуп
+            "avito.threads": self._avito_threads,
+            "avito.thread_save": self._avito_thread_save,
+            "avito.to_order": self._avito_to_order,
+            "avito.schedule": self._avito_schedule,
+            "avito.notify": self._avito_notify,
+            "avito.dedup": self._avito_dedup,
+            "tg.schedule": self._tg_schedule,
+            "tg.schedules": self._tg_schedules,
+            "tg.template_save": self._tg_template_save,
+            "tg.templates": self._tg_templates,
+            "tg.template_apply": self._tg_template_apply,
+            "tg.hashtags": self._tg_hashtags,
+            "tg.search": self._tg_search,
+            "tg.export": self._tg_export,
+            "tg.stats": self._tg_stats,
+            "tg.idea_save": self._tg_idea_save,
+            "tg.ideas_history": self._tg_ideas_history,
         }
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
@@ -608,6 +648,239 @@ class Runner:
         return {"ok": True, "reason": "", "message_id": res.get("message_id"),
                 "chat": chat or "из настроек", "text": text[:500],
                 "hint": "Пост отправлен в ТГ-канал"}
+
+    # --- 18.16: архив переписок, связка, расписание, дедуп (И191, И193, И195-И197) ---
+    def _avito_threads(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 30)
+        status = str(params.get("status") or "").strip()
+        rows = self.store.list_avito_threads(limit, status)
+        return {"ok": True, "threads": rows, "count": len(rows), "reason": "",
+                "hint": "Архив переписок — только текст для копирования, без авто-отправки"}
+
+    def _avito_thread_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        thread = str(params.get("thread") or "").strip()
+        if not thread:
+            return {"ok": False, "reason": "Пустая переписка"}
+        intent = str(params.get("intent") or "").strip()[:300]
+        city = str(params.get("city") or "").strip()[:120]
+        status = str(params.get("status") or "new").strip()[:20]
+        # генерим варианты ответа сразу для копирования
+        state = model.status()
+        rep = avito_mod.suggest_replies(thread, intent, city,
+                                        model_status=state if state.get("ok") else None)
+        replies = rep.get("replies") or []
+        saved = self.store.add_avito_thread(thread, intent, city, replies, status=status)
+        return {"ok": True, "thread": saved, "replies": replies, "reason": "",
+                "hint": "Переписка сохранена. Варианты — только для копирования"}
+
+    def _avito_to_order(self, params: dict[str, Any]) -> dict[str, Any]:
+        # берём данные объявления из базы или из параметров
+        listing_id = int(params.get("listing_id") or 0)
+        url = str(params.get("url") or "").strip()
+        title = str(params.get("title") or "").strip()
+        price = str(params.get("price") or "").strip()
+        city = str(params.get("city") or "").strip()
+
+        listing = None
+        if listing_id:
+            rows = self.store.list_avito_listings(limit=1)
+            # ищем по id
+            all_rows = self.store._rows("SELECT * FROM avito_listings WHERE id=?", (listing_id,))
+            listing = all_rows[0] if all_rows else None
+        if listing:
+            title = title or str(listing.get("title") or "")
+            url = url or str(listing.get("url") or "")
+            price = price or str(listing.get("price") or "")
+            city = city or str(listing.get("city") or "")
+
+        if not title and not url:
+            return {"ok": False, "reason": "Не указано объявление: нужен listing_id или url/title"}
+
+        # формируем черновик заказа для панели
+        draft = {
+            "product": title[:200] or "Заказ с Авито",
+            "notes": f"Авито: {title} {url} {price} {city}".strip()[:1000],
+            "source": "avito",
+        }
+        # через панель: order/save требует confirmed, но навык сам с confirm
+        action, why = self.panel.find_action("order_save")
+        if action is None:
+            # если панель недоступна — возвращаем черновик для ручного сохранения
+            return {"ok": True, "draft": draft, "reason": "",
+                    "hint": f"Панель недоступна ({why}) — черновик для копирования",
+                    "panel_available": False}
+
+        res = self.panel.run_action(action, {"draft": draft}, confirmed=True)
+        if not res.get("ok"):
+            return {"ok": False, "reason": res.get("reason") or "Панель не создала заказ",
+                    "draft": draft}
+        return {"ok": True, "draft": draft, "result": res.get("result"), "reason": "",
+                "hint": "Черновик заказа создан в PrintFlow, проверьте и сохраните"}
+
+    def _avito_schedule(self, params: dict[str, Any]) -> dict[str, Any]:
+        watch_id = int(params.get("watch_id") or 0)
+        if not watch_id:
+            return {"ok": False, "reason": "Не указан watch_id"}
+        w = self.store.get_avito_watch(watch_id)
+        if not w:
+            return {"ok": False, "reason": f"Слежки {watch_id} нет"}
+        interval = int(params.get("interval_hours") or 0)
+        notify = params.get("notify")
+        if "notify" in params:
+            notify = bool(notify)
+        else:
+            notify = None
+        ok = self.store.set_avito_watch_schedule(watch_id, interval, notify)
+        return {"ok": bool(ok), "watch_id": watch_id, "interval_hours": interval,
+                "notify": notify, "reason": "" if ok else "Не удалось обновить расписание"}
+
+    def _avito_notify(self, params: dict[str, Any]) -> dict[str, Any]:
+        watch_id = int(params.get("watch_id") or 0)
+        if not watch_id:
+            return {"ok": False, "reason": "Не указан watch_id"}
+        enabled = bool(params.get("enabled")) if "enabled" in params else True
+        ok = self.store.set_avito_watch_schedule(watch_id, interval_hours=self.store.get_avito_watch(watch_id).get("check_interval_hours", 0) if self.store.get_avito_watch(watch_id) else 0,
+                                                 notify=enabled)
+        # второй вызов для notify отдельно если interval не трогаем
+        if not ok:
+            ok = self.store.set_avito_watch_schedule(watch_id, interval_hours=0, notify=enabled)
+        return {"ok": bool(ok), "watch_id": watch_id, "enabled": enabled, "reason": ""}
+
+    def _avito_dedup(self, params: dict[str, Any]) -> dict[str, Any]:
+        image_hash = str(params.get("image_hash") or "").strip()
+        limit = int(params.get("limit") or 20)
+        if image_hash:
+            rows = self.store.find_duplicate_listings_by_image(image_hash, limit)
+            return {"ok": True, "duplicates": rows, "count": len(rows),
+                    "image_hash": image_hash, "reason": ""}
+        groups = self.store.list_duplicate_image_groups(limit)
+        # для каждой группы подтянем примеры
+        detailed = []
+        for g in groups:
+            h = g.get("image_hash") or ""
+            items = self.store.find_duplicate_listings_by_image(h, 5)
+            detailed.append({"image_hash": h, "count": int(g.get("cnt") or len(items)), "items": items})
+        return {"ok": True, "groups": detailed, "count": len(detailed), "reason": "",
+                "hint": "Дубли по хешу первых 32КБ фото"}
+
+    # --- 18.16: ТГ календарь, шаблоны, хештеги, поиск, экспорт, статистика ---
+    def _tg_schedule(self, params: dict[str, Any]) -> dict[str, Any]:
+        draft_id = int(params.get("draft_id") or 0)
+        planned_at = str(params.get("planned_at") or "").strip()
+        chat = str(params.get("chat") or "").strip()
+        chk = tg_mod.schedule_post(draft_id, planned_at, chat)
+        if not chk.get("ok"):
+            return chk
+        saved = self.store.add_tg_schedule(draft_id, chk["planned_at"], chk["chat"])
+        return {"ok": True, "schedule": saved, "reason": "", "hint": "Пост запланирован"}
+
+    def _tg_schedules(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 30)
+        status = str(params.get("status") or "").strip()
+        rows = self.store.list_tg_schedules(limit, status)
+        return {"ok": True, "schedules": rows, "count": len(rows), "reason": ""}
+
+    def _tg_template_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        name = str(params.get("name") or "").strip()
+        tone = str(params.get("tone") or "").strip()
+        template = str(params.get("template") or "").strip()
+        chk = tg_mod.save_template(name, tone, template)
+        if not chk.get("ok"):
+            return chk
+        saved = self.store.add_tg_template(chk["name"], chk["tone"], chk["template_text"], chk["vars"])
+        return {"ok": True, "template": saved, "reason": ""}
+
+    def _tg_templates(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 50)
+        rows = self.store.list_tg_templates(limit)
+        # добавим встроенные
+        builtin = [{"id": 0, "name": b["name"], "tone": b["tone"], "template_text": b["template"],
+                    "vars": b["vars"], "builtin": True} for b in tg_mod.BUILTIN_TEMPLATES]
+        all_rows = builtin + rows
+        return {"ok": True, "templates": all_rows[:limit], "count": len(all_rows[:limit]), "reason": ""}
+
+    def _tg_template_apply(self, params: dict[str, Any]) -> dict[str, Any]:
+        template_id = int(params.get("template_id") or 0)
+        facts = str(params.get("facts") or "").strip()[:1000]
+        topic = str(params.get("topic") or "").strip()[:300]
+        tone = str(params.get("tone") or "").strip()
+
+        tmpl_text = ""
+        tmpl_tone = tone
+        if template_id:
+            if template_id < 0:
+                return {"ok": False, "reason": "Неверный template_id"}
+            # 0 — встроенные не в базе, берём по индексу? для простоты требуем id из базы
+            t = self.store.get_tg_template(template_id)
+            if not t:
+                # проверим встроенные по порядку
+                if 1 <= template_id <= len(tg_mod.BUILTIN_TEMPLATES):
+                    b = tg_mod.BUILTIN_TEMPLATES[template_id-1]
+                    tmpl_text = b["template"]
+                    tmpl_tone = b["tone"]
+                else:
+                    return {"ok": False, "reason": f"Шаблона {template_id} нет"}
+            else:
+                tmpl_text = str(t.get("template_text") or "")
+                tmpl_tone = t.get("tone") or tone
+
+        if not tmpl_text:
+            # если без id — берём первый встроенный
+            tmpl_text = tg_mod.BUILTIN_TEMPLATES[0]["template"]
+            tmpl_tone = tg_mod.BUILTIN_TEMPLATES[0]["tone"]
+
+        # подставляем переменные
+        vars_dict = {"topic": topic or "новинка", "fact": facts or "факты цеха",
+                     "detail": "Фото в карусели", "material": "PETG", "time": "4ч",
+                     "price": "от 300 ₽", "source": "запрос клиента", "action": "напечатали партию"}
+        applied = tg_mod.apply_template(tmpl_text, vars_dict)
+        if not applied.get("ok"):
+            return applied
+        text = applied["text"]
+        # создаём черновик
+        draft = self.store.add_tg_draft(topic or "Из шаблона", tmpl_tone, text, source="template")
+        return {"ok": True, "draft": draft, "draft_id": draft["id"], "text": text,
+                "missing": applied.get("missing") or [], "reason": ""}
+
+    def _tg_hashtags(self, params: dict[str, Any]) -> dict[str, Any]:
+        txt = str(params.get("text") or "").strip()
+        limit = int(params.get("limit") or 6)
+        return tg_mod.generate_hashtags(txt, limit)
+
+    def _tg_search(self, params: dict[str, Any]) -> dict[str, Any]:
+        query = str(params.get("query") or "").strip()
+        limit = int(params.get("limit") or 20)
+        rows = self.store.search_tg_drafts(query, limit)
+        return {"ok": True, "results": rows, "count": len(rows), "query": query, "reason": ""}
+
+    def _tg_export(self, params: dict[str, Any]) -> dict[str, Any]:
+        status = str(params.get("status") or "").strip()
+        limit = int(params.get("limit") or 100)
+        fmt = str(params.get("format") or "md").strip()
+        rows = self.store.export_tg_drafts(status, limit)
+        res = tg_mod.export_drafts_text(rows, fmt)
+        res["drafts"] = rows
+        return res
+
+    def _tg_stats(self, _params: dict[str, Any]) -> dict[str, Any]:
+        stats = self.store.tg_ideas_stats()
+        return {"ok": True, "stats": stats, "reason": "",
+                "hint": "Конверсия идей→черновики→посты"}
+
+    def _tg_idea_save(self, params: dict[str, Any]) -> dict[str, Any]:
+        context = str(params.get("context") or "").strip()[:600]
+        idea = str(params.get("idea") or params.get("idea_text") or "").strip()
+        if not idea:
+            return {"ok": False, "reason": "Пустая идея"}
+        saved = self.store.add_tg_idea(context, idea)
+        return {"ok": True, "idea": saved, "reason": ""}
+
+    def _tg_ideas_history(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 30)
+        status = str(params.get("status") or "").strip()
+        rows = self.store.list_tg_ideas(limit, status)
+        stats = self.store.tg_ideas_stats()
+        return {"ok": True, "ideas": rows, "count": len(rows), "stats": stats, "reason": ""}
 
     # --- мета (И178, И180) -------------------------------------------------
     def _agent_skills(self, _params: dict[str, Any]) -> dict[str, Any]:

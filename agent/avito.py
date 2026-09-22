@@ -1,4 +1,4 @@
-"""Авито-слежка ассистента (18.15): поиск, разбор, варианты ответа.
+"""Авито-слежка ассистента (18.16): поиск, разбор, варианты ответа, архив, дедуп по фото.
 
 Почему этот модуль внутри агента, а не в коннекторе.
 
@@ -14,11 +14,14 @@
     верстка Авито меняется, поэтому парсер ищет несколько признаков и
     возвращает то, что нашёл, с причиной, если ничего не нашлось;
   * модель — как в `model.py`: если рантайм недоступен, варианты ответа
-    собираются из шаблонов, а не падают.
+    собираются из шаблонов, а не падают;
+  * фото — для дедупа (И196) качается только первые 32КБ, хеш считается
+    локально, без внешних библиотек.
 """
 
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 import urllib.parse
@@ -27,9 +30,10 @@ from html.parser import HTMLParser
 from typing import Any
 
 AVITO_BASE = "https://www.avito.ru"
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NOZZA-Assistant/18.15"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NOZZA-Assistant/18.16"
 TIMEOUT_SEC = 15
 MAX_HTML = 2 * 1024 * 1024
+MAX_IMAGE_BYTES = 32 * 1024
 
 # ---------------------------------------------------------------------------
 # Сеть
@@ -99,7 +103,8 @@ class _AvitoParser(HTMLParser):
         if marker == "item" or ("data-item-id" in d and tag == "div"):
             if self._cur is None:
                 self._cur = {"external_id": d.get("data-item-id") or d.get("id") or "",
-                             "title": "", "price": "", "url": "", "city": "", "snippet": ""}
+                             "title": "", "price": "", "url": "", "city": "", "snippet": "",
+                             "image_url": "", "image_hash": "", "price_int": 0}
                 self._item_depth = self._depth
                 self._buf = ""
         if self._cur is not None:
@@ -131,6 +136,11 @@ class _AvitoParser(HTMLParser):
                 if not self._cur["city"]:
                     # will capture in data
                     self._cur["_need_city"] = True  # type: ignore
+            # image — ищем img src
+            if tag == "img" and not self._cur.get("image_url"):
+                src = d.get("src") or d.get("data-src") or ""
+                if src and ("avito" in src or src.startswith("http")):
+                    self._cur["image_url"] = src[:600]
         self._depth += 1
 
     def handle_endtag(self, tag: str) -> None:
@@ -237,8 +247,61 @@ def parse_listings(html_text: str) -> list[dict[str, Any]]:
         it.setdefault("city", "")
         it.setdefault("snippet", "")
         it.setdefault("external_id", it.get("url") or it.get("title") or "")
+        it.setdefault("image_url", "")
+        it.setdefault("image_hash", "")
+        it["price_int"] = _price_to_int(it.get("price", ""))
         uniq.append(it)
     return uniq[:50]
+
+
+def _price_to_int(price: str) -> int:
+    """Выделить число из строки цены."""
+    txt = str(price or "")
+    digits = re.sub(r"[^\d]", "", txt)
+    try:
+        return int(digits) if digits else 0
+    except ValueError:
+        return 0
+
+
+def image_hash_from_bytes(data: bytes) -> str:
+    """Хеш первых 32КБ картинки — для дедупа (И196)."""
+    if not data:
+        return ""
+    # берём первые 32КБ и считаем sha256, первые 16 символов
+    chunk = data[:MAX_IMAGE_BYTES]
+    return hashlib.sha256(chunk).hexdigest()[:16]
+
+
+def fetch_image_hash(image_url: str, timeout: float = 10.0) -> tuple[str, str]:
+    """Скачать начало картинки и посчитать хеш. Возвращает (hash, reason)."""
+    url = str(image_url or "").strip()
+    if not url:
+        return "", "Пустой URL картинки"
+    if not url.startswith(("http://", "https://")):
+        return "", "URL картинки не http/https"
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            data = resp.read(MAX_IMAGE_BYTES)
+    except Exception as exc:  # noqa: BLE001
+        return "", f"Картинка не скачалась: {exc.__class__.__name__}"
+    return image_hash_from_bytes(data), ""
+
+
+def detect_duplicate_by_image(listings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Найти группы с одинаковым image_hash (уже посчитанным)."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in listings:
+        h = str(item.get("image_hash") or "").strip()
+        if not h:
+            continue
+        groups.setdefault(h, []).append(item)
+    dups = []
+    for h, items in groups.items():
+        if len(items) > 1:
+            dups.append({"image_hash": h, "count": len(items), "items": items})
+    return sorted(dups, key=lambda g: -g["count"])
 
 
 def build_search_url(query: str, city: str = "", category: str = "",

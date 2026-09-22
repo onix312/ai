@@ -1,4 +1,4 @@
-"""Реестр навыков личного ассистента (18.15): навык — это данные, а не ветка кода.
+"""Реестр навыков личного ассистента (18.16): навык — это данные, а не ветка кода.
 
 Зачем реестр, если можно написать `if name == "files.search"`.
 
@@ -81,7 +81,7 @@ _LEARNED_RE = re.compile(r"^my\.[a-z][a-z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Реестр: двадцать семь живых навыков из каталога `docs/НАВЫКИ.md`
+# Реестр: сорок два живых навыка из каталога `docs/НАВЫКИ.md`
 # ---------------------------------------------------------------------------
 #
 # Объявлены только те навыки, которые исполняются. Навык «в планах» живёт в
@@ -303,7 +303,146 @@ SKILLS: dict[str, dict[str, Any]] = {
         "requires": ("network", "sqlite", "tg"), "ideas": ("И188",),
         "doc": "Берёт текст из черновика или из параметра, отправляет в чат. Токен из настроек агента.",
     },
+    # --- 18.16: архив переписок, связка, расписание, дедуп (И191, И193, И195-И197) ----
+    "avito.threads": {
+        "title": "Архив переписок Авито",
+        "description": "Список сохранённых переписок с Авито: текст, варианты ответа, статус.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int", "status": "text"},
+        "requires": ("sqlite",), "ideas": ("И191",),
+        "doc": "Переписки сохраняются локально, только текст для копирования, без авто-отправки.",
+    },
+    "avito.thread_save": {
+        "title": "Сохранить переписку Авито",
+        "description": "Сохранить текст переписки и варианты ответа в архив.",
+        "host": "agent", "risk": "own",
+        "params": {"thread": "text", "intent": "text", "city": "text", "status": "text"},
+        "requires": ("sqlite",), "ideas": ("И191",),
+        "doc": "Архив — своя база ассистента, без авто-ответа, только для копирования.",
+    },
+    "avito.to_order": {
+        "title": "Объявление в заказ",
+        "description": "Создать черновик заказа PrintFlow из объявления Авито.",
+        "host": "agent", "risk": "write",
+        "params": {"listing_id": "int", "url": "text", "title": "text", "price": "text", "city": "text"},
+        "requires": ("panel", "sqlite"), "ideas": ("И193",),
+        "doc": "Берёт данные объявления и через панель создаёт черновик заказа. Требует подтверждения.",
+    },
+    "avito.schedule": {
+        "title": "Расписание проверки Авито",
+        "description": "Задать интервал автопроверки слежки и уведомление в трее.",
+        "host": "agent", "risk": "own",
+        "params": {"watch_id": "int", "interval_hours": "int", "notify": "bool"},
+        "requires": ("sqlite",), "ideas": ("И195", "И197"),
+        "doc": "Интервал в часах, 0 — выкл. Уведомление — флаг для UI/трея.",
+    },
+    "avito.notify": {
+        "title": "Уведомления Авито",
+        "description": "Включить/выключить уведомления в трее для слежки.",
+        "host": "agent", "risk": "own",
+        "params": {"watch_id": "int", "enabled": "bool"},
+        "requires": ("sqlite",), "ideas": ("И197",),
+        "doc": "Флаг в базе, панель показывает бейдж о новых.",
+    },
+    "avito.dedup": {
+        "title": "Дубли Авито по фото",
+        "description": "Найти объявления с одинаковым фото-хешем.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int", "image_hash": "text"},
+        "requires": ("sqlite",), "ideas": ("И196",),
+        "doc": "Хеш считается из первых 32КБ картинки локально, без ML.",
+    },
+    # --- 18.16: ТГ календарь, шаблоны, хештеги, поиск, экспорт, статистика (И198, И200-И205) ----
+    "tg.schedule": {
+        "title": "Запланировать пост ТГ",
+        "description": "Добавить черновик в календарь публикаций.",
+        "host": "agent", "risk": "own",
+        "params": {"draft_id": "int", "planned_at": "text", "chat": "text"},
+        "requires": ("sqlite",), "ideas": ("И198",),
+        "doc": "Дата YYYY-MM-DD или YYYY-MM-DD HH:MM, статус planned.",
+    },
+    "tg.schedules": {
+        "title": "Календарь ТГ-постов",
+        "description": "Список запланированных постов.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int", "status": "text"},
+        "requires": ("sqlite",), "ideas": ("И198",),
+        "doc": "Читает tg_schedule, показывает план и факты публикации.",
+    },
+    "tg.template_save": {
+        "title": "Сохранить шаблон ТГ",
+        "description": "Сохранить шаблон поста с переменными {fact} {topic} и т.д.",
+        "host": "agent", "risk": "own",
+        "params": {"name": "text", "tone": "text", "template": "text"},
+        "requires": ("sqlite",), "ideas": ("И200",),
+        "doc": "Переменные в фигурных скобках, тон опционально.",
+    },
+    "tg.templates": {
+        "title": "Шаблоны ТГ-постов",
+        "description": "Список шаблонов постов.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И200",),
+        "doc": "Шаблоны из своей базы + встроенные.",
+    },
+    "tg.template_apply": {
+        "title": "Пост из шаблона",
+        "description": "Применить шаблон к фактам и создать черновик.",
+        "host": "agent", "risk": "own",
+        "params": {"template_id": "int", "facts": "text", "topic": "text", "tone": "text"},
+        "requires": ("sqlite", "tg"), "ideas": ("И200",),
+        "doc": "Берёт шаблон, подставляет переменные, сохраняет черновик.",
+    },
+    "tg.hashtags": {
+        "title": "Хештеги для ТГ",
+        "description": "Подобрать хештеги к тексту поста локально.",
+        "host": "agent", "risk": "read",
+        "params": {"text": "text", "limit": "int"},
+        "requires": (), "ideas": ("И202",),
+        "doc": "Словарь цеха, без внешних API, без модели.",
+    },
+    "tg.search": {
+        "title": "Поиск по черновикам ТГ",
+        "description": "Найти черновики по словам в теме и тексте.",
+        "host": "agent", "risk": "read",
+        "params": {"query": "text", "limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И203",),
+        "doc": "LIKE по lower(topic) и lower(text), без FTS5 чтобы без зависимостей.",
+    },
+    "tg.export": {
+        "title": "Экспорт черновиков ТГ",
+        "description": "Выгрузить черновики в md/json/txt для ручной правки.",
+        "host": "agent", "risk": "read",
+        "params": {"status": "text", "limit": "int", "format": "oneof:md|json|txt"},
+        "requires": ("sqlite",), "ideas": ("И204",),
+        "doc": "Возвращает текст, файл сохраняет панель/человек.",
+    },
+    "tg.stats": {
+        "title": "Статистика ТГ",
+        "description": "Конверсия идей → черновики → посты, календарь.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И205",),
+        "doc": "Считает из tg_ideas, tg_drafts, tg_schedule.",
+    },
+    "tg.idea_save": {
+        "title": "Сохранить идею ТГ",
+        "description": "Сохранить идею поста в историю для подсчёта конверсии.",
+        "host": "agent", "risk": "own",
+        "params": {"context": "text", "idea": "text"},
+        "requires": ("sqlite",), "ideas": ("И205",),
+        "doc": "История идей в своей базе, связывается с черновиком при создании.",
+    },
+    "tg.ideas_history": {
+        "title": "История идей ТГ",
+        "description": "Список сохранённых идей с их статусом.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int", "status": "text"},
+        "requires": ("sqlite",), "ideas": ("И205",),
+        "doc": "Идеи, которые превратились в черновики — used, остальные new.",
+    },
 }
+
 
 
 # ---------------------------------------------------------------------------
@@ -502,7 +641,10 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
              "question", "query", "skill", "path", "order", "kind", "action",
              "city", "category", "max_price", "min_price", "enabled",
              "watch_id", "only_new", "thread", "intent", "topic", "tone",
-             "facts", "source", "context", "status", "draft_id", "chat", "text")
+             "facts", "source", "context", "status", "draft_id", "chat", "text",
+             "interval_hours", "notify", "image_hash", "planned_at", "name",
+             "template", "template_id", "idea", "format", "listing_id", "price",
+             "url", "title", "replies")
 
 
 # ---------------------------------------------------------------------------

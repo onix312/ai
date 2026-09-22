@@ -262,7 +262,24 @@ class JournalTests(unittest.TestCase):
                           ("POST", "/api/assistant/tg/draft"),
                           ("GET", "/api/assistant/tg/drafts"),
                           ("POST", "/api/assistant/tg/ideas"),
-                          ("POST", "/api/assistant/tg/post")}, found)
+                          ("POST", "/api/assistant/tg/post"),
+                          ("GET", "/api/assistant/avito/threads"),
+                          ("POST", "/api/assistant/avito/thread/save"),
+                          ("POST", "/api/assistant/avito/to-order"),
+                          ("POST", "/api/assistant/avito/schedule"),
+                          ("POST", "/api/assistant/avito/notify"),
+                          ("GET", "/api/assistant/avito/dedup"),
+                          ("POST", "/api/assistant/tg/schedule"),
+                          ("GET", "/api/assistant/tg/schedules"),
+                          ("POST", "/api/assistant/tg/template/save"),
+                          ("GET", "/api/assistant/tg/templates"),
+                          ("POST", "/api/assistant/tg/template/apply"),
+                          ("POST", "/api/assistant/tg/hashtags"),
+                          ("GET", "/api/assistant/tg/search"),
+                          ("GET", "/api/assistant/tg/export"),
+                          ("GET", "/api/assistant/tg/stats"),
+                          ("POST", "/api/assistant/tg/idea/save"),
+                          ("GET", "/api/assistant/tg/ideas/history")}, found)
 
 
 class PageTests(unittest.TestCase):
