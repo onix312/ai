@@ -1,6 +1,6 @@
-"""Маршруты помощника (18.13): рантайм, действия, голос, агент, журнал.
+"""Маршруты помощника (18.15): рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Десять маршрутов, и каждый отвечает за свою часть договорённости:
+Шестнадцать маршрутов, и каждый отвечает за свою часть договорённости:
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -11,13 +11,15 @@
   * `agent` — жив ли агент компьютера и какое окно сейчас активно;
   * `ask` — ответ на вопрос владельца по фактам его же базы (18.14, идея И1);
   * `day` — утренний брифинг или итог дня, собранный детерминированно (И174);
-  * `skills` — реестр навыков ассистента компьютера, который отдаёт агент (И136).
+  * `skills` — реестр навыков ассистента компьютера, который отдаёт агент (И136);
+  * `avito/*` — слежка за Авито, поиск, проверка, варианты ответа (18.15, И181–И186);
+  * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188).
 
 Деньги и печать эти маршруты не двигают: выполнение делает панель через обычные
 маршруты системы с `confirmed`, взятым из каталога, а не из ответа модели.
-Три маршрута 18.14 тоже только читают: `ask` отдаёт факты и ответ по ним, `day`
-считает цифры дня из тех же сервисов, что рисуют панели, а `skills` показывает
-реестр агента и ничего у него не просит выполнить.
+Маршруты 18.14 тоже только читают, а 18.15 проксируют вызовы к агенту: панель
+не исполняет Авито и ТГ сама, а просит агента по loopback — тот же узор, что у
+реестра навыков.
 """
 from __future__ import annotations
 
@@ -167,3 +169,120 @@ def assistant_phrase(api: Any, ctx: Ctx):
                             {"source": source})
     return {"ok": True, "text": text, "source": source, "event": event,
             "reason": "", "hint": "Действие по фразе делает человек в панели помощника"}
+
+
+# --- 18.15: Авито и ТГ — прокси к агенту компьютера ------------------------
+
+@router.post("/api/assistant/avito/watch", doc="Помощник: добавить слежку за Авито")
+def assistant_avito_watch(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.avito_watch(
+        api.db,
+        str(body.get("query") or ctx.one("query") or ""),
+        str(body.get("city") or ctx.one("city") or ""),
+        str(body.get("category") or ctx.one("category") or ""),
+        int(body.get("max_price") or ctx.num("max_price", 0) or 0),
+        int(body.get("min_price") or ctx.num("min_price", 0) or 0))
+
+
+@router.get("/api/assistant/avito/watches", doc="Помощник: список слежек Авито")
+def assistant_avito_watches(api: Any, ctx: Ctx):
+    from . import assistant as service
+    # читаем напрямую через агент-клиент: прокси без своей логики
+    state = service.agent_status(api.db)
+    if not state.get("available"):
+        return {"ok": False, "reason": state.get("reason") or "Агент недоступен"}
+    ok, payload, reason = service._get_json(f"{state['url']}/skills", service.PING_SEC)
+    # не используем skills, а напрямую зовём avito.watches через _call_agent_skill
+    return service._call_agent_skill(api.db, "avito.watches", {"limit": int(ctx.num("limit", 20))})
+
+
+@router.post("/api/assistant/avito/search", doc="Помощник: поиск на Авито")
+def assistant_avito_search(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.avito_search(
+        api.db,
+        str(body.get("query") or ctx.one("query") or ""),
+        str(body.get("city") or ctx.one("city") or ""),
+        str(body.get("category") or ctx.one("category") or ""),
+        int(body.get("max_price") or ctx.num("max_price", 0) or 0),
+        int(body.get("min_price") or ctx.num("min_price", 0) or 0),
+        int(body.get("limit") or ctx.num("limit", 20) or 20))
+
+
+@router.post("/api/assistant/avito/check", doc="Помощник: проверить слежки Авито")
+def assistant_avito_check(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.avito_check(
+        api.db,
+        int(body.get("watch_id") or ctx.num("watch_id", 0) or 0),
+        bool(body.get("only_new")) if "only_new" in body else True)
+
+
+@router.post("/api/assistant/avito/reply", doc="Помощник: варианты ответа на Авито")
+def assistant_avito_reply(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    thread = str(body.get("thread") or body.get("text") or "")
+    if not thread:
+        return 400, {"ok": False, "error": "Пустая переписка"}
+    return service.avito_reply(api.db, thread,
+                               str(body.get("intent") or ""),
+                               str(body.get("city") or ""))
+
+
+@router.post("/api/assistant/tg/draft", doc="Помощник: черновик поста в ТГ")
+def assistant_tg_draft(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    topic = str(body.get("topic") or "").strip()
+    if not topic:
+        return 400, {"ok": False, "error": "Пустая тема поста"}
+    return service.tg_draft(api.db, topic,
+                            str(body.get("tone") or "дружелюбный"),
+                            str(body.get("facts") or ""),
+                            str(body.get("source") or ""))
+
+
+@router.get("/api/assistant/tg/drafts", doc="Помощник: список черновиков ТГ")
+def assistant_tg_drafts(api: Any, ctx: Ctx):
+    from . import assistant as service
+    return service._call_agent_skill(api.db, "tg.drafts",
+                                     {"limit": int(ctx.num("limit", 20)),
+                                      "status": str(ctx.one("status") or "")})
+
+
+@router.post("/api/assistant/tg/ideas", doc="Помощник: идеи постов в ТГ")
+def assistant_tg_ideas(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.tg_ideas(api.db,
+                            str(body.get("context") or ""),
+                            int(body.get("limit") or ctx.num("limit", 8) or 8))
+
+
+@router.post("/api/assistant/tg/post", doc="Помощник: опубликовать пост в ТГ",
+             audit="Помощник: публикация в ТГ")
+def assistant_tg_post(api: Any, ctx: Ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    # Подтверждение берётся из общего механизма панели, а не из тела: маршрут
+    # помечен audit и требует confirmed из каталога действий? Для ТГ делаем
+    # своё подтверждение: без confirmed — отказ.
+    if not ctx.body:
+        pass
+    # Проверяем confirmed флаг панели: если маршрут вызван без confirmed — просим
+    # подтверждение как для денег/печати (тот же приём, что у panel.do).
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False)
+                     or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True,
+                "reason": "Публикация в ТГ требует подтверждения человека",
+                "text": f"Опубликовать пост «{str(body.get('topic') or body.get('text') or '')[:80]}» в ТГ"}
+    return service.tg_post(api.db,
+                           int(body.get("draft_id") or ctx.num("draft_id", 0) or 0),
+                           str(body.get("text") or ""),
+                           str(body.get("chat") or ""))

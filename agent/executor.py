@@ -1,4 +1,4 @@
-"""Исполнение навыков ассистента (18.14).
+"""Исполнение навыков ассистента (18.15).
 
 Порядок один для всех навыков, и именно он держит договорённость с владельцем:
 
@@ -14,13 +14,17 @@
 
 Отказ здесь — нормальный ответ, а не исключение: у каждого отказа есть
 `reason`, который можно показать человеку и который объясняет `agent.why`.
+
+18.15: добавлены Авито-слежка (И181, И183, И185, И186) и ТГ-посты (И182, И184).
 """
+
 from __future__ import annotations
 
 import pathlib
 from typing import Any, Callable
 
-from . import capabilities, config, documents, fileops, model, skills
+from . import avito as avito_mod
+from . import capabilities, config, documents, fileops, model, skills, tg as tg_mod
 from .panel_client import Client
 from .store import Store
 
@@ -48,6 +52,18 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         return f"{title}: сохранить навык «{skill_name or 'без имени'}»"
     if name == "files.index":
         return f"{title}: перечитать папки {params.get('folders') or 'из настроек'}"
+    if name == "avito.watch":
+        return f"{title}: «{params.get('query') or '—'}» в {params.get('city') or 'везде'} до {params.get('max_price') or '∞'} ₽"
+    if name == "avito.check":
+        wid = params.get("watch_id")
+        return f"{title}: проверить {'слежку ' + str(wid) if wid else 'все слежки'}"
+    if name == "tg.draft":
+        return f"{title}: «{params.get('topic') or '—'}» тон {params.get('tone') or 'дружелюбный'}"
+    if name == "tg.post":
+        did = params.get("draft_id")
+        return f"{title}: черновик {did}" if did else f"{title}: «{str(params.get('text') or '')[:60]}»"
+    if name == "avito.reply":
+        return f"{title}: ответ на «{str(params.get('thread') or '')[:60]}»"
     shown = ", ".join(f"{key}=«{str(value)[:60]}»" for key, value in list(params.items())[:3])
     return f"{title}" + (f": {shown}" if shown else "")
 
@@ -180,6 +196,17 @@ class Runner:
             "agent.why": self._agent_why,
             "agent.journal": self._agent_journal,
             "agent.learn": self._agent_learn,
+            # 18.15: Авито и ТГ
+            "avito.watch": self._avito_watch,
+            "avito.watches": self._avito_watches,
+            "avito.search": self._avito_search,
+            "avito.check": self._avito_check,
+            "avito.reply": self._avito_reply,
+            "avito.listings": self._avito_listings,
+            "tg.draft": self._tg_draft,
+            "tg.drafts": self._tg_drafts,
+            "tg.ideas": self._tg_ideas,
+            "tg.post": self._tg_post,
         }
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
@@ -408,6 +435,180 @@ class Runner:
                       skipped=plan["skipped"], target=plan["folder"])
         return result
 
+    # --- Авито (И181, И183, И185, И186) ------------------------------------
+    def _avito_watch(self, params: dict[str, Any]) -> dict[str, Any]:
+        query = str(params.get("query") or "").strip()
+        if not query:
+            return {"ok": False, "reason": "Пустой запрос: что искать на Авито?"}
+        city = str(params.get("city") or "").strip()[:120]
+        category = str(params.get("category") or "").strip()[:120]
+        max_price = int(params.get("max_price") or 0)
+        min_price = int(params.get("min_price") or 0)
+        enabled = bool(params.get("enabled")) if "enabled" in params else True
+        if max_price and min_price and max_price < min_price:
+            return {"ok": False, "reason": "max_price меньше min_price"}
+        watch = self.store.add_avito_watch(query, city, category, max_price, min_price, enabled)
+        return {"ok": True, "watch": watch, "reason": "",
+                "hint": "Слежка сохранена. Проверьте её через avito.check"}
+
+    def _avito_watches(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 20)
+        watches = self.store.list_avito_watches(limit)
+        return {"ok": True, "watches": watches, "count": len(watches), "reason": "",
+                "hint": "Список слежек из своей базы"}
+
+    def _avito_search(self, params: dict[str, Any]) -> dict[str, Any]:
+        query = str(params.get("query") or "").strip()
+        if not query:
+            return {"ok": False, "reason": "Пустой запрос"}
+        city = str(params.get("city") or "").strip()
+        category = str(params.get("category") or "").strip()
+        max_price = int(params.get("max_price") or 0)
+        min_price = int(params.get("min_price") or 0)
+        limit = int(params.get("limit") or 20)
+        result = avito_mod.search(query, city, category, max_price, min_price, limit)
+        # не сохраняем в базу — это разовый поиск
+        return result
+
+    def _avito_check(self, params: dict[str, Any]) -> dict[str, Any]:
+        watch_id = int(params.get("watch_id") or 0)
+        only_new = bool(params.get("only_new")) if "only_new" in params else True
+
+        watches: list[dict[str, Any]]
+        if watch_id:
+            w = self.store.get_avito_watch(watch_id)
+            if not w:
+                return {"ok": False, "reason": f"Слежки {watch_id} нет"}
+            watches = [w]
+        else:
+            watches = [w for w in self.store.list_avito_watches(100) if w.get("enabled")]
+
+        if not watches:
+            return {"ok": True, "checked": 0, "new": 0, "listings": [], "reason": "Нет активных слежек"}
+
+        all_new: list[dict[str, Any]] = []
+        total_checked = 0
+        total_new = 0
+        for w in watches:
+            res = avito_mod.search(str(w.get("query") or ""), str(w.get("city") or ""),
+                                   str(w.get("category") or ""),
+                                   int(w.get("max_price") or 0),
+                                   int(w.get("min_price") or 0), 30)
+            total_checked += 1
+            if not res.get("ok"):
+                continue
+            listings = res.get("listings") or []
+            _total, new_cnt = self.store.save_avito_listings(int(w["id"]), listings)
+            self.store.update_avito_watch(int(w["id"]), last_count=new_cnt)
+            total_new += new_cnt
+            if only_new:
+                # только новые для ответа
+                saved = self.store.list_avito_listings(int(w["id"]), 50, only_new=True)
+                all_new.extend(saved)
+            else:
+                all_new.extend(listings)
+
+        # если only_new и ничего нового — отдаём последние
+        if only_new and not all_new:
+            return {"ok": True, "checked": total_checked, "new": 0,
+                    "listings": [], "reason": "Нового нет — все объявления уже видели"}
+
+        return {"ok": True, "checked": total_checked, "new": total_new,
+                "listings": all_new[:100], "count": len(all_new[:100]), "reason": "",
+                "hint": f"Проверено {total_checked}, нового {total_new}"}
+
+    def _avito_reply(self, params: dict[str, Any]) -> dict[str, Any]:
+        thread = str(params.get("thread") or "").strip()
+        if not thread:
+            return {"ok": False, "reason": "Пустая переписка: что отвечаем?"}
+        intent = str(params.get("intent") or "").strip()[:300]
+        city = str(params.get("city") or "").strip()[:120]
+        state = model.status()
+        result = avito_mod.suggest_replies(thread, intent, city,
+                                           model_status=state if state.get("ok") else None)
+        return result
+
+    def _avito_listings(self, params: dict[str, Any]) -> dict[str, Any]:
+        watch_id = int(params.get("watch_id") or 0)
+        limit = int(params.get("limit") or 30)
+        only_new = bool(params.get("only_new")) if "only_new" in params else False
+        rows = self.store.list_avito_listings(watch_id, limit, only_new)
+        return {"ok": True, "listings": rows, "count": len(rows), "reason": "",
+                "watch_id": watch_id, "only_new": only_new}
+
+    # --- ТГ (И182, И184) ---------------------------------------------------
+    def _tg_draft(self, params: dict[str, Any]) -> dict[str, Any]:
+        topic = str(params.get("topic") or "").strip()
+        if not topic:
+            return {"ok": False, "reason": "Пустая тема поста"}
+        tone = str(params.get("tone") or "дружелюбный").strip().lower()
+        facts = str(params.get("facts") or "").strip()[:1000]
+        source = str(params.get("source") or "").strip()[:600]
+
+        # контекст из базы: последние файлы и знания
+        if not facts:
+            try:
+                recent = self.store.documents(5)
+                facts = "Недавно: " + ", ".join(r.get("title") or "" for r in recent[:3])
+            except Exception:
+                facts = ""
+
+        state = model.status()
+        res = tg_mod.draft_post(topic, tone, facts, source,
+                                model_status=state if state.get("ok") else None)
+        if not res.get("ok"):
+            return res
+        saved = self.store.add_tg_draft(res.get("topic") or topic,
+                                        res.get("tone") or tone,
+                                        res.get("text") or "", source)
+        res["draft"] = saved
+        res["draft_id"] = saved["id"]
+        return res
+
+    def _tg_drafts(self, params: dict[str, Any]) -> dict[str, Any]:
+        limit = int(params.get("limit") or 20)
+        status = str(params.get("status") or "").strip()[:20]
+        rows = self.store.list_tg_drafts(limit, status)
+        return {"ok": True, "drafts": rows, "count": len(rows), "reason": "",
+                "hint": "Черновики из своей базы — публикуете руками в ТГ"}
+
+    def _tg_ideas(self, params: dict[str, Any]) -> dict[str, Any]:
+        context = str(params.get("context") or "").strip()[:600]
+        limit = int(params.get("limit") or 8)
+        if not context:
+            try:
+                docs = self.store.documents(5)
+                context = "Печатали: " + ", ".join(d.get("title") or "" for d in docs[:3])
+            except Exception:
+                context = ""
+        state = model.status()
+        res = tg_mod.generate_ideas(context, limit,
+                                    model_status=state if state.get("ok") else None)
+        return res
+
+    def _tg_post(self, params: dict[str, Any]) -> dict[str, Any]:
+        draft_id = int(params.get("draft_id") or 0)
+        text = str(params.get("text") or "").strip()
+        chat = str(params.get("chat") or "").strip()
+
+        if draft_id:
+            draft = self.store.get_tg_draft(draft_id)
+            if not draft:
+                return {"ok": False, "reason": f"Черновика {draft_id} нет"}
+            if not text:
+                text = str(draft.get("text") or "")
+        if not text:
+            return {"ok": False, "reason": "Пустой текст поста"}
+        # постим
+        res = tg_mod.post_to_telegram(text, chat_id=chat)
+        if not res.get("ok"):
+            return {"ok": False, "reason": res.get("reason") or "Не удалось отправить в ТГ"}
+        if draft_id:
+            self.store.update_tg_draft_status(draft_id, "posted")
+        return {"ok": True, "reason": "", "message_id": res.get("message_id"),
+                "chat": chat or "из настроек", "text": text[:500],
+                "hint": "Пост отправлен в ТГ-канал"}
+
     # --- мета (И178, И180) -------------------------------------------------
     def _agent_skills(self, _params: dict[str, Any]) -> dict[str, Any]:
         rows = self.catalog()
@@ -475,11 +676,14 @@ def _summary(result: dict[str, Any]) -> str:
     """Короткая подпись успеха для журнала: что именно получилось."""
     for key, label in (("count", "позиций"), ("moved", "перемещено"),
                        ("indexed", "проиндексировано"), ("saved", "сохранено"),
-                       ("ready", "доступно")):
+                       ("ready", "доступно"), ("new", "нового"),
+                       ("checked", "проверено")):
         if key in result:
             return f"{label}: {result[key]}"
     if result.get("answer"):
         return str(result["answer"])[:120]
+    if result.get("text"):
+        return str(result["text"])[:120]
     if result.get("actions"):
         return f"действий панели: {len(result['actions'])}"
     return "готово"

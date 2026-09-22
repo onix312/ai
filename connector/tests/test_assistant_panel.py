@@ -253,7 +253,16 @@ class JournalTests(unittest.TestCase):
                           ("POST", "/api/assistant/journal"),
                           ("POST", "/api/assistant/ask"),
                           ("GET", "/api/assistant/day"),
-                          ("GET", "/api/assistant/skills")}, found)
+                          ("GET", "/api/assistant/skills"),
+                          ("POST", "/api/assistant/avito/watch"),
+                          ("GET", "/api/assistant/avito/watches"),
+                          ("POST", "/api/assistant/avito/search"),
+                          ("POST", "/api/assistant/avito/check"),
+                          ("POST", "/api/assistant/avito/reply"),
+                          ("POST", "/api/assistant/tg/draft"),
+                          ("GET", "/api/assistant/tg/drafts"),
+                          ("POST", "/api/assistant/tg/ideas"),
+                          ("POST", "/api/assistant/tg/post")}, found)
 
 
 class PageTests(unittest.TestCase):

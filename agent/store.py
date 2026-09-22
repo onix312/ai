@@ -78,6 +78,39 @@ SCHEMA = (
         name TEXT PRIMARY KEY,
         payload TEXT NOT NULL,
         learned_at TEXT NOT NULL)""",
+    # --- 18.15: Авито и ТГ ------------------------------------------------
+    """CREATE TABLE IF NOT EXISTS avito_watches(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        query TEXT NOT NULL,
+        city TEXT DEFAULT '',
+        category TEXT DEFAULT '',
+        max_price INTEGER DEFAULT 0,
+        min_price INTEGER DEFAULT 0,
+        enabled INTEGER DEFAULT 1,
+        last_checked TEXT DEFAULT '',
+        last_count INTEGER DEFAULT 0)""",
+    """CREATE TABLE IF NOT EXISTS avito_listings(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        watch_id INTEGER NOT NULL,
+        external_id TEXT DEFAULT '',
+        title TEXT NOT NULL,
+        price TEXT DEFAULT '',
+        url TEXT DEFAULT '',
+        city TEXT DEFAULT '',
+        snippet TEXT DEFAULT '',
+        seen_at TEXT NOT NULL,
+        is_new INTEGER DEFAULT 1)""",
+    "CREATE INDEX IF NOT EXISTS avito_listings_watch ON avito_listings(watch_id)",
+    "CREATE INDEX IF NOT EXISTS avito_listings_external ON avito_listings(external_id)",
+    """CREATE TABLE IF NOT EXISTS tg_drafts(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        tone TEXT DEFAULT '',
+        text TEXT NOT NULL,
+        source TEXT DEFAULT '',
+        status TEXT DEFAULT 'draft')""",
 )
 
 
@@ -312,6 +345,142 @@ class Store:
     def forget_skill(self, name: str) -> bool:
         return self._run("DELETE FROM skills WHERE name=?", (str(name),)).rowcount > 0
 
+    # --- Авито: слежка (И181) ---------------------------------------------
+    def add_avito_watch(self, query: str, city: str = "", category: str = "",
+                        max_price: int = 0, min_price: int = 0,
+                        enabled: bool = True) -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO avito_watches(at,query,city,category,max_price,min_price,enabled,last_checked,last_count)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (at, " ".join(str(query).split())[:300], str(city or "")[:120],
+             str(category or "")[:120], int(max_price or 0), int(min_price or 0),
+             1 if enabled else 0, "", 0))
+        return {"id": cursor.lastrowid, "at": at, "query": str(query)[:300],
+                "city": str(city or "")[:120], "category": str(category or "")[:120],
+                "max_price": int(max_price or 0), "min_price": int(min_price or 0),
+                "enabled": bool(enabled), "last_checked": "", "last_count": 0}
+
+    def list_avito_watches(self, limit: int = 50) -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 50)))
+        return self._rows("SELECT * FROM avito_watches ORDER BY id DESC LIMIT ?", (limit,))
+
+    def get_avito_watch(self, watch_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM avito_watches WHERE id=?", (int(watch_id),))
+        return rows[0] if rows else None
+
+    def update_avito_watch(self, watch_id: int, enabled: bool | None = None,
+                           last_count: int | None = None) -> bool:
+        fields: list[str] = []
+        params: list[Any] = []
+        if enabled is not None:
+            fields.append("enabled=?")
+            params.append(1 if enabled else 0)
+        if last_count is not None:
+            fields.append("last_count=?")
+            params.append(int(last_count))
+            fields.append("last_checked=?")
+            params.append(now_iso())
+        elif enabled is None:
+            fields.append("last_checked=?")
+            params.append(now_iso())
+        if not fields:
+            return False
+        params.append(int(watch_id))
+        sql = f"UPDATE avito_watches SET {', '.join(fields)} WHERE id=?"
+        return self._run(sql, tuple(params)).rowcount > 0
+
+    def delete_avito_watch(self, watch_id: int) -> bool:
+        with self._lock:
+            self._conn.execute("DELETE FROM avito_listings WHERE watch_id=?", (int(watch_id),))
+            self._conn.execute("DELETE FROM avito_watches WHERE id=?", (int(watch_id),))
+            self._conn.commit()
+        return True
+
+    def save_avito_listings(self, watch_id: int,
+                            listings: list[dict[str, Any]]) -> tuple[int, int]:
+        """Сохранить найденные объявления. Возвращает (всего, новых)."""
+        if not listings:
+            return 0, 0
+        existing = {str(row["external_id"]) for row
+                    in self._rows("SELECT external_id FROM avito_listings WHERE watch_id=?",
+                                  (int(watch_id),)) if row.get("external_id")}
+        new = 0
+        at = now_iso()
+        with self._lock:
+            for item in listings:
+                ext = str(item.get("external_id") or item.get("url") or "")[:300]
+                if ext and ext in existing:
+                    # обновляем цену/заголовок, но не считаем новым
+                    self._conn.execute(
+                        "UPDATE avito_listings SET title=?, price=?, snippet=?, city=?, url=? WHERE watch_id=? AND external_id=?",
+                        (str(item.get("title") or "")[:300], str(item.get("price") or "")[:120],
+                         str(item.get("snippet") or "")[:600], str(item.get("city") or "")[:120],
+                         str(item.get("url") or "")[:600], int(watch_id), ext))
+                    continue
+                self._conn.execute(
+                    "INSERT INTO avito_listings(watch_id,external_id,title,price,url,city,snippet,seen_at,is_new)"
+                    " VALUES(?,?,?,?,?,?,?,?,1)",
+                    (int(watch_id), ext, str(item.get("title") or "")[:300],
+                     str(item.get("price") or "")[:120], str(item.get("url") or "")[:600],
+                     str(item.get("city") or "")[:120], str(item.get("snippet") or "")[:600], at))
+                new += 1
+                if ext:
+                    existing.add(ext)
+            self._conn.commit()
+        return len(listings), new
+
+    def list_avito_listings(self, watch_id: int = 0, limit: int = 50,
+                            only_new: bool = False) -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 50)))
+        if watch_id:
+            if only_new:
+                return self._rows(
+                    "SELECT * FROM avito_listings WHERE watch_id=? AND is_new=1 ORDER BY id DESC LIMIT ?",
+                    (int(watch_id), limit))
+            return self._rows(
+                "SELECT * FROM avito_listings WHERE watch_id=? ORDER BY id DESC LIMIT ?",
+                (int(watch_id), limit))
+        if only_new:
+            return self._rows("SELECT * FROM avito_listings WHERE is_new=1 ORDER BY id DESC LIMIT ?",
+                              (limit,))
+        return self._rows("SELECT * FROM avito_listings ORDER BY id DESC LIMIT ?", (limit,))
+
+    def mark_avito_seen(self, watch_id: int = 0) -> int:
+        if watch_id:
+            cur = self._run("UPDATE avito_listings SET is_new=0 WHERE watch_id=?",
+                            (int(watch_id),))
+        else:
+            cur = self._run("UPDATE avito_listings SET is_new=0", ())
+        return cur.rowcount
+
+    # --- ТГ: черновики постов (И182) ---------------------------------------
+    def add_tg_draft(self, topic: str, tone: str, text: str, source: str = "") -> dict[str, Any]:
+        at = now_iso()
+        cursor = self._run(
+            "INSERT INTO tg_drafts(at,topic,tone,text,source,status) VALUES(?,?,?,?,?,?)",
+            (at, " ".join(str(topic).split())[:300], str(tone or "")[:60],
+             str(text or "")[:8000], str(source or "")[:600], "draft"))
+        return {"id": cursor.lastrowid, "at": at, "topic": str(topic)[:300],
+                "tone": str(tone or "")[:60], "text": str(text)[:8000],
+                "source": str(source or "")[:600], "status": "draft"}
+
+    def list_tg_drafts(self, limit: int = 30, status: str = "") -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 30)))
+        if status:
+            return self._rows("SELECT * FROM tg_drafts WHERE status=? ORDER BY id DESC LIMIT ?",
+                              (str(status), limit))
+        return self._rows("SELECT * FROM tg_drafts ORDER BY id DESC LIMIT ?", (limit,))
+
+    def get_tg_draft(self, draft_id: int) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM tg_drafts WHERE id=?", (int(draft_id),))
+        return rows[0] if rows else None
+
+    def update_tg_draft_status(self, draft_id: int, status: str) -> bool:
+        status = str(status or "draft")[:20]
+        return self._run("UPDATE tg_drafts SET status=? WHERE id=?",
+                         (status, int(draft_id))).rowcount > 0
+
     # --- сводка -----------------------------------------------------------
     def stats(self) -> dict[str, Any]:
         """Что лежит в памяти ассистента — для окна и для диагностики."""
@@ -322,4 +491,7 @@ class Store:
         return {"path": str(self.path), "documents": count("documents"),
                 "chunks": count("chunks"), "facts": count("facts"),
                 "notes": count("notes"), "skills": count("skills"),
-                "journal": count("journal")}
+                "journal": count("journal"),
+                "avito_watches": count("avito_watches"),
+                "avito_listings": count("avito_listings"),
+                "tg_drafts": count("tg_drafts")}

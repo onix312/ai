@@ -57,6 +57,13 @@ def detect() -> dict:
         "window_reason": "" if _has("webview")
         else ("Нет pywebview — окно ассистента откроется в браузере по адресу, "
               "который напечатает агент"),
+        # 18.15: Авито и ТГ — сеть и своя база, без внешних зависимостей.
+        "network": True,
+        "network_reason": "",
+        "avito": True,
+        "avito_reason": "",
+        "tg": True,
+        "tg_reason": "",
         "speech_model": "",
     }
     if capabilities["speech"]:

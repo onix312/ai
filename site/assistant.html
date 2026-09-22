@@ -1,25 +1,21 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
-<script src="/assets/theme-init.js?v=18.13.0"></script>
+<script src="/assets/theme-init.js?v=18.15.0"></script>
 <meta name="theme-color" content="#4f46e5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · помощник</title>
-<link rel="stylesheet" href="assets/tokens.css?v=18.13.0">
+<link rel="stylesheet" href="assets/tokens.css?v=18.15.0">
 <style>
- /* Панель помощника (18.13) — свой экран, а не вкладка панели: разговор,
-    каталог действий и журнал в одном месте. Открывается нативным окном
-    (`python pf.py assistant`) и обычным адресом /assistant.html.
-    Никаких внешних библиотек: только общие токены темы. */
  * { box-sizing:border-box; margin:0; padding:0; }
  html, body { height:100%; }
  body {
    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
    background:var(--bg); color:var(--text);
  }
- .as-wrap { max-width:1180px; margin:0 auto; padding:14px 14px 40px; }
+ .as-wrap { max-width:1240px; margin:0 auto; padding:14px 14px 40px; }
  .as-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
  .as-brand { display:flex; align-items:center; gap:9px; }
  .as-brand img { width:32px; height:32px; }
@@ -42,7 +38,7 @@
  .verdict.warn { border-color:var(--warn); }
  .verdict small { color:var(--muted); }
  .as-grid { display:grid; grid-template-columns:1.35fr .95fr; gap:12px; align-items:start; }
- @media (max-width:900px) { .as-grid { grid-template-columns:1fr; } }
+ @media (max-width:1000px) { .as-grid { grid-template-columns:1fr; } }
  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
  .card h2 { font-size:14px; margin-bottom:4px; }
  .card p.sub { color:var(--muted); font-size:12px; margin-bottom:10px; }
@@ -81,6 +77,9 @@
   #as_mic.recording { background:#7f1d1d; border-color:#b91c1c; color:#fff;
     animation:as-pulse 1.3s infinite; }
   @keyframes as-pulse { 50% { opacity:.5; } }
+ .inp { background:var(--bg); color:var(--text); border:1px solid var(--line);
+   border-radius:8px; padding:6px 8px; font:inherit; font-size:12.5px; }
+ .inp.wide { flex:1; min-width:120px; }
 </style>
 </head>
 <body>
@@ -88,7 +87,7 @@
  <div class="as-top">
   <div class="as-brand">
    <img src="assets/brand/nozza-mark-white.svg" alt="NOZZA">
-   <div><b>Помощник NOZZA</b><small>локальная модель · полный доступ к панели PrintFlow</small></div>
+   <div><b>Помощник NOZZA</b><small>локальная модель · Авито · ТГ · PrintFlow</small></div>
   </div>
   <div class="as-top-right">
    <span class="as-pill" id="as_state">Проверяем рантайм…</span>
@@ -138,6 +137,60 @@
    </section>
 
    <section class="card">
+    <h2>Авито — слежка и ответы</h2>
+    <p class="sub">Слежка сохраняется в своей базе ассистента. Поиск — без зависимостей, ответы — 3 тона через модель или шаблоны.</p>
+    <div class="as-row">
+     <input class="inp wide" id="av_query" placeholder="Запрос: 3d принтер">
+     <input class="inp" id="av_city" placeholder="Город: Москва" style="width:110px">
+     <input class="inp" id="av_max" placeholder="До ₽" type="number" style="width:90px">
+    </div>
+    <div class="as-row" style="margin-top:6px">
+     <input class="inp wide" id="av_cat" placeholder="Категория: bytovaya_tehnika (опц.)">
+     <button class="btn sm primary" id="av_watch" type="button">+ Слежка</button>
+     <button class="btn sm" id="av_search" type="button">Поиск</button>
+     <button class="btn sm" id="av_check" type="button">Проверить</button>
+    </div>
+    <div id="av_result" style="margin-top:8px"><span class="muted">Слежки и объявления появятся здесь.</span></div>
+    <div style="margin-top:10px">
+     <p class="sub">Переписка → варианты ответа</p>
+     <textarea id="av_thread" rows="2" class="inp" style="width:100%" placeholder="Сообщение покупателя: Здравствуйте, ещё актуально? Торг уместен?"></textarea>
+     <div class="as-row" style="margin-top:6px">
+      <input class="inp wide" id="av_intent" placeholder="Намерение: продать сегодня, торг до 1000">
+      <button class="btn sm primary" id="av_reply" type="button">Ответы</button>
+     </div>
+     <div id="av_reply_result" style="margin-top:6px"><span class="muted">Варианты ответа появятся здесь.</span></div>
+    </div>
+   </section>
+
+   <section class="card">
+    <h2>ТГ-канал цеха</h2>
+    <p class="sub">Идеи → черновик из фактов цеха → публикация только после «Подтвердить». Токен из настроек агента.</p>
+    <div class="as-row">
+     <button class="btn sm" id="tg_ideas" type="button">Идеи</button>
+     <span class="muted" style="font-size:11px">из недавних печатей и знаний</span>
+    </div>
+    <div id="tg_ideas_result" style="margin-top:6px"><span class="muted">Темы появятся здесь.</span></div>
+    <div style="margin-top:10px">
+     <div class="as-row">
+      <input class="inp wide" id="tg_topic" placeholder="Тема: что напечатали на неделе">
+      <select class="inp" id="tg_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
+     </div>
+     <div class="as-row" style="margin-top:6px">
+      <input class="inp wide" id="tg_facts" placeholder="Факты: PETG чёрный, 20 адресников, 6 часов">
+      <button class="btn sm primary" id="tg_draft" type="button">Черновик</button>
+     </div>
+     <div id="tg_draft_result" style="margin-top:8px"><span class="muted">Черновик появится здесь.</span></div>
+    </div>
+    <div style="margin-top:10px">
+     <div class="as-row">
+      <button class="btn sm" id="tg_list" type="button">Черновики</button>
+      <button class="btn sm" id="tg_post_btn" type="button">Опубликовать последний</button>
+     </div>
+     <div id="tg_list_result" style="margin-top:6px"><span class="muted">Список черновиков.</span></div>
+    </div>
+   </section>
+
+   <section class="card">
     <h2>Действия</h2>
     <p class="sub">Тот же каталог, что видит модель. Оранжевая рамка — требует подтверждения.</p>
     <div class="chips" id="as_actions"></div>
@@ -173,16 +226,12 @@
 </div>
 
 <script>
-/* Панель помощника. Самодостаточная страница: свой HTTP-клиент, свой рендер.
-   Каталог действий приходит с сервера (/api/assistant/status) — адреса
-   маршрутов здесь не хардкодятся, поэтому мёртвый маршрут не может появиться
-   в кнопках молча. */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
-    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    return String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c];
     });
   };
   var state = { available: false, actions: [], model: '', reason: '' };
@@ -200,7 +249,7 @@
       return r.text().then(function (text) {
         var data = {};
         if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text.slice(0, 300) }; } }
-        if (!r.ok) throw new Error(data.error || ('ошибка ' + r.status));
+        if (!r.ok) throw new Error(data.error || data.reason || ('ошибка ' + r.status));
         return data;
       });
     });
@@ -212,7 +261,7 @@
     var box = $('as_log');
     var node = document.createElement('div');
     node.className = 'msg' + (cls ? ' ' + cls : '');
-    node.innerHTML = '<b class="who">' + esc(who) + '</b>' + html;
+    node.innerHTML = '<b class=\"who\">' + esc(who) + '</b>' + html;
     box.appendChild(node);
     box.scrollTop = box.scrollHeight;
     return node;
@@ -243,10 +292,6 @@
     renderAgent(state.agent);
   }
 
-  /* Голос — свой рантайм (срез 2): текстовая модель может молчать, а запись
-     при этом работать, и наоборот. Кнопка «Говорю» заменяет стоп-слово,
-     которое слушает внешний агент: микрофон в браузере всегда открыт только
-     на время фразы. */
   function renderSpeech(speech) {
     var pill = $('as_speech');
     var mic = $('as_mic');
@@ -266,8 +311,6 @@
     mic.title = 'Скажите фразу — запись уйдёт в рантайм речи на этом компьютере';
   }
 
-  /* Агент компьютера (срез 3): PrintFlow только показывает, жив ли он и какое
-     окно сейчас активно. Действия в чужих приложениях выполняет сам агент. */
   function renderAgent(agent) {
     var pill = $('as_agent');
     if (!agent || !agent.available) {
@@ -292,7 +335,7 @@
 
   function startRecording() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      log('помощник', '<div class="warnline">В этом окне нет доступа к микрофону — напишите фразу текстом</div>');
+      log('помощник', '<div class=\"warnline\">В этом окне нет доступа к микрофону — напишите фразу текстом</div>');
       return;
     }
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
@@ -305,9 +348,9 @@
       var mic = $('as_mic');
       mic.classList.add('recording');
       mic.textContent = '⏹ Стоп';
-      log('вы', '<div class="body">Говорю…</div>', 'me');
+      log('вы', '<div class=\"body\">Говорю…</div>', 'me');
     }).catch(function (e) {
-      log('помощник', '<div class="warnline">Микрофон не отдан: ' + esc(e.message || e)
+      log('помощник', '<div class=\"warnline\">Микрофон не отдан: ' + esc(e.message || e)
         + '. Фразу можно написать текстом.</div>');
     });
   }
@@ -326,22 +369,22 @@
     stopStream();
     CHUNKS = [];
     if (!blob.size) {
-      log('помощник', '<div class="warnline">Звук не записался — повторите фразу</div>');
+      log('помощник', '<div class=\"warnline\">Звук не записался — повторите фразу</div>');
       return;
     }
     var form = new FormData();
     form.append('language', 'ru');
     form.append('audio', blob, 'phrase.webm');
-    log('помощник', '<div class="body">Расшифровываю на этом компьютере…</div>');
+    log('помощник', '<div class=\"body\">Расшифровываю на этом компьютере…</div>');
     call('POST', '/api/assistant/speech', form).then(function (data) {
       if (!data.ok) {
-        log('помощник', '<div class="warnline">' + esc(data.reason || 'Речь не расшифрована') + '</div>');
+        log('помощник', '<div class=\"warnline\">' + esc(data.reason || 'Речь не расшифрована') + '</div>');
         return;
       }
-      log('вы', '<div class="body">' + esc(data.text) + '</div>', 'me');
+      log('вы', '<div class=\"body\">' + esc(data.text) + '</div>', 'me');
       ask(data.text);
     }).catch(function (e) {
-      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
     });
   }
 
@@ -358,38 +401,36 @@
       host.appendChild(btn);
     });
     if (!(state.actions || []).length) {
-      host.innerHTML = '<span class="muted">Каталог пуст — коннектор старше помощника.</span>';
+      host.innerHTML = '<span class=\"muted\">Каталог пуст — коннектор старше помощника.</span>';
     }
   }
 
   function paramsLine(params) {
     var keys = Object.keys(params || {});
     if (!keys.length) return '';
-    return '<div class="kv">' + keys.map(function (k) {
+    return '<div class=\"kv\">' + keys.map(function (k) {
       return esc(k) + ': ' + esc(typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
     }).join(' · ') + '</div>';
   }
 
-  /* Карточка действия: что будет сделано, какие параметры, и две кнопки —
-     выполнить (для чтения) или подтвердить (для денег и печати). */
   function askAction(action, params, explain, warnings) {
-    var html = '<div class="body"><b>' + esc(action.title) + '</b> · '
+    var html = '<div class=\"body\"><b>' + esc(action.title) + '</b> · '
       + esc(action.method) + ' ' + esc(action.path) + '</div>'
-      + (explain ? '<div class="body" style="margin-top:4px">' + esc(explain) + '</div>' : '')
+      + (explain ? '<div class=\"body\" style=\"margin-top:4px\">' + esc(explain) + '</div>' : '')
       + paramsLine(params)
-      + ((warnings || []).map(function (w) { return '<div class="warnline">⚠ ' + esc(w) + '</div>'; }).join(''))
-      + '<div class="acts">'
+      + ((warnings || []).map(function (w) { return '<div class=\"warnline\">⚠ ' + esc(w) + '</div>'; }).join(''))
+      + '<div class=\"acts\">'
       + (action.confirm
-        ? '<button class="btn sm primary" type="button" data-run="confirm">Подтвердить и выполнить</button>'
-        : '<button class="btn sm" type="button" data-run="now">Выполнить</button>')
-      + '<button class="btn sm" type="button" data-run="cancel">Отменить</button>'
+        ? '<button class=\"btn sm primary\" type=\"button\" data-run=\"confirm\">Подтвердить и выполнить</button>'
+        : '<button class=\"btn sm\" type=\"button\" data-run=\"now\">Выполнить</button>')
+      + '<button class=\"btn sm\" type=\"button\" data-run=\"cancel\">Отменить</button>'
       + '</div>';
     var node = log('действие', html);
     node.querySelectorAll('[data-run]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var what = btn.dataset.run;
         if (what === 'cancel') {
-          node.querySelector('.acts').innerHTML = '<span class="muted">Отменено человеком</span>';
+          node.querySelector('.acts').innerHTML = '<span class=\"muted\">Отменено человеком</span>';
           journal(action, params, 'cancelled', 'Отменено в панели помощника');
           return;
         }
@@ -400,11 +441,9 @@
 
   function runAction(action, params, node) {
     var body = Object.assign({}, params || {});
-    /* Подтверждение берётся из каталога, а не из ответа модели: правило
-       «деньги и печать — через кнопку» модель понизить не может. */
     if (action.confirm) body.confirmed = true;
     node.querySelectorAll('.acts').forEach(function (box) {
-      box.innerHTML = '<span class="muted">Выполняем…</span>';
+      box.innerHTML = '<span class=\"muted\">Выполняем…</span>';
     });
     var request = action.method === 'GET'
       ? get(action.path + (Object.keys(body).length
@@ -412,13 +451,13 @@
       : post(action.path, body);
     request.then(function (data) {
       node.insertAdjacentHTML('beforeend',
-        '<pre class="result">' + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + '</pre>');
+        '<pre class=\"result\">' + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + '</pre>');
       node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
       journal(action, params, 'done', '');
       refreshJournal();
     }).catch(function (e) {
       node.insertAdjacentHTML('beforeend',
-        '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+        '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
       node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
       journal(action, params, 'error', String(e.message || e));
       refreshJournal();
@@ -426,62 +465,60 @@
   }
 
   function journal(action, params, outcome, detail) {
-    /* След действия: входа в панель помощника нет, поэтому журнал — единственное
-       место, где видно, что сделано и кем подтверждено. */
     post('/api/assistant/journal', {
       action: action.id, title: action.title, outcome: outcome, detail: detail,
       printer_id: String((params || {}).printer_id || ''),
       data: { params: params || {}, path: action.path, method: action.method },
-    }).catch(function () { /* журнал не должен ронять действие */ });
+    }).catch(function () { });
   }
 
   function refreshJournal() {
     get('/api/assistant/journal?limit=20').then(function (data) {
       var host = $('as_journal');
       var rows = (data.events || []);
-      if (!rows.length) { host.innerHTML = '<span class="muted">Действий ещё не было.</span>'; return; }
+      if (!rows.length) { host.innerHTML = '<span class=\"muted\">Действий ещё не было.</span>'; return; }
       host.innerHTML = rows.map(function (row) {
         var d = row.data || {};
         var outcome = d.outcome || '';
-        return '<div class="jrow ' + esc(outcome) + '"><b>' + esc(row.title || '') + '</b>'
+        return '<div class=\"jrow ' + esc(outcome) + '\"><b>' + esc(row.title || '') + '</b>'
           + ' · ' + esc(outcome === 'done' ? 'выполнено' : outcome === 'error' ? 'отказ'
             : outcome === 'cancelled' ? 'отменено' : outcome)
-          + '<div class="muted">' + esc((row.at || '').replace('T', ' ').slice(0, 19))
+          + '<div class=\"muted\">' + esc((row.at || '').replace('T', ' ').slice(0, 19))
           + (row.detail ? ' · ' + esc(row.detail) : '') + '</div></div>';
       }).join('');
     }).catch(function (e) {
-      $('as_journal').innerHTML = '<span class="muted">Журнал недоступен: ' + esc(e.message || e) + '</span>';
+      $('as_journal').innerHTML = '<span class=\"muted\">Журнал недоступен: ' + esc(e.message || e) + '</span>';
     });
   }
 
   function ask(text) {
-    log('вы', '<div class="body">' + esc(text) + '</div>', 'me');
+    log('вы', '<div class=\"body\">' + esc(text) + '</div>', 'me');
     post('/api/assistant/intent', { text: text }).then(function (data) {
       if (!data.ok) {
-        log('помощник', '<div class="body">' + esc(data.reason || 'Не получилось') + '</div>');
+        log('помощник', '<div class=\"body\">' + esc(data.reason || 'Не получилось') + '</div>');
         return;
       }
       if (!data.action) {
-        log('помощник', '<div class="body">'
+        log('помощник', '<div class=\"body\">'
           + esc(data.explain || 'Действие из каталога не подошло — уточните фразу.')
           + '</div>');
         return;
       }
       askAction(data.action, data.params || {}, data.explain, data.warnings || []);
     }).catch(function (e) {
-      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
     });
   }
 
   function intake() {
     var text = $('as_intake_text').value.trim();
     var file = $('as_intake_file').files && $('as_intake_file').files[0];
-    if (!text && !file) { log('помощник', '<div class="warnline">Вставьте сообщение или приложите файл</div>'); return; }
+    if (!text && !file) { log('помощник', '<div class=\"warnline\">Вставьте сообщение или приложите файл</div>'); return; }
     var form = new FormData();
     form.append('text', text);
     form.append('channel', 'direct');
     if (file) form.append('file', file);
-    log('вы', '<div class="body">Разобрать входящее сообщение'
+    log('вы', '<div class=\"body\">Разобрать входящее сообщение'
       + (file ? ' с файлом ' + esc(file.name) : '') + '</div>', 'me');
     call('POST', '/api/order/intake/upload', form).then(function (data) {
       var draft = data.draft || {};
@@ -491,25 +528,25 @@
         'Материал: ' + (draft.material || '—') + ' · Цвет: ' + (draft.color || '—'),
         'Срок: ' + (draft.due || '—') + ' · Файл: ' + (draft.file || '—')];
       var suggestions = data.suggestions || [];
-      log('помощник', '<div class="body">Черновик заказа · уверенность '
-        + (data.confidence || 0) + '%</div><div class="kv">'
+      log('помощник', '<div class=\"body\">Черновик заказа · уверенность '
+        + (data.confidence || 0) + '%</div><div class=\"kv\">'
         + lines.map(esc).join('<br>') + '</div>'
-        + (suggestions.length ? '<div class="warnline">Помощник предложил: '
+        + (suggestions.length ? '<div class=\"warnline\">Помощник предложил: '
           + suggestions.map(function (s) { return esc(s.field) + ' → «' + esc(s.value) + '»'; }).join(', ')
           + '</div>' : '')
         + ((data.warnings || []).map(function (w) {
-          return '<div class="warnline">⚠ ' + esc(w) + '</div>'; }).join(''))
-        + (data.reply ? '<div class="body" style="margin-top:6px">Черновик ответа клиенту:<br>'
+          return '<div class=\"warnline\">⚠ ' + esc(w) + '</div>'; }).join(''))
+        + (data.reply ? '<div class=\"body\" style=\"margin-top:6px\">Черновик ответа клиенту:<br>'
           + esc(data.reply) + '</div>' : '')
-        + '<div class="acts"><button class="btn sm primary" type="button" data-save="1">Сохранить заказ</button>'
-        + '<a class="btn sm" href="/index.html" >Открыть в панели</a></div>');
+        + '<div class=\"acts\"><button class=\"btn sm primary\" type=\"button\" data-save=\"1\">Сохранить заказ</button>'
+        + '<a class=\"btn sm\" href=\"/index.html\" >Открыть в панели</a></div>');
       var box = $('as_log').lastElementChild;
       var save = box.querySelector('[data-save]');
       if (save) save.addEventListener('click', function () {
         save.disabled = true;
         post('/api/order/save', draft).then(function (res) {
           var order = res.order || {};
-          box.insertAdjacentHTML('beforeend', '<div class="body">Заказ сохранён: №'
+          box.insertAdjacentHTML('beforeend', '<div class=\"body\">Заказ сохранён: №'
             + esc(order.number || '') + '</div>');
           journal({ id: 'order_save', title: 'Сохранить заказ', method: 'POST',
             path: '/api/order/save', confirm: true }, { draft: draft }, 'done',
@@ -517,67 +554,63 @@
           refreshJournal();
         }).catch(function (e) {
           save.disabled = false;
-          box.insertAdjacentHTML('beforeend', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+          box.insertAdjacentHTML('beforeend', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
         });
       });
       $('as_intake_text').value = '';
       $('as_intake_file').value = '';
       $('as_intake_filename').textContent = '';
     }).catch(function (e) {
-      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
     });
   }
 
-  /* Ответ по фактам базы (18.14, идея И1): факты показываются вместе с ответом,
-     чтобы любую цифру можно было проверить в знакомом разделе панели. */
   function askFacts() {
     var text = $('as_ask_text').value.trim();
     var host = $('as_ask_result');
-    if (!text) { host.innerHTML = '<div class="warnline">Введите вопрос</div>'; return; }
-    host.innerHTML = '<span class="muted">Ищем факты в базе…</span>';
+    if (!text) { host.innerHTML = '<div class=\"warnline\">Введите вопрос</div>'; return; }
+    host.innerHTML = '<span class=\"muted\">Ищем факты в базе…</span>';
     post('/api/assistant/ask', { question: text }).then(function (data) {
       var facts = data.facts || [];
       var html = '';
-      if (data.answer) html += '<div class="body">' + esc(data.answer) + '</div>';
-      if (!data.answered) html += '<div class="warnline">' + esc(data.reason || 'Ответ не собран') + '</div>';
+      if (data.answer) html += '<div class=\"body\">' + esc(data.answer) + '</div>';
+      if (!data.answered) html += '<div class=\"warnline\">' + esc(data.reason || 'Ответ не собран') + '</div>';
       (data.warnings || []).forEach(function (w) {
-        html += '<div class="warnline">⚠ ' + esc(w) + '</div>';
+        html += '<div class=\"warnline\">⚠ ' + esc(w) + '</div>';
       });
       html += facts.length
-        ? '<div class="kv" style="margin-top:6px">Факты из базы (' + facts.length + '):<br>'
+        ? '<div class=\"kv\" style=\"margin-top:6px\">Факты из базы (' + facts.length + '):<br>'
           + facts.slice(0, 12).map(function (f) {
             return '• ' + esc(f.title) + ' — ' + esc(f.text)
-              + (f.ref ? ' <span class="muted">[' + esc(f.ref) + ']</span>' : '');
+              + (f.ref ? ' <span class=\"muted\">[' + esc(f.ref) + ']</span>' : '');
           }).join('<br>') + '</div>'
         : '';
-      host.innerHTML = html || '<span class="muted">Фактов не нашлось</span>';
+      host.innerHTML = html || '<span class=\"muted\">Фактов не нашлось</span>';
     }).catch(function (e) {
-      host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
+      host.innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
     });
   }
 
-  /* День цеха (идея И174): модель не зовётся, поэтому цифры доступны всегда. */
   function loadDay(kind) {
     var host = $('as_day_result');
-    host.innerHTML = '<span class="muted">Считаем…</span>';
+    host.innerHTML = '<span class=\"muted\">Считаем…</span>';
     var query = kind === 'summary' ? '?kind=summary&days=7' : '?kind=briefing';
     get('/api/assistant/day' + query).then(function (data) {
       if (!data.ok) {
-        host.innerHTML = '<div class="warnline">' + esc(data.reason || 'Не получилось') + '</div>';
+        host.innerHTML = '<div class=\"warnline\">' + esc(data.reason || 'Не получилось') + '</div>';
         return;
       }
       $('as_day_hint').textContent = data.title || '';
-      host.innerHTML = '<div class="body">' + (data.lines || []).map(function (line) {
+      host.innerHTML = '<div class=\"body\">' + (data.lines || []).map(function (line) {
         return '• ' + esc(line);
       }).join('<br>') + '</div>'
         + ((data.problems || []).map(function (p) {
-          return '<div class="warnline">⚠ ' + esc(p) + '</div>'; }).join(''));
+          return '<div class=\"warnline\">⚠ ' + esc(p) + '</div>'; }).join(''));
     }).catch(function (e) {
-      host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
+      host.innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
     });
   }
 
-  /* Реестр навыков агента (идея И136): недоступный навык показан с причиной. */
   function refreshSkills() {
     return get('/api/assistant/skills').then(function (data) {
       var pill = $('as_skills');
@@ -586,23 +619,23 @@
         pill.className = 'as-pill warn';
         pill.textContent = '🧩 Навыки: агент не отвечает';
         pill.title = data.reason || 'Агент компьютера выключен или не запущен';
-        host.innerHTML = '<span class="muted">' + esc(data.reason || 'Агент не отвечает') + '</span>';
+        host.innerHTML = '<span class=\"muted\">' + esc(data.reason || 'Агент не отвечает') + '</span>';
         return;
       }
       pill.className = 'as-pill ok';
       pill.textContent = '🧩 Навыки: ' + data.ready + ' из ' + data.count;
       pill.title = 'Реестр отдаёт агент; панель его только читает';
       host.innerHTML = (data.skills || []).map(function (row) {
-        return '<div class="jrow ' + (row.available ? 'done' : 'error') + '">'
-          + '<b>' + esc(row.title) + '</b> <span class="muted">' + esc(row.name) + '</span>'
-          + (row.confirm ? ' <span class="muted">· подтверждение</span>' : '')
-          + '<div class="muted">' + esc(row.available ? row.description : (row.reason || 'недоступен'))
+        return '<div class=\"jrow ' + (row.available ? 'done' : 'error') + '\">'
+          + '<b>' + esc(row.title) + '</b> <span class=\"muted\">' + esc(row.name) + '</span>'
+          + (row.confirm ? ' <span class=\"muted\">· подтверждение</span>' : '')
+          + '<div class=\"muted\">' + esc(row.available ? row.description : (row.reason || 'недоступен'))
           + '</div></div>';
-      }).join('') || '<span class="muted">Навыков нет</span>';
+      }).join('') || '<span class=\"muted\">Навыков нет</span>';
     }).catch(function (e) {
       $('as_skills').className = 'as-pill warn';
       $('as_skills').textContent = '🧩 Навыки: недоступны';
-      $('as_skills_list').innerHTML = '<span class="muted">' + esc(e.message || e) + '</span>';
+      $('as_skills_list').innerHTML = '<span class=\"muted\">' + esc(e.message || e) + '</span>';
     });
   }
 
@@ -624,6 +657,130 @@
         agent: { available: false, reason: String(e.message || e) } };
       renderState();
     });
+  }
+
+  // --- 18.15: Авито и ТГ ---------------------------------------------------
+  var lastTgDraftId = 0;
+  function avitoRender(data) {
+    var host = $('av_result');
+    if (!data.ok) { host.innerHTML = '<div class=\"warnline\">' + esc(data.reason || 'Ошибка') + '</div>'; return; }
+    var html = '';
+    if (data.watch) html += '<div class=\"body\">Слежка #' + data.watch.id + ': «' + esc(data.watch.query) + '»</div>';
+    if (data.watches) {
+      html += '<div class=\"kv\">Слежек: ' + data.watches.length + '<br>' + data.watches.slice(0,10).map(function (w) {
+        return '#' + w.id + ' «' + esc(w.query) + '» ' + (w.city ? esc(w.city) : '') + ' ' + (w.max_price ? 'до ' + w.max_price : '') + ' · нашёл ' + (w.last_count||0);
+      }).join('<br>') + '</div>';
+    }
+    if (data.listings) {
+      html += '<div class=\"body\" style=\"margin-top:6px\">Объявлений: ' + data.listings.length + '</div>';
+      html += '<div class=\"kv\">' + data.listings.slice(0,15).map(function (it) {
+        return '• <a href=\"' + esc(it.url||'#') + '\" target=\"_blank\">' + esc(it.title||'—') + '</a> ' + esc(it.price||'') + ' ' + esc(it.city||'');
+      }).join('<br>') + '</div>';
+    }
+    if (data.hint) html += '<div class=\"muted\" style=\"margin-top:4px\">' + esc(data.hint) + '</div>';
+    if (data.reason) html += '<div class=\"warnline\">' + esc(data.reason) + '</div>';
+    host.innerHTML = html || '<span class=\"muted\">Пусто</span>';
+  }
+  function avitoWatch() {
+    var q = $('av_query').value.trim();
+    if (!q) { $('av_result').innerHTML = '<div class=\"warnline\">Введите запрос</div>'; return; }
+    $('av_result').innerHTML = '<span class=\"muted\">Сохраняем слежку…</span>';
+    post('/api/assistant/avito/watch', { query: q, city: $('av_city').value.trim(), category: $('av_cat').value.trim(), max_price: parseInt($('av_max').value||'0',10)||0 }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoSearch() {
+    var q = $('av_query').value.trim();
+    if (!q) { $('av_result').innerHTML = '<div class=\"warnline\">Введите запрос</div>'; return; }
+    $('av_result').innerHTML = '<span class=\"muted\">Ищем на Авито…</span>';
+    post('/api/assistant/avito/search', { query: q, city: $('av_city').value.trim(), category: $('av_cat').value.trim(), max_price: parseInt($('av_max').value||'0',10)||0, limit: 20 }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoCheck() {
+    $('av_result').innerHTML = '<span class=\"muted\">Проверяем слежки…</span>';
+    post('/api/assistant/avito/check', { only_new: true }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoReply() {
+    var thread = $('av_thread').value.trim();
+    if (!thread) { $('av_reply_result').innerHTML = '<div class=\"warnline\">Вставьте переписку</div>'; return; }
+    $('av_reply_result').innerHTML = '<span class=\"muted\">Придумываем ответы…</span>';
+    post('/api/assistant/avito/reply', { thread: thread, intent: $('av_intent').value.trim(), city: $('av_city').value.trim() }).then(function (data) {
+      if (!data.ok) { $('av_reply_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var html = '<div class=\"body\">Варианты (' + (data.source||'') + '):</div>';
+      html += (data.replies||[]).map(function (r) { return '<div class=\"jrow done\" style=\"margin-top:4px\"><div class=\"body\">' + esc(r) + '</div><div class=\"as-row\" style=\"margin-top:4px\"><button class=\"btn sm\" type=\"button\" onclick=\"navigator.clipboard.writeText(this.dataset.txt)\">Копировать</button></div></div>'.replace('this.dataset.txt', 'decodeURIComponent(\\'' + encodeURIComponent(r) + '\\')'); }).join('');
+      if (data.hint) html += '<div class=\"muted\" style=\"margin-top:4px\">' + esc(data.hint) + '</div>';
+      // рекомендации
+      html += '<div class=\"kv\" style=\"margin-top:6px\">Рекомендация: выбирайте вежливый для первого контакта, короткий — для уточнения, торг — когда просят скидку. Не обещайте доставку, если не готовы.</div>';
+      $('av_reply_result').innerHTML = html;
+      // fix copy buttons
+      var rows = $('av_reply_result').querySelectorAll('.jrow');
+      rows.forEach(function (row, i) {
+        var btn = row.querySelector('button');
+        if (btn) { btn.dataset.txt = (data.replies||[])[i]||''; btn.addEventListener('click', function () { navigator.clipboard.writeText(this.dataset.txt); this.textContent='Скопировано'; }); }
+      });
+    }).catch(function (e) { $('av_reply_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+
+  function tgIdeas() {
+    $('tg_ideas_result').innerHTML = '<span class=\"muted\">Придумываем темы…</span>';
+    post('/api/assistant/tg/ideas', { limit: 8 }).then(function (data) {
+      if (!data.ok) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var html = '<div class=\"kv\">' + (data.ideas||[]).map(function (t, i) { return (i+1)+'. ' + esc(t) + ' <button class=\"btn sm\" type=\"button\" data-topic=\"'+esc(t)+'\">→ в тему</button>'; }).join('<br>') + '</div>';
+      if (data.hint) html += '<div class=\"muted\">' + esc(data.hint) + '</div>';
+      $('tg_ideas_result').innerHTML = html;
+      $('tg_ideas_result').querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { $('tg_topic').value = this.dataset.topic; }); });
+    }).catch(function (e) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgDraft() {
+    var topic = $('tg_topic').value.trim();
+    if (!topic) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">Введите тему</div>'; return; }
+    $('tg_draft_result').innerHTML = '<span class=\"muted\">Пишем черновик…</span>';
+    post('/api/assistant/tg/draft', { topic: topic, tone: $('tg_tone').value, facts: $('tg_facts').value.trim() }).then(function (data) {
+      if (!data.ok) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      lastTgDraftId = data.draft_id || (data.draft && data.draft.id) || 0;
+      var html = '<div class=\"body\">' + esc(data.text||'') + '</div>';
+      if (data.warning) html += '<div class=\"warnline\">⚠ ' + esc(data.warning) + '</div>';
+      if (data.hint) html += '<div class=\"muted\">' + esc(data.hint) + '</div>';
+      html += '<div class=\"as-row\" style=\"margin-top:6px\"><button class=\"btn sm\" type=\"button\" id=\"tg_copy\">Копировать</button><button class=\"btn sm primary\" type=\"button\" id=\"tg_publish\">Опубликовать (с подтверждением)</button></div>';
+      $('tg_draft_result').innerHTML = html;
+      $('tg_copy').addEventListener('click', function () { navigator.clipboard.writeText(data.text||''); this.textContent='Скопировано'; });
+      $('tg_publish').addEventListener('click', tgPostLast);
+    }).catch(function (e) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgList() {
+    $('tg_list_result').innerHTML = '<span class=\"muted\">Загружаем черновики…</span>';
+    get('/api/assistant/tg/drafts?limit=20').then(function (data) {
+      if (!data.ok) { $('tg_list_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var drafts = data.drafts || data.result || [];
+      // _call_agent_skill возвращает напрямую массив? Проверяем оба
+      if (!drafts.length && data.drafts === undefined && Array.isArray(data)) drafts = data;
+      // если прокси вернул {drafts: []}
+      var html = '<div class=\"kv\">Черновиков: ' + drafts.length + '<br>' + drafts.slice(0,15).map(function (d) {
+        return '#' + d.id + ' «' + esc(d.topic||'') + '» [' + esc(d.tone||'') + '] ' + esc(d.status||'') + ' <button class=\"btn sm\" type=\"button\" data-id=\"'+d.id+'\" data-txt=\"'+esc(d.text||'').replace(/\"/g,'&quot;')+'\">Выбрать</button>';
+      }).join('<br>') + '</div>';
+      $('tg_list_result').innerHTML = html || '<span class=\"muted\">Пусто</span>';
+      $('tg_list_result').querySelectorAll('button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          lastTgDraftId = parseInt(this.dataset.id,10)||0;
+          $('tg_topic').value = '';
+          $('tg_draft_result').innerHTML = '<div class=\"body\">' + esc(this.dataset.txt||'') + '</div><div class=\"as-row\" style=\"margin-top:6px\"><button class=\"btn sm primary\" type=\"button\" id=\"tg_publish2\">Опубликовать</button></div>';
+          var btn = document.getElementById('tg_publish2');
+          if (btn) btn.addEventListener('click', tgPostLast);
+        });
+      });
+    }).catch(function (e) { $('tg_list_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgPostLast() {
+    if (!lastTgDraftId) { alert('Нет выбранного черновика'); return; }
+    if (!confirm('Опубликовать пост #' + lastTgDraftId + ' в ТГ-канал? Токен берётся из настроек агента.')) return;
+    post('/api/assistant/tg/post', { draft_id: lastTgDraftId, confirmed: true }).then(function (data) {
+      if (!data.ok && data.needs_confirmation) {
+        if (confirm(data.text || 'Подтвердить публикацию в ТГ?')) {
+          return post('/api/assistant/tg/post', { draft_id: lastTgDraftId, confirmed: true }).then(function (d2) {
+            $('tg_list_result').innerHTML = '<div class=\"body\">' + (d2.ok ? '✅ Опубликовано, message_id ' + (d2.message_id||'') : '❌ ' + esc(d2.reason||'')) + '</div>';
+          });
+        }
+        return;
+      }
+      $('tg_list_result').innerHTML = '<div class=\"body\">' + (data.ok ? '✅ Опубликовано, message_id ' + (data.message_id||'') : '❌ ' + esc(data.reason||'')) + '</div>';
+    }).catch(function (e) { $('tg_list_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
   }
 
   $('as_send').addEventListener('click', function () {
@@ -654,6 +811,14 @@
   $('as_day_briefing').addEventListener('click', function () { loadDay('briefing'); });
   $('as_day_summary').addEventListener('click', function () { loadDay('summary'); });
   $('as_skills_refresh').addEventListener('click', refreshSkills);
+  $('av_watch').addEventListener('click', avitoWatch);
+  $('av_search').addEventListener('click', avitoSearch);
+  $('av_check').addEventListener('click', avitoCheck);
+  $('av_reply').addEventListener('click', avitoReply);
+  $('tg_ideas').addEventListener('click', tgIdeas);
+  $('tg_draft').addEventListener('click', tgDraft);
+  $('tg_list').addEventListener('click', tgList);
+  $('tg_post_btn').addEventListener('click', tgPostLast);
 
   refreshState();
   refreshJournal();

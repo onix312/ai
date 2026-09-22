@@ -856,7 +856,7 @@ def agent_status(db: Database) -> dict[str, Any]:
 
 
 def agent_skills(db: Database) -> dict[str, Any]:
-    """Реестр навыков ассистента компьютера (18.14, идея И136).
+    """Реестр навыков ассистента компьютера (18.15, идея И136).
 
     Панель показывает реестр, но не владеет им: навыки объявляет агент, а панель
     читает их по loopback. Поэтому здесь нет ни списка навыков, ни их параметров
@@ -879,3 +879,64 @@ def agent_skills(db: Database) -> dict[str, Any]:
                unavailable=[row for row in (payload.get("unavailable") or [])
                             if isinstance(row, dict)])
     return out
+
+
+def _call_agent_skill(db: Database, name: str, params: dict[str, Any],
+                      timeout: float = 30.0) -> dict[str, Any]:
+    """Вызвать навык агента по loopback (Авито, ТГ). Возвращает ответ агента."""
+    state = agent_status(db)
+    if not state.get("available"):
+        return {"ok": False, "reason": state.get("reason") or "Агент недоступен"}
+    ok, payload, reason = _post_json(f"{state['url']}/skill",
+                                     {"name": str(name), "params": dict(params or {})},
+                                     timeout=timeout)
+    if not ok or not isinstance(payload, dict):
+        return {"ok": False, "reason": f"Агент не ответил: {reason}"}
+    # Агент может вернуть needs_confirmation для write-навыков
+    return payload
+
+
+def avito_watch(db: Database, query: str, city: str = "", category: str = "",
+                max_price: int = 0, min_price: int = 0) -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.watch",
+                             {"query": query, "city": city, "category": category,
+                              "max_price": max_price, "min_price": min_price})
+
+
+def avito_search(db: Database, query: str, city: str = "", category: str = "",
+                 max_price: int = 0, min_price: int = 0, limit: int = 20) -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.search",
+                             {"query": query, "city": city, "category": category,
+                              "max_price": max_price, "min_price": min_price, "limit": limit},
+                             timeout=20.0)
+
+
+def avito_check(db: Database, watch_id: int = 0, only_new: bool = True) -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.check",
+                             {"watch_id": watch_id, "only_new": only_new},
+                             timeout=30.0)
+
+
+def avito_reply(db: Database, thread: str, intent: str = "", city: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "avito.reply",
+                             {"thread": thread, "intent": intent, "city": city},
+                             timeout=30.0)
+
+
+def tg_draft(db: Database, topic: str, tone: str = "дружелюбный",
+             facts: str = "", source: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.draft",
+                             {"topic": topic, "tone": tone, "facts": facts, "source": source},
+                             timeout=30.0)
+
+
+def tg_ideas(db: Database, context: str = "", limit: int = 8) -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.ideas",
+                             {"context": context, "limit": limit},
+                             timeout=20.0)
+
+
+def tg_post(db: Database, draft_id: int = 0, text: str = "", chat: str = "") -> dict[str, Any]:
+    return _call_agent_skill(db, "tg.post",
+                             {"draft_id": draft_id, "text": text, "chat": chat},
+                             timeout=20.0)

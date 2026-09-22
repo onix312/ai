@@ -57,6 +57,11 @@ KNOWLEDGE_FOLDERS = tuple(
 OPEN_WINDOW = os.environ.get("PRINTFLOW_ASSISTANT_WINDOW", "1").strip().lower() not in (
     "0", "false", "нет", "no", "off")
 
+# --- 18.15: Авито и ТГ ------------------------------------------------------
+TG_BOT_TOKEN = os.environ.get("PRINTFLOW_TG_BOT_TOKEN") or os.environ.get("TG_BOT_TOKEN") or ""
+TG_CHAT_ID = os.environ.get("PRINTFLOW_TG_CHAT_ID") or os.environ.get("TG_CHAT_ID") or ""
+AVITO_DEFAULT_CITY = os.environ.get("PRINTFLOW_AVITO_CITY", "").strip()
+
 
 def knowledge_folders() -> tuple[str, ...]:
     """Папки знаний цеха: инструкции, профили печати, чек-листы."""
