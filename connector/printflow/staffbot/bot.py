@@ -23,13 +23,19 @@ from .core.config import get_miniapp_url, load_config, miniapp_state
 from .core.db import ensure_scenes_table
 from .handlers.menu import MenuMixin
 from .handlers.notify import NotifyMixin
+from .handlers.report import ReportMixin
 from .router import ROUTER, normalize, suggest_command
 from .scenes import BotScenes
 from .ui import HELP, main_menu_keyboard
 
 
-class StaffBot(MenuMixin, NotifyMixin):
-    """Рабочий бот PrintFlow: цех в кармане — тонкий, notify_only."""
+class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
+    """Рабочий бот PrintFlow: цех в кармане — уведомления, Mini App и текст.
+
+    18.12.3: кнопка Mini App больше не единственный ответ. Отчёты
+    (статус/принтеры/заказы/полка/очередь/кадр/деньги) отдаёт ReportMixin —
+    словами и фото, чтобы цех читался прямо в чате.
+    """
 
     def __init__(self, manager):
         self.manager = manager
@@ -72,8 +78,10 @@ class StaffBot(MenuMixin, NotifyMixin):
         except Exception:
             return {}
 
-    def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
-        return self.transport.call(method, params, timeout=timeout)
+    def _call(self, method: str, params: dict, timeout: int = 35,
+              files: dict[str, tuple[str, bytes]] | None = None) -> dict:
+        """Вызов Bot API; `files` — вложение (фото отчёта, 18.12.3)."""
+        return self.transport.call(method, params, timeout=timeout, files=files)
 
     def _miniapp_note(self) -> str:
         """Строка про адрес Mini App, когда кнопка «Открыть цех» не работает.
@@ -99,7 +107,10 @@ class StaffBot(MenuMixin, NotifyMixin):
         if buttons:
             payload["reply_markup"] = json.dumps(buttons, ensure_ascii=False)
         try:
-            row = self.outbox.add(str(chat), "sendMessage", payload, dedupe_key=f"reply:{chat}:{hash(payload['text'])}")
+            # Ключ дедупликации пустой: ответ на команду — всегда новое
+            # сообщение. С ключом из текста вторая «деньги» или «статус» с теми
+            # же цифрами молча не отправлялась (18.12.3).
+            row = self.outbox.add(str(chat), "sendMessage", payload)
             self.outbox.send(row)
         except Exception:
             # fallback прямой вызов
@@ -194,7 +205,8 @@ class StaffBot(MenuMixin, NotifyMixin):
                     self._reply(
                         chat,
                         welcome + self._miniapp_note(),
-                        main_menu_keyboard(get_miniapp_url(self.db)),
+                        main_menu_keyboard(get_miniapp_url(self.db),
+                                           str(member.get("role") or "")),
                     )
                     self.db.add_event("bot", "Новый участник по приглашению", f"{member.get('name')} — {role}", "", {})
                     return
@@ -236,7 +248,7 @@ class StaffBot(MenuMixin, NotifyMixin):
                     chat,
                     f"🚫 «{word}» недоступен для роли «{ROLE_NAMES.get(who['role'])}».\n"
                     "Откройте цех — там доступно по вашей роли.",
-                    main_menu_keyboard(get_miniapp_url(self.db)),
+                    main_menu_keyboard(get_miniapp_url(self.db), str(who["role"] or "")),
                 )
             handler = getattr(self, route.method, None)
             if handler:
@@ -307,9 +319,10 @@ class StaffBot(MenuMixin, NotifyMixin):
     def _unknown(self, chat: str, raw: str) -> None:
         suggestion = suggest_command(raw)
         lines = [
-            "Не узнал команду — откройте цех, там всё кнопками.",
+            "Не узнал команду — откройте цех кнопкой ниже или спросите текстом:",
+            "статус · принтеры · заказы [номер] · полка · очередь · кадр · деньги.",
         ]
-        kb = main_menu_keyboard(get_miniapp_url(self.db))
+        kb = main_menu_keyboard(get_miniapp_url(self.db), self._report_role(chat))
         self._call(
             "sendMessage",
             {
