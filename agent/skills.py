@@ -1,4 +1,4 @@
-"""Реестр навыков личного ассистента (18.17): навык — это данные, а не ветка кода.
+"""Реестр навыков личного ассистента (18.18): навык — это данные, а не ветка кода.
 
 Зачем реестр, если можно написать `if name == "files.search"`.
 
@@ -93,7 +93,7 @@ _LEARNED_RE = re.compile(r"^my\.[a-z][a-z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Реестр: восемьдесят семь живых навыков из каталога `docs/НАВЫКИ.md`
+# Реестр: восемьдесят девять живых навыков из каталога `docs/НАВЫКИ.md`
 # ---------------------------------------------------------------------------
 #
 # Объявлены только те навыки, которые исполняются. Навык «в планах» живёт в
@@ -517,6 +517,22 @@ SKILLS: dict[str, dict[str, Any]] = {
         "params": {},
         "requires": ("system",), "ideas": ("И159",),
         "doc": "Через ctypes и psutil-fallback, без внешних зависимостей.",
+    },
+    "system.check": {
+        "title": "Проверка зависимостей",
+        "description": "Что установлено для полноценного ассистента: pip-пакеты, модели, tesseract, ollama.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": (), "ideas": ("И222",),
+        "doc": "Читает capabilities + agent/install.check(), без сети.",
+    },
+    "system.install": {
+        "title": "Автоустановка",
+        "description": "Поставить недостающие pip-пакеты и модели речи для ассистента.",
+        "host": "agent", "risk": "write",
+        "params": {"what": "oneof:pip|models|full|requirements", "confirm_text": "text"},
+        "requires": (), "ideas": ("И222",),
+        "doc": "Ставит только то, чего нет: pip install + скачивание vosk small ru в ~/.printflow/models. Требует подтверждения.",
     },
     # --- окна и ввод (Н16-Н26) -------------------------------------------
     "window.active": {
@@ -1034,7 +1050,7 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
              "app_name", "device_id", "level", "minutes", "x", "y", "left_title",
              "right_title", "left", "top", "right", "bottom", "max_side",
              "seconds", "speed", "volume", "timer_id", "note", "key", "value",
-             "steps", "description")
+             "steps", "description", "what", "confirm_text")
 
 
 # ---------------------------------------------------------------------------

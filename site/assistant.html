@@ -1,13 +1,23 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
-<script src="/assets/theme-init.js?v=18.17.0"></script>
+<script src="/assets/theme-init.js?v=18.18.0">
+  function sysCheck() {
+    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
+    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysInstall() {
+    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
+    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
+    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+</script>
 <meta name="theme-color" content="#4f46e5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · помощник</title>
-<link rel="stylesheet" href="assets/tokens.css?v=18.17.0">
+<link rel="stylesheet" href="assets/tokens.css?v=18.18.0">
 <style>
  * { box-sizing:border-box; margin:0; padding:0; }
  html, body { height:100%; }
@@ -986,7 +996,11 @@
 
   // --- 18.17: система, окна, экран, голос, буфер, фокус, файлы, предпочтения ---
   function sysRender(data) { $('sys_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(data,null,2))+'</pre></div>'; }
-  function sysAutostart(enabled) {
+  function 
+  el = $('sys_check'); if (el) el.addEventListener('click', sysCheck);
+  el = $('sys_install'); if (el) el.addEventListener('click', sysInstall);
+
+  el = $('sys_autostart_on')(enabled) {
     $('sys_result').innerHTML = '<span class="muted">Автозагрузка…</span>';
     post('/api/assistant/system/autostart', {enabled: enabled}).then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
   }
@@ -1139,6 +1153,16 @@ $('av_watch').addEventListener('click', avitoWatch);
   refreshJournal();
   refreshSkills();
 })();
+
+  function sysCheck() {
+    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
+    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysInstall() {
+    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
+    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
+    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
 </script>
 
   <div class="as-card" id="card-avito-threads">
@@ -1324,5 +1348,16 @@ $('av_watch').addEventListener('click', avitoWatch);
    <div id="voice_result" style="margin-top:6px"><span class="muted">Голос/буфер/макросы появятся здесь.</span></div>
   </div>
 
+
+  <div class="as-card" id="card-install">
+   <div class="as-head"><div class="as-title">Автоустановка — проверка и установка зависимостей (И222, 18.18)</div><div class="as-sub">Ставит только то, чего нет: pip-пакеты, модели речи, проверка tesseract/ollama</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="sys_check" type="button">Проверить что не хватает</button>
+    <select class="inp sm" id="install_what"><option value="pip">pip (только недостающие)</option><option value="requirements">requirements.txt</option><option value="models">модели речи (vosk small ru)</option><option value="full">full (pip+модели)</option></select>
+    <input class="inp sm" id="install_confirm" placeholder='для моделей введите "установить"' style="width:180px">
+    <button class="btn sm primary" id="sys_install" type="button">Установить (с подтверждением)</button>
+   </div>
+   <div id="install_result" style="margin-top:6px"><span class="muted">Отчёт появится здесь.</span></div>
+  </div>
 </body>
 </html>

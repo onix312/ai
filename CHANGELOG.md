@@ -1,3 +1,10 @@
+## 18.18.0 — Автоустановка зависимостей и моделей: system.check/install
+
+- **Установщик.** `agent/install.py` — новый модуль: REQUIRED mss/Pillow/pywebview/pystray, VOICE vosk/sounddevice, OCR rapidocr-onnxruntime, OPTIONAL faster-whisper. `check()` — has_module 8 штук + which tesseract/ollama + ~/.printflow/models, `install()` — ставит только недостающее, `_pip_install` через sys.executable -m pip, `download_vosk_model` — zip с alphacephei.com в ~/.printflow/models, `full_setup` — pip+модели+external. CLI --check/--install/--requirements/--models/--full.
+- **Навыки 89.** +2: `system.check` (read) и `system.install` (write, what=oneof:pip|models|full|requirements + confirm_text, для models/full требует слово «установить» + подтверждение человека).
+- **Исполнение.** `_system_check` — install.check + capabilities.detect + missing, `_system_install` — pip/requirements/models/full, пишет preferences install.last.
+- **Панель.** +2 wrapper'а, 86 маршрутов (было 84): `system/check`, `system/install` (audit+confirm), `assistant.html` v18.18.0 карточка автоустановки, `sw.js` v88, versionCode 181800.
+
 ## 18.17.0 — Полноценный ассистент ПК: голос+система+зрение+окна+И206-И221
 
 - **Ядро 18.17 (7 таблиц).** `agent/store.py` — `clipboard_history` (И211, дедуп SHA-256), `preferences` (И214,И219), `whitelist` (И220), `macros` (И221), `focus_timers` (И215), `file_watches` (И217), `screen_archive` (Н38). Миграция `_migrate_1817` создаёт таблицы и индексы `clipboard_hash`, `file_watches_path`. Методы `add_clipboard, list_clipboard, clear_clipboard, set_preference, get_preference, list_preferences, set_whitelist, list_whitelist, is_whitelisted, save_macro, list_macros, get_macro, delete_macro, add_focus_timer, list_focus_timers, stop_focus_timer, add_file_watch, list_file_watches, update_file_watch, add_screen_archive, list_screen_archive, clear_screen_archive, stats_17`.

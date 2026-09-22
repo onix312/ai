@@ -1,6 +1,6 @@
-"""Маршруты помощника (18.17): рантайм, действия, голос, агент, журнал, Авито, ТГ.
+"""Маршруты помощника (18.18): рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Восемьдесят два маршрута, и каждый отвечает за свою часть договорённости:
+Восемьдесят четыре маршрута, и каждый отвечает за свою часть договорённости:
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -16,7 +16,8 @@
     архив переписок, связка с заказом, расписание, дедуп по фото, уведомления (18.16, И191, И193, И195-И197);
   * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188),
     календарь, шаблоны, хештеги, поиск, экспорт, статистика конверсии (18.16, И198, И200-И205),
-    система, окна, экран, голос, буфер, таймеры, предпочтения, белый список, макросы (18.17, И206-И221).
+    система, окна, экран, голос, буфер, таймеры, предпочтения, белый список, макросы (18.17, И206-И221),
+    автоустановка зависимостей и моделей (18.18, И222).
 
 Деньги и печать эти маршруты не двигают: выполнение делает панель через обычные
 маршруты системы с `confirmed`, взятым из каталога, а не из ответа модели.
@@ -756,3 +757,18 @@ def assistant_macro_run(api, ctx):
     if not confirmed:
         return {"ok": False, "needs_confirmation": True, "reason": "Запуск макроса требует подтверждения", "text": f"Макрос {body.get('name')}"}
     return service.assistant_macro_run(api.db, str(body.get("name") or ""))
+
+@router.get("/api/assistant/system/check", doc="Помощник: проверка зависимостей")
+def assistant_system_check(api, ctx):
+    from . import assistant as service
+    return service.system_check(api.db)
+
+@router.post("/api/assistant/system/install", doc="Помощник: автоустановка", audit="Помощник: автоустановка")
+def assistant_system_install(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Автоустановка меняет систему — нужно подтверждение", "text": f"Установить {body.get('what') or 'pip'}"}
+    return service.system_install(api.db, str(body.get("what") or "pip"), str(body.get("confirm_text") or ""))
+

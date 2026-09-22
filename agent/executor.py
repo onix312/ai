@@ -1,4 +1,4 @@
-"""Исполнение навыков ассистента (18.17).
+"""Исполнение навыков ассистента (18.18).
 
 Порядок один для всех навыков, и именно он держит договорённость с владельцем:
 
@@ -15,7 +15,8 @@
 Отказ здесь — нормальный ответ, а не исключение: у каждого отказа есть
 `reason`, который можно показать человеку и который объясняет `agent.why`.
 
-18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221)
+18.18: автоустановка систем
+# 18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221)
 # 18.16: архив переписок, связка, расписание, дедуп, календарь ТГ, шаблоны, хештеги, поиск, экспорт, статистика
 # 18.17: голос+система+зрение+окна+И206-И221
 # 18.15: добавлены Авито-слежка (И181, И183, И185, И186) и ТГ-посты (И182, И184).
@@ -117,6 +118,10 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         return f"{title}: {params.get('key')} = {str(params.get('value') or '')[:40]}"
     if name == "safety.whitelist_save":
         return f"{title}: {params.get('app_name')} → {'разрешить' if params.get('allowed') else 'запретить'}"
+    if name == "system.check":
+        return f"{title}: проверка зависимостей"
+    if name == "system.install":
+        return f"{title}: установить {params.get('what') or 'недостающее'}"
     if name == "assistant.macro":
         return f"{title}: макрос «{params.get('name') or ''}» из {len(params.get('steps') or []) if isinstance(params.get('steps'), list) else 0} шагов"
     shown = ", ".join(f"{key}=«{str(value)[:60]}»" for key, value in list(params.items())[:3])
@@ -289,6 +294,8 @@ class Runner:
             "system.focus": self._system_focus,
             "system.power": self._system_power,
             "system.health": self._system_health,
+            "system.check": self._system_check,
+            "system.install": self._system_install,
             "window.active": self._window_active,
             "window.list": self._window_list,
             "window.focus": self._window_focus,
@@ -729,7 +736,8 @@ class Runner:
                 "chat": chat or "из настроек", "text": text[:500],
                 "hint": "Пост отправлен в ТГ-канал"}
 
-    # --- 18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221)
+    # --- 18.18: автоустановка систем
+# 18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221)
 # 18.16: архив переписок, связка, расписание, дедуп (И191, И193, И195-И197) ---
     def _avito_threads(self, params: dict[str, Any]) -> dict[str, Any]:
         limit = int(params.get("limit") or 30)

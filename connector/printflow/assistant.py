@@ -1156,3 +1156,10 @@ def assistant_macros(db, limit: int = 20) -> dict:
 
 def assistant_macro_run(db, name: str = "") -> dict:
     return _call_agent_skill(db, "assistant.macro_run", {"name": name})
+
+def system_check(db) -> dict:
+    return _call_agent_skill(db, "system.check", {})
+
+def system_install(db, what: str = "pip", confirm_text: str = "") -> dict:
+    return _call_agent_skill(db, "system.install", {"what": what, "confirm_text": confirm_text})
+

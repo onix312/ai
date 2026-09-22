@@ -17,6 +17,6 @@ from __future__ import annotations
 
 __all__ = ["AGENT_VERSION", "SPEECH_PORT", "AGENT_PORT"]
 
-AGENT_VERSION = "18.17.0"
+AGENT_VERSION = "18.18.0"
 SPEECH_PORT = 8791
 AGENT_PORT = 8799

@@ -9,7 +9,7 @@
   контуров, площади, аналитика (свесы, тонкие места, нормали, стол, масса),
   источник фонового потока и его исполнение.
 * **Строковые контракты**: кнопка «Сечения» и хост виджета в `index.html`,
-  пин `?v=18.17.0`, запись модуля в service-worker, точки монтирования в
+  пин `?v=18.18.0`, запись модуля в service-worker, точки монтирования в
   `print.js` (выбор модели → авто-сечения, кнопка, настройки профиля),
   WGSL-шейдер (подписи compute-точки входа и атомарного буфера).
 """
@@ -301,7 +301,7 @@ class GpuSliceContracts(unittest.TestCase):
         self.assertIn('Разрезать модель на слои прямо в браузере', INDEX)
 
     def test_index_pins_gpuslice(self):
-        self.assertIn('<script src="assets/gpuslice.js?v=18.17.0"></script>', INDEX)
+        self.assertIn('<script src="assets/gpuslice.js?v=18.18.0"></script>', INDEX)
 
     def test_sw_precaches_gpuslice(self):
         self.assertIn("'/assets/gpuslice.js',", SW_JS)
