@@ -280,6 +280,113 @@ class UploadMixin:
             "source": source, "library": record,
         })
 
+    def handle_intake_upload(self):
+        """Сообщение клиента вместе с его файлом — в один черновик заказа.
+
+        Зачем отдельный маршрут. Текст входящего заказа разбирает
+        `/api/order/intake/preview`, а файлы принимают `/api/jobs/upload` и
+        `/api/estimate/upload` — и ни один из них не умеет оба сразу. Клиент
+        присылает сообщение с моделью в мессенджере, и мастер переносит файл
+        руками: сначала в очередь или оценку, потом в карточку заказа. Здесь
+        файл и текст проходят один путь и дают один черновик.
+
+        Маршрут байтовый, поэтому живёт в цепочке `do_POST` до реестра, как
+        остальные загрузки. Он ничего не сохраняет: заказ появляется только
+        после того, как человек нажал «Сохранить» в карточке.
+
+        Порядок заполнения намеренный и совпадает с `OrderIntake.preview`:
+        сначала детерминированный разбор текста, потом оценка файла дополняет
+        пустые поля, и только потом — если помощник включён — модель
+        предлагает значения для того, что не разобрали первые два слоя.
+        """
+        fields, upload = self._multipart_upload()
+        text = " ".join(str(fields.get("text") or "").split())
+        channel = str(fields.get("channel") or "").strip() or "direct"
+        if not text and not upload:
+            return self.send_json(400, {"error": "Вставьте сообщение или приложите файл"})
+
+        from .order_intake import OrderIntake
+        intake = OrderIntake(self.api.db)
+        parsed: dict = {}
+        try:
+            preview = intake.preview(text, channel) if text else None
+        except ValueError as exc:
+            return self.send_json(400, {"error": str(exc)})
+        if preview is None:
+            # Файл без сообщения: черновик собирается так же, как это делает
+            # Watch Folder для 3MF, — изделие по имени файла, всё остальное
+            # остаётся человеку.
+            preview = intake.preview(f"{channel} файл", channel)
+            preview["draft"].update({
+                "product": "Изделие из файла",
+                "notes": f"Входящий файл ({channel}): сообщение не приложено",
+            })
+            preview["parsed"] = {}
+        draft = dict(preview.get("draft") or {})
+        parsed = dict(preview.get("parsed") or {})
+        warnings = list(preview.get("warnings") or [])
+
+        file_info: dict = {}
+        estimate: dict = {}
+        if upload:
+            if not upload[1]:
+                return self.send_json(400, {"error": "Файл пустой"})
+            try:
+                requested_name = _upload_filename(upload[0])
+            except ValueError as exc:
+                return self.send_json(400, {"error": str(exc)})
+            if not requested_name.lower().endswith((".3mf", ".gcode", ".stl", ".obj")):
+                return self.send_json(400, {
+                    "error": "Из сообщения принимаются 3MF, G-code, STL и OBJ; "
+                             "фото клиента — в карточку заказа",
+                })
+            name, local, _created = save_upload(requested_name, upload[1])
+            try:
+                from .estimate import estimate_file
+                estimate = estimate_file(local) or {}
+            except Exception:
+                estimate = {}
+            draft["file"] = name
+            grams = num(estimate.get("total_grams")) or num(estimate.get("grams"))
+            minutes = num(estimate.get("total_minutes")) or num(estimate.get("minutes"))
+            # Файл дополняет только пустые поля: значение, разобранное из
+            # сообщения или взятое из карточки товара, он не перетирает.
+            if grams and not num(draft.get("grams")):
+                draft["grams"] = grams
+            if minutes and not num(draft.get("hours")):
+                draft["hours"] = round(minutes / 60.0, 2)
+            for key in ("material", "color"):
+                value = str(estimate.get(key) or "").strip()
+                if value and not str(draft.get(key) or "").strip():
+                    draft[key] = value
+            file_info = {"name": name, "size": len(upload[1]),
+                         "extension": Path(name).suffix.lower().lstrip("."),
+                         "estimate": bool(estimate)}
+            warnings.append("Файл из сообщения подставлен в черновик — проверьте его до сохранения")
+
+        assistant: dict = {"ok": False, "available": False, "suggestions": [], "reply": ""}
+        try:
+            from . import assistant as assistant_service
+            if assistant_service.config(self.api.db)["enabled"]:
+                assistant = assistant_service.suggest(
+                    self.api.db, draft, text or str(draft.get("notes") or ""), channel)
+                if assistant.get("ok"):
+                    draft = dict(assistant.get("draft") or draft)
+                    warnings.extend(assistant.get("warnings") or [])
+        except Exception as exc:  # помощник не имеет права ронять разбор заказа
+            from .logging_setup import log
+            log().warning("Помощник не отработал на входящем заказе: %s", exc)
+            assistant = {"ok": False, "available": False, "suggestions": [], "reply": "",
+                         "reason": "Помощник не отработал — черновик собран без него"}
+
+        return self.send_json(200, {
+            "ok": True, "draft": draft, "parsed": parsed,
+            "confidence": preview.get("confidence", 0),
+            "warnings": warnings, "matches": preview.get("matches") or {},
+            "file": file_info or None, "estimate": estimate,
+            "assistant": assistant,
+        })
+
     def handle_upload(self, query: dict):
         """Приём файла модели и отправка его на принтер по FTPS."""
         length, too_large = request_length(self.headers.get("Content-Length"), MAX_UPLOAD)
@@ -403,3 +510,22 @@ class UploadMixin:
         return self.send_json(200, {"ok": True, "estimate": estimate, **result})
 
 
+
+    def handle_speech_upload(self):
+        """Запись голоса → текст (срез 2).
+
+        Байтовый маршрут, поэтому в цепочке `do_POST` до реестра. Звук не
+        сохраняется на диске и не пишется в базу: он передаётся внешнему
+        рантайму речи на этом же компьютере и забывается. Расшифрованный текст
+        ничего не выполняет — панель подставляет его в поле фразы, а действие
+        человек подтверждает как обычно.
+        """
+        fields, upload = self._multipart_upload()
+        if not upload or not upload[1]:
+            return self.send_json(400, {"error": "Запись не передана"})
+        from . import assistant as service
+        result = service.transcribe(self.api.db, upload[1],
+                                    str(fields.get("language") or "ru"))
+        if not result.get("ok"):
+            return self.send_json(200, result)
+        return self.send_json(200, result)

@@ -1595,10 +1595,39 @@ async function openOrder(id, intakeDraft, intakeMeta) {
       matches.previous_order ? `прошлый заказ №${matches.previous_order.number}` : '',
     ].filter(Boolean).join(' · ');
     const warnings = (intakeMeta.warnings || []).map((w) => `⚠ ${esc(w)}`).join('<br>');
+    /* 18.13: файл из сообщения и предложения помощника показываем здесь же —
+       человек обязан видеть, какое поле придумала модель, а какое разобрала
+       система. Молча подставлять значения нельзя: черновик подтверждает он. */
+    const file = intakeMeta.file || null;
+    const fileLine = file
+      ? `<br>Файл из сообщения: ${esc(file.name)}${file.estimate ? ' · вес и время подставлены из оценки' : ' · оценка не прочиталась, заполните вес и время вручную'}`
+      : '';
+    const suggestions = intakeMeta.suggestions || [];
+    const suggestLine = suggestions.length
+      ? `<br>Помощник предложил: ${suggestions.map((s) => `${esc(s.field)} → «${esc(s.value)}»`).join(', ')}`
+      : '';
+    const reply = String(intakeMeta.reply || '').trim();
     intakeHint.className = `verdict ${num(intakeMeta.confidence) >= 80 ? 'ok' : 'warn'}`;
     intakeHint.innerHTML = `<b>Заполнено из текста · уверенность ${nfmt(intakeMeta.confidence)}%</b>`
-      + (found ? `<br>${esc(found)}` : '') + (warnings ? `<br>${warnings}` : '')
-      + '<br><small>Проверьте поля и нажмите «Сохранить» — до этого база не меняется.</small>';
+      + (found ? `<br>${esc(found)}` : '') + fileLine + suggestLine + (warnings ? `<br>${warnings}` : '')
+      + '<br><small>Проверьте поля и нажмите «Сохранить» — до этого база не меняется.</small>'
+      + (reply
+        ? '<br><small>Черновик ответа клиенту — суммы и сроки подставьте сами:</small>'
+          + `<textarea id="of_intake_reply" rows="3" style="width:100%;margin-top:4px">${esc(reply)}</textarea>`
+          + '<button class="btn sm" type="button" id="of_intake_reply_copy">Скопировать ответ</button>'
+        : '');
+    const copyReply = $('of_intake_reply_copy');
+    if (copyReply && !copyReply.dataset.bound) {
+      copyReply.dataset.bound = '1';
+      copyReply.addEventListener('click', async () => {
+        const area = $('of_intake_reply');
+        const value = area ? area.value : '';
+        try {
+          if (navigator.clipboard) await navigator.clipboard.writeText(value);
+          toast('Ответ скопирован', 'Вставьте в чат клиента — суммы и сроки проверьте', 'ok');
+        } catch (error) { fail(error); }
+      });
+    }
   }
   $('order_delete').hidden = !id;
   $('order_archive').hidden = !id;
@@ -3172,25 +3201,128 @@ function exportCsv() {
 }
 
 /* ================================================ входящий заказ из текста */
+let intakeFile = null;
+
+function intakeSetFile(file) {
+  /* Файл из сообщения клиента живёт только до «Разобрать»: черновик уходит в
+     карточку заказа, а повторный разбор с тем же файлом означал бы вторую
+     копию в uploads. */
+  intakeFile = file || null;
+  const label = $('intake_file_name');
+  if (!label) return;
+  if (intakeFile) {
+    label.hidden = false;
+    label.textContent = `Выбран: ${intakeFile.name} · ${(intakeFile.size / 1048576).toFixed(1)} МБ`;
+  } else {
+    label.hidden = true;
+    label.textContent = '';
+  }
+}
+
+function bindIntakeFile() {
+  const input = $('intake_file');
+  const button = $('intake_file_btn');
+  const drop = $('intake_drop');
+  if (input && !input.dataset.bound) {
+    input.dataset.bound = '1';
+    input.addEventListener('change', () => intakeSetFile(input.files && input.files[0]));
+  }
+  if (button && !button.dataset.bound) {
+    button.dataset.bound = '1';
+    button.addEventListener('click', () => { if (input) input.click(); });
+  }
+  if (drop && !drop.dataset.bound) {
+    drop.dataset.bound = '1';
+    ['dragenter', 'dragover'].forEach((name) => drop.addEventListener(name, (e) => {
+      e.preventDefault(); drop.classList.add('over');
+    }));
+    ['dragleave', 'drop'].forEach((name) => drop.addEventListener(name, (e) => {
+      e.preventDefault(); drop.classList.remove('over');
+    }));
+    drop.addEventListener('drop', (e) => {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) intakeSetFile(file);
+    });
+  }
+}
+
+async function intakeAssistantLine() {
+  /* Строка состояния помощника в модалке: человек должен видеть, работает ли
+     модель, ДО того как положится на её предложения. Ошибка состояния не
+     мешает разбору — тогда строка просто остаётся скрытой. */
+  const box = $('intake_assistant');
+  if (!box) return;
+  try {
+    const state = await get('/api/assistant/status');
+    const text = $('intake_assistant_text');
+    const row = $('intake_assistant_row');
+    const use = $('intake_use_assistant');
+    if (text) text.textContent = state.available
+      ? `модель «${state.model}» на этом компьютере — предложит значения для полей, которые парсер не разобрал`
+      : (state.enabled ? state.reason : 'выключен в настройках — сообщение разбирает только локальный парсер');
+    if (row) row.hidden = !state.available;
+    if (use) use.checked = !!state.available;
+    box.hidden = false;
+  } catch (e) { box.hidden = true; }
+}
+
 function openOrderIntake() {
   $('intake_text').value = '';
   $('intake_channel').value = 'telegram';
+  if ($('intake_file')) $('intake_file').value = '';
+  intakeSetFile(null);
+  bindIntakeFile();
   openModal('order_intake_modal');
+  intakeAssistantLine();
   setTimeout(() => $('intake_text').focus(), 50);
 }
 
 async function previewOrderIntake() {
   const text = $('intake_text').value.trim();
-  if (!text) return fail(new Error('Вставьте сообщение клиента'));
+  if (!text && !intakeFile) return fail(new Error('Вставьте сообщение клиента или приложите его файл'));
   const button = $('intake_preview');
   button.disabled = true;
   button.textContent = 'Разбираю…';
+  const channel = $('intake_channel').value;
   try {
-    const result = await post('/api/order/intake/preview', {
-      text,
-      channel: $('intake_channel').value,
-    });
+    let result;
+    if (intakeFile) {
+      /* Сообщение и файл идут одним multipart: так черновик сразу получает
+         файл, вес и время из оценки, а не собирается из двух запросов. */
+      const form = new FormData();
+      form.append('text', text);
+      form.append('channel', channel);
+      form.append('file', intakeFile);
+      result = await post('/api/order/intake/upload', form);
+    } else {
+      result = await post('/api/order/intake/preview', { text, channel });
+    }
+    if (!intakeFile) {
+      /* Без файла помощник зовётся вторым шагом и только когда доступен:
+         детерминированный разбор первичен, модель добирает пустые поля. */
+      const useAssistant = $('intake_use_assistant');
+      try {
+        const state = await get('/api/assistant/status');
+        if (state.available && useAssistant && useAssistant.checked) {
+          const extra = await post('/api/assistant/suggest', {
+            text,
+            channel,
+            draft: result.draft || {},
+          });
+          if (extra && extra.ok) {
+            result.draft = extra.draft || result.draft;
+            result.suggestions = extra.suggestions || [];
+            result.reply = extra.reply || '';
+            result.warnings = (result.warnings || []).concat(extra.warnings || []);
+          } else if (extra && extra.reason) {
+            result.warnings = (result.warnings || []).concat([`Помощник: ${extra.reason}`]);
+          }
+        }
+      } catch (e) { /* помощник недоступен — черновик уже собран парсером */ }
+    }
     closeModal('order_intake_modal');
+    intakeSetFile(null);
+    if ($('intake_file')) $('intake_file').value = '';
     await openOrder(null, result.draft || {}, result);
   } catch (e) { fail(e); }
   finally {

@@ -1377,6 +1377,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 say("      Принтер выключен, в другой сети или включён облачный режим",
                     Style.DIM)
 
+    # Помощник (18.13) — предупреждения, а не ошибки: система обязана
+    # работать без него, как работает без Pillow в спагетти-детекте.
+    say()
+    say("  Локальный помощник", Style.BOLD)
+    assistant_reports()
+
     # Автозапуск — предупреждения, не ошибки: работать можно и без него.
     say()
     say("  Автозапуск", Style.BOLD)
@@ -1425,6 +1431,178 @@ def read_printers() -> list[dict]:
         return [dict(row) for row in rows]
     except Exception:
         return []
+
+
+def read_assistant_settings() -> dict:
+    """Настройки помощника из SQLite. Без базы — безопасные умолчания.
+
+    Лаунчер намеренно не импортирует коннектор: `pf.py doctor` обязан работать
+    и с повреждённой базой, и до первого запуска. Значения по умолчанию здесь
+    повторяют `config.DEFAULT_SETTINGS`, и расхождение ловит тест.
+    """
+    defaults = {"assistant_enabled": False,
+                "assistant_url": "http://127.0.0.1:11434",
+                "assistant_model": "",
+                "assistant_speech_enabled": False,
+                "assistant_speech_url": "http://127.0.0.1:8791",
+                "assistant_speech_model": "",
+                "assistant_agent_enabled": False,
+                "assistant_agent_url": "http://127.0.0.1:8799"}
+    if not DB_FILE.exists():
+        return dict(defaults)
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(f"file:{DB_FILE}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT key, value FROM settings WHERE key IN ("
+                + ",".join("?" * len(defaults)) + ")",
+                tuple(defaults)).fetchall()
+        finally:
+            conn.close()
+        for key, raw in rows:
+            try:
+                defaults[key] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                defaults[key] = raw
+    except Exception:
+        pass
+    return defaults
+
+
+def assistant_models(url: str, timeout: float = 2.0) -> tuple[list[str], str]:
+    """Список моделей рантайма и причина, если он не отвечает.
+
+    Запрос уходит только в loopback: диагностика не должна случайно отправить
+    текст на чужой адрес, даже если владелец вписал его в настройках.
+    """
+    from connector.printflow.assistant import DEFAULT_URL, _loopback_ok, _post_json
+
+    address = str(url or "").strip() or DEFAULT_URL
+    local, why = _loopback_ok(address)
+    if not local:
+        return [], f"адрес должен быть этим компьютером ({why})"
+    ok, payload, reason = _post_json(f"{address.rstrip('/')}/api/tags", {}, timeout)
+    if not ok:
+        return [], reason
+    models = [str(row.get("name") or "")
+              for row in ((payload or {}).get("models") or []) if isinstance(row, dict)]
+    return [name for name in models if name], ""
+
+
+def assistant_runtime_report(kind: str, path: str, timeout: float = 1.5) -> tuple[dict, str]:
+    """Ответ `/health` внешнего рантайма и причина молчания.
+
+    Рантайм речи живёт на процессоре, агент компьютера — вообще вне коннектора
+    (папка `agent/` со своим окружением), поэтому диагностика их только
+    пингует: ничего не устанавливает и не запускает.
+    """
+    from connector.printflow.assistant import _loopback_ok, _post_json
+
+    address = str(kind or "").strip()
+    if not address:
+        return {}, "адрес не указан"
+    local, why = _loopback_ok(address)
+    if not local:
+        return {}, f"адрес должен быть этим компьютером ({why})"
+    ok_, payload, reason = _post_json(f"{address.rstrip('/')}{path}", {}, timeout)
+    if not ok_:
+        return {}, reason
+    return payload if isinstance(payload, dict) else {}, ""
+
+
+def speech_report(settings: dict) -> None:
+    """Голос (срез 2): внешний рантайм речи на процессоре."""
+    say("    Голос")
+    url = str(settings.get("assistant_speech_url") or "").strip()
+    if not settings.get("assistant_speech_enabled"):
+        say("      Выключен в настройках — фраза вводится текстом", Style.DIM)
+        return
+    ok(f"Включён · адрес {url or 'не указан'}")
+    state, reason = assistant_runtime_report(url, "/health")
+    if reason:
+        warn(f"Рантайм речи не отвечает: {reason}")
+        step("Расшифровка идёт на процессоре — видеопамять она не занимает")
+        step("Голос выключится сам: текст и кнопки работают как раньше")
+        return
+    model = str(state.get("model") or settings.get("assistant_speech_model") or "")
+    ok("Рантайм речи отвечает" + (f" · модель {model}" if model else ""))
+
+
+def agent_report(settings: dict) -> None:
+    """Агент компьютера (срез 3): стоп-слово, активное окно, действия в нём."""
+    say("    Агент компьютера")
+    url = str(settings.get("assistant_agent_url") or "").strip()
+    if not settings.get("assistant_agent_enabled"):
+        say("      Выключен в настройках", Style.DIM)
+        return
+    ok(f"Включён · адрес {url or 'не указан'}")
+    state, reason = assistant_runtime_report(url, "/health")
+    if reason:
+        warn(f"Агент не отвечает: {reason}")
+        step("Агент ставится отдельно: папка agent/ со своим окружением")
+        step("Его зависимости в окружение коннектора не попадают")
+        return
+    window = str(state.get("window") or "")
+    ok("Агент отвечает" + (f" · активное окно «{window}»" if window else ""))
+    if state.get("wake_word"):
+        ok("Стоп-слово слушается")
+    else:
+        say("      Стоп-слово не слушается — микрофон закрыт", Style.DIM)
+
+
+def assistant_reports() -> None:
+    """Все три внешних рантайма помощника в диагностике.
+
+    Блоки независимы и не роняют `pf.py doctor`: система обязана работать и без
+    модели, и без речи, и без агента компьютера.
+    """
+    settings = read_assistant_settings()
+    for report in (lambda: assistant_report(),
+                   lambda: speech_report(settings),
+                   lambda: agent_report(settings)):
+        try:
+            report()
+        except Exception as exc:  # диагностика на экзотической ОС
+            warn(f"Не получилось проверить: {exc}")
+
+
+def assistant_report() -> None:
+    """Блок диагностики помощника: что включено, отвечает ли рантайм, есть ли модель."""
+    settings = read_assistant_settings()
+    url = str(settings.get("assistant_url") or "").strip()
+    model = str(settings.get("assistant_model") or "").strip()
+    if not settings.get("assistant_enabled"):
+        say("      Выключен в настройках — панель работает как раньше", Style.DIM)
+        return
+    ok(f"Включён · адрес {url or 'не указан'}")
+    if not url:
+        warn("Адрес рантайма пустой — впишите, например http://127.0.0.1:11434")
+        return
+    try:
+        models, reason = assistant_models(url)
+    except Exception as exc:  # диагностика не должна падать на экзотических ОС
+        models, reason = [], str(exc)
+    if reason:
+        warn(f"Рантайм не отвечает: {reason}")
+        step("Запустите его на этом компьютере (для Ollama: `ollama serve`)")
+        step("Помощник выключится сам: заказы и печать работают без него")
+        return
+    ok(f"Рантайм отвечает · моделей: {len(models)}")
+    if not model:
+        warn("Модель не выбрана — помощник не отвечает на запросы")
+        if models:
+            step("Доступны: " + ", ".join(models[:5]))
+        step("Скачайте модель и впишите её имя в настройках (например, `ollama pull qwen2.5:3b`)")
+        return
+    if models and not any(model in name for name in models):
+        warn(f"Модели «{model}» у рантайма нет")
+        step("Доступны: " + ", ".join(models[:5]))
+        return
+    ok(f"Модель: {model} — помощник готов предлагать черновики")
+    step("Он ничего не сохраняет и не трогает принтеры: предложение становится"
+         " фактом после вашего «Сохранить»")
 
 
 def configured_backup_keep() -> int:
@@ -2702,6 +2880,33 @@ def cmd_app(args: argparse.Namespace) -> int:
     return app_main(argv)
 
 
+def cmd_assistant(args: argparse.Namespace) -> int:
+    """Окно помощника: та же страница сервера, свой вход (18.13).
+
+    Отдельного приложения у помощника нет намеренно: `/assistant.html` отдаёт
+    тот же коннектор, что и панель, поэтому окно не заводит второй HTTP-клиент,
+    вторую копию состояния и вторую точку обновления. pywebview уже есть в
+    требованиях, а при его отсутствии окно честно падает в браузер — тот же
+    путь, что у `pf.py app`.
+    """
+    try:
+        from connector.printflow.app_window import main as app_main
+    except ImportError as exc:
+        fail(f"Не удалось загрузить нативное окно: {exc}")
+        say("    Открываю помощник в браузере…")
+        port = running_port() or resolve_port(getattr(args, "port", None))
+        try:
+            webbrowser.open(f"http://localhost:{port}/assistant.html")
+        except Exception:
+            pass
+        return 0
+    argv = ["--port", str(args.port), "--path", "/assistant.html",
+            "--title", f"NOZZA · помощник {app_version()}"]
+    if getattr(args, "local", False):
+        argv.append("--local")
+    return app_main(argv)
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     """Текстовое меню — запасной вариант, когда окно недоступно."""
     if not interactive_console():
@@ -2750,6 +2955,16 @@ HELP = """
     python pf.py --local            только этот компьютер, без доступа по сети
     python pf.py --port 9000        другой порт
     python pf.py --background       запустить в фоне, консоль можно закрыть
+
+  ПОМОЩНИК (локальная модель, необязательно)
+    python pf.py assistant          своё окно помощника (pywebview)
+    python pf.py assistant --local  окно помощника без доступа по сети
+    python pf.py doctor             в том числе проверяет рантайм и модель
+
+    Помощник — надстройка, а не часть системы: заказы, печать и касса работают
+    без него. Модель крутит внешняя программа на этом компьютере (например,
+    Ollama), PrintFlow обращается к ней только по адресу 127.0.0.1 и ничего не
+    ставит сам. Включается в настройках панели: «Локальный помощник».
 
   ТЕЛЕФОН И ПЛАНШЕТ
     python pf.py net                адреса для кассы и пульта, QR, проверки
@@ -2866,6 +3081,7 @@ COMMANDS = {
     "service": cmd_service,
     "gui": cmd_gui,
     "app": cmd_app,
+    "assistant": cmd_assistant,
     "menu": cmd_menu,
     "stop": cmd_stop,
     "status": cmd_status,

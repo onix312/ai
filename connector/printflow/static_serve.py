@@ -68,6 +68,10 @@ SHORT_ALIASES = {
     "/pult": "control.html",
     "/staff": "staff.html",
     "/цех": "staff.html",
+    # Помощник (18.13): адрес диктуется вслух и попадает в ярлык нативного
+    # окна, поэтому закреплён явно, а не выводится из имени файла.
+    "/assist": "assistant.html",
+    "/помощник": "assistant.html",
 }
 
 

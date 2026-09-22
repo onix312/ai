@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<script src="/assets/theme-init.js?v=18.13.0"></script>
+<meta name="theme-color" content="#4f46e5">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA · помощник</title>
+<link rel="stylesheet" href="assets/tokens.css?v=18.13.0">
+<style>
+ /* Панель помощника (18.13) — свой экран, а не вкладка панели: разговор,
+    каталог действий и журнал в одном месте. Открывается нативным окном
+    (`python pf.py assistant`) и обычным адресом /assistant.html.
+    Никаких внешних библиотек: только общие токены темы. */
+ * { box-sizing:border-box; margin:0; padding:0; }
+ html, body { height:100%; }
+ body {
+   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   background:var(--bg); color:var(--text);
+ }
+ .as-wrap { max-width:1180px; margin:0 auto; padding:14px 14px 40px; }
+ .as-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+ .as-brand { display:flex; align-items:center; gap:9px; }
+ .as-brand img { width:32px; height:32px; }
+ .as-brand b { font-size:16px; display:block; }
+ .as-brand small { display:block; color:var(--muted); font-size:11px; }
+ .as-top-right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+ .as-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px;
+   font-weight:700; background:var(--panel); border:1px solid var(--line); }
+ .as-pill.ok { color:var(--ok); border-color:var(--ok); }
+ .as-pill.warn { color:var(--warn); border-color:var(--warn); }
+ .btn { background:var(--panel); border:1px solid var(--line); color:var(--text);
+   border-radius:10px; padding:8px 14px; font:inherit; font-size:13px; cursor:pointer; }
+ .btn:hover { border-color:var(--accent); }
+ .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+ .btn.sm { padding:5px 10px; font-size:12px; border-radius:8px; }
+ .btn:disabled { opacity:.5; cursor:not-allowed; }
+ .verdict { border:1px solid var(--line); background:var(--panel); border-radius:12px;
+   padding:10px 12px; font-size:13px; margin-bottom:12px; }
+ .verdict.ok { border-color:var(--ok); }
+ .verdict.warn { border-color:var(--warn); }
+ .verdict small { color:var(--muted); }
+ .as-grid { display:grid; grid-template-columns:1.35fr .95fr; gap:12px; align-items:start; }
+ @media (max-width:900px) { .as-grid { grid-template-columns:1fr; } }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
+ .card h2 { font-size:14px; margin-bottom:4px; }
+ .card p.sub { color:var(--muted); font-size:12px; margin-bottom:10px; }
+ .as-log { display:flex; flex-direction:column; gap:10px; min-height:220px; max-height:56vh;
+   overflow:auto; padding-right:4px; }
+ .msg { border:1px solid var(--line); border-radius:12px; padding:10px; background:var(--bg); }
+ .msg.me { border-color:var(--accent); }
+ .msg b.who { display:block; font-size:11px; color:var(--muted); margin-bottom:4px;
+   text-transform:uppercase; letter-spacing:.04em; }
+ .msg .body { font-size:13.5px; white-space:pre-wrap; word-break:break-word; }
+ .msg .warnline { color:var(--warn); font-size:12px; margin-top:6px; }
+ .msg .acts { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+ .kv { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted);
+   margin-top:6px; word-break:break-all; }
+ pre.result { font-family:ui-monospace,monospace; font-size:11.5px; white-space:pre-wrap;
+   background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px;
+   margin-top:8px; max-height:260px; overflow:auto; word-break:break-word; }
+ .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+ .chip { border:1px solid var(--line); background:var(--bg); color:var(--text);
+   border-radius:999px; padding:5px 11px; font-size:12px; cursor:pointer; }
+ .chip:hover { border-color:var(--accent); }
+ .chip.confirm { border-color:var(--warn); }
+ .as-input { display:flex; gap:8px; margin-top:10px; }
+ .as-input textarea { flex:1; resize:vertical; min-height:44px; max-height:160px;
+   background:var(--bg); color:var(--text); border:1px solid var(--line);
+   border-radius:10px; padding:10px; font:inherit; font-size:13.5px; }
+ .as-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+ .muted { color:var(--muted); }
+ .journal { display:flex; flex-direction:column; gap:6px; max-height:34vh; overflow:auto; }
+ .jrow { border:1px solid var(--line); border-radius:10px; padding:7px 9px; font-size:12px; }
+ .jrow b { font-size:12.5px; }
+ .jrow.done { border-color:var(--ok); }
+ .jrow.error { border-color:var(--warn); }
+ .notice { border:1px dashed var(--line); border-radius:10px; padding:8px 10px;
+   font-size:12px; color:var(--muted); margin-top:10px; }
+  #as_mic.recording { background:#7f1d1d; border-color:#b91c1c; color:#fff;
+    animation:as-pulse 1.3s infinite; }
+  @keyframes as-pulse { 50% { opacity:.5; } }
+</style>
+</head>
+<body>
+<div class="as-wrap">
+ <div class="as-top">
+  <div class="as-brand">
+   <img src="assets/brand/nozza-mark-white.svg" alt="NOZZA">
+   <div><b>Помощник NOZZA</b><small>локальная модель · полный доступ к панели PrintFlow</small></div>
+  </div>
+  <div class="as-top-right">
+   <span class="as-pill" id="as_state">Проверяем рантайм…</span>
+   <span class="as-pill warn" id="as_speech" title="Внешний рантайм речи на процессоре">🎙 Голос: проверяем…</span>
+   <span class="as-pill warn" id="as_agent" title="Внешний агент: стоп-слово и активное окно">🖥 Агент: проверяем…</span>
+   <button class="btn sm" id="as_refresh" type="button">⟳ Состояние</button>
+   <a class="btn sm" href="/index.html" id="as_panel_link">Открыть панель</a>
+  </div>
+ </div>
+
+ <div class="verdict" id="as_verdict"><span>Проверяем, доступен ли рантайм на этом компьютере…</span></div>
+
+ <div class="as-grid">
+  <section class="card">
+   <h2>Разговор</h2>
+   <p class="sub">Фраза → действие из каталога. Деньги и печать выполняются только после «Подтвердить».</p>
+   <div class="as-log" id="as_log"></div>
+   <div class="as-input">
+    <textarea id="as_text" rows="2" placeholder="Например: что сейчас печатается; поставь паузу на P1S; покажи долги"></textarea>
+    <button class="btn" id="as_mic" type="button" disabled title="Голос включается, когда жив внешний рантайм речи">🎙</button>
+    <button class="btn primary" id="as_send" type="button">Спросить</button>
+   </div>
+   <div class="notice" id="as_notice">Помощник читает и предлагает; запись в базу и команды станку делает только ваше нажатие.</div>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+   <section class="card">
+    <h2>Действия</h2>
+    <p class="sub">Тот же каталог, что видит модель. Оранжевая рамка — требует подтверждения.</p>
+    <div class="chips" id="as_actions"></div>
+   </section>
+
+   <section class="card">
+    <h2>Входящее сообщение</h2>
+    <p class="sub">Текст клиента и его файл — в черновик заказа одним заходом.</p>
+    <textarea id="as_intake_text" rows="3" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px;font:inherit;font-size:13px" placeholder="Нужно 20 адресников, PETG чёрный, для Марии, до пятницы"></textarea>
+    <div class="as-row" style="margin-top:8px">
+     <input type="file" id="as_intake_file" accept=".3mf,.gcode,.stl,.obj" hidden>
+     <button class="btn sm" id="as_intake_pick" type="button">Приложить файл</button>
+     <span class="muted" id="as_intake_filename" style="font-size:12px"></span>
+     <button class="btn sm primary" id="as_intake_run" type="button" style="margin-left:auto">Разобрать</button>
+    </div>
+   </section>
+
+   <section class="card">
+    <h2>Журнал действий помощника</h2>
+    <p class="sub">Входа нет, поэтому след остаётся здесь: что сделано и чем кончилось.</p>
+    <div class="journal" id="as_journal"><span class="muted">Загружаем…</span></div>
+    <button class="btn sm" id="as_journal_refresh" type="button" style="margin-top:8px">⟳ Обновить</button>
+   </section>
+  </div>
+ </div>
+</div>
+
+<script>
+/* Панель помощника. Самодостаточная страница: свой HTTP-клиент, свой рендер.
+   Каталог действий приходит с сервера (/api/assistant/status) — адреса
+   маршрутов здесь не хардкодятся, поэтому мёртвый маршрут не может появиться
+   в кнопках молча. */
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var state = { available: false, actions: [], model: '', reason: '' };
+
+  function call(method, path, body) {
+    var opts = { method: method, headers: { 'Accept': 'application/json' }, cache: 'no-store' };
+    if (body !== undefined) {
+      if (body instanceof FormData) { opts.body = body; }
+      else {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body || {});
+      }
+    }
+    return fetch(path, opts).then(function (r) {
+      return r.text().then(function (text) {
+        var data = {};
+        if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text.slice(0, 300) }; } }
+        if (!r.ok) throw new Error(data.error || ('ошибка ' + r.status));
+        return data;
+      });
+    });
+  }
+  var get = function (p) { return call('GET', p); };
+  var post = function (p, b) { return call('POST', p, b || {}); };
+
+  function log(who, html, cls) {
+    var box = $('as_log');
+    var node = document.createElement('div');
+    node.className = 'msg' + (cls ? ' ' + cls : '');
+    node.innerHTML = '<b class="who">' + esc(who) + '</b>' + html;
+    box.appendChild(node);
+    box.scrollTop = box.scrollHeight;
+    return node;
+  }
+
+  function verdict(text, tone) {
+    var box = $('as_verdict');
+    box.className = 'verdict' + (tone ? ' ' + tone : '');
+    box.innerHTML = text;
+  }
+
+  function renderState() {
+    var pill = $('as_state');
+    if (state.available) {
+      pill.className = 'as-pill ok';
+      pill.textContent = 'Модель готова: ' + state.model;
+      verdict('<b>Помощник готов.</b> ' + esc(state.reason || 'Рантайм на этом компьютере отвечает.')
+        + '<br><small>Данные не покидают машину: адрес рантайма проверяется на loopback до запроса. '
+        + 'Деньги и печать — только через «Подтвердить».</small>', 'ok');
+    } else {
+      pill.className = 'as-pill warn';
+      pill.textContent = state.model ? 'Рантайм недоступен' : 'Модель не выбрана';
+      verdict('<b>Помощник не отвечает.</b> ' + esc(state.reason || '')
+        + '<br><small>Заказы, печать и касса работают как раньше: помощник — необязательная надстройка. '
+        + 'Кнопки каталога ниже при этом работают — они ходят в обычные маршруты панели.</small>', 'warn');
+    }
+    renderSpeech(state.speech);
+    renderAgent(state.agent);
+  }
+
+  /* Голос — свой рантайм (срез 2): текстовая модель может молчать, а запись
+     при этом работать, и наоборот. Кнопка «Говорю» заменяет стоп-слово,
+     которое слушает внешний агент: микрофон в браузере всегда открыт только
+     на время фразы. */
+  function renderSpeech(speech) {
+    var pill = $('as_speech');
+    var mic = $('as_mic');
+    if (!speech || !speech.available) {
+      pill.className = 'as-pill warn';
+      pill.textContent = '🎙 Голос: выключен';
+      pill.title = (speech && speech.reason) || 'Рантайм речи не отвечает';
+      mic.disabled = true;
+      mic.textContent = '🎙';
+      mic.title = 'Голос выключен: нужен внешний рантайм речи на этом компьютере';
+      return;
+    }
+    pill.className = 'as-pill ok';
+    pill.textContent = '🎙 Голос: рантайм жив';
+    pill.title = speech.reason || 'Расшифровка идёт на процессоре, звук не покидает машину';
+    mic.disabled = false;
+    mic.title = 'Скажите фразу — запись уйдёт в рантайм речи на этом компьютере';
+  }
+
+  /* Агент компьютера (срез 3): PrintFlow только показывает, жив ли он и какое
+     окно сейчас активно. Действия в чужих приложениях выполняет сам агент. */
+  function renderAgent(agent) {
+    var pill = $('as_agent');
+    if (!agent || !agent.available) {
+      pill.className = 'as-pill warn';
+      pill.textContent = '🖥 Агент: не подключён';
+      pill.title = (agent && agent.reason) || 'Агент не отвечает';
+      return;
+    }
+    pill.className = 'as-pill ok';
+    pill.textContent = '🖥 Агент: жив' + (agent.window ? ' · «' + agent.window + '»' : '');
+    pill.title = 'Стоп-слово слушает агент: ' + (agent.wake_word ? 'да' : 'нет');
+  }
+
+  var RECORDER = null;
+  var CHUNKS = [];
+  var STREAM = null;
+
+  function stopStream() {
+    if (STREAM) { STREAM.getTracks().forEach(function (t) { t.stop(); }); }
+    STREAM = null;
+  }
+
+  function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      log('помощник', '<div class="warnline">В этом окне нет доступа к микрофону — напишите фразу текстом</div>');
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      STREAM = stream;
+      CHUNKS = [];
+      RECORDER = new MediaRecorder(stream);
+      RECORDER.ondataavailable = function (e) { if (e.data && e.data.size) CHUNKS.push(e.data); };
+      RECORDER.onstop = sendRecording;
+      RECORDER.start();
+      var mic = $('as_mic');
+      mic.classList.add('recording');
+      mic.textContent = '⏹ Стоп';
+      log('вы', '<div class="body">Говорю…</div>', 'me');
+    }).catch(function (e) {
+      log('помощник', '<div class="warnline">Микрофон не отдан: ' + esc(e.message || e)
+        + '. Фразу можно написать текстом.</div>');
+    });
+  }
+
+  function stopRecording() {
+    if (RECORDER && RECORDER.state !== 'inactive') RECORDER.stop();
+    else { stopStream(); }
+  }
+
+  function sendRecording() {
+    var mic = $('as_mic');
+    mic.classList.remove('recording');
+    mic.textContent = '🎙';
+    var mime = (RECORDER && RECORDER.mimeType) || 'audio/webm';
+    var blob = new Blob(CHUNKS, { type: mime });
+    stopStream();
+    CHUNKS = [];
+    if (!blob.size) {
+      log('помощник', '<div class="warnline">Звук не записался — повторите фразу</div>');
+      return;
+    }
+    var form = new FormData();
+    form.append('language', 'ru');
+    form.append('audio', blob, 'phrase.webm');
+    log('помощник', '<div class="body">Расшифровываю на этом компьютере…</div>');
+    call('POST', '/api/assistant/speech', form).then(function (data) {
+      if (!data.ok) {
+        log('помощник', '<div class="warnline">' + esc(data.reason || 'Речь не расшифрована') + '</div>');
+        return;
+      }
+      log('вы', '<div class="body">' + esc(data.text) + '</div>', 'me');
+      ask(data.text);
+    }).catch(function (e) {
+      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function renderActions() {
+    var host = $('as_actions');
+    host.innerHTML = '';
+    (state.actions || []).forEach(function (action) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (action.confirm ? ' confirm' : '');
+      btn.textContent = action.title;
+      btn.title = action.doc + (action.confirm ? ' · требует подтверждения' : '');
+      btn.addEventListener('click', function () { askAction(action, {}); });
+      host.appendChild(btn);
+    });
+    if (!(state.actions || []).length) {
+      host.innerHTML = '<span class="muted">Каталог пуст — коннектор старше помощника.</span>';
+    }
+  }
+
+  function paramsLine(params) {
+    var keys = Object.keys(params || {});
+    if (!keys.length) return '';
+    return '<div class="kv">' + keys.map(function (k) {
+      return esc(k) + ': ' + esc(typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
+    }).join(' · ') + '</div>';
+  }
+
+  /* Карточка действия: что будет сделано, какие параметры, и две кнопки —
+     выполнить (для чтения) или подтвердить (для денег и печати). */
+  function askAction(action, params, explain, warnings) {
+    var html = '<div class="body"><b>' + esc(action.title) + '</b> · '
+      + esc(action.method) + ' ' + esc(action.path) + '</div>'
+      + (explain ? '<div class="body" style="margin-top:4px">' + esc(explain) + '</div>' : '')
+      + paramsLine(params)
+      + ((warnings || []).map(function (w) { return '<div class="warnline">⚠ ' + esc(w) + '</div>'; }).join(''))
+      + '<div class="acts">'
+      + (action.confirm
+        ? '<button class="btn sm primary" type="button" data-run="confirm">Подтвердить и выполнить</button>'
+        : '<button class="btn sm" type="button" data-run="now">Выполнить</button>')
+      + '<button class="btn sm" type="button" data-run="cancel">Отменить</button>'
+      + '</div>';
+    var node = log('действие', html);
+    node.querySelectorAll('[data-run]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var what = btn.dataset.run;
+        if (what === 'cancel') {
+          node.querySelector('.acts').innerHTML = '<span class="muted">Отменено человеком</span>';
+          journal(action, params, 'cancelled', 'Отменено в панели помощника');
+          return;
+        }
+        runAction(action, params, node);
+      });
+    });
+  }
+
+  function runAction(action, params, node) {
+    var body = Object.assign({}, params || {});
+    /* Подтверждение берётся из каталога, а не из ответа модели: правило
+       «деньги и печать — через кнопку» модель понизить не может. */
+    if (action.confirm) body.confirmed = true;
+    node.querySelectorAll('.acts').forEach(function (box) {
+      box.innerHTML = '<span class="muted">Выполняем…</span>';
+    });
+    var request = action.method === 'GET'
+      ? get(action.path + (Object.keys(body).length
+        ? '?' + new URLSearchParams(body).toString() : ''))
+      : post(action.path, body);
+    request.then(function (data) {
+      node.insertAdjacentHTML('beforeend',
+        '<pre class="result">' + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + '</pre>');
+      node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
+      journal(action, params, 'done', '');
+      refreshJournal();
+    }).catch(function (e) {
+      node.insertAdjacentHTML('beforeend',
+        '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+      node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
+      journal(action, params, 'error', String(e.message || e));
+      refreshJournal();
+    });
+  }
+
+  function journal(action, params, outcome, detail) {
+    /* След действия: входа в панель помощника нет, поэтому журнал — единственное
+       место, где видно, что сделано и кем подтверждено. */
+    post('/api/assistant/journal', {
+      action: action.id, title: action.title, outcome: outcome, detail: detail,
+      printer_id: String((params || {}).printer_id || ''),
+      data: { params: params || {}, path: action.path, method: action.method },
+    }).catch(function () { /* журнал не должен ронять действие */ });
+  }
+
+  function refreshJournal() {
+    get('/api/assistant/journal?limit=20').then(function (data) {
+      var host = $('as_journal');
+      var rows = (data.events || []);
+      if (!rows.length) { host.innerHTML = '<span class="muted">Действий ещё не было.</span>'; return; }
+      host.innerHTML = rows.map(function (row) {
+        var d = row.data || {};
+        var outcome = d.outcome || '';
+        return '<div class="jrow ' + esc(outcome) + '"><b>' + esc(row.title || '') + '</b>'
+          + ' · ' + esc(outcome === 'done' ? 'выполнено' : outcome === 'error' ? 'отказ'
+            : outcome === 'cancelled' ? 'отменено' : outcome)
+          + '<div class="muted">' + esc((row.at || '').replace('T', ' ').slice(0, 19))
+          + (row.detail ? ' · ' + esc(row.detail) : '') + '</div></div>';
+      }).join('');
+    }).catch(function (e) {
+      $('as_journal').innerHTML = '<span class="muted">Журнал недоступен: ' + esc(e.message || e) + '</span>';
+    });
+  }
+
+  function ask(text) {
+    log('вы', '<div class="body">' + esc(text) + '</div>', 'me');
+    post('/api/assistant/intent', { text: text }).then(function (data) {
+      if (!data.ok) {
+        log('помощник', '<div class="body">' + esc(data.reason || 'Не получилось') + '</div>');
+        return;
+      }
+      if (!data.action) {
+        log('помощник', '<div class="body">'
+          + esc(data.explain || 'Действие из каталога не подошло — уточните фразу.')
+          + '</div>');
+        return;
+      }
+      askAction(data.action, data.params || {}, data.explain, data.warnings || []);
+    }).catch(function (e) {
+      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function intake() {
+    var text = $('as_intake_text').value.trim();
+    var file = $('as_intake_file').files && $('as_intake_file').files[0];
+    if (!text && !file) { log('помощник', '<div class="warnline">Вставьте сообщение или приложите файл</div>'); return; }
+    var form = new FormData();
+    form.append('text', text);
+    form.append('channel', 'direct');
+    if (file) form.append('file', file);
+    log('вы', '<div class="body">Разобрать входящее сообщение'
+      + (file ? ' с файлом ' + esc(file.name) : '') + '</div>', 'me');
+    call('POST', '/api/order/intake/upload', form).then(function (data) {
+      var draft = data.draft || {};
+      var lines = ['Изделие: ' + (draft.product || '—'),
+        'Клиент: ' + (draft.customer_name || '—') + (draft.phone ? ' · ' + draft.phone : ''),
+        'Количество: ' + (draft.qty || 1) + ' · Сумма: ' + (draft.price || 0) + ' ₽',
+        'Материал: ' + (draft.material || '—') + ' · Цвет: ' + (draft.color || '—'),
+        'Срок: ' + (draft.due || '—') + ' · Файл: ' + (draft.file || '—')];
+      var suggestions = data.suggestions || [];
+      log('помощник', '<div class="body">Черновик заказа · уверенность '
+        + (data.confidence || 0) + '%</div><div class="kv">'
+        + lines.map(esc).join('<br>') + '</div>'
+        + (suggestions.length ? '<div class="warnline">Помощник предложил: '
+          + suggestions.map(function (s) { return esc(s.field) + ' → «' + esc(s.value) + '»'; }).join(', ')
+          + '</div>' : '')
+        + ((data.warnings || []).map(function (w) {
+          return '<div class="warnline">⚠ ' + esc(w) + '</div>'; }).join(''))
+        + (data.reply ? '<div class="body" style="margin-top:6px">Черновик ответа клиенту:<br>'
+          + esc(data.reply) + '</div>' : '')
+        + '<div class="acts"><button class="btn sm primary" type="button" data-save="1">Сохранить заказ</button>'
+        + '<a class="btn sm" href="/index.html" >Открыть в панели</a></div>');
+      var box = $('as_log').lastElementChild;
+      var save = box.querySelector('[data-save]');
+      if (save) save.addEventListener('click', function () {
+        save.disabled = true;
+        post('/api/order/save', draft).then(function (res) {
+          var order = res.order || {};
+          box.insertAdjacentHTML('beforeend', '<div class="body">Заказ сохранён: №'
+            + esc(order.number || '') + '</div>');
+          journal({ id: 'order_save', title: 'Сохранить заказ', method: 'POST',
+            path: '/api/order/save', confirm: true }, { draft: draft }, 'done',
+            'Черновик из входящего сообщения');
+          refreshJournal();
+        }).catch(function (e) {
+          save.disabled = false;
+          box.insertAdjacentHTML('beforeend', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+        });
+      });
+      $('as_intake_text').value = '';
+      $('as_intake_file').value = '';
+      $('as_intake_filename').textContent = '';
+    }).catch(function (e) {
+      log('помощник', '<div class="warnline">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function refreshState() {
+    return Promise.all([
+      get('/api/assistant/status'),
+      get('/api/assistant/agent').catch(function (e) { return { available: false, reason: String(e.message || e) }; }),
+    ]).then(function (pair) {
+      var data = pair[0] || {};
+      state = { available: !!data.available, actions: data.actions || [],
+        model: data.model || '', reason: data.reason || '',
+        speech: data.speech || { available: false, reason: 'Рантайм речи не отвечает' },
+        agent: pair[1] || { available: false, reason: '' } };
+      renderState();
+      renderActions();
+    }).catch(function (e) {
+      state = { available: false, actions: [], model: '', reason: String(e.message || e),
+        speech: { available: false, reason: String(e.message || e) },
+        agent: { available: false, reason: String(e.message || e) } };
+      renderState();
+    });
+  }
+
+  $('as_send').addEventListener('click', function () {
+    var text = $('as_text').value.trim();
+    if (!text) return;
+    $('as_text').value = '';
+    ask(text);
+  });
+  $('as_text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('as_send').click();
+  });
+  $('as_refresh').addEventListener('click', function () { refreshState(); refreshJournal(); });
+  $('as_journal_refresh').addEventListener('click', refreshJournal);
+  $('as_intake_pick').addEventListener('click', function () { $('as_intake_file').click(); });
+  $('as_intake_file').addEventListener('change', function () {
+    var f = $('as_intake_file').files && $('as_intake_file').files[0];
+    $('as_intake_filename').textContent = f ? f.name + ' · ' + (f.size / 1048576).toFixed(1) + ' МБ' : '';
+  });
+  $('as_mic').addEventListener('click', function () {
+    if (RECORDER && RECORDER.state === 'recording') stopRecording();
+    else startRecording();
+  });
+  $('as_intake_run').addEventListener('click', intake);
+
+  refreshState();
+  refreshJournal();
+})();
+</script>
+</body>
+</html>
