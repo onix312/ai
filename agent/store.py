@@ -1,4 +1,4 @@
-"""Своя база ассистента (18.14): память, индекс, журнал, заметки, навыки.
+"""Своя база ассистента (18.17): память, индекс, журнал, заметки, навыки.
 
 Почему у ассистента своя SQLite, а не таблицы в базе PrintFlow.
 
@@ -152,6 +152,49 @@ SCHEMA = (
         status TEXT DEFAULT 'new')""",
     "CREATE INDEX IF NOT EXISTS tg_ideas_status ON tg_ideas(status)",
     "CREATE INDEX IF NOT EXISTS tg_schedule_status ON tg_schedule(status)",
+
+    # --- 18.17: полноценный ассистент ПК (И206-И221) ----------------------
+    """CREATE TABLE IF NOT EXISTS clipboard_history(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        text TEXT NOT NULL,
+        source_app TEXT DEFAULT '',
+        hash TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS preferences(
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        at TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS whitelist(
+        app_name TEXT PRIMARY KEY,
+        allowed INTEGER DEFAULT 1,
+        at TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS macros(
+        name TEXT PRIMARY KEY,
+        steps_json TEXT NOT NULL,
+        at TEXT NOT NULL,
+        description TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS focus_timers(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        duration_min INTEGER NOT NULL,
+        status TEXT DEFAULT 'running',
+        end_at TEXT DEFAULT '',
+        note TEXT DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS file_watches(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        path TEXT NOT NULL,
+        enabled INTEGER DEFAULT 1,
+        last_seen TEXT DEFAULT '',
+        last_count INTEGER DEFAULT 0)""",
+    """CREATE TABLE IF NOT EXISTS screen_archive(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        title TEXT DEFAULT '',
+        path TEXT DEFAULT '',
+        hash TEXT DEFAULT '')""",
+    "CREATE INDEX IF NOT EXISTS clipboard_hash ON clipboard_history(hash)",
+    "CREATE INDEX IF NOT EXISTS file_watches_path ON file_watches(path)",
 )
 
 
@@ -182,9 +225,9 @@ class Store:
                 self._conn.execute(statement)
             self._conn.commit()
             # --- миграции 18.16: добавить колонки к старым таблицам -----------
-            self._migrate_1816()
+            self._migrate_1817()
 
-    def _migrate_1816(self) -> None:
+    def _migrate_1817(self) -> None:
         """Добавить колонки, которых не было в 18.15 — без пересоздания таблиц."""
         def has_column(table: str, col: str) -> bool:
             try:
@@ -218,6 +261,19 @@ class Store:
             self._conn.execute("CREATE INDEX IF NOT EXISTS avito_listings_image_hash ON avito_listings(image_hash)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS tg_ideas_status ON tg_ideas(status)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS tg_schedule_status ON tg_schedule(status)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS clipboard_hash ON clipboard_history(hash)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS file_watches_path ON file_watches(path)")
+            # create new tables if missing (for old DBs)
+            for stmt in (
+                "CREATE TABLE IF NOT EXISTS clipboard_history(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, text TEXT NOT NULL, source_app TEXT DEFAULT '', hash TEXT DEFAULT '')",
+                "CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY, value TEXT NOT NULL, at TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS whitelist(app_name TEXT PRIMARY KEY, allowed INTEGER DEFAULT 1, at TEXT NOT NULL)",
+                "CREATE TABLE IF NOT EXISTS macros(name TEXT PRIMARY KEY, steps_json TEXT NOT NULL, at TEXT NOT NULL, description TEXT DEFAULT '')",
+                "CREATE TABLE IF NOT EXISTS focus_timers(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, duration_min INTEGER NOT NULL, status TEXT DEFAULT 'running', end_at TEXT DEFAULT '', note TEXT DEFAULT '')",
+                "CREATE TABLE IF NOT EXISTS file_watches(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, path TEXT NOT NULL, enabled INTEGER DEFAULT 1, last_seen TEXT DEFAULT '', last_count INTEGER DEFAULT 0)",
+                "CREATE TABLE IF NOT EXISTS screen_archive(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, title TEXT DEFAULT '', path TEXT DEFAULT '', hash TEXT DEFAULT '')",
+            ):
+                self._conn.execute(stmt)
             self._conn.commit()
         except sqlite3.Error:
             pass
@@ -801,3 +857,149 @@ class Store:
                 "tg_templates": count("tg_templates"),
                 "tg_schedule": count("tg_schedule"),
                 "tg_ideas": count("tg_ideas")}
+
+    # --- 18.17: полноценный ассистент ПК ----------------------------------
+    # clipboard_history (И211)
+    def add_clipboard(self, text: str, source_app: str = "") -> dict[str, Any]:
+        import hashlib
+        at = now_iso()
+        h = hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()[:16]
+        # дедуп по хешу: не пишем подряд одинаковое
+        rows = self._rows("SELECT hash FROM clipboard_history ORDER BY id DESC LIMIT 1")
+        if rows and rows[0].get("hash") == h:
+            return {"id": 0, "at": at, "text": str(text)[:4000], "source_app": source_app, "hash": h, "dedup": True}
+        cur = self._run("INSERT INTO clipboard_history(at,text,source_app,hash) VALUES(?,?,?,?)",
+                        (at, str(text)[:8000], str(source_app or "")[:200], h))
+        return {"id": cur.lastrowid, "at": at, "text": str(text)[:4000], "source_app": str(source_app or "")[:200], "hash": h}
+
+    def list_clipboard(self, limit: int = 30) -> list[dict[str, Any]]:
+        limit = max(1, min(200, int(limit or 30)))
+        return self._rows("SELECT * FROM clipboard_history ORDER BY id DESC LIMIT ?", (limit,))
+
+    def clear_clipboard(self) -> int:
+        cur = self._run("DELETE FROM clipboard_history", ())
+        return cur.rowcount
+
+    # preferences (И214, И219)
+    def set_preference(self, key: str, value: str) -> dict[str, Any]:
+        at = now_iso()
+        self._run("INSERT INTO preferences(key,value,at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, at=excluded.at",
+                  (str(key)[:200], str(value)[:4000], at))
+        return {"key": str(key)[:200], "value": str(value)[:4000], "at": at}
+
+    def get_preference(self, key: str) -> dict[str, Any] | None:
+        rows = self._rows("SELECT * FROM preferences WHERE key=?", (str(key)[:200],))
+        return rows[0] if rows else None
+
+    def list_preferences(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM preferences ORDER BY key ASC LIMIT ?", (max(1, min(500, int(limit or 100))),))
+
+    def delete_preference(self, key: str) -> bool:
+        return self._run("DELETE FROM preferences WHERE key=?", (str(key)[:200],)).rowcount > 0
+
+    # whitelist (И220)
+    def set_whitelist(self, app_name: str, allowed: bool = True) -> dict[str, Any]:
+        at = now_iso()
+        self._run("INSERT INTO whitelist(app_name,allowed,at) VALUES(?,?,?) ON CONFLICT(app_name) DO UPDATE SET allowed=excluded.allowed, at=excluded.at",
+                  (str(app_name)[:300], 1 if allowed else 0, at))
+        return {"app_name": str(app_name)[:300], "allowed": bool(allowed), "at": at}
+
+    def list_whitelist(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM whitelist ORDER BY app_name ASC LIMIT ?", (max(1, min(500, int(limit or 100))),))
+
+    def is_whitelisted(self, app_name: str) -> bool:
+        rows = self._rows("SELECT allowed FROM whitelist WHERE app_name=?", (str(app_name)[:300],))
+        if not rows:
+            return False
+        return bool(rows[0].get("allowed"))
+
+    # macros (И221)
+    def save_macro(self, name: str, steps: list[dict[str, Any]], description: str = "") -> dict[str, Any]:
+        import json as _json
+        at = now_iso()
+        self._run("INSERT INTO macros(name,steps_json,at,description) VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET steps_json=excluded.steps_json, at=excluded.at, description=excluded.description",
+                  (str(name)[:200], _json.dumps(steps, ensure_ascii=False)[:20000], at, str(description or "")[:600]))
+        return {"name": str(name)[:200], "steps": steps, "at": at, "description": str(description or "")[:600]}
+
+    def list_macros(self, limit: int = 50) -> list[dict[str, Any]]:
+        import json as _json
+        rows = self._rows("SELECT * FROM macros ORDER BY at DESC LIMIT ?", (max(1, min(200, int(limit or 50))),))
+        for r in rows:
+            try:
+                r["steps"] = _json.loads(r.get("steps_json") or "[]")
+            except Exception:
+                r["steps"] = []
+        return rows
+
+    def get_macro(self, name: str) -> dict[str, Any] | None:
+        import json as _json
+        rows = self._rows("SELECT * FROM macros WHERE name=?", (str(name)[:200],))
+        if not rows:
+            return None
+        r = rows[0]
+        try:
+            r["steps"] = _json.loads(r.get("steps_json") or "[]")
+        except Exception:
+            r["steps"] = []
+        return r
+
+    def delete_macro(self, name: str) -> bool:
+        return self._run("DELETE FROM macros WHERE name=?", (str(name)[:200],)).rowcount > 0
+
+    # focus_timers (И215)
+    def add_focus_timer(self, duration_min: int, note: str = "") -> dict[str, Any]:
+        at = now_iso()
+        import datetime
+        try:
+            end = datetime.datetime.now() + datetime.timedelta(minutes=int(duration_min))
+            end_at = end.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            end_at = ""
+        cur = self._run("INSERT INTO focus_timers(at,duration_min,status,end_at,note) VALUES(?,?,?,?,?)",
+                        (at, max(1, min(240, int(duration_min or 25))), "running", end_at, str(note or "")[:400]))
+        return {"id": cur.lastrowid, "at": at, "duration_min": int(duration_min or 25), "status": "running", "end_at": end_at, "note": str(note or "")[:400]}
+
+    def list_focus_timers(self, limit: int = 20) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM focus_timers ORDER BY id DESC LIMIT ?", (max(1, min(100, int(limit or 20))),))
+
+    def stop_focus_timer(self, timer_id: int) -> bool:
+        return self._run("UPDATE focus_timers SET status='stopped' WHERE id=?", (int(timer_id),)).rowcount > 0
+
+    # file_watches (И217)
+    def add_file_watch(self, path: str, enabled: bool = True) -> dict[str, Any]:
+        at = now_iso()
+        cur = self._run("INSERT INTO file_watches(at,path,enabled,last_seen,last_count) VALUES(?,?,?,?,?)",
+                        (at, str(path)[:600], 1 if enabled else 0, "", 0))
+        return {"id": cur.lastrowid, "at": at, "path": str(path)[:600], "enabled": bool(enabled), "last_seen": "", "last_count": 0}
+
+    def list_file_watches(self, limit: int = 50) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM file_watches ORDER BY id DESC LIMIT ?", (max(1, min(200, int(limit or 50))),))
+
+    def update_file_watch(self, watch_id: int, last_count: int = 0) -> bool:
+        return self._run("UPDATE file_watches SET last_seen=?, last_count=? WHERE id=?",
+                         (now_iso(), int(last_count), int(watch_id))).rowcount > 0
+
+    # screen_archive
+    def add_screen_archive(self, title: str = "", path: str = "", hash_val: str = "") -> dict[str, Any]:
+        at = now_iso()
+        cur = self._run("INSERT INTO screen_archive(at,title,path,hash) VALUES(?,?,?,?)",
+                        (at, str(title or "")[:300], str(path or "")[:600], str(hash_val or "")[:120]))
+        return {"id": cur.lastrowid, "at": at, "title": str(title or "")[:300], "path": str(path or "")[:600], "hash": str(hash_val or "")[:120]}
+
+    def list_screen_archive(self, limit: int = 30) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM screen_archive ORDER BY id DESC LIMIT ?", (max(1, min(200, int(limit or 30))),))
+
+    def clear_screen_archive(self) -> int:
+        cur = self._run("DELETE FROM screen_archive", ())
+        return cur.rowcount
+
+    def stats_17(self) -> dict[str, Any]:
+        def cnt(t: str) -> int:
+            rows = self._rows(f"SELECT COUNT(*) as n FROM {t}")
+            return int(rows[0]["n"]) if rows else 0
+        base = self.stats()
+        base.update(clipboard=cnt("clipboard_history"), preferences=cnt("preferences"),
+                    whitelist=cnt("whitelist"), macros=cnt("macros"),
+                    focus_timers=cnt("focus_timers"), file_watches=cnt("file_watches"),
+                    screen_archive=cnt("screen_archive"))
+        return base

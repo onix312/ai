@@ -1016,3 +1016,143 @@ def tg_idea_save(db: Database, context: str = "", idea: str = "") -> dict[str, A
 
 def tg_ideas_history(db: Database, limit: int = 30, status: str = "") -> dict[str, Any]:
     return _call_agent_skill(db, "tg.ideas_history", {"limit": limit, "status": status})
+
+# --- 18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221) ----
+
+def system_autostart(db, enabled: bool = True, app_name: str = "PrintFlowAssistant") -> dict:
+    return _call_agent_skill(db, "system.autostart", {"enabled": enabled, "app_name": app_name})
+
+def system_process_list(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "system.process_list", {"limit": limit})
+
+def system_audio_device(db, device_id: str = "") -> dict:
+    return _call_agent_skill(db, "system.audio_device", {"device_id": device_id})
+
+def system_volume(db, level: int = 0) -> dict:
+    return _call_agent_skill(db, "system.volume", {"level": level})
+
+def system_display(db) -> dict:
+    return _call_agent_skill(db, "system.display", {})
+
+def system_focus(db, minutes: int = 30) -> dict:
+    return _call_agent_skill(db, "system.focus", {"minutes": minutes})
+
+def system_power(db, action: str = "lock") -> dict:
+    return _call_agent_skill(db, "system.power", {"action": action})
+
+def system_health(db) -> dict:
+    return _call_agent_skill(db, "system.health", {})
+
+def window_active(db) -> dict:
+    return _call_agent_skill(db, "window.active", {})
+
+def window_list(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "window.list", {"limit": limit})
+
+def window_focus(db, title: str = "") -> dict:
+    return _call_agent_skill(db, "window.focus", {"title": title})
+
+def window_text(db, title: str = "") -> dict:
+    return _call_agent_skill(db, "window.text", {"title": title})
+
+def window_controls(db, title: str = "") -> dict:
+    return _call_agent_skill(db, "window.controls", {"title": title})
+
+def window_click(db, x: int = 0, y: int = 0) -> dict:
+    return _call_agent_skill(db, "window.click", {"x": x, "y": y})
+
+def window_type(db, text: str = "") -> dict:
+    return _call_agent_skill(db, "window.type", {"text": text})
+
+def window_snap(db, left_title: str = "", right_title: str = "") -> dict:
+    return _call_agent_skill(db, "window.snap", {"left_title": left_title, "right_title": right_title})
+
+def screen_shot(db, max_side: int = 800) -> dict:
+    return _call_agent_skill(db, "screen.shot", {"max_side": max_side})
+
+def screen_region_shot(db, left: int = 0, top: int = 0, right: int = 0, bottom: int = 0) -> dict:
+    return _call_agent_skill(db, "screen.region_shot", {"left": left, "top": top, "right": right, "bottom": bottom})
+
+def screen_describe(db, max_side: int = 800) -> dict:
+    return _call_agent_skill(db, "screen.describe", {"max_side": max_side})
+
+def screen_find(db, text: str = "") -> dict:
+    return _call_agent_skill(db, "screen.find", {"text": text})
+
+def screen_find_and_click(db, text: str = "") -> dict:
+    return _call_agent_skill(db, "screen.find_and_click", {"text": text})
+
+def screen_archive(db, title: str = "") -> dict:
+    return _call_agent_skill(db, "screen.archive", {"title": title})
+
+def screen_archive_search(db, query: str = "", limit: int = 20) -> dict:
+    return _call_agent_skill(db, "screen.archive_search", {"query": query, "limit": limit})
+
+def screen_archive_erase(db) -> dict:
+    return _call_agent_skill(db, "screen.archive_erase", {})
+
+def voice_listen(db, seconds: int = 5) -> dict:
+    return _call_agent_skill(db, "voice.listen", {"seconds": seconds})
+
+def voice_say(db, text: str = "", tone: str = "") -> dict:
+    return _call_agent_skill(db, "voice.say", {"text": text, "tone": tone})
+
+def voice_dictate(db, seconds: int = 5) -> dict:
+    return _call_agent_skill(db, "voice.dictate", {"seconds": seconds})
+
+def voice_note(db, text: str = "", due: str = "") -> dict:
+    return _call_agent_skill(db, "voice.note", {"text": text, "due": due})
+
+def voice_command(db, text: str = "") -> dict:
+    return _call_agent_skill(db, "voice.command", {"text": text})
+
+def voice_profile(db, speed: str = "", tone: str = "", volume: int = 0) -> dict:
+    return _call_agent_skill(db, "voice.profile", {"speed": speed, "tone": tone, "volume": volume})
+
+def clipboard_history(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "clipboard.history", {"limit": limit})
+
+def clipboard_read(db) -> dict:
+    return _call_agent_skill(db, "clipboard.read", {})
+
+def clipboard_write(db, text: str = "") -> dict:
+    return _call_agent_skill(db, "clipboard.write", {"text": text})
+
+def focus_timer(db, minutes: int = 25, note: str = "") -> dict:
+    return _call_agent_skill(db, "scheduler.focus_timer", {"minutes": minutes, "note": note})
+
+def focus_list(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "scheduler.focus_list", {"limit": limit})
+
+def focus_stop(db, timer_id: int = 0) -> dict:
+    return _call_agent_skill(db, "scheduler.focus_stop", {"timer_id": timer_id})
+
+def files_watch(db, path: str = "", enabled: bool = True) -> dict:
+    return _call_agent_skill(db, "files.watch", {"path": path, "enabled": enabled})
+
+def files_watches(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "files.watches", {"limit": limit})
+
+def files_quick_open(db, name: str = "", limit: int = 10) -> dict:
+    return _call_agent_skill(db, "files.quick_open", {"name": name, "limit": limit})
+
+def knowledge_preferences(db, key: str = "") -> dict:
+    return _call_agent_skill(db, "knowledge.preferences", {"key": key})
+
+def knowledge_preference_save(db, key: str = "", value: str = "") -> dict:
+    return _call_agent_skill(db, "knowledge.preference_save", {"key": key, "value": value})
+
+def safety_whitelist(db, limit: int = 100) -> dict:
+    return _call_agent_skill(db, "safety.whitelist", {"limit": limit})
+
+def safety_whitelist_save(db, app_name: str = "", allowed: bool = True) -> dict:
+    return _call_agent_skill(db, "safety.whitelist_save", {"app_name": app_name, "allowed": allowed})
+
+def assistant_macro(db, name: str = "", steps=None, description: str = "") -> dict:
+    return _call_agent_skill(db, "assistant.macro", {"name": name, "steps": steps or [], "description": description})
+
+def assistant_macros(db, limit: int = 20) -> dict:
+    return _call_agent_skill(db, "assistant.macros", {"limit": limit})
+
+def assistant_macro_run(db, name: str = "") -> dict:
+    return _call_agent_skill(db, "assistant.macro_run", {"name": name})

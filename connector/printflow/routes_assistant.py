@@ -1,6 +1,6 @@
-"""Маршруты помощника (18.16): рантайм, действия, голос, агент, журнал, Авито, ТГ.
+"""Маршруты помощника (18.17): рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Тридцать три маршрута, и каждый отвечает за свою часть договорённости:
+Восемьдесят два маршрута, и каждый отвечает за свою часть договорённости:
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -15,11 +15,12 @@
   * `avito/*` — слежка за Авито, поиск, проверка, варианты ответа (18.15, И181–И186),
     архив переписок, связка с заказом, расписание, дедуп по фото, уведомления (18.16, И191, И193, И195-И197);
   * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188),
-    календарь, шаблоны, хештеги, поиск, экспорт, статистика конверсии (18.16, И198, И200-И205).
+    календарь, шаблоны, хештеги, поиск, экспорт, статистика конверсии (18.16, И198, И200-И205),
+    система, окна, экран, голос, буфер, таймеры, предпочтения, белый список, макросы (18.17, И206-И221).
 
 Деньги и печать эти маршруты не двигают: выполнение делает панель через обычные
 маршруты системы с `confirmed`, взятым из каталога, а не из ответа модели.
-Маршруты 18.14 тоже только читают, а 18.15-18.16 проксируют вызовы к агенту: панель
+Маршруты 18.14 тоже только читают, а 18.15-18.17 проксируют вызовы к агенту: панель
 не исполняет Авито и ТГ сама, а просит агента по loopback — тот же узор, что у
 реестра навыков.
 """
@@ -456,3 +457,302 @@ def assistant_tg_idea_save(api: Any, ctx: Ctx):
 def assistant_tg_ideas_history(api: Any, ctx: Ctx):
     from . import assistant as service
     return service.tg_ideas_history(api.db, int(ctx.num("limit", 30)), str(ctx.one("status") or ""))
+
+# --- 18.17: система, окна, экран, голос, буфер, таймеры, предпочтения ----
+
+@router.post("/api/assistant/system/autostart", doc="Помощник: автозагрузка")
+def assistant_system_autostart(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    enabled = bool(body.get("enabled")) if "enabled" in body else True
+    return service.system_autostart(api.db, enabled, str(body.get("app_name") or "PrintFlowAssistant"))
+
+@router.get("/api/assistant/system/processes", doc="Помощник: список процессов")
+def assistant_system_processes(api, ctx):
+    from . import assistant as service
+    return service.system_process_list(api.db, int(ctx.num("limit", 20)))
+
+@router.get("/api/assistant/system/audio", doc="Помощник: аудио-устройства")
+def assistant_system_audio(api, ctx):
+    from . import assistant as service
+    return service.system_audio_device(api.db, str(ctx.one("device_id") or ""))
+
+@router.post("/api/assistant/system/audio", doc="Помощник: выбрать аудио-устройство")
+def assistant_system_audio_set(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.system_audio_device(api.db, str(body.get("device_id") or ""))
+
+@router.get("/api/assistant/system/volume", doc="Помощник: громкость")
+def assistant_system_volume_get(api, ctx):
+    from . import assistant as service
+    return service.system_volume(api.db, 0)
+
+@router.post("/api/assistant/system/volume", doc="Помощник: задать громкость", audit="Помощник: громкость")
+def assistant_system_volume_set(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.system_volume(api.db, int(body.get("level") or ctx.num("level", 0) or 0))
+
+@router.get("/api/assistant/system/display", doc="Помощник: дисплеи")
+def assistant_system_display(api, ctx):
+    from . import assistant as service
+    return service.system_display(api.db)
+
+@router.post("/api/assistant/system/focus", doc="Помощник: режим фокуса")
+def assistant_system_focus(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.system_focus(api.db, int(body.get("minutes") or ctx.num("minutes", 30) or 30))
+
+@router.post("/api/assistant/system/power", doc="Помощник: питание", audit="Помощник: питание")
+def assistant_system_power(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Действие питания требует подтверждения", "text": f"Выполнить {str(body.get('action') or 'lock')}"}
+    return service.system_power(api.db, str(body.get("action") or "lock"))
+
+@router.get("/api/assistant/system/health", doc="Помощник: здоровье ПК")
+def assistant_system_health(api, ctx):
+    from . import assistant as service
+    return service.system_health(api.db)
+
+@router.get("/api/assistant/window/active", doc="Помощник: активное окно")
+def assistant_window_active(api, ctx):
+    from . import assistant as service
+    return service.window_active(api.db)
+
+@router.get("/api/assistant/window/list", doc="Помощник: список окон")
+def assistant_window_list(api, ctx):
+    from . import assistant as service
+    return service.window_list(api.db, int(ctx.num("limit", 20)))
+
+@router.post("/api/assistant/window/focus", doc="Помощник: фокус на окно", audit="Помощник: фокус окна")
+def assistant_window_focus(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.window_focus(api.db, str(body.get("title") or ctx.one("title") or ""))
+
+@router.get("/api/assistant/window/text", doc="Помощник: текст окна")
+def assistant_window_text(api, ctx):
+    from . import assistant as service
+    return service.window_text(api.db, str(ctx.one("title") or ""))
+
+@router.get("/api/assistant/window/controls", doc="Помощник: элементы окна")
+def assistant_window_controls(api, ctx):
+    from . import assistant as service
+    return service.window_controls(api.db, str(ctx.one("title") or ""))
+
+@router.post("/api/assistant/window/click", doc="Помощник: клик", audit="Помощник: клик")
+def assistant_window_click(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Клик требует подтверждения", "text": f"Клик {body.get('x')},{body.get('y')}"}
+    return service.window_click(api.db, int(body.get("x") or ctx.num("x", 0) or 0), int(body.get("y") or ctx.num("y", 0) or 0))
+
+@router.post("/api/assistant/window/type", doc="Помощник: ввод текста", audit="Помощник: ввод текста")
+def assistant_window_type(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Ввод требует подтверждения", "text": f"Ввести «{str(body.get('text') or '')[:40]}»"}
+    return service.window_type(api.db, str(body.get("text") or ""))
+
+@router.post("/api/assistant/window/snap", doc="Помощник: разложить окна", audit="Помощник: разложить окна")
+def assistant_window_snap(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Разложить окна требует подтверждения", "text": f"Разложить {body.get('left_title')} и {body.get('right_title')}"}
+    return service.window_snap(api.db, str(body.get("left_title") or ""), str(body.get("right_title") or ""))
+
+@router.get("/api/assistant/screen/shot", doc="Помощник: снимок экрана")
+def assistant_screen_shot(api, ctx):
+    from . import assistant as service
+    return service.screen_shot(api.db, int(ctx.num("max_side", 800) or 800))
+
+@router.post("/api/assistant/screen/region", doc="Помощник: снимок области")
+def assistant_screen_region(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.screen_region_shot(api.db, int(body.get("left") or 0), int(body.get("top") or 0), int(body.get("right") or 0), int(body.get("bottom") or 0))
+
+@router.get("/api/assistant/screen/find", doc="Помощник: найти на экране")
+def assistant_screen_find(api, ctx):
+    from . import assistant as service
+    q = str(ctx.one("q") or ctx.one("text") or "")
+    return service.screen_find(api.db, q)
+
+@router.post("/api/assistant/screen/find", doc="Помощник: найти на экране")
+def assistant_screen_find_post(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.screen_find(api.db, str(body.get("text") or ""))
+
+@router.post("/api/assistant/screen/find-click", doc="Помощник: найти и кликнуть", audit="Помощник: найти и кликнуть")
+def assistant_screen_find_click(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Клик по найденному требует подтверждения", "text": f"Найти и кликнуть «{body.get('text') or ''}»"}
+    return service.screen_find_and_click(api.db, str(body.get("text") or ""))
+
+@router.post("/api/assistant/screen/archive", doc="Помощник: архивировать экран")
+def assistant_screen_archive(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.screen_archive(api.db, str(body.get("title") or ""))
+
+@router.get("/api/assistant/screen/archive", doc="Помощник: архив экрана")
+def assistant_screen_archive_list(api, ctx):
+    from . import assistant as service
+    return service.screen_archive_search(api.db, str(ctx.one("q") or ctx.one("query") or ""), int(ctx.num("limit", 20)))
+
+@router.post("/api/assistant/screen/archive/erase", doc="Помощник: стереть архив экрана", audit="Помощник: стереть архив экрана")
+def assistant_screen_archive_erase(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Стирание архива необратимо", "text": "Стереть архив экрана"}
+    return service.screen_archive_erase(api.db)
+
+@router.post("/api/assistant/voice/listen", doc="Помощник: слушать микрофон")
+def assistant_voice_listen(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.voice_listen(api.db, int(body.get("seconds") or ctx.num("seconds", 5) or 5))
+
+@router.post("/api/assistant/voice/say", doc="Помощник: озвучить")
+def assistant_voice_say(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.voice_say(api.db, str(body.get("text") or ""), str(body.get("tone") or ""))
+
+@router.post("/api/assistant/voice/dictate", doc="Помощник: диктовка", audit="Помощник: диктовка")
+def assistant_voice_dictate(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Диктовка вводит текст в активное окно", "text": f"Диктовать {body.get('seconds') or 5} сек"}
+    return service.voice_dictate(api.db, int(body.get("seconds") or 5))
+
+@router.post("/api/assistant/voice/note", doc="Помощник: голосовая заметка")
+def assistant_voice_note(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.voice_note(api.db, str(body.get("text") or ""), str(body.get("due") or ""))
+
+@router.post("/api/assistant/voice/command", doc="Помощник: голосовая команда")
+def assistant_voice_command(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.voice_command(api.db, str(body.get("text") or ""))
+
+@router.post("/api/assistant/voice/profile", doc="Помощник: профиль голоса")
+def assistant_voice_profile(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.voice_profile(api.db, str(body.get("speed") or ""), str(body.get("tone") or ""), int(body.get("volume") or 0))
+
+@router.get("/api/assistant/clipboard/history", doc="Помощник: история буфера")
+def assistant_clipboard_history(api, ctx):
+    from . import assistant as service
+    return service.clipboard_history(api.db, int(ctx.num("limit", 20)))
+
+@router.post("/api/assistant/clipboard/read", doc="Помощник: читать буфер")
+def assistant_clipboard_read(api, ctx):
+    from . import assistant as service
+    return service.clipboard_read(api.db)
+
+@router.post("/api/assistant/clipboard/write", doc="Помощник: писать в буфер")
+def assistant_clipboard_write(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.clipboard_write(api.db, str(body.get("text") or ""))
+
+@router.post("/api/assistant/focus/timer", doc="Помощник: таймер фокуса")
+def assistant_focus_timer(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.focus_timer(api.db, int(body.get("minutes") or ctx.num("minutes", 25) or 25), str(body.get("note") or ""))
+
+@router.get("/api/assistant/focus/timers", doc="Помощник: таймеры фокуса")
+def assistant_focus_timers(api, ctx):
+    from . import assistant as service
+    return service.focus_list(api.db, int(ctx.num("limit", 20)))
+
+@router.post("/api/assistant/focus/stop", doc="Помощник: стоп таймер")
+def assistant_focus_stop(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.focus_stop(api.db, int(body.get("timer_id") or ctx.num("timer_id", 0) or 0))
+
+@router.post("/api/assistant/files/watch", doc="Помощник: следить за папкой")
+def assistant_files_watch(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.files_watch(api.db, str(body.get("path") or ""), bool(body.get("enabled")) if "enabled" in body else True)
+
+@router.get("/api/assistant/files/watches", doc="Помощник: слежки за папками")
+def assistant_files_watches(api, ctx):
+    from . import assistant as service
+    return service.files_watches(api.db, int(ctx.num("limit", 20)))
+
+@router.get("/api/assistant/files/quick-open", doc="Помощник: быстрый поиск файла")
+def assistant_files_quick_open(api, ctx):
+    from . import assistant as service
+    return service.files_quick_open(api.db, str(ctx.one("q") or ctx.one("name") or ""), int(ctx.num("limit", 10)))
+
+@router.get("/api/assistant/preferences", doc="Помощник: предпочтения")
+def assistant_preferences(api, ctx):
+    from . import assistant as service
+    return service.knowledge_preferences(api.db, str(ctx.one("key") or ""))
+
+@router.post("/api/assistant/preferences", doc="Помощник: сохранить предпочтение")
+def assistant_preferences_save(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.knowledge_preference_save(api.db, str(body.get("key") or ""), str(body.get("value") or ""))
+
+@router.get("/api/assistant/whitelist", doc="Помощник: белый список")
+def assistant_whitelist(api, ctx):
+    from . import assistant as service
+    return service.safety_whitelist(api.db, int(ctx.num("limit", 100)))
+
+@router.post("/api/assistant/whitelist", doc="Помощник: править белый список", audit="Помощник: белый список")
+def assistant_whitelist_save(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Правка белого списка требует подтверждения", "text": f"Белый список: {body.get('app_name')}"}
+    return service.safety_whitelist_save(api.db, str(body.get("app_name") or ""), bool(body.get("allowed")) if "allowed" in body else True)
+
+@router.post("/api/assistant/macro", doc="Помощник: сохранить макрос")
+def assistant_macro_save(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    return service.assistant_macro(api.db, str(body.get("name") or ""), body.get("steps") or [], str(body.get("description") or ""))
+
+@router.get("/api/assistant/macros", doc="Помощник: макросы")
+def assistant_macros_list(api, ctx):
+    from . import assistant as service
+    return service.assistant_macros(api.db, int(ctx.num("limit", 20)))
+
+@router.post("/api/assistant/macro/run", doc="Помощник: запустить макрос", audit="Помощник: запуск макроса")
+def assistant_macro_run(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "reason": "Запуск макроса требует подтверждения", "text": f"Макрос {body.get('name')}"}
+    return service.assistant_macro_run(api.db, str(body.get("name") or ""))

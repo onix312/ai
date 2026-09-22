@@ -1,8 +1,8 @@
-"""Реестр навыков личного ассистента (18.16): навык — это данные, а не ветка кода.
+"""Реестр навыков личного ассистента (18.17): навык — это данные, а не ветка кода.
 
 Зачем реестр, если можно написать `if name == "files.search"`.
 
-Ассистент компьютера растёт навыками: сегодня их двадцать семь, в каталоге
+Ассистент компьютера растёт навыками: сегодня их восемьдесят семь, в каталоге
 `docs/НАВЫКИ.md` их шестьдесят девять плюс Авито и ТГ. Если каждый навык добавлять
 веткой в диспетчер, то к тридцатому навыку подтверждение, журнал и проверка
 параметров разъедутся по трём местам — ровно так, как разошлись `api.py` и
@@ -67,6 +67,18 @@ CAPABILITIES = (
     "network",     # сеть для Авито/ТГ (18.15)
     "avito",       # Авито-слежка
     "tg",          # ТГ-посты
+    "system",      # системные действия (18.17)
+    "autostart",   # автозагрузка
+    "process_list",# список процессов
+    "audio_device",# аудиоустройства
+    "clipboard",   # буфер обмена
+    "region_shot", # скрин области
+    "focus_timer", # таймер фокуса
+    "file_watch",  # слежка за папками
+    "preferences", # предпочтения владельца
+    "whitelist",   # белый список приложений
+    "macro",       # макросы
+    "quick_open",  # быстрый поиск файлов
 )
 
 # Предел на объявленные шаги выученного навыка: сценарий из восьмидесяти шагов —
@@ -81,7 +93,7 @@ _LEARNED_RE = re.compile(r"^my\.[a-z][a-z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Реестр: сорок два живых навыка из каталога `docs/НАВЫКИ.md`
+# Реестр: восемьдесят семь живых навыков из каталога `docs/НАВЫКИ.md`
 # ---------------------------------------------------------------------------
 #
 # Объявлены только те навыки, которые исполняются. Навык «в планах» живёт в
@@ -441,6 +453,380 @@ SKILLS: dict[str, dict[str, Any]] = {
         "requires": ("sqlite",), "ideas": ("И205",),
         "doc": "Идеи, которые превратились в черновики — used, остальные new.",
     },
+    # --- 18.17: система (И206, И208, И209) + голос (И214) + буфер (И211) ---
+    "system.autostart": {
+        "title": "Автозагрузка",
+        "description": "Включить/выключить автозапуск ассистента при входе в Windows.",
+        "host": "agent", "risk": "write",
+        "params": {"enabled": "bool", "app_name": "text"},
+        "requires": ("autostart",), "ideas": ("И206",),
+        "doc": "Пишет в HKCU Run, требует подтверждения.",
+    },
+    "system.process_list": {
+        "title": "Процессы",
+        "description": "Список процессов с CPU/RAM: что жрёт ресурсы.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("process_list",), "ideas": ("И208",),
+        "doc": "Windows tasklist, Linux ps — без внешних зависимостей.",
+    },
+    "system.audio_device": {
+        "title": "Аудио-устройства",
+        "description": "Список устройств вывода звука и переключение.",
+        "host": "agent", "risk": "own",
+        "params": {"device_id": "text"},
+        "requires": ("audio_device",), "ideas": ("И209",),
+        "doc": "Читает реестр MMDevices, переключение через реестр.",
+    },
+    "system.volume": {
+        "title": "Громкость",
+        "description": "Узнать и изменить громкость системы 0-100.",
+        "host": "agent", "risk": "system",
+        "params": {"level": "int"},
+        "requires": ("system",), "ideas": ("И156",),
+        "doc": "Windows waveOutSetVolume через ctypes, без внешних библиотек.",
+    },
+    "system.display": {
+        "title": "Экран и яркость",
+        "description": "Информация о мониторах и яркости.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("system",), "ideas": ("И156",),
+        "doc": "Заглушка для живой Windows: возвращает количество мониторов.",
+    },
+    "system.focus": {
+        "title": "Не беспокоить",
+        "description": "Включить режим фокуса на N минут: без уведомлений.",
+        "host": "agent", "risk": "own",
+        "params": {"minutes": "int"},
+        "requires": ("system",), "ideas": ("И156",),
+        "doc": "Флаг в базе + таймер, требует подтверждения для длительных.",
+    },
+    "system.power": {
+        "title": "Питание",
+        "description": "Блокировка, сон, перезагрузка — с подтверждением.",
+        "host": "agent", "risk": "system",
+        "params": {"action": "oneof:lock|sleep|restart"},
+        "requires": ("system",), "ideas": ("И156",),
+        "doc": "Только после подтверждения человека, иначе чужой ПК уснул бы от сети.",
+    },
+    "system.health": {
+        "title": "Здоровье ПК",
+        "description": "Диск, память, температура, загрузка CPU.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("system",), "ideas": ("И159",),
+        "doc": "Через ctypes и psutil-fallback, без внешних зависимостей.",
+    },
+    # --- окна и ввод (Н16-Н26) -------------------------------------------
+    "window.active": {
+        "title": "Активное окно",
+        "description": "Имя и класс активного окна.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("windows",), "ideas": ("И149",),
+        "doc": "GetForegroundWindow через ctypes, только Windows.",
+    },
+    "window.list": {
+        "title": "Список окон",
+        "description": "Видимые окна с заголовками.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("windows",), "ideas": ("И149",),
+        "doc": "EnumWindows, показывает человеку, а не выбирает сам.",
+    },
+    "window.focus": {
+        "title": "Фокус на окно",
+        "description": "Переключить фокус на окно по части заголовка.",
+        "host": "agent", "risk": "write",
+        "params": {"title": "text"},
+        "requires": ("windows",), "ideas": ("И152",),
+        "doc": "Ищет окно и активирует, требует подтверждения.",
+    },
+    "window.text": {
+        "title": "Текст окна",
+        "description": "Текст активного окна или окна по заголовку.",
+        "host": "agent", "risk": "read",
+        "params": {"title": "text"},
+        "requires": ("windows",), "ideas": ("И149",),
+        "doc": "GetWindowText, без OCR.",
+    },
+    "window.controls": {
+        "title": "Элементы окна",
+        "description": "Список кнопок и полей окна (заглушка без UIA).",
+        "host": "agent", "risk": "read",
+        "params": {"title": "text"},
+        "requires": ("windows",), "ideas": ("И150",),
+        "doc": "Требует UI Automation — пока возвращает заголовки окон.",
+    },
+    "window.click": {
+        "title": "Клик",
+        "description": "Клик по координатам экрана после подтверждения.",
+        "host": "agent", "risk": "write",
+        "params": {"x": "int", "y": "int"},
+        "requires": ("windows",), "ideas": ("И150",),
+        "doc": "SetCursorPos + SendInput, только после подтверждения.",
+    },
+    "window.type": {
+        "title": "Ввод текста",
+        "description": "Ввести текст в активное окно.",
+        "host": "agent", "risk": "write",
+        "params": {"text": "text"},
+        "requires": ("windows",), "ideas": ("И151",),
+        "doc": "Unicode SendInput, язык любой, с подтверждением.",
+    },
+    "window.snap": {
+        "title": "Разложить окна",
+        "description": "Разложить два окна по сетке 50/50.",
+        "host": "agent", "risk": "write",
+        "params": {"left_title": "text", "right_title": "text"},
+        "requires": ("windows",), "ideas": ("И210",),
+        "doc": "MoveWindow через ctypes, требует подтверждения.",
+    },
+    # --- зрение (Н35-Н40, И212, И213) ------------------------------------
+    "screen.shot": {
+        "title": "Снимок экрана",
+        "description": "Снимок экрана в PNG, никуда не уходит, только loopback.",
+        "host": "agent", "risk": "read",
+        "params": {"max_side": "int"},
+        "requires": ("screen",), "ideas": ("И164",),
+        "doc": "Pillow/mss, возвращается по loopback, на диске не сохраняется.",
+    },
+    "screen.region_shot": {
+        "title": "Снимок области",
+        "description": "Снимок области экрана по координатам.",
+        "host": "agent", "risk": "read",
+        "params": {"left": "int", "top": "int", "right": "int", "bottom": "int"},
+        "requires": ("region_shot",), "ideas": ("И212",),
+        "doc": "ImageGrab.grab(bbox), без сохранения на диск.",
+    },
+    "screen.describe": {
+        "title": "Описать экран",
+        "description": "Описание экрана локальной моделью (заглушка без модели).",
+        "host": "agent", "risk": "read",
+        "params": {"max_side": "int"},
+        "requires": ("screen", "model"), "ideas": ("И164",),
+        "doc": "Требует локальный рантайм модели, иначе — причина.",
+    },
+    "screen.find": {
+        "title": "Найти на экране",
+        "description": "Найти текст на экране: без OCR — только в заголовках окон.",
+        "host": "agent", "risk": "read",
+        "params": {"text": "text"},
+        "requires": ("screen",), "ideas": ("И167",),
+        "doc": "Заглушка: ищет в заголовках окон, пока нет OCR.",
+    },
+    "screen.find_and_click": {
+        "title": "Найти и кликнуть",
+        "description": "Найти текст и кликнуть по нему (с подтверждением и whitelist).",
+        "host": "agent", "risk": "write",
+        "params": {"text": "text"},
+        "requires": ("screen", "windows"), "ideas": ("И213",),
+        "doc": "Ищет в заголовках, клик только после подтверждения и проверки whitelist.",
+    },
+    "screen.archive": {
+        "title": "Архив экрана",
+        "description": "Сохранить снимок в архив (только метаданные, без картинки).",
+        "host": "agent", "risk": "own",
+        "params": {"title": "text"},
+        "requires": ("screen", "sqlite"), "ideas": ("И165",),
+        "doc": "Картинка не сохраняется, только заголовок и хеш.",
+    },
+    "screen.archive_search": {
+        "title": "Поиск по архиву экрана",
+        "description": "Найти в архиве экрана по заголовку.",
+        "host": "agent", "risk": "read",
+        "params": {"query": "text", "limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И165",),
+        "doc": "LIKE по title в screen_archive.",
+    },
+    "screen.archive_erase": {
+        "title": "Стереть архив экрана",
+        "description": "Удалить весь архив экрана — необратимо, с подтверждением.",
+        "host": "agent", "risk": "irreversible",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И165",),
+        "doc": "Только после подтверждения, откат невозможен.",
+    },
+    # --- голос (Н41-Н45, И214) -------------------------------------------
+    "voice.listen": {
+        "title": "Слушать",
+        "description": "Слушать микрофон после стоп-слова, вернуть текст.",
+        "host": "agent", "risk": "read",
+        "params": {"seconds": "int"},
+        "requires": ("speech_in",), "ideas": ("И163",),
+        "doc": "Требует vosk/faster-whisper, микрофон.",
+    },
+    "voice.say": {
+        "title": "Озвучить",
+        "description": "Озвучить текст с интонацией (тревога/отчёт).",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text", "tone": "text"},
+        "requires": ("speech_out",), "ideas": ("И162",),
+        "doc": "Внешний TTS, пока заглушка — возвращает текст.",
+    },
+    "voice.dictate": {
+        "title": "Диктовка",
+        "description": "Диктовка в активное поле: речь → текст → ввод.",
+        "host": "agent", "risk": "write",
+        "params": {"seconds": "int"},
+        "requires": ("speech_in", "windows"), "ideas": ("И151",),
+        "doc": "Слушает, распознаёт, вводит в активное окно с подтверждением.",
+    },
+    "voice.note": {
+        "title": "Голосовая заметка",
+        "description": "Записать заметку голосом с напоминанием.",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text", "due": "text"},
+        "requires": ("sqlite",), "ideas": ("И168",),
+        "doc": "Сохраняет в notes, использует существующую таблицу.",
+    },
+    "voice.command": {
+        "title": "Голосовая команда",
+        "description": "Короткая команда без мыши: фраза → действие из каталога.",
+        "host": "agent", "risk": "read",
+        "params": {"text": "text"},
+        "requires": (), "ideas": ("И163",),
+        "doc": "Парсит фразу в действие панели, без выполнения.",
+    },
+    "voice.profile": {
+        "title": "Профиль голоса",
+        "description": "Скорость, тон, громкость озвучки.",
+        "host": "agent", "risk": "own",
+        "params": {"speed": "text", "tone": "text", "volume": "int"},
+        "requires": ("preferences",), "ideas": ("И214",),
+        "doc": "Сохраняет в preferences: voice.speed/tone/volume.",
+    },
+    # --- буфер, таймеры, файлы, предпочтения (И211, И215, И217-И221) -----
+    "clipboard.history": {
+        "title": "История буфера",
+        "description": "Последние тексты из буфера обмена.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("clipboard", "sqlite"), "ideas": ("И211",),
+        "doc": "Читает clipboard_history, дедуп по хешу.",
+    },
+    "clipboard.read": {
+        "title": "Читать буфер",
+        "description": "Прочитать текущий текст буфера и сохранить в историю.",
+        "host": "agent", "risk": "own",
+        "params": {},
+        "requires": ("clipboard", "sqlite"), "ideas": ("И211",),
+        "doc": "GetClipboardData через ctypes, только Windows.",
+    },
+    "clipboard.write": {
+        "title": "Писать в буфер",
+        "description": "Записать текст в буфер обмена.",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text"},
+        "requires": ("clipboard",), "ideas": ("И211",),
+        "doc": "SetClipboardData через ctypes, с подтверждением на большие тексты.",
+    },
+    "scheduler.focus_timer": {
+        "title": "Таймер фокуса",
+        "description": "Запустить помодоро-таймер на N минут.",
+        "host": "agent", "risk": "own",
+        "params": {"minutes": "int", "note": "text"},
+        "requires": ("focus_timer", "sqlite"), "ideas": ("И215",),
+        "doc": "Сохраняет в focus_timers, end_at считается детерминированно.",
+    },
+    "scheduler.focus_list": {
+        "title": "Таймеры фокуса",
+        "description": "Список таймеров фокуса.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И215",),
+        "doc": "Чтение из focus_timers.",
+    },
+    "scheduler.focus_stop": {
+        "title": "Стоп таймер",
+        "description": "Остановить таймер фокуса.",
+        "host": "agent", "risk": "own",
+        "params": {"timer_id": "int"},
+        "requires": ("sqlite",), "ideas": ("И215",),
+        "doc": "Ставит status=stopped.",
+    },
+    "files.watch": {
+        "title": "Слежка за папкой",
+        "description": "Добавить папку в слежку: уведомлять о новых файлах.",
+        "host": "agent", "risk": "own",
+        "params": {"path": "path", "enabled": "bool"},
+        "requires": ("file_watch", "sqlite"), "ideas": ("И217",),
+        "doc": "Сохраняет в file_watches, проверка — по расписанию.",
+    },
+    "files.watches": {
+        "title": "Мои слежки за папками",
+        "description": "Список папок под наблюдением.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И217",),
+        "doc": "Чтение из file_watches.",
+    },
+    "files.quick_open": {
+        "title": "Быстро открыть",
+        "description": "Найти файл по имени и открыть: быстрый поиск без индекса.",
+        "host": "agent", "risk": "read",
+        "params": {"name": "text", "limit": "int"},
+        "requires": ("files",), "ideas": ("И218",),
+        "doc": "rglob по разрешённым папкам, без записи в индекс.",
+    },
+    "knowledge.preferences": {
+        "title": "Предпочтения",
+        "description": "Что ассистент помнит про владельца: тон, единицы, правила.",
+        "host": "agent", "risk": "read",
+        "params": {"key": "text"},
+        "requires": ("preferences", "sqlite"), "ideas": ("И219",),
+        "doc": "Чтение из preferences, ключ опционален — тогда весь список.",
+    },
+    "knowledge.preference_save": {
+        "title": "Сохранить предпочтение",
+        "description": "Сохранить правило/предпочтение владельца.",
+        "host": "agent", "risk": "own",
+        "params": {"key": "text", "value": "text"},
+        "requires": ("preferences", "sqlite"), "ideas": ("И219",),
+        "doc": "Пишет в preferences, ключ — латиница с точкой.",
+    },
+    "safety.whitelist": {
+        "title": "Белый список",
+        "description": "Список приложений, куда можно кликать и вводить.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("whitelist", "sqlite"), "ideas": ("И220",),
+        "doc": "Чтение из whitelist.",
+    },
+    "safety.whitelist_save": {
+        "title": "Править белый список",
+        "description": "Добавить/убрать приложение из белого списка.",
+        "host": "agent", "risk": "write",
+        "params": {"app_name": "text", "allowed": "bool"},
+        "requires": ("whitelist", "sqlite"), "ideas": ("И220",),
+        "doc": "Пишет в whitelist, требует подтверждения.",
+    },
+    "assistant.macro": {
+        "title": "Макрос",
+        "description": "Сохранить цепочку навыков как макрос и выполнить по имени.",
+        "host": "agent", "risk": "own",
+        "params": {"name": "text", "steps": "object", "description": "text"},
+        "requires": ("macro", "sqlite"), "ideas": ("И221",),
+        "doc": "Сохраняет в macros, шаги — массив {skill,params}, выполняется через agent.learn-логику.",
+    },
+    "assistant.macros": {
+        "title": "Макросы",
+        "description": "Список макросов.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И221",),
+        "doc": "Чтение из macros.",
+    },
+    "assistant.macro_run": {
+        "title": "Запустить макрос",
+        "description": "Выполнить макрос по имени.",
+        "host": "agent", "risk": "write",
+        "params": {"name": "text"},
+        "requires": ("macro", "sqlite"), "ideas": ("И221",),
+        "doc": "Берёт шаги из macros и выполняет подряд, с подтверждением.",
+    },
+
 }
 
 
@@ -644,7 +1030,11 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
              "facts", "source", "context", "status", "draft_id", "chat", "text",
              "interval_hours", "notify", "image_hash", "planned_at", "name",
              "template", "template_id", "idea", "format", "listing_id", "price",
-             "url", "title", "replies")
+             "url", "title", "replies",
+             "app_name", "device_id", "level", "minutes", "x", "y", "left_title",
+             "right_title", "left", "top", "right", "bottom", "max_side",
+             "seconds", "speed", "volume", "timer_id", "note", "key", "value",
+             "steps", "description")
 
 
 # ---------------------------------------------------------------------------
