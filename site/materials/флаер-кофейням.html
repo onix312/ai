@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOZZA — флаер для кофеен (A6, к коробке с образцами)</title>
+<link rel="icon" href="../assets/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="../assets/fonts.css">
+<link rel="stylesheet" href="generator.css">
+<style>
+  /* ------------------------------------------------------------------ лист
+     Формат A6 (105 × 148) на A4 не встаёт «по 4 штуки»: с полями принтера
+     8 мм печатное поле портретного A4 — 194 × 281 мм, две карточки в ряд
+     уже 210 мм. Поэтому A6 печатается на альбомном листе (два поля 105 мм
+     помещаются свободно), а «компакт» 95 × 135 — на обычном портретном по
+     четыре. Ориентацию @page переключает скрипт. */
+  .pair, .row2, .grid4 { display: flex; flex-wrap: wrap; justify-content: center; }
+  .pair { gap: 0; margin: 0 auto; }
+  .row2 { gap: 6mm; margin: 0 auto; }
+  /* Четыре «компакта» на портретном листе: печатное поле A4 с полями 8 мм —
+     194 × 281 мм, две карточки 95 мм в ряд оставляют на зазор меньше 4 мм. */
+  .grid4 { gap: 4mm 3mm; margin: 0 auto; }
+  .sheet-title { font-size: 11px; font-weight: 700; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; margin: 0 0 3mm; }
+  .sheet-title em { font-style: normal; text-transform: none; letter-spacing: 0; color: #98a2b8; font-weight: 500; }
+  .cutnote { text-align: center; font-size: 8px; letter-spacing: .08em; color: #9aa6bd; margin-top: 3mm; text-transform: uppercase; }
+
+  /* ------------------------------------------------------------- карточка
+     Все внутренние размеры — в em от размера шрифта карточки: «компакт»
+     получается уменьшением одной величины, без второго набора правил. */
+  .fl {
+    width: 105mm; height: 148mm; font-size: 3.3mm; line-height: 1.45;
+    padding: 6.4mm 6.6mm 5.6mm; box-sizing: border-box;
+    display: flex; flex-direction: column; position: relative; overflow: hidden;
+    background: #fff; color: var(--ink);
+    page-break-inside: avoid; break-inside: avoid;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .fl.compact { width: 95mm; height: 135mm; font-size: 3mm; padding: 5.6mm 5.8mm 5mm; }
+  .cut { outline: 1px dashed #c3cbdd; outline-offset: 0; }
+
+  /* лицо: три темы */
+  .fl.front.t-grad { background: linear-gradient(148deg, #4f46e5 0%, #6d3fea 52%, #7c3aed 100%); color: #fff; }
+  .fl.front.t-ink  { background: #101420; color: #fff; }
+  .fl.front.t-air  { background: #fff; color: var(--ink); border: 1.1px solid #c9cfe2; }
+  .fl.front.t-grad .soft, .fl.front.t-ink .soft { color: rgba(255,255,255,.82); }
+  .fl.front.t-air .soft { color: var(--ink-soft); }
+  .fl.front::after {
+    content: ""; position: absolute; right: -14mm; top: -16mm; width: 58mm; height: 58mm;
+    border-radius: 18mm; transform: rotate(22deg);
+    background: linear-gradient(135deg, #fff, rgba(255,255,255,0)); opacity: .1;
+  }
+  .fl.front.t-air::after { background: linear-gradient(135deg, var(--brand), rgba(124,58,237,0)); opacity: .12; }
+
+  /* шапка бренда */
+  .brandline { display: flex; align-items: center; gap: 2.4mm; flex: none; }
+  .brandline img { width: 10mm; height: 10mm; flex: none; }
+  .fl.compact .brandline img { width: 9mm; height: 9mm; }
+  .brandline .word { font-size: 1.9em; font-weight: 900; letter-spacing: .12em; line-height: 1; }
+  .brandline .slog { font-size: .62em; letter-spacing: .13em; text-transform: uppercase; margin-top: .45em; }
+
+  /* лицо — заголовок */
+  .hero { margin-top: 5.5mm; flex: none; }
+  .hero .h1 { font-size: 3.05em; font-weight: 900; letter-spacing: -.02em; line-height: .96; }
+  .hero .h2 { font-size: 1.32em; font-weight: 800; letter-spacing: .015em; line-height: 1.12; margin-top: 1.4mm; }
+  .fl.front.t-air .hero .h1 { color: var(--brand); }
+  .hero .lead { font-size: .96em; margin-top: 2.6mm; max-width: 78mm; }
+
+  /* плашка-подарок и «кому» */
+  .chip {
+    display: inline-block; font-size: .74em; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+    border-radius: 20mm; padding: .5em 1.1em; margin-top: 3.2mm;
+    background: rgba(255,255,255,.17); border: .8px solid rgba(255,255,255,.5);
+  }
+  .fl.front.t-air .chip { background: #eeecff; border-color: #cdc7ff; color: var(--brand); }
+  .wholine { font-size: .8em; margin-top: 2.4mm; font-weight: 700; letter-spacing: .02em; }
+
+  /* рисунок: стакан с напечатанной фигуркой */
+  .art { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; margin: 2mm 0; }
+  .art svg { width: 44mm; height: auto; max-height: 100%; opacity: .95; }
+  .fl.compact .art svg { width: 39mm; }
+
+  /* низ карточки: QR + призыв */
+  .foot { flex: none; display: flex; align-items: flex-end; gap: 3.4mm; padding-top: 3mm; border-top: 1px solid rgba(255,255,255,.28); }
+  .fl.front.t-air .foot, .fl.back .foot { border-top-color: var(--line); }
+  .foot .qr { flex: none; background: #fff; border-radius: 1.6mm; padding: 1.1mm; line-height: 0; }
+  .foot .qr svg { width: 19mm; height: 19mm; display: block; }
+  .fl.compact .foot .qr svg { width: 17mm; height: 17mm; }
+  .foot .cta { flex: 1; min-width: 0; }
+  .foot .cta .big { font-size: 1.26em; font-weight: 900; letter-spacing: -.01em; line-height: 1.1; }
+  .foot .cta .tg { font-size: 1.12em; font-weight: 800; margin-top: 1mm; letter-spacing: .01em; }
+  .foot .cta .hint { font-size: .72em; margin-top: .9mm; }
+
+  /* оборот */
+  .fl.back .backhead { display: flex; align-items: center; justify-content: space-between; gap: 3mm; flex: none; padding-bottom: 2.6mm; border-bottom: 1px solid var(--line); }
+  .fl.back .backhead .bh-l { display: flex; align-items: center; gap: 2.2mm; }
+  .fl.back .backhead img { width: 7.6mm; height: 7.6mm; }
+  .fl.back .backhead .w { font-size: 1.15em; font-weight: 900; letter-spacing: .12em; line-height: 1; }
+  .fl.back .backhead .c { font-size: .66em; color: var(--ink-soft); letter-spacing: .1em; text-transform: uppercase; margin-top: .4em; }
+  .fl.back .backhead .tag { font-size: .66em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--brand); text-align: right; line-height: 1.3; }
+
+  /* Кегль блоков подбирается скриптом (--fit): длинный текст сначала
+     ужимается, и только если не помещается даже в минимуме — страница
+     честно ругается, а не режет фразу на полуслове. */
+  .steps { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 3mm 0 0; font-size: calc(1em * var(--fit, 1)); }
+  .step { display: flex; gap: 2.8mm; align-items: flex-start; }
+  .step .n {
+    flex: none; font-size: 1.02em; font-weight: 900; line-height: 1; letter-spacing: -.02em;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    width: 5.6mm; padding-top: .15em;
+  }
+  .step .tx { flex: 1; min-width: 0; }
+  .step .tt { font-size: .95em; font-weight: 800; letter-spacing: -.005em; line-height: 1.2; }
+  .step .td { font-size: .86em; color: #44506b; line-height: 1.38; margin-top: .6mm; }
+  .step .td b { color: var(--ink); font-weight: 750; }
+
+  .fineprint {
+    flex: none; font-size: .68em; line-height: 1.35; color: var(--ink-soft);
+    background: #f4f6fc; border-radius: 1.6mm; padding: 1.8mm 2.2mm; margin: 2.6mm 0 2.4mm;
+  }
+
+  /* Текст не поместился даже в минимальном кегле: на экране карточка
+     обведена красным и подписана, на печать метка не идёт. */
+  .fl.over { outline: 2px solid #b42318; outline-offset: 1mm; }
+  .overbadge {
+    position: absolute; left: 0; right: 0; bottom: 0; background: #b42318; color: #fff;
+    font-size: 2.6mm; font-weight: 800; letter-spacing: .04em; text-align: center; padding: 1mm .5mm;
+  }
+  @media print { .overbadge { display: none; } .fl.over { outline: none; } }
+
+  /* На печати лист — это сама страница: фиксированная ширина 297 мм из
+     generator.css перекрывает печатное поле (281 мм с полями 8 мм) и
+     выталкивает каждую вторую карточку на пустую страницу. */
+  @media print {
+    .sheet, .sheet.landscape { width: auto; min-height: 0; }
+    .pair, .row2, .grid4 { page-break-inside: avoid; break-inside: avoid; }
+  }
+
+  /* ------------------------------------------------------------- редактор */
+  .editor { background: #f4f6fc; border: 1px solid #dde2ef; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+  .editor h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); }
+  .editor .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start; margin-bottom: 10px; }
+  .editor .row:last-child { margin-bottom: 0; }
+  .editor label { font-size: 11.5px; color: var(--ink-soft); display: flex; flex-direction: column; gap: 4px; }
+  .editor label.inline { flex-direction: row; align-items: center; gap: 6px; }
+  .editor input, .editor textarea, .editor select {
+    font: inherit; font-size: 12px; padding: 5px 8px; border: 1px solid var(--line);
+    border-radius: 7px; background: #fff; color: var(--ink);
+  }
+  .editor textarea { min-width: 320px; min-height: 52px; resize: vertical; line-height: 1.4; }
+  .editor input.w1 { width: 150px; }
+  .editor input.w2 { width: 230px; }
+  .editor .blk { border: 1px dashed #cdd5e6; border-radius: 9px; padding: 8px 10px 10px; background: #fff; }
+  .editor .blk > b { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--brand); margin-bottom: 6px; }
+  .btn.danger { background: #fef2f2; border-color: #f4b4b4; color: #b42318; }
+  .hintline { font-size: 11.5px; color: var(--ink-soft); line-height: 1.5; }
+</style>
+</head><body>
+
+<div class="panel noprint">
+  <div class="panel-row">
+    <h1><img data-nz-mark src="../assets/brand/nozza-mark-1.svg" alt="">Флаер кофейням · A6</h1>
+    <label>Telegram <input type="text" data-nz="tg" style="width:120px"></label>
+    <label>Ссылка QR <input type="text" id="qrlink" data-page="qrlink" placeholder="по умолчанию — ваш Telegram" style="width:200px"></label>
+    <label>Город <input type="text" data-nz="city" style="width:110px"></label>
+    <button class="btn primary" data-nz-print>Печать</button>
+  </div>
+  <div class="panel-row">
+    <label>Формат <select id="size" data-page="size">
+      <option value="a6">A6 105 × 148 — альбомный лист</option>
+      <option value="compact">Компакт 95 × 135 — портретный лист</option>
+    </select></label>
+    <label>Печать <select id="mode" data-page="mode">
+      <option value="fold">Сложить пополам — одна сторона</option>
+      <option value="duplex">Двусторонняя — лицо и оборот отдельно</option>
+    </select></label>
+    <label>Тема лица <select id="theme" data-page="theme">
+      <option value="grad">Градиент (фирменный)</option>
+      <option value="ink">Тёмный</option>
+      <option value="air">Светлый</option>
+    </select></label>
+    <label>Сколько флаеров <input type="number" id="count" data-page="count" min="1" max="60" value="4" style="width:70px"></label>
+    <label class="inline" id="mirrorWrap" hidden><input type="checkbox" id="mirror" data-page="mirror" checked> зеркальный оборот</label>
+    <span class="status" id="plan"></span>
+    <span class="status err" id="overWarn" hidden></span>
+  </div>
+
+  <div class="panel-row">
+    <label style="flex:1">Список кофеен — по строке на заведение, на каждом флаере будет своё имя
+      <textarea id="places" data-page="places" style="min-width:420px;min-height:44px;font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);border-radius:7px" placeholder="Скай Кофе, ул. Пушкина 12&#10;Кофеин на Гагарина&#10;Brew &amp; Co"></textarea></label>
+    <label class="inline"><input type="checkbox" id="placeson" data-page="placeson"> печатать по списку</label>
+    <span class="hintline" id="placesInfo"></span>
+  </div>
+
+  <div class="editor">
+    <h3>✏️ Тексты флаера</h3>
+    <div class="row">
+      <div class="blk">
+        <b>Лицо</b>
+        <div class="row" style="margin-bottom:8px">
+          <label>Заголовок <input class="w1" id="f_h1" data-page="f_h1" value="3D-ПЕЧАТЬ"></label>
+          <label>Вторая строка <input class="w2" id="f_h2" data-page="f_h2" value="ДЛЯ ВАШЕГО БИЗНЕСА"></label>
+          <label>Плашка <input class="w2" id="f_chip" data-page="f_chip" value="Образцы в коробке — вам в подарок"></label>
+        </div>
+        <div class="row" style="margin-bottom:0">
+          <label>Подзаголовок <textarea id="f_lead" data-page="f_lead">Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.</textarea></label>
+          <label>Призыв <input class="w1" id="f_cta" data-page="f_cta" value="Давайте обсудим?"></label>
+          <label>Подпись под QR <input class="w1" id="f_qrcap" data-page="f_qrcap" value="наведите камеру — откроется чат"></label>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="blk">
+        <b>Оборот · 01</b>
+        <div class="row" style="margin-bottom:0">
+          <label>Заголовок <input class="w1" id="s1t" data-page="s1t" value="Привет!"></label>
+          <label>Текст <textarea id="s1d" data-page="s1d">Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.</textarea></label>
+        </div>
+      </div>
+      <div class="blk">
+        <b>Оборот · 02</b>
+        <div class="row" style="margin-bottom:0">
+          <label>Заголовок <input class="w1" id="s2t" data-page="s2t" value="Это вам, бесплатно"></label>
+          <label>Текст <textarea id="s2d" data-page="s2d">В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.</textarea></label>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="blk">
+        <b>Оборот · 03</b>
+        <div class="row" style="margin-bottom:0">
+          <label>Заголовок <input class="w1" id="s3t" data-page="s3t" value="Можем сделать своё"></label>
+          <label>Текст <textarea id="s3d" data-page="s3d">Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.</textarea></label>
+        </div>
+      </div>
+      <div class="blk">
+        <b>Оборот · 04</b>
+        <div class="row" style="margin-bottom:0">
+          <label>Заголовок <input class="w1" id="s4t" data-page="s4t" value="Тестовая партия"></label>
+          <label>Текст <textarea id="s4d" data-page="s4d">Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.</textarea></label>
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <label style="flex:1">Сноска на обороте <textarea id="fine" data-page="fine" style="min-width:420px;min-height:44px">Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.</textarea></label>
+      <label class="inline"><input type="checkbox" id="fineon" data-page="fineon" checked> печатать сноску</label>
+      <button class="btn danger" id="btnReset" type="button">↺ Вернуть исходные тексты</button>
+    </div>
+  </div>
+</div>
+
+<div class="note noprint">
+  <b>Как печатать:</b> плотная бумага <b>250–300 г/м²</b>, масштаб <b>100 %</b>, «вписать в страницу» — снять.
+  В режиме «сложить пополам» лист печатается с одной стороны: согните по пунктиру, срежьте поля — получится плотная двусторонняя карточка.
+  В двустороннем режиме сначала напечатайте <b>один</b> пробный лист: если оборот встал не к тому лицу — переключите «зеркальный оборот» или смените переворот в настройках принтера.
+  Перед тиражом отсканируйте QR телефоном: чат должен открыться.
+</div>
+
+<div id="sheets"></div>
+
+<script src="../assets/qr.js"></script>
+<script src="nz.js"></script>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+/* Исходные тексты: кнопка «вернуть» и первый запуск берут их отсюда,
+   поля страницы сохраняются в localStorage движком nz.js. */
+const START = {
+  f_h1: '3D-ПЕЧАТЬ', f_h2: 'ДЛЯ ВАШЕГО БИЗНЕСА',
+  f_chip: 'Образцы в коробке — вам в подарок',
+  f_lead: 'Игрушки на стакан, таблички с QR и фирменный декор для кофеен. Печатаем сами, на своих принтерах.',
+  f_cta: 'Давайте обсудим?', f_qrcap: 'наведите камеру — откроется чат',
+  s1t: 'Привет!',
+  s1d: 'Мы NOZZA — мастерская 3D-печати. Печатаем сами: от одной штуки до партии, без посредников и ожидания доставки.',
+  s2t: 'Это вам, бесплатно',
+  s2d: 'В коробке — тестовые образцы игрушек на стакан. Простая и прикольная фишка: гость надевает фигурку, фотографирует кофе и выкладывает в сторис — с отметкой вашей кофейни.',
+  s3t: 'Можем сделать своё',
+  s3d: 'Сейчас печатаем по готовым моделям. Понравится идея — нарисуем оригинальный дизайн под вас: фирменного персонажа, таблички с QR на столы, держатели и декор.',
+  s4t: 'Тестовая партия',
+  s4d: 'Сделаем небольшую партию 10–20 штук, чтобы вы просто посмотрели, как на это реагируют гости. Сроки и условия обсудим в Telegram.',
+  fine: 'Фигурка надевается на стакан снаружи и не касается напитка. Пластик PLA, моется тёплой водой. Ставить в микроволновку и посудомойку нельзя.',
+};
+
+/* Ссылка QR: по умолчанию — Telegram владельца (домен не куплен, зашивать
+   его в макет нельзя: тираж уйдёт в никуда). */
+function tgLink(tg) {
+  tg = String(tg || '').trim();
+  if (!tg) return '';
+  if (/^https?:\/\//.test(tg)) return tg;
+  return 'https://t.me/' + tg.replace(/^@/, '');
+}
+function qrTarget() {
+  const own = ($('qrlink').value || '').trim();
+  return own || tgLink(NZ.contact().tg);
+}
+
+/* Рисунок: стакан кофе с напечатанной фигуркой на крышке. Своя графика,
+   одним цветом (currentColor) — одинаково ложится на светлую и тёмную тему. */
+function cupArt() {
+  return `<svg viewBox="0 0 136 152" fill="none" stroke="currentColor" stroke-width="2.7"
+      stroke-linecap="round" stroke-linejoin="round" role="img"
+      aria-label="Стакан кофе с напечатанной фигуркой, сидящей на крышке">
+    <!-- аромат -->
+    <path d="M23 45c-4.6-4.6-4.6-10.2 0-14.8" opacity=".32"/>
+    <path d="M32 41c-3.6-3.6-3.6-8 0-11.6" opacity=".32"/>
+    <!-- стакан -->
+    <path d="M34 58l7.2 78a6.5 6.5 0 0 0 6.5 6h40.6a6.5 6.5 0 0 0 6.5-6l7.2-78"/>
+    <rect x="28" y="46" width="80" height="12.5" rx="6.2"/>
+    <!-- картонный держатель -->
+    <path d="M40.1 92h55.8l-3.9 22H44Z" opacity=".85"/>
+    <path d="M45.5 103h45" opacity=".3"/>
+    <!-- фигурка: сидит на крышке, лапки по бокам -->
+    <g>
+      <circle cx="68" cy="17.5" r="11.5"/>
+      <circle cx="58.6" cy="8.2" r="4.6"/>
+      <circle cx="77.4" cy="8.2" r="4.6"/>
+      <path d="M62 16.5h12M64 22h8" opacity=".42"/>
+      <path d="M58 46c0-11.5 4.5-16.5 10-16.5S78 34.5 78 46"/>
+      <path d="M57.4 37.5c-4.6.4-7.4 2.6-8.4 6.6M78.6 37.5c4.6.4 7.4 2.6 8.4 6.6"/>
+      <path d="M60 41.5h16" opacity=".4"/>
+    </g>
+  </svg>`;
+}
+
+/* Список кофеен: по строке на заведение. Если он включён, тираж считается
+   по списку — каждому свой флаер с именем, чтобы обход не превратился
+   в раздачу безличных бумажек. */
+function placeList() {
+  if (!$('placeson').checked) return [];
+  return ($('places').value || '').split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+function frontCard(extraClass, who) {
+  const c = NZ.contact();
+  const theme = $('theme').value || 'grad';
+  const white = theme !== 'air';
+  who = (who || '').trim();
+  const chip = ($('f_chip').value || '').trim();
+  const link = qrTarget();
+  const qr = link ? NZ.qr(link, { ecl: 'M', margin: 1 }) : '';
+  const city = (c.city || '').trim();
+  return `<div class="fl front t-${theme} ${extraClass}">
+    <div class="brandline">
+      <img src="${NZ.markSrc(white)}" alt="">
+      <div>
+        <div class="word">NOZZA</div>
+        <div class="slog soft">Там, где рождается форма${city ? ' · ' + NZ.esc(city) : ''}</div>
+      </div>
+    </div>
+    <div class="hero">
+      <div class="h1">${NZ.esc($('f_h1').value)}</div>
+      <div class="h2">${NZ.esc($('f_h2').value)}</div>
+      <div class="lead soft">${NZ.esc($('f_lead').value)}</div>
+      ${chip ? `<div class="chip">${NZ.esc(chip)}</div>` : ''}
+      ${who ? `<div class="wholine">Для: ${NZ.esc(who)}</div>` : ''}
+    </div>
+    <div class="art">${cupArt()}</div>
+    <div class="foot">
+      ${qr ? `<div class="qr">${qr}</div>` : ''}
+      <div class="cta">
+        <div class="big">${NZ.esc($('f_cta').value)}</div>
+        <div class="tg">Telegram ${NZ.esc(c.tg || '')}</div>
+        <div class="hint soft">${NZ.esc($('f_qrcap').value)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function backCard(extraClass, who) {
+  const c = NZ.contact();
+  who = (who || '').trim();
+  const link = qrTarget();
+  const qr = link ? NZ.qr(link, { ecl: 'M', margin: 1 }) : '';
+  const steps = [1, 2, 3, 4].map((i) => {
+    const t = ($(`s${i}t`).value || '').trim();
+    const d = ($(`s${i}d`).value || '').trim();
+    if (!t && !d) return '';
+    return `<div class="step">
+      <div class="n">0${i}</div>
+      <div class="tx">${t ? `<div class="tt">${NZ.esc(t)}</div>` : ''}${d ? `<div class="td">${NZ.esc(d)}</div>` : ''}</div>
+    </div>`;
+  }).join('');
+  const fine = $('fineon').checked ? ($('fine').value || '').trim() : '';
+  const city = (c.city || '').trim();
+  return `<div class="fl back ${extraClass}">
+    <div class="backhead">
+      <div class="bh-l">
+        <img src="${NZ.markSrc(false)}" alt="">
+        <div>
+          <div class="w">NOZZA</div>
+          <div class="c">3D-печать${city ? ' · ' + NZ.esc(city) : ''}</div>
+        </div>
+      </div>
+      <div class="tag">${who ? NZ.esc(who) : 'Игрушки на стакан<br>для вашей кофейни'}</div>
+    </div>
+    <div class="steps">${steps}</div>
+    ${fine ? `<div class="fineprint">${NZ.esc(fine)}</div>` : ''}
+    <div class="foot">
+      ${qr ? `<div class="qr">${qr}</div>` : ''}
+      <div class="cta">
+        <div class="big">${NZ.esc($('f_cta').value)}</div>
+        <div class="tg">Telegram ${NZ.esc(c.tg || '')}</div>
+        <div class="hint" style="color:var(--ink-soft)">${NZ.esc($('f_qrcap').value)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* Ориентация листа зависит от формата: A6 печатается по два на альбомном
+   листе, «компакт» — по четыре на портретном. */
+function applyPageSize(landscape) {
+  let tag = document.getElementById('pageStyle');
+  if (!tag) { tag = document.createElement('style'); tag.id = 'pageStyle'; document.head.appendChild(tag); }
+  tag.textContent = landscape ? '@page { size: A4 landscape; margin: 8mm; }' : '@page { size: A4; margin: 8mm; }';
+}
+
+/* Подгонка оборота: блоки 01–04 — единственное место, где текст владельца
+   может не поместиться. Кегль опускается ступенями до 0.8; если и этого мало,
+   карточка помечается красным и в панели загорается предупреждение —
+   обрезанная на полуслове фраза не должна уехать в тираж незамеченной. */
+function fitBacks() {
+  let over = 0;
+  document.querySelectorAll('.fl.back').forEach((card) => {
+    const steps = card.querySelector('.steps');
+    if (!steps) return;
+    let scale = 1;
+    steps.style.setProperty('--fit', scale);
+    card.classList.remove('over');
+    // .steps растянут флексом на остаток карточки, поэтому переполнение
+    // видно только по его собственной прокрутке: сумма высот детей карточки
+    // всегда равна её высоте и переполнения не показывает.
+    const spills = () => steps.scrollHeight - steps.clientHeight > 1;
+    while (spills() && scale > 0.8) {
+      scale = +(scale - 0.04).toFixed(2);
+      steps.style.setProperty('--fit', scale);
+    }
+    if (spills()) {
+      over++;
+      card.classList.add('over');
+      if (!card.querySelector('.overbadge')) {
+        const badge = document.createElement('div');
+        badge.className = 'overbadge noprint';
+        badge.textContent = 'текст не помещается — сократите блоки 01–04';
+        card.appendChild(badge);
+      }
+    }
+  });
+  const warn = $('overWarn');
+  warn.hidden = !over;
+  warn.textContent = over ? `⚠ текст не помещается на ${over} ${plural(over, 'флаере', 'флаерах', 'флаерах')} — сократите блоки 01–04` : '';
+}
+
+/* «1 лист», «2 листа», «5 листов» — иначе счётчик тиража читается как ошибка. */
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
+
+function draw() {
+  const compact = $('size').value === 'compact';
+  const fold = $('mode').value !== 'duplex';
+  const cls = compact ? 'compact' : '';
+  const places = placeList();
+  // Список кофеен задаёт тираж: сколько заведений — столько именных флаеров.
+  const count = places.length || Math.max(1, Math.min(60, Number($('count').value) || 1));
+  const nameFor = (i) => places.length ? places[i % places.length] : '';
+  const landscape = !compact;
+  applyPageSize(landscape);
+  $('mirrorWrap').hidden = fold;
+  $('count').disabled = places.length > 0;
+  $('placesInfo').textContent = places.length
+    ? `по списку: ${places.length} ${plural(places.length, 'флаер', 'флаера', 'флаеров')}, у каждого своё имя`
+    : ($('placeson').checked ? 'список пуст — печатается обычный тираж' : '');
+
+  const sheetCls = 'sheet' + (landscape ? ' landscape' : '');
+  const out = [];
+
+  if (fold) {
+    // Лист печатается с одной стороны: слева оборот, справа лицо, сгиб по центру.
+    // После сгиба текст остаётся «головой вверх» — переворачивать половину не нужно.
+    const perSheet = compact ? 2 : 1;
+    const sheets = Math.ceil(count / perSheet);
+    for (let s = 0; s < sheets; s++) {
+      const on = Math.min(perSheet, count - s * perSheet);
+      const pairs = [];
+      for (let i = 0; i < on; i++) {
+        const who = nameFor(s * perSheet + i);
+        pairs.push(`<div class="pair">${backCard(cls + ' cut', who)}${frontCard(cls + ' cut', who)}</div>`);
+      }
+      out.push(`<div class="${sheetCls}">
+        <div class="sheet-title noprint">Лист ${s + 1} из ${sheets} · сгиб пополам <em>${on} ${plural(on, 'флаер', 'флаера', 'флаеров')} · печать с одной стороны</em></div>
+        ${pairs.join('<div style="height:6mm"></div>')}
+        <div class="cutnote">по центральному пунктиру — сгиб · по контуру — рез</div>
+      </div>`);
+    }
+  } else {
+    // Два листа на пару: лица и обороты. Порядок листов — «лицо, оборот,
+    // лицо, оборот»: так их берёт автоматическая двусторонняя печать.
+    const perSheet = compact ? 4 : 2;
+    const mirror = $('mirror').checked;
+    const sheets = Math.ceil(count / perSheet);
+    const perRow = 2;
+    for (let s = 0; s < sheets; s++) {
+      const on = Math.min(perSheet, count - s * perSheet);
+      const wrap = compact ? 'grid4' : 'row2';
+      const fronts = [];
+      for (let i = 0; i < on; i++) fronts.push(frontCard(cls + ' cut', nameFor(s * perSheet + i)));
+      // Зеркалим оборот построчно: при перевороте листа левая карточка
+      // оказывается справа, иначе оборот встанет к чужому лицу.
+      const backs = [];
+      for (let r = 0; r * perRow < on; r++) {
+        const row = [];
+        for (let i = r * perRow; i < Math.min(on, (r + 1) * perRow); i++) {
+          row.push(backCard(cls + ' cut', nameFor(s * perSheet + i)));
+        }
+        if (mirror) row.reverse();
+        backs.push(...row);
+      }
+      out.push(`<div class="${sheetCls}">
+        <div class="sheet-title noprint">Лист ${s * 2 + 1} · лица <em>${on} шт.</em></div>
+        <div class="${wrap}">${fronts.join('')}</div>
+        <div class="cutnote">резать по контуру</div>
+      </div>`);
+      out.push(`<div class="${sheetCls}">
+        <div class="sheet-title noprint">Лист ${s * 2 + 2} · обороты <em>${on} шт.${mirror ? ' · зеркально' : ''}</em></div>
+        <div class="${wrap}">${backs.join('')}</div>
+        <div class="cutnote">печатать на обороте предыдущего листа</div>
+      </div>`);
+    }
+  }
+
+  $('sheets').innerHTML = out.join('');
+  fitBacks();
+
+  const perSheet = fold ? (compact ? 2 : 1) : (compact ? 4 : 2);
+  const paper = fold ? Math.ceil(count / perSheet) : Math.ceil(count / perSheet) * 2;
+  $('plan').textContent = `${count} ${plural(count, 'флаер', 'флаера', 'флаеров')} · `
+    + `${paper} ${plural(paper, 'лист', 'листа', 'листов')} A4 `
+    + (landscape ? '(альбомная ориентация)' : '(портретная ориентация)');
+}
+
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Вернуть исходные тексты флаера? Контакты и настройки печати останутся.')) return;
+  Object.keys(START).forEach((k) => { const el = $(k); if (el) el.value = START[k]; });
+  NZ.pageStateSave(START);
+  draw();
+});
+
+// Поле «Ссылка QR» пустое — ведём на Telegram; подсказку показываем в плейсхолдере.
+document.querySelectorAll('[data-nz="tg"]').forEach((el) => {
+  el.addEventListener('input', () => { $('qrlink').placeholder = tgLink(el.value) || 'по умолчанию — ваш Telegram'; });
+});
+
+NZ.mount(draw);
+$('qrlink').placeholder = tgLink(NZ.contact().tg) || 'по умолчанию — ваш Telegram';
+</script>
+</body></html>
