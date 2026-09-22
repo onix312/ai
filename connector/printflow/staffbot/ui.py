@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import urllib.parse
+
 from .. import APP_VERSION
+from .core.config import normalize_miniapp_url
 
 STATE_RU = {
     "RUNNING": "печатает",
@@ -48,13 +51,43 @@ REPLY_ALIASES: dict[str, str] = {
 }
 
 
+def miniapp_button(url: str, text: str = "🏭 Открыть цех") -> dict | None:
+    """Кнопка web_app для адреса цеха; None — Telegram такую не примет.
+
+    Требование Telegram: web_app открывается только по https. Кнопка с
+    ``http://`` или пустым адресом роняет ВСЁ сообщение (``BUTTON_URL_INVALID``,
+    400), поэтому её отсутствие — не косметика, а условие доставки.
+    """
+    clean = normalize_miniapp_url(url)
+    if not clean or urllib.parse.urlparse(clean).scheme != "https":
+        return None
+    return {"text": text, "web_app": {"url": clean}}
+
+
 def web_app_keyboard(url: str, extra_rows: list[list[dict]] | None = None) -> dict:
-    """Клавиатура с кнопкой web_app «Открыть цех» + опциональные строки."""
-    url = (url or "").strip() or "https://example.com/staff"
-    rows: list[list[dict]] = [[{"text": "🏭 Открыть цех", "web_app": {"url": url}}]]
+    """Клавиатура с кнопкой web_app «Открыть цех» + опциональные строки.
+
+    Ненастроенный или не-HTTPS адрес кнопку не добавляет: раньше сюда
+    подставлялся ``https://example.com/staff``, и человек попадал на страницу
+    «Example Domain» вместо цеха (18.12.2).
+    """
+    rows: list[list[dict]] = []
+    button = miniapp_button(url)
+    if button:
+        rows.append([button])
     if extra_rows:
         rows.extend(extra_rows)
     return {"inline_keyboard": rows}
+
+
+def markup_or_none(keyboard: dict | None) -> dict | None:
+    """Клавиатура для Telegram или None, если в ней нет ни одного ряда.
+
+    Пустой ``inline_keyboard`` Telegram отклоняет, и сообщение не уходит —
+    а без адреса Mini App клавиатура может остаться без рядов.
+    """
+    rows = (keyboard or {}).get("inline_keyboard") or []
+    return keyboard if rows else None
 
 
 def main_menu_keyboard(url: str) -> dict:

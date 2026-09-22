@@ -2834,21 +2834,17 @@ class PrinterManager:
         if (printer and kind in ("complete", "error")
                 and settings.get("notify_photo", True)):
             photo = printer.camera.frame
-        # Кнопка Mini App цеха — во всех уведомлениях, плюс старые action-кнопки
-        miniapp_url = ""
-        try:
-            from .staffbot.core.config import get_miniapp_url
-            miniapp_url = get_miniapp_url(self.db)
-        except Exception:
-            miniapp_url = str(settings.get("public_url") or settings.get("base_url") or "") .strip()
-            if miniapp_url:
-                miniapp_url = miniapp_url.rstrip("/") + "/staff"
-            else:
-                miniapp_url = "https://example.com/staff"
-        web_btn = {"text": "🏭 Открыть цех", "web_app": {"url": miniapp_url}}
+        # Кнопка Mini App цеха — во всех уведомлениях, плюс старые action-кнопки.
+        # 18.12.2: кнопка web_app только для https-адреса — Telegram отклоняет
+        # сообщение целиком (BUTTON_URL_INVALID), если адрес http или не задан.
         buttons: list = []
-        # web_app первым рядом
-        buttons.append([web_btn])
+        try:
+            from .staffbot.core.config import miniapp_state
+            state = miniapp_state(self.db)
+        except Exception:
+            state = {"url": "", "ready": False}
+        if state.get("ready"):
+            buttons.append([{"text": "🏭 Открыть цех", "web_app": {"url": state["url"]}}])
         if kind == "complete":
             buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
                             {"text": "▶ Следующее", "callback_data": "cmd:next"},

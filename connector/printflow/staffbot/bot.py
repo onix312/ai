@@ -19,7 +19,7 @@ import time
 from ..accounting import num, uid
 from ..staff import ROLE_NAMES, Staff, gate, group_for_word
 from .core.api_client import TelegramApiClient
-from .core.config import get_miniapp_url, load_config
+from .core.config import get_miniapp_url, load_config, miniapp_state
 from .core.db import ensure_scenes_table
 from .handlers.menu import MenuMixin
 from .handlers.notify import NotifyMixin
@@ -74,6 +74,19 @@ class StaffBot(MenuMixin, NotifyMixin):
 
     def _call(self, method: str, params: dict, timeout: int = 35) -> dict:
         return self.transport.call(method, params, timeout=timeout)
+
+    def _miniapp_note(self) -> str:
+        """Строка про адрес Mini App, когда кнопка «Открыть цех» не работает.
+
+        18.12.2: тексты «откройте цех кнопкой ниже» не должны обещать кнопку,
+        которой Telegram не покажет (адрес не задан или не https).
+        """
+        try:
+            state = miniapp_state(self.db)
+        except Exception:
+            return ""
+        return "" if state["ready"] else f"\n\n⚠ {state['problem']}."
+
 
     def _claim_update(self, update: dict):
         return self.ledger.claim(update)
@@ -173,11 +186,14 @@ class StaffBot(MenuMixin, NotifyMixin):
                         invite.group(1), chat, str(profile.get("first_name") or ""), str(profile.get("id") or "")
                     )
                     role = member.get("role_name") or "сотрудник"
-                    self._reply(
-                        chat,
+                    welcome = (
                         f"Добро пожаловать, {member.get('name')}! Вы в команде как {role}.\n"
                         f"Права: {Staff(self.db).rights_text(member.get('role'))}\n\n"
-                        "Откройте цех кнопкой ниже.",
+                        "Откройте цех кнопкой ниже."
+                    )
+                    self._reply(
+                        chat,
+                        welcome + self._miniapp_note(),
                         main_menu_keyboard(get_miniapp_url(self.db)),
                     )
                     self.db.add_event("bot", "Новый участник по приглашению", f"{member.get('name')} — {role}", "", {})
@@ -298,7 +314,7 @@ class StaffBot(MenuMixin, NotifyMixin):
             "sendMessage",
             {
                 "chat_id": chat,
-                "text": "\n".join(lines)[:3800],
+                "text": ("\n".join(lines) + self._miniapp_note())[:3800],
                 "reply_markup": json.dumps(kb, ensure_ascii=False),
             },
             timeout=15,

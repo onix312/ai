@@ -388,6 +388,7 @@ META.update({
     "qc_checklist": ("workshop", "Чек-лист контроля качества", {"advanced": True}),
     # --- Telegram и уведомления
     "telegram_enabled": ("telegram", "Telegram-уведомления включены", {}),
+    "staff_miniapp_url": ("telegram", "Адрес Mini App цеха", {"max_len": 300}),
     "telegram_bot": ("telegram", "Бот сотрудников включён", {}),
     "telegram_quiet_from": ("telegram", "Тихие часы сотрудников: начало", {"max_len": 8}),
     "telegram_quiet_to": ("telegram", "Тихие часы сотрудников: конец", {"max_len": 8}),
@@ -716,6 +717,7 @@ HINTS: dict[str, str] = {
     "slicer_zhop_mm": "Подъём по Z при переезде (z-hop), мм.",
     "spaghetti_enabled": "Детектор «спагетти» по камере: узнал клубок нитей — поднимет тревогу и поставит паузу.",
     "spaghetti_sensitivity": "Чувствительность детектора: выше — ловит раньше, но чаще ошибается.",
+    "staff_miniapp_url": "Адрес, по которому Mini App цеха открывается с телефона: кнопка «🏭 Открыть цех» в боте сотрудников. Telegram открывает Mini App только по HTTPS, поэтому LAN-адрес http://192.168.1.50:8765 здесь не годится. Пусто — берётся «Публичный адрес панели» + /staff (тоже только https). Как получить адрес — docs/MINIAPP-ЦЕХА.md.",
     "studio_gateway_access_code": "Код, который Bambu Studio спросит при подключении к шлюзу PrintFlow. Пусто при включении — сгенерируется сам.",
     "studio_gateway_autostart": "Поднимать шлюз Studio при запуске коннектора.",
     "studio_gateway_enabled": "Шлюз делает Studio видимой PrintFlow как принтер: Slice → Print уходит в очередь, а не напрямую на станок.",

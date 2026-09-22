@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 
 from ...accounting import num
-from ..core.config import get_miniapp_url
+from ..core.config import miniapp_state
 from ..ui import web_app_keyboard
 
 
@@ -17,61 +17,35 @@ class NotifyMixin:
     """Миксин с тиками расписания и текстами уведомлений."""
 
     def _notify_with_button(self, text: str, event: str = "", photo: bytes | None = None) -> None:
-        """Отправить уведомление с кнопкой «Открыть цех»."""
-        url = ""
-        try:
-            url = get_miniapp_url(self.db)
-        except Exception:
-            url = "https://example.com/staff"
-        kb = web_app_keyboard(url)
-        # manager.notify_async понимает кнопки как list[tuple] callback,
-        # но мы хотим web_app. Поэтому формируем reply_markup вручную
-        # и передаём через manager.send_telegram если есть, иначе через bot._call.
-        # Для совместимости с manager.send_telegram, который теперь умеет web_app,
-        # передаём buttons как list[dict] с web_app.
-        try:
-            # новый формат: buttons как список словарей-кнопок
-            buttons = [[{"text": "🏭 Открыть цех", "web_app": {"url": url}}]]
-            # если manager умеет, используем его
-            if hasattr(self, "manager") and hasattr(self.manager, "notify_async"):
-                # manager.notify_async ожидает buttons как list[tuple] или list[list[dict]]?
-                # Мы передаём special kwarg через send_telegram напрямую с reply_markup
-                # Чтобы не ломать старый путь, вызываем send_telegram с reply_markup json
-                # через manager.send_telegram с кастомным markup
-                rm = json.dumps({"inline_keyboard": buttons}, ensure_ascii=False)
-                # обходим notify_async и идём в send_telegram с кастомным markup
-                # но manager.send_telegram принимает buttons, а не markup.
-                # Поэтому используем manager.send_telegram с buttons=None и
-                # подменяем reply_markup внутри через monkey? Проще вызвать bot._call
-                # напрямую для owner chat, а для подписчиков — через manager.notify_async с текстом + кнопка callback «menu»
-                # Для минимализма: используем manager.notify_async с callback-кнопкой «Открыть цех» → menu
-                # А web_app добавим в bot._send_main_menu для интерактива.
-                # Здесь шлём через manager.notify_async с кнопкой callback, которая откроет меню с web_app
-                self.manager.notify_async(
-                    text,
-                    photo=photo,
-                    buttons=[("🏭 Открыть цех", "cmd:menu")],
-                    event=event,
-                )
+        """Отправить уведомление с кнопкой «Открыть цех».
+
+        У самой кнопки — callback на меню, а не web_app: меню уже показывает
+        web_app, когда адрес Mini App настроен, а в уведомлении не-HTTPS адрес
+        уронил бы всё сообщение (``BUTTON_URL_INVALID``). Если адреса нет,
+        сообщение всё равно уходит — но без мёртвой кнопки на example.com.
+        """
+        buttons = [("🏭 Открыть цех", "cmd:menu")]
+        if hasattr(self, "manager") and hasattr(self.manager, "notify_async"):
+            try:
+                self.manager.notify_async(text, photo=photo, buttons=buttons, event=event)
                 return
-        except Exception:
-            pass
+            except Exception:
+                pass
         # fallback — шлём напрямую в owner chat
         try:
             chat = str(self._settings().get("telegram_chat_id") or "")
             if not chat:
                 return
-            kb = web_app_keyboard(url)
-            self._call(
-                "sendMessage",
-                {
-                    "chat_id": chat,
-                    "text": text[:3800],
-                    "reply_markup": json.dumps(kb, ensure_ascii=False),
-                    "disable_web_page_preview": "true",
-                },
-                timeout=15,
-            )
+            state = miniapp_state(self.db)
+            payload: dict = {
+                "chat_id": chat,
+                "text": text[:3800],
+                "disable_web_page_preview": "true",
+            }
+            if state["ready"]:
+                payload["reply_markup"] = json.dumps(web_app_keyboard(state["url"]),
+                                                    ensure_ascii=False)
+            self._call("sendMessage", payload, timeout=15)
         except Exception:
             pass
 
