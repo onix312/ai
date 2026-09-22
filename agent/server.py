@@ -5,10 +5,17 @@
 Раздельные порты позволяют выключить одно, не трогая другое, и совпадают с
 настройками панели (`assistant_speech_url`, `assistant_agent_url`).
 
+С 18.14 порт 8799 — ещё и личный ассистент компьютера: `/skills` отдаёт реестр
+навыков с доступностью, `/skill` исполняет навык, `/journal` показывает след
+действий на этом компьютере, а `/ui` отдаёт страницу окна ассистента.
+
 Предохранители:
   * слушаем только 127.0.0.1 — агент недоступен из сети даже случайно;
-  * любое действие в чужом окне сначала становится «ожидающим» и выполняется
-    только после подтверждения человека на этом же компьютере;
+  * любое действие в чужом окне и любой навык с риском `write` сначала
+    становятся «ожидающими» и выполняются только после подтверждения человека
+    на этом же компьютере;
+  * признак подтверждения берётся из реестра навыков (`skills.confirm_required`),
+    а не из тела запроса: понизить его вызовом нельзя;
   * снимок экрана возвращается байтами тому, кто спросил, и не сохраняется;
   * без зависимостей сервер жив и честно отдаёт причины в `/capabilities`.
 """
@@ -17,11 +24,12 @@ from __future__ import annotations
 import json
 import threading
 import time
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import capabilities, config, speech, winapi
+from . import capabilities, config, executor, skills, speech, ui, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
@@ -38,6 +46,17 @@ class Agent:
         self.microphone = speech.Microphone(self.recognizer)
         self._pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
+        # Исполнитель навыков и своя база создаются по первому обращению: агент
+        # обязан стартовать (и отвечать на `/health`) даже там, где папка базы
+        # ещё не создана, а навыки никто не звал.
+        self._runner: executor.Runner | None = None
+
+    @property
+    def runner(self) -> executor.Runner:
+        """Исполнитель навыков: реестр, способности, своя база, клиент панели."""
+        if self._runner is None:
+            self._runner = executor.Runner()
+        return self._runner
 
     # --- статус -----------------------------------------------------------
     def health(self) -> dict[str, Any]:
@@ -77,13 +96,52 @@ class Agent:
         self.microphone.disarm()
         return {"ok": True, "armed": False, "reason": ""}
 
+    # --- навыки ассистента (18.14) ----------------------------------------
+    def run_skill(self, name: str, params: Any = None) -> dict[str, Any]:
+        """Выполнить навык. Риск «write» и выше — через подтверждение человека.
+
+        Порядок тот же, что для клика в чужом окне: навык с подтверждением не
+        исполняется сразу, а становится ожидающим. `confirmed` в теле запроса
+        намеренно не читается — иначе любой loopback-вызов получил бы право
+        двигать файлы и нажимать кнопки без человека.
+        """
+        runner = self.runner
+        key = str(name or "").strip().casefold()
+        skill = skills.get(key, runner.learned())
+        if skill is None:
+            return runner.run(key, params)
+        clean, errors = skills.check_params(skill, params)
+        if errors:
+            # Путь отказа один: тот же `runner.run` запишет причину в журнал,
+            # и её потом покажет навык `agent.why`.
+            return runner.run(key, params)
+        if skills.confirm_required(skill):
+            return self.queue_action("skill", {"name": key, "params": clean})
+        return runner.run(key, clean)
+
+    def skills_payload(self) -> dict[str, Any]:
+        rows = self.runner.catalog()
+        return {"ok": True, "skills": rows, "count": len(rows),
+                "ready": sum(1 for row in rows if row["available"]),
+                "unavailable": [{"name": row["name"], "reason": row["reason"]}
+                                for row in rows if not row["available"]],
+                "stats": self.runner.store.stats()}
+
+    def journal(self, limit: int = 30) -> dict[str, Any]:
+        """Журнал действий на компьютере. Чтение журнала в журнал не пишется."""
+        rows = self.runner.store.journal_recent(limit)
+        return {"ok": True, "entries": rows, "count": len(rows),
+                "stats": self.runner.store.stats()}
+
     # --- действия в чужих окнах -------------------------------------------
     def queue_action(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
         """Действие становится ожидающим: без человека оно не выполняется."""
-        if not self.capabilities.get("windows"):
+        # Навык подтверждается так же, как клик, но управление окнами ему не
+        # нужно: файлы и панель существуют и не в Windows.
+        if kind != "skill" and not self.capabilities.get("windows"):
             return {"ok": False, "queued": False,
                     "reason": self.capabilities.get("windows_reason") or "Не Windows"}
-        if kind not in ("click", "type", "key", "activate"):
+        if kind not in ("click", "type", "key", "activate", "skill"):
             return {"ok": False, "queued": False, "reason": f"Действие «{kind}» не известно"}
         action_id = uuid.uuid4().hex[:12]
         window, _reason = winapi.active_window()
@@ -112,6 +170,17 @@ class Agent:
         if not confirmed:
             self.state.last_action = "отменено человеком"
             return {"ok": True, "done": False, "reason": "Отменено человеком"}
+        if action["kind"] == "skill":
+            params = action["params"] if isinstance(action["params"], dict) else {}
+            result = self.runner.run(str(params.get("name") or ""),
+                                     params.get("params") or {}, confirmed=True)
+            ok = bool(result.get("ok"))
+            reason = str(result.get("reason") or "")
+            self.state.last_action = (f"навык {params.get('name')}: "
+                                      + ("выполнен" if ok else reason))
+            if not ok:
+                return {"ok": False, "done": False, "reason": reason, "result": result}
+            return {"ok": True, "done": True, "reason": "", "result": result}
         ok, reason = _execute(action["kind"], action["params"])
         self.state.last_action = f"{action['kind']}: {'выполнено' if ok else reason}"
         if not ok:
@@ -176,6 +245,11 @@ class Agent:
 
 def _describe(kind: str, params: dict[str, Any], window: str) -> str:
     where = f" в окне «{window}»" if window else ""
+    if kind == "skill":
+        name = str(params.get("name") or "")
+        skill = skills.get(name) or {"name": name, "title": name}
+        inner = params.get("params") if isinstance(params.get("params"), dict) else {}
+        return f"Навык ассистента: {executor.describe(skill, inner)}"
     if kind == "click":
         return f"Клик в точке {params.get('x')}, {params.get('y')}{where}"
     if kind == "type":
@@ -292,6 +366,21 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._bytes(200, image, "image/png")
         if path == "/pending":
             return self._json(200, {"ok": True, "pending": agent.pending()})
+        if path == "/skills":
+            return self._json(200, agent.skills_payload())
+        if path == "/journal":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            limit = int((query.get("limit") or ["30"])[0] or 30)
+            return self._json(200, agent.journal(limit))
+        if path == "/ui":
+            body = ui.page().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return None
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -326,6 +415,9 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.queue_action("key", body))
         if path == "/activate":
             return self._json(200, agent.queue_action("activate", body))
+        if path == "/skill":
+            return self._json(200, agent.run_skill(str(body.get("name") or ""),
+                                                   body.get("params")))
         if path == "/action/confirm":
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
@@ -368,8 +460,13 @@ def run() -> int:
     print(f"  Компьютер: http://127.0.0.1:{config.AGENT_PORT}/status")
     print(f"  Панель:    {config.PRINTFLOW_URL}")
     print(f"  Стоп-слово: «{config.WAKE_WORD}» (микрофон закрыт до включения)")
+    print(f"  Ассистент: {window.url(config.AGENT_PORT)}")
     for line in capabilities.missing(agent.capabilities):
         print(f"  ⚠ {line}")
+    if config.OPEN_WINDOW:
+        opened = window.open_window(window.url(config.AGENT_PORT))
+        if not opened["ok"]:
+            print(f"  ⚠ {opened['reason']} — {opened['hint']}")
     threading.Thread(target=speech_server.serve_forever, daemon=True).start()
     try:
         agent_server.serve_forever()

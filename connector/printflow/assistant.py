@@ -167,6 +167,30 @@ def _post_json(url: str, payload: dict, timeout: float) -> tuple[bool, Any, str]
         return False, None, "рантайм ответил не JSON"
 
 
+def _get_json(url: str, timeout: float) -> tuple[bool, Any, str]:
+    """Один GET к внешнему рантайму. Отказ — ответ с причиной, не исключение.
+
+    Чтение реестра навыков агента идёт именно так: у агента нет тела запроса,
+    а panel-side помощнику нечего ему отправить.
+    """
+    request = urllib.request.Request(
+        url, method="GET",
+        headers={"Accept": "application/json",
+                 "User-Agent": "PrintFlow-assistant/1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read(8 * 1024 * 1024).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return False, None, f"агент ответил {exc.code}"
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        reason = getattr(exc, "reason", exc)
+        return False, None, f"агент недоступен: {reason}"
+    try:
+        return True, json.loads(raw or "{}"), ""
+    except json.JSONDecodeError:
+        return False, None, "агент ответил не JSON"
+
+
 def list_models(db: Database) -> list[str]:
     """Какие модели рантайм уже отдаёт. Пусто — не ошибка, а «не спросили»."""
     cfg = config(db)
@@ -566,6 +590,35 @@ def _clean_params(action: dict[str, Any], raw: Any) -> dict[str, Any]:
     return out
 
 
+def complete(db: Database, prompt: str) -> dict[str, Any]:
+    """Один запрос к рантайму модели: промпт на входе, текст на выходе.
+
+    Общая точка входа для всех разговоров с моделью (намерение, ответ по фактам
+    базы). Правила те же, что у помощника в целом: только loopback, отказ всегда
+    с причиной, пустой ответ модели — тоже отказ, а не пустая строка.
+    """
+    state = status(db)
+    if not state.get("available"):
+        return {"ok": False, "text": "", "model": state.get("model", ""),
+                "reason": state.get("reason") or "Помощник недоступен"}
+    cfg = config(db)
+    ok, payload, reason = _post_json(
+        f"{cfg['url']}/api/chat",
+        {"model": cfg["model"], "stream": False, "options": {"temperature": 0.0},
+         "messages": [{"role": "user", "content": str(prompt or "")[:MAX_INPUT_CHARS * 4]}]},
+        timeout=cfg["timeout_sec"])
+    if not ok or not isinstance(payload, dict):
+        return {"ok": False, "text": "", "model": cfg["model"],
+                "reason": f"Рантайм не ответил: {reason}"}
+    message = payload.get("message") or {}
+    text = " ".join(str(message.get("content") or payload.get("response") or "").split())
+    if not text:
+        return {"ok": False, "text": "", "model": cfg["model"],
+                "reason": "Модель ответила пустотой"}
+    return {"ok": True, "text": text[:MAX_REPLY_CHARS * 3], "model": cfg["model"],
+            "reason": ""}
+
+
 def parse_intent(db: Database, text: str) -> dict[str, Any]:
     """Фраза владельца → действие из каталога, параметры и объяснение.
 
@@ -799,4 +852,30 @@ def agent_status(db: Database) -> dict[str, Any]:
     out.update(available=True, reason="",
                wake_word=bool(payload.get("wake_word")),
                window=str(payload.get("window") or "")[:200])
+    return out
+
+
+def agent_skills(db: Database) -> dict[str, Any]:
+    """Реестр навыков ассистента компьютера (18.14, идея И136).
+
+    Панель показывает реестр, но не владеет им: навыки объявляет агент, а панель
+    читает их по loopback. Поэтому здесь нет ни списка навыков, ни их параметров
+    — только чтение и причина, если агент выключен или не отвечает. Исполняет
+    навыки тоже агент: панель не зовёт их сама и не подменяет подтверждение.
+    """
+    state = agent_status(db)
+    out: dict[str, Any] = {"ok": True, "enabled": state["enabled"], "url": state["url"],
+                           "available": False, "reason": state.get("reason") or "",
+                           "skills": [], "count": 0, "ready": 0, "unavailable": []}
+    if not state.get("available"):
+        return out
+    ok, payload, reason = _get_json(f"{state['url']}/skills", PING_SEC)
+    if not ok or not isinstance(payload, dict):
+        out["reason"] = f"Агент не отдал реестр навыков ({reason})"
+        return out
+    rows = [row for row in (payload.get("skills") or []) if isinstance(row, dict)]
+    out.update(available=True, reason="", skills=rows, count=len(rows),
+               ready=int(payload.get("ready") or 0),
+               unavailable=[row for row in (payload.get("unavailable") or [])
+                            if isinstance(row, dict)])
     return out

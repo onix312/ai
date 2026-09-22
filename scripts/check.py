@@ -77,7 +77,9 @@ def main(argv: list[str] | None = None) -> int:
 
     checks.append(run(
         "Компиляция Python",
-        [sys.executable, "-m", "compileall", "-q", "connector", "pf.py",
+        # `agent/` компилируется вместе с коннектором с 18.14: агент перестал
+        # быть черновиком и несёт реестр навыков, свою базу и индекс документов.
+        [sys.executable, "-m", "compileall", "-q", "connector", "agent", "pf.py",
          "launcher_window.py", "scripts"],
     ))
 

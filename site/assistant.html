@@ -94,6 +94,7 @@
    <span class="as-pill" id="as_state">Проверяем рантайм…</span>
    <span class="as-pill warn" id="as_speech" title="Внешний рантайм речи на процессоре">🎙 Голос: проверяем…</span>
    <span class="as-pill warn" id="as_agent" title="Внешний агент: стоп-слово и активное окно">🖥 Агент: проверяем…</span>
+   <span class="as-pill warn" id="as_skills" title="Реестр навыков ассистента компьютера">🧩 Навыки: проверяем…</span>
    <button class="btn sm" id="as_refresh" type="button">⟳ Состояние</button>
    <a class="btn sm" href="/index.html" id="as_panel_link">Открыть панель</a>
   </div>
@@ -114,7 +115,28 @@
    <div class="notice" id="as_notice">Помощник читает и предлагает; запись в базу и команды станку делает только ваше нажатие.</div>
   </section>
 
+  <section class="card">
+   <h2>Ответ по фактам базы</h2>
+   <p class="sub">Вопрос → факты из ваших же разделов и ответ только по ним. Числа сверяются: расхождение показано предупреждением.</p>
+   <div class="as-input">
+    <textarea id="as_ask_text" rows="2" placeholder="Например: сколько должна Мария; какие долги просрочены; что с PETG чёрным"></textarea>
+    <button class="btn primary" id="as_ask_run" type="button">Спросить базу</button>
+   </div>
+   <div id="as_ask_result"><span class="muted">Ответ и источники появятся здесь. Без рантайма модели останутся факты — их достаточно, чтобы проверить цифру.</span></div>
+  </section>
+
   <div style="display:flex;flex-direction:column;gap:12px">
+   <section class="card">
+    <h2>День цеха</h2>
+    <p class="sub">Брифинг и итог считаются без модели: те же сервисы, что рисуют панели плана и финансов.</p>
+    <div class="as-row">
+     <button class="btn sm" id="as_day_briefing" type="button">Утро</button>
+     <button class="btn sm" id="as_day_summary" type="button">Итог за 7 дней</button>
+     <span class="muted" id="as_day_hint" style="font-size:12px"></span>
+    </div>
+    <div id="as_day_result"><span class="muted">Нажмите «Утро» или «Итог».</span></div>
+   </section>
+
    <section class="card">
     <h2>Действия</h2>
     <p class="sub">Тот же каталог, что видит модель. Оранжевая рамка — требует подтверждения.</p>
@@ -138,6 +160,13 @@
     <p class="sub">Входа нет, поэтому след остаётся здесь: что сделано и чем кончилось.</p>
     <div class="journal" id="as_journal"><span class="muted">Загружаем…</span></div>
     <button class="btn sm" id="as_journal_refresh" type="button" style="margin-top:8px">⟳ Обновить</button>
+   </section>
+
+   <section class="card">
+    <h2>Навыки ассистента компьютера</h2>
+    <p class="sub">Реестр принадлежит агенту: панель читает его по loopback и показывает причину, если навык недоступен.</p>
+    <div class="journal" id="as_skills_list"><span class="muted">Загружаем…</span></div>
+    <button class="btn sm" id="as_skills_refresh" type="button" style="margin-top:8px">⟳ Обновить</button>
    </section>
   </div>
  </div>
@@ -499,6 +528,84 @@
     });
   }
 
+  /* Ответ по фактам базы (18.14, идея И1): факты показываются вместе с ответом,
+     чтобы любую цифру можно было проверить в знакомом разделе панели. */
+  function askFacts() {
+    var text = $('as_ask_text').value.trim();
+    var host = $('as_ask_result');
+    if (!text) { host.innerHTML = '<div class="warnline">Введите вопрос</div>'; return; }
+    host.innerHTML = '<span class="muted">Ищем факты в базе…</span>';
+    post('/api/assistant/ask', { question: text }).then(function (data) {
+      var facts = data.facts || [];
+      var html = '';
+      if (data.answer) html += '<div class="body">' + esc(data.answer) + '</div>';
+      if (!data.answered) html += '<div class="warnline">' + esc(data.reason || 'Ответ не собран') + '</div>';
+      (data.warnings || []).forEach(function (w) {
+        html += '<div class="warnline">⚠ ' + esc(w) + '</div>';
+      });
+      html += facts.length
+        ? '<div class="kv" style="margin-top:6px">Факты из базы (' + facts.length + '):<br>'
+          + facts.slice(0, 12).map(function (f) {
+            return '• ' + esc(f.title) + ' — ' + esc(f.text)
+              + (f.ref ? ' <span class="muted">[' + esc(f.ref) + ']</span>' : '');
+          }).join('<br>') + '</div>'
+        : '';
+      host.innerHTML = html || '<span class="muted">Фактов не нашлось</span>';
+    }).catch(function (e) {
+      host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
+  /* День цеха (идея И174): модель не зовётся, поэтому цифры доступны всегда. */
+  function loadDay(kind) {
+    var host = $('as_day_result');
+    host.innerHTML = '<span class="muted">Считаем…</span>';
+    var query = kind === 'summary' ? '?kind=summary&days=7' : '?kind=briefing';
+    get('/api/assistant/day' + query).then(function (data) {
+      if (!data.ok) {
+        host.innerHTML = '<div class="warnline">' + esc(data.reason || 'Не получилось') + '</div>';
+        return;
+      }
+      $('as_day_hint').textContent = data.title || '';
+      host.innerHTML = '<div class="body">' + (data.lines || []).map(function (line) {
+        return '• ' + esc(line);
+      }).join('<br>') + '</div>'
+        + ((data.problems || []).map(function (p) {
+          return '<div class="warnline">⚠ ' + esc(p) + '</div>'; }).join(''));
+    }).catch(function (e) {
+      host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
+  /* Реестр навыков агента (идея И136): недоступный навык показан с причиной. */
+  function refreshSkills() {
+    return get('/api/assistant/skills').then(function (data) {
+      var pill = $('as_skills');
+      var host = $('as_skills_list');
+      if (!data.available) {
+        pill.className = 'as-pill warn';
+        pill.textContent = '🧩 Навыки: агент не отвечает';
+        pill.title = data.reason || 'Агент компьютера выключен или не запущен';
+        host.innerHTML = '<span class="muted">' + esc(data.reason || 'Агент не отвечает') + '</span>';
+        return;
+      }
+      pill.className = 'as-pill ok';
+      pill.textContent = '🧩 Навыки: ' + data.ready + ' из ' + data.count;
+      pill.title = 'Реестр отдаёт агент; панель его только читает';
+      host.innerHTML = (data.skills || []).map(function (row) {
+        return '<div class="jrow ' + (row.available ? 'done' : 'error') + '">'
+          + '<b>' + esc(row.title) + '</b> <span class="muted">' + esc(row.name) + '</span>'
+          + (row.confirm ? ' <span class="muted">· подтверждение</span>' : '')
+          + '<div class="muted">' + esc(row.available ? row.description : (row.reason || 'недоступен'))
+          + '</div></div>';
+      }).join('') || '<span class="muted">Навыков нет</span>';
+    }).catch(function (e) {
+      $('as_skills').className = 'as-pill warn';
+      $('as_skills').textContent = '🧩 Навыки: недоступны';
+      $('as_skills_list').innerHTML = '<span class="muted">' + esc(e.message || e) + '</span>';
+    });
+  }
+
   function refreshState() {
     return Promise.all([
       get('/api/assistant/status'),
@@ -528,7 +635,7 @@
   $('as_text').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('as_send').click();
   });
-  $('as_refresh').addEventListener('click', function () { refreshState(); refreshJournal(); });
+  $('as_refresh').addEventListener('click', function () { refreshState(); refreshJournal(); refreshSkills(); });
   $('as_journal_refresh').addEventListener('click', refreshJournal);
   $('as_intake_pick').addEventListener('click', function () { $('as_intake_file').click(); });
   $('as_intake_file').addEventListener('change', function () {
@@ -540,9 +647,17 @@
     else startRecording();
   });
   $('as_intake_run').addEventListener('click', intake);
+  $('as_ask_run').addEventListener('click', askFacts);
+  $('as_ask_text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('as_ask_run').click();
+  });
+  $('as_day_briefing').addEventListener('click', function () { loadDay('briefing'); });
+  $('as_day_summary').addEventListener('click', function () { loadDay('summary'); });
+  $('as_skills_refresh').addEventListener('click', refreshSkills);
 
   refreshState();
   refreshJournal();
+  refreshSkills();
 })();
 </script>
 </body>

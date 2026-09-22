@@ -250,7 +250,10 @@ class JournalTests(unittest.TestCase):
                           ("POST", "/api/assistant/phrase"),
                           ("GET", "/api/assistant/agent"),
                           ("GET", "/api/assistant/journal"),
-                          ("POST", "/api/assistant/journal")}, found)
+                          ("POST", "/api/assistant/journal"),
+                          ("POST", "/api/assistant/ask"),
+                          ("GET", "/api/assistant/day"),
+                          ("GET", "/api/assistant/skills")}, found)
 
 
 class PageTests(unittest.TestCase):
