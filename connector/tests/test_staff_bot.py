@@ -131,9 +131,13 @@ class StaffRoleTests(unittest.TestCase):
         self.staff.restore(member["id"])
         self.assertEqual(gate(self.db, "222")["role"], "employee")
 
-    def test_miniapp_url_fallback(self):
-        url = get_miniapp_url(self.db)
-        self.assertIn("staff", url)
+    def test_miniapp_url_without_address_is_empty(self):
+        """18.12.2: без адреса URL пустой — example.com больше не подставляется."""
+        self.db.clear_settings(["staff_miniapp_url", "public_url", "base_url", "app_url"])
+        self.assertEqual("", get_miniapp_url(self.db))
+
+    def test_miniapp_url_from_public_url(self):
+        self.assertEqual("https://example.com/staff", get_miniapp_url(self.db))
 
     def test_stranger_gets_hint(self):
         calls = self._capture_call()

@@ -1,7 +1,9 @@
 """Архитектура бота сотрудников — тонкий бот notify_only + Mini App.
 
 Проверяется:
-- clean_layers: core/config, core/db, core/api_client, router, handlers/menu, handlers/notify, scenes, ui, miniapp
+- clean_layers: core/config, core/db, core/api_client, router, handlers/menu,
+  handlers/notify, handlers/report (18.12.3: текстовые отчёты), scenes, ui,
+  report (формулировки), miniapp
 - таблицы маршрутов консистентны — у каждой записи есть метод-обработчик, слова не перекрываются, фразы выигрывают
 - права считаются по записи маршрута
 - диалоги живут в SQLite: переживают пересоздание бота, просроченное ожидание честно начинается заново
@@ -60,7 +62,8 @@ class CleanLayersTests(unittest.TestCase):
         base = ROOT / "connector" / "printflow" / "staffbot"
         for rel in ("core/config.py", "core/db.py", "core/api_client.py",
                     "router.py", "scenes.py", "ui.py", "miniapp.py",
-                    "handlers/menu.py", "handlers/notify.py", "bot.py"):
+                    "report.py", "handlers/menu.py", "handlers/notify.py",
+                    "handlers/report.py", "bot.py"):
             self.assertTrue((base / rel).exists(), f"нет файла {rel}")
 
     def test_api_client_has_call(self):
@@ -134,8 +137,12 @@ class RouterTableTests(unittest.TestCase):
         self.assertEqual(late, ["goto"])
 
     def test_normalize_reply_aliases(self):
+        # 18.12.3: у «полки», «кассы» и «кадра» есть свои текстовые ответы,
+        # поэтому в меню ведут только те кнопки, чьего ответа у бота нет.
         self.assertEqual(normalize("🛒 Продать"), "меню")
-        self.assertEqual(normalize("📦 Полка"), "меню")
+        self.assertEqual(normalize("📦 Полка"), "полка")
+        self.assertEqual(normalize("💰 Касса"), "деньги")
+        self.assertEqual(normalize("📷 Кадр"), "кадр")
         self.assertEqual(normalize("/start"), "start")
 
     def test_suggest_command(self):

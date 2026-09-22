@@ -32,10 +32,17 @@ def count_inbox_unread(db) -> int:
 
 
 def today_money(db) -> float:
+    """Приход за сегодня.
+
+    18.12.3: спрашивали таблицу `money_log`, которой в базе нет, — запрос
+    падал в `except` и функция всегда возвращала ноль. Касса в боте и в
+    Mini App была нулевой при живых продажах. Деньги лежат в `transactions`
+    (`kind='income'`, дата — первые 10 знаков `at`, как и во всех отчётах).
+    """
     try:
         row = db.one(
-            "SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) s "
-            "FROM money_log WHERE date(created_at)=date('now','localtime')"
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) s "
+            "FROM transactions WHERE substr(at,1,10)=date('now','localtime')"
         )
         return float((row or {}).get("s") or 0)
     except Exception:
@@ -51,16 +58,66 @@ def count_low_stock(db) -> int:
 
 
 def list_shelf(db) -> list[dict]:
+    """Остатки на полке с подписями и картинкой.
+
+    Колонки номенклатуры названы `nom_*`: у `shelf_items` есть свои `name`,
+    `sku` и `photo`, и в словаре остаётся именно своя колонка (первое
+    вхождение имени побеждает). Свою подпись/фото подставляем только там, где
+    у позиции полки пусто, — тогда карточка товара из базы видна и в боте
+    (18.12.3: отчёт «полка» отвечает текстом с фото).
+    """
     try:
-        return db.query(
-            "SELECT s.*, n.name, n.sku, n.barcode, c.name category_name, c.color category_color "
+        rows = db.query(
+            "SELECT s.*, n.name nom_name, n.sku nom_sku, n.barcode nom_barcode, "
+            "n.photo nom_photo, g.name category_name, g.color category_color "
             "FROM shelf_items s "
             "LEFT JOIN nomenclature n ON n.id=s.nom_id "
-            "LEFT JOIN categories c ON c.id=n.category_id "
-            "ORDER BY s.qty ASC, n.name"
+            # Категория — группа номенклатуры (`nom_groups`). Раньше здесь была
+            # таблица `categories`, которой в схеме нет: запрос падал, и полка
+            # молча оставалась пустой и в Mini App, и в отчёте бота (18.12.3).
+            "LEFT JOIN nom_groups g ON g.id=n.group_id "
+            "ORDER BY s.qty ASC, COALESCE(NULLIF(s.name,''), n.name)"
         )
     except Exception:
         return []
+    for row in rows:
+        row["name"] = row.get("name") or row.get("nom_name") or row.get("nom_id") or ""
+        row["sku"] = row.get("sku") or row.get("nom_sku") or ""
+        row["barcode"] = row.get("barcode") or row.get("nom_barcode") or ""
+        row["photo"] = row.get("photo") or row.get("nom_photo") or ""
+    return rows
+
+
+def order_photo_file(db, order_id: str) -> str:
+    """Имя файла-картинки заказа: снимок производства, иначе фото позиции.
+
+    Бот 18.12.3 показывает заказ текстом с фотографией, и картинка должна быть
+    «про этот заказ»: сначала фотоальбом заказа (кадры с камеры, снимки
+    оператора), затем обложка номенклатуры из позиций заказа. Пустая строка =
+    показывать нечего, а не «нет фото» в тексте.
+    """
+    oid = str(order_id or "").strip()
+    if not oid:
+        return ""
+    try:
+        row = db.one(
+            "SELECT file FROM order_photos WHERE order_id=? AND file<>'' "
+            "ORDER BY datetime(at) DESC LIMIT 1", (oid,))
+        if row and row.get("file"):
+            return str(row["file"])
+    except Exception:
+        pass
+    try:
+        row = db.one(
+            "SELECT n.photo photo FROM order_items i "
+            "JOIN nomenclature n ON n.id=i.nom_id "
+            "WHERE i.order_id=? AND COALESCE(n.photo,'')<>'' "
+            "ORDER BY i.position LIMIT 1", (oid,))
+        if row and row.get("photo"):
+            return str(row["photo"])
+    except Exception:
+        pass
+    return ""
 
 
 def list_orders(db, status: str, limit: int) -> list[dict]:
@@ -96,15 +153,17 @@ def list_inbox_chats(db) -> list[dict]:
 
 
 def finance_today_week(db) -> tuple[dict, dict]:
+    """Деньги за сегодня и за неделю — из `transactions`, как в панели."""
     try:
         today = db.one(
-            "SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) income, "
-            "COALESCE(SUM(CASE WHEN amount<0 THEN amount ELSE 0 END),0) expense "
-            "FROM money_log WHERE date(created_at)=date('now','localtime')"
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) income, "
+            "COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) expense "
+            "FROM transactions WHERE substr(at,1,10)=date('now','localtime')"
         )
         week = db.one(
-            "SELECT COALESCE(SUM(CASE WHEN amount>0 THEN amount ELSE 0 END),0) income "
-            "FROM money_log WHERE datetime(created_at)>=datetime('now','-7 days','localtime')"
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) income "
+            "FROM transactions WHERE kind='income' "
+            "AND substr(at,1,10)>=date('now','-6 days','localtime')"
         )
         return (dict(today) if today else {"income": 0, "expense": 0},
                 dict(week) if week else {"income": 0})
