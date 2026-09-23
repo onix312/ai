@@ -3316,12 +3316,17 @@ class PrinterManager:
         # раскладку слотов, чтобы она пережила и выключение, и перезапуск.
         try:
             from .ams_sync import backfill_slots, sync_one_printer
-            sync_one_printer(self.db, printer.id, snap)
+            counts = sync_one_printer(self.db, printer.id, snap)
             if printer.id not in self._ams_backfilled:
                 self._ams_backfilled.add(printer.id)
                 # Привязки, сделанные до 17.0.25, в память слотов не попадали —
                 # дописываем их один раз за запуск, дальше память ведёт синк.
                 backfill_slots(self.db, printer.id)
+            # 18.13: синк собрал факты (привязки, остатки, пустые катушки), но
+            # MQTT-команд он не знает — настройки слота и уведомления доводит
+            # менеджер, у которого есть живой принтер.
+            counts = counts if isinstance(counts, dict) else {}
+            self._finish_ams_autopilot(printer, counts)
         except Exception as exc:
             self.db.add_event("error", "Сбой автосинка AMS", str(exc), printer.id)
         trays = snap["ams"].get("trays", []) or []
@@ -3369,6 +3374,117 @@ class PrinterManager:
                         None)
             elif diff <= 20:
                 reported.discard(key)
+
+    def ams_fix_all(self, printer_id: str = "") -> dict:
+        """Привести AMS в порядок прямо сейчас, не дожидаясь цикла монитора.
+
+        Кнопка доктора: пройти по парку и сделать то же, что фоновый цикл раз в
+        пять минут (синк, настройки слота, уведомления), но по требованию. Отметка
+        «последний синк» сдвигается, чтобы монитор не пропустил следующий вызов
+        из-за своего таймаута.
+        """
+        from .ams_sync import sync_one_printer
+
+        printers = list(self.printers.values())
+        if printer_id:
+            printers = [item for item in printers if item.id == printer_id]
+        total = {"ok": True, "printers": 0, "created": 0, "updated": 0,
+                 "unbound": 0, "moved": 0, "adopted": 0, "empty": 0,
+                 "pushes": 0, "notify": 0, "errors": 0}
+        for printer in printers:
+            try:
+                snap = printer.snapshot()
+                counts = sync_one_printer(self.db, printer.id, snap)
+                counts = counts if isinstance(counts, dict) else {}
+                self._finish_ams_autopilot(printer, counts)
+                if isinstance(self._last_ams_sync, dict):
+                    self._last_ams_sync[printer.id] = time.time()
+            except Exception as exc:
+                total["errors"] += 1
+                self.db.add_event("error", "Сбой автопилота AMS", str(exc), printer.id)
+                continue
+            total["printers"] += 1
+            for key in ("created", "updated", "unbound", "moved", "adopted", "empty"):
+                total[key] += int(counts.get(key) or 0)
+            total["pushes"] += len(counts.get("pushes") or [])
+            total["notify"] += len(counts.get("notify") or [])
+        self.db.add_event(
+            "ams", "Автопилот AMS отработал по кнопке",
+            f"Принтеров: {total['printers']}, новых катушек: {total['created']},"
+            f" переносов: {total['moved']}, записей в слот: {total['pushes']},"
+            f" пустых: {total['empty']}",
+            printer_id, {"counts": total})
+        return total
+
+    def _finish_ams_autopilot(self, printer, counts: dict) -> None:
+        """Довести работу автопилота AMS: слот в принтере и уведомления.
+
+        Разделение намеренное: `ams_sync` считает, что не сходится (и остаётся
+        без MQTT, поэтому проверяется тестами), а отправка команды в слот и
+        сообщение в Telegram живут здесь — тут есть живой принтер.
+
+        Отдельная защита — отказ отправки: если принтер не принял настройки,
+        об этом пишется событие, а не молчание. Иначе оператор видел бы в
+        Bambu Studio старый тип пластика и не понимал, почему автопилот молчит.
+        """
+        from .ams_actions import log_action
+        from .ams_push import desired_slot, push_slot_settings
+        from .ams_sync import mark_slot_pushed
+
+        for item in counts.get("pushes") or []:
+            spool = self.db.one("SELECT * FROM spools WHERE id=?", (item.get("spool_id"),))
+            if not spool:
+                continue
+            settings = desired_slot(spool)
+            result = push_slot_settings(self.db, printer, item.get("slot"), settings,
+                                        reason="auto")
+            label = str(item.get("label") or f"Слот {item.get('slot')}")
+            if not result.get("pushed"):
+                self.db.add_event(
+                    "error", "Настройки слота не ушли в принтер",
+                    f"{label}: {result.get('error') or 'принтер не ответил'}",
+                    printer.id, {"slot": item.get("slot")})
+                continue
+            mark_slot_pushed(self.db, printer.id, item.get("slot"),
+                             str(item.get("signature") or ""))
+            diff_text = ", ".join(
+                f"{d.get('label')}: {d.get('actual') or '—'} → {d.get('want')}"
+                for d in item.get("diff") or [])
+            log_action(self.db, "push", "Настройки слота приведены к складу",
+                       printer_id=printer.id, slot=item.get("slot"),
+                       spool_id=str(spool["id"]),
+                       detail=f"{label}: {diff_text}",
+                       before={"slot_settings": item.get("previous") or {}},
+                       after={"slot_settings": settings})
+            self.db.add_event("ams", "Настройки слота AMS обновлены",
+                              f"{label}: {diff_text}", printer.id,
+                              {"slot": item.get("slot"), "kind": "push"})
+
+        for note in counts.get("notify") or []:
+            self._notify_ams(printer, note)
+
+    def _notify_ams(self, printer, note: dict) -> None:
+        """Важное от автопилота AMS — в Telegram, и только важное.
+
+        Полный автомат без уведомлений страшен, а автомат, который пишет про
+        каждую привязку, — шум. Здесь те четыре случая, о которых договорились:
+        отвязка катушки, потеря пластика, конфликт «в слоте не то» и пластик,
+        кончившийся во время печати (последнее уходит как критичное — даже в
+        тихие часы: печать встала).
+        """
+        if not self.db.setting("notify_ams_auto", True):
+            return
+        kind = str(note.get("kind") or "")
+        events = {"unbind": "ams_unbind", "empty": "ams_empty", "loss": "ams_loss",
+                  "conflict": "ams_conflict", "runout": "ams_runout"}
+        if kind not in events:
+            return
+        name = printer.record.get("name", "Принтер") if printer else "PrintFlow"
+        text = f"PrintFlow · {name}\n{note.get('title') or 'AMS'}\n{note.get('detail') or ''}"
+        # Н54: у каждого события свой список подписчиков (`subscriptions.EVENTS`).
+        # Кончившийся на печати пластик — критичное: уходит всем и в общий чат.
+        self.notify_async(text.strip(), None, critical=(kind == "runout"),
+                          event=events[kind])
 
     def check_filament_stock(self) -> None:
         """Напоминания о закупке пластика: катушки ниже порога, раз в сутки."""
@@ -3758,7 +3874,12 @@ class PrinterManager:
         return {"ok": True}
 
     def balance_queue(self) -> dict:
-        """26: балансировщик — распределить queued по принтерам."""
+        """26: балансировщик — распределить queued по принтерам.
+
+        Отдаёт план (`job_id → printer_id` со счётом и материалом) и размеры
+        очереди и парка: маршрут `GET /api/farmloop/queue/balance` остаётся
+        транспортом, а запрос к базе живёт здесь (см. `test_router`).
+        """
         try:
             jobs = self.db.query("SELECT * FROM print_jobs WHERE state='queued' ORDER BY priority DESC, datetime(created_at)")
             printers = list(self.printers.values())
@@ -3790,8 +3911,10 @@ class PrinterManager:
                         best_score = score
                         best_pid = pr.id
                 if best_pid:
-                    plan.append({"job_id": job["id"], "printer_id": best_pid, "score": best_score})
-            return {"ok": True, "plan": plan}
+                    plan.append({"job_id": job["id"], "printer_id": best_pid,
+                                 "score": best_score, "material": need_mat})
+            return {"ok": True, "plan": plan, "jobs": len(jobs),
+                    "printers": len(printers)}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

@@ -986,7 +986,31 @@ class Repo:
         data["rec_settings"] = str(data.get("rec_settings") or "").strip()[:2000]
 
         data["updated_at"] = now_iso()
-        return self.db.upsert("spools", data)
+        before = None
+        if not new and self.db.setting("ams_learn", True):
+            # Карточку правят руками — это лучший источник правды о том, сколько
+            # весит бобина и как называется цвет. Снимок «до» нужен, чтобы
+            # учиться только на изменённых полях (см. `ams_defaults`).
+            before = self.db.one("SELECT * FROM spools WHERE id=?", (data["id"],))
+        row = self.db.upsert("spools", data)
+        if before:
+            from .ams_defaults import learn_from_edit
+            from .ams_actions import log_action
+
+            for learned in learn_from_edit(self.db, dict(before), dict(row)):
+                payload = learned.get("value") or {}
+                bits = ", ".join(f"{key}={value}" for key, value in payload.items())
+                log_action(
+                    self.db, "learn",
+                    "Запомнил правило по правке катушки" if learned.get("applied")
+                    else "Запомнил правку (нужно подтверждение)",
+                    printer_id=str(row.get("printer_id") or ""),
+                    slot=row.get("ams_slot") or "", spool_id=str(row.get("id") or ""),
+                    detail=(f"{learned.get('key')}: {bits}"
+                            + ("" if learned.get("applied")
+                               else f" (видели {learned.get('seen')} раз)")),
+                    after=payload, undoable=False)
+        return row
 
     def delete_spool(self, spool_id: str) -> None:
         if not spool_id:

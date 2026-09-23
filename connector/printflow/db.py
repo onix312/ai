@@ -358,7 +358,21 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("email", "TEXT DEFAULT ''"),
         ("portal_code", "TEXT DEFAULT ''"),  # код «Мой NOZZA» (идея 94)
     ],
+    "ams_slots": [
+        # 18.13: чем закончилась последняя отправка настроек слота в принтер.
+        # Сигнатура — от повторов в MQTT (одна и та же команда не летит каждые
+        # пять минут), время — для повторной попытки, если принтер не применил.
+        ("pushed_sig", "TEXT DEFAULT ''"),
+        ("pushed_at", "TEXT DEFAULT ''"),
+    ],
     "spools": [
+        # 18.13: катушку завёл автопилот AMS (для обучения и для фильтра
+        # «что система создала сама»), ams_state — что с ней в слоте:
+        # ok | empty | check. note — что автопилот подставил и что остаётся
+        # уточнить («масса бобины, цена, бренд»), видно в докторе AMS.
+        ("ams_auto", "INTEGER DEFAULT 0"),
+        ("ams_state", "TEXT DEFAULT ''"),
+        ("note", "TEXT DEFAULT ''"),
         ("warehouse_id", "TEXT"),            # где физически лежит катушка
         ("cell", "TEXT DEFAULT ''"),         # адрес хранения
         ("opened_at", "TEXT"),               # когда вскрыта
@@ -1464,6 +1478,45 @@ CREATE TABLE IF NOT EXISTS ams_slots (
     updated_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ams_slots_slot ON ams_slots(printer_id, slot);
+
+/* Выученные правила автопилота AMS (18.13): «PLA от Bambu весит 750 и стоит
+   1 900» и «чёрный PLA называется Графит». Правило включается только после
+   двух одинаковых правок владельца — разовая опечатка в карточке не должна
+   разъезжаться по всему складу. `seen` — сколько раз такое значение видели,
+   `applied` — действует ли правило (см. `ams_defaults.py`). */
+CREATE TABLE IF NOT EXISTS ams_rules (
+    id TEXT PRIMARY KEY,
+    kind TEXT DEFAULT '',
+    key TEXT DEFAULT '',
+    value TEXT DEFAULT '{}',
+    seen INTEGER DEFAULT 0,
+    applied INTEGER DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ams_rules_kind ON ams_rules(kind, key);
+
+/* Журнал действий автопилота AMS (18.13): что он сделал с катушкой, слотом или
+   настройками слота. `before`/`after` — снимки для отката одной кнопкой;
+   `undoable=0` — действие сообщает о факте (потеря пластика) и не откатывается.
+   Таблица отвечает на вопрос «почему остаток не тот» без раскопок в логах. */
+CREATE TABLE IF NOT EXISTS ams_actions (
+    id TEXT PRIMARY KEY,
+    at TEXT,
+    printer_id TEXT DEFAULT '',
+    slot TEXT DEFAULT '',
+    spool_id TEXT DEFAULT '',
+    kind TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    before TEXT DEFAULT '{}',
+    after TEXT DEFAULT '{}',
+    undoable INTEGER DEFAULT 1,
+    undone_at TEXT DEFAULT '',
+    undone_by TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ams_actions_at ON ams_actions(at);
+CREATE INDEX IF NOT EXISTS idx_ams_actions_printer ON ams_actions(printer_id, at);
 
 CREATE TABLE IF NOT EXISTS filament_scrap (
     id TEXT PRIMARY KEY,

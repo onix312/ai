@@ -162,6 +162,12 @@ def _ams_tray_dict(unit_id: int, slot: int, tray_raw: dict | None,
         "present": bool(present),
         "bambulab": bool(bambulab),
         "generic": bool(present) and not bool(bambulab),
+        # 18.13: бренд и пресет — из RFID-метки Bambu. Без них автопилот мог
+        # завести катушку только «какой-то PLA» и не знал, чьи температуры
+        # ставить в слот; теперь «Bambu Lab» и «Bambu PLA Basic» известны сразу.
+        "brand": "Bambu Lab" if bambulab else "",
+        "sub_brands": str(tray_raw.get("tray_sub_brands") or "").strip(),
+        "idx": str(tray_raw.get("tray_info_idx") or "").strip(),
     }
 
 
@@ -238,6 +244,9 @@ def parse_ams_trays(ams_raw: Any, vt_tray: Any = None) -> list[dict]:
                 "present": True,
                 "bambulab": bool(uuid),
                 "generic": not bool(uuid),
+                "brand": "Bambu Lab" if uuid else "",
+                "sub_brands": str(vt_tray.get("tray_sub_brands") or "").strip(),
+                "idx": str(vt_tray.get("tray_info_idx") or "").strip(),
             })
     return trays
 

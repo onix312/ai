@@ -269,25 +269,24 @@ class WatchFolder:
         })
 
     def _file_hash(self, filename: str) -> str:
-        try:
-            candidates = []
+        """Хеш файла: по нему вспоминается прошлая раскладка слотов AMS.
+
+        Смотрим папку Watch, затем загрузки: файл мог уже уехать из Watch
+        в `processed`. `_watch_path()` сам возвращает папку по умолчанию, если
+        настройка пустая, — отдельная страховка вокруг него не нужна, а
+        молчаливое проглатывание ошибки в очереди запрещено (см.
+        `test_watch_folder_queue`).
+        """
+        for cand in (self._watch_path() / filename, UPLOAD_DIR / filename):
             try:
-                candidates.append(self._watch_path() / filename)
-            except Exception:
-                pass
-            candidates.append(UPLOAD_DIR / filename)
-            for cand in candidates:
-                try:
-                    if cand.exists() and cand.stat().st_size > 0:
-                        h = hashlib.sha256()
-                        with open(cand, "rb") as f:
-                            for chunk in iter(lambda: f.read(1024*1024), b""):
-                                h.update(chunk)
-                        return h.hexdigest()[:16]
-                except Exception:
-                    continue
-        except Exception:
-            pass
+                if cand.exists() and cand.stat().st_size > 0:
+                    h = hashlib.sha256()
+                    with open(cand, "rb") as f:
+                        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    return h.hexdigest()[:16]
+            except OSError:
+                continue
         return ""
 
     def _enqueue(self, filename: str, info: dict, order_id: str) -> tuple[bool, str]:

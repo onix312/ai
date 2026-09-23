@@ -50,6 +50,44 @@ const AMS_MEMORY = {
   ],
 };
 
+/* Доктор AMS (18.13): проблемы слотов, лента автопилота и совет по раскладке.
+   Стенд подменяет эти ответы, чтобы проверить вёрстку без сервера. */
+const AMS_DOCTOR = {
+  at: '2020-01-01T10:00:00+00:00',
+  printers: [{
+    printer_id: 'p1', name: 'P1S Test', online: true, state: 'IDLE', state_label: 'Готов',
+    issues: [
+      { code: 'slot_type_mismatch', severity: 'error', title: 'В слоте не тот пластик',
+        detail: 'AMS 1 · слот 2: в принтере PETG, по складу PLA', slot: '1' },
+      { code: 'spool_unverified', severity: 'warn', title: 'Катушка из AMS не проверена',
+        detail: 'AMS 1 · слот 1: уточните массу бобины', slot: '0', spool_id: 'spool-1' },
+    ],
+    issues_count: 2, actions_24h: 3,
+  }],
+  issues_total: 2, errors: 1, warns: 1, actions_24h: 3,
+  actions: [
+    { id: 'act-1', at: '2020-01-01T09:59:00+00:00', kind: 'move', title: 'Перенёс катушку',
+      detail: 'AMS 1 · слот 3: PLA Зелёный', slot: '2', undoable: 1, undone_at: '' },
+    { id: 'act-2', at: '2020-01-01T09:40:00+00:00', kind: 'loss', title: 'Потеря пластика',
+      detail: 'AMS 1 · слот 1: −60 г без печати', slot: '0', undoable: 0, undone_at: '' },
+  ],
+  material_defaults: { PLA: { total_grams: 750, price: 1900, brand: 'Bambu Lab' } },
+  rules: [{ id: 'r1', kind: 'color_name', key: 'PLA|#00AE42', value: { color_name: 'Изумрудный' },
+            seen: 3, applied: 1 }],
+  settings: { autopilot: true, push_settings: true, adopt_generic: true, learn: true,
+              retry_min: 30, auto_spools: true, sync_remaining: true },
+};
+const AMS_PLAN = {
+  at: '2020-01-01T10:00:00+00:00',
+  printers: [{ printer_id: 'p1', plan: [{ slot: '2', slot_num: 3, spool_id: 'spool-3',
+    action: 'put', why: 'нужна для «Тестовая деталь» — поставить в свободный слот',
+    material: 'PETG', color_name: 'Зелёный' }], moves: [], spare: [], unknown: [], steps: 1 }],
+  queue: [],
+};
+/* Какой ответ отдавать: по умолчанию — данные, пусто — фаза «сервер без истории». */
+let amsDoctorReply = AMS_DOCTOR;
+let amsPlanReply = AMS_PLAN;
+
 const CHAIN = { _c: {} };
 CHAIN.get = (prop) => {
   if (!(prop in CHAIN._c)) CHAIN._c[prop] = () => CHAIN._c;
@@ -142,6 +180,16 @@ const win = {
     if (path.indexOf('/api/ams/memory') === 0) {
       return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
         json: () => Promise.resolve(AMS_MEMORY), text: () => Promise.resolve(JSON.stringify(AMS_MEMORY)) });
+    }
+    if (path.indexOf('/api/ams/doctor') === 0) {
+      return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
+        json: () => Promise.resolve(amsDoctorReply),
+        text: () => Promise.resolve(JSON.stringify(amsDoctorReply)) });
+    }
+    if (path.indexOf('/api/ams/plan') === 0) {
+      return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
+        json: () => Promise.resolve(amsPlanReply),
+        text: () => Promise.resolve(JSON.stringify(amsPlanReply)) });
     }
     return Promise.resolve({ ok: true, status: 200, headers: { get: () => null },
       json: () => Promise.resolve({}), text: () => Promise.resolve('') });
@@ -426,6 +474,79 @@ async function checkAmsMemory() {
   return failures;
 }
 
+/* ================================================= сценарий AMS-доктора (18.13)
+   Второй сценарий вкладки AMS: автопилот должен быть виден. Панель обязана
+   показать проблемы слотов, ленту своих действий с кнопкой отката и совет по
+   раскладке — и не упасть, если сервер ещё ничего не делал. */
+async function checkAmsDoctor() {
+  const failures = [];
+  if (!ctx.PF || !ctx.PF.modules || !ctx.PF.modules.printer
+      || typeof ctx.PF.modules.printer.loadAmsDoctor !== 'function') {
+    return ['AMS-доктор: раздел «Принтеры» не отдал загрузку доктора — сценарий не проверить'];
+  }
+  const issuesHtml = () => String(ELEMENTS.get('pr_ams_issues_list').innerHTML || '');
+  const feedHtml = () => String(ELEMENTS.get('pr_ams_actions_list').innerHTML || '');
+  const chipText = () => String(ELEMENTS.get('pr_ams_issues').textContent || '');
+
+  // (1) Автопилот работал: проблемы, лента с откатом и совет на месте.
+  amsDoctorReply = AMS_DOCTOR;
+  amsPlanReply = AMS_PLAN;
+  let error = renderAmsForTest();
+  if (error) return ['AMS-доктор: отрисовка раздела упала — ' + error];
+  await ctx.PF.modules.printer.loadAmsDoctor('p1', true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  if (issuesHtml().indexOf('ams-doc-issue') < 0) {
+    failures.push('AMS-доктор: проблемы слотов не показаны оператору');
+  }
+  if (issuesHtml().indexOf('В слоте не тот пластик') < 0) {
+    failures.push('AMS-доктор: текст проблемы потерялся');
+  }
+  if (feedHtml().indexOf('Перенёс катушку') < 0) {
+    failures.push('AMS-доктор: лента действий автопилота не показана');
+  }
+  if (feedHtml().indexOf('data-ams-undo=\"act-1\"') < 0) {
+    failures.push('AMS-доктор: у действия нет кнопки отката');
+  }
+  if (chipText().indexOf('ошиб') < 0) {
+    failures.push('AMS-доктор: счётчик проблем в шапке не обновился');
+  }
+  const plan = String(ELEMENTS.get('pr_ams_plan_box').innerHTML || '');
+  if (plan.indexOf('План раскладки') < 0) {
+    failures.push('AMS-доктор: совет по раскладке не показан');
+  }
+  if (ELEMENTS.get('pr_ams_plan_box').hidden) {
+    failures.push('AMS-доктор: блок плана скрыт, хотя совет есть');
+  }
+  if (issuesHtml().indexOf('data-ams-accept=') < 0) {
+    failures.push('AMS-доктор: у проблемы слота нет кнопки «принять остаток датчика»');
+  }
+  const rules = String(ELEMENTS.get('pr_ams_rules').innerHTML || '');
+  if (rules.indexOf('data-ams-rule-forget="r1"') < 0) {
+    failures.push('AMS-доктор: выученное правило не показано (его нечем забыть)');
+  }
+  if (rules.indexOf('Изумрудный') < 0) {
+    failures.push('AMS-доктор: значение правила потерялось');
+  }
+  if (rules.indexOf('750') < 0) {
+    failures.push('AMS-доктор: таблица материалов не показана');
+  }
+
+  // (2) Сервер без истории: пустой ответ — понятная пустота, а не падение.
+  amsDoctorReply = {};
+  amsPlanReply = {};
+  error = renderAmsForTest();
+  if (error) return failures.concat(['AMS-доктор: отрисовка без данных упала — ' + error]);
+  await ctx.PF.modules.printer.loadAmsDoctor('p1', true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  if (issuesHtml().indexOf('Автопилот AMS ещё не работал') < 0) {
+    failures.push('AMS-доктор: без данных не сказано, что автопилот ещё не работал');
+  }
+  if (!ELEMENTS.get('pr_ams_plan_box').hidden) {
+    failures.push('AMS-доктор: пустой совет по раскладке показан как настоящий');
+  }
+  return failures;
+}
+
 /* ================================================================ отчёт */
 function finishReport(standFailures) {
   const isReference = (entry) => {
@@ -474,7 +595,7 @@ function finishReport(standFailures) {
     process.exit(2);
   }
   console.log('Необъявленных переменных нет.');
-  if (!standFailures.length) console.log('Сценарии стенда: память слотов AMS — ok.');
+  if (!standFailures.length) console.log('Сценарии стенда: память слотов AMS и доктор — ok.');
   process.exit(0);
 }
 
@@ -482,6 +603,7 @@ function finishReport(standFailures) {
 setTimeout(() => {
   Promise.resolve()
     .then(checkAmsMemory)
+    .then((failures) => checkAmsDoctor().then((more) => (failures || []).concat(more || [])))
     .then((failures) => finishReport(failures || []))
     .catch((e) => finishReport([
       'Стенд: сценарий не выполнился — ' + ((e && e.message) || String(e)),

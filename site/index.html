@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="assets/fonts.css?v=17.0.1">
 <link rel="stylesheet" href="assets/theme.css?v=18.6.0">
 <link rel="stylesheet" href="assets/app.css?v=18.6.0">
-<link rel="stylesheet" href="assets/more.css?v=18.12.3">
+<link rel="stylesheet" href="assets/more.css?v=18.13.0">
 <link rel="stylesheet" href="assets/controls.css?v=18.12.3">
 </head><body>
 <a class="skip-link" href="#views" id="skip_link">Перейти к содержимому</a>
@@ -401,6 +401,22 @@
       <div id="pr_ams_path_host"></div>
      </div>
      <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
+    </div>
+    <div class="card" id="pr_ams_doc_card">
+      <div class="card-head"><div><h2>AMS-доктор</h2><p id="pr_ams_doc_env">Автопилот: что он сделал и что осталось человеку</p></div><button class="btn sm" id="pr_ams_fix" type="button" title="Занести катушки из AMS, привести слоты и настройки к складу">⚙ Привести в порядок</button><span class="chip" id="pr_ams_issues">—</span></div>
+     <div id="pr_ams_issues_list"></div>
+     <div class="ams-doc-head"><b>Лента автопилота</b><small id="pr_ams_actions_count">Всё, что он сделал, — с откатом одной кнопкой</small></div>
+     <div id="pr_ams_actions_list"></div>
+     <div id="pr_ams_plan_box" hidden></div>
+     <div class="ams-doc-head"><b>Правила и таблица материалов</b><small>что автопилот подставляет новым катушкам</small></div>
+     <div id="pr_ams_rules"></div>
+     <div class="ams-rule-form">
+      <input id="pr_ams_mat" placeholder="PLA" size="6" title="Материал, например PETG">
+      <input id="pr_ams_grams" placeholder="750 г" size="6" title="Масса бобины, г">
+      <input id="pr_ams_price" placeholder="1900 ₽" size="7" title="Цена бобины, ₽">
+      <input id="pr_ams_brand" placeholder="бренд" size="10" title="Бренд, необязательно">
+      <button class="btn sm" id="pr_ams_mat_save" type="button" title="Новые катушки этого материала будут заводиться с этими значениями">Записать в таблицу</button>
+     </div>
     </div>
   </div>
   <div class="ptab-pane" id="ptab-files" role="tabpanel" hidden>
@@ -5588,7 +5604,7 @@
 <script src="assets/layers.js?v=18.12.3"></script>
 <script src="assets/incidents.js?v=18.12.3"></script>
 <script src="assets/gpuslice.js?v=18.12.3"></script>
-<script src="assets/printer.js?v=18.12.3"></script>
+<script src="assets/printer.js?v=18.13.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=18.6.0"></script>
 <script src="assets/money.js?v=18.7.0"></script>

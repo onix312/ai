@@ -167,6 +167,7 @@ def build_from_timeline(blocks: list[dict]) -> dict:
     preview_path: list[dict] = []
     cur_x, cur_y, cur_z = 128.0, 10.0, 15.0
     warnings: list[str] = []
+    custom_started = False
 
     def clamp(v, lo, hi):
         try:
@@ -247,6 +248,12 @@ def build_from_timeline(blocks: list[dict]) -> dict:
             g = str(b.get("gcode") or "").strip()
             if not g:
                 continue
+            if not custom_started:
+                # Раздел дополнений нужен и человеку, и разбору шаблона:
+                # `parse_template_blocks` ищет именно этот маркер, и без него
+                # строки оператора терялись при повторном открытии конструктора.
+                lines.append("; 5. Дополнения")
+                custom_started = True
             # safety: forbid dangerous
             upper = g.upper()
             if "M112" in upper or "M999" in upper:

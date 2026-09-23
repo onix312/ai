@@ -123,13 +123,22 @@ class SafetyVersionTests(unittest.TestCase):
         self.assertEqual(self.db.one("SELECT name FROM catalog WHERE id=?", (old["id"],))["name"], "Каноническое имя")
 
     def test_ams_import_is_unverified_and_not_auto_consumed(self):
+        """Катушка из AMS — черновик: списывать с неё автоматически нельзя.
+
+        18.13: автомат заводит катушку сразу, но значения для неизвестного
+        материала берёт из таблицы или настроек (`default_spool_price`), а не
+        оставляет нули: с нулевой ценой себестоимость молча врёт. Что катушка
+        не проверена человеком, держит `verified=0` — именно оно, а не цена,
+        запрещает автоматическое списание.
+        """
         result = sync_ams_spools(self.db, "printer-1", {"ams": {"trays": [{
             "uuid": "rfid-1", "slot": 0, "type": "PETG", "color": "FF0000", "remain": 80,
         }]}})
         self.assertEqual(result["created"], 1)
         spool = self.db.one("SELECT * FROM spools WHERE tray_uuid='rfid-1'")
         self.assertEqual(num(spool["verified"]), 0)
-        self.assertEqual(num(spool["price"]), 0)
+        self.assertEqual(num(spool["price"]), DEFAULT_SETTINGS["default_spool_price"])
+        self.assertIn("уточните", str(spool["note"]).lower())
         blocked = self.acc.consume_filament(10, spool_id=spool["id"], auto=True)
         self.assertFalse(blocked["ok"])
 
