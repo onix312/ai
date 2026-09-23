@@ -446,56 +446,24 @@ def farmloop_timeline_get(api: Any, ctx: Ctx):
 
 @router.get("/api/farmloop/queue/balance", doc="Балансировщик очереди")
 def farmloop_queue_balance(api: Any, ctx: Ctx):
+    """План «какое задание на какой принтер»: распределение очереди по парку.
+
+    Сам расчёт живёт в менеджере (`balance_queue`): здесь только транспорт —
+    маршрут не ходит в базу сам, иначе логика балансировки разъедется по двум
+    местам (см. контракт `test_router`).
+    """
     manager = getattr(api, "manager", None)
     if not manager:
         return {"ok": False, "error": "менеджер недоступен"}
-    if hasattr(manager, "balance_queue"):
-        try:
-            res = manager.balance_queue()
-            if isinstance(res, dict) and res.get("ok"):
-                jobs = api.db.query("SELECT COUNT(*) n FROM print_jobs WHERE state='queued'")
-                return {"ok": True, "plan": res.get("plan", []), "jobs": (jobs[0].get("n") if jobs else 0), "printers": len(getattr(manager, "printers", {}))}
-        except Exception:
-            pass
-    try:
-        jobs = api.db.query("SELECT * FROM print_jobs WHERE state='queued' ORDER BY priority DESC, datetime(created_at)")
-        printers = list(getattr(manager, "printers", {}).values())
-        snaps = {}
-        for pr in printers:
-            try:
-                snaps[pr.id] = pr.snapshot()
-            except Exception:
-                snaps[pr.id] = {}
-        plan = []
-        used = set()
-        for job in jobs:
-            need_mat = str(job.get("material") or "").upper()
-            best_pid = ""
-            best_score = -1
-            for pr in printers:
-                if pr.id in used and len(jobs) > len(printers):
-                    continue
-                snap = snaps.get(pr.id, {})
-                state = (snap.get("printer") or {}).get("state") or "OFFLINE"
-                if state not in ("IDLE", "FINISH"):
-                    continue
-                loaded = {str(t.get("type") or "").upper() for t in (snap.get("ams") or {}).get("trays", [])}
-                score = 0
-                if need_mat and need_mat in loaded:
-                    score += 10
-                if not need_mat:
-                    score += 5
-                qlen = len([j for j in jobs if j.get("printer_id") == pr.id])
-                score -= qlen
-                if score > best_score:
-                    best_score = score
-                    best_pid = pr.id
-            if best_pid:
-                plan.append({"job_id": job["id"], "printer_id": best_pid, "score": best_score, "material": need_mat})
-                used.add(best_pid)
-        return {"ok": True, "plan": plan, "jobs": len(jobs), "printers": len(printers)}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    result = manager.balance_queue()
+    if not isinstance(result, dict):
+        return {"ok": False, "error": "балансировщик не ответил"}
+    if not result.get("ok"):
+        return {"ok": False, "error": str(result.get("error") or "балансировщик недоступен")}
+    return {"ok": True, "plan": result.get("plan") or [],
+            "jobs": result.get("jobs", 0),
+            "printers": result.get("printers") or len(getattr(manager, "printers", {}))}
+
 
 
 @router.post("/api/farmloop/ams/cleanup", audit="AMS: очистка фантомов", doc="Очистить фантомные AMS слоты")

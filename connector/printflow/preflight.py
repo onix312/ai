@@ -160,6 +160,18 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
             except Exception:
                 pass
 
+    # 18.13: слоты AMS против склада — блокирует то, из чего печатать нельзя,
+    # и заранее говорит про расхождения (что решает кнопка «Привести в порядок»).
+    try:
+        from .ams_doctor import preflight_ams
+        ams = preflight_ams(db, printer.id, snap, est, ams_mapping)
+        blocks.extend(ams["blocks"])
+        warns.extend(ams["warns"])
+        infos.extend(ams["infos"])
+    except Exception as exc:
+        infos.append({"code": "ams_check", "title": "Проверка AMS не выполнена",
+                      "detail": str(exc)})
+
     # Я40: стол чист до старта (тот же эталон, что #10 после финиша).
     # Нет эталона/кадра — честно пропускаем, не блокируем (как слепая ячейка).
     if db.setting("preflight_block_bed", True):

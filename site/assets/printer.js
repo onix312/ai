@@ -1145,12 +1145,211 @@ function amsMemoryHtml(p) {
     + dead.map((s) => amsMemoryCard(s)).join('');
 }
 
+/* ================================================== AMS-доктор (18.13)
+   Автопилот убирает ручную правку, но у автоматики должен быть экран: что она
+   сделала, где сомневается и что советует по раскладке. Источник — доктор
+   (`/api/ams/doctor`: проблемы слотов и лента действий с откатом) и план
+   (`/api/ams/plan`: совет, раскладку не меняет). Стенд `panel-check.js`
+   проверяет эту вёрстку без сервера: пустой ответ обязан оставить блок пустым,
+   а не уронить отрисовку вкладки. */
+let amsDoctor = { printer_id: '', data: null, plan: null };
+let amsDoctorFor = '';
+let amsDoctorAt = 0;
+const AMS_DOCTOR_TTL_MS = 60000;
+
+const AMS_KIND_LABELS = {
+  create: 'Завёл катушку', bind: 'Привязал катушку', move: 'Перенёс катушку',
+  unbind: 'Отвязал катушку', empty: 'Пустая катушка', fill: 'Долив',
+  loss: 'Потеря пластика', adopt: 'Узнал сторонний пластик',
+  push: 'Записал настройки в слот', accept: 'Принял остаток датчика',
+  learn: 'Запомнил правило', conflict: 'Конфликт слота', swap: 'Подмена катушки',
+  runout: 'Пластик кончился', skip: 'Не понял случай', undo: 'Откат действия',
+};
+
+/* Проблемы, где «принять остаток датчика» — разумный ответ человека: склад
+   расходится с AMS, автомат молчит (не знает, кто прав), а оператор видит слот
+   своими глазами. Кнопка отправляет один маршрут — тот же, что и в докторе. */
+const AMS_ACCEPT_CODES = ['slot_low', 'slot_empty_sensor', 'spool_unverified',
+                          'slot_empty_bound', 'empty_in_slot'];
+
+function amsIssueHtml(item) {
+  const sev = ['error', 'warn', 'info'].indexOf(String(item.severity || '')) >= 0
+    ? item.severity : 'warn';
+  const slot = item.slot === undefined || item.slot === '' ? ''
+    : ` · слот ${num(item.slot) + 1}`;
+  const canAccept = item.spool_id && AMS_ACCEPT_CODES.indexOf(String(item.code)) >= 0;
+  return `<div class="hms-item sev-${esc(sev)} ams-doc-issue">`
+    + `<b>${esc(item.title || 'AMS')}</b>`
+    + `<span>${esc(item.detail || '')}${esc(slot)}</span>`
+    + (canAccept
+      ? `<button class="btn sm ghost" type="button" data-ams-accept="${esc(item.spool_id)}"`
+        + ' title="Взять остаток из принтера в склад"'
+        + '>Принять остаток датчика</button>'
+      : '')
+    + '</div>';
+}
+
+const AMS_RULE_LABELS = {
+  spool_defaults: 'Масса и цена катушки',
+  color_name: 'Имя цвета',
+};
+
+function amsRuleValueText(kind, value) {
+  const data = value || {};
+  if (kind === 'color_name') return String(data.color_name || '');
+  const bits = [];
+  if (num(data.total_grams) > 0) bits.push(`${nfmt(num(data.total_grams))} г`);
+  if (num(data.price) > 0) bits.push(`${nfmt(num(data.price))} ₽`);
+  if (data.brand) bits.push(String(data.brand));
+  return bits.join(' · ') || '—';
+}
+
+/** Таблица материалов и выученные правила: видно, откуда автопилот берёт цифры. */
+function amsRulesHtml(data) {
+  const table = (data && data.material_defaults) || {};
+  const rules = data && Array.isArray(data.rules) ? data.rules : [];
+  const rows = Object.keys(table).map((key) => '<div class="ams-act">'
+    + '<span class="when">таблица</span>'
+    + `<span class="grow"><b>${esc(key)}</b>`
+    + `<small>${esc(amsRuleValueText('spool_defaults', table[key]) || '—')}</small></span>`
+    + `<button class="btn sm ghost" type="button" data-ams-mat-forget="${esc(key)}"`
+    + ' title="Убрать строку: новые катушки этого материала снова будут «на проверку»"'
+    + '>Забыть</button></div>').concat(rules.map((rule) => {
+      const label = AMS_RULE_LABELS[rule.kind] || rule.kind || 'Правило';
+      return '<div class="ams-act' + (rule.applied ? '' : ' undone') + '">'
+        + `<span class="when">${rule.applied ? 'правило' : 'ждёт'}</span>`
+        + `<span class="grow"><b>${esc(label)}: ${esc(rule.key || '')}</b>`
+        + `<small>${esc(amsRuleValueText(rule.kind, rule.value) || '—')}`
+        + (rule.applied ? '' : ` · подтверждений: ${num(rule.seen)} из 2`)
+        + '</small></span>'
+        + `<button class="btn sm ghost" type="button" data-ams-rule-forget="${esc(rule.id)}"`
+        + ' title="Удалить правило">Забыть</button>'
+        + '</div>';
+    }));
+  return rows.join('');
+}
+
+function amsActionHtml(item) {
+  const kind = AMS_KIND_LABELS[item.kind] || item.kind || 'Действие';
+  const slot = item.slot === undefined || item.slot === '' ? ''
+    : ` · слот ${num(item.slot) + 1}`;
+  const canUndo = item.undoable && !item.undone_at;
+  return '<div class="ams-act' + (item.undone_at ? ' undone' : '') + '">'
+    + `<span class="when">${esc(agoText(item.at))}</span>`
+    + `<span class="grow"><b>${esc(kind)}${esc(slot)}</b>`
+    + `<small>${esc(item.detail || item.title || '')}</small></span>`
+    + (canUndo
+      ? `<button class="btn sm ghost" type="button" data-ams-undo="${esc(item.id)}"`
+        + ' title="Вернуть как было">↩ Отменить</button>'
+      : (item.undone_at ? '<span class="muted">отменено</span>' : ''))
+    + '</div>';
+}
+
+function amsPlanHtml() {
+  const plan = amsDoctor.plan || {};
+  const row = ((Array.isArray(plan.printers) ? plan.printers : [])[0]) || {};
+  const steps = Array.isArray(row.plan) ? row.plan : [];
+  const unknown = Array.isArray(row.unknown) ? row.unknown : [];
+  if (!steps.length && !unknown.length) return '';
+  const moves = steps.filter((s) => s.action === 'put');
+  const lines = (moves.length ? moves : steps).map((s) =>
+    `<li>${s.action === 'keep' ? 'оставить' : 'поставить'} — слот ${num(s.slot) + 1}: `
+    + `${esc((s.material || '') + ' ' + (s.color_name || ''))}`
+    + `<small>${esc(s.why || '')}</small></li>`).join('');
+  return '<div class="notice" style="margin-top:10px"><span>⇄</span><span>'
+    + `<b>План раскладки по очереди</b><ul class="ams-plan">${lines}</ul>`
+    + (unknown.length
+      ? `<small class="muted">Без катушки: ${esc(unknown.map((u) => u.job).join(', '))}`
+        + ' — назначьте материал на задании.</small>'
+      : '<small class="muted">Совет: раскладку PrintFlow не меняет.</small>')
+    + '</span></div>';
+}
+
+function renderAmsDoctor(p) {
+  const host = $('pr_ams_issues_list');
+  const chip = $('pr_ams_issues');
+  const feed = $('pr_ams_actions_list');
+  const planBox = $('pr_ams_plan_box');
+  if (!host) return;
+  const pid = String((p && p.id) || '');
+  const data = amsDoctor.data && amsDoctor.printer_id === pid ? amsDoctor.data : null;
+  const rows = data && Array.isArray(data.printers) ? data.printers : [];
+  const row = rows.find((x) => String(x.printer_id) === pid) || rows[0] || null;
+  const issues = row && Array.isArray(row.issues) ? row.issues : [];
+  if (chip) {
+    const errs = issues.filter((i) => i.severity === 'error').length;
+    const warns = issues.filter((i) => i.severity === 'warn').length;
+    chip.className = 'chip ' + (errs ? 'bad' : warns ? 'warn' : 'ok');
+    chip.textContent = !row ? '—'
+      : errs || warns
+        ? `${errs ? errs + ' ' + plural(errs, 'ошибка', 'ошибки', 'ошибок') : ''}`
+          + `${errs && warns ? ' · ' : ''}`
+          + `${warns ? warns + ' ' + plural(warns, 'внимание', 'внимания', 'вниманий') : ''}`
+        : 'порядок';
+  }
+  if (!row) {
+    host.innerHTML = '<div class="empty compact"><span>Автопилот AMS ещё не работал '
+      + 'по этому принтеру — нажмите «Привести в порядок».</span></div>';
+  } else {
+    host.innerHTML = issues.length
+      ? issues.map(amsIssueHtml).join('')
+      : '<div class="health-ok"><span class="shield" data-icon="shield">✓</span>'
+        + '<span><b>Слоты сходятся со складом</b><small>Автопилот не нашёл, за что '
+        + 'зацепиться: привязки, остатки и настройки слотов совпадают.'
+        + '</small></span></div>';
+  }
+  const actions = data && Array.isArray(data.actions) ? data.actions : [];
+  if (feed) {
+    feed.innerHTML = actions.length
+      ? actions.map(amsActionHtml).join('')
+      : '<div class="empty compact"><span>Лента пуста: автопилот пока не менял катушки.</span></div>';
+  }
+  const count = $('pr_ams_actions_count');
+  if (count) {
+    count.textContent = data && data.actions_24h
+      ? `за сутки: ${data.actions_24h}`
+      : 'Всё, что он сделал, — с откатом одной кнопкой';
+  }
+  if (planBox) {
+    const html = amsPlanHtml();
+    planBox.hidden = !html;
+    planBox.innerHTML = html;
+  }
+  const rulesBox = $('pr_ams_rules');
+  if (rulesBox) {
+    const html = amsRulesHtml(data);
+    rulesBox.innerHTML = html || '<div class="empty compact"><span>Правил пока нет: '
+      + 'автопилот заводит катушки по встроенным значениям и таблице материалов.'
+      + '</span></div>';
+  }
+}
+
+/** Доктор по требованию: раз в минуту или принудительно (после отката, по кнопке). */
+async function loadAmsDoctor(printerId, force) {
+  const pid = String(printerId || '');
+  if (!pid) return;
+  if (amsDoctorFor === pid && !force && (Date.now() - amsDoctorAt) < AMS_DOCTOR_TTL_MS) return;
+  amsDoctorFor = pid;
+  amsDoctorAt = Date.now();
+  try {
+    const data = await get('/api/ams/doctor', { printer_id: pid, actions: 8 });
+    const plan = await get('/api/ams/plan', { printer_id: pid });
+    if (PF.state.activePrinter !== pid) return;   // принтер успели сменить
+    amsDoctor = { printer_id: pid, data, plan };
+    const p = active();
+    if (p && p.id === pid && PF.viewOn('printers')) renderAmsDoctor(p);
+  } catch (e) { amsDoctorFor = ''; }
+}
+
 function renderAms(p) {
   const ams = p.ams || { trays: [] };
   const trays = ams.trays || [];
   // Память тянем всегда: она дополняет живые слоты теми, о которых принтер
   // сейчас молчит (второй AMS отключён, слот не прислали, принтер перезапущен).
   loadAmsMemory(p.id);
+  // Доктор нужен и без живой телеметрии: он читает склад и журнал.
+  loadAmsDoctor(p.id);
+  renderAmsDoctor(p);
   const occupied = trays.filter((t) => t.present !== false && (t.present || t.generic || t.type || t.uuid));
   text('pr_ams_count', trays.length
     ? `${occupied.length} из ${trays.length} занято`
@@ -2398,6 +2597,86 @@ function applyDensity(on) {
   U.store.set(DENSITY_KEY, on ? '1' : '0');
 }
 
+/** Кнопки AMS-доктора: «Привести в порядок» и откат действия из ленты. */
+function bindAmsDoctor() {
+  const fix = $('pr_ams_fix');
+  if (fix && !fix.dataset.amsFixBound) {
+    fix.dataset.amsFixBound = '1';
+    fix.addEventListener('click', async () => {
+      const pid = PF.state.activePrinter;
+      if (!pid) return fail(new Error('Сначала выберите принтер'));
+      fix.disabled = true;
+      try {
+        const res = await post('/api/ams/doctor/fix-all', { printer_id: pid });
+        const bits = [];
+        if (res.created) bits.push(`новых катушек: ${res.created}`);
+        if (res.moved) bits.push(`переносов: ${res.moved}`);
+        if (res.adopted) bits.push(`узнано: ${res.adopted}`);
+        if (res.pushes) bits.push(`записей в слот: ${res.pushes}`);
+        if (res.empty) bits.push(`пустых: ${res.empty}`);
+        if (res.errors) bits.push(`сбоев: ${res.errors}`);
+        toast('Автопилот AMS отработал', bits.join(' · ') || 'Изменений нет');
+        await loadAmsDoctor(pid, true);
+        PF.refreshCore();
+      } catch (e) { fail(e); } finally { fix.disabled = false; }
+    });
+  }
+  const card = $('pr_ams_doc_card');
+  if (card && !card.dataset.amsDocBound) {
+    card.dataset.amsDocBound = '1';
+    card.addEventListener('click', async (e) => {
+      const undo = e.target.closest('[data-ams-undo]');
+      const accept = e.target.closest('[data-ams-accept]');
+      const ruleForget = e.target.closest('[data-ams-rule-forget]');
+      const matForget = e.target.closest('[data-ams-mat-forget]');
+      const btn = undo || accept || ruleForget || matForget;
+      if (!btn) return;
+      if (undo && !confirmDanger('Отменить действие автопилота и вернуть прежние значения?')) return;
+      if (accept && !confirmDanger('Взять остаток из принтера в склад? Текущее значение склада изменится.')) return;
+      btn.disabled = true;
+      try {
+        let res = null;
+        if (undo) {
+          res = await post('/api/ams/action/undo', { id: undo.dataset.amsUndo });
+          toast('Действие отменено', res.detail || '');
+        } else if (accept) {
+          res = await post('/api/ams/accept', { spool_id: accept.dataset.amsAccept });
+          toast('Остаток принят из AMS', `в складе ${nfmt(num(res.remaining_grams))} г`);
+        } else if (ruleForget) {
+          res = await post('/api/ams/rule/forget', { id: ruleForget.dataset.amsRuleForget });
+          toast('Правило забыто', 'Автопилот снова спросит, если значение изменится');
+        } else {
+          res = await post('/api/ams/material-default',
+                           { material: matForget.dataset.amsMatForget, total_grams: 0 });
+          toast('Строка таблицы убрана', matForget.dataset.amsMatForget);
+        }
+        const pid = PF.state.activePrinter;
+        if (pid) await loadAmsDoctor(pid, true);
+        PF.refreshCore();
+      } catch (err) { fail(err); btn.disabled = false; }
+    });
+  }
+  const matSave = $('pr_ams_mat_save');
+  if (matSave && !matSave.dataset.amsMatBound) {
+    matSave.dataset.amsMatBound = '1';
+    matSave.addEventListener('click', async () => {
+      const material = String(($('pr_ams_mat') || {}).value || '').trim().toUpperCase();
+      if (!material) return fail(new Error('Укажите материал: PLA, PETG, ABS…'));
+      try {
+        await post('/api/ams/material-default', {
+          material,
+          total_grams: num(($('pr_ams_grams') || {}).value),
+          price: num(($('pr_ams_price') || {}).value),
+          brand: String(($('pr_ams_brand') || {}).value || '').trim(),
+        });
+        toast('Таблица материалов обновлена', material);
+        const pid = PF.state.activePrinter;
+        if (pid) await loadAmsDoctor(pid, true);
+      } catch (err) { fail(err); }
+    });
+  }
+}
+
 /** Кнопка «Забыть» в памяти слотов: чистит память, привязки катушек не трогает. */
 function bindAmsMemory() {
   const host = $('pr_ams');
@@ -3097,6 +3376,7 @@ function bindLinkOrder() {
 
 /* =============================================================== старт */
 PF.on('ready', () => { bindAmsProfiles(); bindSchedule(); bindAmsMemory();
+  bindAmsDoctor();
   bind();
   bindLinkOrder();
   renderTabs();
@@ -3113,5 +3393,5 @@ PF.on('view', (d) => {
   if (d.view === 'printers') { loadFiles(); loadEvents(); loadAmsMemory(PF.state.activePrinter); }
 });
 
-PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, convertActiveToOrder, convertJobToOrder };
+PF.modules.printer = { command, openJob, loadFiles, renderLive, openPrinterModal, fillPrintModal, convertActiveToOrder, convertJobToOrder, loadAmsDoctor };
 })();

@@ -457,6 +457,15 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "printer_info_sync": True,    # прошивка, Wi-Fi, влажность → карточка принтера
     "ams_auto_spools": True,      # заводить катушки из AMS на складе автоматически
     "ams_sync_remaining": True,   # обновлять остаток катушки по датчику AMS
+    # --- 18.13: автопилот AMS ---------------------------------------------
+    # Главный тумблер: привязки, переносы, пустые катушки, журнал и откат.
+    "ams_autopilot": True,
+    "ams_adopt_generic": True,    # узнавать сторонний пластик без RFID по истории
+    "ams_push_settings": True,    # приводить настройки слота в принтере к складу
+    "ams_push_retry_min": 30.0,   # не повторять ту же запись в слот раньше, мин
+    "ams_learn": True,            # учиться на правках карточек катушек
+    "ams_material_defaults": {},  # таблица «материал → масса, цена, бренд»
+    "notify_ams_auto": True,      # важное от автопилота — в Telegram
     # --- 8.0: Безопасность и система --------------------------------------
     "encrypt_access_code": True,
     "settings_profiles": [],  # снапшоты [{id, name, at, data}]
