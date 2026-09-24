@@ -164,8 +164,14 @@ class PassTests(WatchdogTestCase):
         self.assertIn("escalated", [row["kind"] for row in watchdog.tail_log(10)])
 
     def test_watch_stops_by_itself_with_pass_limit(self):
-        with mock.patch.object(watchdog.time, "sleep", return_value=None) as pause:
+        # Подъём роли подменён: без этого проход надзора запускал настоящий
+        # `python -m agent`, и после тестов на машине оставался живой агент,
+        # занявший порты 8791 и 8799 (найдено в 18.21).
+        with mock.patch.object(watchdog.time, "sleep", return_value=None) as pause, \
+                mock.patch.object(watchdog, "start_role",
+                                  return_value={"ok": True, "role": "agent", "pid": 0}) as start:
             result = watchdog.watch(roles=["agent"], interval_sec=5, max_passes=2)
+        self.assertTrue(start.called, "без пульса надзор обязан попытаться поднять роль")
         self.assertEqual(result["passes"], 2)
         self.assertEqual(pause.call_count, 1)
         self.assertIn("watching", [row["kind"] for row in watchdog.tail_log(10)])

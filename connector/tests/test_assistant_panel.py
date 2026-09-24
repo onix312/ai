@@ -246,6 +246,13 @@ class JournalTests(unittest.TestCase):
         found = {(r["method"], r["path"]) for r in router.reference()
                  if r["path"].startswith("/api/assistant")}
         self.assertEqual({("GET", "/api/assistant/agent"),
+                          # 18.21: мозг помощника — разговор, память, контекст.
+                          ("POST", "/api/assistant/chat"),
+                          ("GET", "/api/assistant/memory"),
+                          ("POST", "/api/assistant/memory"),
+                          ("GET", "/api/assistant/context"),
+                          ("GET", "/api/assistant/dialog"),
+                          ("POST", "/api/assistant/dialog"),
                           ("GET", "/api/assistant/avito/dedup"),
                           ("GET", "/api/assistant/avito/threads"),
                           ("GET", "/api/assistant/avito/watches"),

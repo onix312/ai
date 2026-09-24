@@ -555,16 +555,24 @@ class ConversationTests(unittest.TestCase):
         self.assertFalse(refused["ok"])
         self.assertIn("не этот компьютер", refused["reason"])
 
-    def test_page_sends_plain_questions_to_chat_not_intent(self):
+    def test_page_sends_every_phrase_to_the_brain(self):
+        """18.21: куда идёт фраза, решает сервер, а не регулярка в браузере.
+
+        До 18.21 страница сама выбирала между диспетчером каталога и разговором
+        (`looksLikeCommand`), и «2+2» или «а у второго?» попадали не туда. Теперь
+        любая фраза уходит в `/api/assistant/chat`, а интент-диспетчер страница
+        не зовёт вовсе: память, станки по имени и контекст живут на сервере.
+        """
         page = (ROOT / "site" / "assistant.html").read_text(encoding="utf-8")
-        self.assertIn("function looksLikeCommand", page)
         self.assertNotIn("looksLikeQuestion", page)
-        self.assertIn("chat: true", page)
+        self.assertNotIn("function looksLikeCommand", page)
         self.assertIn('data-q="2+2"', page)
-        ask = page[page.find("function ask(text)"):page.find("function intake(")]
-        gate = ask.find("if (!looksLikeCommand(text))")
-        self.assertGreater(gate, 0)
-        self.assertLess(ask.find("askChat(text)", gate), ask.find("/api/assistant/intent", gate))
+        ask = page[page.find("function ask(text)"):page.find("function loadHistory(")]
+        self.assertGreater(len(ask), 50)
+        self.assertIn("/api/assistant/chat", ask)
+        self.assertIn("session: SESSION", ask)
+        self.assertNotIn("/api/assistant/intent", page)
+        self.assertNotIn("/api/assistant/ask', {question: text, chat: true", page)
 
 
 class BrainUpgradeTests(unittest.TestCase):

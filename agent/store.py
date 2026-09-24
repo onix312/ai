@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sqlite3
 import threading
 import time
@@ -233,6 +234,7 @@ class Store:
             # --- миграции 18.16-18.19: добавить колонки и таблицы к старым базам --
             self._migrate_1817()
             self._migrate_1819()
+            self._migrate_1821()
 
     def _migrate_1817(self) -> None:
         """Добавить колонки, которых не было в 18.15 — без пересоздания таблиц."""
@@ -300,6 +302,33 @@ class Store:
                 "kind TEXT NOT NULL, detail TEXT DEFAULT '')")
             self._conn.execute("CREATE INDEX IF NOT EXISTS watchdog_events_role ON watchdog_events(role)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS watchdog_events_kind ON watchdog_events(kind)")
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
+
+    def _migrate_1821(self) -> None:
+        """Память и разговор (18.21): то, без чего «мозг» каждый раз начинал с нуля.
+
+        `memories` — что владелец просил запомнить и что помощник узнал о нём сам
+        (имя, предпочтения); `dialog` — реплики разговора с метками: какой навык
+        звали, о каком окне или файле шла речь. Второе нужно для «а теперь
+        закрой его» — местоимение понимается только по прошлой реплике.
+        """
+        try:
+            for statement in (
+                "CREATE TABLE IF NOT EXISTS memories("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+                "kind TEXT NOT NULL DEFAULT 'fact', subject TEXT DEFAULT '', text TEXT NOT NULL, "
+                "norm TEXT NOT NULL, source TEXT DEFAULT '', pinned INTEGER DEFAULT 0, "
+                "uses INTEGER DEFAULT 0, last_used TEXT DEFAULT '')",
+                "CREATE INDEX IF NOT EXISTS memories_norm ON memories(norm)",
+                "CREATE INDEX IF NOT EXISTS memories_subject ON memories(kind, subject)",
+                "CREATE TABLE IF NOT EXISTS dialog("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, session TEXT NOT NULL, "
+                "role TEXT NOT NULL, text TEXT NOT NULL, meta_json TEXT DEFAULT '{}')",
+                "CREATE INDEX IF NOT EXISTS dialog_session ON dialog(session, id)",
+            ):
+                self._conn.execute(statement)
             self._conn.commit()
         except sqlite3.Error:
             pass
@@ -881,7 +910,8 @@ class Store:
                 "avito_threads": count("avito_threads"),
                 "tg_templates": count("tg_templates"),
                 "tg_schedule": count("tg_schedule"),
-                "tg_ideas": count("tg_ideas")}
+                "tg_ideas": count("tg_ideas"),
+                "memories": count("memories"), "dialog": count("dialog")}
 
     # --- 18.17: полноценный ассистент ПК ----------------------------------
     # clipboard_history (И211)
@@ -1063,3 +1093,172 @@ class Store:
         rows = self._rows("SELECT COUNT(*) AS n FROM watchdog_events")
         base["watchdog_events"] = int(rows[0]["n"]) if rows else 0
         return base
+
+
+# ---------------------------------------------------------------------------
+# 18.21: память и разговор
+# ---------------------------------------------------------------------------
+
+MEMORY_KINDS = ("fact", "preference", "profile", "person", "rule")
+MAX_MEMORY_CHARS = 500
+MAX_DIALOG_TURNS = 400
+_WORD_RE = re.compile(r"[0-9a-zа-яё]+", re.IGNORECASE)
+# Окончания без «ия/ие/ию»: иначе «Мария» и «Марии» дают разные основы
+# («мар» и «мари»), и «вспомни про Марию» не находит запись о Марии.
+_ENDINGS = ("ями", "ами", "ого", "его", "ому", "ему", "ыми", "ими", "ях", "ах",
+            "ов", "ев", "ей", "ой", "ый", "ий", "ая", "яя", "ое", "ее", "ую", "юю", "ом", "ем",
+            "ам", "ям", "ы", "и", "а", "я", "о", "е", "у", "ю", "ь")
+_MEMORY_STOP = frozenset((
+    "что", "это", "как", "мне", "меня", "мой", "моя", "мои", "моё", "мое", "для", "про",
+    "при", "так", "там", "тут", "его", "еще", "ещё", "уже", "или", "the", "and", "всегда",
+    "запомни", "помни", "забудь", "знаешь", "помнишь", "обо", "все", "всё", "был", "была",
+))
+
+
+def normalize(text: str) -> str:
+    """Текст для сравнения: регистр, ё, пунктуация и пробелы не различаются."""
+    words = _WORD_RE.findall(str(text or "").casefold().replace("ё", "е"))
+    return " ".join(words)
+
+
+def stems(text: str) -> list[str]:
+    """Основы слов: «Марии», «Марией», «Мария» → «мари». Грубо и предсказуемо.
+
+    Полноценный морфологический разбор потребовал бы словарь на десятки
+    мегабайт; для «вспомни про Марию» хватает отсечения окончания и первых
+    шести букв — и это видно и проверяемо.
+    """
+    out: list[str] = []
+    for word in normalize(text).split():
+        if word in _MEMORY_STOP or (len(word) < 3 and not word.isdigit()):
+            continue
+        stem = word
+        if len(stem) > 4 and not stem.isdigit():
+            for ending in _ENDINGS:
+                if stem.endswith(ending) and len(stem) - len(ending) >= 3:
+                    stem = stem[:-len(ending)]
+                    break
+        stem = stem[:6]
+        if stem not in out:
+            out.append(stem)
+    return out
+
+
+def memory_score(query_stems: list[str], row: dict[str, Any]) -> float:
+    """Похожесть записи памяти на вопрос: доля совпавших основ плюс закрепление."""
+    if not query_stems:
+        return 0.0
+    have = set(stems(f"{row.get('subject') or ''} {row.get('text') or ''}"))
+    hits = sum(1 for stem in query_stems if stem in have)
+    if not hits:
+        return 0.0
+    return round(hits / len(query_stems) + (0.25 if row.get("pinned") else 0.0)
+                 + min(0.2, int(row.get("uses") or 0) * 0.02), 3)
+
+
+def _memory_methods() -> None:
+    """Методы памяти подключаются к `Store` отдельным блоком: таблицы свои, правила свои."""
+
+    def remember(self: Store, text: str, kind: str = "fact", subject: str = "",
+                 source: str = "chat", pinned: bool = False) -> dict[str, Any]:
+        clean = " ".join(str(text or "").split())[:MAX_MEMORY_CHARS]
+        if not clean:
+            return {"ok": False, "reason": "Пустая запись памяти"}
+        kind = kind if kind in MEMORY_KINDS else "fact"
+        subject = " ".join(str(subject or "").split())[:80]
+        norm = normalize(clean)
+        at = now_iso()
+        same = self._rows("SELECT * FROM memories WHERE norm=? LIMIT 1", (norm,))
+        if same:
+            self._run("UPDATE memories SET updated_at=? WHERE id=?", (at, same[0]["id"]))
+            return {"ok": True, "memory": {**same[0], "updated_at": at}, "duplicate": True, "reason": ""}
+        if subject and kind in ("profile", "preference"):
+            # «Меня зовут Олег» после «меня зовут Саша» — это исправление, а не второй факт.
+            old = self._rows("SELECT * FROM memories WHERE kind=? AND subject=? LIMIT 1", (kind, subject))
+            if old:
+                self._run("UPDATE memories SET text=?, norm=?, updated_at=?, source=? WHERE id=?",
+                          (clean, norm, at, str(source)[:40], old[0]["id"]))
+                row = self._rows("SELECT * FROM memories WHERE id=?", (old[0]["id"],))[0]
+                return {"ok": True, "memory": row, "replaced": old[0]["text"], "reason": ""}
+        cursor = self._run(
+            "INSERT INTO memories(at, updated_at, kind, subject, text, norm, source, pinned) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (at, at, kind, subject, clean, norm, str(source)[:40], 1 if pinned else 0))
+        row = self._rows("SELECT * FROM memories WHERE id=?", (int(cursor.lastrowid or 0),))
+        return {"ok": True, "memory": row[0] if row else {}, "reason": ""}
+
+    def memories(self: Store, limit: int = 50, kind: str = "") -> list[dict[str, Any]]:
+        limit = max(1, min(500, int(limit or 50)))
+        if kind:
+            return self._rows("SELECT * FROM memories WHERE kind=? ORDER BY pinned DESC, updated_at DESC, id DESC "
+                              "LIMIT ?", (kind, limit))
+        return self._rows("SELECT * FROM memories ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT ?",
+                          (limit,))
+
+    def recall(self: Store, query: str, limit: int = 5, touch: bool = True) -> list[dict[str, Any]]:
+        wanted = stems(query)
+        scored = []
+        for row in self._rows("SELECT * FROM memories ORDER BY id DESC LIMIT 2000"):
+            score = memory_score(wanted, row)
+            if score > 0:
+                scored.append({**row, "score": score})
+        scored.sort(key=lambda row: (-row["score"], -int(row["id"])))
+        top = scored[:max(1, min(50, int(limit or 5)))]
+        if touch and top:
+            at = now_iso()
+            for row in top:
+                self._run("UPDATE memories SET uses=uses+1, last_used=? WHERE id=?", (at, row["id"]))
+        return top
+
+    def forget(self: Store, what: str | int) -> list[dict[str, Any]]:
+        """Стереть запись памяти по номеру или по словам (лучшее совпадение ≥ половины слов)."""
+        if isinstance(what, int) or str(what).strip().isdigit():
+            rows = self._rows("SELECT * FROM memories WHERE id=?", (int(what),))
+        else:
+            rows = [row for row in self.recall(str(what), 3, touch=False) if row["score"] >= 0.5]
+            rows = rows[:1] if rows and (len(rows) == 1 or rows[0]["score"] > rows[1]["score"]) else rows
+        for row in rows:
+            self._run("DELETE FROM memories WHERE id=?", (row["id"],))
+        return rows
+
+    def pin_memory(self: Store, memory_id: int, pinned: bool = True) -> bool:
+        cursor = self._run("UPDATE memories SET pinned=? WHERE id=?", (1 if pinned else 0, int(memory_id)))
+        return cursor.rowcount > 0
+
+    def add_turn(self: Store, session: str, role: str, text: str,
+                 meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        session = (str(session or "main").strip() or "main")[:40]
+        role = role if role in ("user", "assistant") else "assistant"
+        clean = str(text or "").strip()[:4000]
+        if not clean:
+            return {}
+        cursor = self._run("INSERT INTO dialog(at, session, role, text, meta_json) VALUES(?,?,?,?,?)",
+                           (now_iso(), session, role, clean,
+                            json.dumps(meta or {}, ensure_ascii=False, default=str)[:4000]))
+        # Разговор не растёт вечно: хвост старше MAX_DIALOG_TURNS реплик уходит.
+        self._run("DELETE FROM dialog WHERE session=? AND id <= "
+                  "(SELECT id FROM dialog WHERE session=? ORDER BY id DESC LIMIT 1 OFFSET ?)",
+                  (session, session, MAX_DIALOG_TURNS))
+        return {"id": int(cursor.lastrowid or 0), "session": session, "role": role}
+
+    def dialog(self: Store, session: str = "main", limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM dialog WHERE session=? ORDER BY id DESC LIMIT ?",
+                          ((str(session or "main").strip() or "main")[:40], max(1, min(200, int(limit or 20)))))
+        out = []
+        for row in reversed(rows):
+            try:
+                row["meta"] = json.loads(row.pop("meta_json") or "{}")
+            except json.JSONDecodeError:
+                row["meta"] = {}
+            out.append(row)
+        return out
+
+    def clear_dialog(self: Store, session: str = "main") -> int:
+        cursor = self._run("DELETE FROM dialog WHERE session=?", ((str(session or "main").strip() or "main")[:40],))
+        return int(cursor.rowcount or 0)
+
+    for function in (remember, memories, recall, forget, pin_memory, add_turn, dialog, clear_dialog):
+        setattr(Store, function.__name__, function)
+
+
+_memory_methods()

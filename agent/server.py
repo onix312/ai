@@ -9,6 +9,10 @@
 навыков с доступностью, `/skill` исполняет навык, `/journal` показывает след
 действий на этом компьютере, а `/ui` отдаёт страницу окна ассистента.
 
+С 18.21 у агента есть мозг (`brain.py`): `POST /chat` принимает фразу и отвечает
+словами, `GET /chat/history` отдаёт разговор, `GET|POST /memory` — память.
+Панель зовёт `/chat` с `mode="pc"`, когда фраза похожа на команду компьютеру.
+
 Предохранители:
   * слушаем только 127.0.0.1 — агент недоступен из сети даже случайно;
   * любое действие в чужом окне и любой навык с риском `write` сначала
@@ -17,7 +21,13 @@
   * признак подтверждения берётся из реестра навыков (`skills.confirm_required`),
     а не из тела запроса: понизить его вызовом нельзя;
   * снимок экрана возвращается байтами тому, кто спросил, и не сохраняется;
-  * без зависимостей сервер жив и честно отдаёт причины в `/capabilities`.
+  * без зависимостей сервер жив и честно отдаёт причины в `/capabilities`;
+  * 18.21: чужие сайты в браузере до агента не достают. Раньше ответы несли
+    `Access-Control-Allow-Origin: *`, и любая открытая страница могла читать
+    буфер обмена, список окон и найденные документы через `fetch` на
+    127.0.0.1. Теперь запрос с чужим `Origin` или чужим `Host` (перепривязка
+    DNS) получает 403, а CORS-заголовков нет вовсе: панель ходит к агенту с
+    сервера, окно агента — со своего же адреса.
 """
 from __future__ import annotations
 
@@ -29,11 +39,15 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import capabilities, config, executor, skills, speech, ui, window, winapi
+from . import brain as brain_mod
+from . import capabilities, config, executor, pc, skills, speech, ui, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
 PENDING_TTL_SEC = 60.0
+# Имена, под которыми агент доступен своему окну и панели. Всё остальное в
+# `Host` — признак перепривязки DNS (сайт, выдающий себя за 127.0.0.1).
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
 
 
 class Agent:
@@ -50,6 +64,9 @@ class Agent:
         # обязан стартовать (и отвечать на `/health`) даже там, где папка базы
         # ещё не создана, а навыки никто не звал.
         self._runner: executor.Runner | None = None
+        self._brain: brain_mod.Brain | None = None
+        # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
+        self.microphone.handler = self.voice_phrase
 
     @property
     def runner(self) -> executor.Runner:
@@ -57,6 +74,34 @@ class Agent:
         if self._runner is None:
             self._runner = executor.Runner()
         return self._runner
+
+    @property
+    def brain(self) -> brain_mod.Brain:
+        """Мозг помощника: правила, контекст, память, модель — поверх навыков."""
+        if self._brain is None:
+            self._brain = brain_mod.Brain(self)
+        return self._brain
+
+    def chat(self, text: str, session: str = "main", mode: str = "full",
+             plan: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Фраза человека → ответ мозга. Способности обновляются перед разговором."""
+        if mode != "pc" or plan:
+            self.runner.refresh_capabilities()
+        return self.brain.chat(text, session=session, mode=mode, plan=plan)
+
+    def voice_phrase(self, phrase: str) -> dict[str, Any]:
+        """Голосовая петля (И311): команда компьютеру — здесь, вопрос цеха — панели; ответ вслух."""
+        answer = self.chat(phrase, session="voice")
+        reply = str(answer.get("reply") or "")
+        if answer.get("kind") in ("clarify", "error") and not answer.get("skill"):
+            panel = self.runner.panel.chat(phrase, session="voice", source="voice")
+            if panel.get("ok") and panel.get("reply"):
+                reply = str(panel["reply"])
+                answer = {**answer, "reply": reply, "source": "panel", "kind": panel.get("kind") or "answer"}
+        if reply and self.capabilities.get("speech_out", True):
+            pc.speak(reply[:600])
+        self.state.last_phrase = phrase[:500]
+        return answer
 
     # --- статус -----------------------------------------------------------
     def health(self) -> dict[str, Any]:
@@ -292,7 +337,8 @@ class AgentHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -341,6 +387,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     # --- маршруты ---------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 — имя задаёт BaseHTTPRequestHandler
+        if not self._local_request():
+            return None
         path = self.path.split("?", 1)[0]
         agent = self.agent
         if agent is None:
@@ -372,18 +420,38 @@ class AgentHandler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
             return self._json(200, agent.journal(limit))
+        if path == "/chat/history":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            session = brain_mod.session_key((query.get("session") or ["main"])[0])
+            limit = int((query.get("limit") or ["40"])[0] or 40)
+            return self._json(200, {"ok": True, "session": session,
+                                    "turns": agent.runner.store.dialog(session, limit)})
+        if path == "/memory":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            wanted = str((query.get("q") or [""])[0] or "")
+            store = agent.runner.store
+            rows = store.recall(wanted, 30, touch=False) if wanted else store.memories(100)
+            return self._json(200, {"ok": True, "memories": rows, "count": len(rows)})
         if path == "/ui":
             body = ui.page().encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            # Окно агента не встраивается в чужие страницы (кликджекинг «Подтвердить»).
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                             "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                             "connect-src 'self'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
             return None
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._local_request():
+            return None
         path = self.path.split("?", 1)[0]
         agent = self.agent
         if agent is None:
@@ -421,15 +489,67 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/action/confirm":
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
+        if path == "/chat":
+            plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
+            mode = "pc" if str(body.get("mode") or "") == "pc" else "full"
+            return self._json(200, agent.chat(str(body.get("text") or ""),
+                                              str(body.get("session") or "main"), mode, plan))
+        if path == "/chat/clear":
+            session = brain_mod.session_key(str(body.get("session") or "main"))
+            return self._json(200, {"ok": True, "session": session,
+                                    "cleared": agent.runner.store.clear_dialog(session)})
+        if path == "/memory":
+            store = agent.runner.store
+            op = str(body.get("op") or "remember")
+            if op == "forget":
+                rows = store.forget(body.get("id") if body.get("id") else str(body.get("text") or ""))
+                return self._json(200, {"ok": bool(rows), "forgotten": rows,
+                                        "reason": "" if rows else "Запись не найдена"})
+            if op == "pin":
+                done = store.pin_memory(int(body.get("id") or 0), bool(body.get("pinned", True)))
+                return self._json(200, {"ok": done, "reason": "" if done else "Запись не найдена"})
+            saved = store.remember(str(body.get("text") or ""), kind=str(body.get("kind") or "fact"),
+                                   subject=str(body.get("subject") or ""), source="window")
+            return self._json(200, saved)
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        # Предзапрос браузера бывает только у чужого сайта: своему окну он не
+        # нужен, панель ходит с сервера. Разрешений CORS агент не выдаёт.
+        if not self._local_request():
+            return None
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
+        return None
+
+    # --- граница loopback -------------------------------------------------
+    def _local_request(self) -> bool:
+        """Запрос от своего окна или от панели. Иначе — 403 и `False`.
+
+        Три признака чужого: `Host` не наш (перепривязка DNS), `Origin` есть и
+        он не адрес самого агента (страница другого сайта), `Origin: null`
+        (песочница, файл с диска). Панель и `urllib` заголовка Origin не шлют.
+        """
+        host = str(self.headers.get("Host") or "").strip().lower()
+        if host:
+            name = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
+            if name not in LOCAL_HOSTS:
+                self._json(403, {"ok": False, "reason": "Агент отвечает только по адресу этого компьютера"})
+                return False
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            parts = urllib.parse.urlsplit(str(origin).strip().lower())
+            port = self.server.server_address[1] if hasattr(self, "server") else None
+            try:
+                origin_port = parts.port
+            except ValueError:
+                origin_port = None
+            if not (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost")
+                    and origin_port == port):
+                self._json(403, {"ok": False, "reason": "Чужой сайт не может обращаться к агенту компьютера"})
+                return False
+        return True
 
 
 def _handler(role: str, agent: Agent) -> type[AgentHandler]:

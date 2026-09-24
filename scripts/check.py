@@ -75,7 +75,7 @@ def check_inline_js(node_available: bool) -> bool:
     print(f"\n==> {label}", flush=True)
     pages = sorted((ROOT / "site").rglob("*.html"))
     problems: list[str] = []
-    blocks: list[tuple[pathlib.Path, str]] = []
+    blocks: list[tuple[Path, str]] = []
     for page in pages:
         text = page.read_text(encoding="utf-8")
         opens = len(re.findall(r"<script\b", text))
@@ -189,6 +189,18 @@ def main(argv: list[str] | None = None) -> int:
         checks.append(False)
     else:
         print("SKIP: node не найден — стенд пульта не запущен")
+
+    # Стенд помощника (18.21): страница разговора держит логику во встроенном
+    # скрипте. Стенд выполняет его с заглушкой DOM и сервера и проверяет путь
+    # «фраза → мозг → карточка действия → Подтвердить → маршрут и журнал».
+    if node:
+        checks.append(run("Headless-стенд помощника (разговор, действие, память)",
+                          [node, "scripts/assistant-check.js"]))
+    elif args.require_tools:
+        print("FAIL: node не найден — стенд помощника не запущен", file=sys.stderr)
+        checks.append(False)
+    else:
+        print("SKIP: node не найден — стенд помощника не запущен")
 
     if not args.quick:
         checks.append(run(
