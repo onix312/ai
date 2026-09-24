@@ -567,6 +567,212 @@ class ConversationTests(unittest.TestCase):
         self.assertLess(ask.find("askChat(text)", gate), ask.find("/api/assistant/intent", gate))
 
 
+class BrainUpgradeTests(unittest.TestCase):
+    """18.20: часы, живые задания, смешанные вопросы и факты цеха у модели.
+
+    Три «глупости», которые это держит контрактом:
+      * «какое сегодня число» уходило в веб-поиск и приносило SEO-страницы
+        с чужими датами — теперь ответ из часов, без модели и поиска;
+      * «что печатаем и из какого пластика» слово «пластик» тащило в дамп
+        всех катушек — теперь живое задание + остаток его материала;
+      * в разговоре модель не видела цех — теперь видит компактный дайджест
+        (дата, парк, склад, долги) из сервисов панели.
+    """
+
+    @staticmethod
+    def _api():
+        """Цех из примера владельца: P1S печатает «Змея руны» на PLA MATTE."""
+
+        class Manager:
+            def snapshot(self):
+                return {"printers": [
+                    {"id": "p1s", "name": "P1S",
+                     "printer": {"name": "P1S", "state": "RUNNING",
+                                 "progress": 73.4, "remaining_min": 95},
+                     "job": {"order": {"number": "12",
+                                        "product": "Кейс: Змея руны 30см",
+                                        "customer_name": "Иван"},
+                              "spool": {"material": "PLA MATTE",
+                                        "color": "Белый"}},
+                     "guard": {}},
+                    {"id": "p2s", "name": "P2S",
+                     "printer": {"name": "P2S", "state": "FINISHED",
+                                 "progress": 100},
+                     "job": {}, "guard": {}},
+                ], "queue": [{"name": "Котик с подвеской"}, {"name": "Ваза"},
+                              {"name": "Адресник"}, {"name": "Брелок"}]}
+
+        class Repo:
+            def spools(self):
+                return [
+                    {"id": "s1", "material": "PLA MATTE", "color_name": "Белый",
+                     "remaining_grams": 840, "brand": "Bambu Lab"},
+                    {"id": "s2", "material": "PLA MATTE",
+                     "color_name": "Lilac Purple", "remaining_grams": 1700,
+                     "brand": "Bambu Lab"},
+                    {"id": "s3", "material": "PLA SILK", "color_name": "RAINBOW",
+                     "remaining_grams": 1000, "brand": "NOZZA"},
+                    {"id": "s4", "material": "PETG-HY", "color_name": "Серый",
+                     "remaining_grams": 860, "brand": "Creality"},
+                ]
+
+        class Acc:
+            def debts(self):
+                return {"total": 2400, "count": 2, "overdue": 600, "rows": []}
+
+        return type("Api", (), {"manager": Manager(), "repo": Repo(),
+                                "acc": Acc(), "db": None})()
+
+    def test_date_question_answered_from_clock(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = self._api()
+        with patch.object(knowledge.assistant, "status") as status, \
+             patch.object(knowledge.assistant, "web_search") as search, \
+             patch.object(knowledge.assistant, "complete") as complete:
+            result = knowledge.answer(api, "Какое сегодня число и день недели?",
+                                      chat=True)
+        status.assert_not_called()
+        search.assert_not_called()
+        complete.assert_not_called()
+        self.assertTrue(result["answered"])
+        self.assertEqual("clock", result["source"])
+        self.assertRegex(result["answer"], r"\d{1,2} [а-яё]+ \d{4}")
+        self.assertIn("сейчас", result["answer"])
+
+    def test_date_question_does_not_go_to_web(self):
+        # «сегодня» больше не триггер веб-поиска; дата уходит модели в промпт.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "clock.sqlite3")
+        self.addCleanup(db.close)
+        db.set_settings({"assistant_enabled": True, "assistant_model": "qwen2.5:3b",
+                         "assistant_url": "http://127.0.0.1:11434"})
+
+        def post(url, payload, timeout):
+            system = payload["messages"][0]
+            self.assertEqual("system", system["role"])
+            self.assertIn("Сегодня —", system["content"])
+            return True, {"message": {"content": "Сегодня 24 сентября."}}, ""
+
+        with patch.object(assistant, "status", return_value={
+                "available": True, "model": "qwen2.5:3b", "reason": ""}), \
+             patch.object(assistant, "web_search") as search, \
+             patch.object(assistant, "_post_json", side_effect=post):
+            result = assistant.converse(db, "какое сегодня число")
+        search.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertFalse(assistant._needs_web("какое сегодня число"))
+        self.assertFalse(assistant._needs_web("сколько станков в сети"))
+        self.assertTrue(assistant._needs_web("какая погода в Софии"))
+        self.assertTrue(assistant._needs_web("каков курс доллара"))
+
+    def test_what_printing_now_is_deterministic(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = self._api()
+        with patch.object(knowledge.assistant, "complete") as complete:
+            result = knowledge.answer(api, "Что мы сейчас печатаем?")
+        complete.assert_not_called()
+        self.assertTrue(result["answered"])
+        self.assertEqual("farm", result["source"])
+        self.assertIn("Змея руны", result["answer"])
+        self.assertIn("P1S", result["answer"])
+        self.assertIn("73%", result["answer"])
+        self.assertIn("PLA MATTE", result["answer"])
+        self.assertIn("В очереди 4", result["answer"])
+
+    def test_mixed_printing_plastic_is_not_full_dump(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = self._api()
+        with patch.object(knowledge.assistant, "complete") as complete:
+            result = knowledge.answer(
+                api, "Что мы сейчас печатаем? И из какого пластика?")
+        complete.assert_not_called()
+        self.assertTrue(result["answered"])
+        self.assertEqual("farm+spools", result["source"])
+        self.assertIn("Змея руны", result["answer"])
+        self.assertIn("№12", result["answer"])
+        self.assertIn("PLA MATTE", result["answer"])
+        self.assertIn("840 г", result["answer"])
+        self.assertIn("Всего на складе", result["answer"])
+        # Материалы, на которые сейчас не печатают, в ответ не вываливаются.
+        self.assertNotIn("RAINBOW", result["answer"])
+        self.assertNotIn("PETG-HY", result["answer"])
+
+    def test_followup_material_answered_from_printing_context(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = self._api()
+        history = [{"role": "user", "content": "Что мы сейчас печатаем?"},
+                   {"role": "assistant",
+                    "content": "P1S печатает «Кейс: Змея руны 30см» — 73%."}]
+        with patch.object(knowledge.assistant, "complete") as complete:
+            result = knowledge.answer(api, "А из какого пластика?", chat=True,
+                                      history=history)
+        complete.assert_not_called()
+        self.assertIn("PLA MATTE", result["answer"])
+        self.assertIn("840 г", result["answer"])
+        self.assertNotIn("RAINBOW", result["answer"])
+
+    def test_pure_stock_question_keeps_full_report(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = self._api()
+        result = knowledge.answer(api, "Сколько у нас пластика?")
+        self.assertEqual("spools", result["source"])
+        self.assertIn("RAINBOW", result["answer"])
+        self.assertIn("PETG-HY", result["answer"])
+
+    def test_converse_sees_shop_facts(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "brain.sqlite3")
+        self.addCleanup(db.close)
+        db.set_settings({"assistant_enabled": True, "assistant_model": "qwen2.5:3b",
+                         "assistant_url": "http://127.0.0.1:11434"})
+        api = self._api()
+        api.db = db
+        seen: list[dict] = []
+
+        def post(url, payload, timeout):
+            seen.append(payload)
+            return True, {"message": {"content": "Работаю, цех в норме."}}, ""
+
+        with patch.object(assistant, "status", return_value={
+                "available": True, "model": "qwen2.5:3b", "reason": ""}), \
+             patch.object(assistant, "_post_json", side_effect=post):
+            result = knowledge.answer(api, "Привет, как дела?", chat=True)
+        self.assertTrue(result["answered"])
+        self.assertTrue(seen)
+        system = seen[0]["messages"][0]
+        self.assertIn("Сегодня —", system["content"])
+        self.assertIn("Парк: P1S печатает «Кейс: Змея руны 30см» 73%",
+                      system["content"])
+        self.assertIn("Склад:", system["content"])
+        self.assertIn("Долги: 2400", system["content"])
+        self.assertIn("цифр", system["content"].casefold())
+
+    def test_park_outage_does_not_claim_printing_idle(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        class BrokenManager:
+            def snapshot(self):
+                raise RuntimeError("порт занят")
+
+        api = type("Api", (), {"manager": BrokenManager(), "db": None})()
+        # Живой ответ честно отказывается, а не говорит «ничего не печатается».
+        self.assertIsNone(knowledge.now_printing_report(api))
+        self.assertIsNone(knowledge.mixed_printing_report(api, "что и из чего"))
+        # Дайджест без блока парка — только дата, без ложного «ничего не печатается».
+        context = knowledge.shop_context(api)
+        self.assertIn("Сегодня —", context)
+        self.assertNotIn("ничего не печатается", context)
+
+
 class WorkshopIdeasTests(unittest.TestCase):
     def test_ideas_come_from_orders_when_agent_is_down(self):
         tmp = tempfile.TemporaryDirectory()

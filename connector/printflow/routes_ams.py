@@ -76,6 +76,32 @@ def ams_plan_custom(api: Any, ctx: Ctx):
     return plan(api.db, pid, ctx.body.get("materials"))
 
 
+@router.post("/api/ams/export", audit="AMS: экспорт цветов и настроек",
+             doc="Отправить цвета и настройки привязанных катушек в AMS (ручной экспорт)")
+def ams_export(api: Any, ctx: Ctx):
+    """Ручной экспорт с вкладки «Принтеры»: цвета и температуры привязанных
+    катушек уходят в AMS тем же проверенным шлюзом, что и автозапись (30-минутный
+    дедуп, журнал, отказ при занятом принтере). В ответе — советы плана с
+    учётом мультиколора: какие катушки ещё надо поставить физически.
+    """
+    from . import ams_push
+    from .ams_doctor import plan
+
+    pid = str(ctx.arg("printer_id") or "").strip()
+    if not pid:
+        raise ValueError("Не указан принтер")
+    printer = api.printer_or_fail(pid)
+    snap = printer.snapshot()
+    advice = plan(api.db, pid).get("advice") or []
+    allowed, reason = ams_push.write_allowed(api.db, snap)
+    if not allowed:
+        return {"ok": False, "sent": 0, "skipped": 0, "errors": [],
+                "reason": reason, "advice": advice,
+                "hint": "Экспорт отложен: принтер должен быть свободен и подключён."}
+    result = ams_push.push(api.db, printer, snap)
+    return {"ok": True, **result, "advice": advice}
+
+
 @router.post("/api/ams/tidy", audit="AMS: привести в порядок",
              doc="Обновить учёт и безопасно отправить настройки в свободный AMS")
 def ams_tidy(api: Any, ctx: Ctx):

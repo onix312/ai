@@ -1,9 +1,20 @@
 """Офлайн-диагностика AMS и советующая раскладка (без команд принтеру)."""
 from __future__ import annotations
 
+import json
+
 from .accounting import num
 from .ams_sync import slot_memory, slot_number
 from .materials import is_hygroscopic
+
+
+def _json_list(raw) -> list:
+    """JSON-список заказа (colors/spools) или пустой список: мусор — не сбой плана."""
+    try:
+        value = json.loads(str(raw or "[]"))
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return value if isinstance(value, list) else []
 
 
 def doctor(db, printer_id: str = "", snapshot: dict | None = None) -> dict:
@@ -139,18 +150,80 @@ def doctor(db, printer_id: str = "", snapshot: dict | None = None) -> dict:
 
 
 def plan(db, printer_id: str, needs: list[dict] | None = None) -> dict:
-    """Советы из ближайшей очереди: ничего не связывает и не отправляет в AMS."""
+    """Советы из ближайшей очереди: ничего не связывает и не отправляет в AMS.
+
+    Мультиколор учитывается тремя уровнями точности:
+      1) `orders.spools` — мастер назначил конкретные катушки: каждая катушка
+         своим требованием со своими граммами;
+      2) `orders.colors` — список цветов без катушек: граммы делятся на цвета;
+      3) простой заказ — один материал и один цвет.
+    """
     if needs is None:
         needs = []
-        jobs = db.query("SELECT j.id,j.order_id,o.material,o.color,o.grams,o.number"
-                        " FROM print_jobs j JOIN orders o ON o.id=j.order_id"
-                        " WHERE j.printer_id=? AND j.state='queued'"
-                        " ORDER BY j.priority DESC, j.queued_at ASC LIMIT 12", (printer_id,))
+        jobs = db.query(
+            "SELECT j.id, j.material AS j_material, j.spool_id AS j_spool_id,"
+            " j.order_id, o.material, o.color, o.colors AS o_colors,"
+            " o.spools AS o_spools, o.grams, o.number"
+            " FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id"
+            " WHERE j.printer_id=? AND j.state='queued'"
+            " ORDER BY j.priority DESC, j.queued_at ASC LIMIT 12", (printer_id,))
+        spool_by_id = {str(row["id"]): row for row in db.query(
+            "SELECT id, material, color_name FROM spools WHERE archived=0")}
         for job in jobs:
-            if job.get("material"):
-                needs.append({"material": str(job["material"]), "color": job.get("color") or "",
-                              "grams": num(job.get("grams")),
-                              "order": job.get("number") or job.get("order_id")})
+            material = str(job.get("material") or job.get("j_material") or "").strip()
+            order = job.get("number") or job.get("order_id") or ""
+            grams = num(job.get("grams"))
+            # 1) Явные катушки заказа — мультицвет, назначенный мастером.
+            explicit = [item for item in _json_list(job.get("o_spools"))
+                        if isinstance(item, dict) and str(item.get("spool_id") or "")]
+            if explicit:
+                for item in explicit[:8]:
+                    spool = spool_by_id.get(str(item.get("spool_id")), {})
+                    needs.append({"material": str(spool.get("material") or material).upper(),
+                                  "color": str(spool.get("color_name") or ""),
+                                  "grams": num(item.get("grams")),
+                                  "order": order, "spool_hint": str(item.get("spool_id")),
+                                  "multi_color": len(explicit) > 1})
+                continue
+            # 2) Список цветов — мультицвет без назначения катушек. Формат
+            # orders.colors: [{"material","color","grams"}]; старый текстовый
+            # «Белый:40, Чёрный:15» понимаем тоже, как учёт.
+            color_items = [item for item in _json_list(job.get("o_colors"))
+                           if isinstance(item, dict)]
+            if not color_items:
+                raw = str(job.get("o_colors") or "").strip()
+                if raw and not raw.startswith("["):
+                    for part in raw.split(","):
+                        name, _, value = part.partition(":")
+                        name = name.strip()
+                        if not name:
+                            continue
+                        try:
+                            part_grams = float(str(value).strip().replace(",", "."))
+                        except ValueError:
+                            part_grams = 0.0
+                        color_items.append({"color": name, "grams": part_grams})
+            if len(color_items) > 1:
+                stated = sum(num(item.get("grams")) for item in color_items)
+                per = round(grams / len(color_items), 1) if (grams and not stated) else 0
+                for index, item in enumerate(color_items):
+                    needs.append({
+                        "material": str(item.get("material") or material).upper(),
+                        "color": str(item.get("color") or "").strip(),
+                        "grams": num(item.get("grams")) or per,
+                        "order": order, "multi_color": True, "color_index": index})
+                continue
+            # 3) Простой заказ: один материал, один цвет; задание без заказа —
+            # через свою катушку.
+            if material:
+                needs.append({"material": material, "color": job.get("color") or "",
+                              "grams": grams, "order": order})
+            elif job.get("j_spool_id"):
+                spool = spool_by_id.get(str(job.get("j_spool_id")), {})
+                if spool.get("material"):
+                    needs.append({"material": str(spool["material"]).upper(),
+                                  "color": str(spool.get("color_name") or ""),
+                                  "grams": grams, "order": order})
     if not isinstance(needs, list):
         raise ValueError("Материалы должны быть списком")
     slots = slot_memory(db, printer_id)
@@ -189,9 +262,15 @@ def plan(db, printer_id: str, needs: list[dict] | None = None) -> dict:
         advised.append({"material": material, "color": request.get("color") or "",
                         "grams": grams, "order": request.get("order") or "",
                         "spool_id": chosen["id"] if chosen else "",
+                        "spool_hint": str(request.get("spool_hint") or ""),
+                        "multi_color": bool(request.get("multi_color")),
                         "slot": suggested_slot,
                         "suggestion": ("Уже в AMS" if standing else
                                        "Поставить со склада" if chosen else "Подходящей катушки нет"),
                         "remaining_grams": num(chosen.get("remaining_grams")) if chosen else 0})
-    return {"printer_id": printer_id, "advice": advised,
-            "note": "Только советы. Раскладка AMS и карточки не изменены."}
+    multi = {str(r.get("order")) for r in advised if r.get("multi_color")}
+    note = "Только советы. Раскладка AMS и карточки не изменены."
+    if multi:
+        note += " Мультицвет: " + ", ".join(sorted(n for n in multi if n)) \
+            + " — в плане каждый цвет отдельно."
+    return {"printer_id": printer_id, "advice": advised, "note": note}
