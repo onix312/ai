@@ -145,7 +145,7 @@ def _ams_tray_dict(unit_id: int, slot: int, tray_raw: dict | None,
                    present: bool, bambulab: bool, tray_now: str) -> dict:
     tray_raw = tray_raw or {}
     uuid = _clean_tray_uuid(tray_raw.get("tray_uuid") or tray_raw.get("tag_uid"))
-    material = str(tray_raw.get("tray_type") or tray_raw.get("tray_sub_brands") or "").strip()
+    material = str(tray_raw.get("tray_type") or "").strip()
     global_id = f"{unit_id}{slot}"
     return {
         "id": global_id,
@@ -153,12 +153,13 @@ def _ams_tray_dict(unit_id: int, slot: int, tray_raw: dict | None,
         "slot": slot,
         "label": f"AMS {unit_id + 1} · слот {slot + 1}",
         "type": material,
+        "brand": str(tray_raw.get("tray_sub_brands") or "").strip(),
         "color": _tray_color(_tray_color_raw(tray_raw)),
         "remain": _tray_remain(tray_raw.get("remain")),
         "uuid": uuid,
         "nozzle_min": tray_raw.get("nozzle_temp_min"),
         "nozzle_max": tray_raw.get("nozzle_temp_max"),
-        "active": str(tray_now) in (global_id, str(slot), str(unit_id * 4 + slot)),
+        "active": str(tray_now) in (global_id, str(unit_id * 4 + slot)),
         "present": bool(present),
         "bambulab": bool(bambulab),
         "generic": bool(present) and not bool(bambulab),
@@ -206,7 +207,7 @@ def parse_ams_trays(ams_raw: Any, vt_tray: Any = None) -> list[dict]:
         for slot in slot_ids:
             raw = by_slot.get(slot) or {}
             uuid = _clean_tray_uuid(raw.get("tray_uuid") or raw.get("tag_uid"))
-            material = str(raw.get("tray_type") or raw.get("tray_sub_brands") or "").strip()
+            material = str(raw.get("tray_type") or "").strip()
             if exist is not None:
                 present = bool(exist & (1 << slot))
             else:
@@ -220,7 +221,7 @@ def parse_ams_trays(ams_raw: Any, vt_tray: Any = None) -> list[dict]:
             trays.append(_ams_tray_dict(unit_id, slot, raw, present, bambulab, tray_now))
     if isinstance(vt_tray, dict):
         uuid = _clean_tray_uuid(vt_tray.get("tray_uuid") or vt_tray.get("tag_uid"))
-        material = str(vt_tray.get("tray_type") or vt_tray.get("tray_sub_brands") or "").strip()
+        material = str(vt_tray.get("tray_type") or "").strip()
         remain = _tray_remain(vt_tray.get("remain"))
         if material or uuid or remain is not None:
             trays.append({
@@ -229,6 +230,7 @@ def parse_ams_trays(ams_raw: Any, vt_tray: Any = None) -> list[dict]:
                 "slot": 254,
                 "label": "Внешний слот",
                 "type": material,
+                "brand": str(vt_tray.get("tray_sub_brands") or "").strip(),
                 "color": _tray_color(_tray_color_raw(vt_tray)),
                 "remain": remain,
                 "uuid": uuid,

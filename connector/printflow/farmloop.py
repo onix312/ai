@@ -251,6 +251,9 @@ def build_from_timeline(blocks: list[dict]) -> dict:
             upper = g.upper()
             if "M112" in upper or "M999" in upper:
                 raise FarmLoopError(f"Блок {idx}: запрещённая команда M112/M999")
+            # Маркер позволяет разобрать произвольные строки обратным парсером.
+            # Это комментарий G-code: на движениях принтера не сказывается.
+            lines.append("; PRINTFLOW CUSTOM BEGIN")
             # check each line
             for line in g.splitlines():
                 ls = line.strip()
@@ -277,6 +280,7 @@ def build_from_timeline(blocks: list[dict]) -> dict:
                     except Exception:
                         pass
                 lines.append(ls)
+            lines.append("; PRINTFLOW CUSTOM END")
     lines.append(END)
     gcode = "\n".join(lines) + "\n"
     # dry-run validation
@@ -345,8 +349,11 @@ def parse_template_blocks(template: str) -> dict:
         raw = line.strip()
         if not raw or raw in (BEGIN, END):
             continue
-        if "; 5. Дополнения" in raw or "; Дополнения" in raw:
+        if raw == "; PRINTFLOW CUSTOM BEGIN" or "; 5. Дополнения" in raw or "; Дополнения" in raw:
             in_custom = True
+            continue
+        if raw == "; PRINTFLOW CUSTOM END":
+            in_custom = False
             continue
         if in_custom:
             if not raw.startswith("; PRINTFLOW"):
@@ -466,3 +473,15 @@ def profile_payload(profile: FarmLoopProfile = P1S_STAGE1) -> dict:
         "max_print_height_mm": profile.max_print_height_mm,
         "requires_verified_template": profile.requires_verified_template,
     }
+
+
+def queued_job_count(db) -> int:
+    """Объём очереди для запасного планировщика FarmLoop."""
+    row = db.one("SELECT COUNT(*) n FROM print_jobs WHERE state='queued'") or {}
+    return int(row.get("n") or 0)
+
+
+def queued_jobs(db) -> list[dict]:
+    """Ранжированная очередь для запасного планировщика FarmLoop."""
+    return db.query("SELECT * FROM print_jobs WHERE state='queued'"
+                    " ORDER BY priority DESC, datetime(created_at)")

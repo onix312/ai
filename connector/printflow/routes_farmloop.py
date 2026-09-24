@@ -453,12 +453,15 @@ def farmloop_queue_balance(api: Any, ctx: Ctx):
         try:
             res = manager.balance_queue()
             if isinstance(res, dict) and res.get("ok"):
-                jobs = api.db.query("SELECT COUNT(*) n FROM print_jobs WHERE state='queued'")
-                return {"ok": True, "plan": res.get("plan", []), "jobs": (jobs[0].get("n") if jobs else 0), "printers": len(getattr(manager, "printers", {}))}
+                from .farmloop import queued_job_count
+                return {"ok": True, "plan": res.get("plan", []),
+                        "jobs": queued_job_count(api.db),
+                        "printers": len(getattr(manager, "printers", {}))}
         except Exception:
             pass
     try:
-        jobs = api.db.query("SELECT * FROM print_jobs WHERE state='queued' ORDER BY priority DESC, datetime(created_at)")
+        from .farmloop import queued_jobs
+        jobs = queued_jobs(api.db)
         printers = list(getattr(manager, "printers", {}).values())
         snaps = {}
         for pr in printers:

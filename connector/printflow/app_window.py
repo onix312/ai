@@ -135,8 +135,7 @@ def main(argv=None):
             print(f"Запускаю сервер на порту {port}…")
             proc = start_server(port, lan=not args.local)
             if not wait_for_port(port, timeout=12):
-                print("Сервер не поднялся, открываю браузер как fallback")
-                webbrowser.open(f"http://localhost:{port}/")
+                print("Сервер не поднялся — страницу не открыть. Проверьте журнал PrintFlow.")
                 return 1
 
     page = str(args.path or "/").strip()

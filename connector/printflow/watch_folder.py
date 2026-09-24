@@ -216,9 +216,11 @@ class WatchFolder:
                     try:
                         self.bus.publish("watch", {"file": path.name, "order_id": order_id,
                                                    "fid": fid, "error": reason})
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.db.add_event("watch", "Сбой уведомления об очереди",
+                                          str(exc), "", {"file": path.name, "fid": fid})
 
+        # оригинал файла остаётся в watch-папке; папка processed нужна для явного переноса.
         try:
             processed = self._watch_path() / "processed"
             processed.mkdir(exist_ok=True)

@@ -12,7 +12,7 @@
    по обычному http с телефона браузер его не разрешает — это ограничение
    браузеров, а не PrintFlow. Панель на телефоне работает и без него. */
 
-const CACHE = 'printflow-shell-v89';
+const CACHE = 'printflow-shell-v90';
 /* Оболочка панели: всё, без чего интерфейс не соберётся офлайн.
    Список сверяется с index.html тестом test_pwa_shell — если в разметку
    добавили скрипт или стиль, проверка упадёт и напомнит внести его сюда.
@@ -66,6 +66,7 @@ const SHELL = [
   '/assets/finance.js',
   '/assets/products.js',
   '/assets/printer.js',
+  '/assets/ams-autopilot.js',
   '/assets/shelf.js',
   '/assets/qr.js',
   '/assets/bridge.js',

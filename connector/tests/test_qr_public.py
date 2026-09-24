@@ -140,7 +140,7 @@ class ApiQrRoutesTests(unittest.TestCase):
         self.db = Database(pathlib.Path(self.tmp.name) / "t.sqlite3")
         self.repo = Repo(self.db)
         self.spool = self.repo.save_spool({
-            "id": "sp_testqr", "material": "PLA", "color_name": "Белый",
+            "id": "sp_testqr", "material": "PLA", "color_name": "Белый", "color_hex": "#FFFFFF",
             "total_grams": 1000, "remaining_grams": 900, "price": 1600,
         })
 
@@ -204,6 +204,9 @@ class ApiQrRoutesTests(unittest.TestCase):
         api = self._api()
 
         class FakePrinter:
+            id = "prn-1"
+            def snapshot(self):
+                return {"printer": {"state": "IDLE"}, "connection": {"connected": True}}
             def command(self, name, value=None):
                 return {"ok": True}
 
@@ -227,6 +230,9 @@ class ApiQrRoutesTests(unittest.TestCase):
         seen = {}
 
         class FakePrinter:
+            id = "prn-1"
+            def snapshot(self):
+                return {"printer": {"state": "IDLE"}, "connection": {"connected": True}}
             def command(self, name, value=None):
                 seen["name"] = name
                 seen["value"] = value

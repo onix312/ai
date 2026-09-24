@@ -12,6 +12,57 @@ from .estimate import parse_3mf_complete, _parse_gcode_head, _read_head
 from pathlib import Path
 
 
+def check_ams_filament(snap: dict, estimate: dict, mapping,
+                       blocks: list[dict], infos: list[dict], *,
+                       block_material: bool = True, block_filament: bool = True) -> None:
+    """Проверить конкретные слоты перед стартом, включая многоцветную плиту.
+
+    Неизвестные данные и ошибка проверки остаются заметкой, не запретом.
+    """
+    try:
+        trays = (snap.get("ams") or {}).get("trays") or []
+        from .ams_sync import slot_number
+        by_slot = {slot_number(t): t for t in trays if t.get("slot") is not None}
+        requested = estimate.get("filaments") or []
+        if mapping:
+            slots = [int(x) for x in mapping]
+            needs = [str((requested[i].get("type") or requested[i].get("material") or "")
+                         if i < len(requested) and isinstance(requested[i], dict)
+                         else estimate.get("material") or "").strip().upper()
+                     for i in range(len(slots))]
+        else:
+            active = next((t for t in trays if t.get("active")), None)
+            slots = [slot_number(active)] if active else []
+            needs = [str(estimate.get("material") or "").strip().upper()]
+        if not slots and estimate.get("material"):
+            infos.append({"code": "ams_unknown", "title": "Неизвестен рабочий слот AMS",
+                          "detail": "В снимке нет активного слота или маппинга: проверьте материал перед стартом."})
+        for index, slot in enumerate(slots):
+            if not 0 <= slot <= 15:
+                continue  # внешний филамент; отдельного слота AMS нет
+            tray = by_slot.get(slot)
+            if tray is None:
+                infos.append({"code": "ams_unknown", "title": "Слот AMS не виден",
+                              "detail": f"Нет свежих данных о слоте {slot}: проверьте катушку."})
+                continue
+            if block_filament and (tray.get("present") is False or
+                                   tray.get("remain") is not None and float(tray["remain"]) <= 0):
+                blocks.append({"code": "ams_empty", "title": "Слот AMS пуст",
+                               "detail": f"Слот {tray.get('label') or slot}: пластик закончился или отсутствует."})
+                continue
+            actual = str(tray.get("type") or "").strip().upper()
+            need = needs[index] if index < len(needs) else ""
+            if block_material and need and actual and need != actual:
+                blocks.append({"code": "ams_material", "title": "Неправильный материал в AMS",
+                               "detail": f"Слот {tray.get('label') or slot}: {actual} вместо {need}."})
+            elif need and not actual:
+                infos.append({"code": "ams_material_unknown", "title": "Материал в AMS неизвестен",
+                              "detail": f"Слот {tray.get('label') or slot}: нельзя сравнить с {need}."})
+    except Exception as exc:
+        infos.append({"code": "ams_check_error", "title": "Проверка AMS не завершилась",
+                      "detail": f"Старт не заблокирован из-за ошибки проверки: {exc}"})
+
+
 def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1, ams_mapping: list[int] | None = None) -> dict:
     """Проверить можно ли запускать печать."""
     if not db.setting("preflight_enabled", True):
@@ -29,7 +80,7 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     snap = printer.snapshot()
     state = snap["printer"]["state"]
     if db.setting("preflight_block_idle", True) and state not in ("IDLE", "FINISH"):
-        blocks.append({"code": "busy", "title": "Принтер занят", "detail": f"Состояние: {snap['printer']['state_label']} ({state}) — дождитесь завершения"})
+        blocks.append({"code": "busy", "title": "Принтер занят", "detail": f"Состояние: {snap['printer'].get('state_label') or state} ({state}) — дождитесь завершения"})
 
     # HMS
     if db.setting("preflight_block_hms", True):
@@ -105,22 +156,13 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
     except Exception as exc:
         infos.append({"code": "estimate", "title": "Не удалось прочитать оценку", "detail": str(exc)})
 
-    # материал и филамент
+    # материал и филамент. Без отчёта AMS заметка вместо исключения,
+    # уже известную блокировку занятого принтера при этом не теряем.
+    ams = snap.get("ams") or {}
     if db.setting("preflight_block_material", True) and est.get("material"):
         need = str(est.get("material") or "").upper()
-        trays = snap["ams"].get("trays", []) or []
+        trays = ams.get("trays", []) or []
         active = next((t for t in trays if t.get("active")), None) if trays else None
-        # также проверить маппинг
-        if ams_mapping is not None and trays:
-            # ams_mapping — список слотов
-            for slot in ams_mapping:
-                tr = next((t for t in trays if int(t.get("slot", -1)) == int(slot)), None)
-                if tr and tr.get("type") and tr.get("type").upper() != need and need:
-                    blocks.append({"code": "material_map", "title": "Не тот материал в слоте", "detail": f"Слот {slot}: {tr.get('type')} vs нужно {need}"})
-        elif active and active.get("type"):
-            loaded = str(active.get("type") or "").upper()
-            if loaded and loaded != need:
-                blocks.append({"code": "material", "title": "Не тот материал в AMS", "detail": f"В активном слоте {loaded}, а файл требует {need} — замените катушку"})
         # многоцвет
         if est.get("filaments") and len(est["filaments"]) > 1:
             # проверить что все материалы есть в AMS
@@ -130,18 +172,25 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
             if missing and db.setting("preflight_block_material", True):
                 warns.append({"code": "multicolor", "title": "Многоцвет: не все материалы в AMS", "detail": f"Нужно {', '.join(need_types)}, в AMS {', '.join(have_types) or 'пусто'}"})
 
+    # Слоты задания: пустой / не тот тип запрещают старт. Исключения — заметка.
+    check_ams_filament(snap, est, ams_mapping, blocks, infos,
+                       block_material=bool(db.setting("preflight_block_material", True)),
+                       block_filament=bool(db.setting("preflight_block_filament", True)))
+
     # остаток пластика
     if db.setting("preflight_block_filament", True) and est.get("grams"):
         need_g = float(est.get("grams") or 0)
         # если qty в заказе — умножить, но тут нет qty, берем 1
-        trays = snap["ams"].get("trays", []) or []
+        trays = ams.get("trays", []) or []
         active = next((t for t in trays if t.get("active")), None) if trays else None
         if active:
             # найти spool
             try:
                 from .accounting import Accounting
                 acc = Accounting(db)
-                spool = acc.pick_spool(printer.id, str(active.get("slot")), active.get("type"), active.get("uuid"))
+                from .ams_sync import slot_number
+                spool = acc.pick_spool(printer.id, str(slot_number(active)),
+                                       active.get("type"), active.get("uuid"))
                 if spool:
                     if not int(float(spool.get("verified", 1) or 0)):
                         blocks.append({"code": "spool_unverified", "title": "Катушка AMS не проверена", "detail": "Уточните массу и цену катушки в складе перед стартом"})
@@ -193,12 +242,12 @@ def check_preflight(db, manager, printer_id: str, filename: str, plate: int = 1,
 
     # влажность AMS — только гигроскопичные (PC/PA/PVA/TPU/PETG…), PLA не критичен
     if db.setting("preflight_warn_humidity", True):
-        hum = snap["ams"].get("humidity")
+        hum = ams.get("humidity")
         if hum is not None:
             try:
                 if float(hum) > float(db.setting("dry_humidity_threshold", 55)):
                     from .materials import is_hygroscopic
-                    trays = snap["ams"].get("trays", []) or []
+                    trays = ams.get("trays", []) or []
                     hygro = []
                     for tray in trays:
                         key = str(tray.get("type") or tray.get("material") or "")

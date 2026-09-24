@@ -1201,7 +1201,7 @@ function renderAms(p) {
     const tubeFillBg = String(tubeCss).indexOf('gradient(') >= 0
       ? `background:${esc(tubeCss)};` : '';
     const spoolTag = bound
-      ? `<span class="spool-tag"><i style="background:${esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(bound, '#cbd5e1') : (bound.color_hex || '#cbd5e1'))}"></i>${esc((bound.material || '') + ' ' + (bound.color_name || ''))} · ${Math.round(num(bound.remaining_grams))} г</span>`
+      ? `<span class="spool-tag" title="${esc(bound.price_source ? 'Источник цены: ' + bound.price_source : 'Цена из складской карточки')}"><i style="background:${esc(window.PFSpoolColor ? PFSpoolColor.swatchCss(bound, '#cbd5e1') : (bound.color_hex || '#cbd5e1'))}"></i>${esc((bound.material || '') + ' ' + (bound.color_name || ''))} · ${Math.round(num(bound.remaining_grams))} г</span>`
       : (empty ? '' : '<span class="spool-tag none">не привязана</span>');
     const typeLabel = empty ? 'пусто' : (t.type || 'Тип не задан');
     return `<div class="ams-tube${t.active ? ' active' : ''}${empty ? ' empty' : ''}${generic ? ' generic' : ''}${low ? ' low' : ''}${(!empty && !bound) ? ' unbound' : ''}"`
@@ -1698,9 +1698,11 @@ function captureAmsSlots() {
   const trays = (snap && snap.ams && snap.ams.trays) || [];
   const host = $('ap_slots');
   if (!host) return;
-  host.innerHTML = trays.map((t) => `<div class="ams-profile-slot">`
+  host.innerHTML = trays.filter((t) => Number(t.unit || 0) < 4 && Number(t.slot) < 4)
+    .map((t) => `<div class="ams-profile-slot">`
     + `<b>${esc(t.label)}</b>`
-    + `<input data-ap-slot-tray value="${t.slot}" type="hidden">`
+    + `<input data-ap-slot-tray value="${Number(t.unit || 0) * 4 + Number(t.slot)}" type="hidden">`
+    + `<input data-ap-slot-brand value="${esc(t.brand || '')}" type="hidden">`
     + `<input data-ap-slot-type value="${esc(t.type || '')}" placeholder="Тип (PLA)">`
     + `<input data-ap-slot-color value="${esc((t.color || '').replace('#', ''))}" placeholder="Цвет FFFFFF">`
     + `</div>`).join('')
@@ -1719,6 +1721,7 @@ async function saveAmsProfile() {
   const slots = $$('#ap_slots [data-ap-slot-tray]').map((el) => ({
     tray: num(el.value), type: (el.parentElement.querySelector('[data-ap-slot-type]').value || '').trim().toUpperCase(),
     color: (el.parentElement.querySelector('[data-ap-slot-color]').value || '').trim().toUpperCase(),
+    brand: (el.parentElement.querySelector('[data-ap-slot-brand]').value || '').trim(),
   })).filter((x) => x.type);
   try {
     await post('/api/ams-profile/save', { name, slots });

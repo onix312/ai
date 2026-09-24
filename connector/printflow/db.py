@@ -25,6 +25,7 @@ SCHEMA_VERSION = 17
 # Колонки, добавленные после первой версии схемы. Ключ — таблица,
 # значение — список (колонка, SQL-тип со значением по умолчанию).
 ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "ams_actions": [("undo_of", "TEXT DEFAULT ''")],
     "nom_groups": [
         # Цвет категории добавлен для мобильной кассы 17.0. Старые базы
         # создавались схемой v3 без этой колонки и падали на загрузке каталога.
@@ -248,6 +249,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("received_spool_grams", "REAL DEFAULT 0"),
         ("receipt_doc_id", "TEXT DEFAULT ''"),
         ("price_per_kg", "REAL DEFAULT 0"),
+        ("price_source", "TEXT DEFAULT ''"),  # AMS: откуда взялась оценочная цена
         ("supplier_id", "TEXT DEFAULT ''"),
     ],
     "transactions": [
@@ -371,6 +373,7 @@ ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
         ("label_note", "TEXT DEFAULT ''"),
         ("qr_payload", "TEXT DEFAULT ''"),
         ("price_per_kg", "REAL DEFAULT 0"),
+        ("price_source", "TEXT DEFAULT ''"),  # AMS: откуда взялась оценочная цена
         ("supplier_id", "TEXT DEFAULT ''"),
         ("received_doc_id", "TEXT DEFAULT ''"),
         # 18.5 (М1): многоцветные катушки. colors_json — список hex по мотку
@@ -877,6 +880,7 @@ CREATE TABLE IF NOT EXISTS spools (
     total_grams REAL DEFAULT 1000,
     remaining_grams REAL DEFAULT 1000,
     price REAL DEFAULT 1600,
+    price_source TEXT DEFAULT '',
     printer_id TEXT,
     ams_slot TEXT DEFAULT '',
     tray_uuid TEXT DEFAULT '',
@@ -1464,6 +1468,46 @@ CREATE TABLE IF NOT EXISTS ams_slots (
     updated_at TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ams_slots_slot ON ams_slots(printer_id, slot);
+
+-- Автопилот AMS: правила владельца, журнал отката и защита от повторной
+-- записи в принтер. Таблицы создаются и для старой базы без backfill катушек.
+CREATE TABLE IF NOT EXISTS ams_rules (
+    id TEXT PRIMARY KEY,
+    priority INTEGER DEFAULT 100,
+    enabled INTEGER DEFAULT 1,
+    match_uuid TEXT DEFAULT '',
+    match_material TEXT DEFAULT '',
+    match_color TEXT DEFAULT '',
+    material TEXT DEFAULT '',
+    brand TEXT DEFAULT '',
+    color_hex TEXT DEFAULT '',
+    total_grams REAL DEFAULT 0,
+    price REAL DEFAULT 0,
+    temp_min INTEGER DEFAULT 0,
+    temp_max INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS ams_actions (
+    id TEXT PRIMARY KEY,
+    at TEXT NOT NULL,
+    printer_id TEXT NOT NULL,
+    slot TEXT DEFAULT '',
+    spool_id TEXT DEFAULT '',
+    action TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    before_json TEXT DEFAULT '{}',
+    after_json TEXT DEFAULT '{}',
+    undone_at TEXT DEFAULT '',
+    undo_of TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_ams_actions_at ON ams_actions(printer_id, at);
+CREATE TABLE IF NOT EXISTS ams_push_state (
+    printer_id TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    fingerprint TEXT DEFAULT '',
+    sent_at TEXT DEFAULT '',
+    PRIMARY KEY (printer_id, slot)
+);
 
 CREATE TABLE IF NOT EXISTS filament_scrap (
     id TEXT PRIMARY KEY,

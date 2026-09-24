@@ -122,16 +122,15 @@ class SafetyVersionTests(unittest.TestCase):
         Nomenclature(self.db).save({"id": nom_id, "name": "Каноническое имя", "expected_updated_at": self.db.one("SELECT updated_at FROM nomenclature WHERE id=?", (nom_id,))["updated_at"]})
         self.assertEqual(self.db.one("SELECT name FROM catalog WHERE id=?", (old["id"],))["name"], "Каноническое имя")
 
-    def test_ams_import_is_unverified_and_not_auto_consumed(self):
+    def test_ams_import_gets_estimated_price_and_is_accountable(self):
         result = sync_ams_spools(self.db, "printer-1", {"ams": {"trays": [{
             "uuid": "rfid-1", "slot": 0, "type": "PETG", "color": "FF0000", "remain": 80,
         }]}})
         self.assertEqual(result["created"], 1)
         spool = self.db.one("SELECT * FROM spools WHERE tray_uuid='rfid-1'")
-        self.assertEqual(num(spool["verified"]), 0)
-        self.assertEqual(num(spool["price"]), 0)
-        blocked = self.acc.consume_filament(10, spool_id=spool["id"], auto=True)
-        self.assertFalse(blocked["ok"])
+        self.assertEqual(num(spool["verified"]), 1)
+        self.assertGreater(num(spool["price"]), 0)
+        self.assertIn("справочник", spool["price_source"])
 
 
 if __name__ == "__main__":

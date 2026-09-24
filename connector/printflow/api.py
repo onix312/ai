@@ -114,11 +114,8 @@ class Api:
             except Exception:
                 pass
         self.repo = Repo(self.db)
-        # Автоочистка фантомов AMS при старте — убирает 50 дублей из склада
-        try:
-            self.repo.cleanup_ams_phantoms()
-        except Exception:
-            pass
+        # Не архивируем катушки при запуске. Сомнительные дубли показывает AMS-доктор;
+        # очистка остаётся только явной ручной операцией.
         self.acc = Accounting(self.db)
         self.manager = PrinterManager(self.db, self.repo)
         from .shelf import Shelf
@@ -1428,11 +1425,14 @@ class Api:
             if cmd in DANGEROUS_AUTOMATION_COMMANDS and body.get("confirmed") is not True:
                 raise ValueError("Подтвердите физическую команду оператора")
             # Для pause marker ставится ДО MQTT-команды, чтобы асинхронный
-            # report PAUSE не успел запустить recovery. При ошибке команды
-            # оставляем безопасную ручную блокировку до явного решения оператора.
+            # report PAUSE не успел запустить recovery.
             if cmd == "pause":
                 self.manager.mark_user_paused(printer.id)
-            result = printer.command(cmd, body.get("value"))
+            if cmd == "ams_filament":
+                from .ams_push import send_checked
+                result = send_checked(self.db, printer, body.get("value"), source="manual")
+            else:
+                result = printer.command(cmd, body.get("value"))
             if cmd == "resume":
                 self.manager.clear_user_paused(printer.id)
             return 200, result
@@ -1480,11 +1480,9 @@ class Api:
             # Ручной запуск автосбора: катушки AMS и данные принтера → база
             printer = self.printer_or_fail(pid)
             snap = printer.snapshot()
-            from .ams_sync import sync_ams_spools, sync_printer_info
-            info_ok = sync_printer_info(self.db, printer.id, snap)
-            counts = sync_ams_spools(self.db, printer.id, snap)
-            return 200, {"ok": True, "printer_info": info_ok, **counts,
-                         "spools": self.repo.spools()}
+            from .ams_autopilot import tidy
+            result = tidy(self.db, printer, self.manager, snap)
+            return 200, {**result, "spools": self.repo.spools()}
         if path == "/api/printer/print":
             if body.get("confirmed") is not True:
                 raise ValueError("Подтвердите физический запуск печати")
@@ -2417,23 +2415,34 @@ class Api:
             if not profile:
                 raise ValueError("Профиль не найден")
             printer = self.printer_or_fail(body.get("printer_id") or "")
+            from .ams_push import require_write_allowed, send_checked
+            require_write_allowed(self.db, printer)
             try:
                 slots = json.loads(profile.get("slots") or "[]")
             except json.JSONDecodeError:
                 slots = []
-            sent = 0
+            sent, skipped = 0, 0
             for slot in slots:
-                if not isinstance(slot, dict) or slot.get("type") not in (None, ""):
-                    try:
-                        printer.command("ams_filament", {"ams_id": 0, "tray_id": int(num(slot.get("tray"))),
-                                                          "type": slot.get("type", "PLA"),
-                                                          "color": slot.get("color", "FFFFFFFF")})
-                        sent += 1
-                    except Exception:
-                        continue
-            self.db.add_event("ams", "Профиль AMS применён", f"{profile['name']} · слотов: {sent}",
-                              printer.id, {"profile_id": profile["id"], "sent": sent})
-            return 200, {"ok": True, "sent": sent}
+                if not isinstance(slot, dict) or not str(slot.get("type") or "").strip():
+                    continue
+                try:
+                    global_slot = int(slot["tray"])
+                    if not 0 <= global_slot <= 15:
+                        raise ValueError("Слот профиля вне AMS (0–15)")
+                    outcome = send_checked(self.db, printer, {
+                        "ams_id": global_slot // 4, "tray_id": global_slot % 4,
+                        "type": slot["type"], "color": slot.get("color"),
+                        "brand": slot.get("brand") or "",
+                    }, source="profile")
+                    sent += int(outcome["sent"])
+                    skipped += int(outcome["skipped"])
+                except Exception as exc:
+                    self.db.add_event("ams", "Запись профиля AMS не удалась",
+                                      str(exc), printer.id, {"profile_id": profile["id"]})
+                    raise ValueError(f"Профиль AMS: отправлено {sent}, ошибка: {exc}") from exc
+            self.db.add_event("ams", "Профиль AMS применён", f"{profile['name']} · отправлено: {sent}",
+                              printer.id, {"profile_id": profile["id"], "sent": sent, "skipped": skipped})
+            return 200, {"ok": True, "sent": sent, "skipped": skipped}
         if path == "/api/schedule/command":
             command = str(body.get("command") or "").strip()
             if not command or not body.get("at"):
@@ -2475,13 +2484,33 @@ class Api:
             raw_slot = body.get("ams_slot")
             slot = "" if raw_slot in (None, "") else str(raw_slot).strip()
             printer_id = str(body.get("printer_id") or spool.get("printer_id") or "").strip()
-            tray_uuid = str(body.get("tray_uuid") or "").strip()
+            tray_uuid = str(body.get("tray_uuid") or spool.get("tray_uuid") or "").strip()
             push_ams = body.get("push_ams") not in (False, 0, "0", "false")
             if not slot:
-                # Отвязка: чистим tray_uuid, location=shop
+                # Метка RFID остаётся с катушкой, чтобы узнать её при следующей загрузке.
                 self.db.execute(
-                    "UPDATE spools SET printer_id=?, ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
+                    "UPDATE spools SET printer_id=?, ams_slot='', location='shop', updated_at=? WHERE id=?",
                     (printer_id or None, now_iso(), spool_id))
+                if printer_id and str(spool.get("ams_slot") or ""):
+                    from .ams_sync import remember_slot, slot_event
+                    previous_slot = str(spool["ams_slot"])
+                    old_slot = self.db.one(
+                        "SELECT * FROM ams_slots WHERE printer_id=? AND slot=?",
+                        (printer_id, previous_slot))
+                    if old_slot and old_slot.get("spool_id") == spool_id:
+                        # Отвязка в учёте не означает, что физический лоток
+                        # пуст. Оставляем телеметрию, но убираем ссылку на
+                        # карточку — доктор подскажет привязать вручную.
+                        remember_slot(self.db, printer_id, previous_slot,
+                                      state="live", tray_uuid=old_slot.get("tray_uuid") or "",
+                                      material=old_slot.get("material") or "",
+                                      color_name=old_slot.get("color_name") or "",
+                                      color_hex=old_slot.get("color_hex") or "",
+                                      label=old_slot.get("label") or "",
+                                      remain_pct=num(old_slot.get("remain_pct"), -1),
+                                      grams_left=num(old_slot.get("grams_left")))
+                    slot_event(self.db, printer_id, previous_slot, spool_id,
+                               "manual_unbind", "Отвязана в учёте, RFID сохранён")
                 self.db.add_event("spool", "Катушка отвязана от AMS",
                                   f"{spool.get('material')} {spool.get('color_name')}",
                                   printer_id, {"spool_id": spool_id})
@@ -2501,10 +2530,6 @@ class Api:
                 if other and body.get("force") is not True:
                     raise ValueError(
                         f"Слот {slot} уже занят катушкой {other.get('material') or ''} {other.get('color_name') or other['id']}")
-                if other and body.get("force") is True:
-                    self.db.execute(
-                        "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
-                        (now_iso(), other["id"]))
             pushed, push_error = False, ""
             manager = getattr(self, "manager", None)
             printer = manager.get(printer_id) if manager and printer_id else None
@@ -2512,12 +2537,32 @@ class Api:
             # («Подтвердите отправку материала в AMS») оставлял бы катушку уже
             # привязанной к слоту — ответ об ошибке, а состояние изменилось.
             # Нашлось живой пробой пульта цеха 18.0.3.
-            if push_ams and printer and body.get("confirmed") is not True:
+            if push_ams and printer and slot_n != 254:
+                from .ams_push import require_write_allowed
+                try:
+                    require_write_allowed(self.db, printer)
+                except ValueError as exc:
+                    push_ams, push_error = False, str(exc)
+            if push_ams and printer and slot_n != 254 and body.get("confirmed") is not True:
                 raise ValueError("Подтвердите отправку материала в AMS")
+            if printer_id and other and body.get("force") is True:
+                self.db.execute(
+                    "UPDATE spools SET ams_slot='', location='shop', updated_at=? WHERE id=?",
+                    (now_iso(), other["id"]))
             self.db.execute(
                 "UPDATE spools SET printer_id=?, ams_slot=?, tray_uuid=?, location='ams', updated_at=? WHERE id=?",
                 (printer_id or None, slot, tray_uuid, now_iso(), spool_id))
-            if push_ams and printer:
+            if printer_id and slot_n != 254:
+                from .ams_sync import remember_slot, slot_event
+                remember_slot(self.db, printer_id, slot, spool_id=spool_id,
+                              tray_uuid=tray_uuid, material=spool.get("material") or "",
+                              color_name=spool.get("color_name") or "",
+                              color_hex=spool.get("color_hex") or "",
+                              label=f"Слот {slot_n + 1}",
+                              grams_left=num(spool.get("remaining_grams")))
+                slot_event(self.db, printer_id, slot, spool_id, "manual_bind",
+                           "Ручная привязка к складской катушке")
+            if push_ams and printer and slot_n != 254:
                 try:
                     payload = {
                         "ams_id": slot_n // 4, "tray_id": slot_n % 4,
@@ -2530,10 +2575,14 @@ class Api:
                     nozzle = _nozzle_range_from_rec(spool.get("rec_settings") or "")
                     if nozzle:
                         payload["temp_min"], payload["temp_max"] = nozzle
-                    printer.command("ams_filament", payload)
-                    pushed = True
+                    from .ams_push import send_checked
+                    outcome = send_checked(self.db, printer, payload,
+                                           source="manual_bind", spool_id=spool_id)
+                    pushed = bool(outcome["sent"])
+                    if outcome["skipped"]:
+                        push_error = outcome["reason"]
                 except Exception as exc:
-                    push_error = str(exc)
+                    push_error = str(exc)  # шлюз уже записал отказ принтера в журнал
             self.db.add_event("spool", "Катушка привязана к слоту AMS",
                               f"{spool.get('material')} {spool.get('color_name')} → слот {slot}",
                               printer_id, {"spool_id": spool_id, "pushed": pushed})

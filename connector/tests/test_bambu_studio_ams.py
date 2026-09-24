@@ -160,10 +160,13 @@ class SpoolBindAmsIntegrationTests(unittest.TestCase):
         })
 
         class FakeManager:
+            id = "p1"
             def __init__(self):
                 self.commands = []
             def get(self, pid):
                 return self
+            def snapshot(self):
+                return {"printer": {"state": "IDLE"}, "connection": {"connected": True}}
             def command(self, name, val):
                 self.commands.append((name, val))
 
@@ -214,10 +217,13 @@ class SpoolBindAmsIntegrationTests(unittest.TestCase):
         })
 
         class FakeManager:
+            id = "p1"
             def __init__(self):
                 self.commands = []
             def get(self, pid):
                 return self
+            def snapshot(self):
+                return {"printer": {"state": "IDLE"}, "connection": {"connected": True}}
             def command(self, name, val):
                 self.commands.append((name, val))
 

@@ -476,6 +476,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "printer_info_sync": True,    # прошивка, Wi-Fi, влажность → карточка принтера
     "ams_auto_spools": True,      # заводить катушки из AMS на складе автоматически
     "ams_sync_remaining": True,   # обновлять остаток катушки по датчику AMS
+    "ams_push_settings": True,    # приводить настройки слота к складу, когда принтер не печатает
     # --- 8.0: Безопасность и система --------------------------------------
     "encrypt_access_code": True,
     "settings_profiles": [],  # снапшоты [{id, name, at, data}]

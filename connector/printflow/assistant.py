@@ -167,11 +167,11 @@ def _post_json(url: str, payload: dict, timeout: float) -> tuple[bool, Any, str]
         return False, None, "рантайм ответил не JSON"
 
 
-def _get_json(url: str, timeout: float) -> tuple[bool, Any, str]:
-    """Один GET к внешнему рантайму. Отказ — ответ с причиной, не исключение.
+def _get_json(url: str, timeout: float, *, label: str = "агент") -> tuple[bool, Any, str]:
+    """Один GET к локальному рантайму: список моделей или навыки агента.
 
-    Чтение реестра навыков агента идёт именно так: у агента нет тела запроса,
-    а panel-side помощнику нечего ему отправить.
+    GET не посылает тело: у Ollama ``/api/tags`` отвечает 405 на POST.
+    ``label`` оставляет причину отказа понятной для обоих рантаймов.
     """
     request = urllib.request.Request(
         url, method="GET",
@@ -181,14 +181,14 @@ def _get_json(url: str, timeout: float) -> tuple[bool, Any, str]:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read(8 * 1024 * 1024).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
-        return False, None, f"агент ответил {exc.code}"
+        return False, None, f"{label} ответил {exc.code}"
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
-        return False, None, f"агент недоступен: {reason}"
+        return False, None, f"{label} недоступен: {reason}"
     try:
         return True, json.loads(raw or "{}"), ""
     except json.JSONDecodeError:
-        return False, None, "агент ответил не JSON"
+        return False, None, f"{label} ответил не JSON"
 
 
 def list_models(db: Database) -> list[str]:
@@ -196,7 +196,7 @@ def list_models(db: Database) -> list[str]:
     cfg = config(db)
     if not _loopback_ok(cfg["url"])[0]:
         return []
-    ok, payload, _reason = _post_json(f"{cfg['url']}/api/tags", {}, PING_TIMEOUT_SEC)
+    ok, payload, _reason = _get_json(f"{cfg['url']}/api/tags", PING_TIMEOUT_SEC, label="рантайм")
     if not ok or not isinstance(payload, dict):
         return []
     return [str(row.get("name") or "") for row in (payload.get("models") or [])
@@ -223,7 +223,7 @@ def status(db: Database) -> dict[str, Any]:
     if not cfg["enabled"]:
         out["reason"] = "Помощник выключен в настройках"
         return out
-    ok, payload, reason = _post_json(f"{cfg['url']}/api/tags", {}, PING_TIMEOUT_SEC)
+    ok, payload, reason = _get_json(f"{cfg['url']}/api/tags", PING_TIMEOUT_SEC, label="рантайм")
     if not ok:
         out["reason"] = (f"Рантайм на {cfg['url']} не отвечает ({reason}). "
                          "Запустите его на этом компьютере — например, `ollama serve`.")
@@ -236,9 +236,10 @@ def status(db: Database) -> dict[str, Any]:
                          + (f"(рантайм отдаёт: {', '.join(models)})" if models
                             else "(рантайм пока не отдаёт ни одной модели — скачайте её)"))
         return out
-    if models and not any(cfg["model"] in name for name in models):
+    if cfg["model"] not in models and f"{cfg['model']}:latest" not in models:
         out["reason"] = (f"Модели «{cfg['model']}» у рантайма нет "
-                         f"(есть: {', '.join(models)})")
+                         + (f"(есть: {', '.join(models)})" if models
+                            else "(локальных моделей нет — выполните `ollama pull qwen2.5:3b`)"))
         return out
     out.update(available=True, reason="")
     return out

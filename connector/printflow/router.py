@@ -171,7 +171,7 @@ def register_module(module_name: str) -> None:
 def register_all() -> int:
     """Подключить все модули маршрутов. Вызывается один раз при старте API."""
     for name in ("routes_workshop", "routes_system", "routes_sbp", "routes_cashier",
-                 "routes_bank", "routes_npd", "routes_app", "routes_printers",
+                 "routes_bank", "routes_npd", "routes_app", "routes_printers", "routes_ams",
                  "routes_print", "routes_get", "routes_farmloop",
                  "routes_slicer", "routes_nomenclature", "routes_assistant",
                  "routes_staff_miniapp"):

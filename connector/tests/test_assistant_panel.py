@@ -142,13 +142,12 @@ class IntentTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def _run(self, answer: dict, text: str = "поставь паузу на первом станке"):
-        def fake_post(url, payload, timeout):
-            if url.endswith("/api/tags"):
-                return True, {"models": [{"name": "qwen2.5:3b"}]}, ""
-            import json
-            return True, {"message": {"content": json.dumps(answer, ensure_ascii=False)}}, ""
-
-        with patch.object(assistant, "_post_json", side_effect=fake_post):
+        import json
+        with patch.object(assistant, "_get_json",
+                          return_value=(True, {"models": [{"name": "qwen2.5:3b"}]}, "")), \
+             patch.object(assistant, "_post_json",
+                          return_value=(True, {"message": {
+                              "content": json.dumps(answer, ensure_ascii=False)}}, "")):
             return assistant.parse_intent(self.db, text)
 
     def test_prompt_never_contains_route_addresses(self):
@@ -198,14 +197,14 @@ class IntentTests(unittest.TestCase):
         self.assertFalse(result["ok"])
 
     def test_dead_runtime_is_a_reason(self):
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=(False, None, "рантайм недоступен")):
             result = assistant.parse_intent(self.db, "что печатается")
         self.assertFalse(result["ok"])
         self.assertIn("Рантайм", result["reason"])
 
     def test_status_carries_catalog(self):
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=(True, {"models": [{"name": "qwen2.5:3b"}]}, "")):
             state = assistant.status(self.db)
         self.assertEqual(len(assistant.ACTIONS), len(state["actions"]))
@@ -434,6 +433,22 @@ class LauncherWindowTests(unittest.TestCase):
         self.assertIn("/assistant.html", seen["argv"])
         self.assertIn("--path", seen["argv"])
 
+    def test_windows_click_launcher_opens_local_assistant(self):
+        launcher = (ROOT / "ЗАПУСТИТЬ-ПОМОЩНИК.bat").read_text(encoding="utf-8")
+        self.assertIn('cd /d "%~dp0"', launcher)
+        self.assertIn('assistant --local', launcher)
+        self.assertIn('if errorlevel 1 goto :failed', launcher)
+
+    def test_window_reuses_running_port(self):
+        seen = {}
+        with mock.patch.object(pf, "running_port", return_value=9010), \
+             mock.patch("connector.printflow.app_window.main",
+                        side_effect=lambda argv: seen.setdefault("argv", argv) and 0):
+            self.assertEqual(0, pf.cmd_assistant(pf_args(port=8765, local=True)))
+        self.assertEqual("9010", seen["argv"][seen["argv"].index("--port") + 1])
+        self.assertIn("--local", seen["argv"])
+        self.assertIn("/assistant.html", seen["argv"])
+
     def test_app_window_accepts_path_argument(self):
         source = (ROOT / "connector" / "printflow"
                   / "app_window.py").read_text(encoding="utf-8")
@@ -469,7 +484,7 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("этим компьютером", reason)
 
     def test_models_probe_reports_dead_runtime(self):
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=(False, None, "connection refused")):
             models, reason = pf.assistant_models("http://127.0.0.1:11434")
         self.assertEqual([], models)
