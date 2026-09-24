@@ -419,5 +419,172 @@ class RouteTests(unittest.TestCase):
             self.assertNotIn(keyword, source.upper())
 
 
+class PlasticAnswerTests(unittest.TestCase):
+    """«Сколько пластика» — катушки склада, не JSON стеллажа и не модель."""
+
+    def test_empty_warehouse_does_not_mention_shelf_products(self):
+        from connector.printflow.assistant_knowledge import format_plastic
+
+        text = format_plastic([])
+        self.assertIn("катуш", text.casefold())
+        self.assertNotIn("{", text)
+        self.assertIn("стеллаж", text.casefold())
+
+    def test_groups_remaining_grams_by_material(self):
+        from connector.printflow.assistant_knowledge import format_plastic
+
+        text = format_plastic([
+            {"material": "PLA", "color_name": "Чёрный", "remaining_grams": 1400},
+            {"material": "PLA", "color_name": "Белый", "remaining_grams": 600},
+            {"material": "PETG", "color_name": "Чёрный", "remaining_grams": 500},
+            {"material": "PLA", "color_name": "Жёлтый", "remaining_grams": 0},
+        ])
+        self.assertIn("2,5 кг", text)
+        self.assertIn("PLA", text)
+        self.assertIn("PETG", text)
+        self.assertNotIn("Жёлтый", text)
+        self.assertNotIn("shf_", text)
+
+    def test_question_does_not_call_the_model(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        class Repo:
+            def spools(self):
+                return [{"id": "sp1", "material": "PLA", "color_name": "Чёрный",
+                         "remaining_grams": 800, "brand": "NOZZA"}]
+
+        api = type("Api", (), {"repo": Repo(), "db": None})()
+        with patch.object(knowledge.assistant, "complete") as complete:
+            result = knowledge.answer(api, "Сколько у нас пластика?")
+        complete.assert_not_called()
+        self.assertTrue(result["answered"])
+        self.assertIn("800 г", result["answer"])
+        self.assertEqual("spools", result["source"])
+        self.assertEqual("катушка", result["facts"][0]["kind"])
+
+
+class ConversationTests(unittest.TestCase):
+    """«2+2» — ответ, а не GET /api/state. Общий вопрос идёт в Ollama, не в каталог."""
+
+    def test_arithmetic_is_not_a_park_action(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "chat.sqlite3")
+        self.addCleanup(db.close)
+        db.set_settings({"assistant_enabled": True, "assistant_model": "qwen2.5:3b"})
+        with patch.object(assistant, "_post_json") as post, \
+             patch.object(assistant, "status") as status:
+            result = assistant.parse_intent(db, "2+2")
+        post.assert_not_called()
+        status.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertIsNone(result["action"])
+        self.assertEqual("4", assistant.simple_math("2+2"))
+        self.assertEqual("4", assistant.simple_math("сколько будет 2+2?"))
+
+    def test_chat_answers_arithmetic_without_the_model(self):
+        from connector.printflow import assistant_knowledge as knowledge
+
+        api = type("Api", (), {"db": None})()
+        with patch.object(assistant, "web_search") as search, \
+             patch.object(assistant, "status") as status:
+            result = knowledge.answer(api, "2+2", chat=True)
+        search.assert_not_called()
+        status.assert_not_called()
+        self.assertTrue(result["answered"])
+        self.assertEqual("4", result["answer"])
+        self.assertEqual("math", result["source"])
+        self.assertFalse(result["web"])
+
+    def test_weather_uses_ollama_search_and_not_customer_data(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "weather.sqlite3")
+        self.addCleanup(db.close)
+        db.set_settings({"assistant_enabled": True, "assistant_model": "qwen2.5:3b",
+                         "assistant_url": "http://127.0.0.1:11434"})
+        seen = []
+
+        def post(url, payload, timeout):
+            seen.append(url)
+            self.assertNotIn("ollama.com", url)
+            content = payload["messages"][-1]["content"]
+            self.assertIn("18 градусов", content)
+            self.assertNotIn("Мария", content)
+            self.assertNotIn("₽", content)
+            return True, {"message": {"content": "В Софии около 18 градусов."}}, ""
+
+        with patch.object(assistant, "status", return_value={
+                "available": True, "model": "qwen2.5:3b", "reason": ""}), \
+             patch.object(assistant, "web_search", return_value={
+                 "ok": True, "text": "- Погода (https://example.com): 18 градусов",
+                 "sources": [{"title": "Погода", "url": "https://example.com"}],
+                 "reason": ""}), \
+             patch.object(assistant, "_post_json", side_effect=post):
+            result = assistant.converse(db, "какая погода в Софии сегодня")
+        self.assertTrue(result["ok"])
+        self.assertIn("18", result["answer"])
+        self.assertTrue(result["web"])
+        self.assertTrue(seen)
+        self.assertTrue(all(url.startswith("http://127.0.0.1:11434/") for url in seen))
+
+    def test_web_search_stays_on_loopback(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "search.sqlite3")
+        self.addCleanup(db.close)
+        urls = []
+
+        def post(url, payload, timeout):
+            urls.append(url)
+            if url.endswith("/api/experimental/web_search"):
+                return True, {"results": [{
+                    "title": "Погода", "url": "https://example.com",
+                    "content": "18 градусов"}]}, ""
+            return False, None, "рантайм ответил 404"
+
+        with patch.object(assistant, "_post_json", side_effect=post):
+            found = assistant.web_search(db, "погода София")
+        self.assertTrue(found["ok"])
+        self.assertEqual("Погода", found["sources"][0]["title"])
+        self.assertTrue(urls)
+        self.assertTrue(all("127.0.0.1" in url for url in urls))
+        self.assertNotIn("ollama.com", " ".join(urls))
+        db.set_settings({"assistant_url": "http://10.0.0.8:11434"})
+        refused = assistant.web_search(db, "погода София")
+        self.assertFalse(refused["ok"])
+        self.assertIn("не этот компьютер", refused["reason"])
+
+    def test_page_sends_plain_questions_to_chat_not_intent(self):
+        page = (ROOT / "site" / "assistant.html").read_text(encoding="utf-8")
+        self.assertIn("function looksLikeCommand", page)
+        self.assertNotIn("looksLikeQuestion", page)
+        self.assertIn("chat: true", page)
+        self.assertIn('data-q="2+2"', page)
+        ask = page[page.find("function ask(text)"):page.find("function intake(")]
+        gate = ask.find("if (!looksLikeCommand(text))")
+        self.assertGreater(gate, 0)
+        self.assertLess(ask.find("askChat(text)", gate), ask.find("/api/assistant/intent", gate))
+
+
+class WorkshopIdeasTests(unittest.TestCase):
+    def test_ideas_come_from_orders_when_agent_is_down(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Database(pathlib.Path(tmp.name) / "ideas.sqlite3")
+        self.addCleanup(db.close)
+        db.set_settings({"assistant_agent_enabled": True})
+        db.execute(
+            "INSERT INTO orders (id, product, material, created_at) VALUES (?,?,?,?)",
+            ("o1", "Адресник", "PETG", "2026-09-20T10:00:00"))
+        with patch.object(assistant, "_call_agent_skill",
+                          return_value={"ok": False, "reason": "агент не запущен"}):
+            result = assistant.tg_ideas(db, limit=6)
+        self.assertTrue(result["ok"])
+        self.assertTrue(any("Адресник" in line for line in result["ideas"]))
+        self.assertNotIn("не запущен", result.get("reason") or "")
+        self.assertEqual("workshop", result["source"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,7 +55,8 @@ TOPICS: dict[str, tuple[str, ...]] = {
     "farm": ("станок", "принтер", "парк", "ams", "катуш", "пластик", "сопло",
              "печата", "hms", "филамент"),
     "plan": ("план", "загрузк", "срок", "успеем", "очеред", "задани", "смен"),
-    "stock": ("склад", "остатк", "стеллаж", "полк", "товар", "позици", "вариаци"),
+    "stock": ("склад", "остатк", "стеллаж", "полк", "товар", "позици", "вариаци",
+              "пластик", "филамент", "катуш", "бобин"),
     "events": ("журнал", "событи", "что было", "истори", "ошибк", "тревог"),
 }
 
@@ -281,6 +282,85 @@ def retrieve(api: Any, question: str) -> dict[str, Any]:
             "keywords": words, "problems": problems}
 
 
+
+def _grams_text(grams: float) -> str:
+    """Граммы так, как их говорит человек у стеллажа с катушками."""
+    grams = max(0.0, float(grams or 0))
+    if grams >= 1000:
+        kilos = grams / 1000.0
+        shown = f"{kilos:.1f}".replace(".", ",")
+        if shown.endswith(",0"):
+            shown = shown[:-2]
+        return f"{shown} кг"
+    return f"{int(round(grams))} г"
+
+
+def format_plastic(spools: list[dict[str, Any]] | None) -> str:
+    """Ответ «сколько пластика»: остатки катушек, не карточки готовых изделий.
+
+    Стеллаж хранит вазы и брелоки. Пластик цеха — remaining_grams катушек.
+    Смешивать их в одном JSON владелец уже видел: вопрос про филамент
+    возвращал полку с ценниками.
+    """
+    rows = [row for row in (spools or []) if isinstance(row, dict)]
+    live = [row for row in rows if _num(row.get("remaining_grams")) > 0]
+    if not live:
+        return ("Катушек с остатком на складе нет. "
+                "Пластик — это катушки склада, а не товары на стеллаже.")
+    by_mat: dict[str, dict[str, float]] = {}
+    totals: dict[str, float] = {}
+    low: list[str] = []
+    for row in live:
+        material = str(row.get("material") or "без материала").strip() or "без материала"
+        color = str(row.get("color_name") or row.get("color") or "без цвета").strip() or "без цвета"
+        grams = _num(row.get("remaining_grams"))
+        bucket = by_mat.setdefault(material, {})
+        bucket[color] = bucket.get(color, 0.0) + grams
+        totals[material] = totals.get(material, 0.0) + grams
+        if grams < 80:
+            low.append(f"{material} {color} — {_grams_text(grams)}")
+    total = sum(totals.values())
+    lines = [f"На складе {_grams_text(total)} пластика, катушек с остатком: {len(live)}."]
+    for material, grams in sorted(totals.items(), key=lambda item: -item[1]):
+        colors = " · ".join(
+            f"{name} {_grams_text(value)}"
+            for name, value in sorted(by_mat[material].items(), key=lambda item: -item[1]))
+        lines.append(f"{material} — {_grams_text(grams)} ({colors})")
+    if low:
+        lines.append("Мало осталось: " + ", ".join(low[:4]) + ".")
+    return "\n".join(lines)
+
+
+def _plastic_question(question: str) -> bool:
+    text = str(question or "").casefold()
+    if not any(word in text for word in ("пластик", "филамент", "катуш", "бобин")):
+        return False
+    # «сколько пластика ушло на заказ» — не остаток склада.
+    if any(word in text for word in ("заказ", "ушло", "ушёл", "ушел", "списал", "расход")):
+        return False
+    return True
+
+
+def plastic_report(api: Any) -> dict[str, Any]:
+    """Сводка катушек для разговора: текст + факты с источниками."""
+    spools, why = _safe("катушки", lambda: api.repo.spools())
+    problems = [why] if why else []
+    rows = [row for row in (spools or []) if isinstance(row, dict)]
+    facts = []
+    for row in rows:
+        if _num(row.get("remaining_grams")) <= 0:
+            continue
+        facts.append(_fact(
+            "катушка",
+            f"{row.get('material') or '—'} {row.get('color_name') or ''}".strip(),
+            f"остаток {_grams_text(_num(row.get('remaining_grams')))} · бренд "
+            f"{row.get('brand') or '—'}",
+            f"spool:{row.get('id')}"))
+        if len(facts) >= 12:
+            break
+    return {"text": format_plastic(rows), "facts": facts, "problems": problems}
+
+
 def facts_text(facts: list[dict[str, Any]]) -> str:
     """Факты одним текстом: его видит модель и по нему сверяются числа."""
     return "\n".join(
@@ -328,19 +408,69 @@ def _prompt(question: str, facts: str) -> str:
     )
 
 
-def answer(api: Any, question: str) -> dict[str, Any]:
+def _digest_facts(facts: list[dict[str, Any]]) -> str:
+    """Короткий ответ без модели: заголовки фактов, не сырой JSON маршрута."""
+    lines = []
+    for fact in facts[:6]:
+        title = str(fact.get("title") or "").strip()
+        body = str(fact.get("text") or "").strip()
+        if title and body:
+            lines.append(f"{title}: {body}")
+        elif title or body:
+            lines.append(title or body)
+    return "\n".join(lines)
+
+
+def _from_chat(reply: dict[str, Any]) -> dict[str, Any]:
+    """Ответ модели в той же форме, что и ответ по фактам базы."""
+    warnings = list(reply.get("warnings") or [])
+    reason = "" if reply.get("ok") else str(reply.get("reason") or "")
+    return {"ok": bool(reply.get("ok")),
+            "answered": bool(reply.get("ok") and reply.get("answer")),
+            "answer": str(reply.get("answer") or ""),
+            "facts": [], "count": 0, "topics": [], "keywords": [],
+            "sources": list(reply.get("sources") or []),
+            "warnings": warnings, "model": reply.get("model") or "",
+            "reason": reason, "source": reply.get("source") or "ollama",
+            "web": bool(reply.get("web"))}
+
+
+def answer(api: Any, question: str, *, fast: bool = False, chat: bool = False,
+           history: list | None = None) -> dict[str, Any]:
     """Вопрос владельца → ответ по фактам базы (идея И1).
 
     Ответ всегда содержит `facts`: даже когда модель недоступна, владелец видит
     то, что база знает по его вопросу. Это не «деградация до списка», а граница
     честности: придумать связный абзац без модели можно, а проверить его — нет.
+
+    `fast` — разговор в панели: не ждать модель десятки секунд ради фразы,
+    которую уже можно собрать из катушек и фактов.
+
+    `chat` — обычный вопрос не про цех. Его отвечает модель Ollama, а свежие
+    факты она берёт из своего включённого веб-поиска. База клиентов в поиск
+    не уходит: вопросы с темой цеха остаются на фактах.
     """
     clean = " ".join(str(question or "").split())
     if not clean:
         return {"ok": False, "answered": False, "answer": "", "facts": [],
                 "warnings": [], "reason": "Пустой вопрос"}
+    if _plastic_question(clean):
+        report = plastic_report(api)
+        return {"ok": True, "answered": True, "answer": report["text"],
+                "facts": report["facts"], "count": len(report["facts"]),
+                "topics": ["stock"], "keywords": keywords_of(clean),
+                "warnings": report["problems"], "model": "", "reason": "",
+                "source": "spools"}
+    if chat and not topics_of(clean):
+        return _from_chat(assistant.converse(getattr(api, "db", None), clean, history))
     found = retrieve(api, clean)
     facts = found["facts"]
+    # Разговор не ждёт модель, если ответ уже лежит в базе цеха.
+    if (fast or chat) and facts:
+        return {"ok": True, "answered": True, "answer": _digest_facts(facts),
+                "facts": facts, "count": len(facts), "topics": found["topics"],
+                "keywords": found["keywords"], "warnings": list(found["problems"]),
+                "model": "", "reason": "", "source": "facts"}
     if not facts:
         return {"ok": False, "answered": False, "answer": "", "facts": [],
                 "topics": found["topics"], "keywords": found["keywords"],

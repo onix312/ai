@@ -12,74 +12,104 @@
  * { box-sizing:border-box; margin:0; padding:0; }
  html, body { height:100%; }
  body {
-   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-   background:var(--bg); color:var(--text);
+   font-family:var(--font, system-ui, "Segoe UI", Roboto, sans-serif);
+   background:var(--bg-grad, var(--bg)); color:var(--text);
  }
- .as-wrap { max-width:1240px; margin:0 auto; padding:14px 14px 40px; }
- .as-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
- .as-brand { display:flex; align-items:center; gap:9px; }
- .as-brand img { width:32px; height:32px; }
- .as-brand b { font-size:16px; display:block; }
- .as-brand small { display:block; color:var(--muted); font-size:11px; }
- .as-top-right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
- .as-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px;
-   font-weight:700; background:var(--panel); border:1px solid var(--line); }
- .as-pill.ok { color:var(--ok); border-color:var(--ok); }
- .as-pill.warn { color:var(--warn); border-color:var(--warn); }
+ .as-wrap { max-width:1080px; margin:0 auto; padding:16px 16px 48px; }
+ .as-top { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+ .as-brand { display:flex; align-items:center; gap:10px; }
+ .as-brand img { width:36px; height:36px; }
+ .as-brand b { font-size:17px; display:block; letter-spacing:-.01em; }
+ .as-brand small { display:block; color:var(--muted); font-size:12px; }
+ .as-top-right { margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+ .as-pill { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:999px;
+   font-size:12px; font-weight:650; background:var(--panel); border:1px solid var(--line);
+   box-shadow:var(--shadow-1, none); }
+ .as-pill.ok { color:var(--ok); background:var(--ok-soft, #f0fbf3); border-color:transparent; }
+ .as-pill.warn { color:var(--warn); background:var(--warn-soft, #fff8eb); border-color:transparent; }
  .btn { background:var(--panel); border:1px solid var(--line); color:var(--text);
    border-radius:10px; padding:8px 14px; font:inherit; font-size:13px; cursor:pointer; }
  .btn:hover { border-color:var(--accent); }
  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
  .btn.sm { padding:5px 10px; font-size:12px; border-radius:8px; }
  .btn:disabled { opacity:.5; cursor:not-allowed; }
- .verdict { border:1px solid var(--line); background:var(--panel); border-radius:12px;
-   padding:10px 12px; font-size:13px; margin-bottom:12px; }
- .verdict.ok { border-color:var(--ok); }
- .verdict.warn { border-color:var(--warn); }
+ .verdict { border:1px solid var(--line); background:var(--panel); border-radius:14px;
+   padding:10px 14px; font-size:13px; margin-bottom:12px; box-shadow:var(--shadow-1, none); }
+ .verdict.ok { border-color:transparent; background:var(--ok-soft, #f0fbf3); }
+ .verdict.warn { border-color:transparent; background:var(--warn-soft, #fff8eb); }
  .verdict small { color:var(--muted); }
+ .as-tabs { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 14px; }
+ .as-tab { border:1px solid var(--line); background:var(--panel); color:var(--muted);
+   border-radius:999px; padding:7px 14px; font:inherit; font-size:13px; font-weight:650; cursor:pointer; }
+ .as-tab.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+ .as-wrap.paned .pane { display:none; }
+ .as-wrap.paned[data-pane="chat"] .pane-chat,
+ .as-wrap.paned[data-pane="shop"] .pane-shop,
+ .as-wrap.paned[data-pane="avito"] .pane-avito,
+ .as-wrap.paned[data-pane="tg"] .pane-tg,
+ .as-wrap.paned[data-pane="pc"] .pane-pc { display:block; }
+ .as-wrap.paned .as-grid { display:none; }
+ .pane { display:flex; flex-direction:column; gap:12px; }
  .as-grid { display:grid; grid-template-columns:1.35fr .95fr; gap:12px; align-items:start; }
  @media (max-width:1000px) { .as-grid { grid-template-columns:1fr; } }
- .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
- .card h2 { font-size:14px; margin-bottom:4px; }
- .card p.sub { color:var(--muted); font-size:12px; margin-bottom:10px; }
- .as-log { display:flex; flex-direction:column; gap:10px; min-height:220px; max-height:56vh;
-   overflow:auto; padding-right:4px; }
- .msg { border:1px solid var(--line); border-radius:12px; padding:10px; background:var(--bg); }
- .msg.me { border-color:var(--accent); }
+ .card, .as-card { background:var(--panel); border:1px solid var(--line); border-radius:16px;
+   padding:14px; box-shadow:var(--shadow-1, none); }
+ .as-card { margin-top:0; }
+ .card h2, .as-title { font-size:15px; margin:0 0 4px; font-weight:750; letter-spacing:-.01em; }
+ .as-head { margin-bottom:10px; }
+ .as-sub, .card p.sub { color:var(--muted); font-size:12.5px; margin-bottom:10px; line-height:1.45; }
+ .as-log { display:flex; flex-direction:column; gap:10px; min-height:280px; max-height:62vh;
+   overflow:auto; padding:4px 2px 8px; }
+ .msg { border:none; border-radius:16px; padding:12px 14px; background:var(--panel-2, var(--bg));
+   max-width:min(640px, 92%); box-shadow:var(--shadow-1, none); }
+ .msg.me { margin-left:auto; background:var(--accent); color:#fff; }
+ .msg.me b.who { color:rgba(255,255,255,.72); }
+ .msg.me .body { color:#fff; }
  .msg b.who { display:block; font-size:11px; color:var(--muted); margin-bottom:4px;
    text-transform:uppercase; letter-spacing:.04em; }
- .msg .body { font-size:13.5px; white-space:pre-wrap; word-break:break-word; }
- .msg .warnline { color:var(--warn); font-size:12px; margin-top:6px; }
- .msg .acts { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
- .kv { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted);
-   margin-top:6px; word-break:break-all; }
- pre.result { font-family:ui-monospace,monospace; font-size:11.5px; white-space:pre-wrap;
-   background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px;
-   margin-top:8px; max-height:260px; overflow:auto; word-break:break-word; }
- .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
- .chip { border:1px solid var(--line); background:var(--bg); color:var(--text);
-   border-radius:999px; padding:5px 11px; font-size:12px; cursor:pointer; }
- .chip:hover { border-color:var(--accent); }
+ .msg .body, .answer { font-size:14.5px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+ .msg .warnline, .warnline { color:var(--warn); font-size:12.5px; margin-top:6px; }
+ .msg .acts { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+ .kv { font-size:12.5px; color:var(--muted); margin-top:6px; word-break:break-word; line-height:1.45; }
+ pre.result { display:none; }
+ .factgrid, .skillgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));
+   gap:8px; margin-top:8px; }
+ .fact, .skill { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:8px 10px; }
+ .fact b, .skill b { display:block; font-size:13px; margin-bottom:2px; }
+ .fact span, .skill span { display:block; color:var(--muted); font-size:12px; line-height:1.35; }
+ .skill.on { border-color:transparent; background:var(--ok-soft, #f0fbf3); }
+ .skill.off { opacity:.72; }
+ .offline { border:1px dashed var(--line); border-radius:16px; padding:18px 16px; text-align:center;
+   background:var(--panel-2, var(--bg)); }
+ .offline b { display:block; font-size:15px; margin:6px 0 4px; }
+ .offline p { color:var(--muted); font-size:13px; margin:0 auto 12px; max-width:420px; line-height:1.45; }
+ .offline .mark { display:inline-block; font-size:11px; font-weight:750; letter-spacing:.06em;
+   text-transform:uppercase; color:var(--accent); }
+ .chips { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+ .chip { border:1px solid var(--line); background:var(--panel); color:var(--text);
+   border-radius:999px; padding:6px 12px; font-size:12.5px; cursor:pointer; text-align:left; }
+ .chip:hover { border-color:var(--accent); color:var(--accent); }
  .chip.confirm { border-color:var(--warn); }
- .as-input { display:flex; gap:8px; margin-top:10px; }
- .as-input textarea { flex:1; resize:vertical; min-height:44px; max-height:160px;
+ .as-input { display:flex; gap:8px; margin-top:10px; align-items:flex-end; }
+ .as-input textarea, textarea.inp { flex:1; resize:vertical; min-height:46px; max-height:160px;
    background:var(--bg); color:var(--text); border:1px solid var(--line);
-   border-radius:10px; padding:10px; font:inherit; font-size:13.5px; }
+   border-radius:12px; padding:10px 12px; font:inherit; font-size:14px; }
  .as-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
  .muted { color:var(--muted); }
  .journal { display:flex; flex-direction:column; gap:6px; max-height:34vh; overflow:auto; }
- .jrow { border:1px solid var(--line); border-radius:10px; padding:7px 9px; font-size:12px; }
- .jrow b { font-size:12.5px; }
- .jrow.done { border-color:var(--ok); }
- .jrow.error { border-color:var(--warn); }
- .notice { border:1px dashed var(--line); border-radius:10px; padding:8px 10px;
+ .jrow { border:1px solid var(--line); border-radius:12px; padding:8px 10px; font-size:12.5px; background:var(--panel-2, transparent); }
+ .jrow b { font-size:13px; }
+ .jrow.done { border-color:transparent; background:var(--ok-soft, #f0fbf3); }
+ .jrow.error { border-color:transparent; background:var(--warn-soft, #fff8eb); }
+ .notice { border:1px dashed var(--line); border-radius:12px; padding:8px 10px;
    font-size:12px; color:var(--muted); margin-top:10px; }
   #as_mic.recording { background:#7f1d1d; border-color:#b91c1c; color:#fff;
     animation:as-pulse 1.3s infinite; }
   @keyframes as-pulse { 50% { opacity:.5; } }
  .inp { background:var(--bg); color:var(--text); border:1px solid var(--line);
-   border-radius:8px; padding:6px 8px; font:inherit; font-size:12.5px; }
- .inp.wide { flex:1; min-width:120px; }
+   border-radius:10px; padding:7px 9px; font:inherit; font-size:13px; }
+ .inp.wide { flex:1; min-width:140px; }
+ .as-check { font-size:12.5px; color:var(--muted); display:inline-flex; gap:4px; align-items:center; }
 </style>
 </head>
 <body>
@@ -100,18 +130,36 @@
  </div>
 
  <div class="verdict" id="as_verdict"><span>Проверяем, доступен ли рантайм на этом компьютере…</span></div>
+ <nav class="as-tabs" id="as_tabs">
+  <button class="as-tab on" type="button" data-pane="chat">Разговор</button>
+  <button class="as-tab" type="button" data-pane="shop">Цех</button>
+  <button class="as-tab" type="button" data-pane="avito">Авито</button>
+  <button class="as-tab" type="button" data-pane="tg">Телеграм</button>
+  <button class="as-tab" type="button" data-pane="pc">Компьютер</button>
+ </nav>
 
  <div class="as-grid">
   <section class="card">
    <h2>Разговор</h2>
-   <p class="sub">Фраза → действие из каталога. Деньги и печать выполняются только после «Подтвердить».</p>
-   <div class="as-log" id="as_log"></div>
+   <p class="sub">Обычный вопрос отвечает модель Ollama. Про цех — по вашей базе. Команда станку или деньгам — только после «Подтвердить».</p>
+   <div class="as-log" id="as_log">
+    <div class="msg" id="as_hello">
+     <b class="who">помощник</b>
+     <div class="body">Спросите что угодно. «2+2» и общие вопросы отвечает модель. Свежие факты она ищет в интернете, если поиск в Ollama включён. Пластик и долги — из базы цеха, не из сети.</div>
+     <div class="chips" id="as_suggestions">
+      <button class="chip" type="button" data-q="2+2">2+2</button>
+      <button class="chip" type="button" data-q="Сколько у нас пластика?">Сколько пластика?</button>
+      <button class="chip" type="button" data-q="Что сейчас печатается?">Что печатается?</button>
+      <button class="chip" type="button" data-q="Какие долги просрочены?">Долги</button>
+     </div>
+    </div>
+   </div>
    <div class="as-input">
-    <textarea id="as_text" rows="2" placeholder="Например: что сейчас печатается; поставь паузу на P1S; покажи долги"></textarea>
+    <textarea id="as_text" rows="2" placeholder="Например: 2+2; какая сегодня погода; сколько пластика; поставь паузу на P1S"></textarea>
     <button class="btn" id="as_mic" type="button" disabled title="Голос включается, когда жив внешний рантайм речи">🎙</button>
     <button class="btn primary" id="as_send" type="button">Спросить</button>
    </div>
-   <div class="notice" id="as_notice">Помощник читает и предлагает; запись в базу и команды станку делает только ваше нажатие.</div>
+   <div class="notice" id="as_notice">Обычный вопрос отвечает модель. Поиск идёт через Ollama, если он там включён. Команды станку и деньгам — только после вашего нажатия.</div>
   </section>
 
   <section class="card">
@@ -665,8 +713,7 @@
         ? '?' + new URLSearchParams(body).toString() : ''))
       : post(action.path, body);
     request.then(function (data) {
-      node.insertAdjacentHTML('beforeend',
-        '<pre class=\"result\">' + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + '</pre>');
+      node.insertAdjacentHTML('beforeend', renderPayload(action.path, data));
       node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
       journal(action, params, 'done', '');
       refreshJournal();
@@ -706,17 +753,120 @@
     });
   }
 
+  function looksLikeCommand(text) {
+    var t = String(text || '').toLowerCase();
+    if (!t) return false;
+    if (/(пауз|возобнов|продолж)/.test(t)) return true;
+    if (/(продай|выдай|смени статус|останови|стоп)/.test(t)) return true;
+    if (/отмен/.test(t) && /(задани|заказ|печат)/.test(t)) return true;
+    if (/запусти/.test(t) && /(печат|задани|очеред)/.test(t)) return true;
+    if (/сохрани/.test(t) && /заказ/.test(t)) return true;
+    return false;
+  }
+
+  var chatTurns = [];
+
+  function gramsLabel(g) {
+    g = Number(g) || 0;
+    if (g >= 1000) {
+      var kilos = (g / 1000).toFixed(g >= 10000 ? 0 : 1).replace(/\.0$/, '').replace('.', ',');
+      return kilos + ' кг';
+    }
+    return Math.round(g) + ' г';
+  }
+
+  function renderFactsAnswer(data) {
+    var html = '';
+    if (data && data.answer) html += '<div class="answer">' + esc(data.answer) + '</div>';
+    var facts = (data && data.facts) || [];
+    if (facts.length) {
+      html += '<div class="factgrid">' + facts.slice(0, 8).map(function (f) {
+        return '<div class="fact"><b>' + esc(f.title || f.kind || '') + '</b><span>' + esc(f.text || '') + '</span></div>';
+      }).join('') + '</div>';
+    }
+    var sources = (data && data.sources) || [];
+    if (sources.length) {
+      html += '<div class="kv">' + sources.slice(0, 4).map(function (s) {
+        return esc(s.title || s.url || '');
+      }).join(' · ') + '</div>';
+    }
+    if (data && data.web) html += '<div class="muted">С поиском Ollama</div>';
+    if (data && !data.answered && data.reason) html += '<div class="warnline">' + esc(data.reason) + '</div>';
+    ((data && data.warnings) || []).forEach(function (w) {
+      html += '<div class="warnline">⚠ ' + esc(w) + '</div>';
+    });
+    return html || '<div class="muted">Не получилось ответить.</div>';
+  }
+
+  function renderPayload(path, data) {
+    path = String(path || '');
+    data = data || {};
+    if (path.indexOf('/api/shelf') === 0) {
+      var items = data.items || [];
+      if (!items.length) return '<div class="answer">На стеллаже пусто. Это готовые изделия, не пластик.</div>';
+      return '<div class="answer">Стеллаж — готовые изделия, не катушки.</div><div class="factgrid">'
+        + items.slice(0, 8).map(function (it) {
+          var extra = it.material ? ' · ' + it.material : '';
+          return '<div class="fact"><b>' + esc(it.name || 'позиция') + '</b><span>'
+            + esc(String(it.qty == null ? '—' : it.qty) + ' шт' + extra) + '</span></div>';
+        }).join('') + '</div>'
+        + (items.length > 8 ? '<div class="muted">и ещё ' + (items.length - 8) + '</div>' : '');
+    }
+    if (path.indexOf('/api/spools') === 0) {
+      var spools = data.spools || [];
+      var live = spools.filter(function (s) { return Number(s.remaining_grams) > 0; });
+      if (!live.length) return '<div class="answer">Катушек с остатком нет.</div>';
+      var total = live.reduce(function (sum, s) { return sum + Number(s.remaining_grams || 0); }, 0);
+      return '<div class="answer">На складе ' + gramsLabel(total) + ' пластика, катушек: ' + live.length + '.</div>'
+        + '<div class="factgrid">' + live.slice(0, 8).map(function (s) {
+          return '<div class="fact"><b>' + esc((s.material || '—') + ' ' + (s.color_name || '')) + '</b><span>'
+            + esc(gramsLabel(s.remaining_grams)) + '</span></div>';
+        }).join('') + '</div>';
+    }
+    if (data.reason && data.ok === false) return '<div class="warnline">' + esc(data.reason) + '</div>';
+    if (data.text && typeof data.text === 'string') return '<div class="answer">' + esc(data.text) + '</div>';
+    var bits = [];
+    Object.keys(data).forEach(function (key) {
+      var value = data[key];
+      if (value == null || value === '' || typeof value === 'object') return;
+      if (key === 'ok') return;
+      bits.push('<div class="fact"><b>' + esc(key) + '</b><span>' + esc(value) + '</span></div>');
+    });
+    if (bits.length) return '<div class="factgrid">' + bits.slice(0, 8).join('') + '</div>';
+    return '<div class="muted">Готово.</div>';
+  }
+
+  function askChat(text) {
+    var pending = log('помощник', '<div class=\"body\">Думаю…</div>');
+    var history = chatTurns.slice(-6);
+    chatTurns.push({role: 'user', content: String(text).slice(0, 500)});
+    if (chatTurns.length > 8) chatTurns = chatTurns.slice(-8);
+    post('/api/assistant/ask', {question: text, chat: true, history: history}).then(function (data) {
+      pending.innerHTML = '<b class=\"who\">помощник</b>' + renderFactsAnswer(data);
+      if (data && data.answer) {
+        chatTurns.push({role: 'assistant', content: String(data.answer).slice(0, 500)});
+        if (chatTurns.length > 8) chatTurns = chatTurns.slice(-8);
+      }
+    }).catch(function (e) {
+      pending.innerHTML = '<b class=\"who\">помощник</b><div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
   function ask(text) {
+    var hello = $('as_hello');
+    if (hello) hello.remove();
     log('вы', '<div class=\"body\">' + esc(text) + '</div>', 'me');
+    if (!looksLikeCommand(text)) {
+      askChat(text);
+      return;
+    }
     post('/api/assistant/intent', { text: text }).then(function (data) {
       if (!data.ok) {
         log('помощник', '<div class=\"body\">' + esc(data.reason || 'Не получилось') + '</div>');
         return;
       }
       if (!data.action) {
-        log('помощник', '<div class=\"body\">'
-          + esc(data.explain || 'Действие из каталога не подошло — уточните фразу.')
-          + '</div>');
+        askChat(text);
         return;
       }
       askAction(data.action, data.params || {}, data.explain, data.warnings || []);
@@ -783,26 +933,12 @@
   function askFacts() {
     var text = $('as_ask_text').value.trim();
     var host = $('as_ask_result');
-    if (!text) { host.innerHTML = '<div class=\"warnline\">Введите вопрос</div>'; return; }
-    host.innerHTML = '<span class=\"muted\">Ищем факты в базе…</span>';
-    post('/api/assistant/ask', { question: text }).then(function (data) {
-      var facts = data.facts || [];
-      var html = '';
-      if (data.answer) html += '<div class=\"body\">' + esc(data.answer) + '</div>';
-      if (!data.answered) html += '<div class=\"warnline\">' + esc(data.reason || 'Ответ не собран') + '</div>';
-      (data.warnings || []).forEach(function (w) {
-        html += '<div class=\"warnline\">⚠ ' + esc(w) + '</div>';
-      });
-      html += facts.length
-        ? '<div class=\"kv\" style=\"margin-top:6px\">Факты из базы (' + facts.length + '):<br>'
-          + facts.slice(0, 12).map(function (f) {
-            return '• ' + esc(f.title) + ' — ' + esc(f.text)
-              + (f.ref ? ' <span class=\"muted\">[' + esc(f.ref) + ']</span>' : '');
-          }).join('<br>') + '</div>'
-        : '';
-      host.innerHTML = html || '<span class=\"muted\">Фактов не нашлось</span>';
+    if (!text) { host.innerHTML = '<div class="warnline">Введите вопрос</div>'; return; }
+    host.innerHTML = '<span class="muted">Смотрю базу…</span>';
+    post('/api/assistant/ask', { question: text, fast: true }).then(function (data) {
+      host.innerHTML = renderFactsAnswer(data);
     }).catch(function (e) {
-      host.innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
+      host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
     });
   }
 
@@ -834,19 +970,22 @@
         pill.className = 'as-pill warn';
         pill.textContent = '🧩 Навыки: агент не отвечает';
         pill.title = data.reason || 'Агент компьютера выключен или не запущен';
-        host.innerHTML = '<span class=\"muted\">' + esc(data.reason || 'Агент не отвечает') + '</span>';
+        host.innerHTML = '<div class=\"offline\"><div class=\"mark\">Компьютер</div>'
+          + '<b>Агент не запущен</b><p>' + esc(data.reason || 'Навыки, окна и скрин живут в отдельной программе на этом компьютере.') + '</p>'
+          + '<button class=\"btn primary\" type=\"button\" id=\"as_agent_start\">Запустить агента</button></div>';
+        var start = $('as_agent_start');
+        if (start) start.addEventListener('click', startAgent);
         return;
       }
       pill.className = 'as-pill ok';
       pill.textContent = '🧩 Навыки: ' + data.ready + ' из ' + data.count;
       pill.title = 'Реестр отдаёт агент; панель его только читает';
-      host.innerHTML = (data.skills || []).map(function (row) {
-        return '<div class=\"jrow ' + (row.available ? 'done' : 'error') + '\">'
-          + '<b>' + esc(row.title) + '</b> <span class=\"muted\">' + esc(row.name) + '</span>'
-          + (row.confirm ? ' <span class=\"muted\">· подтверждение</span>' : '')
-          + '<div class=\"muted\">' + esc(row.available ? row.description : (row.reason || 'недоступен'))
-          + '</div></div>';
-      }).join('') || '<span class=\"muted\">Навыков нет</span>';
+      host.innerHTML = '<div class=\"skillgrid\">' + (data.skills || []).map(function (row) {
+        return '<div class=\"skill ' + (row.available ? 'on' : 'off') + '\">'
+          + '<b>' + esc(row.title) + '</b><span>'
+          + esc(row.available ? (row.description || row.doc || row.name) : (row.reason || 'недоступен'))
+          + '</span></div>';
+      }).join('') + '</div>' || '<span class=\"muted\">Навыков нет</span>';
     }).catch(function (e) {
       $('as_skills').className = 'as-pill warn';
       $('as_skills').textContent = '🧩 Навыки: недоступны';
@@ -934,13 +1073,17 @@
   }
 
   function tgIdeas() {
-    $('tg_ideas_result').innerHTML = '<span class=\"muted\">Придумываем темы…</span>';
+    $('tg_ideas_result').innerHTML = '<span class=\"muted\">Собираю темы…</span>';
     post('/api/assistant/tg/ideas', { limit: 8 }).then(function (data) {
-      if (!data.ok) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
-      var html = '<div class=\"kv\">' + (data.ideas||[]).map(function (t, i) { return (i+1)+'. ' + esc(t) + ' <button class=\"btn sm\" type=\"button\" data-topic=\"'+esc(t)+'\">→ в тему</button>'; }).join('<br>') + '</div>';
+      if (!data.ok) { $('tg_ideas_result').innerHTML = '<div class=\"offline\"><b>Темы не собрались</b><p>' + esc(data.reason||'Ошибка') + '</p></div>'; return; }
+      var html = '<div class=\"chips\">' + (data.ideas||[]).map(function (t) {
+        return '<button class=\"chip\" type=\"button\" data-topic=\"' + esc(t) + '\">' + esc(t) + '</button>';
+      }).join('') + '</div>';
       if (data.hint) html += '<div class=\"muted\">' + esc(data.hint) + '</div>';
       $('tg_ideas_result').innerHTML = html;
-      $('tg_ideas_result').querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { $('tg_topic').value = this.dataset.topic; }); });
+      $('tg_ideas_result').querySelectorAll('button').forEach(function (b) {
+        b.addEventListener('click', function () { $('tg_topic').value = this.dataset.topic; });
+      });
     }).catch(function (e) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
   }
   function tgDraft() {
@@ -1427,6 +1570,60 @@ $('av_watch').addEventListener('click', avitoWatch);
   $('av_watch').addEventListener('click', avitoWatch);
   $('tg_post_btn').addEventListener('click', tgPostLast);
 
+
+  function startAgent() {
+    var host = $('as_skills_list');
+    if (host) host.innerHTML = '<span class="muted">Запускаю агента на этом компьютере…</span>';
+    get('/api/assistant/agent?start=1').then(function (data) {
+      state.agent = data;
+      renderAgent(data);
+      refreshSkills();
+    }).catch(function (e) {
+      if (host) host.innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
+  function sectionOf(id) {
+    var node = $(id);
+    while (node && node !== document.body) {
+      if (node.classList && (node.classList.contains('card') || node.classList.contains('as-card'))) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function layoutPanes() {
+    var wrap = document.querySelector('.as-wrap');
+    if (!wrap || wrap.classList.contains('paned')) return;
+    var groups = {
+      chat: [sectionOf('as_log')],
+      shop: [sectionOf('as_ask_text'), sectionOf('as_day_result'), sectionOf('as_actions'), sectionOf('as_intake_text'), sectionOf('as_journal')],
+      avito: [sectionOf('av_query'), $('card-avito-threads'), $('card-avito-extra')],
+      tg: [sectionOf('tg_ideas'), $('card-tg-calendar'), $('card-tg-templates'), $('card-tg-search-export')],
+      pc: [sectionOf('as_skills_list'), $('card-system'), $('card-windows'), $('card-screen'), $('card-voice-clip'), $('card-watchdog'), $('card-install')]
+    };
+    Object.keys(groups).forEach(function (name) {
+      var pane = document.createElement('div');
+      pane.className = 'pane pane-' + name;
+      groups[name].forEach(function (node) { if (node) pane.appendChild(node); });
+      wrap.appendChild(pane);
+    });
+    wrap.dataset.pane = 'chat';
+    wrap.classList.add('paned');
+    document.querySelectorAll('#as_tabs .as-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        wrap.dataset.pane = btn.dataset.pane;
+        document.querySelectorAll('#as_tabs .as-tab').forEach(function (other) {
+          other.classList.toggle('on', other === btn);
+        });
+      });
+    });
+  }
+
+  document.querySelectorAll('#as_suggestions .chip').forEach(function (btn) {
+    btn.addEventListener('click', function () { ask(btn.dataset.q); });
+  });
+  layoutPanes();
   refreshState();
   refreshJournal();
   refreshSkills();

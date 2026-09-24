@@ -144,7 +144,7 @@ class TranscribeTests(DatabaseTestCase):
             return FakeResponse(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
         with patch.object(assistant, "_post_json", return_value=(True, {"ok": True}, "")), \
-             patch.object(assistant.urllib.request, "urlopen", fake_urlopen):
+             patch.object(assistant, "_local_open", fake_urlopen):
             result = assistant.transcribe(self.db, audio)
         return result, calls
 
@@ -167,9 +167,9 @@ class TranscribeTests(DatabaseTestCase):
 
     def test_unavailable_runtime_is_not_called(self):
         self.db.set_settings({"assistant_speech_enabled": False})
-        with patch.object(assistant.urllib.request, "urlopen") as urlopen:
+        with patch.object(assistant, "_local_open") as opened:
             result = assistant.transcribe(self.db, AUDIO)
-        urlopen.assert_not_called()
+        opened.assert_not_called()
         self.assertFalse(result["ok"])
 
     def test_silence_is_a_reason_not_an_empty_answer(self):
@@ -253,7 +253,7 @@ class SpeechRouteTests(DatabaseTestCase):
                 return False
 
         with patch.object(assistant, "_post_json", return_value=(True, {"ok": True}, "")), \
-             patch.object(assistant.urllib.request, "urlopen",
+             patch.object(assistant, "_local_open",
                           return_value=FakeResponse()):
             sent = self._post(AUDIO)
         self.assertEqual(200, sent["code"])
@@ -289,7 +289,8 @@ class AgentStatusTests(DatabaseTestCase):
 
     def test_alive_agent_reports_window_and_wake_word(self):
         self.db.set_settings({"assistant_agent_enabled": True})
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_tcp_up", return_value=(True, "")), \
+             patch.object(assistant, "_post_json",
                           return_value=(True, {"ok": True, "window": "Telegram",
                                                "wake_word": True}, "")):
             state = assistant.agent_status(self.db)

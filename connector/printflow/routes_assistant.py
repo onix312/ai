@@ -106,6 +106,8 @@ def assistant_agent(api: Any, ctx: Ctx):
     снимков, ни нажатий.
     """
     from . import assistant as service
+    if str(ctx.one("start") or "").strip().lower() in ("1", "true", "да", "yes"):
+        service.start_agent(api.db)
     return service.agent_status(api.db)
 
 
@@ -124,7 +126,12 @@ def assistant_ask(api: Any, ctx: Ctx):
     question = " ".join(str(body.get("question") or "").split())[:600]
     if not question:
         return 400, {"ok": False, "error": "Пустой вопрос"}
-    return knowledge.answer(api, question)
+    # Разговор просит chat: обычный вопрос отвечает модель, свежие факты —
+    # через включённый поиск Ollama. fast остаётся у карточки «Спросить базу».
+    fast = bool(body.get("fast") or body.get("local"))
+    chat = bool(body.get("chat") or body.get("web"))
+    history = body.get("history") if isinstance(body.get("history"), list) else None
+    return knowledge.answer(api, question, fast=fast, chat=chat, history=history)
 
 
 @router.get("/api/assistant/day", doc="Помощник: брифинг или итог дня")
