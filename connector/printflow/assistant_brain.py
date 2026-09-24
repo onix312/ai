@@ -141,6 +141,28 @@ def _money(value: Any) -> str:
     return f"{shown} ₽"
 
 
+def plural(count: Any, one: str, few: str, many: str) -> str:
+    """Форма слова для числа: 1 клиент, 2 клиента, 5 клиентов, 21 клиент, 11 клиентов."""
+    try:
+        value = abs(int(float(count)))
+    except (TypeError, ValueError):
+        return many
+    if value % 10 == 1 and value % 100 != 11:
+        return one
+    if 2 <= value % 10 <= 4 and not 12 <= value % 100 <= 14:
+        return few
+    return many
+
+
+def eta_label(minutes: float, now: datetime.datetime | None = None) -> str:
+    """Во сколько закончит: «около 22:55», «завтра около 07:10»."""
+    now = now or datetime.datetime.now()
+    finish = now + datetime.timedelta(minutes=max(0.0, float(minutes or 0)))
+    days = (finish.date() - now.date()).days
+    prefix = "" if days <= 0 else ("завтра " if days == 1 else f"{finish:%d.%m} ")
+    return f"{prefix}около {finish:%H:%M}"
+
+
 # ---------------------------------------------------------------------------
 # Сущности цеха
 # ---------------------------------------------------------------------------
@@ -161,7 +183,7 @@ def printers(ctx: Context) -> list[dict[str, Any]]:
                      "progress": int(float(info.get("progress") or 0)),
                      "remaining_min": float(info.get("remaining_min") or 0),
                      "task": str(order.get("product") or info.get("task") or job.get("name") or "").strip(),
-                     "online": bool(info.get("online", True))})
+                     "online": info.get("online") is not False})  # None — «не знаю», не «отключён»
     return rows
 
 
@@ -382,6 +404,10 @@ def _memory(ctx: Context, text: str) -> dict[str, Any] | None:
         name = memory.owner_name(db)
         return _answer(ctx, text, f"Вас зовут {name}." if name else "Пока не знаю. Скажите: «меня зовут …».",
                        kind="memory", source="memory")
+    if payload and len(payload.split()) <= 3:
+        card = customer_card(ctx, text, payload.split()[-1], record_required=True)
+        if card:  # «что ты помнишь про Ивана» — клиент из базы: карточка вместе с памятью
+            return card
     rows = memory.recall(db, payload, 8) if payload else memory.memories(db, 12)
     if not rows:
         return _answer(ctx, text, "Про это в памяти ничего нет." if payload
@@ -396,12 +422,75 @@ def _memory(ctx: Context, text: str) -> dict[str, Any] | None:
 # 3. Мгновенные ответы
 # ---------------------------------------------------------------------------
 
+_NUMBER_WORDS = {"ноль": "0", "один": "1", "одну": "1", "два": "2", "две": "2", "три": "3", "четыре": "4",
+                 "пять": "5", "шесть": "6", "семь": "7", "восемь": "8", "девять": "9", "десять": "10",
+                 "двадцать": "20", "сто": "100", "тысячу": "1000", "тысяча": "1000", "половину": "0.5"}
+_NUM = r"(\d+(?:[.,]\d+)?|" + "|".join(_NUMBER_WORDS) + r")"
+_MATH_FOLLOW: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"(?:подел\w*|раздел\w*|дели\w*)\s+(?:это\s+|его\s+|результат\s+)?(?:на\s+)?" + _NUM + r"\b"), "/", "÷"),
+    (re.compile(r"(?:умнож\w*|помнож\w*)\s+(?:это\s+|его\s+|результат\s+)?(?:на\s+)?" + _NUM + r"\b"), "*", "×"),
+    (re.compile(r"(?:прибав\w*|добав\w*|плюс|приплюсу\w*)\s+(?:к\s+этому\s+|ещ[её]\s+)?" + _NUM + r"\b"), "+", "+"),
+    (re.compile(r"(?:отним\w*|отнять|вычт\w*|вычесть|минус|убав\w*)\s+(?:от\s+этого\s+|ещ[её]\s+)?" + _NUM + r"\b"), "-", "−"),
+)
+_PERCENT_RE = re.compile(_NUM + r"\s*(?:%|процент\w*)")
+
+
+def _math_follow_up(ctx: Context, text: str) -> dict[str, Any] | None:
+    """«А если поделить на 5?» после «17*23+4»: считаем от прошлого результата."""
+    previous = str((ctx.last_meta().get("entities") or {}).get("number") or "")
+    low = _norm(text).rstrip("?!. ")
+    if not previous or len(low) > 60:
+        return None
+    pretty = previous.replace(".", ",")
+    expression = shown = ""
+    divides_by_zero = False
+    if re.search(r"в\s+квадрат", low):
+        expression, shown = f"{previous}*{previous}", f"{pretty}²"
+    percent = _PERCENT_RE.search(low)
+    if not expression and percent and re.search(r"(от\s+(этого|него|результата|числа)|^а\s|^\d|^сколько)", low):
+        number = _NUMBER_WORDS.get(percent.group(1), percent.group(1)).replace(",", ".")
+        expression, shown = f"{previous}*{number}/100", f"{number.replace('.', ',')}% от {pretty}"
+    for pattern, operator, sign in _MATH_FOLLOW:
+        if expression:
+            break
+        found = pattern.search(low)
+        if found:
+            number = _NUMBER_WORDS.get(found.group(1), found.group(1)).replace(",", ".")
+            divides_by_zero = operator == "/" and float(number) == 0
+            expression = f"({previous}){operator}{number}"
+            shown = f"{pretty} {sign} {number.replace('.', ',')}"
+    if not expression:
+        return None
+    if divides_by_zero:
+        return _answer(ctx, text, "На ноль делить нельзя.", kind="clarify", source="math",
+                       entities={"number": previous})
+    result = assistant.simple_math(expression)
+    if not result:
+        return None
+    ctx.step("context", "Продолжение расчёта", f"от прошлого результата {previous}")
+    return _answer(ctx, text, f"{shown} = {result}", source="math",
+                   entities={"number": result.replace(",", ".")})
+
+
 def _instant(ctx: Context, text: str) -> dict[str, Any] | None:
     low = _norm(text)
     math = assistant.simple_math(text)
     if math:
         ctx.step("rule", "Арифметика", "без модели")
-        return _answer(ctx, text, math, source="math")
+        return _answer(ctx, text, math, source="math", entities={"number": math.replace(",", ".")})
+    follow = _math_follow_up(ctx, text)
+    if follow:
+        return follow
+    if re.fullmatch(r"(а\s+)?(ты\s+)?кто\s+ты|ты\s+кто|расскажи\s+(о|про)\s+себ[ея]|как\s+тебя\s+зовут|представься", low.rstrip("?!. ")):
+        ctx.step("rule", "Кто я", "без модели")
+        return _answer(ctx, text, "Я NOZZA — помощник цеха PrintFlow. Вижу станки, заказы, клиентов и деньги в "
+                       "вашей базе, помню то, что вы просите запомнить, предлагаю действия — а выполняете вы "
+                       "кнопкой «Подтвердить».\n" + capabilities_text(ctx).split("\n", 1)[-1], source="registry",
+                       suggestions=suggestions_for(ctx))
+    if re.fullmatch(r"(а\s+)?(ну\s+)?как\s+(у\s+тебя\s+)?(дела|ты|жизнь|сам|поживаешь|оно)", low.rstrip("?!. ")):
+        ctx.step("rule", "Как дела", "сводка цеха")
+        return _answer(ctx, text, "Работаю, всё под контролем. " + farm_phrase(ctx), source="farm",
+                       entities=_single_busy(ctx), suggestions=suggestions_for(ctx))
     if re.search(r"(который|сколько)\s+(сейчас\s+)?(час|времени)|^время\??$", low):
         ctx.step("rule", "Часы", "без модели")
         return _answer(ctx, text, f"Сейчас {datetime.datetime.now():%H:%M}.", source="clock")
@@ -416,7 +505,8 @@ def _instant(ctx: Context, text: str) -> dict[str, Any] | None:
         ctx.step("rule", "Приветствие", "сводка цеха")
         name = memory.owner_name(ctx.db) if ctx.db is not None else ""
         return _answer(ctx, text, f"Привет{', ' + name if name else ''}! " + farm_phrase(ctx),
-                       source="farm", suggestions=["Что сейчас печатается?", "Брифинг на сегодня", "Что ты умеешь?"])
+                       source="farm", entities=_single_busy(ctx),
+                       suggestions=["Что сейчас печатается?", "Брифинг на сегодня", "Что ты умеешь?"])
     if re.fullmatch(r"(спасибо|благодарю|спс|отлично|супер|класс)[!.]*", low):
         return _answer(ctx, text, "Обращайтесь! Если что-то нужно запомнить — скажите «запомни, что …».", source="rules")
     return None
@@ -429,7 +519,8 @@ def capabilities_text(ctx: Context) -> str:
              "• предлагать действия — пауза или стоп станка, статус и выдача заказа, запуск задания; "
              "выполняете вы кнопкой «Подтвердить»;",
              "• помнить: «запомни, что…», «что ты помнишь про Марию»;",
-             "• понимать продолжение: «а у второго?», «поставь его на паузу»;",
+             "• понимать продолжение: «а у второго?», «поставь его на паузу», «сколько ему осталось?», "
+             "«а если поделить на 5?»;",
              "• отвечать на общие вопросы моделью Ollama, свежее — через её веб-поиск."]
     if agent.get("enabled"):
         lines.append("• управлять компьютером через агента: окна, звук, программы, файлы, экран.")
@@ -445,18 +536,97 @@ def farm_phrase(ctx: Context) -> str:
     busy = [row for row in rows if row["state"] in ("RUNNING", "PREPARE")]
     paused = [row for row in rows if row["state"] == "PAUSE"]
     queue = len(ctx.snapshot().get("queue") or [])
-    parts = [f"Печатают {len(busy)} из {len(rows)}" if busy else f"Все {len(rows)} станков свободны"]
-    if paused:
-        parts.append("на паузе: " + ", ".join(row["name"] for row in paused[:3]))
+    if len(rows) == 1:
+        only = rows[0]
+        state = "печатает" if busy else ("на паузе" if paused else "свободен")
+        parts = [f"{only['name']} {state}" + (f" «{only['task']}», {only['progress']}%" if (busy or paused) and only["task"] else "")]
+    else:
+        parts = [f"Печата{'ет' if len(busy) == 1 else 'ют'} {len(busy)} из {len(rows)}" if busy
+                 else f"Все {len(rows)} {plural(len(rows), 'станок', 'станка', 'станков')} свободны"]
+        if paused:
+            parts.append("на паузе: " + ", ".join(row["name"] for row in paused[:3]))
     if queue:
         parts.append(f"в очереди {queue}")
     return ", ".join(parts) + "."
+
+
+def _single_busy(ctx: Context) -> dict[str, Any]:
+    """Единственный занятый станок становится «им» для следующей реплики."""
+    busy = [row for row in printers(ctx) if row["state"] in ("RUNNING", "PAUSE", "PREPARE")]
+    if len(busy) == 1:
+        return {"printer": {"id": busy[0]["id"], "name": busy[0]["name"]}}
+    return {}
+
+
+def suggestions_for(ctx: Context) -> list[str]:
+    """Подсказки по ситуации в цехе, а не один и тот же набор кнопок."""
+    rows = printers(ctx)
+    tips: list[str] = []
+    if any(row["state"] == "PAUSE" for row in rows):
+        tips.append("Продолжи печать")
+    if any(row["state"] in ("RUNNING", "PREPARE") for row in rows):
+        tips.append("Сколько осталось печатать?")
+    try:
+        if knowledge._num((ctx.api.acc.debts() or {}).get("total")):
+            tips.append("Кто должен денег?")
+    except Exception:
+        pass
+    tips += ["Брифинг на сегодня", "Что ты умеешь?"]
+    return tips[:4]
+
+
+def _printer_line(row: dict[str, Any], *, eta: bool = True) -> str:
+    state = {"RUNNING": "печатает", "PAUSE": "на паузе", "PREPARE": "готовится", "FINISH": "закончил",
+             "FAILED": "ошибка", "IDLE": "свободен"}.get(row["state"], row["state"].lower() or "нет данных")
+    line = f"{row['name']} — {state}"
+    if row["state"] in ("RUNNING", "PAUSE", "PREPARE"):
+        if row["task"]:
+            line += f" «{row['task']}»"
+        line += f", {row['progress']}%"
+        if row["remaining_min"] >= 1:
+            line += f", осталось ~{knowledge._minutes_label(row['remaining_min'])}"
+            if eta and row["state"] in ("RUNNING", "PREPARE"):
+                line += f" (закончит {eta_label(row['remaining_min'])})"
+    elif not row.get("online", True):
+        line += ", не на связи"
+    return line
+
+
+_FARM_RE = re.compile(
+    r"(как\s+(там\s+)?(у\s+нас\s+)?(дела|обстановка|ситуация|успехи|оно)\s+(на\s+ферм|в\s+цех|с\s+принтер|со\s+станк|"
+    r"с\s+печать|на\s+производств|с\s+парк)"
+    r"|что\s+(там\s+)?(у\s+нас\s+)?(на\s+ферм|в\s+цех|с\s+принтерам|со\s+станкам|с\s+ферм|с\s+парк|на\s+производств)"
+    r"|статус\w*\s+(ферм|парк|станк|принтер|цех)|состояни\w*\s+(ферм|парк|станк|принтер|цех)"
+    r"|как\s+(там\s+)?(ферма|станки|принтеры|парк|цех|производство)\b|что\s+(там\s+)?происходит|обстановк)")
+
+
+def _farm_overview(ctx: Context, text: str) -> dict[str, Any] | None:
+    """«Как дела на ферме?» — каждый станок одной строкой, с временем окончания."""
+    low = _norm(text)
+    if not _FARM_RE.search(low):
+        return None
+    rows = printers(ctx)
+    ctx.step("rule", "Обзор парка", f"станков {len(rows)}")
+    if not rows:
+        return _answer(ctx, text, farm_phrase(ctx), source="farm", link={"title": "Принтеры", "href": "/#printers"})
+    lines = [farm_phrase(ctx)] if len(rows) > 1 else []
+    lines += [("• " if len(rows) > 1 else "") + _printer_line(row) + "." for row in rows[:8]]
+    queue = ctx.snapshot().get("queue") or []
+    if queue:
+        names = [str(item.get("name") or item.get("title") or "") for item in queue[:3] if isinstance(item, dict)]
+        names = [name for name in names if name]
+        if names:
+            lines.append("Следующим в очереди: " + ", ".join(f"«{name}»" for name in names) + ".")
+    return _answer(ctx, text, "\n".join(lines), source="farm", entities=_single_busy(ctx),
+                   link={"title": "Принтеры", "href": "/#printers"}, suggestions=suggestions_for(ctx))
 
 
 # ---------------------------------------------------------------------------
 # 4. Цех без модели
 # ---------------------------------------------------------------------------
 
+_STATE_WORDS = {"RUNNING": "печатает", "PAUSE": "на паузе", "PREPARE": "готовится", "FINISH": "закончил печать",
+                "FAILED": "в ошибке", "IDLE": "свободен", "OFFLINE": "не на связи"}
 _PAUSE_RE = re.compile(r"(поставь\s+(?:\S+\s+)?на\s+паузу|приостанови|пауз[ау]\b|на паузу)", re.IGNORECASE)
 _RESUME_RE = re.compile(r"(продолж\w*|возобнов\w*|сними\s+(?:\S+\s+)?с\s+паузы|сними с паузы)", re.IGNORECASE)
 _STOP_RE = re.compile(r"(останови\w*|прерви|отмени\s+печать|стоп\b|заверши\s+печать)", re.IGNORECASE)
@@ -481,12 +651,26 @@ def _printer_command(ctx: Context, text: str) -> dict[str, Any] | None:
     states = {"pause": ("RUNNING", "PREPARE"), "resume": ("PAUSE",), "stop": ("RUNNING", "PAUSE", "PREPARE")}[command]
     explicit = (_PRINT_CTX_RE.search(low) or (last and any(p in words for p in _PRONOUNS))
                 or any(name_in(row["name"], low) for row in printers(ctx)))
+    nothing = {"pause": "ставить на паузу нечего", "resume": "продолжать нечего", "stop": "останавливать нечего"}[command]
     if not explicit and not any(row["state"] in states for row in printers(ctx)):
         # «Пауза» без станка, и ни один станок сейчас не подходит — вероятно,
-        # это про музыку на компьютере: пусть решает агент.
-        return None
+        # это про музыку на компьютере: пусть решает агент. Агент выключен —
+        # говорим прямо, а не «не понял».
+        agent_on = bool(assistant.agent_config(ctx.db).get("enabled")) if ctx.db is not None else False
+        if agent_on or not printers(ctx):
+            return None
+        ctx.step("entity", "Станки", "ни один не подходит, агент выключен")
+        return _answer(ctx, text, f"Станки сейчас не печатают — {nothing}. Если это про музыку или видео на "
+                       "компьютере — включите агента компьютера в настройках помощника.", kind="clarify",
+                       source="entity", link={"title": "Настройки", "href": "/#settings"},
+                       suggestions=suggestions_for(ctx))
     printer, candidates, how = resolve_printer(ctx, text, states)
     ctx.step("entity", "Станок", how)
+    if printer is not None and printer["state"] and printer["state"] not in states:
+        state = _STATE_WORDS.get(printer["state"], printer["state"].lower())
+        return _answer(ctx, text, f"{printer['name']} сейчас {state} — {nothing}.", source="entity",
+                       entities={"printer": {"id": printer["id"], "name": printer["name"]}},
+                       suggestions=suggestions_for(ctx))
     if printer is None:
         if not candidates:
             return _answer(ctx, text, "Станков для этой команды не нашёл: " + how + ".", kind="error", source="entity")
@@ -518,16 +702,62 @@ def _printer_proposal(ctx: Context, text: str, command: str, printer: dict[str, 
                    entities={"printer": {"id": printer["id"], "name": printer.get("name")}})
 
 
+_REMAIN_RE = re.compile(
+    r"(сколько\s+(\S+\s+){0,2}осталось|когда\s+(\S+\s+){0,2}(законч|допечата|освобод|будет\s+готов|кончит|доделает)"
+    r"|какой\s+прогресс|прогресс\s+печат|на\s+скольк\w+\s+процент|сколько\s+процент|долго\s+(ещ[её]\s+)?(печатать|осталось))")
+_REMAIN_NOT_RE = re.compile(r"(пластик|катушк|филамент|грамм|денег|деньг|заказ|дн[еяй]\b|срок|склад|мест[оа]|рабоч)")
+_OBJECT_PRONOUNS = ("ним", "ней", "нем", "него", "нее", "неё", "он", "она", "ему", "его")
+
+
+def _printer_remaining(ctx: Context, text: str) -> dict[str, Any] | None:
+    """«Сколько ему осталось?», «когда закончит?» — прогресс и время окончания по часам."""
+    rows = printers(ctx)
+    if not rows:
+        return None
+    working = ("RUNNING", "PAUSE", "PREPARE")
+    printer, candidates, how = resolve_printer(ctx, text, working)
+    if printer is None:
+        busy = [row for row in candidates if row["state"] in working]
+        if not busy:
+            return _answer(ctx, text, "Сейчас ничего не печатается. " + farm_phrase(ctx), source="farm",
+                           suggestions=suggestions_for(ctx))
+        ctx.step("entity", "Станки", f"занято {len(busy)} — отвечаю про все")
+        return _answer(ctx, text, "\n".join("• " + _printer_line(row) + "." for row in busy[:8]), source="farm",
+                       suggestions=suggestions_for(ctx))
+    ctx.step("entity", "Станок", how)
+    entities = {"printer": {"id": printer["id"], "name": printer["name"]}}
+    if printer["state"] not in working:
+        state = _STATE_WORDS.get(printer["state"], printer["state"].lower() or "без данных")
+        return _answer(ctx, text, f"{printer['name']} сейчас ничего не печатает ({state}).", source="farm",
+                       entities=entities, suggestions=suggestions_for(ctx))
+    task = f" «{printer['task']}»" if printer["task"] else ""
+    left = knowledge._minutes_label(printer["remaining_min"]) if printer["remaining_min"] >= 1 else ""
+    if printer["state"] == "PAUSE":
+        reply = f"{printer['name']} на паузе{task} на {printer['progress']}%" + (
+            f" — после продолжения останется ~{left}." if left else ".")
+        tips = ["Продолжи печать"]
+    else:
+        reply = f"{printer['name']}{task}: {printer['progress']}%" + (
+            f", осталось ~{left}, закончит {eta_label(printer['remaining_min'])}." if left else ", почти готово.")
+        tips = ["Поставь его на паузу", "Как дела на ферме?"]
+    return _answer(ctx, text, reply, source="farm", entities=entities, suggestions=tips)
+
+
 def _printer_status(ctx: Context, text: str) -> dict[str, Any] | None:
     low = _norm(text)
+    if _REMAIN_RE.search(low) and not _REMAIN_NOT_RE.search(low):
+        return _printer_remaining(ctx, text)
     follow = re.fullmatch(r"(а\s+)?(у|на|что\s+(у|на))\s+(\S+)(\s+станк\w*)?\??", low)
     asks = re.search(r"(что|как)\s+(там\s+)?(с|у|на)\s+", low) or follow
-    if not asks:
+    words = re.findall(r"[0-9a-zа-я]+", low)
+    about_him = (bool(ctx.entities().get("printer")) and any(word in _OBJECT_PRONOUNS for word in words)
+                 and bool(re.search(r"(что|как)\s+(там\s+)?(с\s+ним|с\s+ней|у\s+него|у\s+нее|он|она)\b|что\s+(он|она)\s+печата", low)))
+    if not asks and not about_him:
         return None
     named = any(name_in(row["name"], low) or (row["model"] and _norm(row["model"]) in low.split())
                 for row in printers(ctx))
-    ordinal = any(word in _ORDINALS for word in re.findall(r"[0-9a-zа-я]+", low))
-    if not named and not (ordinal and (follow or re.search(r"станк|принтер", low))):
+    ordinal = any(word in _ORDINALS for word in words)
+    if not named and not about_him and not (ordinal and (follow or re.search(r"станк|принтер", low))):
         return None
     printer, _candidates, how = resolve_printer(ctx, text)
     if printer is None:
@@ -539,7 +769,8 @@ def _printer_status(ctx: Context, text: str) -> dict[str, Any] | None:
     if printer["task"] and printer["state"] in ("RUNNING", "PAUSE", "PREPARE"):
         line += f" «{printer['task']}», {printer['progress']}%"
         if printer["remaining_min"] >= 5 and printer["state"] == "RUNNING":
-            line += f", осталось ~{knowledge._minutes_label(printer['remaining_min'])}"
+            line += (f", осталось ~{knowledge._minutes_label(printer['remaining_min'])}"
+                     f" (закончит {eta_label(printer['remaining_min'])})")
     suggestions = {"RUNNING": ["Поставь его на паузу"], "PAUSE": ["Продолжи печать на нём"]}.get(printer["state"], [])
     return _answer(ctx, text, line + ".", source="farm", entities={"printer": {"id": printer["id"], "name": printer["name"]}},
                    suggestions=suggestions + ["А у второго?"] if len(printers(ctx)) > 1 else suggestions)
@@ -592,25 +823,53 @@ def _order_intents(ctx: Context, text: str) -> dict[str, Any] | None:
                    link={"title": "Открыть заказы", "href": "/#orders"}, suggestions=suggestions)
 
 
+_CUSTOMER_RE = re.compile(
+    r"(?:что|как)\s+(?:там\s+)?(?:с|у|по)\s+(?:клиент\w*\s+)?(?P<a>[А-ЯЁ][а-яё]{2,})"
+    r"|клиент\w*\s+(?P<b>[А-ЯЁа-яё][а-яё]{2,})"
+    r"|(?:расскажи|напомни|покажи)\s+(?:мне\s+)?(?:про|о|об|по)?\s*(?:клиент\w*\s+)?(?P<c>[А-ЯЁа-яё][а-яё]{2,})"
+    r"|(?:что\s+(?:ты\s+)?(?:знаешь|известно)|кто\s+так(?:ой|ая))\s+(?:про|о|об)?\s*(?:клиент\w*\s+)?(?P<d>[А-ЯЁа-яё][а-яё]{2,})")
+_NOT_NAMES = {"него", "нее", "неё", "них", "это", "этом", "этот", "все", "всё", "всех", "себя", "себе", "меня", "нас",
+              "вас", "тебя", "погоду", "погода", "новости", "сегодня", "завтра", "план", "день", "деньги", "долги",
+              "склад", "печать", "станки", "принтеры", "очередь", "финансы", "клиентов", "клиентах"}
+
+
+def _name_match(stem: str, full_name: Any) -> bool:
+    """Основа имени совпадает с началом слова в карточке: «иван» → «Иван (демо)», но «ол» ≠ «Николай»."""
+    stem = stem[:4]
+    if len(stem) < 3:
+        return False
+    return any(word.startswith(stem) for word in re.findall(r"[0-9a-zа-я]+", _norm(full_name)))
+
+
 def _customer(ctx: Context, text: str) -> dict[str, Any] | None:
     low = _norm(text)
-    match = re.search(r"(?:что|как)\s+(?:там\s+)?(?:с|у|по)\s+(?:клиент\w*\s+)?([А-ЯЁ][а-яё]{2,})|клиент\w*\s+([А-ЯЁ][а-яё]{2,})",
-                      str(text or ""))
+    match = _CUSTOMER_RE.search(str(text or ""))
     if not match or "заказ" in low:
         return None
-    raw = match.group(1) or match.group(2)
-    if any(name_in(row["name"], raw) for row in printers(ctx)):
+    raw = next(group for group in match.groups() if group)
+    return customer_card(ctx, text, raw, record_required=not raw[:1].isupper())
+
+
+def customer_card(ctx: Context, text: str, raw: str, record_required: bool = False) -> dict[str, Any] | None:
+    """Карточка клиента: контакты, заказы и то, что о нём помнит помощник.
+
+    `record_required` — ответить, только если в базе есть клиент или заказ
+    (строчное слово или вопрос к памяти: без записи это не имя клиента).
+    """
+    raw = raw.strip(" .,!?«»\"")
+    if not raw or raw.casefold().replace("ё", "е") in _NOT_NAMES or any(name_in(row["name"], raw) for row in printers(ctx)):
         return None
+    capital = raw[:1].isupper() and not record_required
     stem = (memory.stems(raw) or [_norm(raw)])[0]
     repo = getattr(ctx.api, "repo", None)
     try:
-        people = [row for row in (repo.customers() if repo is not None else []) if stem[:4] in _norm(row.get("name"))]
+        people = [row for row in (repo.customers() if repo is not None else []) if _name_match(stem, row.get("name"))]
     except Exception:
         people = []
-    orders = [row for row in _order_rows(ctx, stem[:5], 30) if stem[:4] in _norm(row.get("customer_name"))]
+    orders = [row for row in _order_rows(ctx, stem[:5], 30) if _name_match(stem, row.get("customer_name"))]
     notes = memory.recall(ctx.db, raw, 3) if ctx.db is not None else []
-    if not people and not orders and not notes:
-        return None
+    if not people and not orders and not (capital and notes):
+        return None  # строчное слово без карточки и заказов — не имя клиента
     ctx.step("entity", "Клиент", f"«{raw}»: карточек {len(people)}, заказов {len(orders)}, в памяти {len(notes)}")
     lines = []
     if people:
@@ -618,11 +877,16 @@ def _customer(ctx: Context, text: str) -> dict[str, Any] | None:
         line = f"{person.get('name')}"
         if person.get("phone"):
             line += f", {person['phone']}"
-        if person.get("orders") not in (None, ""):
-            line += f", заказов {person['orders']}"
-        if person.get("revenue") not in (None, ""):
-            line += f", выручка {_money(person['revenue'])}"
+        count = person.get("orders")
+        if count not in (None, ""):
+            line += f", {count} {plural(count, 'заказ', 'заказа', 'заказов')}"
+            if person.get("revenue") not in (None, "") and knowledge._num(person.get("revenue")):
+                line += f" на {_money(person['revenue'])}"
+        if person.get("last_order"):
+            line += f", последний {str(person['last_order'])[:10]}"
         lines.append(line + ".")
+        if len(people) > 1:
+            lines.append("Похожие: " + ", ".join(str(row.get("name")) for row in people[1:4]) + ".")
     active = [row for row in orders if row.get("status") != "done"]
     for row in active[:3]:
         lines.append(order_line(row) + ".")
@@ -664,12 +928,17 @@ def _reads(ctx: Context, text: str) -> dict[str, Any] | None:
         if not rows:
             return _answer(ctx, text, "Долгов нет — все заказы оплачены.", source="facts",
                            link={"title": "Финансы", "href": "/#finance"})
-        lines = [f"Должны {_money(debts.get('total'))} — {debts.get('count')} клиентов"
+        count = debts.get("count") or len(rows)
+        lines = [f"Должны {_money(debts.get('total'))} — {count} {plural(count, 'клиент', 'клиента', 'клиентов')}"
                  + (f", просрочено {_money(debts.get('overdue'))}" if knowledge._num(debts.get("overdue")) else "") + "."]
         for row in rows[:5]:
+            days = row.get("days")
+            age = ""
+            if days is not None:
+                age = ", с сегодняшнего дня" if int(knowledge._num(days)) == 0 else \
+                    f", {int(knowledge._num(days))} {plural(days, 'день', 'дня', 'дней')}"
             lines.append(f"• {row.get('customer') or 'клиент'} — {_money(row.get('debt'))}, заказ №{row.get('number') or '—'}"
-                         + (f", {row.get('days')} дн." if row.get("days") is not None else "")
-                         + (" — просрочен" if row.get("overdue") else ""))
+                         + age + (" — просрочен" if row.get("overdue") else ""))
         return _answer(ctx, text, "\n".join(lines), source="facts", link={"title": "Финансы", "href": "/#finance"})
     if re.search(r"(выручк|прибыл|доход|сколько (мы )?заработал|финанс|маржа)", low):
         ctx.step("rule", "Деньги", "учёт панели за 30 дней")
@@ -856,10 +1125,20 @@ def _converse(ctx: Context, text: str) -> dict[str, Any]:
     if found.get("answered"):
         return _answer(ctx, text, found["answer"], source="facts", facts=found.get("facts") or [],
                        warnings=[f"Модель недоступна: {reply.get('reason')}"])
-    return _answer(ctx, text, "Не могу ответить: " + str(reply.get("reason") or "модель недоступна")
-                   + ". Спросите про заказ, клиента, долги, печать или склад — это я знаю без модели.",
-                   kind="error", source="model",
-                   suggestions=["Что сейчас печатается?", "Кто должен денег?", "Что ты умеешь?"])
+    reason = str(reply.get("reason") or "модель недоступна")
+    off = "выключен" in reason.casefold()
+    ctx.step("model", "Разговор", "модель выключена в настройках" if off else f"модель не ответила: {reason}")
+    lines = ["Такое без модели я не разберу." if off else f"Модель сейчас не ответила ({reason}), а без неё такое я не разберу.",
+             "Зато знаю цех: станки, заказы, клиентов, долги, деньги, план и склад — и умею считать, "
+             "запоминать и открывать разделы панели."]
+    if off:
+        lines.append("Свободные вопросы заработают, когда в настройках помощника включите модель Ollama.")
+    return _answer(ctx, text, " ".join(lines), kind="clarify", source="rules", suggestions=suggestions_for(ctx),
+                   link={"title": "Настройки помощника", "href": "/#settings"} if off else None,
+                   warnings=[] if off else [f"Модель недоступна: {reason}"],
+                   # Явный признак для агента компьютера: панель фразу не поняла —
+                   # пусть решает он сам, а не показывает человеку этот запасной ответ.
+                   extra={"understood": False})
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +1155,8 @@ def chat(api: Any, text: str, session: str = "main", source: str = "panel", dele
         found = layer(ctx, clean)
         if found:
             return found
-    for layer in (_printer_command, _printer_status, _order_intents, _customer, _navigate, _reads, _knowledge_fast):
+    for layer in (_printer_command, _printer_status, _farm_overview, _order_intents, _customer, _navigate, _reads,
+                  _knowledge_fast):
         try:
             found = layer(ctx, clean)
         except Exception as exc:  # один сломанный сервис не роняет разговор

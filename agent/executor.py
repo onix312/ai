@@ -48,7 +48,7 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         chain = " → ".join(str(step.get("skill")) for step in skill["steps"])
         return f"{title}: {chain}"
     if name == "panel.do":
-        return f"{title}: {params.get('action') or 'действие не указано'}"
+        return f"{title}: {params.get('explain') or params.get('action') or 'действие не указано'}"
     if name == "files.to_order":
         return f"{title}: {pathlib.Path(str(params.get('path') or '')).name} → заказ «{params.get('order') or '—'}»"
     if name == "files.tidy_apply":
@@ -426,8 +426,12 @@ class Runner:
         result = self.panel.run_action(action, values, confirmed=confirmed)
         result["title_action"] = str(action.get("title") or action.get("id") or "")
         result["panel_confirm"] = confirmed
+        explain = " ".join(str(params.get("explain") or "").split())[:300]
+        result["target"] = explain or result["title_action"]
         if not confirmed:
             result["hint"] = "Действие чтения: выполнено без подтверждения"
+        elif explain and result.get("ok"):
+            result["hint"] = explain  # в журнал — что именно сделано словами панели, а не «готово»
         return result
 
     def _panel_ask(self, params: dict[str, Any]) -> dict[str, Any]:

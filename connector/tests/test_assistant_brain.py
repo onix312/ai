@@ -284,6 +284,151 @@ class ReadsAndNavigationTests(BrainTestCase):
         self.assertEqual(2400, summary["debts"]["total"])
 
 
+class LiveDialogTests(BrainTestCase):
+    """Фразы из живого прогона страницы в Chromium, где мозг без модели сдавался (18.21)."""
+
+    def test_plural_forms(self):
+        forms = ("клиент", "клиента", "клиентов")
+        self.assertEqual(["клиент", "клиента", "клиентов", "клиентов", "клиент", "клиентов", "клиента"],
+                         [brain.plural(n, *forms) for n in (1, 2, 5, 11, 21, 112, 1034)])
+        self.assertEqual("клиентов", brain.plural("не число", *forms))
+
+    def test_eta_label_crosses_midnight(self):
+        import datetime
+        now = datetime.datetime(2026, 9, 25, 22, 0)
+        self.assertEqual("около 23:30", brain.eta_label(90, now))
+        self.assertEqual("завтра около 01:00", brain.eta_label(180, now))
+
+    def test_minutes_label_is_exact_below_five_minutes(self):
+        from connector.printflow import assistant_knowledge as knowledge
+        self.assertEqual("3 мин", knowledge._minutes_label(3))
+        self.assertEqual("меньше минуты", knowledge._minutes_label(0.4))
+        self.assertEqual("1 ч 30 мин", knowledge._minutes_label(90))
+
+    def test_math_follow_up_uses_previous_result(self):
+        self.assertEqual("395", self.say("сколько будет 17*23+4")["reply"])
+        self.assertEqual("395 ÷ 5 = 79", self.say("а если поделить на 5?")["reply"])
+        self.assertEqual("79 × 2 = 158", self.say("а умножить на два")["reply"])
+        self.assertEqual("158 + 10 = 168", self.say("плюс 10")["reply"])
+        zero = self.say("раздели на 0")
+        self.assertEqual("На ноль делить нельзя.", zero["reply"])
+        self.assertEqual("168 − 8 = 160", self.say("а если отнять 8")["reply"])
+        self.assertEqual("15% от 160 = 24", self.say("а 15% от этого")["reply"])
+        self.assertEqual("24 ÷ 0,5 = 48", self.say("подели на 0,5")["reply"])
+
+    def test_math_follow_up_needs_a_previous_result(self):
+        answer = self.say("подели на 5")
+        self.assertNotEqual("math", answer["source"])
+
+    def test_farm_overview_lists_every_printer_with_finish_time(self):
+        answer = self.say("как дела на ферме?")
+        self.assertEqual("farm", answer["source"])
+        self.assertIn("Печатают 2 из 3", answer["reply"])
+        self.assertIn("Альфа — печатает «Ваза», 40%, осталось ~1 ч 30 мин (закончит около", answer["reply"])
+        self.assertIn("Гамма — на паузе «Кашпо»", answer["reply"])
+        self.assertIn("Следующим в очереди: «Подставка»", answer["reply"])
+        self.assertIn("Продолжи печать", answer["suggestions"])
+        for phrase in ("что там со станками", "статус фермы", "как там принтеры?", "что происходит в цеху"):
+            self.assertEqual("farm", self.say(phrase)["source"], phrase)
+
+    def test_how_are_you_and_who_are_you(self):
+        self.assertIn("Печатают 2 из 3", self.say("как дела?")["reply"])
+        self.assertIn("NOZZA", self.say("кто ты?")["reply"])
+
+    def test_remaining_time_follows_pronoun(self):
+        self.say("что с Альфой?")
+        answer = self.say("сколько ему осталось?")
+        self.assertRegex(answer["reply"], r"^Альфа «Ваза»: 40%, осталось ~1 ч 30 мин, закончит около \d{2}:\d{2}\.$")
+        self.assertEqual("p1", answer["entities"]["printer"]["id"])
+        self.say("что с Гаммой?")
+        paused = self.say("когда он закончит?")
+        self.assertIn("Гамма на паузе «Кашпо» на 40% — после продолжения останется ~1 ч 30 мин", paused["reply"])
+
+    def test_remaining_without_context_answers_for_every_busy_printer(self):
+        answer = self.say("сколько осталось печатать?")
+        for name in ("Альфа", "Бета", "Гамма"):
+            self.assertIn(name, answer["reply"])
+
+    def test_remaining_plastic_is_not_hijacked(self):
+        answer = self.say("сколько осталось пластика?")
+        self.assertNotIn("закончит около", answer["reply"])
+
+    def test_single_idle_printer_phrases(self):
+        self.api.manager = FakeManager(states=("IDLE", "IDLE"))
+        self.assertIn("Все 2 станка свободны", self.say("привет")["reply"])
+        self.api.manager = FakeManager(states=("RUNNING",))
+        self.assertIn("Альфа печатает «Ваза», 40%", self.say("привет")["reply"])
+        self.assertEqual("printer_command", self.say("поставь его на паузу")["action"]["id"])
+
+    def test_customer_card_from_natural_phrases(self):
+        self.api.repo.save_customer({"name": "Иван Петров", "phone": "+7 900 000-00-02"})
+        self.api.repo.save_customer({"name": "Николай", "phone": "+7 900 000-00-03"})
+        memory.remember(self.db, "PETG берём только у Ивана с Садовой")
+        for phrase in ("расскажи про Ивана", "расскажи про ивана", "что ты знаешь об Иване?", "клиент иван"):
+            answer = self.say(phrase)
+            self.assertIn("Иван Петров", answer["reply"], phrase)
+            self.assertEqual("Иван Петров", answer["entities"]["customer"]["name"], phrase)
+        self.assertIn("Помню: PETG берём только у Ивана с Садовой", self.say("расскажи про Ивана")["reply"])
+        self.assertTrue(brain._name_match("иван", "Иван (демо)"))
+        self.assertFalse(brain._name_match("ол", "Николай"))
+        self.assertNotEqual("entity", self.say("расскажи про печать")["source"])
+
+    def test_command_that_does_not_fit_printer_state_is_explained_not_proposed(self):
+        self.say("что с Гаммой?")  # Гамма на паузе
+        answer = self.say("поставь его на паузу")
+        self.assertIsNone(answer["action"])
+        self.assertEqual("Гамма сейчас на паузе — ставить на паузу нечего.", answer["reply"])
+        answer = self.say("продолжи печать на Альфе")
+        self.assertIsNone(answer["action"])
+        self.assertEqual("Альфа сейчас печатает — продолжать нечего.", answer["reply"])
+
+    def test_bare_pause_with_idle_farm(self):
+        self.api.manager = FakeManager(states=("IDLE", "IDLE"))
+        answer = self.say("пауза")
+        self.assertEqual("clarify", answer["kind"])
+        self.assertIn("Станки сейчас не печатают — ставить на паузу нечего", answer["reply"])
+        self.db.set_settings({"assistant_agent_enabled": True})
+        reply = {"ok": True, "handled": True, "kind": "action", "reply": "Пауза.", "skill": "system.media"}
+        with patch.object(assistant, "agent_chat", return_value=reply) as agent:
+            answer = self.say("пауза")
+        agent.assert_called_once()  # агент включён — музыка на компьютере
+        self.assertEqual("pc", answer["kind"])
+
+    def test_unknown_online_flag_is_not_offline(self):
+        class Snap(FakeManager):
+            def __init__(self, online):
+                super().__init__(states=("IDLE", "IDLE"))
+                self.online = online
+
+            def snapshot(self):
+                snap = super().snapshot()
+                for row in snap["printers"]:
+                    row["printer"]["online"] = self.online
+                return snap
+
+        self.api.manager = Snap(None)  # виртуальный станок присылает online: None
+        self.assertNotIn("не на связи", self.say("как дела на ферме?")["reply"])
+        self.api.manager = Snap(False)
+        self.assertIn("не на связи", self.say("как дела на ферме?")["reply"])
+
+    def test_debts_use_plural_and_days(self):
+        reply = self.say("кто нам должен?")["reply"]
+        self.assertIn("Должны 2 400 ₽ — 1 клиент.", reply)
+        self.assertIn("3 дня", reply)
+
+    def test_unknown_phrase_without_model_is_help_not_error(self):
+        answer = self.say("бла бла квазимодо")
+        self.assertEqual("clarify", answer["kind"])
+        self.assertTrue(answer["ok"])
+        self.assertIn("без модели", answer["reply"])
+        self.assertNotIn("Помощник выключен", answer["reply"])
+        self.assertEqual("/#settings", answer["link"]["href"])
+        self.assertIn("Кто должен денег?", answer["suggestions"])
+        # Агент компьютера по этому признаку не показывает запасной ответ панели как свой.
+        self.assertIs(False, answer["understood"])
+        self.assertNotIn("understood", self.say("который час"))
+
+
 class ComputerDelegationTests(BrainTestCase):
     def test_pc_command_with_agent_disabled_is_honest(self):
         answer = self.say("громкость 30")

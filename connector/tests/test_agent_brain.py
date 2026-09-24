@@ -279,9 +279,11 @@ class FakeAgent:
     def __init__(self, store):
         self.runner = executor.Runner(store=store, panel=Client(DEAD_PANEL))
         self.calls = []
+        self.asks = []
 
-    def run_skill(self, name, params):
+    def run_skill(self, name, params, ask=True):
         self.calls.append((name, params))
+        self.asks.append(ask)
         skill = skills.get(name)
         if skill and skills.confirm_required(skill):
             return {"ok": True, "queued": True, "id": "abc", "text": executor.describe(skill, params)}
@@ -345,6 +347,252 @@ class BrainChatTests(unittest.TestCase):
         self.assertEqual(("system.volume", {"level": 30}), (result["plan"]["skill"], result["plan"]["params"]))
         self.assertEqual("voice.command", result["skill"])
         self.assertEqual([], self.agent.calls, "разбор команды ничего не исполняет")
+
+
+class FakePanel:
+    """Панель цеха без сети: заранее заданные ответы мозга панели и сводка."""
+
+    url = "http://127.0.0.1:8765"
+
+    def __init__(self, answer=None, context=None):
+        self.answer = answer
+        self.summary = context if context is not None else {"ok": False, "reason": "панель недоступна"}
+        self.calls = []
+
+    def chat(self, text, session="agent", source="agent"):
+        self.calls.append((text, session, source))
+        return dict(self.answer) if self.answer is not None else {"ok": False, "reason": "панель недоступна"}
+
+    def context(self):
+        return dict(self.summary)
+
+    def clear_dialog(self, session):
+        return {"ok": True}
+
+
+_NO_MODEL = {"ok": False, "reason": "[Errno 111] Connection refused — ollama serve", "model": ""}
+
+
+class SmallTalkAndMathTests(unittest.TestCase):
+    def test_small_talk_kinds(self):
+        cases = {"Привет!": "greet", "привет, как дела?": "greet", "Добрый день": "greet", "как дела?": "how",
+                 "Как ты?": "how", "кто ты?": "who", "Спасибо": "thanks", "спасибо большое": "thanks",
+                 "пока": "bye", "как дела на ферме": "", "открой блокнот": "", "спасибо, открой блокнот": ""}
+        for phrase, kind in cases.items():
+            self.assertEqual(kind, brain.small_talk(phrase), phrase)
+
+    def test_math_follow_up_uses_previous_number(self):
+        self.assertEqual(("395 ÷ 5 = 79", 79.0), brain.math_follow_up("а если поделить на 5?", 395.0))
+        self.assertEqual("79 × 3 = 237", brain.math_follow_up("умножь на три", 79.0)[0])
+        self.assertEqual("10 + 5 = 15", brain.math_follow_up("прибавь ещё 5", 10.0)[0])
+        self.assertEqual("10 − 2,5 = 7,5", brain.math_follow_up("отними 2,5", 10.0)[0])
+        self.assertEqual("15% от 200 = 30", brain.math_follow_up("15% от этого", 200.0)[0])
+        self.assertEqual("12² = 144", brain.math_follow_up("а в квадрате?", 12.0)[0])
+        self.assertEqual("9 ÷ 2 = 4,5", brain.math_follow_up("раздели пополам", 9.0)[0])
+        self.assertEqual(("На ноль делить нельзя.", None), brain.math_follow_up("раздели на 0", 9.0))
+        self.assertEqual(("", None), brain.math_follow_up("прибавь громкость", 9.0))
+        self.assertEqual(("", None), brain.math_follow_up("поделить на 5", None))
+        self.assertEqual(("17*23+4 = 395", 395.0), brain.math_value("17*23+4"))
+        self.assertEqual("17*23+4 = 395", brain.math_answer("посчитай 17*23+4"))
+
+
+class BrainPanelTests(unittest.TestCase):
+    """Слой «спросить панель цеха» и разговор — с панелью-заглушкой, без сети и модели."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.store = Store(pathlib.Path(self._tmp.name) / "a.sqlite3")
+        self.agent = FakeAgent(self.store)
+        self.panel = FakePanel()
+        self.agent.runner.panel = self.panel
+        self.brain = brain.Brain(self.agent, clock=lambda: datetime.datetime(2026, 9, 24, 9, 30))
+        self._model = patch.object(model, "status", return_value=dict(_NO_MODEL))
+        self._model.start()
+
+    def tearDown(self):
+        self._model.stop()
+        self.store.close()
+        self._tmp.cleanup()
+
+    def test_math_chain_keeps_the_number_between_turns(self):
+        first = self.brain.chat("17*23+4")
+        self.assertEqual(("17*23+4 = 395", "math", 395.0), (first["reply"], first["source"], first["target"]["number"]))
+        self.assertEqual("395 ÷ 5 = 79", self.brain.chat("а если поделить на 5?")["reply"])
+        self.assertEqual("79 × 2 = 158", self.brain.chat("умножь на 2")["reply"])
+        self.brain.chat("который час")
+        self.assertNotIn("×", self.brain.chat("умножь на 2")["reply"], "без числа в прошлом ответе это не арифметика")
+
+    def test_greeting_uses_panel_summary_and_owner_name(self):
+        self.panel.summary = {"ok": True, "farm": "Альфа печатает «Кашпо», 40%.", "owner": ""}
+        self.brain.chat("меня зовут Олег")
+        answer = self.brain.chat("Привет!")
+        self.assertEqual(("Привет, Олег! Альфа печатает «Кашпо», 40%.", "talk"), (answer["reply"], answer["source"]))
+        self.assertIn("Что сейчас печатается?", answer["suggestions"])
+        self.assertEqual([], self.panel.calls, "приветствие не пишет в разговор панели")
+
+    def test_greeting_without_panel_is_honest(self):
+        answer = self.brain.chat("здравствуйте")
+        self.assertTrue(answer["reply"].startswith("Привет!"))
+        self.assertIn("Панель цеха сейчас не отвечает", answer["reply"])
+        self.assertIn("NOZZA", self.brain.chat("кто ты?")["reply"])
+        self.assertEqual("Пожалуйста! Обращайтесь.", self.brain.chat("спасибо")["reply"])
+
+    def test_workshop_question_is_answered_by_panel(self):
+        self.panel.answer = {"ok": True, "kind": "answer", "source": "facts", "reply": "Должны 2 400 ₽ — 1 клиент.",
+                             "suggestions": ["Кто должен больше всех?"], "steps": [{"title": "Долги", "detail": "база"}],
+                             "link": {"title": "Финансы", "href": "/#finance"}}
+        answer = self.brain.chat("кто нам должен?")
+        self.assertEqual(("Должны 2 400 ₽ — 1 клиент.", "panel", "answer"),
+                         (answer["reply"], answer["source"], answer["kind"]))
+        self.assertEqual({"title": "Финансы", "href": "http://127.0.0.1:8765/#finance"}, answer["link"])
+        self.assertEqual(["Кто должен больше всех?"], answer["suggestions"])
+        self.assertEqual([("кто нам должен?", "agent-main", "agent")], self.panel.calls)
+        self.assertIn("Панель: Долги", [step["title"] for step in answer["steps"]])
+        self.assertTrue(answer["panel_asked"])
+
+    def test_panel_fallback_is_not_passed_off_as_an_answer(self):
+        self.panel.answer = {"ok": True, "kind": "clarify", "source": "rules", "understood": False,
+                             "reply": "Такое без модели я не разберу. Зато знаю цех…"}
+        answer = self.brain.chat("бла бла квазимодо")
+        self.assertEqual(("clarify", "rules"), (answer["kind"], answer["source"]))
+        self.assertIn("без модели", answer["reply"])
+        self.assertNotIn("Errno", answer["reply"], "техническая причина — в ходе мысли, не в ответе")
+        self.assertNotIn("ollama serve", answer["reply"])
+        self.assertIn("Errno", " ".join(str(step.get("detail")) for step in answer["steps"]))
+
+    def test_silent_panel_on_workshop_question_is_named(self):
+        answer = self.brain.chat("что печатает альфа")
+        self.assertEqual("clarify", answer["kind"])
+        self.assertIn("панели цеха, а она сейчас не отвечает", answer["reply"])
+
+    def test_panel_action_becomes_confirm_card_in_agent(self):
+        self.panel.answer = {"ok": True, "kind": "action", "source": "entity",
+                             "reply": "Поставить на паузу: Альфа — «Кашпо». Подтвердите в карточке.",
+                             "action": {"id": "printer_command", "title": "Команда станку"},
+                             "params": {"printer_id": "a1", "command": "pause"}}
+        with patch.dict(self.agent.runner._caps, {"panel": True}):
+            answer = self.brain.chat("поставь альфу на паузу", session="window")
+        self.assertEqual(("pending", "panel"), (answer["kind"], answer["source"]))
+        name, params = self.agent.calls[-1]
+        self.assertEqual("panel.do", name)
+        self.assertEqual({"action": "printer_command", "params": {"printer_id": "a1", "command": "pause"},
+                          "explain": "Поставить на паузу: Альфа — «Кашпо»"}, params)
+        self.assertIn("Поставить на паузу: Альфа", answer["pending"]["text"])
+        self.assertIs(False, self.agent.asks[-1], "в окне агента подтверждает карточка, без всплывающего окна")
+        clean, errors = skills.check_params(skills.get("panel.do"), params)
+        self.assertEqual([], errors, "пояснение — объявленный необязательный параметр")
+        self.assertEqual("Действие в панели: Поставить на паузу: Альфа — «Кашпо»",
+                         executor.describe(skills.get("panel.do"), clean))
+
+    def test_other_sessions_keep_the_confirmation_popup(self):
+        with patch.dict(self.agent.runner._caps, {"windows": True}):
+            self.brain.chat("закрой блокнот", session="voice")
+            self.assertIs(True, self.agent.asks[-1])
+            self.brain.chat("закрой блокнот", session="window")
+            self.assertIs(False, self.agent.asks[-1])
+
+    def test_navigation_opens_panel_section_or_gives_a_link(self):
+        self.panel.answer = {"ok": True, "kind": "navigate", "source": "rules", "reply": "Открываю раздел «Заказы».",
+                             "link": {"title": "Заказы", "href": "/#orders"}}
+        with patch.object(pc, "open_url", return_value=(False, "Нет рабочего стола")) as opener:
+            answer = self.brain.chat("открой заказы")
+        opener.assert_called_once_with("http://127.0.0.1:8765/#orders")
+        self.assertEqual("Раздел «Заказы» — в панели цеха: ссылка ниже.", answer["reply"])
+        self.assertEqual("http://127.0.0.1:8765/#orders", answer["link"]["href"])
+        with patch.object(pc, "open_url", return_value=(True, "")):
+            self.assertEqual("Открыл в браузере раздел «Заказы» панели цеха.", self.brain.chat("открой заказы")["reply"])
+        last = self.store.dialog("main", 1)[-1]
+        self.assertEqual("http://127.0.0.1:8765/#orders", last["meta"]["link"]["href"], "ссылка переживает перезагрузку окна")
+        self.assertEqual("panel", last["meta"]["source"])
+
+    def test_foreign_links_from_panel_are_dropped(self):
+        for href in ("javascript:alert(1)", "//evil.example/x", "https://evil.example/"):
+            self.panel.answer = {"ok": True, "kind": "answer", "source": "facts", "reply": "Готово.",
+                                 "link": {"title": "Ссылка", "href": href}}
+            self.assertNotIn("link", self.brain.chat("какая выручка за неделю"), href)
+
+    def test_recall_miss_asks_the_panel(self):
+        self.panel.answer = {"ok": True, "kind": "answer", "source": "entity",
+                             "reply": "Иванов: 3 заказа на 2 300 ₽, последний 21 сентября."}
+        answer = self.brain.chat("что ты знаешь про Иванова")
+        self.assertEqual(("panel", "Иванов: 3 заказа на 2 300 ₽, последний 21 сентября."),
+                         (answer["source"], answer["reply"]))
+        self.brain.chat("запомни, что Мария любит PETG")
+        self.assertEqual("memory", self.brain.chat("что ты помнишь про Марию")["source"], "своя память — первой")
+
+    def test_follow_up_after_panel_answer_goes_to_panel_even_with_model(self):
+        self.panel.answer = {"ok": True, "kind": "answer", "source": "entity", "reply": "Альфа: 40%, осталось ~1 ч."}
+        self.brain.chat("что печатает альфа")
+        with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \
+                patch.object(model, "chat") as thinker:
+            answer = self.brain.chat("а у второй?")
+        self.assertEqual("panel", answer["source"])
+        thinker.assert_not_called()
+        self.assertEqual(2, len(self.panel.calls))
+
+    def test_general_question_with_model_skips_the_panel(self):
+        with patch.object(model, "status", return_value={"ok": True, "model": "qwen2.5:3b", "reason": ""}), \
+                patch.object(model, "chat", return_value={"ok": True, "text": json.dumps(
+                    {"reply": "Могу рассказать про станки или компьютер."}), "model": "qwen2.5:3b"}):
+            answer = self.brain.chat("расскажи что-нибудь интересное")
+        self.assertEqual("model", answer["source"])
+        self.assertEqual([], self.panel.calls)
+
+    def test_voice_does_not_ask_the_panel_twice(self):
+        agent = server.Agent()
+        agent._runner = self.agent.runner
+        with patch.object(agent, "chat", return_value={"kind": "clarify", "reply": "Не понял.", "panel_asked": True}), \
+                patch.object(self.panel, "chat") as asked, patch.object(pc, "speak"):
+            agent.capabilities = {"speech_out": False}
+            agent.voice_phrase("бла бла")
+        asked.assert_not_called()
+
+
+class ConfirmInWindowTests(unittest.TestCase):
+    """Окно агента подтверждает карточкой: без всплывающего окна, со сроком ожидания."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.agent = server.Agent()
+        self.agent._runner = executor.Runner(store=Store(pathlib.Path(self._tmp.name) / "a.sqlite3"),
+                                             panel=Client(DEAD_PANEL))
+
+    def tearDown(self):
+        self.agent._runner.store.close()
+        self._tmp.cleanup()
+
+    def test_window_action_waits_for_the_card_not_a_popup(self):
+        with patch.object(self.agent, "_ask") as popup:
+            queued = self.agent.queue_action("skill", {"name": "panel.do", "params": {"action": "x"}}, ask=False)
+            popup.assert_not_called()
+            self.assertEqual((True, True, 60), (queued["ok"], queued["queued"], queued["ttl"]))
+            waiting = {row["id"]: row for row in self.agent.pending()}
+            self.assertIn(queued["id"], waiting)
+            row = waiting[queued["id"]]
+            self.assertAlmostEqual(row["created_at"] + 60, row["expires_at"], places=3)
+            self.agent.queue_action("skill", {"name": "panel.do", "params": {"action": "x"}})
+        self.assertTrue(popup.called, "голос и панель по-прежнему спрашивают всплывающим окном")
+
+    def test_panel_action_is_journaled_in_panel_words(self):
+        class Catalog:
+            url = DEAD_PANEL
+
+            def find_action(self, action_id):
+                return {"id": action_id, "title": "Команда станку", "confirm": True}, ""
+
+            def run_action(self, action, values, confirmed=False):
+                return {"ok": True, "reason": "", "confirmed": confirmed, "values": values}
+
+        runner = self.agent._runner
+        runner.panel = Catalog()
+        with patch.dict(runner._caps, {"panel": True}):
+            result = runner.run("panel.do", {"action": "printer_command", "params": {"command": "pause"},
+                                             "explain": "Поставить на паузу: Альфа — «Кашпо»"}, confirmed=True)
+        self.assertTrue(result["ok"])
+        self.assertEqual("Поставить на паузу: Альфа — «Кашпо»", result["target"])
+        rows = self.agent.journal(5)["entries"]
+        self.assertEqual(("panel.do", "done", "Поставить на паузу: Альфа — «Кашпо»"),
+                         (rows[0]["skill"], rows[0]["outcome"], rows[0]["detail"]))
 
 
 class ExecutorRefusalTests(unittest.TestCase):

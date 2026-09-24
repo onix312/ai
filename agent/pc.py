@@ -1071,6 +1071,26 @@ def launch_plan(target: str, panel_url: str = "", roots: tuple[str, ...] = (),
                 + ", ".join(spec["title"] for spec in APPS.values()) + ", сайт по адресу или папку")
 
 
+def open_url(url: str) -> tuple[bool, str]:
+    """Открыть адрес (раздел панели цеха) в браузере по умолчанию.
+
+    Только http(s). Без рабочего стола (служба, контейнер, SSH) браузер не
+    запускаем вовсе: `webbrowser` там ищет текстовые браузеры и может занять
+    терминал — вместо этого окно покажет ссылку.
+    """
+    if not re.match(r"^https?://[^\s]+$", str(url or "")):
+        return False, "Это не адрес страницы"
+    try:
+        if IS_WINDOWS:
+            os.startfile(url)  # type: ignore[attr-defined]
+            return True, ""
+        if not IS_MAC and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return False, "Нет рабочего стола — открыть браузер негде"
+        return (True, "") if webbrowser.open(url) else (False, "Браузер не открылся")
+    except Exception as exc:  # noqa: BLE001 — причина уходит человеку
+        return False, f"Браузер не открылся: {exc.__class__.__name__}"
+
+
 def open_target(target: str, panel_url: str = "", roots: tuple[str, ...] = ()) -> tuple[dict[str, Any], str]:
     """Открыть программу, сайт или папку. Только белый список (см. `launch_plan`)."""
     plan, reason = launch_plan(target, panel_url, roots)

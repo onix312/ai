@@ -93,7 +93,7 @@ class Agent:
         """Голосовая петля (И311): команда компьютеру — здесь, вопрос цеха — панели; ответ вслух."""
         answer = self.chat(phrase, session="voice")
         reply = str(answer.get("reply") or "")
-        if answer.get("kind") in ("clarify", "error") and not answer.get("skill"):
+        if answer.get("kind") in ("clarify", "error") and not answer.get("skill") and not answer.get("panel_asked"):
             panel = self.runner.panel.chat(phrase, session="voice", source="voice")
             if panel.get("ok") and panel.get("reply"):
                 reply = str(panel["reply"])
@@ -142,7 +142,7 @@ class Agent:
         return {"ok": True, "armed": False, "reason": ""}
 
     # --- навыки ассистента (18.14) ----------------------------------------
-    def run_skill(self, name: str, params: Any = None) -> dict[str, Any]:
+    def run_skill(self, name: str, params: Any = None, ask: bool = True) -> dict[str, Any]:
         """Выполнить навык. Риск «write» и выше — через подтверждение человека.
 
         Порядок тот же, что для клика в чужом окне: навык с подтверждением не
@@ -161,7 +161,7 @@ class Agent:
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
         if skills.confirm_required(skill):
-            return self.queue_action("skill", {"name": key, "params": clean})
+            return self.queue_action("skill", {"name": key, "params": clean}, ask=ask)
         return runner.run(key, clean)
 
     def skills_payload(self) -> dict[str, Any]:
@@ -179,8 +179,14 @@ class Agent:
                 "stats": self.runner.store.stats()}
 
     # --- действия в чужих окнах -------------------------------------------
-    def queue_action(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Действие становится ожидающим: без человека оно не выполняется."""
+    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True) -> dict[str, Any]:
+        """Действие становится ожидающим: без человека оно не выполняется.
+
+        `ask=False` — просьба пришла из окна агента: там же карточка
+        «Подтвердить / Отменить», второе всплывающее окно не нужно. Без экрана
+        (служба, контейнер) всплывающее окно не открывается и отклоняет
+        действие сразу — поэтому для окна агента его не зовём вовсе.
+        """
         # Навык подтверждается так же, как клик, но управление окнами ему не
         # нужно: файлы и панель существуют и не в Windows.
         if kind != "skill" and not self.capabilities.get("windows"):
@@ -198,10 +204,11 @@ class Agent:
                 "text": _describe(kind, params, window),
             }
         self.state.last_action = f"ждёт подтверждения: {kind}"
-        threading.Thread(target=self._ask, args=(action_id,), daemon=True,
-                         name="agent-confirm").start()
+        if ask:
+            threading.Thread(target=self._ask, args=(action_id,), daemon=True,
+                             name="agent-confirm").start()
         return {"ok": True, "queued": True, "id": action_id, "reason": "",
-                "requires_confirmation": True,
+                "requires_confirmation": True, "ttl": int(PENDING_TTL_SEC),
                 "text": self._pending[action_id]["text"]}
 
     def confirm_action(self, action_id: str, confirmed: bool) -> dict[str, Any]:
@@ -235,7 +242,7 @@ class Agent:
     def pending(self) -> list[dict[str, Any]]:
         with self._lock:
             self._purge()
-            return [{key: value for key, value in action.items()}
+            return [{**action, "expires_at": float(action.get("created_at") or 0) + PENDING_TTL_SEC}
                     for action in self._pending.values()]
 
     def _purge(self) -> None:
@@ -294,6 +301,8 @@ def _describe(kind: str, params: dict[str, Any], window: str) -> str:
         name = str(params.get("name") or "")
         skill = skills.get(name) or {"name": name, "title": name}
         inner = params.get("params") if isinstance(params.get("params"), dict) else {}
+        if name == "panel.do" and inner.get("explain"):
+            return f"Панель цеха: {inner['explain']}"
         return f"Навык ассистента: {executor.describe(skill, inner)}"
     if kind == "click":
         return f"Клик в точке {params.get('x')}, {params.get('y')}{where}"
@@ -396,8 +405,13 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, agent.health())
         if path == "/capabilities":
-            return self._json(200, {"ok": True, "capabilities": agent.refresh_capabilities(),
-                                    "missing": capabilities.missing(agent.capabilities)})
+            caps = dict(agent.refresh_capabilities())
+            # Живые связи для шапки окна: панель цеха и модель (короткие пинги).
+            live = agent.runner.refresh_capabilities()
+            caps.update({key: live.get(key) for key in ("panel", "panel_reason", "model", "model_reason")
+                         if key in live})
+            return self._json(200, {"ok": True, "capabilities": caps, "missing": capabilities.missing(caps),
+                                    "panel_url": agent.runner.panel.url})
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
         if path == "/status":
@@ -484,8 +498,14 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/activate":
             return self._json(200, agent.queue_action("activate", body))
         if path == "/skill":
-            return self._json(200, agent.run_skill(str(body.get("name") or ""),
-                                                   body.get("params")))
+            name = str(body.get("name") or "")
+            # Ручной запуск из окна агента: подтверждение — карточкой во вкладке
+            # «Ждёт», без всплывающего окна. Панель и прочие вызовы — как раньше.
+            result = agent.run_skill(name, body.get("params"), ask=body.get("where") != "window")
+            if isinstance(result, dict) and not result.get("queued"):
+                key = str(result.get("skill") or name).strip().casefold()
+                result = {**result, "summary": brain_mod.summarize(key, result)}
+            return self._json(200, result)
         if path == "/action/confirm":
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
@@ -496,8 +516,11 @@ class AgentHandler(BaseHTTPRequestHandler):
                                               str(body.get("session") or "main"), mode, plan))
         if path == "/chat/clear":
             session = brain_mod.session_key(str(body.get("session") or "main"))
-            return self._json(200, {"ok": True, "session": session,
-                                    "cleared": agent.runner.store.clear_dialog(session)})
+            cleared = agent.runner.store.clear_dialog(session)
+            # Контекст «его / второй» живёт и в панели (сессия агента) — забываем вместе.
+            panel = agent.runner.panel.clear_dialog(brain_mod.panel_session(session))
+            return self._json(200, {"ok": True, "session": session, "cleared": cleared,
+                                    "panel_cleared": bool(panel.get("ok"))})
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")

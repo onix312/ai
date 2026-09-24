@@ -45,7 +45,7 @@ def open_window(address: str, title: str = "Помощник NOZZA",
             try:
                 window = webview.create_window(title, address,
                                                width=int(width), height=int(height),
-                                               resizable=True)
+                                               resizable=True, min_size=(420, 560))
                 webview.start(window)
             except Exception as exc:  # нет дисплея: служба Windows, SSH, контейнер
                 # Окно — удобный слой, а не обязательный: страница по тому же

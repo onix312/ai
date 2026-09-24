@@ -394,8 +394,8 @@ def _history_printing(history: list | None) -> bool:
 
 
 def _minutes_label(minutes: float) -> str:
-    minutes = max(0, int(_num(minutes)))
-    if minutes < 5:
+    minutes = max(0, int(round(_num(minutes))))
+    if minutes < 1:
         return "меньше минуты"
     if minutes < 60:
         return f"{minutes} мин"

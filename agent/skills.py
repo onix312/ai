@@ -116,9 +116,10 @@ SKILLS: dict[str, dict[str, Any]] = {
     "panel.do": {
         "title": "Действие в панели",
         "description": "Выполнить действие PrintFlow из каталога: чтение сразу, деньги и печать через подтверждение.",
-        "host": "panel", "risk": "write", "params": {"action": "text", "params": "object"},
+        "host": "panel", "risk": "write", "params": {"action": "text", "params": "object", "explain": "text"},
         "requires": ("panel",), "ideas": ("И137",),
-        "doc": "Адрес и метод берёт панель из своего каталога, а не из запроса.",
+        "doc": "Адрес и метод берёт панель из своего каталога, а не из запроса. `explain` — что именно будет "
+               "сделано словами панели («Поставить на паузу: P1S»): его видит человек в карточке подтверждения.",
     },
     "panel.ask": {
         "title": "Вопрос по фактам базы",
@@ -1134,7 +1135,7 @@ def check_params(skill: dict[str, Any], raw: Any) -> tuple[dict[str, Any], list[
 # Параметры, которые навык умеет домыслить сам (папка по умолчанию, предел
 # выдачи). Их отсутствие — не ошибка, а обычная работа: «индекс» без папки
 # индексирует то, что задано в настройках агента.
-_OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
+_OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params", "explain",
              "question", "query", "skill", "path", "order", "kind", "action",
              "city", "category", "max_price", "min_price", "enabled",
              "watch_id", "only_new", "thread", "intent", "topic", "tone",

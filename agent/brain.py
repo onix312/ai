@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import datetime
+import inspect
 import re
 import time
 from typing import Any, Callable
@@ -59,6 +60,10 @@ def normalize_phrase(text: str) -> str:
     clean = _LEAD_RE.sub("", clean, count=1)
     clean = _TAIL_RE.sub("", clean)
     return clean.strip()
+
+
+# Сессия окна агента (`/ui`): подтверждение там — карточкой в ленте.
+WINDOW_SESSION = "window"
 
 
 def session_key(raw: str) -> str:
@@ -119,25 +124,128 @@ def _evaluate(node: ast.AST) -> float:
     raise ValueError("не арифметика")
 
 
-def math_answer(text: str) -> str:
-    """Арифметика без модели: «2+2», «посчитай 15*3.5». Только числа и знаки."""
+def _fmt_number(value: float) -> str:
+    value = round(float(value), 6)
+    return str(int(value)) if value.is_integer() else str(value).replace(".", ",")
+
+
+def math_value(text: str) -> tuple[str, float | None]:
+    """Арифметика без модели и её значение — чтобы понять «а если поделить на 5?»."""
     match = _MATH_RE.match(normalize_phrase(text).casefold())
     if not match:
-        return ""
+        return "", None
     raw = match.group(1).replace("×", "*").replace("÷", "/").replace("x", "*").replace(",", ".")
     if not re.search(r"\d", raw) or not re.search(r"[+\-*/]", raw) or len(raw) > 60:
-        return ""
+        return "", None
     try:
         value = _evaluate(ast.parse(raw.strip(), mode="eval"))
     except ZeroDivisionError:
-        return "На ноль делить нельзя."
+        return "На ноль делить нельзя.", None
     except (SyntaxError, ValueError, OverflowError, TypeError):
-        return ""
-    if isinstance(value, float):
-        value = round(value, 6)
-        if value.is_integer():
-            value = int(value)
-    return f"{match.group(1).strip()} = {str(value).replace('.', ',')}"
+        return "", None
+    return f"{match.group(1).strip()} = {_fmt_number(value)}", float(value)
+
+
+def math_answer(text: str) -> str:
+    """Арифметика без модели: «2+2», «посчитай 15*3.5». Только числа и знаки."""
+    return math_value(text)[0]
+
+
+_NUMBER_WORDS = {"ноль": 0, "один": 1, "одну": 1, "одна": 1, "два": 2, "две": 2, "три": 3, "четыре": 4,
+                 "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "двадцать": 20,
+                 "тридцать": 30, "сорок": 40, "пятьдесят": 50, "сто": 100, "двести": 200, "тысячу": 1000,
+                 "тысяча": 1000}
+_FOLLOW_NUM = r"(?P<n>-?\d+(?:[.,]\d+)?|[а-я]+)"
+_FOLLOW_FILL = r"(?:(?:это|его|результат|число|к\s+этому|от\s+этого|еще)\s+)*"
+_FOLLOW_OPS = (("/", r"(?:по|раз)?дел\w*"), ("*", r"(?:у|по)?множ\w*"), ("+", r"прибав\w*|добав\w*|плюс"),
+               ("-", r"отним\w*|отня\w*|вычт\w*|вычес\w*|минус"))
+_SIGNS = {"/": "÷", "*": "×", "+": "+", "-": "−"}
+
+
+def math_follow_up(text: str, number: float | None) -> tuple[str, float | None]:
+    """«А если поделить на 5?», «умножь на 3», «15% от этого» — действие над прошлым результатом.
+
+    Срабатывает только сразу после ответа-числа: агент хранит его в метке
+    реплики (`target.number`), а не угадывает, о каком числе речь.
+    """
+    if number is None:
+        return "", None
+    low = normalize_phrase(text).casefold().rstrip("?!. ")
+    low = re.sub(r"^(?:(?:а|и|теперь|тогда|если|ну)\s+)+", "", low)
+    prev = _fmt_number(number)
+    if re.fullmatch(r"(?:это\s+|его\s+)?(?:в\s+квадрат\w*|возвед\w*\s+(?:это\s+|его\s+)?в\s+квадрат)", low):
+        value = number * number
+        return (f"{prev}² = {_fmt_number(value)}", value) if abs(value) < 1e15 else ("", None)
+    if re.fullmatch(r"(?:(?:раз|по)?дели\w*\s+)?(?:это\s+|его\s+)?пополам", low):
+        return f"{prev} ÷ 2 = {_fmt_number(number / 2)}", number / 2
+    match = re.fullmatch(r"(?P<p>\d+(?:[.,]\d+)?)\s*(?:%|процент\w*)(?:\s+от\s+(?:этого|него|результата|числа|суммы))?",
+                         low)
+    if match:
+        percent = float(match.group("p").replace(",", "."))
+        value = number * percent / 100
+        return f"{_fmt_number(percent)}% от {prev} = {_fmt_number(value)}", value
+    for op, verbs in _FOLLOW_OPS:
+        match = re.fullmatch(rf"(?:{verbs})\s+{_FOLLOW_FILL}(?:на\s+)?{_FOLLOW_NUM}", low)
+        if not match:
+            continue
+        raw = match.group("n").replace(",", ".")
+        other = float(raw) if re.fullmatch(r"-?\d+(?:\.\d+)?", raw) else _NUMBER_WORDS.get(raw)
+        if other is None:
+            return "", None
+        if op == "/" and float(other) == 0:
+            return "На ноль делить нельзя.", None
+        value = {"/": lambda: number / other, "*": lambda: number * other,
+                 "+": lambda: number + other, "-": lambda: number - other}[op]()
+        if abs(value) > 1e15:
+            return "", None
+        return f"{prev} {_SIGNS[op]} {_fmt_number(other)} = {_fmt_number(value)}", value
+    return "", None
+
+
+# ---------------------------------------------------------------------------
+# 1б. Разговор: привет, как дела, кто ты, спасибо, пока
+# ---------------------------------------------------------------------------
+
+_TALK = (
+    ("greet", re.compile(r"^(?:привет\w*|здравствуй\w*|здрасьте|здорово|добрый\s+(?:день|вечер)|доброй\s+ночи|хай|"
+                         r"хелло|hello|hi|hey|салют|приветствую)(?:[\s,!]+(?:как\s+(?:у\s+тебя\s+)?дела|как\s+ты))?$")),
+    ("how", re.compile(r"^(?:как\s+(?:у\s+тебя\s+|твои\s+)?(?:дела|делишки|жизнь|поживаешь|ты|сам|настроение)"
+                       r"(?:\s+там)?|как\s+ты\s+там|что\s+нового|как\s+обстановка|все\s+в\s+порядке)$")),
+    ("who", re.compile(r"^(?:кто\s+ты(?:\s+такой|\s+такая)?|ты\s+кто(?:\s+такой)?|что\s+ты\s+такое|как\s+тебя\s+зовут|"
+                       r"представься|расскажи\s+о\s+себе)$")),
+    ("thanks", re.compile(r"^(?:спасибо|благодарю|спс|пасиб\w*|thanks|thank\s+you|thx|сенкс|мерси)"
+                          r"(?:\s+(?:большое|огромное|тебе|вам))*$")),
+    ("bye", re.compile(r"^(?:пока|до\s+свидания|до\s+завтра|до\s+встречи|спокойной\s+ночи|бывай|увидимся)$")),
+)
+
+
+def small_talk(text: str) -> str:
+    """Вид реплики без команды: greet / how / who / thanks / bye — или пусто.
+
+    Проверяется и сырая фраза: `normalize_phrase` срезает хвостовое «спасибо»
+    как вежливость, а здесь «спасибо» — вся реплика.
+    """
+    raw = " ".join(str(text or "").casefold().replace("ё", "е").split()).strip(" .!?,")
+    for candidate in (raw, normalize_phrase(text).casefold().strip(" .!?,")):
+        for kind, pattern in _TALK:
+            if candidate and pattern.match(candidate):
+                return kind
+    return ""
+
+
+# Вопросы, на которые отвечает панель цеха, а не компьютер: станки, заказы,
+# деньги, склад. Шире `_WORKSHOP_WORDS`, который лишь не даёт правилам
+# компьютера перехватить фразу про печать.
+_PANEL_WORDS = _WORKSHOP_WORDS + ("ферм", "деньг", "выручк", "прибыл", "расход", "склад", "остат", "брифинг",
+                                  "итог", "план ", "должн", "задолж", "оплат", "продаж", "материал", "филамент",
+                                  "petg", "pla", "abs", "осталось", "закончит", "прогресс")
+_PANEL_SOURCES = {"farm": "парк", "entity": "база цеха", "facts": "факты базы", "knowledge": "база", "math": "арифметика",
+                  "clock": "часы", "memory": "память панели", "model": "модель панели", "rules": "правила панели"}
+
+
+def panel_session(session: str) -> str:
+    """Сессия агента в панели: контекст «его / второй» у окна агента свой, не общий с панелью."""
+    return session_key(f"agent-{session}")
 
 
 # ---------------------------------------------------------------------------
@@ -634,6 +742,7 @@ class Brain:
     def __init__(self, agent: Any, clock: Callable[[], datetime.datetime] | None = None) -> None:
         self.agent = agent
         self.clock = clock or datetime.datetime.now
+        self._panel_down = False  # последний вопрос панели остался без ответа (для честного «панель молчит»)
 
     # --- доступ к агенту ------------------------------------------------
     @property
@@ -644,9 +753,16 @@ class Brain:
     def store(self) -> Any:
         return self.runner.store
 
-    def _run(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
+    def _run(self, name: str, params: dict[str, Any], popup: bool = True) -> dict[str, Any]:
+        """Навык через агента: запись и системное — через подтверждение человека.
+
+        `popup=False` — разговор идёт в окне агента, подтверждение там же
+        карточкой; всплывающее окно подтверждения не нужно.
+        """
         run = getattr(self.agent, "run_skill", None)
         if callable(run):
+            if not popup and "ask" in inspect.signature(run).parameters:
+                return run(name, params, ask=False)
             return run(name, params)
         return self.runner.run(name, params)
 
@@ -674,11 +790,25 @@ class Brain:
                 "план панели"), history, steps, started, source="panel")
 
         if mode != "pc":
-            answer = clock_answer(clean, self.clock()) or math_answer(clean)
+            answer = clock_answer(clean, self.clock())
             if answer:
-                steps.append({"kind": "rule", "title": "Часы и арифметика", "detail": "без модели"})
+                steps.append({"kind": "rule", "title": "Часы и календарь", "detail": "без модели"})
                 return self._reply(session, clean, answer, kind="answer", source="clock",
                                    steps=steps, started=started)
+            answer, value = math_value(clean)
+            if answer:
+                steps.append({"kind": "rule", "title": "Арифметика", "detail": "посчитал сам, без модели"})
+            else:
+                answer, value = math_follow_up(clean, self._last_number(history))
+                if answer:
+                    steps.append({"kind": "context", "title": "Понял по прошлой реплике",
+                                  "detail": "действие над прошлым результатом"})
+            if answer:
+                return self._reply(session, clean, answer, kind="answer", source="math", steps=steps, started=started,
+                                   target={"number": value} if value is not None else None)
+            talk = small_talk(clean)
+            if talk:
+                return self._small_talk(session, clean, talk, steps, started)
             if re.search(r"что ты умеешь|что умеешь|^помощь$|^help$|твои навыки|список навыков|чем (ты )?можешь помочь",
                          clean.casefold()):
                 steps.append({"kind": "rule", "title": "Реестр навыков", "detail": "готовые навыки"})
@@ -688,6 +818,11 @@ class Brain:
             memory_reply = self._memory(clean)
             if memory_reply:
                 steps.append({"kind": "memory", "title": "Память", "detail": memory_reply["op"]})
+                if memory_reply["op"] == "recall" and memory_reply.get("payload") and not memory_reply.get("rows"):
+                    # «Что ты знаешь про Иванова»: в памяти пусто — может, это клиент или станок цеха.
+                    known = self._ask_panel(session, clean, steps, started)
+                    if known:
+                        return known
                 return self._reply(session, clean, memory_reply["text"], kind="memory", source="memory",
                                    steps=steps, started=started, extra={"memory": memory_reply.get("rows", [])})
 
@@ -707,7 +842,128 @@ class Brain:
         if mode == "pc":
             return self._reply(session, clean, "", kind="skip", handled=False, steps=steps,
                                started=started, save=False)
-        return self._think(session, clean, history, steps, started)
+        # Вопрос не про компьютер. Про цех (или продолжение разговора с панелью)
+        # и всегда, когда своей модели нет, — сначала мозг панели: у него база
+        # станков, заказов и денег. Иначе своя модель выберет навык сама
+        # (среди них и `panel.ask`), не тратя время на второй мозг.
+        state = model.status()
+        last = history[-1] if history and history[-1].get("role") == "assistant" else {}
+        workshop = any(word in f"{clean.casefold()} " for word in _PANEL_WORDS)
+        if workshop or not state.get("ok") or (last.get("meta") or {}).get("source") == "panel":
+            answer = self._ask_panel(session, clean, steps, started)
+            if answer:
+                return answer
+        return self._think(session, clean, history, steps, started, state=state, workshop=workshop)
+
+    # --- разговор -----------------------------------------------------------
+    def _owner_name(self) -> str:
+        try:
+            rows = self.store.memories(5, kind="profile")
+        except Exception:
+            return ""
+        row = next((row for row in rows if row.get("subject") == "имя"), None)
+        return row["text"].replace("Владельца зовут", "").strip() if row else ""
+
+    @staticmethod
+    def _last_number(history: list[dict[str, Any]]) -> float | None:
+        """Число из прошлого ответа агента (арифметика) — для «а если поделить на 5?»."""
+        if not history or history[-1].get("role") != "assistant":
+            return None
+        value = ((history[-1].get("meta") or {}).get("target") or {}).get("number")
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+    def _small_talk(self, session: str, text: str, talk: str, steps: list[dict[str, Any]],
+                    started: float) -> dict[str, Any]:
+        """Привет / как дела / кто ты — по-человечески и с живой сводкой цеха, без модели."""
+        name = self._owner_name()
+        farm, panel_note = "", ""
+        if talk in ("greet", "how"):
+            client = getattr(self.runner, "panel", None)
+            try:
+                context = client.context() if client is not None and hasattr(client, "context") else {}
+            except Exception:
+                context = {}
+            if context.get("ok"):
+                farm = " ".join(str(context.get("farm") or "").split())
+                name = name or " ".join(str(context.get("owner") or "").split())
+                steps.append({"kind": "panel", "title": "Сводка цеха", "detail": "от панели"})
+            else:
+                panel_note = " Панель цеха сейчас не отвечает — про станки скажу, когда она вернётся."
+                steps.append({"kind": "panel", "title": "Панель цеха", "detail": str(context.get("reason") or "не отвечает")})
+        hello = f"Привет, {name}!" if name else "Привет!"
+        texts = {
+            "greet": f"{hello} {farm}" if farm else f"{hello} Я на связи: компьютер, окна, звук, файлы и память.{panel_note}",
+            "how": "Работаю, всё под контролем." + (f" {farm}" if farm else panel_note),
+            "who": ("Я NOZZA — помощник цеха на этом компьютере. Сам управляю окнами, звуком, программами и файлами, "
+                    "помню ваши просьбы, а про станки, заказы и деньги спрашиваю панель цеха. Всё, что меняет "
+                    "систему или цех, — только после вашего «Подтвердить»."),
+            "thanks": f"Пожалуйста{', ' + name if name else ''}! Обращайтесь.",
+            "bye": "До связи! Если что — позовите.",
+        }
+        steps.append({"kind": "rule", "title": "Разговор", "detail": {"greet": "приветствие", "how": "как дела",
+                      "who": "кто я", "thanks": "благодарность", "bye": "прощание"}[talk]})
+        chips = ["Что сейчас печатается?", "Как там компьютер?", "Что ты умеешь?"] if talk in ("greet", "how", "who") else []
+        return self._reply(session, text, texts[talk].strip(), kind="answer", source="talk", steps=steps,
+                           started=started, suggestions=chips)
+
+    # --- панель цеха ----------------------------------------------------------
+    def _ask_panel(self, session: str, text: str, steps: list[dict[str, Any]],
+                   started: float) -> dict[str, Any] | None:
+        """Спросить мозг панели. None — панель молчит или сама не поняла (тогда решает агент).
+
+        Панель отвечает со своей базой и своим контекстом («его», «второй»);
+        `delegate: False` в клиенте не даёт ей вернуть вопрос агенту — петли нет.
+        Предложенное панелью действие не исполняется здесь: оно становится
+        планом `panel.do` и ждёт «Подтвердить» в окне агента, как любая запись.
+        """
+        client = getattr(self.runner, "panel", None)
+        if client is None or not callable(getattr(client, "chat", None)):
+            return None
+        try:
+            data = client.chat(text, session=panel_session(session), source="agent")
+        except Exception as exc:  # noqa: BLE001 — панель не должна ронять разговор
+            data = {"ok": False, "reason": exc.__class__.__name__}
+        data = data if isinstance(data, dict) else {}
+        reply = str(data.get("reply") or "").strip()
+        if not reply or data.get("kind") == "error":
+            self._panel_down = True
+            steps.append({"kind": "panel", "title": "Панель цеха", "detail": str(data.get("reason") or "не отвечает")})
+            return None
+        self._panel_down = False
+        if data.get("understood") is False or (data.get("kind") == "clarify" and data.get("source") == "rules"):
+            steps.append({"kind": "panel", "title": "Панель цеха", "detail": "это не про цех"})
+            return None
+        source = str(data.get("source") or "")
+        steps.append({"kind": "panel", "title": "Ответила панель цеха", "detail": _PANEL_SOURCES.get(source, source)})
+        for step in list(data.get("steps") or [])[:4]:
+            if isinstance(step, dict) and step.get("title"):
+                steps.append({"kind": "panel", "title": f"Панель: {step['title']}",
+                              "detail": str(step.get("detail") or "")[:160]})
+        chips = [str(item) for item in (data.get("suggestions") or []) if str(item or "").strip()][:4]
+        action = data.get("action") if isinstance(data.get("action"), dict) else None
+        if data.get("kind") == "action" and action and action.get("id"):
+            explain = re.sub(r"\s*Подтвердите в карточке\.?\s*$", "", reply).strip().rstrip(".") \
+                or str(action.get("title") or action["id"])
+            plan = _plan("panel.do", {"action": str(action["id"]),
+                                      "params": dict(data.get("params") or {}) if isinstance(data.get("params"), dict) else {},
+                                      "explain": explain[:240]},
+                         "предложила панель", reply=f"{explain}. Подтвердите в карточке.")
+            return self._execute(session, text, plan, self._history(session), steps, started, source="panel")
+        extra: dict[str, Any] = {"panel_asked": True}
+        link = data.get("link") if isinstance(data.get("link"), dict) else None
+        href = str((link or {}).get("href") or "")
+        if link and href.startswith("/") and not href.startswith("//"):
+            url = f"{client.url}{href}"
+            title = " ".join(str(link.get("title") or "Панель").split())[:60]
+            extra["link"] = {"title": title, "href": url}
+            if data.get("kind") == "navigate":
+                opened, why = pc.open_url(url)
+                steps.append({"kind": "skill", "title": "Браузер", "detail": "открыл раздел панели" if opened else why})
+                reply = (f"Открыл в браузере раздел «{title}» панели цеха." if opened
+                         else f"Раздел «{title}» — в панели цеха: ссылка ниже.")
+        kind = str(data.get("kind") or "answer")
+        return self._reply(session, text, reply, kind=kind if kind in ("answer", "clarify", "memory") else "answer",
+                           source="panel", steps=steps, started=started, suggestions=chips, extra=extra)
 
     # --- память -----------------------------------------------------------
     def _memory(self, text: str) -> dict[str, Any] | None:
@@ -737,8 +993,8 @@ class Brain:
             return {"op": op, "text": name_row["text"].replace("Владельца зовут", "Вас зовут") + "."}
         rows = self.store.recall(payload, 8) if payload else self.store.memories(12)
         if not rows:
-            return {"op": op, "text": ("Про это в памяти ничего нет." if payload
-                                       else "Память пока пуста. Скажите «запомни, что …».")}
+            return {"op": op, "payload": payload, "text": ("Про это в памяти ничего нет." if payload
+                                                           else "Память пока пуста. Скажите «запомни, что …».")}
         lines = [f"• {row['text']}" for row in rows[:8]]
         head = f"Про «{payload}» помню:" if payload else "Вот что я помню:"
         return {"op": op, "text": head + "\n" + "\n".join(lines), "rows": rows}
@@ -767,7 +1023,7 @@ class Brain:
             return self._reply(session, text, f"{skill['title']}: сейчас недоступно — {why}", kind="error",
                                skill=name, params=params, steps=steps, started=started)
         steps.append({"kind": "skill", "title": skill["title"], "detail": executor_describe(skill, params)})
-        result = self._run(name, params)
+        result = self._run(name, params, popup=session != WINDOW_SESSION)
         target = dict(plan.get("target") or {})
         target.pop("pronoun", None)
         if delta:
@@ -780,9 +1036,14 @@ class Brain:
         pending = None
         if result.get("queued"):
             pending = {"id": result.get("id"), "text": result.get("text")}
+            if result.get("ttl"):
+                pending["ttl"] = int(result["ttl"])  # окно показывает, сколько действие ещё ждёт
         reply = plan.get("reply") or summarize(name, result)
         if plan.get("reply") and not result.get("ok"):
             reply = summarize(name, result)
+        if pending and session == WINDOW_SESSION and not plan.get("reply"):
+            # В окне агента всплывающего окна нет — подтверждают карточкой в ленте.
+            reply = f"Нужно ваше подтверждение: {result.get('text') or name}. Подтвердите в карточке ниже."
         kind = "pending" if pending else ("action" if result.get("ok") else "error")
         return self._reply(session, text, reply, kind=kind, skill=name, params=params,
                            result=_trim(result), pending=pending, target=target,
@@ -802,18 +1063,26 @@ class Brain:
 
     # --- модель -----------------------------------------------------------
     def _think(self, session: str, text: str, history: list[dict[str, Any]],
-               steps: list[dict[str, Any]], started: float) -> dict[str, Any]:
-        state = model.status()
+               steps: list[dict[str, Any]], started: float, state: dict[str, Any] | None = None,
+               workshop: bool = False) -> dict[str, Any]:
+        state = state if state is not None else model.status()
         memories = self.store.recall(text, 5, touch=False)
         if not state.get("ok"):
-            steps.append({"kind": "model", "title": "Модель", "detail": "недоступна"})
-            note = ("Этого я без модели не понимаю. Попробуйте командой: «громкость 30», «открой блокнот», "
-                    "«переключись на телеграм», «что грузит компьютер», «запомни, что…». "
-                    f"Модель: {state.get('reason')}")
+            # Техническая причина (порт, ошибка Ollama) — в ходе мысли, а не в лицо человеку.
+            steps.append({"kind": "model", "title": "Модель", "detail": str(state.get("reason") or "недоступна")[:200]})
+            if workshop and getattr(self, "_panel_down", False):
+                note = ("Это вопрос к панели цеха, а она сейчас не отвечает. Проверьте, что PrintFlow запущен, "
+                        "и спросите ещё раз.")
+            else:
+                note = ("Такое без модели я не разберу. Без неё умею: команды компьютеру («громкость 30», "
+                        "«что грузит компьютер», «какие окна открыты»), вопросы про цех («что печатается», "
+                        "«кто нам должен»), память («запомни, что…») и счёт. Свободные вопросы заработают, "
+                        "когда на этом компьютере запустите модель (Ollama).")
             if memories:
                 note = "Из памяти: " + "; ".join(row["text"] for row in memories[:3]) + ".\n" + note
             return self._reply(session, text, note, kind="clarify", source="rules", steps=steps, started=started,
-                               suggestions=["Что ты умеешь?", "Как там компьютер?", "Какие окна открыты?"])
+                               suggestions=["Что ты умеешь?", "Что сейчас печатается?", "Как там компьютер?"],
+                               extra={"panel_asked": True})
         catalog = skills.prompt(self.runner.caps, self.runner.learned())
         context = [date_line(self.clock()) + f" Время {self.clock():%H:%M}."]
         try:
@@ -878,9 +1147,11 @@ class Brain:
                extra: dict[str, Any] | None = None) -> dict[str, Any]:
         if save and text:
             self.store.add_turn(session, "user", text, {})
-            self.store.add_turn(session, "assistant", reply, {
-                "skill": skill, "params": params or {}, "target": target or {}, "kind": kind,
-                "ok": bool(result.get("ok")) if isinstance(result, dict) else kind not in ("error",)})
+            meta = {"skill": skill, "params": params or {}, "target": target or {}, "kind": kind, "source": source,
+                    "ok": bool(result.get("ok")) if isinstance(result, dict) else kind not in ("error",)}
+            if extra and isinstance(extra.get("link"), dict):
+                meta["link"] = extra["link"]  # «ссылка ниже» должна остаться и после перезагрузки окна
+            self.store.add_turn(session, "assistant", reply, meta)
         payload = {"ok": kind != "error", "handled": handled, "session": session, "reply": reply,
                    "kind": kind, "skill": skill or None, "params": params or {}, "result": result or {},
                    "pending": pending, "target": target or {}, "source": source, "steps": steps or [],
