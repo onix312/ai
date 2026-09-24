@@ -244,6 +244,19 @@ class BatchLauncherTests(unittest.TestCase):
         self.assertIn("pause", self.text)
         self.assertTrue(callable(pf.main))
 
+    def test_echo_inside_blocks_has_no_raw_parentheses(self):
+        """Скобка в echo внутри `if (` закрывает блок: «… was unexpected at this time»."""
+        depth = 0
+        for line in self.text.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("rem"):
+                continue
+            if depth and "echo" in stripped.lower() and re.search(r"(?<!\^)[()]", stripped):
+                self.fail(f"скобки в echo внутри блока: {stripped}")
+            depth += stripped.count("(") - stripped.count(")")
+            if depth < 0:
+                depth = 0
+
 
 class FirewallTests(unittest.TestCase):
     """Брандмауэр — вторая по частоте причина «телефон не видит сервер»."""

@@ -37,13 +37,20 @@
 from __future__ import annotations
 
 import json
+import ast
+import math
+import os
 import re
 import socket
+import subprocess
+import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from .db import Database
@@ -142,6 +149,41 @@ def _loopback_ok(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+# Прокси из окружения (HTTP_PROXY) не умеет ходить на 127.0.0.1 этой машины:
+# urllib тогда ждёт таймаут вместо «порт закрыт», и панель «тупит» на каждом
+# пинге агента, речи и модели. Loopback открываем мимо прокси.
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_AGENT_START_LOCK = threading.Lock()
+
+
+def _local_open(request: urllib.request.Request, timeout: float):
+    """Открыть loopback-запрос, не отдавая его системному прокси."""
+    return _LOCAL_OPENER.open(request, timeout=timeout)
+
+
+def _tcp_up(url: str, timeout: float = 0.35) -> tuple[bool, str]:
+    """Порт слушает? Быстрее HTTP: закрытый порт на Windows — отказ, не 1.5 с."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = int(parsed.port or (443 if parsed.scheme == "https" else 80))
+    except (TypeError, ValueError):
+        return False, "адрес не разбирается"
+    if host == "localhost":
+        host = "127.0.0.1"
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect((host, port))
+        return True, ""
+    except TimeoutError:
+        return False, "timed out"
+    except OSError as exc:
+        return False, str(exc)
+    finally:
+        sock.close()
+
+
 def _post_json(url: str, payload: dict, timeout: float) -> tuple[bool, Any, str]:
     """Один POST в рантайм. Возвращает (получилось, JSON, причина отказа).
 
@@ -154,7 +196,7 @@ def _post_json(url: str, payload: dict, timeout: float) -> tuple[bool, Any, str]
         headers={"Content-Type": "application/json",
                  "User-Agent": "PrintFlow-assistant/1"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _local_open(request, timeout) as response:
             raw = response.read(8 * 1024 * 1024).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return False, None, f"рантайм ответил {exc.code}"
@@ -178,7 +220,7 @@ def _get_json(url: str, timeout: float, *, label: str = "агент") -> tuple[b
         headers={"Accept": "application/json",
                  "User-Agent": "PrintFlow-assistant/1"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _local_open(request, timeout) as response:
             raw = response.read(8 * 1024 * 1024).decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return False, None, f"{label} ответил {exc.code}"
@@ -549,8 +591,9 @@ def _intent_prompt(text: str) -> str:
         "1. Выбери ровно одно действие или ни одного. Не выдумывай действия из списка.\n"
         "2. Параметры — только из списка этого действия и только значениями из фразы.\n"
         "3. Не подставляй суммы, количество, вес и сроки, которых во фразе нет.\n"
-        "4. Если фраза — вопрос о состоянии, выбирай чтение, а не действие.\n"
-        "5. explain — одно предложение по-русски: что будет сделано.\n\n"
+        "4. Если фраза — вопрос о состоянии цеха, выбирай чтение, а не действие.\n"
+        "5. explain — одно предложение по-русски: что будет сделано.\n"
+        "6. Арифметика, приветствие и вопрос не про цех — не действие: action пустая строка.\n\n"
         'Ответь одним JSON-объектом: {"action": "идентификатор", '
         '"params": {"имя": "значение"}, "explain": "текст"}'
     )
@@ -620,6 +663,349 @@ def complete(db: Database, prompt: str) -> dict[str, Any]:
             "reason": ""}
 
 
+# Фраза, которую имеет смысл отдавать диспетчеру каталога. «2+2», приветствие и
+# вопрос про погоду сюда не входят: маленькая модель иначе выбирает первое
+# чтение из списка — «Состояние парка» — и панель выполняет GET /api/state.
+_CATALOG_RE = re.compile(
+    r"пауз|возобнов|продолж|запусти|отмен|продай|выдай|смени статус|"
+    r"останови|стоп|сохрани|поставь|"
+    r"парк|станк|принтер|печат|заказ|долг|касс|полк|стеллаж|"
+    r"очеред|план|клиент|финанс|пульт|диагност|настройк",
+    re.IGNORECASE)
+
+_WEB_RE = re.compile(
+    r"интернет|погугл|загугл|новост|погод|курс|доллар|евро|биткоин|"
+    r"закон|актуальн|сегодня|сейчас|кто так|что так|википед|"
+    r"202[4-9]|найди|поищи|в сети|сайт",
+    re.IGNORECASE)
+_MATH_PREFIX_RE = re.compile(
+    r"^(?:сколько будет|посчитай|вычисли|реши|сколько)\s+", re.IGNORECASE)
+_THINK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+CHAT_CHARS = 1600
+_WEB_TOOLS = [
+    {"type": "function", "function": {
+        "name": "web_search",
+        "description": ("Поиск в интернете через включённый веб-поиск Ollama. "
+                        "Нужен для свежих фактов: новости, курсы, погода, законы. "
+                        "Не передавай имена клиентов, телефоны, суммы и номера заказов."),
+        "parameters": {"type": "object", "required": ["query"], "properties": {
+            "query": {"type": "string", "description": "Короткий поисковый запрос"},
+            "max_results": {"type": "integer", "description": "От 1 до 5"}}}}},
+    {"type": "function", "function": {
+        "name": "web_fetch",
+        "description": "Прочитать публичную http(s)-страницу. Не для адресов этой машины.",
+        "parameters": {"type": "object", "required": ["url"], "properties": {
+            "url": {"type": "string"}}}}},
+]
+
+
+def catalog_phrase(text: str) -> bool:
+    """Команда или вопрос про цех — единственное, что диспетчер имеет право разбирать."""
+    return bool(_CATALOG_RE.search(str(text or "")))
+
+
+def simple_math(text: str) -> str:
+    """Арифметика без модели: «2+2» не должен ждать Ollama и не должен стать действием."""
+    raw = " ".join(str(text or "").split()).strip().rstrip("?？").strip()
+    raw = (raw.replace("×", "*").replace("÷", "/").replace("х", "*")
+           .replace(":", "/").replace(",", "."))
+    raw = _MATH_PREFIX_RE.sub("", raw).strip().rstrip("=").strip()
+    if not raw or len(raw) > 40 or not re.fullmatch(r"[0-9+\-*/().\s]+", raw):
+        return ""
+    if not re.search(r"\d", raw) or not re.search(r"[+\-*/]", raw):
+        return ""
+    try:
+        tree = ast.parse(raw, mode="eval")
+    except SyntaxError:
+        return ""
+    allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+               ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.FloorDiv,
+               ast.USub, ast.UAdd)
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            return ""
+        if isinstance(node, ast.Constant) and not isinstance(node.value, (int, float)):
+            return ""
+    try:
+        value = eval(compile(tree, "<math>", "eval"), {"__builtins__": {}}, {})
+    except Exception:
+        return ""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    if isinstance(value, float) and not math.isfinite(value):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, float):
+        shown = f"{value:.4f}".rstrip("0").rstrip(".").replace(".", ",")
+    else:
+        shown = str(value)
+    return shown
+
+
+def _public_http_url(url: str) -> bool:
+    """Страница для web_fetch: только чужой http(s), не панель и не принтер."""
+    try:
+        parsed = urllib.parse.urlparse(str(url or "").strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        return False
+    if host.endswith(".local") or host.endswith(".lan"):
+        return False
+    if host.startswith("10.") or host.startswith("192.168.") or host.startswith("169.254."):
+        return False
+    if host.startswith("172."):
+        parts = host.split(".")
+        if len(parts) >= 2 and parts[1].isdigit() and 16 <= int(parts[1]) <= 31:
+            return False
+    return True
+
+
+def _search_query_ok(query: str) -> bool:
+    """В поиск уходит вопрос, не карточка клиента: телефон и сумма остаются на машине."""
+    text = " ".join(str(query or "").split())
+    if len(text) < 3 or len(text) > 200:
+        return False
+    if re.search(r"\d{10,}", text) or "₽" in text:
+        return False
+    return True
+
+
+def _format_hits(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    rows = payload.get("results") if isinstance(payload, dict) else None
+    lines: list[str] = []
+    sources: list[dict[str, str]] = []
+    for row in (rows or [])[:4]:
+        if not isinstance(row, dict):
+            continue
+        title = " ".join(str(row.get("title") or "").split())[:160]
+        url = str(row.get("url") or "").strip()[:300]
+        content = " ".join(str(row.get("content") or "").split())[:400]
+        if not title and not content:
+            continue
+        sources.append({"title": title or url, "url": url})
+        lines.append(f"- {title or 'страница'}" + (f" ({url})" if url else "")
+                     + (f": {content}" if content else ""))
+    return "\n".join(lines), sources
+
+
+def _ollama_web(db: Database, kind: str, payload: dict[str, Any]) -> tuple[bool, Any, str]:
+    """Веб-поиск только через локальную Ollama: она уже вошла в аккаунт и включила поиск.
+
+    PrintFlow сам на ollama.com не ходит. База клиентов в этот запрос не попадает.
+    """
+    cfg = config(db)
+    local, why = _loopback_ok(cfg["url"])
+    if not local:
+        return False, None, why
+    paths = (("/api/experimental/web_search", "/api/web_search") if kind == "search"
+             else ("/api/experimental/web_fetch", "/api/web_fetch"))
+    last = "веб-поиск Ollama не ответил"
+    for path in paths:
+        ok, body, reason = _post_json(f"{cfg['url']}{path}", payload, timeout=12)
+        if ok and isinstance(body, dict):
+            return True, body, ""
+        last = reason or last
+    return False, None, last
+
+
+def web_search(db: Database, query: str, max_results: int = 4) -> dict[str, Any]:
+    """Поиск через включённый веб-поиск Ollama на этом компьютере."""
+    clean = " ".join(str(query or "").split())[:200]
+    if not _search_query_ok(clean):
+        return {"ok": False, "results": [], "text": "", "sources": [],
+                "reason": "Запрос в интернет слишком короткий или похож на данные клиента"}
+    try:
+        limit = max(1, min(5, int(max_results or 4)))
+    except (TypeError, ValueError):
+        limit = 4
+    ok, body, reason = _ollama_web(db, "search", {"query": clean, "max_results": limit})
+    if not ok or not isinstance(body, dict):
+        return {"ok": False, "results": [], "text": "", "sources": [],
+                "reason": reason or "Веб-поиск Ollama не ответил"}
+    text, sources = _format_hits(body)
+    if not text:
+        return {"ok": False, "results": [], "text": "", "sources": [],
+                "reason": "Поиск Ollama ничего не нашёл"}
+    return {"ok": True, "results": sources, "text": text, "sources": sources, "reason": ""}
+
+
+def web_fetch(db: Database, url: str) -> dict[str, Any]:
+    """Текст публичной страницы через Ollama. Адрес панели и принтера не открываем."""
+    clean = str(url or "").strip()[:300]
+    if not _public_http_url(clean):
+        return {"ok": False, "text": "", "title": "",
+                "reason": "Этот адрес в интернет не отправляю"}
+    ok, body, reason = _ollama_web(db, "fetch", {"url": clean})
+    if not ok or not isinstance(body, dict):
+        return {"ok": False, "text": "", "title": "",
+                "reason": reason or "Страница не открылась"}
+    title = " ".join(str(body.get("title") or "").split())[:160]
+    content = " ".join(str(body.get("content") or "").split())[:2000]
+    if not content and not title:
+        return {"ok": False, "text": "", "title": "", "reason": "Страница пустая"}
+    return {"ok": True, "text": content, "title": title, "reason": ""}
+
+
+def _needs_web(question: str) -> bool:
+    return bool(_WEB_RE.search(str(question or "")))
+
+
+def _visible_answer(text: str) -> str:
+    cleaned = _THINK_RE.sub("", str(text or ""))
+    cleaned = re.sub(r"</?think>", "", cleaned, flags=re.IGNORECASE)
+    lines = [" ".join(line.split()) for line in cleaned.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _tool_calls(message: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = message.get("tool_calls") if isinstance(message, dict) else None
+    out: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw[:3]:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function") if isinstance(item.get("function"), dict) else item
+        name = str(fn.get("name") or "").strip()
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        if name in ("web_search", "web_fetch"):
+            out.append({"name": name, "arguments": args})
+    return out
+
+
+def _run_tool(db: Database, name: str, args: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+    if name == "web_search":
+        found = web_search(db, str(args.get("query") or ""), int(args.get("max_results") or 4))
+        return found["text"] or found.get("reason") or "поиск пуст", list(found.get("sources") or [])
+    if name == "web_fetch":
+        page = web_fetch(db, str(args.get("url") or ""))
+        if not page.get("ok"):
+            return page.get("reason") or "страница не открылась", []
+        return f"{page.get('title') or ''}\n{page.get('text') or ''}".strip(), []
+    return "неизвестный инструмент", []
+
+
+def converse(db: Database, question: str, history: list | None = None) -> dict[str, Any]:
+    """Обычный вопрос → ответ модели. Свежие факты — через веб-поиск самой Ollama.
+
+    Сюда не попадают команды станку и вопросы про базу цеха: те остаются в
+    каталоге и в фактах. В поиск уходит только текст вопроса, не карточки клиентов.
+    """
+    clean = " ".join(str(question or "").split())
+    if not clean:
+        return {"ok": False, "answer": "", "model": "", "sources": [], "web": False,
+                "reason": "Пустой вопрос", "source": ""}
+    math_answer = simple_math(clean)
+    if math_answer:
+        return {"ok": True, "answer": math_answer, "model": "", "sources": [],
+                "web": False, "reason": "", "source": "math"}
+    state = status(db)
+    if not state.get("available"):
+        return {"ok": False, "answer": "", "model": state.get("model", ""),
+                "sources": [], "web": False,
+                "reason": state.get("reason") or "Модель недоступна", "source": "ollama"}
+    cfg = config(db)
+    needed = _needs_web(clean)
+    sources: list[dict[str, str]] = []
+    web_reason = ""
+    snippets = ""
+    if needed:
+        found = web_search(db, clean)
+        if found.get("ok"):
+            snippets = found["text"]
+            sources = list(found.get("sources") or [])
+        else:
+            web_reason = str(found.get("reason") or "Веб-поиск Ollama не ответил")
+    user = clean[:MAX_INPUT_CHARS]
+    if snippets:
+        user += ("\n\nВыдержки из включённого поиска Ollama. Опирайся на них и "
+                 "назови источник. Не выдумывай сверх выдержек.\n" + snippets)
+    messages: list[dict[str, Any]] = [{
+        "role": "system",
+        "content": (
+            "Ты помощник владельца 3D-печатного цеха. Отвечай по-русски, коротко "
+            "и обычными словами. На арифметику и общие вопросы отвечай сразу. "
+            "Не предлагай действия программы и не проси подтверждения. "
+            "Если нужны свежие факты — вызови web_search. В запрос поиска не клади "
+            "имена клиентов, телефоны, суммы и номера заказов. "
+            "Если поиска нет — так и скажи, что отвечаешь без интернета. "
+            "Команды станкам и правки заказов не выполняй: это делает человек в панели."
+        ),
+    }]
+    for turn in (history or [])[-6:]:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "")
+        if role not in ("user", "assistant"):
+            continue
+        content = " ".join(str(turn.get("content") or "").split())[:400]
+        if content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": user})
+    tools_on = True
+    answer = ""
+    for _step in range(3):
+        body: dict[str, Any] = {
+            "model": cfg["model"], "stream": False,
+            "options": {"temperature": 0.2},
+            "messages": messages,
+        }
+        if tools_on:
+            body["tools"] = _WEB_TOOLS
+        ok, payload, reason = _post_json(
+            f"{cfg['url']}/api/chat", body, timeout=cfg["timeout_sec"])
+        if not ok and tools_on and ("400" in reason or "tool" in reason.casefold()):
+            tools_on = False
+            continue
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "answer": "", "model": cfg["model"], "sources": sources,
+                    "web": bool(snippets), "reason": f"Рантайм не ответил: {reason}",
+                    "source": "ollama", "web_reason": web_reason}
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        calls = _tool_calls(message)
+        visible = _visible_answer(str(message.get("content") or payload.get("response") or ""))
+        if not calls:
+            answer = visible
+            break
+        messages.append(message)
+        for call in calls:
+            tool_text, tool_sources = _run_tool(db, call["name"], call["arguments"])
+            if tool_sources and not sources:
+                sources = tool_sources
+            messages.append({
+                "role": "tool",
+                "name": call["name"],
+                "tool_name": call["name"],
+                "content": tool_text[:2000],
+            })
+        if visible and not answer:
+            answer = visible
+    answer = _visible_answer(answer)[:CHAT_CHARS]
+    if not answer:
+        return {"ok": False, "answer": "", "model": cfg["model"], "sources": sources,
+                "web": bool(snippets or sources),
+                "reason": "Модель ответила пустотой", "source": "ollama",
+                "web_reason": web_reason}
+    warnings = []
+    if needed and not snippets and web_reason:
+        warnings.append("Поиск Ollama не сработал — ответ без интернета. " + web_reason)
+    return {"ok": True, "answer": answer, "model": cfg["model"], "sources": sources[:4],
+            "web": bool(snippets or sources), "reason": "", "source": "ollama",
+            "web_reason": web_reason, "warnings": warnings}
+
+
 def parse_intent(db: Database, text: str) -> dict[str, Any]:
     """Фраза владельца → действие из каталога, параметры и объяснение.
 
@@ -632,6 +1018,13 @@ def parse_intent(db: Database, text: str) -> dict[str, Any]:
     if not clean_text:
         return {"ok": False, "available": False, "reason": "Пустая фраза",
                 "action": None, "params": {}, "explain": "", "warnings": []}
+    # «2+2» и любой вопрос не из цеха — не действие. Иначе модель выбирает
+    # первое чтение каталога, и панель сама запрашивает состояние парка.
+    if not catalog_phrase(clean_text):
+        return {"ok": True, "available": True, "reason": "",
+                "action": None, "params": {},
+                "explain": "Это вопрос, не команда цеху.",
+                "warnings": []}
     state = status(db)
     if not state.get("available"):
         return {"ok": False, "available": False,
@@ -792,7 +1185,7 @@ def transcribe(db: Database, audio: bytes, language: str = "ru") -> dict[str, An
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}",
                  "User-Agent": "PrintFlow-assistant/1"})
     try:
-        with urllib.request.urlopen(request, timeout=cfg["timeout_sec"]) as response:
+        with _local_open(request, cfg["timeout_sec"]) as response:
             raw = response.read(1024 * 1024).decode("utf-8", "replace")
         payload = json.loads(raw or "{}")
     except urllib.error.HTTPError as exc:
@@ -844,10 +1237,17 @@ def agent_status(db: Database) -> dict[str, Any]:
     if not cfg["enabled"]:
         out["reason"] = "Агент компьютера выключен в настройках"
         return out
+    # Сначала сокет: мёртвый порт не должен держать кнопку «Идеи» на таймауте HTTP.
+    up, why = _tcp_up(cfg["url"], 0.35)
+    if not up:
+        out["reason"] = (
+            "Агент компьютера не запущен. Навыки и окна появятся после кнопки "
+            "«Запустить агента» в разделе «Компьютер». Идеи для ТГ собираются и без него.")
+        return out
     ok, payload, reason = _post_json(f"{cfg['url']}/health", {}, PING_SEC)
     if not ok:
         out["reason"] = (f"Агент на {cfg['url']} не отвечает ({reason}). "
-                         "Запустите его отдельно: папка agent/ со своим окружением.")
+                         "Нажмите «Запустить агента» в разделе «Компьютер».")
         return out
     payload = payload if isinstance(payload, dict) else {}
     out.update(available=True, reason="",
@@ -932,9 +1332,136 @@ def tg_draft(db: Database, topic: str, tone: str = "дружелюбный",
 
 
 def tg_ideas(db: Database, context: str = "", limit: int = 8) -> dict[str, Any]:
-    return _call_agent_skill(db, "tg.ideas",
-                             {"context": context, "limit": limit},
-                             timeout=20.0)
+    result = _call_agent_skill(db, "tg.ideas",
+                               {"context": context, "limit": limit},
+                               timeout=20.0)
+    if result.get("ok") and (result.get("ideas") or result.get("result")):
+        return result
+    # Агент — отдельная программа. Темы постов из заказов цеха ей не нужны:
+    # иначе кнопка «Идеи» показывает только «порт не отвечает».
+    return _workshop_tg_ideas(db, context, limit, str(result.get("reason") or ""))
+
+
+_TG_IDEA_TEMPLATES = (
+    "Что напечатали на этой неделе — три изделия с фото",
+    "Чем PETG отличается от PLA на ваших деталях",
+    "Из чего складывается цена: пластик, время, работа",
+    "Как готовится стол перед печатью",
+    "Кейс: от сообщения клиента до выдачи",
+    "Три ошибки в моделях, из-за которых печать дорожает",
+    "Новый цвет или материал на складе",
+    "Итог месяца: что печатали и что было сложным",
+)
+
+
+def _workshop_tg_ideas(db: Database, context: str, limit: int,
+                       agent_reason: str = "") -> dict[str, Any]:
+    """Темы для ТГ из своих заказов, без агента и без модели."""
+    try:
+        limit = max(1, min(12, int(limit or 8)))
+    except (TypeError, ValueError):
+        limit = 8
+    ideas: list[str] = []
+    ctx = " ".join(str(context or "").split())[:200]
+    try:
+        rows = db.query(
+            "SELECT product, material FROM orders "
+            "WHERE TRIM(COALESCE(product, '')) <> '' "
+            "ORDER BY created_at DESC LIMIT 8")
+    except Exception:
+        rows = []
+    for row in rows or []:
+        product = " ".join(str(row.get("product") or "").split())
+        material = " ".join(str(row.get("material") or "").split())
+        if not product:
+            continue
+        line = f"Кейс: {product}" + (f" — {material}" if material else "")
+        if line not in ideas:
+            ideas.append(line)
+    if ctx and ctx not in ideas:
+        ideas.insert(0, ctx)
+    for line in _TG_IDEA_TEMPLATES:
+        if line not in ideas:
+            ideas.append(line)
+        if len(ideas) >= limit:
+            break
+    return {"ok": True, "ideas": ideas[:limit], "source": "workshop", "model": "",
+            "reason": "",
+            "hint": ("Темы собраны из заказов цеха. Агент компьютера сейчас не нужен — "
+                     "публикация всё равно только после «Подтвердить»."
+                     if agent_reason else
+                     "Темы собраны из заказов цеха.")}
+
+
+def start_agent(db: Database) -> dict[str, Any]:
+    """Поднять `python -m agent` рядом с репозиторием, не импортируя пакет.
+
+    Агент остаётся чужой программой: коннектор только запускает процесс и ждёт
+    порт. Окно не открываем — человек уже в панели помощника.
+    """
+    cfg = agent_config(db)
+    if not cfg["enabled"]:
+        return {"ok": False, "started": False, "available": False,
+                "reason": "Агент выключен в настройках панели. Включите его там и нажмите ещё раз."}
+    local, why = _loopback_ok(cfg["url"])
+    if not local:
+        return {"ok": False, "started": False, "available": False,
+                "reason": f"Адрес агента должен быть этим компьютером: {why}"}
+    up, _why = _tcp_up(cfg["url"], 0.3)
+    if up:
+        state = agent_status(db)
+        state["started"] = False
+        return state
+    root = Path(__file__).resolve().parents[2]
+    if not (root / "agent" / "__main__.py").is_file():
+        return {"ok": False, "started": False, "available": False,
+                "reason": "Рядом с PrintFlow нет папки agent — запуск невозможен."}
+    log_path = Path.home() / ".printflow" / "agent-start.log"
+    with _AGENT_START_LOCK:
+        up, _why = _tcp_up(cfg["url"], 0.2)
+        if up:
+            state = agent_status(db)
+            state["started"] = False
+            return state
+        env = os.environ.copy()
+        env["PRINTFLOW_ASSISTANT_WINDOW"] = "0"
+        env.setdefault("PYTHONUTF8", "1")
+        flags = 0
+        if sys.platform.startswith("win"):
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(
+                subprocess, "DETACHED_PROCESS", 0)
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = open(log_path, "a", encoding="utf-8")
+            log_file.write("\n--- старт ---\n")
+            log_file.flush()
+            subprocess.Popen(
+                [sys.executable, "-m", "agent"],
+                cwd=str(root), env=env,
+                stdout=log_file, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                creationflags=flags,
+                start_new_session=not sys.platform.startswith("win"))
+        except OSError as exc:
+            return {"ok": False, "started": False, "available": False,
+                    "reason": f"Не удалось запустить агента: {exc}"}
+    deadline = time.time() + 2.8
+    while time.time() < deadline:
+        if _tcp_up(cfg["url"], 0.2)[0]:
+            state = agent_status(db)
+            state["started"] = True
+            state["reason"] = state.get("reason") or "Агент запущен"
+            return state
+        time.sleep(0.15)
+    tail = ""
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-240:].strip()
+    except OSError:
+        tail = ""
+    reason = "Агент не открыл порт. Проверьте, что Python видит папку agent."
+    if tail:
+        reason = f"{reason} Последняя строка: {tail.splitlines()[-1][:180]}"
+    return {"ok": False, "started": True, "available": False, "reason": reason}
+
 
 
 def tg_post(db: Database, draft_id: int = 0, text: str = "", chat: str = "") -> dict[str, Any]:
@@ -1182,4 +1709,3 @@ def system_watchdog_once(db, roles: str = "", dry: bool = False, confirm_text: s
     """Один проход надзора по кнопке: проверить пульс и поднять упавшие роли (И263)."""
     return _call_agent_skill(db, "system.watchdog_once", {
         "roles": roles, "dry": "on" if dry else "off", "confirm_text": confirm_text})
-

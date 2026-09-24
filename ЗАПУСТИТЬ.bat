@@ -97,24 +97,11 @@ echo  Python:  !PYVER!  ^(!PY!^)
 echo  Папка:   %CD%
 echo.
 
-rem ---- библиотеки безопасности (cryptography, OpenSSL) --------------------
-rem Без них коннектор работает, но связь со станками идёт без шифрования, а
-rem шлюз Bambu Studio не поднимает TLS. Ставим тихо и один раз: дальше
-rem импорт проходит мгновенно.
-%PY% -c "import cryptography" >nul 2>&1
-if errorlevel 1 (
-  echo  Установка базовых библиотек безопасности (cryptography, OpenSSL)...
-  %PY% -m pip install --disable-pip-version-check -q cryptography pyOpenSSL >nul 2>&1
-  %PY% -c "import cryptography" >nul 2>&1
-  if errorlevel 1 (
-    echo.
-    echo  Библиотеки безопасности не установились — запуск без них.
-    echo  Причина почти всегда одна: нет интернета или pip закрыт политикой.
-    echo  Повторить вручную:  %PY% -m pip install cryptography pyOpenSSL
-    echo  Точный диагноз:     %PY% pf.py doctor
-    echo.
-  )
-)
+rem ---- библиотеки безопасности -------------------------------------------------
+rem cryptography и OpenSSL ставит сам pf.py (ensure_crypto_prerequisites).
+rem Второй список в батнике уже ронял запуск: скобка в echo внутри блока if
+rem закрывает блок раньше времени, и cmd пишет «... was unexpected at this time»
+rem ещё до вызова pf.py. Поэтому здесь нет echo со скобками и нет своего pip.
 
 rem ---- запуск -------------------------------------------------------------
 rem Если PrintFlow уже запущен на любом порту — pf.py покажет адреса для
