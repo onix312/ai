@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<script src="/assets/theme-init.js?v=18.19.0"></script>
+<meta name="theme-color" content="#4f46e5">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>NOZZA · помощник</title>
+<link rel="stylesheet" href="assets/tokens.css?v=18.19.0">
+<style>
+ * { box-sizing:border-box; margin:0; padding:0; }
+ html, body { height:100%; }
+ body {
+   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   background:var(--bg); color:var(--text);
+ }
+ .as-wrap { max-width:1240px; margin:0 auto; padding:14px 14px 40px; }
+ .as-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+ .as-brand { display:flex; align-items:center; gap:9px; }
+ .as-brand img { width:32px; height:32px; }
+ .as-brand b { font-size:16px; display:block; }
+ .as-brand small { display:block; color:var(--muted); font-size:11px; }
+ .as-top-right { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+ .as-pill { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px;
+   font-weight:700; background:var(--panel); border:1px solid var(--line); }
+ .as-pill.ok { color:var(--ok); border-color:var(--ok); }
+ .as-pill.warn { color:var(--warn); border-color:var(--warn); }
+ .btn { background:var(--panel); border:1px solid var(--line); color:var(--text);
+   border-radius:10px; padding:8px 14px; font:inherit; font-size:13px; cursor:pointer; }
+ .btn:hover { border-color:var(--accent); }
+ .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700; }
+ .btn.sm { padding:5px 10px; font-size:12px; border-radius:8px; }
+ .btn:disabled { opacity:.5; cursor:not-allowed; }
+ .verdict { border:1px solid var(--line); background:var(--panel); border-radius:12px;
+   padding:10px 12px; font-size:13px; margin-bottom:12px; }
+ .verdict.ok { border-color:var(--ok); }
+ .verdict.warn { border-color:var(--warn); }
+ .verdict small { color:var(--muted); }
+ .as-grid { display:grid; grid-template-columns:1.35fr .95fr; gap:12px; align-items:start; }
+ @media (max-width:1000px) { .as-grid { grid-template-columns:1fr; } }
+ .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px; }
+ .card h2 { font-size:14px; margin-bottom:4px; }
+ .card p.sub { color:var(--muted); font-size:12px; margin-bottom:10px; }
+ .as-log { display:flex; flex-direction:column; gap:10px; min-height:220px; max-height:56vh;
+   overflow:auto; padding-right:4px; }
+ .msg { border:1px solid var(--line); border-radius:12px; padding:10px; background:var(--bg); }
+ .msg.me { border-color:var(--accent); }
+ .msg b.who { display:block; font-size:11px; color:var(--muted); margin-bottom:4px;
+   text-transform:uppercase; letter-spacing:.04em; }
+ .msg .body { font-size:13.5px; white-space:pre-wrap; word-break:break-word; }
+ .msg .warnline { color:var(--warn); font-size:12px; margin-top:6px; }
+ .msg .acts { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+ .kv { font-family:ui-monospace,monospace; font-size:12px; color:var(--muted);
+   margin-top:6px; word-break:break-all; }
+ pre.result { font-family:ui-monospace,monospace; font-size:11.5px; white-space:pre-wrap;
+   background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px;
+   margin-top:8px; max-height:260px; overflow:auto; word-break:break-word; }
+ .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+ .chip { border:1px solid var(--line); background:var(--bg); color:var(--text);
+   border-radius:999px; padding:5px 11px; font-size:12px; cursor:pointer; }
+ .chip:hover { border-color:var(--accent); }
+ .chip.confirm { border-color:var(--warn); }
+ .as-input { display:flex; gap:8px; margin-top:10px; }
+ .as-input textarea { flex:1; resize:vertical; min-height:44px; max-height:160px;
+   background:var(--bg); color:var(--text); border:1px solid var(--line);
+   border-radius:10px; padding:10px; font:inherit; font-size:13.5px; }
+ .as-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+ .muted { color:var(--muted); }
+ .journal { display:flex; flex-direction:column; gap:6px; max-height:34vh; overflow:auto; }
+ .jrow { border:1px solid var(--line); border-radius:10px; padding:7px 9px; font-size:12px; }
+ .jrow b { font-size:12.5px; }
+ .jrow.done { border-color:var(--ok); }
+ .jrow.error { border-color:var(--warn); }
+ .notice { border:1px dashed var(--line); border-radius:10px; padding:8px 10px;
+   font-size:12px; color:var(--muted); margin-top:10px; }
+  #as_mic.recording { background:#7f1d1d; border-color:#b91c1c; color:#fff;
+    animation:as-pulse 1.3s infinite; }
+  @keyframes as-pulse { 50% { opacity:.5; } }
+ .inp { background:var(--bg); color:var(--text); border:1px solid var(--line);
+   border-radius:8px; padding:6px 8px; font:inherit; font-size:12.5px; }
+ .inp.wide { flex:1; min-width:120px; }
+</style>
+</head>
+<body>
+<div class="as-wrap">
+ <div class="as-top">
+  <div class="as-brand">
+   <img src="assets/brand/nozza-mark-white.svg" alt="NOZZA">
+   <div><b>Помощник NOZZA</b><small>локальная модель · Авито · ТГ · PrintFlow</small></div>
+  </div>
+  <div class="as-top-right">
+   <span class="as-pill" id="as_state">Проверяем рантайм…</span>
+   <span class="as-pill warn" id="as_speech" title="Внешний рантайм речи на процессоре">🎙 Голос: проверяем…</span>
+   <span class="as-pill warn" id="as_agent" title="Внешний агент: стоп-слово и активное окно">🖥 Агент: проверяем…</span>
+   <span class="as-pill warn" id="as_skills" title="Реестр навыков ассистента компьютера">🧩 Навыки: проверяем…</span>
+   <button class="btn sm" id="as_refresh" type="button">⟳ Состояние</button>
+   <a class="btn sm" href="/index.html" id="as_panel_link">Открыть панель</a>
+  </div>
+ </div>
+
+ <div class="verdict" id="as_verdict"><span>Проверяем, доступен ли рантайм на этом компьютере…</span></div>
+
+ <div class="as-grid">
+  <section class="card">
+   <h2>Разговор</h2>
+   <p class="sub">Фраза → действие из каталога. Деньги и печать выполняются только после «Подтвердить».</p>
+   <div class="as-log" id="as_log"></div>
+   <div class="as-input">
+    <textarea id="as_text" rows="2" placeholder="Например: что сейчас печатается; поставь паузу на P1S; покажи долги"></textarea>
+    <button class="btn" id="as_mic" type="button" disabled title="Голос включается, когда жив внешний рантайм речи">🎙</button>
+    <button class="btn primary" id="as_send" type="button">Спросить</button>
+   </div>
+   <div class="notice" id="as_notice">Помощник читает и предлагает; запись в базу и команды станку делает только ваше нажатие.</div>
+  </section>
+
+  <section class="card">
+   <h2>Ответ по фактам базы</h2>
+   <p class="sub">Вопрос → факты из ваших же разделов и ответ только по ним. Числа сверяются: расхождение показано предупреждением.</p>
+   <div class="as-input">
+    <textarea id="as_ask_text" rows="2" placeholder="Например: сколько должна Мария; какие долги просрочены; что с PETG чёрным"></textarea>
+    <button class="btn primary" id="as_ask_run" type="button">Спросить базу</button>
+   </div>
+   <div id="as_ask_result"><span class="muted">Ответ и источники появятся здесь. Без рантайма модели останутся факты — их достаточно, чтобы проверить цифру.</span></div>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:12px">
+   <section class="card">
+    <h2>День цеха</h2>
+    <p class="sub">Брифинг и итог считаются без модели: те же сервисы, что рисуют панели плана и финансов.</p>
+    <div class="as-row">
+     <button class="btn sm" id="as_day_briefing" type="button">Утро</button>
+     <button class="btn sm" id="as_day_summary" type="button">Итог за 7 дней</button>
+     <span class="muted" id="as_day_hint" style="font-size:12px"></span>
+    </div>
+    <div id="as_day_result"><span class="muted">Нажмите «Утро» или «Итог».</span></div>
+   </section>
+
+   <section class="card">
+    <h2>Авито — слежка и ответы</h2>
+    <p class="sub">Слежка сохраняется в своей базе ассистента. Поиск — без зависимостей, ответы — 3 тона через модель или шаблоны.</p>
+    <div class="as-row">
+     <input class="inp wide" id="av_query" placeholder="Запрос: 3d принтер">
+     <input class="inp" id="av_city" placeholder="Город: Москва" style="width:110px">
+     <input class="inp" id="av_max" placeholder="До ₽" type="number" style="width:90px">
+    </div>
+    <div class="as-row" style="margin-top:6px">
+     <input class="inp wide" id="av_cat" placeholder="Категория: bytovaya_tehnika (опц.)">
+     <button class="btn sm primary" id="av_watch" type="button">+ Слежка</button>
+     <button class="btn sm" id="av_search" type="button">Поиск</button>
+     <button class="btn sm" id="av_check" type="button">Проверить</button>
+    </div>
+    <div id="av_result" style="margin-top:8px"><span class="muted">Слежки и объявления появятся здесь.</span></div>
+    <div style="margin-top:10px">
+     <p class="sub">Переписка → варианты ответа</p>
+     <textarea id="av_thread" rows="2" class="inp" style="width:100%" placeholder="Сообщение покупателя: Здравствуйте, ещё актуально? Торг уместен?"></textarea>
+     <div class="as-row" style="margin-top:6px">
+      <input class="inp wide" id="av_intent" placeholder="Намерение: продать сегодня, торг до 1000">
+      <button class="btn sm primary" id="av_reply" type="button">Ответы</button>
+     </div>
+     <div id="av_reply_result" style="margin-top:6px"><span class="muted">Варианты ответа появятся здесь.</span></div>
+    </div>
+   </section>
+
+   <section class="card">
+    <h2>ТГ-канал цеха</h2>
+    <p class="sub">Идеи → черновик из фактов цеха → публикация только после «Подтвердить». Токен из настроек агента.</p>
+    <div class="as-row">
+     <button class="btn sm" id="tg_ideas" type="button">Идеи</button>
+     <span class="muted" style="font-size:11px">из недавних печатей и знаний</span>
+    </div>
+    <div id="tg_ideas_result" style="margin-top:6px"><span class="muted">Темы появятся здесь.</span></div>
+    <div style="margin-top:10px">
+     <div class="as-row">
+      <input class="inp wide" id="tg_topic" placeholder="Тема: что напечатали на неделе">
+      <select class="inp" id="tg_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
+     </div>
+     <div class="as-row" style="margin-top:6px">
+      <input class="inp wide" id="tg_facts" placeholder="Факты: PETG чёрный, 20 адресников, 6 часов">
+      <button class="btn sm primary" id="tg_draft" type="button">Черновик</button>
+     </div>
+     <div id="tg_draft_result" style="margin-top:8px"><span class="muted">Черновик появится здесь.</span></div>
+    </div>
+    <div style="margin-top:10px">
+     <div class="as-row">
+      <button class="btn sm" id="tg_list" type="button">Черновики</button>
+      <button class="btn sm" id="tg_post_btn" type="button">Опубликовать последний</button>
+     </div>
+     <div id="tg_list_result" style="margin-top:6px"><span class="muted">Список черновиков.</span></div>
+    </div>
+   </section>
+
+   <section class="card">
+    <h2>Действия</h2>
+    <p class="sub">Тот же каталог, что видит модель. Оранжевая рамка — требует подтверждения.</p>
+    <div class="chips" id="as_actions"></div>
+   </section>
+
+   <section class="card">
+    <h2>Входящее сообщение</h2>
+    <p class="sub">Текст клиента и его файл — в черновик заказа одним заходом.</p>
+    <textarea id="as_intake_text" rows="3" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px;font:inherit;font-size:13px" placeholder="Нужно 20 адресников, PETG чёрный, для Марии, до пятницы"></textarea>
+    <div class="as-row" style="margin-top:8px">
+     <input type="file" id="as_intake_file" accept=".3mf,.gcode,.stl,.obj" hidden>
+     <button class="btn sm" id="as_intake_pick" type="button">Приложить файл</button>
+     <span class="muted" id="as_intake_filename" style="font-size:12px"></span>
+     <button class="btn sm primary" id="as_intake_run" type="button" style="margin-left:auto">Разобрать</button>
+    </div>
+   </section>
+
+   <section class="card">
+    <h2>Журнал действий помощника</h2>
+    <p class="sub">Входа нет, поэтому след остаётся здесь: что сделано и чем кончилось.</p>
+    <div class="journal" id="as_journal"><span class="muted">Загружаем…</span></div>
+    <button class="btn sm" id="as_journal_refresh" type="button" style="margin-top:8px">⟳ Обновить</button>
+   </section>
+
+   <section class="card">
+    <h2>Навыки ассистента компьютера</h2>
+    <p class="sub">Реестр принадлежит агенту: панель читает его по loopback и показывает причину, если навык недоступен.</p>
+    <div class="journal" id="as_skills_list"><span class="muted">Загружаем…</span></div>
+    <button class="btn sm" id="as_skills_refresh" type="button" style="margin-top:8px">⟳ Обновить</button>
+   </section>
+  </div>
+ </div>
+</div>
+
+  <div class="as-card" id="card-avito-threads">
+   <div class="as-head"><div class="as-title">Авито — архив переписок (И191)</div><div class="as-sub">Только текст для копирования, без авто-отправки</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="av_threads" type="button">Архив</button>
+    <button class="btn sm" id="av_thread_save" type="button">Сохранить текущую</button>
+    <input class="inp sm" id="av_thread_status" placeholder="статус new/replied" style="width:140px">
+   </div>
+   <div id="av_threads_result" style="margin-top:6px"><span class="muted">Переписки появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-avito-extra">
+   <div class="as-head"><div class="as-title">Авито — связка, расписание, дедуп (И193, И195-И197)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="av_listing_id" placeholder="listing_id" style="width:90px">
+    <button class="btn sm primary" id="av_to_order" type="button">В заказ (с подтверждением)</button>
+    <input class="inp sm" id="av_watch_id" placeholder="watch_id" style="width:80px">
+    <input class="inp sm" id="av_interval" placeholder="интервал ч" style="width:90px" type="number">
+    <label class="as-check"><input type="checkbox" id="av_notify"> уведомление</label>
+    <button class="btn sm" id="av_schedule" type="button">Расписание</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <button class="btn sm" id="av_dedup" type="button">Дубли по фото</button>
+    <input class="inp sm" id="av_image_hash" placeholder="image_hash (опц)" style="width:200px">
+    <span class="muted" id="av_extra_result"></span>
+   </div>
+   <div id="av_dedup_result" style="margin-top:6px"><span class="muted">Дубли появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-calendar">
+   <div class="as-head"><div class="as-title">ТГ — календарь постов (И198)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="tg_plan_date" placeholder="YYYY-MM-DD HH:MM" style="width:170px">
+    <button class="btn sm primary" id="tg_schedule_btn" type="button">Запланировать последний черновик</button>
+    <button class="btn sm" id="tg_schedules_btn" type="button">Календарь</button>
+   </div>
+   <div id="tg_schedules_result" style="margin-top:6px"><span class="muted">План появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-templates">
+   <div class="as-head"><div class="as-title">ТГ — шаблоны и хештеги (И200, И202)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_tpl_name" placeholder="Имя шаблона" style="width:160px">
+    <select class="inp" id="tg_tpl_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_tpl_text" placeholder="Шаблон: {topic} {fact} {detail} {price}">
+    <button class="btn sm" id="tg_tpl_save" type="button">Сохранить шаблон</button>
+    <button class="btn sm" id="tg_tpl_list" type="button">Шаблоны</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="tg_tpl_id" placeholder="template_id" style="width:90px">
+    <button class="btn sm primary" id="tg_tpl_apply" type="button">Применить → черновик</button>
+    <input class="inp wide" id="tg_hash_text" placeholder="Текст для хештегов">
+    <button class="btn sm" id="tg_hash_btn" type="button">Хештеги</button>
+   </div>
+   <div id="tg_templates_result" style="margin-top:6px"><span class="muted">Шаблоны появятся здесь.</span></div>
+   <div id="tg_hash_result" style="margin-top:6px"><span class="muted">Хештеги появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-search-export">
+   <div class="as-head"><div class="as-title">ТГ — поиск, экспорт, статистика (И203-И205)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_search_q" placeholder="Поиск по черновикам">
+    <button class="btn sm" id="tg_search_btn" type="button">Найти</button>
+    <select class="inp sm" id="tg_export_fmt"><option value="md">md</option><option value="json">json</option><option value="txt">txt</option></select>
+    <button class="btn sm" id="tg_export_btn" type="button">Экспорт</button>
+    <button class="btn sm" id="tg_stats_btn" type="button">Статистика</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_idea_ctx" placeholder="Контекст идеи">
+    <input class="inp wide" id="tg_idea_text" placeholder="Идея поста">
+    <button class="btn sm" id="tg_idea_save" type="button">Сохранить идею</button>
+    <button class="btn sm" id="tg_ideas_hist" type="button">История идей</button>
+   </div>
+   <div id="tg_search_result" style="margin-top:6px"><span class="muted">Результаты поиска.</span></div>
+   <div id="tg_export_result" style="margin-top:6px"><span class="muted">Экспорт появится здесь.</span></div>
+   <div id="tg_stats_result" style="margin-top:6px"><span class="muted">Статистика конверсии.</span></div>
+  </div>
+
+
+  <div class="as-card" id="card-system">
+   <div class="as-head"><div class="as-title">Система — автозагрузка, процессы, звук, здоровье (И206, И208, И209)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="sys_autostart_on" type="button">Автозагрузка вкл</button>
+    <button class="btn sm" id="sys_autostart_off" type="button">выкл</button>
+    <button class="btn sm" id="sys_procs" type="button">Процессы</button>
+    <button class="btn sm" id="sys_audio" type="button">Аудио-устройства</button>
+    <button class="btn sm" id="sys_health" type="button">Здоровье ПК</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="sys_vol" placeholder="громкость 0-100" type="number" style="width:120px">
+    <button class="btn sm" id="sys_vol_set" type="button">Громкость</button>
+    <input class="inp sm" id="sys_focus_min" placeholder="фокус мин" type="number" style="width:90px">
+    <button class="btn sm" id="sys_focus" type="button">Фокус</button>
+   </div>
+   <div id="sys_result" style="margin-top:6px"><span class="muted">Система появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-windows">
+   <div class="as-head"><div class="as-title">Окна — активное, список, фокус, клик, ввод (Н16-Н26)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="win_active" type="button">Активное</button>
+    <button class="btn sm" id="win_list" type="button">Список окон</button>
+    <input class="inp" id="win_title" placeholder="часть заголовка для фокуса">
+    <button class="btn sm" id="win_focus" type="button">Фокус</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="win_x" placeholder="x" type="number" style="width:70px">
+    <input class="inp sm" id="win_y" placeholder="y" type="number" style="width:70px">
+    <button class="btn sm" id="win_click" type="button">Клик (с подтверждением)</button>
+    <input class="inp" id="win_type" placeholder="текст для ввода">
+    <button class="btn sm" id="win_type_btn" type="button">Ввести (с подтверждением)</button>
+   </div>
+   <div id="win_result" style="margin-top:6px"><span class="muted">Окна появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-screen">
+   <div class="as-head"><div class="as-title">Экран — скрин, область, поиск, архив (И212, И213)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="scr_shot" type="button">Скрин</button>
+    <input class="inp sm" id="scr_l" placeholder="left" type="number" style="width:60px">
+    <input class="inp sm" id="scr_t" placeholder="top" type="number" style="width:60px">
+    <input class="inp sm" id="scr_r" placeholder="right" type="number" style="width:60px">
+    <input class="inp sm" id="scr_b" placeholder="bottom" type="number" style="width:60px">
+    <button class="btn sm" id="scr_region" type="button">Область</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp" id="scr_find" placeholder="найти текст на экране">
+    <button class="btn sm" id="scr_find_btn" type="button">Найти</button>
+    <button class="btn sm" id="scr_find_click" type="button">Найти+клик (с подтверждением)</button>
+    <button class="btn sm" id="scr_arch" type="button">Архив</button>
+    <button class="btn sm" id="scr_arch_erase" type="button">Стереть архив (с подтверждением)</button>
+   </div>
+   <div id="scr_result" style="margin-top:6px"><span class="muted">Экран появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-voice-clip">
+   <div class="as-head"><div class="as-title">Голос, буфер, фокус, файлы, предпочтения, whitelist, макросы (И211, И214-И221)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="voice_listen" type="button">Слушать 5с</button>
+    <input class="inp" id="voice_text" placeholder="текст для озвучки">
+    <button class="btn sm" id="voice_say" type="button">Озвучить</button>
+    <select class="inp sm" id="voice_tone"><option>дружелюбный</option><option>деловой</option><option>тревога</option><option>отчёт</option></select>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <button class="btn sm" id="clip_hist" type="button">История буфера</button>
+    <button class="btn sm" id="clip_read" type="button">Читать буфер</button>
+    <input class="inp" id="clip_write" placeholder="записать в буфер">
+    <button class="btn sm" id="clip_write_btn" type="button">Записать</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="focus_min" placeholder="фокус мин" type="number" style="width:90px">
+    <input class="inp" id="focus_note" placeholder="заметка фокуса">
+    <button class="btn sm" id="focus_start" type="button">Старт фокуса</button>
+    <button class="btn sm" id="focus_list" type="button">Таймеры</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp" id="watch_path" placeholder="папка для слежки">
+    <button class="btn sm" id="watch_add" type="button">Следить</button>
+    <button class="btn sm" id="watch_list" type="button">Слежки</button>
+    <input class="inp" id="quick_name" placeholder="быстрый поиск файла">
+    <button class="btn sm" id="quick_btn" type="button">Найти файл</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="pref_key" placeholder="ключ предпочтения">
+    <input class="inp" id="pref_val" placeholder="значение">
+    <button class="btn sm" id="pref_save" type="button">Сохранить</button>
+    <button class="btn sm" id="pref_list" type="button">Предпочтения</button>
+    <input class="inp sm" id="wl_app" placeholder="приложение">
+    <label class="as-check"><input type="checkbox" id="wl_allow" checked> разрешить</label>
+    <button class="btn sm" id="wl_save" type="button">Whitelist</button>
+    <button class="btn sm" id="wl_list" type="button">Список</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="macro_name" placeholder="имя макроса">
+    <input class="inp wide" id="macro_steps" placeholder='шаги JSON [{"skill":"files.recent","params":{}}]'>
+    <button class="btn sm" id="macro_save" type="button">Сохранить макрос</button>
+    <button class="btn sm" id="macro_list" type="button">Макросы</button>
+    <button class="btn sm primary" id="macro_run" type="button">Запустить (с подтверждением)</button>
+   </div>
+   <div id="voice_result" style="margin-top:6px"><span class="muted">Голос/буфер/макросы появятся здесь.</span></div>
+  </div>
+
+
+  <div class="as-card" id="card-watchdog">
+   <div class="as-head"><div class="as-title">Надзор за процессами (И263, 18.19)</div><div class="as-sub">Пульс агента и панели: кто упал, почему и сколько раз</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="wd_status" type="button">Кто жив</button>
+    <button class="btn sm" id="wd_log" type="button">Журнал надзора</button>
+    <button class="btn sm" id="wd_self" type="button">Проверка надзирателя</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="wd_roles" value="agent,panel" placeholder="роли: agent,panel" style="width:170px">
+    <input class="inp sm" id="wd_interval" value="30" placeholder="интервал, с" style="width:110px">
+    <input class="inp sm" id="wd_stale" value="90" placeholder="порог пульса, с" style="width:130px">
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="wd_confirm" placeholder='для действий введите "вооружить" или "поднять"' style="width:250px">
+    <button class="btn sm primary" id="wd_arm" type="button">Вооружить (с подтверждением)</button>
+    <button class="btn sm" id="wd_disarm" type="button">Снять надзор</button>
+    <button class="btn sm primary" id="wd_once" type="button">Поднять упавших</button>
+   </div>
+   <div id="wd_result" style="margin-top:6px"><span class="muted">Здесь появится пульс ролей.</span></div>
+  </div>
+
+  <div class="as-card" id="card-install">
+   <div class="as-head"><div class="as-title">Автоустановка — проверка и установка зависимостей (И222, 18.18)</div><div class="as-sub">Ставит только то, чего нет: pip-пакеты, модели речи, проверка tesseract/ollama</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="sys_check" type="button">Проверить что не хватает</button>
+    <select class="inp sm" id="install_what"><option value="pip">pip (только недостающие)</option><option value="requirements">requirements.txt</option><option value="models">модели речи (vosk small ru)</option><option value="full">full (pip+модели)</option></select>
+    <input class="inp sm" id="install_confirm" placeholder='для моделей введите "установить"' style="width:180px">
+    <button class="btn sm primary" id="sys_install" type="button">Установить (с подтверждением)</button>
+   </div>
+   <div id="install_result" style="margin-top:6px"><span class="muted">Отчёт появится здесь.</span></div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var state = { available: false, actions: [], model: '', reason: '' };
+
+  function call(method, path, body) {
+    var opts = { method: method, headers: { 'Accept': 'application/json' }, cache: 'no-store' };
+    if (body !== undefined) {
+      if (body instanceof FormData) { opts.body = body; }
+      else {
+        opts.body = JSON.stringify(body || {});
+      }
+    }
+    return fetch(path, opts).then(function (r) {
+      return r.text().then(function (text) {
+        var data = {};
+        if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text.slice(0, 300) }; } }
+        if (!r.ok) throw new Error(data.error || data.reason || ('ошибка ' + r.status));
+        return data;
+      });
+    });
+  }
+  var get = function (p) { return call('GET', p); };
+  var post = function (p, b) { return call('POST', p, b || {}); };
+
+  function log(who, html, cls) {
+    var box = $('as_log');
+    var node = document.createElement('div');
+    node.className = 'msg' + (cls ? ' ' + cls : '');
+    node.innerHTML = '<b class=\"who\">' + esc(who) + '</b>' + html;
+    box.appendChild(node);
+    box.scrollTop = box.scrollHeight;
+    return node;
+  }
+
+  function verdict(text, tone) {
+    var box = $('as_verdict');
+    box.className = 'verdict' + (tone ? ' ' + tone : '');
+    box.innerHTML = text;
+  }
+
+  function renderState() {
+    var pill = $('as_state');
+    if (state.available) {
+      pill.className = 'as-pill ok';
+      pill.textContent = 'Модель готова: ' + state.model;
+      verdict('<b>Помощник готов.</b> ' + esc(state.reason || 'Рантайм на этом компьютере отвечает.')
+        + '<br><small>Данные не покидают машину: адрес рантайма проверяется на loopback до запроса. '
+        + 'Деньги и печать — только через «Подтвердить».</small>', 'ok');
+    } else {
+      pill.className = 'as-pill warn';
+      pill.textContent = state.model ? 'Рантайм недоступен' : 'Модель не выбрана';
+      verdict('<b>Помощник не отвечает.</b> ' + esc(state.reason || '')
+        + '<br><small>Заказы, печать и касса работают как раньше: помощник — необязательная надстройка. '
+        + 'Кнопки каталога ниже при этом работают — они ходят в обычные маршруты панели.</small>', 'warn');
+    }
+    renderSpeech(state.speech);
+    renderAgent(state.agent);
+  }
+
+  function renderSpeech(speech) {
+    var pill = $('as_speech');
+    var mic = $('as_mic');
+    if (!speech || !speech.available) {
+      pill.className = 'as-pill warn';
+      pill.textContent = '🎙 Голос: выключен';
+      pill.title = (speech && speech.reason) || 'Рантайм речи не отвечает';
+      mic.disabled = true;
+      mic.textContent = '🎙';
+      mic.title = 'Голос выключен: нужен внешний рантайм речи на этом компьютере';
+      return;
+    }
+    pill.className = 'as-pill ok';
+    pill.textContent = '🎙 Голос: рантайм жив';
+    pill.title = speech.reason || 'Расшифровка идёт на процессоре, звук не покидает машину';
+    mic.disabled = false;
+    mic.title = 'Скажите фразу — запись уйдёт в рантайм речи на этом компьютере';
+  }
+
+  function renderAgent(agent) {
+    var pill = $('as_agent');
+    if (!agent || !agent.available) {
+      pill.className = 'as-pill warn';
+      pill.textContent = '🖥 Агент: не подключён';
+      pill.title = (agent && agent.reason) || 'Агент не отвечает';
+      return;
+    }
+    pill.className = 'as-pill ok';
+    pill.textContent = '🖥 Агент: жив' + (agent.window ? ' · «' + agent.window + '»' : '');
+    pill.title = 'Стоп-слово слушает агент: ' + (agent.wake_word ? 'да' : 'нет');
+  }
+
+  var RECORDER = null;
+  var CHUNKS = [];
+  var STREAM = null;
+
+  function stopStream() {
+    if (STREAM) { STREAM.getTracks().forEach(function (t) { t.stop(); }); }
+    STREAM = null;
+  }
+
+  function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      log('помощник', '<div class=\"warnline\">В этом окне нет доступа к микрофону — напишите фразу текстом</div>');
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      STREAM = stream;
+      CHUNKS = [];
+      RECORDER = new MediaRecorder(stream);
+      RECORDER.ondataavailable = function (e) { if (e.data && e.data.size) CHUNKS.push(e.data); };
+      RECORDER.onstop = sendRecording;
+      RECORDER.start();
+      var mic = $('as_mic');
+      mic.classList.add('recording');
+      mic.textContent = '⏹ Стоп';
+      log('вы', '<div class=\"body\">Говорю…</div>', 'me');
+    }).catch(function (e) {
+      log('помощник', '<div class=\"warnline\">Микрофон не отдан: ' + esc(e.message || e)
+        + '. Фразу можно написать текстом.</div>');
+    });
+  }
+
+  function stopRecording() {
+    if (RECORDER && RECORDER.state !== 'inactive') RECORDER.stop();
+    else { stopStream(); }
+  }
+
+  function sendRecording() {
+    var mic = $('as_mic');
+    mic.classList.remove('recording');
+    mic.textContent = '🎙';
+    var mime = (RECORDER && RECORDER.mimeType) || 'audio/webm';
+    var blob = new Blob(CHUNKS, { type: mime });
+    stopStream();
+    CHUNKS = [];
+    if (!blob.size) {
+      log('помощник', '<div class=\"warnline\">Звук не записался — повторите фразу</div>');
+      return;
+    }
+    var form = new FormData();
+    form.append('language', 'ru');
+    form.append('audio', blob, 'phrase.webm');
+    log('помощник', '<div class=\"body\">Расшифровываю на этом компьютере…</div>');
+    call('POST', '/api/assistant/speech', form).then(function (data) {
+      if (!data.ok) {
+        log('помощник', '<div class=\"warnline\">' + esc(data.reason || 'Речь не расшифрована') + '</div>');
+        return;
+      }
+      log('вы', '<div class=\"body\">' + esc(data.text) + '</div>', 'me');
+      ask(data.text);
+    }).catch(function (e) {
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function renderActions() {
+    var host = $('as_actions');
+    host.innerHTML = '';
+    (state.actions || []).forEach(function (action) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chip' + (action.confirm ? ' confirm' : '');
+      btn.textContent = action.title;
+      btn.title = action.doc + (action.confirm ? ' · требует подтверждения' : '');
+      btn.addEventListener('click', function () { askAction(action, {}); });
+      host.appendChild(btn);
+    });
+    if (!(state.actions || []).length) {
+      host.innerHTML = '<span class=\"muted\">Каталог пуст — коннектор старше помощника.</span>';
+    }
+  }
+
+  function paramsLine(params) {
+    var keys = Object.keys(params || {});
+    if (!keys.length) return '';
+    return '<div class=\"kv\">' + keys.map(function (k) {
+      return esc(k) + ': ' + esc(typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]);
+    }).join(' · ') + '</div>';
+  }
+
+  function askAction(action, params, explain, warnings) {
+    var html = '<div class=\"body\"><b>' + esc(action.title) + '</b> · '
+      + esc(action.method) + ' ' + esc(action.path) + '</div>'
+      + (explain ? '<div class=\"body\" style=\"margin-top:4px\">' + esc(explain) + '</div>' : '')
+      + paramsLine(params)
+      + ((warnings || []).map(function (w) { return '<div class=\"warnline\">⚠ ' + esc(w) + '</div>'; }).join(''))
+      + '<div class=\"acts\">'
+      + (action.confirm
+        ? '<button class=\"btn sm primary\" type=\"button\" data-run=\"confirm\">Подтвердить и выполнить</button>'
+        : '<button class=\"btn sm\" type=\"button\" data-run=\"now\">Выполнить</button>')
+      + '<button class=\"btn sm\" type=\"button\" data-run=\"cancel\">Отменить</button>'
+      + '</div>';
+    var node = log('действие', html);
+    node.querySelectorAll('[data-run]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var what = btn.dataset.run;
+        if (what === 'cancel') {
+          node.querySelector('.acts').innerHTML = '<span class=\"muted\">Отменено человеком</span>';
+          journal(action, params, 'cancelled', 'Отменено в панели помощника');
+          return;
+        }
+        runAction(action, params, node);
+      });
+    });
+  }
+
+  function runAction(action, params, node) {
+    var body = Object.assign({}, params || {});
+    if (action.confirm) body.confirmed = true;
+    node.querySelectorAll('.acts').forEach(function (box) {
+      box.innerHTML = '<span class=\"muted\">Выполняем…</span>';
+    });
+    var request = action.method === 'GET'
+      ? get(action.path + (Object.keys(body).length
+        ? '?' + new URLSearchParams(body).toString() : ''))
+      : post(action.path, body);
+    request.then(function (data) {
+      node.insertAdjacentHTML('beforeend',
+        '<pre class=\"result\">' + esc(JSON.stringify(data, null, 1).slice(0, 4000)) + '</pre>');
+      node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
+      journal(action, params, 'done', '');
+      refreshJournal();
+    }).catch(function (e) {
+      node.insertAdjacentHTML('beforeend',
+        '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
+      node.querySelectorAll('.acts').forEach(function (box) { box.remove(); });
+      journal(action, params, 'error', String(e.message || e));
+      refreshJournal();
+    });
+  }
+
+  function journal(action, params, outcome, detail) {
+    post('/api/assistant/journal', {
+      action: action.id, title: action.title, outcome: outcome, detail: detail,
+      printer_id: String((params || {}).printer_id || ''),
+      data: { params: params || {}, path: action.path, method: action.method },
+    }).catch(function () { });
+  }
+
+  function refreshJournal() {
+    get('/api/assistant/journal?limit=20').then(function (data) {
+      var host = $('as_journal');
+      var rows = (data.events || []);
+      if (!rows.length) { host.innerHTML = '<span class=\"muted\">Действий ещё не было.</span>'; return; }
+      host.innerHTML = rows.map(function (row) {
+        var d = row.data || {};
+        var outcome = d.outcome || '';
+        return '<div class=\"jrow ' + esc(outcome) + '\"><b>' + esc(row.title || '') + '</b>'
+          + ' · ' + esc(outcome === 'done' ? 'выполнено' : outcome === 'error' ? 'отказ'
+            : outcome === 'cancelled' ? 'отменено' : outcome)
+          + '<div class=\"muted\">' + esc((row.at || '').replace('T', ' ').slice(0, 19))
+          + (row.detail ? ' · ' + esc(row.detail) : '') + '</div></div>';
+      }).join('');
+    }).catch(function (e) {
+      $('as_journal').innerHTML = '<span class=\"muted\">Журнал недоступен: ' + esc(e.message || e) + '</span>';
+    });
+  }
+
+  function ask(text) {
+    log('вы', '<div class=\"body\">' + esc(text) + '</div>', 'me');
+    post('/api/assistant/intent', { text: text }).then(function (data) {
+      if (!data.ok) {
+        log('помощник', '<div class=\"body\">' + esc(data.reason || 'Не получилось') + '</div>');
+        return;
+      }
+      if (!data.action) {
+        log('помощник', '<div class=\"body\">'
+          + esc(data.explain || 'Действие из каталога не подошло — уточните фразу.')
+          + '</div>');
+        return;
+      }
+      askAction(data.action, data.params || {}, data.explain, data.warnings || []);
+    }).catch(function (e) {
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function intake() {
+    var text = $('as_intake_text').value.trim();
+    var file = $('as_intake_file').files && $('as_intake_file').files[0];
+    if (!text && !file) { log('помощник', '<div class=\"warnline\">Вставьте сообщение или приложите файл</div>'); return; }
+    var form = new FormData();
+    form.append('text', text);
+    form.append('channel', 'direct');
+    if (file) form.append('file', file);
+    log('вы', '<div class=\"body\">Разобрать входящее сообщение'
+      + (file ? ' с файлом ' + esc(file.name) : '') + '</div>', 'me');
+    call('POST', '/api/order/intake/upload', form).then(function (data) {
+      var draft = data.draft || {};
+      var lines = ['Изделие: ' + (draft.product || '—'),
+        'Клиент: ' + (draft.customer_name || '—') + (draft.phone ? ' · ' + draft.phone : ''),
+        'Количество: ' + (draft.qty || 1) + ' · Сумма: ' + (draft.price || 0) + ' ₽',
+        'Материал: ' + (draft.material || '—') + ' · Цвет: ' + (draft.color || '—'),
+        'Срок: ' + (draft.due || '—') + ' · Файл: ' + (draft.file || '—')];
+      var suggestions = data.suggestions || [];
+      log('помощник', '<div class=\"body\">Черновик заказа · уверенность '
+        + (data.confidence || 0) + '%</div><div class=\"kv\">'
+        + lines.map(esc).join('<br>') + '</div>'
+        + (suggestions.length ? '<div class=\"warnline\">Помощник предложил: '
+          + suggestions.map(function (s) { return esc(s.field) + ' → «' + esc(s.value) + '»'; }).join(', ')
+          + '</div>' : '')
+        + ((data.warnings || []).map(function (w) {
+          return '<div class=\"warnline\">⚠ ' + esc(w) + '</div>'; }).join(''))
+        + (data.reply ? '<div class=\"body\" style=\"margin-top:6px\">Черновик ответа клиенту:<br>'
+          + esc(data.reply) + '</div>' : '')
+        + '<div class=\"acts\"><button class=\"btn sm primary\" type=\"button\" data-save=\"1\">Сохранить заказ</button>'
+        + '<a class=\"btn sm\" href=\"/index.html\" >Открыть в панели</a></div>');
+      var box = $('as_log').lastElementChild;
+      var save = box.querySelector('[data-save]');
+      if (save) save.addEventListener('click', function () {
+        save.disabled = true;
+        post('/api/order/save', draft).then(function (res) {
+          var order = res.order || {};
+          box.insertAdjacentHTML('beforeend', '<div class=\"body\">Заказ сохранён: №'
+            + esc(order.number || '') + '</div>');
+          journal({ id: 'order_save', title: 'Сохранить заказ', method: 'POST',
+            path: '/api/order/save', confirm: true }, { draft: draft }, 'done',
+            'Черновик из входящего сообщения');
+          refreshJournal();
+        }).catch(function (e) {
+          save.disabled = false;
+          box.insertAdjacentHTML('beforeend', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
+        });
+      });
+      $('as_intake_text').value = '';
+      $('as_intake_file').value = '';
+      $('as_intake_filename').textContent = '';
+    }).catch(function (e) {
+      log('помощник', '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>');
+    });
+  }
+
+  function askFacts() {
+    var text = $('as_ask_text').value.trim();
+    var host = $('as_ask_result');
+    if (!text) { host.innerHTML = '<div class=\"warnline\">Введите вопрос</div>'; return; }
+    host.innerHTML = '<span class=\"muted\">Ищем факты в базе…</span>';
+    post('/api/assistant/ask', { question: text }).then(function (data) {
+      var facts = data.facts || [];
+      var html = '';
+      if (data.answer) html += '<div class=\"body\">' + esc(data.answer) + '</div>';
+      if (!data.answered) html += '<div class=\"warnline\">' + esc(data.reason || 'Ответ не собран') + '</div>';
+      (data.warnings || []).forEach(function (w) {
+        html += '<div class=\"warnline\">⚠ ' + esc(w) + '</div>';
+      });
+      html += facts.length
+        ? '<div class=\"kv\" style=\"margin-top:6px\">Факты из базы (' + facts.length + '):<br>'
+          + facts.slice(0, 12).map(function (f) {
+            return '• ' + esc(f.title) + ' — ' + esc(f.text)
+              + (f.ref ? ' <span class=\"muted\">[' + esc(f.ref) + ']</span>' : '');
+          }).join('<br>') + '</div>'
+        : '';
+      host.innerHTML = html || '<span class=\"muted\">Фактов не нашлось</span>';
+    }).catch(function (e) {
+      host.innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
+  function loadDay(kind) {
+    var host = $('as_day_result');
+    host.innerHTML = '<span class=\"muted\">Считаем…</span>';
+    var query = kind === 'summary' ? '?kind=summary&days=7' : '?kind=briefing';
+    get('/api/assistant/day' + query).then(function (data) {
+      if (!data.ok) {
+        host.innerHTML = '<div class=\"warnline\">' + esc(data.reason || 'Не получилось') + '</div>';
+        return;
+      }
+      $('as_day_hint').textContent = data.title || '';
+      host.innerHTML = '<div class=\"body\">' + (data.lines || []).map(function (line) {
+        return '• ' + esc(line);
+      }).join('<br>') + '</div>'
+        + ((data.problems || []).map(function (p) {
+          return '<div class=\"warnline\">⚠ ' + esc(p) + '</div>'; }).join(''));
+    }).catch(function (e) {
+      host.innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message || e) + '</div>';
+    });
+  }
+
+  function refreshSkills() {
+    return get('/api/assistant/skills').then(function (data) {
+      var pill = $('as_skills');
+      var host = $('as_skills_list');
+      if (!data.available) {
+        pill.className = 'as-pill warn';
+        pill.textContent = '🧩 Навыки: агент не отвечает';
+        pill.title = data.reason || 'Агент компьютера выключен или не запущен';
+        host.innerHTML = '<span class=\"muted\">' + esc(data.reason || 'Агент не отвечает') + '</span>';
+        return;
+      }
+      pill.className = 'as-pill ok';
+      pill.textContent = '🧩 Навыки: ' + data.ready + ' из ' + data.count;
+      pill.title = 'Реестр отдаёт агент; панель его только читает';
+      host.innerHTML = (data.skills || []).map(function (row) {
+        return '<div class=\"jrow ' + (row.available ? 'done' : 'error') + '\">'
+          + '<b>' + esc(row.title) + '</b> <span class=\"muted\">' + esc(row.name) + '</span>'
+          + (row.confirm ? ' <span class=\"muted\">· подтверждение</span>' : '')
+          + '<div class=\"muted\">' + esc(row.available ? row.description : (row.reason || 'недоступен'))
+          + '</div></div>';
+      }).join('') || '<span class=\"muted\">Навыков нет</span>';
+    }).catch(function (e) {
+      $('as_skills').className = 'as-pill warn';
+      $('as_skills').textContent = '🧩 Навыки: недоступны';
+      $('as_skills_list').innerHTML = '<span class=\"muted\">' + esc(e.message || e) + '</span>';
+    });
+  }
+
+  function refreshState() {
+    return Promise.all([
+      get('/api/assistant/status'),
+      get('/api/assistant/agent').catch(function (e) { return { available: false, reason: String(e.message || e) }; }),
+    ]).then(function (pair) {
+      var data = pair[0] || {};
+      state = { available: !!data.available, actions: data.actions || [],
+        model: data.model || '', reason: data.reason || '',
+        speech: data.speech || { available: false, reason: 'Рантайм речи не отвечает' },
+        agent: pair[1] || { available: false, reason: '' } };
+      renderState();
+      renderActions();
+    }).catch(function (e) {
+      state = { available: false, actions: [], model: '', reason: String(e.message || e),
+        speech: { available: false, reason: String(e.message || e) },
+        agent: { available: false, reason: String(e.message || e) } };
+      renderState();
+    });
+  }
+
+  // --- 18.15: Авито и ТГ ---------------------------------------------------
+  var lastTgDraftId = 0;
+  function avitoRender(data) {
+    var host = $('av_result');
+    if (!data.ok) { host.innerHTML = '<div class=\"warnline\">' + esc(data.reason || 'Ошибка') + '</div>'; return; }
+    var html = '';
+    if (data.watch) html += '<div class=\"body\">Слежка #' + data.watch.id + ': «' + esc(data.watch.query) + '»</div>';
+    if (data.watches) {
+      html += '<div class=\"kv\">Слежек: ' + data.watches.length + '<br>' + data.watches.slice(0,10).map(function (w) {
+        return '#' + w.id + ' «' + esc(w.query) + '» ' + (w.city ? esc(w.city) : '') + ' ' + (w.max_price ? 'до ' + w.max_price : '') + ' · нашёл ' + (w.last_count||0);
+      }).join('<br>') + '</div>';
+    }
+    if (data.listings) {
+      html += '<div class=\"body\" style=\"margin-top:6px\">Объявлений: ' + data.listings.length + '</div>';
+      html += '<div class=\"kv\">' + data.listings.slice(0,15).map(function (it) {
+        return '• <a href=\"' + esc(it.url||'#') + '\" target=\"_blank\">' + esc(it.title||'—') + '</a> ' + esc(it.price||'') + ' ' + esc(it.city||'');
+      }).join('<br>') + '</div>';
+    }
+    if (data.hint) html += '<div class=\"muted\" style=\"margin-top:4px\">' + esc(data.hint) + '</div>';
+    if (data.reason) html += '<div class=\"warnline\">' + esc(data.reason) + '</div>';
+    host.innerHTML = html || '<span class=\"muted\">Пусто</span>';
+  }
+  function avitoWatch() {
+    var q = $('av_query').value.trim();
+    if (!q) { $('av_result').innerHTML = '<div class=\"warnline\">Введите запрос</div>'; return; }
+    $('av_result').innerHTML = '<span class=\"muted\">Сохраняем слежку…</span>';
+    post('/api/assistant/avito/watch', { query: q, city: $('av_city').value.trim(), category: $('av_cat').value.trim(), max_price: parseInt($('av_max').value||'0',10)||0 }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoSearch() {
+    var q = $('av_query').value.trim();
+    if (!q) { $('av_result').innerHTML = '<div class=\"warnline\">Введите запрос</div>'; return; }
+    $('av_result').innerHTML = '<span class=\"muted\">Ищем на Авито…</span>';
+    post('/api/assistant/avito/search', { query: q, city: $('av_city').value.trim(), category: $('av_cat').value.trim(), max_price: parseInt($('av_max').value||'0',10)||0, limit: 20 }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoCheck() {
+    $('av_result').innerHTML = '<span class=\"muted\">Проверяем слежки…</span>';
+    post('/api/assistant/avito/check', { only_new: true }).then(avitoRender).catch(function (e) { $('av_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function avitoReply() {
+    var thread = $('av_thread').value.trim();
+    if (!thread) { $('av_reply_result').innerHTML = '<div class=\"warnline\">Вставьте переписку</div>'; return; }
+    $('av_reply_result').innerHTML = '<span class=\"muted\">Придумываем ответы…</span>';
+    post('/api/assistant/avito/reply', { thread: thread, intent: $('av_intent').value.trim(), city: $('av_city').value.trim() }).then(function (data) {
+      if (!data.ok) { $('av_reply_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var html = '<div class=\"body\">Варианты (' + (data.source||'') + '):</div>';
+      html += (data.replies||[]).map(function (r) { return '<div class="jrow done" style="margin-top:4px"><div class="body">' + esc(r) + '</div><div class="as-row" style="margin-top:4px"><button class="btn sm" type="button" data-txt="' + encodeURIComponent(r) + '" onclick="navigator.clipboard.writeText(decodeURIComponent(this.dataset.txt))">Копировать</button></div></div>'; }).join('');
+      if (data.hint) html += '<div class=\"muted\" style=\"margin-top:4px\">' + esc(data.hint) + '</div>';
+      // рекомендации
+      html += '<div class=\"kv\" style=\"margin-top:6px\">Рекомендация: выбирайте вежливый для первого контакта, короткий — для уточнения, торг — когда просят скидку. Не обещайте доставку, если не готовы.</div>';
+      $('av_reply_result').innerHTML = html;
+      // fix copy buttons
+      var rows = $('av_reply_result').querySelectorAll('.jrow');
+      rows.forEach(function (row, i) {
+        var btn = row.querySelector('button');
+        if (btn) { btn.dataset.txt = (data.replies||[])[i]||''; btn.addEventListener('click', function () { navigator.clipboard.writeText(this.dataset.txt); this.textContent='Скопировано'; }); }
+      });
+    }).catch(function (e) { $('av_reply_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+
+  function tgIdeas() {
+    $('tg_ideas_result').innerHTML = '<span class=\"muted\">Придумываем темы…</span>';
+    post('/api/assistant/tg/ideas', { limit: 8 }).then(function (data) {
+      if (!data.ok) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var html = '<div class=\"kv\">' + (data.ideas||[]).map(function (t, i) { return (i+1)+'. ' + esc(t) + ' <button class=\"btn sm\" type=\"button\" data-topic=\"'+esc(t)+'\">→ в тему</button>'; }).join('<br>') + '</div>';
+      if (data.hint) html += '<div class=\"muted\">' + esc(data.hint) + '</div>';
+      $('tg_ideas_result').innerHTML = html;
+      $('tg_ideas_result').querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { $('tg_topic').value = this.dataset.topic; }); });
+    }).catch(function (e) { $('tg_ideas_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgDraft() {
+    var topic = $('tg_topic').value.trim();
+    if (!topic) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">Введите тему</div>'; return; }
+    $('tg_draft_result').innerHTML = '<span class=\"muted\">Пишем черновик…</span>';
+    post('/api/assistant/tg/draft', { topic: topic, tone: $('tg_tone').value, facts: $('tg_facts').value.trim() }).then(function (data) {
+      if (!data.ok) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      lastTgDraftId = data.draft_id || (data.draft && data.draft.id) || 0;
+      var html = '<div class=\"body\">' + esc(data.text||'') + '</div>';
+      if (data.warning) html += '<div class=\"warnline\">⚠ ' + esc(data.warning) + '</div>';
+      if (data.hint) html += '<div class=\"muted\">' + esc(data.hint) + '</div>';
+      html += '<div class=\"as-row\" style=\"margin-top:6px\"><button class=\"btn sm\" type=\"button\" id=\"tg_copy\">Копировать</button><button class=\"btn sm primary\" type=\"button\" id=\"tg_publish\">Опубликовать (с подтверждением)</button></div>';
+      $('tg_draft_result').innerHTML = html;
+      $('tg_copy').addEventListener('click', function () { navigator.clipboard.writeText(data.text||''); this.textContent='Скопировано'; });
+      $('tg_publish').addEventListener('click', tgPostLast);
+    }).catch(function (e) { $('tg_draft_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgList() {
+    $('tg_list_result').innerHTML = '<span class=\"muted\">Загружаем черновики…</span>';
+    get('/api/assistant/tg/drafts?limit=20').then(function (data) {
+      if (!data.ok) { $('tg_list_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
+      var drafts = data.drafts || data.result || [];
+      // _call_agent_skill возвращает напрямую массив? Проверяем оба
+      if (!drafts.length && data.drafts === undefined && Array.isArray(data)) drafts = data;
+      // если прокси вернул {drafts: []}
+      var html = '<div class=\"kv\">Черновиков: ' + drafts.length + '<br>' + drafts.slice(0,15).map(function (d) {
+        return '#' + d.id + ' «' + esc(d.topic||'') + '» [' + esc(d.tone||'') + '] ' + esc(d.status||'') + ' <button class=\"btn sm\" type=\"button\" data-id=\"'+d.id+'\" data-txt=\"'+esc(d.text||'').replace(/\"/g,'&quot;')+'\">Выбрать</button>';
+      }).join('<br>') + '</div>';
+      $('tg_list_result').innerHTML = html || '<span class=\"muted\">Пусто</span>';
+      $('tg_list_result').querySelectorAll('button').forEach(function (b) {
+        b.addEventListener('click', function () {
+          lastTgDraftId = parseInt(this.dataset.id,10)||0;
+          $('tg_topic').value = '';
+          $('tg_draft_result').innerHTML = '<div class=\"body\">' + esc(this.dataset.txt||'') + '</div><div class=\"as-row\" style=\"margin-top:6px\"><button class=\"btn sm primary\" type=\"button\" id=\"tg_publish2\">Опубликовать</button></div>';
+          var btn = document.getElementById('tg_publish2');
+          if (btn) btn.addEventListener('click', tgPostLast);
+        });
+      });
+    }).catch(function (e) { $('tg_list_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+  function tgPostLast() {
+    if (!lastTgDraftId) { alert('Нет выбранного черновика'); return; }
+    if (!confirm('Опубликовать пост #' + lastTgDraftId + ' в ТГ-канал? Токен берётся из настроек агента.')) return;
+    post('/api/assistant/tg/post', { draft_id: lastTgDraftId, confirmed: true }).then(function (data) {
+      if (!data.ok && data.needs_confirmation) {
+        if (confirm(data.text || 'Подтвердить публикацию в ТГ?')) {
+          return post('/api/assistant/tg/post', { draft_id: lastTgDraftId, confirmed: true }).then(function (d2) {
+            $('tg_list_result').innerHTML = '<div class=\"body\">' + (d2.ok ? '✅ Опубликовано, message_id ' + (d2.message_id||'') : '❌ ' + esc(d2.reason||'')) + '</div>';
+          });
+        }
+        return;
+      }
+      $('tg_list_result').innerHTML = '<div class=\"body\">' + (data.ok ? '✅ Опубликовано, message_id ' + (data.message_id||'') : '❌ ' + esc(data.reason||'')) + '</div>';
+    }).catch(function (e) { $('tg_list_result').innerHTML = '<div class=\"warnline\">✗ ' + esc(e.message||e) + '</div>'; });
+  }
+
+  $('as_send').addEventListener('click', function () {
+    var text = $('as_text').value.trim();
+    if (!text) return;
+    $('as_text').value = '';
+    ask(text);
+  });
+  $('as_text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('as_send').click();
+  });
+  $('as_refresh').addEventListener('click', function () { refreshState(); refreshJournal(); refreshSkills(); });
+  $('as_journal_refresh').addEventListener('click', refreshJournal);
+  $('as_intake_pick').addEventListener('click', function () { $('as_intake_file').click(); });
+  $('as_intake_file').addEventListener('change', function () {
+    var f = $('as_intake_file').files && $('as_intake_file').files[0];
+    $('as_intake_filename').textContent = f ? f.name + ' · ' + (f.size / 1048576).toFixed(1) + ' МБ' : '';
+  });
+  $('as_mic').addEventListener('click', function () {
+    if (RECORDER && RECORDER.state === 'recording') stopRecording();
+    else startRecording();
+  });
+  $('as_intake_run').addEventListener('click', intake);
+  $('as_ask_run').addEventListener('click', askFacts);
+  $('as_ask_text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('as_ask_run').click();
+  });
+  $('as_day_briefing').addEventListener('click', function () { loadDay('briefing'); });
+  $('as_day_summary').addEventListener('click', function () { loadDay('summary'); });
+  $('as_skills_refresh').addEventListener('click', refreshSkills);
+
+  // --- 18.16: архив переписок, связка, расписание, дедуп ---
+  function avitoThreads() {
+    var st = $('av_thread_status').value.trim();
+    var url = '/api/assistant/avito/threads?limit=30' + (st ? '&status='+encodeURIComponent(st) : '');
+    $('av_threads_result').innerHTML = '<span class="muted">Загружаем архив…</span>';
+    get(url).then(function (data) {
+      if (!data.ok) { $('av_threads_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      var rows = data.threads||[];
+      if (!rows.length) { $('av_threads_result').innerHTML = '<span class="muted">Пусто</span>'; return; }
+      var html = rows.map(function (r) {
+        return '<div class="as-item"><div class="as-item-head"><b>#'+r.id+'</b> '+esc((r.thread_text||'').slice(0,120))+' <span class="muted">'+esc(r.status||'')+' '+esc(r.at||'')+'</span></div><div class="as-item-body">'+(r.replies||[]).map(function (t){ return '<div class="as-reply"><span>'+esc(t)+'</span> <button class="btn xs" type="button" data-copy="'+esc(t).replace(/"/g,'&quot;')+'">Копировать</button></div>'; }).join('')+'</div></div>';
+      }).join('');
+      $('av_threads_result').innerHTML = html;
+      $('av_threads_result').querySelectorAll('button[data-copy]').forEach(function (b){ b.addEventListener('click', function(){ navigator.clipboard.writeText(this.dataset.copy||''); this.textContent='Скопировано'; }); });
+    }).catch(function (e){ $('av_threads_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function avitoThreadSave() {
+    var thread = $('av_thread').value.trim();
+    if (!thread) { $('av_threads_result').innerHTML = '<div class="warnline">Введите переписку в поле выше (Авито-слежка)</div>'; return; }
+    $('av_threads_result').innerHTML = '<span class="muted">Сохраняем…</span>';
+    post('/api/assistant/avito/thread/save', { thread: thread, intent: $('av_intent').value.trim(), city: $('av_city').value.trim(), status: $('av_thread_status').value.trim()||'new' }).then(function (data){
+      if (!data.ok) { $('av_threads_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      var replies = data.replies||[];
+      var html = '<div class="body">✅ Сохранено #'+(data.thread&&data.thread.id||'')+'</div>' + replies.map(function (t){ return '<div class="as-reply"><span>'+esc(t)+'</span> <button class="btn xs" type="button" data-copy="'+esc(t).replace(/"/g,'&quot;')+'">Копировать</button></div>'; }).join('');
+      $('av_threads_result').innerHTML = html;
+      $('av_threads_result').querySelectorAll('button[data-copy]').forEach(function (b){ b.addEventListener('click', function(){ navigator.clipboard.writeText(this.dataset.copy||''); this.textContent='Скопировано'; }); });
+    }).catch(function (e){ $('av_threads_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function avitoToOrder() {
+    var listing_id = parseInt($('av_listing_id').value||'0',10)||0;
+    var payload = { listing_id: listing_id, confirmed: true };
+    // если listing_id пустой, возьмём из последнего результата avitoRender? для простоты требуем id
+    $('av_extra_result').textContent = 'Создаём заказ…';
+    post('/api/assistant/avito/to-order', payload).then(function (data){
+      if (!data.ok && data.needs_confirmation) {
+        // второй раз с confirmed уже есть, но если сервер просит — ещё раз
+        return post('/api/assistant/avito/to-order', { listing_id: listing_id, confirmed: true });
+      }
+      return data;
+    }).then(function (data){
+      if (!data.ok) { $('av_extra_result').innerHTML = '<span class="warnline">'+esc(data.reason||'Ошибка')+'</span>'; return; }
+      $('av_extra_result').innerHTML = '✅ '+(data.hint||'Готово');
+    }).catch(function (e){ $('av_extra_result').innerHTML = '<span class="warnline">✗ '+esc(e.message||e)+'</span>'; });
+  }
+  function avitoSchedule() {
+    var watch_id = parseInt($('av_watch_id').value||'0',10)||0;
+    var interval = parseInt($('av_interval').value||'0',10)||0;
+    var notify = $('av_notify').checked;
+    if (!watch_id) { $('av_extra_result').textContent = 'Укажите watch_id'; return; }
+    $('av_extra_result').textContent = 'Сохраняем расписание…';
+    post('/api/assistant/avito/schedule', { watch_id: watch_id, interval_hours: interval, notify: notify }).then(function (data){
+      $('av_extra_result').textContent = data.ok ? '✅ Расписание: '+interval+'ч, notify='+notify : '❌ '+(data.reason||'');
+    }).catch(function (e){ $('av_extra_result').textContent = '✗ '+(e.message||e); });
+  }
+  function avitoDedup() {
+    var h = $('av_image_hash').value.trim();
+    $('av_dedup_result').innerHTML = '<span class="muted">Ищем дубли…</span>';
+    get('/api/assistant/avito/dedup?limit=20'+(h ? '&image_hash='+encodeURIComponent(h):'')).then(function (data){
+      if (!data.ok) { $('av_dedup_result').innerHTML = '<div class="warnline">'+esc(data.reason||'Ошибка')+'</div>'; return; }
+      if (data.duplicates) {
+        var html = data.duplicates.map(function (r){ return '<div class="as-item"><b>'+esc(r.title||'')+'</b> '+esc(r.url||'')+' '+esc(r.price||'')+'</div>'; }).join('') || '<span class="muted">Дублей нет</span>';
+        $('av_dedup_result').innerHTML = html;
+      } else {
+        var groups = data.groups||[];
+        if (!groups.length) { $('av_dedup_result').innerHTML = '<span class="muted">Дублей по фото нет</span>'; return; }
+        var html = groups.map(function (g){ return '<div class="as-item"><b>hash '+esc(g.image_hash)+' x'+g.count+'</b><div>'+(g.items||[]).map(function (it){ return '<div>'+esc(it.title||'')+' '+esc(it.url||'')+'</div>'; }).join('')+'</div></div>'; }).join('');
+        $('av_dedup_result').innerHTML = html;
+      }
+    }).catch(function (e){ $('av_dedup_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+
+  // --- 18.16: ТГ календарь, шаблоны, хештеги, поиск, экспорт, статистика ---
+  function tgSchedule() {
+    var date = $('tg_plan_date').value.trim();
+    if (!date) { $('tg_schedules_result').innerHTML = '<div class="warnline">Введите дату YYYY-MM-DD HH:MM</div>'; return; }
+    if (!lastTgDraftId) { $('tg_schedules_result').innerHTML = '<div class="warnline">Нет черновика для планирования</div>'; return; }
+    $('tg_schedules_result').innerHTML = '<span class="muted">Планируем…</span>';
+    post('/api/assistant/tg/schedule', { draft_id: lastTgDraftId, planned_at: date }).then(function (data){
+      $('tg_schedules_result').innerHTML = data.ok ? '<div class="body">✅ Запланировано #'+data.schedule.id+' на '+esc(data.schedule.planned_at)+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_schedules_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgSchedules() {
+    $('tg_schedules_result').innerHTML = '<span class="muted">Загружаем календарь…</span>';
+    get('/api/assistant/tg/schedules?limit=30').then(function (data){
+      if (!data.ok) { $('tg_schedules_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.schedules||[];
+      if (!rows.length) { $('tg_schedules_result').innerHTML = '<span class="muted">Пусто</span>'; return; }
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+r.id+'</b> draft '+r.draft_id+' на '+esc(r.planned_at)+' <span class="muted">'+esc(r.status)+'</span></div>'; }).join('');
+      $('tg_schedules_result').innerHTML = html;
+    }).catch(function (e){ $('tg_schedules_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplSave() {
+    var name = $('tg_tpl_name').value.trim();
+    var txt = $('tg_tpl_text').value.trim();
+    if (!name || !txt) { $('tg_templates_result').innerHTML = '<div class="warnline">Имя и текст шаблона обязательны</div>'; return; }
+    post('/api/assistant/tg/template/save', { name: name, tone: $('tg_tpl_tone').value, template: txt }).then(function (data){
+      $('tg_templates_result').innerHTML = data.ok ? '<div class="body">✅ Шаблон #'+data.template.id+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplList() {
+    $('tg_templates_result').innerHTML = '<span class="muted">Загружаем шаблоны…</span>';
+    get('/api/assistant/tg/templates?limit=30').then(function (data){
+      if (!data.ok) { $('tg_templates_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.templates||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+(r.id||0)+'</b> '+esc(r.name||'')+' ['+esc(r.tone||'')+'] vars: '+(r.vars||[]).join(',')+'<div class="muted">'+esc((r.template_text||r.template||'').slice(0,120))+'</div><button class="btn xs" type="button" data-tpl="'+(r.id||0)+'">Применить</button></div>'; }).join('');
+      $('tg_templates_result').innerHTML = html || '<span class="muted">Пусто</span>';
+      $('tg_templates_result').querySelectorAll('button[data-tpl]').forEach(function (b){ b.addEventListener('click', function(){ $('tg_tpl_id').value = this.dataset.tpl; }); });
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgTplApply() {
+    var id = parseInt($('tg_tpl_id').value||'0',10)||0;
+    $('tg_templates_result').innerHTML = '<span class="muted">Применяем шаблон…</span>';
+    post('/api/assistant/tg/template/apply', { template_id: id, facts: $('tg_facts').value.trim(), topic: $('tg_topic').value.trim(), tone: $('tg_tpl_tone').value }).then(function (data){
+      if (!data.ok) { $('tg_templates_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      $('tg_templates_result').innerHTML = '<div class="body">✅ Черновик #'+data.draft_id+'<div>'+esc(data.text||'')+'</div></div>';
+      lastTgDraftId = data.draft_id||lastTgDraftId;
+    }).catch(function (e){ $('tg_templates_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgHashtags() {
+    var txt = $('tg_hash_text').value.trim() || $('tg_topic').value.trim() + ' ' + $('tg_facts').value.trim();
+    if (!txt) { $('tg_hash_result').innerHTML = '<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/tg/hashtags', { text: txt, limit: 8 }).then(function (data){
+      $('tg_hash_result').innerHTML = data.ok ? '<div class="body">'+(data.hashtags||[]).map(function (h){ return '<span style="margin-right:6px">'+esc(h)+'</span>'; }).join('')+' <button class="btn xs" type="button" id="hash_copy">Копировать</button></div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+      var btn = document.getElementById('hash_copy');
+      if (btn) btn.addEventListener('click', function(){ navigator.clipboard.writeText((data.hashtags||[]).join(' ')); this.textContent='Скопировано'; });
+    }).catch(function (e){ $('tg_hash_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgSearch() {
+    var q = $('tg_search_q').value.trim();
+    if (!q) { $('tg_search_result').innerHTML = '<div class="warnline">Введите запрос</div>'; return; }
+    get('/api/assistant/tg/search?q='+encodeURIComponent(q)+'&limit=20').then(function (data){
+      if (!data.ok) { $('tg_search_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.results||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>'+esc(r.topic||'')+'</b> ['+esc(r.tone||'')+'] '+esc((r.text||'').slice(0,120))+'</div>'; }).join('') || '<span class="muted">Ничего не нашлось</span>';
+      $('tg_search_result').innerHTML = html;
+    }).catch(function (e){ $('tg_search_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgExport() {
+    var fmt = $('tg_export_fmt').value;
+    get('/api/assistant/tg/export?limit=100&format='+encodeURIComponent(fmt)).then(function (data){
+      if (!data.ok) { $('tg_export_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      $('tg_export_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">'+esc(data.text||'')+'</pre><button class="btn xs" type="button" id="exp_copy">Копировать</button></div>';
+      var btn = document.getElementById('exp_copy');
+      if (btn) btn.addEventListener('click', function(){ navigator.clipboard.writeText(data.text||''); this.textContent='Скопировано'; });
+    }).catch(function (e){ $('tg_export_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgStats() {
+    get('/api/assistant/tg/stats').then(function (data){
+      if (!data.ok) { $('tg_stats_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var s = data.stats||{};
+      $('tg_stats_result').innerHTML = '<div class="body">Идей: '+s.ideas_total+' (used '+s.ideas_used+' '+s.ideas_conversion+'%)<br>Черновиков: '+s.drafts_total+' (posted '+s.drafts_posted+' '+s.drafts_conversion+'%)<br>Календарь: всего '+s.schedules_total+' план '+s.schedules_planned+'</div>';
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgIdeaSave() {
+    var ctx = $('tg_idea_ctx').value.trim();
+    var idea = $('tg_idea_text').value.trim();
+    if (!idea) { $('tg_stats_result').innerHTML = '<div class="warnline">Введите идею</div>'; return; }
+    post('/api/assistant/tg/idea/save', { context: ctx, idea: idea }).then(function (data){
+      $('tg_stats_result').innerHTML = data.ok ? '<div class="body">✅ Идея #'+data.idea.id+'</div>' : '<div class="warnline">'+esc(data.reason||'')+'</div>';
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function tgIdeasHist() {
+    get('/api/assistant/tg/ideas/history?limit=30').then(function (data){
+      if (!data.ok) { $('tg_stats_result').innerHTML = '<div class="warnline">'+esc(data.reason||'')+'</div>'; return; }
+      var rows = data.ideas||[];
+      var html = rows.map(function (r){ return '<div class="as-item"><b>#'+r.id+'</b> '+esc(r.idea_text||'')+' <span class="muted">'+esc(r.status||'')+' draft '+r.draft_id+'</span></div>'; }).join('') || '<span class="muted">Пусто</span>';
+      $('tg_stats_result').innerHTML = html;
+    }).catch(function (e){ $('tg_stats_result').innerHTML = '<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+
+
+
+  // --- 18.17: система, окна, экран, голос, буфер, фокус, файлы, предпочтения ---
+  function sysRender(data) { $('sys_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(data,null,2))+'</pre></div>'; }
+  function sysCheck() {
+    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
+    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysInstall() {
+    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
+    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
+    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  // --- провода кнопок -----------------------------------------------------
+  // Разметка карточек стоит ВЫШЕ этого скрипта: к моменту выполнения DOM уже
+  // собран, поэтому слушатели ставятся сразу. Раньше карточки дописывались в
+  // конец файла ЗА закрывающим тегом скрипта, и кнопки молча не работали (18.15-18.18).
+  function wdRender(d) {
+    $('wd_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">' + esc(JSON.stringify(d, null, 2)) + '</pre></div>';
+  }
+  function wdShow(path, what) {
+    $('wd_result').innerHTML = '<span class="muted">' + esc(what) + '…</span>';
+    get(path).then(wdRender).catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdStatus() { wdShow('/api/assistant/system/watchdog?mode=status', 'Пульс ролей'); }
+  function wdLog() { wdShow('/api/assistant/system/watchdog?mode=log', 'Журнал надзора'); }
+  function wdSelf() { wdShow('/api/assistant/system/watchdog?mode=self_check', 'Проверка надзирателя'); }
+  function wdArm() {
+    var roles = $('wd_roles').value.trim();
+    var interval = parseInt($('wd_interval').value || '0', 10) || 0;
+    var stale = parseInt($('wd_stale').value || '0', 10) || 0;
+    var word = $('wd_confirm').value.trim();
+    $('wd_result').innerHTML = '<span class="muted">Вооружаем надзор…</span>';
+    post('/api/assistant/system/watchdog/arm', {enabled: 'on', roles: roles, interval: interval, stale_sec: stale, confirm_text: word, confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdDisarm() {
+    $('wd_result').innerHTML = '<span class="muted">Снимаем надзор…</span>';
+    post('/api/assistant/system/watchdog/arm', {enabled: 'off', confirm_text: 'снять', confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdOnce() {
+    var roles = $('wd_roles').value.trim();
+    var word = $('wd_confirm').value.trim();
+    $('wd_result').innerHTML = '<span class="muted">Проход надзора…</span>';
+    post('/api/assistant/system/watchdog/once', {roles: roles, dry: false, confirm_text: word, confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+
+  var wiring = {
+    av_threads: avitoThreads, av_thread_save: avitoThreadSave,
+    av_to_order: avitoToOrder, av_schedule: avitoSchedule, av_dedup: avitoDedup,
+    tg_schedule_btn: tgSchedule, tg_schedules_btn: tgSchedules,
+    tg_tpl_save: tgTplSave, tg_tpl_list: tgTplList, tg_tpl_apply: tgTplApply,
+    tg_hash_btn: tgHashtags, tg_search_btn: tgSearch, tg_export_btn: tgExport,
+    tg_stats_btn: tgStats, tg_idea_save: tgIdeaSave, tg_ideas_hist: tgIdeasHist,
+    sys_check: sysCheck, sys_install: sysInstall,
+    sys_procs: sysProcs, sys_audio: sysAudio, sys_health: sysHealth,
+    sys_vol_set: sysVol, sys_focus: sysFocus,
+    win_active: winActive, win_list: winList, win_focus: winFocus,
+    win_click: winClick, win_type_btn: winType,
+    scr_shot: scrShot, scr_region: scrRegion, scr_find_btn: scrFind,
+    scr_find_click: scrFindClick, scr_arch: scrArch, scr_arch_erase: scrArchErase,
+    voice_listen: voiceListen, voice_say: voiceSay,
+    clip_hist: clipHist, clip_read: clipRead, clip_write_btn: clipWrite,
+    focus_start: focusStart, focus_list: focusList,
+    watch_add: watchAdd, watch_list: watchList, quick_btn: quickOpen,
+    pref_save: prefSave, pref_list: prefList,
+    wl_save: wlSave, wl_list: wlList,
+    macro_save: macroSave, macro_list: macroList, macro_run: macroRun,
+    wd_status: wdStatus, wd_log: wdLog, wd_self: wdSelf,
+    wd_arm: wdArm, wd_disarm: wdDisarm, wd_once: wdOnce
+  };
+  Object.keys(wiring).forEach(function (id) {
+    var node = $(id);
+    if (node) node.addEventListener('click', wiring[id]);
+  });
+  var autoOn = $('sys_autostart_on'), autoOff = $('sys_autostart_off');
+  if (autoOn) autoOn.addEventListener('click', function () { sysAutostart(true); });
+  if (autoOff) autoOff.addEventListener('click', function () { sysAutostart(false); });
+
+  function sysAutostart(enabled) {
+    $('sys_result').innerHTML = '<span class="muted">Автозагрузка…</span>';
+    post('/api/assistant/system/autostart', {enabled: enabled}).then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysProcs() {
+    $('sys_result').innerHTML = '<span class="muted">Процессы…</span>';
+    get('/api/assistant/system/processes?limit=20').then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysAudio() {
+    $('sys_result').innerHTML = '<span class="muted">Аудио…</span>';
+    get('/api/assistant/system/audio').then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysHealth() {
+    $('sys_result').innerHTML = '<span class="muted">Здоровье…</span>';
+    get('/api/assistant/system/health').then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysVol() {
+    var lvl = parseInt($('sys_vol').value||'0',10);
+    $('sys_result').innerHTML = '<span class="muted">Громкость…</span>';
+    post('/api/assistant/system/volume', {level: lvl}).then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysFocus() {
+    var m = parseInt($('sys_focus_min').value||'25',10);
+    post('/api/assistant/system/focus', {minutes: m}).then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function winActive() {
+    get('/api/assistant/window/active').then(function(d){ $('win_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('win_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function winList() {
+    get('/api/assistant/window/list?limit=30').then(function(d){ $('win_result').innerHTML='<div class="body"><pre>'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('win_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function winFocus() {
+    var t = $('win_title').value.trim();
+    if (!t) { $('win_result').innerHTML='<div class="warnline">Введите заголовок</div>'; return; }
+    post('/api/assistant/window/focus', {title: t, confirmed: true}).then(function(d){ $('win_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('win_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function winClick() {
+    var x=parseInt($('win_x').value||'0',10), y=parseInt($('win_y').value||'0',10);
+    post('/api/assistant/window/click', {x:x,y:y, confirmed: true}).then(function(d){ $('win_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('win_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function winType() {
+    var txt=$('win_type').value;
+    if (!txt) { $('win_result').innerHTML='<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/window/type', {text: txt, confirmed: true}).then(function(d){ $('win_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('win_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrShot() {
+    get('/api/assistant/screen/shot?max_side=800').then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrRegion() {
+    var l=parseInt($('scr_l').value||'0',10), t=parseInt($('scr_t').value||'0',10), r=parseInt($('scr_r').value||'0',10), b=parseInt($('scr_b').value||'0',10);
+    post('/api/assistant/screen/region', {left:l,top:t,right:r,bottom:b}).then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrFind() {
+    var q=$('scr_find').value.trim();
+    if (!q) { $('scr_result').innerHTML='<div class="warnline">Введите текст</div>'; return; }
+    get('/api/assistant/screen/find?q='+encodeURIComponent(q)).then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrFindClick() {
+    var q=$('scr_find').value.trim();
+    if (!q) { $('scr_result').innerHTML='<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/screen/find-click', {text: q, confirmed: true}).then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrArch() {
+    get('/api/assistant/screen/archive?limit=20').then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function scrArchErase() {
+    post('/api/assistant/screen/archive/erase', {confirmed: true}).then(function(d){ $('scr_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('scr_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function voiceListen() {
+    post('/api/assistant/voice/listen', {seconds:5}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function voiceSay() {
+    var txt=$('voice_text').value.trim(), tone=$('voice_tone').value;
+    if (!txt) { $('voice_result').innerHTML='<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/voice/say', {text: txt, tone: tone}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function clipHist() {
+    get('/api/assistant/clipboard/history?limit=20').then(function(d){ $('voice_result').innerHTML='<div class="body"><pre>'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function clipRead() {
+    post('/api/assistant/clipboard/read', {}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function clipWrite() {
+    var txt=$('clip_write').value;
+    if (!txt) { $('voice_result').innerHTML='<div class="warnline">Введите текст</div>'; return; }
+    post('/api/assistant/clipboard/write', {text: txt}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function focusStart() {
+    var m=parseInt($('focus_min').value||'25',10), note=$('focus_note').value.trim();
+    post('/api/assistant/focus/timer', {minutes:m, note:note}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function focusList() {
+    get('/api/assistant/focus/timers?limit=20').then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function watchAdd() {
+    var p=$('watch_path').value.trim();
+    if (!p) { $('voice_result').innerHTML='<div class="warnline">Введите путь</div>'; return; }
+    post('/api/assistant/files/watch', {path:p, enabled:true}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function watchList() {
+    get('/api/assistant/files/watches?limit=20').then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function quickOpen() {
+    var q=$('quick_name').value.trim();
+    if (!q) { $('voice_result').innerHTML='<div class="warnline">Введите имя</div>'; return; }
+    get('/api/assistant/files/quick-open?q='+encodeURIComponent(q)+'&limit=10').then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function prefSave() {
+    var k=$('pref_key').value.trim(), v=$('pref_val').value.trim();
+    if (!k||!v) { $('voice_result').innerHTML='<div class="warnline">Ключ и значение</div>'; return; }
+    post('/api/assistant/preferences', {key:k, value:v}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function prefList() {
+    get('/api/assistant/preferences').then(function(d){ $('voice_result').innerHTML='<div class="body"><pre>'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function wlSave() {
+    var app=$('wl_app').value.trim(), allow=$('wl_allow').checked;
+    if (!app) { $('voice_result').innerHTML='<div class="warnline">Введите приложение</div>'; return; }
+    post('/api/assistant/whitelist', {app_name:app, allowed:allow, confirmed:true}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function wlList() {
+    get('/api/assistant/whitelist?limit=100').then(function(d){ $('voice_result').innerHTML='<div class="body"><pre>'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function macroSave() {
+    var name=$('macro_name').value.trim(), stepsStr=$('macro_steps').value.trim();
+    if (!name||!stepsStr) { $('voice_result').innerHTML='<div class="warnline">Имя и шаги</div>'; return; }
+    var steps;
+    try { steps=JSON.parse(stepsStr); } catch(e) { $('voice_result').innerHTML='<div class="warnline">Шаги — не JSON</div>'; return; }
+    post('/api/assistant/macro', {name:name, steps:steps}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function macroList() {
+    get('/api/assistant/macros?limit=20').then(function(d){ $('voice_result').innerHTML='<div class="body"><pre>'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function macroRun() {
+    var name=$('macro_name').value.trim();
+    if (!name) { $('voice_result').innerHTML='<div class="warnline">Введите имя макроса</div>'; return; }
+    post('/api/assistant/macro/run', {name:name, confirmed:true}).then(function(d){ $('voice_result').innerHTML='<div class="body">'+esc(JSON.stringify(d,null,2))+'</div>'; }).catch(function(e){ $('voice_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+
+$('av_watch').addEventListener('click', avitoWatch);
+  $('av_search').addEventListener('click', avitoSearch);
+  $('av_check').addEventListener('click', avitoCheck);
+  $('av_reply').addEventListener('click', avitoReply);
+  $('tg_ideas').addEventListener('click', tgIdeas);
+  $('tg_draft').addEventListener('click', tgDraft);
+  $('tg_list').addEventListener('click', tgList);
+  $('av_watch').addEventListener('click', avitoWatch);
+  $('tg_post_btn').addEventListener('click', tgPostLast);
+
+  refreshState();
+  refreshJournal();
+  refreshSkills();
+})();
+</script>
+
+</body>
+</html>

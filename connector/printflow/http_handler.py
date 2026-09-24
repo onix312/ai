@@ -571,6 +571,17 @@ class Handler(UploadMixin, BaseHTTPRequestHandler):
                 # библиотеку. Байтовый маршрут, поэтому в цепочке до реестра,
                 # как и остальные загрузки: реестр принимает только JSON.
                 return self.handle_library_upload()
+            if path == "/api/assistant/speech":
+                # 18.13 (срез 2): запись голоса в текст. Байты, поэтому здесь,
+                # а не в реестре; звук не сохраняется и не уходит из машины.
+                return self.handle_speech_upload()
+            if path == "/api/order/intake/upload":
+                # 18.13: сообщение клиента и его файл — в один черновик заказа.
+                # Тоже байтовый и тоже до реестра: multipart в JSON-диспетчер
+                # не проходит, а черновик возвращается тем же ответом, что и
+                # /api/order/intake/preview, поэтому панель рисует его одной
+                # карточкой заказа.
+                return self.handle_intake_upload()
             length, too_large = request_length(self.headers.get("Content-Length"), MAX_JSON)
             if too_large:
                 return self.send_json(413, {"error": "JSON-запрос слишком большой"})

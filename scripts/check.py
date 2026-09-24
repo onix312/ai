@@ -57,6 +57,58 @@ def check_data_icons() -> bool:
         return True  # не блокируем если icons.js нет
 
 
+def check_inline_js(node_available: bool) -> bool:
+    """19.0: скрипты, встроенные в HTML, тоже должны парситься.
+
+    `node --check` в этом файле проверял только файлы `site/assets/*.js` и
+    `sw.js`, а страница помощника держит всю логику во встроенном `<script>`.
+    В 18.18 туда попал обрывок (`function` без имени и карточки, дописанные
+    после закрывающего тега скрипта): кнопки панели молча не работали, и ни
+    одна проверка этого не увидела. Здесь тот же разбор, что у Node, но
+    собранный на stdlib: считаем баланс тегов и вытаскиваем встроенные блоки
+    во временные файлы для `node --check`, если Node есть.
+    """
+    import os
+    import re
+    import tempfile
+    label = "Встроенный JS в HTML"
+    print(f"\n==> {label}", flush=True)
+    pages = sorted((ROOT / "site").rglob("*.html"))
+    problems: list[str] = []
+    blocks: list[tuple[pathlib.Path, str]] = []
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        opens = len(re.findall(r"<script\b", text))
+        closes = len(re.findall(r"</script>", text))
+        if opens != closes:
+            problems.append(f"{page.relative_to(ROOT)}: <script> {opens}, </script> {closes}")
+        for match in re.finditer(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", text, re.S):
+            body = match.group(1)
+            if body.strip():
+                blocks.append((page, body))
+    if problems:
+        print(f"FAIL: {label} — не сходятся теги:", file=sys.stderr)
+        for line in problems[:10]:
+            print(f"  {line}", file=sys.stderr)
+        return False
+    if not node_available:
+        print(f"SKIP: {label} — node не найден, проверен только баланс тегов ({len(blocks)} блоков)")
+        return True
+    for page, body in blocks:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+            handle.write(body)
+            temp = handle.name
+        proceed = run(f"Встроенный JS: {page.relative_to(ROOT)}", ["node", "--check", temp])
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        if not proceed:
+            return False
+    print(f"OK: {label} ({len(blocks)} блоков на {len(pages)} страницах)")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Проверить репозиторий PrintFlow")
     parser.add_argument("--quick", action="store_true",
@@ -77,7 +129,9 @@ def main(argv: list[str] | None = None) -> int:
 
     checks.append(run(
         "Компиляция Python",
-        [sys.executable, "-m", "compileall", "-q", "connector", "pf.py",
+        # `agent/` компилируется вместе с коннектором с 18.14: агент перестал
+        # быть черновиком и несёт реестр навыков, свою базу и индекс документов.
+        [sys.executable, "-m", "compileall", "-q", "connector", "agent", "pf.py",
          "launcher_window.py", "scripts"],
     ))
 
@@ -92,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
         checks.append(False)
     else:
         print("SKIP: node не найден; синтаксис JS также проверяется unit-тестом при наличии Node.js")
+
+    checks.append(check_inline_js(node is not None))
 
     # Б8: проверка что все data-icon существуют в PFIcons
     checks.append(check_data_icons())

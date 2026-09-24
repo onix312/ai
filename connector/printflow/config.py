@@ -364,6 +364,25 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # unicast-объявление самого шлюза на UDP :2021.
     "studio_relay_enabled": False,
     "studio_relay_targets": "",
+    # --- 18.13: локальный помощник ----------------------------------------
+    # Внешний рантайм на этом же компьютере (Ollama, llama.cpp server):
+    # коннектор ходит в него через urllib, поэтому в requirements.txt ничего
+    # не появляется. Модель не закреплена намеренно — веса ставит владелец, а
+    # «из коробки» помощник выключен и ничего не обещает (см. assistant.py).
+    "assistant_enabled": False,
+    "assistant_url": "http://127.0.0.1:11434",
+    "assistant_model": "",
+    "assistant_timeout_sec": 90.0,
+    # Рантайм речи (срез 2): тоже внешний, тоже loopback, но на процессоре —
+    # видеопамять уже делят текстовая модель и WebGPU-нарезка.
+    "assistant_speech_enabled": False,
+    "assistant_speech_url": "http://127.0.0.1:8791",
+    "assistant_speech_model": "",
+    "assistant_speech_timeout_sec": 30.0,
+    # Агент ОС (срез 3): третья внешняя программа — стоп-слово, захват окна и
+    # действия в чужих приложениях. PrintFlow хранит только адрес и статус.
+    "assistant_agent_enabled": False,
+    "assistant_agent_url": "http://127.0.0.1:8799",
     "slicer_bin": "",
     "slicer_profile_path": "",
     # --- 8.0: 3MF парсер --------------------------------------------------

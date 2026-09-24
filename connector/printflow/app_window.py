@@ -95,6 +95,11 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--local", action="store_true", help="только 127.0.0.1")
     ap.add_argument("--no-server", action="store_true", help="не запускать сервер, только окно")
+    # 18.13: окно умеет открывать не только панель. Помощник — та же страница
+    # сервера в своём окне (`pf.py assistant`), поэтому путь задаётся, а
+    # отдельное приложение с собственным HTTP-клиентом не появляется.
+    ap.add_argument("--path", default="/", help="адрес внутри сервера (например /assistant.html)")
+    ap.add_argument("--title", default="", help="заголовок окна")
     args = ap.parse_args(argv)
 
     port = args.port
@@ -134,10 +139,13 @@ def main(argv=None):
                 webbrowser.open(f"http://localhost:{port}/")
                 return 1
 
-    url = f"http://localhost:{port}/"
+    page = str(args.path or "/").strip()
+    if not page.startswith("/"):
+        page = "/" + page
+    url = f"http://localhost:{port}{page}"
     print(f"Открываю окно {url}")
     try:
-        return open_native_window(url)
+        return open_native_window(url, args.title or None)
     finally:
         if proc and proc.poll() is None:
             # при закрытии окна — спросить? пока оставляем висеть в фоне 2 сек и гасим

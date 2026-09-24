@@ -1,3 +1,145 @@
+## 18.19.0 — Надзор за процессами и починенный JS панели помощника: system.watchdog/watchdog_arm/watchdog_once (И263)
+
+- **Надзиратель.** `agent/watchdog.py` (новый, только stdlib): пульс ролей `agent` и `panel` в `~/.printflow/watchdog.json` (pid, время, заметка), `pid_alive` через `OpenProcess`/`os.kill`, `status()` различает «процесс не отвечает» и «пульс старше порога», `log_event` в `watchdog.log`, `tail_log`, `pass_once(restart=…)`, `watch(interval)`, `start_role/stop_role/restart_role`, `escalate` после `max_restarts`, `self_check()` на восемь вопросов, CLI `--beat/--status/--once/--dry/--watch/--log/--arm/--disarm/--self-check/--start/--stop/--restart`.
+- **Пульс у подопечных.** `agent/server.py` отмечает пульс роли `agent` при старте и держит поток `beat_forever`; `pf.py` отмечает `panel` в `cmd_start` и перед нативным окном, плюс новая команда `python pf.py watchdog --status|--once|--dry|--watch|--log|--arm|--disarm|--self-check|--start-role|--stop-role|--restart-role`.
+- **Навыки 96.** +3 (`system.watchdog` read, `system.watchdog_arm` write с `confirm_text` «вооружить»/«снять», `system.watchdog_once` write с «поднять», `dry=on` — посмотреть). Исполнитель: `_system_watchdog`, `_system_watchdog_arm`, `_system_watchdog_once`; события надзора пишутся в новую таблицу `watchdog_events` (+`stats_18`).
+- **Панель.** +3 маршрута (89 в `routes_assistant.py`): `system/watchdog`, `system/watchdog/arm`, `system/watchdog/once` (audit+confirm); карточка «Надзор за процессами (И263)» в `assistant.html` с кнопками «Кто жив», «Журнал», «Проверка надзирателя», «Вооружить», «Снять», «Поднять упавших».
+- **Починен JS панели помощника.** В `site/assistant.html` встроенный скрипт не парсился: висячий `function` без имени, дубль функций надзора, карточки 18.15-18.18 стояли ЗА закрывающим тегом скрипта (слушатели кнопок не ставились вовсе), `esc()` собирал строку из `\"`. Всё исправлено, карточки перенесены выше скрипта, кнопки всех десяти карточек получили слушателей; `scripts/check.py` теперь проверяет встроенный JS страниц (37 проверок вместо 36).
+- **Версия 18.19.0:** `APP_VERSION`, `AGENT_VERSION`, пины `?v=18.19.0`, `printflow-shell-v89`, `versionCode 181900`. Реестр: 674 маршрута (было 671), 399 декораторных (было 396), 89 в `routes_assistant.py` (было 86); OpenAPI — 385 путей, 399 операций.
+
+## 18.18.0 — Автоустановка зависимостей и моделей: system.check/install
+
+- **Установщик.** `agent/install.py` — новый модуль: REQUIRED mss/Pillow/pywebview/pystray, VOICE vosk/sounddevice, OCR rapidocr-onnxruntime, OPTIONAL faster-whisper. `check()` — has_module 8 штук + which tesseract/ollama + ~/.printflow/models, `install()` — ставит только недостающее, `_pip_install` через sys.executable -m pip, `download_vosk_model` — zip с alphacephei.com в ~/.printflow/models, `full_setup` — pip+модели+external. CLI --check/--install/--requirements/--models/--full.
+- **Навыки 89.** +2: `system.check` (read) и `system.install` (write, what=oneof:pip|models|full|requirements + confirm_text, для models/full требует слово «установить» + подтверждение человека).
+- **Исполнение.** `_system_check` — install.check + capabilities.detect + missing, `_system_install` — pip/requirements/models/full, пишет preferences install.last.
+- **Панель.** +2 wrapper'а, 86 маршрутов (было 84): `system/check`, `system/install` (audit+confirm), `assistant.html` v18.18.0 карточка автоустановки, `sw.js` v88, versionCode 181800.
+
+## 18.17.0 — Полноценный ассистент ПК: голос+система+зрение+окна+И206-И221
+
+- **Ядро 18.17 (7 таблиц).** `agent/store.py` — `clipboard_history` (И211, дедуп SHA-256), `preferences` (И214,И219), `whitelist` (И220), `macros` (И221), `focus_timers` (И215), `file_watches` (И217), `screen_archive` (Н38). Миграция `_migrate_1817` создаёт таблицы и индексы `clipboard_hash`, `file_watches_path`. Методы `add_clipboard, list_clipboard, clear_clipboard, set_preference, get_preference, list_preferences, set_whitelist, list_whitelist, is_whitelisted, save_macro, list_macros, get_macro, delete_macro, add_focus_timer, list_focus_timers, stop_focus_timer, add_file_watch, list_file_watches, update_file_watch, add_screen_archive, list_screen_archive, clear_screen_archive, stats_17`.
+- **Система (И206,И208,И209 + Н27-Н33).** `agent/system.py` — `autostart_status/enable/disable` (winreg HKCU Run), `process_list` (tasklist CSV / ps), `audio_devices` (реестр MMDevices), `set_volume/get_volume` (waveOutSetVolume через ctypes). `agent/clipboard.py` — `get_text/set_text` (OpenClipboard/GlobalAlloc), `agent/screen.py` — `region_shot` (Pillow ImageGrab bbox), `find_text_on_screen` (поиск в заголовках окон как заглушка без OCR).
+- **Реестр 87 навыков.** `agent/skills.py` 18.17: 42 новых — `system.autostart/process_list/audio_device/volume/display/focus/power/health` (Н27-Н33,И206,И208,И209), `window.active/list/focus/text/controls/click/type/snap` (Н16-Н26,И210), `screen.shot/region_shot/describe/find/find_and_click/archive/archive_search/archive_erase` (Н35-Н40,И212,И213), `voice.listen/say/dictate/note/command/profile` (Н41-Н45,И214), `clipboard.history/read/write` (И211), `scheduler.focus_timer/focus_list/focus_stop` (И215), `files.watch/watches/quick_open` (И217,И218), `knowledge.preferences/preference_save` (И219), `safety.whitelist/whitelist_save` (И220), `assistant.macro/macros/macro_run` (И221). CAPABILITIES расширены: `system,autostart,process_list,audio_device,clipboard,region_shot,focus_timer,file_watch,preferences,whitelist,macro,quick_open`. Всего 87 живых.
+- **Исполнение 42 handlers.** `agent/executor.py` 18.17: describe для 18 новых, handlers +42, методы `_system_autostart` (winreg + preferences), `_process_list` (system.process_list), `_audio_device` (system.audio_devices + preferences), `_volume` (get/set), `_display` (GetSystemMetrics), `_focus` (preferences + focus_timer), `_power` (lock/sleep/restart, needs_os), `_health` (disk_usage + GlobalMemoryStatusEx), `_window_active/list/focus/text/controls/click/type/snap` (winapi + whitelist проверка), `_screen_shot/region_shot/describe/find/find_and_click/archive/search/erase` (grab_screen, region_shot, model.complete, whitelist), `_voice_listen/say/dictate/note/command/profile` (speech заглушка, preferences), `_clipboard_history/read/write` (clipboard + store), `_focus_timer/list/stop`, `_files_watch/watches/quick_open` (fileops.inside_allowed + rglob), `_knowledge_preferences/preference_save`, `_safety_whitelist/whitelist_save`, `_assistant_macro/macros/macro_run` (8 шагов max, confirmed). Подтверждение для write/system/irreversible сохранено.
+- **Панель.** `connector/printflow/assistant.py` 18.17: +42 wrapper'а через `_call_agent_skill`. `connector/printflow/routes_assistant.py` 18.17: 84 маршрута (было 36), 48 новых — система (autostart, processes, audio, volume, display, focus, power, health), окна (active, list, focus, text, controls, click, type, snap), экран (shot, region, find, find-click, archive, archive/erase), голос (listen, say, dictate, note, command, profile), буфер (clipboard/history/read/write), фокус (timer/timers/stop), файлы (watch, watches, quick-open), предпочтения (preferences), whitelist, макросы (macro, macros, macro/run). `site/assistant.html` v18.17.0 — 4 новые карточки (система, окна, экран, голос/буфер/фокус/файлы/предпочтения/whitelist/макросы), 30+ JS функций. `site/sw.js` v87.
+- **Версия 18.17.0:** `APP_VERSION`, `AGENT_VERSION`, пины `?v=18.17.0`, `printflow-shell-v87`, `versionCode 181700`. Реестр: 669 (было 621), из них 394 декораторных (было 346), 84 в `routes_assistant.py` (было 36); OpenAPI — 380 путей (было 338), ops 394.
+
+## 18.16.0 — Архив Авито, связка с заказом, расписание, дедуп, календарь ТГ, шаблоны, хештеги, FTS, экспорт, статистика
+, связка с заказом, расписание, дедуп, календарь ТГ, шаблоны, хештеги, FTS, экспорт, статистика
+
+- **Ядро 18.16 (4 таблицы, 6 колонок).** `agent/store.py` — `avito_threads` (архив переписок), `tg_templates` (шаблоны с vars), `tg_schedules` (календарь), `tg_ideas` расширена (draft_id/status/at, конверсия), `avito_watches` + `check_interval_hours, last_checked_at, notify_enabled, image_hash, price_int, city`. Методы `save_avito_thread, avito_threads, save_tg_template, tg_templates, get_tg_template, save_tg_schedule, tg_schedules, save_tg_idea, tg_ideas, find_duplicate_listings_by_image, set_avito_watch_schedule, avito_stats, tg_stats`.
+- **Авито 18.16.** `agent/avito.py` — UA `NOZZA-Assistant/18.16`, `MAX_IMAGE_BYTES=32KB` (И196), `image_url/image_hash/price_int`, `image_hash_from_bytes/fetch_image_hash/detect_duplicate_by_image`, `find_duplicate_listings_by_image` в store.
+- **ТГ 18.16.** `agent/tg.py` — `HASHTAG_DICT` 14 ключей (И202), `BUILTIN_TEMPLATES` 3 штуки (И200), +7 функций `save_template, apply_template, generate_hashtags, search_drafts, export_drafts_text, schedule_post, idea_to_draft_link`.
+- **Реестр 42 навыка.** `agent/skills.py` — 16 новых: `avito.threads/thread_save/to_order/schedule/notify/dedup, tg.schedule/schedules/template_save/templates/template_apply/hashtags/search/export/stats/idea_save/ideas_history`, `_OPTIONAL` расширен.
+- **Исполнение 17 handlers.** `agent/executor.py` — заголовок 18.16, describe для 11 новых, handlers +17: `_avito_threads/_thread_save` (text to copy, без авто-отправки, И191), `_to_order` (draft product/notes/source:avito + panel order_save, И193), `_schedule/_notify` (check_interval_hours/notify_enabled, И195,И197), `_dedup` (image_hash 32KB groups, И196), `_tg_schedule/_schedules` (planned_at→tg_schedules, И198), `_template_save/_templates/_template_apply` (vars topic/fact/detail/material/time/price/source/action, И200,И201), `_hashtags` (HASHTAG_DICT, И202), `_search/_export/_stats/_idea_save/_ideas_history` (FTS LIKE, md/json/txt, конверсия, И203-205). `agent/__init__.py` 18.16.0.
+- **Панель помощника.** `connector/printflow/assistant.py` — 17 wrappers через `_call_agent_skill`. `connector/printflow/routes_assistant.py` — 36 маршрутов (было 19), 17 новых: `avito/threads, thread/save, to-order (audit+confirm), schedule, notify, dedup, tg/schedule, schedules, template/save, templates, template/apply, hashtags, search, export, stats, idea/save, ideas/history`. `site/assistant.html` v18.16.0 — 5 новых карточек (архив, связка/расписание/дедуп, календарь, шаблоны/хештеги, поиск/экспорт/статистика), 17 JS функций, копирование в буфер. `site/sw.js` v86.
+- **Версия 18.16.0:** `APP_VERSION`, `AGENT_VERSION`, пины `?v=18.16.0`, `printflow-shell-v86`, `versionCode 181600`/`versionName '18.16.0'`. Реестр: 621 (было 604), из них 346 декораторных (было 329), 36 в `routes_assistant.py` (было 19); OpenAPI — 338 путей (было 321), ops 346; `docs/МАРШРУТЫ.md`, `docs/НАВЫКИ.md` (44 навыка), `docs/ИДЕИ-АССИСТЕНТ-ПК.md`, `docs/ТЕСТЫ.md` пересчитаны. Тесты: `test_assistant_panel` — 36 assistant-маршрутов, `test_hero_controls`/`test_gpuslice` — v86/18.16.0; `scripts/check.py --quick` 36/36.
+
+## 18.15.0 — Авито-слежка и ТГ-посты: варианты ответа и публикация с подтверждением
+
+
+Ассистент научился следить за Авито и придумывать посты в ТГ-канал цеха. Сеть — только по запросу навыка, токены — из переменных окружения агента, публикация — только с подтверждением человека, как деньги и печать.
+
+- **Авито-навыки (И181, И183, И185, И186).** `agent/avito.py` — `fetch_html` с UA `NOZZA-Assistant/18.15`, таймаут 15с, поддержка `file://` для тестов, парсер `data-marker=item` и JSON-фолбэк, `build_search_url` с городом/ценой/категорией, `search` и `suggest_replies` (3 тона: вежливый, короткий, торг) через `assistant.complete` с фолбэком на шаблоны. `agent/store.py` — таблицы `avito_watches` (query/city/category/max/min/enabled/last_checked/last_count) и `avito_listings` (external_id/title/price/url/city/snippet/seen/is_new) с дедупликацией по URL и детектом новых. `agent/skills.py` — 6 навыков: `avito.watch` (own, sqlite, avito), `avito.watches` (read), `avito.search` (read, network, avito), `avito.check` (own, network, sqlite, avito), `avito.reply` (read, 3 варианта), `avito.listings` (read). `agent/capabilities.py` — `network`, `avito`, `tg`. `agent/config.py` — `TG_BOT_TOKEN` из `PRINTFLOW_TG_BOT_TOKEN`/`TG_BOT_TOKEN`, `TG_CHAT_ID`, `AVITO_DEFAULT_CITY`.
+- **ТГ-навыки (И182, И184, И188).** `agent/tg.py` — `generate_ideas` (12 тем-заготовок + модель), `draft_post` (6 тонов: деловой/дружелюбный/техничный/продающий/короткий/история, `TOPIC_TEMPLATES`, факты не выдумываются), `_tg_config` читает токен/чат из env, `post_to_telegram` — Bot API `sendMessage` с таймаутом 15с. `store.py` — `tg_drafts` (topic/tone/text/source/status). Навыки: `tg.draft` (own, sqlite, tg), `tg.drafts` (read), `tg.ideas` (read), `tg.post` (write, network, sqlite, tg) — требует подтверждения, берёт текст из черновика или параметра, возвращает `message_id`/`chat`.
+- **Исполнение (27 навыков).** `agent/executor.py` — 27 обработчиков: `_avito_watch` валидирует max<min, `_avito_check` сохраняет и помечает новые, `_tg_draft` пишет черновик, `_tg_post` — draft_id→text из базы, `post_to_telegram(text,chat)`, update status posted, `describe` для `tg.post` («Черновик N») и `avito.reply`. `agent/__init__.py` — `AGENT_VERSION 18.15.0`.
+- **Прокси панели.** `connector/printflow/assistant.py` — `_call_agent_skill(db,name,params,timeout)` POST `{url}/skill` loopback, 7 обёрток `avito_watch/search/check/reply`, `tg_draft/ideas/post`, `PING_SEC` для быстрых пингов, `_get_json/_post_json` для реестра. `connector/printflow/routes_assistant.py` — 9 новых маршрутов: `POST /api/assistant/avito/watch` (query/city/category/max/min), `GET /api/assistant/avito/watches`, `POST /api/assistant/avito/search`, `POST /api/assistant/avito/check` (watch_id, only_new), `POST /api/assistant/avito/reply` (thread/intent/city), `POST /api/assistant/tg/draft` (topic/tone/facts/source), `GET /api/assistant/tg/drafts`, `POST /api/assistant/tg/ideas`, `POST /api/assistant/tg/post` (draft_id/text/chat, требует `confirmed`, audit). Всего assistant-маршрутов 19, декораторных 329, всего 604, OpenAPI 321.
+- **Панель помощника.** `site/assistant.html` v18.15.0 — карточки «Авито-слежка» (inputs query/city/max/category, кнопки watch/search/check, thread/intent→reply) и «ТГ-посты» (ideas→topic, draft tone/facts, list drafts, post с confirm), JS `lastTgDraftId`, `avitoRender/Watch/Search/Check/Reply`, `tgIdeas/Draft/List/PostLast`, copy-кнопки, `tokens.css?v=18.15.0`, `theme-init 18.15.0`, `sw.js v85`.
+- **Версия 18.15.0:** `APP_VERSION`, `AGENT_VERSION`, 13 пинов `?v=18.15.0` в `site/index.html`, `printflow-shell-v85`, `versionCode 181500`/`versionName '18.15.0'`. Реестр маршрутов: 604 (было 595), из них 329 декораторных (было 320), 19 в `routes_assistant.py` (было 10); спецификация OpenAPI — 321 путь (было 312); `docs/МАРШРУТЫ.md`, `docs/ТЕСТЫ.md`, `docs/НАВЫКИ.md` (27 навыков) пересчитаны. Тесты: `test_assistant_panel` — 19 assistant-маршрутов, `test_hero_controls`/`test_gpuslice` — v85/18.15.0; полный прогон `scripts/check.py --quick` 36/36.
+
+
+
+## 18.14.0 — личный ассистент компьютера: реестр навыков, своя память, файлы и день цеха
+
+PrintFlow теперь — один из навыков личного ассистента, а не его хозяин. Ассистент живёт в `agent/` со своим окружением, своей SQLite и своим окном, а в панель ходит по loopback. Все прежние инварианты сохранены: данные машину не покидают, деньги и печать — только через подтверждение, микрофон и камера в этом заходе не используются.
+
+- **Реестр навыков вместо веток кода (И136, И178, И180).** `agent/skills.py` — 18 живых навыков из каталога `docs/НАВЫКИ.md` (57 в плане) в форме данных: имя вида `группа.навык`, заголовок, описание, хост, риск, параметры, требуемые способности и идея. Самопроверка `validate()` и контракт `test_assistant_skills.py`: объявленный навык без обработчика — падение, подтверждение определяется риском из реестра, а не из запроса (`confirmed` в теле не читается), недоступный навык показывается с причиной, а не прячется, параметры разбираются по типам, а необъявленное имя отбрасывается с предупреждением. Выученный навык — только `my.*`, только из существующих шагов, не может звать другой выученный, максимум 8 шагов, риск — максимальный из шагов, подтверждение — всегда, параметров своих нет.
+- **Своя база ассистента (И138).** `agent/store.py` — `~/.printflow/assistant.db` (переменная `PRINTFLOW_ASSISTANT_DB`): таблицы `journal`, `documents`, `chunks`, `facts`, `notes`, `skills`. База цеха агентом не открывается вовсе (ADR-0004): факты цеха — по loopback через `panel_client`. Журнал пишет и успех, и отказ, иначе `agent.why` объяснял бы причину по догадке; чтение в журнал не пишется, если успешно — иначе лента утонет (правило 18.13). Поиск лексический (`pylower` — casefold для русского), отрывок возвращается с путём, номером строки и оценкой из совпадений слов, а не «похожий по смыслу». Файл, исчезнувший с диска, уходит из индекса.
+- **Чтение файлов и индекс знаний (И142, И143, И147, И148).** `agent/documents.py`: `.txt/.md/.csv/.log/.json/.html`/исходники — как есть; `.docx/.xlsx` — zip с XML через `zipfile` без новых зависимостей; `.gcode` — только комментарии и настройки, координаты не индексируются; `.stl` — только метаданные (имя и число треугольников, текстовый STL считается по `facet normal`); `.pdf` честно требует `pypdf`, без него — причина, а не пустота; фото — причина с упоминанием «зрением». Нарезка `chunks_of` не теряет номер строки, `tokens_of` без стоп-слов и коротких, повторы убираются. Обход `walk` без служебных папок (`.git`, `node_modules`, `.venv`, `__pycache__` и т.д.) и скрытых. `is_knowledge` отделяет знания цеха (инструкции, чек-листы, профили) от личных договоров: папки `знания`/`knowledge` или слово в имени, `docs/` — только внутри репозитория. Факты детерминированные (`facts_from_text`): суммы ₽, даты, телефоны +7, почты, количества шт, номера заказов — с местом `строка N`. Индекс не перечитывает неизменённое (размер, mtime, хеш начала файла).
+- **Раскладка загрузок (И144).** `agent/fileops.py`: навыки `files.tidy_plan` (риск `read`, только план) и `files.tidy_apply` (риск `write`, подтверждение). Граница папок — `inside_allowed`: путь обязан лежать внутри папок из настроек агента (`PRINTFLOW_ASSISTANT_FOLDERS`, `PRINTFLOW_DOWNLOADS_FOLDER`, `PRINTFLOW_KNOWLEDGE_FOLDERS`), `..` и ссылки не обходят её. Назначения — подпапки той же папки (`Модели`, `Счета`, `Договоры`, `Заказы`, `Чертежи`, `Нарезка`, `Фото`, `Архивы`, `Установщики`, `Документы`): имя (счёт, договор, заказ, модель) бьёт расширение, неизвестное — остаётся. `unique_target` не перезаписывает: `счёт.pdf` → `счёт (2).pdf`. Исполнение `execute` только внутри той же папки, удаления нет, чужой план не уедет в другое место диска. Файлы крупнее 512 МБ не трогаем.
+- **PrintFlow как навык (И137, И1, И174).** `agent/panel_client.py` — loopback-клиент панели: `loopback_ok`, `_request` с причиной отказа, `multipart` для загрузки файла в заказ, `Client` с `status`, `actions`, `run_action` (адрес, метод и confirm из каталога панели), `ask`, `day`, `upload_to_order`. `connector/printflow/assistant_knowledge.py` — ответ по фактам базы и день владельца: `retrieve` собирает строки из существующих сервисов (`Search`, `Accounting`, `Planner`, `PrinterManager`, `Repo`, `Shelf`) без нового SQL, `facts_text` — текст-источник для модели, `_numbers` сверяет цифры ответа с цифрами фактов (предупреждение рядом), `answer` отдаёт факты и причину без модели, `day` — брифинг и итог детерминированно (план, парк, долги, цель месяца, касса, налоги) без модели, текст предложениями для озвучки. Маршруты панели 18.14: `POST /api/assistant/ask` (вопрос → факты), `GET /api/assistant/day?kind=briefing|summary&days=N`, `GET /api/assistant/skills` (реестр агента по loopback).
+- **Исполнение навыков (И139, И178).** `agent/executor.py` — один порядок для всех: существует → доступен → параметры → подтверждение → журнал. `describe` — фраза для окна подтверждения. `Runner` с ленивым `Store`, живыми способностями (`capabilities.detect` + `dynamic`: панель и модель короткими пингами), `learned`, `catalog`, `run` (неизвестный навык — отказ с подсказкой, параметры — только объявленные, `confirmed` в параметрах не существует, выученный навык с шагами проверяет доступность по шагам). `_dispatch` — 18 обработчиков, `_run_steps` — шаги подряд с остановкой на первом отказе. `panel.do` берёт confirm из каталога панели. `files.*` проверяют границу папок до чтения. `files.tidy_plan` — план, `files.tidy_apply` — исполнение с пересчётом плана. Мета-навыки `agent.skills`, `agent.why`, `agent.journal`, `agent.learn` — честность как функция: причина отказа всегда из факта, а не из догадки.
+- **Окно ассистента (И139).** `agent/ui.py` — страница `/ui` на порту агента (только loopback, без внешних ресурсов): выбор навыка, параметры, кнопка «Выполнить», блок ожидающих подтверждения, таблица реестра с риском и доступностью, журнал. `agent/window.py` — необязательная обёртка `pywebview`: если нет — печатает адрес страницы, окно не становится единственным способом увидеть ассистента. `agent/capabilities.py` — новые статические способности `files`, `sqlite`, `tray`, `window` с причинами, и `dynamic` для панели и модели. `agent/config.py` — папки ассистента (`PRINTFLOW_ASSISTANT_FOLDERS`, `KNOWLEDGE_FOLDERS`, `DOWNLOADS_FOLDER`), своя база, рантайм модели (`MODEL_URL`, `MODEL_NAME`), флаг окна.
+- **Панель помощника.** `site/assistant.html` — новые карточки «Ответ по фактам базы» (факты с источниками и сверка чисел), «День цеха» (утро/итог без модели) и «Навыки ассистента компьютера» (реестр агента с причиной недоступности). `site/sw.js` — `printflow-shell-v84`.
+- **Версия 18.14.0:** `APP_VERSION`, 13 пинов `?v=18.14.0` в `site/index.html`, `printflow-shell-v84`, `versionCode 181400`/`versionName '18.14.0'` в `android/app` и `android/pult`. Реестр маршрутов: 595 (было 592), из них 320 декораторных (было 317), 10 в `routes_assistant.py` (было 7); спецификация OpenAPI — 312 путей (было 309); всего уникальных путей 579, «не зовёт site/» 126, «нигде» 97; справочники пересчитаны (`docs/МАРШРУТЫ.md`, `docs/ТЕСТЫ.md` — 163 файла). Тесты: +4 файла (`test_assistant_store`, `test_assistant_documents`, `test_assistant_fileops`, `test_assistant_skills`) — 128 новых проверок, всего 50+78+...; полный прогон 2880+ тестов, 4 базовых падения как раньше.
+
+
+## 18.13.0 — локальный помощник: своя панель, каталог действий, голос и агент компьютера
+
+Помощник живёт на этом же компьютере и ничего не отправляет наружу. Все три
+внешние программы — модель, речь, агент — слушают только loopback, а их адреса
+проверяются ДО запроса. Отчёт: `docs/ОТЧЁТ-18.13.0.md`, решение:
+`docs/adr/0004-помощник-три-внешних-рантайма.md`, инструкция владельцу:
+`docs/ПОМОЩНИК.md`.
+
+- **Панель помощника — своя страница и своё окно.** `site/assistant.html`
+  открывается как `/assistant.html`, `/assist` и `/помощник`, а на компьютере —
+  нативным окном `pf.py assistant` (pywebview, `app_window.py` получил
+  аргументы `--path` и `--title`; нет pywebview — открывается браузер).
+  Страница самодостаточна: свой HTTP-клиент, лог разговора, карточка действия,
+  приём входящего сообщения с файлом и журнал. Каталог действий приходит с
+  сервера (`/api/assistant/status` → `actions`), поэтому адреса маршрутов в
+  разметке не зашиты и мёртвый маршрут не может появиться в кнопках молча.
+- **Каталог действий: 20 действий, все — существующие маршруты.** Чтение
+  выполняется сразу (`park`, `pult`, `orders`, `queue`, `insights`, `plan`,
+  `finance`, `clients`, `shelf`, `diagnostics`, `messages`, `search`), деньги и
+  печать — только через «Подтвердить и выполнить» (`printer_command`,
+  `job_start`, `job_cancel`, `order_save`, `order_status`, `order_fulfill`,
+  `shelf_sale`, `settings_save`). Признак `confirmed` берётся из каталога на
+  сервере, а не из ответа модели: модель не знает адресов маршрутов вовсе —
+  `_intent_prompt()` перечисляет только имена действий, а `parse_intent()`
+  возвращает действие из `ACTIONS`, отбрасывая выдуманные и неизвестные
+  параметры (словари и списки проходят только там, где их ждёт маршрут:
+  `draft` у `/api/order/save` и `patch` у `/api/settings`).
+- **Входящее сообщение с файлом — в один черновик.**
+  `POST /api/order/intake/upload` принимает текст клиента и его модель
+  (`.3mf`, `.gcode`, `.stl`, `.obj`) одним multipart-запросом: файл кладётся в
+  `uploads/` (та же дедупликация по содержимому, что у остальных загрузок),
+  оценка файла дополняет пустые поля черновика и не перетирает то, что разобрал
+  парсер текста. Маршрут заказ НЕ сохраняет — сохранение делает человек через
+  `/api/order/save`. Фото и пустой файл отклоняются с причиной. Байтовый
+  маршрут стоит в if-цепочке `http_handler.py` до реестра: реестр принимает
+  только JSON-тело.
+- **Голос: внешний рантайм речи на процессоре.** `POST /api/assistant/speech`
+  принимает запись микрофона и возвращает текст. Распознавание намеренно не в
+  браузере: `webkitSpeechRecognition` отправляет звук в облако вендора. В
+  панели — кнопка «Говорю» (MediaRecorder, микрофон открыт только на время
+  фразы), она живёт по состоянию рантайма речи, а не текстовой модели. Звук не
+  сохраняется ни на диске, ни в базе. Настройки:
+  `assistant_speech_enabled`, `assistant_speech_url` (по умолчанию
+  `http://127.0.0.1:8791`), `assistant_speech_model`,
+  `assistant_speech_timeout_sec`.
+- **Агент компьютера — внешняя программа в `agent/`.** Стоп-слово, имя
+  активного окна, список окон, снимок экрана и действия в чужих приложениях
+  (клик, ввод текста, клавиша, активация окна). Свои зависимости
+  (`agent/requirements.txt`: vosk, sounddevice, mss, pillow) и своя точка
+  входа `python -m agent`; окружение коннектора не меняется, `pf.py` агент не
+  импортирует и не запускает. PrintFlow хранит только адрес и статус
+  (`assistant_agent_enabled`, `assistant_agent_url`, `GET /api/assistant/agent`)
+  и показывает их в панели. Микрофон открывается только на короткое окно
+  времени после явного включения (`POST /mic/arm`), постоянно открытого
+  микрофона нет. Услышанная фраза уходит в `POST /api/assistant/phrase` — след
+  в журнале, а не выполнение: решение и подтверждение остаются в панели.
+- **Действие в чужом окне всегда ждёт человека.** Действие становится
+  «ожидающим», на этом же компьютере показывается окно подтверждения
+  (tkinter), и без «Подтвердить» оно не выполняется; неподтверждённое умирает
+  через 60 с. Нет экрана — нет подтверждения, значит нет и действия. Снимок
+  экрана возвращается байтами по loopback и не сохраняется.
+- **Журнал вместо входа.** Панель помощника открывается без входа — это выбор
+  владельца, и единственная замена входу: каждое действие пишет событие
+  `kind='assistant'` с пометкой источника в `data` (`source`, `action`,
+  `outcome`, параметры). Запись — `POST /api/assistant/journal`, чтение —
+  `GET /api/assistant/journal`; сбой журнала не роняет действие.
+- **Диагностика.** `pf.py doctor` показывает три блока — модель, голос, агент —
+  и каждый честен про причину: адрес не loopback, рантайм не отвечает, модель не
+  выбрана, нет зависимостей. Помощник выключен по умолчанию, поэтому панель,
+  заказы и печать работают как раньше.
+- **Версия 18.13.0:** `APP_VERSION`, 13 пинов `?v=18.13.0` в `site/index.html`,
+  пины `site/assistant.html`, `printflow-shell-v82` в `site/sw.js` (в оболочку
+  добавлен `/assistant.html`), `versionCode 181300` и `versionName '18.13.0'`
+  в `android/app` и `android/pult`. Реестр маршрутов: 592 (было 583), из них
+  317 декораторных; спецификация OpenAPI отдаёт 309 путей; справочники
+  пересчитаны (`docs/МАРШРУТЫ.md`, `docs/ТЕСТЫ.md` — 159 файлов).
+
 ## 18.12.4 — Флаер кофейням: заход с коробкой образцов
 
 Идея из Instagram: оставить в кофейне коробку с напечатанными игрушками на

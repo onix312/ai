@@ -1500,6 +1500,24 @@ const SYSTEM2 = [
   ['encrypt_access_code', 'Шифровать Access Code', 'Рекомендуется: код хранится отдельно от ключа шифрования', 'bool'],
   ['backup_keep', 'Хранить бэкапов', 'Единый лимит для ручных, автоматических и страховочных копий', 'num', 1],
 ];
+/* Локальный помощник (18.13). Рантайм внешний: PrintFlow не ставит модель сам,
+   поэтому поле имени модели пустое по умолчанию — «из коробки» помощник
+   выключен и ничего не обещает. */
+const ASSISTANT_FIELDS = [
+  ['assistant_enabled', 'Включить помощника', 'Предлагает значения для полей, которые парсер не разобрал, и черновик ответа клиенту. Ничего не сохраняет сам.', 'bool'],
+  ['assistant_url', 'Адрес рантайма', 'Только этот компьютер: 127.0.0.1 или localhost. Ollama по умолчанию слушает 11434.', 'text'],
+  ['assistant_model', 'Имя модели', 'Как её называет рантайм, например qwen2.5:3b. Пусто — помощник не отвечает.', 'text'],
+  ['assistant_timeout_sec', 'Ожидание ответа, с', 'Локальная модель отвечает десятками секунд: короткое значение обрывает полезный ответ.', 'num', 5],
+  /* Голос (срез 2) и агент компьютера (срез 3) — тоже внешние программы.
+     Рантайм речи работает на процессоре: видеопамять уже делят модель и
+     WebGPU-нарезка. Агент ставится отдельно, из папки agent/. */
+  ['assistant_speech_enabled', 'Голосовой вход', 'Фразу можно продиктовать: запись уходит в рантайм речи на этом компьютере и возвращается текстом. Звук не сохраняется и не покидает машину.', 'bool'],
+  ['assistant_speech_url', 'Адрес рантайма речи', 'Только этот компьютер: 127.0.0.1 или localhost. По умолчанию 8791.', 'text'],
+  ['assistant_speech_model', 'Модель речи', 'Только для показа в диагностике: чем распознавать, решает рантайм.', 'text'],
+  ['assistant_speech_timeout_sec', 'Ожидание расшифровки, с', 'Распознавание идёт на процессоре, поэтому секунды.', 'num', 3],
+  ['assistant_agent_enabled', 'Агент компьютера', 'Внешняя программа: слушает стоп-слово, смотрит в активное окно и делает в нём действия. PrintFlow хранит только её адрес и статус.', 'bool'],
+  ['assistant_agent_url', 'Адрес агента', 'Только этот компьютер: 127.0.0.1 или localhost. По умолчанию 8799.', 'text'],
+];
 const ACCENTS = [
   ['indigo', '#4f46e5'], ['violet', '#7c3aed'], ['blue', '#2563eb'],
   ['emerald', '#059669'], ['amber', '#d97706'], ['rose', '#e11d48'],
@@ -2248,6 +2266,11 @@ function renderSettings() {
     if ($('set_profiles')) renderProfiles();
   });
 
+  safe('assistant', () => {
+    if ($('set_assistant')) put('set_assistant', settingGroup(ASSISTANT_FIELDS));
+    renderAssistantStatus();
+  });
+
   safe('telegram', () => {
     put('set_tg', settingRow('telegram_enabled', 'Включить Telegram', 'Уведомления о печати',
       `<label class="switch"><input type="checkbox" data-setting="telegram_enabled"${s.telegram_enabled ? ' checked' : ''}><i></i></label>`)
@@ -2536,6 +2559,65 @@ function filterSettings(query) {
   });
   $('set_no_results').hidden = found > 0;
 }
+
+/* ================================= 18.13: локальный помощник (внешний рантайм) */
+async function assistantState() {
+  /* Состояние помощника живёт на сервере: рантайм внешний, и знать о нём
+     должен и раздел настроек, и модалка входящего заказа. */
+  try { return await get('/api/assistant/status'); }
+  catch (e) { return { ok: false, available: false, enabled: false, reason: String(e.message || e) }; }
+}
+
+function assistantVerdict(state) {
+  if (!state || !state.ok) return ['warn', 'Состояние помощника неизвестно: ' + ((state && state.reason) || 'нет связи с коннектором')];
+  if (!state.enabled) return ['muted', 'Выключен. Включите и укажите модель — заказы и печать работают без помощника.'];
+  if (!state.loopback) return ['warn', state.reason || 'Адрес рантайма должен быть этим компьютером'];
+  if (!state.model) return ['warn', 'Включён, но модель не выбрана: ' + (state.reason || 'впишите имя модели из рантайма')];
+  if (state.available) {
+    const models = (state.models || []).length;
+    return ['ok', `Готов: модель «${state.model}» на ${state.url}`
+      + (models ? ` · рантайм отдаёт моделей: ${models}` : '')
+      + '. Предлагает значения пустых полей и черновик ответа; сохраняет — только вы.'];
+  }
+  return ['warn', state.reason || 'Рантайм не отвечает'];
+}
+
+async function renderAssistantStatus() {
+  const host = $('set_assistant_status');
+  if (!host) return;
+  host.hidden = false;
+  host.className = 'verdict';
+  host.innerHTML = '<span>Проверяем рантайм…</span>';
+  const state = await assistantState();
+  const [tone, text] = assistantVerdict(state);
+  host.className = `verdict ${tone === 'ok' ? 'ok' : tone === 'warn' ? 'warn' : ''}`;
+  const speech = state.speech || {};
+  host.innerHTML = `<b>Помощник:</b> ${esc(text)}`
+    + ((state.models || []).length
+      ? `<br><small>Модели рантайма: ${esc((state.models || []).slice(0, 8).join(', '))}</small>` : '')
+    + `<br><small>Голос: ${esc(speech.available ? 'рантайм речи жив' : speech.reason || 'выключен')}</small>`;
+}
+
+async function bindAssistantCheck() {
+  const button = $('assistant_check');
+  if (!button || button.dataset.bound) return;
+  button.dataset.bound = '1';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Проверяю…';
+    try {
+      /* Проверяем то, что сохранено в базе, а не то, что сейчас в полях:
+         иначе «Проверить» обещает состояние, которого сервер ещё не видел. */
+      const state = await assistantState();
+      const [tone, text] = assistantVerdict(state);
+      renderAssistantStatus();
+      if (tone === 'ok') toast('Помощник готов', text);
+      else fail(new Error(text));
+    } catch (e) { fail(e); }
+    finally { button.disabled = false; button.textContent = 'Проверить'; }
+  });
+}
+PF.on('view', (d) => { if (d.view === 'settings') bindAssistantCheck(); });
 
 async function resetSettings() {
   if (!confirmDanger('Вернуть настройки к заводским? Заказы, клиенты и проводки останутся на месте.')) return;
