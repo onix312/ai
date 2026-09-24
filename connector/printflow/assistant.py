@@ -1163,3 +1163,22 @@ def system_check(db) -> dict:
 def system_install(db, what: str = "pip", confirm_text: str = "") -> dict:
     return _call_agent_skill(db, "system.install", {"what": what, "confirm_text": confirm_text})
 
+
+def system_watchdog(db, mode: str = "status") -> dict:
+    """Надзор за процессами агента и панели (18.19, И263) — только чтение."""
+    return _call_agent_skill(db, "system.watchdog", {"mode": mode})
+
+
+def system_watchdog_arm(db, enabled: str = "on", interval: int = 0, stale_sec: int = 0,
+                        max_restarts: int = 0, confirm_text: str = "") -> dict:
+    """Вооружить или снять надзор. Поднимает процессы надзиратель, а не панель."""
+    return _call_agent_skill(db, "system.watchdog_arm", {
+        "enabled": enabled, "interval": interval, "stale_sec": stale_sec,
+        "max_restarts": max_restarts, "confirm_text": confirm_text})
+
+
+def system_watchdog_once(db, roles: str = "", dry: bool = False, confirm_text: str = "") -> dict:
+    """Один проход надзора по кнопке: проверить пульс и поднять упавшие роли (И263)."""
+    return _call_agent_skill(db, "system.watchdog_once", {
+        "roles": roles, "dry": "on" if dry else "off", "confirm_text": confirm_text})
+

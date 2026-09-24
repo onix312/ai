@@ -195,6 +195,12 @@ SCHEMA = (
         hash TEXT DEFAULT '')""",
     "CREATE INDEX IF NOT EXISTS clipboard_hash ON clipboard_history(hash)",
     "CREATE INDEX IF NOT EXISTS file_watches_path ON file_watches(path)",
+    """CREATE TABLE IF NOT EXISTS watchdog_events(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at TEXT NOT NULL,
+        role TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        detail TEXT DEFAULT '')"""
 )
 
 
@@ -224,8 +230,9 @@ class Store:
             for statement in SCHEMA:
                 self._conn.execute(statement)
             self._conn.commit()
-            # --- миграции 18.16: добавить колонки к старым таблицам -----------
+            # --- миграции 18.16-18.19: добавить колонки и таблицы к старым базам --
             self._migrate_1817()
+            self._migrate_1819()
 
     def _migrate_1817(self) -> None:
         """Добавить колонки, которых не было в 18.15 — без пересоздания таблиц."""
@@ -278,6 +285,24 @@ class Store:
         except sqlite3.Error:
             pass
 
+
+    def _migrate_1819(self) -> None:
+        """Надзор (И263): таблица событий надзирателя и индекс по роли.
+
+        Таблица живёт в базе, а не только в файле журнала: события надзора нужны
+        ассистенту — «что падало на этой неделе» он отвечает из памяти, а не
+        чтением текстового лога.
+        """
+        try:
+            self._conn.execute(
+                "CREATE TABLE IF NOT EXISTS watchdog_events("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, role TEXT NOT NULL, "
+                "kind TEXT NOT NULL, detail TEXT DEFAULT '')")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS watchdog_events_role ON watchdog_events(role)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS watchdog_events_kind ON watchdog_events(kind)")
+            self._conn.commit()
+        except sqlite3.Error:
+            pass
 
     # --- служебное --------------------------------------------------------
     def close(self) -> None:
@@ -993,6 +1018,34 @@ class Store:
         cur = self._run("DELETE FROM screen_archive", ())
         return cur.rowcount
 
+    # watchdog_events (И263)
+    def add_watchdog_event(self, role: str, kind: str, detail: str = "") -> dict[str, Any]:
+        """Событие надзора: протух пульс, подняли роль, сдались и позвали человека."""
+        at = now_iso()
+        cur = self._run("INSERT INTO watchdog_events(at,role,kind,detail) VALUES(?,?,?,?)",
+                        (at, str(role or "")[:80], str(kind or "")[:60], str(detail or "")[:600]))
+        return {"id": cur.lastrowid, "at": at, "role": str(role or "")[:80],
+                "kind": str(kind or "")[:60], "detail": str(detail or "")[:600]}
+
+    def list_watchdog_events(self, limit: int = 30, role: str = "") -> list[dict[str, Any]]:
+        value = max(1, min(MAX_JOURNAL_LIMIT, int(limit or 30)))
+        if role:
+            return self._rows("SELECT * FROM watchdog_events WHERE role=? ORDER BY id DESC LIMIT ?",
+                              (str(role)[:80], value))
+        return self._rows("SELECT * FROM watchdog_events ORDER BY id DESC LIMIT ?", (value,))
+
+    def clear_watchdog_events(self) -> int:
+        return self._run("DELETE FROM watchdog_events", ()).rowcount
+
+    def watchdog_report(self, limit: int = 20) -> dict[str, Any]:
+        """Сводка для панели: по ролям — сколько раз падало и когда последний раз."""
+        rows = self._rows(
+            "SELECT role, kind, COUNT(*) AS n, MAX(at) AS last_at FROM watchdog_events "
+            "GROUP BY role, kind ORDER BY role, kind", ())
+        return {"by_role_kind": rows,
+                "total": sum(int(r["n"]) for r in rows),
+                "recent": self.list_watchdog_events(limit)}
+
     def stats_17(self) -> dict[str, Any]:
         def cnt(t: str) -> int:
             rows = self._rows(f"SELECT COUNT(*) as n FROM {t}")
@@ -1002,4 +1055,11 @@ class Store:
                     whitelist=cnt("whitelist"), macros=cnt("macros"),
                     focus_timers=cnt("focus_timers"), file_watches=cnt("file_watches"),
                     screen_archive=cnt("screen_archive"))
+        return base
+
+    def stats_18(self) -> dict[str, Any]:
+        """К прежним цифрам 18.17 добавились события надзора (И263)."""
+        base = self.stats_17()
+        rows = self._rows("SELECT COUNT(*) AS n FROM watchdog_events")
+        base["watchdog_events"] = int(rows[0]["n"]) if rows else 0
         return base

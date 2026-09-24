@@ -116,3 +116,11 @@
   фразы, постоянно открытого прослушивания нет.
 - «Агент выполняет команды» — агент показывает и подтверждает; решение и
   подтверждение денег и печати остаются в панели.
+
+## 18.19.0 — надзор за процессами (И263)
+
+- `agent/watchdog.py` — второй лёгкий процесс: пульс `~/.printflow/watchdog.json`, журнал `watchdog.log`, настройки `watchdog_config.json`, `pass_once`, `watch`, эскалация после порога падений.
+- Навыки `system.watchdog` (read), `system.watchdog_arm` (write, «вооружить»/«снять»), `system.watchdog_once` (write, «поднять»); таблица `watchdog_events` в базе ассистента.
+- Маршруты `GET /api/assistant/system/watchdog`, `POST …/watchdog/arm`, `POST …/watchdog/once` — 89 assistant-маршрутов, 674 всего, 399 декораторных.
+- `pf.py watchdog …` и `python -m agent.watchdog …` — одна и та же правда: статус ролей, проход, вооружение, журнал, самопроверка.
+- `site/assistant.html`: починен встроенный JS (18.15-18.18 кнопки не работали), добавлена карточка надзора; `scripts/check.py` проверяет встроенный JS.

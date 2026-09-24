@@ -1,6 +1,6 @@
-"""Маршруты помощника (18.18): рантайм, действия, голос, агент, журнал, Авито, ТГ.
+"""Маршруты помощника (18.19): рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Восемьдесят четыре маршрута, и каждый отвечает за свою часть договорённости:
+Восемьдесят девять маршрутов, и каждый отвечает за свою часть договорённости:
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -17,7 +17,8 @@
   * `tg/*` — идеи и черновики постов в ТГ, публикация с подтверждением (18.15, И182, И184, И188),
     календарь, шаблоны, хештеги, поиск, экспорт, статистика конверсии (18.16, И198, И200-И205),
     система, окна, экран, голос, буфер, таймеры, предпочтения, белый список, макросы (18.17, И206-И221),
-    автоустановка зависимостей и моделей (18.18, И222).
+    автоустановка зависимостей и моделей (18.18, И222),
+    надзор за процессами агента и панели (18.19, И263).
 
 Деньги и печать эти маршруты не двигают: выполнение делает панель через обычные
 маршруты системы с `confirmed`, взятым из каталога, а не из ответа модели.
@@ -772,3 +773,37 @@ def assistant_system_install(api, ctx):
         return {"ok": False, "needs_confirmation": True, "reason": "Автоустановка меняет систему — нужно подтверждение", "text": f"Установить {body.get('what') or 'pip'}"}
     return service.system_install(api.db, str(body.get("what") or "pip"), str(body.get("confirm_text") or ""))
 
+@router.get("/api/assistant/system/watchdog", doc="Помощник: надзор за процессами")
+def assistant_system_watchdog(api, ctx):
+    from . import assistant as service
+    return service.system_watchdog(api.db, str(ctx.arg("mode") or "status"))
+
+@router.post("/api/assistant/system/watchdog/arm", doc="Помощник: вооружить надзор", audit="Помощник: надзор")
+def assistant_system_watchdog_arm(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    enabled = str(body.get("enabled") or "on")
+    if not confirmed:
+        word = "вооружить" if enabled != "off" else "снять"
+        return {"ok": False, "needs_confirmation": True, "needs_text": True,
+                "reason": f"Надзор меняет поведение процессов — подтвердите словом «{word}»",
+                "text": f"Надзор: {enabled}"}
+    return service.system_watchdog_arm(
+        api.db, enabled,
+        int(body.get("interval") or 0), int(body.get("stale_sec") or 0),
+        int(body.get("max_restarts") or 0), str(body.get("confirm_text") or ""))
+
+@router.post("/api/assistant/system/watchdog/once", doc="Помощник: проход надзора",
+             audit="Помощник: надзор проход")
+def assistant_system_watchdog_once(api, ctx):
+    from . import assistant as service
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    if not confirmed:
+        return {"ok": False, "needs_confirmation": True, "needs_text": True,
+                "reason": "Подъём процессов требует подтверждения — введите «поднять»",
+                "text": "Один проход надзора"}
+    return service.system_watchdog_once(
+        api.db, str(body.get("roles") or ""),
+        bool(body.get("dry")), str(body.get("confirm_text") or ""))

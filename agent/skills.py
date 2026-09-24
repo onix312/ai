@@ -1,4 +1,4 @@
-"""Реестр навыков личного ассистента (18.18): навык — это данные, а не ветка кода.
+"""Реестр навыков личного ассистента (18.19): навык — это данные, а не ветка кода.
 
 Зачем реестр, если можно написать `if name == "files.search"`.
 
@@ -93,7 +93,7 @@ _LEARNED_RE = re.compile(r"^my\.[a-z][a-z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Реестр: восемьдесят девять живых навыков из каталога `docs/НАВЫКИ.md`
+# Реестр: девяносто шесть живых навыков из каталога `docs/НАВЫКИ.md`
 # ---------------------------------------------------------------------------
 #
 # Объявлены только те навыки, которые исполняются. Навык «в планах» живёт в
@@ -534,6 +534,31 @@ SKILLS: dict[str, dict[str, Any]] = {
         "requires": (), "ideas": ("И222",),
         "doc": "Ставит только то, чего нет: pip install + скачивание vosk small ru в ~/.printflow/models. Требует подтверждения.",
     },
+    "system.watchdog": {
+        "title": "Надзор за процессами",
+        "description": "Кто жив: пульс агента и панели, причина протухания, сколько раз падало.",
+        "host": "agent", "risk": "read",
+        "params": {"mode": "oneof:status|log|self_check"},
+        "requires": (), "ideas": ("И263",),
+        "doc": "Читает ~/.printflow/watchdog.json, watchdog_config.json и watchdog.log. Ничего не поднимает — это делает сам надзиратель.",
+    },
+    "system.watchdog_once": {
+        "title": "Поднять упавших",
+        "description": "Один проход надзора прямо сейчас: проверить пульс и поднять упавшие роли.",
+        "host": "agent", "risk": "write",
+        "params": {"roles": "text", "dry": "oneof:on|off", "confirm_text": "text"},
+        "requires": (), "ideas": ("И263",),
+        "doc": "Тот же проход, что делает надзиратель по таймеру, но по кнопке владельца. Подтверждение словом «поднять»: подъём процесса — действие, а не чтение.",
+    },
+    "system.watchdog_arm": {
+        "title": "Вооружить надзор",
+        "description": "Включить или выключить надзор за процессами и сохранить пороги срабатывания.",
+        "host": "agent", "risk": "write",
+        "params": {"enabled": "oneof:on|off", "interval": "int", "stale_sec": "int",
+                   "max_restarts": "int", "confirm_text": "text"},
+        "requires": (), "ideas": ("И263",),
+        "doc": "Пишет настройки надзора в ~/.printflow/watchdog_config.json. Подъём процессов делает отдельный лёгкий процесс, а не панель: у надзирателя нет причин падать вместе с подопечным.",
+    },
     # --- окна и ввод (Н16-Н26) -------------------------------------------
     "window.active": {
         "title": "Активное окно",
@@ -658,7 +683,7 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "screen.archive_erase": {
         "title": "Стереть архив экрана",
-        "description": "Удалить весь архив экрана — необратимо, с подтверждением.",
+        "description": "Стереть архив экрана (метаданные агента, не файлы) — необратимо, с подтверждением.",
         "host": "agent", "risk": "irreversible",
         "params": {},
         "requires": ("sqlite",), "ideas": ("И165",),
@@ -1050,7 +1075,8 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
              "app_name", "device_id", "level", "minutes", "x", "y", "left_title",
              "right_title", "left", "top", "right", "bottom", "max_side",
              "seconds", "speed", "volume", "timer_id", "note", "key", "value",
-             "steps", "description", "what", "confirm_text")
+             "steps", "description", "what", "confirm_text", "mode", "enabled",
+             "interval", "stale_sec", "max_restarts", "dry")
 
 
 # ---------------------------------------------------------------------------

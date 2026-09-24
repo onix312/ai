@@ -1,4 +1,4 @@
-"""Исполнение навыков ассистента (18.18).
+"""Исполнение навыков ассистента (18.19).
 
 Порядок один для всех навыков, и именно он держит договорённость с владельцем:
 
@@ -122,6 +122,12 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         return f"{title}: проверка зависимостей"
     if name == "system.install":
         return f"{title}: установить {params.get('what') or 'недостающее'}"
+    if name == "system.watchdog":
+        return f"{title}: надзор — {params.get('mode') or 'status'}"
+    if name == "system.watchdog_arm":
+        return f"{title}: надзор {'включить' if str(params.get('enabled') or '') == 'on' else 'выключить'}"
+    if name == "system.watchdog_once":
+        return f"{title}: поднять упавшие роли ({(params.get('roles') or 'все')})"
     if name == "assistant.macro":
         return f"{title}: макрос «{params.get('name') or ''}» из {len(params.get('steps') or []) if isinstance(params.get('steps'), list) else 0} шагов"
     shown = ", ".join(f"{key}=«{str(value)[:60]}»" for key, value in list(params.items())[:3])
@@ -296,6 +302,9 @@ class Runner:
             "system.health": self._system_health,
             "system.check": self._system_check,
             "system.install": self._system_install,
+            "system.watchdog": self._system_watchdog,
+            "system.watchdog_arm": self._system_watchdog_arm,
+            "system.watchdog_once": self._system_watchdog_once,
             "window.active": self._window_active,
             "window.list": self._window_list,
             "window.focus": self._window_focus,
@@ -1623,6 +1632,121 @@ class Runner:
         except Exception as exc:
             return {"ok": False, "reason": f"Макрос не выполнен: {exc}"}
 
+
+    def _system_check(self, _params: dict) -> dict:
+        """Что установлено для полноценного ассистента (И222) — только чтение."""
+        try:
+            from . import install as install_module
+            from . import capabilities as capabilities_module
+            state = install_module.check()
+            caps = capabilities_module.detect()
+            missing = capabilities_module.missing(caps)
+            return {"ok": True, "check": state, "capabilities": caps, "missing": missing,
+                    "reason": "", "hint": "Не хватает — видно в missing; ставит только недостающее system.install"}
+        except Exception as exc:
+            return {"ok": False, "reason": f"Проверка зависимостей не удалась: {exc}"}
+
+    def _system_install(self, params: dict) -> dict:
+        """Автоустановка (И222): pip ставит только то, чего нет; модели — по слову."""
+        what = str(params.get("what") or "pip").strip().lower()
+        if what not in ("pip", "requirements", "models", "full"):
+            return {"ok": False, "reason": f"what должен быть pip|requirements|models|full, а не {what}"}
+        confirm_text = str(params.get("confirm_text") or "").strip().casefold()
+        if what in ("models", "full") and confirm_text != "установить":
+            return {"ok": False, "needs_text": True, "needs_confirmation": True,
+                    "reason": "Скачивание моделей требует слова «установить» в confirm_text"}
+        try:
+            from . import install as install_module
+            if what == "pip":
+                result = install_module.install()
+            elif what == "requirements":
+                result = install_module.install_requirements()
+            elif what == "models":
+                result = install_module.download_vosk_model()
+            else:
+                result = install_module.full_setup()
+            try:
+                self.store.set_preference("install.last", f"{what}:{'ok' if result.get('ok') else 'fail'}")
+            except Exception:
+                pass
+            return {"ok": bool(result.get("ok")), "what": what, "result": result,
+                    "reason": "" if result.get("ok") else str(result.get("reason") or "не получилось"),
+                    "hint": "Ставится только недостающее; модели речи скачиваются в ~/.printflow/models"}
+        except Exception as exc:
+            return {"ok": False, "reason": f"Автоустановка не удалась: {exc}"}
+
+    def _system_watchdog(self, params: dict) -> dict:
+        """Надзор: кто жив, что в журнале, верить ли самому надзирателю (И263)."""
+        mode = str(params.get("mode") or "status").strip().lower()
+        try:
+            from . import watchdog as wd
+        except Exception as exc:
+            return {"ok": False, "reason": f"Модуль надзора недоступен: {exc}"}
+        try:
+            if mode == "log":
+                events = wd.tail_log(40)
+                self.store.add_watchdog_event("watchdog", "log_read", f"прочитано {len(events)}")
+                return {"ok": True, "mode": mode, "events": events, "config": wd.load_config(),
+                        "reason": "", "hint": "Журнал надзора: свежие события сверху"}
+            if mode in ("self_check", "self-check", "check"):
+                report = wd.self_check()
+                return {"ok": bool(report.get("ok")), "mode": "self_check", "check": report,
+                        "reason": report.get("reason") or "", "hint": report.get("hint") or ""}
+            state = wd.status()
+            saved = self.store.list_watchdog_events(10)
+            return {"ok": True, "mode": "status", "status": state, "saved": saved,
+                    "reason": state.get("reason") or "",
+                    "hint": "Пульс протух — надзиратель поднимет роль; причина записана в журнал"}
+        except Exception as exc:
+            return {"ok": False, "reason": f"Надзор не ответил: {exc}"}
+
+    def _system_watchdog_arm(self, params: dict) -> dict:
+        """Вооружить или снять надзор. Сам надзиратель — отдельный процесс (И263)."""
+        enabled = str(params.get("enabled") or "on").strip().lower()
+        if enabled not in ("on", "off", "вкл", "выкл", "true", "false", "да", "нет"):
+            return {"ok": False, "reason": f"enabled должен быть on или off, а не {enabled}"}
+        want_on = enabled in ("on", "вкл", "true", "да")
+        confirm_text = str(params.get("confirm_text") or "").strip().casefold()
+        if confirm_text != ("вооружить" if want_on else "снять"):
+            word = "вооружить" if want_on else "снять"
+            return {"ok": False, "needs_text": True, "needs_confirmation": True,
+                    "reason": f"Подтвердите словом «{word}» в confirm_text"}
+        try:
+            from . import watchdog as wd
+            config = wd.save_config(interval_sec=params.get("interval") or None,
+                                    stale_sec=params.get("stale_sec") or None,
+                                    max_restarts=params.get("max_restarts") or None,
+                                    enabled=want_on)
+            event = self.store.add_watchdog_event(
+                "watchdog", "armed" if want_on else "disarmed",
+                f"роли {','.join(config.get('roles') or [])}, интервал {config.get('interval_sec')} с")
+            self.store.set_preference("watchdog.enabled", "1" if want_on else "0")
+            return {"ok": True, "enabled": want_on, "config": config, "event": event, "reason": "",
+                    "hint": "Надзор поднимает только упавшие роли; запуск в цикле — python -m agent.watchdog --watch"}
+        except Exception as exc:
+            return {"ok": False, "reason": f"Надзор не вооружился: {exc}"}
+
+    def _system_watchdog_once(self, params: dict) -> dict:
+        """Подъём упавших по кнопке владельца (И263) — тот же проход, что по таймеру."""
+        confirm_text = str(params.get("confirm_text") or "").strip().casefold()
+        if confirm_text != "поднять":
+            return {"ok": False, "needs_text": True, "needs_confirmation": True,
+                    "reason": "Подтвердите словом «поднять» в confirm_text"}
+        roles = params.get("roles") or None
+        if isinstance(roles, str) and roles.strip():
+            roles = [r.strip() for r in roles.split(",") if r.strip()]
+        dry = str(params.get("dry") or "off").strip().lower() in ("on", "вкл", "true", "да")
+        try:
+            from . import watchdog as wd
+            report = wd.pass_once(roles=roles, restart=not dry)
+            for action in report.get("actions") or []:
+                self.store.add_watchdog_event(str(action.get("role") or ""), str(action.get("action") or ""),
+                                              str(action.get("reason") or "")[:300])
+            self.store.set_preference("watchdog.last_pass", str(report.get("checked_at") or ""))
+            return {"ok": True, "dry": dry, "report": report, "reason": "",
+                    "hint": "Каждый подъём и каждая причина записаны в журнал надзора"}
+        except Exception as exc:
+            return {"ok": False, "reason": f"Проход надзора не удался: {exc}"}
 
         # --- мета (И178, И180) -------------------------------------------------
     def _agent_skills(self, _params: dict[str, Any]) -> dict[str, Any]:

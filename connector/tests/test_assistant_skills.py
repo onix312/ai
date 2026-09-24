@@ -441,12 +441,23 @@ class GuardTests(unittest.TestCase):
         self.assertTrue(reason)
 
     def test_registry_has_no_destructive_skill(self):
-        """Удаление файлов навыком не делается вовсе: только перемещение."""
+        """Удаление файлов навыком не делается вовсе: только перемещение.
+
+        18.19: у правила появилось исключение, которое фактически жило с 18.17 —
+        `screen.archive_erase` стирает метаданные архива экрана, то есть свою
+        базу агента, а не файлы человека. Такое стирание допустимо только для
+        собственной памяти агента, только с подтверждением и только когда навык
+        вообще не работает с файлами.
+        """
         for name, skill in skills.SKILLS.items():
             self.assertNotIn("delete", name)
+            if skills.risk_of(skill) == "irreversible":
+                self.assertTrue(skills.confirm_required(skill),
+                                f"«{name}» необратим без подтверждения")
+                self.assertNotIn("files", tuple(skill.get("requires") or ()),
+                                 f"«{name}» необратим и трогает файлы — так нельзя")
+                continue
             self.assertNotIn("удал", str(skill["description"]).casefold())
-            self.assertNotEqual("irreversible", skill["risk"],
-                                f"«{name}» необратим: такого навыка в 18.14 быть не должно")
 
 
 if __name__ == "__main__":

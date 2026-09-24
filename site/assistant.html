@@ -1,23 +1,13 @@
 <!DOCTYPE html>
 <html lang="ru" data-theme="dark">
 <head>
-<script src="/assets/theme-init.js?v=18.18.0">
-  function sysCheck() {
-    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
-    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
-  }
-  function sysInstall() {
-    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
-    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
-    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
-  }
-</script>
+<script src="/assets/theme-init.js?v=18.19.0"></script>
 <meta name="theme-color" content="#4f46e5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>NOZZA · помощник</title>
-<link rel="stylesheet" href="assets/tokens.css?v=18.18.0">
+<link rel="stylesheet" href="assets/tokens.css?v=18.19.0">
 <style>
  * { box-sizing:border-box; margin:0; padding:0; }
  html, body { height:100%; }
@@ -235,13 +225,229 @@
  </div>
 </div>
 
+  <div class="as-card" id="card-avito-threads">
+   <div class="as-head"><div class="as-title">Авито — архив переписок (И191)</div><div class="as-sub">Только текст для копирования, без авто-отправки</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="av_threads" type="button">Архив</button>
+    <button class="btn sm" id="av_thread_save" type="button">Сохранить текущую</button>
+    <input class="inp sm" id="av_thread_status" placeholder="статус new/replied" style="width:140px">
+   </div>
+   <div id="av_threads_result" style="margin-top:6px"><span class="muted">Переписки появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-avito-extra">
+   <div class="as-head"><div class="as-title">Авито — связка, расписание, дедуп (И193, И195-И197)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="av_listing_id" placeholder="listing_id" style="width:90px">
+    <button class="btn sm primary" id="av_to_order" type="button">В заказ (с подтверждением)</button>
+    <input class="inp sm" id="av_watch_id" placeholder="watch_id" style="width:80px">
+    <input class="inp sm" id="av_interval" placeholder="интервал ч" style="width:90px" type="number">
+    <label class="as-check"><input type="checkbox" id="av_notify"> уведомление</label>
+    <button class="btn sm" id="av_schedule" type="button">Расписание</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <button class="btn sm" id="av_dedup" type="button">Дубли по фото</button>
+    <input class="inp sm" id="av_image_hash" placeholder="image_hash (опц)" style="width:200px">
+    <span class="muted" id="av_extra_result"></span>
+   </div>
+   <div id="av_dedup_result" style="margin-top:6px"><span class="muted">Дубли появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-calendar">
+   <div class="as-head"><div class="as-title">ТГ — календарь постов (И198)</div></div>
+   <div class="as-row">
+    <input class="inp sm" id="tg_plan_date" placeholder="YYYY-MM-DD HH:MM" style="width:170px">
+    <button class="btn sm primary" id="tg_schedule_btn" type="button">Запланировать последний черновик</button>
+    <button class="btn sm" id="tg_schedules_btn" type="button">Календарь</button>
+   </div>
+   <div id="tg_schedules_result" style="margin-top:6px"><span class="muted">План появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-templates">
+   <div class="as-head"><div class="as-title">ТГ — шаблоны и хештеги (И200, И202)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_tpl_name" placeholder="Имя шаблона" style="width:160px">
+    <select class="inp" id="tg_tpl_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_tpl_text" placeholder="Шаблон: {topic} {fact} {detail} {price}">
+    <button class="btn sm" id="tg_tpl_save" type="button">Сохранить шаблон</button>
+    <button class="btn sm" id="tg_tpl_list" type="button">Шаблоны</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="tg_tpl_id" placeholder="template_id" style="width:90px">
+    <button class="btn sm primary" id="tg_tpl_apply" type="button">Применить → черновик</button>
+    <input class="inp wide" id="tg_hash_text" placeholder="Текст для хештегов">
+    <button class="btn sm" id="tg_hash_btn" type="button">Хештеги</button>
+   </div>
+   <div id="tg_templates_result" style="margin-top:6px"><span class="muted">Шаблоны появятся здесь.</span></div>
+   <div id="tg_hash_result" style="margin-top:6px"><span class="muted">Хештеги появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-tg-search-export">
+   <div class="as-head"><div class="as-title">ТГ — поиск, экспорт, статистика (И203-И205)</div></div>
+   <div class="as-row">
+    <input class="inp" id="tg_search_q" placeholder="Поиск по черновикам">
+    <button class="btn sm" id="tg_search_btn" type="button">Найти</button>
+    <select class="inp sm" id="tg_export_fmt"><option value="md">md</option><option value="json">json</option><option value="txt">txt</option></select>
+    <button class="btn sm" id="tg_export_btn" type="button">Экспорт</button>
+    <button class="btn sm" id="tg_stats_btn" type="button">Статистика</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp wide" id="tg_idea_ctx" placeholder="Контекст идеи">
+    <input class="inp wide" id="tg_idea_text" placeholder="Идея поста">
+    <button class="btn sm" id="tg_idea_save" type="button">Сохранить идею</button>
+    <button class="btn sm" id="tg_ideas_hist" type="button">История идей</button>
+   </div>
+   <div id="tg_search_result" style="margin-top:6px"><span class="muted">Результаты поиска.</span></div>
+   <div id="tg_export_result" style="margin-top:6px"><span class="muted">Экспорт появится здесь.</span></div>
+   <div id="tg_stats_result" style="margin-top:6px"><span class="muted">Статистика конверсии.</span></div>
+  </div>
+
+
+  <div class="as-card" id="card-system">
+   <div class="as-head"><div class="as-title">Система — автозагрузка, процессы, звук, здоровье (И206, И208, И209)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="sys_autostart_on" type="button">Автозагрузка вкл</button>
+    <button class="btn sm" id="sys_autostart_off" type="button">выкл</button>
+    <button class="btn sm" id="sys_procs" type="button">Процессы</button>
+    <button class="btn sm" id="sys_audio" type="button">Аудио-устройства</button>
+    <button class="btn sm" id="sys_health" type="button">Здоровье ПК</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="sys_vol" placeholder="громкость 0-100" type="number" style="width:120px">
+    <button class="btn sm" id="sys_vol_set" type="button">Громкость</button>
+    <input class="inp sm" id="sys_focus_min" placeholder="фокус мин" type="number" style="width:90px">
+    <button class="btn sm" id="sys_focus" type="button">Фокус</button>
+   </div>
+   <div id="sys_result" style="margin-top:6px"><span class="muted">Система появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-windows">
+   <div class="as-head"><div class="as-title">Окна — активное, список, фокус, клик, ввод (Н16-Н26)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="win_active" type="button">Активное</button>
+    <button class="btn sm" id="win_list" type="button">Список окон</button>
+    <input class="inp" id="win_title" placeholder="часть заголовка для фокуса">
+    <button class="btn sm" id="win_focus" type="button">Фокус</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="win_x" placeholder="x" type="number" style="width:70px">
+    <input class="inp sm" id="win_y" placeholder="y" type="number" style="width:70px">
+    <button class="btn sm" id="win_click" type="button">Клик (с подтверждением)</button>
+    <input class="inp" id="win_type" placeholder="текст для ввода">
+    <button class="btn sm" id="win_type_btn" type="button">Ввести (с подтверждением)</button>
+   </div>
+   <div id="win_result" style="margin-top:6px"><span class="muted">Окна появятся здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-screen">
+   <div class="as-head"><div class="as-title">Экран — скрин, область, поиск, архив (И212, И213)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="scr_shot" type="button">Скрин</button>
+    <input class="inp sm" id="scr_l" placeholder="left" type="number" style="width:60px">
+    <input class="inp sm" id="scr_t" placeholder="top" type="number" style="width:60px">
+    <input class="inp sm" id="scr_r" placeholder="right" type="number" style="width:60px">
+    <input class="inp sm" id="scr_b" placeholder="bottom" type="number" style="width:60px">
+    <button class="btn sm" id="scr_region" type="button">Область</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp" id="scr_find" placeholder="найти текст на экране">
+    <button class="btn sm" id="scr_find_btn" type="button">Найти</button>
+    <button class="btn sm" id="scr_find_click" type="button">Найти+клик (с подтверждением)</button>
+    <button class="btn sm" id="scr_arch" type="button">Архив</button>
+    <button class="btn sm" id="scr_arch_erase" type="button">Стереть архив (с подтверждением)</button>
+   </div>
+   <div id="scr_result" style="margin-top:6px"><span class="muted">Экран появится здесь.</span></div>
+  </div>
+
+  <div class="as-card" id="card-voice-clip">
+   <div class="as-head"><div class="as-title">Голос, буфер, фокус, файлы, предпочтения, whitelist, макросы (И211, И214-И221)</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="voice_listen" type="button">Слушать 5с</button>
+    <input class="inp" id="voice_text" placeholder="текст для озвучки">
+    <button class="btn sm" id="voice_say" type="button">Озвучить</button>
+    <select class="inp sm" id="voice_tone"><option>дружелюбный</option><option>деловой</option><option>тревога</option><option>отчёт</option></select>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <button class="btn sm" id="clip_hist" type="button">История буфера</button>
+    <button class="btn sm" id="clip_read" type="button">Читать буфер</button>
+    <input class="inp" id="clip_write" placeholder="записать в буфер">
+    <button class="btn sm" id="clip_write_btn" type="button">Записать</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="focus_min" placeholder="фокус мин" type="number" style="width:90px">
+    <input class="inp" id="focus_note" placeholder="заметка фокуса">
+    <button class="btn sm" id="focus_start" type="button">Старт фокуса</button>
+    <button class="btn sm" id="focus_list" type="button">Таймеры</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp" id="watch_path" placeholder="папка для слежки">
+    <button class="btn sm" id="watch_add" type="button">Следить</button>
+    <button class="btn sm" id="watch_list" type="button">Слежки</button>
+    <input class="inp" id="quick_name" placeholder="быстрый поиск файла">
+    <button class="btn sm" id="quick_btn" type="button">Найти файл</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="pref_key" placeholder="ключ предпочтения">
+    <input class="inp" id="pref_val" placeholder="значение">
+    <button class="btn sm" id="pref_save" type="button">Сохранить</button>
+    <button class="btn sm" id="pref_list" type="button">Предпочтения</button>
+    <input class="inp sm" id="wl_app" placeholder="приложение">
+    <label class="as-check"><input type="checkbox" id="wl_allow" checked> разрешить</label>
+    <button class="btn sm" id="wl_save" type="button">Whitelist</button>
+    <button class="btn sm" id="wl_list" type="button">Список</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="macro_name" placeholder="имя макроса">
+    <input class="inp wide" id="macro_steps" placeholder='шаги JSON [{"skill":"files.recent","params":{}}]'>
+    <button class="btn sm" id="macro_save" type="button">Сохранить макрос</button>
+    <button class="btn sm" id="macro_list" type="button">Макросы</button>
+    <button class="btn sm primary" id="macro_run" type="button">Запустить (с подтверждением)</button>
+   </div>
+   <div id="voice_result" style="margin-top:6px"><span class="muted">Голос/буфер/макросы появятся здесь.</span></div>
+  </div>
+
+
+  <div class="as-card" id="card-watchdog">
+   <div class="as-head"><div class="as-title">Надзор за процессами (И263, 18.19)</div><div class="as-sub">Пульс агента и панели: кто упал, почему и сколько раз</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="wd_status" type="button">Кто жив</button>
+    <button class="btn sm" id="wd_log" type="button">Журнал надзора</button>
+    <button class="btn sm" id="wd_self" type="button">Проверка надзирателя</button>
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="wd_roles" value="agent,panel" placeholder="роли: agent,panel" style="width:170px">
+    <input class="inp sm" id="wd_interval" value="30" placeholder="интервал, с" style="width:110px">
+    <input class="inp sm" id="wd_stale" value="90" placeholder="порог пульса, с" style="width:130px">
+   </div>
+   <div class="as-row" style="margin-top:6px">
+    <input class="inp sm" id="wd_confirm" placeholder='для действий введите "вооружить" или "поднять"' style="width:250px">
+    <button class="btn sm primary" id="wd_arm" type="button">Вооружить (с подтверждением)</button>
+    <button class="btn sm" id="wd_disarm" type="button">Снять надзор</button>
+    <button class="btn sm primary" id="wd_once" type="button">Поднять упавших</button>
+   </div>
+   <div id="wd_result" style="margin-top:6px"><span class="muted">Здесь появится пульс ролей.</span></div>
+  </div>
+
+  <div class="as-card" id="card-install">
+   <div class="as-head"><div class="as-title">Автоустановка — проверка и установка зависимостей (И222, 18.18)</div><div class="as-sub">Ставит только то, чего нет: pip-пакеты, модели речи, проверка tesseract/ollama</div></div>
+   <div class="as-row">
+    <button class="btn sm" id="sys_check" type="button">Проверить что не хватает</button>
+    <select class="inp sm" id="install_what"><option value="pip">pip (только недостающие)</option><option value="requirements">requirements.txt</option><option value="models">модели речи (vosk small ru)</option><option value="full">full (pip+модели)</option></select>
+    <input class="inp sm" id="install_confirm" placeholder='для моделей введите "установить"' style="width:180px">
+    <button class="btn sm primary" id="sys_install" type="button">Установить (с подтверждением)</button>
+   </div>
+   <div id="install_result" style="margin-top:6px"><span class="muted">Отчёт появится здесь.</span></div>
+  </div>
+
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) {
-    return String(s == null ? '' : s).replace(/[&<>\"']/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c];
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   };
   var state = { available: false, actions: [], model: '', reason: '' };
@@ -251,7 +457,6 @@
     if (body !== undefined) {
       if (body instanceof FormData) { opts.body = body; }
       else {
-        opts.headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(body || {});
       }
     }
@@ -714,7 +919,7 @@
     post('/api/assistant/avito/reply', { thread: thread, intent: $('av_intent').value.trim(), city: $('av_city').value.trim() }).then(function (data) {
       if (!data.ok) { $('av_reply_result').innerHTML = '<div class=\"warnline\">' + esc(data.reason||'Ошибка') + '</div>'; return; }
       var html = '<div class=\"body\">Варианты (' + (data.source||'') + '):</div>';
-      html += (data.replies||[]).map(function (r) { return '<div class=\"jrow done\" style=\"margin-top:4px\"><div class=\"body\">' + esc(r) + '</div><div class=\"as-row\" style=\"margin-top:4px\"><button class=\"btn sm\" type=\"button\" onclick=\"navigator.clipboard.writeText(this.dataset.txt)\">Копировать</button></div></div>'.replace('this.dataset.txt', 'decodeURIComponent(\\'' + encodeURIComponent(r) + '\\')'); }).join('');
+      html += (data.replies||[]).map(function (r) { return '<div class="jrow done" style="margin-top:4px"><div class="body">' + esc(r) + '</div><div class="as-row" style="margin-top:4px"><button class="btn sm" type="button" data-txt="' + encodeURIComponent(r) + '" onclick="navigator.clipboard.writeText(decodeURIComponent(this.dataset.txt))">Копировать</button></div></div>'; }).join('');
       if (data.hint) html += '<div class=\"muted\" style=\"margin-top:4px\">' + esc(data.hint) + '</div>';
       // рекомендации
       html += '<div class=\"kv\" style=\"margin-top:6px\">Рекомендация: выбирайте вежливый для первого контакта, короткий — для уточнения, торг — когда просят скидку. Не обещайте доставку, если не готовы.</div>';
@@ -996,11 +1201,84 @@
 
   // --- 18.17: система, окна, экран, голос, буфер, фокус, файлы, предпочтения ---
   function sysRender(data) { $('sys_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(data,null,2))+'</pre></div>'; }
-  function 
-  el = $('sys_check'); if (el) el.addEventListener('click', sysCheck);
-  el = $('sys_install'); if (el) el.addEventListener('click', sysInstall);
+  function sysCheck() {
+    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
+    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  function sysInstall() {
+    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
+    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
+    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
+  }
+  // --- провода кнопок -----------------------------------------------------
+  // Разметка карточек стоит ВЫШЕ этого скрипта: к моменту выполнения DOM уже
+  // собран, поэтому слушатели ставятся сразу. Раньше карточки дописывались в
+  // конец файла ЗА закрывающим тегом скрипта, и кнопки молча не работали (18.15-18.18).
+  function wdRender(d) {
+    $('wd_result').innerHTML = '<div class="body"><pre style="white-space:pre-wrap">' + esc(JSON.stringify(d, null, 2)) + '</pre></div>';
+  }
+  function wdShow(path, what) {
+    $('wd_result').innerHTML = '<span class="muted">' + esc(what) + '…</span>';
+    get(path).then(wdRender).catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdStatus() { wdShow('/api/assistant/system/watchdog?mode=status', 'Пульс ролей'); }
+  function wdLog() { wdShow('/api/assistant/system/watchdog?mode=log', 'Журнал надзора'); }
+  function wdSelf() { wdShow('/api/assistant/system/watchdog?mode=self_check', 'Проверка надзирателя'); }
+  function wdArm() {
+    var roles = $('wd_roles').value.trim();
+    var interval = parseInt($('wd_interval').value || '0', 10) || 0;
+    var stale = parseInt($('wd_stale').value || '0', 10) || 0;
+    var word = $('wd_confirm').value.trim();
+    $('wd_result').innerHTML = '<span class="muted">Вооружаем надзор…</span>';
+    post('/api/assistant/system/watchdog/arm', {enabled: 'on', roles: roles, interval: interval, stale_sec: stale, confirm_text: word, confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdDisarm() {
+    $('wd_result').innerHTML = '<span class="muted">Снимаем надзор…</span>';
+    post('/api/assistant/system/watchdog/arm', {enabled: 'off', confirm_text: 'снять', confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
+  function wdOnce() {
+    var roles = $('wd_roles').value.trim();
+    var word = $('wd_confirm').value.trim();
+    $('wd_result').innerHTML = '<span class="muted">Проход надзора…</span>';
+    post('/api/assistant/system/watchdog/once', {roles: roles, dry: false, confirm_text: word, confirmed: true}).then(wdRender)
+      .catch(function (e) { $('wd_result').innerHTML = '<div class="warnline">✗ ' + esc(e.message || e) + '</div>'; });
+  }
 
-  el = $('sys_autostart_on')(enabled) {
+  var wiring = {
+    av_threads: avitoThreads, av_thread_save: avitoThreadSave,
+    av_to_order: avitoToOrder, av_schedule: avitoSchedule, av_dedup: avitoDedup,
+    tg_schedule_btn: tgSchedule, tg_schedules_btn: tgSchedules,
+    tg_tpl_save: tgTplSave, tg_tpl_list: tgTplList, tg_tpl_apply: tgTplApply,
+    tg_hash_btn: tgHashtags, tg_search_btn: tgSearch, tg_export_btn: tgExport,
+    tg_stats_btn: tgStats, tg_idea_save: tgIdeaSave, tg_ideas_hist: tgIdeasHist,
+    sys_check: sysCheck, sys_install: sysInstall,
+    sys_procs: sysProcs, sys_audio: sysAudio, sys_health: sysHealth,
+    sys_vol_set: sysVol, sys_focus: sysFocus,
+    win_active: winActive, win_list: winList, win_focus: winFocus,
+    win_click: winClick, win_type_btn: winType,
+    scr_shot: scrShot, scr_region: scrRegion, scr_find_btn: scrFind,
+    scr_find_click: scrFindClick, scr_arch: scrArch, scr_arch_erase: scrArchErase,
+    voice_listen: voiceListen, voice_say: voiceSay,
+    clip_hist: clipHist, clip_read: clipRead, clip_write_btn: clipWrite,
+    focus_start: focusStart, focus_list: focusList,
+    watch_add: watchAdd, watch_list: watchList, quick_btn: quickOpen,
+    pref_save: prefSave, pref_list: prefList,
+    wl_save: wlSave, wl_list: wlList,
+    macro_save: macroSave, macro_list: macroList, macro_run: macroRun,
+    wd_status: wdStatus, wd_log: wdLog, wd_self: wdSelf,
+    wd_arm: wdArm, wd_disarm: wdDisarm, wd_once: wdOnce
+  };
+  Object.keys(wiring).forEach(function (id) {
+    var node = $(id);
+    if (node) node.addEventListener('click', wiring[id]);
+  });
+  var autoOn = $('sys_autostart_on'), autoOff = $('sys_autostart_off');
+  if (autoOn) autoOn.addEventListener('click', function () { sysAutostart(true); });
+  if (autoOff) autoOff.addEventListener('click', function () { sysAutostart(false); });
+
+  function sysAutostart(enabled) {
     $('sys_result').innerHTML = '<span class="muted">Автозагрузка…</span>';
     post('/api/assistant/system/autostart', {enabled: enabled}).then(sysRender).catch(function(e){ $('sys_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
   }
@@ -1153,211 +1431,7 @@ $('av_watch').addEventListener('click', avitoWatch);
   refreshJournal();
   refreshSkills();
 })();
-
-  function sysCheck() {
-    $('install_result').innerHTML='<span class="muted">Проверяем…</span>';
-    get('/api/assistant/system/check').then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
-  }
-  function sysInstall() {
-    var what=$('install_what').value, confirmText=$('install_confirm').value.trim();
-    $('install_result').innerHTML='<span class="muted">Устанавливаем '+esc(what)+' — может занять минуты…</span>';
-    post('/api/assistant/system/install', {what: what, confirm_text: confirmText, confirmed: true}).then(function(d){ $('install_result').innerHTML='<div class="body"><pre style="white-space:pre-wrap">'+esc(JSON.stringify(d,null,2))+'</pre></div>'; }).catch(function(e){ $('install_result').innerHTML='<div class="warnline">✗ '+esc(e.message||e)+'</div>'; });
-  }
 </script>
 
-  <div class="as-card" id="card-avito-threads">
-   <div class="as-head"><div class="as-title">Авито — архив переписок (И191)</div><div class="as-sub">Только текст для копирования, без авто-отправки</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="av_threads" type="button">Архив</button>
-    <button class="btn sm" id="av_thread_save" type="button">Сохранить текущую</button>
-    <input class="inp sm" id="av_thread_status" placeholder="статус new/replied" style="width:140px">
-   </div>
-   <div id="av_threads_result" style="margin-top:6px"><span class="muted">Переписки появятся здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-avito-extra">
-   <div class="as-head"><div class="as-title">Авито — связка, расписание, дедуп (И193, И195-И197)</div></div>
-   <div class="as-row">
-    <input class="inp sm" id="av_listing_id" placeholder="listing_id" style="width:90px">
-    <button class="btn sm primary" id="av_to_order" type="button">В заказ (с подтверждением)</button>
-    <input class="inp sm" id="av_watch_id" placeholder="watch_id" style="width:80px">
-    <input class="inp sm" id="av_interval" placeholder="интервал ч" style="width:90px" type="number">
-    <label class="as-check"><input type="checkbox" id="av_notify"> уведомление</label>
-    <button class="btn sm" id="av_schedule" type="button">Расписание</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <button class="btn sm" id="av_dedup" type="button">Дубли по фото</button>
-    <input class="inp sm" id="av_image_hash" placeholder="image_hash (опц)" style="width:200px">
-    <span class="muted" id="av_extra_result"></span>
-   </div>
-   <div id="av_dedup_result" style="margin-top:6px"><span class="muted">Дубли появятся здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-tg-calendar">
-   <div class="as-head"><div class="as-title">ТГ — календарь постов (И198)</div></div>
-   <div class="as-row">
-    <input class="inp sm" id="tg_plan_date" placeholder="YYYY-MM-DD HH:MM" style="width:170px">
-    <button class="btn sm primary" id="tg_schedule_btn" type="button">Запланировать последний черновик</button>
-    <button class="btn sm" id="tg_schedules_btn" type="button">Календарь</button>
-   </div>
-   <div id="tg_schedules_result" style="margin-top:6px"><span class="muted">План появится здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-tg-templates">
-   <div class="as-head"><div class="as-title">ТГ — шаблоны и хештеги (И200, И202)</div></div>
-   <div class="as-row">
-    <input class="inp" id="tg_tpl_name" placeholder="Имя шаблона" style="width:160px">
-    <select class="inp" id="tg_tpl_tone"><option>дружелюбный</option><option>деловой</option><option>техничный</option><option>продающий</option><option>короткий</option><option>история</option></select>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp wide" id="tg_tpl_text" placeholder="Шаблон: {topic} {fact} {detail} {price}">
-    <button class="btn sm" id="tg_tpl_save" type="button">Сохранить шаблон</button>
-    <button class="btn sm" id="tg_tpl_list" type="button">Шаблоны</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="tg_tpl_id" placeholder="template_id" style="width:90px">
-    <button class="btn sm primary" id="tg_tpl_apply" type="button">Применить → черновик</button>
-    <input class="inp wide" id="tg_hash_text" placeholder="Текст для хештегов">
-    <button class="btn sm" id="tg_hash_btn" type="button">Хештеги</button>
-   </div>
-   <div id="tg_templates_result" style="margin-top:6px"><span class="muted">Шаблоны появятся здесь.</span></div>
-   <div id="tg_hash_result" style="margin-top:6px"><span class="muted">Хештеги появятся здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-tg-search-export">
-   <div class="as-head"><div class="as-title">ТГ — поиск, экспорт, статистика (И203-И205)</div></div>
-   <div class="as-row">
-    <input class="inp" id="tg_search_q" placeholder="Поиск по черновикам">
-    <button class="btn sm" id="tg_search_btn" type="button">Найти</button>
-    <select class="inp sm" id="tg_export_fmt"><option value="md">md</option><option value="json">json</option><option value="txt">txt</option></select>
-    <button class="btn sm" id="tg_export_btn" type="button">Экспорт</button>
-    <button class="btn sm" id="tg_stats_btn" type="button">Статистика</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp wide" id="tg_idea_ctx" placeholder="Контекст идеи">
-    <input class="inp wide" id="tg_idea_text" placeholder="Идея поста">
-    <button class="btn sm" id="tg_idea_save" type="button">Сохранить идею</button>
-    <button class="btn sm" id="tg_ideas_hist" type="button">История идей</button>
-   </div>
-   <div id="tg_search_result" style="margin-top:6px"><span class="muted">Результаты поиска.</span></div>
-   <div id="tg_export_result" style="margin-top:6px"><span class="muted">Экспорт появится здесь.</span></div>
-   <div id="tg_stats_result" style="margin-top:6px"><span class="muted">Статистика конверсии.</span></div>
-  </div>
-
-
-  <div class="as-card" id="card-system">
-   <div class="as-head"><div class="as-title">Система — автозагрузка, процессы, звук, здоровье (И206, И208, И209)</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="sys_autostart_on" type="button">Автозагрузка вкл</button>
-    <button class="btn sm" id="sys_autostart_off" type="button">выкл</button>
-    <button class="btn sm" id="sys_procs" type="button">Процессы</button>
-    <button class="btn sm" id="sys_audio" type="button">Аудио-устройства</button>
-    <button class="btn sm" id="sys_health" type="button">Здоровье ПК</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="sys_vol" placeholder="громкость 0-100" type="number" style="width:120px">
-    <button class="btn sm" id="sys_vol_set" type="button">Громкость</button>
-    <input class="inp sm" id="sys_focus_min" placeholder="фокус мин" type="number" style="width:90px">
-    <button class="btn sm" id="sys_focus" type="button">Фокус</button>
-   </div>
-   <div id="sys_result" style="margin-top:6px"><span class="muted">Система появится здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-windows">
-   <div class="as-head"><div class="as-title">Окна — активное, список, фокус, клик, ввод (Н16-Н26)</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="win_active" type="button">Активное</button>
-    <button class="btn sm" id="win_list" type="button">Список окон</button>
-    <input class="inp" id="win_title" placeholder="часть заголовка для фокуса">
-    <button class="btn sm" id="win_focus" type="button">Фокус</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="win_x" placeholder="x" type="number" style="width:70px">
-    <input class="inp sm" id="win_y" placeholder="y" type="number" style="width:70px">
-    <button class="btn sm" id="win_click" type="button">Клик (с подтверждением)</button>
-    <input class="inp" id="win_type" placeholder="текст для ввода">
-    <button class="btn sm" id="win_type_btn" type="button">Ввести (с подтверждением)</button>
-   </div>
-   <div id="win_result" style="margin-top:6px"><span class="muted">Окна появятся здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-screen">
-   <div class="as-head"><div class="as-title">Экран — скрин, область, поиск, архив (И212, И213)</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="scr_shot" type="button">Скрин</button>
-    <input class="inp sm" id="scr_l" placeholder="left" type="number" style="width:60px">
-    <input class="inp sm" id="scr_t" placeholder="top" type="number" style="width:60px">
-    <input class="inp sm" id="scr_r" placeholder="right" type="number" style="width:60px">
-    <input class="inp sm" id="scr_b" placeholder="bottom" type="number" style="width:60px">
-    <button class="btn sm" id="scr_region" type="button">Область</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp" id="scr_find" placeholder="найти текст на экране">
-    <button class="btn sm" id="scr_find_btn" type="button">Найти</button>
-    <button class="btn sm" id="scr_find_click" type="button">Найти+клик (с подтверждением)</button>
-    <button class="btn sm" id="scr_arch" type="button">Архив</button>
-    <button class="btn sm" id="scr_arch_erase" type="button">Стереть архив (с подтверждением)</button>
-   </div>
-   <div id="scr_result" style="margin-top:6px"><span class="muted">Экран появится здесь.</span></div>
-  </div>
-
-  <div class="as-card" id="card-voice-clip">
-   <div class="as-head"><div class="as-title">Голос, буфер, фокус, файлы, предпочтения, whitelist, макросы (И211, И214-И221)</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="voice_listen" type="button">Слушать 5с</button>
-    <input class="inp" id="voice_text" placeholder="текст для озвучки">
-    <button class="btn sm" id="voice_say" type="button">Озвучить</button>
-    <select class="inp sm" id="voice_tone"><option>дружелюбный</option><option>деловой</option><option>тревога</option><option>отчёт</option></select>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <button class="btn sm" id="clip_hist" type="button">История буфера</button>
-    <button class="btn sm" id="clip_read" type="button">Читать буфер</button>
-    <input class="inp" id="clip_write" placeholder="записать в буфер">
-    <button class="btn sm" id="clip_write_btn" type="button">Записать</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="focus_min" placeholder="фокус мин" type="number" style="width:90px">
-    <input class="inp" id="focus_note" placeholder="заметка фокуса">
-    <button class="btn sm" id="focus_start" type="button">Старт фокуса</button>
-    <button class="btn sm" id="focus_list" type="button">Таймеры</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp" id="watch_path" placeholder="папка для слежки">
-    <button class="btn sm" id="watch_add" type="button">Следить</button>
-    <button class="btn sm" id="watch_list" type="button">Слежки</button>
-    <input class="inp" id="quick_name" placeholder="быстрый поиск файла">
-    <button class="btn sm" id="quick_btn" type="button">Найти файл</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="pref_key" placeholder="ключ предпочтения">
-    <input class="inp" id="pref_val" placeholder="значение">
-    <button class="btn sm" id="pref_save" type="button">Сохранить</button>
-    <button class="btn sm" id="pref_list" type="button">Предпочтения</button>
-    <input class="inp sm" id="wl_app" placeholder="приложение">
-    <label class="as-check"><input type="checkbox" id="wl_allow" checked> разрешить</label>
-    <button class="btn sm" id="wl_save" type="button">Whitelist</button>
-    <button class="btn sm" id="wl_list" type="button">Список</button>
-   </div>
-   <div class="as-row" style="margin-top:6px">
-    <input class="inp sm" id="macro_name" placeholder="имя макроса">
-    <input class="inp wide" id="macro_steps" placeholder='шаги JSON [{"skill":"files.recent","params":{}}]'>
-    <button class="btn sm" id="macro_save" type="button">Сохранить макрос</button>
-    <button class="btn sm" id="macro_list" type="button">Макросы</button>
-    <button class="btn sm primary" id="macro_run" type="button">Запустить (с подтверждением)</button>
-   </div>
-   <div id="voice_result" style="margin-top:6px"><span class="muted">Голос/буфер/макросы появятся здесь.</span></div>
-  </div>
-
-
-  <div class="as-card" id="card-install">
-   <div class="as-head"><div class="as-title">Автоустановка — проверка и установка зависимостей (И222, 18.18)</div><div class="as-sub">Ставит только то, чего нет: pip-пакеты, модели речи, проверка tesseract/ollama</div></div>
-   <div class="as-row">
-    <button class="btn sm" id="sys_check" type="button">Проверить что не хватает</button>
-    <select class="inp sm" id="install_what"><option value="pip">pip (только недостающие)</option><option value="requirements">requirements.txt</option><option value="models">модели речи (vosk small ru)</option><option value="full">full (pip+модели)</option></select>
-    <input class="inp sm" id="install_confirm" placeholder='для моделей введите "установить"' style="width:180px">
-    <button class="btn sm primary" id="sys_install" type="button">Установить (с подтверждением)</button>
-   </div>
-   <div id="install_result" style="margin-top:6px"><span class="muted">Отчёт появится здесь.</span></div>
-  </div>
 </body>
 </html>

@@ -11,6 +11,8 @@
   * каждое действие оставляет след в журнале — единственную замену отсутствующему
     входу.
 
+Маршрутов помощника в 18.19 — восемьдесят девять (три новых: надзор за процессами).
+
 Плюс то, что проверяется без Windows: страница отдаётся, в ней нет чужих
 доменов, окно лаунчера открывает именно её, диагностика читает настройки.
 """
@@ -244,8 +246,7 @@ class JournalTests(unittest.TestCase):
         register_routes()
         found = {(r["method"], r["path"]) for r in router.reference()
                  if r["path"].startswith("/api/assistant")}
-        self.assertEqual({
-                          ("GET", "/api/assistant/agent"),
+        self.assertEqual({("GET", "/api/assistant/agent"),
                           ("GET", "/api/assistant/avito/dedup"),
                           ("GET", "/api/assistant/avito/threads"),
                           ("GET", "/api/assistant/avito/watches"),
@@ -268,6 +269,7 @@ class JournalTests(unittest.TestCase):
                           ("GET", "/api/assistant/system/health"),
                           ("GET", "/api/assistant/system/processes"),
                           ("GET", "/api/assistant/system/volume"),
+                          ("GET", "/api/assistant/system/watchdog"),
                           ("GET", "/api/assistant/tg/drafts"),
                           ("GET", "/api/assistant/tg/export"),
                           ("GET", "/api/assistant/tg/ideas/history"),
@@ -312,6 +314,8 @@ class JournalTests(unittest.TestCase):
                           ("POST", "/api/assistant/system/install"),
                           ("POST", "/api/assistant/system/power"),
                           ("POST", "/api/assistant/system/volume"),
+                          ("POST", "/api/assistant/system/watchdog/arm"),
+                          ("POST", "/api/assistant/system/watchdog/once"),
                           ("POST", "/api/assistant/tg/draft"),
                           ("POST", "/api/assistant/tg/hashtags"),
                           ("POST", "/api/assistant/tg/idea/save"),
@@ -330,7 +334,8 @@ class JournalTests(unittest.TestCase):
                           ("POST", "/api/assistant/window/click"),
                           ("POST", "/api/assistant/window/focus"),
                           ("POST", "/api/assistant/window/snap"),
-                          ("POST", "/api/assistant/window/type")}, found)
+                          ("POST", "/api/assistant/window/type")
+}, found)
 
 
 class PageTests(unittest.TestCase):

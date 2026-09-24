@@ -467,6 +467,14 @@ def run() -> int:
         opened = window.open_window(window.url(config.AGENT_PORT))
         if not opened["ok"]:
             print(f"  ⚠ {opened['reason']} — {opened['hint']}")
+    # И263 (18.19): агент сам отмечает свой пульс, иначе надзор считал бы его
+    # мёртвым сразу после старта и поднимал второй экземпляр на занятый порт.
+    try:
+        from . import watchdog as wd
+        wd.beat("agent", note="старт агента")
+        wd.beat_forever("agent", 30)
+    except Exception as exc:
+        print(f"  ⚠ Пульс надзора не включился: {exc}")
     threading.Thread(target=speech_server.serve_forever, daemon=True).start()
     try:
         agent_server.serve_forever()

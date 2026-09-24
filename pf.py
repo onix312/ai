@@ -2877,7 +2877,50 @@ def cmd_app(args: argparse.Namespace) -> int:
     argv += ["--port", str(args.port)]
     if args.local:
         argv += ["--local"]
+    start_beat_thread("panel", note="нативное окно")
     return app_main(argv)
+
+
+def cmd_watchdog(args: argparse.Namespace) -> int:
+    """Надзор за процессами ассистента (18.19, И263) — запуск модуля процессом.
+
+    pf.py не импортирует `agent` (см. выше), поэтому команда собирает аргументы
+    и зовёт `python -m agent.watchdog` отдельным процессом: то же, что владелец
+    набрал бы руками, но одной командой и с подсказкой.
+    """
+    argv: list[str] = []
+    roles = str(getattr(args, "roles", "") or "").strip()
+    if roles:
+        argv += ["--roles", roles]
+    if int(getattr(args, "interval", 0) or 0):
+        argv += ["--interval", str(int(args.interval))]
+    if int(getattr(args, "stale", 0) or 0):
+        argv += ["--stale", str(int(args.stale))]
+    if int(getattr(args, "max_restarts", 0) or 0):
+        argv += ["--max-restarts", str(int(args.max_restarts))]
+    role = str(getattr(args, "role", "") or "agent")
+    chosen = None
+    for flag, as_argv in (
+        ("once", ["--once"]), ("dry", ["--dry"]), ("watch", ["--watch"]),
+        ("log", ["--log"]), ("clear_log", ["--clear-log"]),
+        ("self_check", ["--self-check"]), ("arm", ["--arm"]), ("disarm", ["--disarm"]),
+        ("start_role", ["--start", role]), ("stop_role", ["--stop", role]),
+        ("restart_role", ["--restart", role]),
+    ):
+        if getattr(args, flag, False):
+            chosen = as_argv
+            break
+    if chosen is None:
+        chosen = ["--status"]
+    if chosen == ["--watch"]:
+        say("    Надзор в цикле: остановить — Ctrl+C", Style.DIM)
+    command = [sys.executable, "-m", "agent.watchdog"] + argv + chosen
+    try:
+        result = subprocess.run(command, cwd=str(ROOT))
+    except OSError as exc:
+        fail(f"Надзор не запустился: {exc}")
+        return 1
+    return int(result.returncode or 0)
 
 
 def cmd_assistant(args: argparse.Namespace) -> int:
@@ -3069,6 +3112,25 @@ def build_parser() -> argparse.ArgumentParser:
                         help="запускать текущим Python, без отдельного окружения")
     parser.add_argument("--verbose", action="store_true", help="подробный журнал")
     parser.add_argument("--lines", type=int, default=40, help="сколько строк журнала показать")
+    parser.add_argument("--roles", default="", help="роли надзора через запятую: agent,panel")
+    parser.add_argument("--role", default="agent", help="роль для watchdog start/stop/restart")
+    parser.add_argument("--interval", type=int, default=0, help="период проверки надзора, секунд")
+    parser.add_argument("--stale", type=int, default=0,
+                        help="через сколько секунд пульс считается протухшим")
+    parser.add_argument("--max-restarts", type=int, default=0,
+                        help="сколько подъёмов подряд до эскалации")
+    parser.add_argument("--once", action="store_true", help="watchdog: один проход с подъёмом упавших")
+    parser.add_argument("--status", action="store_true", help="watchdog: кто жив и у кого пульс протух")
+    parser.add_argument("--dry", action="store_true", help="watchdog: посмотреть правду, ничего не поднимая")
+    parser.add_argument("--watch", action="store_true", help="watchdog: надзор в цикле")
+    parser.add_argument("--log", action="store_true", help="watchdog: последние события надзора")
+    parser.add_argument("--clear-log", action="store_true", help="watchdog: очистить журнал надзора")
+    parser.add_argument("--self-check", action="store_true", help="watchdog: проверка самого надзирателя")
+    parser.add_argument("--arm", action="store_true", help="watchdog: включить надзор")
+    parser.add_argument("--disarm", action="store_true", help="watchdog: выключить надзор")
+    parser.add_argument("--start-role", action="store_true", help="watchdog: поднять роль из --role")
+    parser.add_argument("--stop-role", action="store_true", help="watchdog: остановить роль из --role")
+    parser.add_argument("--restart-role", action="store_true", help="watchdog: перезапустить роль из --role")
     parser.add_argument("--file", default="", help="путь к файлу копии для restore")
     parser.add_argument("-h", "--help", action="store_const", const=True, dest="want_help")
     return parser
@@ -3082,6 +3144,7 @@ COMMANDS = {
     "gui": cmd_gui,
     "app": cmd_app,
     "assistant": cmd_assistant,
+    "watchdog": cmd_watchdog,
     "menu": cmd_menu,
     "stop": cmd_stop,
     "status": cmd_status,
@@ -3106,6 +3169,75 @@ COMMANDS = {
 # владелец. Теперь сбой показывается тремя способами сразу: в консоль (если
 # она есть), в журнал запуска (если консоль уже закрылась) и системным окном —
 # когда PrintFlow поднят через pythonw.exe и консоли нет вовсе.
+
+
+# ─────────────────────────────────────────── надзор за процессами (18.19, И263)
+# Панель отмечает свой пульс в ~/.printflow/watchdog.json, а отдельный лёгкий
+# процесс (`python -m agent.watchdog --watch`) читает пульс и поднимает упавших.
+#
+# Два ограничения, из которых выросла эта форма:
+#   * launcher не имеет права импортировать пакет `agent` (проверяется
+#     `test_agent_os.IsolationTests`): агент — внешняя программа, у pf.py с ним
+#     ровно две связи — адрес и процесс. Поэтому пульс здесь пишется своими
+#     пятнадцатью строками, а команда надзора запускает модуль отдельным
+#     процессом, а не зовёт его функции;
+#   * формат файла пульса — контракт между двумя сторонами: тот же JSON читает
+#     `agent/watchdog.py` (ключи pid/at/ts/note). Менять его нужно сразу в двух
+#     местах, и это единственная общая точка, поэтому она описана здесь.
+
+WATCHDOG_DIR = DATA_DIR.parent / ".printflow"
+
+
+def watchdog_files() -> dict:
+    """Пути надзора. Папку можно переназначить — как и у агента."""
+    base = Path(os.environ.get("PRINTFLOW_WATCHDOG_DIR", "") or WATCHDOG_DIR)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return {"heartbeat": base / "watchdog.json", "log": base / "watchdog.log"}
+
+
+def beat_role(role: str = "panel", note: str = "") -> bool:
+    """Отметить пульс роли. Молча: панель не должна падать из-за надзора."""
+    import json
+    import os as _os
+    import time
+    path = watchdog_files()["heartbeat"]
+    data = {}
+    try:
+        if path.exists():
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+    except (OSError, ValueError):
+        data = {}
+    data[role] = {"pid": _os.getpid(), "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                  "ts": time.time(), "note": str(note or "")[:200]}
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(path)
+        return True
+    except OSError:
+        return False
+
+
+def start_beat_thread(role: str = "panel", interval: int = 30) -> bool:
+    """Пульс панели в фоне: отметиться сразу и дальше по таймеру."""
+    import threading
+    import time
+
+    if not beat_role(role, note="старт панели"):
+        return False
+
+    def _loop() -> None:
+        while True:
+            time.sleep(max(5, int(interval)))
+            beat_role(role)
+
+    threading.Thread(target=_loop, name=f"beat-{role}", daemon=True).start()
+    return True
 
 
 def console_alive() -> bool:
