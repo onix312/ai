@@ -49,7 +49,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +94,21 @@ COLORS = ("Чёрный", "Белый", "Красный", "Синий", "Зел�
 
 _JSON_START = re.compile(r"[\{\[]")
 _MONEY_RE = re.compile(r"\d")
+
+# Дата и день недели по-русски. «Сегодня» модель берёт отсюда, а не из
+# памяти и не из веб-поиска: поиск на «какое сегодня число» приносил SEO-
+# страницы с чужими датами, которые маленькая модель вставляла дословно.
+_RU_DAYS = ("понедельник", "вторник", "среда", "четверг", "пятница",
+            "суббота", "воскресенье")
+_RU_MONTHS = ("января", "февраля", "марта", "апреля", "мая", "июня",
+              "июля", "августа", "сентября", "октября", "ноября", "декабря")
+
+
+def date_line(now: datetime | None = None) -> str:
+    """«Сегодня — …, сейчас …» — единственный источник даты для модели."""
+    now = now or datetime.now()
+    return (f"Сегодня — {_RU_DAYS[now.weekday()]}, {now.day} {_RU_MONTHS[now.month - 1]} "
+            f"{now.year} года, сейчас {now:%H:%M}.")
 
 
 def _setting(db: Database, key: str, default: Any = "") -> Any:
@@ -673,10 +688,13 @@ _CATALOG_RE = re.compile(
     r"очеред|план|клиент|финанс|пульт|диагност|настройк",
     re.IGNORECASE)
 
+# В веб идут только действительно свежие факты. «Сегодня», «сейчас», «курс»,
+# «в сети» из триггеров убраны: «какое сегодня число» уходило в SEO-поиск
+# вместо часов, «сколько станков в сети» — в поиск вместо панели, «курс»
+# покрывает и «курс доллара» (слово «доллар» осталось в списке).
 _WEB_RE = re.compile(
-    r"интернет|погугл|загугл|новост|погод|курс|доллар|евро|биткоин|"
-    r"закон|актуальн|сегодня|сейчас|кто так|что так|википед|"
-    r"202[4-9]|найди|поищи|в сети|сайт",
+    r"интернет|погугл|загугл|новост|погод|доллар|евро|биткоин|"
+    r"закон|актуальн|википед|найди|поищи|сайт",
     re.IGNORECASE)
 _MATH_PREFIX_RE = re.compile(
     r"^(?:сколько будет|посчитай|вычисли|реши|сколько)\s+", re.IGNORECASE)
@@ -775,6 +793,20 @@ def _search_query_ok(query: str) -> bool:
     return True
 
 
+def _clean_web_text(value: str) -> str:
+    """Выдержку поиска без SEO-хлама.
+
+    Маленькая модель вставляет маркировку ссылок и заголовки страниц
+    дословно («++**[сайт](http://сайт)**++»): фидуем ей чистый текст, а
+    пересказывать просит промпт.
+    """
+    text = str(value or "")
+    text = re.sub(r"\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"\[([^\]]*)\]", r"\1", text)
+    text = re.sub(r"[*_+]{1,3}", "", text)
+    return " ".join(text.split())
+
+
 def _format_hits(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
     rows = payload.get("results") if isinstance(payload, dict) else None
     lines: list[str] = []
@@ -782,9 +814,9 @@ def _format_hits(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
     for row in (rows or [])[:4]:
         if not isinstance(row, dict):
             continue
-        title = " ".join(str(row.get("title") or "").split())[:160]
+        title = _clean_web_text(str(row.get("title") or ""))[:160]
         url = str(row.get("url") or "").strip()[:300]
-        content = " ".join(str(row.get("content") or "").split())[:400]
+        content = _clean_web_text(str(row.get("content") or ""))[:400]
         if not title and not content:
             continue
         sources.append({"title": title or url, "url": url})
@@ -897,11 +929,16 @@ def _run_tool(db: Database, name: str, args: dict[str, Any]) -> tuple[str, list[
     return "неизвестный инструмент", []
 
 
-def converse(db: Database, question: str, history: list | None = None) -> dict[str, Any]:
+def converse(db: Database, question: str, history: list | None = None,
+             context: str = "") -> dict[str, Any]:
     """Обычный вопрос → ответ модели. Свежие факты — через веб-поиск самой Ollama.
 
     Сюда не попадают команды станку и вопросы про базу цеха: те остаются в
     каталоге и в фактах. В поиск уходит только текст вопроса, не карточки клиентов.
+
+    `context` — дайджест фактов цеха (дата, парк, склад, долги), собранный
+    вызывающим из сервисов панели: с ним модель отвечает и на общие вопросы
+    по цеху, а не из памяти.
     """
     clean = " ".join(str(question or "").split())
     if not clean:
@@ -930,18 +967,35 @@ def converse(db: Database, question: str, history: list | None = None) -> dict[s
             web_reason = str(found.get("reason") or "Веб-поиск Ollama не ответил")
     user = clean[:MAX_INPUT_CHARS]
     if snippets:
-        user += ("\n\nВыдержки из включённого поиска Ollama. Опирайся на них и "
-                 "назови источник. Не выдумывай сверх выдержек.\n" + snippets)
+        user += ("\n\nВыдержки из включённого поиска Ollama. Перескажи их своими "
+                 "словами и назови источник одной фразой. Не вставляй ссылки, "
+                 "названия сайтов и заголовки страниц. Не выдумывай сверх выдержек.\n"
+                 + snippets)
+    context_lines = [line for line in str(context or "").splitlines() if line.strip()]
+    if not any(line.strip().startswith("Сегодня") for line in context_lines):
+        context_lines.insert(0, date_line())
+    context_block = "\n".join(context_lines)
     messages: list[dict[str, Any]] = [{
         "role": "system",
         "content": (
-            "Ты помощник владельца 3D-печатного цеха. Отвечай по-русски, коротко "
-            "и обычными словами. На арифметику и общие вопросы отвечай сразу. "
-            "Не предлагай действия программы и не проси подтверждения. "
-            "Если нужны свежие факты — вызови web_search. В запрос поиска не клади "
-            "имена клиентов, телефоны, суммы и номера заказов. "
-            "Если поиска нет — так и скажи, что отвечаешь без интернета. "
-            "Команды станкам и правки заказов не выполняй: это делает человек в панели."
+            "Ты помощник владельца мастерской 3D-печати. Ты работаешь в панели "
+            "PrintFlow и видишь факты цеха в блоке ниже. Отвечай по-русски, "
+            "коротко (два-четыре предложения), обычными словами, без заголовков "
+            "и без списков ради списков.\n\n"
+            f"Факты цеха (из базы, обновлены только что):\n{context_block}\n\n"
+            "Правила:\n"
+            "1. Цифры — только из фактов цеха или из выдержек поиска. Суммы, "
+            "граммы, сроки и названия не выдумывай; если факта нет — честно "
+            "скажи, что в базе этого нет.\n"
+            "2. Дату и время бери из блока фактов, а не из поиска и не из памяти.\n"
+            "3. Свежие факты (погода, новости, курсы) — вызови web_search и "
+            "перескажи; если поиска нет — так и скажи, что отвечаешь без интернета.\n"
+            "4. В запрос поиска не клади имена клиентов, телефоны, суммы и "
+            "номера заказов.\n"
+            "5. Команды станкам, заказы и деньги не выполняешь: это делает "
+            "человек в панели. На такой запрос коротко подскажи, где это сделать.\n"
+            "6. Вопрос не про цех — отвечай по существу, коротко; если не уверен — "
+            "скажи, что не уверен."
         ),
     }]
     for turn in (history or [])[-6:]:

@@ -49,7 +49,8 @@ function renderPlan(data) {
   const rows = data.advice || [];
   $('aa_plan').innerHTML = rows.length ? rows.map((r) =>
     `<div class="aa-item"><span><b>${esc(r.material)}${r.color ? ' · ' + esc(r.color) : ''}`
-    + `${r.order ? ' · №' + esc(r.order) : ''}</b><small>${esc(r.suggestion)}`
+    + `${r.order ? ' · №' + esc(r.order) : ''}`
+    + `${r.multi_color ? ' · <span class="chip warn">мультицвет</span>' : ''}</b><small>${esc(r.suggestion)}`
     + `${r.slot !== '' ? ' · слот ' + (num(r.slot) + 1) : ''}`
     + `${r.remaining_grams ? ' · осталось ' + Math.round(num(r.remaining_grams)) + ' г' : ''}`
     + `${r.grams ? ' · нужно ' + Math.round(num(r.grams)) + ' г' : ''}</small></span></div>`).join('')
@@ -128,6 +129,24 @@ function bind() {
       const data = await post('/api/ams/tidy', { printer_id: pid() });
       toast('Учёт AMS обновлён', data.push.reason ||
         `Новых: ${data.created} · привязок/остатков: ${data.updated} · команд отправлено: ${data.push.sent}`);
+      await PF.refreshCore();
+      state.at = 0;
+      await refresh(true);
+    } catch (err) { fail(err); }
+    finally { button.disabled = false; }
+  });
+  $('aa_export').addEventListener('click', async () => {
+    const button = $('aa_export');
+    if (!pid()) return fail(new Error('Не выбран принтер'));
+    button.disabled = true;
+    try {
+      const data = await post('/api/ams/export', { printer_id: pid() });
+      const missing = (data.advice || []).filter((a) => a.suggestion === 'Подходящей катушки нет');
+      if (!data.ok) toast('Экспорт в AMS отложен', data.reason || 'Принтер занят или не подключён');
+      else toast('Экспорт в AMS',
+        `Команд отправлено: ${data.sent} · пропущено: ${data.skipped}`
+        + ((data.errors || []).length ? ' · отказов: ' + data.errors.length : '')
+        + (missing.length ? ' · нет подходящей катушки: ' + missing.length : ''));
       await PF.refreshCore();
       state.at = 0;
       await refresh(true);

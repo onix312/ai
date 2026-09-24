@@ -500,5 +500,119 @@ class AmsAutopilotTests(unittest.TestCase):
         self.assertEqual(["ams_check_error"], [i["code"] for i in infos])
 
 
+class AmsExportAndMulticolorTests(unittest.TestCase):
+    """18.20: ручной экспорт цветов и настроек в AMS + мультиколор в плане."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = Database(Path(self.tmp.name) / "test.sqlite3")
+        self.addCleanup(self.db.close)
+        self.db.upsert("printers", {"id": "p1", "name": "P1S"})
+        self.printer = FakePrinter()
+        self.manager = types.SimpleNamespace(get=lambda pid: self.printer,
+            notify_async=lambda text, **kw: None)
+        self.api = Api.__new__(Api)
+        self.api.db = self.db
+        self.api.manager = self.manager
+        self.api.repo = Repo(self.db)
+
+    def spool(self, **fields):
+        data = {"id": "sp1", "material": "PLA", "color_hex": "#FF4400",
+                "color_name": "Красный", "total_grams": 1000, "remaining_grams": 800,
+                "price": 1600, "tray_uuid": "rfid-new", "printer_id": "p1",
+                "ams_slot": "0", "location": "ams", "ams_sync": 1,
+                "created_at": now_iso()}
+        data.update(fields)
+        return self.db.upsert("spools", data)
+
+    def order(self, oid, **fields):
+        data = {"id": oid, "product": "Кейс", "material": "PLA", "color": "Красный",
+                "grams": 100, "price": 1000, "status": "queued",
+                "created_at": now_iso()}
+        data.update(fields)
+        return self.db.upsert("orders", data)
+
+    def job(self, jid, order_id):
+        return self.db.upsert("print_jobs", {"id": jid, "printer_id": "p1",
+                                             "order_id": order_id, "state": "queued",
+                                             "priority": 0, "queued_at": now_iso()})
+
+    def test_plan_accounts_for_multicolor_orders(self):
+        self.spool(id="sp1", color_name="Красный", color_hex="#FF0000")
+        self.spool(id="sp2", color_name="Белый", color_hex="#FFFFFF",
+                   ams_slot="", printer_id="")
+        self.spool(id="sp3", color_name="Синий", color_hex="#0000FF",
+                   ams_slot="", printer_id="")
+        self.order("o1")
+        # Мультицвет списком цветов (без катушек).
+        self.order("o2", color="", grams=100,
+                   colors='[{"material":"PLA","color":"Белый","grams":60},'
+                          '{"material":"PLA","color":"Синий","grams":40}]')
+        # Мультицвет явными катушками (мастер назначил сам).
+        self.order("o3", color="", grams=80,
+                   spools='[{"spool_id":"sp2","grams":30},{"spool_id":"sp3","grams":50}]')
+        self.job("j1", "o1")
+        self.job("j2", "o2")
+        self.job("j3", "o3")
+
+        _, plan = self.api.get("/api/ams/plan", {"printer_id": ["p1"]})
+        by_order = {}
+        for row in plan["advice"]:
+            by_order.setdefault(str(row["order"]), []).append(row)
+        # Простой заказ — одна строка.
+        self.assertEqual(1, len(by_order["o1"]))
+        self.assertEqual("Красный", by_order["o1"][0]["color"])
+        self.assertFalse(by_order["o1"][0]["multi_color"])
+        # Список цветов — по строке на цвет, граммы из списка, пометка мультицвета.
+        o2 = {row["color"]: row for row in by_order["o2"]}
+        self.assertEqual(["Белый", "Синий"], list(o2))
+        self.assertEqual(60, o2["Белый"]["grams"])
+        self.assertEqual(40, o2["Синий"]["grams"])
+        self.assertTrue(o2["Белый"]["multi_color"])
+        # Явные катушки — материал и цвет берутся с катушек, подсказка сохранена.
+        o3 = {row["color"]: row for row in by_order["o3"]}
+        self.assertEqual(["Белый", "Синий"], list(o3))
+        self.assertEqual(30, o3["Белый"]["grams"])
+        self.assertEqual("sp2", o3["Белый"]["spool_hint"])
+        self.assertIn("Мультицвет", plan["note"])
+        self.assertIn("o2", plan["note"])
+
+    def test_export_sends_bound_settings_and_defers_when_busy(self):
+        self.spool()  # sp1 на слоте 0, tray_uuid совпадает с телеметрией
+        # Tidy связывает слот с катушкой (память live); автозапись уже успела
+        # отправить несоответствующий набор (у трея нет температур).
+        status, tidy_data = self.api.post("/api/ams/tidy", {"printer_id": "p1"}, {})
+        self.assertEqual(200, status)
+        memory = self.db.one("SELECT * FROM ams_slots WHERE printer_id='p1' AND slot='0'")
+        self.assertEqual("sp1", memory["spool_id"])
+        self.assertEqual("live", memory["state"])
+        calls = [call for call in self.printer.calls if call[0] == "ams_filament"]
+        self.assertTrue(calls)
+
+        # Новый стикер: экспорт обязан отправить обновлённый цвет и настройки.
+        self.db.upsert("spools", {"id": "sp1", "color_hex": "#00AAFF"})
+        status, data = self.api.post("/api/ams/export", {"printer_id": "p1"}, {})
+        self.assertEqual(200, status)
+        self.assertTrue(data["ok"])
+        self.assertGreaterEqual(data["sent"], 1)
+        last = [call for call in self.printer.calls if call[0] == "ams_filament"][-1][1]
+        self.assertEqual("#00AAFF", str(last["color"]).upper())
+        self.assertEqual("PLA", str(last["type"]).upper())
+        self.assertIn("temp_min", last)
+        self.assertIn("temp_max", last)
+        # Советы плана идут в том же ответе — туда глядеть, чего не хватает.
+        self.assertIsInstance(data["advice"], list)
+
+        # Занятый принтер: экспорт отложен, MQTT не тронут.
+        before = len(self.printer.calls)
+        self.printer.current = snap(tray(), state="RUNNING")
+        status, busy = self.api.post("/api/ams/export", {"printer_id": "p1"}, {})
+        self.assertEqual(200, status)
+        self.assertFalse(busy["ok"])
+        self.assertIn("занят", busy["reason"])
+        self.assertEqual(before, len(self.printer.calls))
+
+
 if __name__ == "__main__":
     unittest.main()

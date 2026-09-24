@@ -336,9 +336,295 @@ def _plastic_question(question: str) -> bool:
     if not any(word in text for word in ("пластик", "филамент", "катуш", "бобин")):
         return False
     # «сколько пластика ушло на заказ» — не остаток склада.
-    if any(word in text for word in ("заказ", "ушло", "ушёл", "ушел", "списал", "расход")):
+    if any(word in text for word in ("заказ", "ушло", "ушёл", "ушел", "списал",
+                                     "расход", "за месяц", "за неделю", "за день",
+                                     "за год", "потратил", "израсход")):
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Живые вопросы: часы, что печатается, из какого пластика — без модели
+# ---------------------------------------------------------------------------
+#
+# Три места, где «глупость» была виднее всего. «Какое сегодня число» уходило
+# в веб-поиск и приносило SEO-страницы с чужими датами; «что печатаем и из
+# какого пластика» слово «пластик» тащило в дамп всех катушек, хотя ждали
+# ответ про текущее задание; в разговоре модель вообще не видела цех. Теперь
+# эти вопросы отвечаются детерминированно, из тех же сервисов, что читают
+# панели, а модель отвечает по их фактам — и только на то, чего в базе нет.
+
+_DATE_TRIGGERS = ("сегодня", "сегодняшн")
+
+
+def _is_date_question(question: str) -> bool:
+    """«Какое сегодня число / какой день / какая дата» — система знает сама.
+
+    Умелено, чтобы не ловить «что напечатали сегодня» и «сколько было
+    заказов за день»: дата — только при явном «числ/дата/день недели», либо
+    коротком вопросе с «днем» («какой сегодня день»).
+    """
+    text = str(question or "").casefold()
+    if not any(word in text for word in _DATE_TRIGGERS):
+        return False
+    if any(word in text for word in ("числ", "дата", "день недели")):
+        return True
+    return "день" in text and len(text) <= 40
+
+
+def _printing_question(question: str) -> bool:
+    """«Что печатается» — про живое задание, а не «сколько напечатали»."""
+    text = str(question or "").casefold()
+    return any(word in text for word in (
+        "печатает", "печатается", "печатаем", "печатают", "печатал",
+        "что печат", "сейчас печат", "в очереди", "что на станк", "что на принтер"))
+
+
+def _history_printing(history: list | None) -> bool:
+    """Уточнение после вопроса про печать: «а из какого пластика?» — про то задание.
+
+    Смотрим последний вопрос пользователя из переписки, а не весь контекст:
+    если человек только что спрашивал про печать, короткий вопрос про
+    материал относится к ней, а не ко всему складу.
+    """
+    for turn in reversed(list(history or [])[-4:]):
+        if isinstance(turn, dict) and str(turn.get("role") or "") == "user":
+            return _printing_question(str(turn.get("content") or ""))
+    return False
+
+
+def _minutes_label(minutes: float) -> str:
+    minutes = max(0, int(_num(minutes)))
+    if minutes < 5:
+        return "меньше минуты"
+    if minutes < 60:
+        return f"{minutes} мин"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} ч" if not rest else f"{hours} ч {rest} мин"
+
+
+def _park_rows(api: Any) -> tuple[list[dict[str, Any]], list[str], int, list[str]]:
+    """Кто печатает прямо сейчас: станок + задание + катушка, из снапшота панели.
+
+    Возвращает (строки, имена очереди, размер очереди, проблемы). Проблемы —
+    «парк не прочитался»: тогда живые ответы отменяются, а не выдумываются.
+    """
+    state, why = _safe("парк", lambda: api.manager.snapshot())
+    if why:
+        return [], [], 0, [why]
+    rows: list[dict[str, Any]] = []
+    for snap in (state.get("printers") or [])[:8]:
+        info = snap.get("printer") or {}
+        state_name = str(info.get("state") or "").upper()
+        if state_name not in ("RUNNING", "PAUSE", "PREPARE"):
+            continue
+        job = snap.get("job") or {}
+        order = job.get("order") or {}
+        spool = job.get("spool") or {}
+        rows.append({
+            "printer": str(snap.get("name") or snap.get("id") or "станок"),
+            "state": state_name,
+            "progress": int(_num(info.get("progress"))),
+            "remaining_min": _num(info.get("remaining_min")),
+            "product": str(order.get("product") or info.get("task") or "").strip(),
+            "order_number": str(order.get("number") or "").strip(),
+            "customer": str(order.get("customer_name") or "").strip(),
+            "material": str(spool.get("material") or "").strip().upper(),
+            "color": str(spool.get("color") or "").strip(),
+        })
+    queue = [str(row.get("name") or row.get("title") or "задание")[:60]
+             for row in (state.get("queue") or []) if isinstance(row, dict)]
+    return rows, queue[:5], len(queue), []
+
+
+def _spool_totals(spools: list[dict[str, Any]] | None
+                  ) -> tuple[dict[str, float], dict[str, dict[str, float]], float]:
+    """(сумма по материалу, сумма по материал/цвету, всего) — только с остатком."""
+    totals: dict[str, float] = {}
+    by_mat: dict[str, dict[str, float]] = {}
+    for spool in (spools or []):
+        if not isinstance(spool, dict):
+            continue
+        grams = _num(spool.get("remaining_grams"))
+        if grams <= 0:
+            continue
+        material = str(spool.get("material") or "без материала").strip() or "без материала"
+        color = str(spool.get("color_name") or spool.get("color") or "без цвета").strip() or "без цвета"
+        bucket = by_mat.setdefault(material, {})
+        bucket[color] = bucket.get(color, 0.0) + grams
+        totals[material] = totals.get(material, 0.0) + grams
+    return totals, by_mat, sum(totals.values())
+
+
+def now_printing_report(api: Any) -> dict[str, Any] | None:
+    """«Что сейчас печатается» — живые задания с материалом, не весь склад.
+
+    `None` — когда парк не прочитался: вызывающий продолжает обычный сбор
+    фактов, а не отвечает «ничего не печатается» по молчанию сервиса.
+    """
+    rows, queue, queue_count, problems = _park_rows(api)
+    if problems:
+        return None
+    lines: list[str] = []
+    facts: list[dict[str, Any]] = []
+    for row in rows[:6]:
+        head = (f"{row['printer']}: печатает «{row['product']}»"
+                if row["product"] else f"{row['printer']}: печатает задание")
+        line = f"{head} — {row['progress']}%"
+        if row["state"] == "PAUSE":
+            line += " (пауза)"
+        elif row["remaining_min"] >= 5:
+            line += f", осталось ~{_minutes_label(row['remaining_min'])}"
+        if row["material"]:
+            line += f". Материал: {row['material']}"
+            if row["color"]:
+                line += f" {row['color']}"
+        line += "."
+        lines.append(line)
+        detail = f"{row['product'] or 'задание'} · {row['progress']}%"
+        if row["material"]:
+            detail += f" · материал {row['material']} {row['color']}".strip()
+        facts.append(_fact("станок", f"Печатает {row['printer']}", detail,
+                           f"printer:{row['printer']}"))
+    if not lines:
+        lines.append("Сейчас ничего не печатается.")
+    if queue:
+        more = f" и ещё {queue_count - 3}" if queue_count > 3 else ""
+        lines.append(f"В очереди {queue_count}: " + ", ".join(queue[:3]) + more + ".")
+    elif not rows:
+        lines[0] = "Сейчас ничего не печатается, очередь пуста."
+    return {"ok": True, "answered": True, "answer": "\n".join(lines),
+            "facts": facts, "count": len(facts), "topics": ["farm"],
+            "keywords": [], "warnings": [], "model": "", "reason": "",
+            "source": "farm"}
+
+
+def mixed_printing_report(api: Any, question: str) -> dict[str, Any] | None:
+    """«Что печатаем и из какого пластика» — два вопроса в одной фразе.
+
+    Сначала живое задание, затем остаток именно его материала и итог склада.
+    Полный список катушек остаётся за прямым «сколько пластика»: клиент,
+    спросивший про текущую печать, не обязан читать 49 позиций.
+    """
+    rows, queue, queue_count, problems = _park_rows(api)
+    if problems:
+        return None
+    spools, why = _safe("катушки", lambda: api.repo.spools())
+    if why:
+        problems.append(why)
+    rows = [row for row in rows if row["product"] or row["material"]]
+    lines: list[str] = []
+    facts: list[dict[str, Any]] = []
+    if rows:
+        for row in rows[:4]:
+            head = f"«{row['product']}»" if row["product"] else "задание"
+            line = f"{row['printer']} печатает {head} — {row['progress']}%"
+            if row["state"] == "PAUSE":
+                line += " (пауза)"
+            if row["order_number"]:
+                line += f", заказ №{row['order_number']}"
+                if row["customer"]:
+                    line += f", {row['customer']}"
+            lines.append(line + ".")
+            facts.append(_fact(
+                "станок", f"Печатает {row['printer']}",
+                f"{row['product'] or 'задание'} · {row['progress']}%"
+                + (f" · заказ №{row['order_number']}" if row["order_number"] else ""),
+                f"printer:{row['printer']}"))
+        materials: list[str] = []
+        for row in rows:
+            if row["material"] and row["material"] not in materials:
+                materials.append(row["material"])
+        totals, by_mat, total_all = _spool_totals(spools)
+        for material in materials:
+            if material not in totals:
+                lines.append(f"{material}: на складе нет — закупите перед печатью.")
+                continue
+            colors = " · ".join(
+                f"{name} {_grams_text(value)}"
+                for name, value in sorted(by_mat[material].items(),
+                                          key=lambda item: -item[1])[:4])
+            lines.append(f"{material}: на складе {_grams_text(totals[material])} ({colors}).")
+            for spool in (spools or []):
+                if (isinstance(spool, dict)
+                        and str(spool.get("material") or "").strip().upper() == material
+                        and _num(spool.get("remaining_grams")) > 0):
+                    facts.append(_fact(
+                        "катушка", f"{material} {spool.get('color_name') or ''}".strip(),
+                        f"остаток {_grams_text(_num(spool.get('remaining_grams')))} · "
+                        f"бренд {spool.get('brand') or '—'}",
+                        f"spool:{spool.get('id')}"))
+                    if len(facts) >= 12:
+                        break
+        if total_all:
+            lines.append(f"Всего на складе {_grams_text(total_all)} пластика.")
+    else:
+        lines.append("Сейчас ничего не печатается.")
+        if spools is not None:
+            lines.append(format_plastic(spools))
+    if queue:
+        more = f" и ещё {queue_count - 3}" if queue_count > 3 else ""
+        lines.append(f"В очереди {queue_count}: " + ", ".join(queue[:3]) + more + ".")
+    if not lines:
+        return None
+    return {"ok": True, "answered": True, "answer": "\n".join(lines),
+            "facts": facts, "count": len(facts), "topics": ["farm", "stock"],
+            "keywords": keywords_of(question), "warnings": problems, "model": "",
+            "reason": "", "source": "farm+spools"}
+
+
+def shop_context(api: Any) -> str:
+    """Компактный дайджест цеха для модели разговора.
+
+    Дата, парк, склад и долги — из тех же сервисов, что рисуют панели: модель
+    отвечает на общие вопросы («сколько долгов», «что печатается») по базе,
+    а не из памяти. Ограничен 900 символами: местная 3b-модель короткого
+    контекста, лишнее ей вредит, а не помогает.
+    """
+    lines = [assistant.date_line()]
+    rows, _queue, queue_count, problems = _park_rows(api)
+    if not problems:
+        if rows:
+            parts = []
+            for row in rows[:4]:
+                title = row["product"] or "задание"
+                part = f"{row['printer']} печатает «{title}» {row['progress']}%"
+                if row["material"]:
+                    part += f", материал {row['material']}"
+                    if row["color"]:
+                        part += f" {row['color']}"
+                parts.append(part)
+            line = "Парк: " + "; ".join(parts)
+            if queue_count:
+                line += f"; в очереди {queue_count}"
+            lines.append(line + ".")
+        else:
+            line = "Парк: ничего не печатается"
+            if queue_count:
+                line += f", в очереди {queue_count}"
+            lines.append(line + ".")
+    spools, _why = _safe("катушки", lambda: api.repo.spools())
+    if spools:
+        totals, _by_mat, total_all = _spool_totals(spools)
+        if totals:
+            live_count = sum(1 for spool in spools
+                             if isinstance(spool, dict)
+                             and _num(spool.get("remaining_grams")) > 0)
+            top = sorted(totals.items(), key=lambda item: -item[1])[:4]
+            line = (f"Склад: {_grams_text(total_all)} пластика, {live_count} катушек: "
+                    + " · ".join(f"{name} {_grams_text(value)}" for name, value in top))
+            low = [f"{spool.get('material')} {spool.get('color_name') or ''}".strip()
+                   for spool in spools
+                   if isinstance(spool, dict)
+                   and 0 < _num(spool.get("remaining_grams")) < 80]
+            if low:
+                line += "; мало: " + ", ".join(low[:3])
+            lines.append(line + ".")
+    debts, _why = _safe("долги", lambda: api.acc.debts())
+    if debts and _num(debts.get("total")) > 0:
+        lines.append(f"Долги: {debts.get('total')} ₽ у {debts.get('count')} клиентов, "
+                     f"просрочено {debts.get('overdue')} ₽.")
+    return "\n".join(lines)[:900]
 
 
 def plastic_report(api: Any) -> dict[str, Any]:
@@ -454,15 +740,35 @@ def answer(api: Any, question: str, *, fast: bool = False, chat: bool = False,
     if not clean:
         return {"ok": False, "answered": False, "answer": "", "facts": [],
                 "warnings": [], "reason": "Пустой вопрос"}
+    # «Какое сегодня число» — часы, а не поиск: веб-поиск приносил SEO-страницы
+    # с чужими датами, которые модель вставляла в ответ дословно.
+    if _is_date_question(clean):
+        return {"ok": True, "answered": True, "answer": assistant.date_line(),
+                "facts": [], "count": 0, "topics": [], "keywords": keywords_of(clean),
+                "warnings": [], "model": "", "reason": "", "source": "clock"}
     if _plastic_question(clean):
+        # «Что печатаем и из какого пластика»: слово «пластик» больше не
+        # тащит вопрос про печать в дамп всех катушек.
+        if _printing_question(clean) or _history_printing(history):
+            mixed = mixed_printing_report(api, clean)
+            if mixed is not None:
+                return mixed
         report = plastic_report(api)
         return {"ok": True, "answered": True, "answer": report["text"],
                 "facts": report["facts"], "count": len(report["facts"]),
                 "topics": ["stock"], "keywords": keywords_of(clean),
                 "warnings": report["problems"], "model": "", "reason": "",
                 "source": "spools"}
+    # «Что мы сейчас печатаем» — живое задание, а не общий сбор фактов.
+    if _printing_question(clean) and "сколько" not in clean.casefold():
+        report = now_printing_report(api)
+        if report is not None:
+            return report
     if chat and not topics_of(clean):
-        return _from_chat(assistant.converse(getattr(api, "db", None), clean, history))
+        # Модель видит факты цеха: общий вопрос про цех отвечает по базе,
+        # а не из памяти.
+        return _from_chat(assistant.converse(getattr(api, "db", None), clean, history,
+                                             context=shop_context(api)))
     found = retrieve(api, clean)
     facts = found["facts"]
     # Разговор не ждёт модель, если ответ уже лежит в базе цеха.
