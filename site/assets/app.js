@@ -1591,6 +1591,18 @@ function settingGroup(list) {
    schema, сложные блоки остаются ручными карточками — решение заказчика
    №7 (гибрид). Секреты не показываем значением, json-поля сворачиваем в
    «Все настройки» и парсим при сохранении. */
+// Черновик живёт до успешного сохранения, а не до следующего события money/printers.
+const settingsDraft = new Map();
+let settingsSaving = false;
+function restoreSettingsDraft() {
+  $$('[data-setting]', $('view-settings')).forEach((el) => {
+    const draft = settingsDraft.get(el.dataset.setting);
+    if (!draft) return;
+    if (el.type === 'checkbox') el.checked = draft.value;
+    else el.value = draft.value;
+  });
+}
+
 let schemaCache = null;
 async function loadSettingsSchema() {
   if (schemaCache) return schemaCache;
@@ -1655,6 +1667,7 @@ async function renderAllSettings() {
   host.innerHTML = d.groups.map((g) =>
     schemaCard(g.title, g.id === 'system' ? 'Системные и технические ключи' : '', d.fields[g.id] || [], { group: g.id })
   ).join('');
+  restoreSettingsDraft();
   const cnt = $('set_all_count');
   const adv = $('set_all_advanced');
   const apply = () => {
@@ -1782,6 +1795,7 @@ async function renderCashierSettings() {
   if (sbpEl) sbpEl.innerHTML = mk(['sbp']);
   const bankEl = $('set_bank_fields');
   if (bankEl) bankEl.innerHTML = mk(['bank']);
+  restoreSettingsDraft();
 }
 
 
@@ -2292,7 +2306,7 @@ function renderSettings() {
   });
 
   safe('theme', () => {
-    if ($('set_cloud')) renderCloudSettings(s);
+    if ($('set_cloud')) renderCloudSettings(s).then(restoreSettingsDraft);
     if ($('set_theme')) $('set_theme').value = s.theme || 'system';
     put('set_accent', ACCENTS.map(([name, color]) =>
       `<button type="button" data-accent="${name}" class="${(s.accent || 'indigo') === name ? 'on' : ''}" style="background:${color}" title="${name}"></button>`).join(''));
@@ -2325,6 +2339,7 @@ function renderSettings() {
     });
     renderUpdateInfo();
   });
+  restoreSettingsDraft();
 }
 
 /* ============================================================ обновления */
@@ -2624,6 +2639,7 @@ async function resetSettings() {
   try {
     const res = await post('/api/settings/reset', {});
     PF.setSettings(res.settings);
+    settingsDraft.clear();
     PF.applyTheme();
     renderSettings();
     toast('Настройки сброшены', 'Вернулись значения по умолчанию');
@@ -2633,9 +2649,12 @@ async function resetSettings() {
 }
 
 async function saveSettings() {
+  if (settingsSaving) return;
+  restoreSettingsDraft();
+  const draftSnapshot = new Map(settingsDraft);
   const payload = {};
   const jsonErrors = [];
-  $$('[data-setting]').forEach((el) => {
+  $$('[data-setting]', $('view-settings')).forEach((el) => {
     const k = el.dataset.setting;
     // Пустой секрет = «не менять» (сервер хранит коды/токены вне браузера)
     if (el.dataset.secret === '1' && !el.value) return;
@@ -2652,18 +2671,30 @@ async function saveSettings() {
     toast('Проверьте JSON', 'Не распознаны поля: ' + jsonErrors.join(', '));
     return;
   }
-  payload.theme = $('set_theme').value;
+  if (!('theme' in payload)) payload.theme = PF.state.settings.theme || 'system';
   payload.accent = PF.state.settings.accent || 'indigo';
+  const button = $('settings_save');
+  const label = button && button.textContent;
+  settingsSaving = true;
+  if (button) { button.disabled = true; button.textContent = 'Сохраняю…'; }
   try {
     const res = await post('/api/settings', payload);
     PF.setSettings(res.settings);
+    // Не теряем правки, сделанные уже во время запроса.
+    draftSnapshot.forEach((draft, key) => {
+      if (settingsDraft.get(key) === draft) settingsDraft.delete(key);
+    });
     PF.applyTheme();
     renderSettings();
-    toast('Настройки сохранены', 'Расчёты пересчитаны по новым тарифам');
+    toast('Настройки сохранены', (res.warnings || []).join(' · ') || 'Расчёты пересчитаны по новым тарифам');
     PF.refreshFinance();
     PF.refreshCore();
     PF.refreshMoney && PF.refreshMoney();
   } catch (e) { fail(e); }
+  finally {
+    settingsSaving = false;
+    if (button) { button.disabled = false; button.textContent = label; }
+  }
 }
 
 /* ============================================================== бэкап */
@@ -3458,6 +3489,7 @@ function bind() {
       if (!k || e.target.type === 'file') return;
       const isCb = e.target.type === 'checkbox';
       const val = isCb ? e.target.checked : e.target.value;
+      settingsDraft.set(k, { value: val });
       $$(`[data-setting="${k}"]`, settingsHost).forEach((el) => {
         if (el === e.target) return;
         if (isCb && el.type === 'checkbox') el.checked = val;
