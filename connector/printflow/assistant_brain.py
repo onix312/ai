@@ -907,7 +907,7 @@ def context_summary(api: Any) -> dict[str, Any]:
         "ok": True, "date": assistant.date_line(), "farm": farm_phrase(ctx),
         "printers": [{"id": row["id"], "name": row["name"], "model": row["model"], "state": row["state"],
                       "progress": row["progress"], "task": row["task"]} for row in rows[:12]],
-        "queue": len(ctx.snapshot().get("queue") or []), "digest": knowledge.shop_context(api),
+        "queue": len(ctx.snapshot().get("queue") or []),
         "owner": memory.owner_name(db) if db is not None else "",
         "memory": memory.stats(db) if db is not None else {"memories": 0, "turns": 0},
     }

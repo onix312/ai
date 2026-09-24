@@ -820,8 +820,6 @@ class Runner:
 
         listing = None
         if listing_id:
-            rows = self.store.list_avito_listings(limit=1)
-            # ищем по id
             all_rows = self.store._rows("SELECT * FROM avito_listings WHERE id=?", (listing_id,))
             listing = all_rows[0] if all_rows else None
         if listing:
@@ -1110,15 +1108,16 @@ class Runner:
         return {"ok": True, **state, "reason": "", "hint": f"Громкость {state.get('level')}%"}
 
     def _system_display(self, _params: dict) -> dict:
+        """Главный экран и число мониторов (GetSystemMetrics)."""
+        if not pc.IS_WINDOWS:
+            return {"ok": False, "reason": "Мониторы читаются только в Windows"}
         try:
             import ctypes
-            if sys_mod_is_win := __import__("sys").platform.startswith("win"):
-                user32 = ctypes.windll.user32
-                w = user32.GetSystemMetrics(0)
-                h = user32.GetSystemMetrics(1)
-                cnt = user32.GetSystemMetrics(80) if hasattr(user32, "GetSystemMetrics") else 1
-                return {"ok": True, "width": w, "height": h, "monitors": cnt, "reason": ""}
-            return {"ok": True, "width": 0, "height": 0, "monitors": 0, "reason": "Только Windows"}
+            user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+            count = user32.GetSystemMetrics(80)  # SM_CMONITORS
+            return {"ok": True, "width": width, "height": height, "monitors": count, "reason": "",
+                    "hint": f"Мониторов: {count}, главный {width}×{height}"}
         except Exception as exc:
             return {"ok": False, "reason": f"Дисплей не прочитан: {exc}"}
 

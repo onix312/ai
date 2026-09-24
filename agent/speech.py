@@ -175,7 +175,6 @@ class Recognizer:
         return " ".join(part for part in text if part).strip()
 
     def _whisper(self, audio: bytes, language: str) -> tuple[str, str]:
-        import io
         import tempfile
         import pathlib
 

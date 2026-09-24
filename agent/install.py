@@ -18,7 +18,6 @@ Ollama). Всё через stdlib + pip, без облаков кроме ска
 from __future__ import annotations
 
 import importlib.util
-import os
 import pathlib
 import shutil
 import subprocess

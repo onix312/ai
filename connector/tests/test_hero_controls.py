@@ -8,7 +8,7 @@
   регулятора, SVG тракта AMS, важность и маршрут инцидента, группировка
   событий, счётчик непрочитанного, настройки звука и тихие часы.
 * **Строковые контракты**: разметка шапки и шторки в `index.html`, пины
-  `?v=18.20.0`, иконки реестра, исправление `p.temperature` в Hero-пульте,
+  `?v=18.21.0`, иконки реестра, исправление `p.temperature` в Hero-пульте,
   инкрементальный рендер (ключ структуры `heroKey`), точки монтирования
   новых модулей — DOM-логику стенд `panel-check.js` не воспроизводит.
 """
@@ -234,13 +234,13 @@ class MarkupContractTests(unittest.TestCase):
 
     def test_new_assets_are_wired_with_current_version(self):
         for name in NEW_ASSETS:
-            self.assertIn(f'<script src="assets/{name}?v=18.20.0"></script>', INDEX, name)
+            self.assertIn(f'<script src="assets/{name}?v=18.21.0"></script>', INDEX, name)
             self.assertIn(f"'/assets/{name}'", SW_JS, f"{name} должен быть в SHELL sw.js")
-        self.assertIn('<link rel="stylesheet" href="assets/controls.css?v=18.20.0">', INDEX)
+        self.assertIn('<link rel="stylesheet" href="assets/controls.css?v=18.21.0">', INDEX)
         self.assertIn("'/assets/controls.css'", SW_JS)
-        self.assertIn('<script src="assets/app.js?v=18.20.0"></script>', INDEX)
-        self.assertIn('<script src="assets/core.js?v=18.20.0"></script>', INDEX)
-        self.assertIn("printflow-shell-v90", SW_JS)
+        self.assertIn('<script src="assets/app.js?v=18.21.0"></script>', INDEX)
+        self.assertIn('<script src="assets/core.js?v=18.21.0"></script>', INDEX)
+        self.assertIn("printflow-shell-v92", SW_JS)
         # Порядок: модули пульта грузятся после icons.js и до app.js.
         order = [INDEX.index(f"assets/{n}?v=") for n in ("icons.js", *NEW_ASSETS, "app.js")]
         self.assertEqual(order, sorted(order))
@@ -260,7 +260,7 @@ class MarkupContractTests(unittest.TestCase):
             self.assertIn(needle, INDEX, needle)
 
     def test_gpuslice_asset_wired(self):
-        self.assertIn('<script src="assets/gpuslice.js?v=18.20.0"></script>', INDEX)
+        self.assertIn('<script src="assets/gpuslice.js?v=18.21.0"></script>', INDEX)
         self.assertIn("'/assets/gpuslice.js'", SW_JS)
 
     def test_sound_settings_card(self):
