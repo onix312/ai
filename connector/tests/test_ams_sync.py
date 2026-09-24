@@ -137,7 +137,7 @@ class AmsSyncTests(unittest.TestCase):
         self.assertEqual(new["ams_slot"], "0")
 
     def test_tray_without_rfid_matches_by_slot(self):
-        self.spool(tray_uuid="")
+        self.spool(tray_uuid="", color_hex="#00ff00")
         result = sync_ams_spools(self.db, "prn1", snap([tray(uuid="", remain=33)]))
         self.assertEqual(result["updated"], 1)
         row = self.db.one("SELECT * FROM spools WHERE id='sp1'")

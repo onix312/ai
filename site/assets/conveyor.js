@@ -7,7 +7,7 @@ const { settingGroup } = PF.modules.settings;
 
 const FARMLOOP = [
   ['farmloop_profile', 'FarmLoop: профиль', 'Профиль конвейера', 'text'],
-  ['farmloop_mechanics_verified', 'Механика проверена', 'Допуск на работу без человека', 'bool'],
+  ['farmloop_mechanics_verified', 'Механика проверена', 'допуск на работу без человека', 'bool'],
   ['farmloop_template_verified', 'Шаблон серии проверен', 'Допуск', 'bool'],
   ['farmloop_pusher_enabled', 'Толкатель установлен', 'Конвейер снимает сам', 'bool'],
   ['farmloop_bender_enabled', 'Изгибатель установлен', 'Детали отгибаются', 'bool'],

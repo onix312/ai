@@ -240,7 +240,7 @@ class MarkupContractTests(unittest.TestCase):
         self.assertIn("'/assets/controls.css'", SW_JS)
         self.assertIn('<script src="assets/app.js?v=18.19.0"></script>', INDEX)
         self.assertIn('<script src="assets/core.js?v=18.19.0"></script>', INDEX)
-        self.assertIn("printflow-shell-v89", SW_JS)
+        self.assertIn("printflow-shell-v90", SW_JS)
         # Порядок: модули пульта грузятся после icons.js и до app.js.
         order = [INDEX.index(f"assets/{n}?v=") for n in ("icons.js", *NEW_ASSETS, "app.js")]
         self.assertEqual(order, sorted(order))

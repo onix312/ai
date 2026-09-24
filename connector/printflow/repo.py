@@ -1554,6 +1554,7 @@ class Repo:
                   "printer_stats", "accounts", "channels", "expense_categories",
                   "fixed_costs", "payments", "tax_periods",
                   "workshop_docs", "ams_slot_history", "ams_slots",
+                  "ams_rules", "ams_actions", "ams_push_state",
                   "filament_scrap", "suppliers", "plate_presets", "shift_checks"]
         data: dict[str, Any] = {"format": "printflow-backup", "version": 2, "exported_at": now_iso()}
         for table in tables:
@@ -1583,6 +1584,7 @@ class Repo:
                       "expense_categories", "fixed_costs", "transactions",
                       "payments", "print_jobs", "tax_periods",
                       "workshop_docs", "ams_slot_history", "ams_slots",
+                  "ams_rules", "ams_actions", "ams_push_state",
                       "filament_scrap",
                       "suppliers", "plate_presets", "shift_checks"):
             rows = payload.get(table)

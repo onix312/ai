@@ -28,6 +28,11 @@ EVENTS: dict[str, tuple[str, str]] = {
     "printer_offline": ("Принтер недоступен", "Печать"),
     "printer_error": ("Ошибка принтера (HMS)", "Печать"),
     "filament_low": ("Пластик заканчивается", "Материалы"),
+    "ams_unbind": ("Катушка снята из AMS", "Материалы"),
+    "ams_empty": ("Слот AMS опустел", "Материалы"),
+    "ams_loss": ("Потеря пластика AMS без печати", "Материалы"),
+    "ams_conflict": ("Неоднозначная привязка AMS", "Материалы"),
+    "ams_runout": ("Пластик закончился при печати", "Печать"),
     "stock_low": ("Позиция на исходе", "Материалы"),
     "defect_new": ("Зарегистрирован брак", "Качество"),
     "review_bad": ("Плохой отзыв покупателя", "Клиенты"),
@@ -41,7 +46,8 @@ EVENTS: dict[str, tuple[str, str]] = {
 # Что включено новому сотруднику по умолчанию.
 DEFAULT_ON = frozenset({
     "order_ready", "print_done", "print_failed", "printer_offline",
-    "printer_error", "filament_low", "defect_new",
+    "printer_error", "filament_low", "defect_new", "ams_unbind", "ams_empty",
+    "ams_loss", "ams_conflict", "ams_runout",
 })
 
 ALL_EVENTS = tuple(EVENTS)

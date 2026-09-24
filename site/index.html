@@ -68,6 +68,7 @@
   <a class="nav-link" href="#clientbot" data-view="clientbot" data-find="клиентский бот telegram покупатель витрина заказ статус каталог"><span class="ic" data-icon="send">✈</span><span>Клиент-бот</span><small>Telegram</small></a>
   <a class="nav-link" href="#library" data-view="library" data-find="библиотека инструкция faq помощь материалы чеклист"><span class="ic" data-icon="book">▤</span><span>Библиотека</span><small>Гайды</small></a>
   <a class="nav-link" href="#pages" data-view="pages" data-find="страницы хаб касса трек полка tv ярлыки ценники ссылки qr телефоны lan"><span class="ic" data-icon="grid">▦</span><span>Страницы</span><small>хаб</small></a>
+  <a class="nav-link nav-link-ext" href="/assistant.html" target="_blank" rel="noopener" data-find="помощник ассистент модель ollama разговор голос каталог действий" aria-label="Открыть панель помощника в отдельной вкладке"><span class="ic" data-icon="sparkles">✦</span><span>Помощник</span><small>отдельная панель ↗</small></a>
   <a class="nav-link" href="#settings" data-view="settings" data-find="настройки налог тема облако telegram тариф данные касса сбп банк"><span class="ic" data-icon="sliders">⚙</span><span>Настройки</span><small>Цех</small></a>
   </div>
   <p class="nav-empty" id="nav_empty" hidden>Нет такого раздела. Попробуйте «принтер», «касса», «пластик».</p>
@@ -401,6 +402,52 @@
       <div id="pr_ams_path_host"></div>
      </div>
      <div class="ams-rack" id="pr_ams"><div class="empty compact"><span>Данные AMS появятся после подключения.</span></div></div>
+    </div>
+    <div class="card ams-auto" id="ams_auto_card">
+     <div class="card-head"><div><h2>Автопилот AMS</h2><p>Склад → слоты · журнал решений · проверка перед печатью</p></div>
+      <div class="head-actions"><span class="chip" id="aa_status">Ожидаем данные</span>
+       <button class="btn sm" id="aa_tidy" type="button">⟳ Привести в порядок</button>
+       <button class="btn sm ghost" id="aa_refresh" type="button">Доктор AMS</button></div>
+     </div>
+     <label class="aa-switch"><input id="aa_push" type="checkbox" checked><span><b>Записывать настройки слотов из склада</b><small>Только на свободном принтере; один и тот же набор не чаще раза в 30 минут. Выключите, чтобы запретить все команды записи настроек AMS; привязка катушки останется доступной.</small></span></label>
+     <div id="aa_doctor" class="aa-results" aria-live="polite"><p class="muted">Проверка появится при открытии вкладки.</p></div>
+     <div class="aa-grid">
+      <section class="aa-panel" aria-label="Правила новых катушек"><h3>Правила новых катушек</h3>
+       <p class="muted">Приоритет: ваше правило → таблица материалов → встроенный справочник. Цена без правила — оценочная.</p>
+       <div id="aa_rules" class="aa-results"></div>
+       <details class="adv" id="aa_rule_details"><summary>Добавить правило</summary><div class="adv-body">
+        <form id="aa_rule_form" class="aa-rule-form">
+         <input type="hidden" name="id" id="aa_rule_id">
+         <label class="field"><span>Тип из AMS</span><input name="match_material" placeholder="PLA, PETG… (или RFID ниже)" maxlength="40"></label>
+         <label class="field"><span>Бренд катушки</span><input name="brand" placeholder="Generic"></label>
+         <label class="field"><span>Масса полной катушки, г</span><input type="number" name="total_grams" min="1" max="100000" value="1000"></label>
+         <label class="field"><span>Цена катушки, ₽</span><input type="number" name="price" min="0" max="100000" step="0.01" placeholder="справочник"></label>
+         <label class="field"><span>Сопло от, °C</span><input type="number" name="temp_min" min="0" max="350" placeholder="справочник"></label>
+         <label class="field"><span>Сопло до, °C</span><input type="number" name="temp_max" min="0" max="350" placeholder="справочник"></label>
+         <details class="adv aa-rule-extra"><summary>Для конкретного RFID и цвета</summary><div class="adv-body">
+          <label class="field"><span>RFID (если нужно)</span><input name="match_uuid" placeholder="Только для этой метки"></label>
+          <label class="field"><span>Цвет из AMS</span><input name="match_color" placeholder="#RRGGBB"></label>
+          <label class="field"><span>Цвет карточки</span><input name="color_hex" placeholder="#RRGGBB"></label>
+          <label class="field"><span>Материал карточки</span><input name="material" placeholder="Как в AMS"></label>
+         </div></details>
+         <div class="aa-form-actions"><button class="btn sm" type="submit">Сохранить правило</button><button class="btn sm ghost" type="button" id="aa_rule_reset">Сбросить</button></div>
+        </form>
+       </div></details>
+      </section>
+      <section class="aa-panel" aria-label="План раскладки"><h3>План раскладки</h3>
+       <p class="muted">Советы для ближайшей очереди. Ничего не переставляет и не записывает в AMS.</p>
+       <div id="aa_plan" class="aa-results"></div>
+       <details class="adv"><summary>Проверить свой материал</summary><div class="adv-body">
+        <form id="aa_plan_form" class="aa-plan-form">
+         <label class="field"><span>Материал</span><input name="material" placeholder="PLA" required></label>
+         <label class="field"><span>Цвет</span><input name="color" placeholder="необязательно"></label>
+         <label class="field"><span>Нужно, г</span><input type="number" name="grams" min="0" value="100"></label>
+         <button class="btn sm" type="submit">Показать совет</button>
+        </form>
+       </div></details>
+      </section>
+     </div>
+     <details class="adv aa-history"><summary>Журнал решений и откат</summary><div class="adv-body"><p class="muted">Откат меняет только учёт; команду принтеру он не отменяет. Если карточка или слот изменились позже, откат запрещён.</p><div id="aa_actions" class="aa-results"></div></div></details>
     </div>
   </div>
   <div class="ptab-pane" id="ptab-files" role="tabpanel" hidden>
@@ -4071,7 +4118,7 @@
     <div id="set_system2"></div>
    </div>
    <div class="card" data-set-card>
-    <div class="card-head"><div><h2>Локальный помощник</h2><p>Внешняя модель на этом компьютере: предложения по входящим заказам и черновик ответа клиенту</p></div><div class="row gap"><button class="btn sm" id="assistant_check" type="button">Проверить</button></div></div>
+    <div class="card-head"><div><h2>Локальный помощник</h2><p>Внешняя модель на этом компьютере: предложения по входящим заказам и черновик ответа клиенту</p></div><div class="row gap"><a class="btn sm" href="/assistant.html" target="_blank" rel="noopener">Открыть помощника ↗</a><button class="btn sm" id="assistant_check" type="button">Проверить</button></div></div>
     <div class="notice"><span>ℹ</span><span>Помощник ничего не сохраняет и не трогает принтеры: предложение становится фактом только после вашего «Сохранить». Суммы, количество, вес и сроки считает система, а не модель. Рантайм (например, Ollama) — отдельная программа на этом же компьютере, PrintFlow не ставит её сам и обращается только по адресу 127.0.0.1.</span></div>
     <div id="set_assistant"></div>
     <div id="set_assistant_status" class="verdict" hidden></div>
@@ -5598,6 +5645,7 @@
 <script src="assets/incidents.js?v=18.19.0"></script>
 <script src="assets/gpuslice.js?v=18.19.0"></script>
 <script src="assets/printer.js?v=18.19.0"></script>
+<script src="assets/ams-autopilot.js?v=18.19.0"></script>
 <script src="assets/queue.js?v=17.0.1"></script>
 <script src="assets/ops.js?v=18.6.0"></script>
 <script src="assets/money.js?v=18.7.0"></script>

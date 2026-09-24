@@ -84,7 +84,7 @@ class IntakeUploadTests(unittest.TestCase):
         handler.send_json = lambda code, payload: sent.update(code=code, payload=payload)
         self.db.set_settings({"assistant_enabled": assistant_enabled})
         with patch("connector.printflow.config.UPLOAD_DIR", self.uploads), \
-             patch("connector.printflow.assistant._post_json",
+             patch("connector.printflow.assistant._get_json",
                    return_value=(False, None, "рантайм недоступен")):
             handler.handle_intake_upload()
         return sent

@@ -1477,13 +1477,13 @@ def assistant_models(url: str, timeout: float = 2.0) -> tuple[list[str], str]:
     Запрос уходит только в loopback: диагностика не должна случайно отправить
     текст на чужой адрес, даже если владелец вписал его в настройках.
     """
-    from connector.printflow.assistant import DEFAULT_URL, _loopback_ok, _post_json
+    from connector.printflow.assistant import DEFAULT_URL, _loopback_ok, _get_json
 
     address = str(url or "").strip() or DEFAULT_URL
     local, why = _loopback_ok(address)
     if not local:
         return [], f"адрес должен быть этим компьютером ({why})"
-    ok, payload, reason = _post_json(f"{address.rstrip('/')}/api/tags", {}, timeout)
+    ok, payload, reason = _get_json(f"{address.rstrip('/')}/api/tags", timeout, label="рантайм")
     if not ok:
         return [], reason
     models = [str(row.get("name") or "")
@@ -1596,9 +1596,12 @@ def assistant_report() -> None:
             step("Доступны: " + ", ".join(models[:5]))
         step("Скачайте модель и впишите её имя в настройках (например, `ollama pull qwen2.5:3b`)")
         return
-    if models and not any(model in name for name in models):
+    if model not in models and f"{model}:latest" not in models:
         warn(f"Модели «{model}» у рантайма нет")
-        step("Доступны: " + ", ".join(models[:5]))
+        if models:
+            step("Доступны: " + ", ".join(models[:5]))
+        else:
+            step("Локальных моделей нет — скачайте одну: ollama pull qwen2.5:3b")
         return
     ok(f"Модель: {model} — помощник готов предлагать черновики")
     step("Он ничего не сохраняет и не трогает принтеры: предложение становится"
@@ -2943,7 +2946,10 @@ def cmd_assistant(args: argparse.Namespace) -> int:
         except Exception:
             pass
         return 0
-    argv = ["--port", str(args.port), "--path", "/assistant.html",
+    # Открываем существующий PrintFlow даже на нестандартном порту, а не
+    # поднимаем второй сервер с той же базой.
+    port = running_port() or resolve_port(getattr(args, "port", None))
+    argv = ["--port", str(port), "--path", "/assistant.html",
             "--title", f"NOZZA · помощник {app_version()}"]
     if getattr(args, "local", False):
         argv.append("--local")

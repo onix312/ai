@@ -34,9 +34,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "connector"))
 
-os.environ["PRINTFLOW_SPEECH_PORT"] = "18791"
-os.environ["PRINTFLOW_AGENT_PORT"] = "18799"
-
 from agent import capabilities, config, server, speech, winapi  # noqa: E402
 from connector.printflow.api import register_routes, router  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
@@ -52,7 +49,10 @@ class ServerTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.agent = server.Agent()
-        cls.speech_server, cls.agent_server = server.serve(cls.agent)
+        # У другого запущенного помощника могут быть заняты фиксированные
+        # порты. Тестовые серверы всегда берут свободные loopback-порты.
+        with patch.object(config, "SPEECH_PORT", 0), patch.object(config, "AGENT_PORT", 0):
+            cls.speech_server, cls.agent_server = server.serve(cls.agent)
         cls.speech_port = cls.speech_server.server_address[1]
         cls.agent_port = cls.agent_server.server_address[1]
         threading.Thread(target=cls.speech_server.serve_forever, daemon=True).start()

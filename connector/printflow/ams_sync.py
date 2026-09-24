@@ -16,8 +16,8 @@
 
 Всё внесённое автоматически можно править вручную:
 
-  * материал, бренд, цвет, цену и вес катушки автосинк не трогает никогда —
-    они принадлежат пользователю;
+  * новые карточки получают значения по правилу/каталогу; существующие ручные
+    материал, бренд, цвет, цену и вес не перезаписывает (пустая цена — исключение);
   * остаток и привязку к слоту автосинк обновляет только у катушек
     с включённой галочкой «Обновлять из AMS» (поле ams_sync = 1);
   * автосоздание и синхронизацию остатка можно выключить целиком
@@ -25,10 +25,22 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .accounting import num, uid
 from .config import now_iso
+
+def slot_number(tray: dict) -> int:
+    """Сквозной номер 0–15: MQTT отдаёт локальный слот 0–3 и номер AMS.
+
+    В тестах и ручных снимках ``slot`` может быть уже сквозным — без ``unit``.
+    """
+    slot = int(tray["slot"])
+    if tray.get("unit") is not None and 0 <= slot < 4:
+        return int(tray["unit"]) * 4 + slot
+    return slot
+
 
 # Пустой слот AMS отдаёт uuid из одних нулей — считаем его отсутствием метки.
 ZERO_UUID = "0" * 32
@@ -226,209 +238,412 @@ def sync_printer_info(db, printer_id: str, snap: dict) -> bool:
     return True
 
 
-def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
-    """Свести катушки в AMS с таблицей spools.
+def _compatible(spool: dict, material: str, color: str, threshold: float) -> bool:
+    """Без RFID материал и цвет нужны оба: один оттенок — не личность катушки."""
+    if not material or not color or str(spool.get("material") or "").upper() != material.upper():
+        return False
+    other = _normalize_hex(str(spool.get("color_hex") or ""))
+    if not other or other in ("#4B5563", "#333333", "#CBD5E1"):
+        # Старые карточки с цветом-заглушкой не доказывают совпадение.
+        return False
+    from .estimate import color_distance
+    return color_distance(color, other) <= threshold
 
-    Возвращает счётчики: created / updated / unbound / remembered / events.
-    Фиксы:
-      * пустой слот (present=False) отвязывает катушку с ams_sync=1, чистит
-        tray_uuid и location=shop, чтобы не плодить 50 AMS-фантомов;
-      * unbind всегда чистит tray_uuid + location;
-      * проверяем ams_sync старой катушки перед отвязкой;
-      * обновляем location=ams при привязке;
-      * каждый слот запоминается в ams_slots, а смена катушки попадает в
-        ams_slot_history — память остаётся в базе, а не в процессе.
+
+def _generic_candidates(db, printer_id: str, slot: str, material: str,
+                        color: str, occupied: set[tuple[str, str]]) -> list[dict]:
+    """Только живые/недавно виденные катушки. Без истории не угадываем."""
+    from datetime import datetime, timedelta, timezone
+    if not material or not color or color in ("#CBD5E1", "#4B5563", "#333333"):
+        return []  # цвет-заглушка из MQTT — не подтверждение совпадения
+    threshold = num(db.setting("ams_delta_e_threshold", 30), 30)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
+    candidates = {}
+    current = db.one("SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
+                     (printer_id, slot))
+    if current:
+        candidates[current["id"]] = current
+    for history in db.query(
+            "SELECT spool_id, at FROM ams_slot_history ORDER BY rowid DESC LIMIT 300"):
+        try:
+            seen = datetime.fromisoformat(str(history["at"]))
+            if seen.tzinfo is None:
+                continue  # старое время без зоны не подтверждает 60 минут
+            if seen.astimezone(timezone.utc) < cutoff:
+                continue
+        except (TypeError, ValueError):
+            continue
+        ident = str(history.get("spool_id") or "")
+        if ident and ident not in candidates:
+            row = db.one("SELECT * FROM spools WHERE id=? AND archived=0 AND ams_sync=1",
+                         (ident,))
+            if row:
+                candidates[ident] = row
+    result = []
+    for spool in candidates.values():
+        if not int(num(spool.get("ams_sync"), 1)):
+            continue
+        last_bind = db.one("SELECT action FROM ams_slot_history WHERE spool_id=?"
+                           " ORDER BY rowid DESC LIMIT 1", (spool["id"],))
+        if last_bind and last_bind["action"] == "manual_unbind":
+            continue  # явную отвязку без RFID не переигрываем в следующем опросе
+        if _clean_uuid(spool.get("tray_uuid")) or not _compatible(spool, material, color, threshold):
+            continue
+        position = (str(spool.get("printer_id") or ""), str(spool.get("ams_slot") or ""))
+        if position != (printer_id, slot) and position in occupied:
+            continue  # катушка всё ещё явно видна в другом занятом слоте
+        result.append(spool)
+    return result
+
+
+def sync_ams_spools(db, printer_id: str, snap: dict) -> dict:
+    """Автопилот AMS: RFID/история → учёт/память → аудит. Без телеметрии — no-op.
+
+    Синк атомарен для снимка парка: переезд RFID не оставляет две привязки.
+    Неизвестную катушку без RFID не создаём «похожей» по всему складу: только
+    одна недавняя, совпавшая по материалу и ΔE≤порог, считается узнаваемой.
     """
+    from . import ams_actions, ams_defaults
+
     result = {"created": 0, "updated": 0, "unbound": 0,
-              "remembered": 0, "events": 0}
+              "remembered": 0, "events": 0, "alerts": [], "action_ids": []}
     trays = (snap.get("ams") or {}).get("trays") or []
     if not trays:
         return result
     auto_create = bool(db.setting("ams_auto_spools", True))
     sync_remaining = bool(db.setting("ams_sync_remaining", True))
-    for tray in trays:
-        tray_uuid = _clean_uuid(tray.get("uuid"))
-        material = str(tray.get("type") or "").strip()
-        slot = "" if tray.get("slot") is None else str(tray.get("slot"))
-        label = tray.get("label") or (f"Слот {slot}" if slot else "AMS")
-        remain = tray.get("remain")
-        color = _normalize_hex(str(tray.get("color") or ""))
-        generic = _tray_generic(tray)
+    printing = str((snap.get("printer") or {}).get("state") or "").upper() in (
+        "RUNNING", "PREPARE", "PAUSE", "PAUSED", "SLICING")
+    occupied = {(printer_id, str(slot_number(t))) for t in trays
+                if t.get("slot") is not None and 0 <= slot_number(t) <= 15
+                and _tray_occupied(t)}
+    uuids = [(_clean_uuid(t.get("uuid"))).upper() for t in trays if _tray_occupied(t)]
+    duplicates = {ident for ident in uuids if ident and uuids.count(ident) > 1}
 
-        if not _tray_occupied(tray):
-            if slot != "":
-                by_slot = db.one(
-                    "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
-                    (printer_id, slot))
-                if by_slot and int(num(by_slot.get("ams_sync"), 1)) == 1:
-                    db.execute(
-                        "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
-                        (now_iso(), by_slot["id"]))
+    def alert(event: str, slot: str, text: str) -> None:
+        result["alerts"].append({"event": event, "slot": slot, "detail": text,
+                                  "critical": event == "ams_runout"})
+
+    with db.transaction():
+        for tray in trays:
+            if tray.get("slot") is None:
+                continue
+            slot = str(slot_number(tray))
+            if not 0 <= int(slot) <= 15:
+                continue  # внешний вход 254 не является слотом AMS
+            label = str(tray.get("label") or f"Слот {slot}")
+            uuid = _clean_uuid(tray.get("uuid"))
+            material = str(tray.get("type") or "").strip().upper()
+            color = _normalize_hex(str(tray.get("color") or ""))
+            remain = tray.get("remain")
+            by_slot = db.one("SELECT * FROM spools WHERE printer_id=? AND ams_slot=?"
+                             " AND archived=0 ORDER BY updated_at DESC LIMIT 1", (printer_id, slot))
+            old_memory = db.one("SELECT * FROM ams_slots WHERE printer_id=? AND slot=?",
+                                (printer_id, slot))
+            spool = None
+            action = ""
+            detail = ""
+            created_id = ""
+            conflict = False
+            if not _tray_occupied(tray):
+                if by_slot and int(num(by_slot.get("ams_sync"), 1)):
+                    before = ams_actions.snapshot(db, [by_slot["id"]], [(printer_id, slot)])
+                    db.execute("UPDATE spools SET ams_slot='', location='shop', updated_at=? WHERE id=?",
+                               (now_iso(), by_slot["id"]))
                     result["unbound"] += 1
                     slot_event(db, printer_id, slot, by_slot["id"], "auto_unbind",
-                               f"{label}: слот опустел — катушка возвращена на склад")
+                               f"{label}: слот опустел")
                     result["events"] += 1
-                    db.add_event(
-                        "spool", "Катушка отвязана от слота",
-                        f"{label}: слот опустел — катушка возвращена на склад",
-                        printer_id, {"spool_id": by_slot["id"], "slot": slot})
-                # Память слота не стирается: видно, что здесь стояло.
-                # Пустой слот, о котором мы ничего не знали, не запоминаем —
-                # иначе база зарастает строками «здесь никогда ничего не было».
-                known = db.one("SELECT id FROM ams_slots WHERE printer_id=? AND slot=?",
-                               (printer_id, slot))
-                if known and remember_slot(db, printer_id, slot, state="empty", keep_last=True):
-                    result["remembered"] += 1
-            continue
-
-        spool = None
-        if tray_uuid:
-            spool = db.one("SELECT * FROM spools WHERE tray_uuid=? AND archived=0",
-                           (tray_uuid,))
-        if not spool and slot != "":
-            by_slot = db.one(
-                "SELECT * FROM spools WHERE printer_id=? AND ams_slot=? AND archived=0",
-                (printer_id, slot))
-            if by_slot:
-                if int(num(by_slot.get("ams_sync"), 1)) != 1:
-                    spool = by_slot
-                else:
-                    old_uuid = _clean_uuid(by_slot.get("tray_uuid"))
-                    swapped = bool(tray_uuid and old_uuid and old_uuid != tray_uuid)
-                    replaced_by_generic = bool(old_uuid and not tray_uuid and generic)
-                    if swapped or replaced_by_generic:
-                        db.execute(
-                            "UPDATE spools SET ams_slot='', tray_uuid='', location='shop', updated_at=? WHERE id=?",
-                            (now_iso(), by_slot["id"]))
-                        result["unbound"] += 1
-                        slot_event(db, printer_id, slot, by_slot["id"], "auto_swap",
-                                   f"{label}: в слоте другая катушка ({material or 'без типа'})")
-                        result["events"] += 1
-                        db.add_event(
-                            "spool", "Катушка отвязана от слота",
-                            f"{label}: в AMS теперь другая катушка",
-                            printer_id, {"spool_id": by_slot["id"], "slot": slot})
+                    action, detail = "auto_unbind", f"{label}: катушка вернулась на склад, RFID сохранён"
+                    if printing:
+                        if not old_memory or old_memory.get("state") != "runout":
+                            alert("ams_runout", slot, f"{label}: пластик исчез во время печати")
                     else:
-                        spool = by_slot
-
-        if spool:
-            previous = db.one("SELECT * FROM ams_slots WHERE printer_id=? AND slot=?",
-                              (printer_id, slot))
-            was_other = bool(previous) and str(previous.get("spool_id") or "") != str(spool["id"])
-            was_empty = bool(previous) and previous.get("state") == "empty"
-            if remember_slot(db, printer_id, slot, spool_id=spool["id"],
-                             tray_uuid=tray_uuid, material=material,
-                             color_name=str(spool.get("color_name") or ""),
-                             color_hex=str(spool.get("color_hex") or ""),
-                             label=str(label), remain_pct=num(remain, -1),
-                             grams_left=num(spool.get("remaining_grams"))):
-                result["remembered"] += 1
-            if not previous or was_other or was_empty:
-                slot_event(db, printer_id, slot, spool["id"], "auto_bind",
-                           f"{label}: {material or 'без типа'} — катушка со склада")
-                result["events"] += 1
-            if not int(num(spool.get("ams_sync"), 1)):
+                        alert("ams_unbind", slot, detail)
+                else:
+                    before = ams_actions.snapshot(db, positions=[(printer_id, slot)])
+                if old_memory and old_memory.get("state") != "empty":
+                    remember_slot(db, printer_id, slot, state="empty", keep_last=True)
+                    result["remembered"] += 1
+                    if not action:
+                        action, detail = "auto_empty", f"{label}: слот опустел"
+                        if old_memory.get("state") != "runout":
+                            alert("ams_empty", slot, detail)
+                if action:
+                    after = ams_actions.snapshot(db, before["spools"], [(printer_id, slot)])
+                    row = ams_actions.record(db, printer_id, slot,
+                                             (by_slot or {}).get("id") or "",
+                                             action, detail, before, after)
+                    result["action_ids"].append(row["id"])
                 continue
-            updates: list[str] = []
-            params: list[Any] = []
-            if tray_uuid and tray_uuid != _clean_uuid(spool.get("tray_uuid")):
-                updates.append("tray_uuid=?")
-                params.append(tray_uuid)
-            if material and not str(spool.get("material") or "").strip():
-                updates.append("material=?")
-                params.append(material)
-            if str(spool.get("printer_id") or "") != printer_id:
-                updates.append("printer_id=?")
-                params.append(printer_id)
-            if slot != "" and str(spool.get("ams_slot") or "") != slot:
-                updates.append("ams_slot=?")
-                params.append(slot)
-            if sync_remaining and remain is not None and num(remain, -1) >= 0:
-                total = max(1.0, num(spool.get("total_grams"), 1000))
-                fresh = round(min(100.0, num(remain)) / 100.0 * total, 1)
-                if abs(fresh - num(spool.get("remaining_grams"))) > 1.0:
-                    updates.append("remaining_grams=?")
-                    params.append(fresh)
-            if color:
-                cur_hex = _normalize_hex(str(spool.get("color_hex") or ""))
-                cur_name = str(spool.get("color_name") or "").strip()
-                if (not cur_name) or cur_hex in ("", "#4B5563", "#333333", "#CBD5E1"):
-                    if cur_hex != color:
-                        updates.append("color_hex=?")
-                        params.append(color)
-                    if not cur_name:
-                        cname = _hex_to_name(color)
-                        if cname:
-                            updates.append("color_name=?")
-                            params.append(cname)
-            if str(spool.get("location") or "") != "ams":
-                updates.append("location=?")
-                params.append("ams")
-            updates.append("synced_at=?")
-            params.append(now_iso())
-            if updates:
-                db.execute(
-                    f"UPDATE spools SET {', '.join(updates)}, updated_at=? WHERE id=?",
-                    (*params, now_iso(), spool["id"]))
-                result["updated"] += 1
-        elif not (auto_create and material):
-            # Пластик в слоте есть, а катушки на складе нет и заводить её
-            # нельзя (автосоздание выключено или тип не сообщён): помним хотя
-            # бы то, что принтер рассказал сам, — иначе память слота пуста.
-            previous = db.one("SELECT * FROM ams_slots WHERE printer_id=? AND slot=?",
-                              (printer_id, slot))
-            if remember_slot(db, printer_id, slot, tray_uuid=tray_uuid,
-                             material=material, color_name=_hex_to_name(color) if color else "",
-                             color_hex=color, label=str(label),
-                             remain_pct=num(remain, -1)):
+
+            if uuid and uuid.upper() in duplicates:
+                detail = f"{label}: один RFID виден в нескольких слотах — привяжите вручную"
+                conflict = True
+            elif uuid:
+                found = db.query("SELECT * FROM spools WHERE UPPER(tray_uuid)=? AND archived=0",
+                                 (uuid.upper(),))
+                if len(found) > 1:
+                    detail = f"{label}: RFID уже принадлежит нескольким катушкам — разберите вручную"
+                    conflict = True
+                elif found:
+                    spool = found[0]
+                elif by_slot and not _clean_uuid(by_slot.get("tray_uuid")) and (
+                        str(by_slot.get("material") or "").upper() == material):
+                    # Ранее привязанная вручную без метки катушка впервые отдала RFID.
+                    spool = by_slot
+                elif auto_create and material:
+                    created_id = uid("sp")
+                else:
+                    detail = f"{label}: RFID не узнан — укажите материал или привяжите вручную"
+            else:
+                # Ручная привязка — явное решение владельца после неоднозначного
+                # generic-слота. Доверяем ей, пока тот же материал/цвет и та же
+                # запись памяти; без последнего manual_bind не угадываем.
+                manual = db.one(
+                    "SELECT spool_id,action FROM ams_slot_history WHERE printer_id=? AND slot=?"
+                    " ORDER BY rowid DESC LIMIT 1", (printer_id, slot))
+                if (by_slot and old_memory
+                        and old_memory.get("spool_id") == by_slot["id"] and
+                        (manual or {}).get("spool_id") == by_slot["id"] and
+                        (manual or {}).get("action") == "manual_bind" and
+                        (not material or str(by_slot.get("material") or "").upper() == material)
+                        and (not color or color in ("#CBD5E1", "#4B5563", "#333333")
+                             or not _normalize_hex(str(by_slot.get("color_hex") or ""))
+                             or _compatible(by_slot, material or str(by_slot.get("material") or ""),
+                                            color, num(db.setting("ams_delta_e_threshold", 30), 30)))):
+                    spool = by_slot
+                matches = [] if spool else _generic_candidates(
+                    db, printer_id, slot, material, color, occupied)
+                if not spool and len(matches) == 1:
+                    spool = matches[0]
+                elif not spool:
+                    detail = (f"{label}: катушка без RFID не узнана — привяжите вручную"
+                              if not matches else
+                              f"{label}: несколько похожих катушек без RFID — привяжите вручную")
+                    conflict = len(matches) > 1 or by_slot is not None
+                    if conflict and by_slot and not matches:
+                        detail = f"{label}: привязанная катушка не совпадает с катушкой в слоте"
+
+            if spool and not int(num(spool.get("ams_sync"), 1)):
+                # Ручной режим катушки: её карточка и слот владельца неизменны.
+                remember_slot(db, printer_id, slot, spool_id=spool["id"], tray_uuid=uuid,
+                              material=material or spool.get("material") or "",
+                              color_name=spool.get("color_name") or "",
+                              color_hex=spool.get("color_hex") or "", label=label,
+                              remain_pct=num(remain, -1),
+                              grams_left=num(spool.get("remaining_grams")))
                 result["remembered"] += 1
-            if previous and previous.get("state") == "empty":
-                slot_event(db, printer_id, slot, "", "auto_seen",
-                           f"{label}: {material or 'пластик без типа'} — катушки нет на складе")
-                result["events"] += 1
-        elif auto_create and material:
-            total = 1000.0
-            remaining = total
-            if remain is not None and num(remain, -1) >= 0:
-                remaining = round(min(100.0, max(0.0, num(remain))) / 100.0 * total, 1)
-            hex_norm = color or "#4b5563"
-            cname = _hex_to_name(hex_norm) if hex_norm != "#4b5563" else ""
-            row = db.upsert("spools", {
-                "id": uid("sp"),
-                "material": material,
-                "brand": "",
-                "color_name": cname,
-                "color_hex": hex_norm,
-                "total_grams": total,
-                "remaining_grams": remaining,
-                "price": 0,
-                "printer_id": printer_id,
-                "ams_slot": slot,
-                "tray_uuid": tray_uuid,
-                "location": "ams",
-                "ams_sync": 1,
-                "synced_at": now_iso(),
-                "verified": 0,
-                "note": "Импортировано из AMS: проверьте массу, цену, бренд и цвет",
-                "archived": 0,
-                "created_at": now_iso(),
-                "updated_at": now_iso(),
-            })
-            result["created"] += 1
-            remember_slot(db, printer_id, slot, spool_id=str(row.get("id") or ""),
-                          tray_uuid=tray_uuid, material=material,
-                          color_name=cname, color_hex=hex_norm, label=str(label),
-                          remain_pct=num(remain, -1), grams_left=remaining)
+                continue
+            if by_slot and (spool or created_id) and (
+                    created_id or by_slot["id"] != spool["id"]) and (
+                    not int(num(by_slot.get("ams_sync"), 1))):
+                detail = f"{label}: слот занят катушкой на ручном учёте — проверьте привязку"
+                conflict = True
+                spool = None
+                created_id = ""
+            affected = {s["id"] for s in (spool, by_slot) if s}
+            if created_id:
+                affected.add(created_id)
+            positions = [(printer_id, slot)]
+            if spool and spool.get("ams_slot") not in (None, ""):
+                positions.append((str(spool.get("printer_id") or ""), str(spool["ams_slot"])))
+            before = ams_actions.snapshot(db, affected, positions)
+            if not spool and not created_id:
+                # Конфликтный RFID нельзя переназначать, а generic нельзя
+                # угадывать: оставляем старую карточку и сохраняем только факт.
+                replacement = False
+                if by_slot and int(num(by_slot.get("ams_sync"), 1)):
+                    saved_uuid = _clean_uuid(by_slot.get("tray_uuid"))
+                    if uuid and saved_uuid and uuid.upper() != saved_uuid.upper():
+                        replacement = True
+                    elif not uuid or not saved_uuid:
+                        if (material and by_slot.get("material") and
+                                material != str(by_slot["material"]).strip().upper()):
+                            replacement = True
+                        elif color and color not in ("#CBD5E1", "#4B5563", "#333333"):
+                            old_color = _normalize_hex(str(by_slot.get("color_hex") or ""))
+                            if old_color and old_color not in ("#CBD5E1", "#4B5563", "#333333"):
+                                from .estimate import color_distance
+                                replacement = color_distance(color, old_color) > num(
+                                    db.setting("ams_delta_e_threshold", 30), 30)
+                if replacement:
+                    db.execute("UPDATE spools SET ams_slot='', location='shop', updated_at=? WHERE id=?",
+                               (now_iso(), by_slot["id"]))
+                    slot_event(db, printer_id, slot, by_slot["id"], "auto_swap",
+                               f"{label}: старую катушку сняли, новая не опознана")
+                    alert("ams_unbind", slot, f"{label}: старая катушка снята, новая не опознана")
+                    result["unbound"] += 1
+                    conflict = True
+                    detail = f"{label}: новая катушка не опознана — привяжите вручную"
+                changed = (replacement or not old_memory or old_memory.get("spool_id") or
+                           old_memory.get("material") != material or
+                           old_memory.get("tray_uuid") != uuid or
+                           old_memory.get("color_hex") != color or
+                           old_memory.get("state") != ("unrecognized" if conflict else "live"))
+                remember_slot(db, printer_id, slot, tray_uuid=uuid,
+                              material=material, color_name=_hex_to_name(color),
+                              color_hex=color, label=label, remain_pct=num(remain, -1),
+                              state="unrecognized" if conflict else "live")
+                result["remembered"] += 1
+                if detail and changed:
+                    if conflict:
+                        alert("ams_conflict", slot, detail)
+                    after = ams_actions.snapshot(db, affected, positions)
+                    row = ams_actions.record(db, printer_id, slot,
+                                             by_slot["id"] if replacement else "",
+                                             "auto_unbind" if replacement else "unrecognized",
+                                             detail, before, after)
+                    result["action_ids"].append(row["id"])
+                continue
+
+            # Подмена освобождает старое место, но RFID остаётся на старой
+            # катушке: следующий опрос другого слота узнает её по метке.
+            if by_slot and (created_id or by_slot["id"] != spool["id"]):
+                if int(num(by_slot.get("ams_sync"), 1)):
+                    db.execute("UPDATE spools SET ams_slot='', location='shop', updated_at=? WHERE id=?",
+                               (now_iso(), by_slot["id"]))
+                    result["unbound"] += 1
+                    slot_event(db, printer_id, slot, by_slot["id"], "auto_swap",
+                               f"{label}: вместо неё другая катушка")
+                    result["events"] += 1
+                    alert("ams_unbind", slot, f"{label}: старая катушка возвращена на склад")
+                else:
+                    # Не перепривязываем принтер поверх ручной блокировки.
+                    continue
+            if created_id:
+                values = ams_defaults.defaults(db, tray)
+                if values is None:
+                    continue
+                remaining = values["total_grams"]
+                if remain is not None and num(remain, -1) >= 0:
+                    remaining = round(min(100., max(0., num(remain))) / 100 * values["total_grams"], 1)
+                spool = db.upsert("spools", {
+                    "id": created_id, "material": values["material"],
+                    "brand": values["brand"], "color_name": values["color_name"],
+                    "color_hex": values["color_hex"], "price": values["price"],
+                    "rec_settings": json.dumps({"temp_nozzle": [values["temp_min"],
+                                                          values["temp_max"]]}),
+                    "total_grams": values["total_grams"], "remaining_grams": remaining,
+                    "printer_id": printer_id, "ams_slot": "" if remain is not None and num(remain, -1) == 0 else slot,
+                    "tray_uuid": uuid,
+                    "location": "shop" if remain is not None and num(remain, -1) == 0 else "ams",
+                    "ams_sync": 1, "verified": 1,
+                    "price_source": values["source"],
+                    "archived": 0, "synced_at": now_iso(), "created_at": now_iso(),
+                    "updated_at": now_iso()})
+                result["created"] += 1
+                action = "auto_create"
+            else:
+                previous_pos = (str(spool.get("printer_id") or ""),
+                                str(spool.get("ams_slot") or ""))
+                if previous_pos[1] and previous_pos != (printer_id, slot):
+                    known = db.one("SELECT * FROM ams_slots WHERE printer_id=? AND slot=?",
+                                   previous_pos)
+                    if known:
+                        remember_slot(db, *previous_pos, state="empty", keep_last=True)
+                    slot_event(db, *previous_pos, spool["id"], "auto_move",
+                               f"{label}: катушка перенесена в другой слот")
+                    result["events"] += 1
+                    action = "auto_move"
+                updates = {}
+                exhausted = remain is not None and num(remain, -1) == 0
+                if str(spool.get("printer_id") or "") != printer_id:
+                    updates["printer_id"] = printer_id
+                if not exhausted and str(spool.get("ams_slot") or "") != slot:
+                    updates["ams_slot"] = slot
+                if uuid and uuid.upper() != _clean_uuid(spool.get("tray_uuid")).upper():
+                    updates["tray_uuid"] = uuid
+                if not exhausted and spool.get("location") != "ams":
+                    updates["location"] = "ams"
+                if (spool.get("price_source") and color and
+                        str(spool.get("color_hex") or "").upper() in
+                        ("#4B5563", "#333333", "#CBD5E1") and
+                        color not in ("#4B5563", "#333333", "#CBD5E1")):
+                    # Цвет-заглушка автокарточки — не правка владельца: заменяем
+                    # его первой достоверной телеметрией, не трогая ручные цвета.
+                    updates["color_hex"] = color
+                    updates["color_name"] = _hex_to_name(color)
+                if not num(spool.get("price")) or not int(num(spool.get("verified"), 1)):
+                    values = ams_defaults.defaults(db, tray)
+                    if values:
+                        if not num(spool.get("price")):
+                            updates["price"] = values["price"]
+                        if not str(spool.get("brand") or "") and values["brand"]:
+                            updates["brand"] = values["brand"]
+                        updates["verified"] = 1
+                        updates["price_source"] = values["source"]
+                if sync_remaining and remain is not None and num(remain, -1) >= 0:
+                    total = max(1.0, num(spool.get("total_grams"), 1000))
+                    fresh = round(min(100., max(0., num(remain))) / 100 * total, 1)
+                    old = num(spool.get("remaining_grams"))
+                    drift = fresh - old
+                    if abs(drift) > 1:
+                        updates["remaining_grams"] = fresh
+                        pct_diff = 100 * drift / total
+                        if pct_diff >= 15 and drift >= 40:
+                            action = "refill"
+                        elif pct_diff <= -25 and drift <= -50 and not printing:
+                            # После реальной печати снижение — нормальный расход,
+                            # даже если принтер уже перешёл в IDLE к этому опросу.
+                            # При старых базах spool_id задания часто пуст: проверяем
+                            # любую недавнюю печать на этом принтере (лучше пропустить
+                            # алерт, чем объявить выполненную печать кражей).
+                            since = (old_memory or {}).get("seen_at") or spool.get("synced_at") or ""
+                            recent_job = db.one(
+                                "SELECT id FROM print_jobs WHERE printer_id=? AND"
+                                " (state IN ('running','starting') OR"
+                                " (state IN ('done','failed') AND datetime(finished_at)>=datetime(?)))"
+                                " LIMIT 1", (printer_id, since)) if since else None
+                            if not recent_job:
+                                action = "loss"
+                                alert("ams_loss", slot, f"{label}: минус {abs(drift):.0f} г без печати")
+                if exhausted:
+                    if num(spool.get("remaining_grams")) > 0:
+                        updates["remaining_grams"] = 0.
+                    if previous_pos[1]:
+                        updates["ams_slot"] = ""
+                    if spool.get("location") != "shop":
+                        updates["location"] = "shop"
+                    if num(spool.get("remaining_grams")) > 0 or previous_pos[1]:
+                        action = "runout"
+                        if printing:
+                            alert("ams_runout", slot, f"{label}: пластик закончился во время печати")
+                if updates:
+                    updates["synced_at"] = now_iso()
+                    updates["updated_at"] = now_iso()
+                    sets = ", ".join(f"{key}=?" for key in updates)
+                    db.execute(f"UPDATE spools SET {sets} WHERE id=?",
+                               (*updates.values(), spool["id"]))
+                    spool = db.one("SELECT * FROM spools WHERE id=?", (spool["id"],))
+                    result["updated"] += 1
+                    action = action or "auto_update"
+            exhausted = remain is not None and num(remain, -1) == 0
+            if exhausted and created_id:
+                action = "runout"
+                if printing:
+                    alert("ams_runout", slot, f"{label}: пластик закончился во время печати")
+            remember_slot(db, printer_id, slot, spool_id=spool["id"], tray_uuid=uuid,
+                          material=material or spool["material"],
+                          color_name=spool.get("color_name") or "",
+                          color_hex=spool.get("color_hex") or color,
+                          label=label, remain_pct=num(remain, -1),
+                          grams_left=num(spool.get("remaining_grams")),
+                          state="runout" if exhausted else "live")
             result["remembered"] += 1
-            slot_event(db, printer_id, slot, str(row.get("id") or ""), "auto_create",
-                       f"{label}: {material}, остаток {round(num(remain, 100))}% — заведена из AMS")
-            result["events"] += 1
-            db.add_event(
-                "spool", "Катушка добавлена из AMS",
-                f"{label}: {material}, остаток {round(num(remain, 100))}%."
-                " Уточните бренд, цвет и цену в карточке склада.",
-                printer_id, {"spool_id": row.get("id"), "slot": slot,
-                             "tray_uuid": tray_uuid})
+            if not old_memory or old_memory.get("spool_id") != spool["id"] or (
+                    old_memory.get("state") != ("runout" if exhausted else "live")):
+                slot_event(db, printer_id, slot, spool["id"],
+                           "auto_create" if created_id else "auto_bind",
+                           f"{label}: {spool['material']} — катушка со склада")
+                result["events"] += 1
+                action = action or "auto_bind"
+            if action:
+                detail = detail or f"{label}: {spool['material']} → {spool.get('remaining_grams')} г ({action})"
+                after = ams_actions.snapshot(db, affected, positions)
+                row = ams_actions.record(db, printer_id, slot, spool["id"],
+                                         action, detail, before, after)
+                result["action_ids"].append(row["id"])
     return result
 
 

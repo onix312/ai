@@ -31,15 +31,16 @@ MAX_PROMPT_CHARS = 12000
 _NUMBER_RE = re.compile(r"\d[\d\s\u00a0]*(?:[.,]\d+)?")
 
 
-def _post(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, Any, str]:
+def _request(url: str, timeout: float, payload: dict[str, Any] | None = None) -> tuple[bool, Any, str]:
+    """POST для чата, GET без тела для списка моделей Ollama."""
     local, why = loopback_ok(url)
     if not local:
         return False, None, why
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(
-        url, data=body, method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8",
-                 "Accept": "application/json"})
+        url, data=body, method="POST" if body is not None else "GET",
+        headers={"Accept": "application/json",
+                 **({"Content-Type": "application/json; charset=utf-8"} if body is not None else {})})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as answer:  # noqa: S310 — только loopback
             raw = answer.read(8 * 1024 * 1024)
@@ -58,6 +59,14 @@ def _post(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, Any,
         return False, None, "рантайм ответил не JSON"
 
 
+def _get(url: str, timeout: float) -> tuple[bool, Any, str]:
+    return _request(url, timeout)
+
+
+def _post(url: str, payload: dict[str, Any], timeout: float) -> tuple[bool, Any, str]:
+    return _request(url, timeout, payload)
+
+
 def status(url: str = "", name: str = "") -> dict[str, Any]:
     """Жив ли рантайм и какая модель выбрана. Ответ всегда с причиной."""
     url = str(url or config.MODEL_URL).rstrip("/")
@@ -68,7 +77,7 @@ def status(url: str = "", name: str = "") -> dict[str, Any]:
     if not local:
         out.update(loopback=False, reason=f"Адрес рантайма должен быть этим компьютером: {why}")
         return out
-    ok, payload, reason = _post(f"{url}/api/tags", {}, PING_SEC)
+    ok, payload, reason = _get(f"{url}/api/tags", PING_SEC)
     if not ok:
         out["reason"] = (f"Рантайм на {url} не отвечает ({reason}). "
                          "Запустите его на этом компьютере — например, `ollama serve`.")
@@ -81,8 +90,10 @@ def status(url: str = "", name: str = "") -> dict[str, Any]:
                          + (f"(рантайм отдаёт: {', '.join(models)})" if models
                             else "(рантайм пока не отдаёт ни одной модели)"))
         return out
-    if models and not any(name in row for row in models):
-        out["reason"] = f"Модели «{name}» у рантайма нет (есть: {', '.join(models)})"
+    if name not in models and f"{name}:latest" not in models:
+        out["reason"] = (f"Модели «{name}» у рантайма нет "
+                         + (f"(есть: {', '.join(models)})" if models
+                            else "(локальных моделей нет — выполните `ollama pull qwen2.5:3b`)"))
         return out
     out.update(ok=True, reason="")
     return out

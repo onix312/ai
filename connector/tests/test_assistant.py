@@ -97,16 +97,16 @@ class StatusTests(unittest.TestCase):
     def test_foreign_url_refused_before_any_request(self):
         self.db.set_settings({"assistant_enabled": True,
                               "assistant_url": "http://10.0.0.7:11434"})
-        with patch.object(assistant, "_post_json") as post:
+        with patch.object(assistant, "_get_json") as get:
             state = assistant.status(self.db)
-        post.assert_not_called()
+        get.assert_not_called()
         self.assertFalse(state["loopback"])
         self.assertIn("этим компьютером", state["reason"])
 
     def test_dead_runtime_is_a_reason_not_an_exception(self):
         self.db.set_settings({"assistant_enabled": True,
                               "assistant_model": "qwen2.5:3b"})
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=(False, None, "рантайм недоступен")):
             state = assistant.status(self.db)
         self.assertFalse(state["available"])
@@ -115,7 +115,7 @@ class StatusTests(unittest.TestCase):
     def test_model_must_exist_in_runtime(self):
         self.db.set_settings({"assistant_enabled": True,
                               "assistant_model": "llama3:70b"})
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=_tags_reply(["qwen2.5:3b"])):
             state = assistant.status(self.db)
         self.assertFalse(state["available"])
@@ -124,20 +124,82 @@ class StatusTests(unittest.TestCase):
     def test_available_when_enabled_model_and_runtime_alive(self):
         self.db.set_settings({"assistant_enabled": True,
                               "assistant_model": "qwen2.5:3b"})
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=_tags_reply(["qwen2.5:3b"])):
             state = assistant.status(self.db)
         self.assertTrue(state["available"])
         self.assertEqual(state["reason"], "")
         self.assertEqual(state["models"], ["qwen2.5:3b"])
 
+    def test_no_local_models_is_not_ready(self):
+        self.db.set_settings({"assistant_enabled": True,
+                              "assistant_model": "qwen2.5:3b"})
+        with patch.object(assistant, "_get_json", return_value=_tags_reply([])):
+            state = assistant.status(self.db)
+        self.assertFalse(state["available"])
+        self.assertIn("ollama pull", state["reason"])
+
     def test_empty_model_name_is_reported_with_hint(self):
         self.db.set_settings({"assistant_enabled": True, "assistant_model": ""})
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=_tags_reply(["qwen2.5:3b"])):
             state = assistant.status(self.db)
         self.assertFalse(state["available"])
         self.assertIn("qwen2.5:3b", state["reason"])
+
+
+class OllamaVerbTests(unittest.TestCase):
+    """Вместо Ollama — HTTP-сервер, который отвечает 405 на POST /api/tags."""
+
+    def test_every_model_probe_gets_tags_without_post_body(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from threading import Thread
+        from agent import model as agent_model
+        import pf
+
+        methods = []
+
+        class OllamaStub(BaseHTTPRequestHandler):
+            def do_GET(self):
+                methods.append(("GET", self.path))
+                if self.path != "/api/tags":
+                    self.send_error(404)
+                    return
+                body = b'{"models":[{"name":"qwen2.5:3b"}]}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                methods.append(("POST", self.path))
+                self.send_error(405)
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), OllamaStub)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}"
+            with tempfile.TemporaryDirectory() as folder:
+                db = _db(pathlib.Path(folder) / "t.sqlite3")
+                try:
+                    db.set_settings({"assistant_enabled": True, "assistant_url": url,
+                                     "assistant_model": "qwen2.5:3b"})
+                    self.assertTrue(assistant.status(db)["available"])
+                    self.assertEqual(["qwen2.5:3b"], assistant.list_models(db))
+                finally:
+                    db.close()
+            self.assertEqual(["qwen2.5:3b"], pf.assistant_models(url)[0])
+            self.assertTrue(agent_model.status(url, "qwen2.5:3b")["ok"])
+            self.assertEqual([("GET", "/api/tags")] * 4, methods)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
 
 class SuggestTests(unittest.TestCase):
@@ -152,13 +214,11 @@ class SuggestTests(unittest.TestCase):
     def _run(self, fields: dict, reply: str = "", draft: dict | None = None,
              models: list[str] | None = None):
         """Два вызова рантайма: проба моделей, затем чат."""
-        answers = [_tags_reply(models if models is not None else ["qwen2.5:3b"]),
-                   _chat_reply({"fields": fields, "reply": reply})]
-
-        def fake_post(url, payload, timeout):
-            return answers.pop(0) if answers else (False, None, "рантайм молчит")
-
-        with patch.object(assistant, "_post_json", side_effect=fake_post):
+        with patch.object(assistant, "_get_json",
+                          return_value=_tags_reply(models if models is not None
+                                                   else ["qwen2.5:3b"])), \
+             patch.object(assistant, "_post_json",
+                          return_value=_chat_reply({"fields": fields, "reply": reply})):
             return assistant.suggest(self.db, dict(draft or DRAFT),
                                      "нужно 20 адресников, чёрных, для Марии")
 
@@ -236,12 +296,9 @@ class SuggestTests(unittest.TestCase):
                             for warning in result["warnings"]))
 
     def test_garbage_instead_of_json_keeps_draft(self):
-        def fake_post(url, payload, timeout):
-            if url.endswith("/api/tags"):
-                return _tags_reply(["qwen2.5:3b"])
-            return True, {"message": {"content": "Извините, я не могу помочь"}}, ""
-
-        with patch.object(assistant, "_post_json", side_effect=fake_post):
+        with patch.object(assistant, "_get_json", return_value=_tags_reply(["qwen2.5:3b"])), \
+             patch.object(assistant, "_post_json",
+                          return_value=(True, {"message": {"content": "Извините, я не могу помочь"}}, "")):
             result = assistant.suggest(self.db, dict(DRAFT), "текст")
         self.assertTrue(result["ok"])
         self.assertEqual(result["draft"], DRAFT)
@@ -253,18 +310,15 @@ class SuggestTests(unittest.TestCase):
                                  "reply": "Здравствуйте"}, ensure_ascii=False)
                    + "\n```\n")
 
-        def fake_post(url, payload, timeout):
-            if url.endswith("/api/tags"):
-                return _tags_reply(["qwen2.5:3b"])
-            return True, {"message": {"content": content}}, ""
-
-        with patch.object(assistant, "_post_json", side_effect=fake_post):
+        with patch.object(assistant, "_get_json", return_value=_tags_reply(["qwen2.5:3b"])), \
+             patch.object(assistant, "_post_json",
+                          return_value=(True, {"message": {"content": content}}, "")):
             result = assistant.suggest(self.db, dict(DRAFT), "текст")
         self.assertEqual(result["draft"]["customer_name"], "Мария")
         self.assertEqual(result["reply"], "Здравствуйте")
 
     def test_runtime_refusal_returns_reason_and_same_draft(self):
-        with patch.object(assistant, "_post_json",
+        with patch.object(assistant, "_get_json",
                           return_value=(False, None, "рантайм недоступен")):
             result = assistant.suggest(self.db, dict(DRAFT), "текст")
         self.assertFalse(result["ok"])

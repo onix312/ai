@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .accounting import Accounting, num, uid
+from .ams_sync import slot_number
 from .bambu import BambuPrinter
 from .config import (BACKUP_DIR, DANGEROUS_AUTOMATION_COMMANDS, UPLOAD_DIR,
                      now_iso, rotate_backups)
@@ -1504,7 +1505,7 @@ class PrinterManager:
         active = next((t for t in snap["ams"].get("trays", []) if t.get("active")), None)
         if not active:
             return (False, "Активный слот AMS не подтверждён") if force else (True, "")
-        spool = self.acc.pick_spool(job.get("printer_id") or "", str(active.get("slot")),
+        spool = self.acc.pick_spool(job.get("printer_id") or "", str(slot_number(active)),
                                     active.get("type"), active.get("uuid"))
         if not spool:
             return (False, "Катушка AMS не найдена в проверенном складе") if force else (True, "")
@@ -2221,7 +2222,7 @@ class PrinterManager:
 
         spool = None
         if active_tray:
-            spool = self.acc.pick_spool(printer.id, str(active_tray.get("slot")),
+            spool = self.acc.pick_spool(printer.id, str(slot_number(active_tray)),
                                         active_tray.get("type"), active_tray.get("uuid"))
         if spool:
             if spool.get("material"):
@@ -2815,7 +2816,9 @@ class PrinterManager:
             from .preflight import check_preflight
             return check_preflight(self.db, self, printer_id, filename, plate, ams_mapping)
         except Exception as exc:
-            return {"ok": True, "blocks": [], "warns": [], "infos": [], "error": str(exc)}
+            return {"ok": True, "blocks": [], "warns": [],
+                    "infos": [{"code": "preflight_error", "title": "Проверка не завершилась",
+                               "detail": str(exc)}], "error": str(exc)}
 
     # ------------------------------------------------------------ уведомления
     def _notify(self, kind: str, title: str, detail: str, printer_id: str) -> None:
@@ -3138,7 +3141,7 @@ class PrinterManager:
             active = next((t for t in (snap.get("ams") or {}).get("trays", [])
                            if t.get("active")), None)
             if active:
-                spool = self.acc.pick_spool(snap["id"], str(active.get("slot")),
+                spool = self.acc.pick_spool(snap["id"], str(slot_number(active)),
                                             active.get("type"), active.get("uuid"))
         if spool:
             per_gram = num(spool.get("price")) / max(1.0, num(spool.get("total_grams"), 1000))
@@ -3331,7 +3334,7 @@ class PrinterManager:
         memory = self._tray_uuids.setdefault(pid, {})
         reported = self._ams_reported.setdefault(pid, set())
         for tray in trays:
-            slot = str(tray.get("slot"))
+            slot = str(slot_number(tray))
             uuid = str(tray.get("uuid") or "")
             previous = memory.get(slot)
             if previous is not None and uuid and uuid != previous:
@@ -3483,8 +3486,13 @@ class PrinterManager:
                         value = json.loads(cmd.get("value") or "null")
                     except json.JSONDecodeError:
                         value = None
-                    printer.command(cmd.get("command", ""), value)
-                    ok, err = True, ""
+                    if command_name == "ams_filament":
+                        from .ams_push import send_checked
+                        outcome = send_checked(self.db, printer, value, source="scheduled")
+                        ok, err = True, outcome.get("reason") or ""
+                    else:
+                        printer.command(command_name, value)
+                        ok, err = True, ""
                 except Exception as exc:
                     err = str(exc)
             self.db.execute(
@@ -3876,7 +3884,7 @@ class PrinterManager:
         while not self._stop.wait(30):
             try:
                 self.auto_backup_if_due()
-                self._cleanup_ams_phantoms_periodic()
+                # Карточки катушек больше не архивируются фоном: разбор дублей ручной.
                 with self.lock:
                     printers = list(self.printers.values())
                 for printer in printers:
