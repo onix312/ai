@@ -485,6 +485,11 @@ DEFAULT_SETTINGS: dict[str, object] = {
     # База для QR-наклеек (катушка, ценник). Пусто — берём LAN IP компьютера.
     # Пример: http://192.168.1.50:8765 или Tailscale http://pc.tailnet.ts.net:8765
     "public_url": "",
+    # 18.12.2: адрес Mini App цеха для кнопки в боте сотрудников. Здесь нужен
+    # именно HTTPS: Telegram открывает Mini App только по защищённому адресу,
+    # LAN-адрес вида http://192.168.1.50:8765 кнопку ломает (BUTTON_URL_INVALID).
+    # Пусто — берём public_url + /staff (если он https), иначе кнопки нет вовсе.
+    "staff_miniapp_url": "",
     # --- 8.0: Бэкап 2.0 ---------------------------------------------------
     "backup_keep": DEFAULT_BACKUP_KEEP,
     "backup_auto_export": False,

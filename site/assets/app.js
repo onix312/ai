@@ -1527,6 +1527,37 @@ function settingRow(key, label, sub, control) {
   return `<div class="set-row" data-set-row><div class="sinfo"><b>${esc(label)}</b><small>${esc(sub || '')}</small></div>${control}</div>`;
 }
 
+/* 18.12.2: адрес Mini App цеха. Раньше незаполненный адрес молча подменялся на
+   example.com — кнопка «🏭 Открыть цех» открывала страницу «Example Domain».
+   Здесь считаем тот же адрес, что и сервер (staffbot/core/config.py), чтобы
+   владелец видел его до нажатия кнопки, а не после. */
+function miniappTarget(s) {
+  const direct = String(s.staff_miniapp_url || '').trim();
+  const base = direct || String(s.public_url || '').trim();
+  if (!base) {
+    return { url: '', problem: 'Адрес не задан — кнопка «🏭 Открыть цех» в боте не появится.' };
+  }
+  const withScheme = /^https?:\/\//i.test(base) ? base : 'https://' + base;
+  const clean = withScheme.replace(/\/+$/, '');
+  // Прямой адрес цеха берём как есть; из «Публичного адреса панели» делаем /staff.
+  const url = direct ? clean : (/\/staff$/i.test(clean) ? clean : clean + '/staff');
+  if (!/^https:\/\//i.test(url)) {
+    return { url, problem: 'Telegram открывает Mini App только по https — по этому адресу кнопки не будет.' };
+  }
+  return { url, problem: '' };
+}
+
+/** Строка-вердикт под полем адреса Mini App: куда ведёт кнопка или почему её нет. */
+function miniappStatusRow(s) {
+  const t = miniappTarget(s);
+  if (t.problem) {
+    return `<div class="notice"><span>⚠</span><span data-miniapp-status="off">Mini App цеха выключен. `
+      + `${esc(t.problem)} Как получить адрес — docs/MINIAPP-ЦЕХА.md.</span></div>`;
+  }
+  return `<div class="notice"><span>✓</span><span data-miniapp-status="on">Кнопка «🏭 Открыть цех» ведёт на `
+    + `<b>${esc(t.url)}</b></span></div>`;
+}
+
 /** Рисует группу настроек по описанию [ключ, подпись, пояснение, тип, шаг]. */
 function settingGroup(list) {
   const s = PF.state.settings;
@@ -2249,6 +2280,10 @@ function renderSettings() {
         `<input type="text" data-setting="telegram_chat_id" value="${esc(String(s.telegram_chat_id || ''))}">`)
       + settingRow('telegram_bot', 'Отвечать на команды', 'Бот принимает «статус», «кадр», «пауза» с телефона',
         `<label class="switch"><input type="checkbox" data-setting="telegram_bot"${s.telegram_bot ? ' checked' : ''}><i></i></label>`)
+      + settingRow('staff_miniapp_url', 'Адрес Mini App цеха',
+        'Куда ведёт кнопка «🏭 Открыть цех». Telegram открывает Mini App только по https — как получить адрес: docs/MINIAPP-ЦЕХА.md',
+        `<input type="text" data-setting="staff_miniapp_url" maxlength="300" placeholder="https://ceh.example.ru/staff" value="${esc(String(s.staff_miniapp_url || ''))}">`)
+      + miniappStatusRow(s)
       + NOTIFY.map(([k, label, sub]) => settingRow(k, label, sub || '',
         `<label class="switch"><input type="checkbox" data-setting="${k}"${s[k] ? ' checked' : ''}><i></i></label>`)).join('')
       + settingRow('browser_notify_enabled', 'Уведомления в браузере', 'Пока PrintFlow открыт вкладкой — события приходят сразу',

@@ -107,10 +107,13 @@ class NotifyTests(unittest.TestCase):
 
 class ChartRoutingTests(unittest.TestCase):
     def test_menu_routes(self):
-        for word in ("график", "итоги", "меню", "цех"):
+        # «график» — витрина Mini App, поэтому меню; «итоги» с 18.12.3
+        # отвечает текстом денег (см. test_staffbot_report).
+        for word in ("график", "меню", "цех"):
             route = ROUTER.match_text(word)
             self.assertIsNotNone(route, word)
             self.assertEqual(route.method, "cmd_menu", word)
+        self.assertEqual(ROUTER.match_text("итоги").method, "cmd_money")
 
 
 if __name__ == "__main__":

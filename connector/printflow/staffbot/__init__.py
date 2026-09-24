@@ -1,9 +1,11 @@
-"""Бот сотрудников PrintFlow — тонкий, notify_only + Mini App.
+"""Бот сотрудников PrintFlow — тонкий: уведомления, Mini App и текст.
 
 Архитектура clean_layers:
-- core/config, core/db, core/api_client
+- core/config, core/db, core/api_client, core/staff_service (только чтение БД)
 - router
-- handlers/menu (кнопка web_app), handlers/notify (все уведомления)
+- report (формулировки) + handlers/menu (web_app), handlers/notify (уведомления),
+  handlers/report (18.12.3: сводка, заказы, полка, очередь, кадр, деньги —
+  текстом с картинками)
 - scenes SQLite с нуля
 - ui keyboards
 - miniapp auth HMAC
