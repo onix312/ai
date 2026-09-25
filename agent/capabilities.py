@@ -67,8 +67,10 @@ def detect() -> dict:
         "process_list_reason": "",
         "audio_device": WINDOWS,
         "audio_device_reason": "" if WINDOWS else "Переключение звука — только Windows",
-        "clipboard": True,
-        "clipboard_reason": "",
+        # Буфер обмена читается через Win32 (`clipboard.py`): в Linux навык
+        # честно недоступен, а не «доступен и падает» (до 18.21 было True везде).
+        "clipboard": WINDOWS,
+        "clipboard_reason": "" if WINDOWS else "Буфер обмена читается только в Windows",
         "region_shot": screen_ok,
         "region_shot_reason": screen_reason,
         "focus_timer": True,
@@ -87,6 +89,21 @@ def detect() -> dict:
     if capabilities["speech"]:
         capabilities["speech_model"] = _speech_model()
     capabilities["wake_word"] = bool(capabilities["speech"] and capabilities["microphone"])
+    # 18.21: способности голоса, которых требуют навыки `voice.*`. До этого их
+    # не вычислял никто, и навыки голоса были недоступны всегда — с причиной
+    # «Нет способности speech_in», которая ничего не объясняла.
+    capabilities["speech_in"] = bool(capabilities["speech"] and capabilities["microphone"])
+    capabilities["speech_in_reason"] = (
+        "" if capabilities["speech_in"]
+        else "Нужны модель речи и микрофон: " + "; ".join(
+            reason for reason in (capabilities["speech_reason"], capabilities["microphone_reason"]) if reason))
+    from . import pc
+
+    engine = pc.speech_engine()
+    capabilities["speech_out"] = bool(engine)
+    capabilities["speech_out_engine"] = engine
+    capabilities["speech_out_reason"] = "" if engine else (
+        "Нет движка озвучки: в Windows нужен PowerShell, в Linux — espeak-ng")
     return capabilities
 
 
@@ -143,5 +160,6 @@ def missing(capabilities: dict) -> list[str]:
                                                "clipboard_reason", "region_shot_reason",
                                                "focus_timer_reason", "file_watch_reason",
                                                "preferences_reason", "whitelist_reason",
-                                               "macro_reason", "quick_open_reason")
+                                               "macro_reason", "quick_open_reason",
+                                               "speech_in_reason", "speech_out_reason")
             if capabilities.get(key)]

@@ -1,6 +1,13 @@
-"""Маршруты помощника (18.19): рантайм, действия, голос, агент, журнал, Авито, ТГ.
+"""Маршруты помощника (18.21): мозг, память, рантайм, действия, голос, агент, журнал, Авито, ТГ.
 
-Восемьдесят девять маршрутов, и каждый отвечает за свою часть договорённости:
+Девяносто пять маршрутов, и каждый отвечает за свою часть договорённости:
+
+  * `chat` (18.21) — единая точка разговора: мозг помощника понимает фразу,
+    помнит разговор, находит станок, заказ и клиента в базе, отдаёт команды ПК
+    агенту и предлагает действия каталога — выполняет их человек;
+  * `memory` (GET/POST) — что помощник помнит о владельце и цехе;
+  * `context` — что помощник видит сейчас: парк, очередь, долги, память;
+  * `dialog` (GET/POST) — разговор по сессиям и «начать заново»;
 
   * `status` — жив ли рантайм модели, какая модель, каталог действий;
   * `suggest` — предложения по пустым полям черновика (ничего не сохраняет);
@@ -179,8 +186,103 @@ def assistant_phrase(api: Any, ctx: Ctx):
     source = str(body.get("source") or "agent")[:60]
     event = service.journal(api.db, "phrase", "Фраза голосом", "heard", text,
                             {"source": source})
+    # 18.21: фразу понимает мозг помощника и отвечает словами (агент произнесёт
+    # ответ вслух). Действие с деньгами или печатью только предлагается — его
+    # выполняет человек кнопкой в панели; агента отсюда не зовём, чтобы голос
+    # не ходил по кругу агент → панель → агент.
+    from . import assistant_brain as brain
+    answer = brain.chat(api, text, session="voice", source=source, delegate=False)
     return {"ok": True, "text": text, "source": source, "event": event,
-            "reason": "", "hint": "Действие по фразе делает человек в панели помощника"}
+            "reason": "", "reply": answer.get("reply") or "",
+            "brain": {"kind": answer.get("kind"), "action": answer.get("action"),
+                      "params": answer.get("params") or {}, "steps": answer.get("steps") or []},
+            "hint": "Действие по фразе делает человек в панели помощника"}
+
+
+# --- 18.21: мозг помощника — разговор, память, контекст -------------------
+
+@router.post("/api/assistant/chat", doc="Помощник: разговор с мозгом помощника")
+def assistant_chat(api: Any, ctx: Ctx):
+    """Реплика владельца → ответ, действие каталога или команда компьютеру.
+
+    Тело: `{text, session, source}`. Сервер сам решает, куда идёт фраза: память,
+    факты базы, станок и заказ по имени, агент компьютера, модель. Действие с
+    деньгами или печатью возвращается карточкой (`action`, `params`) — адрес и
+    признак подтверждения берутся из каталога на сервере, выполняет человек.
+    """
+    from . import assistant_brain as brain
+
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    text = " ".join(str(body.get("text") or body.get("question") or "").split())[:1000]
+    if not text:
+        return 400, {"ok": False, "error": "Пустая фраза"}
+    return brain.chat(api, text, session=str(body.get("session") or "main"),
+                      source=str(body.get("source") or "panel")[:40],
+                      delegate=body.get("delegate", True) is not False)
+
+
+@router.get("/api/assistant/memory", doc="Помощник: что помнит помощник")
+def assistant_memory_list(api: Any, ctx: Ctx):
+    """Память помощника: все записи или найденные по словам (`q`)."""
+    from . import assistant_memory as memory
+
+    wanted = str(ctx.one("q") or "").strip()
+    limit = int(ctx.num("limit", 100))
+    rows = memory.recall(api.db, wanted, limit, touch=False) if wanted else memory.memories(api.db, limit)
+    return {"ok": True, "memories": rows, "count": len(rows), "stats": memory.stats(api.db),
+            "owner": memory.owner_name(api.db)}
+
+
+@router.post("/api/assistant/memory", doc="Помощник: запомнить, забыть, закрепить",
+             audit="Помощник: память")
+def assistant_memory_change(api: Any, ctx: Ctx):
+    """`{op: remember|forget|pin, text, kind, subject, id, pinned}` — память меняет только человек."""
+    from . import assistant_memory as memory
+
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    op = str(body.get("op") or "remember")
+    if op == "forget":
+        rows = memory.forget(api.db, body.get("id") or str(body.get("text") or ""))
+        return {"ok": bool(rows), "forgotten": rows, "reason": "" if rows else "Запись не найдена"}
+    if op == "pin":
+        done = memory.pin(api.db, int(body.get("id") or 0), bool(body.get("pinned", True)))
+        return {"ok": done, "reason": "" if done else "Запись не найдена"}
+    if op != "remember":
+        return 400, {"ok": False, "error": f"Неизвестная операция «{op}»"}
+    saved = memory.remember(api.db, str(body.get("text") or ""), str(body.get("kind") or "fact"),
+                            str(body.get("subject") or ""), source="panel", pinned=bool(body.get("pinned")))
+    return saved if saved.get("ok") else (400, saved)
+
+
+@router.get("/api/assistant/context", doc="Помощник: что помощник видит сейчас")
+def assistant_context(api: Any, ctx: Ctx):
+    """Сводка для боковой панели: дата, парк, очередь, долги, память, имя владельца."""
+    from . import assistant_brain as brain
+    return brain.context_summary(api)
+
+
+@router.get("/api/assistant/dialog", doc="Помощник: разговор по сессиям")
+def assistant_dialog(api: Any, ctx: Ctx):
+    """Реплики сессии (`session`, `limit`) и список сессий — разговор переживает перезагрузку."""
+    from . import assistant_memory as memory
+
+    session = memory.session_key(ctx.one("session") or "main")
+    return {"ok": True, "session": session,
+            "turns": memory.dialog(api.db, session, int(ctx.num("limit", 40))),
+            "sessions": memory.sessions(api.db)}
+
+
+@router.post("/api/assistant/dialog", doc="Помощник: начать разговор заново",
+             audit="Помощник: очистка разговора")
+def assistant_dialog_clear(api: Any, ctx: Ctx):
+    """`{op: "clear", session}` — стереть реплики сессии; память остаётся."""
+    from . import assistant_memory as memory
+
+    body = ctx.body if isinstance(ctx.body, dict) else {}
+    if str(body.get("op") or "clear") != "clear":
+        return 400, {"ok": False, "error": "Поддерживается только op=clear"}
+    session = memory.session_key(body.get("session") or "main")
+    return {"ok": True, "session": session, "cleared": memory.clear_dialog(api.db, session)}
 
 
 # --- 18.15: Авито и ТГ — прокси к агенту компьютера ------------------------
@@ -494,14 +596,17 @@ def assistant_system_audio_set(api, ctx):
 
 @router.get("/api/assistant/system/volume", doc="Помощник: громкость")
 def assistant_system_volume_get(api, ctx):
+    """Только прочитать громкость: GET ничего не меняет (до 18.21 ставил 0)."""
     from . import assistant as service
-    return service.system_volume(api.db, 0)
+    return service.system_volume(api.db)
 
 @router.post("/api/assistant/system/volume", doc="Помощник: задать громкость", audit="Помощник: громкость")
 def assistant_system_volume_set(api, ctx):
     from . import assistant as service
     body = ctx.body if isinstance(ctx.body, dict) else {}
-    return service.system_volume(api.db, int(body.get("level") or ctx.num("level", 0) or 0))
+    raw = body.get("level", ctx.one("level"))
+    level = None if raw in (None, "") else int(float(raw))
+    return service.system_volume(api.db, level, str(body.get("mute") or ""))
 
 @router.get("/api/assistant/system/display", doc="Помощник: дисплеи")
 def assistant_system_display(api, ctx):
@@ -519,9 +624,12 @@ def assistant_system_power(api, ctx):
     from . import assistant as service
     body = ctx.body if isinstance(ctx.body, dict) else {}
     confirmed = bool((body.get("confirmed") if isinstance(body, dict) else False) or ctx.arg("confirmed"))
+    action = str(body.get("action") or "").strip()
+    if not action:
+        return 400, {"ok": False, "reason": "Не названо действие питания: lock, sleep, restart, shutdown, cancel, screen_off"}
     if not confirmed:
-        return {"ok": False, "needs_confirmation": True, "reason": "Действие питания требует подтверждения", "text": f"Выполнить {str(body.get('action') or 'lock')}"}
-    return service.system_power(api.db, str(body.get("action") or "lock"))
+        return {"ok": False, "needs_confirmation": True, "reason": "Действие питания требует подтверждения", "text": f"Выполнить {action}"}
+    return service.system_power(api.db, action)
 
 @router.get("/api/assistant/system/health", doc="Помощник: здоровье ПК")
 def assistant_system_health(api, ctx):

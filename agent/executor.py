@@ -15,6 +15,10 @@
 Отказ здесь — нормальный ответ, а не исключение: у каждого отказа есть
 `reason`, который можно показать человеку и который объясняет `agent.why`.
 
+18.21: мозг помощника — навыки ПК стали настоящими (громкость Core Audio,
+питание, окна по имени программы, элементы окна, озвучка, описание экрана
+видящей моделью), добавлены программы, медиаклавиши, сочетания клавиш,
+свернуть/закрыть окно и память (`agent/pc.py`, `agent/brain.py`).
 18.18: автоустановка систем
 # 18.17: полноценный ассистент ПК (голос+система+зрение+окна+И206-И221)
 # 18.16: архив переписок, связка, расписание, дедуп, календарь ТГ, шаблоны, хештеги, поиск, экспорт, статистика
@@ -24,12 +28,15 @@
 
 from __future__ import annotations
 
+import datetime
 import pathlib
 from typing import Any, Callable
 
 from . import avito as avito_mod
-from . import capabilities, config, documents, fileops, model, skills, tg as tg_mod
+from . import capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
+from .learning import Learning
 from .panel_client import Client
+from .personal import Personal
 from .store import Store
 
 MAX_PASSAGES = 6
@@ -44,7 +51,7 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
         chain = " → ".join(str(step.get("skill")) for step in skill["steps"])
         return f"{title}: {chain}"
     if name == "panel.do":
-        return f"{title}: {params.get('action') or 'действие не указано'}"
+        return f"{title}: {params.get('explain') or params.get('action') or 'действие не указано'}"
     if name == "files.to_order":
         return f"{title}: {pathlib.Path(str(params.get('path') or '')).name} → заказ «{params.get('order') or '—'}»"
     if name == "files.tidy_apply":
@@ -97,7 +104,33 @@ def describe(skill: dict[str, Any], params: dict[str, Any]) -> str:
     if name == "system.audio_device":
         return f"{title}: {params.get('device_id') or 'список устройств'}"
     if name == "system.volume":
-        return f"{title}: громкость {params.get('level')}%"
+        if params.get("mute"):
+            return f"{title}: звук {'выключить' if params['mute'] == 'on' else 'включить' if params['mute'] == 'off' else 'переключить'}"
+        if params.get("level") is not None:
+            return f"{title}: громкость {params.get('level')}%"
+        if params.get("delta"):
+            return f"{title}: {'громче' if int(params['delta']) > 0 else 'тише'} на {abs(int(params['delta']))}%"
+        return f"{title}: узнать текущую"
+    if name == "system.power":
+        return f"{title}: {pc.POWER_ACTIONS.get(str(params.get('action') or ''), 'действие не указано')}"
+    if name == "app.open":
+        return f"{title}: «{params.get('target') or '—'}»"
+    if name == "system.media":
+        return f"{title}: {pc.MEDIA_ACTIONS.get(str(params.get('action') or ''), ('', 'действие не указано'))[1]}"
+    if name == "system.hotkey":
+        return f"{title}: нажать {params.get('keys') or '—'} в активном окне"
+    if name == "window.arrange":
+        verb = {"minimize": "свернуть", "maximize": "развернуть", "restore": "восстановить"}.get(
+            str(params.get("action") or ""), "действие не указано")
+        return f"{title}: {verb} «{params.get('title') or 'текущее окно'}»"
+    if name == "window.close":
+        return f"{title}: закрыть «{params.get('title') or '—'}» (программа спросит про несохранённое)"
+    if name == "memory.remember":
+        return f"{title}: «{str(params.get('text') or '')[:60]}»"
+    if name == "memory.forget":
+        return f"{title}: «{str(params.get('what') or '')[:60]}»"
+    if name == "voice.listen":
+        return f"{title}: открыть микрофон на {params.get('seconds') or '?'} с"
     if name == "window.focus":
         return f"{title}: фокус на «{params.get('title') or '—'}»"
     if name == "window.click":
@@ -141,7 +174,26 @@ class Runner:
         self.store = store if store is not None else Store()
         self.panel = panel if panel is not None else Client(config.PRINTFLOW_URL)
         self._caps: dict[str, Any] = {}
+        # Часы помощника: мозг подменяет их своими — «сейчас» одно на весь разговор.
+        self.clock: Callable[[], datetime.datetime] = datetime.datetime.now
+        self._personal: Personal | None = None
+        self._learning: Learning | None = None
         self.refresh_capabilities()
+
+    # --- личное и обучение (18.22) ------------------------------------------
+    @property
+    def personal(self) -> Personal:
+        """Напоминания, списки, цели, привычки, расходы, дневник — таблицы своей базы."""
+        if self._personal is None:
+            self._personal = Personal(self.store)
+        return self._personal
+
+    @property
+    def learning(self) -> Learning:
+        """Выученные фразы, поправки, синонимы, непонятое и привычки владельца."""
+        if self._learning is None:
+            self._learning = Learning(self.store)
+        return self._learning
 
     # --- способности ------------------------------------------------------
     def refresh_capabilities(self) -> dict[str, Any]:
@@ -343,7 +395,18 @@ class Runner:
             "assistant.macro": self._assistant_macro,
             "assistant.macros": self._assistant_macros,
             "assistant.macro_run": self._assistant_macro_run,
+            # 18.21
+            "app.open": self._app_open,
+            "system.media": self._system_media,
+            "system.hotkey": self._system_hotkey,
+            "window.arrange": self._window_arrange,
+            "window.close": self._window_close,
+            "memory.remember": self._memory_remember,
+            "memory.recall": self._memory_recall,
+            "memory.forget": self._memory_forget,
         }
+        # 18.22: личные навыки и обучение живут в своём модуле.
+        handlers.update(personal_skills.handlers(self))
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
             return {"ok": False,
@@ -387,8 +450,12 @@ class Runner:
         result = self.panel.run_action(action, values, confirmed=confirmed)
         result["title_action"] = str(action.get("title") or action.get("id") or "")
         result["panel_confirm"] = confirmed
+        explain = " ".join(str(params.get("explain") or "").split())[:300]
+        result["target"] = explain or result["title_action"]
         if not confirmed:
             result["hint"] = "Действие чтения: выполнено без подтверждения"
+        elif explain and result.get("ok"):
+            result["hint"] = explain  # в журнал — что именно сделано словами панели, а не «готово»
         return result
 
     def _panel_ask(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -781,8 +848,6 @@ class Runner:
 
         listing = None
         if listing_id:
-            rows = self.store.list_avito_listings(limit=1)
-            # ищем по id
             all_rows = self.store._rows("SELECT * FROM avito_listings WHERE id=?", (listing_id,))
             listing = all_rows[0] if all_rows else None
         if listing:
@@ -983,7 +1048,16 @@ class Runner:
 
     # --- 18.17: система (И206, И208, И209) + голос+окна+зрение+буфер ---------
     def _system_autostart(self, params: dict) -> dict:
-        enabled = bool(params.get("enabled")) if "enabled" in params else True
+        if "enabled" not in params:
+            # Без явного «включить/выключить» реестр Windows не трогаем: вызов
+            # навыка пустым (тест диспетчера, ошибка модели) не должен ничего менять.
+            try:
+                from . import system as sys_mod
+                on, reason = sys_mod.autostart_status(str(params.get("app_name") or "PrintFlowAssistant"))
+                return {"ok": False, "enabled": on, "reason": reason or "Скажите явно: включить или выключить автозагрузку (enabled)"}
+            except Exception as exc:
+                return {"ok": False, "reason": f"Автозагрузка не прочитана: {exc}"}
+        enabled = bool(params.get("enabled"))
         app_name = str(params.get("app_name") or "PrintFlowAssistant").strip()[:120]
         try:
             from . import system as sys_mod
@@ -1031,31 +1105,47 @@ class Runner:
             return {"ok": False, "reason": f"Аудио-устройства не получены: {exc}"}
 
     def _system_volume(self, params: dict) -> dict:
+        """Общая громкость: уровень, «громче/тише» на дельту, выключить/включить звук."""
+        mute = str(params.get("mute") or "").strip()
+        if mute:
+            state, reason = pc.mute_set(None if mute == "toggle" else mute == "on")
+            if reason:
+                return {"ok": False, "reason": reason}
+            return {"ok": True, **state, "reason": "",
+                    "hint": "Звук выключен" if state.get("muted") else "Звук включён"}
         level = params.get("level")
-        try:
-            from . import system as sys_mod
-            if level is None or level == "":
-                cur, reason = sys_mod.get_volume()
-                if reason and cur == 0:
+        delta = params.get("delta")
+        if level is None and delta:
+            current, reason = pc.volume_get()
+            if current.get("level") is not None:
+                level = int(current["level"]) + int(delta)
+            else:
+                title, reason = pc.media("volume_up" if int(delta) > 0 else "volume_down",
+                                         max(1, abs(int(delta)) // 2))
+                if reason:
                     return {"ok": False, "reason": reason}
-                return {"ok": True, "level": cur, "reason": ""}
-            lvl = max(0, min(100, int(level)))
-            ok, reason = sys_mod.set_volume(lvl)
-            return {"ok": ok, "level": lvl, "reason": reason,
-                    "hint": f"Громкость {lvl}%" if ok else reason}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Громкость не изменена: {exc}"}
+                return {"ok": True, "level": None, "approximate": True, "reason": "", "hint": title}
+        if level is None:
+            state, reason = pc.volume_get()
+            if reason:
+                return {"ok": False, "reason": reason}
+            return {"ok": True, **state, "reason": "", "hint": f"Громкость {state.get('level')}%"}
+        state, reason = pc.volume_set(max(0, min(100, int(level))))
+        if reason and not state:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, **state, "reason": "", "hint": f"Громкость {state.get('level')}%"}
 
     def _system_display(self, _params: dict) -> dict:
+        """Главный экран и число мониторов (GetSystemMetrics)."""
+        if not pc.IS_WINDOWS:
+            return {"ok": False, "reason": "Мониторы читаются только в Windows"}
         try:
             import ctypes
-            if sys_mod_is_win := __import__("sys").platform.startswith("win"):
-                user32 = ctypes.windll.user32
-                w = user32.GetSystemMetrics(0)
-                h = user32.GetSystemMetrics(1)
-                cnt = user32.GetSystemMetrics(80) if hasattr(user32, "GetSystemMetrics") else 1
-                return {"ok": True, "width": w, "height": h, "monitors": cnt, "reason": ""}
-            return {"ok": True, "width": 0, "height": 0, "monitors": 0, "reason": "Только Windows"}
+            user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+            width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+            count = user32.GetSystemMetrics(80)  # SM_CMONITORS
+            return {"ok": True, "width": width, "height": height, "monitors": count, "reason": "",
+                    "hint": f"Мониторов: {count}, главный {width}×{height}"}
         except Exception as exc:
             return {"ok": False, "reason": f"Дисплей не прочитан: {exc}"}
 
@@ -1072,40 +1162,29 @@ class Runner:
             return {"ok": False, "reason": f"Фокус не включён: {exc}"}
 
     def _system_power(self, params: dict) -> dict:
-        action = str(params.get("action") or "lock").strip().lower()
-        if action not in ("lock", "sleep", "restart"):
-            return {"ok": False, "reason": "action должен быть lock|sleep|restart"}
-        # только после подтверждения — уже проверено в run()
-        return {"ok": True, "action": action, "reason": "",
-                "hint": f"Действие {action} требует выполнения в Windows — агент покажет окно подтверждения",
-                "needs_os": True}
+        """Питание — только названное действие и только после подтверждения (см. `run`)."""
+        action = str(params.get("action") or "").strip().lower()
+        if not action:
+            return {"ok": False, "reason": "Скажите, что сделать: " + ", ".join(pc.POWER_ACTIONS)}
+        done, reason = pc.power(action)
+        if reason:
+            return {"ok": False, "action": action, "reason": reason}
+        hint = done
+        if action in ("restart", "shutdown"):
+            hint += ". Передумали — скажите «отмени выключение» в течение минуты"
+        return {"ok": True, "action": action, "done": done, "reason": "", "hint": hint}
 
     def _system_health(self, _params: dict) -> dict:
-        try:
-            import shutil, os
-            disk = shutil.disk_usage("/")
-            total = disk.total // (1024*1024*1024)
-            free = disk.free // (1024*1024*1024)
-            # память — через psutil fallback
-            mem_info = {}
-            try:
-                import ctypes
-                if __import__("sys").platform.startswith("win"):
-                    class MEMSTAT(ctypes.Structure):
-                        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
-                                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
-                    stat = MEMSTAT()
-                    stat.dwLength = ctypes.sizeof(MEMSTAT)
-                    ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-                    mem_info = {"load": int(stat.dwMemoryLoad), "total_gb": int(stat.ullTotalPhys // (1024**3)), "avail_gb": int(stat.ullAvailPhys // (1024**3))}
-            except Exception:
-                pass
-            return {"ok": True, "disk_total_gb": total, "disk_free_gb": free, "memory": mem_info, "reason": ""}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Здоровье не прочитано: {exc}"}
+        """Снимок здоровья: процессор, память, диски, время работы, батарея."""
+        state, reason = pc.health()
+        if reason:
+            return {"ok": False, "reason": reason}
+        warnings = pc.health_warnings(state)
+        return {"ok": True, **state, "warnings": warnings, "reason": "",
+                # Поля 18.17 оставлены для панели и старых клиентов.
+                "disk_total_gb": int((state.get("disks") or [{}])[0].get("total_gb") or 0),
+                "disk_free_gb": int((state.get("disks") or [{}])[0].get("free_gb") or 0),
+                "hint": "Всё спокойно" if not warnings else "Внимание: " + "; ".join(warnings)}
 
     def _window_active(self, _params: dict) -> dict:
         try:
@@ -1131,57 +1210,37 @@ class Runner:
     def _window_focus(self, params: dict) -> dict:
         title = str(params.get("title") or "").strip()
         if not title:
-            return {"ok": False, "reason": "Не указан заголовок окна"}
-        try:
-            from .winapi import window_rect
-            import ctypes
-            rect, reason = window_rect(title)
-            if reason:
-                return {"ok": False, "reason": reason}
-            # SetForegroundWindow
-            if __import__("sys").platform.startswith("win"):
-                user32 = ctypes.windll.user32
-                # найдём hwnd по заголовку
-                hwnd = user32.FindWindowW(None, rect.get("title") or title)
-                if hwnd:
-                    user32.SetForegroundWindow(hwnd)
-                    return {"ok": True, "title": rect.get("title"), "rect": rect, "reason": ""}
-            return {"ok": True, "title": rect.get("title"), "rect": rect, "reason": "", "hint": "Окно найдено, фокус — только Windows"}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Фокус не переключён: {exc}"}
+            return {"ok": False, "reason": "Не указано окно: скажите название программы или часть заголовка"}
+        row, reason = pc.focus(title)
+        if row is None:
+            return {"ok": False, "reason": reason}
+        return {"ok": not reason, "title": row["title"], "process": row.get("process", ""),
+                "reason": reason, "hint": f"На переднем плане: {row['title']}" if not reason else reason}
 
     def _window_text(self, params: dict) -> dict:
         title = str(params.get("title") or "").strip()
-        try:
-            from .winapi import active_window, window_rect
-            if title:
-                rect, reason = window_rect(title)
-                if reason:
-                    return {"ok": False, "reason": reason}
-                return {"ok": True, "title": rect.get("title"), "text": rect.get("title"), "reason": "", "hint": "Текст окна — заголовок, без OCR"}
-            t, reason = active_window()
-            if reason:
-                return {"ok": False, "reason": reason}
-            return {"ok": True, "title": t, "text": t, "reason": ""}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Текст окна не прочитан: {exc}"}
+        state, reason = pc.window_text(title)
+        if reason and not state:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, **state, "reason": "",
+                "hint": "Текст элементов окна" if state.get("text") else "Окно не отдаёт текст элементов"}
 
     def _window_controls(self, params: dict) -> dict:
         title = str(params.get("title") or "").strip()
-        # заглушка: возвращаем список окон как контролы
-        try:
-            from .winapi import list_windows
-            titles, reason = list_windows(30)
-            if reason:
-                return {"ok": False, "reason": reason}
-            controls = [{"name": t[:120], "type": "window"} for t in titles]
-            return {"ok": True, "controls": controls, "count": len(controls), "reason": "", "hint": "UIA пока не подключён — показываем окна"}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Элементы не прочитаны: {exc}"}
+        rows, reason = pc.controls(title)
+        if reason and not rows:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "controls": rows, "count": len(rows), "reason": "",
+                "hint": (f"Элементов: {len(rows)}" if rows
+                         else "Программа рисует интерфейс сама — стандартных элементов нет")}
 
     def _window_click(self, params: dict) -> dict:
-        x = int(params.get("x") or 0)
-        y = int(params.get("y") or 0)
+        if params.get("x") is None or params.get("y") is None:
+            # Раньше пустой вызов кликал в угол экрана (0, 0) — туда, где у
+            # Windows меню «Пуск» и горячий угол. Координаты обязательны.
+            return {"ok": False, "reason": "Нужны координаты x и y: куда кликать, помощник не угадывает"}
+        x = int(params.get("x"))
+        y = int(params.get("y"))
         # проверка whitelist
         try:
             from .winapi import active_window
@@ -1217,31 +1276,12 @@ class Runner:
         left_title = str(params.get("left_title") or "").strip()
         right_title = str(params.get("right_title") or "").strip()
         if not left_title or not right_title:
-            return {"ok": False, "reason": "Нужны left_title и right_title"}
-        try:
-            from .winapi import window_rect
-            import ctypes
-            l_rect, l_reason = window_rect(left_title)
-            r_rect, r_reason = window_rect(right_title)
-            if l_reason:
-                return {"ok": False, "reason": l_reason}
-            if r_reason:
-                return {"ok": False, "reason": r_reason}
-            if not __import__("sys").platform.startswith("win"):
-                return {"ok": True, "left": l_rect, "right": r_rect, "reason": "", "hint": "Разложить — только Windows"}
-            user32 = ctypes.windll.user32
-            sw = user32.GetSystemMetrics(0)
-            sh = user32.GetSystemMetrics(1)
-            # найдём hwnd
-            hl = user32.FindWindowW(None, l_rect.get("title") or left_title)
-            hr = user32.FindWindowW(None, r_rect.get("title") or right_title)
-            if hl:
-                user32.MoveWindow(hl, 0, 0, sw//2, sh, 1)
-            if hr:
-                user32.MoveWindow(hr, sw//2, 0, sw//2, sh, 1)
-            return {"ok": True, "left": l_rect, "right": r_rect, "reason": "", "hint": "Окна разложены 50/50"}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Разложить не удалось: {exc}"}
+            return {"ok": False, "reason": "Нужны два окна: left_title и right_title"}
+        state, reason = pc.snap(left_title, right_title)
+        if reason:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "left": state["left"], "right": state["right"], "reason": "",
+                "hint": "Окна разложены 50/50"}
 
     def _screen_shot(self, params: dict) -> dict:
         max_side = int(params.get("max_side") or 800)
@@ -1270,21 +1310,28 @@ class Runner:
             return {"ok": False, "reason": f"Снимок области не получился: {exc}"}
 
     def _screen_describe(self, params: dict) -> dict:
-        max_side = int(params.get("max_side") or 800)
+        """Описание экрана только видящей моделью: текстовая раньше «описывала» наугад."""
+        max_side = max(320, min(1600, int(params.get("max_side") or 1024)))
+        seeing, why = model.vision_ok()
+        if not seeing:
+            window, _reason = winapi.active_window()
+            return {"ok": False, "reason": why, "window": window,
+                    "hint": f"Активное окно: {window}" if window else ""}
         try:
-            from .winapi import grab_screen
-            data, reason = grab_screen(max_side)
-            if reason:
-                return {"ok": False, "reason": reason}
-            state = model.status()
-            if not state.get("ok"):
-                return {"ok": False, "reason": f"Модель недоступна: {state.get('reason')}", "size": len(data)}
-            # модель описывает — заглушка, так как картинку в текст не передаём без vision-модели
-            prompt = "Опиши что на экране одним предложением, без выдумок."
-            res = model.complete(prompt)
-            return {"ok": res.get("ok"), "description": res.get("text") or "", "size": len(data), "reason": res.get("reason") or ""}
+            data, reason = winapi.grab_screen(max_side)
         except Exception as exc:
-            return {"ok": False, "reason": f"Описание не получилось: {exc}"}
+            return {"ok": False, "reason": f"Снимок не получился: {exc}"}
+        if reason:
+            return {"ok": False, "reason": reason}
+        question = str(params.get("question") or "").strip()[:300]
+        reply = model.chat(
+            [{"role": "user", "content": (question or "Что на этом снимке экрана? Назови программу, "
+                                          "главное содержимое и то, что требует внимания.")}],
+            system=("Ты описываешь снимок экрана владельца мастерской. Отвечай по-русски, "
+                    "два-четыре предложения, только то, что видно на снимке. Не выдумывай."),
+            images=[data], temperature=0.1)
+        return {"ok": bool(reply.get("ok")), "description": reply.get("text") or "", "size": len(data),
+                "model": reply.get("model") or "", "reason": reply.get("reason") or ""}
 
     def _screen_find(self, params: dict) -> dict:
         txt = str(params.get("text") or "").strip()
@@ -1295,7 +1342,9 @@ class Runner:
             found, reason = find_text_on_screen(txt)
             if reason and not found:
                 return {"ok": False, "reason": reason}
-            return {"ok": True, "found": found, "reason": ""}
+            method = "ocr" if self.caps.get("ocr") else "titles"
+            return {"ok": True, "found": found, "method": method, "reason": "",
+                    "hint": "" if method == "ocr" else "Без распознавания текста ищу только в заголовках окон"}
         except Exception as exc:
             return {"ok": False, "reason": f"Поиск не удался: {exc}"}
 
@@ -1350,33 +1399,55 @@ class Runner:
             return {"ok": False, "reason": f"Стереть не удалось: {exc}"}
 
     def _voice_listen(self, params: dict) -> dict:
-        seconds = max(1, min(30, int(params.get("seconds") or 5)))
+        """Послушать микрофон названное число секунд и распознать речь локально."""
+        if params.get("seconds") is None:
+            return {"ok": False, "reason": "Скажите, сколько секунд слушать (seconds): микрофон не открывается «на всякий случай»"}
+        seconds = max(1, min(30, int(params.get("seconds"))))
         try:
             from . import speech as speech_mod
-            # заглушка — без модели
-            return {"ok": False, "reason": "Распознавание речи требует vosk/faster-whisper — установите зависимости агента", "seconds": seconds}
+            recognizer = speech_mod.Recognizer()
+            text, reason = speech_mod.record_and_transcribe(recognizer, seconds)
         except Exception as exc:
-            return {"ok": False, "reason": f"Слушать не удалось: {exc}"}
+            return {"ok": False, "reason": f"Слушать не удалось: {exc}", "seconds": seconds}
+        if reason:
+            return {"ok": False, "reason": reason, "seconds": seconds}
+        return {"ok": True, "text": text, "seconds": seconds, "reason": "",
+                "hint": f"Услышал: «{text}»" if text else "Речь не распознана"}
 
     def _voice_say(self, params: dict) -> dict:
         txt = str(params.get("text") or "").strip()
         tone = str(params.get("tone") or "").strip()
         if not txt:
             return {"ok": False, "reason": "Пустой текст для озвучки"}
-        # сохраняем профиль
         try:
             if tone:
                 self.store.set_preference("voice.tone", tone)
+            prefs = {row["key"]: row["value"] for row in self.store.list_preferences(100)}
         except Exception:
-            pass
-        return {"ok": True, "text": txt[:500], "tone": tone, "reason": "", "hint": "Озвучка — внешний TTS, пока возвращаем текст"}
+            prefs = {}
+        rate = {"быстро": 3, "fast": 3, "медленно": -3, "slow": -3}.get(str(prefs.get("voice.speed") or "").casefold(), 0)
+        if tone.casefold() in ("тревога", "alarm", "срочно"):
+            rate += 1
+        try:
+            volume = int(prefs.get("voice.volume") or 100)
+        except (TypeError, ValueError):
+            volume = 100
+        state, reason = pc.speak(txt, rate=rate, volume=volume)
+        if reason:
+            return {"ok": False, "text": txt[:500], "spoken": False, "reason": reason}
+        return {"ok": True, "text": txt[:500], "tone": tone, "spoken": True, **state, "reason": "",
+                "hint": "Говорю вслух"}
 
     def _voice_dictate(self, params: dict) -> dict:
-        # слушать + ввод
-        listen_res = self._voice_listen(params)
-        if not listen_res.get("ok"):
-            return listen_res
-        return {"ok": False, "reason": "Диктовка требует микрофон и модель речи"}
+        """Диктовка: послушать и ввести в активное окно (подтверждение уже получено в `run`)."""
+        heard = self._voice_listen(params)
+        if not heard.get("ok"):
+            return heard
+        text = str(heard.get("text") or "").strip()
+        if not text:
+            return {"ok": False, "reason": "Речь не распознана — вводить нечего"}
+        ok, reason = winapi.type_text(text)
+        return {"ok": ok, "text": text, "reason": reason, "hint": f"Введено: «{text[:80]}»" if ok else reason}
 
     def _voice_note(self, params: dict) -> dict:
         txt = str(params.get("text") or "").strip()
@@ -1385,20 +1456,35 @@ class Runner:
             return {"ok": False, "reason": "Пустая заметка"}
         try:
             note = self.store.add_note(txt, due)
-            return {"ok": True, "note": note, "reason": ""}
         except Exception as exc:
             return {"ok": False, "reason": f"Заметка не сохранена: {exc}"}
+        # До 18.22 «заметка на завтра» только записывалась и никогда не всплывала.
+        # Срок словами становится настоящим напоминанием — его поднимет планировщик.
+        parsed = when.parse(due, self.clock()) if due else None
+        if parsed and not parsed["past"]:
+            reminder = self.personal.add_reminder(txt, parsed["at"], parsed["repeat"], source="note")
+            return {"ok": True, "note": note, "reminder": reminder, "reason": "",
+                    "say": f"Заметка сохранена, напомню {parsed['label']}."}
+        return {"ok": True, "note": note, "reason": ""}
 
     def _voice_command(self, params: dict) -> dict:
+        """Фраза → понятый навык и параметры. Ничего не выполняет — только разбор."""
         txt = str(params.get("text") or "").strip()
         if not txt:
             return {"ok": False, "reason": "Пустая команда"}
-        # парсим как intent панели
-        try:
-            # используем panel.actions для подсказки — заглушка
-            return {"ok": True, "command": txt, "reason": "", "hint": "Команда распознана, действие — через panel.do с подтверждением"}
-        except Exception as exc:
-            return {"ok": False, "reason": f"Команда не разобрана: {exc}"}
+        from . import brain
+        plan = brain.understand(txt)
+        if plan is None:
+            return {"ok": True, "command": txt, "plan": None, "reason": "",
+                    "hint": "Правила фразу не поняли — окно помощника спросит модель"}
+        skill = skills.get(plan["skill"]) or {}
+        # Понятое кладётся в `plan`, а не в `skill`/`params`: эти поля ответа
+        # принадлежат самому навыку `voice.command` (их заполняет `Runner.run`).
+        return {"ok": True, "command": txt,
+                "plan": {"skill": plan["skill"], "params": plan["params"],
+                         "title": skill.get("title", plan["skill"]),
+                         "confirm": skills.confirm_required(skill) if skill else False},
+                "reason": "", "hint": f"Понял как «{skill.get('title', plan['skill'])}»"}
 
     def _voice_profile(self, params: dict) -> dict:
         speed = str(params.get("speed") or "").strip()
@@ -1470,7 +1556,10 @@ class Runner:
     def _focus_stop(self, params: dict) -> dict:
         timer_id = int(params.get("timer_id") or 0)
         if not timer_id:
-            return {"ok": False, "reason": "Не указан timer_id"}
+            running = [row for row in self.store.list_focus_timers(20) if row.get("status") == "running"]
+            if not running:
+                return {"ok": False, "reason": "Запущенных таймеров нет"}
+            timer_id = int(running[0]["id"])
         try:
             ok = self.store.stop_focus_timer(timer_id)
             return {"ok": ok, "timer_id": timer_id, "reason": "" if ok else "Таймер не найден"}
@@ -1648,7 +1737,11 @@ class Runner:
 
     def _system_install(self, params: dict) -> dict:
         """Автоустановка (И222): pip ставит только то, чего нет; модели — по слову."""
-        what = str(params.get("what") or "pip").strip().lower()
+        what = str(params.get("what") or "").strip().lower()
+        if not what:
+            # Пустой вызов раньше означал «pip»: тест диспетчера на машине
+            # разработчика ставил пакеты по-настоящему. Что ставить — называется явно.
+            return {"ok": False, "reason": "Скажите, что ставить: pip, requirements, models или full (what)"}
         if what not in ("pip", "requirements", "models", "full"):
             return {"ok": False, "reason": f"what должен быть pip|requirements|models|full, а не {what}"}
         confirm_text = str(params.get("confirm_text") or "").strip().casefold()
@@ -1809,6 +1902,96 @@ class Runner:
                 "available": available, "reason": "" if available else unavailable_reason,
                 "learned_at": saved["learned_at"],
                 "hint": "Выученный навык исполняет шаги подряд и всегда спрашивает подтверждение"}
+
+    # --- 18.21: программы, медиа, клавиши, окна, память --------------------
+    def _app_open(self, params: dict) -> dict:
+        target = str(params.get("target") or "").strip()
+        if not target:
+            return {"ok": False, "reason": "Скажите, что открыть: программу, сайт или папку"}
+        plan, reason = pc.open_target(target, self.panel.url, config.file_folders())
+        if reason:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "title": plan.get("title"), "kind": plan.get("kind"),
+                "target": plan.get("target") or target, "reason": "",
+                "hint": f"Открыто: {plan.get('title')}"}
+
+    def _system_media(self, params: dict) -> dict:
+        action = str(params.get("action") or "").strip()
+        if not action:
+            return {"ok": False, "reason": "Скажите, что сделать: " + ", ".join(pc.MEDIA_ACTIONS)}
+        done, reason = pc.media(action)
+        if reason:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "action": action, "done": done, "reason": "", "hint": done}
+
+    def _system_hotkey(self, params: dict) -> dict:
+        keys = str(params.get("keys") or "").strip()
+        if not keys:
+            return {"ok": False, "reason": "Не сказано, какие клавиши нажать"}
+        window, _why = winapi.active_window()
+        if window and not self._window_allowed(window):
+            return {"ok": False, "reason": f"Окно «{window}» не в белом списке — добавьте его через safety.whitelist_save"}
+        pressed, reason = pc.press_combo(keys)
+        if reason:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "keys": pressed, "window": window, "reason": "",
+                "hint": f"Нажато {'+'.join(pressed)}" + (f" в «{window}»" if window else "")}
+
+    def _window_arrange(self, params: dict) -> dict:
+        action = str(params.get("action") or "").strip()
+        if not action:
+            return {"ok": False, "reason": "Скажите, что сделать с окном: свернуть, развернуть или восстановить"}
+        row, reason = pc.arrange(str(params.get("title") or ""), action)
+        if row is None:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "title": row["title"], "done": row.get("done"), "action": action, "reason": "",
+                "hint": f"«{row['title']}» {row.get('done')}"}
+
+    def _window_close(self, params: dict) -> dict:
+        row, reason = pc.close_window(str(params.get("title") or ""))
+        if row is None:
+            return {"ok": False, "reason": reason}
+        return {"ok": True, "title": row["title"], "reason": "",
+                "hint": f"Окно «{row['title']}» попросили закрыться"}
+
+    def _memory_remember(self, params: dict) -> dict:
+        text = str(params.get("text") or "").strip()
+        if not text:
+            return {"ok": False, "reason": "Что запомнить? Текст пустой"}
+        saved = self.store.remember(text, kind=str(params.get("kind") or "fact"),
+                                    subject=str(params.get("subject") or ""), source="skill")
+        if not saved.get("ok"):
+            return {"ok": False, "reason": saved.get("reason") or "Не запомнил"}
+        return {"ok": True, "memory": saved["memory"], "duplicate": bool(saved.get("duplicate")),
+                "reason": "", "hint": "Уже помню" if saved.get("duplicate") else "Запомнил"}
+
+    def _memory_recall(self, params: dict) -> dict:
+        query = str(params.get("query") or "").strip()
+        limit = max(1, min(50, int(params.get("limit") or 10)))
+        rows = self.store.recall(query, limit) if query else self.store.memories(limit)
+        return {"ok": True, "memories": rows, "count": len(rows), "reason": "",
+                "hint": f"Записей: {len(rows)}" if rows else "В памяти ничего не нашлось"}
+
+    def _memory_forget(self, params: dict) -> dict:
+        what = str(params.get("what") or "").strip()
+        if not what:
+            return {"ok": False, "reason": "Что забыть? Назовите запись словами или номером"}
+        rows = self.store.forget(what)
+        if not rows:
+            return {"ok": False, "reason": f"В памяти нет уверенного совпадения с «{what}»"}
+        return {"ok": True, "forgotten": rows, "count": len(rows), "reason": "",
+                "hint": "Забыто: " + "; ".join(str(row.get("text"))[:60] for row in rows)}
+
+    def _window_allowed(self, title: str) -> bool:
+        """Белый список окон (И220): пуст — разрешено всё, иначе только перечисленные."""
+        try:
+            rows = self.store.list_whitelist(200)
+        except Exception:
+            return True
+        if not rows:
+            return True
+        low = str(title or "").casefold()
+        return any(str(row.get("app_name") or "").casefold() in low and row.get("allowed") for row in rows)
 
 
 def _summary(result: dict[str, Any]) -> str:

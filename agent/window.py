@@ -24,7 +24,7 @@ def url(port: int) -> str:
     return f"http://127.0.0.1:{int(port)}/ui"
 
 
-def open_window(address: str, title: str = "Ассистент NOZZA",
+def open_window(address: str, title: str = "Помощник NOZZA",
                 width: int = 1080, height: int = 820) -> dict[str, Any]:
     """Открыть страницу ассистента окном. Отказ всегда с причиной и советом."""
     address = str(address or "")
@@ -45,7 +45,7 @@ def open_window(address: str, title: str = "Ассистент NOZZA",
             try:
                 window = webview.create_window(title, address,
                                                width=int(width), height=int(height),
-                                               resizable=True)
+                                               resizable=True, min_size=(420, 560))
                 webview.start(window)
             except Exception as exc:  # нет дисплея: служба Windows, SSH, контейнер
                 # Окно — удобный слой, а не обязательный: страница по тому же

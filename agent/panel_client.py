@@ -210,6 +210,32 @@ class Client:
             return {"ok": False, "reason": reason or "панель не ответила"}
         return payload
 
+    def chat(self, text: str, session: str = "voice", source: str = "agent") -> dict[str, Any]:
+        """Разговор с мозгом панели (18.21): вопрос цеха отвечает панель, не агент."""
+        ok, payload, reason = _request(f"{self.url}/api/assistant/chat",
+                                       payload={"text": str(text), "session": str(session),
+                                                "source": str(source), "delegate": False},
+                                       timeout=self.timeout)
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "reason": reason or "панель не ответила"}
+        return payload
+
+    def context(self) -> dict[str, Any]:
+        """Сводка цеха одной строкой (станки, долги, имя владельца) — без записи в диалог панели."""
+        ok, payload, reason = _request(f"{self.url}/api/assistant/context", timeout=min(self.timeout, 4.0))
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "reason": reason or "панель не ответила"}
+        return payload
+
+    def clear_dialog(self, session: str) -> dict[str, Any]:
+        """Забыть контекст разговора агента в панели («его», «второй») — вместе с лентой окна."""
+        ok, payload, reason = _request(f"{self.url}/api/assistant/dialog",
+                                       payload={"op": "clear", "session": str(session)},
+                                       timeout=min(self.timeout, 4.0))
+        if not ok or not isinstance(payload, dict):
+            return {"ok": False, "reason": reason or "панель не ответила"}
+        return payload
+
     def day(self, kind: str = "briefing", days: int = 1) -> dict[str, Any]:
         """Утренний брифинг или итог дня (идея И174)."""
         query = urllib.parse.urlencode({"kind": str(kind or "briefing"), "days": int(days or 1)})

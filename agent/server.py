@@ -9,6 +9,10 @@
 навыков с доступностью, `/skill` исполняет навык, `/journal` показывает след
 действий на этом компьютере, а `/ui` отдаёт страницу окна ассистента.
 
+С 18.21 у агента есть мозг (`brain.py`): `POST /chat` принимает фразу и отвечает
+словами, `GET /chat/history` отдаёт разговор, `GET|POST /memory` — память.
+Панель зовёт `/chat` с `mode="pc"`, когда фраза похожа на команду компьютеру.
+
 Предохранители:
   * слушаем только 127.0.0.1 — агент недоступен из сети даже случайно;
   * любое действие в чужом окне и любой навык с риском `write` сначала
@@ -17,7 +21,13 @@
   * признак подтверждения берётся из реестра навыков (`skills.confirm_required`),
     а не из тела запроса: понизить его вызовом нельзя;
   * снимок экрана возвращается байтами тому, кто спросил, и не сохраняется;
-  * без зависимостей сервер жив и честно отдаёт причины в `/capabilities`.
+  * без зависимостей сервер жив и честно отдаёт причины в `/capabilities`;
+  * 18.21: чужие сайты в браузере до агента не достают. Раньше ответы несли
+    `Access-Control-Allow-Origin: *`, и любая открытая страница могла читать
+    буфер обмена, список окон и найденные документы через `fetch` на
+    127.0.0.1. Теперь запрос с чужим `Origin` или чужим `Host` (перепривязка
+    DNS) получает 403, а CORS-заголовков нет вовсе: панель ходит к агенту с
+    сервера, окно агента — со своего же адреса.
 """
 from __future__ import annotations
 
@@ -29,11 +39,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import capabilities, config, executor, skills, speech, ui, window, winapi
+from . import brain as brain_mod
+from . import capabilities, config, executor, pc, skills, speech, ui, window, winapi
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
 PENDING_TTL_SEC = 60.0
+# Планировщик личного (18.22): как часто проверять напоминания, таймеры и привычки.
+SCHEDULER_SEC = 20.0
+# Имена, под которыми агент доступен своему окну и панели. Всё остальное в
+# `Host` — признак перепривязки DNS (сайт, выдающий себя за 127.0.0.1).
+LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
 
 
 class Agent:
@@ -50,6 +66,10 @@ class Agent:
         # обязан стартовать (и отвечать на `/health`) даже там, где папка базы
         # ещё не создана, а навыки никто не звал.
         self._runner: executor.Runner | None = None
+        self._brain: brain_mod.Brain | None = None
+        self._stop = threading.Event()
+        # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
+        self.microphone.handler = self.voice_phrase
 
     @property
     def runner(self) -> executor.Runner:
@@ -57,6 +77,146 @@ class Agent:
         if self._runner is None:
             self._runner = executor.Runner()
         return self._runner
+
+    @property
+    def brain(self) -> brain_mod.Brain:
+        """Мозг помощника: правила, контекст, память, модель — поверх навыков."""
+        if self._brain is None:
+            self._brain = brain_mod.Brain(self)
+        return self._brain
+
+    def chat(self, text: str, session: str = "main", mode: str = "full",
+             plan: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Фраза человека → ответ мозга. Способности обновляются перед разговором."""
+        if mode != "pc" or plan:
+            self.runner.refresh_capabilities()
+        return self.brain.chat(text, session=session, mode=mode, plan=plan)
+
+    # --- планировщик личного (18.22) ---------------------------------------
+    def tick(self, now: Any = None) -> list[dict[str, Any]]:
+        """Один шаг: напоминания, закончившиеся таймеры, заметки со сроком, привычки.
+
+        До 18.22 таймер фокуса только записывался в базу, а заметка «на завтра»
+        не всплывала никогда — будильника у агента не было. Сработавшее
+        становится уведомлением окна (`/notifications`) и, если есть озвучка,
+        звучит вслух.
+        """
+        try:
+            fired = self.runner.personal.tick(now)
+        except Exception as exc:  # noqa: BLE001 — планировщик не имеет права уронить агента
+            print(f"  ⚠ Планировщик: {exc.__class__.__name__}: {exc}")
+            return []
+        if fired and self._voice_notify():
+            for item in fired[:3]:
+                try:
+                    pc.speak(f"{item['title']}: {item['text']}"[:300])
+                except Exception:  # noqa: BLE001
+                    pass
+        return fired
+
+    def _voice_notify(self) -> bool:
+        if not self.capabilities.get("speech_out"):
+            return False
+        try:
+            pref = self.runner.store.get_preference("notify.voice")
+        except Exception:  # noqa: BLE001
+            pref = None
+        return not pref or str(pref.get("value") or "").casefold() not in ("off", "нет", "0", "выкл")
+
+    def start_scheduler(self, interval: float = SCHEDULER_SEC) -> threading.Thread:
+        def loop() -> None:
+            while not self._stop.is_set():
+                self.tick()
+                self._stop.wait(interval)
+
+        thread = threading.Thread(target=loop, name="agent-scheduler", daemon=True)
+        thread.start()
+        return thread
+
+    def stop_scheduler(self) -> None:
+        self._stop.set()
+
+    def personal_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Кнопки вкладки «Дела»: «Готово», «Отложить», «Сегодня», «+1», «вычеркнуть»."""
+        op = str(body.get("op") or "")
+        personal = self.runner.personal
+        item_id = int(body.get("id") or 0)
+        skills_by_op = {"reminder_done": "reminder.done", "reminder_cancel": "reminder.cancel",
+                        "reminder_snooze": "reminder.snooze"}
+        if op in skills_by_op:
+            params: dict[str, Any] = {"id": item_id}
+            if op == "reminder_snooze":
+                params["minutes"] = int(body.get("minutes") or 10)
+            return self.run_skill(skills_by_op[op], params, ask=False)
+        if op in ("habit_check", "habit_uncheck"):
+            habit = personal.habit(item_id)
+            if not habit:
+                return {"ok": False, "reason": "Привычка не найдена"}
+            if op == "habit_check":
+                return self.run_skill("habit.check", {"habit": habit["title"]}, ask=False)
+            today = self.runner.clock().date()
+            done = personal.uncheck_habit(item_id, today)
+            return {"ok": done, "say": f"Отметка «{habit['title']}» за сегодня снята." if done else "",
+                    "reason": "" if done else "Сегодня отметки не было"}
+        if op == "goal_progress":
+            goal = personal.goal(item_id)
+            if not goal:
+                return {"ok": False, "reason": "Цель не найдена"}
+            return self.run_skill("goal.progress", {"goal": goal["title"], "amount": float(body.get("amount") or 1)},
+                                  ask=False)
+        if op == "list_remove":
+            rows = personal.store._rows("SELECT * FROM lists WHERE id=? AND done=0", (item_id,))
+            if not rows:
+                return {"ok": False, "reason": "Пункт не найден"}
+            personal.store._run("UPDATE lists SET done=1 WHERE id=?", (item_id,))
+            return {"ok": True, "say": f"Вычеркнул: {rows[0]['item']}."}
+        return {"ok": False, "reason": f"Неизвестное действие «{op}»"}
+
+    def learning_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Кнопки вкладки «Обучение»: научить непонятому, забыть выученное, убрать синоним."""
+        op = str(body.get("op") or "")
+        learning = self.runner.learning
+        if op == "teach":
+            return self.run_skill("learn.teach", {"phrase": str(body.get("phrase") or ""),
+                                                  "meaning": str(body.get("meaning") or "")}, ask=False)
+        if op == "forget":
+            return self.run_skill("learn.forget", {"id": int(body.get("id") or 0)}, ask=False)
+        if op == "alias_forget":
+            done = learning.forget_alias(str(body.get("word") or ""))
+            return {"ok": done, "say": "Синоним забыт." if done else "", "reason": "" if done else "Синоним не найден"}
+        if op == "dismiss":
+            done = learning.dismiss_unknown(int(body.get("id") or 0))
+            return {"ok": done, "reason": "" if done else "Фраза не найдена"}
+        return {"ok": False, "reason": f"Неизвестное действие «{op}»"}
+
+    def learning_payload(self) -> dict[str, Any]:
+        learning = self.runner.learning
+        now = self.runner.clock()
+        rows = learning.entries(100)
+        from .personal_skills import describe_steps
+        for row in rows:
+            row["meaning_text"] = (f"ответ «{row['answer']}»" if row.get("answer") else
+                                   row.get("meaning") or describe_steps(row.get("steps") or []))
+        return {"ok": True, "learned": rows, "unknown": learning.unknowns(30), "aliases": learning.aliases(),
+                "insights": learning.insights(now), "feedback": learning.feedback_stats()}
+
+    def voice_phrase(self, phrase: str) -> dict[str, Any]:
+        """Голосовая петля (И311): команда компьютеру — здесь, вопрос цеха — панели; ответ вслух."""
+        answer = self.chat(phrase, session="voice")
+        reply = str(answer.get("reply") or "")
+        # «Когда напомнить?», «что было нужно?» — вопрос помощника, а не непонятая
+        # фраза: панель не переспрашивается, иначе её ответ затрёт вопрос (18.22).
+        own_question = bool(answer.get("awaiting")) or answer.get("source") in ("personal", "teach", "learned", "util")
+        if answer.get("kind") in ("clarify", "error") and not answer.get("skill") and not answer.get("panel_asked") \
+                and not own_question:
+            panel = self.runner.panel.chat(phrase, session="voice", source="voice")
+            if panel.get("ok") and panel.get("reply"):
+                reply = str(panel["reply"])
+                answer = {**answer, "reply": reply, "source": "panel", "kind": panel.get("kind") or "answer"}
+        if reply and self.capabilities.get("speech_out", True):
+            pc.speak(reply[:600])
+        self.state.last_phrase = phrase[:500]
+        return answer
 
     # --- статус -----------------------------------------------------------
     def health(self) -> dict[str, Any]:
@@ -97,7 +257,7 @@ class Agent:
         return {"ok": True, "armed": False, "reason": ""}
 
     # --- навыки ассистента (18.14) ----------------------------------------
-    def run_skill(self, name: str, params: Any = None) -> dict[str, Any]:
+    def run_skill(self, name: str, params: Any = None, ask: bool = True) -> dict[str, Any]:
         """Выполнить навык. Риск «write» и выше — через подтверждение человека.
 
         Порядок тот же, что для клика в чужом окне: навык с подтверждением не
@@ -116,7 +276,7 @@ class Agent:
             # и её потом покажет навык `agent.why`.
             return runner.run(key, params)
         if skills.confirm_required(skill):
-            return self.queue_action("skill", {"name": key, "params": clean})
+            return self.queue_action("skill", {"name": key, "params": clean}, ask=ask)
         return runner.run(key, clean)
 
     def skills_payload(self) -> dict[str, Any]:
@@ -134,8 +294,14 @@ class Agent:
                 "stats": self.runner.store.stats()}
 
     # --- действия в чужих окнах -------------------------------------------
-    def queue_action(self, kind: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Действие становится ожидающим: без человека оно не выполняется."""
+    def queue_action(self, kind: str, params: dict[str, Any], ask: bool = True) -> dict[str, Any]:
+        """Действие становится ожидающим: без человека оно не выполняется.
+
+        `ask=False` — просьба пришла из окна агента: там же карточка
+        «Подтвердить / Отменить», второе всплывающее окно не нужно. Без экрана
+        (служба, контейнер) всплывающее окно не открывается и отклоняет
+        действие сразу — поэтому для окна агента его не зовём вовсе.
+        """
         # Навык подтверждается так же, как клик, но управление окнами ему не
         # нужно: файлы и панель существуют и не в Windows.
         if kind != "skill" and not self.capabilities.get("windows"):
@@ -153,10 +319,11 @@ class Agent:
                 "text": _describe(kind, params, window),
             }
         self.state.last_action = f"ждёт подтверждения: {kind}"
-        threading.Thread(target=self._ask, args=(action_id,), daemon=True,
-                         name="agent-confirm").start()
+        if ask:
+            threading.Thread(target=self._ask, args=(action_id,), daemon=True,
+                             name="agent-confirm").start()
         return {"ok": True, "queued": True, "id": action_id, "reason": "",
-                "requires_confirmation": True,
+                "requires_confirmation": True, "ttl": int(PENDING_TTL_SEC),
                 "text": self._pending[action_id]["text"]}
 
     def confirm_action(self, action_id: str, confirmed: bool) -> dict[str, Any]:
@@ -190,7 +357,7 @@ class Agent:
     def pending(self) -> list[dict[str, Any]]:
         with self._lock:
             self._purge()
-            return [{key: value for key, value in action.items()}
+            return [{**action, "expires_at": float(action.get("created_at") or 0) + PENDING_TTL_SEC}
                     for action in self._pending.values()]
 
     def _purge(self) -> None:
@@ -249,6 +416,8 @@ def _describe(kind: str, params: dict[str, Any], window: str) -> str:
         name = str(params.get("name") or "")
         skill = skills.get(name) or {"name": name, "title": name}
         inner = params.get("params") if isinstance(params.get("params"), dict) else {}
+        if name == "panel.do" and inner.get("explain"):
+            return f"Панель цеха: {inner['explain']}"
         return f"Навык ассистента: {executor.describe(skill, inner)}"
     if kind == "click":
         return f"Клик в точке {params.get('x')}, {params.get('y')}{where}"
@@ -292,7 +461,8 @@ class AgentHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -341,6 +511,8 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     # --- маршруты ---------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 — имя задаёт BaseHTTPRequestHandler
+        if not self._local_request():
+            return None
         path = self.path.split("?", 1)[0]
         agent = self.agent
         if agent is None:
@@ -348,8 +520,13 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/health":
             return self._json(200, agent.health())
         if path == "/capabilities":
-            return self._json(200, {"ok": True, "capabilities": agent.refresh_capabilities(),
-                                    "missing": capabilities.missing(agent.capabilities)})
+            caps = dict(agent.refresh_capabilities())
+            # Живые связи для шапки окна: панель цеха и модель (короткие пинги).
+            live = agent.runner.refresh_capabilities()
+            caps.update({key: live.get(key) for key in ("panel", "panel_reason", "model", "model_reason")
+                         if key in live})
+            return self._json(200, {"ok": True, "capabilities": caps, "missing": capabilities.missing(caps),
+                                    "panel_url": agent.runner.panel.url})
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
         if path == "/status":
@@ -372,18 +549,44 @@ class AgentHandler(BaseHTTPRequestHandler):
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
             return self._json(200, agent.journal(limit))
+        if path == "/chat/history":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            session = brain_mod.session_key((query.get("session") or ["main"])[0])
+            limit = int((query.get("limit") or ["40"])[0] or 40)
+            return self._json(200, {"ok": True, "session": session,
+                                    "turns": agent.runner.store.dialog(session, limit)})
+        if path == "/notifications":
+            return self._json(200, {"ok": True, "notifications": agent.runner.personal.unseen(20)})
+        if path == "/personal":
+            return self._json(200, {"ok": True, **agent.runner.personal.overview(agent.runner.clock())})
+        if path == "/learning":
+            return self._json(200, agent.learning_payload())
+        if path == "/memory":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            wanted = str((query.get("q") or [""])[0] or "")
+            store = agent.runner.store
+            rows = store.recall(wanted, 30, touch=False) if wanted else store.memories(100)
+            return self._json(200, {"ok": True, "memories": rows, "count": len(rows)})
         if path == "/ui":
             body = ui.page().encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            # Окно агента не встраивается в чужие страницы (кликджекинг «Подтвердить»).
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                             "script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                             "connect-src 'self'; frame-ancestors 'none'")
             self.end_headers()
             self.wfile.write(body)
             return None
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._local_request():
+            return None
         path = self.path.split("?", 1)[0]
         agent = self.agent
         if agent is None:
@@ -416,20 +619,90 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/activate":
             return self._json(200, agent.queue_action("activate", body))
         if path == "/skill":
-            return self._json(200, agent.run_skill(str(body.get("name") or ""),
-                                                   body.get("params")))
+            name = str(body.get("name") or "")
+            # Ручной запуск из окна агента: подтверждение — карточкой во вкладке
+            # «Ждёт», без всплывающего окна. Панель и прочие вызовы — как раньше.
+            result = agent.run_skill(name, body.get("params"), ask=body.get("where") != "window")
+            if isinstance(result, dict) and not result.get("queued"):
+                key = str(result.get("skill") or name).strip().casefold()
+                result = {**result, "summary": brain_mod.summarize(key, result)}
+            return self._json(200, result)
         if path == "/action/confirm":
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
+        if path == "/chat":
+            plan = body.get("plan") if isinstance(body.get("plan"), dict) else None
+            mode = "pc" if str(body.get("mode") or "") == "pc" else "full"
+            return self._json(200, agent.chat(str(body.get("text") or ""),
+                                              str(body.get("session") or "main"), mode, plan))
+        if path == "/chat/clear":
+            session = brain_mod.session_key(str(body.get("session") or "main"))
+            cleared = agent.runner.store.clear_dialog(session)
+            # Контекст «его / второй» живёт и в панели (сессия агента) — забываем вместе.
+            panel = agent.runner.panel.clear_dialog(brain_mod.panel_session(session))
+            return self._json(200, {"ok": True, "session": session, "cleared": cleared,
+                                    "panel_cleared": bool(panel.get("ok"))})
+        if path == "/notifications/seen":
+            ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+            return self._json(200, {"ok": True, "seen": agent.runner.personal.mark_seen(ids)})
+        if path == "/personal":
+            return self._json(200, agent.personal_op(body))
+        if path == "/learning":
+            return self._json(200, agent.learning_op(body))
+        if path == "/feedback":
+            return self._json(200, agent.brain.feedback(int(body.get("turn_id") or 0), int(body.get("rating") or 0)))
+        if path == "/memory":
+            store = agent.runner.store
+            op = str(body.get("op") or "remember")
+            if op == "forget":
+                rows = store.forget(body.get("id") if body.get("id") else str(body.get("text") or ""))
+                return self._json(200, {"ok": bool(rows), "forgotten": rows,
+                                        "reason": "" if rows else "Запись не найдена"})
+            if op == "pin":
+                done = store.pin_memory(int(body.get("id") or 0), bool(body.get("pinned", True)))
+                return self._json(200, {"ok": done, "reason": "" if done else "Запись не найдена"})
+            saved = store.remember(str(body.get("text") or ""), kind=str(body.get("kind") or "fact"),
+                                   subject=str(body.get("subject") or ""), source="window")
+            return self._json(200, saved)
         return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        # Предзапрос браузера бывает только у чужого сайта: своему окну он не
+        # нужен, панель ходит с сервера. Разрешений CORS агент не выдаёт.
+        if not self._local_request():
+            return None
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", "0")
         self.end_headers()
+        return None
+
+    # --- граница loopback -------------------------------------------------
+    def _local_request(self) -> bool:
+        """Запрос от своего окна или от панели. Иначе — 403 и `False`.
+
+        Три признака чужого: `Host` не наш (перепривязка DNS), `Origin` есть и
+        он не адрес самого агента (страница другого сайта), `Origin: null`
+        (песочница, файл с диска). Панель и `urllib` заголовка Origin не шлют.
+        """
+        host = str(self.headers.get("Host") or "").strip().lower()
+        if host:
+            name = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
+            if name not in LOCAL_HOSTS:
+                self._json(403, {"ok": False, "reason": "Агент отвечает только по адресу этого компьютера"})
+                return False
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            parts = urllib.parse.urlsplit(str(origin).strip().lower())
+            port = self.server.server_address[1] if hasattr(self, "server") else None
+            try:
+                origin_port = parts.port
+            except ValueError:
+                origin_port = None
+            if not (parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost")
+                    and origin_port == port):
+                self._json(403, {"ok": False, "reason": "Чужой сайт не может обращаться к агенту компьютера"})
+                return False
+        return True
 
 
 def _handler(role: str, agent: Agent) -> type[AgentHandler]:
@@ -476,11 +749,15 @@ def run() -> int:
     except Exception as exc:
         print(f"  ⚠ Пульс надзора не включился: {exc}")
     threading.Thread(target=speech_server.serve_forever, daemon=True).start()
+    # 18.22: напоминания, таймеры фокуса и привычки звонят сами.
+    agent.start_scheduler()
+    print(f"  Напоминания: планировщик проверяет каждые {int(SCHEDULER_SEC)} с")
     try:
         agent_server.serve_forever()
     except KeyboardInterrupt:
         print("Останавливаю агента")
     finally:
+        agent.stop_scheduler()
         speech_server.shutdown()
         agent_server.shutdown()
     return 0

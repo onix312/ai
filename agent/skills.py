@@ -1,9 +1,9 @@
-"""Реестр навыков личного ассистента (18.19): навык — это данные, а не ветка кода.
+"""Реестр навыков личного ассистента (18.21): навык — это данные, а не ветка кода.
 
 Зачем реестр, если можно написать `if name == "files.search"`.
 
-Ассистент компьютера растёт навыками: сегодня их восемьдесят семь, в каталоге
-`docs/НАВЫКИ.md` их шестьдесят девять плюс Авито и ТГ. Если каждый навык добавлять
+Ассистент компьютера растёт навыками: сегодня их сто четыре (список и числа
+сверяет с `docs/НАВЫКИ.md` контракт `test_assistant_skills.py`). Если каждый навык добавлять
 веткой в диспетчер, то к тридцатому навыку подтверждение, журнал и проверка
 параметров разъедутся по трём местам — ровно так, как разошлись `api.py` и
 `routes_*.py`. Поэтому здесь одно описание навыка, из которого берутся:
@@ -35,11 +35,16 @@ PARAM_TYPES = ("text", "int", "float", "bool", "date", "path", "object", "oneof"
 
 # Риск решает, нужно ли подтверждение человека.
 #   read         — ничего не меняет;
-#   own          — пишет только в свою базу ассистента (индекс, журнал, заметки);
-#   write        — меняет чужое: файлы на диске, панель, чужое окно;
-#   system       — меняет состояние компьютера (звук, экран, питание);
+#   own          — пишет только в свою базу ассистента (индекс, журнал, заметки, память);
+#   soft         — мягкое действие удобства (18.21): открыть программу из белого
+#                  списка, звук громче или тише, пауза музыки, свернуть или
+#                  переключить окно. Обратимо одной фразой, данных не трогает, в
+#                  чужое окно ничего не вводит — поэтому без окна «Подтвердить»;
+#   write        — меняет чужое: файлы на диске, панель, ввод в чужое окно;
+#   system       — меняет состояние компьютера (питание, микрофон, автозагрузка);
 #   irreversible — откатить нельзя (удаление, стирание архива).
-RISKS = ("read", "own", "write", "system", "irreversible")
+# Порядок — от мягкого к опасному: у выученного навыка риск — максимальный из шагов.
+RISKS = ("read", "own", "soft", "write", "system", "irreversible")
 CONFIRM_RISKS = ("write", "system", "irreversible")
 
 # Хост: кто исполняет навык. `agent` — эта программа, `panel` — PrintFlow
@@ -93,7 +98,7 @@ _LEARNED_RE = re.compile(r"^my\.[a-z][a-z0-9_]{1,40}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # ---------------------------------------------------------------------------
-# Реестр: девяносто шесть живых навыков из каталога `docs/НАВЫКИ.md`
+# Реестр: сто четыре живых навыка из каталога `docs/НАВЫКИ.md`
 # ---------------------------------------------------------------------------
 #
 # Объявлены только те навыки, которые исполняются. Навык «в планах» живёт в
@@ -111,9 +116,10 @@ SKILLS: dict[str, dict[str, Any]] = {
     "panel.do": {
         "title": "Действие в панели",
         "description": "Выполнить действие PrintFlow из каталога: чтение сразу, деньги и печать через подтверждение.",
-        "host": "panel", "risk": "write", "params": {"action": "text", "params": "object"},
+        "host": "panel", "risk": "write", "params": {"action": "text", "params": "object", "explain": "text"},
         "requires": ("panel",), "ideas": ("И137",),
-        "doc": "Адрес и метод берёт панель из своего каталога, а не из запроса.",
+        "doc": "Адрес и метод берёт панель из своего каталога, а не из запроса. `explain` — что именно будет "
+               "сделано словами панели («Поставить на паузу: P1S»): его видит человек в карточке подтверждения.",
     },
     "panel.ask": {
         "title": "Вопрос по фактам базы",
@@ -460,7 +466,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "write",
         "params": {"enabled": "bool", "app_name": "text"},
         "requires": ("autostart",), "ideas": ("И206",),
-        "doc": "Пишет в HKCU Run, требует подтверждения.",
+        "doc": "Пишет в HKCU Run, требует подтверждения и явного enabled: вызов без него ничего не меняет.",
     },
     "system.process_list": {
         "title": "Процессы",
@@ -480,11 +486,11 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "system.volume": {
         "title": "Громкость",
-        "description": "Узнать и изменить громкость системы 0-100.",
-        "host": "agent", "risk": "system",
-        "params": {"level": "int"},
-        "requires": ("system",), "ideas": ("И156",),
-        "doc": "Windows waveOutSetVolume через ctypes, без внешних библиотек.",
+        "description": "Узнать и изменить общую громкость 0-100: громче, тише, выключить или включить звук.",
+        "host": "agent", "risk": "soft",
+        "params": {"level": "int", "delta": "int", "mute": "oneof:on|off|toggle"},
+        "requires": ("system",), "ideas": ("И156", "И302"),
+        "doc": "Общий звук Windows через Core Audio (IAudioEndpointVolume, ctypes); без него — медиаклавиши. Мягкий риск: обратимо одной фразой.",
     },
     "system.display": {
         "title": "Экран и яркость",
@@ -504,19 +510,19 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "system.power": {
         "title": "Питание",
-        "description": "Блокировка, сон, перезагрузка — с подтверждением.",
+        "description": "Блокировка, сон, перезагрузка, выключение, отмена и погасить монитор — с подтверждением.",
         "host": "agent", "risk": "system",
-        "params": {"action": "oneof:lock|sleep|restart"},
+        "params": {"action": "oneof:lock|sleep|restart|shutdown|cancel|screen_off"},
         "requires": ("system",), "ideas": ("И156",),
-        "doc": "Только после подтверждения человека, иначе чужой ПК уснул бы от сети.",
+        "doc": "LockWorkStation, SetSuspendState, shutdown /r и /s с минутой на отмену (shutdown /a). Действие называется явно: без него навык отказывает.",
     },
     "system.health": {
         "title": "Здоровье ПК",
-        "description": "Диск, память, температура, загрузка CPU.",
+        "description": "Процессор, память, диски, время работы и батарея — и что из этого тревожно.",
         "host": "agent", "risk": "read",
         "params": {},
-        "requires": ("system",), "ideas": ("И159",),
-        "doc": "Через ctypes и psutil-fallback, без внешних зависимостей.",
+        "requires": (), "ideas": ("И159",),
+        "doc": "GetSystemTimes, GlobalMemoryStatusEx, GetDriveType в Windows; /proc в Linux. Без внешних зависимостей.",
     },
     "system.check": {
         "title": "Проверка зависимостей",
@@ -532,7 +538,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "write",
         "params": {"what": "oneof:pip|models|full|requirements", "confirm_text": "text"},
         "requires": (), "ideas": ("И222",),
-        "doc": "Ставит только то, чего нет: pip install + скачивание vosk small ru в ~/.printflow/models. Требует подтверждения.",
+        "doc": "Ставит только то, чего нет: pip install + скачивание vosk small ru в ~/.printflow/models. Требует подтверждения и явного what: вызов без него ничего не ставит.",
     },
     "system.watchdog": {
         "title": "Надзор за процессами",
@@ -578,27 +584,27 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "window.focus": {
         "title": "Фокус на окно",
-        "description": "Переключить фокус на окно по части заголовка.",
-        "host": "agent", "risk": "write",
+        "description": "Вывести окно на передний план по названию программы или части заголовка.",
+        "host": "agent", "risk": "soft",
         "params": {"title": "text"},
         "requires": ("windows",), "ideas": ("И152",),
-        "doc": "Ищет окно и активирует, требует подтверждения.",
+        "doc": "Ищет по заголовку, имени процесса и синонимам («телеграм» → Telegram.exe), разворачивает свёрнутое и обходит запрет Windows на смену окна. Ввода в окно нет — мягкий риск.",
     },
     "window.text": {
         "title": "Текст окна",
-        "description": "Текст активного окна или окна по заголовку.",
+        "description": "Заголовок и видимый текст элементов окна: поля ввода, надписи, кнопки.",
         "host": "agent", "risk": "read",
         "params": {"title": "text"},
         "requires": ("windows",), "ideas": ("И149",),
-        "doc": "GetWindowText, без OCR.",
+        "doc": "EnumChildWindows + WM_GETTEXT с таймаутом: зависшая программа не держит помощника.",
     },
     "window.controls": {
         "title": "Элементы окна",
-        "description": "Список кнопок и полей окна (заглушка без UIA).",
+        "description": "Кнопки, поля и надписи окна с классом и координатами.",
         "host": "agent", "risk": "read",
         "params": {"title": "text"},
         "requires": ("windows",), "ideas": ("И150",),
-        "doc": "Требует UI Automation — пока возвращает заголовки окон.",
+        "doc": "EnumChildWindows: класс, текст, прямоугольник элемента. Программы, которые рисуют интерфейс сами, отдают мало — это видно по счётчику.",
     },
     "window.click": {
         "title": "Клик",
@@ -606,7 +612,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "write",
         "params": {"x": "int", "y": "int"},
         "requires": ("windows",), "ideas": ("И150",),
-        "doc": "SetCursorPos + SendInput, только после подтверждения.",
+        "doc": "SetCursorPos + SendInput, только после подтверждения и только с явными x и y.",
     },
     "window.type": {
         "title": "Ввод текста",
@@ -622,7 +628,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "write",
         "params": {"left_title": "text", "right_title": "text"},
         "requires": ("windows",), "ideas": ("И210",),
-        "doc": "MoveWindow через ctypes, требует подтверждения.",
+        "doc": "Рабочая область без панели задач, SetWindowPos через ctypes, требует подтверждения.",
     },
     # --- зрение (Н35-Н40, И212, И213) ------------------------------------
     "screen.shot": {
@@ -643,19 +649,19 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "screen.describe": {
         "title": "Описать экран",
-        "description": "Описание экрана локальной моделью (заглушка без модели).",
+        "description": "Описание экрана локальной моделью, которая видит изображения; текстовая модель честно отказывает.",
         "host": "agent", "risk": "read",
-        "params": {"max_side": "int"},
+        "params": {"max_side": "int", "question": "text"},
         "requires": ("screen", "model"), "ideas": ("И164",),
-        "doc": "Требует локальный рантайм модели, иначе — причина.",
+        "doc": "Снимок уходит только в локальную модель (loopback) и не сохраняется. Без видящей модели — отказ с советом, а не выдуманное описание.",
     },
     "screen.find": {
         "title": "Найти на экране",
-        "description": "Найти текст на экране: без OCR — только в заголовках окон.",
+        "description": "Найти текст на экране: распознаванием, если оно установлено, иначе в заголовках окон.",
         "host": "agent", "risk": "read",
         "params": {"text": "text"},
         "requires": ("screen",), "ideas": ("И167",),
-        "doc": "Заглушка: ищет в заголовках окон, пока нет OCR.",
+        "doc": "rapidocr или pytesseract дают координаты слов; без них — заголовки окон с пометкой method.",
     },
     "screen.find_and_click": {
         "title": "Найти и кликнуть",
@@ -692,27 +698,27 @@ SKILLS: dict[str, dict[str, Any]] = {
     # --- голос (Н41-Н45, И214) -------------------------------------------
     "voice.listen": {
         "title": "Слушать",
-        "description": "Слушать микрофон после стоп-слова, вернуть текст.",
-        "host": "agent", "risk": "read",
+        "description": "Слушать микрофон заданное число секунд и вернуть распознанный текст.",
+        "host": "agent", "risk": "system",
         "params": {"seconds": "int"},
         "requires": ("speech_in",), "ideas": ("И163",),
-        "doc": "Требует vosk/faster-whisper, микрофон.",
+        "doc": "sounddevice + vosk/faster-whisper. Микрофон закрыт по умолчанию (решение владельца): открывается только после подтверждения и только на названное число секунд.",
     },
     "voice.say": {
         "title": "Озвучить",
-        "description": "Озвучить текст с интонацией (тревога/отчёт).",
+        "description": "Сказать текст вслух голосом системы (тон — для тревоги или отчёта).",
         "host": "agent", "risk": "own",
         "params": {"text": "text", "tone": "text"},
         "requires": ("speech_out",), "ideas": ("И162",),
-        "doc": "Внешний TTS, пока заглушка — возвращает текст.",
+        "doc": "SAPI в Windows, say в macOS, espeak-ng в Linux. Текст передаётся данными, а не командной строкой.",
     },
     "voice.dictate": {
         "title": "Диктовка",
-        "description": "Диктовка в активное поле: речь → текст → ввод.",
+        "description": "Диктовка в активное поле: послушать, распознать и ввести текст (с подтверждением).",
         "host": "agent", "risk": "write",
         "params": {"seconds": "int"},
         "requires": ("speech_in", "windows"), "ideas": ("И151",),
-        "doc": "Слушает, распознаёт, вводит в активное окно с подтверждением.",
+        "doc": "Слушает названное число секунд, распознаёт и вводит в активное окно — после подтверждения.",
     },
     "voice.note": {
         "title": "Голосовая заметка",
@@ -724,11 +730,11 @@ SKILLS: dict[str, dict[str, Any]] = {
     },
     "voice.command": {
         "title": "Голосовая команда",
-        "description": "Короткая команда без мыши: фраза → действие из каталога.",
+        "description": "Короткая команда без мыши: фраза → понятый навык и параметры, без выполнения.",
         "host": "agent", "risk": "read",
         "params": {"text": "text"},
         "requires": (), "ideas": ("И163",),
-        "doc": "Парсит фразу в действие панели, без выполнения.",
+        "doc": "Тот же разбор, что у мозга помощника (agent/brain.py): правила и контекст, без модели.",
     },
     "voice.profile": {
         "title": "Профиль голоса",
@@ -785,7 +791,7 @@ SKILLS: dict[str, dict[str, Any]] = {
         "host": "agent", "risk": "own",
         "params": {"timer_id": "int"},
         "requires": ("sqlite",), "ideas": ("И215",),
-        "doc": "Ставит status=stopped.",
+        "doc": "Ставит status=stopped; без номера — последний запущенный таймер.",
     },
     "files.watch": {
         "title": "Слежка за папкой",
@@ -866,6 +872,292 @@ SKILLS: dict[str, dict[str, Any]] = {
         "params": {"name": "text"},
         "requires": ("macro", "sqlite"), "ideas": ("И221",),
         "doc": "Берёт шаги из macros и выполняет подряд, с подтверждением.",
+    },
+    # --- 18.21: мозг помощника — программы, медиа, клавиши, окна, память ---
+    "app.open": {
+        "title": "Открыть программу, сайт или папку",
+        "description": "Открыть программу из белого списка, сайт по адресу или папку внутри разрешённых — чужие исполняемые файлы не запускаются.",
+        "host": "agent", "risk": "soft",
+        "params": {"target": "text"},
+        "requires": (), "ideas": ("И301",),
+        "doc": "Блокнот, калькулятор, проводник, диспетчер задач, Bambu Studio, OrcaSlicer, Telegram, панель PrintFlow, Авито и другие известные имена; http(s)-адрес; папка загрузок и знаний. Без аргументов командной строки.",
+    },
+    "system.media": {
+        "title": "Музыка и видео",
+        "description": "Пауза, следующий или предыдущий трек, стоп, звук громче, тише или выключить — медиаклавишами для любого плеера.",
+        "host": "agent", "risk": "soft",
+        "params": {"action": "oneof:play_pause|next|prev|stop|mute|volume_up|volume_down"},
+        "requires": ("system",), "ideas": ("И302",),
+        "doc": "VK_MEDIA_* через SendInput: работает с браузером, Spotify, плеером Windows. Действие называется явно.",
+    },
+    "system.hotkey": {
+        "title": "Сочетание клавиш",
+        "description": "Нажать сочетание клавиш в активном окне (Ctrl+S, Win+D, Enter) — с подтверждением.",
+        "host": "agent", "risk": "write",
+        "params": {"keys": "text"},
+        "requires": ("windows",), "ideas": ("И303",),
+        "doc": "Разбор по-русски и по-английски («контрл с» = Ctrl+C). Выход из системы, Ctrl+Alt+Del и Alt+F4 не нажимаются никогда.",
+    },
+    "window.arrange": {
+        "title": "Свернуть или развернуть окно",
+        "description": "Свернуть, развернуть на весь экран или восстановить окно по названию программы.",
+        "host": "agent", "risk": "soft",
+        "params": {"action": "oneof:minimize|maximize|restore", "title": "text"},
+        "requires": ("windows",), "ideas": ("И304",),
+        "doc": "ShowWindow по найденному окну. Без названия — окно, с которым работает человек (окно помощника не трогается).",
+    },
+    "window.close": {
+        "title": "Закрыть окно",
+        "description": "Попросить программу закрыть окно: про несохранённое она спросит сама. С подтверждением.",
+        "host": "agent", "risk": "write",
+        "params": {"title": "text"},
+        "requires": ("windows",), "ideas": ("И304",),
+        "doc": "WM_CLOSE, а не завершение процесса: программа сохраняет данные по своим правилам. Без названия окна навык отказывает.",
+    },
+    "memory.remember": {
+        "title": "Запомнить",
+        "description": "Запомнить факт, правило или предпочтение владельца в памяти помощника.",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text", "kind": "oneof:fact|preference|profile|person|rule", "subject": "text"},
+        "requires": ("sqlite",), "ideas": ("И305",),
+        "doc": "Таблица memories своей базы. Повтор не плодит дубль, новое имя владельца заменяет старое.",
+    },
+    "memory.recall": {
+        "title": "Вспомнить",
+        "description": "Найти в памяти помощника то, что владелец просил запомнить.",
+        "host": "agent", "risk": "read",
+        "params": {"query": "text", "limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И305",),
+        "doc": "Совпадение основ слов («Марии» = «Мария»); без запроса — последние записи.",
+    },
+    "memory.forget": {
+        "title": "Забыть",
+        "description": "Стереть запись памяти по номеру или по словам — по просьбе владельца.",
+        "host": "agent", "risk": "own",
+        "params": {"what": "text"},
+        "requires": ("sqlite",), "ideas": ("И305",),
+        "doc": "Стирается только уверенное совпадение; при двух равных кандидатах — обе записи показываются, стирается совпавшая точнее.",
+    },
+
+    # --- 18.22: личный помощник ------------------------------------------------
+    "reminder.add": {
+        "title": "Напомнить",
+        "description": "Поставить напоминание на время словами: «через 20 минут», «завтра в 10», «по будням в 8:30».",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text", "when": "text", "due": "text", "repeat": "text"},
+        "requires": ("sqlite",), "ideas": ("И323", "И324"),
+        "doc": "Таблица reminders своей базы. Время разбирает when.py без модели; фоновый планировщик агента сам "
+               "поднимает напоминание в окне и голосом, повтор переезжает на следующий раз.",
+    },
+    "reminder.list": {
+        "title": "Мои напоминания",
+        "description": "Какие напоминания впереди и какие сработали и ждут отметки.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И323",),
+        "doc": "Только чтение своей базы.",
+    },
+    "reminder.done": {
+        "title": "Напоминание выполнено",
+        "description": "Отметить напоминание сделанным — по номеру или словами («я позвонил маме»).",
+        "host": "agent", "risk": "own",
+        "params": {"id": "int", "text": "text"},
+        "requires": ("sqlite",), "ideas": ("И323",),
+        "doc": "Повторяющееся напоминание не гасится: следующий раз уже назначен.",
+    },
+    "reminder.cancel": {
+        "title": "Отменить напоминание",
+        "description": "Отменить напоминание по номеру или по словам.",
+        "host": "agent", "risk": "own",
+        "params": {"id": "int", "text": "text"},
+        "requires": ("sqlite",), "ideas": ("И323",),
+        "doc": "Запись остаётся в базе со статусом cancelled — видно, что отменяли.",
+    },
+    "reminder.snooze": {
+        "title": "Отложить напоминание",
+        "description": "Отложить сработавшее напоминание на N минут (по умолчанию 10).",
+        "host": "agent", "risk": "own",
+        "params": {"id": "int", "minutes": "int"},
+        "requires": ("sqlite",), "ideas": ("И323",),
+        "doc": "Разовое переезжает целиком; у повторяющегося откладывается только этот раз.",
+    },
+    "list.add": {
+        "title": "Добавить в список",
+        "description": "Добавить пункты в личный список: покупки, дела, книги, фильмы, подарки.",
+        "host": "agent", "risk": "own",
+        "params": {"list": "text", "items": "text"},
+        "requires": ("sqlite",), "ideas": ("И325",),
+        "doc": "«молоко, хлеб и яйца» — три пункта; повтор не плодит дубль.",
+    },
+    "list.show": {
+        "title": "Показать список",
+        "description": "Что в списке (или какие списки есть вообще).",
+        "host": "agent", "risk": "read",
+        "params": {"list": "text"},
+        "requires": ("sqlite",), "ideas": ("И325",),
+        "doc": "Только чтение своей базы.",
+    },
+    "list.remove": {
+        "title": "Вычеркнуть из списка",
+        "description": "Вычеркнуть пункты из списка — «вычеркни хлеб», «купил молоко».",
+        "host": "agent", "risk": "own",
+        "params": {"list": "text", "item": "text"},
+        "requires": ("sqlite",), "ideas": ("И325",),
+        "doc": "Пункт ищется по основам слов: «хлеба» вычеркнет «хлеб».",
+    },
+    "list.clear": {
+        "title": "Очистить список",
+        "description": "Вычеркнуть весь список разом.",
+        "host": "agent", "risk": "write",
+        "params": {"list": "text"},
+        "requires": ("sqlite",), "ideas": ("И325",),
+        "doc": "Сразу много записей — поэтому с подтверждением.",
+    },
+    "goal.add": {
+        "title": "Новая цель",
+        "description": "Записать цель с числом и сроком: «прочитать 12 книг до конца года».",
+        "host": "agent", "risk": "own",
+        "params": {"title": "text", "target": "float", "unit": "text", "deadline": "text"},
+        "requires": ("sqlite",), "ideas": ("И326",),
+        "doc": "Срок понимается словами: «до конца года», «к 1 декабря», «к лету».",
+    },
+    "goal.progress": {
+        "title": "Прогресс цели",
+        "description": "Добавить к цели (+2) или задать прогресс; ответ — темп и сколько нужно в неделю.",
+        "host": "agent", "risk": "own",
+        "params": {"goal": "text", "amount": "float", "absolute": "bool"},
+        "requires": ("sqlite",), "ideas": ("И326",),
+        "doc": "Цель ищется по словам названия или по единице («прочитал 2 книги» → цель с «книг»).",
+    },
+    "goal.list": {
+        "title": "Мои цели",
+        "description": "Цели с прогрессом, темпом и отставанием.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И326",),
+        "doc": "Только чтение своей базы.",
+    },
+    "goal.remove": {
+        "title": "Удалить цель",
+        "description": "Убрать цель из списка.",
+        "host": "agent", "risk": "write",
+        "params": {"goal": "text"},
+        "requires": ("sqlite",), "ideas": ("И326",),
+        "doc": "Цель помечается удалённой, история прогресса остаётся в базе.",
+    },
+    "habit.add": {
+        "title": "Новая привычка",
+        "description": "Завести привычку и, если нужно, час напоминания: «зарядка в 8».",
+        "host": "agent", "risk": "own",
+        "params": {"title": "text", "remind_at": "text"},
+        "requires": ("sqlite",), "ideas": ("И327",),
+        "doc": "Напоминание приходит, только если к этому часу привычка ещё не отмечена.",
+    },
+    "habit.check": {
+        "title": "Отметить привычку",
+        "description": "Отметить привычку на сегодня — «я сделал зарядку»; ответ — серия дней подряд.",
+        "host": "agent", "risk": "own",
+        "params": {"habit": "text"},
+        "requires": ("sqlite",), "ideas": ("И327",),
+        "doc": "Одна отметка в день; сегодняшний пропуск не рвёт серию до конца дня.",
+    },
+    "habit.list": {
+        "title": "Мои привычки",
+        "description": "Привычки, серии и отметки за неделю.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И327",),
+        "doc": "Только чтение своей базы.",
+    },
+    "habit.remove": {
+        "title": "Удалить привычку",
+        "description": "Перестать отслеживать привычку.",
+        "host": "agent", "risk": "write",
+        "params": {"habit": "text"},
+        "requires": ("sqlite",), "ideas": ("И327",),
+        "doc": "Отметки остаются в базе, привычка скрывается.",
+    },
+    "expense.add": {
+        "title": "Записать расход",
+        "description": "Личный расход словами: «потратил 450 на такси» — категория определяется сама.",
+        "host": "agent", "risk": "own",
+        "params": {"amount": "float", "note": "text", "category": "text", "day": "text"},
+        "requires": ("sqlite",), "ideas": ("И328",),
+        "doc": "Названная владельцем категория запоминается для этих слов и важнее встроенного словаря.",
+    },
+    "expense.report": {
+        "title": "Итог расходов",
+        "description": "Сколько потрачено за день, неделю, месяц — по категориям.",
+        "host": "agent", "risk": "read",
+        "params": {"period": "text", "category": "text"},
+        "requires": ("sqlite",), "ideas": ("И328",),
+        "doc": "Личные расходы агента; деньги цеха считает панель.",
+    },
+    "diary.add": {
+        "title": "Запись в дневник",
+        "description": "Запись в личный дневник, с оценкой настроения, если она прозвучала.",
+        "host": "agent", "risk": "own",
+        "params": {"text": "text", "mood": "int"},
+        "requires": ("sqlite",), "ideas": ("И329",),
+        "doc": "«Настроение 8» и «отличный день» становятся оценкой от 1 до 10.",
+    },
+    "diary.read": {
+        "title": "Прочитать дневник",
+        "description": "Записи дневника за день («вчера», «25 сентября») или настроение за неделю.",
+        "host": "agent", "risk": "read",
+        "params": {"day": "text", "query": "text", "limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И329",),
+        "doc": "Только чтение своей базы.",
+    },
+    "me.today": {
+        "title": "Мой день",
+        "description": "Напоминания на сегодня, привычки, цели, покупки и сводка цеха — одним ответом.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И330",),
+        "doc": "Сводка цеха добавляется, только если панель отвечает; без неё — личная часть.",
+    },
+
+    # --- 18.22: обучение ----------------------------------------------------------
+    "learn.teach": {
+        "title": "Научить фразе",
+        "description": "Научить помощника своей фразе: «рабочий режим» → «открой телеграм и громкость 30».",
+        "host": "agent", "risk": "own",
+        "params": {"phrase": "text", "meaning": "text"},
+        "requires": ("sqlite",), "ideas": ("И316",),
+        "doc": "Смысл разбирается правилами в шаги из реестра; выученная команда проходит те же проверки и подтверждение.",
+    },
+    "learn.list": {
+        "title": "Чему научился",
+        "description": "Выученные фразы, поправки, самовыученное и синонимы.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И316", "И318", "И321"),
+        "doc": "Только чтение своей базы.",
+    },
+    "learn.forget": {
+        "title": "Забыть выученное",
+        "description": "Забыть выученную фразу или синоним.",
+        "host": "agent", "risk": "own",
+        "params": {"phrase": "text", "id": "int"},
+        "requires": ("sqlite",), "ideas": ("И316",),
+        "doc": "Удаляется только выученное; встроенные правила не трогаются.",
+    },
+    "learn.unknown": {
+        "title": "Что не понял",
+        "description": "Фразы, которые помощник не понял, — с числом повторов; из них учат.",
+        "host": "agent", "risk": "read",
+        "params": {"limit": "int"},
+        "requires": ("sqlite",), "ideas": ("И319",),
+        "doc": "Урок по фразе снимает её из списка.",
+    },
+    "learn.habits": {
+        "title": "Привычки на компьютере",
+        "description": "Что и в какой час владелец обычно просит — основа подсказок-кнопок.",
+        "host": "agent", "risk": "read",
+        "params": {},
+        "requires": ("sqlite",), "ideas": ("И322",),
+        "doc": "Подсказки никогда не запускаются сами — только кнопкой.",
     },
 
 }
@@ -1064,7 +1356,7 @@ def check_params(skill: dict[str, Any], raw: Any) -> tuple[dict[str, Any], list[
 # Параметры, которые навык умеет домыслить сам (папка по умолчанию, предел
 # выдачи). Их отсутствие — не ошибка, а обычная работа: «индекс» без папки
 # индексирует то, что задано в настройках агента.
-_OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
+_OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params", "explain",
              "question", "query", "skill", "path", "order", "kind", "action",
              "city", "category", "max_price", "min_price", "enabled",
              "watch_id", "only_new", "thread", "intent", "topic", "tone",
@@ -1075,8 +1367,15 @@ _OPTIONAL = ("folders", "folder", "limit", "days", "save", "execute", "params",
              "app_name", "device_id", "level", "minutes", "x", "y", "left_title",
              "right_title", "left", "top", "right", "bottom", "max_side",
              "seconds", "speed", "volume", "timer_id", "note", "key", "value",
-             "steps", "description", "what", "confirm_text", "mode", "enabled",
-             "interval", "stale_sec", "max_restarts", "dry")
+             "steps", "description", "what", "confirm_text", "mode",
+             "interval", "stale_sec", "max_restarts", "dry",
+             # 18.21: у громкости всё необязательно — без параметров она читается;
+             # у памяти и окон отказ с причиной делает сам обработчик.
+             "delta", "mute", "target", "subject", "due", "roles",
+             # 18.22: личные навыки и обучение — недостающее объясняет обработчик
+             # («Когда напомнить?», «К какой цели?»), а не общий отказ реестра.
+             "id", "list", "items", "item", "unit", "deadline", "goal", "amount", "absolute", "remind_at",
+             "habit", "period", "mood", "day", "phrase", "meaning", "when", "repeat")
 
 
 # ---------------------------------------------------------------------------

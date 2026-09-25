@@ -19,7 +19,10 @@ INDEX = ROOT / "docs" / "ТЕСТЫ.md"
 def classify(path: pathlib.Path) -> str:
     """Вид теста по его исходнику: запускает код, читает текст или и то и то."""
     source = path.read_text(encoding="utf-8")
-    runs_code = bool(re.search(r"^(from|import)\s+connector\.printflow", source, re.M))
+    # Агент компьютера (`agent/`) — такой же исполняемый код, как коннектор:
+    # тест, который импортирует `agent`, запускает навыки, базу и сервер агента,
+    # а не читает их как текст (уточнено в 18.21).
+    runs_code = bool(re.search(r"^(from|import)\s+(connector\.printflow|agent)\b", source, re.M))
     reads_text = bool(re.search(r"read_text\(|open\(.*encoding", source))
     if runs_code and reads_text:
         return "оба"

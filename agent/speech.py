@@ -175,7 +175,6 @@ class Recognizer:
         return " ".join(part for part in text if part).strip()
 
     def _whisper(self, audio: bytes, language: str) -> tuple[str, str]:
-        import io
         import tempfile
         import pathlib
 
@@ -201,6 +200,10 @@ class Microphone:
         self.last_error = ""
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        # 18.21: фраза после стоп-слова сначала идёт мозгу агента (команды
+        # компьютеру исполняются сразу и ответ звучит вслух), а вопросы цеха —
+        # в панель. Без обработчика — прежний путь: только в журнал панели.
+        self.handler: Any = None
 
     def arm(self, seconds: float = config.MIC_ARM_SECONDS) -> tuple[bool, str]:
         """Включить прослушивание на короткое окно времени."""
@@ -314,6 +317,12 @@ class Microphone:
         """
         if not phrase:
             return
+        if callable(self.handler):
+            try:
+                self.handler(phrase)
+                return
+            except Exception as exc:  # голос не должен ронять поток микрофона
+                self.last_error = f"Фраза не обработана: {exc.__class__.__name__}"
         payload = json.dumps({"text": phrase, "source": "agent-wake-word"},
                              ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
@@ -333,3 +342,50 @@ def _int16_samples(data: bytes):
 
     count = len(data) // 2
     return struct.unpack(f"<{count}h", data[:count * 2]) if count else ()
+
+
+def pack_wav(chunks: list[bytes], rate: int = 16000) -> bytes:
+    """Сырые кадры int16 моно → WAV в памяти (голос на диск не пишется)."""
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(rate)
+        stream.writeframes(b"".join(chunks))
+    return buffer.getvalue()
+
+
+def record_and_transcribe(recognizer: Recognizer, seconds: float) -> tuple[str, str]:
+    """Открыть микрофон на `seconds`, записать и распознать. Микрофон закрывается сам.
+
+    Нужен навыкам `voice.listen` и `voice.dictate` (18.21): раньше они
+    отвечали «требует зависимостей» даже там, где vosk и sounddevice стоят.
+    """
+    try:
+        import sounddevice as sd  # type: ignore
+    except ImportError:
+        return "", "Нет sounddevice — микрофон недоступен (python -m agent.install --install)"
+    if not recognizer.load():
+        return "", recognizer.reason or "Модель речи не загружена"
+    frames: queue.Queue = queue.Queue()
+    chunks: list[bytes] = []
+    deadline = time.time() + max(1.0, min(30.0, float(seconds)))
+    try:
+        with sd.RawInputStream(samplerate=16000, channels=1, dtype="int16", blocksize=4000,
+                               callback=lambda data, *_a: frames.put(bytes(data))):
+            while time.time() < deadline:
+                try:
+                    chunks.append(frames.get(timeout=0.2))
+                except queue.Empty:
+                    continue
+    except OSError as exc:
+        return "", f"Микрофон не открылся: {exc}"
+    if not chunks:
+        return "", "Микрофон ничего не записал"
+    text, reason = recognizer.transcribe_wav(pack_wav(chunks))
+    if reason:
+        return "", reason
+    return text, "" if text else "Речь не распознана"

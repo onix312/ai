@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import sys
-import ctypes
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -14,7 +13,7 @@ def region_shot(left: int, top: int, right: int, bottom: int, max_side: int = 80
     if not IS_WINDOWS:
         return b"", "Снимок области возможен только в Windows"
     try:
-        from PIL import Image, ImageGrab
+        from PIL import ImageGrab
     except ImportError:
         return b"", "Нет Pillow — снимок области недоступен"
     try:

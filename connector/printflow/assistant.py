@@ -1336,6 +1336,26 @@ def agent_skills(db: Database) -> dict[str, Any]:
     return out
 
 
+def agent_chat(db: Database, text: str, session: str = "main",
+               plan: dict[str, Any] | None = None, timeout: float = 25.0) -> dict[str, Any]:
+    """Фраза агенту компьютера (18.21): он понимает команды ПК своими правилами.
+
+    `mode="pc"` — агент отвечает только на то, что понял как команду компьютеру,
+    и не зовёт модель: вопросы цеха остаются панели. Подтверждение ввода в чужие
+    окна и питания по-прежнему показывает агент на своём экране.
+    """
+    state = agent_status(db)
+    if not state.get("available"):
+        return {"ok": False, "handled": False, "reason": state.get("reason") or "Агент недоступен"}
+    body: dict[str, Any] = {"text": str(text or "")[:1000], "session": f"panel-{session}"[:40], "mode": "pc"}
+    if plan:
+        body["plan"] = plan
+    ok, payload, reason = _post_json(f"{state['url']}/chat", body, timeout=timeout)
+    if not ok or not isinstance(payload, dict):
+        return {"ok": False, "handled": False, "reason": f"Агент не ответил: {reason}"}
+    return payload
+
+
 def _call_agent_skill(db: Database, name: str, params: dict[str, Any],
                       timeout: float = 30.0) -> dict[str, Any]:
     """Вызвать навык агента по loopback (Авито, ТГ). Возвращает ответ агента."""
@@ -1610,8 +1630,19 @@ def system_process_list(db, limit: int = 20) -> dict:
 def system_audio_device(db, device_id: str = "") -> dict:
     return _call_agent_skill(db, "system.audio_device", {"device_id": device_id})
 
-def system_volume(db, level: int = 0) -> dict:
-    return _call_agent_skill(db, "system.volume", {"level": level})
+def system_volume(db, level: int | None = None, mute: str = "") -> dict:
+    """Громкость ПК. Без уровня — только чтение.
+
+    До 18.21 чтение громкости (GET) передавало агенту `level=0`, то есть
+    «узнать громкость» означало «выключить звук» — страница делала это при
+    каждом открытии карточки «Система».
+    """
+    params: dict[str, Any] = {}
+    if level is not None:
+        params["level"] = max(0, min(100, int(level)))
+    if mute in ("on", "off", "toggle"):
+        params["mute"] = mute
+    return _call_agent_skill(db, "system.volume", params)
 
 def system_display(db) -> dict:
     return _call_agent_skill(db, "system.display", {})
@@ -1619,8 +1650,9 @@ def system_display(db) -> dict:
 def system_focus(db, minutes: int = 30) -> dict:
     return _call_agent_skill(db, "system.focus", {"minutes": minutes})
 
-def system_power(db, action: str = "lock") -> dict:
-    return _call_agent_skill(db, "system.power", {"action": action})
+def system_power(db, action: str = "") -> dict:
+    """Питание ПК: действие называется явно — пустой вызов больше не блокирует экран."""
+    return _call_agent_skill(db, "system.power", {"action": action} if action else {})
 
 def system_health(db) -> dict:
     return _call_agent_skill(db, "system.health", {})
