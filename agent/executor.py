@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import datetime
 import pathlib
+import time
 from typing import Any, Callable
 
 from . import avito as avito_mod
@@ -174,6 +175,7 @@ class Runner:
         self.store = store if store is not None else Store()
         self.panel = panel if panel is not None else Client(config.PRINTFLOW_URL)
         self._caps: dict[str, Any] = {}
+        self._caps_at = 0.0  # когда в последний раз пинговали панель и модель
         # Часы помощника: мозг подменяет их своими — «сейчас» одно на весь разговор.
         self.clock: Callable[[], datetime.datetime] = datetime.datetime.now
         self._personal: Personal | None = None
@@ -196,23 +198,36 @@ class Runner:
         return self._learning
 
     # --- способности ------------------------------------------------------
-    def refresh_capabilities(self) -> dict[str, Any]:
+    #: Живые пинги панели и модели кэшируются на это время: окно агента зовёт
+    #: `/capabilities` каждые 30 секунд, а `chat` — на каждую реплику (И315).
+    DYNAMIC_TTL_SEC = 10.0
+
+    def refresh_capabilities(self, force: bool = False) -> dict[str, Any]:
         """Статические способности плюс живые: панель и рантайм модели.
 
         Живые проверяются коротким пингом и только здесь: `capabilities.detect()`
         остаётся без сети, чтобы агент стартовал даже с выключенной панелью.
+        С 18.23 пинги не повторяются чаще `DYNAMIC_TTL_SEC` — иначе открытое окно
+        агента и каждая реплика гоняли HTTP туда-сюда и тормозили компьютер.
         """
         caps = dict(capabilities.detect())
-        caps.update(capabilities.dynamic(self.panel.url, config.MODEL_URL))
-        caps["sqlite"] = True
-        caps["sqlite_reason"] = ""
-        try:
-            self.store.stats()
-        except Exception as exc:  # база могла оказаться на сетевом диске без прав
-            caps["sqlite"] = False
-            caps["sqlite_reason"] = f"Своя база ассистента не открывается: {exc.__class__.__name__}"
-        self._caps = caps
-        return caps
+        now = time.time()
+        if force or not self._caps or now - self._caps_at > self.DYNAMIC_TTL_SEC:
+            caps.update(capabilities.dynamic(self.panel.url, config.MODEL_URL))
+            caps["sqlite"] = True
+            caps["sqlite_reason"] = ""
+            try:
+                self.store.stats()
+            except Exception as exc:  # база могла оказаться на сетевом диске без прав
+                caps["sqlite"] = False
+                caps["sqlite_reason"] = f"Своя база ассистента не открывается: {exc.__class__.__name__}"
+            self._caps = caps
+            self._caps_at = now
+            return caps
+        cached = dict(self._caps)
+        cached.update({key: value for key, value in caps.items()
+                       if not key.endswith("_reason") and key not in ("panel", "model", "sqlite")})
+        return cached
 
     @property
     def caps(self) -> dict[str, Any]:

@@ -449,7 +449,7 @@ _JS = r"""
   };
   var ICON = JSON.parse($('icons').textContent);
   var SESSION = 'window';
-  var state = { skills: [], titles: {}, pending: [], fired: 0, busy: false };
+  var state = { pendingKey: '', skills: [], titles: {}, pending: [], fired: 0, busy: false };
   function updateBadge() {
     var total = state.pending.length + state.fired;
     $('side-badge').textContent = total;
@@ -618,7 +618,10 @@ _JS = r"""
     if (left > 0) { label.textContent = 'ждёт ещё ' + left + ' с'; return; }
     finish(card, 'expired', 'Время вышло — попросите ещё раз, если это ещё нужно.');
   }
-  setInterval(function () { document.querySelectorAll('.confirm[data-deadline]').forEach(tick); }, 1000);
+  setInterval(function () {
+    var cards = document.querySelectorAll('.confirm[data-deadline]');
+    if (cards.length) { cards.forEach(tick); }
+  }, 1000);
 
   function finish(card, tone, text) {
     card.className = 'confirm ' + tone;
@@ -643,6 +646,13 @@ _JS = r"""
   function loadPending() {
     return api('/pending').then(function (data) {
       state.pending = data.pending || [];
+      // Окно опрашивает сервер каждые 3 секунды: перерисовываем список только
+      // когда он реально изменился, иначе WebView циклом гоняет разметку (18.23).
+      var key = JSON.stringify(state.pending.map(function (item) {
+        return [item.id, item.text, Math.round((item.expires_at || 0) / 5)];
+      }));
+      if (key === state.pendingKey) { return; }
+      state.pendingKey = key;
       var alive = {};
       state.pending.forEach(function (item) { alive[safeId(item.id)] = true; });
       var count = state.pending.length;
@@ -1270,9 +1280,15 @@ _JS = r"""
 
   loadSkills().then(function () { loadHistory(); loadJournal(); });
   loadPending(); loadMemory(); loadStatus(); loadLife(); loadLearn(); loadNotes();
-  setInterval(function () { loadPending(); loadNotes(); }, 3000);
-  setInterval(loadStatus, 30000);
-  setInterval(loadLife, 60000);
+  // Опрос — только у видимого окна: свёрнутый pywebview не должен грузить
+  // компьютер, из-за которого «сайт цеха начинает тормозить» (18.23).
+  function pollLight() { if (!document.hidden) { loadPending(); loadNotes(); } }
+  setInterval(pollLight, 3000);
+  setInterval(function () { if (!document.hidden) loadStatus(); }, 30000);
+  setInterval(function () { if (!document.hidden) loadLife(); }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { pollLight(); loadStatus(); }
+  });
   input.focus();
 })();
 """

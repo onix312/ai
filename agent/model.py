@@ -37,6 +37,10 @@ from typing import Any
 from . import config
 from .panel_client import loopback_ok
 
+# Loopback-запросы идут мимо системного прокси (как в `assistant._local_open` с 18.19):
+# с HTTP_PROXY в окружении каждый пинг уходил в прокси и мог висеть до таймаута.
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 PING_SEC = 2.0
 MAX_REPLY_CHARS = 4000
 MAX_PROMPT_CHARS = 12000
@@ -56,7 +60,7 @@ def _request(url: str, timeout: float, payload: dict[str, Any] | None = None) ->
         headers={"Accept": "application/json",
                  **({"Content-Type": "application/json; charset=utf-8"} if body is not None else {})})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as answer:  # noqa: S310 — только loopback
+        with _LOCAL_OPENER.open(request, timeout=timeout) as answer:  # noqa: S310 — только loopback
             raw = answer.read(8 * 1024 * 1024)
     except urllib.error.HTTPError as exc:
         return False, None, f"рантайм ответил {exc.code}"

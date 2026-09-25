@@ -22,8 +22,25 @@ def _has(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
 
 
+_DETECT_CACHE: dict | None = None
+
+
 def detect() -> dict:
-    """Карта возможностей: что включено и почему."""
+    """Карта возможностей: что включено и почему.
+
+    С 18.23 результат кэшируется процессом: статика (платформа, библиотеки,
+    движок озвучки) не меняется, пока жив агент, а `loadStatus` окна зовёт
+    `/capabilities` каждые 30 секунд — раньше каждый вызов заново сканировал
+    модули и папки моделей. Живые соседи (панель, модель) проверяет `dynamic()`.
+    """
+    global _DETECT_CACHE
+    if _DETECT_CACHE is None:
+        _DETECT_CACHE = _detect_now()
+    return dict(_DETECT_CACHE)
+
+
+def _detect_now() -> dict:
+    """Свежая карта возможностей — один раз при старте агента."""
     screen_ok = bool(WINDOWS and (_has("mss") or _has("PIL")))
     screen_reason = "" if screen_ok else ("Нет mss или Pillow — снимок экрана недоступен" if WINDOWS else "Снимок экрана работает только в Windows")
     capabilities = {

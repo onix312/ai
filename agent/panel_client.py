@@ -30,6 +30,10 @@ import uuid
 from typing import Any
 
 DEFAULT_URL = "http://127.0.0.1:8765"
+# Loopback-запросы идут мимо системного прокси (как в `assistant._local_open` с 18.19):
+# с HTTP_PROXY в окружении каждый пинг уходил в прокси и мог висеть до таймаута.
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 PING_SEC = 2.0
 TIMEOUT_SEC = 30.0
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1", "[::1]")
@@ -72,7 +76,7 @@ def _request(url: str, payload: dict | None = None, timeout: float = TIMEOUT_SEC
     request = urllib.request.Request(url, data=body, headers=headers,
                                      method="POST" if body is not None else "GET")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as answer:  # noqa: S310 — только loopback
+        with _LOCAL_OPENER.open(request, timeout=timeout) as answer:  # noqa: S310 — только loopback
             raw = answer.read(MAX_UPLOAD_BYTES)
     except urllib.error.HTTPError as exc:
         detail = ""
