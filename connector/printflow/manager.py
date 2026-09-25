@@ -2837,17 +2837,9 @@ class PrinterManager:
         if (printer and kind in ("complete", "error")
                 and settings.get("notify_photo", True)):
             photo = printer.camera.frame
-        # Кнопка Mini App цеха — во всех уведомлениях, плюс старые action-кнопки.
-        # 18.12.2: кнопка web_app только для https-адреса — Telegram отклоняет
-        # сообщение целиком (BUTTON_URL_INVALID), если адрес http или не задан.
+        # Кнопки действий в уведомлении (19.0): отвечают в чате, web_app-кнопок
+        # и внешних адресов у бота больше нет.
         buttons: list = []
-        try:
-            from .staffbot.core.config import miniapp_state
-            state = miniapp_state(self.db)
-        except Exception:
-            state = {"url": "", "ready": False}
-        if state.get("ready"):
-            buttons.append([{"text": "🏭 Открыть цех", "web_app": {"url": state["url"]}}])
         if kind == "complete":
             buttons.append([{"text": "📷 Кадр", "callback_data": "cmd:frame"},
                             {"text": "▶ Следующее", "callback_data": "cmd:next"},
@@ -2902,10 +2894,9 @@ class PrinterManager:
             return {"ok": True, "skipped": "quiet"}
         reply_markup = ""
         if buttons:
-            # Поддержка web_app кнопок (Mini App full_miniapp):
-            # - старый формат: [("text","callback")]
-            # - новый: [[{"text":"...","web_app":{"url":...}}]] или [{"text":...,"web_app":...}]
-            # - смешанный: [(text,callback)] + dict с web_app
+            # Форматы кнопок: старый [("text","callback")], готовые ряды
+            # [[{...}]] и смешанный. Терпимый парсер: уведомления приходят
+            # из разных мест и не должны падать из-за формы.
             try:
                 kb_rows: list[list[dict]] = []
                 # если buttons — список списков словарей (inline_keyboard уже готов)

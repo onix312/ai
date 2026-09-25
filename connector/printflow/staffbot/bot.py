@@ -1,13 +1,19 @@
-"""Тонкий бот сотрудников — только уведомления + кнопка «Открыть цех» web_app.
+"""Бот сотрудников — уведомления, кнопки и ассистент (19.0).
 
 Архитектура clean_layers:
 - core/config, core/db, core/api_client
 - router
-- handlers/menu (notify_only + web_app)
+- handlers/menu (меню, помощь, код)
 - handlers/notify (дайджест 09:00, график 20:00, низкий остаток)
+- handlers/report (сводка, принтеры, заказы, полка, очередь, кадр, деньги)
+  + действия по уведомлениям: следующее, продолжить, снял, повтор
+- handlers/assistant (core assistant.py): вопросы про цех мозгом помощника
 - scenes SQLite с нуля
-- ui keyboards
-- miniapp auth (вне бота, в routes_staff)
+- ui keyboards — только callback-кнопки
+
+19.0: Mini App убран. У бота нет кнопки web_app и внешнего адреса: всё меню
+на callback-кнопках, каждая отвечает в чате, а на свободные вопросы отвечает
+мозг помощника панели (`assistant_brain`).
 """
 from __future__ import annotations
 
@@ -16,25 +22,25 @@ import re as _re
 import threading
 import time
 
-from ..accounting import num, uid
+from ..accounting import num
 from ..staff import ROLE_NAMES, Staff, gate, group_for_word
+from .assistant import AskMixin
 from .core.api_client import TelegramApiClient
-from .core.config import get_miniapp_url, load_config, miniapp_state
+from .core.config import load_config
 from .core.db import ensure_scenes_table
 from .handlers.menu import MenuMixin
 from .handlers.notify import NotifyMixin
 from .handlers.report import ReportMixin
 from .router import ROUTER, normalize, suggest_command
-from .scenes import BotScenes
+from .scenes import ASK, BotScenes
 from .ui import HELP, main_menu_keyboard
 
 
-class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
-    """Рабочий бот PrintFlow: цех в кармане — уведомления, Mini App и текст.
+class StaffBot(MenuMixin, NotifyMixin, ReportMixin, AskMixin):
+    """Рабочий бот PrintFlow: цех в кармане — кнопки, уведомления, ассистент.
 
-    18.12.3: кнопка Mini App больше не единственный ответ. Отчёты
-    (статус/принтеры/заказы/полка/очередь/кадр/деньги) отдаёт ReportMixin —
-    словами и фото, чтобы цех читался прямо в чате.
+    19.0: ни одной web_app-кнопки и ни одного «откройте цех» — отчёты,
+    действия и вопросы ассистенту живут в самом чате.
     """
 
     def __init__(self, manager):
@@ -80,20 +86,8 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
 
     def _call(self, method: str, params: dict, timeout: int = 35,
               files: dict[str, tuple[str, bytes]] | None = None) -> dict:
-        """Вызов Bot API; `files` — вложение (фото отчёта, 18.12.3)."""
+        """Вызов Bot API; `files` — вложение (фото отчёта)."""
         return self.transport.call(method, params, timeout=timeout, files=files)
-
-    def _miniapp_note(self) -> str:
-        """Строка про адрес Mini App, когда кнопка «Открыть цех» не работает.
-
-        18.12.2: тексты «откройте цех кнопкой ниже» не должны обещать кнопку,
-        которой Telegram не покажет (адрес не задан или не https).
-        """
-        try:
-            state = miniapp_state(self.db)
-        except Exception:
-            return ""
-        return "" if state["ready"] else f"\n\n⚠ {state['problem']}."
 
 
     def _claim_update(self, update: dict):
@@ -200,13 +194,12 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
                     welcome = (
                         f"Добро пожаловать, {member.get('name')}! Вы в команде как {role}.\n"
                         f"Права: {Staff(self.db).rights_text(member.get('role'))}\n\n"
-                        "Откройте цех кнопкой ниже."
+                        "Нажмите «Меню» — отчёты кнопками, а 🤖 Ассистент ответит на вопросы."
                     )
                     self._reply(
                         chat,
-                        welcome + self._miniapp_note(),
-                        main_menu_keyboard(get_miniapp_url(self.db),
-                                           str(member.get("role") or "")),
+                        welcome,
+                        main_menu_keyboard(str(member.get("role") or "")),
                     )
                     self.db.add_event("bot", "Новый участник по приглашению", f"{member.get('name')} — {role}", "", {})
                     return
@@ -233,12 +226,18 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
 
     def _dispatch(self, chat: str, raw: str) -> None:
         text = normalize(raw)
-        # сцены — пока минимально: если есть активная, сбрасываем и показываем меню
-        scene = self.scenes.active(chat)
-        if scene:
-            # для тонкого бота любая сцена ведёт в цех
-            self.scenes.pop(chat)
         route = ROUTER.match_text(text)
+        scene = self.scenes.active(chat)
+        if scene and scene.get("scene") == ASK:
+            # Режим ассистента: меню, помощь и код выходят из него, отчёты
+            # отвечают поверх, остальное — вопрос ассистенту.
+            if route is None:
+                return self._ask_answer(chat, raw)
+            if route.method in ("cmd_menu", "cmd_help", "cmd_code"):
+                self.scenes.pop(chat)
+        elif scene:
+            # сцены старых релизов сбрасываем: у тонкого бота их больше нет
+            self.scenes.pop(chat)
         who = gate(self.db, chat)
         if route is not None:
             group = ROUTER.group_for(route, text)
@@ -247,8 +246,8 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
                 return self._reply(
                     chat,
                     f"🚫 «{word}» недоступен для роли «{ROLE_NAMES.get(who['role'])}».\n"
-                    "Откройте цех — там доступно по вашей роли.",
-                    main_menu_keyboard(get_miniapp_url(self.db), str(who["role"] or "")),
+                    "Доступное — кнопками в меню.",
+                    main_menu_keyboard(str(who["role"] or "")),
                 )
             handler = getattr(self, route.method, None)
             if handler:
@@ -287,7 +286,7 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
         match = ROUTER.match_callback(command)
         if match is None:
             self._answer_callback()
-            return self._reply(chat, "Не понял команду.", main_menu_keyboard(get_miniapp_url(self.db)))
+            return self._reply(chat, "Не понял команду.", main_menu_keyboard(self._report_role(chat)))
         route, params = match
         handler = getattr(self, route.method, None)
         if not handler:
@@ -300,7 +299,7 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
                 res = handler(chat, params) if route.kind == "text" else None
                 if isinstance(res, str) and res:
                     self._answer_callback()
-                    self._reply(chat, res, main_menu_keyboard(get_miniapp_url(self.db)))
+                    self._reply(chat, res, main_menu_keyboard(self._report_role(chat)))
                     return
             except TypeError:
                 pass
@@ -319,22 +318,22 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
     def _unknown(self, chat: str, raw: str) -> None:
         suggestion = suggest_command(raw)
         lines = [
-            "Не узнал команду — откройте цех кнопкой ниже или спросите текстом:",
-            "статус · принтеры · заказы [номер] · полка · очередь · кадр · деньги.",
+            "Не узнал команду. Кнопки ниже — отчёты цеха, 🤖 Ассистент ответит",
+            "на вопрос словами. Спросите текстом: «что печатает P1S?»",
         ]
-        kb = main_menu_keyboard(get_miniapp_url(self.db), self._report_role(chat))
+        kb = main_menu_keyboard(self._report_role(chat))
         self._call(
             "sendMessage",
             {
                 "chat_id": chat,
-                "text": ("\n".join(lines) + self._miniapp_note())[:3800],
+                "text": ("\n".join(lines))[:3800],
                 "reply_markup": json.dumps(kb, ensure_ascii=False),
             },
             timeout=15,
         )
 
 
-    # --- совместимость со старыми тестами: любые старые команды ведут в цех
+    # --- совместимость со старыми тестами: любые старые команды ведут в меню
     def __getattr__(self, name: str):
         # старые методы бота: _list_printers, _client_answer, _sell_rows и т.д.
         # тонкий бот их не имеет — возвращаем заглушку, которая шлёт меню
@@ -349,7 +348,7 @@ class StaffBot(MenuMixin, NotifyMixin, ReportMixin):
                         self._send_main_menu("111")
                 except Exception:
                     pass
-                return "Открыть цех"
+                return "Меню"
             return _compat
         raise AttributeError(name)
 

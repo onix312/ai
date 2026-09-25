@@ -94,15 +94,15 @@ class NotifyTests(unittest.TestCase):
         # должен отправить (хотя бы текст)
         self.assertEqual(len(self.manager.notified), 1)
 
-    def test_notify_with_button_includes_open_ceh(self):
+    def test_notify_with_button_includes_menu(self):
         self.bot._notify_with_button("тест", event="digest")
         self.assertEqual(len(self.manager.notified), 1)
         text, photo, buttons, event = self.manager.notified[0]
-        # кнопка callback «Открыть цех» → menu
+        # кнопка callback «Меню»: отчёты отвечают в чате, web_app нет (19.0)
         self.assertTrue(buttons)
-        # в тексте или кнопках должен быть цех
         flat = str(buttons)
-        self.assertIn("Открыть цех", flat)
+        self.assertIn("Меню", flat)
+        self.assertNotIn("web_app", flat)
 
 
 class ChartRoutingTests(unittest.TestCase):

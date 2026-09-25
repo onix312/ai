@@ -62,13 +62,17 @@ class UnknownReplyTests(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def test_unknown_sends_menu_with_web_app(self):
+    def test_unknown_sends_menu_without_web_app(self):
         calls = []
         self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
         self.bot._dispatch("111", "абракадабра")
         self.assertTrue(calls)
         rm = json.loads(calls[-1][1]["reply_markup"])
-        self.assertIn("web_app", rm["inline_keyboard"][0][0])
+        flat = [b for row in rm["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertNotIn("web_app", btn)
+            self.assertIn("callback_data", btn)
 
     def test_goto_callback_opens_menu(self):
         calls = []

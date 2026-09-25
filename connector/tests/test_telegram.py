@@ -58,14 +58,16 @@ class TelegramThinTests(unittest.TestCase):
         self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
         return calls
 
-    def test_menu_contains_web_app(self):
+    def test_menu_contains_buttons_without_web_app(self):
         calls = self._capture()
         self.bot._dispatch("111", "меню")
         self.assertTrue(calls)
         rm = json.loads(calls[-1][1]["reply_markup"])
-        btn = rm["inline_keyboard"][0][0]
-        self.assertIn("web_app", btn)
-        self.assertIn("Открыть цех", btn["text"])
+        flat = [b for row in rm["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertNotIn("web_app", btn)
+            self.assertIn("callback_data", btn)
 
     def test_old_commands_still_show_menu(self):
         for cmd in ("продажа", "полка", "касса", "принтеры", "деньги", "очередь", "заказы"):
@@ -73,7 +75,10 @@ class TelegramThinTests(unittest.TestCase):
             self.bot._dispatch("111", cmd)
             self.assertTrue(calls, f"no reply for {cmd}")
             rm = json.loads(calls[-1][1]["reply_markup"])
-            self.assertIn("web_app", rm["inline_keyboard"][0][0])
+            flat = [b for row in rm["inline_keyboard"] for b in row]
+            self.assertTrue(flat)
+            for btn in flat:
+                self.assertNotIn("web_app", btn)
 
     def test_help_contains_ceh(self):
         calls = self._capture()

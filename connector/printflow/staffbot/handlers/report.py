@@ -1,9 +1,7 @@
-"""Отчёты бота текстом и картинками — цех без Mini App (18.12.3).
+"""Отчёты бота текстом и картинками.
 
-До 18.12.3 тонкий бот умел только одно: показать кнопку web_app «Открыть цех».
-Если внешнего HTTPS-адреса нет (он не нужен до первого телефона), на любой
-вопрос отвечало «откройте цех» — а открывать было нечего. Теперь у бота есть
-свои глаза и рот:
+Тонкий бот отвечает сам, без внешних окон и адресов — у него есть свои глаза
+и рот:
 
 * «статус», «принтеры» — сводка цеха словами, плюс кадр камеры печатающего
   станка;
@@ -16,6 +14,10 @@
 `staffbot/report.py`, здесь только сборка данных и отправка. Картинка уходит
 первым сообщением, текст — вторым: подпись к фото Telegram режет, а полный
 текст в подпись не влезает, поэтому последним всегда остаётся sendMessage.
+
+19.0: здесь же действия из кнопок уведомлений — «Следующее», «Продолжить»,
+«Снял», «Повторить». Каждая кнопка отвечает в чате; физическую команду
+«Продолжить» нажимает человек, поэтому она равна кнопке панели.
 """
 from __future__ import annotations
 
@@ -23,7 +25,6 @@ import re as _re
 
 from ...staff import gate
 from .. import report
-from ..core.config import get_miniapp_url
 from ..core.staff_service import (
     count_inbox_unread,
     count_low_stock,
@@ -35,11 +36,11 @@ from ..core.staff_service import (
     order_photo_file,
     today_money,
 )
-from ..ui import markup_or_none, report_keyboard
+from ..ui import main_menu_keyboard, markup_or_none
 
 
 class ReportMixin:
-    """Команды, которые отвечают текстом и фото, не открывая Mini App."""
+    """Команды, которые отвечают текстом и фото прямо в чате."""
 
     ORDERS_LIMIT = 10
     SHELF_LIMIT = 12
@@ -64,7 +65,7 @@ class ReportMixin:
         return queue if isinstance(queue, list) else []
 
     def _report_summary(self) -> dict:
-        """Те же цифры, что показывает главный экран Mini App."""
+        """Те же цифры, что на главном экране панели."""
         printers = self._report_printers()
         return {
             "total": len(printers),
@@ -84,11 +85,7 @@ class ReportMixin:
             return ""
 
     def _report_keyboard(self, chat: str) -> dict | None:
-        try:
-            url = get_miniapp_url(self.db)
-        except Exception:
-            url = ""
-        return markup_or_none(report_keyboard(url, self._report_role(chat)))
+        return markup_or_none(main_menu_keyboard(self._report_role(chat)))
 
     # ---------------------------------------------------------- картинки
     def _camera_frame(self) -> tuple[bytes | None, str]:
@@ -208,7 +205,7 @@ class ReportMixin:
         self._send_report(chat, report.shelf_text(items[: self.SHELF_LIMIT]))
 
     def cmd_money(self, chat: str, raw: str = "", text: str = "") -> None:
-        """Деньги — как в Mini App: только руководителю и владельцу."""
+        """Деньги — только руководителю и владельцу."""
         if self._report_role(chat) not in ("owner", "manager"):
             self._send_report(chat, "💰 Деньги — только руководителю и владельцу.")
             return
@@ -216,7 +213,7 @@ class ReportMixin:
         self._send_report(chat, report.money_text(today, week))
 
     def cmd_frame(self, chat: str, raw: str = "", text: str = "") -> None:
-        """«кадр» — фото с камеры; живое видео остаётся в Mini App и панели."""
+        """«кадр» — фото с камеры; живое видео — в панели."""
         printers = self._report_printers()
         frame, name = self._camera_frame()
         if frame:
@@ -246,3 +243,111 @@ class ReportMixin:
 
     def cb_frame(self, chat: str, message_id: str = "", params: str = "") -> None:
         self.cmd_frame(chat)
+
+    # ------------------------------------------------- действия по уведомлениям
+    # Кнопки в уведомлениях менеджера: «Следующее», «Продолжить», «Снял»,
+    # «Повторить». Каждая отвечает в чате; физическая команда одна —
+    # «Продолжить», и нажимает её человек, как кнопку панели.
+
+    def _manager_printers(self) -> list:
+        source = getattr(self.manager, "printers", None) or {}
+        return list(source.values()) if isinstance(source, dict) else list(source)
+
+    def cmd_next(self, chat: str, raw: str = "", text: str = "") -> None:
+        """«Следующее» — что встанет на освободившийся станок (только превью)."""
+        lines: list[str] = []
+        for printer in self._manager_printers():
+            state = str(getattr(printer, "state", "") or "").upper()
+            if state in ("RUNNING", "PREPARE"):
+                continue
+            try:
+                job = self.manager.next_job(getattr(printer, "id", ""))
+            except Exception:
+                job = None
+            if job:
+                lines.append(f"▸ {report.printer_name(printer, self._report_printers())}: "
+                             + report.queue_line(job, 1))
+        self._send_report(chat, "\n".join(lines) if lines else "🧾 Очередь пуста — станки свободны.")
+
+    def cb_next(self, chat: str, message_id: str = "", params: str = "") -> None:
+        self.cmd_next(chat)
+
+    def cmd_resume(self, chat: str, raw: str = "", text: str = "") -> None:
+        """«Продолжить» — снять паузу с тех станков, что на паузе."""
+        resumed, failed = [], []
+        for printer in self._manager_printers():
+            state = str(getattr(printer, "state", "") or "").upper()
+            if state not in ("PAUSE", "PAUSED"):
+                continue
+            name = report.printer_name(printer, self._report_printers())
+            try:
+                printer.command("resume")
+            except Exception as exc:
+                failed.append(f"{name}: {exc}")
+                continue
+            resumed.append(name)
+        if resumed:
+            self._send_report(chat, "▶ Продолжаю: " + ", ".join(resumed) + ".")
+        elif failed:
+            self._send_report(chat, "Не получилось: " + "; ".join(failed) + ".")
+        else:
+            self._send_report(chat, "На паузе никого нет — все станки работают или свободны.")
+
+    def cb_resume(self, chat: str, message_id: str = "", params: str = "") -> None:
+        self.cmd_resume(chat)
+
+    def cmd_removed(self, chat: str, raw: str = "", text: str = "") -> None:
+        """«Снял» — зафиксировать, что деталь снята со стола."""
+        printers = self._report_printers()
+        target = ""
+        for printer in self._manager_printers():
+            state = str(getattr(printer, "state", "") or "").upper()
+            if state in ("FINISH", "IDLE"):
+                target = getattr(printer, "id", "")
+                break
+        if not target:
+            try:
+                job = self.db.one(
+                    "SELECT printer_id FROM print_jobs WHERE state='done'"
+                    " ORDER BY datetime(finished_at) DESC LIMIT 1")
+                target = str((job or {}).get("printer_id") or "")
+            except Exception:
+                target = ""
+        try:
+            if hasattr(self.manager, "part_removed"):
+                self.manager.part_removed(target)
+        except Exception as exc:
+            return self._send_report(chat, f"Не получилось отметить: {exc}")
+        name = ""
+        if target and hasattr(self.manager, "get"):
+            try:
+                name = report.printer_name(self.manager.get(target), printers)
+            except Exception:
+                name = ""
+        self._send_report(chat, "🤚 Зафиксировал: деталь снята" + (f" — {name}." if name else "."))
+
+    def cb_removed(self, chat: str, message_id: str = "", params: str = "") -> None:
+        self.cmd_removed(chat)
+
+    def cmd_reprint(self, chat: str, raw: str = "", text: str = "") -> None:
+        """«Повторить» — честно: повтор требует разбора причины в панели."""
+        try:
+            job = self.db.one(
+                "SELECT j.*, o.number AS order_number FROM print_jobs j"
+                " LEFT JOIN orders o ON o.id=j.order_id"
+                " WHERE j.state='failed' ORDER BY datetime(j.finished_at) DESC LIMIT 1")
+        except Exception:
+            job = None
+        if not job:
+            return self._send_report(chat, "✅ Сорванных заданий нет — повторять нечего.")
+        name = str(job.get("file") or job.get("name") or "задание")
+        order = str(job.get("order_number") or "")
+        self._send_report(
+            chat,
+            "↻ Последнее сорванное: " + name + (f" (заказ №{order})" if order else "") + ".\n"
+            "Повтор запускается в панели: сначала разберитесь с причиной брака,\n"
+            "потом «Повторить» в карточке задания — станок получит его заново.",
+        )
+
+    def cb_reprint(self, chat: str, message_id: str = "", params: str = "") -> None:
+        self.cmd_reprint(chat)

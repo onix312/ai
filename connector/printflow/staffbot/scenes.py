@@ -15,6 +15,7 @@ from .core.db import ensure_scenes_table
 SELL = "sell"
 CASH_RECONCILE = "cash_reconcile"
 CLIENT_REPLY = "client_reply"
+ASK = "ask"  # 19.0: режим вопроса ассистенту
 
 
 class BotScenes:

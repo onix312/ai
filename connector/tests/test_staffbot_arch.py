@@ -1,14 +1,13 @@
-"""Архитектура бота сотрудников — тонкий бот notify_only + Mini App.
+"""Архитектура бота сотрудников — кнопки и ассистент, без Mini App (19.0).
 
 Проверяется:
 - clean_layers: core/config, core/db, core/api_client, router, handlers/menu,
-  handlers/notify, handlers/report (18.12.3: текстовые отчёты), scenes, ui,
-  report (формулировки), miniapp
+  handlers/notify, handlers/report (текстовые отчёты и действия), assistant
+  (вопросы мозгом помощника), scenes, ui, report (формулировки)
 - таблицы маршрутов консистентны — у каждой записи есть метод-обработчик, слова не перекрываются, фразы выигрывают
 - права считаются по записи маршрута
 - диалоги живут в SQLite: переживают пересоздание бота, просроченное ожидание честно начинается заново
-- ui: клавиатура с web_app «Открыть цех»
-- miniapp auth HMAC
+- ui: клавиатура только на callback-кнопках, web_app-кнопок нет ни в одном ответе
 """
 from __future__ import annotations
 
@@ -17,10 +16,6 @@ import pathlib
 import sys
 import tempfile
 import unittest
-import hashlib
-import hmac
-import urllib.parse
-import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -30,10 +25,9 @@ from connector.printflow.accounting import Accounting  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.staffbot import StaffBot  # noqa: E402
 from connector.printflow.staffbot.router import CALLBACKS, ROUTER, TEXT_COMMANDS, normalize, suggest_command  # noqa: E402
-from connector.printflow.staffbot.scenes import BotScenes, SELL  # noqa: E402
-from connector.printflow.staffbot.ui import main_menu_keyboard, web_app_keyboard  # noqa: E402
-from connector.printflow.staffbot.miniapp import validate_init_data  # noqa: E402
-from connector.printflow.staffbot.core.config import get_miniapp_url  # noqa: E402
+from connector.printflow.staffbot.scenes import ASK, BotScenes, SELL  # noqa: E402
+from connector.printflow.staffbot.ui import main_menu_keyboard  # noqa: E402
+from connector.printflow.staffbot.core.config import load_config  # noqa: E402
 from connector.printflow.staffbot.core.db import ensure_scenes_table  # noqa: E402
 from connector.printflow.staffbot.core.api_client import TelegramApiClient  # noqa: E402
 
@@ -61,10 +55,23 @@ class CleanLayersTests(unittest.TestCase):
     def test_core_files_exist(self):
         base = ROOT / "connector" / "printflow" / "staffbot"
         for rel in ("core/config.py", "core/db.py", "core/api_client.py",
-                    "router.py", "scenes.py", "ui.py", "miniapp.py",
+                    "router.py", "scenes.py", "ui.py", "assistant.py",
                     "report.py", "handlers/menu.py", "handlers/notify.py",
                     "handlers/report.py", "bot.py"):
             self.assertTrue((base / rel).exists(), f"нет файла {rel}")
+
+    def test_miniapp_is_gone(self):
+        """19.0: файлов и маршрутов Mini App больше нет — и не импортируются."""
+        self.assertFalse((ROOT / "connector" / "printflow" / "routes_staff_miniapp.py").exists())
+        self.assertFalse((ROOT / "connector" / "printflow" / "staffbot" / "miniapp.py").exists())
+        self.assertFalse((ROOT / "site" / "staff.html").exists())
+        self.assertFalse((ROOT / "site" / "assets" / "js" / "staff-miniapp.js").exists())
+        source = (ROOT / "connector" / "printflow" / "staffbot").rglob("*.py")
+        for path in source:
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn('"web_app"', text, f"{path.name}: осталась web_app-кнопка")
+            self.assertNotIn("get_miniapp_url", text, f"{path.name}: остался адрес Mini App")
+            self.assertNotIn("miniapp_state", text, f"{path.name}: осталось состояние Mini App")
 
     def test_api_client_has_call(self):
         client = TelegramApiClient(lambda: "", "staff")
@@ -78,10 +85,6 @@ class CleanLayersTests(unittest.TestCase):
         self.assertIsNotNone(row)
         db.close()
         tmp.cleanup()
-
-    def test_routes_staff_miniapp_exists(self):
-        self.assertTrue((ROOT / "connector" / "printflow" / "routes_staff_miniapp.py").exists())
-        self.assertTrue((ROOT / "site" / "assets" / "js" / "staff-miniapp.js").exists())
 
 
 class RouterTableTests(unittest.TestCase):
@@ -118,6 +121,13 @@ class RouterTableTests(unittest.TestCase):
         self.assertIsNotNone(route)
         self.assertEqual(route.method, "cmd_menu")
 
+    def test_assistant_and_actions_routed(self):
+        self.assertEqual(ROUTER.match_text("ассистент").method, "cmd_ask")
+        self.assertEqual(ROUTER.match_text("следующее").method, "cmd_next")
+        self.assertEqual(ROUTER.match_text("снял").method, "cmd_removed")
+        self.assertEqual(ROUTER.match_text("продолжить").method, "cmd_resume")
+        self.assertEqual(ROUTER.match_text("повторить").method, "cmd_reprint")
+
     def test_unknown_text_and_callback(self):
         self.assertIsNone(ROUTER.match_text("ываваыва"))
         self.assertIsNone(ROUTER.match_text(""))
@@ -132,14 +142,18 @@ class RouterTableTests(unittest.TestCase):
     def test_unknown_callback_group_is_view(self):
         self.assertEqual(ROUTER.group_for_callback("нет-такой-кнопки"), "view")
 
-    def test_late_answer_only_for_goto(self):
-        late = [r.prefix for r in CALLBACKS if r.late_answer]
-        self.assertEqual(late, ["goto"])
+    def test_late_answer_only_for_goto_and_suggestion(self):
+        late = sorted(r.prefix for r in CALLBACKS if r.late_answer)
+        self.assertEqual(late, ["goto", "sug"])
+
+    def test_ask_group_is_finance(self):
+        """Ассистент видит деньги и клиентов — группа та же, что у «денег»."""
+        self.assertEqual(ROUTER.group_for_callback("ask"), "finance")
+        self.assertEqual(ROUTER.group_for_callback("sug:0"), "finance")
 
     def test_normalize_reply_aliases(self):
-        # 18.12.3: у «полки», «кассы» и «кадра» есть свои текстовые ответы,
+        # у «полки», «кассы» и «кадра» есть свои текстовые ответы,
         # поэтому в меню ведут только те кнопки, чьего ответа у бота нет.
-        self.assertEqual(normalize("🛒 Продать"), "меню")
         self.assertEqual(normalize("📦 Полка"), "полка")
         self.assertEqual(normalize("💰 Касса"), "деньги")
         self.assertEqual(normalize("📷 Кадр"), "кадр")
@@ -150,22 +164,35 @@ class RouterTableTests(unittest.TestCase):
         self.assertEqual(suggest_command(""), "")
 
 
-class UiWebAppTests(unittest.TestCase):
-    def test_web_app_keyboard_has_url(self):
-        kb = web_app_keyboard("https://example.com/staff")
-        self.assertIn("inline_keyboard", kb)
-        btn = kb["inline_keyboard"][0][0]
-        self.assertEqual(btn["text"], "🏭 Открыть цех")
-        self.assertEqual(btn["web_app"]["url"], "https://example.com/staff")
+class UiKeyboardTests(unittest.TestCase):
+    def test_main_menu_has_no_web_app(self):
+        kb = main_menu_keyboard("owner")
+        flat = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertNotIn("web_app", btn, "в меню осталась web_app-кнопка")
+            self.assertIn("callback_data", btn)
 
-    def test_main_menu_keyboard_has_help_and_code(self):
-        kb = main_menu_keyboard("https://example.com/staff")
+    def test_main_menu_has_help_and_code(self):
+        kb = main_menu_keyboard("owner")
         flat = [b for row in kb["inline_keyboard"] for b in row]
         texts = [b["text"] for b in flat]
-        self.assertIn("🏭 Открыть цех", texts)
-        # есть помощь и код
         self.assertTrue(any("Помощь" in t for t in texts))
         self.assertTrue(any("код" in t.lower() or "Мой код" in t for t in texts))
+
+    def test_money_visible_to_owner_only(self):
+        owner = [b["text"] for row in main_menu_keyboard("owner")["inline_keyboard"] for b in row]
+        employee = [b["text"] for row in main_menu_keyboard("employee")["inline_keyboard"] for b in row]
+        self.assertIn("💰 Деньги", owner)
+        self.assertNotIn("💰 Деньги", employee)
+        self.assertIn("🤖 Ассистент", owner)
+        self.assertNotIn("🤖 Ассистент", employee)
+
+    def test_url_argument_ignored(self):
+        """Старые вызовы с адресом работают: кнопка web_app всё равно не ставится."""
+        kb = main_menu_keyboard("https://example.com/staff", "owner")
+        flat = [b for row in kb["inline_keyboard"] for b in row]
+        self.assertFalse([b for b in flat if "web_app" in b])
 
 
 class BotScenesTests(unittest.TestCase):
@@ -213,52 +240,11 @@ class BotScenesTests(unittest.TestCase):
         self.assertEqual(scene["data"]["await"], "price")
 
 
-class MiniAppAuthTests(unittest.TestCase):
-    def _make_init_data(self, token: str, user: dict, auth_date: int | None = None) -> str:
-        auth_date = auth_date or int(time.time())
-        user_json = json.dumps(user, separators=(",", ":"))
-        data = {
-            "user": user_json,
-            "auth_date": str(auth_date),
-            "query_id": "test",
-        }
-        check_parts = [f"{k}={v}" for k, v in sorted(data.items())]
-        check_string = "\n".join(check_parts)
-        secret_key = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
-        calc_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-        data["hash"] = calc_hash
-        return urllib.parse.urlencode(data)
-
-    def test_validate_init_data_ok(self):
-        token = "123:ABC"
-        user = {"id": 123, "first_name": "Test"}
-        init_data = self._make_init_data(token, user)
-        res = validate_init_data(init_data, token)
-        self.assertIsNotNone(res)
-        self.assertEqual(res["id"], 123)
-
-    def test_validate_init_data_bad_hash(self):
-        token = "123:ABC"
-        user = {"id": 123}
-        init_data = self._make_init_data(token, user) + "x"
-        res = validate_init_data(init_data, token)
-        self.assertIsNone(res)
-
-    def test_validate_init_data_expired(self):
-        token = "123:ABC"
-        user = {"id": 123}
-        old_date = int(time.time()) - 90000
-        init_data = self._make_init_data(token, user, auth_date=old_date)
-        res = validate_init_data(init_data, token, max_age=86400)
-        self.assertIsNone(res)
-
-
 class MenuDispatchTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.db = Database(pathlib.Path(self._tmp.name) / "t.sqlite3")
-        self.db.set_settings({"telegram_chat_id": "111", "telegram_token": "tok",
-                              "public_url": "https://example.com"})
+        self.db.set_settings({"telegram_chat_id": "111", "telegram_token": "tok"})
         self.manager = FakeManager(self.db)
         self.bot = StaffBot(self.manager)
 
@@ -267,7 +253,7 @@ class MenuDispatchTests(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def test_dispatch_sends_menu_with_web_app(self):
+    def test_dispatch_sends_menu_with_buttons(self):
         calls = []
         self.bot._call = lambda method, params, timeout=35: calls.append((method, params)) or {"ok": True}
         self.bot._dispatch("111", "меню")
@@ -275,8 +261,11 @@ class MenuDispatchTests(unittest.TestCase):
         method, params = calls[-1]
         self.assertEqual(method, "sendMessage")
         rm = json.loads(params["reply_markup"])
-        btn = rm["inline_keyboard"][0][0]
-        self.assertIn("web_app", btn)
+        flat = [b for row in rm["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertIn("callback_data", btn)
+            self.assertNotIn("web_app", btn)
 
     def test_unknown_suggests_menu(self):
         calls = []

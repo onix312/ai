@@ -46,13 +46,18 @@ class ClientBotThinTests(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def test_kotvet_now_in_miniapp(self):
+    def test_kotvet_answers_with_menu_buttons(self):
+        """Витринное слово отвечает меню на callback-кнопках — web_app нет (19.0)."""
         calls = []
         self.bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
         self.bot._dispatch("111", "кответ 555 привет")
         self.assertTrue(calls)
         rm = json.loads(calls[-1][1]["reply_markup"])
-        self.assertIn("web_app", rm["inline_keyboard"][0][0])
+        flat = [b for row in rm["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertIn("callback_data", btn)
+            self.assertNotIn("web_app", btn)
 
 
 if __name__ == "__main__":

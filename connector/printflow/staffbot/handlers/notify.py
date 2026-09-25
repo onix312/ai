@@ -1,7 +1,10 @@
-"""Notify handlers — все уведомления + кнопка web_app.
+"""Notify handlers — все уведомления + кнопки действий.
 
 Печать, inbox, касса, низкий остаток, дайджест 09:00, график 20:00, недельный.
 Бот тонкий, но расписание шлёт сам, через manager.notify_async.
+
+19.0: web_app-кнопки нет — уведомление несёт «🏠 Меню» и кнопки действий
+(кадр, следующее, продолжить, снял), каждая отвечает в чате.
 """
 from __future__ import annotations
 
@@ -9,22 +12,18 @@ import json
 from datetime import datetime
 
 from ...accounting import num
-from ..core.config import miniapp_state
-from ..ui import web_app_keyboard
 
 
 class NotifyMixin:
     """Миксин с тиками расписания и текстами уведомлений."""
 
     def _notify_with_button(self, text: str, event: str = "", photo: bytes | None = None) -> None:
-        """Отправить уведомление с кнопкой «Открыть цех».
+        """Отправить уведомление с кнопкой меню.
 
-        У самой кнопки — callback на меню, а не web_app: меню уже показывает
-        web_app, когда адрес Mini App настроен, а в уведомлении не-HTTPS адрес
-        уронил бы всё сообщение (``BUTTON_URL_INVALID``). Если адреса нет,
-        сообщение всё равно уходит — но без мёртвой кнопки на example.com.
+        Кнопка — callback на меню: отчёты отвечают в чате, web_app-кнопок у
+        бота больше нет (19.0).
         """
-        buttons = [("🏭 Открыть цех", "cmd:menu")]
+        buttons = [("🏠 Меню", "cmd:menu")]
         if hasattr(self, "manager") and hasattr(self.manager, "notify_async"):
             try:
                 self.manager.notify_async(text, photo=photo, buttons=buttons, event=event)
@@ -36,15 +35,11 @@ class NotifyMixin:
             chat = str(self._settings().get("telegram_chat_id") or "")
             if not chat:
                 return
-            state = miniapp_state(self.db)
             payload: dict = {
                 "chat_id": chat,
                 "text": text[:3800],
                 "disable_web_page_preview": "true",
             }
-            if state["ready"]:
-                payload["reply_markup"] = json.dumps(web_app_keyboard(state["url"]),
-                                                    ensure_ascii=False)
             self._call("sendMessage", payload, timeout=15)
         except Exception:
             pass
@@ -84,7 +79,7 @@ class NotifyMixin:
                     lines.append(f"  • {r.get('name')} — {r.get('qty')} шт")
             if len(lines) == 1:
                 lines.append("Всё спокойно — цех готов к работе.")
-            lines.append("\nОткройте цех — там детали.")
+            lines.append("\nДетали — кнопкой «🏠 Меню».")
             return "\n".join(lines)
         except Exception as exc:
             return f"☀ Дайджест: {exc}"
@@ -130,7 +125,7 @@ class NotifyMixin:
         lines = [f"⚠ На полке заканчивается ({len(rows)}):"]
         for row in rows[:6]:
             lines.append(f"• {row.get('name')} — {row.get('qty')} шт (минимум {row.get('min_qty')})")
-        lines.append("\nОткройте цех — пополните.")
+        lines.append("\nПополнить — в панели, детали — «🏠 Меню».")
         self._notify_with_button("\n".join(lines), event="shelf:low")
 
     def _maybe_weekly(self, settings: dict) -> None:
@@ -166,11 +161,11 @@ class NotifyMixin:
             self._notify_with_button(caption, photo=png)
         except Exception:
             # fallback — просто текст
-            self._notify_with_button("📈 Итоги дня — откройте цех, там график.", event="evening")
+            self._notify_with_button("📈 Итоги дня. График — в панели.", event="evening")
 
     # совместимость: старые методы из views, которые могут вызываться из тестов/менеджера
     def text_shelf(self, only_needs: bool = False) -> str:
-        return "Полка — откройте цех."
+        return "Полка — кнопкой «🛒 Полка» в меню."
 
     def text_queue(self) -> str:
-        return "Очередь — откройте цех."
+        return "Очередь — кнопкой «🧾 Очередь» в меню."

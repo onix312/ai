@@ -66,8 +66,6 @@ def cache_policy(target: Path, raw_path: str = "") -> str:
 # выводятся из имени файла (18.0.1: пульт цеха → control.html).
 SHORT_ALIASES = {
     "/pult": "control.html",
-    "/staff": "staff.html",
-    "/цех": "staff.html",
     # Помощник (18.13): адрес диктуется вслух и попадает в ярлык нативного
     # окна, поэтому закреплён явно, а не выводится из имени файла.
     "/assist": "assistant.html",
