@@ -46,7 +46,7 @@ class CatalogThinTests(unittest.TestCase):
         self.db.close()
         self._tmp.cleanup()
 
-    def test_catalog_commands_show_menu_with_web_app(self):
+    def test_catalog_commands_show_menu_without_web_app(self):
         calls = []
         self.bot._call = lambda m, p, timeout=35: calls.append((m, p)) or {"ok": True}
         for cmd in ("каталог", "цена", "товар", "витрина", "группы"):
@@ -54,7 +54,11 @@ class CatalogThinTests(unittest.TestCase):
             self.bot._dispatch("111", cmd)
             self.assertTrue(calls, cmd)
             rm = json.loads(calls[-1][1]["reply_markup"])
-            self.assertIn("web_app", rm["inline_keyboard"][0][0])
+            flat = [b for row in rm["inline_keyboard"] for b in row]
+            self.assertTrue(flat)
+            for btn in flat:
+                self.assertNotIn("web_app", btn)
+                self.assertIn("callback_data", btn)
 
 
 if __name__ == "__main__":

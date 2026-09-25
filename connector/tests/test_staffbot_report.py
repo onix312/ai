@@ -1,7 +1,7 @@
 """Бот отвечает текстом и картинками, а не только кнопкой Mini App (18.12.3).
 
 Просьба владельца: «сделай пока вывод не только miniapp но и текстом с
-картинками». Кнопка web_app открывается лишь по внешнему HTTPS-адресу, и пока
+картинками». С 19.0 web_app-кнопок нет вовсе: все отчёты живут в чате
 его нет, цех в чате был недоступен. Здесь закреплено новое поведение:
 
 * у слов появились свои ответы: «статус», «принтеры», «заказы [номер]»,
@@ -135,7 +135,7 @@ class TextTests(unittest.TestCase):
         text = report.camera_absent_text([{"name": "P1S"}])
         self.assertIn("Кадр недоступен", text)
         self.assertIn("P1S", text)
-        self.assertIn("Tailscale", report.camera_absent_text([{"name": "P1S"}]))
+        self.assertIn("панели", report.camera_absent_text([{"name": "P1S"}]))
 
     def test_limit_keeps_telegram_limits(self):
         self.assertEqual(3800, len(report.limit("я" * 9000, 3800)))
@@ -187,17 +187,19 @@ class RouterTests(unittest.TestCase):
                 self.assertTrue(hasattr(StaffBot, methods[prefix]),
                                 f"нет метода {methods[prefix]}")
 
-    def test_keyboard_shows_text_reports_and_keeps_web_app_first(self):
-        without = ui.main_menu_keyboard("", "owner")
+    def test_keyboard_shows_text_reports_without_web_app(self):
+        without = ui.main_menu_keyboard("owner")
         texts = [b["text"] for b in flat_buttons(without)]
         self.assertIn("📊 Статус", texts)
         self.assertIn("🛒 Полка", texts)
         self.assertIn("💰 Деньги", texts)
+        self.assertIn("🤖 Ассистент", texts)
         self.assertFalse([b for b in flat_buttons(without) if "web_app" in b])
-        with_url = ui.main_menu_keyboard("https://ceh.example.ru/staff", "employee")
-        first = with_url["inline_keyboard"][0][0]
-        self.assertIn("web_app", first)
+        with_url = ui.main_menu_keyboard("employee")
+        # адрес-аргумент игнорируется: web_app-кнопок нет ни для одной роли
+        self.assertFalse([b for b in flat_buttons(with_url) if "web_app" in b])
         self.assertNotIn("Деньги", [b["text"] for b in flat_buttons(with_url)])
+        self.assertNotIn("Ассистент", [b["text"] for b in flat_buttons(with_url)])
 
 
 class FakeCamera:
@@ -395,7 +397,7 @@ class BotReportTests(unittest.TestCase):
         self.assertIn("только руководителю и владельцу", self.last_text())
 
     def test_money_button_is_hidden_for_employee(self):
-        self.assertNotIn("Деньги", [b["text"] for b in flat_buttons(ui.main_menu_keyboard("", "employee"))])
+        self.assertNotIn("Деньги", [b["text"] for b in flat_buttons(ui.main_menu_keyboard("employee"))])
 
     # ---------------------------------------------------------- регрессии
     def test_repeated_command_is_sent_again(self):
@@ -412,7 +414,7 @@ class BotReportTests(unittest.TestCase):
         self.assertIn("📊 Статус", texts)
         self.assertFalse([b for b in flat_buttons(markup) if "web_app" in b])
         self.assertIn("готово 1", self.last_text())
-        self.assertIn("Адрес Mini App цеха", self.last_text())
+        self.assertNotIn("Mini App", self.last_text())
 
     def test_reports_never_exceed_telegram_limits(self):
         for index in range(40):

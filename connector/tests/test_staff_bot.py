@@ -1,6 +1,6 @@
-"""Роли в Telegram-боте — тонкий бот notify_only + кнопка web_app.
+"""Роли в Telegram-боте — кнопки и ассистент, без Mini App (19.0).
 
-Проверяем gate, invite, и что все команды ведут в меню с web_app.
+Проверяем gate, invite, и что меню отвечает кнопками без web_app.
 """
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from connector.printflow.accounting import Accounting  # noqa: E402
 from connector.printflow.db import Database  # noqa: E402
 from connector.printflow.staff import ROLE_RIGHTS, Staff, gate  # noqa: E402
 from connector.printflow.staffbot import StaffBot  # noqa: E402
-from connector.printflow.staffbot.core.config import get_miniapp_url  # noqa: E402
 
 
 class FakeManager:
@@ -76,15 +75,7 @@ class StaffRoleTests(unittest.TestCase):
     def test_unknown_chat_has_no_rights(self):
         self.assertIsNone(gate(self.db, "999")["role"])
 
-    def test_bot_menu_has_web_app(self):
-        self._capture_call()
-        self.bot._dispatch("111", "меню")
-        # _reply через outbox, но мы перехватили _call в _send_main_menu
-        # Проверяем что последний вызов содержит web_app
-        found = False
-        for method, params in self.bot._call.__self__ if hasattr(self.bot._call, "__self__") else []:
-            pass
-        # напрямую вызываем _send_main_menu и проверяем markup
+    def test_bot_menu_has_callback_buttons(self):
         calls = self._capture_call()
         self.bot._send_main_menu("111")
         self.assertTrue(calls)
@@ -92,17 +83,28 @@ class StaffRoleTests(unittest.TestCase):
         self.assertEqual(method, "sendMessage")
         rm = json.loads(params.get("reply_markup") or "{}")
         self.assertIn("inline_keyboard", rm)
-        btn = rm["inline_keyboard"][0][0]
-        self.assertIn("web_app", btn)
-        self.assertIn("staff", btn["web_app"]["url"])
-        self.assertIn("Открыть цех", btn["text"])
+        flat = [b for row in rm["inline_keyboard"] for b in row]
+        self.assertTrue(flat)
+        for btn in flat:
+            self.assertIn("callback_data", btn)
+            self.assertNotIn("web_app", btn)
 
-    def test_bot_dispatch_all_commands_to_menu(self):
+    def test_employee_menu_hides_money_and_assistant(self):
+        """Сотрудник не видит «Деньги» и ассистента: они про деньги и клиентов."""
+        self.staff.add("Ваня", "employee", "222")
         calls = self._capture_call()
-        for cmd in ("продажа", "полка", "касса", "принтеры", "деньги", "старт", "help"):
+        self.bot._send_main_menu("222")
+        method, params = calls[-1]
+        texts = [b["text"] for row in json.loads(params["reply_markup"])["inline_keyboard"] for b in row]
+        self.assertNotIn("💰 Деньги", texts)
+        self.assertNotIn("🤖 Ассистент", texts)
+
+    def test_bot_dispatch_commands_answer_in_chat(self):
+        calls = self._capture_call()
+        for cmd in ("продажа", "полка", "касса", "принтеры", "деньги", "старт", "help", "ассистент"):
             calls.clear()
             self.bot._dispatch("111", cmd)
-            # должен отправить меню
+            # каждая команда отвечает сообщением в чат — без внешних окон
             self.assertTrue(calls, f"no call for {cmd}")
             method, params = calls[-1]
             self.assertEqual(method, "sendMessage")
@@ -131,13 +133,10 @@ class StaffRoleTests(unittest.TestCase):
         self.staff.restore(member["id"])
         self.assertEqual(gate(self.db, "222")["role"], "employee")
 
-    def test_miniapp_url_without_address_is_empty(self):
-        """18.12.2: без адреса URL пустой — example.com больше не подставляется."""
-        self.db.clear_settings(["staff_miniapp_url", "public_url", "base_url", "app_url"])
-        self.assertEqual("", get_miniapp_url(self.db))
-
-    def test_miniapp_url_from_public_url(self):
-        self.assertEqual("https://example.com/staff", get_miniapp_url(self.db))
+    def test_miniapp_setting_is_gone(self):
+        """19.0: настройка адреса цеха удалена — set_settings её не сохраняет."""
+        self.db.set_settings({"staff_miniapp_url": "https://example.com/staff"})
+        self.assertIsNone(self.db.setting("staff_miniapp_url", None))
 
     def test_stranger_gets_hint(self):
         calls = self._capture_call()

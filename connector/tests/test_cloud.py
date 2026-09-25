@@ -853,7 +853,11 @@ class GuardAndTelegramTests(unittest.TestCase):
             self.assertTrue(calls)
             import json
             rm = json.loads(calls[-1][1]["reply_markup"])
-            self.assertIn("web_app", rm["inline_keyboard"][0][0])
+            flat = [b for row in rm["inline_keyboard"] for b in row]
+            self.assertTrue(flat)
+            for btn in flat:
+                self.assertNotIn("web_app", btn)
+                self.assertIn("callback_data", btn)
         finally:
             bot.shutdown()
 

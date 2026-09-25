@@ -1,6 +1,6 @@
-"""Сервис Mini App — все запросы к БД, без SQL в routes_.
+"""Сервис отчётов бота — все запросы к БД, без SQL в обработчиках.
 
-Вызывается из routes_staff_miniapp.py, чтобы пройти проверку
+Вызывается из handlers/report.py, чтобы пройти проверку
 RoutesHaveNoSqlTests.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ def today_money(db) -> float:
 
     18.12.3: спрашивали таблицу `money_log`, которой в базе нет, — запрос
     падал в `except` и функция всегда возвращала ноль. Касса в боте и в
-    Mini App была нулевой при живых продажах. Деньги лежат в `transactions`
+    Отчёт была нулевым при живых продажах. Деньги лежат в `transactions`
     (`kind='income'`, дата — первые 10 знаков `at`, как и во всех отчётах).
     """
     try:
@@ -74,7 +74,7 @@ def list_shelf(db) -> list[dict]:
             "LEFT JOIN nomenclature n ON n.id=s.nom_id "
             # Категория — группа номенклатуры (`nom_groups`). Раньше здесь была
             # таблица `categories`, которой в схеме нет: запрос падал, и полка
-            # молча оставалась пустой и в Mini App, и в отчёте бота (18.12.3).
+            # молча оставалась пустой в отчёте бота (18.12.3).
             "LEFT JOIN nom_groups g ON g.id=n.group_id "
             "ORDER BY s.qty ASC, COALESCE(NULLIF(s.name,''), n.name)"
         )

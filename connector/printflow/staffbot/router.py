@@ -1,9 +1,8 @@
 """Роутер бота — таблицы команд, без бизнеса.
 
-До 18.12.3 все слова вели в меню с web_app: бот умел только показать кнопку
-Mini App. Теперь у цеха есть и текстовый ответ — сводка, принтеры, заказы,
-полка, очередь, кадр, деньги (`handlers/report.py`). Витринные слова (продажа,
-закрыть месяц) по-прежнему ведут в меню: это Mini App.
+19.0: Mini App убран. Каждое слово и каждая кнопка имеют своего обработчика
+в чате: отчёты, действия по уведомлениям и ассистент. Витринные слова
+(продажа, закрыть месяц) отвечают меню — их действия живут в панели.
 """
 from __future__ import annotations
 
@@ -45,13 +44,12 @@ def normalize(raw: str) -> str:
     return text
 
 
-# Все текстовые команды ведут в меню — бот notify_only
+# Все команды отвечают в чате — кнопок web_app и внешних адресов больше нет
 TEXT_COMMANDS: tuple[Command, ...] = (
     Command(("start", "help", "старт", "помощь", "меню", "?", "панель", "panel", "цех", "staff"), "view", "cmd_menu"),
     Command(("more", "еще", "ещё"), "view", "cmd_menu"),
     Command(("код", "code", "id", "мой код", "myid"), "view", "cmd_code"),
-    # 18.12.3: текстовые отчёты. Данные те же, что в Mini App, но ответ
-    # приходит в чат словами и фото — Mini App для них не нужен.
+    # Текстовые отчёты: ответ приходит в чат словами и фото.
     Command(("статус", "status", "сводка", "доктор"), "view", "cmd_status"),
     Command(("принтер", "принтеры", "датчики", "сенсоры", "ams"), "view", "cmd_printers"),
     Command(("план", "очередь", "queue"), "view", "cmd_queue"),
@@ -59,6 +57,14 @@ TEXT_COMMANDS: tuple[Command, ...] = (
     Command(("полка", "стеллаж", "остатки"), "view", "cmd_shelf"),
     Command(("деньги", "касса", "итоги", "сегодня", "продажи", "выручка"), "view", "cmd_money"),
     Command(("кадр", "камера", "фото", "живой", "live", "стоп-живой"), "view", "cmd_frame"),
+    # Действия по уведомлениям (19.0): те же ответы, что у кнопок.
+    Command(("следующее", "дальше", "next"), "view", "cmd_next"),
+    Command(("повторить", "повтор", "reprint"), "view", "cmd_reprint"),
+    Command(("продолжить", "resume"), "printers", "cmd_resume"),
+    Command(("снял", "снято", "removed"), "view", "cmd_removed"),
+    # Ассистент (19.0): вопросы про цех — деньгами видны только руководству,
+    # поэтому группа finance, как у «денег».
+    Command(("ассистент", "ask", "помощник", "спросить"), "finance", "cmd_ask"),
     Command(("как дела", "что там"), "view", "cmd_status", phrase=True),
     Command(("продажа", "продать", "приход", "забрали", "график", "долги", "брак", "рейтинг", "филамент", "пластик", "каталог", "цена", "группы", "выдать", "оплата", "чаты", "кответ", "команда", "сотрудники", "пригласить"), "view", "cmd_menu"),
     Command(("закрыть месяц", "движения стеллаж", "продажи стеллаж", "оплата подтвердить", "отзыв ответ"), "view", "cmd_menu", phrase=True),
@@ -70,7 +76,7 @@ CALLBACKS: tuple[Route, ...] = (
     Route("code", "view", "cb_code"),
     Route("open", "view", "cb_menu"),
     Route("panel", "view", "cb_menu", kind="text"),
-    # Кнопки текстовых отчётов: те же ответы, что у слов (18.12.3).
+    # Кнопки отчётов: те же ответы, что у слов.
     Route("status", "view", "cb_status"),
     Route("printers", "view", "cb_printers"),
     Route("queue", "view", "cb_queue"),
@@ -78,6 +84,14 @@ CALLBACKS: tuple[Route, ...] = (
     Route("shelf", "view", "cb_shelf"),
     Route("frame", "view", "cb_frame"),
     Route("money", "view", "cb_money"),
+    # Действия из уведомлений (19.0).
+    Route("next", "view", "cb_next"),
+    Route("resume", "printers", "cb_resume"),
+    Route("removed", "view", "cb_removed"),
+    Route("reprint", "view", "cb_reprint"),
+    # Ассистент (19.0).
+    Route("ask", "finance", "cb_ask"),
+    Route("sug", "finance", "cb_sug", late_answer=True),
     Route("today", "view", "cb_menu", kind="text"),
     Route("inbox", "view", "cb_menu", kind="text"),
     Route("team", "view", "cb_menu", kind="text"),
