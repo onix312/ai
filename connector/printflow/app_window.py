@@ -41,6 +41,65 @@ def find_free_port(start=DEFAULT_PORT):
     return start
 
 
+def probe_health(port, attempts=3, pause=0.4):
+    """Отвечает ли на порту PrintFlow. Повторы обязательны (18.23).
+
+    Одна секунда на проверку — мало: занятый сервер под нагрузкой не успевает
+    ответить, и окно помощника запускало ВТОРОЙ сервер на той же базе — сайт
+    после этого «плохо работал» (двойной MQTT, конфликты SQLite).
+    """
+    import urllib.request, json
+    for attempt in range(max(1, int(attempts))):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+                pass
+        except OSError:
+            return False  # порт свободен — это точно не работающий PrintFlow
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
+                if json.loads(r.read().decode()).get("version"):
+                    return True
+        except Exception:
+            pass
+        if attempt + 1 < attempts:
+            time.sleep(pause)
+    return False
+
+
+def find_printflow(start, span=9, attempts=1):
+    """Уже запущенный PrintFlow рядом с ожидаемым портом — привязаться, не поднимать второй."""
+    for port in range(start, start + span):
+        if probe_health(port, attempts=attempts):
+            return port
+    return None
+
+
+def pick_port(start):
+    """(порт, нужно ли запускать сервер). Второй сервер на той же базе не появляется никогда."""
+    found = find_printflow(start, attempts=3) or find_printflow(max(DEFAULT_PORT, start - 4), attempts=1)
+    if found:
+        return found, False
+    try:
+        with socket.create_connection(("127.0.0.1", start), timeout=0.4):
+            # порт занят чужой программой — берём свободный рядом
+            return find_free_port(start + 1), True
+    except OSError:
+        return start, True
+
+
+def assistant_window_argv(port, attach_only=True):
+    """Аргументы окна помощника (`pf.py assistant`).
+
+    `attach_only=True` — окно открывается у УЖЕ работающей панели и не имеет
+    права запускать свой сервер (док-строка `cmd_assistant` обещала это, а
+    флаг `--no-server` до 18.23 забывали передать).
+    """
+    argv = ["--port", str(port), "--path", "/assistant.html"]
+    if attach_only:
+        argv.append("--no-server")
+    return argv
+
+
 def wait_for_port(port, timeout=15):
     end = time.time() + timeout
     while time.time() < end:
@@ -103,40 +162,25 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     port = args.port
-    # если порт занят и там не PrintFlow — взять свободный
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.4):
-            # порт занят — проверить health
-            import urllib.request, json
-            try:
-                with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
-                    data = json.loads(r.read().decode())
-                    if data.get("version"):
-                        print(f"PrintFlow уже работает на {port}")
-                    else:
-                        port = find_free_port(port+1)
-            except Exception:
-                port = find_free_port(port+1)
-    except OSError:
-        pass
-
     proc = None
-    if not args.no_server:
-        # если сервер уже отвечает — не стартуем второй
-        need_start = True
-        try:
-            import urllib.request, json
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
-                if json.loads(r.read().decode()).get("version"):
-                    need_start = False
-        except Exception:
-            need_start = True
+    if args.no_server:
+        # Окно-приложение к работающей панели: свой сервер не нужен (18.23).
+        if not probe_health(port, attempts=3):
+            print(f"PrintFlow не отвечает на {port}. Сначала запустите панель: python pf.py")
+            return 1
+    else:
+        # Ищем уже работающий PrintFlow рядом и ТОЛЬКО при полном отсутствии
+        # поднимаем свой — иначе получался второй сервер с той же базой.
+        port, need_start = pick_port(port)
+        if not need_start:
+            print(f"PrintFlow уже работает на {port} — открываю окно без второго сервера")
         if need_start:
             print(f"Запускаю сервер на порту {port}…")
             proc = start_server(port, lan=not args.local)
             if not wait_for_port(port, timeout=12):
                 print("Сервер не поднялся — страницу не открыть. Проверьте журнал PrintFlow.")
                 return 1
+
 
     page = str(args.path or "/").strip()
     if not page.startswith("/"):

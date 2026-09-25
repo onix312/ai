@@ -2936,7 +2936,7 @@ def cmd_assistant(args: argparse.Namespace) -> int:
     путь, что у `pf.py app`.
     """
     try:
-        from connector.printflow.app_window import main as app_main
+        from connector.printflow.app_window import assistant_window_argv, main as app_main
     except ImportError as exc:
         fail(f"Не удалось загрузить нативное окно: {exc}")
         say("    Открываю помощник в браузере…")
@@ -2947,10 +2947,13 @@ def cmd_assistant(args: argparse.Namespace) -> int:
             pass
         return 0
     # Открываем существующий PrintFlow даже на нестандартном порту, а не
-    # поднимаем второй сервер с той же базой.
-    port = running_port() or resolve_port(getattr(args, "port", None))
-    argv = ["--port", str(port), "--path", "/assistant.html",
-            "--title", f"NOZZA · помощник {app_version()}"]
+    # поднимаем второй сервер с той же базой. Работающая панель найдена — окно
+    # идёт с `--no-server` (18.23: раньше флаг забывали, и помощник поднимал
+    # вторую копию сервера — сайт после этого «плохо работал»).
+    running = running_port()
+    port = running or resolve_port(getattr(args, "port", None))
+    argv = assistant_window_argv(port, attach_only=running is not None)
+    argv += ["--title", f"NOZZA · помощник {app_version()}"]
     if getattr(args, "local", False):
         argv.append("--local")
     return app_main(argv)

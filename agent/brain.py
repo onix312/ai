@@ -308,17 +308,106 @@ def memory_command(text: str) -> tuple[str, str]:
 # 3. Правила: частые команды компьютера
 # ---------------------------------------------------------------------------
 
+def _word_number(text: str) -> int | None:
+    """Число из цифр или слов («тридцать пять», «пять») — И333, через словарь `when`."""
+    match = re.search(when.NUM + r"(?![а-яa-z])", text)
+    if not match:
+        return None
+    value = when.number(match.group(0).replace("ё", "е"))
+    return int(value) if value is not None else None
+
+
 def _level(text: str) -> int | None:
     match = re.search(r"(\d{1,3})\s*(?:%|процент)?", text)
     if not match:
-        words = {"ноль": 0, "десять": 10, "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
-                 "половин": 50, "шестьдесят": 60, "семьдесят": 70, "восемьдесят": 80, "девяносто": 90,
-                 "сто": 100, "максимум": 100, "на всю": 100}
+        words = {"максимум": 100, "на всю": 100, "половин": 50, "минимум": 0, "ноль": 0}
         for word, value in words.items():
             if word in text:
                 return value
-        return None
+        number = _word_number(text)
+        return max(0, min(100, number)) if number is not None else None
     return max(0, min(100, int(match.group(1))))
+
+
+def _volume_plan(low: str) -> dict[str, Any] | None:
+    """Громкость в любом порядке слов (И335) и числа словами (И333).
+
+    «на 30 громкость», «сделай громкость 30», «громкость тридцать пять»,
+    «сделай тише», «на пять громче», «убавь на пять». Дельта важнее уровня:
+    «громкость на 10 тише» — это −10, а не «громкость 10». «Убавь цену» — не
+    про звук: направление без «звук/громкост» берётся только с явным числом.
+    """
+    if re.search(r"(какая|сколько)\s+(сейчас\s+)?громкост", low) or re.match(r"^(?:а\s+|ну\s+)?громкость\s*\??$", low):
+        return _plan("system.volume", {}, "звук: узнать")
+    if "скорост" in low or "говори" in low:
+        return None  # «не говори тише» и регулятор скорости — не про звук
+    step = 20 if "намного" in low or "сильно" in low else 10
+    explicit = re.search(r"(?:на|в)\s+(?P<n>" + when.NUM + r")\s*(?:%|процент)?(?![а-яa-z])", low)
+    named = _word_number(explicit.group("n")) if explicit else None
+    words = bool(re.search(r"звук|громкост", low))
+    up = bool(re.search(r"погромче|громче", low))
+    down = bool(re.search(r"потише|тише", low))
+    up_verb = bool(re.search(r"прибав\w*|добав\w*\s+звук|увелич\w*", low))
+    down_verb = bool(re.search(r"убав\w*|уменьш\w*", low))
+    bare = re.match(r"^(?:давай\s+)?(?:прибав\w*|убав\w*|погромче|потише|громче|тише)"
+                    r"(?:\s+(?:на|в)\s+" + when.NUM + r")?$", low)
+    if up != down or up_verb != down_verb:
+        toward_up = up or (up_verb and not down and not down_verb)
+        if named is not None and (up or down or words or bare):
+            return _plan("system.volume", {"delta": named if toward_up else -named},
+                         "звук: громче" if toward_up else "звук: тише")
+        if up or down or words or bare:
+            return _plan("system.volume", {"delta": step if toward_up else -step},
+                         "звук: громче" if toward_up else "звук: тише")
+    if words:
+        level = _level(low)
+        if level is not None:
+            return _plan("system.volume", {"level": level}, "звук: уровень")
+    return None
+
+
+_ORDINAL_PICK = {"первый": 0, "первое": 0, "один": 0, "одна": 0, "1": 0, "1-й": 0, "раз": 0,
+                 "второй": 1, "второе": 1, "два": 1, "две": 1, "2": 1, "2-й": 1,
+                 "третий": 2, "третье": 2, "три": 2, "3": 2, "3-й": 2,
+                 "четвертый": 3, "четвертое": 3, "четыре": 3, "4": 3, "4-й": 3,
+                 "пятый": 4, "пятое": 4, "пять": 4, "5": 4, "5-й": 4,
+                 "последний": -1, "последнее": -1}
+
+
+# Разговорные имена приложений: «телега» → Telegram (кириллица против латиницы
+# контainment сам не найдёт). Правая сторона — канонический кусок имени.
+_NICKNAMES: dict[str, str] = {
+    "телега": "telegram", "телеграм": "telegram", "телеграмм": "telegram", "тг": "telegram",
+    "хром": "chrome", "гугл": "chrome",
+    "блокнот": "notepad",
+    "калькулятор": "calculator", "кальк": "calculator",
+    "проводник": "explorer", "эксплорер": "explorer",
+    "вк": "vk", "вконтакте": "vk",
+}
+
+
+def pick_option(phrase: str, options: list[str]) -> str | None:
+    """Короткий ответ на «какое окно?»: порядковое слово или имя из списка (И336)."""
+    low = normalize_phrase(phrase).casefold().replace("ё", "е")
+    if not low:
+        return None
+    for word in re.findall(r"[0-9a-zа-я-]+", low):
+        if word in _ORDINAL_PICK:
+            index = _ORDINAL_PICK[word]
+            if -len(options) <= index < len(options):
+                return options[index]
+    aliases = [_NICKNAMES[word] for word in re.findall(r"[0-9a-zа-я-]+", low) if word in _NICKNAMES]
+    for option in options:
+        name = option.casefold().replace("ё", "е")
+        if name and (name in low or low in name):
+            return option
+        for word in re.findall(r"[0-9a-zа-я-]{4,}", low):
+            if word in name:
+                return option
+        for alias in aliases:
+            if alias in name:
+                return option
+    return None
 
 
 def understand(text: str) -> dict[str, Any] | None:
@@ -334,16 +423,10 @@ def understand(text: str) -> dict[str, Any] | None:
         return _plan("system.volume", {"mute": "on"}, "звук: выключить")
     if re.search(r"\b(включи|верни)\s+звук\b|^unmute$", low):
         return _plan("system.volume", {"mute": "off"}, "звук: включить")
-    if not workshop and re.search(r"(громкост|звук)\w*\s*(на|в|до)?\s*\d{1,3}|(громкост|звук)\w*\s+(на\s+)?(максимум|половин|ноль)", low):
-        level = _level(low)
-        if level is not None:
-            return _plan("system.volume", {"level": level}, "звук: уровень")
-    if re.search(r"(какая|сколько)\s+(сейчас\s+)?громкост|громкость\s*\?*$", low):
-        return _plan("system.volume", {}, "звук: узнать")
-    if re.search(r"(погромче|громче|^прибав\w*$|прибав\w*\s+(звук|громкост)|увелич\w*\s+(звук|громкост)|добав\w*\s+звук)", low):
-        return _plan("system.volume", {"delta": 20 if "намного" in low or "сильно" in low else 10}, "звук: громче")
-    if re.search(r"(потише|тише|^убав\w*$|убав\w*\s+(звук|громкост)|уменьш\w*\s+(звук|громкост))", low) and "говори" not in low:
-        return _plan("system.volume", {"delta": -20 if "намного" in low or "сильно" in low else -10}, "звук: тише")
+    if not workshop:
+        volume = _volume_plan(low)
+        if volume is not None:
+            return volume
 
     # --- музыка и видео
     if not workshop:
@@ -373,21 +456,28 @@ def understand(text: str) -> dict[str, Any] | None:
     match = re.match(r"^(?:сверни|спрячь)(?:\s+(?:окно|окна))?(?:\s+(?P<t>.+))?$", low)
     if match and not (match.group("t") or "").startswith(("все", "всё")):
         target = (match.group("t") or "").strip()
-        return _plan("window.arrange", {"action": "minimize", "title": "" if target in ("его", "ее", "это") else target},
-                     "окно: свернуть", target={"pronoun": target in ("его", "ее", "это")})
+        if target in ("его", "ее", "это"):
+            return _plan("window.arrange", {"action": "minimize", "title": ""},
+                         "окно: свернуть", target={"pronoun": True})
+        return _plan("window.arrange", {"action": "minimize", "title": target},
+                     "окно: свернуть", target={"needs": "window"} if not target else {})
     if re.match(r"^(?:сверни все|сверни всё|покажи рабочий стол|рабочий стол)", low):
         return _plan("system.hotkey", {"keys": "win+d"}, "окна: рабочий стол")
     match = re.match(r"^(?:разверни|раскрой)(?:\s+(?:окно))?(?:\s+(?P<t>.+?))?(?:\s+на\s+весь\s+экран)?$", low)
     if match and not workshop:
         target = (match.group("t") or "").strip()
-        return _plan("window.arrange", {"action": "maximize", "title": "" if target in ("его", "ее", "это") else target},
-                     "окно: развернуть", target={"pronoun": target in ("его", "ее", "это")})
-    match = re.match(r"^(?:закрой|закрыть)\s+(?:окно\s+|программу\s+)?(?P<t>.+)$", low)
+        if target in ("его", "ее", "это"):
+            return _plan("window.arrange", {"action": "maximize", "title": ""},
+                         "окно: развернуть", target={"pronoun": True})
+        return _plan("window.arrange", {"action": "maximize", "title": target},
+                     "окно: развернуть", target={"needs": "window"} if not target else {})
+    match = re.match(r"^(?:закрой|закрыть)(?:\s+(?:окно|программ\w*))?(?:\s+(?P<t>.*))?$", low)
     if match and not workshop:
-        target = match.group("t").strip()
+        target = (match.group("t") or "").strip()
         if target in ("его", "ее", "это", "это окно", "окно"):
             return _plan("window.close", {"title": ""}, "окно: закрыть", target={"pronoun": True})
-        return _plan("window.close", {"title": target}, "окно: закрыть")
+        return _plan("window.close", {"title": target}, "окно: закрыть",
+                     target={"needs": "window"} if not target else {})
     match = re.match(r"^(?:прочитай|что написано в|покажи текст)\s+(?:окн\w*\s*)?(?P<t>.*)$", low)
     if match and "окн" in low:
         return _plan("window.text", {"title": match.group("t").strip()}, "окно: текст")
@@ -406,6 +496,11 @@ def understand(text: str) -> dict[str, Any] | None:
     match = re.match(r"^(?:открой|запусти|включи|открыть|запустить|зайди на|перейди на сайт|открой сайт)\s+(?P<t>.+)$", low)
     if match and not workshop:
         target = re.sub(r"^(?:программу|приложение|сайт|страницу)\s+", "", match.group("t")).strip()
+        # «открой телеграм и квазимодо бла»: хвост после «и» из двух и более слов —
+        # не имя приложения, а несвязанный мусор или чужая команда; не гадаем
+        # и ничего не открываем (И332: непонятая часть не исполняется).
+        if re.search(r"(?:\sи\s|\sили\s|,\s*)\S+\s+\S+", target):
+            return None
         if re.match(r"^(?:папку\s+)?(?:загрузки|загрузок|скачанное|downloads)$", target):
             return _plan("app.open", {"target": config.DOWNLOADS_FOLDER}, "папка загрузок")
         if target in ("его", "ее", "это", "файл", "первый", "первый файл", "последний"):
@@ -463,11 +558,18 @@ def understand(text: str) -> dict[str, Any] | None:
             return _plan("system.power", {"action": action}, f"питание: {action}")
 
     # --- таймеры и заметки
-    match = re.search(r"(?:таймер|засеки|фокус|помодоро|напомни)\w*\s+(?:на\s+|через\s+)?(\d{1,3})\s*(мин\w*|час\w*)", low)
+    match = re.search(r"(?:таймер|засеки|фокус|помодоро|напомни)\w*\s+(?:на\s+|через\s+)?"
+                      r"(?P<n>" + when.NUM + r"|полтора\s+часа|полчаса|пол\s*часа)\s*(?P<u>мин\w*|час\w*)?", low)
     if match:
-        note = re.sub(r".*?(?:\d{1,3})\s*(?:мин\w*|час\w*)\s*", "", phrase, count=1).strip(" ,.")
-        return _plan("scheduler.focus_timer", {"minutes": max(1, min(240, _minutes(*match.groups()))),
-                                               "note": note[:120]}, "таймер")
+        if match.group("n").startswith("пол"):
+            minutes = 90 if "полтора" in match.group("n") else 30
+        else:
+            number = _word_number(match.group("n")) or 1
+            minutes = number * (60 if (match.group("u") or "").startswith("час") else 1)
+        tail = phrase[match.end():]
+        note = re.sub(r"^\s*(?:на\s+|для\s+|про\s+)?", "", tail).strip(" ,.")[:120]
+        return _plan("scheduler.focus_timer", {"minutes": max(1, min(240, int(minutes))),
+                                               "note": note}, "таймер")
     if re.search(r"(останови|выключи|сбрось|стоп)\s+таймер", low):
         return _plan("scheduler.focus_stop", {}, "таймер: стоп")
     if re.search(r"(мои|какие|список)\s+таймер", low):
@@ -526,9 +628,11 @@ def follow_up(text: str, history: list[dict[str, Any]]) -> dict[str, Any] | None
             return _plan("system.volume", {"delta": 10}, "звук: ещё громче")
         if re.fullmatch(r"(а\s+)?(еще|ещё)\s+(тише|потише)|(а\s+)?тише", low):
             return _plan("system.volume", {"delta": -10}, "звук: ещё тише")
-        match = re.fullmatch(r"(?:а\s+)?(?:давай\s+)?(?:на\s+)?(\d{1,3})\s*%?", low)
+        match = re.fullmatch(r"(?:а\s+)?(?:давай\s+)?(?:на\s+)?(" + when.NUM + r")\s*%?", low)
         if match:
-            return _plan("system.volume", {"level": max(0, min(100, int(match.group(1))))}, "звук: уточнение")
+            level = _word_number(match.group(1))
+            if level is not None:
+                return _plan("system.volume", {"level": max(0, min(100, level))}, "звук: уточнение")
     window_title = str(target.get("window") or "")
     if window_title:
         for pattern, plan_skill, extra in ((r"(закрой|закрыть)\s+(его|ее|её|это|окно)", "window.close", {}),
@@ -829,6 +933,8 @@ class Brain:
         self.agent = agent
         self.clock = clock or datetime.datetime.now
         self._panel_down = False  # последний вопрос панели остался без ответа (для честного «панель молчит»)
+        # Откат «верни как было» (И334): прежний уровень громкости по сессиям.
+        self._undo: dict[str, dict[str, Any]] = {}
         # Вложенный разговор (шаг выученной команды) не пишет реплики и не ищет
         # выученное повторно — так урок не может вызвать сам себя.
         self._local = threading.local()
@@ -946,6 +1052,14 @@ class Brain:
                 return self._reply(session, clean, memory_reply["text"], kind="memory", source="memory",
                                    steps=steps, started=started, extra={"memory": memory_reply.get("rows", [])})
 
+        if not nested:
+            cancelled = self._cancel_turn(session, clean, work, steps, started)
+            if cancelled:
+                return cancelled
+            chained = self._chain_turn(session, clean, work, history, steps, started, now)
+            if chained:
+                return chained
+
         mine = self._personal_turn(session, clean, work, history, steps, started, now)
         if mine:
             return mine
@@ -961,6 +1075,10 @@ class Brain:
             found = resolve_pronoun(found, history)
             if found.get("clarify"):
                 return self._reply(session, clean, found["clarify"], kind="clarify", steps=steps, started=started)
+            if (found.get("target") or {}).get("needs") == "window" and not found["params"].get("title"):
+                asked = self._window_clarify(session, clean, found, steps, started)
+                if asked:
+                    return asked
             return self._execute(session, clean, found, history, steps, started)
 
         if not nested:
@@ -1197,6 +1315,17 @@ class Brain:
             return self._execute(session, text, {**_plan("reminder.add", {
                 "text": phrase, "due": str(awaiting.get("iso") or ""), "repeat": str(awaiting.get("repeat") or "")},
                 "напоминание"), "source": "personal"}, history, steps, started, source="personal")
+        if kind == "window":
+            options = [str(row) for row in (awaiting.get("options") or []) if str(row).strip()]
+            pick = pick_option(phrase, options)
+            if not pick:
+                return None
+            steps.append({"kind": "context", "title": "Ответ на «какое окно»", "detail": _short(pick)})
+            params = dict(awaiting.get("params") or {})
+            params["title"] = pick
+            plan = _plan(str(awaiting.get("skill") or ""), params, "окно: выбрано из списка")
+            plan["target"] = {"window": pick}
+            return self._execute(session, text, plan, history, steps, started)
         return None
 
     def _lesson(self, session: str, text: str, lesson: dict[str, Any], history: list[dict[str, Any]],
@@ -1336,15 +1465,17 @@ class Brain:
 
     def _run_steps_plan(self, session: str, text: str, plan_steps: list[dict[str, Any]], history: list[dict[str, Any]],
                         steps: list[dict[str, Any]], started: float, extra: dict[str, Any] | None = None,
-                        head: str = "") -> dict[str, Any]:
+                        head: str = "", origin: str = "learned") -> dict[str, Any]:
         """Шаги выученного подряд: навык — через реестр и подтверждение, фраза — через мозг."""
         plan_steps = [step for step in plan_steps if isinstance(step, dict)][:8]
         if not plan_steps:
             return self._reply(session, text, "В выученном нет шагов — научите заново.", kind="error",
                                source="learned", steps=steps, started=started)
         if len(plan_steps) == 1 and not head:
-            return self._one_step(session, text, plan_steps[0], history, steps, started, extra=extra, save=True)
-        results = [self._one_step(session, text, step, history, steps, started, save=False) for step in plan_steps]
+            return self._one_step(session, text, plan_steps[0], history, steps, started, extra=extra, save=True,
+                                  origin=origin)
+        results = [self._one_step(session, text, step, history, steps, started, save=False, origin=origin)
+                   for step in plan_steps]
         lines = [str(result.get("reply") or "") for result in results if result.get("reply")]
         pending = next((result["pending"] for result in results if result.get("pending")), None)
         ok = all(result.get("kind") != "error" for result in results)
@@ -1354,16 +1485,17 @@ class Brain:
         link = next((result["link"] for result in results if isinstance(result.get("link"), dict)), None)
         merged = {**(extra or {}), **({"link": link} if link else {})}
         return self._reply(session, text, reply, kind="pending" if pending else ("action" if ok else "error"),
-                           skill=skill_name, pending=pending, source="learned", steps=steps, started=started,
+                           skill=skill_name, pending=pending, source=origin, steps=steps, started=started,
                            result={"ok": ok}, extra=merged or None,
                            suggestions=next((result.get("suggestions") for result in results if result.get("suggestions")), []))
 
     def _one_step(self, session: str, text: str, step: dict[str, Any], history: list[dict[str, Any]],
                   steps: list[dict[str, Any]], started: float, extra: dict[str, Any] | None = None,
-                  save: bool = True) -> dict[str, Any]:
+                  save: bool = True, origin: str = "learned") -> dict[str, Any]:
         if step.get("skill"):
-            plan = {**_plan(str(step["skill"]), dict(step.get("params") or {}), "выучено"), "source": "learned"}
-            return self._execute(session, text, plan, history, steps, started, source="learned", extra=extra, save=save)
+            plan = {**_plan(str(step["skill"]), dict(step.get("params") or {}),
+                            "выучено" if origin == "learned" else "цепочка"), "source": origin}
+            return self._execute(session, text, plan, history, steps, started, source=origin, extra=extra, save=save)
         said = str(step.get("say") or "").strip()
         previous = (getattr(self._local, "nested", False), getattr(self._local, "nosave", False))
         self._local.nested, self._local.nosave = True, True
@@ -1457,6 +1589,106 @@ class Brain:
             parts.append(f"ждут отметки: {len(fired)}")
         return (" По личному: " + ", ".join(parts) + ".") if parts else ""
 
+    # --- отмена и цепочки (18.23, И332–И336) --------------------------------
+    def _cancel_turn(self, session: str, text: str, work: str,
+                     steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """«Отмена» и «верни как было» (И334): гасит ожидающее, откатывает громкость."""
+        low = normalize_phrase(work).casefold()
+        undo_words = bool(re.match(r"^(?:верни|возврати|откати)(?:\s+(?:громкост\w*|звук))?\s+как\s+было$|^откат$", low))
+        plain = intents.CANCEL_RE.match(low)
+        if not undo_words and not plain:
+            return None
+        pending: list[dict[str, Any]] = []
+        get_pending = getattr(self.agent, "pending", None)
+        if not undo_words and callable(get_pending):
+            try:
+                pending = [row for row in (get_pending() or []) if isinstance(row, dict)]
+            except Exception:  # noqa: BLE001
+                pending = []
+        if pending:
+            confirm = getattr(self.agent, "confirm_action", None)
+            dropped = []
+            for action in pending[:8]:
+                if callable(confirm):
+                    try:
+                        confirm(str(action.get("id") or ""), False)
+                    except Exception:  # noqa: BLE001
+                        pass
+                dropped.append(_short(str(action.get("text") or action.get("kind") or "действие"), 40))
+            steps.append({"kind": "context", "title": "Отмена", "detail": f"гашу {len(dropped)} ожидающих"})
+            return self._reply(session, text, "Отменил ожидающие действия: " + "; ".join(dropped) + ".",
+                               kind="answer", source="rules", steps=steps, started=started)
+        undo = self._undo.get(session)
+        if undo:
+            self._undo.pop(session, None)
+            steps.append({"kind": "context", "title": "Откат", "detail": "вернуть звук как было"})
+            return self._execute(session, text, _plan("system.volume", dict(undo), "откат звука"),
+                                 [], steps, started)
+        if undo_words:
+            return self._reply(session, text, "Возвращать нечего: громкость я пока не менял.",
+                               kind="answer", source="rules", steps=steps, started=started)
+        steps.append({"kind": "context", "title": "Отмена", "detail": "ожидающих действий нет"})
+        return self._reply(session, text, "Принято. Ожидающих действий нет — отменять нечего.",
+                           kind="answer", source="rules", steps=steps, started=started)
+
+    def _chain_turn(self, session: str, text: str, work: str, history: list[dict[str, Any]],
+                    steps: list[dict[str, Any]], started: float,
+                    now: datetime.datetime) -> dict[str, Any] | None:
+        """«Открой телеграм и громкость 30» — две команды одной фразой (И332).
+
+        Цепочка собирается только когда каждая часть понятна правилам сама по
+        себе; иначе фраза целиком уходит прежним слоям (модель, панель).
+        """
+        parts = intents.split_meaning(work)
+        if len(parts) < 2:
+            return None
+        plan_steps: list[dict[str, Any]] = []
+        for part in parts:
+            step = _rule_step(part, self.personal, now)
+            if not step:
+                return None
+            plan_steps.append(step)
+        steps.append({"kind": "context", "title": "Две команды в одной фразе",
+                      "detail": f"{len(plan_steps)} шага: " + " · ".join(_short(part, 20) for part in parts)})
+        return self._run_steps_plan(session, text, plan_steps, history, steps, started,
+                                    head=f"Понял {len(plan_steps)} команды одной фразой:", origin="rules")
+
+    def _window_clarify(self, session: str, text: str, plan: dict[str, Any],
+                        steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """«Закрой» без объекта (И336): список окон вопросом, а не догадка.
+
+        Возвращает None, когда выбирать не из чего (одно окно — берём его) или
+        план уже наполнен — тогда вызывающий исполняет его как обычно.
+        """
+        titles: list[str] = []
+        reason = ""
+        try:
+            from . import winapi
+            titles, reason = winapi.list_windows(12)
+        except Exception as exc:  # noqa: BLE001
+            reason = exc.__class__.__name__
+        options = [str(row).strip() for row in titles if str(row).strip()][:5]
+        if not options:
+            return self._reply(session, text, "Не вижу открытых окон, чтобы выбрать. "
+                                             f"Назовите окно целиком: «закрой блокнот». ({reason or 'окон нет'})",
+                               kind="clarify", skill=plan.get("skill", ""), source="rules",
+                               steps=steps, started=started)
+        if len(options) == 1:
+            plan["params"]["title"] = options[0]
+            plan["target"] = {"window": options[0]}
+            steps.append({"kind": "context", "title": "Одно окно", "detail": options[0]})
+            return None
+        action = {"window.close": "закрыть", "window.focus": "показать"}.get(
+            str(plan.get("skill") or ""), {"minimize": "свернуть", "maximize": "развернуть"}.get(
+                str((plan.get("params") or {}).get("action") or ""), "выбрать"))
+        lines = "\n".join(f"{index}) {name}" for index, name in enumerate(options, 1))
+        steps.append({"kind": "context", "title": "Уточнение", "detail": "какое окно — из списка"})
+        return self._reply(
+            session, text, f"Какое окно {action}?\n{lines}\nСкажите номер или имя.",
+            kind="clarify", skill=str(plan.get("skill") or ""), source="rules", steps=steps, started=started,
+            extra={"awaiting": {"kind": "window", "skill": str(plan.get("skill") or ""),
+                                "params": dict(plan.get("params") or {}), "options": options}})
+
     # --- исполнение плана -------------------------------------------------
     def _execute(self, session: str, text: str, plan: dict[str, Any], history: list[dict[str, Any]],
                  steps: list[dict[str, Any]], started: float, source: str = "",
@@ -1469,6 +1701,12 @@ class Brain:
                                steps=steps, started=started, extra=extra, save=save)
         params = dict(plan.get("params") or {})
         delta = 0
+        volume_before = None
+        if name == "system.volume":
+            try:
+                volume_before, _reason = pc.volume_get()
+            except Exception:  # noqa: BLE001
+                volume_before = None
         if name == "system.volume" and "delta" in params:
             delta = int(params.get("delta") or 0)
             params = self._volume_delta(params)
@@ -1491,6 +1729,20 @@ class Brain:
                 self.learning.record_usage(name, params, text, self.clock())
             except Exception:  # noqa: BLE001
                 pass
+            if name == "system.volume" and isinstance(volume_before, dict):
+                # И334: «верни как было» — вернуть прежний уровень громкости.
+                prev_level = volume_before.get("level")
+                undo = None
+                if params.get("mute") == "on":
+                    undo = {"level": int(prev_level)} if prev_level is not None else {"mute": "off"}
+                elif params.get("mute") == "off":
+                    undo = {"level": int(prev_level)} if prev_level is not None else {"mute": "on"}
+                elif prev_level is not None:
+                    undo = {"level": int(prev_level)}
+                if undo and undo != {key: params.get(key) for key in undo}:
+                    self._undo[session] = undo
+                elif undo:
+                    self._undo.pop(session, None)
         target = dict(plan.get("target") or {})
         target.pop("pronoun", None)
         if delta:
