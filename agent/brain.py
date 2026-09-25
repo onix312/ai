@@ -24,6 +24,19 @@
 Границы прежние: навык с риском `write` и выше исполняется только после
 подтверждения человека на этом компьютере (`Agent.run_skill` ставит его в
 очередь), деньги и печать остаются за панелью.
+
+18.22 — помощник учится и становится личным:
+
+  6. **Обучение.** «Научись: когда я говорю «рабочий режим» — открой Telegram
+     и громкость 30», «нет, я имел в виду …», «это значит …» после непонятой
+     фразы, 👍/👎 под ответом, синонимы («телега» — это телеграм). Фраза,
+     которую поняла модель и навык выполнился, запоминается сама — в следующий
+     раз без модели (`learning.py`). Урок и поправка важнее встроенных правил,
+     самовыученное — только там, где правила молчат.
+  7. **Личное.** Напоминания со временем по-русски, списки, цели с темпом,
+     привычки с сериями, расходы, дневник, «мой день», счёт дат и единиц
+     (`intents.py`, `personal.py`). Уточнения («Когда напомнить?») помнят, о
+     чём шла речь: ответ «через час» понимается следующей репликой.
 """
 from __future__ import annotations
 
@@ -31,10 +44,12 @@ import ast
 import datetime
 import inspect
 import re
+import threading
 import time
 from typing import Any, Callable
 
-from . import config, model, pc, skills
+from . import config, intents, model, pc, skills, when
+from .personal_skills import describe_steps, is_live
 
 SESSION_RE = re.compile(r"[^0-9A-Za-z_.:-]+")
 MAX_TEXT = 1000
@@ -64,6 +79,8 @@ def normalize_phrase(text: str) -> str:
 
 # Сессия окна агента (`/ui`): подтверждение там — карточкой в ленте.
 WINDOW_SESSION = "window"
+# Самообучение на таких навыках бессмысленно: «запомни …» и уроки повторять незачем.
+_NO_SELF_LEARN = ("agent.", "learn.", "memory.", "assistant.macro")
 
 
 def session_key(raw: str) -> str:
@@ -216,6 +233,9 @@ _TALK = (
     ("thanks", re.compile(r"^(?:спасибо|благодарю|спс|пасиб\w*|thanks|thank\s+you|thx|сенкс|мерси)"
                           r"(?:\s+(?:большое|огромное|тебе|вам))*$")),
     ("bye", re.compile(r"^(?:пока|до\s+свидания|до\s+завтра|до\s+встречи|спокойной\s+ночи|бывай|увидимся)$")),
+    # 18.22: короткое согласие и «нет, спасибо» — не повод говорить «не понимаю».
+    ("ok", re.compile(r"^(?:нет,?\s+спасибо|не\s+надо,?\s+спасибо|ничего\s+не\s+надо|ок|окей|ok|хорошо|ладно|понятно|"
+                     r"ясно|отлично|супер|класс|круто|договорились|принято)$")),
 )
 
 
@@ -568,6 +588,8 @@ def summarize(skill: str, result: dict[str, Any]) -> str:
     if not result.get("ok"):
         reason = str(result.get("reason") or "навык не выполнился")
         return f"Не получилось: {reason}"
+    if result.get("say"):
+        return str(result["say"])  # личные навыки и обучение (18.22) отвечают готовой фразой
     if skill == "system.volume":
         if result.get("muted"):
             return "Звук выключен."
@@ -714,7 +736,69 @@ def suggestions_for(skill: str, result: dict[str, Any]) -> list[str]:
         return ["Открой первый", "Открой второй"]
     if skill == "scheduler.focus_timer":
         return ["Мои таймеры", "Останови таймер"]
-    return []
+    personal = {"reminder.add": ["Мои напоминания"], "reminder.list": ["Мой день"],
+                "goal.add": ["Мои цели"], "goal.progress": ["Мои цели"], "habit.add": ["Мои привычки"],
+                "habit.check": ["Мои привычки"], "expense.add": ["Сколько я потратил за неделю?"],
+                "learn.list": ["Что ты не понял?"], "learn.unknown": ["Чему ты научился?"],
+                "me.today": ["Мои напоминания", "Мои цели"]}
+    if skill in ("list.add", "list.remove"):
+        return ["Что купить?"] if result.get("list") == "покупки" or "покупки" in str(result.get("params")) else ["Мои списки"]
+    if skill == "me.today":
+        return [str(item) for item in (result.get("suggestions") or [])][:2] + personal[skill]
+    return personal.get(skill, [])
+
+
+def _rule_step(text: str, personal: Any, now: datetime.datetime) -> dict[str, Any] | None:
+    """Одна часть урока → шаг по правилам. «Живые» навыки (время «сейчас») хранятся фразой."""
+    phrase = normalize_phrase(text)
+    found = understand(phrase)
+    if found and not found.get("clarify") and not (found.get("target") or {}).get("pronoun"):
+        return {"say": text, "skill": found["skill"], "params": found["params"]}
+    intent = intents.personal_intent(phrase, personal, now) if personal is not None else None
+    if intent and intent.get("skill"):
+        if is_live(intent["skill"]):
+            return {"say": text, "live": intent["skill"]}  # «напомни через 5 минут» — время считается при вызове
+        return {"say": text, "skill": intent["skill"], "params": intent["params"]}
+    return None
+
+
+def resolve_meaning(meaning: str, personal: Any = None, now: datetime.datetime | None = None) -> list[dict[str, Any]]:
+    """Смысл урока → шаги. Понятое правилами — план навыка; остальное — фраза, её поймёт мозг при вызове.
+
+    «Открой телеграм и поставь громкость 30» — два шага; «что печатается» —
+    фраза (её ответит панель); «напомни через 5 минут» — фраза, потому что
+    застывшее «через 5 минут» от момента урока было бы неправдой.
+    """
+    now = now or datetime.datetime.now()
+    parts = intents.split_meaning(meaning)
+    if len(parts) > 1:
+        # «Громкость 30 и открой блокнот»: правило громкости съело бы всю фразу —
+        # поэтому сначала части, и только если каждая понятна сама по себе.
+        split = [_rule_step(part, personal, now) for part in parts]
+        if all(split):
+            return [step for step in split if step]
+    whole = _rule_step(meaning, personal, now)
+    if whole:
+        return [whole]
+    if len(parts) <= 1:
+        return [{"say": meaning}]
+    return [_rule_step(part, personal, now) or {"say": part} for part in parts]
+
+
+def _short(text: str, limit: int = 60) -> str:
+    clean = " ".join(str(text or "").split())
+    return clean if len(clean) <= limit else clean[:limit - 1].rstrip() + "…"
+
+
+_ALIAS_VERBS = re.compile(r"^(?:что|кто|как|где|когда|сколько|какой|какая|какие|почему|зачем|покажи|открой|включи|"
+                          r"выключи|найди|запусти|сделай|поставь|закрой|напомни|добавь)\b", re.IGNORECASE)
+
+
+def looks_like_alias(phrase: str, meaning: str, hint: bool = False) -> bool:
+    """««Телега» — это телеграм» — синоним слова, а не команда: коротко и без глагола."""
+    if hint:
+        return len(phrase.split()) <= 3 and len(meaning.split()) <= 4
+    return len(phrase.split()) <= 2 and len(meaning.split()) <= 2 and not _ALIAS_VERBS.match(meaning.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -732,7 +816,9 @@ _PLANNER_RULES = (
     "3. Если не хватает важного (какое окно, какой файл) — заполни ask и не выбирай навык.\n"
     "4. Вопросы про заказы, клиентов, деньги, печать и склад — навык panel.ask с question.\n"
     "5. Не выдумывай факты: если не знаешь — так и скажи в reply.\n"
-    "6. reply — одно-два предложения, без markdown."
+    "6. reply — одно-два предложения, без markdown.\n"
+    "7. Напоминание — reminder.add: время словами в when («через 20 минут», «завтра в 10»), о чём — в text. "
+    "Списки, цели, привычки, расходы, дневник — навыки list.*, goal.*, habit.*, expense.*, diary.*."
 )
 
 
@@ -743,6 +829,14 @@ class Brain:
         self.agent = agent
         self.clock = clock or datetime.datetime.now
         self._panel_down = False  # последний вопрос панели остался без ответа (для честного «панель молчит»)
+        # Вложенный разговор (шаг выученной команды) не пишет реплики и не ищет
+        # выученное повторно — так урок не может вызвать сам себя.
+        self._local = threading.local()
+        if clock is not None:
+            try:
+                agent.runner.clock = clock  # навыки считают «сейчас» по тем же часам, что и мозг
+            except Exception:  # noqa: BLE001
+                pass
 
     # --- доступ к агенту ------------------------------------------------
     @property
@@ -752,6 +846,14 @@ class Brain:
     @property
     def store(self) -> Any:
         return self.runner.store
+
+    @property
+    def learning(self) -> Any:
+        return self.runner.learning
+
+    @property
+    def personal(self) -> Any:
+        return self.runner.personal
 
     def _run(self, name: str, params: dict[str, Any], popup: bool = True) -> dict[str, Any]:
         """Навык через агента: запись и системное — через подтверждение человека.
@@ -789,7 +891,25 @@ class Brain:
                 str(plan["skill"]), plan.get("params") if isinstance(plan.get("params"), dict) else {},
                 "план панели"), history, steps, started, source="panel")
 
+        nested = bool(getattr(self._local, "nested", False))
+        now = self.clock()
+        if not nested:
+            taught = self._learning_turn(session, clean, history, steps, started, mode)
+            if taught:
+                return taught
+        # Синонимы владельца («телега» → «телеграм») — для правил и выученного.
+        work = clean if nested else self._with_aliases(clean, steps)
+        if not nested:
+            learned = self._learned(work, ("correction", "taught"))
+            if learned:
+                return self._run_learned(session, clean, learned, history, steps, started)
+
         if mode != "pc":
+            counted = intents.util_answer(normalize_phrase(work), now)
+            if counted:
+                steps.append({"kind": "rule", "title": "Посчитал сам", "detail": counted[1]})
+                return self._reply(session, clean, counted[0], kind="answer", source="util", steps=steps,
+                                   started=started)
             answer = clock_answer(clean, self.clock())
             if answer:
                 steps.append({"kind": "rule", "title": "Часы и календарь", "detail": "без модели"})
@@ -826,11 +946,15 @@ class Brain:
                 return self._reply(session, clean, memory_reply["text"], kind="memory", source="memory",
                                    steps=steps, started=started, extra={"memory": memory_reply.get("rows", [])})
 
-        found = follow_up(clean, history)
+        mine = self._personal_turn(session, clean, work, history, steps, started, now)
+        if mine:
+            return mine
+
+        found = follow_up(work, history)
         if found:
             steps.append({"kind": "context", "title": "Понял по прошлой реплике", "detail": found["why"]})
         else:
-            found = understand(clean)
+            found = understand(work)
             if found:
                 steps.append({"kind": "rule", "title": "Понял без модели", "detail": found["why"]})
         if found:
@@ -838,6 +962,11 @@ class Brain:
             if found.get("clarify"):
                 return self._reply(session, clean, found["clarify"], kind="clarify", steps=steps, started=started)
             return self._execute(session, clean, found, history, steps, started)
+
+        if not nested:
+            learned = self._learned(work, ("self",))
+            if learned:
+                return self._run_learned(session, clean, learned, history, steps, started)
 
         if mode == "pc":
             return self._reply(session, clean, "", kind="skip", handled=False, steps=steps,
@@ -891,18 +1020,26 @@ class Brain:
                 panel_note = " Панель цеха сейчас не отвечает — про станки скажу, когда она вернётся."
                 steps.append({"kind": "panel", "title": "Панель цеха", "detail": str(context.get("reason") or "не отвечает")})
         hello = f"Привет, {name}!" if name else "Привет!"
+        mine = self._personal_hint(self.clock()) if talk == "greet" else ""
         texts = {
-            "greet": f"{hello} {farm}" if farm else f"{hello} Я на связи: компьютер, окна, звук, файлы и память.{panel_note}",
+            "greet": (f"{hello} {farm}{mine}" if farm else
+                      f"{hello} Я на связи: компьютер, окна, звук, файлы, память и личные дела.{mine}{panel_note}"),
             "how": "Работаю, всё под контролем." + (f" {farm}" if farm else panel_note),
             "who": ("Я NOZZA — помощник цеха на этом компьютере. Сам управляю окнами, звуком, программами и файлами, "
                     "помню ваши просьбы, а про станки, заказы и деньги спрашиваю панель цеха. Всё, что меняет "
                     "систему или цех, — только после вашего «Подтвердить»."),
             "thanks": f"Пожалуйста{', ' + name if name else ''}! Обращайтесь.",
             "bye": "До связи! Если что — позовите.",
+            "ok": "Хорошо. Если что — я рядом.",
         }
         steps.append({"kind": "rule", "title": "Разговор", "detail": {"greet": "приветствие", "how": "как дела",
-                      "who": "кто я", "thanks": "благодарность", "bye": "прощание"}[talk]})
+                      "who": "кто я", "thanks": "благодарность", "bye": "прощание", "ok": "согласие"}[talk]})
         chips = ["Что сейчас печатается?", "Как там компьютер?", "Что ты умеешь?"] if talk in ("greet", "how", "who") else []
+        if talk == "greet":
+            try:  # привычки владельца: «в это время вы обычно…» — первыми кнопками
+                chips = self.learning.suggestions(self.clock()) + ["Мой день"] + chips[:2]
+            except Exception:  # noqa: BLE001
+                pass
         return self._reply(session, text, texts[talk].strip(), kind="answer", source="talk", steps=steps,
                            started=started, suggestions=chips)
 
@@ -999,14 +1136,337 @@ class Brain:
         head = f"Про «{payload}» помню:" if payload else "Вот что я помню:"
         return {"op": op, "text": head + "\n" + "\n".join(lines), "rows": rows}
 
+    # --- обучение (18.22) ---------------------------------------------------
+    def _learning_turn(self, session: str, text: str, history: list[dict[str, Any]], steps: list[dict[str, Any]],
+                       started: float, mode: str) -> dict[str, Any] | None:
+        """Ответ на уточнение, урок, поправка. None — реплика не про это."""
+        phrase = normalize_phrase(text)
+        last = history[-1] if history and history[-1].get("role") == "assistant" else {}
+        awaiting = (last.get("meta") or {}).get("awaiting")
+        if isinstance(awaiting, dict) and awaiting.get("kind"):
+            done = self._awaiting(session, text, phrase, awaiting, history, steps, started)
+            if done:
+                return done
+        if mode == "pc":
+            return None
+        lesson = intents.teach_command(phrase)
+        if lesson:
+            done = self._lesson(session, text, lesson, history, steps, started)
+            if done:
+                return done
+        fix = intents.correction(phrase)
+        if fix is not None:
+            return self._correction(session, text, fix, history, steps, started)
+        return None
+
+    def _awaiting(self, session: str, text: str, phrase: str, awaiting: dict[str, Any], history: list[dict[str, Any]],
+                  steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """Прошлая реплика помощника была вопросом — эта, возможно, ответ на него."""
+        kind = str(awaiting.get("kind") or "")
+        if intents.CANCEL_RE.match(phrase):
+            steps.append({"kind": "context", "title": "Уточнение", "detail": "владелец передумал"})
+            return self._reply(session, text, "Хорошо, не буду.", kind="answer", source="teach", steps=steps,
+                               started=started)
+        now = self.clock()
+        if kind in ("teach", "correction"):
+            meaning = intents.this_means(phrase) if kind == "teach" else (intents.this_means(phrase) or phrase)
+            target = str(awaiting.get("phrase") or "")
+            if not meaning or not target or normalize_phrase(meaning).casefold() == normalize_phrase(target).casefold():
+                return None
+            steps.append({"kind": "context", "title": "Ответ на мой вопрос", "detail": "что значила прошлая фраза"})
+            plan_steps = resolve_meaning(meaning, self.personal, now)
+            return self._learn_now(session, text, target, meaning, plan_steps,
+                                   "taught" if kind == "teach" else "correction", history, steps, started)
+        if kind == "remind_when":
+            parsed = when.parse(phrase, now)
+            if not parsed:
+                return None
+            steps.append({"kind": "context", "title": "Ответ на «когда напомнить»", "detail": parsed["label"]})
+            if parsed["past"]:
+                return self._reply(session, text, f"Это время уже прошло ({parsed['label']}). Когда напомнить?",
+                                   kind="clarify", source="personal", steps=steps, started=started,
+                                   extra={"awaiting": awaiting})
+            about = str(awaiting.get("text") or "") or parsed["text"] or "Напоминание"
+            return self._execute(session, text, {**_plan("reminder.add", {"text": about, "due": parsed["iso"],
+                                                                           "repeat": parsed["repeat"]}, "напоминание"),
+                                                 "source": "personal"}, history, steps, started, source="personal")
+        if kind == "remind_text":
+            if len(phrase) < 2 or text.rstrip().endswith("?") or understand(phrase):
+                return None
+            steps.append({"kind": "context", "title": "Ответ на «о чём напомнить»", "detail": _short(phrase)})
+            return self._execute(session, text, {**_plan("reminder.add", {
+                "text": phrase, "due": str(awaiting.get("iso") or ""), "repeat": str(awaiting.get("repeat") or "")},
+                "напоминание"), "source": "personal"}, history, steps, started, source="personal")
+        return None
+
+    def _lesson(self, session: str, text: str, lesson: dict[str, Any], history: list[dict[str, Any]],
+                steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """«Научись…», «забудь команду…», «чему ты научился», «что ты не понял»."""
+        op = lesson["op"]
+        titles = {"list": "что выучено", "unknown": "что не понято", "habits": "привычки", "forget": "забыть",
+                  "answer": "урок: ответ", "teach": "урок: команда"}
+        if op == "teach" and not lesson.get("explicit", True):
+            # ««Рыжик» — это клиент из Питера» — факт, а не урок: урок, только если
+            # смысл — понятная команда или короткий синоним.
+            meaning = str(lesson.get("meaning") or "")
+            implied = resolve_meaning(meaning, self.personal, self.clock())
+            if not any(step.get("skill") or step.get("live") for step in implied) \
+                    and not looks_like_alias(str(lesson.get("phrase") or ""), meaning):
+                return None
+        steps.append({"kind": "learned", "title": "Обучение", "detail": titles.get(op, op)})
+        if op in ("list", "unknown", "habits", "forget"):
+            skill = {"list": "learn.list", "unknown": "learn.unknown", "habits": "learn.habits",
+                     "forget": "learn.forget"}[op]
+            params = {"phrase": lesson["phrase"]} if op == "forget" else {}
+            return self._execute(session, text, {**_plan(skill, params, "обучение"), "source": "teach"}, history,
+                                 steps, started, source="teach")
+        if op == "answer":
+            saved = self.learning.teach(lesson["phrase"], answer=lesson["answer"],
+                                        meaning=f"ответ «{lesson['answer']}»", source="taught")
+            reply = (f"Запомнил: на «{_short(lesson['phrase'])}» отвечу «{_short(lesson['answer'], 120)}»."
+                     if saved.get("ok") else f"Не запомнил: {saved.get('reason')}")
+            return self._reply(session, text, reply, kind="answer" if saved.get("ok") else "error", source="teach",
+                               steps=steps, started=started)
+        phrase, meaning = str(lesson.get("phrase") or ""), str(lesson.get("meaning") or "")
+        if lesson.get("split"):
+            phrase, meaning = self._split_lesson(str(lesson["split"]))
+        if not phrase or not meaning:
+            return self._reply(session, text, "Не понял, где ваша фраза, а где действие. Скажите так: когда я говорю "
+                                              "«рабочий режим» — открой телеграм и громкость 30.",
+                               kind="clarify", source="teach", steps=steps, started=started)
+        plan_steps = resolve_meaning(meaning, self.personal, self.clock())
+        commands = [step for step in plan_steps if step.get("skill") or step.get("live")]
+        if not commands and looks_like_alias(phrase, meaning, bool(lesson.get("alias_hint"))):
+            saved = self.learning.set_alias(phrase, meaning)
+            if saved.get("ok"):
+                steps.append({"kind": "learned", "title": "Синоним", "detail": f"{saved['word']} → {saved['meaning']}"})
+                return self._reply(session, text, f"Запомнил: «{phrase}» — это «{meaning}». Теперь, например, "
+                                                  f"«открой {phrase}» пойму как «открой {meaning}».",
+                                   kind="answer", source="teach", steps=steps, started=started,
+                                   suggestions=["Чему ты научился?"])
+        saved = self.learning.teach(phrase, plan_steps, meaning=meaning, source="taught")
+        if not saved.get("ok"):
+            return self._reply(session, text, f"Не запомнил: {saved.get('reason')}", kind="error", source="teach",
+                               steps=steps, started=started)
+        tail = "" if commands else " Правилами это пока не разбирается — при вызове спрошу панель или модель."
+        again = " Переучился: раньше эта фраза значила другое." if saved.get("replaced") else ""
+        steps.append({"kind": "learned", "title": "Запомнил урок", "detail": describe_steps(plan_steps)})
+        return self._reply(session, text, f"Запомнил: «{phrase}» → {describe_steps(plan_steps)}.{again}{tail} "
+                                          f"Скажите «{phrase}» — сделаю.",
+                           kind="answer", source="teach", steps=steps, started=started,
+                           suggestions=[phrase[:40][:1].upper() + phrase[:40][1:], "Чему ты научился?"])
+
+    @staticmethod
+    def _split_lesson(rest: str) -> tuple[str, str]:
+        """«когда я говорю рабочий режим открой телеграм» без запятой: действие — первая понятная правилам часть."""
+        words = rest.split()
+        for index in range(1, len(words)):
+            tail = " ".join(words[index:])
+            if understand(tail):
+                return " ".join(words[:index]).strip(" ,.«»\""), tail
+        return "", ""
+
+    def _correction(self, session: str, text: str, fix: dict[str, Any], history: list[dict[str, Any]],
+                    steps: list[dict[str, Any]], started: float) -> dict[str, Any] | None:
+        """«Нет, я имел в виду …» — выполнить правильное и запомнить поправку для прошлой фразы."""
+        if len(history) < 2 or history[-1].get("role") != "assistant" or history[-2].get("role") != "user":
+            return None
+        meta = history[-1].get("meta") or {}
+        if meta.get("source") in ("teach", "talk"):
+            return None
+        previous = str(history[-2].get("text") or "")
+        meaning = str(fix.get("meaning") or "")
+        if not meaning:
+            if not (meta.get("skill") or meta.get("source") in ("learned", "model", "personal", "util", "panel")):
+                return None
+            if meta.get("learned_id"):
+                self.learning.bad(int(meta["learned_id"]))
+            steps.append({"kind": "learned", "title": "Поправка", "detail": "жду, что было нужно"})
+            return self._reply(session, text, f"Понял, с «{_short(previous)}» я ошибся. Что нужно было сделать? "
+                                              "Скажите — я запомню.",
+                               kind="clarify", source="teach", steps=steps, started=started,
+                               extra={"awaiting": {"kind": "correction", "phrase": previous}})
+        plan_steps = resolve_meaning(meaning, self.personal, self.clock())
+        if not any(step.get("skill") or step.get("live") for step in plan_steps) and not fix.get("marked"):
+            return None  # «нет звука» — жалоба, а не поправка
+        if meta.get("learned_id"):
+            self.learning.bad(int(meta["learned_id"]))
+        steps.append({"kind": "learned", "title": "Поправка", "detail": f"«{_short(previous)}» → {_short(meaning)}"})
+        return self._learn_now(session, text, previous, meaning, plan_steps, "correction", history, steps, started)
+
+    def _learn_now(self, session: str, text: str, phrase: str, meaning: str, plan_steps: list[dict[str, Any]],
+                   source: str, history: list[dict[str, Any]], steps: list[dict[str, Any]],
+                   started: float) -> dict[str, Any]:
+        """Запомнить «фраза → смысл» и сразу сделать смысл: человек ведь этого и хотел."""
+        saved = self.learning.teach(phrase, plan_steps, meaning=meaning, source=source)
+        if not saved.get("ok"):
+            return self._reply(session, text, f"Не запомнил: {saved.get('reason')}", kind="error", source="teach",
+                               steps=steps, started=started)
+        head = f"Понял: «{_short(phrase)}» — это «{_short(meaning)}». Запомнил."
+        return self._run_steps_plan(session, text, plan_steps, history, steps, started,
+                                    extra={"learned_id": saved["entry"]["id"]}, head=head)
+
+    def _with_aliases(self, text: str, steps: list[dict[str, Any]]) -> str:
+        try:
+            out, applied = self.learning.apply_aliases(text)
+        except Exception:  # noqa: BLE001 — синонимы не должны ронять разговор
+            return text
+        if applied:
+            steps.append({"kind": "learned", "title": "Ваши слова",
+                          "detail": ", ".join(f"{word} → {meaning}" for word, meaning in applied)})
+        return out
+
+    def _learned(self, text: str, sources: tuple[str, ...]) -> dict[str, Any] | None:
+        try:
+            return self.learning.match(text, sources)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _run_learned(self, session: str, text: str, match: dict[str, Any], history: list[dict[str, Any]],
+                     steps: list[dict[str, Any]], started: float) -> dict[str, Any]:
+        entry = match["entry"]
+        self.learning.used(entry["id"])
+        steps.append({"kind": "learned", "title": "Выученное",
+                      "detail": f"«{_short(entry['phrase'])}» · {entry['source_title']} · {match['how']}"})
+        extra = {"learned_id": entry["id"]}
+        if entry.get("kind") == "answer":
+            return self._reply(session, text, entry["answer"], kind="answer", source="learned", steps=steps,
+                               started=started, extra=extra)
+        return self._run_steps_plan(session, text, match["steps"], history, steps, started, extra=extra)
+
+    def _run_steps_plan(self, session: str, text: str, plan_steps: list[dict[str, Any]], history: list[dict[str, Any]],
+                        steps: list[dict[str, Any]], started: float, extra: dict[str, Any] | None = None,
+                        head: str = "") -> dict[str, Any]:
+        """Шаги выученного подряд: навык — через реестр и подтверждение, фраза — через мозг."""
+        plan_steps = [step for step in plan_steps if isinstance(step, dict)][:8]
+        if not plan_steps:
+            return self._reply(session, text, "В выученном нет шагов — научите заново.", kind="error",
+                               source="learned", steps=steps, started=started)
+        if len(plan_steps) == 1 and not head:
+            return self._one_step(session, text, plan_steps[0], history, steps, started, extra=extra, save=True)
+        results = [self._one_step(session, text, step, history, steps, started, save=False) for step in plan_steps]
+        lines = [str(result.get("reply") or "") for result in results if result.get("reply")]
+        pending = next((result["pending"] for result in results if result.get("pending")), None)
+        ok = all(result.get("kind") != "error" for result in results)
+        body = "\n".join(f"• {line}" for line in lines) if len(lines) > 1 else (lines[0] if lines else "")
+        reply = f"{head}\n{body}".strip() if head else body
+        skill_name = next((str(result.get("skill")) for result in reversed(results) if result.get("skill")), "")
+        link = next((result["link"] for result in results if isinstance(result.get("link"), dict)), None)
+        merged = {**(extra or {}), **({"link": link} if link else {})}
+        return self._reply(session, text, reply, kind="pending" if pending else ("action" if ok else "error"),
+                           skill=skill_name, pending=pending, source="learned", steps=steps, started=started,
+                           result={"ok": ok}, extra=merged or None,
+                           suggestions=next((result.get("suggestions") for result in results if result.get("suggestions")), []))
+
+    def _one_step(self, session: str, text: str, step: dict[str, Any], history: list[dict[str, Any]],
+                  steps: list[dict[str, Any]], started: float, extra: dict[str, Any] | None = None,
+                  save: bool = True) -> dict[str, Any]:
+        if step.get("skill"):
+            plan = {**_plan(str(step["skill"]), dict(step.get("params") or {}), "выучено"), "source": "learned"}
+            return self._execute(session, text, plan, history, steps, started, source="learned", extra=extra, save=save)
+        said = str(step.get("say") or "").strip()
+        previous = (getattr(self._local, "nested", False), getattr(self._local, "nosave", False))
+        self._local.nested, self._local.nosave = True, True
+        try:
+            inner = self.chat(said, session=session)
+        finally:
+            self._local.nested, self._local.nosave = previous
+        for item in (inner.get("steps") or [])[:6]:
+            steps.append(item)
+        if not save:
+            return inner
+        merged = {**(extra or {}), **({"link": inner["link"]} if isinstance(inner.get("link"), dict) else {})}
+        return self._reply(session, text, str(inner.get("reply") or ""), kind=str(inner.get("kind") or "answer"),
+                           skill=str(inner.get("skill") or ""), params=inner.get("params") or {},
+                           result=inner.get("result") or {}, pending=inner.get("pending"), target=inner.get("target"),
+                           source="learned", steps=steps, started=started, suggestions=inner.get("suggestions") or [],
+                           extra=merged or None)
+
+    def feedback(self, turn_id: int, rating: int) -> dict[str, Any]:
+        """👍/👎 под ответом. 👍 закрепляет выученное; 👎 снижает вес и спрашивает, что было нужно."""
+        turn = self.store.turn(int(turn_id or 0))
+        if not turn or turn.get("role") != "assistant":
+            return {"ok": False, "reason": "Ответ не найден — возможно, разговор очищен"}
+        meta = turn.get("meta") or {}
+        session = str(turn.get("session") or WINDOW_SESSION)
+        before = self.store.user_turn_before(session, int(turn["id"]))
+        phrase = str((before or {}).get("text") or "")
+        self.learning.feedback(rating, int(turn["id"]), phrase, str(turn.get("text") or ""),
+                               str(meta.get("skill") or ""), str(meta.get("source") or ""))
+        learned_id = int(meta.get("learned_id") or 0)
+        if int(rating) > 0:
+            note = "Спасибо! Запомню, что так — правильно."
+            if learned_id:
+                self.learning.good(learned_id)
+            elif meta.get("source") == "model" and meta.get("skill") and phrase and meta.get("ok"):
+                saved = self.learning.teach(phrase, [{"skill": meta["skill"], "params": meta.get("params") or {}}],
+                                            meaning=str(meta.get("skill")), source="self")
+                if saved.get("ok"):
+                    note = "Спасибо! Запомнил эту фразу — в следующий раз сделаю так же и без модели."
+            return {"ok": True, "text": note}
+        if learned_id:
+            self.learning.bad(learned_id)
+        if phrase:
+            self.learning.note_unknown(phrase)
+        ask = (f"Понял, с «{_short(phrase)}» я ошибся. Что нужно было сделать? Напишите — я запомню."
+               if phrase else "Понял, ошибся. Что нужно было сделать?")
+        meta_out: dict[str, Any] = {"kind": "clarify", "source": "teach", "skill": "", "params": {}, "target": {},
+                                    "ok": True}
+        if phrase:
+            meta_out["awaiting"] = {"kind": "correction", "phrase": phrase}
+        saved_turn = self.store.add_turn(session, "assistant", ask, meta_out)
+        return {"ok": True, "text": "Учту.", "message": {"reply": ask, "kind": "clarify", "source": "teach",
+                                                        "turn_id": saved_turn.get("id"), "session": session}}
+
+    # --- личное (18.22) -----------------------------------------------------
+    def _personal_turn(self, session: str, text: str, work: str, history: list[dict[str, Any]],
+                       steps: list[dict[str, Any]], started: float, now: datetime.datetime) -> dict[str, Any] | None:
+        try:
+            intent = intents.personal_intent(normalize_phrase(work), self.personal, now)
+        except Exception as exc:  # noqa: BLE001 — личный слой не должен ронять команды компьютеру
+            steps.append({"kind": "rule", "title": "Личные дела", "detail": f"не разобрал: {exc.__class__.__name__}"})
+            return None
+        if not intent:
+            return None
+        steps.append({"kind": "rule", "title": "Личные дела", "detail": intent.get("why") or ""})
+        if intent.get("clarify"):
+            return self._reply(session, text, intent["clarify"], kind="clarify", source="personal", steps=steps,
+                               started=started, suggestions=list(intent.get("suggestions") or []),
+                               extra={"awaiting": intent["awaiting"]} if intent.get("awaiting") else None)
+        plan = {**_plan(intent["skill"], intent.get("params") or {}, intent.get("why", "")), "source": "personal"}
+        if intent["skill"] == "me.today" and normalize_phrase(work).casefold().startswith("доброе утро"):
+            name = self._owner_name()
+            plan["greeting"] = f"Доброе утро, {name}!" if name else "Доброе утро!"
+        return self._execute(session, text, plan, history, steps, started, source="personal")
+
+    def _personal_hint(self, now: datetime.datetime) -> str:
+        """Для приветствия: что сегодня по личному — коротко."""
+        try:
+            rows = self.personal.reminders(("active",), 30)
+            fired = self.personal.reminders(("fired",), 10)
+        except Exception:  # noqa: BLE001
+            return ""
+        end = now.strftime("%Y-%m-%d") + " 23:59:59"
+        today = [row for row in rows if str(row.get("due_at") or "") <= end]
+        parts = []
+        if today:
+            shown = "; ".join(f"{str(row['due_at'])[11:16]} — {_short(row['text'], 40)}" for row in today[:2])
+            more = f" и ещё {len(today) - 2}" if len(today) > 2 else ""
+            parts.append(f"на сегодня {shown}{more}")
+        if fired:
+            parts.append(f"ждут отметки: {len(fired)}")
+        return (" По личному: " + ", ".join(parts) + ".") if parts else ""
+
     # --- исполнение плана -------------------------------------------------
     def _execute(self, session: str, text: str, plan: dict[str, Any], history: list[dict[str, Any]],
-                 steps: list[dict[str, Any]], started: float, source: str = "") -> dict[str, Any]:
+                 steps: list[dict[str, Any]], started: float, source: str = "",
+                 extra: dict[str, Any] | None = None, save: bool = True) -> dict[str, Any]:
         name = plan["skill"]
         skill = skills.get(name, self.runner.learned())
+        origin = source or plan.get("source") or "rules"
         if skill is None:
-            return self._reply(session, text, f"Навыка «{name}» нет в реестре.", kind="error",
-                               steps=steps, started=started)
+            return self._reply(session, text, f"Навыка «{name}» нет в реестре.", kind="error", source=origin,
+                               steps=steps, started=started, extra=extra, save=save)
         params = dict(plan.get("params") or {})
         delta = 0
         if name == "system.volume" and "delta" in params:
@@ -1015,15 +1475,22 @@ class Brain:
         if name == "scheduler.focus_stop" and not params.get("timer_id"):
             running = [row for row in self.store.list_focus_timers(10) if row.get("status") == "running"]
             if not running:
-                return self._reply(session, text, "Запущенных таймеров нет.", kind="answer", steps=steps, started=started)
+                return self._reply(session, text, "Запущенных таймеров нет.", kind="answer", source=origin,
+                                   steps=steps, started=started, extra=extra, save=save)
             params["timer_id"] = int(running[0]["id"])
         available, why = skills.availability(skill, self.runner.caps)
         if not available:
             steps.append({"kind": "skill", "title": skill["title"], "detail": "недоступен"})
             return self._reply(session, text, f"{skill['title']}: сейчас недоступно — {why}", kind="error",
-                               skill=name, params=params, steps=steps, started=started)
+                               skill=name, params=params, source=origin, steps=steps, started=started,
+                               extra=extra, save=save)
         steps.append({"kind": "skill", "title": skill["title"], "detail": executor_describe(skill, params)})
         result = self._run(name, params, popup=session != WINDOW_SESSION)
+        if result.get("ok") and not result.get("queued"):
+            try:  # привычки владельца: что и в какой час он просит (подсказки, не автозапуск)
+                self.learning.record_usage(name, params, text, self.clock())
+            except Exception:  # noqa: BLE001
+                pass
         target = dict(plan.get("target") or {})
         target.pop("pronoun", None)
         if delta:
@@ -1041,6 +1508,8 @@ class Brain:
         reply = plan.get("reply") or summarize(name, result)
         if plan.get("reply") and not result.get("ok"):
             reply = summarize(name, result)
+        if plan.get("greeting") and result.get("ok"):
+            reply = f"{plan['greeting']} {reply}"
         if pending and session == WINDOW_SESSION and not plan.get("reply"):
             # В окне агента всплывающего окна нет — подтверждают карточкой в ленте.
             reply = f"Нужно ваше подтверждение: {result.get('text') or name}. Подтвердите в карточке ниже."
@@ -1048,7 +1517,7 @@ class Brain:
         return self._reply(session, text, reply, kind=kind, skill=name, params=params,
                            result=_trim(result), pending=pending, target=target,
                            source=source or plan.get("source") or "rules", steps=steps, started=started,
-                           suggestions=suggestions_for(name, result))
+                           suggestions=suggestions_for(name, result), extra=extra, save=save)
 
     def _volume_delta(self, params: dict[str, Any]) -> dict[str, Any]:
         """«Громче» — это «текущая + 10»: навык получает уровень, а не догадку."""
@@ -1070,19 +1539,28 @@ class Brain:
         if not state.get("ok"):
             # Техническая причина (порт, ошибка Ollama) — в ходе мысли, а не в лицо человеку.
             steps.append({"kind": "model", "title": "Модель", "detail": str(state.get("reason") or "недоступна")[:200]})
+            awaiting: dict[str, Any] | None = None
             if workshop and getattr(self, "_panel_down", False):
                 note = ("Это вопрос к панели цеха, а она сейчас не отвечает. Проверьте, что PrintFlow запущен, "
                         "и спросите ещё раз.")
             else:
-                note = ("Такое без модели я не разберу. Без неё умею: команды компьютеру («громкость 30», "
-                        "«что грузит компьютер», «какие окна открыты»), вопросы про цех («что печатается», "
-                        "«кто нам должен»), память («запомни, что…») и счёт. Свободные вопросы заработают, "
-                        "когда на этом компьютере запустите модель (Ollama).")
+                # Непонятое не пропадает: фраза копится во вкладке «Обучение», а
+                # «это значит …» следующей репликой учит помощника сразу.
+                if not getattr(self._local, "nested", False):
+                    try:
+                        self.learning.note_unknown(text)
+                        awaiting = {"kind": "teach", "phrase": text}
+                    except Exception:  # noqa: BLE001
+                        awaiting = None
+                note = (f"Пока не понимаю «{_short(text)}»: без модели такое не разобрать. Научите меня — скажите "
+                        "«это значит …» (например, «это значит открой телеграм»), и я запомню. Уже умею: команды "
+                        "компьютеру, вопросы про цех, память, напоминания, списки, цели, привычки, расходы и счёт. "
+                        "Свободные вопросы заработают, когда на этом компьютере запустите модель (Ollama).")
             if memories:
                 note = "Из памяти: " + "; ".join(row["text"] for row in memories[:3]) + ".\n" + note
             return self._reply(session, text, note, kind="clarify", source="rules", steps=steps, started=started,
-                               suggestions=["Что ты умеешь?", "Что сейчас печатается?", "Как там компьютер?"],
-                               extra={"panel_asked": True})
+                               suggestions=["Что ты умеешь?", "Чему ты научился?", "Что сейчас печатается?"],
+                               extra={"panel_asked": True, **({"awaiting": awaiting} if awaiting else {})})
         catalog = skills.prompt(self.runner.caps, self.runner.learned())
         context = [date_line(self.clock()) + f" Время {self.clock():%H:%M}."]
         try:
@@ -1129,8 +1607,21 @@ class Brain:
             return self._reply(session, text, f"Чтобы выполнить «{skill['title']}», уточните: " + "; ".join(hard),
                                kind="clarify", source="model", steps=steps, started=started)
         steps.append({"kind": "check", "title": "Проверка реестром", "detail": "навык и параметры в порядке"})
-        return self._execute(session, text, {**_plan(name, params, "модель"), "source": "model"},
-                             history, steps, started, source="model")
+        answer = self._execute(session, text, {**_plan(name, params, "модель"), "source": "model"},
+                               history, steps, started, source="model")
+        if answer.get("kind") == "action" and not name.startswith(_NO_SELF_LEARN) and "due" not in params \
+                and not getattr(self._local, "nested", False):
+            # Самообучение (И318): понятое моделью и выполненное — в следующий раз без модели.
+            try:
+                saved = self.learning.teach(text, [{"skill": name, "params": params}],
+                                            meaning=executor_describe(skill, params), source="self")
+            except Exception:  # noqa: BLE001
+                saved = {}
+            if saved.get("ok"):
+                answer["steps"].append({"kind": "learned", "title": "Запомнил фразу",
+                                        "detail": "в следующий раз пойму без модели"})
+                answer["learned"] = True
+        return answer
 
     # --- служебное --------------------------------------------------------
     def _history(self, session: str) -> list[dict[str, Any]]:
@@ -1145,17 +1636,23 @@ class Brain:
                source: str = "rules", steps: list[dict[str, Any]] | None = None, started: float = 0.0,
                suggestions: list[str] | None = None, handled: bool = True, save: bool = True,
                extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        if save and text:
+        turn_id = 0
+        if save and text and not getattr(self._local, "nosave", False):
             self.store.add_turn(session, "user", text, {})
             meta = {"skill": skill, "params": params or {}, "target": target or {}, "kind": kind, "source": source,
-                    "ok": bool(result.get("ok")) if isinstance(result, dict) else kind not in ("error",)}
+                    "ok": bool(result.get("ok")) if isinstance(result, dict) and result else kind not in ("error",)}
             if extra and isinstance(extra.get("link"), dict):
                 meta["link"] = extra["link"]  # «ссылка ниже» должна остаться и после перезагрузки окна
-            self.store.add_turn(session, "assistant", reply, meta)
+            if extra and extra.get("learned_id"):
+                meta["learned_id"] = int(extra["learned_id"])  # 👎 и «нет, не то» снижают вес именно этого урока
+            if extra and isinstance(extra.get("awaiting"), dict):
+                meta["awaiting"] = extra["awaiting"]  # «Когда напомнить?» — ответ поймётся следующей репликой
+            turn_id = int(self.store.add_turn(session, "assistant", reply, meta).get("id") or 0)
         payload = {"ok": kind != "error", "handled": handled, "session": session, "reply": reply,
                    "kind": kind, "skill": skill or None, "params": params or {}, "result": result or {},
                    "pending": pending, "target": target or {}, "source": source, "steps": steps or [],
-                   "suggestions": suggestions or [], "ms": int((time.time() - started) * 1000) if started else 0}
+                   "suggestions": suggestions or [], "ms": int((time.time() - started) * 1000) if started else 0,
+                   "turn_id": turn_id or None}
         if extra:
             payload.update(extra)
         return payload

@@ -1257,7 +1257,26 @@ def _memory_methods() -> None:
         cursor = self._run("DELETE FROM dialog WHERE session=?", ((str(session or "main").strip() or "main")[:40],))
         return int(cursor.rowcount or 0)
 
-    for function in (remember, memories, recall, forget, pin_memory, add_turn, dialog, clear_dialog):
+    def turn(self: Store, turn_id: int) -> dict[str, Any] | None:
+        """Одна реплика по номеру — для 👍/👎 под ответом (18.22)."""
+        rows = self._rows("SELECT * FROM dialog WHERE id=?", (int(turn_id or 0),))
+        if not rows:
+            return None
+        row = rows[0]
+        try:
+            row["meta"] = json.loads(row.pop("meta_json") or "{}")
+        except json.JSONDecodeError:
+            row["meta"] = {}
+        return row
+
+    def user_turn_before(self: Store, session: str, turn_id: int) -> dict[str, Any] | None:
+        """Фраза человека, на которую отвечала реплика `turn_id`."""
+        rows = self._rows("SELECT * FROM dialog WHERE session=? AND id<? AND role='user' ORDER BY id DESC LIMIT 1",
+                          ((str(session or "main").strip() or "main")[:40], int(turn_id or 0)))
+        return rows[0] if rows else None
+
+    for function in (remember, memories, recall, forget, pin_memory, add_turn, dialog, clear_dialog, turn,
+                     user_turn_before):
         setattr(Store, function.__name__, function)
 
 

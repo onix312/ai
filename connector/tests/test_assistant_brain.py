@@ -324,7 +324,9 @@ class LiveDialogTests(BrainTestCase):
         answer = self.say("как дела на ферме?")
         self.assertEqual("farm", answer["source"])
         self.assertIn("Печатают 2 из 3", answer["reply"])
-        self.assertIn("Альфа — печатает «Ваза», 40%, осталось ~1 ч 30 мин (закончит около", answer["reply"])
+        # После 22:30 окончание честно уходит на «завтра около 01:00» — тест не зависит от часа прогона.
+        self.assertRegex(answer["reply"], r"Альфа — печатает «Ваза», 40%, осталось ~1 ч 30 мин "
+                                          r"\(закончит (?:завтра )?около \d{2}:\d{2}\)")
         self.assertIn("Гамма — на паузе «Кашпо»", answer["reply"])
         self.assertIn("Следующим в очереди: «Подставка»", answer["reply"])
         self.assertIn("Продолжи печать", answer["suggestions"])
@@ -338,7 +340,8 @@ class LiveDialogTests(BrainTestCase):
     def test_remaining_time_follows_pronoun(self):
         self.say("что с Альфой?")
         answer = self.say("сколько ему осталось?")
-        self.assertRegex(answer["reply"], r"^Альфа «Ваза»: 40%, осталось ~1 ч 30 мин, закончит около \d{2}:\d{2}\.$")
+        self.assertRegex(answer["reply"],
+                         r"^Альфа «Ваза»: 40%, осталось ~1 ч 30 мин, закончит (?:завтра )?около \d{2}:\d{2}\.$")
         self.assertEqual("p1", answer["entities"]["printer"]["id"])
         self.say("что с Гаммой?")
         paused = self.say("когда он закончит?")

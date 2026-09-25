@@ -45,6 +45,8 @@ from . import capabilities, config, executor, pc, skills, speech, ui, window, wi
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
 # вечно и выстрелить через час, когда человек уже ушёл.
 PENDING_TTL_SEC = 60.0
+# Планировщик личного (18.22): как часто проверять напоминания, таймеры и привычки.
+SCHEDULER_SEC = 20.0
 # Имена, под которыми агент доступен своему окну и панели. Всё остальное в
 # `Host` — признак перепривязки DNS (сайт, выдающий себя за 127.0.0.1).
 LOCAL_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
@@ -65,6 +67,7 @@ class Agent:
         # ещё не создана, а навыки никто не звал.
         self._runner: executor.Runner | None = None
         self._brain: brain_mod.Brain | None = None
+        self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
 
@@ -89,11 +92,123 @@ class Agent:
             self.runner.refresh_capabilities()
         return self.brain.chat(text, session=session, mode=mode, plan=plan)
 
+    # --- планировщик личного (18.22) ---------------------------------------
+    def tick(self, now: Any = None) -> list[dict[str, Any]]:
+        """Один шаг: напоминания, закончившиеся таймеры, заметки со сроком, привычки.
+
+        До 18.22 таймер фокуса только записывался в базу, а заметка «на завтра»
+        не всплывала никогда — будильника у агента не было. Сработавшее
+        становится уведомлением окна (`/notifications`) и, если есть озвучка,
+        звучит вслух.
+        """
+        try:
+            fired = self.runner.personal.tick(now)
+        except Exception as exc:  # noqa: BLE001 — планировщик не имеет права уронить агента
+            print(f"  ⚠ Планировщик: {exc.__class__.__name__}: {exc}")
+            return []
+        if fired and self._voice_notify():
+            for item in fired[:3]:
+                try:
+                    pc.speak(f"{item['title']}: {item['text']}"[:300])
+                except Exception:  # noqa: BLE001
+                    pass
+        return fired
+
+    def _voice_notify(self) -> bool:
+        if not self.capabilities.get("speech_out"):
+            return False
+        try:
+            pref = self.runner.store.get_preference("notify.voice")
+        except Exception:  # noqa: BLE001
+            pref = None
+        return not pref or str(pref.get("value") or "").casefold() not in ("off", "нет", "0", "выкл")
+
+    def start_scheduler(self, interval: float = SCHEDULER_SEC) -> threading.Thread:
+        def loop() -> None:
+            while not self._stop.is_set():
+                self.tick()
+                self._stop.wait(interval)
+
+        thread = threading.Thread(target=loop, name="agent-scheduler", daemon=True)
+        thread.start()
+        return thread
+
+    def stop_scheduler(self) -> None:
+        self._stop.set()
+
+    def personal_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Кнопки вкладки «Дела»: «Готово», «Отложить», «Сегодня», «+1», «вычеркнуть»."""
+        op = str(body.get("op") or "")
+        personal = self.runner.personal
+        item_id = int(body.get("id") or 0)
+        skills_by_op = {"reminder_done": "reminder.done", "reminder_cancel": "reminder.cancel",
+                        "reminder_snooze": "reminder.snooze"}
+        if op in skills_by_op:
+            params: dict[str, Any] = {"id": item_id}
+            if op == "reminder_snooze":
+                params["minutes"] = int(body.get("minutes") or 10)
+            return self.run_skill(skills_by_op[op], params, ask=False)
+        if op in ("habit_check", "habit_uncheck"):
+            habit = personal.habit(item_id)
+            if not habit:
+                return {"ok": False, "reason": "Привычка не найдена"}
+            if op == "habit_check":
+                return self.run_skill("habit.check", {"habit": habit["title"]}, ask=False)
+            today = self.runner.clock().date()
+            done = personal.uncheck_habit(item_id, today)
+            return {"ok": done, "say": f"Отметка «{habit['title']}» за сегодня снята." if done else "",
+                    "reason": "" if done else "Сегодня отметки не было"}
+        if op == "goal_progress":
+            goal = personal.goal(item_id)
+            if not goal:
+                return {"ok": False, "reason": "Цель не найдена"}
+            return self.run_skill("goal.progress", {"goal": goal["title"], "amount": float(body.get("amount") or 1)},
+                                  ask=False)
+        if op == "list_remove":
+            rows = personal.store._rows("SELECT * FROM lists WHERE id=? AND done=0", (item_id,))
+            if not rows:
+                return {"ok": False, "reason": "Пункт не найден"}
+            personal.store._run("UPDATE lists SET done=1 WHERE id=?", (item_id,))
+            return {"ok": True, "say": f"Вычеркнул: {rows[0]['item']}."}
+        return {"ok": False, "reason": f"Неизвестное действие «{op}»"}
+
+    def learning_op(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Кнопки вкладки «Обучение»: научить непонятому, забыть выученное, убрать синоним."""
+        op = str(body.get("op") or "")
+        learning = self.runner.learning
+        if op == "teach":
+            return self.run_skill("learn.teach", {"phrase": str(body.get("phrase") or ""),
+                                                  "meaning": str(body.get("meaning") or "")}, ask=False)
+        if op == "forget":
+            return self.run_skill("learn.forget", {"id": int(body.get("id") or 0)}, ask=False)
+        if op == "alias_forget":
+            done = learning.forget_alias(str(body.get("word") or ""))
+            return {"ok": done, "say": "Синоним забыт." if done else "", "reason": "" if done else "Синоним не найден"}
+        if op == "dismiss":
+            done = learning.dismiss_unknown(int(body.get("id") or 0))
+            return {"ok": done, "reason": "" if done else "Фраза не найдена"}
+        return {"ok": False, "reason": f"Неизвестное действие «{op}»"}
+
+    def learning_payload(self) -> dict[str, Any]:
+        learning = self.runner.learning
+        now = self.runner.clock()
+        rows = learning.entries(100)
+        from .personal_skills import describe_steps
+        for row in rows:
+            row["meaning_text"] = (f"ответ «{row['answer']}»" if row.get("answer") else
+                                   row.get("meaning") or describe_steps(row.get("steps") or []))
+        return {"ok": True, "learned": rows, "unknown": learning.unknowns(30), "aliases": learning.aliases(),
+                "insights": learning.insights(now), "feedback": learning.feedback_stats()}
+
     def voice_phrase(self, phrase: str) -> dict[str, Any]:
         """Голосовая петля (И311): команда компьютеру — здесь, вопрос цеха — панели; ответ вслух."""
         answer = self.chat(phrase, session="voice")
         reply = str(answer.get("reply") or "")
-        if answer.get("kind") in ("clarify", "error") and not answer.get("skill") and not answer.get("panel_asked"):
+        # «Когда напомнить?», «что было нужно?» — вопрос помощника, а не непонятая
+        # фраза: панель не переспрашивается, иначе её ответ затрёт вопрос (18.22).
+        own_question = bool(answer.get("awaiting")) or answer.get("source") in ("personal", "teach", "learned", "util")
+        if answer.get("kind") in ("clarify", "error") and not answer.get("skill") and not answer.get("panel_asked") \
+                and not own_question:
             panel = self.runner.panel.chat(phrase, session="voice", source="voice")
             if panel.get("ok") and panel.get("reply"):
                 reply = str(panel["reply"])
@@ -440,6 +555,12 @@ class AgentHandler(BaseHTTPRequestHandler):
             limit = int((query.get("limit") or ["40"])[0] or 40)
             return self._json(200, {"ok": True, "session": session,
                                     "turns": agent.runner.store.dialog(session, limit)})
+        if path == "/notifications":
+            return self._json(200, {"ok": True, "notifications": agent.runner.personal.unseen(20)})
+        if path == "/personal":
+            return self._json(200, {"ok": True, **agent.runner.personal.overview(agent.runner.clock())})
+        if path == "/learning":
+            return self._json(200, agent.learning_payload())
         if path == "/memory":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             wanted = str((query.get("q") or [""])[0] or "")
@@ -521,6 +642,15 @@ class AgentHandler(BaseHTTPRequestHandler):
             panel = agent.runner.panel.clear_dialog(brain_mod.panel_session(session))
             return self._json(200, {"ok": True, "session": session, "cleared": cleared,
                                     "panel_cleared": bool(panel.get("ok"))})
+        if path == "/notifications/seen":
+            ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+            return self._json(200, {"ok": True, "seen": agent.runner.personal.mark_seen(ids)})
+        if path == "/personal":
+            return self._json(200, agent.personal_op(body))
+        if path == "/learning":
+            return self._json(200, agent.learning_op(body))
+        if path == "/feedback":
+            return self._json(200, agent.brain.feedback(int(body.get("turn_id") or 0), int(body.get("rating") or 0)))
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
@@ -619,11 +749,15 @@ def run() -> int:
     except Exception as exc:
         print(f"  ⚠ Пульс надзора не включился: {exc}")
     threading.Thread(target=speech_server.serve_forever, daemon=True).start()
+    # 18.22: напоминания, таймеры фокуса и привычки звонят сами.
+    agent.start_scheduler()
+    print(f"  Напоминания: планировщик проверяет каждые {int(SCHEDULER_SEC)} с")
     try:
         agent_server.serve_forever()
     except KeyboardInterrupt:
         print("Останавливаю агента")
     finally:
+        agent.stop_scheduler()
         speech_server.shutdown()
         agent_server.shutdown()
     return 0

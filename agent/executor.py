@@ -28,12 +28,15 @@
 
 from __future__ import annotations
 
+import datetime
 import pathlib
 from typing import Any, Callable
 
 from . import avito as avito_mod
-from . import capabilities, config, documents, fileops, model, pc, skills, tg as tg_mod, winapi
+from . import capabilities, config, documents, fileops, model, pc, personal_skills, skills, tg as tg_mod, when, winapi
+from .learning import Learning
 from .panel_client import Client
+from .personal import Personal
 from .store import Store
 
 MAX_PASSAGES = 6
@@ -171,7 +174,26 @@ class Runner:
         self.store = store if store is not None else Store()
         self.panel = panel if panel is not None else Client(config.PRINTFLOW_URL)
         self._caps: dict[str, Any] = {}
+        # Часы помощника: мозг подменяет их своими — «сейчас» одно на весь разговор.
+        self.clock: Callable[[], datetime.datetime] = datetime.datetime.now
+        self._personal: Personal | None = None
+        self._learning: Learning | None = None
         self.refresh_capabilities()
+
+    # --- личное и обучение (18.22) ------------------------------------------
+    @property
+    def personal(self) -> Personal:
+        """Напоминания, списки, цели, привычки, расходы, дневник — таблицы своей базы."""
+        if self._personal is None:
+            self._personal = Personal(self.store)
+        return self._personal
+
+    @property
+    def learning(self) -> Learning:
+        """Выученные фразы, поправки, синонимы, непонятое и привычки владельца."""
+        if self._learning is None:
+            self._learning = Learning(self.store)
+        return self._learning
 
     # --- способности ------------------------------------------------------
     def refresh_capabilities(self) -> dict[str, Any]:
@@ -383,6 +405,8 @@ class Runner:
             "memory.recall": self._memory_recall,
             "memory.forget": self._memory_forget,
         }
+        # 18.22: личные навыки и обучение живут в своём модуле.
+        handlers.update(personal_skills.handlers(self))
         handler = handlers.get(str(skill.get("name") or ""))
         if handler is None:
             return {"ok": False,
@@ -1432,9 +1456,16 @@ class Runner:
             return {"ok": False, "reason": "Пустая заметка"}
         try:
             note = self.store.add_note(txt, due)
-            return {"ok": True, "note": note, "reason": ""}
         except Exception as exc:
             return {"ok": False, "reason": f"Заметка не сохранена: {exc}"}
+        # До 18.22 «заметка на завтра» только записывалась и никогда не всплывала.
+        # Срок словами становится настоящим напоминанием — его поднимет планировщик.
+        parsed = when.parse(due, self.clock()) if due else None
+        if parsed and not parsed["past"]:
+            reminder = self.personal.add_reminder(txt, parsed["at"], parsed["repeat"], source="note")
+            return {"ok": True, "note": note, "reminder": reminder, "reason": "",
+                    "say": f"Заметка сохранена, напомню {parsed['label']}."}
+        return {"ok": True, "note": note, "reason": ""}
 
     def _voice_command(self, params: dict) -> dict:
         """Фраза → понятый навык и параметры. Ничего не выполняет — только разбор."""
