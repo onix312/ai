@@ -24,6 +24,10 @@
      неделю», «за сентябрь», «на прошлой неделе»); без периода — 30 дней, и
      ответ всё равно называет даты. «Топ товаров за неделю», «что берут»,
      «топ клиентов» — реестр продаж с этими границами, а не остатки стеллажа.
+     Короткие продолжения — «а за прошлую неделю?», «а по штукам?», «а
+     клиенты?», «а доход?» — наследуют тему и окно из мета прошлой реплики
+     (`_followup`), как человек не повторяет вопрос целиком; период без темы
+     и контекста — живое уточнение с тремя срезами окна.
   5. **Компьютер.** Команды ПК уходят агенту (`POST /chat`, `mode=pc`) — он
      исполняет их по своим правилам подтверждения и отвечает словами.
   6. **Модель.** Планировщик в JSON-режиме видит факты цеха, память и
@@ -166,6 +170,128 @@ def eta_label(minutes: float, now: datetime.datetime | None = None) -> str:
     days = (finish.date() - now.date()).days
     prefix = "" if days <= 0 else ("завтра " if days == 1 else f"{finish:%d.%m} ")
     return f"{prefix}около {finish:%H:%M}"
+
+
+# Ключи extra, которые помощник переносит в мета своей реплики: из них строится
+# продолжение разговора («а за прошлую неделю?», «а по штукам?», «а клиенты?»).
+_REMEMBER_META = ("topic", "period", "subject", "rank_by", "category")
+
+# Что именно человек имеет в виду в короткой реплике-продолжении. Порядок
+# важен: «топ клиентов» — про клиентов, а не про топ; «кто больше покупал» —
+# до слова «топ».
+_TOPIC_CUSTOMER_RE = re.compile(r"(клиент|кто\s+(больше|много|чаще|покуп))")
+_TOPIC_TOP_RE = re.compile(r"(топ|товар|продукт|что\s+(берут|популярн|забирают|продав))")
+_TOPIC_MONEY_RE = re.compile(r"(доход|выручк|прибыл|расход|заработ|финанс|маржа|продал|продаж)")
+_TOPIC_PRINT_RE = re.compile(r"(напечатал|задани|печати|печат)")
+_TOPIC_SPEND_RE = re.compile(r"(потратил|затрат|ушло|ушли|налог|аренд|электричеств|филамент|пластик|катушк)")
+_RANK_QTY_RE = re.compile(r"по\s+(штукам|штуке|количеств)")
+_RANK_AMOUNT_RE = re.compile(r"по\s+(сумме|деньгам|выручк|рубл)")
+_COMPARE_RE = re.compile(r"(больше|меньше|чем)")
+# Период без темы: «а за прошлую неделю?» — после него человек ждёт уточнения.
+_PERIOD_FILLERS = re.compile(
+    r"\b(а|как|что|сколько|давай|дай|посмотри|покажи|смотри|какой|какая|какие|интересует|хочу|было|бы|есть|там|за)\b")
+
+
+def _topic_signal(low: str) -> str:
+    """Тема в короткой фразе: «customers», «top_products», «money», «print»,
+    «spend», «orders» или пусто, если тема только из контекста."""
+    if _TOPIC_CUSTOMER_RE.search(low):
+        return "customers"
+    if _TOPIC_TOP_RE.search(low):
+        return "top_products"
+    if _TOPIC_MONEY_RE.search(low):
+        return "money"
+    if _TOPIC_PRINT_RE.search(low):
+        return "print"
+    if _TOPIC_SPEND_RE.search(low):
+        return "spend"
+    if re.search(r"заказ\w*", low):
+        return "orders"
+    return ""
+
+
+def _is_pure_period(text: str) -> bool:
+    """«а за прошлую неделю?», «сколько за вчера» — период и только период."""
+    period = periods.parse(text)
+    if not period.explicit or not period.matched:
+        return False
+    low = _norm(text)
+    if len(low) > 48:
+        return False
+    rest = low.replace(_norm(period.matched), " ", 1)
+    rest = _PERIOD_FILLERS.sub(" ", rest)
+    return not re.search(r"[а-яa-z0-9]", rest)
+
+
+def _short_phrase(period: periods.Period) -> str:
+    """Фраза окна без дат в скобках — для подсказок: «за неделю», а не
+    «за неделю (20.09–26.09)». Даты нужны в ответе, в чипе-вопросе — лишние."""
+    return re.sub(r"\s*[\(（][^)\]）]*[\)）]\s*$", "", period.phrase)
+
+
+def _prev_period_question(period: periods.Period) -> str:
+    """Следующий за окном вопрос тем же шагом: «А на прошлой неделе?».
+
+    Каждая фраза понятна тому же парсеру периодов: клик по подсказке —
+    не новый вопрос для человека и не пустота для мозга.
+    """
+    by_kind = {"today": "А вчера?", "yesterday": "А позавчера?", "day_before": "А вчера?",
+               "week": "А на прошлой неделе?", "last_week": "А за 7 дней до этого?",
+               "weekend": "А на прошлых выходных?", "last_weekend": "А за 2 дня до этого?",
+               "month": "А в прошлом месяце?", "year": "А в прошлом году?"}
+    if period.kind in by_kind:
+        return by_kind[period.kind]
+    if period.days == 7:  # «за неделю» парсер отдаёт спаном, а не календарной неделей
+        return "А на прошлой неделе?"
+    return f"А за {period.days} {plural(period.days, 'день', 'дня', 'дней')} до этого?"
+
+
+def _money_suggestions(period: periods.Period) -> list[str]:
+    phrase = _short_phrase(period)
+    return [_prev_period_question(period), f"Топ товаров {phrase}?", f"Кто больше всего покупал {phrase}?"]
+
+
+def _top_suggestions(subject: str, period: periods.Period, rank_by: str) -> list[str]:
+    phrase = _short_phrase(period)
+    if subject == "customers":
+        return [f"Топ товаров {phrase}?", f"Какой доход {phrase}?"]
+    alt = "по штукам" if rank_by == "amount" else "по сумме"
+    return [f"А {alt}?", f"А кто больше всего покупал {phrase}?", f"Какой доход {phrase}?"]
+
+
+def _print_suggestions(period: periods.Period) -> list[str]:
+    return [_prev_period_question(period), f"Какой доход {_short_phrase(period)}?"]
+
+
+def _spend_suggestions(period: periods.Period) -> list[str]:
+    return [_prev_period_question(period), f"Какой доход {_short_phrase(period)}?"]
+
+
+# Словарь владельца → категория расходов (та же, что в учётных проводках).
+_SPEND_CATEGORIES: tuple[tuple[str, str, str], ...] = (
+    ("пластик|филамент|катушк|пластмасс", "filament", "пластик"),
+    ("электричеств|энерг|свет", "energy", "электричество"),
+    ("аренд", "rent", "аренду"),
+    ("налог", "tax", "налоги"),
+    ("комисс", "fee", "комиссии"),
+)
+_SPEND_CATEGORY_LABELS = {category: label for _pattern, category, label in _SPEND_CATEGORIES}
+_SPEND_VERB_RE = re.compile(r"(потратил|затрат|расход|ушло|ушли|ушла|на\s+что)")
+# «Сколько напечатали?», «сколько заданий/часов печати» — журнал заданий,
+# но не «сколько часов до конца» (прогресс станка) и не «сколько пластика
+# осталось» (катушки).
+_PRINT_QUESTION_RE = re.compile(
+    r"(напечатал\w*|сколько\s+печатали|сколько\s+(всего\s+)?(задани|часов\s+(печати|напечата)"
+    r"|грамм\s+(напечата|выпечата)))")
+_ORDERS_QUESTION_RE = re.compile(r"(сколько\s+(всего\s+)?заказов|заказов\s+(было|стало|нов))")
+
+
+def _spend_category(low: str) -> str:
+    """Категория расходов из фразы: «на пластик» → filament, «на аренду» → rent."""
+    for pattern, category, _label in _SPEND_CATEGORIES:
+        if re.search(pattern, low):
+            return category
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -332,9 +458,15 @@ def _answer(ctx: Context, text: str, reply: str, *, kind: str = "answer", source
     if save and ctx.db is not None and text:
         try:
             memory.add_turn(ctx.db, ctx.session, "user", text, {"source": ctx.source})
+            # Помним, о чём шла речь: «а за прошлую неделю?» после «Какой
+            # доход?» не начинается с нуля — слой `_followup` читает эти ключи
+            # из мета прошлой реплики.
+            remembered = {key: (extra or {}).get(key) for key in _REMEMBER_META
+                          if (extra or {}).get(key) not in (None, "", {}, [])}
             memory.add_turn(ctx.db, ctx.session, "assistant", reply, {
                 "kind": kind, "source": source, "entities": entities or {},
-                "action": (action or {}).get("id"), "params": params or {}, "awaiting": awaiting or {}})
+                "action": (action or {}).get("id"), "params": params or {},
+                "awaiting": awaiting or {}, **remembered})
         except Exception as exc:
             log().warning("Мозг помощника: разговор не записан (%s)", exc)
     return payload
@@ -941,24 +1073,88 @@ def _rank_customers(rep: dict[str, Any]) -> list[dict[str, Any]]:
     return items[:5]
 
 
-def _top_sales(ctx: Context, text: str) -> dict[str, Any] | None:
-    """«Топ товаров за неделю», «что берут», «топ клиентов» — по реестру продаж.
+def _period_clarify(ctx: Context, text: str, period: periods.Period) -> dict[str, Any]:
+    """Период назван, темы нет, контекста нет — уточняем, как человек.
 
-    До 18.24 слово «товар» относило фразу к теме «склад», и на «Топ товаров за
-    неделю?» помощник вываливал остатки стеллажа с ценниками — что лежит на
-    полке, а не что у неё купили. Ответ — реестр продаж `sales_details` с
-    границами из фразы: та же правда, что рисует раздел «Финансы» (документы,
-    заказы, полка), с периодом, который владелец попросил.
+    «А за прошлую неделю?» в первый же день работы — не ошибка: человек
+    назвал окно и ждёт, что его догонит тема. Вместо падения в модель
+    отвечаем предложением трёх главных срезов этого окна.
     """
-    subject = periods.top_subject(text)
-    if subject is None:
+    ctx.step("clarify", "Период без темы", period.phrase)
+    phrase = _short_phrase(period)
+    reply = (f"Понял: {period.phrase}. Что посчитать — доход, топ товаров или кто больше "
+             f"всего покупал? Скажите — посчитаю.")
+    return _answer(ctx, text, reply, kind="clarify", source="rules",
+                   link={"title": "Финансы", "href": "/#finance"},
+                   suggestions=[f"Какой доход {phrase}?", f"Топ товаров {phrase}?",
+                                f"Кто больше всего покупал {phrase}?"],
+                   extra={"period": period.as_dict()})
+
+
+def _followup(ctx: Context, text: str) -> dict[str, Any] | None:
+    """Продолжение разговора (18.25): «а за прошлую неделю?», «а по штукам?»,
+    «а клиенты?» — тема и окно наследуются из мета прошлой реплики помощника.
+
+    Человек не повторяет вопрос целиком: после «Какой доход за неделю?» он
+    спросит «а за прошлую?» и ждёт тот же ответ для другого окна. До 18.25
+    такая реплика падала в модель или в нерелевантный слой. Теперь короткие
+    фразы разбираются детерминированно: новый период — из фразы, тема — из
+    фразы или из контекста, а ответ строит тот же код, что и прямой вопрос.
+    """
+    low = _norm(text)
+    if len(low) > 60:
         return None
+    # Конкретный заказ по номеру или имени — не продолжение, а свой вопрос.
+    if re.search(r"заказ\w*\s+(№\s*\d|[а-яa-z]{3,})", low):
+        return None
+    period = periods.parse(text)
+    meta = ctx.last_meta()
+    prev = periods.Period.from_dict(meta.get("period") or None)
+    topic = meta.get("topic")
+    subject = meta.get("subject") or "products"
+    rank_by = meta.get("rank_by") or "amount"
+    category = meta.get("category") or ""
+    if topic not in ("money", "top", "print", "spend", "orders") or prev is None:
+        if _is_pure_period(text):
+            return _period_clarify(ctx, text, period)
+        return None
+    prev_key = {"money": "money", "print": "print", "spend": "spend", "orders": "orders",
+                "top": ("customers" if subject == "customers" else "top_products")}[topic]
+    signal = _topic_signal(low)
+    rank_new = "qty" if _RANK_QTY_RE.search(low) else ("amount" if _RANK_AMOUNT_RE.search(low) else "")
+    cat_new = _spend_category(low)
+    aspect = signal or prev_key
+    rank_changed = bool(rank_new) and rank_new != rank_by
+    cat_changed = bool(cat_new) and cat_new != category
+    if aspect == prev_key and not (period.explicit or cat_changed
+                                   or (rank_changed and aspect in ("customers", "top_products"))):
+        return None  # Ничего не поменялось — не повторяем один и тот же ответ
+    use_period = period if period.explicit else prev
+    if aspect == "money":
+        return _money_reply(ctx, text, use_period, compare=bool(_COMPARE_RE.search(low)))
+    if aspect in ("customers", "top_products"):
+        sub = "customers" if aspect == "customers" else "products"
+        rb = (rank_new or rank_by) if sub == "products" else "amount"
+        return _top_reply(ctx, text, sub, use_period, rb)
+    if aspect == "print":
+        return _print_reply(ctx, text, use_period)
+    if aspect == "spend":
+        cat = _spend_category(low) or category
+        if not cat:
+            return None
+        return _spend_reply(ctx, text, cat, use_period)
+    return _orders_count_reply(ctx, text, use_period)
+
+
+def _top_reply(ctx: Context, text: str, subject: str, period: periods.Period,
+               rank_by: str = "amount") -> dict[str, Any]:
+    """Топ продаж/клиентов за окно — общий ответ и для «Топ товаров за неделю?»,
+    и для продолжения «а по штукам?», «а клиенты?» (слой `_followup`)."""
     api = ctx.api
     acc = getattr(api, "acc", None)
     if acc is None or not hasattr(acc, "sales_details"):
         return None
-    period = periods.parse(text)
-    ctx.step("rule", "Топ продаж", f"{period.phrase}")
+    ctx.step("rule", "Топ продаж", f"{period.phrase} — {subject}")
     try:
         rep = acc.sales_details(limit=5000, start=period.start, end=period.until)
     except Exception as exc:
@@ -978,7 +1174,6 @@ def _top_sales(ctx: Context, text: str) -> dict[str, Any] | None:
             lines.append(f"{index}. {item['name']} — {_money(item['amount'])} ({qty_text})")
         reply = "\n".join(lines)
     else:
-        rank_by = periods.rank_by(text)
         items = _rank_products(rep, rank_by)
         if not items:
             return _answer(ctx, text,
@@ -987,7 +1182,7 @@ def _top_sales(ctx: Context, text: str) -> dict[str, Any] | None:
                            "покажет точные даты проводок.",
                            kind="clarify", source="facts",
                            link={"title": "Финансы", "href": "/#finance"},
-                           suggestions=["Какой доход за месяц?", "Что сейчас печатается?"])
+                           suggestions=[f"Какой доход {_short_phrase(period)}?", "Что сейчас печатается?"])
         total = float(rep.get("total_amount") or 0)
         total_qty = float(rep.get("total_qty") or 0)
         by_word = "по штукам" if rank_by == "qty" else "по сумме"
@@ -1003,7 +1198,144 @@ def _top_sales(ctx: Context, text: str) -> dict[str, Any] | None:
         reply = "\n".join(lines)
     return _answer(ctx, text, reply, source="facts",
                    entities={}, link={"title": "Финансы", "href": "/#finance"},
-                   extra={"period": period.as_dict()})
+                   suggestions=_top_suggestions(subject, period, rank_by),
+                   extra={"topic": "top", "subject": subject, "rank_by": rank_by,
+                          "period": period.as_dict()})
+
+
+def _top_sales(ctx: Context, text: str) -> dict[str, Any] | None:
+    """«Топ товаров за неделю», «что берут», «топ клиентов» — по реестру продаж.
+
+    До 18.24 слово «товар» относило фразу к теме «склад», и на «Топ товаров за
+    неделю?» помощник вываливал остатки стеллажа с ценниками — что лежит на
+    полке, а не что у неё купили. Ответ — реестр продаж `sales_details` с
+    границами из фразы: та же правда, что рисует раздел «Финансы» (документы,
+    заказы, полка), с периодом, который владелец попросил. Короткие
+    продолжения («а по штукам?», «а клиенты?») доходят сюда через `_followup`.
+    """
+    subject = periods.top_subject(text)
+    if subject is None:
+        return None
+    period = periods.parse(text)
+    rank_by = periods.rank_by(text) if subject == "products" else "amount"
+    return _top_reply(ctx, text, subject, period, rank_by)
+
+
+def _money_reply(ctx: Context, text: str, period: periods.Period, compare: bool = False) -> dict[str, Any]:
+    """Деньги за окно — общий ответ для «Какой доход за неделю?» и для
+    продолжения «а за прошлую неделю?» (слой `_followup`)."""
+    api = ctx.api
+    ctx.step("rule", "Деньги", f"учёт панели — {period.phrase}")
+    try:
+        if period.explicit:
+            summary = api.acc.summary(1, start=period.start, end=period.until)
+        else:
+            summary = api.acc.summary(30)
+    except Exception as exc:
+        return _answer(ctx, text, f"Финансы не прочитались: {exc.__class__.__name__}.", kind="error", source="facts")
+    reply = (f"{period.phrase.capitalize()}: доход {_money(summary.get('income'))}, "
+             f"расход {_money(summary.get('expense'))}, прибыль {_money(summary.get('profit'))}, "
+             f"маржа {summary.get('margin')}%.")
+    if compare:
+        # «больше, чем прошлая неделя?» — сравниваем с окном той же длины.
+        previous = period.previous()
+        try:
+            prev_summary = api.acc.summary(1, start=previous.start, end=previous.until)
+            prev_profit = float(prev_summary.get("profit") or 0)
+            profit = float(summary.get("profit") or 0)
+            diff = round(profit - prev_profit, 2)
+            # Сдвиг окна «сегодня» даёт вчерашнюю дату: называем её датой,
+            # а не «сегодня».
+            prev_phrase = previous.phrase if previous.kind not in ("today", "yesterday", "day_before") \
+                else f"{previous.first:%d.%m}"
+            ctx.step("rule", "Сравнение", prev_phrase)
+            if diff == 0:
+                tail = "столько же"
+            else:
+                tail = f"{'больше' if diff > 0 else 'меньше'} на {_money(abs(diff))}"
+            reply += f" {prev_phrase.capitalize()} прибыль была {_money(prev_profit)} — {tail}."
+        except Exception as exc:
+            log().warning("Мозг помощника: сравнение с прошлым периодом не считалось (%s)", exc)
+    return _answer(ctx, text, reply, source="facts", link={"title": "Финансы", "href": "/#finance"},
+                   suggestions=_money_suggestions(period),
+                   extra={"topic": "money", "period": period.as_dict()})
+
+
+def _print_reply(ctx: Context, text: str, period: periods.Period) -> dict[str, Any]:
+    """«Сколько напечатали за месяц?» — журнал завершённых заданий за окно."""
+    api = ctx.api
+    ctx.step("rule", "Печать", f"журнал заданий — {period.phrase}")
+    try:
+        if period.explicit:
+            summary = api.acc.summary(1, start=period.start, end=period.until)
+        else:
+            summary = api.acc.summary(30)
+    except Exception as exc:
+        return _answer(ctx, text, f"Журнал заданий не прочитался: {exc.__class__.__name__}.",
+                       kind="error", source="facts")
+    jobs = int(summary.get("jobs_done") or 0)
+    hours = float(summary.get("print_hours") or 0)
+    grams = float(summary.get("grams") or 0)
+    failed = int(summary.get("jobs_failed") or 0)
+    grams_text = f"{grams / 1000:.1f} кг" if grams >= 1000 else f"{int(round(grams))} г"
+    reply = (f"{period.phrase.capitalize()}: {jobs} {plural(jobs, 'задание', 'задания', 'заданий')} "
+             f"на {hours:.1f} ч печати, {grams_text} пластика")
+    if failed:
+        reply += f", {failed} {plural(failed, 'неудача', 'неудачи', 'неудач')}"
+    reply += "."
+    return _answer(ctx, text, reply, source="facts", link={"title": "Обзор", "href": "/#dashboard"},
+                   suggestions=_print_suggestions(period),
+                   extra={"topic": "print", "period": period.as_dict()})
+
+
+def _spend_reply(ctx: Context, text: str, category: str, period: periods.Period) -> dict[str, Any]:
+    """«Сколько потратили на пластик?» — расходы категории за окно."""
+    api = ctx.api
+    ctx.step("rule", "Расходы", f"категория «{category}» — {period.phrase}")
+    try:
+        rep = api.acc.category_spending(start=period.start, end=period.until, category=category)
+    except Exception as exc:
+        return _answer(ctx, text, f"Расходы не прочитались: {exc.__class__.__name__}.", kind="error", source="facts")
+    label = _SPEND_CATEGORY_LABELS.get(category, category)
+    if float(rep.get("total") or 0) <= 0:
+        reply = f"{period.phrase.capitalize()}: на {label} ничего не ушло."
+    else:
+        count = int(rep.get("count") or 0)
+        reply = (f"{period.phrase.capitalize()}: на {label} ушло {_money(rep.get('total'))} — "
+                 f"{count} {plural(count, 'покупка', 'покупки', 'покупок')}.")
+    return _answer(ctx, text, reply, source="facts", link={"title": "Финансы", "href": "/#finance"},
+                   suggestions=_spend_suggestions(period),
+                   extra={"topic": "spend", "category": category, "period": period.as_dict()})
+
+
+def _orders_count_reply(ctx: Context, text: str, period: periods.Period) -> dict[str, Any] | None:
+    """«Сколько заказов за месяц?» — доска заказов за окно, не весь архив."""
+    api = ctx.api
+    repo = getattr(api, "repo", None)
+    if repo is None or not hasattr(repo, "orders"):
+        return None
+    ctx.step("rule", "Заказы", f"доска заказов — {period.phrase}")
+    try:
+        rows = [row for row in repo.orders()
+                if period.start <= str(row.get("created_at") or "") < period.until]
+        if ctx.db is not None:
+            finals = {r["id"] for r in ctx.db.query("SELECT id FROM statuses WHERE is_final=1")}
+        else:
+            finals = {"done", "canceled", "cancelled"}
+    except Exception as exc:
+        return _answer(ctx, text, f"Заказы не прочитались: {exc.__class__.__name__}.", kind="error", source="facts")
+    total = len(rows)
+    if not total:
+        reply = f"{period.phrase.capitalize()} новых заказов не было."
+    else:
+        done = sum(1 for row in rows if str(row.get("status")) in finals)
+        working = total - done
+        reply = (f"{period.phrase.capitalize()}: {total} {plural(total, 'заказ', 'заказа', 'заказов')} — "
+                 f"{done} {plural(done, 'выдан', 'выданы', 'выдано')}, {working} {plural(working, 'в работе', 'в работе', 'в работе')}.")
+    return _answer(ctx, text, reply, source="facts", link={"title": "Заказы", "href": "/#orders"},
+                   suggestions=[f"Какой доход {_short_phrase(period)}?",
+                                f"Топ товаров {_short_phrase(period)}?"],
+                   extra={"topic": "orders", "period": period.as_dict()})
 
 
 def _reads(ctx: Context, text: str) -> dict[str, Any] | None:
@@ -1031,45 +1363,26 @@ def _reads(ctx: Context, text: str) -> dict[str, Any] | None:
             lines.append(f"• {row.get('customer') or 'клиент'} — {_money(row.get('debt'))}, заказ №{row.get('number') or '—'}"
                          + age + (" — просрочен" if row.get("overdue") else ""))
         return _answer(ctx, text, "\n".join(lines), source="facts", link={"title": "Финансы", "href": "/#finance"})
+    # «Сколько напечатали за месяц?» — журнал заданий за окно, а не деньги.
+    if _PRINT_QUESTION_RE.search(low) and "план" not in low and "осталось" not in low:
+        return _print_reply(ctx, text, periods.parse(text))
+    # «Сколько заказов за месяц?» — доска заказов за окно, не весь архив.
+    if _ORDERS_QUESTION_RE.search(low) and "очеред" not in low:
+        found = _orders_count_reply(ctx, text, periods.parse(text))
+        if found is not None:
+            return found
+    # «Сколько потратили на пластик?» — расходы категории, не вся сводка.
+    if _SPEND_VERB_RE.search(low) and _spend_category(low):
+        return _spend_reply(ctx, text, _spend_category(low), periods.parse(text))
     if (re.search(r"(выручк|прибыл|доход|сколько (мы )?заработал|финанс|маржа|продаж|продал|потратил|затрат)", low)
-            and not any(word in low for word in ("пластик", "филамент", "катуш"))):
+            and not any(word in low for word in ("пластик", "филамент", "катуш", "электричеств", "энерг",
+                                                 "аренд", "налог", "комисс"))):
         # Период — из фразы: «с 21.09 по 25.09», «за неделю», «за сентябрь».
         # Без него — 30 дней, как раньше; ответ в любом случае называет даты,
         # чтобы месяц нельзя было принять за неделю.
-        period = periods.parse(text)
-        ctx.step("rule", "Деньги", f"учёт панели — {period.phrase}")
-        try:
-            if period.explicit:
-                summary = api.acc.summary(1, start=period.start, end=period.until)
-            else:
-                summary = api.acc.summary(30)
-        except Exception as exc:
-            return _answer(ctx, text, f"Финансы не прочитались: {exc.__class__.__name__}.", kind="error", source="facts")
-        profit = float(summary.get("profit") or 0)
-        reply = (f"{period.phrase.capitalize()}: доход {_money(summary.get('income'))}, "
-                 f"расход {_money(summary.get('expense'))}, прибыль {_money(summary.get('profit'))}, "
-                 f"маржа {summary.get('margin')}%.")
-        if re.search(r"(больше|меньше|чем|по сравнен|как прошл|чем прошл|чем в прошл)", low):
-            # «больше, чем прошлая неделя?» — сравниваем с окном той же длины.
-            previous = period.previous()
-            try:
-                prev_summary = api.acc.summary(1, start=previous.start, end=previous.until)
-                prev_profit = float(prev_summary.get("profit") or 0)
-                diff = round(profit - prev_profit, 2)
-                # Сдвиг окна «сегодня» даёт вчерашнюю дату: называем её датой,
-                # а не «сегодня».
-                prev_phrase = previous.phrase if previous.kind not in ("today", "yesterday", "day_before") \
-                    else f"{previous.first:%d.%m}"
-                ctx.step("rule", "Сравнение", prev_phrase)
-                if diff == 0:
-                    tail = "столько же"
-                else:
-                    tail = f"{'больше' if diff > 0 else 'меньше'} на {_money(abs(diff))}"
-                reply += f" {prev_phrase.capitalize()} прибыль была {_money(prev_profit)} — {tail}."
-            except Exception as exc:
-                log().warning("Мозг помощника: сравнение с прошлым периодом не считалось (%s)", exc)
-        return _answer(ctx, text, reply, source="facts", link={"title": "Финансы", "href": "/#finance"},
-                       extra={"period": period.as_dict()})
+        return _money_reply(ctx, text, periods.parse(text),
+                            compare=bool(re.search(
+                                r"(больше|меньше|чем|по сравнен|как прошл|чем прошл|чем в прошл)", low)))
     if re.search(r"(план\s+на\s+(сегодня|день)|что\s+печатать\s+дальше|что\s+дальше\s+печатать|следующее\s+задание)", low):
         ctx.step("rule", "План", "мастер-план производства")
         try:
@@ -1276,8 +1589,8 @@ def chat(api: Any, text: str, session: str = "main", source: str = "panel", dele
         found = layer(ctx, clean)
         if found:
             return found
-    for layer in (_printer_command, _printer_status, _farm_overview, _order_intents, _customer, _navigate,
-                  _top_sales, _reads, _knowledge_fast):
+    for layer in (_followup, _printer_command, _printer_status, _farm_overview, _order_intents, _customer,
+                  _navigate, _top_sales, _reads, _knowledge_fast):
         try:
             found = layer(ctx, clean)
         except Exception as exc:  # один сломанный сервис не роняет разговор

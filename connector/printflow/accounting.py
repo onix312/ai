@@ -1691,6 +1691,31 @@ class Accounting:
                 " FROM spools WHERE archived=0") or {}).get("v")), 2),
         }
 
+    def category_spending(self, start: str = "", end: str = "", category: str = "") -> dict[str, Any]:
+        """Расходы одной категории за окно («сколько ушло на пластик»).
+
+        Те же правила цифр, что в `summary`: ISO-границы, конец исключён,
+        категория — из справочника расходов. `category` пустой — вся сумма
+        расходов за окно, не только по категории.
+        """
+        if not start:
+            start = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
+        sql = "SELECT at, amount, title, note FROM transactions WHERE kind='expense'"
+        params: list[Any] = []
+        if category:
+            sql += " AND category=?"
+            params.append(category)
+        sql += " AND at>=?"
+        params.append(start)
+        if end:
+            sql += " AND at<?"
+            params.append(end)
+        sql += " ORDER BY datetime(at) DESC"
+        rows = self.db.query(sql, params)
+        total = round(sum(num(r["amount"]) for r in rows), 2)
+        return {"category": category, "start": start, "end": end, "total": total,
+                "count": len(rows), "rows": rows[:20]}
+
     def daily_series(self, days: int = 30) -> list[dict]:
         """Ряды для графиков: деньги и часы печати по дням."""
         today = date.today()

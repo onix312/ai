@@ -84,7 +84,7 @@ _RE_SPAN = re.compile(r"за\s+(?:один\s+|одну\s+|две\s+|два\s+|т
                       r"(?P<n>\d{1,2})?\s*(?P<u>недел\w*|месяц\w*|квартал\w*|год[а]?|"
                       r"полгод[а]?|сутки|день)")
 _SPAN_WORD_MULT = {"один": 1, "одну": 1, "две": 2, "два": 2, "три": 3, "четыре": 4}
-_RE_THIS_WEEK = re.compile(r"(?:на|за|в)\s+(эт[уо]й|текущ\w+|нынешн\w+)\s+недел\w*")
+_RE_THIS_WEEK = re.compile(r"(?:на|за|в)\s+(эт[уо]й|эту|текущ\w+|нынешн\w+)\s+недел\w*")
 _RE_LAST_WEEK = re.compile(r"(?:на|за|в)\s+(прошл\w+|предыдущ\w+|минувш\w+)\s+недел\w*")
 _RE_THIS_MONTH = re.compile(r"(?:в|за|на)\s+(этом|текущем|нынешнем)\s+месяц\w*"
                             r"|с\s+начала\s+месяца")
@@ -136,6 +136,25 @@ class Period:
         return {"start": self.start, "until": self.until, "first": self.first.isoformat(),
                 "last": self.last.isoformat(), "days": self.days, "label": self.label,
                 "phrase": self.phrase, "kind": self.kind, "explicit": self.explicit}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "Period | None":
+        """Окно из мета реплики: продолжение «а за прошлую неделю?».
+
+        Мета хранит результат `as_dict`. Не хватает границ или дней — честно
+        `None`: дальше мозг не продолжает тему, а отвечает как на новый вопрос.
+        """
+        if not data:
+            return None
+        try:
+            return cls(start=str(data["start"]), until=str(data["until"]),
+                       label=str(data.get("label") or ""), phrase=str(data.get("phrase") or ""),
+                       days=int(data.get("days") or 0), kind=str(data.get("kind") or "range"),
+                       explicit=bool(data.get("explicit")), matched="",
+                       first=datetime.date.fromisoformat(str(data["first"])),
+                       last=datetime.date.fromisoformat(str(data["last"])))
+        except (KeyError, TypeError, ValueError):
+            return None
 
 
 def _norm(text: str) -> str:
