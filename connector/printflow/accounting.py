@@ -1607,15 +1607,30 @@ class Accounting:
         return {"items": items, "count": len(items),
                 "changed": sum(1 for item in items if item["changed"])}
 
-    def summary(self, days: int = 30) -> dict[str, Any]:
-        since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    def summary(self, days: int = 30, start: str = "", end: str = "") -> dict[str, Any]:
+        """Сводка цеха: за N дней до сегодня или за точное окно `start`/`end`.
+
+        Точные границы (ISO, конец исключён) — для вопросов с названным
+        периодом «доход с 21.09 по 25.09»: окно берётся из фразы, а не
+        подгоняется под календарь. Правила цифр прежние.
+        """
+        if start and end:
+            since, until = str(start), str(end)
+        else:
+            since = (datetime.now() - timedelta(days=max(1, int(days or 30)))).isoformat(timespec="seconds")
+            until = ""
+        tx_win = " AND at<?" if until else ""
+        tx_args = (since, until) if until else (since,)
+        job_win = " AND finished_at<?" if until else ""
+        job_args = (since, until) if until else (since,)
         income_rows = self.db.query(
-            "SELECT amount, fee FROM transactions WHERE kind='income' AND at>=?", (since,))
+            f"SELECT amount, fee FROM transactions WHERE kind='income' AND at>=?{tx_win}",
+            tx_args)
         income = sum(num(r["amount"]) for r in income_rows)
         fees = sum(num(r["fee"]) for r in income_rows)
         expense_rows = self.db.query(
-            "SELECT amount, category FROM transactions WHERE kind='expense' AND at>=?",
-            (since,))
+            f"SELECT amount, category FROM transactions WHERE kind='expense' AND at>=?{tx_win}",
+            tx_args)
         # P&L считает прибыль без «вывода себе» и с отдельной строкой налогов;
         # сводка цеха должна давать ту же цифру, иначе два отчёта расходятся.
         expense = sum(num(r["amount"]) for r in expense_rows
@@ -1627,10 +1642,10 @@ class Accounting:
         jobs = self.db.one(
             "SELECT COUNT(*) n, COALESCE(SUM(duration_min),0) m, COALESCE(SUM(grams),0) g,"
             " COALESCE(SUM(cost),0) c, COALESCE(SUM(energy_kwh),0) e"
-            " FROM print_jobs WHERE state='done' AND finished_at>=?", (since,)) or {}
+            f" FROM print_jobs WHERE state='done' AND finished_at>=?{job_win}", job_args) or {}
         failed = num((self.db.one(
-            "SELECT COUNT(*) n FROM print_jobs WHERE state='failed' AND finished_at>=?",
-            (since,)) or {}).get("n"))
+            f"SELECT COUNT(*) n FROM print_jobs WHERE state='failed' AND finished_at>=?{job_win}",
+            job_args) or {}).get("n"))
         orders = self.db.query("SELECT * FROM orders")
         finals = {r["id"] for r in self.db.query("SELECT id FROM statuses WHERE is_final=1")}
         active = [o for o in orders if o["status"] not in finals]
@@ -1640,8 +1655,18 @@ class Accounting:
         total_minutes = num(jobs.get("m"))
         done_jobs = int(num(jobs.get("n")))
         profit = income - fees - expense - taxes
+        if until:  # окно из фразы: «дней» — его календарная длина
+            try:
+                window_days = max(1, (datetime.fromisoformat(until[:10])
+                                      - datetime.fromisoformat(since[:10])).days)
+            except ValueError:
+                window_days = max(1, int(days or 30))
+        else:
+            window_days = max(1, int(days or 30))
         return {
-            "period_days": days,
+            "period_days": window_days,
+            "period_start": since[:10],
+            "period_end": (until[:10] or datetime.now().strftime("%Y-%m-%d")),
             "income": round(income, 2),
             "fees": round(fees, 2),
             "expense": round(expense, 2),
@@ -1658,7 +1683,7 @@ class Accounting:
             "failure_rate": round(failed / (done_jobs + failed) * 100, 1) if (done_jobs + failed) else 0.0,
             "active_orders": len(active),
             "pipeline": round(pipeline, 2),
-            "defects_cost": self.defects_cost(days)["cost"],
+            "defects_cost": self.defects_cost(window_days)["cost"],
             "stock_grams": round(num((self.db.one(
                 "SELECT COALESCE(SUM(remaining_grams),0) v FROM spools WHERE archived=0") or {}).get("v")), 1),
             "stock_value": round(num((self.db.one(
@@ -2361,7 +2386,7 @@ class Accounting:
         return "\r\n".join(lines)
 
     def sales_details(self, period: str = "month", offset: int = 0,
-                      limit: int = 500) -> dict[str, Any]:
+                      limit: int = 500, start: str = "", end: str = "") -> dict[str, Any]:
         """Построчный реестр проданных товаров за период.
 
         Владелец просил «буквально посмотреть каждый товар, который продался,
@@ -2373,8 +2398,15 @@ class Accounting:
 
         Это рабочий реестр фактов, а не сведённый P&L: один и тот же товар
         показывается столько раз, сколько реально ушёл, с документом-источником.
+
+        `start`/`end` — точные границы окна (ISO, конец исключён): вопрос
+        «топ товаров с 21.09 по 25.09» не умещается в month/offset и ждёт
+        свои границы. Без них работает прежняя логика `period_bounds`.
         """
-        start, end, label = self.period_bounds(period, offset)
+        if start and end:
+            label = f"{start[:10]} — {end[:10]}"
+        else:
+            start, end, label = self.period_bounds(period, offset)
         channels = {c["id"]: c.get("name") or c["id"]
                     for c in self.db.query("SELECT id,name FROM channels")}
         final_ids = [r["id"] for r in self.db.query(

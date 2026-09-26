@@ -26,7 +26,7 @@ import re
 from datetime import date
 from typing import Any
 
-from . import assistant
+from . import assistant, periods
 from .db import Database
 from .logging_setup import log
 from .search import Search
@@ -140,12 +140,19 @@ def retrieve(api: Any, question: str) -> dict[str, Any]:
 
     # --- деньги
     if "money" in topics:
-        summary, why = _safe("финансы", lambda: api.acc.summary(30))
+        period = periods.parse(question)
+        if period.explicit:
+            summary, why = _safe("финансы", lambda: api.acc.summary(
+                1, start=period.start, end=period.until))
+            period_title = f"Финансы {period.phrase}"
+        else:
+            summary, why = _safe("финансы", lambda: api.acc.summary(30))
+            period_title = "Финансы за 30 дней"
         if why:
             problems.append(why)
         elif summary:
             facts.append(_fact(
-                "деньги", "Финансы за 30 дней",
+                "деньги", period_title,
                 f"доход {summary.get('income')} ₽, расход {summary.get('expense')} ₽, "
                 f"прибыль {summary.get('profit')} ₽, маржа {summary.get('margin')}%, "
                 f"часов печати {summary.get('print_hours')}",
