@@ -264,3 +264,134 @@ class OrdersCountTests(ShopTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoneyByDayTests(ShopTestCase):
+    """«Доход по дням за неделю?» — каждый день окна, итог той же сводкой."""
+
+    def test_by_day_for_week(self):
+        reply = self.say("Доход по дням за неделю?")["reply"]
+        self.assertIn("по дням", reply)
+        # Спан 7: движение только сегодня (2 000 − 500) и вчера (1 500).
+        self.assertIn(f"{self.dm(0)}: +2 000 ₽ −500 ₽", reply)
+        self.assertIn(f"{self.dm(1)}: +1 500 ₽", reply)
+        # Итог — те же цифры, что в обычном ответе про деньги за окно.
+        self.assertIn("Итого: доход 3 500 ₽", reply)
+
+    def test_by_day_followup_from_money(self):
+        self.say("Какой доход за неделю?")
+        reply = self.say("а по дням?")["reply"]
+        self.assertIn("по дням", reply)
+        self.assertIn(f"{self.dm(0)}: +2 000 ₽ −500 ₽", reply)
+        self.assertIn("Итого: доход 3 500 ₽", reply)
+
+    def test_by_day_empty_window_is_honest(self):
+        reply = self.say("Доход по дням за 2020 год?")["reply"]
+        self.assertIn("движения по деньгам не было", reply)
+
+
+class ChannelTests(ShopTestCase):
+    """«Сколько продали через Авито?» — канал из реестра продаж."""
+
+    def test_channel_from_ledger(self):
+        # Все продажи фикстуры — со стеллажа: 100% за 30 дней.
+        reply = self.say("Сколько продали через стеллаж за 30 дней?")["reply"]
+        self.assertIn("через «Стеллаж»", reply)
+        self.assertIn("6 500 ₽", reply)
+        self.assertIn("100% от всех продаж", reply)
+
+    def test_channel_followup_from_top(self):
+        self.say("Топ товаров за неделю?")
+        reply = self.say("а через стеллаж?")["reply"]
+        self.assertIn("через «Стеллаж»", reply)
+        self.assertIn("3 500 ₽", reply)
+
+    def test_channel_zero_is_honest(self):
+        # Канал «Авито» в справочнике есть, продаж через него — нет: ноль честный.
+        reply = self.say("Сколько с авито за 30 дней?")["reply"]
+        self.assertIn("через «Авито» продаж не было", reply)
+
+
+class TopOrdersTests(ShopTestCase):
+    """«Самый большой заказ за месяц?» — крупные заказы доски за окно."""
+
+    def setUp(self):
+        super().setUp()
+        self.db.execute(
+            "INSERT INTO orders(id, number, product, customer_name, status, price,"
+            " created_at) VALUES(?,?,?,?,?,?,?)",
+            ("ord-to-91", "91", "Чехол", "Иван", "new", 2000, self._at(0)))
+        self.db.execute(
+            "INSERT INTO orders(id, number, product, customer_name, status, price,"
+            " created_at) VALUES(?,?,?,?,?,?,?)",
+            ("ord-to-92", "92", "Брелок", "Пётр", "printing", 800, self._at(1)))
+        self.db.execute(
+            "INSERT INTO orders(id, number, product, customer_name, status, price,"
+            " created_at, closed_at) VALUES(?,?,?,?,?,?,?,?)",
+            ("ord-to-93", "93", "Набор органайзеров", "Мария", "done", 5000,
+             self._at(3), self._at(3)))
+
+    def test_top_orders_for_period(self):
+        reply = self.say("Какой самый большой заказ за месяц?")["reply"]
+        self.assertIn("№93", reply)
+        self.assertIn("5 000 ₽", reply)
+        self.assertIn("Мария", reply)
+        # Крупный — впереди: №93 раньше №91.
+        self.assertLess(reply.index("№93"), reply.index("№91"))
+
+    def test_top_orders_followup_from_count(self):
+        self.say("Сколько заказов за месяц?")
+        reply = self.say("а самый большой заказ?")["reply"]
+        self.assertIn("№93", reply)
+        self.assertIn("5 000 ₽", reply)
+
+    def test_top_orders_empty_window_is_honest(self):
+        reply = self.say("Самые крупные заказы за 2020 год?")["reply"]
+        self.assertIn("заказов с ценой не было", reply)
+
+
+class DynamicsTests(ShopTestCase):
+    """«Как динамика?», «продажи растут?» — сравнение с окном той же длины."""
+
+    def test_dynamics_triggers_comparison(self):
+        reply = self.say("Как динамика за неделю?")["reply"]
+        self.assertIn("За неделю", reply)
+        # Неделя: 3 500 − 500 = 3 000. Прошлый календарный: 3 000 − 100 = 2 900.
+        self.assertIn("прибыль была 2 900 ₽", reply)
+        self.assertIn("больше на 100 ₽", reply)
+
+    def test_expenses_are_money_too(self):
+        # «Сколько расходов за месяц?» — тот же детерминированный ответ денег.
+        reply = self.say("Сколько расходов за 30 дней?")["reply"]
+        self.assertIn("расход 600 ₽", reply)
+
+    def test_went_words_answer_money(self):
+        reply = self.say("Сколько ушло за неделю?")["reply"]
+        self.assertIn("расход 500 ₽", reply)
+
+
+class CorrectionTests(ShopTestCase):
+    """«нет, …», «не …, а …» — человек поправляет окно или тему."""
+
+    def test_no_comma_correction(self):
+        self.say("Какой доход за неделю?")
+        reply = self.say("нет, за 2 недели")["reply"]
+        self.assertIn("доход 6 500 ₽", reply)
+
+    def test_ne_correction(self):
+        self.say("Какой доход за неделю?")
+        reply = self.say("не за неделю, а за 2 недели")["reply"]
+        self.assertIn("доход 6 500 ₽", reply)
+
+    def test_correction_to_topic(self):
+        self.say("Какой доход за неделю?")
+        reply = self.say("нет, топ клиентов")["reply"]
+        # Продаж с именем клиента в фикстуре нет — честное пустое окно.
+        self.assertIn("нет строк с именем клиента", reply)
+
+    def test_plain_refusal_is_not_correction(self):
+        # «нет спасибо» — не поправка окна: не повторяем старый ответ.
+        self.say("Какой доход за неделю?")
+        answer = self.say("нет спасибо")
+        self.assertNotIn("доход 3 500 ₽", answer["reply"])
+        self.assertFalse(answer.get("understood", True))

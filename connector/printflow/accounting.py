@@ -1716,6 +1716,40 @@ class Accounting:
         return {"category": category, "start": start, "end": end, "total": total,
                 "count": len(rows), "rows": rows[:20]}
 
+    def daily_breakdown(self, start: str, end: str) -> list[dict[str, Any]]:
+        """Деньги по дням за окно: доход/расход/прибыль каждого дня.
+
+        Окно ISO, конец исключён — как в `summary`. Нулевые дни остаются в
+        списке («по дням» — это каждый день окна, а не только где было).
+        Расход — те же правила, что в `summary`: «вывод себе», налоги и
+        страховка не считаются расходом цеха.
+        """
+        if not start or not end:
+            return []
+        income: dict[str, float] = {}
+        expense: dict[str, float] = {}
+        for row in self.db.query(
+                "SELECT date(at) d, amount FROM transactions"
+                " WHERE kind='income' AND at>=? AND at<?", (start, end)):
+            income[row["d"]] = income.get(row["d"], 0.0) + num(row["amount"])
+        for row in self.db.query(
+                "SELECT date(at) d, amount, category FROM transactions"
+                " WHERE kind='expense' AND at>=? AND at<?", (start, end)):
+            if row["category"] in ("tax", "insurance", "withdrawal"):
+                continue
+            expense[row["d"]] = expense.get(row["d"], 0.0) + num(row["amount"])
+        out: list[dict[str, Any]] = []
+        day = date.fromisoformat(start[:10])
+        last = date.fromisoformat(end[:10]) - timedelta(days=1)
+        while day <= last:
+            key = day.isoformat()
+            inc = round(income.get(key, 0.0), 2)
+            exp = round(expense.get(key, 0.0), 2)
+            out.append({"date": key, "income": inc, "expense": exp,
+                        "profit": round(inc - exp, 2)})
+            day += timedelta(days=1)
+        return out
+
     def daily_series(self, days: int = 30) -> list[dict]:
         """Ряды для графиков: деньги и часы печати по дням."""
         today = date.today()
