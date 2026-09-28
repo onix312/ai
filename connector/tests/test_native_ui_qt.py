@@ -6,7 +6,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from agent.native_ui.control_center import ControlCenter, TasksPage
 from agent.native_ui.orb import VoiceOrb
@@ -41,7 +41,7 @@ class NativeQtSmokeTests(unittest.TestCase):
         self.assertIn("агент", center.footer.text())
         self.assertIsInstance(center.pages["tasks"], TasksPage)
         task_page = center.pages["tasks"]
-        labels = [w.text() for w in task_page.findChildren(__import__("PySide6").QtWidgets.QLabel)]
+        labels = [w.text() for w in task_page.findChildren(QLabel)]
         self.assertTrue(any("Подготовить рабочее место" in text for text in labels))
 
         center.deleteLater()
