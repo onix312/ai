@@ -168,6 +168,42 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8799/autonomy", {"op": "reset"}),
         ], calls)
 
+    def test_proactivity_api_uses_agent_port(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True, "settings": {"mode": "balanced"}, "recent": []})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.proactivity()
+            client.proactivity_update({
+                "mode": "active",
+                "max_nonurgent_per_hour": 3,
+                "cooldown_minutes": 15,
+                "quiet_start": "23:00",
+                "quiet_end": "07:00",
+            })
+            client.events(12, "suppressed")
+            client.proactivity_reset()
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/proactivity", None),
+            ("POST", "http://127.0.0.1:8799/proactivity", {
+                "op": "update",
+                "settings": {
+                    "mode": "active",
+                    "max_nonurgent_per_hour": 3,
+                    "cooldown_minutes": 15,
+                    "quiet_start": "23:00",
+                    "quiet_end": "07:00",
+                },
+            }),
+            ("GET", "http://127.0.0.1:8799/events?limit=12&state=suppressed", None),
+            ("POST", "http://127.0.0.1:8799/proactivity", {"op": "reset"}),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
