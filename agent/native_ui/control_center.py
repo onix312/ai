@@ -122,6 +122,10 @@ class TasksPage(QWidget):
         preview.clicked.connect(self._preview_plan)
         planner_row.addWidget(preview)
         self.layout.addLayout(planner_row)
+        self.planner_message = QLabel("")
+        self.planner_message.setObjectName("muted")
+        self.planner_message.setWordWrap(True)
+        self.layout.addWidget(self.planner_message)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -135,6 +139,9 @@ class TasksPage(QWidget):
         goal = self.goal_input.text().strip()
         if goal:
             self.plan_preview.emit(goal)
+
+    def set_planner_message(self, text: str) -> None:
+        self.planner_message.setText(str(text or ""))
 
     def _clear(self) -> None:
         while self.host.count():
@@ -395,6 +402,11 @@ class ControlCenter(QMainWindow):
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+
+    def set_planner_message(self, text: str) -> None:
+        page = self.pages.get("tasks")
+        if isinstance(page, TasksPage):
+            page.set_planner_message(text)
 
     def set_page_payload(self, key: str, payload: Any) -> None:
         page = self.pages.get(key)
