@@ -73,6 +73,23 @@ class BackendClientTests(unittest.TestCase):
             ("POST", "http://127.0.0.1:8791/voice/disable"),
         ], calls)
 
+    def test_task_api_uses_agent_port(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True, "tasks": []})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.tasks(12)
+            client.task_op("pause", 7)
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/tasks?limit=12", None),
+            ("POST", "http://127.0.0.1:8799/tasks", {"op": "pause", "id": 7}),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):
