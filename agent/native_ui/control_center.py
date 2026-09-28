@@ -147,8 +147,9 @@ class TasksPage(QWidget):
             buttons = QHBoxLayout()
             task_id = int(task.get("id") or 0)
             if status in ("planned", "paused"):
+                op = "resume" if status == "paused" else "run"
                 run = QPushButton("Продолжить" if status == "paused" else "Запустить")
-                run.clicked.connect(lambda _=False, i=task_id: self.command.emit(i, "resume" if status == "paused" else "run"))
+                run.clicked.connect(lambda _=False, i=task_id, action=op: self.command.emit(i, action))
                 buttons.addWidget(run)
             if status in ("running", "waiting"):
                 pause = QPushButton("Пауза")
