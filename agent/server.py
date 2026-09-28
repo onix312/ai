@@ -442,6 +442,13 @@ class Agent:
         (служба, контейнер) всплывающее окно не открывается и отклоняет
         действие сразу — поэтому для окна агента его не зовём вовсе.
         """
+        # Raw UI actions are still actions: Observer must not bypass policy
+        # through the legacy /click /type /key /activate endpoints.
+        if kind != "skill":
+            allowed, why = self.autonomy.check("assistant", "core")
+            if not allowed:
+                return {"ok": False, "queued": False, "reason": why,
+                        "autonomy_blocked": True, "autonomy": self.autonomy.payload()}
         # Навык подтверждается так же, как клик, но управление окнами ему не
         # нужно: файлы и панель существуют и не в Windows.
         if kind != "skill" and not self.capabilities.get("windows"):
@@ -474,6 +481,11 @@ class Agent:
         if not action:
             return {"ok": False, "done": False,
                     "reason": "Действие не найдено или истекло — запросите заново"}
+        if confirmed and action["kind"] != "skill":
+            allowed, why = self.autonomy.check("assistant", "core")
+            if not allowed:
+                return {"ok": False, "done": False, "reason": why,
+                        "autonomy_blocked": True}
         if not confirmed:
             self.state.last_action = "отменено человеком"
             result = {"ok": True, "done": False, "reason": "Отменено человеком"}
