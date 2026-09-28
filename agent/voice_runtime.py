@@ -52,6 +52,7 @@ class VoiceRuntime:
     def __init__(self, recognizer: speech.Recognizer) -> None:
         self.recognizer = recognizer
         self.handler: Any = None
+        self.cancel_handler: Any = None
         self.persistent_enabled = False
         self.manual_until = 0.0
         self.conversation_until = 0.0
@@ -157,13 +158,20 @@ class VoiceRuntime:
     def stop_output(self) -> dict[str, Any]:
         from . import pc
         stopped = pc.stop_speaking()
-        if self.persistent_enabled or time.time() < self.manual_until:
+        generation_cancelled = False
+        if callable(self.cancel_handler):
+            try:
+                generation_cancelled = bool(self.cancel_handler())
+            except Exception:
+                generation_cancelled = False
+        if self.persistent_enabled or time.time() < self.manual_until or self.conversation_active:
             self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
             self.state = "listening"
         else:
             self.conversation_until = 0.0
             self.state = "idle"
-        return {"ok": True, "stopped": stopped, **self.status()}
+        return {"ok": True, "stopped": stopped,
+                "generation_cancelled": generation_cancelled, **self.status()}
 
     def _prepare(self) -> tuple[bool, str]:
         from . import capabilities
@@ -357,6 +365,16 @@ class VoiceRuntime:
             return
 
         if self._handler_busy:
+            if is_stop_phrase(clean):
+                cancelled = False
+                if callable(self.cancel_handler):
+                    try:
+                        cancelled = bool(self.cancel_handler())
+                    except Exception:
+                        cancelled = False
+                if cancelled:
+                    self.conversation_until = time.time() + config.VOICE_FOLLOWUP_SECONDS
+                    self.state = "listening"
             return
 
         wake = speech.is_wake_phrase(clean)
