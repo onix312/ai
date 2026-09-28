@@ -142,23 +142,6 @@ class TasksPage(QWidget):
         if goal:
             self.plan_preview.emit(goal)
 
-    def set_providers_payload(self, payload: dict[str, Any]) -> None:
-        rows = list(payload.get("providers") or [])
-        if not rows:
-            self.providers_view.setPlainText("Providers пока не зарегистрированы.")
-            return
-        lines = []
-        for row in rows:
-            mark = "✓" if row.get("available") else "–"
-            title = str(row.get("title") or row.get("name") or "provider")
-            skills = [str(item.get("name") or "") for item in (row.get("skills") or [])]
-            detail = ", ".join(skills) if skills else "skills не перенесены"
-            line = f"{mark} {title}: {detail}"
-            if not row.get("available") and row.get("reason"):
-                line += f"\n  {row.get('reason')}"
-            lines.append(line)
-        self.providers_view.setPlainText("\n\n".join(lines))
-
     def set_planner_message(self, text: str) -> None:
         self.planner_message.setText(str(text or ""))
 
@@ -498,6 +481,23 @@ class ControlCenter(QMainWindow):
             self.footer.setText("Агент недоступен" + (f": {error}" if error else ""))
             self.settings_status.setText("Backend: недоступен" + (f" · {error}" if error else ""))
         self.mic_button.setText("🎤 Выключить wake word" if armed else "🎤 Включить wake word")
+
+    def set_providers_payload(self, payload: dict[str, Any]) -> None:
+        rows = list(payload.get("providers") or [])
+        if not rows:
+            self.providers_view.setPlainText("Providers пока не зарегистрированы.")
+            return
+        lines = []
+        for row in rows:
+            mark = "✓" if row.get("available") else "–"
+            title = str(row.get("title") or row.get("name") or "provider")
+            skill_names = [str(item.get("name") or "") for item in (row.get("skills") or [])]
+            detail = ", ".join(skill_names) if skill_names else "skills не перенесены"
+            line = f"{mark} {title}: {detail}"
+            if not row.get("available") and row.get("reason"):
+                line += f"\n  {row.get('reason')}"
+            lines.append(line)
+        self.providers_view.setPlainText("\n\n".join(lines))
 
     def set_planner_message(self, text: str) -> None:
         page = self.pages.get("tasks")
