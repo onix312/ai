@@ -1,0 +1,49 @@
+name: persona-engine
+
+on:
+  pull_request:
+    paths:
+      - "agent/persona.py"
+      - "agent/brain.py"
+      - "agent/server.py"
+      - "agent/native_ui/**"
+      - "connector/tests/test_persona.py"
+      - "connector/tests/test_native_ui.py"
+      - "connector/tests/test_native_ui_qt.py"
+      - "docs/PERSONA.md"
+      - ".github/workflows/persona-engine.yml"
+  push:
+    branches:
+      - "feature/nozza-persona-engine-v1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile Persona Engine
+        run: python -m compileall -q agent/persona.py agent/brain.py agent/server.py agent/native_ui
+      - name: Persona contracts
+        run: >-
+          python -m unittest
+          connector.tests.test_persona
+          connector.tests.test_native_ui
+          connector.tests.test_agent_brain.BrainChatTests
+          connector.tests.test_agent_os.PersonaApiTests
+
+  windows-ui:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PySide6
+        run: python -m pip install "PySide6>=6.7,<7"
+      - name: Persona UI smoke
+        run: python -m unittest connector.tests.test_native_ui_qt

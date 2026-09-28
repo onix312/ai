@@ -124,6 +124,28 @@ class BackendClientTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(["http://127.0.0.1:8799/providers"], urls)
 
+    def test_persona_api_uses_agent_port_and_whitelisted_profile_body(self):
+        client = BackendClient()
+        calls = []
+
+        def fake(req, timeout=0):
+            body = json.loads(req.data.decode("utf-8")) if req.data else None
+            calls.append((req.get_method(), req.full_url, body))
+            return _Response({"ok": True, "profile": {"address": "informal"}})
+
+        with mock.patch("urllib.request.urlopen", fake):
+            client.persona()
+            client.persona_update({"address": "informal", "verbosity": "normal"})
+            client.persona_reset()
+        self.assertEqual([
+            ("GET", "http://127.0.0.1:8799/persona", None),
+            ("POST", "http://127.0.0.1:8799/persona", {
+                "op": "update",
+                "profile": {"address": "informal", "verbosity": "normal"},
+            }),
+            ("POST", "http://127.0.0.1:8799/persona", {"op": "reset"}),
+        ], calls)
+
     def test_network_failure_is_friendly(self):
         client = BackendClient()
         with mock.patch("urllib.request.urlopen", side_effect=OSError("down")):

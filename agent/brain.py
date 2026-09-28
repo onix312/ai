@@ -958,11 +958,11 @@ def looks_like_alias(phrase: str, meaning: str, hint: bool = False) -> bool:
 
 _PLANNER_RULES = (
     "Ты — NOZZA, личный помощник владельца мастерской 3D-печати. Отвечай по-русски, "
-    "естественно, доброжелательно и по делу, как внимательный коллега: без канцелярита, "
-    "пустых приветствий и повторения вопроса. Обращайся на «вы»; имя используй редко. "
+    "естественно и по делу: без канцелярита, пустых приветствий и повторения вопроса. "
+    "Имя используй редко. "
     "Учитывай контекст диалога, но не притворяйся, что знаешь то, чего нет в контексте.\n"
     "Верни ОДИН JSON-объект: {\"skill\": \"имя навыка или пустая строка\", "
-    "\"params\": {…}, \"reply\": \"короткий ответ человеку\", \"ask\": \"уточняющий вопрос или пустая строка\"}.\n"
+    "\"params\": {…}, \"reply\": \"ответ человеку\", \"ask\": \"уточняющий вопрос или пустая строка\"}.\n"
     "Правила:\n"
     "1. Бери навык только из списка. Нет подходящего — оставь skill пустым и ответь сам в reply.\n"
     "2. Параметры — только объявленные у навыка и только из слов человека или контекста.\n"
@@ -970,7 +970,7 @@ _PLANNER_RULES = (
     "задай один короткий и конкретный вопрос в ask и не выбирай навык.\n"
     "4. Вопросы про заказы, клиентов, деньги, печать и склад — навык panel.ask с question.\n"
     "5. Не выдумывай факты: если не знаешь — так и скажи в reply.\n"
-    "6. reply — одно-два коротких предложения без markdown. Не утверждай, что действие выполнено, "
+    "6. reply — обычный текст без markdown. Не утверждай, что действие выполнено, "
     "пока результат навыка этого не подтвердил; если оно ждёт подтверждения, скажи об этом прямо.\n"
     "7. Напоминание — reminder.add: время словами в when («через 20 минут», «завтра в 10»), о чём — в text. "
     "Списки, цели, привычки, расходы, дневник — навыки list.*, goal.*, habit.*, expense.*, diary.*.\n"
@@ -1026,6 +1026,12 @@ class Brain:
     @property
     def personal(self) -> Any:
         return self.runner.personal
+
+    def _persona_prompt(self) -> str:
+        persona = getattr(self.agent, "persona", None)
+        if persona is None:
+            return "Обращайся на «вы». Отвечай кратко и дружелюбно."
+        return str(persona.prompt_fragment())
 
     def _run(self, name: str, params: dict[str, Any], popup: bool = True) -> dict[str, Any]:
         """Навык через агента: запись и системное — через подтверждение человека.
@@ -1204,6 +1210,9 @@ class Brain:
                     started: float) -> dict[str, Any]:
         """Привет / как дела / кто ты — по-человечески и с живой сводкой цеха, без модели."""
         name = self._owner_name()
+        persona = getattr(self.agent, "persona", None)
+        profile = persona.profile() if persona is not None else {"address": "formal"}
+        informal = profile.get("address") == "informal"
         farm, panel_note = "", ""
         if talk in ("greet", "how"):
             client = getattr(self.runner, "panel", None)
@@ -1224,11 +1233,14 @@ class Brain:
             "greet": (f"{hello} {farm}{mine}" if farm else
                       f"{hello} Я на связи: компьютер, окна, звук, файлы, память и личные дела.{mine}{panel_note}"),
             "how": "Я на связи." + (f" {farm}" if farm else panel_note),
-            "who": ("Я NOZZA — помощник цеха на этом компьютере. Сам управляю окнами, звуком, программами и файлами, "
-                    "помню ваши просьбы, а про станки, заказы и деньги спрашиваю панель цеха. Всё, что меняет "
-                    "систему или цех, — только после вашего «Подтвердить»."),
-            "thanks": f"Пожалуйста{', ' + name if name else ''}! Обращайтесь.",
-            "bye": "До связи! Если что — позовите.",
+            "who": (
+                "Я NOZZA — помощник на этом компьютере. Управляю окнами, звуком, программами и файлами, "
+                + ("помню твои просьбы" if informal else "помню ваши просьбы")
+                + ", а про станки, заказы и деньги спрашиваю PrintFlow. Всё, что требует подтверждения, "
+                  "по-прежнему выполняю только после кнопки «Подтвердить»."
+            ),
+            "thanks": f"Пожалуйста{', ' + name if name else ''}! " + ("Обращайся." if informal else "Обращайтесь."),
+            "bye": "До связи! Если что — " + ("позови." if informal else "позовите."),
             "ok": "Хорошо. Если что — я рядом.",
         }
         steps.append({"kind": "rule", "title": "Разговор", "detail": {"greet": "приветствие", "how": "как дела",
@@ -1999,8 +2011,13 @@ class Brain:
             pass
         if memories:
             context.append("Память о владельце: " + "; ".join(memory_statement(row) for row in memories))
-        system = (f"{_PLANNER_RULES}\n\nКонтекст:\n" + "\n".join(context)
-                  + f"\n\nНавыки (только эти):\n{catalog[:6000]}")
+        persona_text = self._persona_prompt()
+        system = (
+            f"{_PLANNER_RULES}\n\nСтиль NOZZA:\n{persona_text}"
+            "\nPersona влияет только на форму ответа и не меняет safety, навыки или подтверждения."
+            "\n\nКонтекст:\n" + "\n".join(context)
+            + f"\n\nНавыки (только эти):\n{catalog[:6000]}"
+        )
         messages = [{"role": turn["role"], "content": turn["text"][:500]} for turn in history[-8:]]
         messages.append({"role": "user", "content": text})
         steps.append({"kind": "model", "title": "Думаю моделью", "detail": state.get("model") or ""})

@@ -40,7 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import brain as brain_mod
-from . import capabilities, config, executor, pc, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
+from . import capabilities, config, executor, pc, persona as persona_mod, planner, replanner, skills, speech, task_engine, ui, voice_runtime, window, winapi
 from .providers import registry as provider_registry
 
 # Ожидающее действие живёт недолго: неподтверждённый клик не должен висеть
@@ -71,6 +71,7 @@ class Agent:
         self._tasks: task_engine.TaskEngine | None = None
         self._planner: planner.Planner | None = None
         self._replanner: replanner.Replanner | None = None
+        self._persona: persona_mod.Persona | None = None
         self._stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
@@ -110,6 +111,13 @@ class Agent:
                 if self._replanner is None:
                     self._replanner = replanner.Replanner(self)
         return self._replanner
+
+    @property
+    def persona(self) -> persona_mod.Persona:
+        """Устойчивая форма общения. Safety и capabilities сюда не входят."""
+        if self._persona is None:
+            self._persona = persona_mod.Persona(self.runner.store)
+        return self._persona
 
     def chat(self, text: str, session: str = "main", mode: str = "full",
              plan: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -687,6 +695,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.skills_payload())
         if path == "/providers":
             return self._json(200, agent.providers_payload())
+        if path == "/persona":
+            return self._json(200, agent.persona.payload())
         if path == "/journal":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             limit = int((query.get("limit") or ["30"])[0] or 30)
@@ -813,6 +823,13 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, agent.plan_op(body))
         if path == "/replans":
             return self._json(200, agent.replan_op(body))
+        if path == "/persona":
+            op = str(body.get("op") or "update").strip().casefold()
+            if op == "reset":
+                return self._json(200, agent.persona.reset())
+            if op == "update":
+                return self._json(200, agent.persona.update(body.get("profile") or {}))
+            return self._json(200, {"ok": False, "reason": f"Неизвестная persona-операция «{op}»"})
         if path == "/memory":
             store = agent.runner.store
             op = str(body.get("op") or "remember")
