@@ -1,0 +1,44 @@
+name: voice-engine-3
+
+on:
+  pull_request:
+    paths:
+      - "agent/config.py"
+      - "agent/speech.py"
+      - "agent/voice_runtime.py"
+      - "agent/native_ui/state.py"
+      - "agent/native_ui/orb.py"
+      - "agent/native_ui/app.py"
+      - "connector/tests/test_voice_runtime.py"
+      - "connector/tests/test_native_ui.py"
+      - "docs/VOICE-ENGINE-3.md"
+      - "docs/NOZZA-NEXT-HANDOFF.md"
+      - ".github/workflows/voice-engine-3.yml"
+  push:
+    branches:
+      - "feature/nozza-voice-engine-3-phase1"
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile
+        run: python -m compileall -q agent connector/tests
+      - name: Voice contracts
+        run: python -m unittest connector.tests.test_voice_runtime connector.tests.test_native_ui
+
+  windows-ui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PySide6
+        run: python -m pip install PySide6
+      - name: Native UI contract
+        run: python -m unittest connector.tests.test_native_ui

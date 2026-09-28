@@ -240,6 +240,23 @@ class UiStateTests(unittest.TestCase):
         self.assertTrue(state.armed)
         self.assertEqual("speaking", state.assistant_state)
 
+    def test_voice_streaming_activity_is_kept_for_orb(self):
+        state = UiState()
+        state.apply_status({
+            "ok": True,
+            "voice": {
+                "enabled": True,
+                "armed": True,
+                "state": "listening",
+                "partial_phrase": "ноза открой телеграм",
+                "audio_level": 1450,
+                "streaming_asr": True,
+            },
+        })
+        self.assertEqual("ноза открой телеграм", state.voice_partial)
+        self.assertEqual(1450, state.audio_level)
+        self.assertTrue(state.streaming_asr)
+
 
 if __name__ == "__main__":
     unittest.main()

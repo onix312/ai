@@ -18,6 +18,8 @@ class VoiceOrb(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._state = "idle"
+        self._partial = ""
+        self._audio_level = 0
         self.setWindowFlags(
             Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
             Qt.WindowDoesNotAcceptFocus
@@ -42,6 +44,16 @@ class VoiceOrb(QWidget):
         if auto_hide_ms:
             self._hide_timer.start(auto_hide_ms)
 
+    def set_activity(self, level: int = 0, partial: str = "") -> None:
+        """Live mic activity without changing the state-machine."""
+        self._audio_level = max(0, int(level or 0))
+        self._partial = " ".join(str(partial or "").split())[:42]
+        if self._state == "listening" and self._partial:
+            self.label.setText(self._partial)
+        else:
+            self.label.setText(self.LABELS[self._state])
+        self.update()
+
     def show_near_bottom(self) -> None:
         screen = self.screen()
         if screen:
@@ -64,3 +76,12 @@ class VoiceOrb(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255, 36), 1))
         painter.setBrush(c)
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 18, 18)
+
+        if self._state == "listening" and self._audio_level:
+            # Нормализованный индикатор громкости. Он декоративный и не влияет
+            # на VAD threshold: решение «слышит/не слышит» остаётся в runtime.
+            strength = min(1.0, self._audio_level / 8000.0)
+            width = int((self.width() - 36) * strength)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 80))
+            painter.drawRoundedRect(18, self.height() - 11, width, 4, 2, 2)

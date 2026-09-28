@@ -1,5 +1,12 @@
 # NOZZA — handoff и roadmap после Verification Engine 1.0
 
+> **Актуализация 29.09.2026, Voice 3:** Local Trusted Mode 1.0 уже в `main`.
+> Текущая ветка — **Voice Engine 3.0 Phase 1**: incremental Vosk ASR, partial
+> transcript только для UI, VAD pre-roll и live mic level в Voice Orb.
+> После этой фазы: interruption model generation → streaming TTS → dynamic
+> vocabulary → усиление wake-word/echo suppression.
+
+
 > **Актуализация 29.09.2026:** Provider Architecture 1.0, Persona Engine 1.0,
 > Autonomy Levels 1.0 и Proactivity/Event Engine 1.0 уже в `main`.
 > Большой Security 2.0 отложен: NOZZA работает как локальный доверенный
