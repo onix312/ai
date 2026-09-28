@@ -8,7 +8,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from agent import pc, speech, voice_runtime
+from agent import config, pc, speech, voice_runtime
 
 
 class _Recognizer:
@@ -79,6 +79,39 @@ class VoiceStreamingTests(unittest.TestCase):
         self.assertGreaterEqual(len(chunks), 4)
         self.assertEqual(silent, chunks[0], "pre-roll должен сохранить звук до VAD")
         self.assertEqual(silent, recognizer.stream.chunks[0])
+
+    def test_echo_gate_suppresses_tts_leak_but_allows_owner_spike(self):
+        recognizer = _StreamingRecognizer()
+        runtime = voice_runtime.VoiceRuntime(recognizer)
+        runtime.echo_floor = 400.0
+        frames = queue.Queue()
+        leak = struct.pack("<4h", 0, 500, -450, 0)
+        owner = struct.pack("<4h", 0, 1100, -900, 0)
+        silent = struct.pack("<4h", 0, 10, -10, 0)
+        frames.put(leak)
+        frames.put(leak)
+        frames.put(owner)
+        for _ in range(8):
+            frames.put(silent)
+
+        with patch.object(runtime, "_should_run", return_value=True), \
+             patch.object(pc, "is_speaking", return_value=True):
+            chunks, during_output, _text = runtime._next_phrase(frames)
+
+        self.assertTrue(during_output)
+        self.assertGreaterEqual(runtime.echo_suppressed, 2)
+        self.assertGreater(runtime.echo_threshold, config.VOICE_VAD_THRESHOLD)
+        self.assertEqual(owner, chunks[0], "suppressed TTS leakage must stay out of ASR pre-roll")
+
+    def test_status_exposes_echo_gate_telemetry(self):
+        runtime = voice_runtime.VoiceRuntime(_Recognizer())
+        runtime.echo_floor = 420.0
+        runtime.echo_threshold = 700
+        runtime.echo_suppressed = 3
+        status = runtime.status()
+        self.assertEqual(420, status["echo_floor"])
+        self.assertEqual(700, status["echo_threshold"])
+        self.assertEqual(3, status["echo_suppressed"])
 
     def test_status_exposes_partial_and_engine(self):
         recognizer = _StreamingRecognizer()
