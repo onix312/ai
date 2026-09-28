@@ -34,6 +34,5 @@ jobs:
         run: >-
           python -m unittest
           connector.tests.test_browser_provider
-          connector.tests.test_assistant_skills.RegistryShapeTests
-          connector.tests.test_assistant_skills.AvailabilityTests
+          connector.tests.test_assistant_skills
           connector.tests.test_agent_brain.UnderstandTests
