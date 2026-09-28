@@ -829,14 +829,27 @@ class AgentHandler(BaseHTTPRequestHandler):
                                     "panel_url": agent.runner.panel.url})
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
+        if path == "/security":
+            return self._json(200, agent.security.payload())
+        if agent.security.private_route(path):
+            return self._json(200, {
+                "ok": False, "guest_mode": True,
+                "reason": "Гостевой режим скрывает личные данные владельца",
+            })
         if path == "/status":
             payload = agent.health()
-            payload["pending"] = agent.pending()
+            payload["pending"] = [] if agent.security.guest() else agent.pending()
             return self._json(200, payload)
         if path == "/windows":
             titles, reason = winapi.list_windows()
             return self._json(200, {"ok": not reason, "windows": titles, "reason": reason})
         if path == "/screen":
+            screen_skill = skills.get("screen.shot") or {"risk": "read"}
+            secure, security_reason = agent.security.guard_skill("screen.shot", {}, screen_skill)
+            if not secure:
+                return self._json(200, {
+                    "ok": False, "reason": security_reason, "security_blocked": True,
+                })
             image, reason = winapi.grab_screen()
             if not image:
                 return self._json(200, {"ok": False, "reason": reason})
@@ -940,6 +953,13 @@ class AgentHandler(BaseHTTPRequestHandler):
         if self.role != "agent":
             return self._json(404, {"ok": False, "reason": f"Маршрута {path} нет"})
         body = self._read_json()
+        if path == "/security":
+            return self._json(200, agent.security_op(body))
+        if agent.security.private_route(path):
+            return self._json(200, {
+                "ok": False, "guest_mode": True,
+                "reason": "Гостевой режим скрывает личные данные владельца",
+            })
         if path == "/click":
             return self._json(200, agent.queue_action("click", body))
         if path == "/type":
@@ -973,6 +993,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             return self._json(200, {**answer, "contract_version": 1, "request_id": request_id})
         if path == "/chat/clear":
             session = brain_mod.session_key(str(body.get("session") or "main"))
+            if agent.security.guest():
+                session = brain_mod.session_key("guest-" + session)
             cleared = agent.runner.store.clear_dialog(session)
             # Контекст «его / второй» живёт и в панели (сессия агента) — забываем вместе.
             panel = agent.runner.panel.clear_dialog(brain_mod.panel_session(session))
