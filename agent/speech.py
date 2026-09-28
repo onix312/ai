@@ -87,6 +87,56 @@ def _words(text: str) -> list[str]:
     return [_clean(word) for word in str(text or "").split()]
 
 
+def normalize_vocabulary(terms: list[str] | tuple[str, ...] | None, limit: int = 160) -> list[str]:
+    """Compact dynamic vocabulary for local ASR correction."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in terms or ():
+        text = " ".join(str(raw or "").split()).strip()
+        if not text or len(text) > 64:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def apply_dynamic_vocabulary(text: str, terms: list[str] | tuple[str, ...] | None) -> str:
+    """Conservative post-ASR correction for names/apps/projects.
+
+    Only replaces similarly-sized tokens/short phrases with edit distance <= 1
+    per word. This biases recognition without Vosk hard grammar, so ordinary
+    unknown speech remains open-vocabulary.
+    """
+    source = " ".join(str(text or "").split())
+    vocab = normalize_vocabulary(terms)
+    if not source or not vocab:
+        return source
+    words = source.split()
+    lowered = [_clean(word) for word in words]
+    for term in sorted(vocab, key=lambda item: len(item.split()), reverse=True):
+        tw = [_clean(part) for part in term.split()]
+        if not tw or any(not part for part in tw) or len(tw) > 3:
+            continue
+        width = len(tw)
+        for start in range(0, len(words) - width + 1):
+            chunk = lowered[start:start + width]
+            if all(
+                abs(len(a) - len(b)) <= 1 and _levenshtein(a, b) <= 1
+                for a, b in zip(chunk, tw)
+            ):
+                original = " ".join(words[start:start + width])
+                if original.casefold() != term.casefold():
+                    words[start:start + width] = [term]
+                    lowered[start:start + width] = tw
+                break
+    return " ".join(words)
+
+
 def discover_vosk_model() -> str:
     """Найти локальную Vosk-модель без скачиваний и сетевых запросов."""
     explicit = str(getattr(config, "SPEECH_MODEL_PATH", "") or "").strip()
