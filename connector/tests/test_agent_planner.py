@@ -131,6 +131,22 @@ class AgentPlannerTests(unittest.TestCase):
         self.assertEqual("planner", self.agent.tasks.created[0]["source"])
         self.assertEqual([], self.planner.list(), "approved draft одноразовый")
 
+    def test_plan_cannot_be_approved_twice_in_parallel_state(self):
+        result = self._preview({
+            "title": "Рабочее место",
+            "summary": "",
+            "ask": "",
+            "steps": [{"skill": "app.open", "params": {"target": "telegram"}, "why": ""}],
+        })
+        plan_id = result["plan"]["id"]
+        self.planner._approving.add(plan_id)
+        approved = self.planner.approve(plan_id)
+        discarded = self.planner.discard(plan_id)
+        self.assertFalse(approved["ok"])
+        self.assertIn("уже запускается", approved["reason"])
+        self.assertFalse(discarded["ok"])
+        self.assertEqual([], self.agent.tasks.created)
+
     def test_denied_meta_skill_never_enters_plan(self):
         result = self._preview({
             "title": "Рекурсия",
