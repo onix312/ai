@@ -283,7 +283,7 @@ class ControlCenter(QMainWindow):
         if connected:
             bits = ["агент ✓", "модель ✓" if model_ok else "модель –",
                     "PrintFlow ✓" if panel_ok else "PrintFlow –",
-                    "микрофон ✓" if armed else "микрофон –"]
+                    "wake ✓" if armed else "wake –"]
             self.footer.setText("   ".join(bits))
             self.settings_status.setText("Backend: подключён · 127.0.0.1:8799")
         else:
