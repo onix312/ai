@@ -1178,6 +1178,30 @@ _SAPI_SCRIPT = (
 
 _TTS_LOCK = threading.RLock()
 _TTS_PROCESS: subprocess.Popen | None = None
+_LAST_TTS_TEXT = ""
+_LAST_TTS_AT = 0.0
+
+
+def recent_tts_echo(text: str, max_age: float = 6.0) -> bool:
+    """Whether recognized speech is probably our own recently spoken TTS."""
+    with _TTS_LOCK:
+        recent = _LAST_TTS_TEXT
+        at = _LAST_TTS_AT
+    if not recent or time.time() - at > max(0.5, float(max_age)):
+        return False
+    normalize = lambda value: [
+        token for token in re.findall(r"[0-9A-Za-zА-Яа-яЁё]+", str(value or "").casefold())
+        if len(token) > 1
+    ]
+    heard = normalize(text)
+    spoken = normalize(recent)
+    if not heard or not spoken:
+        return False
+    spoken_set = set(spoken)
+    overlap = sum(1 for token in heard if token in spoken_set) / len(heard)
+    joined_heard = " ".join(heard)
+    joined_spoken = " ".join(spoken)
+    return overlap >= 0.72 or (len(heard) >= 2 and joined_heard in joined_spoken)
 
 
 def is_speaking() -> bool:
@@ -1303,7 +1327,9 @@ def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], 
             process.stdin.close()
     except (OSError, ValueError) as exc:
         return {}, f"Озвучка не запустилась: {exc}"
-    global _TTS_PROCESS
+    global _TTS_PROCESS, _LAST_TTS_TEXT, _LAST_TTS_AT
     with _TTS_LOCK:
         _TTS_PROCESS = process
+        _LAST_TTS_TEXT = clean
+        _LAST_TTS_AT = time.time()
     return {"engine": engine, "chars": len(clean), "pid": process.pid}, ""
