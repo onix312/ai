@@ -122,6 +122,38 @@ class TaskEngineTests(unittest.TestCase):
         self.assertIn(action_id, self.agent.discarded)
         self.assertEqual("pending", result["task"]["steps"][0]["status"])
 
+    def test_expired_confirmation_returns_task_to_paused(self):
+        task_id = self._create([
+            {"skill": "clipboard.write", "params": {"text": "x"}},
+        ])
+        self.engine.run_sync(task_id)
+        action_id = self.engine.get(task_id)["steps"][0]["pending_action"]
+        task = self.engine.on_action_expired(action_id)
+        self.assertEqual("paused", task["status"])
+        self.assertEqual("pending", task["steps"][0]["status"])
+        self.assertEqual("", task["steps"][0]["pending_action"])
+        self.assertIn("истекло", task["error"])
+
+    def test_restart_recovers_running_task_to_explicit_pause(self):
+        task_id = self._create([
+            {"skill": "system.volume", "params": {"level": 30}},
+        ])
+        self.engine._set_task(task_id, status="running", current_step=0)
+        self.engine._set_step(task_id, 0, status="running", started_at="2026-09-28 10:00:00")
+        recovered = TaskEngine(self.agent).get(task_id)
+        self.assertEqual("paused", recovered["status"])
+        self.assertEqual("pending", recovered["steps"][0]["status"])
+        self.assertIn("перезапуском", recovered["error"])
+
+    def test_failed_task_cannot_be_restarted_silently(self):
+        task_id = self._create([
+            {"skill": "system.volume", "params": {"level": 30}},
+        ])
+        self.engine._set_task(task_id, status="failed", error="boom")
+        result = self.engine.start(task_id)
+        self.assertFalse(result["ok"])
+        self.assertIn("failed", result["reason"])
+
     def test_cancel_is_terminal_and_discards_pending(self):
         task_id = self._create([
             {"skill": "clipboard.write", "params": {"text": "x"}},
