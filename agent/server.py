@@ -75,6 +75,7 @@ class Agent:
         self._autonomy: autonomy_mod.AutonomyPolicy | None = None
         self._events: event_mod.EventEngine | None = None
         self._stop = threading.Event()
+        self._emergency_stop = threading.Event()
         # Голос: фраза после стоп-слова идёт мозгу, ответ звучит вслух.
         self.microphone.handler = self.voice_phrase
         self.microphone.cancel_handler = lambda: self.brain.cancel_session("voice")
@@ -403,6 +404,59 @@ class Agent:
         payload["generation_cancelled"] = bool(cancelled)
         return payload
 
+    def stop_all(self) -> dict[str, Any]:
+        """Emergency stop latch for local execution.
+
+        Current atomic provider calls are not force-killed. Long-running tasks
+        are paused so they stop before the next step.
+        """
+        self._emergency_stop.set()
+        pc.stop_speaking()
+        try:
+            self.microphone.disable()
+        except Exception:
+            pass
+
+        cancelled_models = 0
+        if self._brain is not None:
+            try:
+                cancelled_models = self._brain.cancel_all_sessions()
+            except Exception:
+                cancelled_models = 0
+
+        with self._lock:
+            pending_ids = list(self._pending.keys())
+            self._pending.clear()
+
+        paused_tasks: list[int] = []
+        if self._tasks is not None:
+            for task in self._tasks.list(200):
+                if str(task.get("status") or "") in ("running", "waiting"):
+                    task_id = int(task.get("id") or 0)
+                    if task_id and self._tasks.pause(task_id).get("ok"):
+                        paused_tasks.append(task_id)
+
+        self.state.last_action = "STOP ALL"
+        return {
+            "ok": True,
+            "stopped": True,
+            "latched": True,
+            "models_cancelled": cancelled_models,
+            "pending_discarded": len(pending_ids),
+            "tasks_paused": paused_tasks,
+            "voice": self.microphone.status(),
+        }
+
+    def resume_all(self) -> dict[str, Any]:
+        """Release emergency latch. Tasks remain paused until resumed explicitly."""
+        self._emergency_stop.clear()
+        self.state.last_action = "STOP ALL снят"
+        return {"ok": True, "stopped": False, "latched": False}
+
+    def safety_status(self) -> dict[str, Any]:
+        return {"ok": True, "stopped": self._emergency_stop.is_set(),
+                "latched": self._emergency_stop.is_set()}
+
     # --- навыки ассистента (18.14) ----------------------------------------
     def run_skill(self, name: str, params: Any = None, ask: bool = True,
                   autonomy_mode: str = "direct") -> dict[str, Any]:
@@ -415,6 +469,9 @@ class Agent:
         """
         runner = self.runner
         key = str(name or "").strip().casefold()
+        if self._emergency_stop.is_set():
+            return {"ok": False, "skill": key, "reason": "STOP ALL активен",
+                    "stopped": True, "latched": True}
         skill = skills.get(key, runner.learned())
         if skill is None:
             return runner.run(key, params)
@@ -531,6 +588,9 @@ class Agent:
         (служба, контейнер) всплывающее окно не открывается и отклоняет
         действие сразу — поэтому для окна агента его не зовём вовсе.
         """
+        if self._emergency_stop.is_set():
+            return {"ok": False, "queued": False, "reason": "STOP ALL активен",
+                    "stopped": True, "latched": True}
         # Raw UI actions are still actions: Observer must not bypass policy
         # through the legacy /click /type /key /activate endpoints.
         if kind != "skill":
@@ -800,7 +860,10 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/status":
             payload = agent.health()
             payload["pending"] = agent.pending()
+            payload["safety"] = agent.safety_status()
             return self._json(200, payload)
+        if path == "/safety/status":
+            return self._json(200, agent.safety_status())
         if path == "/windows":
             titles, reason = winapi.list_windows()
             return self._json(200, {"ok": not reason, "windows": titles, "reason": reason})
@@ -928,6 +991,10 @@ class AgentHandler(BaseHTTPRequestHandler):
         if path == "/action/confirm":
             return self._json(200, agent.confirm_action(str(body.get("id") or ""),
                                                         bool(body.get("confirmed"))))
+        if path == "/safety/stop":
+            return self._json(200, agent.stop_all())
+        if path == "/safety/resume":
+            return self._json(200, agent.resume_all())
         if path == "/chat":
             if body.get("contract_version", 1) != 1:
                 return self._json(400, {"ok": False, "error": "Неподдерживаемая версия контракта помощника"})
