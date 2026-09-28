@@ -25,6 +25,7 @@ from __future__ import annotations
 import ctypes
 import os
 import pathlib
+import queue
 import re
 import shutil
 import subprocess
@@ -1209,6 +1210,59 @@ def stop_speaking() -> bool:
         return True
     except (OSError, ValueError):
         return False
+
+
+class SpeechQueue:
+    """Sequential sentence-level TTS for streaming voice replies."""
+
+    def __init__(self, rate: int = 0, volume: int = 100) -> None:
+        self.rate = rate
+        self.volume = volume
+        self._queue: "queue.Queue[str | None]" = queue.Queue()
+        self._stop = threading.Event()
+        self._closed = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="nozza-tts-stream")
+        self._thread.start()
+
+    def write(self, text: str) -> bool:
+        clean = " ".join(str(text or "").split())
+        if not clean or self._stop.is_set() or self._closed.is_set():
+            return False
+        self._queue.put(clean[:600])
+        return True
+
+    def close(self) -> None:
+        if not self._closed.is_set():
+            self._closed.set()
+            self._queue.put(None)
+
+    def stop(self) -> None:
+        self._stop.set()
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+        stop_speaking()
+        self._queue.put(None)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                item = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                if self._closed.is_set():
+                    break
+                continue
+            if item is None:
+                break
+            state, _reason = speak(item, rate=self.rate, volume=self.volume)
+            if not state:
+                continue
+            while is_speaking() and not self._stop.is_set():
+                time.sleep(0.03)
+        if self._stop.is_set():
+            stop_speaking()
 
 
 def speak(text: str, rate: int = 0, volume: int = 100) -> tuple[dict[str, Any], str]:
